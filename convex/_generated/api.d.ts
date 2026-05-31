@@ -8,13 +8,21 @@
  * @module
  */
 
+import type * as channels from "../channels.js";
+import type * as runStages from "../runStages.js";
+import type * as runs from "../runs.js";
+
 import type {
   ApiFromModules,
   FilterApi,
   FunctionReference,
 } from "convex/server";
 
-declare const fullApi: ApiFromModules<{}>;
+declare const fullApi: ApiFromModules<{
+  channels: typeof channels;
+  runStages: typeof runStages;
+  runs: typeof runs;
+}>;
 
 /**
  * A utility for referencing Convex functions in your app's public API.

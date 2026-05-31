@@ -40,6 +40,9 @@ yarn-error.log*
 .convex
 .env.local
 
+# trigger.dev (local build/cache + lockfiles)
+.trigger
+
 # typescript
 *.tsbuildinfo
 next-env.d.ts

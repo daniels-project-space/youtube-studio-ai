@@ -16,7 +16,12 @@
  * surface, but real upload/list logic is filled in per-feature.
  */
 
-import { S3Client, PutObjectCommand, GetObjectCommand } from "@aws-sdk/client-s3";
+import {
+  S3Client,
+  PutObjectCommand,
+  GetObjectCommand,
+} from "@aws-sdk/client-s3";
+import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 
 const R2_REGION = "auto";
@@ -98,4 +103,71 @@ export function publicUrl(key: string): string {
     throw new Error("R2_PUBLIC_BASE_URL is not configured");
   }
   return `${base.replace(/\/$/, "")}/${key.replace(/^\//, "")}`;
+}
+
+/**
+ * Per-channel R2 key prefix. All media for a channel is namespaced under this
+ * so tenancy/cleanup/quotas can be scoped per channel (and per owner later).
+ * Example: `owner/<ownerId>/channel/<channelSlug>/`.
+ */
+export function channelPrefix(ownerId: string, channelSlug: string): string {
+  const clean = (s: string) => s.replace(/^\/+|\/+$/g, "");
+  return `owner/${clean(ownerId)}/channel/${clean(channelSlug)}/`;
+}
+
+/** Join a channel prefix with a relative key, normalising slashes. */
+export function channelKey(
+  ownerId: string,
+  channelSlug: string,
+  relKey: string,
+): string {
+  return channelPrefix(ownerId, channelSlug) + relKey.replace(/^\/+/, "");
+}
+
+export type PutBody = PutObjectCommandInput["Body"];
+
+export interface PutOptions {
+  bucket?: string;
+  contentType?: string;
+  metadata?: Record<string, string>;
+}
+
+/**
+ * Upload an object to R2. Body may be a Buffer/Uint8Array/string/stream — for
+ * large renders the caller streams from disk so bytes never sit in app memory.
+ * Returns the stored key.
+ */
+export async function putObject(
+  key: string,
+  body: PutBody,
+  opts: PutOptions = {},
+): Promise<string> {
+  const command = new PutObjectCommand({
+    Bucket: getBucket(opts.bucket),
+    Key: key,
+    Body: body,
+    ContentType: opts.contentType,
+    Metadata: opts.metadata,
+  });
+  await getR2Client().send(command);
+  return key;
+}
+
+/** Fetch an object's bytes from R2 as a Uint8Array. */
+export async function getObjectBytes(
+  key: string,
+  bucket?: string,
+): Promise<Uint8Array> {
+  const command = new GetObjectCommand({
+    Bucket: getBucket(bucket),
+    Key: key,
+  });
+  const res = await getR2Client().send(command);
+  if (!res.Body) {
+    throw new Error(`R2 object has no body: ${key}`);
+  }
+  // @aws-sdk v3 streams expose transformToByteArray in Node + browser builds.
+  return await (
+    res.Body as { transformToByteArray: () => Promise<Uint8Array> }
+  ).transformToByteArray();
 }
