@@ -8,9 +8,11 @@
  * @module
  */
 
+import type * as assets from "../assets.js";
 import type * as channels from "../channels.js";
 import type * as runStages from "../runStages.js";
 import type * as runs from "../runs.js";
+import type * as topicMemory from "../topicMemory.js";
 
 import type {
   ApiFromModules,
@@ -19,9 +21,11 @@ import type {
 } from "convex/server";
 
 declare const fullApi: ApiFromModules<{
+  assets: typeof assets;
   channels: typeof channels;
   runStages: typeof runStages;
   runs: typeof runs;
+  topicMemory: typeof topicMemory;
 }>;
 
 /**

@@ -5,14 +5,18 @@
  */
 import { register, _clear } from "./registry";
 import { echoSeed, echoSink } from "@/trigger/blocks/echoBlocks";
+import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 
 let registered = false;
 
 /** Idempotently register all blocks. Safe to call multiple times. */
 export function registerAllBlocks(): void {
   if (registered) return;
+  // Phase-1 smoke blocks.
   register(echoSeed);
   register(echoSink);
+  // Phase-2 Template C (Lofi) blocks.
+  for (const b of lofiBlocks) register(b);
   registered = true;
 }
 

@@ -24,6 +24,7 @@ import { runPipeline as runEngine } from "@/engine/runner";
 import { makeConvexSink } from "@/engine/convexSink";
 import { channelPrefix } from "@/lib/storage";
 import { alertFailure } from "@/lib/telegram";
+import { bootstrapSecrets } from "@/lib/bootstrap";
 import type { PipelineEntry } from "@/engine/types";
 
 export interface RunPipelineInput {
@@ -35,6 +36,9 @@ export const runPipelineTask = task({
   id: "run-pipeline",
   run: async (payload: RunPipelineInput) => {
     registerAllBlocks();
+    await bootstrapSecrets((m, x) =>
+      console.log(`[run-pipeline] ${m}`, x ?? ""),
+    );
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
@@ -70,6 +74,14 @@ export const runPipelineTask = task({
         if (e.params) paramsByBlock[e.block] = e.params as Record<string, unknown>;
       }
 
+      // Seed channel identity into the store so blocks can read style/topics.
+      const seedStore: Record<string, unknown> = {
+        topicPool: channel.identity?.topicPool ?? [],
+        styleGrammar: channel.identity?.styleGrammar ?? "",
+        channelName: channel.name,
+        palette: channel.identity?.palette ?? [],
+      };
+
       const sink = makeConvexSink(convex, ownerId);
       const result = await runEngine(resolved, {
         ownerId,
@@ -78,6 +90,7 @@ export const runPipelineTask = task({
         keyPrefix: channelPrefix(ownerId, channel.slug),
         budgetUsd: channel.budget ?? 0,
         paramsByBlock,
+        seedStore,
         sink,
         log: (msg, extra) => console.log(`[run-pipeline] ${msg}`, extra ?? ""),
       });
