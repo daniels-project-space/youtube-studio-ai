@@ -59,3 +59,35 @@ export const listRunsByChannel = query({
       .collect();
   },
 });
+
+/**
+ * Recent runs for an owner, newest first, enriched with the channel name.
+ * Powers the minimal dashboard page (read-only).
+ */
+export const listRecent = query({
+  args: { ownerId: v.string(), limit: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const runs = await ctx.db
+      .query("runs")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .collect();
+    runs.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+    const limited = runs.slice(0, args.limit ?? 10);
+    return await Promise.all(
+      limited.map(async (run) => {
+        const channel = await ctx.db.get(run.channelId);
+        return {
+          _id: run._id,
+          status: run.status,
+          startedAt: run.startedAt,
+          finishedAt: run.finishedAt,
+          costTotal: run.costTotal,
+          youtubeVideoId: run.youtubeVideoId,
+          error: run.error,
+          channelName: channel?.name ?? "(unknown)",
+          channelSlug: channel?.slug ?? "",
+        };
+      }),
+    );
+  },
+});

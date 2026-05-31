@@ -1,65 +1,193 @@
-import Image from "next/image";
+"use client";
+
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
+
+// Single-operator default — the owner used by the Milestone-1 Lofi pipeline.
+const OWNER_ID = "owner_daniel";
+
+type RunRow = {
+  _id: string;
+  status: string;
+  startedAt?: number;
+  finishedAt?: number;
+  costTotal: number;
+  youtubeVideoId?: string;
+  error?: string;
+  channelName: string;
+  channelSlug: string;
+};
+
+type ChannelRow = {
+  _id: string;
+  name: string;
+  slug: string;
+  status: string;
+  template: string;
+};
+
+const STATUS_COLOR: Record<string, string> = {
+  ok: "#22c55e",
+  running: "#3b82f6",
+  queued: "#a1a1aa",
+  failed: "#ef4444",
+  canceled: "#f59e0b",
+};
+
+function fmt(ts?: number) {
+  if (!ts) return "—";
+  return new Date(ts).toLocaleString();
+}
 
 export default function Home() {
+  const channels = useQuery(api.channels.listChannels, { ownerId: OWNER_ID }) as
+    | ChannelRow[]
+    | undefined;
+  const runs = useQuery(api.runs.listRecent, { ownerId: OWNER_ID, limit: 10 }) as
+    | RunRow[]
+    | undefined;
+
+  const featured = runs?.find((r) => r.youtubeVideoId);
+
   return (
-    <div className="flex flex-col flex-1 items-center justify-center bg-zinc-50 font-sans dark:bg-black">
-      <main className="flex flex-1 w-full max-w-3xl flex-col items-center justify-between py-32 px-16 bg-white dark:bg-black sm:items-start">
-        <Image
-          className="dark:invert"
-          src="/next.svg"
-          alt="Next.js logo"
-          width={100}
-          height={20}
-          priority
-        />
-        <div className="flex flex-col items-center gap-6 text-center sm:items-start sm:text-left">
-          <h1 className="max-w-xs text-3xl font-semibold leading-10 tracking-tight text-black dark:text-zinc-50">
-            To get started, edit the page.tsx file.
-          </h1>
-          <p className="max-w-md text-lg leading-8 text-zinc-600 dark:text-zinc-400">
-            Looking for a starting point or more instructions? Head over to{" "}
-            <a
-              href="https://vercel.com/templates?framework=next.js&utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Templates
-            </a>{" "}
-            or the{" "}
-            <a
-              href="https://nextjs.org/learn?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-              className="font-medium text-zinc-950 dark:text-zinc-50"
-            >
-              Learning
-            </a>{" "}
-            center.
-          </p>
-        </div>
-        <div className="flex flex-col gap-4 text-base font-medium sm:flex-row">
-          <a
-            className="flex h-12 w-full items-center justify-center gap-2 rounded-full bg-foreground px-5 text-background transition-colors hover:bg-[#383838] dark:hover:bg-[#ccc] md:w-[158px]"
-            href="https://vercel.com/new?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
-            target="_blank"
-            rel="noopener noreferrer"
+    <main
+      style={{
+        maxWidth: 880,
+        margin: "0 auto",
+        padding: "3rem 1.5rem 5rem",
+        fontFamily: "var(--font-geist-sans), system-ui, sans-serif",
+      }}
+    >
+      <header style={{ marginBottom: "2.5rem" }}>
+        <h1 style={{ fontSize: "2rem", fontWeight: 700, letterSpacing: "-0.02em", margin: 0 }}>
+          YouTube Studio AI
+        </h1>
+        <p style={{ color: "#71717a", marginTop: "0.5rem" }}>
+          Autonomous channel pipeline — live data from Convex ({OWNER_ID}).
+        </p>
+      </header>
+
+      {/* Featured / Milestone-1 video */}
+      {featured?.youtubeVideoId && (
+        <section style={{ marginBottom: "3rem" }}>
+          <h2 style={{ fontSize: "1.1rem", fontWeight: 600, marginBottom: "0.75rem" }}>
+            Latest published video
+          </h2>
+          <div
+            style={{
+              position: "relative",
+              paddingBottom: "56.25%",
+              height: 0,
+              borderRadius: 12,
+              overflow: "hidden",
+              border: "1px solid #27272a",
+            }}
           >
-            <Image
-              className="dark:invert"
-              src="/vercel.svg"
-              alt="Vercel logomark"
-              width={16}
-              height={16}
+            <iframe
+              src={`https://www.youtube.com/embed/${featured.youtubeVideoId}`}
+              title="Latest published video"
+              allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+              allowFullScreen
+              style={{ position: "absolute", inset: 0, width: "100%", height: "100%", border: 0 }}
             />
-            Deploy Now
-          </a>
+          </div>
           <a
-            className="flex h-12 w-full items-center justify-center rounded-full border border-solid border-black/[.08] px-5 transition-colors hover:border-transparent hover:bg-black/[.04] dark:border-white/[.145] dark:hover:bg-[#1a1a1a] md:w-[158px]"
-            href="https://nextjs.org/docs?utm_source=create-next-app&utm_medium=appdir-template-tw&utm_campaign=create-next-app"
+            href={`https://www.youtube.com/watch?v=${featured.youtubeVideoId}`}
             target="_blank"
             rel="noopener noreferrer"
+            style={{ display: "inline-block", marginTop: "0.5rem", color: "#3b82f6", fontSize: "0.9rem" }}
           >
-            Documentation
+            youtube.com/watch?v={featured.youtubeVideoId} ↗
           </a>
-        </div>
-      </main>
-    </div>
+        </section>
+      )}
+
+      {/* Channels */}
+      <section style={{ marginBottom: "3rem" }}>
+        <h2 style={{ fontSize: "1.1rem", fontWeight: 600, marginBottom: "0.75rem" }}>Channels</h2>
+        {channels === undefined ? (
+          <p style={{ color: "#71717a" }}>Loading…</p>
+        ) : channels.length === 0 ? (
+          <p style={{ color: "#71717a" }}>No channels yet.</p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>
+            {channels.map((c) => (
+              <li
+                key={c._id}
+                style={{
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  border: "1px solid #27272a",
+                  borderRadius: 10,
+                  padding: "0.75rem 1rem",
+                }}
+              >
+                <span style={{ fontWeight: 500 }}>{c.name}</span>
+                <span style={{ fontSize: "0.8rem", color: "#a1a1aa" }}>
+                  {c.template} · {c.status}
+                </span>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+
+      {/* Recent runs */}
+      <section>
+        <h2 style={{ fontSize: "1.1rem", fontWeight: 600, marginBottom: "0.75rem" }}>Recent runs</h2>
+        {runs === undefined ? (
+          <p style={{ color: "#71717a" }}>Loading…</p>
+        ) : runs.length === 0 ? (
+          <p style={{ color: "#71717a" }}>No runs yet.</p>
+        ) : (
+          <ul style={{ listStyle: "none", padding: 0, margin: 0, display: "grid", gap: "0.5rem" }}>
+            {runs.map((r) => (
+              <li
+                key={r._id}
+                style={{
+                  border: "1px solid #27272a",
+                  borderRadius: 10,
+                  padding: "0.75rem 1rem",
+                  display: "flex",
+                  alignItems: "center",
+                  justifyContent: "space-between",
+                  gap: "1rem",
+                }}
+              >
+                <div style={{ display: "flex", alignItems: "center", gap: "0.6rem", minWidth: 0 }}>
+                  <span
+                    style={{
+                      width: 9,
+                      height: 9,
+                      borderRadius: "50%",
+                      background: STATUS_COLOR[r.status] ?? "#a1a1aa",
+                      flexShrink: 0,
+                    }}
+                  />
+                  <span style={{ fontWeight: 500, whiteSpace: "nowrap" }}>{r.status}</span>
+                  <span style={{ color: "#a1a1aa", fontSize: "0.85rem", overflow: "hidden", textOverflow: "ellipsis" }}>
+                    {r.channelName}
+                  </span>
+                </div>
+                <div style={{ display: "flex", alignItems: "center", gap: "1rem", fontSize: "0.8rem", color: "#71717a", whiteSpace: "nowrap" }}>
+                  {r.youtubeVideoId && (
+                    <a
+                      href={`https://www.youtube.com/watch?v=${r.youtubeVideoId}`}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                      style={{ color: "#3b82f6" }}
+                    >
+                      video ↗
+                    </a>
+                  )}
+                  <span>{fmt(r.startedAt)}</span>
+                </div>
+              </li>
+            ))}
+          </ul>
+        )}
+      </section>
+    </main>
   );
 }
