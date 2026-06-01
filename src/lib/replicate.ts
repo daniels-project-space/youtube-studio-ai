@@ -15,7 +15,6 @@
  * `succeeded`/`failed` → return output URL(s).
  */
 import { readFile, stat } from "node:fs/promises";
-import { basename } from "node:path";
 
 const REPLICATE_BASE = "https://api.replicate.com/v1";
 
@@ -163,32 +162,18 @@ const UPLOAD_SIZE_CAP_MB = 95;
 const VALID_RESOLUTIONS = new Set(["720p", "1080p", "4k"]);
 
 /**
- * Upload a local file to Replicate's file store; returns the served URL to use
- * as a prediction input. Uses multipart/form-data (the documented endpoint).
+ * Encode a local video file as a `data:video/mp4;base64,...` URI.
+ *
+ * Topaz `video-upscale` rejects bare Replicate `/v1/files` URLs with
+ * "`source.container` is required" because that URL carries no file extension
+ * for it to infer the container from. A data URI carries the MIME type
+ * explicitly, so the container is unambiguous — and it matches the legacy
+ * pattern (the python client base64-inlines small file inputs). The loop unit
+ * is short (~10-30s) so this stays well within request limits.
  */
-async function uploadFile(path: string): Promise<string> {
-  const form = new FormData();
+async function fileToDataUri(path: string): Promise<string> {
   const buf = await readFile(path);
-  form.append(
-    "content",
-    new Blob([new Uint8Array(buf)], { type: "video/mp4" }),
-    basename(path),
-  );
-  const res = await fetch(`${REPLICATE_BASE}/files`, {
-    method: "POST",
-    headers: { Authorization: `Bearer ${token()}` },
-    body: form,
-  });
-  const json = (await res.json()) as {
-    urls?: { get?: string };
-    detail?: string;
-  };
-  if (!res.ok || !json.urls?.get) {
-    throw new ReplicateError(
-      `replicate /files upload failed (HTTP ${res.status}): ${json.detail ?? JSON.stringify(json).slice(0, 200)}`,
-    );
-  }
-  return json.urls.get;
+  return `data:video/mp4;base64,${Buffer.from(buf).toString("base64")}`;
 }
 
 export interface UpscaleLoopUnitArgs {
@@ -196,7 +181,7 @@ export interface UpscaleLoopUnitArgs {
   inputPath: string;
   /** 720p | 1080p | 4k (default 4k, legacy default). */
   targetResolution?: string;
-  /** Output fps (15..120, default 30). */
+  /** Output fps (15..60 per Topaz schema, default 30). */
   targetFps?: number;
   pollIntervalMs?: number;
   timeoutMs?: number;
@@ -219,9 +204,9 @@ export async function upscaleLoopUnit(
       `upscaleLoopUnit: invalid target_resolution '${targetResolution}' (allowed: 720p,1080p,4k)`,
     );
   }
-  if (targetFps < 15 || targetFps > 120) {
+  if (targetFps < 15 || targetFps > 60) {
     throw new ReplicateError(
-      `upscaleLoopUnit: target_fps ${targetFps} out of range (15..120)`,
+      `upscaleLoopUnit: target_fps ${targetFps} out of range (15..60)`,
     );
   }
   const sizeMb = (await stat(args.inputPath)).size / (1024 * 1024);
@@ -231,7 +216,7 @@ export async function upscaleLoopUnit(
     );
   }
 
-  const videoUrl = await uploadFile(args.inputPath);
+  const videoUrl = await fileToDataUri(args.inputPath);
   const [, version] = TOPAZ_MODEL_VERSION.split(":");
   const created = await api<Prediction>("/predictions", {
     method: "POST",
