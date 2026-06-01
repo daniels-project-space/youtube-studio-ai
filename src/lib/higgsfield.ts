@@ -284,6 +284,16 @@ export async function generateKeyframe(
 
 export interface ClipRequest {
   prompt: string;
+  /**
+   * Optional negative prompt (the locked-camera STATIC_CAMERA_NEGATIVE from the
+   * constitution). Only emitted as `--negative_prompt` when `emitNegative` is
+   * true, because not every Higgsfield video model accepts the flag — the
+   * positive prompt already carries the locked-camera suffix, so the negative is
+   * a belt-and-suspenders opt-in.
+   */
+  negativePrompt?: string;
+  /** When true, pass `negativePrompt` to the CLI as `--negative_prompt`. */
+  emitNegative?: boolean;
   /** Start image: a higgsfield job id, upload id, or local path. */
   startImage: string;
   /** End image: a higgsfield job id, upload id, or local path. */
@@ -308,33 +318,30 @@ export async function generateClip(
   req: ClipRequest,
   opts?: HiggsfieldRunOptions,
 ): Promise<GenerateResult> {
-  const out = await runCli(
-    [
-      "generate",
-      "create",
-      req.model ?? "kling3_0",
-      "--prompt",
-      req.prompt,
-      "--start-image",
-      req.startImage,
-      "--end-image",
-      req.endImage,
-      "--duration",
-      String(req.durationSec ?? 5),
-      "--aspect_ratio",
-      req.aspectRatio ?? "16:9",
-      "--mode",
-      req.mode ?? "std",
-      "--sound",
-      req.sound ?? "off",
-      "--wait",
-      "--wait-timeout",
-      "20m",
-      "--wait-interval",
-      "5s",
-    ],
-    opts,
-  );
+  const args = [
+    "generate",
+    "create",
+    req.model ?? "kling3_0",
+    "--prompt",
+    req.prompt,
+    "--start-image",
+    req.startImage,
+    "--end-image",
+    req.endImage,
+    "--duration",
+    String(req.durationSec ?? 5),
+    "--aspect_ratio",
+    req.aspectRatio ?? "16:9",
+    "--mode",
+    req.mode ?? "std",
+    "--sound",
+    req.sound ?? "off",
+  ];
+  if (req.emitNegative && req.negativePrompt) {
+    args.push("--negative_prompt", req.negativePrompt);
+  }
+  args.push("--wait", "--wait-timeout", "20m", "--wait-interval", "5s");
+  const out = await runCli(args, opts);
   const job = asJob(out);
   return { jobId: extractJobId(job), url: extractResultUrl(job), raw: job };
 }

@@ -4,16 +4,23 @@
  *
  * Data flow (store keys), in pipeline order:
  *   topic_select  → topic
+ *   scene_planner → scenes sceneMusicPrompt
  *   keyframes     → f1JobId f2JobId f1Url f2Url f1Key
  *   loop_clips    → clip1Key clip2Key clip1Url clip2Url
- *   upscale       → upscaledThumbUrl upscaledThumbKey
+ *   upscale       → loopUnitKey loopUnitUrl loopUnitUpscaled loopUnitResolution
  *   music         → musicKey musicProvider musicUrl
  *   metadata      → title description tags
  *   assemble      → videoKey videoLocalPath videoDurationSec
+ *   intro_card    → introApplied introMode (+ overrides videoKey/videoLocalPath)
  *   qa_light      → qaPassed qaReport
  *   thumbnail     → thumbnailKey
  *   upload_draft  → youtubeVideoId watchUrl youtubePrivacy
  *   notify        → notified
+ *
+ * The Kling prompt CONSTITUTION (src/engine/prompt/constitution.ts) is appended
+ * to every i2v call via composeKlingPrompt; FLUX stills via composeFluxPrompt.
+ * The REAL upscale (Topaz on the loop UNIT) lives in the upscale block; the
+ * Remotion intro card (LofiIntroV2) is overlaid by intro_card.
  *
  * Heavy blocks (keyframes/loop_clips/upscale/music/assemble) are gated and run
  * the REAL CLIs/APIs. Everything is addressed by R2 key + remote URL; ffmpeg
@@ -28,24 +35,37 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { generateKeyframe, generateClip } from "@/lib/higgsfield";
-import { upscaleImage } from "@/lib/replicate";
+import { upscaleLoopUnit } from "@/lib/replicate";
+// (Real-ESRGAN image upscaler intentionally not used for video — Topaz only.)
 import { generateMusic, type MusicProvider } from "@/lib/music";
 import { uploadPrivateDraft } from "@/lib/youtube";
 import { notifyDraftReady } from "@/lib/telegram";
 import {
   concatClips,
   loopUnderAudio,
-  grabFrame,
   titleCard,
   probe,
+  overlayIntro,
+  renderLofiIntro,
 } from "@/lib/ffmpeg";
 import {
   makeRunTempDir,
   downloadTo,
   readBytes,
+  writeBytes,
 } from "@/lib/files";
-import { putObject } from "@/lib/storage";
+import { putObject, getObjectBytes } from "@/lib/storage";
 import { join } from "node:path";
+import { access } from "node:fs/promises";
+import {
+  composeKlingPrompt,
+  composeFluxPrompt,
+} from "@/engine/prompt/constitution";
+import {
+  planScenes,
+  type SceneSpec,
+  type SceneLibraryEntry,
+} from "@/engine/prompt/scenePlanner";
 
 /* ----------------------------- helpers --------------------------------- */
 
@@ -66,6 +86,34 @@ function str(ctx: StageContext, key: string): string {
 function styleGrammar(ctx: StageContext): string {
   const sg = (ctx.store["styleGrammar"] as string | undefined) ?? "";
   return sg;
+}
+
+/** Channel visual-style preset key (drives the Kling/Flux constitution). */
+function visualStyle(ctx: StageContext): string {
+  return (
+    (ctx.params["visualStyle"] as string | undefined) ??
+    (ctx.store["visualStyle"] as string | undefined) ??
+    "lofi"
+  );
+}
+
+/** Read the planned scenes from the store (scene_planner output). */
+function scenesFromStore(ctx: StageContext): SceneSpec[] {
+  const s = ctx.store["scenes"] as SceneSpec[] | undefined;
+  if (!Array.isArray(s) || s.length === 0) {
+    throw new Error("lofi: store[\"scenes\"] missing — scene_planner must run first");
+  }
+  return s;
+}
+
+/** True if a local file path exists and is readable. */
+async function fileExists(path: string): Promise<boolean> {
+  try {
+    await access(path);
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Record an asset row in Convex (best-effort metadata index). */
@@ -126,21 +174,67 @@ export const topicSelect: Block = {
   },
 };
 
+/* -------------------------- 1b. scene_planner --------------------------- */
+
+export const scenePlanner: Block = {
+  id: "scene_planner",
+  consumes: ["topic"],
+  produces: ["scenes", "sceneMusicPrompt"],
+  run: async (ctx) => {
+    const topic = str(ctx, "topic");
+    const style = styleGrammar(ctx);
+    const vs = visualStyle(ctx);
+    // Optional per-channel pre-authored library (locked consistency across a
+    // series). Seeded from channel identity into the store by the runner, or
+    // passed as a block param.
+    const sceneLibrary =
+      (ctx.params["sceneLibrary"] as Record<string, SceneLibraryEntry> | undefined) ??
+      (ctx.store["sceneLibrary"] as Record<string, SceneLibraryEntry> | undefined);
+    const defaultDurationSec = Number(ctx.params["clipDurationSec"] ?? 5);
+
+    const plan = planScenes({
+      topic,
+      styleGrammar: style,
+      visualStyle: vs,
+      sceneLibrary,
+      defaultDurationSec,
+    });
+    ctx.log(
+      `scene_planner: ${plan.scenes.length} scene(s) (fromLibrary=${plan.fromLibrary}, style=${vs})`,
+    );
+    return {
+      scenes: plan.scenes,
+      sceneMusicPrompt: plan.musicPrompt ?? "",
+    };
+  },
+};
+
 /* ---------------------------- 2. keyframes ------------------------------ */
 
 export const keyframes: Block = {
   id: "keyframes",
-  consumes: ["topic"],
+  consumes: ["scenes"],
   produces: ["f1JobId", "f2JobId", "f1Url", "f2Url", "f1Key"],
   paid: true,
   run: async (ctx) => {
-    const topic = str(ctx, "topic");
     const style = styleGrammar(ctx);
+    const vs = visualStyle(ctx);
+    const scene = scenesFromStore(ctx)[0];
     const aspect = (ctx.params.aspectRatio as string) ?? "16:9";
     const resolution = (ctx.params.resolution as string) ?? "2k";
 
-    const f1Prompt = `${topic}. ${style}. Lofi aesthetic, cozy ambient scene, soft warm lighting, detailed background, cinematic, no people, frame A`;
-    const f2Prompt = `${topic}. ${style}. Lofi aesthetic, same scene gentle variation (drifting clouds / shifting light), cinematic, no people, frame B`;
+    // Compose the FULL flux still prompt via the constitution. Frame A is the
+    // planned scene; Frame B is a gentle variation for the A→B→A loop.
+    const f1Prompt = composeFluxPrompt({
+      sceneDescription: `${scene.fluxPrompt}, frame A`,
+      styleGrammar: style,
+      visualStyle: vs,
+    });
+    const f2Prompt = composeFluxPrompt({
+      sceneDescription: `${scene.fluxPrompt}, same scene with a gentle variation (drifting clouds / shifting light / subtle reflections), frame B`,
+      styleGrammar: style,
+      visualStyle: vs,
+    });
 
     ctx.log("keyframes: generating F1 (flux_2)…");
     const f1 = await generateKeyframe({ prompt: f1Prompt, aspectRatio: aspect, resolution });
@@ -172,26 +266,45 @@ export const keyframes: Block = {
 
 export const loopClips: Block = {
   id: "loop_clips",
-  consumes: ["f1JobId", "f2JobId"],
+  consumes: ["f1JobId", "f2JobId", "scenes"],
   produces: ["clip1Key", "clip2Key", "clip1Url", "clip2Url"],
   paid: true,
   run: async (ctx) => {
     // Pass the keyframe JOB IDS directly as Kling media flags (08c: no reupload).
     const f1 = str(ctx, "f1JobId");
     const f2 = str(ctx, "f2JobId");
-    const topic = str(ctx, "topic");
-    const dur = Number(ctx.params.clipDurationSec ?? 5);
+    const style = styleGrammar(ctx);
+    const vs = visualStyle(ctx);
+    const scene = scenesFromStore(ctx)[0];
+    const dur = Number(ctx.params.clipDurationSec ?? scene.durationSec ?? 5);
 
-    ctx.log("loop_clips: clip1 (F1→F2)…");
+    // Compose the FULL Kling i2v prompt: motion-only scene description + style
+    // grammar + the locked-camera constitution (+ negative prompt). This is the
+    // gap the first M1 had — Kling now receives the full scene+camera+style
+    // instruction, not a one-liner.
+    const fwd = composeKlingPrompt({
+      sceneDescription: scene.klingMotionPrompt,
+      styleGrammar: style,
+      visualStyle: vs,
+    });
+    const rev = composeKlingPrompt({
+      sceneDescription: `${scene.klingMotionPrompt}, motion gently reversing back to the starting state`,
+      styleGrammar: style,
+      visualStyle: vs,
+    });
+
+    ctx.log(`loop_clips: clip1 (F1→F2) — kling prompt: "${fwd.prompt.slice(0, 90)}…"`);
     const clip1 = await generateClip({
-      prompt: `Slow gentle ambient motion, ${topic}, subtle drifting, static camera, seamless lofi loop`,
+      prompt: fwd.prompt,
+      negativePrompt: fwd.negativePrompt,
       startImage: f1,
       endImage: f2,
       durationSec: dur,
     });
     ctx.log("loop_clips: clip2 (F2→F1)…");
     const clip2 = await generateClip({
-      prompt: `Slow gentle ambient motion returning to start, ${topic}, subtle drifting, static camera, seamless lofi loop`,
+      prompt: rev.prompt,
+      negativePrompt: rev.negativePrompt,
       startImage: f2,
       endImage: f1,
       durationSec: dur,
@@ -223,36 +336,72 @@ export const loopClips: Block = {
 
 export const upscale: Block = {
   id: "upscale",
-  consumes: ["f1Url"],
-  produces: ["upscaledThumbUrl", "upscaledThumbKey"],
+  consumes: ["clip1Url", "clip2Url", "f1Url"],
+  produces: [
+    "loopUnitKey",
+    "loopUnitUrl",
+    "loopUnitUpscaled",
+    "loopUnitResolution",
+  ],
   paid: true,
   run: async (ctx) => {
-    // Higgsfield has no image upscaler → Real-ESRGAN on Replicate (08c spec).
-    // We upscale the F1 still (thumbnail base). The upscaler only feeds the
-    // thumbnail, never the video, so a hard shared-GPU OOM degrades to the
-    // original still (logged loudly) rather than killing a finished video.
-    const f1Url = str(ctx, "f1Url");
-    const scale = Number(ctx.params.scale ?? 2);
-    ctx.log("upscale: Real-ESRGAN on F1 still…");
-    let upUrl: string;
-    let upscaled = true;
-    try {
-      upUrl = await upscaleImage({ imageUrl: f1Url, scale });
-    } catch (e) {
-      ctx.log(
-        `upscale: cloud upscaler exhausted (${e instanceof Error ? e.message : e}); degrading to original F1 still`,
-      );
-      upUrl = f1Url;
-      upscaled = false;
-    }
+    // THE REAL UPSCALE (legacy topaz.py): build the short A→B→A loop UNIT, then
+    // run Topaz `topazlabs/video-upscale` on JUST that ~10-30s unit. assemble
+    // then stream_loops the 4K unit under audio — so we never upscale the full
+    // render. Bounds cost/time to ~$0.25 / ~1 min. Real-ESRGAN-on-full-video is
+    // removed entirely (it was the OOM + "no upscale" bug).
+    const clip1Url = str(ctx, "clip1Url");
+    const clip2Url = str(ctx, "clip2Url");
+    const targetResolution = (ctx.params.targetResolution as string) ?? "4k";
+    const targetFps = Number(ctx.params.targetFps ?? 30);
 
     const tmp = await makeRunTempDir(ctx.runId);
-    const local = await downloadTo(upUrl, join(tmp, "f1_upscaled.png"));
-    const key = `${ctx.keyPrefix}runs/${ctx.runId}/f1_upscaled.png`;
-    await putObject(key, await readBytes(local), { contentType: "image/png" });
-    await recordAsset(ctx, "upscaled", key, { scale, upscaled });
+    const c1 = await downloadTo(clip1Url, join(tmp, "c1.mp4"));
+    const c2 = await downloadTo(clip2Url, join(tmp, "c2.mp4"));
 
-    return { upscaledThumbUrl: upUrl, upscaledThumbKey: key };
+    ctx.log("upscale: concat clip1+clip2 → loop unit (A→B→A)…");
+    const loopUnit = await concatClips([c1, c2], join(tmp, "loopunit.mp4"));
+
+    let finalLoopPath = loopUnit;
+    let upscaled = true;
+    let resolution = targetResolution;
+    try {
+      ctx.log(
+        `upscale: Topaz video-upscale on loop unit → ${targetResolution}@${targetFps}fps…`,
+      );
+      const upUrl = await upscaleLoopUnit({
+        inputPath: loopUnit,
+        targetResolution,
+        targetFps,
+      });
+      finalLoopPath = await downloadTo(upUrl, join(tmp, "loopunit_4k.mp4"));
+      ctx.log(`upscale: Topaz complete — ${targetResolution}`);
+    } catch (e) {
+      // HONEST degrade: keep the native loop unit, log LOUDLY (legacy parity).
+      resolution = "native";
+      upscaled = false;
+      ctx.log(
+        `upscale: !!! TOPAZ UPSCALE FAILED (${e instanceof Error ? e.message : e}) — DEGRADING to native loop unit (NOT 4K)`,
+      );
+    }
+
+    const loopUnitKey = `${ctx.keyPrefix}runs/${ctx.runId}/loopunit_${resolution}.mp4`;
+    await putObject(loopUnitKey, await readBytes(finalLoopPath), {
+      contentType: "video/mp4",
+    });
+    await recordAsset(ctx, "loop_unit", loopUnitKey, {
+      upscaled,
+      resolution,
+      targetFps,
+    });
+
+    // Stash the local path so assemble can stream_loop without re-downloading.
+    return {
+      loopUnitKey,
+      loopUnitUrl: finalLoopPath, // local path; assemble reads it directly
+      loopUnitUpscaled: upscaled,
+      loopUnitResolution: resolution,
+    };
   },
 };
 
@@ -315,27 +464,38 @@ export const metadata: Block = {
 
 export const assemble: Block = {
   id: "assemble",
-  consumes: ["clip1Key", "clip2Key", "musicKey"],
+  consumes: ["loopUnitKey", "musicKey"],
   produces: ["videoKey", "videoLocalPath", "videoDurationSec"],
   run: async (ctx) => {
     // SHORT for M1; set durationSec=7200 in the channel pipeline for a 2h render.
+    // The loop UNIT is already upscaled (Topaz) by the upscale block; assemble
+    // ONLY stream_loops that 4K unit under the full music track → the cost of
+    // length is just ffmpeg time, not another upscale.
     const durationSec = Number(ctx.params.durationSec ?? 90);
-    const clip1Url = str(ctx, "clip1Url");
-    const clip2Url = str(ctx, "clip2Url");
     const musicUrl = str(ctx, "musicUrl");
+    // upscale stashed the loop-unit local path in loopUnitUrl; if absent (e.g.
+    // resumed run), fall back to the R2 key via a fresh download.
+    const loopUnitLocal = ctx.store["loopUnitUrl"] as string | undefined;
 
     const tmp = await makeRunTempDir(ctx.runId);
-    const c1 = await downloadTo(clip1Url, join(tmp, "c1.mp4"));
-    const c2 = await downloadTo(clip2Url, join(tmp, "c2.mp4"));
     const audio = await downloadTo(musicUrl, join(tmp, "music.mp3"));
 
-    ctx.log("assemble: concat clip1+clip2 → loop unit (A→B→A)…");
-    const loopUnit = await concatClips([c1, c2], join(tmp, "loopunit.mp4"));
+    let loopUnitPath: string;
+    if (loopUnitLocal && (await fileExists(loopUnitLocal))) {
+      loopUnitPath = loopUnitLocal;
+    } else {
+      // Re-fetch the upscaled loop unit from R2 if the local temp is gone
+      // (e.g. a resumed run on a fresh worker).
+      const key = str(ctx, "loopUnitKey");
+      ctx.log(`assemble: loop-unit temp missing — re-fetching ${key} from R2`);
+      const bytes = await getObjectBytes(key);
+      loopUnitPath = await writeBytes(join(tmp, "loopunit.mp4"), bytes);
+    }
 
-    ctx.log(`assemble: stream_loop under music to ${durationSec}s…`);
+    ctx.log(`assemble: stream_loop upscaled loop unit under music to ${durationSec}s…`);
     const finalPath = join(tmp, "final.mp4");
     await loopUnderAudio({
-      loopUnitPath: loopUnit,
+      loopUnitPath,
       audioPath: audio,
       outPath: finalPath,
       durationSec,
@@ -343,9 +503,84 @@ export const assemble: Block = {
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObject(videoKey, await readBytes(finalPath), { contentType: "video/mp4" });
-    await recordAsset(ctx, "video", videoKey, { durationSec });
+    await recordAsset(ctx, "video", videoKey, {
+      durationSec,
+      loopUnitResolution: ctx.store["loopUnitResolution"],
+    });
 
     return { videoKey, videoLocalPath: finalPath, videoDurationSec: durationSec };
+  },
+};
+
+/* ---------------------------- 7b. intro_card ---------------------------- */
+
+export const introCard: Block = {
+  id: "intro_card",
+  consumes: ["videoLocalPath"],
+  produces: ["introApplied", "introMode"],
+  run: async (ctx) => {
+    // Reusable Remotion intro-card block (port of legacy intro_renderer + the
+    // LofiIntroV2 composition). Renders a transparent alpha intro with the
+    // channel name and overlays it on the first ~8s of the assembled video
+    // (intro_mode='overlay', legacy lofi default). try/except guarded — the
+    // intro is a bonus that must NEVER block a finished video (legacy parity).
+    const videoLocal = str(ctx, "videoLocalPath");
+    const channelName =
+      (ctx.params["channelName"] as string | undefined) ??
+      (ctx.store["channelName"] as string | undefined) ??
+      "Lofi";
+    const videoTitle =
+      (ctx.store["title"] as string | undefined) ??
+      (ctx.params["videoTitle"] as string | undefined) ??
+      "lofi beats to relax / study to";
+    const introMode = (ctx.params["introMode"] as string | undefined) ?? "overlay";
+
+    // motion-graphics is a sibling Remotion project at repo-root/motion-graphics.
+    const mgDir =
+      (ctx.params["motionGraphicsDir"] as string | undefined) ??
+      process.env.MOTION_GRAPHICS_DIR ??
+      join(process.cwd(), "motion-graphics");
+    const fallbackTemplate = join(mgDir, "templates", "lofi-intro-transparent.webm");
+
+    try {
+      const tmp = await makeRunTempDir(ctx.runId);
+      const introWebm = join(tmp, "intro.webm");
+      ctx.log(`intro_card: rendering LofiIntroV2 (channel="${channelName}")…`);
+      const { path: introPath, rendered } = await renderLofiIntro({
+        motionGraphicsDir: mgDir,
+        outputPath: introWebm,
+        channelName,
+        videoTitle,
+        fallbackTemplate,
+      });
+      ctx.log(
+        `intro_card: intro ready (rendered=${rendered}); overlaying first 8s…`,
+      );
+      const withIntro = join(tmp, "with_intro.mp4");
+      await overlayIntro({
+        introWebm: introPath,
+        videoPath: videoLocal,
+        outPath: withIntro,
+      });
+
+      // Replace the canonical video with the intro'd version (QA + upload use it).
+      const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
+      await putObject(videoKey, await readBytes(withIntro), { contentType: "video/mp4" });
+      await recordAsset(ctx, "video_with_intro", videoKey, { introMode, rendered });
+
+      return {
+        introApplied: true,
+        introMode,
+        videoLocalPath: withIntro,
+        videoKey,
+      };
+    } catch (e) {
+      // HONEST degrade: keep the no-intro video, log LOUDLY. Never block upload.
+      ctx.log(
+        `intro_card: !!! INTRO FAILED (${e instanceof Error ? e.message : e}) — shipping WITHOUT intro`,
+      );
+      return { introApplied: false, introMode: "none" };
+    }
   },
 };
 
@@ -394,10 +629,13 @@ export const qaLight: Block = {
 
 export const thumbnail: Block = {
   id: "thumbnail",
-  consumes: ["upscaledThumbUrl", "title"],
+  consumes: ["f1Url", "title"],
   produces: ["thumbnailKey"],
   run: async (ctx) => {
-    const baseUrl = str(ctx, "upscaledThumbUrl");
+    // Thumbnail uses the F1 keyframe still directly (titleCard scales/crops to
+    // 1280x720). The video upscale (Topaz) handles the loop unit; a still
+    // upscale here would add cost for no visible thumbnail gain.
+    const baseUrl = str(ctx, "f1Url");
     const channelName = (ctx.store["channelName"] as string | undefined) ?? "Lofi";
     const topic = str(ctx, "topic");
 
@@ -476,30 +714,44 @@ export const notify: Block = {
   },
 };
 
-/** All lofi blocks in canonical order. */
+/** All lofi blocks (registration order; pipeline order is set by LOFI_PIPELINE). */
 export const lofiBlocks: Block[] = [
   topicSelect,
+  scenePlanner,
   keyframes,
   loopClips,
   upscale,
   music,
   metadata,
   assemble,
+  introCard,
   qaLight,
   thumbnail,
   uploadDraft,
   notify,
 ];
 
-/** Canonical lofi pipeline (ordered block entries) for a channel. */
+/**
+ * Canonical lofi pipeline (ordered block entries) for a channel.
+ *
+ * Order (faithful to legacy lofi sequence, adapted to upscale-the-loop-unit):
+ *   scene_planner → keyframes → loop_clips → upscale(LOOP UNIT, Topaz 4K)
+ *   → music → metadata → assemble(stream_loop 4K unit + mux) → intro_card(overlay)
+ *   → qa_light → thumbnail → upload_draft → notify
+ *
+ * We upscale the ~10-30s loop UNIT (not the full render), then stream_loop the
+ * 4K unit to length — so length is just a duration param, never extra GPU cost.
+ */
 export const LOFI_PIPELINE = [
   { block: "topic_select" },
-  { block: "keyframes", params: { aspectRatio: "16:9", resolution: "2k" } },
-  { block: "loop_clips", params: { clipDurationSec: 5 } },
-  { block: "upscale", params: { scale: 2 } },
+  { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 5 } },
+  { block: "keyframes", params: { aspectRatio: "16:9", resolution: "2k", visualStyle: "lofi" } },
+  { block: "loop_clips", params: { clipDurationSec: 5, visualStyle: "lofi" } },
+  { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "music", params: { provider: "mureka" } },
   { block: "metadata" },
   { block: "assemble", params: { durationSec: 90 } }, // ← set 7200 for 2h production
+  { block: "intro_card", params: { introMode: "overlay" } },
   { block: "qa_light", params: { toleranceSec: 5 } },
   { block: "thumbnail" },
   { block: "upload_draft" },

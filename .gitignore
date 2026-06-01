@@ -2,6 +2,7 @@
 
 # dependencies
 /node_modules
+node_modules/
 /.pnp
 .pnp.*
 .yarn/*
@@ -46,3 +47,8 @@ yarn-error.log*
 # typescript
 *.tsbuildinfo
 next-env.d.ts
+
+# motion-graphics (Remotion render project) — never commit deps or render outputs
+/motion-graphics/node_modules
+/motion-graphics/output
+/motion-graphics/.cache

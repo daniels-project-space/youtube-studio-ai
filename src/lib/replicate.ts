@@ -1,12 +1,22 @@
 /**
- * Replicate API wrapper — used for upscaling (Real-ESRGAN) since Higgsfield has
- * no image upscaler (08c spec). Generic enough to run any model version.
+ * Replicate API wrapper.
  *
  *   REPLICATE_API_TOKEN — vault-hydrated; never hardcoded.
  *
- * Flow: POST /v1/predictions with a versioned model + input → poll the
- * prediction until status `succeeded`/`failed` → return output URL(s).
+ * Two uses:
+ *   1. {@link upscaleLoopUnit} — the REAL upscaler (legacy `topaz.py`):
+ *      Topaz `topazlabs/video-upscale` on the short ~30s LOOP UNIT only (never
+ *      the full render). Bounds cost/time to ~$0.25 / ~1 min vs ~$40-75 / ~3h.
+ *      Real-ESRGAN is blacklisted for video per the legacy policy.
+ *   2. {@link upscaleImage} — Real-ESRGAN still upscaler (kept for thumbnails).
+ *
+ * Flow: optionally upload the input file to Replicate's file store, POST
+ * /v1/predictions with a versioned model + input → poll until
+ * `succeeded`/`failed` → return output URL(s).
  */
+import { readFile, stat } from "node:fs/promises";
+import { basename } from "node:path";
+
 const REPLICATE_BASE = "https://api.replicate.com/v1";
 
 export class ReplicateError extends Error {
@@ -135,5 +145,125 @@ export async function upscaleImage(args: {
   }
   throw new ReplicateError(
     `upscale exhausted scale ladder: ${lastErr instanceof Error ? lastErr.message : lastErr}`,
+  );
+}
+
+/* -------------------------- Topaz video upscale ------------------------- */
+
+/**
+ * Pinned Topaz video-upscale model + version — ported VERBATIM from legacy
+ * `strategies/upscale/topaz.py:22`. Do not bump without re-verifying params.
+ */
+export const TOPAZ_MODEL_VERSION =
+  "topazlabs/video-upscale:f4dad23bbe2d0bf4736d2ea8c9156f1911d8eeb511c8d0bb390931e25caaef61";
+
+/** Loop unit must fit a direct upload (legacy UPLOAD_SIZE_CAP_MB). */
+const UPLOAD_SIZE_CAP_MB = 95;
+
+const VALID_RESOLUTIONS = new Set(["720p", "1080p", "4k"]);
+
+/**
+ * Upload a local file to Replicate's file store; returns the served URL to use
+ * as a prediction input. Uses multipart/form-data (the documented endpoint).
+ */
+async function uploadFile(path: string): Promise<string> {
+  const form = new FormData();
+  const buf = await readFile(path);
+  form.append(
+    "content",
+    new Blob([new Uint8Array(buf)], { type: "video/mp4" }),
+    basename(path),
+  );
+  const res = await fetch(`${REPLICATE_BASE}/files`, {
+    method: "POST",
+    headers: { Authorization: `Bearer ${token()}` },
+    body: form,
+  });
+  const json = (await res.json()) as {
+    urls?: { get?: string };
+    detail?: string;
+  };
+  if (!res.ok || !json.urls?.get) {
+    throw new ReplicateError(
+      `replicate /files upload failed (HTTP ${res.status}): ${json.detail ?? JSON.stringify(json).slice(0, 200)}`,
+    );
+  }
+  return json.urls.get;
+}
+
+export interface UpscaleLoopUnitArgs {
+  /** Local path to the short loop-unit mp4 (must be < ~95MB). */
+  inputPath: string;
+  /** 720p | 1080p | 4k (default 4k, legacy default). */
+  targetResolution?: string;
+  /** Output fps (15..120, default 30). */
+  targetFps?: number;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+}
+
+/**
+ * Topaz upscale of the LOOP UNIT (faithful port of legacy `upscale_loop_unit`).
+ * Validates the size cap + resolution + fps, uploads the unit, runs the pinned
+ * Topaz model, and returns the upscaled video URL. Raises on any failure — the
+ * caller (upscale block) decides whether to degrade to the native loop.
+ */
+export async function upscaleLoopUnit(
+  args: UpscaleLoopUnitArgs,
+): Promise<string> {
+  const targetResolution = args.targetResolution ?? "4k";
+  const targetFps = args.targetFps ?? 30;
+
+  if (!VALID_RESOLUTIONS.has(targetResolution)) {
+    throw new ReplicateError(
+      `upscaleLoopUnit: invalid target_resolution '${targetResolution}' (allowed: 720p,1080p,4k)`,
+    );
+  }
+  if (targetFps < 15 || targetFps > 120) {
+    throw new ReplicateError(
+      `upscaleLoopUnit: target_fps ${targetFps} out of range (15..120)`,
+    );
+  }
+  const sizeMb = (await stat(args.inputPath)).size / (1024 * 1024);
+  if (sizeMb > UPLOAD_SIZE_CAP_MB) {
+    throw new ReplicateError(
+      `upscaleLoopUnit: loop unit ${sizeMb.toFixed(1)}MB exceeds ${UPLOAD_SIZE_CAP_MB}MB upload cap`,
+    );
+  }
+
+  const videoUrl = await uploadFile(args.inputPath);
+  const [, version] = TOPAZ_MODEL_VERSION.split(":");
+  const created = await api<Prediction>("/predictions", {
+    method: "POST",
+    body: JSON.stringify({
+      version,
+      input: {
+        video: videoUrl,
+        target_resolution: targetResolution,
+        target_fps: targetFps,
+      },
+    }),
+  });
+
+  const deadline = Date.now() + (args.timeoutMs ?? 1_200_000);
+  let pred = created;
+  while (pred.status !== "succeeded" && pred.status !== "failed") {
+    if (Date.now() > deadline) {
+      throw new ReplicateError(`topaz upscale timed out (prediction ${created.id})`);
+    }
+    await new Promise((r) => setTimeout(r, args.pollIntervalMs ?? 5000));
+    pred = await api<Prediction>(`/predictions/${created.id}`);
+  }
+  if (pred.status === "failed") {
+    throw new ReplicateError(`topaz upscale failed: ${pred.error ?? "unknown"}`);
+  }
+  const out = pred.output;
+  if (typeof out === "string") return out;
+  if (Array.isArray(out) && typeof out[0] === "string") return out[0];
+  if (out && typeof out === "object" && typeof (out as { url?: string }).url === "string") {
+    return (out as { url: string }).url;
+  }
+  throw new ReplicateError(
+    `topaz upscale produced no URL output: ${JSON.stringify(out).slice(0, 200)}`,
   );
 }

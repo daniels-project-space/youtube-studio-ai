@@ -1,0 +1,26 @@
+{
+  "name": "youtube-studio-ai-motion-graphics",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Remotion motion-graphics render project (lofi intro cards). Rendered out-of-band via `npx remotion render`; NOT bundled into the Next/Trigger app. Ported faithfully from legacy autostudio/motion-graphics (LofiIntroV2).",
+  "scripts": {
+    "render:lofi-v2": "remotion render src/index.ts LofiIntroV2 --output output/lofi-intro-v2.mp4",
+    "render:lofi-v2-transparent": "remotion render src/index.ts LofiIntroV2Transparent --codec=vp8 --output output/lofi-intro-v2-transparent.webm",
+    "template:lofi": "remotion render src/index.ts LofiIntroV2 --output templates/lofi-intro.mp4",
+    "template:lofi-transparent": "remotion render src/index.ts LofiIntroV2Transparent --codec=vp8 --output templates/lofi-intro-transparent.webm",
+    "preview": "remotion preview src/index.ts"
+  },
+  "dependencies": {
+    "@remotion/cli": "^4.0.441",
+    "@remotion/google-fonts": "^4.0.441",
+    "culori": "^4.0.2",
+    "react": "^19.2.4",
+    "react-dom": "^19.2.4",
+    "remotion": "^4.0.441",
+    "remotion-bits": "^0.2.0"
+  },
+  "devDependencies": {
+    "@types/react": "^19.2.14",
+    "typescript": "^5.6.2"
+  }
+}

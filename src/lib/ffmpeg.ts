@@ -10,6 +10,7 @@
  *      duration; mux audio; output mp4 (yuv420p, +faststart).
  */
 import { spawn } from "node:child_process";
+import { stat, copyFile } from "node:fs/promises";
 
 export class FfmpegError extends Error {
   constructor(message: string) {
@@ -232,4 +233,152 @@ export async function probe(path: string): Promise<ProbeResult> {
     videoCodec: video?.codec_name,
     audioCodec: audio?.codec_name,
   };
+}
+
+/* --------------------------- intro card (Remotion) ---------------------- */
+
+/** npx invocation for a single CLI command with a timeout. */
+function runCmd(
+  bin: string,
+  args: string[],
+  cwd: string,
+  timeoutMs = 300_000,
+): Promise<{ stdout: string; stderr: string }> {
+  return new Promise((resolve, reject) => {
+    const child = spawn(bin, args, {
+      cwd,
+      stdio: ["ignore", "pipe", "pipe"],
+      env: { ...process.env, npm_config_userconfig: "/tmp/empty-npmrc" },
+    });
+    let stdout = "";
+    let stderr = "";
+    const timer = setTimeout(() => {
+      child.kill("SIGKILL");
+      reject(new FfmpegError(`${bin} timed out after ${timeoutMs}ms`));
+    }, timeoutMs);
+    child.stdout.on("data", (d) => (stdout += d.toString()));
+    child.stderr.on("data", (d) => (stderr += d.toString()));
+    child.on("error", (e) => {
+      clearTimeout(timer);
+      reject(new FfmpegError(`${bin} spawn failed: ${e.message}`));
+    });
+    child.on("close", (code) => {
+      clearTimeout(timer);
+      if (code !== 0) {
+        reject(new FfmpegError(`${bin} exited ${code}: ${stderr.slice(-800)}`));
+      } else {
+        resolve({ stdout, stderr });
+      }
+    });
+  });
+}
+
+export interface RenderIntroArgs {
+  /** Absolute path to the motion-graphics Remotion project. */
+  motionGraphicsDir: string;
+  /** Output path for the rendered transparent intro (WebM, alpha). */
+  outputPath: string;
+  /** Channel name shown in the intro. */
+  channelName: string;
+  /** Subtitle / video title shown in the intro. */
+  videoTitle: string;
+  /** Pre-rendered fallback template (copied if on-demand render fails). */
+  fallbackTemplate?: string;
+  /** Render timeout (ms). */
+  timeoutMs?: number;
+}
+
+/**
+ * Render the lofi intro card (transparent/alpha WebM) via Remotion — a faithful
+ * port of legacy `intro_renderer.render_intro()`. On-demand renders the
+ * `LofiIntroV2Transparent` composition with custom props; if the render is
+ * unavailable (no node_modules / failure) and a pre-rendered template exists, it
+ * copies that instead (legacy's "copy pre-rendered template" branch).
+ *
+ * Returns `{ path, rendered }` — `rendered=false` means the fallback template
+ * was used (still a real animated intro, just with default channel name).
+ */
+export async function renderLofiIntro(
+  args: RenderIntroArgs,
+): Promise<{ path: string; rendered: boolean }> {
+  const props = JSON.stringify({
+    channelName: args.channelName,
+    videoTitle: args.videoTitle,
+    transparent: true,
+  });
+  try {
+    await runCmd(
+      "npx",
+      [
+        "remotion",
+        "render",
+        "src/index.ts",
+        "LofiIntroV2Transparent",
+        "--output",
+        args.outputPath,
+        "--codec=vp8",
+        "--props",
+        props,
+      ],
+      args.motionGraphicsDir,
+      args.timeoutMs ?? 300_000,
+    );
+    const size = (await stat(args.outputPath)).size;
+    if (size < 10_000) {
+      throw new FfmpegError(`intro render produced a tiny file (${size}B)`);
+    }
+    return { path: args.outputPath, rendered: true };
+  } catch (e) {
+    if (args.fallbackTemplate) {
+      await copyFile(args.fallbackTemplate, args.outputPath);
+      return { path: args.outputPath, rendered: false };
+    }
+    throw e instanceof Error ? e : new FfmpegError(String(e));
+  }
+}
+
+/**
+ * Overlay a transparent intro (WebM with alpha) on the first N seconds of a
+ * video — VERBATIM port of legacy `overlay_intro_ffmpeg`. N is read from the
+ * intro's own duration via ffprobe.
+ */
+export async function overlayIntro(args: {
+  introWebm: string;
+  videoPath: string;
+  outPath: string;
+  timeoutMs?: number;
+}): Promise<string> {
+  const introInfo = await probe(args.introWebm);
+  const introDuration = introInfo.durationSec || 8;
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-i",
+      args.videoPath,
+      "-i",
+      args.introWebm,
+      "-filter_complex",
+      `[0:v][1:v]overlay=0:0:enable='between(t,0,${introDuration})'[vout]`,
+      "-map",
+      "[vout]",
+      "-map",
+      "0:a?",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "fast",
+      "-crf",
+      "22",
+      "-c:a",
+      "copy",
+      args.outPath,
+    ],
+    args.timeoutMs ?? 600_000,
+  );
+  const size = (await stat(args.outPath)).size;
+  if (size < 100_000) {
+    throw new FfmpegError(`overlayIntro produced a tiny file (${size}B)`);
+  }
+  return args.outPath;
 }
