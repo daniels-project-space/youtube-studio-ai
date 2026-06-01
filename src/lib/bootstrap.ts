@@ -10,11 +10,15 @@ import { hydrateEnv } from "@/lib/vault";
 
 const SERVICES = [
   "cloudflare", // R2_*
-  "youtube", // YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN
+  "youtube", // YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN (+ YOUTUBE_DATA_API_KEY)
   "mureka", // MUREKA_API_KEY
   "suno", // SUNO_API_KEY
   "replicate", // REPLICATE_API_TOKEN
   "telegram", // TELEGRAM_BOT_TOKEN (+ admin chat id)
+  // Competitor-intelligence engine. hydrateEnv tolerates a missing service
+  // (logs + continues), so these are safe even before the vault entries exist.
+  "google", // GEMINI_API_KEY (Gemini 2.5 Flash + Vision)
+  "anthropic", // ANTHROPIC_API_KEY (claude_flux thumbnail concept)
 ];
 
 let done = false;

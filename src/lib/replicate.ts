@@ -147,6 +147,61 @@ export async function upscaleImage(args: {
   );
 }
 
+/* --------------------------- Flux text-to-image ------------------------- */
+
+/**
+ * Flux base-image generator for the claude_flux thumbnailer. Renders a
+ * TEXT-FREE 16:9 base from a prompt (text is overlaid downstream by ffmpeg).
+ *
+ * Defaults to `black-forest-labs/flux-schnell` (fast/cheap). The slug is an
+ * official model (no version pin needed — `/models/<owner>/<name>/predictions`
+ * runs the latest official version). Returns the rendered image URL.
+ */
+const FLUX_MODEL =
+  process.env.REPLICATE_FLUX_MODEL ?? "black-forest-labs/flux-schnell";
+
+export async function generateFluxImage(args: {
+  prompt: string;
+  aspectRatio?: string;
+  pollIntervalMs?: number;
+  timeoutMs?: number;
+}): Promise<string> {
+  const created = await api<Prediction>(
+    `/models/${FLUX_MODEL}/predictions`,
+    {
+      method: "POST",
+      body: JSON.stringify({
+        input: {
+          prompt: args.prompt,
+          aspect_ratio: args.aspectRatio ?? "16:9",
+          output_format: "png",
+          num_outputs: 1,
+          disable_safety_checker: false,
+        },
+      }),
+    },
+  );
+
+  const deadline = Date.now() + (args.timeoutMs ?? 300_000);
+  let pred = created;
+  while (pred.status !== "succeeded" && pred.status !== "failed") {
+    if (Date.now() > deadline) {
+      throw new ReplicateError("flux generation timed out");
+    }
+    await new Promise((r) => setTimeout(r, args.pollIntervalMs ?? 2000));
+    pred = await api<Prediction>(`/predictions/${created.id}`);
+  }
+  if (pred.status === "failed") {
+    throw new ReplicateError(`flux failed: ${pred.error ?? "unknown"}`);
+  }
+  const out = pred.output;
+  if (typeof out === "string") return out;
+  if (Array.isArray(out) && typeof out[0] === "string") return out[0];
+  throw new ReplicateError(
+    `flux produced no URL output: ${JSON.stringify(out).slice(0, 200)}`,
+  );
+}
+
 /* -------------------------- Topaz video upscale ------------------------- */
 
 /**

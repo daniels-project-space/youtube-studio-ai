@@ -722,7 +722,17 @@ export const notify: Block = {
   },
 };
 
-/** All lofi blocks (registration order; pipeline order is set by LOFI_PIPELINE). */
+/**
+ * All lofi blocks (registration order; pipeline order is set by LOFI_PIPELINE).
+ *
+ * NOTE: the legacy `metadata` and `thumbnail` blocks are intentionally OMITTED
+ * from registration. The competitor-intelligence engine supersedes them with
+ * `metadataOptimized` (same id "metadata", title-optimised + view estimate) and
+ * `thumbnailGen` (id "thumbnail_gen", claude_flux), both registered via
+ * `intelligenceBlocks` in src/engine/blocks.ts. Registering both copies of the
+ * "metadata" id would throw a duplicate-id error. The legacy exports remain for
+ * reference but are no longer wired into the registry or LOFI_PIPELINE.
+ */
 export const lofiBlocks: Block[] = [
   topicSelect,
   scenePlanner,
@@ -730,11 +740,9 @@ export const lofiBlocks: Block[] = [
   loopClips,
   upscale,
   music,
-  metadata,
   assemble,
   introCard,
   qaLight,
-  thumbnail,
   uploadDraft,
   notify,
 ];
@@ -742,15 +750,21 @@ export const lofiBlocks: Block[] = [
 /**
  * Canonical lofi pipeline (ordered block entries) for a channel.
  *
- * Order (faithful to legacy lofi sequence, adapted to upscale-the-loop-unit):
- *   scene_planner → keyframes → loop_clips → upscale(LOOP UNIT, Topaz 4K)
- *   → music → metadata → assemble(stream_loop 4K unit + mux) → intro_card(overlay)
- *   → qa_light → thumbnail → upload_draft → notify
+ * Order (faithful to legacy lofi sequence + competitor-intelligence engine):
+ *   competitor_research → scene_planner → keyframes → loop_clips
+ *   → upscale(LOOP UNIT, Topaz 4K) → music → metadata(title-optimised)
+ *   → assemble(stream_loop 4K unit + mux) → intro_card(overlay) → qa_light
+ *   → thumbnail_gen(claude_flux) → upload_draft → notify
+ *
+ * `competitor_research` runs first (consumes []) so nicheIntelligence /
+ * seoDatabank / competitors are in the store before `metadata` optimises the
+ * title and `thumbnail_gen` designs the claude_flux thumbnail.
  *
  * We upscale the ~10-30s loop UNIT (not the full render), then stream_loop the
  * 4K unit to length — so length is just a duration param, never extra GPU cost.
  */
 export const LOFI_PIPELINE = [
+  { block: "competitor_research" },
   { block: "topic_select" },
   { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 5 } },
   { block: "keyframes", params: { aspectRatio: "16:9", resolution: "2k", visualStyle: "lofi" } },
@@ -761,7 +775,7 @@ export const LOFI_PIPELINE = [
   { block: "assemble", params: { durationSec: 90 } }, // ← set 7200 for 2h production
   { block: "intro_card", params: { introMode: "overlay" } },
   { block: "qa_light", params: { toleranceSec: 5 } },
-  { block: "thumbnail" },
+  { block: "thumbnail_gen" },
   { block: "upload_draft" },
   { block: "notify" },
 ];

@@ -214,6 +214,70 @@ export async function titleCard(args: {
   return args.outJpg;
 }
 
+/**
+ * Bold, centered, Impact-style title overlay for the claude_flux thumbnailer.
+ * Renders a punchy YouTube-style headline onto a TEXT-FREE Flux base, with a
+ * strong outline (and optional drop shadow) so it stays legible at small size.
+ * Pure ffmpeg, $0. Auto-wraps to ~14 chars/line so ≤8-word titles fit.
+ */
+export async function thumbnailText(args: {
+  basePath: string;
+  outJpg: string;
+  title: string;
+  /** Hex like "#FFEE00" or an ffmpeg colour name. Defaults to white. */
+  textColor?: string;
+  /** Add a drop shadow under the text. */
+  textShadow?: boolean;
+  fontFile?: string;
+}): Promise<string> {
+  const font =
+    args.fontFile ?? "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
+  const esc = (s: string) =>
+    s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "’");
+  // Normalise colour: ffmpeg accepts 0xRRGGBB or names; map #hex → 0xhex.
+  const color = (args.textColor ?? "white").replace(/^#/, "0x");
+  // Soft word-wrap so long titles don't run off-frame.
+  const words = args.title.trim().split(/\s+/);
+  const lines: string[] = [];
+  let cur = "";
+  for (const w of words) {
+    if ((cur + " " + w).trim().length > 16 && cur) {
+      lines.push(cur.trim());
+      cur = w;
+    } else {
+      cur = (cur + " " + w).trim();
+    }
+  }
+  if (cur) lines.push(cur);
+  const wrapped = lines.join("\n");
+
+  const draws: string[] = [];
+  if (args.textShadow) {
+    draws.push(
+      `drawtext=fontfile=${font}:text='${esc(wrapped)}':fontcolor=black@0.75:fontsize=96:` +
+        `line_spacing=12:x=(w-text_w)/2+6:y=(h-text_h)/2+6`,
+    );
+  }
+  draws.push(
+    `drawtext=fontfile=${font}:text='${esc(wrapped)}':fontcolor=${color}:fontsize=96:` +
+      `borderw=8:bordercolor=black:line_spacing=12:x=(w-text_w)/2:y=(h-text_h)/2`,
+  );
+
+  await run(FFMPEG, [
+    "-y",
+    "-i",
+    args.basePath,
+    "-vf",
+    `scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,${draws.join(",")}`,
+    "-frames:v",
+    "1",
+    "-q:v",
+    "2",
+    args.outJpg,
+  ]);
+  return args.outJpg;
+}
+
 export interface ProbeResult {
   durationSec: number;
   hasVideo: boolean;

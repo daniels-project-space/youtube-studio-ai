@@ -4,6 +4,8 @@ import { v } from "convex/values";
 const identityValidator = v.object({
   persona: v.string(),
   voiceId: v.optional(v.string()),
+  voiceRef: v.optional(v.string()),
+  toneRefs: v.optional(v.array(v.string())),
   bannedWords: v.array(v.string()),
   requiredCallbacks: v.array(v.string()),
   styleGrammar: v.string(),
@@ -11,7 +13,22 @@ const identityValidator = v.object({
   thumbnailTemplate: v.string(),
   topicPool: v.array(v.string()),
   cadence: v.string(),
+  niche: v.optional(v.string()),
+  thumbnailIdentity: v.optional(
+    v.object({
+      colorPalette: v.array(v.string()),
+      visualStyle: v.string(),
+      textPosition: v.string(),
+      avoid: v.array(v.string()),
+    }),
+  ),
 });
+
+const thumbnailerValidator = v.union(
+  v.literal("claude_flux"),
+  v.literal("ideogram"),
+  v.literal("title_card"),
+);
 
 const pipelineValidator = v.array(
   v.object({
@@ -26,6 +43,7 @@ export const createChannel = mutation({
     slug: v.string(),
     name: v.string(),
     identity: identityValidator,
+    thumbnailer: v.optional(thumbnailerValidator),
     template: v.string(),
     pipeline: pipelineValidator,
     modelRouting: v.optional(v.any()),
@@ -50,6 +68,7 @@ export const createChannel = mutation({
       slug: args.slug,
       name: args.name,
       identity: args.identity,
+      thumbnailer: args.thumbnailer,
       template: args.template,
       pipeline: args.pipeline,
       modelRouting: args.modelRouting,
@@ -118,6 +137,7 @@ export const updateChannel = mutation({
     channelId: v.id("channels"),
     name: v.optional(v.string()),
     identity: v.optional(identityValidator),
+    thumbnailer: v.optional(thumbnailerValidator),
     template: v.optional(v.string()),
     pipeline: v.optional(pipelineValidator),
     modelRouting: v.optional(v.any()),

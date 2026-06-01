@@ -10,8 +10,10 @@
 
 import type * as assets from "../assets.js";
 import type * as channels from "../channels.js";
+import type * as competitors from "../competitors.js";
 import type * as runStages from "../runStages.js";
 import type * as runs from "../runs.js";
+import type * as seo from "../seo.js";
 import type * as topicMemory from "../topicMemory.js";
 
 import type {
@@ -23,8 +25,10 @@ import type {
 declare const fullApi: ApiFromModules<{
   assets: typeof assets;
   channels: typeof channels;
+  competitors: typeof competitors;
   runStages: typeof runStages;
   runs: typeof runs;
+  seo: typeof seo;
   topicMemory: typeof topicMemory;
 }>;
 
