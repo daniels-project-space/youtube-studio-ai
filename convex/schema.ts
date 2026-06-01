@@ -150,6 +150,19 @@ export default defineSchema({
     .index("by_run_block", ["runId", "block"])
     .index("by_owner", ["ownerId"]),
 
+  // Per-run streamed console lines (ctx.log) — drives the live LogConsole.
+  runLogs: defineTable({
+    ownerId: v.string(),
+    runId: v.id("runs"),
+    block: v.optional(v.string()),
+    level: v.string(), // info|warn|error
+    message: v.string(),
+    at: v.number(), // ms epoch — primary chronological sort
+    seq: v.optional(v.number()), // tie-breaker within the same flush batch
+  })
+    .index("by_run", ["runId"])
+    .index("by_run_seq", ["runId", "at", "seq"]),
+
   // Media artifacts; bytes live in R2, addressed by r2Key.
   assets: defineTable({
     ownerId: v.string(),
@@ -210,6 +223,42 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerId"])
     .index("by_owner_provider", ["ownerId", "provider"]),
+
+  // -------------------- Analytics (stats-refresh sink) --------------------
+  // Per-video performance snapshots, captured by the stats-refresh task from
+  // the YouTube Data API v3 (videos.list?part=statistics). Each row is one
+  // point-in-time reading; the history is the (youtubeVideoId, snapshotAt) axis.
+  videoAnalytics: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    youtubeVideoId: v.string(),
+    views: v.number(),
+    likes: v.number(),
+    comments: v.number(),
+    watchTimeHours: v.optional(v.number()),
+    estimatedRevenueUsd: v.optional(v.number()),
+    ctr: v.optional(v.number()),
+    rpm: v.optional(v.number()),
+    snapshotAt: v.number(),
+  })
+    .index("by_channel", ["channelId"])
+    .index("by_video", ["youtubeVideoId", "snapshotAt"]),
+
+  // Per-channel daily rollup, captured by the stats-refresh task from
+  // channels.list?part=statistics. Idempotent on (channelId, date) — the task
+  // upserts one row per channel per UTC day and computes subscriberDelta vs the
+  // previous day. This is what v1 never populated (channelAnalytics gap).
+  channelAnalytics: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    date: v.string(), // YYYY-MM-DD (UTC)
+    totalViews: v.number(),
+    totalWatchHours: v.optional(v.number()),
+    subscriberCount: v.number(),
+    subscriberDelta: v.number(),
+    videoCount: v.number(),
+    estimatedRevenueUsd: v.optional(v.number()),
+  }).index("by_channel_date", ["channelId", "date"]),
 
   // Generic key/value settings.
   settings: defineTable({

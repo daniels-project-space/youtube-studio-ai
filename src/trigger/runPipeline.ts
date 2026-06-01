@@ -22,6 +22,7 @@ import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline, preflight } from "@/engine/validate";
 import { runPipeline as runEngine } from "@/engine/runner";
 import { makeConvexSink } from "@/engine/convexSink";
+import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix } from "@/lib/storage";
 import { alertFailure } from "@/lib/telegram";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -65,6 +66,13 @@ export const runPipelineTask = task({
       status: "running",
     });
 
+    // Live log sink — tees every ctx.log line into the runLogs table so the
+    // run detail page can stream a console. Best-effort: never crashes the run.
+    const logSink = makeRunLogSink(convex, ownerId, payload.runId);
+    const log = teeLog(logSink, (msg, extra) =>
+      console.log(`[run-pipeline] ${msg}`, extra ?? ""),
+    );
+
     try {
       const resolved = validatePipeline(entries);
       preflight(resolved, { budgetUsd: channel.budget ?? 0 });
@@ -92,8 +100,11 @@ export const runPipelineTask = task({
         paramsByBlock,
         seedStore,
         sink,
-        log: (msg, extra) => console.log(`[run-pipeline] ${msg}`, extra ?? ""),
+        log,
       });
+
+      // Drain any buffered log lines before resolving the run state.
+      await logSink.flush();
 
       if (!result.ok) {
         await convex.mutation(api.runs.updateRun, {
@@ -117,6 +128,8 @@ export const runPipelineTask = task({
       return { ok: true, stages: result.stages };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      log(`run aborted: ${message}`);
+      await logSink.flush();
       await convex.mutation(api.runs.updateRun, {
         runId: payload.runId as Id<"runs">,
         status: "failed",

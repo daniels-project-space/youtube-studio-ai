@@ -82,6 +82,7 @@ interface VideosResponse {
     id: string;
     snippet?: {
       title?: string;
+      channelId?: string;
       channelTitle?: string;
       tags?: string[];
       publishedAt?: string;
@@ -131,6 +132,89 @@ export async function fetchVideoDetails(ids: string[]): Promise<VideoDetail[]> {
         thumbnailUrl: thumbUrl,
         durationSec: parseIsoDuration(it.contentDetails?.duration ?? ""),
         publishedAt: sn.publishedAt ?? "",
+      });
+    }
+  }
+  return out;
+}
+
+// --------------------------- Stats refresh ---------------------------
+// Lightweight readers used by the `stats-refresh` Trigger task (Tranche 5).
+// Distinct from fetchVideoDetails (which is the heavier competitor-research
+// shape): here we only need the live engagement numbers + each video's owning
+// YouTube channelId so we can roll up subscriber/view counts.
+
+export interface VideoStat {
+  youtubeVideoId: string;
+  channelId: string; // YouTube channelId (UC...), for channels.list rollup
+  views: number;
+  likes: number;
+  comments: number;
+}
+
+/** videos.list?part=snippet,statistics for a batch of ids → live numbers. */
+export async function fetchVideoStats(ids: string[]): Promise<VideoStat[]> {
+  const out: VideoStat[] = [];
+  for (let i = 0; i < ids.length; i += 50) {
+    const batch = ids.slice(i, i + 50);
+    if (batch.length === 0) continue;
+    const json = await get<VideosResponse>("videos", {
+      part: "snippet,statistics",
+      id: batch.join(","),
+    });
+    for (const it of json.items ?? []) {
+      const sn = it.snippet ?? {};
+      const st = it.statistics ?? {};
+      out.push({
+        youtubeVideoId: it.id,
+        channelId: sn.channelId ?? "",
+        views: Number(st.viewCount) || 0,
+        likes: Number(st.likeCount) || 0,
+        comments: Number(st.commentCount) || 0,
+      });
+    }
+  }
+  return out;
+}
+
+export interface ChannelStat {
+  channelId: string; // YouTube channelId (UC...)
+  subscriberCount: number;
+  viewCount: number;
+  videoCount: number;
+}
+
+interface ChannelsResponse {
+  items?: {
+    id: string;
+    statistics?: {
+      subscriberCount?: string;
+      viewCount?: string;
+      videoCount?: string;
+    };
+  }[];
+}
+
+/** channels.list?part=statistics for a batch of YouTube channelIds (≤50). */
+export async function fetchChannelStats(
+  channelIds: string[],
+): Promise<ChannelStat[]> {
+  const out: ChannelStat[] = [];
+  const unique = [...new Set(channelIds.filter(Boolean))];
+  for (let i = 0; i < unique.length; i += 50) {
+    const batch = unique.slice(i, i + 50);
+    if (batch.length === 0) continue;
+    const json = await get<ChannelsResponse>("channels", {
+      part: "statistics",
+      id: batch.join(","),
+    });
+    for (const it of json.items ?? []) {
+      const st = it.statistics ?? {};
+      out.push({
+        channelId: it.id,
+        subscriberCount: Number(st.subscriberCount) || 0,
+        viewCount: Number(st.viewCount) || 0,
+        videoCount: Number(st.videoCount) || 0,
       });
     }
   }

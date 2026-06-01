@@ -15,6 +15,7 @@ import {
   type PipelineNode,
   type PipelineStage,
 } from "@/components/LivePipeline";
+import { LogConsole } from "@/components/LogConsole";
 import { LOFI_BLOCK_IDS } from "@/lib/blocks";
 import { fmtDateTime, fmtUsd } from "@/lib/format";
 import { IconChevron, IconExternal } from "@/components/icons";
@@ -238,6 +239,12 @@ export default function RunDetailPage({
             description="This run has no planned blocks and no stages recorded yet."
           />
         )}
+      </section>
+
+      {/* Live logs */}
+      <section style={{ marginTop: "1.75rem" }}>
+        <SectionTitle>Console</SectionTitle>
+        <LogConsole runId={run._id} />
       </section>
     </>
   );

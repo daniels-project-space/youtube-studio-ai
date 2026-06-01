@@ -18,6 +18,7 @@ import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline, preflight } from "@/engine/validate";
 import { runPipeline } from "@/engine/runner";
 import { makeConvexSink } from "@/engine/convexSink";
+import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix } from "@/lib/storage";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { accountStatus } from "@/lib/higgsfield";
@@ -107,6 +108,7 @@ async function main(): Promise<void> {
   };
 
   const sink = makeConvexSink(convex, OWNER);
+  const logSink = makeRunLogSink(convex, OWNER, runId);
   const result = await runPipeline(resolved, {
     ownerId: OWNER,
     runId,
@@ -116,8 +118,9 @@ async function main(): Promise<void> {
     paramsByBlock,
     seedStore,
     sink,
-    log: (msg, extra) => console.log(`[m1] ${msg}`, extra ?? ""),
+    log: teeLog(logSink, (msg, extra) => console.log(`[m1] ${msg}`, extra ?? "")),
   });
+  await logSink.flush();
 
   await convex.mutation(api.runs.updateRun, {
     runId,

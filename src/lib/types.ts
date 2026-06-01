@@ -23,3 +23,30 @@ export type ChannelRow = {
   template: string;
   budget: number;
 };
+
+/**
+ * A finished-video row as returned by `videos.listVideos` (Tranche 4). Mirrors
+ * the enrichment shape in convex/videos.ts so the Library UI is strongly typed.
+ */
+export type VideoRow = {
+  _id: string;
+  status: string;
+  createdAt: number;
+  startedAt?: number;
+  finishedAt?: number;
+  youtubeVideoId?: string;
+  channelId: string;
+  channelName: string;
+  channelSlug: string;
+  title: string;
+  /** r2Key of the generated thumbnail asset; presign via /api/asset-url. */
+  thumbnailKey: string | null;
+  /** r2Key of the rendered video asset; lightbox <video> fallback. */
+  videoKey: string | null;
+  /** claude_flux thumbnail intelligence (surfaced in the lightbox). */
+  thumbnailTitle?: string;
+  visualRationale?: string;
+  estimatedViews?: number;
+  estimatedViewsSource?: string;
+  durationSec?: number;
+};
