@@ -48,7 +48,9 @@ function sunoKey(): string {
 }
 
 function extractAudioUrl(choice: Record<string, unknown>): string | undefined {
-  for (const k of ["url", "audio_url", "flac_url", "mp3_url", "stream_url"]) {
+  // Prefer lossless (FLAC/WAV) when the provider offers it, so the highest-
+  // quality master flows into assembly; fall back to mp3/stream otherwise.
+  for (const k of ["flac_url", "wav_url", "url", "audio_url", "mp3_url", "stream_url"]) {
     if (typeof choice[k] === "string") return choice[k] as string;
   }
   return undefined;

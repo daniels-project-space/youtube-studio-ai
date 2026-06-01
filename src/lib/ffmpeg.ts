@@ -145,7 +145,9 @@ export async function loopUnderAudio(args: {
       "-c:a",
       "aac",
       "-b:a",
-      "192k",
+      // Highest-quality AAC-LC delivery (YouTube's recommended stereo ceiling).
+      // Source is the lossless FLAC master when the provider offers one.
+      "384k",
       "-movflags",
       "+faststart",
       "-shortest",
