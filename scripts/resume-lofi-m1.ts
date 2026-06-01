@@ -25,12 +25,14 @@ import type { PipelineEntry } from "@/engine/types";
 
 const OWNER = "owner_daniel";
 
-// Resume pipeline: everything from upscale onward.
+// Resume pipeline: everything from upscale onward (Tranche-1 tail, incl the
+// Topaz loop-unit upscale + the Remotion intro_card).
 const RESUME_PIPELINE: PipelineEntry[] = [
-  { block: "upscale", params: { scale: 2 } },
+  { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "music", params: { provider: "mureka" } },
   { block: "metadata" },
-  { block: "assemble", params: { durationSec: 90 } },
+  { block: "assemble", params: { durationSec: 90, maxHeight: 2160, encodePreset: "veryfast" } },
+  { block: "intro_card", params: { introMode: "overlay" } },
   { block: "qa_light", params: { toleranceSec: 5 } },
   { block: "thumbnail" },
   { block: "upload_draft" },

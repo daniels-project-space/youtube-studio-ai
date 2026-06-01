@@ -100,38 +100,59 @@ export async function loopUnderAudio(args: {
   audioPath: string;
   outPath: string;
   durationSec: number;
+  /**
+   * Optional max output height. The Topaz loop unit can be true 4K
+   * (e.g. 5088x2880); re-encoding that to H.264 on a CPU-only host at
+   * `preset medium` is impractically slow (~0.3x realtime → hours). Capping the
+   * height to a clean delivery resolution (default 2160 = UHD) keeps the Topaz
+   * detail while staying encodable. Even width/height are forced (yuv420p).
+   */
+  maxHeight?: number;
+  /** libx264 preset for the long stream-loop encode (default "veryfast"). */
+  preset?: string;
+  /** Hard timeout (ms) — default 45min for long/large encodes. */
+  timeoutMs?: number;
 }): Promise<string> {
-  await run(FFMPEG, [
-    "-y",
-    "-stream_loop",
-    "-1",
-    "-i",
-    args.loopUnitPath,
-    "-i",
-    args.audioPath,
-    "-map",
-    "0:v:0",
-    "-map",
-    "1:a:0",
-    "-t",
-    String(args.durationSec),
-    "-c:v",
-    "libx264",
-    "-preset",
-    "medium",
-    "-crf",
-    "20",
-    "-pix_fmt",
-    "yuv420p",
-    "-c:a",
-    "aac",
-    "-b:a",
-    "192k",
-    "-movflags",
-    "+faststart",
-    "-shortest",
-    args.outPath,
-  ]);
+  const maxHeight = args.maxHeight ?? 2160;
+  // Downscale only if taller than the cap; always force even dims for yuv420p.
+  const vf = `scale=-2:'min(${maxHeight},ih)':flags=lanczos,scale=trunc(iw/2)*2:trunc(ih/2)*2`;
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-stream_loop",
+      "-1",
+      "-i",
+      args.loopUnitPath,
+      "-i",
+      args.audioPath,
+      "-map",
+      "0:v:0",
+      "-map",
+      "1:a:0",
+      "-t",
+      String(args.durationSec),
+      "-vf",
+      vf,
+      "-c:v",
+      "libx264",
+      "-preset",
+      args.preset ?? "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "192k",
+      "-movflags",
+      "+faststart",
+      "-shortest",
+      args.outPath,
+    ],
+    args.timeoutMs ?? 2_700_000,
+  );
   return args.outPath;
 }
 
@@ -367,14 +388,14 @@ export async function overlayIntro(args: {
       "-c:v",
       "libx264",
       "-preset",
-      "fast",
+      "veryfast",
       "-crf",
       "22",
       "-c:a",
       "copy",
       args.outPath,
     ],
-    args.timeoutMs ?? 600_000,
+    args.timeoutMs ?? 1_800_000,
   );
   const size = (await stat(args.outPath)).size;
   if (size < 100_000) {

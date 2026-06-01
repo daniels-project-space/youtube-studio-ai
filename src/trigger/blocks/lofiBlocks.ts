@@ -492,13 +492,21 @@ export const assemble: Block = {
       loopUnitPath = await writeBytes(join(tmp, "loopunit.mp4"), bytes);
     }
 
-    ctx.log(`assemble: stream_loop upscaled loop unit under music to ${durationSec}s…`);
+    // Cap delivery height (default UHD 2160) so a true-4K Topaz unit stays
+    // CPU-encodable; the upscale detail is preserved, the pixel count is sane.
+    const maxHeight = Number(ctx.params.maxHeight ?? 2160);
+    const preset = (ctx.params.encodePreset as string) ?? "veryfast";
+    ctx.log(
+      `assemble: stream_loop upscaled loop unit under music to ${durationSec}s (maxH=${maxHeight}, preset=${preset})…`,
+    );
     const finalPath = join(tmp, "final.mp4");
     await loopUnderAudio({
       loopUnitPath,
       audioPath: audio,
       outPath: finalPath,
       durationSec,
+      maxHeight,
+      preset,
     });
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
