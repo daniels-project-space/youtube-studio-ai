@@ -10,18 +10,14 @@ import { StageBadge } from "@/components/StageBadge";
 import { Elapsed } from "@/components/Elapsed";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
+import {
+  LivePipeline,
+  type PipelineNode,
+  type PipelineStage,
+} from "@/components/LivePipeline";
+import { LOFI_BLOCK_IDS } from "@/lib/blocks";
 import { fmtDateTime, fmtUsd } from "@/lib/format";
-import { IconExternal } from "@/components/icons";
-
-type Stage = {
-  _id: string;
-  block: string;
-  status: string;
-  startedAt?: number;
-  finishedAt?: number;
-  cost: number;
-  error?: string;
-};
+import { IconChevron, IconExternal } from "@/components/icons";
 
 export default function RunDetailPage({
   params,
@@ -33,13 +29,21 @@ export default function RunDetailPage({
   const run = useQuery(api.runs.getRun, { runId: runId as Id<"runs"> });
   const stages = useQuery(api.runStages.listRunStages, {
     runId: runId as Id<"runs">,
-  }) as Stage[] | undefined;
+  }) as PipelineStage[] | undefined;
+
+  // Fetch the run's channel to derive the expected (planned) block list. We
+  // skip the query until we know the channelId.
+  const channel = useQuery(
+    api.channels.getChannel,
+    run ? { channelId: run.channelId as Id<"channels"> } : "skip",
+  );
 
   if (run === undefined) {
     return (
       <>
+        <BackLink />
         <PageHeader title="Run" />
-        <SkeletonList rows={3} />
+        <SkeletonList rows={4} />
       </>
     );
   }
@@ -47,6 +51,7 @@ export default function RunDetailPage({
   if (run === null) {
     return (
       <>
+        <BackLink />
         <PageHeader title="Run" />
         <EmptyState
           title="Run not found"
@@ -61,24 +66,62 @@ export default function RunDetailPage({
   }
 
   const live = run.status === "running" || run.status === "queued";
-  const ordered = (stages ?? [])
-    .slice()
-    .sort((a, b) => (a.startedAt ?? Infinity) - (b.startedAt ?? Infinity));
+
+  // DERIVE-AND-MERGE: expected blocks come from the channel pipeline (fallback
+  // to the canonical lofi block ids), then each is matched to its live stage.
+  const expectedBlocks: string[] =
+    channel && channel.pipeline && channel.pipeline.length > 0
+      ? channel.pipeline.map((p: { block: string }) => p.block)
+      : [...LOFI_BLOCK_IDS];
+
+  const stageByBlock = new Map<string, PipelineStage>();
+  for (const s of stages ?? []) stageByBlock.set(s.block, s);
+
+  const nodes: PipelineNode[] = expectedBlocks.map((block) => ({
+    block,
+    stage: stageByBlock.get(block),
+  }));
+
+  // Surface any executed stages not present in the expected list (e.g. an old
+  // run whose channel pipeline has since changed) so nothing is hidden.
+  for (const s of stages ?? []) {
+    if (!expectedBlocks.includes(s.block)) {
+      nodes.push({ block: s.block, stage: s });
+    }
+  }
+
+  const channelName = channel?.name ?? "Channel";
+  const channelSlug = channel?.slug;
 
   return (
     <>
+      <BackLink />
+
       <PageHeader
         title="Run detail"
         subtitle={
-          <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}>
-            {run._id}
+          <span style={{ display: "inline-flex", alignItems: "center", gap: "0.6rem" }}>
+            {channelSlug ? (
+              <Link
+                href={`/channels/${channelSlug}`}
+                style={{ color: "var(--color-accent)", fontWeight: 500 }}
+              >
+                {channelName}
+              </Link>
+            ) : (
+              <span>{channelName}</span>
+            )}
+            <span style={{ color: "var(--color-faint)" }}>·</span>
+            <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.82rem" }}>
+              {run._id}
+            </span>
           </span>
         }
         actions={<StageBadge status={run.status} />}
       />
 
       {/* Summary */}
-      <section style={{ marginBottom: "2rem" }}>
+      <section style={{ marginBottom: "1.5rem" }}>
         <div
           className="glass glass-shine"
           style={{
@@ -89,10 +132,15 @@ export default function RunDetailPage({
           }}
         >
           <Field label="Started" value={fmtDateTime(run.startedAt)} />
-          <Field label="Finished" value={run.finishedAt ? fmtDateTime(run.finishedAt) : "—"} />
+          <Field
+            label="Finished"
+            value={run.finishedAt ? fmtDateTime(run.finishedAt) : "—"}
+          />
           <Field
             label="Elapsed"
-            value={<Elapsed from={run.startedAt} to={live ? undefined : run.finishedAt} />}
+            value={
+              <Elapsed from={run.startedAt} to={live ? undefined : run.finishedAt} />
+            }
           />
           <Field label="Cost" value={fmtUsd(run.costTotal)} mono />
           <Field
@@ -103,7 +151,12 @@ export default function RunDetailPage({
                   href={`https://www.youtube.com/watch?v=${run.youtubeVideoId}`}
                   target="_blank"
                   rel="noopener noreferrer"
-                  style={{ display: "inline-flex", alignItems: "center", gap: "0.3rem", color: "var(--color-secondary)" }}
+                  style={{
+                    display: "inline-flex",
+                    alignItems: "center",
+                    gap: "0.3rem",
+                    color: "var(--color-secondary)",
+                  }}
                 >
                   Watch <IconExternal width={13} height={13} />
                 </a>
@@ -120,7 +173,8 @@ export default function RunDetailPage({
             style={{
               marginTop: "0.9rem",
               padding: "0.9rem 1.1rem",
-              border: "1px solid color-mix(in srgb, var(--color-failed) 35%, transparent)",
+              border:
+                "1px solid color-mix(in srgb, var(--color-failed) 35%, transparent)",
               color: "var(--color-failed)",
               fontSize: "0.85rem",
               fontFamily: "var(--font-mono)",
@@ -132,47 +186,83 @@ export default function RunDetailPage({
         )}
       </section>
 
-      {/* Stages (full live track ships in Tranche 2) */}
-      <section>
-        <SectionTitle>Stages</SectionTitle>
-        {stages === undefined ? (
-          <SkeletonList rows={3} />
-        ) : ordered.length > 0 ? (
-          <div style={{ display: "grid", gap: "0.5rem" }}>
-            {ordered.map((s) => (
-              <div
-                key={s._id}
-                className="glass"
+      {/* Published video embed */}
+      {run.youtubeVideoId && (
+        <section style={{ marginBottom: "1.75rem" }}>
+          <SectionTitle>Published video</SectionTitle>
+          <div
+            className="glass"
+            style={{
+              padding: 6,
+              borderRadius: "var(--radius-card)",
+              overflow: "hidden",
+            }}
+          >
+            <div
+              style={{
+                position: "relative",
+                width: "100%",
+                aspectRatio: "16 / 9",
+                borderRadius: 12,
+                overflow: "hidden",
+              }}
+            >
+              <iframe
+                src={`https://www.youtube.com/embed/${run.youtubeVideoId}`}
+                title="Published video"
+                allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
+                allowFullScreen
                 style={{
-                  padding: "0.8rem 1.1rem",
-                  display: "flex",
-                  alignItems: "center",
-                  justifyContent: "space-between",
-                  gap: "1rem",
+                  position: "absolute",
+                  inset: 0,
+                  width: "100%",
+                  height: "100%",
+                  border: "none",
                 }}
-              >
-                <div style={{ display: "flex", alignItems: "center", gap: "0.75rem", minWidth: 0 }}>
-                  <StageBadge status={s.status} size="sm" />
-                  <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.85rem" }}>{s.block}</span>
-                </div>
-                <div style={{ display: "flex", alignItems: "center", gap: "1rem", fontSize: "0.78rem", color: "var(--color-faint)" }}>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{fmtUsd(s.cost)}</span>
-                  <Elapsed
-                    from={s.startedAt}
-                    to={s.status === "running" ? undefined : s.finishedAt}
-                  />
-                </div>
-              </div>
-            ))}
+              />
+            </div>
           </div>
+        </section>
+      )}
+
+      {/* Live pipeline */}
+      <section>
+        <SectionTitle>Pipeline</SectionTitle>
+        {stages === undefined || (run && channel === undefined) ? (
+          <SkeletonList rows={5} />
+        ) : nodes.length > 0 ? (
+          <LivePipeline nodes={nodes} />
         ) : (
           <EmptyState
-            title="No stages recorded"
-            description="The full live stage-track view arrives in the next build."
+            title="No pipeline blocks"
+            description="This run has no planned blocks and no stages recorded yet."
           />
         )}
       </section>
     </>
+  );
+}
+
+function BackLink() {
+  return (
+    <Link
+      href="/runs"
+      style={{
+        display: "inline-flex",
+        alignItems: "center",
+        gap: "0.3rem",
+        marginBottom: "1rem",
+        fontSize: "0.85rem",
+        color: "var(--color-muted)",
+      }}
+    >
+      <IconChevron
+        width={15}
+        height={15}
+        style={{ transform: "rotate(90deg)" }}
+      />
+      Back to runs
+    </Link>
   );
 }
 
@@ -198,7 +288,12 @@ function Field({
       >
         {label}
       </div>
-      <div style={{ fontSize: "0.95rem", fontFamily: mono ? "var(--font-mono)" : undefined }}>
+      <div
+        style={{
+          fontSize: "0.95rem",
+          fontFamily: mono ? "var(--font-mono)" : undefined,
+        }}
+      >
         {value}
       </div>
     </div>
