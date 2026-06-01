@@ -61,6 +61,64 @@ export const listRunsByChannel = query({
 });
 
 /**
+ * Active runs (queued|running) for an owner, newest first, enriched with the
+ * channel name/slug — mirrors listRecent's enrichment. Powers the Overview
+ * "Active runs" board.
+ */
+export const listActive = query({
+  args: { ownerId: v.string() },
+  handler: async (ctx, args) => {
+    const runs = await ctx.db
+      .query("runs")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .collect();
+    const active = runs.filter(
+      (r) => r.status === "queued" || r.status === "running",
+    );
+    active.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
+    return await Promise.all(
+      active.map(async (run) => {
+        const channel = await ctx.db.get(run.channelId);
+        return {
+          _id: run._id,
+          status: run.status,
+          startedAt: run.startedAt,
+          finishedAt: run.finishedAt,
+          costTotal: run.costTotal,
+          youtubeVideoId: run.youtubeVideoId,
+          error: run.error,
+          channelName: channel?.name ?? "(unknown)",
+          channelSlug: channel?.slug ?? "",
+        };
+      }),
+    );
+  },
+});
+
+/**
+ * Repoint all runs of one channel onto another. Used by the dedupe-channels
+ * maintenance script to migrate runs off duplicate channel docs before they
+ * are deleted. Idempotent: re-running with no matching runs is a no-op.
+ */
+export const repointChannel = mutation({
+  args: {
+    fromChannelId: v.id("channels"),
+    toChannelId: v.id("channels"),
+  },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const runs = await ctx.db
+      .query("runs")
+      .withIndex("by_channel", (q) => q.eq("channelId", args.fromChannelId))
+      .collect();
+    for (const run of runs) {
+      await ctx.db.patch(run._id, { channelId: args.toChannelId });
+    }
+    return runs.length;
+  },
+});
+
+/**
  * Recent runs for an owner, newest first, enriched with the channel name.
  * Powers the minimal dashboard page (read-only).
  */

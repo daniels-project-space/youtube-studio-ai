@@ -1,26 +1,200 @@
 @import "tailwindcss";
 
-:root {
-  --background: #ffffff;
-  --foreground: #171717;
+/*
+ * YouTube Studio AI — warm-glass dark design system.
+ *
+ * TAILWIND v4 CASCADE RULE (load-bearing): all reset / element rules MUST live
+ * inside `@layer base`. Tailwind v4 places its utilities in the `utilities`
+ * cascade layer; any UNLAYERED `body{}` / `*{}` rule outranks every utility and
+ * silently breaks the theme. Keep base rules layered or the design collapses.
+ */
+
+@theme {
+  /* Surfaces */
+  --color-bg: #0a0a0b;
+  --color-surface: rgba(24, 24, 27, 0.6);
+  --color-surface-solid: #18181b;
+  --color-border: rgba(255, 255, 255, 0.08);
+  --color-border-strong: rgba(255, 255, 255, 0.14);
+
+  /* Text */
+  --color-fg: #ededed;
+  --color-muted: #a1a1aa;
+  --color-faint: #71717a;
+
+  /* Brand */
+  --color-accent: #d4a574; /* warm tan */
+  --color-accent-soft: rgba(212, 165, 116, 0.14);
+  --color-secondary: #7dd3c0; /* teal */
+  --color-secondary-soft: rgba(125, 211, 192, 0.14);
+
+  /* Status */
+  --color-ok: #22c55e;
+  --color-running: #3b82f6;
+  --color-queued: #a1a1aa;
+  --color-failed: #ef4444;
+  --color-canceled: #f59e0b;
+  --color-amber: #f59e0b;
+
+  /* Fonts (wired via next/font in layout.tsx) */
+  --font-display: var(--font-fraunces), Georgia, serif;
+  --font-sans: var(--font-instrument), system-ui, sans-serif;
+  --font-mono: var(--font-jetbrains), ui-monospace, monospace;
+
+  /* Radii + shadows */
+  --radius-card: 16px;
+  --shadow-card: 0 1px 0 rgba(255, 255, 255, 0.04) inset,
+    0 8px 24px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.3);
+  --shadow-lift: 0 1px 0 rgba(255, 255, 255, 0.06) inset,
+    0 16px 40px rgba(0, 0, 0, 0.5), 0 4px 12px rgba(0, 0, 0, 0.35);
 }
 
-@theme inline {
-  --color-background: var(--background);
-  --color-foreground: var(--foreground);
-  --font-sans: var(--font-geist-sans);
-  --font-mono: var(--font-geist-mono);
-}
+@layer base {
+  * {
+    box-sizing: border-box;
+  }
 
-@media (prefers-color-scheme: dark) {
-  :root {
-    --background: #0a0a0a;
-    --foreground: #ededed;
+  html,
+  body {
+    height: 100%;
+  }
+
+  body {
+    margin: 0;
+    background: var(--color-bg);
+    color: var(--color-fg);
+    font-family: var(--font-sans);
+    font-feature-settings: "ss01", "cv01";
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  /* Ambient warm glow behind the whole app */
+  body::before {
+    content: "";
+    position: fixed;
+    inset: 0;
+    z-index: -1;
+    pointer-events: none;
+    background:
+      radial-gradient(
+        60rem 40rem at 78% -10%,
+        rgba(212, 165, 116, 0.1),
+        transparent 60%
+      ),
+      radial-gradient(
+        50rem 36rem at 8% 8%,
+        rgba(125, 211, 192, 0.07),
+        transparent 55%
+      );
+  }
+
+  h1,
+  h2,
+  h3 {
+    font-family: var(--font-display);
+    letter-spacing: -0.01em;
+    margin: 0;
+  }
+
+  a {
+    color: inherit;
+    text-decoration: none;
+  }
+
+  ::selection {
+    background: var(--color-accent-soft);
+  }
+
+  /* Slim themed scrollbars */
+  ::-webkit-scrollbar {
+    width: 10px;
+    height: 10px;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: rgba(255, 255, 255, 0.1);
+    border-radius: 8px;
+    border: 2px solid transparent;
+    background-clip: padding-box;
+  }
+  ::-webkit-scrollbar-thumb:hover {
+    background: rgba(255, 255, 255, 0.18);
+    background-clip: padding-box;
   }
 }
 
-body {
-  background: var(--background);
-  color: var(--foreground);
-  font-family: Arial, Helvetica, sans-serif;
+@layer components {
+  /* Frosted glass card primitive */
+  .glass {
+    background: var(--color-surface);
+    backdrop-filter: blur(20px);
+    -webkit-backdrop-filter: blur(20px);
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    box-shadow: var(--shadow-card);
+    position: relative;
+  }
+
+  /* Top shine on glass surfaces */
+  .glass-shine::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    border-radius: inherit;
+    pointer-events: none;
+    background: linear-gradient(
+      180deg,
+      rgba(255, 255, 255, 0.06),
+      transparent 35%
+    );
+  }
+
+  .lift {
+    transition:
+      transform 0.18s ease,
+      box-shadow 0.18s ease,
+      border-color 0.18s ease;
+  }
+  .lift:hover {
+    transform: translateY(-2px);
+    box-shadow: var(--shadow-lift);
+    border-color: var(--color-border-strong);
+  }
+
+  .studio-pulse {
+    animation: studio-pulse 1.4s ease-in-out infinite;
+  }
+
+  .studio-skeleton {
+    background: linear-gradient(
+      90deg,
+      rgba(255, 255, 255, 0.04) 25%,
+      rgba(255, 255, 255, 0.09) 37%,
+      rgba(255, 255, 255, 0.04) 63%
+    );
+    background-size: 400% 100%;
+    animation: studio-shimmer 1.4s ease infinite;
+    border-radius: 8px;
+  }
+}
+
+@keyframes studio-pulse {
+  0%,
+  100% {
+    opacity: 1;
+    box-shadow: 0 0 0 0 currentColor;
+  }
+  50% {
+    opacity: 0.55;
+    box-shadow: 0 0 0 3px transparent;
+  }
+}
+
+@keyframes studio-shimmer {
+  0% {
+    background-position: 100% 50%;
+  }
+  100% {
+    background-position: 0% 50%;
+  }
 }

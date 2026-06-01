@@ -35,7 +35,17 @@ export const createChannel = mutation({
   },
   returns: v.id("channels"),
   handler: async (ctx, args) => {
-    return await ctx.db.insert("channels", {
+    // Idempotent upsert keyed on (ownerId, slug): a re-seed of the same
+    // channel patches the existing doc instead of inserting a duplicate
+    // (the prior bare-insert was the source of duplicate channels).
+    const existing = await ctx.db
+      .query("channels")
+      .withIndex("by_owner_slug", (q) =>
+        q.eq("ownerId", args.ownerId).eq("slug", args.slug),
+      )
+      .unique();
+
+    const doc = {
       ownerId: args.ownerId,
       slug: args.slug,
       name: args.name,
@@ -46,7 +56,30 @@ export const createChannel = mutation({
       qaRubric: args.qaRubric,
       budget: args.budget,
       status: args.status ?? "draft",
-    });
+    };
+
+    if (existing) {
+      await ctx.db.patch(existing._id, doc);
+      return existing._id;
+    }
+
+    return await ctx.db.insert("channels", doc);
+  },
+});
+
+/**
+ * Resolve a channel by (ownerId, slug) via the by_owner_slug index.
+ * Powers the /channels/[slug] detail route.
+ */
+export const getChannelBySlug = query({
+  args: { ownerId: v.string(), slug: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("channels")
+      .withIndex("by_owner_slug", (q) =>
+        q.eq("ownerId", args.ownerId).eq("slug", args.slug),
+      )
+      .unique();
   },
 });
 
@@ -64,6 +97,19 @@ export const getChannel = query({
   args: { channelId: v.id("channels") },
   handler: async (ctx, args) => {
     return await ctx.db.get(args.channelId);
+  },
+});
+
+/**
+ * Hard-delete a channel doc. Used by the dedupe-channels maintenance script
+ * after its runs have been repointed onto the kept channel.
+ */
+export const deleteChannel = mutation({
+  args: { channelId: v.id("channels") },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    await ctx.db.delete(args.channelId);
+    return null;
   },
 });
 
