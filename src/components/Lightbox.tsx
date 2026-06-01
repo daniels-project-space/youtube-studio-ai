@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect } from "react";
+import { useCallback, useEffect, useState } from "react";
 import type { VideoRow } from "@/lib/types";
 import { fmtDateTime } from "@/lib/format";
 import {
@@ -326,10 +326,15 @@ function FilmstripThumb({
   active: boolean;
   onClick: () => void;
 }) {
-  const r2Thumb = useAssetUrl(video.youtubeVideoId ? null : video.thumbnailKey);
-  const src = video.youtubeVideoId
-    ? youtubeThumb(video.youtubeVideoId)
-    : r2Thumb;
+  const r2Thumb = useAssetUrl(video.thumbnailKey);
+  const [errored, setErrored] = useState(false);
+  const src = errored
+    ? null
+    : video.thumbnailKey
+      ? r2Thumb
+      : video.youtubeVideoId
+        ? youtubeThumb(video.youtubeVideoId)
+        : null;
   return (
     <button
       type="button"
@@ -354,6 +359,7 @@ function FilmstripThumb({
           src={src}
           alt={video.title}
           loading="lazy"
+          onError={() => setErrored(true)}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
       )}

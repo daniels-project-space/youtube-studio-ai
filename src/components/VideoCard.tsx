@@ -1,5 +1,6 @@
 "use client";
 
+import { useState } from "react";
 import type { VideoRow } from "@/lib/types";
 import { fmtDateTime } from "@/lib/format";
 import {
@@ -23,14 +24,19 @@ export function VideoCard({
   video: VideoRow;
   onOpen?: (video: VideoRow) => void;
 }) {
-  // YouTube thumb is free (no presign). Only presign R2 when there's no
-  // youtubeVideoId — the hook no-ops on a null key.
-  const r2Thumb = useAssetUrl(
-    video.youtubeVideoId ? null : video.thumbnailKey,
-  );
-  const thumbSrc = video.youtubeVideoId
-    ? youtubeThumb(video.youtubeVideoId)
-    : r2Thumb;
+  // Prefer the generated R2 thumbnail (works for private drafts AND surfaces the
+  // branded claude_flux thumbnail); fall back to the public YouTube image only
+  // when no thumbnail was stored. On any load error, drop to the placeholder —
+  // private-draft YouTube thumbs 404, so without this they'd show broken images.
+  const r2Thumb = useAssetUrl(video.thumbnailKey);
+  const [errored, setErrored] = useState(false);
+  const thumbSrc = errored
+    ? null
+    : video.thumbnailKey
+      ? r2Thumb
+      : video.youtubeVideoId
+        ? youtubeThumb(video.youtubeVideoId)
+        : null;
 
   const views = fmtViews(video.estimatedViews);
 
@@ -67,6 +73,7 @@ export function VideoCard({
             src={thumbSrc}
             alt={video.title}
             loading="lazy"
+            onError={() => setErrored(true)}
             style={{
               position: "absolute",
               inset: 0,
