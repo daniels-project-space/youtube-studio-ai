@@ -9,7 +9,9 @@ import { PageHeader } from "@/components/PageHeader";
 import { StageBadge } from "@/components/StageBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
+import { ChannelAvatar } from "@/components/ChannelArt";
 import { IconChannels } from "@/components/icons";
+import { fmtUsd } from "@/lib/format";
 
 export default function ChannelsPage() {
   const ownerId = useOwnerId();
@@ -41,8 +43,10 @@ export default function ChannelsPage() {
           }}
         >
           {channels.map((c) => {
-            const count =
-              recent?.filter((r) => r.channelSlug === c.slug).length ?? 0;
+            const chRuns = recent?.filter((r) => r.channelSlug === c.slug) ?? [];
+            const count = chRuns.length;
+            const videos = chRuns.filter((r) => r.youtubeVideoId).length;
+            const cost = chRuns.reduce((s, r) => s + (r.costTotal ?? 0), 0);
             return (
               <Link
                 key={c._id}
@@ -50,25 +54,39 @@ export default function ChannelsPage() {
                 className="glass glass-shine lift"
                 style={{ padding: "1.25rem", display: "grid", gap: "0.85rem" }}
               >
-                <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.6rem" }}>
-                  <h3 style={{ fontSize: "1.1rem" }}>{c.name}</h3>
-                  <StageBadge status={c.status === "active" ? "ok" : "queued"} size="sm" />
-                </div>
-                <div style={{ fontSize: "0.8rem", color: "var(--color-muted)" }}>
-                  Template <span style={{ color: "var(--color-fg)" }}>{c.template}</span>
+                <div style={{ display: "flex", alignItems: "flex-start", gap: "0.8rem" }}>
+                  <ChannelAvatar
+                    imageKey={c.identity?.imageKey}
+                    name={c.name}
+                    palette={c.identity?.palette}
+                    size={48}
+                    radius={12}
+                  />
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.5rem" }}>
+                      <h3 style={{ fontSize: "1.05rem", lineHeight: 1.2 }}>{c.name}</h3>
+                      <StageBadge status={c.status === "active" ? "ok" : "queued"} size="sm" />
+                    </div>
+                    <div style={{ fontSize: "0.78rem", color: "var(--color-muted)", marginTop: "0.2rem" }}>
+                      {c.identity?.niche ?? `Template ${c.template}`}
+                    </div>
+                  </div>
                 </div>
                 <div
                   style={{
-                    display: "flex",
-                    justifyContent: "space-between",
-                    fontSize: "0.78rem",
-                    color: "var(--color-faint)",
+                    display: "grid",
+                    gridTemplateColumns: "repeat(3, 1fr)",
+                    gap: "0.5rem",
                     borderTop: "1px solid var(--color-border)",
                     paddingTop: "0.7rem",
                   }}
                 >
-                  <span>{count} run{count === 1 ? "" : "s"}</span>
-                  <span style={{ fontFamily: "var(--font-mono)" }}>{c.slug}</span>
+                  <CardStat label="Runs" value={String(count)} />
+                  <CardStat label="Videos" value={String(videos)} />
+                  <CardStat label="Spend" value={fmtUsd(cost)} />
+                </div>
+                <div style={{ fontSize: "0.72rem", fontFamily: "var(--font-mono)", color: "var(--color-faint)" }}>
+                  {c.slug}
                 </div>
               </Link>
             );
@@ -76,5 +94,25 @@ export default function ChannelsPage() {
         </div>
       )}
     </>
+  );
+}
+
+function CardStat({ label, value }: { label: string; value: string }) {
+  return (
+    <div>
+      <div
+        style={{
+          fontSize: "0.62rem",
+          letterSpacing: "0.05em",
+          textTransform: "uppercase",
+          color: "var(--color-faint)",
+        }}
+      >
+        {label}
+      </div>
+      <div style={{ fontSize: "0.92rem", fontWeight: 600, marginTop: "0.15rem" }}>
+        {value}
+      </div>
+    </div>
   );
 }

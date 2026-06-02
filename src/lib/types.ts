@@ -15,6 +15,22 @@ export type RunRow = {
   channelSlug: string;
 };
 
+export type ChannelIdentity = {
+  persona?: string;
+  styleGrammar?: string;
+  palette?: string[];
+  topicPool?: string[];
+  bannedWords?: string[];
+  requiredCallbacks?: string[];
+  cadence?: string;
+  niche?: string;
+  voiceId?: string;
+  thumbnailTemplate?: string;
+  /** Generated channel art (R2 keys) — presign via /api/asset-url. */
+  imageKey?: string;
+  bannerKey?: string;
+};
+
 export type ChannelRow = {
   _id: string;
   name: string;
@@ -22,6 +38,8 @@ export type ChannelRow = {
   status: string;
   template: string;
   budget: number;
+  identity?: ChannelIdentity;
+  pipeline?: { block: string; params?: unknown }[];
 };
 
 /**
