@@ -88,6 +88,8 @@ export const runPipelineTask = task({
         styleGrammar: channel.identity?.styleGrammar ?? "",
         channelName: channel.name,
         palette: channel.identity?.palette ?? [],
+        persona: channel.identity?.persona ?? "",
+        niche: channel.identity?.niche ?? "",
       };
 
       const sink = makeConvexSink(convex, ownerId);

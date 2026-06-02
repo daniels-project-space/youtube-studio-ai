@@ -7,6 +7,7 @@ import { register, _clear } from "./registry";
 import { echoSeed, echoSink } from "@/trigger/blocks/echoBlocks";
 import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 import { intelligenceBlocks } from "@/trigger/blocks/intelligenceBlocks";
+import { narratedBlocks } from "@/trigger/blocks/narratedBlocks";
 
 let registered = false;
 
@@ -22,6 +23,8 @@ export function registerAllBlocks(): void {
   // Competitor-intelligence engine: competitor_research, metadata (optimised),
   // thumbnail_gen (claude_flux).
   for (const b of intelligenceBlocks) register(b);
+  // Narrated archetypes (essay/crime/shorts/meditation) — text "brain" (3a).
+  for (const b of narratedBlocks) register(b);
   registered = true;
 }
 

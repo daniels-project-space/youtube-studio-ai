@@ -20,8 +20,9 @@ const SERVICES = [
   "telegram", // TELEGRAM_BOT_TOKEN (+ admin chat id)
   // Competitor-intelligence engine. hydrateEnv tolerates a missing service
   // (logs + continues), so these are safe even before the vault entries exist.
-  "google", // GEMINI_API_KEY (Gemini 2.5 Flash + Vision)
-  "anthropic", // ANTHROPIC_API_KEY (claude_flux thumbnail concept)
+  "gemini", // GEMINI_API_KEY (Gemini 2.5 Flash + Vision) — script_gen, research, metadata
+  "google", // GOOGLE_* (places / app credentials)
+  "anthropic", // ANTHROPIC_API_KEY (claude_flux thumbnail concept, qa_script)
 ];
 
 let done = false;
