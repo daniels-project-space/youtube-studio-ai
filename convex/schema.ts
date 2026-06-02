@@ -187,43 +187,6 @@ export default defineSchema({
     .index("by_channel", ["channelId"])
     .index("by_channel_key", ["channelId", "key"]),
 
-  // Per-run, per-provider spend.
-  costLedger: defineTable({
-    ownerId: v.string(),
-    channelId: v.id("channels"),
-    runId: v.id("runs"),
-    provider: v.string(),
-    units: v.number(),
-    usd: v.number(),
-    at: v.number(),
-  })
-    .index("by_owner", ["ownerId"])
-    .index("by_channel", ["channelId"])
-    .index("by_run", ["runId"]),
-
-  // Per-channel cron schedule.
-  schedules: defineTable({
-    ownerId: v.string(),
-    channelId: v.id("channels"),
-    cron: v.string(),
-    enabled: v.boolean(),
-    lastRun: v.optional(v.number()),
-    nextRun: v.optional(v.number()),
-  })
-    .index("by_owner", ["ownerId"])
-    .index("by_channel", ["channelId"]),
-
-  // YouTube OAuth (one Google acct, many channels).
-  oauthTokens: defineTable({
-    ownerId: v.string(),
-    provider: v.string(), // youtube
-    refreshToken: v.string(), // encrypted at rest in P3
-    scopes: v.array(v.string()),
-    channels: v.array(v.string()),
-  })
-    .index("by_owner", ["ownerId"])
-    .index("by_owner_provider", ["ownerId", "provider"]),
-
   // -------------------- Analytics (stats-refresh sink) --------------------
   // Per-video performance snapshots, captured by the stats-refresh task from
   // the YouTube Data API v3 (videos.list?part=statistics). Each row is one
@@ -259,13 +222,4 @@ export default defineSchema({
     videoCount: v.number(),
     estimatedRevenueUsd: v.optional(v.number()),
   }).index("by_channel_date", ["channelId", "date"]),
-
-  // Generic key/value settings.
-  settings: defineTable({
-    ownerId: v.string(),
-    key: v.string(),
-    value: v.any(),
-  })
-    .index("by_owner", ["ownerId"])
-    .index("by_owner_key", ["ownerId", "key"]),
 });
