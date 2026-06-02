@@ -279,7 +279,10 @@ export const stockFootage: Block = {
     // queries (~1 clip per ~11s) so we reach coverage even after the relevance gate.
     const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 120;
     const targetSec = narrationSec + 13;
-    const nQueries = Math.min(26, Math.max(8, Math.ceil(targetSec / 11)));
+    // Beat-body shows each clip ~SEG seconds, so we need ~targetSec/SEG DISTINCT
+    // clips (not a few long ones) — count coverage at the per-segment rate.
+    const SEG = 8;
+    const nQueries = Math.min(28, Math.max(10, Math.ceil(targetSec / SEG)));
 
     // Derive CONCRETE, filmable b-roll queries (abstract topics like philosophy
     // have no literal stock footage — turn them into visual terms a camera can
@@ -381,10 +384,10 @@ export const stockFootage: Block = {
         }
         if (picked) {
           clips.push(picked);
-          coveredSec += pickedDur;
+          coveredSec += Math.min(pickedDur, SEG); // per-segment screen time
         } else if (fallback) {
           clips.push(fallback);
-          coveredSec += fallbackDur;
+          coveredSec += Math.min(fallbackDur, SEG);
           ctx.log(`stock_footage: no on-topic clip for "${q}" — best-scored fallback`);
         }
       } catch (e) {
