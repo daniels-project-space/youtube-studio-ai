@@ -27,6 +27,7 @@ import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { geminiVision, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { agentJson } from "@/agents/mastra";
 import { produceAndCritique } from "@/engine/critiqueLoop";
+import { loadPerformanceContext } from "@/lib/performance";
 import { z } from "zod";
 
 /** SEO chunk structured-output schemas (validated on Mastra + REST). */
@@ -244,6 +245,9 @@ export const metadataOptimized: Block = {
       return { title, description, tags, ...ve };
     }
 
+    // Phase 7: bias titles toward past high-CTR/retention winners ("" until data).
+    const perfCtx = await loadPerformanceContext(ctx.keyPrefix);
+
     // Producer ↔ Director SEO loop: niche-aware, script-grounded, high-CTR.
     const loop = await produceAndCritique<{
       title: string;
@@ -268,6 +272,7 @@ export const metadataOptimized: Block = {
             (competitorTitles.length ? `TOP COMPETITOR TITLES:\n${competitorTitles.join("\n")}\n` : "") +
             (powerWords.length ? `POWER WORDS: ${powerWords.join(", ")}\n` : "") +
             (databank?.titleTemplates?.length ? `TITLE TEMPLATES:\n${databank.titleTemplates.join("\n")}\n` : "") +
+            (perfCtx ? perfCtx + "\n" : "") +
             `RULES:\n` +
             `- title: high-CTR, <= ${titleMax} chars, main keyword + hook in the first ~40 chars.\n` +
             `- description: the FIRST 150 chars must stand alone as a compelling summary (shown above the fold); then 150-350 words with natural keywords; end with 3-5 hashtags.\n` +

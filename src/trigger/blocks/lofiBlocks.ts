@@ -46,6 +46,7 @@ import { hasGeminiKey } from "@/lib/gemini";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
+import { loadPerformanceContext } from "@/lib/performance";
 import { z } from "zod";
 
 /** Topic-chunk structured-output schemas (validated on both Mastra + REST). */
@@ -227,6 +228,8 @@ export const topicSelect: Block = {
     }
     const usedNorm = new Set(usedRows.map((r) => normalizeTopic(r.key)));
     const recentList = usedRows.map((r) => r.key).slice(-40);
+    // Phase 7: bias toward topics like past high-retention winners ("" until enough data).
+    const perfCtx = await loadPerformanceContext(ctx.keyPrefix);
 
     // Degrade: no Gemini → legacy static-pool first-fresh pick.
     if (!hasGeminiKey()) {
@@ -259,6 +262,7 @@ export const topicSelect: Block = {
             (policy === "no_repeat"
               ? "This channel must NEVER repeat a topic. Invent genuinely NEW, specific, on-identity video topics absent from the used list.\n"
               : "Prefer fresh topics not in the used list.\n") +
+            (perfCtx ? perfCtx + "\n" : "") +
             (priorIssues.length ? `Fix these problems from the last attempt: ${priorIssues.join("; ")}\n` : "") +
             `Propose 5 DISTINCT candidate topics — each a specific, compelling video topic (not a broad category) plus a one-line unique ANGLE.\n` +
             `Return STRICT JSON {"candidates":[{"topic":string,"angle":string}]}.`,
