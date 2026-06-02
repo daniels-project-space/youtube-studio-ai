@@ -330,6 +330,12 @@ export const metadataOptimized: Block = {
     tags = Array.from(new Set([...tags, ...nicheTags])).slice(0, 15);
     if (tags.length === 0) tags = [topic.toLowerCase()];
 
+    // Append chapters (from the captions block) to the description if present.
+    const chaptersText = ctx.store["chaptersText"] as string | undefined;
+    if (chaptersText && chaptersText.trim()) {
+      description = `${description}\n\nChapters:\n${chaptersText}`;
+    }
+
     const ve = await viewEstimate(tags);
     ctx.log(
       `metadata: title="${title.slice(0, 60)}…" (score=${loop.critique.score.toFixed(2)}, accepted=${loop.accepted}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,

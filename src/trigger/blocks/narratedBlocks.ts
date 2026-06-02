@@ -20,7 +20,13 @@ import { synthNarration, hasFishKey } from "@/lib/tts";
 import { searchFootage, hasPexelsKey } from "@/lib/footage";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
-import { putObject, getObjectBytes } from "@/lib/storage";
+import { putObject, getObjectBytes, publicUrl } from "@/lib/storage";
+import {
+  hasAssemblyKey,
+  transcribeWords,
+  wordsToSrt,
+  buildChapters,
+} from "@/lib/assemblyai";
 import { probe, concatScaled, composeWithIntro, grabFrame, kenBurns } from "@/lib/ffmpeg";
 import { renderTitleCard } from "@/lib/remotionRender";
 import {
@@ -479,6 +485,51 @@ export const lengthCheck: Block = {
   },
 };
 
+export const captions: Block = {
+  id: "captions",
+  consumes: ["narrationDurationSec", "videoDurationSec"],
+  produces: ["captionsKey", "chaptersText"],
+  run: async (ctx) => {
+    const introSec = Number(ctx.store["introSec"] ?? 0);
+    const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0);
+    const script = ctx.store["script"] as
+      | { sections?: { heading?: string; text?: string; narration?: string }[] }
+      | undefined;
+    const sections = script?.sections ?? [];
+
+    // Chapters: derived from script sections + narration timing + intro offset.
+    // No external dependency — works today (lands in the video description).
+    const chaptersText = buildChapters(sections, narrationSec, introSec);
+    if (chaptersText) ctx.log(`captions: ${chaptersText.split("\n").length} chapters`);
+
+    // Captions (SRT): AssemblyAI word timestamps shifted by the intro offset.
+    // Degrades to chapters-only without a key (add vault service "assemblyai").
+    let captionsKey = "";
+    if (!hasAssemblyKey()) {
+      ctx.log("captions: no ASSEMBLYAI_API_KEY — chapters only (add vault 'assemblyai' for SRT)");
+      return { captionsKey, chaptersText };
+    }
+    try {
+      const narrationKey = opt(ctx, "narrationKey");
+      if (!narrationKey) {
+        ctx.log("captions: no narrationKey — skipping SRT");
+        return { captionsKey, chaptersText };
+      }
+      const words = await transcribeWords(publicUrl(narrationKey));
+      const srt = wordsToSrt(words, Math.round(introSec * 1000));
+      captionsKey = `${ctx.keyPrefix}runs/${ctx.runId}/captions.srt`;
+      await putObject(captionsKey, Buffer.from(srt, "utf8"), {
+        contentType: "application/x-subrip",
+      });
+      await recordAsset(ctx, "captions", captionsKey, { words: words.length });
+      ctx.log(`captions: SRT ${words.length} words → ${captionsKey}`);
+    } catch (e) {
+      ctx.log(`captions: AssemblyAI failed (continuing, chapters only): ${e instanceof Error ? e.message : e}`);
+    }
+    return { captionsKey, chaptersText };
+  },
+};
+
 export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
@@ -631,6 +682,7 @@ export const narratedBlocks: Block[] = [
   introCard,
   timelineAssemble,
   lengthCheck,
+  captions,
   qaVisual,
 ];
 
