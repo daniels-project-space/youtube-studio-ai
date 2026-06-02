@@ -58,7 +58,12 @@ function styleGuidance(style?: string): string {
     case "meditation":
       return "Calm guided tone: slow, soothing, second-person, long gentle sentences, generous pauses (use ellipses).";
     default:
-      return "Engaging video-essay tone: a curiosity hook, then clear narrative sections with a satisfying arc.";
+      return (
+        "Engaging video-essay tone: a curiosity hook, then clear narrative sections with a satisfying arc. " +
+        "Occasionally (when it genuinely fits — not every video) draw the viewer in with an immersive " +
+        "second-person hypothetical or short illustrative story, e.g. \"Imagine you are alone in a room…\", " +
+        "to make an abstract idea concrete and felt before explaining it."
+      );
   }
 }
 

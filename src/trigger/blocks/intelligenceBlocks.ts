@@ -505,8 +505,8 @@ export const thumbnailGen: Block = {
           basePath: base,
           outJpg,
           title: concept.thumbnail_title || title,
-          textColor: concept.text_color,
-          textShadow: Boolean(concept.text_shadow),
+          subtitle: (ctx.store["channelName"] as string | undefined) ?? "",
+          textShadow: true,
         });
 
         // Upload first (so QA can fetch the rendered image by URL).

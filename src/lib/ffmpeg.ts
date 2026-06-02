@@ -673,24 +673,25 @@ export async function thumbnailText(args: {
   basePath: string;
   outJpg: string;
   title: string;
-  /** Hex like "#FFEE00" or an ffmpeg colour name. Defaults to white. */
+  /** Channel name shown small at the bottom. */
+  subtitle?: string;
   textColor?: string;
-  /** Add a drop shadow under the text. */
   textShadow?: boolean;
   fontFile?: string;
 }): Promise<string> {
+  // Tasteful, CONSISTENT overlay (v1 look): modest white centered title with a
+  // soft drop shadow over a slight scrim, channel name small at the bottom — NOT
+  // a giant garish Impact block. The image carries the thumbnail; text supports.
   const font =
     args.fontFile ?? "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
   const esc = (s: string) =>
     s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "’");
-  // Normalise colour: ffmpeg accepts 0xRRGGBB or names; map #hex → 0xhex.
-  const color = (args.textColor ?? "white").replace(/^#/, "0x");
-  // Soft word-wrap so long titles don't run off-frame.
+  // Word-wrap ~20 chars/line so the title fits at a modest size.
   const words = args.title.trim().split(/\s+/);
   const lines: string[] = [];
   let cur = "";
   for (const w of words) {
-    if ((cur + " " + w).trim().length > 16 && cur) {
+    if ((cur + " " + w).trim().length > 20 && cur) {
       lines.push(cur.trim());
       cur = w;
     } else {
@@ -699,18 +700,20 @@ export async function thumbnailText(args: {
   }
   if (cur) lines.push(cur);
   const wrapped = lines.join("\n");
+  const titleSize = lines.length >= 3 ? 48 : 58;
 
-  const draws: string[] = [];
-  if (args.textShadow) {
+  const draws: string[] = [
+    // subtle bottom scrim for legibility (gradient-ish dark band)
+    `drawbox=x=0:y=ih*0.30:w=iw:h=ih*0.70:color=black@0.28:t=fill`,
+    `drawtext=fontfile=${font}:text='${esc(wrapped)}':fontcolor=white:fontsize=${titleSize}:` +
+      `line_spacing=10:shadowcolor=black@0.85:shadowx=3:shadowy=3:x=(w-text_w)/2:y=(h-text_h)/2`,
+  ];
+  if (args.subtitle) {
     draws.push(
-      `drawtext=fontfile=${font}:text='${esc(wrapped)}':fontcolor=black@0.75:fontsize=96:` +
-        `line_spacing=12:x=(w-text_w)/2+6:y=(h-text_h)/2+6`,
+      `drawtext=fontfile=${font}:text='${esc(args.subtitle.toUpperCase())}':fontcolor=white@0.82:fontsize=26:` +
+        `shadowcolor=black@0.8:shadowx=2:shadowy=2:x=(w-text_w)/2:y=h*0.88`,
     );
   }
-  draws.push(
-    `drawtext=fontfile=${font}:text='${esc(wrapped)}':fontcolor=${color}:fontsize=96:` +
-      `borderw=8:bordercolor=black:line_spacing=12:x=(w-text_w)/2:y=(h-text_h)/2`,
-  );
 
   await run(FFMPEG, [
     "-y",

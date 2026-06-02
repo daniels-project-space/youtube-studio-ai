@@ -27,32 +27,44 @@ function looksLikeR2Key(v: unknown): v is string {
   return typeof v === "string" && v.length > 0 && !/^https?:\/\//i.test(v) && !/^[/\\]/.test(v) && !/^[a-zA-Z]:\\/.test(v);
 }
 
+/** Recursively: does this value contain a local-path string that's missing? */
+function hasMissingLocalPath(val: unknown): boolean {
+  if (typeof val === "string") return isLocalPath(val) && !existsSync(val);
+  if (Array.isArray(val)) return val.some(hasMissingLocalPath);
+  if (val && typeof val === "object") return Object.values(val).some(hasMissingLocalPath);
+  return false;
+}
+
 export async function rehydrateOutputs(
   _block: string,
   outputs: Record<string, unknown>,
   runId: string,
 ): Promise<{ ok: boolean; outputs: Record<string, unknown> }> {
   let tmp: string | null = null;
+  // First, rehydrate TOP-LEVEL local files from their sibling R2 key
+  // (narrationLocalPath←narrationKey, videoLocalPath←videoKey, loopUnitUrl←loopUnitKey).
   for (const [k, val] of Object.entries(outputs)) {
-    // Arrays of local paths can't be rehydrated (no per-item R2 key) → re-run.
-    if (Array.isArray(val)) {
-      if (val.some((x) => isLocalPath(x) && !existsSync(x))) return { ok: false, outputs };
-      continue;
-    }
-    if (isLocalPath(val) && !existsSync(val)) {
+    if (typeof val === "string" && isLocalPath(val) && !existsSync(val)) {
       const base = k.replace(/(LocalPath|Url|Path)$/, "");
       const r2 = outputs[`${base}Key`];
-      if (!looksLikeR2Key(r2)) return { ok: false, outputs };
-      try {
-        if (!tmp) tmp = await makeRunTempDir(runId);
-        const ext = val.match(/\.[a-z0-9]+$/i)?.[0] ?? "";
-        const dest = join(tmp, `resume_${k}${ext}`);
-        await writeBytes(dest, await getObjectBytes(r2));
-        outputs[k] = dest;
-      } catch {
-        return { ok: false, outputs };
+      if (looksLikeR2Key(r2)) {
+        try {
+          if (!tmp) tmp = await makeRunTempDir(runId);
+          const ext = val.match(/\.[a-z0-9]+$/i)?.[0] ?? "";
+          const dest = join(tmp, `resume_${k}${ext}`);
+          await writeBytes(dest, await getObjectBytes(r2));
+          outputs[k] = dest;
+        } catch {
+          return { ok: false, outputs };
+        }
       }
     }
+  }
+  // Then: if ANY value (including nested in arrays/objects, e.g. quoteOverlays
+  // [{path}], footageClips[]) still points at a missing local file, we cannot
+  // restore it → re-run the block (correctness over a skipped re-run).
+  if (Object.values(outputs).some(hasMissingLocalPath)) {
+    return { ok: false, outputs };
   }
   return { ok: true, outputs };
 }

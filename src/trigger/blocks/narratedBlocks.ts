@@ -274,6 +274,13 @@ export const stockFootage: Block = {
         ? ("portrait" as const)
         : ("landscape" as const);
 
+    // Enough DISTINCT clips to cover the whole video so the body never visibly
+    // loops the same footage. Target = narration + intro + tail; over-provision
+    // queries (~1 clip per ~11s) so we reach coverage even after the relevance gate.
+    const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 120;
+    const targetSec = narrationSec + 13;
+    const nQueries = Math.min(26, Math.max(8, Math.ceil(targetSec / 11)));
+
     // Derive CONCRETE, filmable b-roll queries (abstract topics like philosophy
     // have no literal stock footage — turn them into visual terms a camera can
     // actually show, so the footage is relevant). Falls back to topic+headings.
@@ -282,34 +289,32 @@ export const stockFootage: Block = {
       try {
         const out = await geminiJson<{ queries?: string[] }>({
           prompt:
-            `Give 6 CONCRETE, filmable stock-footage search queries (2-4 words each, ` +
-            `things a camera can literally show) that visually evoke a video about ` +
+            `Give ${nQueries} CONCRETE, filmable, VISUALLY DISTINCT stock-footage search ` +
+            `queries (2-4 words each, things a camera can literally show) that evoke a video about ` +
             `"${topic}"${opt(ctx, "niche") ? ` (${opt(ctx, "niche")})` : ""}. ` +
-            `Prefer evocative scenes (e.g. "rain on window", "candle flame", ` +
-            `"person walking alone dusk", "calm ocean waves"). Avoid abstract words. ` +
-            `Return STRICT JSON {"queries":string[]}.`,
-          maxTokens: 300,
-          temperature: 0.6,
+            `Vary scenes/subjects/settings so no two look alike (e.g. "rain on window", ` +
+            `"candle flame", "person walking alone dusk", "calm ocean waves", "old library", ` +
+            `"storm clouds timelapse"). Avoid abstract words. Return STRICT JSON {"queries":string[]}.`,
+          maxTokens: 500,
+          temperature: 0.7,
         });
         queries = (out.queries ?? [])
           .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
-          .slice(0, 6);
+          .filter((q, i, a) => a.indexOf(q) === i)
+          .slice(0, nQueries);
       } catch (e) {
         ctx.log(`stock_footage: query-gen failed (${e instanceof Error ? e.message : e})`);
       }
     }
-    if (queries.length === 0) {
-      queries = [
+    if (queries.length < nQueries) {
+      const extra = [
         topic,
         ...(script?.sections ?? []).map((s) => s.heading ?? "").filter(Boolean),
         opt(ctx, "niche") ?? "cinematic background",
-      ]
-        .map((q) => q.trim())
-        .filter(Boolean)
-        .filter((q, i, a) => a.indexOf(q) === i)
-        .slice(0, 6);
+      ].map((q) => q.trim());
+      queries = [...queries, ...extra].filter(Boolean).filter((q, i, a) => a.indexOf(q) === i).slice(0, nQueries);
     }
-    ctx.log(`stock_footage: queries = ${queries.join(" | ")}`);
+    ctx.log(`stock_footage: ${queries.length} queries, target ${targetSec.toFixed(0)}s coverage`);
 
     // Pick the BEST + RELEVANT clip per query (not the first): rank candidates
     // by technical score (v1), dedup across queries, then a Gemini-vision
@@ -322,7 +327,9 @@ export const stockFootage: Block = {
     const usedUrls = new Set<string>();
     let dl = 0;
     let gated = 0;
+    let coveredSec = 0;
     for (const q of queries) {
+      if (coveredSec >= targetSec) break; // enough footage to cover the video
       try {
         const cands = (await searchFootage(q, 5, orientation))
           .filter((c) => !usedUrls.has(c.url))
@@ -330,14 +337,20 @@ export const stockFootage: Block = {
           .slice(0, 3);
         if (cands.length === 0) continue;
         let picked: string | null = null;
+        let pickedDur = 0;
         let fallback: string | null = null;
+        let fallbackDur = 0;
         for (const cand of cands) {
           const local = join(tmp, `footage_${dl++}.mp4`);
           await downloadTo(cand.url, local);
           usedUrls.add(cand.url);
-          if (!fallback) fallback = local;
+          if (!fallback) {
+            fallback = local;
+            fallbackDur = cand.durationSec || 8;
+          }
           if (!relevanceGate) {
             picked = local;
+            pickedDur = cand.durationSec || 8;
             break;
           }
           let ok = true;
@@ -361,13 +374,17 @@ export const stockFootage: Block = {
           }
           if (ok) {
             picked = local;
+            pickedDur = cand.durationSec || 8;
             gated++;
             break;
           }
         }
-        if (picked) clips.push(picked);
-        else if (fallback) {
+        if (picked) {
+          clips.push(picked);
+          coveredSec += pickedDur;
+        } else if (fallback) {
           clips.push(fallback);
+          coveredSec += fallbackDur;
           ctx.log(`stock_footage: no on-topic clip for "${q}" — best-scored fallback`);
         }
       } catch (e) {
@@ -377,7 +394,7 @@ export const stockFootage: Block = {
     if (clips.length === 0) {
       throw new Error("stock_footage: no clips found for any query");
     }
-    ctx.log(`stock_footage: ${clips.length} clips from ${queries.length} queries (${gated} passed relevance gate, gate=${relevanceGate})`);
+    ctx.log(`stock_footage: ${clips.length} clips covering ~${coveredSec.toFixed(0)}s/${targetSec.toFixed(0)}s (${gated} passed relevance gate)`);
     return { footageClips: clips };
   },
 };
