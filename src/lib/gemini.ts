@@ -49,6 +49,10 @@ async function generate(
     generationConfig: {
       maxOutputTokens: opts.maxTokens ?? 2048,
       temperature: opts.temperature ?? 0.7,
+      // Gemini 2.5 Flash spends maxOutputTokens on internal "thinking" first,
+      // which truncated small structured/JSON replies (finishReason MAX_TOKENS).
+      // Disable thinking so the whole budget goes to the actual output.
+      thinkingConfig: { thinkingBudget: 0 },
       ...(opts.json ? { responseMimeType: "application/json" } : {}),
     },
   };
