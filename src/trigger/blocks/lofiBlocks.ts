@@ -41,14 +41,7 @@ import { upscaleLoopUnit } from "@/lib/replicate";
 import { generateMusic, type MusicProvider } from "@/lib/music";
 import { uploadPrivateDraft } from "@/lib/youtube";
 import { notifyDraftReady } from "@/lib/telegram";
-import {
-  concatClips,
-  loopUnderAudio,
-  titleCard,
-  probe,
-  overlayIntro,
-  renderLofiIntro,
-} from "@/lib/ffmpeg";
+import { concatClips, composeWithIntro, probe } from "@/lib/ffmpeg";
 import {
   makeRunTempDir,
   downloadTo,
@@ -82,6 +75,11 @@ function str(ctx: StageContext, key: string): string {
     throw new Error(`lofi: expected non-empty string store["${key}"], got ${JSON.stringify(v)}`);
   }
   return v;
+}
+
+function opt(ctx: StageContext, key: string): string | undefined {
+  const v = ctx.store[key];
+  return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
 function styleGrammar(ctx: StageContext): string {
@@ -446,13 +444,15 @@ export const music: Block = {
 
 export const assemble: Block = {
   id: "assemble",
-  consumes: ["loopUnitKey", "musicKey"],
+  consumes: ["loopUnitKey", "musicUrl", "introCardPath"],
   produces: ["videoKey", "videoLocalPath", "videoDurationSec"],
   run: async (ctx) => {
     // SHORT for M1; set durationSec=7200 in the channel pipeline for a 2h render.
     // The loop UNIT is already upscaled (Topaz) by the upscale block; assemble
-    // ONLY stream_loops that 4K unit under the full music track → the cost of
-    // length is just ffmpeg time, not another upscale.
+    // PREPENDS the Remotion title card (music-only intro, no narration), then
+    // stream_loops that 4K unit under the full music track → the cost of length
+    // is just ffmpeg time, not another upscale. Lofi has no narration so the
+    // music plays at full volume the whole way (composeWithIntro skips ducking).
     const durationSec = Number(ctx.params.durationSec ?? 90);
     const musicUrl = str(ctx, "musicUrl");
     // upscale stashed the loop-unit local path in loopUnitUrl; if absent (e.g.
@@ -476,101 +476,49 @@ export const assemble: Block = {
 
     // Cap delivery height (default UHD 2160) so a true-4K Topaz unit stays
     // CPU-encodable; the upscale detail is preserved, the pixel count is sane.
+    // The card (rendered 1080p) is scaled up to match this canvas.
     const maxHeight = Number(ctx.params.maxHeight ?? 2160);
+    const p = await probe(loopUnitPath);
+    const ih = p.height && p.height > 0 ? p.height : 1080;
+    const iw = p.width && p.width > 0 ? p.width : 1920;
+    let H = Math.min(maxHeight, ih);
+    H -= H % 2;
+    let W = Math.round(iw * (H / ih));
+    W -= W % 2;
     const preset = (ctx.params.encodePreset as string) ?? "veryfast";
+
+    const introCardPath = opt(ctx, "introCardPath"); // "" if the card render failed
+    const introSec = introCardPath ? Number(ctx.store["introSec"] ?? 5) : 0;
+    const fadeOutSec = Number(ctx.params.fadeOutSec ?? 0);
+    const videoDurationSec = introSec + durationSec;
+
     ctx.log(
-      `assemble: stream_loop upscaled loop unit under music to ${durationSec}s (maxH=${maxHeight}, preset=${preset})…`,
+      `assemble: prepend card (${introSec}s) + stream_loop 4K unit under music to ${durationSec}s @ ${W}x${H} (preset=${preset})…`,
     );
     const finalPath = join(tmp, "final.mp4");
-    await loopUnderAudio({
-      loopUnitPath,
-      audioPath: audio,
+    await composeWithIntro({
+      introCardPath: introCardPath || undefined,
+      loopBodyPath: loopUnitPath,
+      musicPath: audio,
       outPath: finalPath,
-      durationSec,
-      maxHeight,
+      introSec,
+      bodySec: durationSec,
+      tailSec: 0,
+      fadeOutSec,
+      width: W,
+      height: H,
       preset,
     });
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObject(videoKey, await readBytes(finalPath), { contentType: "video/mp4" });
     await recordAsset(ctx, "video", videoKey, {
-      durationSec,
+      durationSec: videoDurationSec,
+      introSec,
       loopUnitResolution: ctx.store["loopUnitResolution"],
     });
 
-    return { videoKey, videoLocalPath: finalPath, videoDurationSec: durationSec };
-  },
-};
-
-/* ---------------------------- 7b. intro_card ---------------------------- */
-
-export const introCard: Block = {
-  id: "intro_card",
-  consumes: ["videoLocalPath"],
-  produces: ["introApplied", "introMode"],
-  run: async (ctx) => {
-    // Reusable Remotion intro-card block (port of legacy intro_renderer + the
-    // LofiIntroV2 composition). Renders a transparent alpha intro with the
-    // channel name and overlays it on the first ~8s of the assembled video
-    // (intro_mode='overlay', legacy lofi default). try/except guarded — the
-    // intro is a bonus that must NEVER block a finished video (legacy parity).
-    const videoLocal = str(ctx, "videoLocalPath");
-    const channelName =
-      (ctx.params["channelName"] as string | undefined) ??
-      (ctx.store["channelName"] as string | undefined) ??
-      "Lofi";
-    const videoTitle =
-      (ctx.store["title"] as string | undefined) ??
-      (ctx.params["videoTitle"] as string | undefined) ??
-      "lofi beats to relax / study to";
-    const introMode = (ctx.params["introMode"] as string | undefined) ?? "overlay";
-
-    // motion-graphics is a sibling Remotion project at repo-root/motion-graphics.
-    const mgDir =
-      (ctx.params["motionGraphicsDir"] as string | undefined) ??
-      process.env.MOTION_GRAPHICS_DIR ??
-      join(process.cwd(), "motion-graphics");
-    const fallbackTemplate = join(mgDir, "templates", "lofi-intro-transparent.webm");
-
-    try {
-      const tmp = await makeRunTempDir(ctx.runId);
-      const introWebm = join(tmp, "intro.webm");
-      ctx.log(`intro_card: rendering LofiIntroV2 (channel="${channelName}")…`);
-      const { path: introPath, rendered } = await renderLofiIntro({
-        motionGraphicsDir: mgDir,
-        outputPath: introWebm,
-        channelName,
-        videoTitle,
-        fallbackTemplate,
-      });
-      ctx.log(
-        `intro_card: intro ready (rendered=${rendered}); overlaying first 8s…`,
-      );
-      const withIntro = join(tmp, "with_intro.mp4");
-      await overlayIntro({
-        introWebm: introPath,
-        videoPath: videoLocal,
-        outPath: withIntro,
-      });
-
-      // Replace the canonical video with the intro'd version (QA + upload use it).
-      const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
-      await putObject(videoKey, await readBytes(withIntro), { contentType: "video/mp4" });
-      await recordAsset(ctx, "video_with_intro", videoKey, { introMode, rendered });
-
-      return {
-        introApplied: true,
-        introMode,
-        videoLocalPath: withIntro,
-        videoKey,
-      };
-    } catch (e) {
-      // HONEST degrade: keep the no-intro video, log LOUDLY. Never block upload.
-      ctx.log(
-        `intro_card: !!! INTRO FAILED (${e instanceof Error ? e.message : e}) — shipping WITHOUT intro`,
-      );
-      return { introApplied: false, introMode: "none" };
-    }
+    return { videoKey, videoLocalPath: finalPath, videoDurationSec };
   },
 };
 
@@ -651,7 +599,6 @@ export const lofiBlocks: Block[] = [
   upscale,
   music,
   assemble,
-  introCard,
   uploadDraft,
   notify,
 ];
@@ -681,8 +628,8 @@ export const LOFI_PIPELINE = [
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "music", params: { provider: "mureka" } },
   { block: "metadata" },
+  { block: "intro_card", params: { introSec: 5 } },
   { block: "assemble", params: { durationSec: 90 } }, // ← set 7200 for 2h production
-  { block: "intro_card", params: { introMode: "overlay" } },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },

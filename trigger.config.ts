@@ -1,5 +1,10 @@
 import { defineConfig } from "@trigger.dev/sdk";
-import { ffmpeg, additionalPackages } from "@trigger.dev/build/extensions/core";
+import {
+  ffmpeg,
+  additionalPackages,
+  additionalFiles,
+  aptGet,
+} from "@trigger.dev/build/extensions/core";
 
 /**
  * Trigger.dev config for YouTube Studio AI.
@@ -14,12 +19,52 @@ import { ffmpeg, additionalPackages } from "@trigger.dev/build/extensions/core";
  *   hand-authed VPS: the CLI runs in the cloud task and authenticates from an
  *   injected credentials.json (see src/lib/bootstrap.ts) using your SUBSCRIPTION
  *   credits — not the separate, empty platform API-key pool.
+ * - additionalFiles bakes the in-app Remotion composition (src/remotion/**) into
+ *   the image so @remotion/bundler can read the entry at runtime and render the
+ *   title card in-process (intro_card → renderTitleCard). The .tsx source must be
+ *   present because bundle() compiles it on the fly; node_modules ships the heavy
+ *   renderer + Chromium-download (ensureBrowser) deps.
  */
 export default defineConfig({
   project: process.env.TRIGGER_PROJECT_REF ?? "proj_vorkjqmnnpkzoiqqgbuu",
   dirs: ["./src/trigger"],
   build: {
-    extensions: [ffmpeg(), additionalPackages({ packages: ["@higgsfield/cli@0.1.40"] })],
+    // Keep the Remotion stack OUT of the esbuild bundle. If bundled, esbuild
+    // walks into @remotion/bundler → @rspack/core and copies the host-resolved
+    // native binding (e.g. @rspack/binding-win32-x64-msvc on Windows) into the
+    // image, which then fails `npm i` on the Linux builder (EBADPLATFORM).
+    // External → Trigger installs them fresh in the Linux image, resolving the
+    // correct platform binaries; remotionRender.ts imports them dynamically.
+    external: ["@remotion/bundler", "@remotion/renderer", "remotion"],
+    extensions: [
+      ffmpeg(),
+      additionalPackages({ packages: ["@higgsfield/cli@0.1.40"] }),
+      additionalFiles({ files: ["src/remotion/**"] }),
+      // Headless-Chromium system libraries (Remotion renderTitleCard). The image
+      // ships chrome-headless-shell but not its shared libs — without these the
+      // browser fails to launch (libnspr4.so / libnss3 missing). Remotion's
+      // documented Debian set.
+      aptGet({
+        packages: [
+          "libnss3",
+          "libnspr4",
+          "libdbus-1-3",
+          "libatk1.0-0",
+          "libatk-bridge2.0-0",
+          "libgbm1",
+          "libasound2",
+          "libxrandr2",
+          "libxkbcommon0",
+          "libxfixes3",
+          "libxcomposite1",
+          "libxdamage1",
+          "libpango-1.0-0",
+          "libcairo2",
+          "libcups2",
+          "libatspi2.0-0",
+        ],
+      }),
+    ],
   },
   maxDuration: 3600, // 1h ceiling; raised per-task for long renders in P2.
 });

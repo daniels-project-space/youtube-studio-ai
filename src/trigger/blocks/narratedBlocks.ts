@@ -21,7 +21,8 @@ import { searchFootage, hasPexelsKey } from "@/lib/footage";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
 import { putObject, getObjectBytes } from "@/lib/storage";
-import { probe, concatScaled, loopUnderAudio, grabFrame, kenBurns } from "@/lib/ffmpeg";
+import { probe, concatScaled, composeWithIntro, grabFrame, kenBurns } from "@/lib/ffmpeg";
+import { renderTitleCard } from "@/lib/remotionRender";
 import {
   evaluateVisualFrames,
   evaluateThumbnail,
@@ -332,9 +333,65 @@ export const entityImagery: Block = {
   },
 };
 
+export const introCard: Block = {
+  id: "intro_card",
+  consumes: ["topic"],
+  produces: ["introCardPath", "introApplied", "introSec", "introMode"],
+  run: async (ctx) => {
+    // Universal Remotion title card (cloud-wired): renders the in-app TitleCard
+    // composition (src/remotion) in-process via headless Chromium. It is
+    // PREPENDED by the assembler so every video opens with a branded card over a
+    // music-only intro (no narration yet). Guarded — a render failure degrades to
+    // no-card (introApplied:false) and NEVER blocks the video.
+    const channelName =
+      opt(ctx, "channelName") ??
+      (ctx.params["channelName"] as string | undefined) ??
+      "Studio";
+    const subtitle =
+      opt(ctx, "tagline") ?? opt(ctx, "topic") ?? opt(ctx, "niche") ?? "";
+    const introSec = Number(ctx.params["introSec"] ?? 5);
+    const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
+    const W = portrait ? 1080 : 1920;
+    const H = portrait ? 1920 : 1080;
+    const palette = ctx.store["palette"] as string[] | undefined;
+    try {
+      const tmp = await makeRunTempDir(ctx.runId);
+      const out = join(tmp, "titlecard.mp4");
+      await renderTitleCard({
+        title: channelName,
+        subtitle,
+        palette,
+        outPath: out,
+        durationSec: introSec,
+        width: W,
+        height: H,
+      });
+      ctx.log(`intro_card: title card rendered (${introSec}s @ ${W}x${H}, "${channelName}")`);
+      return {
+        introCardPath: out,
+        introApplied: true,
+        introSec,
+        introMode: "prepend",
+      };
+    } catch (e) {
+      ctx.log(
+        `intro_card: !!! title-card render FAILED (${e instanceof Error ? e.message : e}) — continuing without a card`,
+      );
+      return { introCardPath: "", introApplied: false, introSec: 0, introMode: "none" };
+    }
+  },
+};
+
 export const timelineAssemble: Block = {
   id: "timeline_assemble",
-  consumes: ["footageClips", "entityClips", "narrationLocalPath", "narrationDurationSec"],
+  consumes: [
+    "footageClips",
+    "entityClips",
+    "narrationLocalPath",
+    "narrationDurationSec",
+    "introCardPath",
+    "musicUrl",
+  ],
   produces: ["videoKey", "videoLocalPath", "videoDurationSec"],
   run: async (ctx) => {
     const footage = ctx.store["footageClips"] as string[] | undefined;
@@ -355,25 +412,40 @@ export const timelineAssemble: Block = {
     const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
     const W = portrait ? 1080 : 1920;
     const H = portrait ? 1920 : 1080;
-    // The video runs a few seconds PAST the narration and fades to black at the
-    // end (no voice over the tail, clean ending, no end text).
+    // Intro = title card over a music-only opener (no narration yet). Tail = a
+    // few silent seconds past the narration, fading to black (clean ending, no
+    // end text). So narration time < video time, by design.
+    const introCardPath = opt(ctx, "introCardPath"); // "" if the card render failed
+    const introSec = introCardPath ? Number(ctx.store["introSec"] ?? 5) : 0;
     const tailSec = Number(ctx.params["tailSec"] ?? 3);
     const fadeOutSec = Number(ctx.params["fadeOutSec"] ?? 2);
-    const videoSec = narrationSec + tailSec;
+    const videoSec = introSec + narrationSec + tailSec;
 
     const tmp = await makeRunTempDir(ctx.runId);
     ctx.log(`timeline_assemble: concat ${clips.length} clips (${footage.length} footage + ${entity.length} entity) @ ${W}x${H}…`);
     const concat = await concatScaled(clips, join(tmp, "footage.mp4"), W, H);
-    ctx.log(`timeline_assemble: narration ${narrationSec}s + ${tailSec}s fade tail → ${videoSec}s…`);
+
+    // Music bed (full during the intro, ducked low under narration). Downloaded
+    // from the music block's provider URL; looped by the composer to length.
+    const musicUrl = str(ctx, "musicUrl");
+    const musicPath = await downloadTo(musicUrl, join(tmp, "music.mp3"));
+
+    ctx.log(
+      `timeline_assemble: compose intro ${introSec}s + narration ${narrationSec}s + ${tailSec}s tail → ${videoSec}s…`,
+    );
     const out = join(tmp, "video.mp4");
-    await loopUnderAudio({
-      loopUnitPath: concat,
-      audioPath: narration,
+    await composeWithIntro({
+      introCardPath: introCardPath || undefined,
+      loopBodyPath: concat,
+      musicPath,
+      narrationPath: narration,
       outPath: out,
-      durationSec: narrationSec,
+      introSec,
+      bodySec: narrationSec,
       tailSec,
       fadeOutSec,
-      maxHeight: H,
+      width: W,
+      height: H,
     });
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
@@ -381,10 +453,11 @@ export const timelineAssemble: Block = {
     await recordAsset(ctx, "video", videoKey, {
       durationSec: videoSec,
       narrationSec,
+      introSec,
       source: "stock_footage",
       clips: footage.length,
     });
-    ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s)`);
+    ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s)`);
     return { videoKey, videoLocalPath: out, videoDurationSec: videoSec };
   },
 };
@@ -555,6 +628,7 @@ export const narratedBlocks: Block[] = [
   narrationTts,
   stockFootage,
   entityImagery,
+  introCard,
   timelineAssemble,
   lengthCheck,
   qaVisual,

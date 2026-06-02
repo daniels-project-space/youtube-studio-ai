@@ -32,8 +32,8 @@ const LOFI: PipelineEntry[] = [
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "music", params: { provider: "mureka" } },
   { block: "metadata" },
+  { block: "intro_card", params: { introSec: 5 } },
   { block: "assemble", params: { durationSec: 90 } },
-  { block: "intro_card", params: { introMode: "overlay" } },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },
@@ -42,6 +42,9 @@ const LOFI: PipelineEntry[] = [
 
 // Narrated base (Stage-3 blocks). Footage-driven; metadata + qa precede
 // thumbnail/upload (which consume title + qaPassed). Crime adds a hook.
+// intro_card (Remotion title card) + music run before timeline_assemble, which
+// prepends the card over a music-only intro and beds the music low under the
+// narration (see src/lib/ffmpeg.ts composeWithIntro).
 const NARRATED: PipelineEntry[] = [
   { block: "competitor_research" },
   { block: "topic_select" },
@@ -50,8 +53,16 @@ const NARRATED: PipelineEntry[] = [
   { block: "narration_tts" },
   { block: "stock_footage" },
   { block: "entity_imagery" },
+  {
+    block: "music",
+    params: {
+      provider: "mureka",
+      prompt:
+        "calm cinematic ambient underscore, soft strings and piano, slow and contemplative, no drums, no vocals",
+    },
+  },
+  { block: "intro_card", params: { introSec: 5 } },
   { block: "timeline_assemble" },
-  { block: "intro_card", params: { introMode: "overlay" } },
   { block: "length_check" },
   { block: "metadata" },
   { block: "thumbnail_gen" },
@@ -110,7 +121,15 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "narration_tts" },
       { block: "stock_footage", params: { aspect: "9:16" } },
       { block: "entity_imagery", params: { aspect: "9:16" } },
-      { block: "timeline_assemble", params: { aspect: "9:16", captions: true } },
+      {
+        block: "music",
+        params: {
+          provider: "mureka",
+          prompt: "energetic minimal underscore, light beat, no vocals",
+        },
+      },
+      { block: "intro_card", params: { introSec: 2, aspect: "9:16" } },
+      { block: "timeline_assemble", params: { aspect: "9:16", captions: true, tailSec: 1 } },
       { block: "length_check", params: { maxSeconds: 60 } },
       { block: "metadata" },
       { block: "thumbnail_gen" },
@@ -132,7 +151,16 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "narration_tts", params: { pace: "slow" } },
       { block: "stock_footage" },
       { block: "entity_imagery" },
-      { block: "timeline_assemble" },
+      {
+        block: "music",
+        params: {
+          provider: "mureka",
+          prompt:
+            "very calm ambient sleep music, soft pads, slow, peaceful, no drums, no vocals",
+        },
+      },
+      { block: "intro_card", params: { introSec: 6 } },
+      { block: "timeline_assemble", params: { tailSec: 4, fadeOutSec: 3 } },
       { block: "length_check" },
       { block: "metadata" },
       { block: "thumbnail_gen" },

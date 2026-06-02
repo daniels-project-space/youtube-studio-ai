@@ -225,6 +225,164 @@ export async function loopUnderAudio(args: {
 }
 
 /**
+ * Final composition with a Remotion title-card intro + a music bed.
+ *
+ * Timeline (all on one uniform W×H canvas):
+ *   [0 ── introSec ──][──── bodySec (narration) ────][── tailSec ──]
+ *    title card +        footage/loop + narration,       fade to black
+ *    music (full)        music ducked low               music fades out
+ *
+ * Guarantees the user's spec:
+ *  - a real title-card intro where MUSIC plays but NO narration yet (narration is
+ *    delayed by introSec so the intro is voice-free);
+ *  - a low music BED throughout — full during the intro, ducked under narration;
+ *  - narration time (bodySec) < video time (introSec+bodySec+tailSec): the video
+ *    runs past the voice and ENDS on a clean fade-to-black with no text.
+ *
+ * `narrationPath` omitted → no ducking, music stays full the whole way (lofi).
+ * `introCardPath` omitted → no intro segment (degrade path if the card render
+ * failed); narration then starts at t=0.
+ *
+ * The body video is stream-looped to cover bodySec+tailSec, so short footage
+ * (or a lofi loop unit) tiles to length without extra cost.
+ */
+export async function composeWithIntro(args: {
+  introCardPath?: string;
+  loopBodyPath: string;
+  musicPath: string;
+  narrationPath?: string;
+  outPath: string;
+  introSec: number;
+  /** Narration length (narrated) or target loop length (lofi). */
+  bodySec: number;
+  /** Silent video AFTER the body so the voice ends before the picture does. */
+  tailSec?: number;
+  /** Fade video to black + audio out over the last N seconds. */
+  fadeOutSec?: number;
+  width?: number;
+  height?: number;
+  /** Music volume during the intro (no voice) and under narration. */
+  introMusicVol?: number;
+  bodyMusicVol?: number;
+  preset?: string;
+  timeoutMs?: number;
+}): Promise<string> {
+  const W = args.width ?? 1920;
+  const H = args.height ?? 1080;
+  const fps = 30;
+  const intro = Math.max(0, args.introCardPath ? args.introSec : 0);
+  const tail = Math.max(0, args.tailSec ?? 0);
+  const fade = Math.max(0, args.fadeOutSec ?? 0);
+  const bodyTail = args.bodySec + tail;
+  const total = intro + args.bodySec + tail;
+  const fadeSt = Math.max(0, total - fade);
+  const introMs = Math.round(intro * 1000);
+  const introVol = args.introMusicVol ?? 0.6;
+  const bodyVol = args.narrationPath ? (args.bodyMusicVol ?? 0.12) : introVol;
+
+  const scalePad =
+    `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+    `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps}`;
+
+  // ----- inputs (order is referenced by index in the filter graph) -----
+  const inputs: string[] = [];
+  let idx = 0;
+  let cardIdx = -1;
+  if (args.introCardPath) {
+    inputs.push("-i", args.introCardPath);
+    cardIdx = idx++;
+  }
+  inputs.push("-stream_loop", "-1", "-i", args.loopBodyPath);
+  const bodyIdx = idx++;
+  inputs.push("-stream_loop", "-1", "-i", args.musicPath);
+  const musicIdx = idx++;
+  let narrIdx = -1;
+  if (args.narrationPath) {
+    inputs.push("-i", args.narrationPath);
+    narrIdx = idx++;
+  }
+
+  // ----- video -----
+  const vparts: string[] = [];
+  vparts.push(
+    `[${bodyIdx}:v]${scalePad},trim=0:${bodyTail.toFixed(3)},setpts=PTS-STARTPTS[body]`,
+  );
+  let vcat: string;
+  if (cardIdx >= 0) {
+    vparts.push(
+      `[${cardIdx}:v]${scalePad},trim=0:${intro.toFixed(3)},setpts=PTS-STARTPTS[card]`,
+    );
+    vparts.push(`[card][body]concat=n=2:v=1:a=0[vcat]`);
+    vcat = "[vcat]";
+  } else {
+    vcat = "[body]";
+  }
+  const vout =
+    fade > 0
+      ? `${vcat}fade=t=out:st=${fadeSt.toFixed(2)}:d=${fade.toFixed(2)}[vout]`
+      : `${vcat}null[vout]`;
+
+  // ----- audio -----
+  const aparts: string[] = [];
+  // Music bed: full during the intro, low under the body. eval=frame so the
+  // volume tracks time. Looped to cover the whole timeline, trimmed to total.
+  aparts.push(
+    `[${musicIdx}:a]aresample=44100,atrim=0:${total.toFixed(3)},` +
+      `volume='if(lt(t,${intro.toFixed(3)}),${introVol},${bodyVol})':eval=frame[mbed]`,
+  );
+  let amixOut: string;
+  if (narrIdx >= 0) {
+    aparts.push(
+      `[${narrIdx}:a]aresample=44100,adelay=${introMs}:all=1,` +
+        `atrim=0:${total.toFixed(3)}[narr]`,
+    );
+    aparts.push(`[narr][mbed]amix=inputs=2:duration=longest:normalize=0[amixraw]`);
+    amixOut = "[amixraw]";
+  } else {
+    amixOut = "[mbed]";
+  }
+  const aout =
+    fade > 0
+      ? `${amixOut}afade=t=out:st=${fadeSt.toFixed(2)}:d=${fade.toFixed(2)},atrim=0:${total.toFixed(3)}[aout]`
+      : `${amixOut}atrim=0:${total.toFixed(3)}[aout]`;
+
+  const filter = [...vparts, vout, ...aparts, aout].join(";");
+
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      ...inputs,
+      "-filter_complex",
+      filter,
+      "-map",
+      "[vout]",
+      "-map",
+      "[aout]",
+      "-t",
+      total.toFixed(3),
+      "-c:v",
+      "libx264",
+      "-preset",
+      args.preset ?? "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "aac",
+      "-b:a",
+      "384k",
+      "-movflags",
+      "+faststart",
+      args.outPath,
+    ],
+    args.timeoutMs ?? 2_700_000,
+  );
+  return args.outPath;
+}
+
+/**
  * Ken Burns clip from a still image (slow zoom-in), normalized to the canvas.
  * Brings entity/concept images to life (e.g. a Marcus Aurelius portrait).
  */
