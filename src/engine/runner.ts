@@ -10,11 +10,12 @@
  *   4. merges the patch into the shared store,
  *   5. writes a runStage (ok) — or (failed) and STOPS the whole run.
  */
-import type {
-  Block,
-  RunStageSink,
-  StageContext,
-  StageStatus,
+import {
+  COST_PATCH_KEY,
+  type Block,
+  type RunStageSink,
+  type StageContext,
+  type StageStatus,
 } from "./types";
 import type { ResolvedPipeline } from "./validate";
 
@@ -39,7 +40,16 @@ export interface RunResult {
   store: Record<string, unknown>;
   failedBlock?: string;
   error?: string;
+  /** Sum of every block's reported spend (USD). */
+  costTotal: number;
   stages: { block: string; status: StageStatus }[];
+}
+
+/** Pull a block's self-reported spend out of its patch (and off the store). */
+function takeCost(patch: Record<string, unknown>): number {
+  const raw = patch[COST_PATCH_KEY];
+  delete patch[COST_PATCH_KEY];
+  return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0;
 }
 
 function assertProduced(block: Block, patch: Record<string, unknown>): void {
@@ -60,6 +70,7 @@ export async function runPipeline(
   const log = opts.log ?? (() => {});
   const store: Record<string, unknown> = { ...(opts.seedStore ?? {}) };
   const stages: { block: string; status: StageStatus }[] = [];
+  let spentUsd = 0;
 
   for (const block of resolved.blocks) {
     const params = opts.paramsByBlock?.[block.id] ?? {};
@@ -89,6 +100,8 @@ export async function runPipeline(
 
     try {
       const patch = await block.run(ctx);
+      const cost = takeCost(patch);
+      spentUsd += cost;
       assertProduced(block, patch);
       Object.assign(store, patch);
 
@@ -98,10 +111,27 @@ export async function runPipeline(
         block: block.id,
         status: "ok",
         finishedAt: Date.now(),
+        cost,
         outputs: patch,
       });
       stages.push({ block: block.id, status: "ok" });
-      log(`block ok: ${block.id}`, { produced: block.produces });
+      log(`block ok: ${block.id}`, { produced: block.produces, costUsd: cost });
+
+      // Enforce the per-run budget ceiling. The block that tipped over has
+      // already run; aborting here prevents every subsequent (paid) block from
+      // spending more. A boolean preflight alone can't do this.
+      if (opts.budgetUsd > 0 && spentUsd > opts.budgetUsd) {
+        const message = `budget ceiling exceeded: spent $${spentUsd.toFixed(2)} > budget $${opts.budgetUsd.toFixed(2)} after block "${block.id}" — aborting before further paid blocks`;
+        log(message);
+        return {
+          ok: false,
+          store,
+          failedBlock: block.id,
+          error: message,
+          costTotal: spentUsd,
+          stages,
+        };
+      }
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await opts.sink.upsert({
@@ -120,10 +150,11 @@ export async function runPipeline(
         store,
         failedBlock: block.id,
         error: message,
+        costTotal: spentUsd,
         stages,
       };
     }
   }
 
-  return { ok: true, store, stages };
+  return { ok: true, store, costTotal: spentUsd, stages };
 }

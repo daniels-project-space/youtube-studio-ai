@@ -10,6 +10,14 @@
 export type BlockPatch = Record<string, unknown>;
 
 /**
+ * Reserved patch key a block MAY include to report what it spent (USD). The
+ * runner extracts it (it never lands in the store), records it on the block's
+ * runStage `cost`, accumulates it into the run total, and enforces the per-run
+ * budget ceiling. Blocks that omit it cost 0. See src/engine/pricing.ts.
+ */
+export const COST_PATCH_KEY = "__costUsd";
+
+/**
  * Execution context handed to every block. Carries run identity plus a
  * key/value store of outputs produced by upstream blocks. A block reads its
  * declared `consumes` keys from `store` and returns a patch of its `produces`.

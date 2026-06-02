@@ -21,12 +21,13 @@ import {
   PipelineValidationError,
 } from "@/engine/validate";
 import { runPipeline } from "@/engine/runner";
-import type { Block, RunStageSink } from "@/engine/types";
+import { COST_PATCH_KEY, type Block, type RunStageSink } from "@/engine/types";
 
 interface Recorded {
   block: string;
   status: string;
   outputs?: unknown;
+  cost?: number;
   error?: string;
 }
 
@@ -40,6 +41,7 @@ function memSink(): { sink: RunStageSink; rows: Recorded[] } {
           block: a.block,
           status: a.status,
           outputs: a.outputs,
+          cost: a.cost,
           error: a.error,
         });
       },
@@ -125,10 +127,67 @@ async function negativeSilentFallback(): Promise<void> {
   console.log("NEGATIVE(no-silent-fallback) PASS:", result.error);
 }
 
+/**
+ * Cost wiring: a paid block that reports __costUsd must (a) have that cost
+ * recorded on its runStage, (b) roll up into RunResult.costTotal, and (c) when
+ * cumulative spend crosses budgetUsd, ABORT the run before the next block runs.
+ */
+async function costAndBudget(): Promise<void> {
+  _resetBlocks();
+  const pricey1: Block = {
+    id: "pricey1",
+    consumes: [],
+    produces: ["a"],
+    paid: true,
+    run: async () => ({ a: "1", [COST_PATCH_KEY]: 3 }),
+  };
+  const pricey2: Block = {
+    id: "pricey2",
+    consumes: ["a"],
+    produces: ["b"],
+    paid: true,
+    run: async () => ({ b: "2", [COST_PATCH_KEY]: 3 }),
+  };
+  register(pricey1);
+  register(pricey2);
+
+  // (a)+(b): budget high enough — both run, costs roll up to 6.
+  {
+    const resolved = validatePipeline([{ block: "pricey1" }, { block: "pricey2" }]);
+    const { sink, rows } = memSink();
+    const result = await runPipeline(resolved, {
+      ownerId: "o", runId: "run_cost_ok", channelId: "c", keyPrefix: "p/",
+      budgetUsd: 100, sink,
+    });
+    assert.equal(result.ok, true, "under budget → run succeeds");
+    assert.equal(result.costTotal, 6, "costs roll up (3+3)");
+    assert.ok(!("__costUsd" in result.store), "cost key never leaks into the store");
+    const okCost = rows.find((r) => r.block === "pricey1" && r.status === "ok")?.cost;
+    assert.equal(okCost, 3, "per-block cost persisted on the runStage");
+  }
+
+  // (c): budget below the first block's cost — abort after pricey1, pricey2 never runs.
+  {
+    const resolved = validatePipeline([{ block: "pricey1" }, { block: "pricey2" }]);
+    const { sink, rows } = memSink();
+    const result = await runPipeline(resolved, {
+      ownerId: "o", runId: "run_cost_over", channelId: "c", keyPrefix: "p/",
+      budgetUsd: 2, sink,
+    });
+    assert.equal(result.ok, false, "over budget → run aborts");
+    assert.equal(result.failedBlock, "pricey1", "aborts at the block that tipped over");
+    assert.equal(result.costTotal, 3, "reports what was actually spent");
+    assert.match(result.error ?? "", /budget ceiling exceeded/);
+    assert.ok(!rows.some((r) => r.block === "pricey2"), "downstream paid block never runs");
+  }
+  console.log("COST/BUDGET PASS: rollup + ceiling abort both enforced");
+}
+
 async function main(): Promise<void> {
   await positive();
   await negativeValidation();
   await negativeSilentFallback();
+  await costAndBudget();
   console.log("\nALL ENGINE TESTS PASSED");
 }
 

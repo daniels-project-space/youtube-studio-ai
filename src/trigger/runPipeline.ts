@@ -111,6 +111,7 @@ export const runPipelineTask = task({
           runId: payload.runId as Id<"runs">,
           status: "failed",
           finishedAt: Date.now(),
+          costTotal: result.costTotal,
           error: result.error,
         });
         await safeAlert(
@@ -124,8 +125,9 @@ export const runPipelineTask = task({
         runId: payload.runId as Id<"runs">,
         status: "ok",
         finishedAt: Date.now(),
+        costTotal: result.costTotal,
       });
-      return { ok: true, stages: result.stages };
+      return { ok: true, stages: result.stages, costTotal: result.costTotal };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log(`run aborted: ${message}`);

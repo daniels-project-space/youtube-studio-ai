@@ -30,7 +30,8 @@
  * production video is the channel pipeline's `assemble.params.durationSec`
  * (and `music.params.durationSec`) — set them to 7200 for a 2h render.
  */
-import type { Block, StageContext } from "@/engine/types";
+import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { PRICE } from "@/engine/pricing";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -258,6 +259,7 @@ export const keyframes: Block = {
       f1Url: f1.url,
       f2Url: f2.url,
       f1Key,
+      [COST_PATCH_KEY]: 2 * PRICE.fluxStillUsd, // two flux stills
     };
   },
 };
@@ -328,6 +330,7 @@ export const loopClips: Block = {
       clip2Key,
       clip1Url: clip1.url,
       clip2Url: clip2.url,
+      [COST_PATCH_KEY]: 2 * PRICE.videoClipUsd, // two i2v clips
     };
   },
 };
@@ -401,6 +404,8 @@ export const upscale: Block = {
       loopUnitUrl: finalLoopPath, // local path; assemble reads it directly
       loopUnitUpscaled: upscaled,
       loopUnitResolution: resolution,
+      // Topaz only billed when the upscale actually ran (degrade path is free).
+      [COST_PATCH_KEY]: upscaled ? PRICE.topazUpscaleUsd : 0,
     };
   },
 };
@@ -428,7 +433,12 @@ export const music: Block = {
     await putObject(musicKey, await readBytes(local), { contentType: "audio/mpeg" });
     await recordAsset(ctx, "music", musicKey, { provider: res.provider, jobId: res.jobId });
 
-    return { musicKey, musicProvider: res.provider, musicUrl: res.url };
+    return {
+      musicKey,
+      musicProvider: res.provider,
+      musicUrl: res.url,
+      [COST_PATCH_KEY]: PRICE.musicTrackUsd,
+    };
   },
 };
 
