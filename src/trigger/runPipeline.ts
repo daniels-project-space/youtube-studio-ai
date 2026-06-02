@@ -26,6 +26,7 @@ import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix } from "@/lib/storage";
 import { alertFailure } from "@/lib/telegram";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { rehydrateOutputs } from "@/lib/rehydrate";
 import type { PipelineEntry } from "@/engine/types";
 
 export interface RunPipelineInput {
@@ -39,6 +40,11 @@ export const runPipelineTask = task({
   // small machine OOM-kills on multi-minute renders.
   machine: "large-1x",
   maxDuration: 3000,
+  // On a crash/OOM/timeout, retry the whole task — the runner's resume restores
+  // completed blocks (no double-spend). Cap parallel renders so they don't
+  // contend for memory.
+  retry: { maxAttempts: 2, minTimeoutInMs: 5000, maxTimeoutInMs: 30000, factor: 2 },
+  queue: { concurrencyLimit: 3 },
   run: async (payload: RunPipelineInput) => {
     registerAllBlocks();
     await bootstrapSecrets((m, x) =>
@@ -107,6 +113,13 @@ export const runPipelineTask = task({
         seedStore,
         sink,
         log,
+        // Reliability (Phase 5): per-block retry on transient errors + resume —
+        // if this task is retried (crash/OOM), skip blocks that already finished
+        // and restore their outputs (re-download local files from R2) so paid
+        // blocks never re-spend.
+        resume: true,
+        defaultRetries: 2,
+        rehydrate: (block, outputs) => rehydrateOutputs(block, outputs, payload.runId),
       });
 
       // Drain any buffered log lines before resolving the run state.

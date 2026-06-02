@@ -33,6 +33,24 @@ export interface RunPipelineOptions {
   sink: RunStageSink;
   /** Optional structured logger. */
   log?: (msg: string, extra?: Record<string, unknown>) => void;
+  /**
+   * Resume: skip blocks that already completed "ok" for this runId (restoring
+   * their persisted outputs) so a retried run never re-spends on paid blocks.
+   * Default true. Requires sink.getCompleted + rehydrate.
+   */
+  resume?: boolean;
+  /**
+   * Make a completed block's persisted outputs usable again on a fresh worker —
+   * re-download local files from their R2 keys. Returns ok:false if it can't
+   * (then the block is re-run). Supplied by the Trigger task (keeps the engine
+   * free of storage deps).
+   */
+  rehydrate?: (
+    block: string,
+    outputs: Record<string, unknown>,
+  ) => Promise<{ ok: boolean; outputs: Record<string, unknown> }>;
+  /** Default per-block retries on TRANSIENT errors (block param `retries` wins). */
+  defaultRetries?: number;
 }
 
 export interface RunResult {
@@ -50,6 +68,37 @@ function takeCost(patch: Record<string, unknown>): number {
   const raw = patch[COST_PATCH_KEY];
   delete patch[COST_PATCH_KEY];
   return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0;
+}
+
+/** Transient (worth retrying) vs deterministic (gate/QA) failures. */
+function isTransient(msg: string): boolean {
+  return /(\b(429|408|425|500|502|503|504)\b|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|timed?\s?out|fetch failed|network|rate.?limit|overloaded|temporarily|unavailable|too many requests)/i.test(
+    msg,
+  );
+}
+
+/** Run a block, retrying TRANSIENT errors with exponential backoff. */
+async function runBlockWithRetry(
+  block: Block,
+  ctx: StageContext,
+  retries: number,
+  log: (msg: string, extra?: Record<string, unknown>) => void,
+): Promise<Record<string, unknown>> {
+  let attempt = 0;
+  for (;;) {
+    try {
+      return await block.run(ctx);
+    } catch (err) {
+      const msg = err instanceof Error ? err.message : String(err);
+      attempt++;
+      if (attempt > retries || !isTransient(msg)) throw err;
+      const backoff = Math.min(30_000, 1000 * 2 ** (attempt - 1));
+      log(
+        `block ${block.id}: transient error (retry ${attempt}/${retries} in ${backoff}ms): ${msg.slice(0, 160)}`,
+      );
+      await new Promise((r) => setTimeout(r, backoff));
+    }
+  }
 }
 
 function assertProduced(block: Block, patch: Record<string, unknown>): void {
@@ -72,11 +121,56 @@ export async function runPipeline(
   const stages: { block: string; status: StageStatus }[] = [];
   let spentUsd = 0;
 
+  // Resume: load already-completed blocks' persisted outputs (skip + restore).
+  const completedMap: Record<string, Record<string, unknown>> = {};
+  if (opts.resume !== false && opts.sink.getCompleted) {
+    try {
+      for (const row of await opts.sink.getCompleted(opts.runId)) {
+        if (row.outputs && typeof row.outputs === "object") {
+          completedMap[row.block] = row.outputs as Record<string, unknown>;
+        }
+      }
+      const n = Object.keys(completedMap).length;
+      if (n > 0) log(`resume: ${n} block(s) previously completed — will restore + skip`);
+    } catch (e) {
+      log(`resume: getCompleted failed (running fresh): ${e instanceof Error ? e.message : e}`);
+    }
+  }
+
   for (const block of resolved.blocks) {
     const params = opts.paramsByBlock?.[block.id] ?? {};
     const inputs = Object.fromEntries(
       block.consumes.map((k) => [k, store[k]]),
     );
+
+    // RESUME: restore a previously-completed block instead of re-running it
+    // (no double-spend on paid blocks). Re-run if its files can't be rehydrated.
+    const cached = completedMap[block.id];
+    if (cached && opts.rehydrate) {
+      try {
+        const { ok, outputs } = await opts.rehydrate(block.id, { ...cached });
+        if (ok) {
+          delete outputs[COST_PATCH_KEY];
+          assertProduced(block, outputs);
+          Object.assign(store, outputs);
+          await opts.sink.upsert({
+            ownerId: opts.ownerId,
+            runId: opts.runId,
+            block: block.id,
+            status: "ok",
+            finishedAt: Date.now(),
+            cost: 0,
+            outputs,
+          });
+          stages.push({ block: block.id, status: "ok" });
+          log(`block resumed (cached, no re-spend): ${block.id}`);
+          continue;
+        }
+        log(`block ${block.id}: cached outputs not rehydratable — re-running`);
+      } catch (e) {
+        log(`block ${block.id}: rehydrate failed — re-running: ${e instanceof Error ? e.message : e}`);
+      }
+    }
 
     await opts.sink.upsert({
       ownerId: opts.ownerId,
@@ -99,7 +193,8 @@ export async function runPipeline(
     };
 
     try {
-      const patch = await block.run(ctx);
+      const retries = Number(params["retries"] ?? opts.defaultRetries ?? 2);
+      const patch = await runBlockWithRetry(block, ctx, retries, log);
       const cost = takeCost(patch);
       spentUsd += cost;
       assertProduced(block, patch);

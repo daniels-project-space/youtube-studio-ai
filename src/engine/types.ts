@@ -75,4 +75,9 @@ export interface RunStageSink {
     outputs?: unknown;
     error?: string;
   }): Promise<void>;
+  /**
+   * Optional: return the persisted outputs of blocks that already completed "ok"
+   * for this run, so a resumed run can skip them (no double-spend on paid blocks).
+   */
+  getCompleted?(runId: string): Promise<Array<{ block: string; outputs: unknown }>>;
 }

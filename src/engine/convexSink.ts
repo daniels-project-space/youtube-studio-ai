@@ -27,6 +27,14 @@ export function makeConvexSink(
         error: args.error,
       });
     },
+    async getCompleted(runId) {
+      const rows = (await client.query(api.runStages.listRunStages, {
+        runId: runId as Id<"runs">,
+      })) as Array<{ block: string; status: string; outputs?: unknown }>;
+      return (rows ?? [])
+        .filter((r) => r.status === "ok" && r.outputs != null)
+        .map((r) => ({ block: r.block, outputs: r.outputs }));
+    },
   };
 }
 
