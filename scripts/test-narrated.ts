@@ -9,6 +9,7 @@ import { validatePipeline } from "@/engine/validate";
 import { synthScript } from "@/lib/scriptGen";
 import { synthNarration, hasFishKey, resolveVoiceId } from "@/lib/tts";
 import { searchFootage, hasPexelsKey } from "@/lib/footage";
+import { ARCHETYPES } from "@/engine/archetypes";
 
 async function main() {
   await bootstrapSecrets((m) => console.log(`[boot] ${m}`));
@@ -70,7 +71,13 @@ async function main() {
   } else {
     console.log("SKIP: no Pexels key hydrated");
   }
-  console.log("\nALL NARRATED 3a+3b+3c CHECKS PASSED");
+  // 5. EVERY archetype graph validates (3d+3e wired — the milestone).
+  for (const key of Object.keys(ARCHETYPES)) {
+    const a = ARCHETYPES[key];
+    validatePipeline(a.pipeline);
+    console.log(`PASS: archetype "${key}" validates (${a.pipeline.length} blocks)`);
+  }
+  console.log("\nALL NARRATED 3a–3e CHECKS PASSED");
 }
 
 main().catch((e) => {

@@ -91,6 +91,53 @@ export async function concatClips(
 }
 
 /**
+ * Concat clips of MIXED resolution/fps into one silent video on a uniform
+ * canvas (default 1920x1080@30): each input is scaled to fit, letterbox-padded,
+ * SAR-normalized, then concatenated. Used by timeline_assemble for Pexels stock
+ * footage (clips vary in size). No audio — narration is muxed later.
+ */
+export async function concatScaled(
+  clipPaths: string[],
+  outPath: string,
+  width = 1920,
+  height = 1080,
+  fps = 30,
+): Promise<string> {
+  if (clipPaths.length < 1) throw new FfmpegError("concatScaled: no inputs");
+  const inputs: string[] = [];
+  for (const p of clipPaths) inputs.push("-i", p);
+  const n = clipPaths.length;
+  const norm = clipPaths
+    .map(
+      (_, i) =>
+        `[${i}:v:0]scale=${width}:${height}:force_original_aspect_ratio=decrease,` +
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps}[v${i}]`,
+    )
+    .join(";");
+  const chain = clipPaths.map((_, i) => `[v${i}]`).join("");
+  const filter = `${norm};${chain}concat=n=${n}:v=1:a=0[outv]`;
+  await run(FFMPEG, [
+    "-y",
+    ...inputs,
+    "-filter_complex",
+    filter,
+    "-map",
+    "[outv]",
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "20",
+    "-pix_fmt",
+    "yuv420p",
+    "-an",
+    outPath,
+  ]);
+  return outPath;
+}
+
+/**
  * stream_loop the loop unit under an audio track to a target duration, muxing
  * audio. `-stream_loop -1` repeats the silent loop video; `-shortest` + an
  * explicit `-t` cut to the target length.

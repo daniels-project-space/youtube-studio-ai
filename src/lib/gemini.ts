@@ -133,3 +133,31 @@ export async function geminiVision(args: {
     maxTokens: args.maxTokens ?? 1024,
   });
 }
+
+/**
+ * Like {@link geminiVision} but inlines LOCAL image files (e.g. ffmpeg-grabbed
+ * frames) instead of fetching URLs. Used by the qa_visual gate.
+ */
+export async function geminiVisionLocal(args: {
+  prompt: string;
+  imagePaths: string[];
+  model?: string;
+  json?: boolean;
+  maxTokens?: number;
+}): Promise<string> {
+  const { readFile } = await import("node:fs/promises");
+  const parts: GeminiPart[] = [{ text: args.prompt }];
+  for (const p of args.imagePaths.slice(0, 12)) {
+    try {
+      const buf = await readFile(p);
+      const mime = p.toLowerCase().endsWith(".png") ? "image/png" : "image/jpeg";
+      parts.push({ inlineData: { mimeType: mime, data: buf.toString("base64") } });
+    } catch {
+      /* skip unreadable frame */
+    }
+  }
+  return generate(args.model ?? "gemini-2.5-flash", parts, {
+    json: args.json,
+    maxTokens: args.maxTokens ?? 1024,
+  });
+}

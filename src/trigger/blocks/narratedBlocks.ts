@@ -14,13 +14,13 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
 import { synthScript } from "@/lib/scriptGen";
-import { geminiJson, hasGeminiKey } from "@/lib/gemini";
+import { geminiJson, hasGeminiKey, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey } from "@/lib/tts";
 import { searchFootage, hasPexelsKey } from "@/lib/footage";
-import { makeRunTempDir, writeBytes, downloadTo } from "@/lib/files";
+import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
-import { probe } from "@/lib/ffmpeg";
+import { probe, concatScaled, loopUnderAudio, grabFrame } from "@/lib/ffmpeg";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -240,12 +240,128 @@ export const stockFootage: Block = {
   },
 };
 
+export const timelineAssemble: Block = {
+  id: "timeline_assemble",
+  consumes: ["footageClips", "narrationLocalPath", "narrationDurationSec"],
+  produces: ["videoKey", "videoLocalPath", "videoDurationSec"],
+  run: async (ctx) => {
+    const footage = ctx.store["footageClips"] as string[] | undefined;
+    if (!footage || footage.length === 0) {
+      throw new Error("timeline_assemble: no footageClips");
+    }
+    const narration = str(ctx, "narrationLocalPath");
+    const durationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
+    const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
+    const W = portrait ? 1080 : 1920;
+    const H = portrait ? 1920 : 1080;
+
+    const tmp = await makeRunTempDir(ctx.runId);
+    ctx.log(`timeline_assemble: concat ${footage.length} clips @ ${W}x${H}…`);
+    const concat = await concatScaled(footage, join(tmp, "footage.mp4"), W, H);
+    ctx.log(`timeline_assemble: loop under narration (${durationSec}s)…`);
+    const out = join(tmp, "video.mp4");
+    await loopUnderAudio({
+      loopUnitPath: concat,
+      audioPath: narration,
+      outPath: out,
+      durationSec,
+      maxHeight: H,
+    });
+
+    const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
+    await putObject(videoKey, await readBytes(out), { contentType: "video/mp4" });
+    await recordAsset(ctx, "video", videoKey, {
+      durationSec,
+      source: "stock_footage",
+      clips: footage.length,
+    });
+    ctx.log(`timeline_assemble ok: ${durationSec}s`);
+    return { videoKey, videoLocalPath: out, videoDurationSec: durationSec };
+  },
+};
+
+export const lengthCheck: Block = {
+  id: "length_check",
+  consumes: ["videoDurationSec"],
+  produces: ["lengthOk"],
+  run: async (ctx) => {
+    const dur = Number(ctx.store["videoDurationSec"] ?? 0);
+    const min = Number(ctx.params["minSeconds"] ?? 10);
+    const max = Number(ctx.params["maxSeconds"] ?? 36000);
+    const ok = dur >= min && dur <= max;
+    ctx.log(
+      ok
+        ? `length_check ok: ${dur}s`
+        : `length_check WARN: ${dur}s outside [${min}, ${max}]`,
+    );
+    return { lengthOk: ok };
+  },
+};
+
+export const qaVisual: Block = {
+  id: "qa_visual",
+  consumes: ["videoLocalPath", "videoDurationSec"],
+  produces: ["qaPassed", "qaReport"],
+  run: async (ctx) => {
+    const video = str(ctx, "videoLocalPath");
+    const dur = Number(ctx.store["videoDurationSec"] ?? 0);
+    const p = await probe(video);
+    const structural = p.hasVideo && p.hasAudio && p.durationSec > 1;
+    const report: Record<string, unknown> = {
+      structural,
+      durationSec: p.durationSec,
+      hasVideo: p.hasVideo,
+      hasAudio: p.hasAudio,
+    };
+    if (!structural) {
+      ctx.log("qa_visual: structural FAIL", report);
+      return { qaPassed: false, qaReport: report };
+    }
+
+    let visionPass = true;
+    if (hasGeminiKey()) {
+      try {
+        const tmp = await makeRunTempDir(ctx.runId);
+        const frames: string[] = [];
+        for (const frac of [0.2, 0.5, 0.8]) {
+          const f = join(tmp, `qa_${Math.round(frac * 100)}.jpg`);
+          await grabFrame(video, Math.max(0, dur * frac), f);
+          frames.push(f);
+        }
+        const niche = opt(ctx, "niche") ?? "video";
+        const raw = await geminiVisionLocal({
+          prompt:
+            `These are 3 frames from a ${niche} video. Rate visual quality: ` +
+            "clarity, relevance, and absence of glitches/black frames/artifacts. " +
+            'Return STRICT JSON {"pass":boolean,"score":0-10,"issues":string[]}.',
+          imagePaths: frames,
+          json: true,
+          maxTokens: 500,
+        });
+        const v = parseJsonLoose<{ pass?: boolean; score?: number; issues?: string[] }>(raw);
+        visionPass = v.pass !== false && (v.score ?? 10) >= 6;
+        report.vision = v;
+        ctx.log(`qa_visual: vision pass=${visionPass} score=${v.score}`, {
+          issues: (v.issues ?? []).slice(0, 4),
+        });
+      } catch (e) {
+        ctx.log(`qa_visual: vision skipped (${e instanceof Error ? e.message : e})`);
+      }
+    }
+    return { qaPassed: structural && visionPass, qaReport: report };
+  },
+};
+
 export const narratedBlocks: Block[] = [
   scriptGen,
   hookCraft,
   qaScript,
   narrationTts,
   stockFootage,
+  timelineAssemble,
+  lengthCheck,
+  qaVisual,
 ];
+
 
 
