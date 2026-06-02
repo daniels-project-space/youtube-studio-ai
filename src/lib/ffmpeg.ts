@@ -448,6 +448,121 @@ export async function imageToJpeg(
   return outJpg;
 }
 
+/**
+ * Concatenate per-sentence narration clips with a silence GAP between each — the
+ * pauses that make TTS sound organic. Every clip but the last is end-padded with
+ * `gapSec` of silence, then all are concatenated. Returns the muxed mp3.
+ */
+export async function concatAudioWithGaps(
+  paths: string[],
+  gapSec: number,
+  outPath: string,
+): Promise<string> {
+  if (paths.length === 0) throw new FfmpegError("concatAudioWithGaps: no inputs");
+  if (paths.length === 1 && gapSec <= 0) {
+    await copyFile(paths[0], outPath);
+    return outPath;
+  }
+  const gap = Math.max(0, gapSec);
+  const inputs: string[] = [];
+  for (const p of paths) inputs.push("-i", p);
+  const parts = paths
+    .map((_, i) =>
+      i < paths.length - 1
+        ? `[${i}:a]apad=pad_dur=${gap.toFixed(3)}[a${i}]`
+        : `[${i}:a]anull[a${i}]`,
+    )
+    .join(";");
+  const chain = paths.map((_, i) => `[a${i}]`).join("");
+  const filter = `${parts};${chain}concat=n=${paths.length}:v=0:a=1[out]`;
+  await run(FFMPEG, [
+    "-y",
+    ...inputs,
+    "-filter_complex",
+    filter,
+    "-map",
+    "[out]",
+    "-c:a",
+    "libmp3lame",
+    "-b:a",
+    "128k",
+    "-ar",
+    "44100",
+    outPath,
+  ]);
+  return outPath;
+}
+
+export interface QuoteOverlaySpec {
+  /** Transparent (VP8/alpha) overlay clip. */
+  path: string;
+  /** Absolute start time in the final video (seconds). */
+  startSec: number;
+  durSec: number;
+}
+
+/**
+ * Composite Remotion quote cards onto the video: during each quote window the
+ * background is gaussian-blurred (focus pull) and the alpha card (quote + yellow
+ * highlights, with its own scrim fade-in) is overlaid. Single pass. Audio copied.
+ */
+export async function applyQuoteOverlays(
+  videoPath: string,
+  overlays: QuoteOverlaySpec[],
+  outPath: string,
+  opts: { blurSigma?: number; timeoutMs?: number } = {},
+): Promise<string> {
+  if (overlays.length === 0) {
+    await copyFile(videoPath, outPath);
+    return outPath;
+  }
+  const sigma = opts.blurSigma ?? 16;
+  const inputs: string[] = ["-i", videoPath];
+  for (const o of overlays) inputs.push("-i", o.path);
+  const enableUnion = overlays
+    .map((o) => `between(t,${o.startSec.toFixed(2)},${(o.startSec + o.durSec).toFixed(2)})`)
+    .join("+");
+  const parts: string[] = [`[0:v]gblur=sigma=${sigma}:enable='${enableUnion}'[bg]`];
+  let prev = "[bg]";
+  overlays.forEach((o, i) => {
+    const idx = i + 1;
+    const start = o.startSec.toFixed(3);
+    const end = (o.startSec + o.durSec).toFixed(2);
+    parts.push(`[${idx}:v]setpts=PTS+${start}/TB[c${i}]`);
+    const out = i === overlays.length - 1 ? "[vout]" : `[v${i}]`;
+    parts.push(`${prev}[c${i}]overlay=0:0:enable='between(t,${start},${end})'${out}`);
+    prev = `[v${i}]`;
+  });
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      ...inputs,
+      "-filter_complex",
+      parts.join(";"),
+      "-map",
+      "[vout]",
+      "-map",
+      "0:a?",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outPath,
+    ],
+    opts.timeoutMs ?? 2_700_000,
+  );
+  return outPath;
+}
+
 /** Solid-colour JPEG (last-resort thumbnail base when no keyframe/Flux). */
 export async function solidImage(
   outJpg: string,

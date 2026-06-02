@@ -48,11 +48,11 @@ const LOFI: PipelineEntry[] = [
 const NARRATED: PipelineEntry[] = [
   { block: "competitor_research" },
   { block: "topic_select", params: { policy: "no_repeat" } },
-  { block: "script_gen" },
+  { block: "script_gen", params: { maxSeconds: 180 } }, // ~3 min
   { block: "qa_script" },
   { block: "originality_gate" },
   { block: "compliance_check" },
-  { block: "narration_tts" },
+  { block: "narration_tts", params: { sentenceGapSec: 0.4 } }, // organic pauses
   { block: "stock_footage" },
   { block: "entity_imagery" },
   {
@@ -64,6 +64,7 @@ const NARRATED: PipelineEntry[] = [
     },
   },
   { block: "intro_card", params: { introSec: 5 } },
+  { block: "quote_overlays", params: { maxQuotes: 3 } },
   { block: "timeline_assemble" },
   { block: "length_check" },
   { block: "captions" },

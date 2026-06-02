@@ -59,6 +59,53 @@ export async function renderTitleCard(args: {
     inputProps,
     codec: args.transparent ? "vp8" : "h264",
     pixelFormat: args.transparent ? "yuva420p" : "yuv420p",
+    imageFormat: args.transparent ? "png" : "jpeg", // png required for alpha
+    outputLocation: args.outPath,
+    chromiumOptions: { gl: "angle" },
+  });
+  return args.outPath;
+}
+
+/**
+ * Render a transparent (VP8/alpha) quote overlay — the QuoteOverlay composition
+ * (bold quote, important words yellow, scrim fade-in). ffmpeg composites it over
+ * the (blurred) body video. width/height should match the body canvas.
+ */
+export async function renderQuoteOverlay(args: {
+  quote: string;
+  highlights?: string[];
+  outPath: string;
+  durationSec: number;
+  width?: number;
+  height?: number;
+}): Promise<string> {
+  const { selectComposition, renderMedia, ensureBrowser } = await import(
+    "@remotion/renderer"
+  );
+  await ensureBrowser();
+  const serveUrl = await getServeUrl();
+  const width = args.width ?? 1920;
+  const height = args.height ?? 1080;
+  const durationInFrames = Math.max(1, Math.round(args.durationSec * 30));
+  const inputProps = {
+    quote: args.quote,
+    highlights: args.highlights ?? [],
+    durationInFrames,
+    width,
+    height,
+  };
+  const composition = await selectComposition({
+    serveUrl,
+    id: "QuoteOverlay",
+    inputProps,
+  });
+  await renderMedia({
+    serveUrl,
+    composition,
+    inputProps,
+    codec: "vp8",
+    pixelFormat: "yuva420p",
+    imageFormat: "png", // required for transparent (alpha) renders
     outputLocation: args.outPath,
     chromiumOptions: { gl: "angle" },
   });

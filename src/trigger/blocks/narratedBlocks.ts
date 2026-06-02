@@ -27,8 +27,26 @@ import {
   wordsToSrt,
   buildChapters,
 } from "@/lib/assemblyai";
-import { probe, concatScaled, composeWithIntro, grabFrame, kenBurns } from "@/lib/ffmpeg";
-import { renderTitleCard } from "@/lib/remotionRender";
+import {
+  probe,
+  concatScaled,
+  composeWithIntro,
+  concatAudioWithGaps,
+  applyQuoteOverlays,
+  grabFrame,
+  kenBurns,
+  type QuoteOverlaySpec,
+} from "@/lib/ffmpeg";
+import { renderTitleCard, renderQuoteOverlay } from "@/lib/remotionRender";
+
+/** Split narration into sentences for organic pauses + per-sentence timing. */
+function splitSentences(text: string): string[] {
+  return text
+    .replace(/\s+/g, " ")
+    .split(/(?<=[.!?])\s+(?=[A-Z"'“‘])/)
+    .map((s) => s.trim())
+    .filter((s) => s.length > 0);
+}
 import {
   evaluateVisualFrames,
   evaluateThumbnail,
@@ -168,7 +186,12 @@ export const qaScript: Block = {
 export const narrationTts: Block = {
   id: "narration_tts",
   consumes: ["narrationText"],
-  produces: ["narrationKey", "narrationDurationSec", "narrationLocalPath"],
+  produces: [
+    "narrationKey",
+    "narrationDurationSec",
+    "narrationLocalPath",
+    "sentenceTimings",
+  ],
   paid: true,
   run: async (ctx) => {
     const text = str(ctx, "narrationText");
@@ -178,30 +201,53 @@ export const narrationTts: Block = {
     const voiceId =
       opt(ctx, "voiceId") ?? (ctx.params["voiceId"] as string | undefined);
     const niche = opt(ctx, "niche");
-    ctx.log(`narration_tts: synthesizing ${text.length} chars…`);
-    const bytes = await synthNarration({ text, voiceId, niche });
+    // Synth PER SENTENCE and concat with a silence gap → organic pauses, plus
+    // exact per-sentence timings (used to anchor quote overlays).
+    const gapSec = Number(ctx.params["sentenceGapSec"] ?? 0.35);
+    const sentences = splitSentences(text);
+    ctx.log(`narration_tts: ${sentences.length} sentences, ${gapSec}s pauses…`);
 
     const tmp = await makeRunTempDir(ctx.runId);
+    const partPaths: string[] = [];
+    const sentenceTimings: { text: string; start: number; end: number }[] = [];
+    let cursor = 0;
+    for (let i = 0; i < sentences.length; i++) {
+      const bytes = await synthNarration({ text: sentences[i], voiceId, niche });
+      const p = join(tmp, `sent_${i}.mp3`);
+      await writeBytes(p, bytes);
+      partPaths.push(p);
+      let dur = 0;
+      try {
+        dur = (await probe(p)).durationSec;
+      } catch {
+        dur = Math.max(1, sentences[i].split(/\s+/).length / 2.5);
+      }
+      sentenceTimings.push({ text: sentences[i], start: cursor, end: cursor + dur });
+      cursor += dur + (i < sentences.length - 1 ? gapSec : 0);
+    }
+
     const local = join(tmp, "narration.mp3");
-    await writeBytes(local, bytes);
+    await concatAudioWithGaps(partPaths, gapSec, local);
     let durationSec = 0;
     try {
       durationSec = (await probe(local)).durationSec;
     } catch {
-      durationSec = Math.round(text.split(/\s+/).length / 2.5);
+      durationSec = cursor;
     }
 
     const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
-    await putObject(narrationKey, bytes, { contentType: "audio/mpeg" });
+    await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
     await recordAsset(ctx, "narration", narrationKey, {
       durationSec,
-      chars: text.length,
+      sentences: sentences.length,
+      gapSec,
     });
-    ctx.log(`narration_tts ok: ${Math.round(bytes.length / 1024)}KB, ${durationSec}s`);
+    ctx.log(`narration_tts ok: ${durationSec}s, ${sentences.length} sentences (${gapSec}s pauses)`);
     return {
       narrationKey,
       narrationDurationSec: durationSec,
       narrationLocalPath: local,
+      sentenceTimings,
       [COST_PATCH_KEY]: (PRICE.ttsPerKCharUsd * text.length) / 1000,
     };
   },
@@ -462,6 +508,70 @@ export const introCard: Block = {
   },
 };
 
+export const quoteOverlaysBlock: Block = {
+  id: "quote_overlays",
+  consumes: ["sentenceTimings"],
+  produces: ["quoteOverlays"],
+  run: async (ctx) => {
+    const timings =
+      (ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined) ?? [];
+    const out: QuoteOverlaySpec[] = [];
+    if (!hasGeminiKey() || timings.length === 0) {
+      ctx.log("quote_overlays: skipping (no Gemini key or no sentence timings)");
+      return { quoteOverlays: out };
+    }
+    const introSec = Number(ctx.store["introSec"] ?? 0);
+    const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
+    const W = portrait ? 1080 : 1920;
+    const H = portrait ? 1920 : 1080;
+    const maxN = Number(ctx.params["maxQuotes"] ?? 3);
+
+    // Director picks the most impactful sentences + the words to highlight yellow.
+    let picks: { index: number; highlights: string[] }[] = [];
+    try {
+      const indexed = timings.map((t, i) => `${i}: ${t.text}`).join("\n");
+      const res = await geminiJson<{ quotes?: { index?: number; highlights?: string[] }[] }>({
+        prompt:
+          `From these narration sentences, choose the ${maxN} MOST quotable/impactful to show as on-screen quote cards. ` +
+          `For each, list 1-3 important words to HIGHLIGHT in yellow (each must literally appear in that sentence). ` +
+          `Prefer concise, punchy sentences (≤ 22 words). Return STRICT JSON {"quotes":[{"index":number,"highlights":string[]}]}.\n\n` +
+          indexed,
+        maxTokens: 500,
+        temperature: 0.4,
+      });
+      picks = (res.quotes ?? [])
+        .filter((q) => typeof q.index === "number" && timings[q.index])
+        .slice(0, maxN)
+        .map((q) => ({ index: q.index as number, highlights: Array.isArray(q.highlights) ? q.highlights : [] }));
+    } catch (e) {
+      ctx.log(`quote_overlays: selection failed (${e instanceof Error ? e.message : e})`);
+    }
+
+    const tmp = await makeRunTempDir(ctx.runId);
+    for (const p of picks) {
+      const t = timings[p.index];
+      const dur = Math.min(8, Math.max(3.5, t.end - t.start + 1.2)); // readable window
+      try {
+        const path = join(tmp, `quote_${p.index}.webm`);
+        await renderQuoteOverlay({
+          quote: t.text,
+          highlights: p.highlights,
+          outPath: path,
+          durationSec: dur,
+          width: W,
+          height: H,
+        });
+        out.push({ path, startSec: introSec + t.start, durSec: dur });
+        ctx.log(`quote_overlays: "${t.text.slice(0, 50)}…" @ ${(introSec + t.start).toFixed(1)}s (hl: ${p.highlights.join(", ")})`);
+      } catch (e) {
+        ctx.log(`quote_overlays: render failed for #${p.index} (${e instanceof Error ? e.message : e})`);
+      }
+    }
+    ctx.log(`quote_overlays: ${out.length} overlay(s) ready`);
+    return { quoteOverlays: out };
+  },
+};
+
 export const timelineAssemble: Block = {
   id: "timeline_assemble",
   consumes: [
@@ -528,17 +638,33 @@ export const timelineAssemble: Block = {
       height: H,
     });
 
+    // Quote overlays (Remotion): gradual-blur the bg + show the quote with yellow
+    // highlights at each anchored timestamp. Optional — clean video if absent.
+    let finalVideo = out;
+    const overlays = ctx.store["quoteOverlays"] as QuoteOverlaySpec[] | undefined;
+    if (overlays && overlays.length > 0) {
+      const withQuotes = join(tmp, "video_quotes.mp4");
+      try {
+        await applyQuoteOverlays(out, overlays, withQuotes, { blurSigma: 16 });
+        finalVideo = withQuotes;
+        ctx.log(`timeline_assemble: composited ${overlays.length} quote overlay(s)`);
+      } catch (e) {
+        ctx.log(`timeline_assemble: quote overlay compositing failed (clean video): ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
-    await putObject(videoKey, await readBytes(out), { contentType: "video/mp4" });
+    await putObject(videoKey, await readBytes(finalVideo), { contentType: "video/mp4" });
     await recordAsset(ctx, "video", videoKey, {
       durationSec: videoSec,
       narrationSec,
       introSec,
+      quoteOverlays: overlays?.length ?? 0,
       source: "stock_footage",
       clips: footage.length,
     });
-    ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s)`);
-    return { videoKey, videoLocalPath: out, videoDurationSec: videoSec };
+    ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s, quotes ${overlays?.length ?? 0})`);
+    return { videoKey, videoLocalPath: finalVideo, videoDurationSec: videoSec };
   },
 };
 
@@ -754,6 +880,7 @@ export const narratedBlocks: Block[] = [
   stockFootage,
   entityImagery,
   introCard,
+  quoteOverlaysBlock,
   timelineAssemble,
   lengthCheck,
   captions,
