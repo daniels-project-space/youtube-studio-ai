@@ -52,7 +52,7 @@ const NARRATED: PipelineEntry[] = [
   { block: "qa_script" },
   { block: "originality_gate" },
   { block: "compliance_check" },
-  { block: "narration_tts", params: { sentenceGapSec: 0.4 } }, // organic pauses
+  { block: "narration_tts", params: { sentenceGapSec: 0.85, sentenceGapJitter: 0.25 } }, // longer organic pauses
   { block: "stock_footage" },
   { block: "entity_imagery" },
   {

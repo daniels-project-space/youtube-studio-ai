@@ -109,6 +109,7 @@ export const scriptGen: Block = {
         niche: opt(ctx, "niche"),
         style: ctx.params["style"] as string | undefined,
         maxSeconds: ctx.params["maxSeconds"] as number | undefined,
+        endWithSummary: ctx.params["endWithSummary"] as boolean | undefined,
       },
       ctx.log,
     );
@@ -202,10 +203,13 @@ export const narrationTts: Block = {
       opt(ctx, "voiceId") ?? (ctx.params["voiceId"] as string | undefined);
     const niche = opt(ctx, "niche");
     // Synth PER SENTENCE and concat with a silence gap → organic pauses, plus
-    // exact per-sentence timings (used to anchor quote overlays).
-    const gapSec = Number(ctx.params["sentenceGapSec"] ?? 0.35);
+    // exact per-sentence timings (used to anchor quote overlays). Gaps are
+    // jittered per sentence so the pacing feels human, not metronomic.
+    const baseGap = Number(ctx.params["sentenceGapSec"] ?? 0.85);
+    const jitter = Number(ctx.params["sentenceGapJitter"] ?? 0.2);
     const sentences = splitSentences(text);
-    ctx.log(`narration_tts: ${sentences.length} sentences, ${gapSec}s pauses…`);
+    const gaps = sentences.map(() => Math.max(0.2, baseGap + (Math.random() * 2 - 1) * jitter));
+    ctx.log(`narration_tts: ${sentences.length} sentences, ~${baseGap}s (±${jitter}) pauses…`);
 
     const tmp = await makeRunTempDir(ctx.runId);
     const partPaths: string[] = [];
@@ -223,11 +227,11 @@ export const narrationTts: Block = {
         dur = Math.max(1, sentences[i].split(/\s+/).length / 2.5);
       }
       sentenceTimings.push({ text: sentences[i], start: cursor, end: cursor + dur });
-      cursor += dur + (i < sentences.length - 1 ? gapSec : 0);
+      cursor += dur + (i < sentences.length - 1 ? gaps[i] : 0);
     }
 
     const local = join(tmp, "narration.mp3");
-    await concatAudioWithGaps(partPaths, gapSec, local);
+    await concatAudioWithGaps(partPaths, gaps, local);
     let durationSec = 0;
     try {
       durationSec = (await probe(local)).durationSec;
@@ -240,9 +244,9 @@ export const narrationTts: Block = {
     await recordAsset(ctx, "narration", narrationKey, {
       durationSec,
       sentences: sentences.length,
-      gapSec,
+      gapSec: baseGap,
     });
-    ctx.log(`narration_tts ok: ${durationSec}s, ${sentences.length} sentences (${gapSec}s pauses)`);
+    ctx.log(`narration_tts ok: ${durationSec}s, ${sentences.length} sentences (~${baseGap}s pauses)`);
     return {
       narrationKey,
       narrationDurationSec: durationSec,
@@ -532,8 +536,11 @@ export const quoteOverlaysBlock: Block = {
       const indexed = timings.map((t, i) => `${i}: ${t.text}`).join("\n");
       const res = await geminiJson<{ quotes?: { index?: number; highlights?: string[] }[] }>({
         prompt:
-          `From these narration sentences, choose the ${maxN} MOST quotable/impactful to show as on-screen quote cards. ` +
-          `For each, list 1-3 important words to HIGHLIGHT in yellow (each must literally appear in that sentence). ` +
+          `From these narration sentences, choose ONLY the genuinely quotable, aphoristic, ` +
+          `or emotionally striking ones to show as on-screen quote cards — between 0 and ${maxN}. ` +
+          `QUALITY OVER QUANTITY: if a sentence is transitional, explanatory, or generic, do NOT pick it. ` +
+          `If none rise to a memorable quote, return an empty list. ` +
+          `For each chosen, list 1-3 important words to HIGHLIGHT in yellow (each must literally appear in that sentence). ` +
           `Prefer concise, punchy sentences (≤ 22 words). Return STRICT JSON {"quotes":[{"index":number,"highlights":string[]}]}.\n\n` +
           indexed,
         maxTokens: 500,

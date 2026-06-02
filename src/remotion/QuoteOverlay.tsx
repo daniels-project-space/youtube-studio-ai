@@ -26,7 +26,7 @@ export const QuoteOverlay: React.FC<QuoteOverlayProps> = ({ quote, highlights })
   const { fps, durationInFrames, width } = useVideoConfig();
   const hi = new Set((highlights ?? []).map(norm).filter(Boolean));
 
-  const scrim = interpolate(frame, [0, 20], [0, 0.55], { extrapolateRight: "clamp" });
+  const scrim = interpolate(frame, [0, 20], [0, 0.38], { extrapolateRight: "clamp" });
   const rise = interpolate(spring({ frame, fps, config: { damping: 200 } }), [0, 1], [36, 0]);
   const appear = interpolate(frame, [8, 26], [0, 1], {
     extrapolateLeft: "clamp",

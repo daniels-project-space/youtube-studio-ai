@@ -259,6 +259,8 @@ export async function composeWithIntro(args: {
   tailSec?: number;
   /** Fade video to black + audio out over the last N seconds. */
   fadeOutSec?: number;
+  /** Crossfade (xfade) seconds from the title card into the body. Default 0.8. */
+  crossfadeSec?: number;
   width?: number;
   height?: number;
   /** Music volume during the intro (no voice) and under narration. */
@@ -303,18 +305,27 @@ export async function composeWithIntro(args: {
   }
 
   // ----- video -----
+  // With a title card, CROSSFADE it into the body (xfade) so the intro dissolves
+  // into the first footage. The body is extended by the crossfade so the output
+  // length stays intro+bodyTail (aligned with the audio timeline).
   const vparts: string[] = [];
-  vparts.push(
-    `[${bodyIdx}:v]${scalePad},trim=0:${bodyTail.toFixed(3)},setpts=PTS-STARTPTS[body]`,
-  );
   let vcat: string;
   if (cardIdx >= 0) {
+    const xf = Math.max(0, Math.min(intro, bodyTail, args.crossfadeSec ?? 0.8));
     vparts.push(
       `[${cardIdx}:v]${scalePad},trim=0:${intro.toFixed(3)},setpts=PTS-STARTPTS[card]`,
     );
-    vparts.push(`[card][body]concat=n=2:v=1:a=0[vcat]`);
+    vparts.push(
+      `[${bodyIdx}:v]${scalePad},trim=0:${(bodyTail + xf).toFixed(3)},setpts=PTS-STARTPTS[body]`,
+    );
+    vparts.push(
+      `[card][body]xfade=transition=fade:duration=${xf.toFixed(3)}:offset=${(intro - xf).toFixed(3)}[vcat]`,
+    );
     vcat = "[vcat]";
   } else {
+    vparts.push(
+      `[${bodyIdx}:v]${scalePad},trim=0:${bodyTail.toFixed(3)},setpts=PTS-STARTPTS[body]`,
+    );
     vcat = "[body]";
   }
   const vout =
@@ -455,21 +466,21 @@ export async function imageToJpeg(
  */
 export async function concatAudioWithGaps(
   paths: string[],
-  gapSec: number,
+  gaps: number | number[],
   outPath: string,
 ): Promise<string> {
   if (paths.length === 0) throw new FfmpegError("concatAudioWithGaps: no inputs");
-  if (paths.length === 1 && gapSec <= 0) {
+  const gapArr = typeof gaps === "number" ? paths.map(() => gaps) : gaps;
+  if (paths.length === 1 && (gapArr[0] ?? 0) <= 0) {
     await copyFile(paths[0], outPath);
     return outPath;
   }
-  const gap = Math.max(0, gapSec);
   const inputs: string[] = [];
   for (const p of paths) inputs.push("-i", p);
   const parts = paths
     .map((_, i) =>
       i < paths.length - 1
-        ? `[${i}:a]apad=pad_dur=${gap.toFixed(3)}[a${i}]`
+        ? `[${i}:a]apad=pad_dur=${Math.max(0, gapArr[i] ?? 0).toFixed(3)}[a${i}]`
         : `[${i}:a]anull[a${i}]`,
     )
     .join(";");
@@ -502,37 +513,56 @@ export interface QuoteOverlaySpec {
 }
 
 /**
- * Composite Remotion quote cards onto the video: during each quote window the
- * background is gaussian-blurred (focus pull) and the alpha card (quote + yellow
- * highlights, with its own scrim fade-in) is overlaid. Single pass. Audio copied.
+ * Composite Remotion quote cards with a GENUINE gradual blur: per window we
+ * trim that slice, gaussian-blur it, and fade its ALPHA in then out — so the
+ * background blur ramps up as the quote appears and ramps back down as it leaves
+ * (not a hard on/off). The alpha card (quote + yellow highlights) is overlaid on
+ * top. Only the quote windows are blurred (cheap). Single pass. Audio copied.
  */
 export async function applyQuoteOverlays(
   videoPath: string,
   overlays: QuoteOverlaySpec[],
   outPath: string,
-  opts: { blurSigma?: number; timeoutMs?: number } = {},
+  opts: { blurSigma?: number; rampSec?: number; timeoutMs?: number } = {},
 ): Promise<string> {
   if (overlays.length === 0) {
     await copyFile(videoPath, outPath);
     return outPath;
   }
-  const sigma = opts.blurSigma ?? 16;
+  const sigma = opts.blurSigma ?? 22;
+  const ramp = opts.rampSec ?? 0.6;
+  const n = overlays.length;
   const inputs: string[] = ["-i", videoPath];
   for (const o of overlays) inputs.push("-i", o.path);
-  const enableUnion = overlays
-    .map((o) => `between(t,${o.startSec.toFixed(2)},${(o.startSec + o.durSec).toFixed(2)})`)
-    .join("+");
-  const parts: string[] = [`[0:v]gblur=sigma=${sigma}:enable='${enableUnion}'[bg]`];
-  let prev = "[bg]";
+
+  const parts: string[] = [];
+  // One base + one trimmed source per window.
+  parts.push(`[0:v]split=${n + 1}[base]${overlays.map((_, i) => `[bsrc${i}]`).join("")}`);
+  let prev = "[base]";
+  // Gradual blur (alpha-faded blurred slice) per window.
   overlays.forEach((o, i) => {
-    const idx = i + 1;
-    const start = o.startSec.toFixed(3);
-    const end = (o.startSec + o.durSec).toFixed(2);
-    parts.push(`[${idx}:v]setpts=PTS+${start}/TB[c${i}]`);
-    const out = i === overlays.length - 1 ? "[vout]" : `[v${i}]`;
-    parts.push(`${prev}[c${i}]overlay=0:0:enable='between(t,${start},${end})'${out}`);
-    prev = `[v${i}]`;
+    const s = o.startSec.toFixed(3);
+    const e = (o.startSec + o.durSec).toFixed(3);
+    const outEdge = Math.max(0, o.durSec - ramp).toFixed(3);
+    parts.push(
+      `[bsrc${i}]trim=${s}:${e},setpts=PTS-STARTPTS,gblur=sigma=${sigma},format=yuva420p,` +
+        `fade=t=in:st=0:d=${ramp}:alpha=1,fade=t=out:st=${outEdge}:d=${ramp}:alpha=1,` +
+        `setpts=PTS+${s}/TB[bf${i}]`,
+    );
+    const out = `[bb${i}]`;
+    parts.push(`${prev}[bf${i}]overlay=0:0:enable='between(t,${s},${e})'${out}`);
+    prev = out;
   });
+  // Quote cards on top.
+  overlays.forEach((o, i) => {
+    const s = o.startSec.toFixed(3);
+    const e = (o.startSec + o.durSec).toFixed(3);
+    parts.push(`[${i + 1}:v]setpts=PTS+${s}/TB[c${i}]`);
+    const out = i === n - 1 ? "[vout]" : `[cc${i}]`;
+    parts.push(`${prev}[c${i}]overlay=0:0:enable='between(t,${s},${e})'${out}`);
+    prev = out;
+  });
+
   await run(
     FFMPEG,
     [

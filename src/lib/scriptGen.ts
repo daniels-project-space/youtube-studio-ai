@@ -29,6 +29,8 @@ export interface ScriptRequest {
   style?: string;
   /** Target spoken length; drives word budget (~2.5 words/sec). */
   maxSeconds?: number;
+  /** End the narration with a concise recap/summary section (default true). */
+  endWithSummary?: boolean;
 }
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
@@ -82,6 +84,9 @@ export async function synthScript(
     req.niche ? `Niche: ${req.niche}.` : "",
     styleGuidance(req.style),
     `Target length: about ${maxSeconds} seconds (~${wordBudget} words of narration total).`,
+    req.endWithSummary === false
+      ? ""
+      : "End with a FINAL section (heading like \"In Summary\") that recaps the key takeaway in 2-3 sentences, so the video closes with a clear, memorable wrap-up.",
     "Return STRICT JSON only:",
     `{
   "hook": string (the spoken opening line(s), <= 2 sentences, grabs attention),
