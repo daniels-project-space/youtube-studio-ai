@@ -85,10 +85,15 @@ function hydrateHiggsfieldCli(
     return;
   }
 
-  // Use a writable XDG dir (container HOME may be read-only).
-  const xdg = process.env.XDG_CONFIG_HOME ?? "/tmp/hf-config";
-  process.env.XDG_CONFIG_HOME = xdg;
-  const dir = join(xdg, "higgsfield");
+  // The CLI needs a writable HOME (the Trigger container leaves $HOME unset →
+  // the Go binary errors "$HOME is not defined"). Anchor HOME at a writable dir
+  // and place creds at $HOME/.config/higgsfield/ (its native location).
+  const home =
+    process.env.HOME && process.env.HOME.length > 0
+      ? process.env.HOME
+      : "/tmp/hf-home";
+  process.env.HOME = home;
+  const dir = join(home, ".config", "higgsfield");
   try {
     mkdirSync(dir, { recursive: true });
     writeFileSync(join(dir, "credentials.json"), creds, { mode: 0o600 });
@@ -111,7 +116,7 @@ function hydrateHiggsfieldCli(
     }
   }
   log("higgsfield: CLI credentials hydrated", {
-    xdg,
+    home,
     bin: process.env.HIGGSFIELD_BIN ?? "higgsfield",
   });
 }
