@@ -642,6 +642,10 @@ export async function applyQuoteOverlays(
         "-y",
         "-i",
         cur,
+        // Decode the overlay with libvpx so the WebM ALPHA channel is honored —
+        // the native vp8 decoder ignores it, making the card opaque black.
+        "-c:v",
+        "libvpx",
         "-i",
         o.path,
         "-filter_complex",
