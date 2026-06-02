@@ -35,6 +35,10 @@ export interface RunPipelineInput {
 
 export const runPipelineTask = task({
   id: "run-pipeline",
+  // Video encodes (ffmpeg concat/loop at 1080p) need real memory — the default
+  // small machine OOM-kills on multi-minute renders.
+  machine: "large-1x",
+  maxDuration: 3000,
   run: async (payload: RunPipelineInput) => {
     registerAllBlocks();
     await bootstrapSecrets((m, x) =>

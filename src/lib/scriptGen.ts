@@ -64,7 +64,7 @@ export async function synthScript(
   req: ScriptRequest,
   log: Logger = () => {},
 ): Promise<Script> {
-  const maxSeconds = req.maxSeconds ?? 480;
+  const maxSeconds = req.maxSeconds ?? 240;
   const wordBudget = Math.round(maxSeconds * WORDS_PER_SEC);
 
   if (!hasGeminiKey()) {

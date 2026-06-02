@@ -14,13 +14,21 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
 import { synthScript } from "@/lib/scriptGen";
-import { geminiJson, hasGeminiKey, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
+import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey } from "@/lib/tts";
 import { searchFootage, hasPexelsKey } from "@/lib/footage";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
-import { putObject } from "@/lib/storage";
+import { putObject, getObjectBytes } from "@/lib/storage";
 import { probe, concatScaled, loopUnderAudio, grabFrame } from "@/lib/ffmpeg";
+import {
+  evaluateVisualFrames,
+  evaluateThumbnail,
+  evaluateFootage,
+  evaluateSeo,
+  evaluateIdentity,
+  type Verdict,
+} from "@/lib/videoVerifier";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -299,67 +307,142 @@ export const lengthCheck: Block = {
 
 export const qaVisual: Block = {
   id: "qa_visual",
-  consumes: ["videoLocalPath", "videoDurationSec"],
+  consumes: ["videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
   produces: ["qaPassed", "qaReport"],
   run: async (ctx) => {
     const video = str(ctx, "videoLocalPath");
+    const title = str(ctx, "title");
     const dur = Number(ctx.store["videoDurationSec"] ?? 0);
+    const topic = opt(ctx, "topic") ?? title;
+    const niche = opt(ctx, "niche");
+    const tmp = await makeRunTempDir(ctx.runId);
+
+    // 1) Structural + resolution (hard) — never ship a broken file.
     const p = await probe(video);
-    const structural = p.hasVideo && p.hasAudio && p.durationSec > 1;
-    const report: Record<string, unknown> = {
-      structural,
-      durationSec: p.durationSec,
-      hasVideo: p.hasVideo,
-      hasAudio: p.hasAudio,
-    };
-    // Hard gate (Stage 4): a structurally-broken render never ships.
-    if (!structural) {
+    if (!p.hasVideo || !p.hasAudio || p.durationSec < 1) {
       throw new Error(
         `qa_visual FAILED (structural): video=${p.hasVideo} audio=${p.hasAudio} dur=${p.durationSec}s`,
       );
     }
+    if ((p.width ?? 0) < 640 || (p.height ?? 0) < 360) {
+      throw new Error(`qa_visual FAILED (resolution): ${p.width}x${p.height}`);
+    }
 
-    // Vision grade (best-effort call; the GATE decision runs outside the try so a
-    // real low-score failure propagates while an API hiccup only skips vision).
-    let vision: { pass?: boolean; score?: number; issues?: string[] } | undefined;
-    if (hasGeminiKey()) {
+    // 2) Script ↔ film length: narration sets the target for narrated archetypes.
+    const target = Number(ctx.store["narrationDurationSec"] ?? dur) || dur;
+    const ratio = target > 0 ? p.durationSec / target : 1;
+    const lengthOk = ratio >= 0.5 && ratio <= 2.0;
+    if (!lengthOk) {
+      throw new Error(`qa_visual FAILED (length): video ${p.durationSec}s vs target ${target}s`);
+    }
+
+    // 3) Video frames (vision, separate).
+    const vframes: string[] = [];
+    for (const frac of [0.2, 0.5, 0.8]) {
+      const f = join(tmp, `qa_v${Math.round(frac * 100)}.jpg`);
       try {
-        const tmp = await makeRunTempDir(ctx.runId);
-        const frames: string[] = [];
-        for (const frac of [0.2, 0.5, 0.8]) {
-          const f = join(tmp, `qa_${Math.round(frac * 100)}.jpg`);
-          await grabFrame(video, Math.max(0, dur * frac), f);
-          frames.push(f);
-        }
-        const niche = opt(ctx, "niche") ?? "video";
-        const raw = await geminiVisionLocal({
-          prompt:
-            `These are 3 frames from a ${niche} video. Rate visual quality: ` +
-            "clarity, relevance, and absence of glitches/black frames/artifacts. " +
-            'Return STRICT JSON {"pass":boolean,"score":0-10,"issues":string[]}.',
-          imagePaths: frames,
-          json: true,
-          maxTokens: 500,
+        await grabFrame(video, Math.max(0, dur * frac), f);
+        vframes.push(f);
+      } catch {
+        /* skip frame */
+      }
+    }
+    const video_ = await evaluateVisualFrames(vframes, { topic, niche });
+
+    // 4) Thumbnail (vision, separate) — download from R2.
+    let thumbnail: Verdict = { score: 10, issues: [], skipped: true };
+    try {
+      const tk = opt(ctx, "thumbnailKey");
+      if (tk) {
+        const tpath = join(tmp, "qa_thumb.jpg");
+        await writeBytes(tpath, await getObjectBytes(tk));
+        thumbnail = await evaluateThumbnail(tpath, {
+          title,
+          persona: opt(ctx, "persona"),
+          palette: ctx.store["palette"] as string[] | undefined,
         });
-        vision = parseJsonLoose(raw);
-      } catch (e) {
-        ctx.log(`qa_visual: vision check skipped (${e instanceof Error ? e.message : e})`);
+      }
+    } catch (e) {
+      ctx.log(`qa_visual: thumbnail check skipped (${e instanceof Error ? e.message : e})`);
+    }
+
+    // 5) Stock-footage appropriateness (vision, separate) — narrated only.
+    let footage: Verdict = { score: 10, issues: [], skipped: true };
+    const footageClips = ctx.store["footageClips"] as string[] | undefined;
+    if (footageClips?.length) {
+      const fframes: string[] = [];
+      for (let i = 0; i < Math.min(3, footageClips.length); i++) {
+        const f = join(tmp, `qa_f${i}.jpg`);
+        try {
+          await grabFrame(footageClips[i], 1, f);
+          fframes.push(f);
+        } catch {
+          /* skip */
+        }
+      }
+      footage = await evaluateFootage(fframes, { topic, niche });
+    }
+
+    // 6) SEO + channel-identity (text, separate).
+    const seo = await evaluateSeo({
+      title,
+      description: opt(ctx, "description"),
+      tags: ctx.store["tags"] as string[] | undefined,
+      niche,
+    });
+    const identity = await evaluateIdentity({
+      title,
+      topic,
+      persona: opt(ctx, "persona"),
+      niche,
+      styleGrammar: opt(ctx, "styleGrammar"),
+    });
+
+    // 7) Presence (deterministic): title-card intro + music track.
+    const music = { present: Boolean(opt(ctx, "musicKey")) };
+    const intro = { applied: ctx.store["introApplied"] === true };
+
+    const report = {
+      structural: { ok: true, durationSec: p.durationSec, width: p.width, height: p.height },
+      lengthMatch: {
+        videoSec: p.durationSec,
+        targetSec: target,
+        ratio: Number(ratio.toFixed(2)),
+        ok: lengthOk,
+      },
+      video: video_,
+      thumbnail,
+      footage,
+      seo,
+      identity,
+      music,
+      intro,
+    };
+
+    // Hard-gate on egregious VISUAL defects; SEO/identity are advisory (logged).
+    const critical: string[] = [];
+    for (const [name, v] of [
+      ["video", video_],
+      ["thumbnail", thumbnail],
+      ["footage", footage],
+    ] as const) {
+      if (!v.skipped && v.score < 4) {
+        critical.push(`${name} score ${v.score}: ${v.issues.slice(0, 2).join("; ")}`);
       }
     }
-    if (vision) {
-      report.vision = vision;
-      const score = vision.score ?? 10;
-      // Hard gate only on egregious failures; tolerate subjective mid-scores so
-      // an over-strict model never blocks every render.
-      if (score < 4) {
-        throw new Error(
-          `qa_visual FAILED (visual score ${score}): ${(vision.issues ?? []).slice(0, 4).join("; ")}`,
-        );
-      }
-      ctx.log(`qa_visual ok: score=${score}`, { issues: (vision.issues ?? []).slice(0, 3) });
-    } else {
-      ctx.log("qa_visual ok: structural-only (no vision grade)");
+    if (critical.length > 0) {
+      throw new Error(`qa_visual FAILED: ${critical.join(" | ")} | ${JSON.stringify(report)}`);
     }
+    ctx.log("qa_visual PASS (per-artifact)", {
+      video: video_.score,
+      thumbnail: thumbnail.score,
+      footage: footage.skipped ? "n/a" : footage.score,
+      seo: seo.score,
+      identity: identity.skipped ? "n/a" : identity.score,
+      lengthRatio: report.lengthMatch.ratio,
+      music: music.present,
+      intro: intro.applied,
+    });
     return { qaPassed: true, qaReport: report };
   },
 };

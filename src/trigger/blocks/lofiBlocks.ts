@@ -574,47 +574,6 @@ export const introCard: Block = {
   },
 };
 
-/* ----------------------------- 8. qa_light ------------------------------ */
-
-export const qaLight: Block = {
-  id: "qa_light",
-  consumes: ["videoLocalPath", "videoDurationSec"],
-  produces: ["qaPassed", "qaReport"],
-  run: async (ctx) => {
-    const path = str(ctx, "videoLocalPath");
-    const target = Number(ctx.store["videoDurationSec"]);
-    const tolerance = Number(ctx.params.toleranceSec ?? 5);
-
-    const p = await probe(path);
-    const failures: string[] = [];
-    if (!p.hasVideo) failures.push("no video stream");
-    if (!p.hasAudio) failures.push("no audio stream");
-    if (Math.abs(p.durationSec - target) > tolerance) {
-      failures.push(
-        `duration ${p.durationSec.toFixed(1)}s off target ${target}s (>${tolerance}s)`,
-      );
-    }
-    if ((p.width ?? 0) < 640 || (p.height ?? 0) < 360) {
-      failures.push(`resolution too small: ${p.width}x${p.height}`);
-    }
-
-    const report = {
-      durationSec: p.durationSec,
-      target,
-      width: p.width,
-      height: p.height,
-      videoCodec: p.videoCodec,
-      audioCodec: p.audioCodec,
-      failures,
-    };
-    if (failures.length > 0) {
-      throw new Error(`qa_light FAILED: ${failures.join("; ")} | ${JSON.stringify(report)}`);
-    }
-    ctx.log(`qa_light passed: ${JSON.stringify(report)}`);
-    return { qaPassed: true, qaReport: report };
-  },
-};
-
 /* --------------------------- 10. upload_draft --------------------------- */
 
 export const uploadDraft: Block = {
@@ -693,7 +652,6 @@ export const lofiBlocks: Block[] = [
   music,
   assemble,
   introCard,
-  qaLight,
   uploadDraft,
   notify,
 ];
@@ -725,8 +683,8 @@ export const LOFI_PIPELINE = [
   { block: "metadata" },
   { block: "assemble", params: { durationSec: 90 } }, // ← set 7200 for 2h production
   { block: "intro_card", params: { introMode: "overlay" } },
-  { block: "qa_light", params: { toleranceSec: 5 } },
   { block: "thumbnail_gen" },
+  { block: "qa_visual" },
   { block: "upload_draft" },
   { block: "notify" },
 ];

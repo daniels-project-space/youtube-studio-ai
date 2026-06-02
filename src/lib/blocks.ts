@@ -18,8 +18,8 @@ export const LOFI_BLOCK_IDS: readonly string[] = [
   "metadata",
   "assemble",
   "intro_card",
-  "qa_light",
   "thumbnail_gen",
+  "qa_visual",
   "upload_draft",
   "notify",
 ];
