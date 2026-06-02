@@ -63,8 +63,13 @@ export interface UploadVideoArgs {
   tags: string[];
   /** YouTube category id (default 10 = Music). */
   categoryId?: string;
-  /** Forced private regardless — this param exists for clarity only. */
-  privacyStatus?: "private";
+  /** Privacy (default "private"). Auto-publish channels may use public/unlisted. */
+  privacyStatus?: "private" | "public" | "unlisted";
+  /**
+   * ISO 8601 timestamp to SCHEDULE publish. When set, the video is uploaded
+   * private and YouTube flips it public at this time (drip-publishing).
+   */
+  publishAt?: string;
 }
 
 export interface UploadVideoResult {
@@ -91,7 +96,10 @@ export async function uploadPrivateDraft(
       categoryId: args.categoryId ?? "10",
     },
     status: {
-      privacyStatus: "private", // hard-locked private (never public)
+      // Scheduling requires the video be uploaded private with a publishAt; it
+      // flips public at that time. Otherwise honour the requested privacy.
+      privacyStatus: args.publishAt ? "private" : (args.privacyStatus ?? "private"),
+      ...(args.publishAt ? { publishAt: args.publishAt } : {}),
       selfDeclaredMadeForKids: false,
     },
   };

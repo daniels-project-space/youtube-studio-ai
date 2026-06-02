@@ -703,13 +703,28 @@ export const uploadDraft: Block = {
     const description = str(ctx, "description");
     const tags = (ctx.store["tags"] as string[]) ?? [];
 
-    ctx.log("upload_draft: uploading PRIVATE draft to YouTube…");
+    // Publish mode (per-channel pipeline param; default "draft" = private, human
+    // approves). "scheduled" → drip-publish at now+offset (humanized jitter to
+    // avoid a metronomic, auto-looking cadence). "public" → immediate.
+    const publishMode = (ctx.params["publishMode"] as string | undefined) ?? "draft";
+    let privacyStatus: "private" | "public" | "unlisted" = "private";
+    let publishAt: string | undefined;
+    if (publishMode === "public") {
+      privacyStatus = "public";
+    } else if (publishMode === "scheduled") {
+      const offsetH = Number(ctx.params["publishOffsetHours"] ?? 6);
+      const jitterH = Math.random() * Number(ctx.params["publishJitterHours"] ?? 4);
+      publishAt = new Date(Date.now() + (offsetH + jitterH) * 3_600_000).toISOString();
+    }
+
+    ctx.log(`upload_draft: uploading to YouTube (mode=${publishMode}${publishAt ? `, publishAt=${publishAt}` : ""})…`);
     const res = await uploadPrivateDraft({
       filePath,
       title,
       description,
       tags,
-      privacyStatus: "private",
+      privacyStatus,
+      publishAt,
     });
     // Persist the youtube id on the run.
     try {
