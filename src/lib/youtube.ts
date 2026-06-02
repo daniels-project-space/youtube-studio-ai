@@ -154,3 +154,32 @@ export async function uploadPrivateDraft(
     privacyStatus: putJson.status?.privacyStatus ?? "private",
   };
 }
+
+/**
+ * Set a custom thumbnail on a video (thumbnails.set). Requires the channel to be
+ * eligible for custom thumbnails (phone-verified) — a 403 means "not verified",
+ * which the caller should treat as non-fatal (the video still uploaded).
+ */
+export async function setVideoThumbnail(
+  videoId: string,
+  imageBytes: Uint8Array,
+  contentType = "image/jpeg",
+): Promise<void> {
+  const accessToken = await getAccessToken();
+  const res = await fetch(
+    `https://www.googleapis.com/upload/youtube/v3/thumbnails/set?videoId=${encodeURIComponent(videoId)}`,
+    {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "Content-Type": contentType,
+        "Content-Length": String(imageBytes.byteLength),
+      },
+      body: Buffer.from(imageBytes),
+    },
+  );
+  if (!res.ok) {
+    const t = await res.text().catch(() => "");
+    throw new YouTubeError(`thumbnails.set HTTP ${res.status}: ${t.slice(0, 220)}`);
+  }
+}
