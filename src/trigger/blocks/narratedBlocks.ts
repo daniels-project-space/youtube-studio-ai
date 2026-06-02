@@ -18,7 +18,7 @@ import { geminiJson, geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/l
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey } from "@/lib/tts";
 import { searchFootage, scoreClip, hasPexelsKey } from "@/lib/footage";
-import { searchWikimediaImageUrl } from "@/lib/wikimedia";
+import { searchWikimediaImage } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
 import { putObject, getObjectBytes, publicUrl } from "@/lib/storage";
 import {
@@ -147,6 +147,9 @@ export const qaScript: Block = {
           `Critique this YouTube narration for quality and on-brand voice` +
           (persona ? ` (channel persona: ${persona})` : "") +
           `. Flag dull sections, off-brand language, factual hedging, or weak structure. ` +
+          `CRITICALLY: require a genuine, specific POINT OF VIEW / original angle — not ` +
+          `just narrated facts — and flag generic, formulaic, or templated writing that ` +
+          `could read as mass-produced (YouTube demonetizes "inauthentic" content). ` +
           `Return STRICT JSON {"pass": boolean, "issues": string[]}.\n\n` +
           narration.slice(0, 6000),
         maxTokens: 800,
@@ -332,12 +335,13 @@ export const stockFootage: Block = {
 export const entityImagery: Block = {
   id: "entity_imagery",
   consumes: ["narrationText"],
-  produces: ["entityClips"],
+  produces: ["entityClips", "attributions"],
   run: async (ctx) => {
     const clips: string[] = [];
+    const attributions: string[] = []; // license ledger (Wikimedia credits)
     if (!hasGeminiKey()) {
       ctx.log("entity_imagery: no Gemini key — skipping");
-      return { entityClips: clips };
+      return { entityClips: clips, attributions };
     }
     const narration = str(ctx, "narrationText");
     const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
@@ -367,12 +371,12 @@ export const entityImagery: Block = {
     let i = 0;
     for (const e of entities) {
       try {
-        const url = await searchWikimediaImageUrl(e);
-        if (!url) {
+        const wi = await searchWikimediaImage(e);
+        if (!wi) {
           ctx.log(`entity_imagery: no Wikimedia image for "${e}"`);
           continue;
         }
-        const img = await downloadTo(url, join(tmp, `entity_${i}.jpg`));
+        const img = await downloadTo(wi.url, join(tmp, `entity_${i}.jpg`));
         // Verify the Wikimedia image actually depicts the entity (search can
         // return the wrong person/place). Reject mismatches rather than show a
         // wrong face. Verify failure (not mismatch) keeps the image.
@@ -397,14 +401,15 @@ export const entityImagery: Block = {
         }
         const clip = await kenBurns(img, join(tmp, `entity_${i}.mp4`), 5, W, H);
         clips.push(clip);
+        if (wi.attribution) attributions.push(`${e}: ${wi.attribution}`);
         ctx.log(`entity_imagery: "${e}" → verified Ken Burns clip`);
         i++;
       } catch (err) {
         ctx.log(`entity_imagery: "${e}" failed (${err instanceof Error ? err.message : err})`);
       }
     }
-    ctx.log(`entity_imagery: ${clips.length} entity clip(s)`);
-    return { entityClips: clips };
+    ctx.log(`entity_imagery: ${clips.length} entity clip(s), ${attributions.length} attribution(s)`);
+    return { entityClips: clips, attributions };
   },
 };
 

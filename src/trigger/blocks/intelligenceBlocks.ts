@@ -336,6 +336,11 @@ export const metadataOptimized: Block = {
     if (chaptersText && chaptersText.trim()) {
       description = `${description}\n\nChapters:\n${chaptersText}`;
     }
+    // License/attribution ledger (Wikimedia CC credits) → required for CC-BY.
+    const attributions = ctx.store["attributions"] as string[] | undefined;
+    if (attributions && attributions.length) {
+      description = `${description}\n\nImage credits:\n${attributions.join("\n")}`;
+    }
 
     const ve = await viewEstimate(tags);
     ctx.log(
