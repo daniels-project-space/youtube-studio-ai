@@ -52,11 +52,15 @@ async function main() {
     const arch = archetypeForTemplate(c.template);
     const before = (c.pipeline ?? []).map((p) => p.block).join(" → ");
     const after = arch.pipeline.map((p) => p.block).join(" → ");
+    // Compare FULL entries (block + params) so param-only changes (e.g. a new
+    // topic_select policy) are detected, not just block-order changes.
+    const beforeFull = JSON.stringify((c.pipeline ?? []).map((p) => ({ block: p.block, params: p.params ?? null })));
+    const afterFull = JSON.stringify(arch.pipeline.map((p) => ({ block: p.block, params: p.params ?? null })));
 
     // Defensive: never write an invalid pipeline.
     validatePipeline(arch.pipeline);
 
-    if (before === after) {
+    if (beforeFull === afterFull) {
       console.log(`= ${c.name} (${c.template}/${arch.key}) — already current, skip`);
       continue;
     }
@@ -81,8 +85,8 @@ async function main() {
     })) as Array<{ name: string; template: string; pipeline?: PipelineEntry[] }>;
     for (const c of after) {
       const arch = archetypeForTemplate(c.template);
-      const got = (c.pipeline ?? []).map((p) => p.block).join(" → ");
-      const want = arch.pipeline.map((p) => p.block).join(" → ");
+      const got = JSON.stringify((c.pipeline ?? []).map((p) => ({ block: p.block, params: p.params ?? null })));
+      const want = JSON.stringify(arch.pipeline.map((p) => ({ block: p.block, params: p.params ?? null })));
       console.log(`  ${got === want ? "✓" : "✗"} ${c.name}`);
     }
   }
