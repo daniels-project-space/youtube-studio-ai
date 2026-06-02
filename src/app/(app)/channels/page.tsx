@@ -24,7 +24,26 @@ export default function ChannelsPage() {
 
   return (
     <>
-      <PageHeader title="Channels" subtitle="Every channel and its pipeline status" />
+      <PageHeader
+        title="Channels"
+        subtitle="Every channel and its pipeline status"
+        actions={
+          <Link
+            href="/channels/new"
+            className="lift"
+            style={{
+              padding: "0.55rem 1rem",
+              borderRadius: 9,
+              background: "var(--color-accent)",
+              color: "#0a0a0b",
+              fontWeight: 600,
+              fontSize: "0.85rem",
+            }}
+          >
+            + New channel
+          </Link>
+        }
+      />
 
       {channels === undefined ? (
         <SkeletonList rows={4} />
