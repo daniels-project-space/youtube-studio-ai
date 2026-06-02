@@ -28,4 +28,6 @@ export const PRICE = {
   topazUpscaleUsd: rate("PRICE_TOPAZ_UPSCALE_USD", 0.25),
   /** Per generated music track (Mureka/Suno). */
   musicTrackUsd: rate("PRICE_MUSIC_TRACK_USD", 0.05),
+  /** Narration TTS, per 1000 characters (Fish Audio ~$0.006/1k). */
+  ttsPerKCharUsd: rate("PRICE_TTS_PER_KCHAR_USD", 0.006),
 } as const;

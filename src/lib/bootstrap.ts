@@ -16,6 +16,8 @@ const SERVICES = [
   "youtube", // YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN (+ YOUTUBE_DATA_API_KEY)
   "mureka", // MUREKA_API_KEY
   "suno", // SUNO_API_KEY
+  "fish-audio", // FISH_AUDIO_API_KEY (narration_tts)
+  "pexels", // PEXELS_API_KEY (stock_footage)
   "replicate", // REPLICATE_API_TOKEN
   "telegram", // TELEGRAM_BOT_TOKEN (+ admin chat id)
   // Competitor-intelligence engine. hydrateEnv tolerates a missing service

@@ -7,10 +7,45 @@
  *
  * All degrade gracefully on a missing key so the pipeline never hard-fails.
  */
-import type { Block, StageContext } from "@/engine/types";
+import { join } from "node:path";
+import { ConvexHttpClient } from "convex/browser";
+import { api } from "../../../convex/_generated/api";
+import type { Id } from "../../../convex/_generated/dataModel";
+import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { PRICE } from "@/engine/pricing";
 import { synthScript } from "@/lib/scriptGen";
 import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { synthNarration, hasFishKey } from "@/lib/tts";
+import { makeRunTempDir, writeBytes } from "@/lib/files";
+import { putObject } from "@/lib/storage";
+import { probe } from "@/lib/ffmpeg";
+
+function convex(): ConvexHttpClient {
+  const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
+  if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
+  return new ConvexHttpClient(url);
+}
+
+async function recordAsset(
+  ctx: StageContext,
+  kind: string,
+  r2Key: string,
+  meta?: Record<string, unknown>,
+): Promise<void> {
+  try {
+    await convex().mutation(api.assets.recordAsset, {
+      ownerId: ctx.ownerId,
+      channelId: ctx.channelId as Id<"channels">,
+      runId: ctx.runId as Id<"runs">,
+      kind,
+      r2Key,
+      meta,
+    });
+  } catch (e) {
+    ctx.log(`recordAsset(${kind}) failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+  }
+}
 
 function str(ctx: StageContext, key: string): string {
   const v = ctx.store[key];
@@ -110,4 +145,47 @@ export const qaScript: Block = {
   },
 };
 
-export const narratedBlocks: Block[] = [scriptGen, hookCraft, qaScript];
+export const narrationTts: Block = {
+  id: "narration_tts",
+  consumes: ["narrationText"],
+  produces: ["narrationKey", "narrationDurationSec", "narrationLocalPath"],
+  paid: true,
+  run: async (ctx) => {
+    const text = str(ctx, "narrationText");
+    if (!hasFishKey()) {
+      throw new Error("narration_tts: FISH_AUDIO_API_KEY missing (vault service 'fish-audio')");
+    }
+    const voiceId =
+      opt(ctx, "voiceId") ?? (ctx.params["voiceId"] as string | undefined);
+    const niche = opt(ctx, "niche");
+    ctx.log(`narration_tts: synthesizing ${text.length} chars…`);
+    const bytes = await synthNarration({ text, voiceId, niche });
+
+    const tmp = await makeRunTempDir(ctx.runId);
+    const local = join(tmp, "narration.mp3");
+    await writeBytes(local, bytes);
+    let durationSec = 0;
+    try {
+      durationSec = (await probe(local)).durationSec;
+    } catch {
+      durationSec = Math.round(text.split(/\s+/).length / 2.5);
+    }
+
+    const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
+    await putObject(narrationKey, bytes, { contentType: "audio/mpeg" });
+    await recordAsset(ctx, "narration", narrationKey, {
+      durationSec,
+      chars: text.length,
+    });
+    ctx.log(`narration_tts ok: ${Math.round(bytes.length / 1024)}KB, ${durationSec}s`);
+    return {
+      narrationKey,
+      narrationDurationSec: durationSec,
+      narrationLocalPath: local,
+      [COST_PATCH_KEY]: (PRICE.ttsPerKCharUsd * text.length) / 1000,
+    };
+  },
+};
+
+export const narratedBlocks: Block[] = [scriptGen, hookCraft, qaScript, narrationTts];
+

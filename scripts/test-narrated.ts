@@ -7,6 +7,7 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline } from "@/engine/validate";
 import { synthScript } from "@/lib/scriptGen";
+import { synthNarration, hasFishKey, resolveVoiceId } from "@/lib/tts";
 
 async function main() {
   await bootstrapSecrets((m) => console.log(`[boot] ${m}`));
@@ -33,7 +34,26 @@ async function main() {
   console.log("  hook:", s.hook);
   console.log("  sections:", s.sections.length, "| estSec:", s.estDurationSec);
   console.log("  preview:", s.narrationText.slice(0, 220).replace(/\n+/g, " "), "…");
-  console.log("\nALL NARRATED 3a CHECKS PASSED");
+
+  // 3. Narration graph + live TTS (3b).
+  validatePipeline([
+    { block: "topic_select" },
+    { block: "script_gen" },
+    { block: "narration_tts" },
+  ]);
+  console.log("PASS: narration graph valid (topic→script→narration_tts)");
+  console.log("  voice resolve(psychological):", resolveVoiceId("psychological"));
+  if (hasFishKey()) {
+    const audio = await synthNarration({
+      text: "This is a short narration test for the studio pipeline.",
+      voiceId: "sleepless_historian",
+    });
+    if (audio.length < 1000) throw new Error("FAIL: TTS audio too small");
+    console.log(`PASS: live TTS produced ${Math.round(audio.length / 1024)}KB mp3`);
+  } else {
+    console.log("SKIP: no Fish Audio key hydrated (cannot live-test TTS)");
+  }
+  console.log("\nALL NARRATED 3a+3b CHECKS PASSED");
 }
 
 main().catch((e) => {
