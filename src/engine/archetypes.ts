@@ -47,7 +47,7 @@ const LOFI: PipelineEntry[] = [
 // narration (see src/lib/ffmpeg.ts composeWithIntro).
 const NARRATED: PipelineEntry[] = [
   { block: "competitor_research" },
-  { block: "topic_select" },
+  { block: "topic_select", params: { policy: "no_repeat" } },
   { block: "script_gen" },
   { block: "qa_script" },
   { block: "narration_tts" },
@@ -101,7 +101,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
     thumbnailTemplate: "claude_flux",
     pipeline: [
       { block: "competitor_research" },
-      { block: "topic_select" },
+      { block: "topic_select", params: { policy: "no_repeat" } },
       { block: "script_gen", params: { style: "crime" } },
       { block: "hook_craft" },
       ...NARRATED.slice(4),
