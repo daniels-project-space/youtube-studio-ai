@@ -142,10 +142,10 @@ Additive, back-compat (all optional):
 - `channels`: `archetype?: string` (which preset built it; `template` stays).
 - `runs`: nothing required (cost already there). Add `kind?: "video" | "setup"` to reuse run/stage machinery for the package builder.
 - `videos`/assets: store `description` in asset meta (already loose). Surface `costTotal` from the run (already present) as **$/video**.
-- `costLedger` (exists, unused): **drop it** — `runStages.cost` is already the per-provider ledger (one paid block ≈ one provider). Reduces entropy.
+- **Stripped now (2026-06-02):** `costLedger` (redundant — `runStages.cost` IS the per-provider ledger), `schedules`, `oauthTokens`, `settings` — all were 0-reference speculative tables. Re-introduce per-stage **with the real fields** when the feature is actually built (don't carry schema you don't use).
 - `seoDatabank.channelId` (exists, optional): use it for **per-channel** SEO.
 
-No new tables required (setup-run reuses `runs`/`runStages`/`runLogs`). One optional table `channelArt` only if we want versioned image history — defer.
+No new tables required (setup-run reuses `runs`/`runStages`/`runLogs`). Channel art rides `channels.identity.imageKey/bannerKey` — no separate table.
 
 ---
 
@@ -219,6 +219,43 @@ Reuse existing components (StatCard, Chart, VideoGrid, Lightbox, LivePipeline, L
 The budget ceiling (shipped) aborts before overspend; `$/video` shown in UI is the summed `runStages.cost`.
 
 ---
+
+## 11. Anti-bloat & no-monolith discipline
+
+Success metric for the migration = **less code in the new app than the capability count would suggest**, not more. v1 (autostudio + passive-income) is the cautionary example: a monolith of overlapping pipelines, SQLite + manual migrations, bash glue, plaintext keys, and a dashboard server. We port the *capabilities*, not the architecture.
+
+### Already stripped from the current app (this session)
+- Dead **Real-ESRGAN** image-upscaler path in `replicate.ts` (`upscaleImage`/`runUpscale`/`REAL_ESRGAN_VERSION`) — superseded by Topaz `upscaleLoopUnit`, zero references (~85 lines).
+- Four **0-reference tables** from `schema.ts`: `costLedger`, `schedules`, `oauthTokens`, `settings`.
+- (Minor, optional) move echo smoke-test blocks out of the production registry into the test.
+
+### No-monolith rules for every port
+1. **One capability = one block + one thin `src/lib/*.ts` wrapper.** No god-modules, no "pipeline" classes that know about every stage. The engine is the only orchestrator.
+2. **Reuse, don't re-implement:** `convexSink` (stages+cost), `runLogSink`, `bootstrapSecrets` (vault), R2 `storage.ts`, `COST_PATCH_KEY`, idempotency keys. A new block adds ~1 lib + ~1 block file and nothing else.
+3. **Config over code:** archetypes, voice routing, QA criteria, conditional features are **data/presets**, never `if (channel === 'crime')` branches in the runner.
+4. **Collapse v1's 13 pipelines → shared blocks + archetype presets.** The overlap (crime/essay/narrated/meditation differ mostly in params + which blocks) becomes one block set + preset lists. This is the single biggest de-bloat.
+5. **Delete-as-you-port:** when a capability is live + verified in cloud, remove the legacy that it replaced (see decommission list). Don't let v1 and v2 both exist long-term.
+6. **No new infrastructure.** If a need seems to require a new service/table/daemon, first prove it can't be a block + an existing table.
+
+### Do NOT carry over from v1 (leave the bloat behind)
+- SQLite + hand-written migrations → Convex.
+- `dashboard/server.js` (separate Express dashboard) → the Convex-reactive UI we already have.
+- Bash orchestration / cross-venv `PYTHONPATH` glue → Trigger tasks.
+- Plaintext `config.json` keys → vault (and rotate, §security).
+- CrewAI multi-agent script critic subprocess → a single Sonnet `qa_script` call.
+- `creator_footage.py` yt-dlp channel scraping → SaaS-unsafe; use Pexels/Openverse + AI b-roll only.
+- Shotstack cloud render ($3–6/video) → ffmpeg/Remotion in the Trigger image.
+- The 9 hardcoded live API keys in `autostudio/config.json` → **rotate immediately**, never replicate that pattern.
+
+### v1 decommission checklist (post-port, on the VPS — flag, don't delete prematurely)
+Only after each capability is ported + a cloud render verifies it:
+- [ ] Stop `trigger.dev dev` on the VPS (cutover) — the VPS stops being a runner.
+- [ ] Rotate `autostudio/config.json` keys → vault; delete the file.
+- [ ] Archive/remove `/home/ubuntu/passive-income/*` legacy apps once nothing references them.
+- [ ] Remove `/home/ubuntu/ghibli-*`, `/home/ubuntu/app-factory` clutter if unused.
+- [ ] Keep `/root/autostudio-migration/audit/*.md` (the spec docs are cheap reference); drop the rest of `autostudio` after the port.
+
+These are surfaced for your approval — I will not delete the porting reference until its capability is live in v2.
 
 ## 10. Open decisions (for later)
 - Footage mix per narrated archetype: stock-only vs stock+AI-broll default.
