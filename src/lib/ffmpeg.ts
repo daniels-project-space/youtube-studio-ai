@@ -10,7 +10,8 @@
  *      duration; mux audio; output mp4 (yuv420p, +faststart).
  */
 import { spawn } from "node:child_process";
-import { stat, copyFile } from "node:fs/promises";
+import { stat, copyFile, writeFile } from "node:fs/promises";
+import { join } from "node:path";
 
 export class FfmpegError extends Error {
   constructor(message: string) {
@@ -88,6 +89,92 @@ export async function concatClips(
     outPath,
   ]);
   return outPath;
+}
+
+/**
+ * Beat-aligned body: show clips in sequence cut on (roughly) sentence beats so
+ * the visuals CHANGE with the narration instead of looping the same footage.
+ * Each clip fills exactly one segment (stream-looped if shorter, trimmed if
+ * longer), so every clip appears once before any repeat and the body is exactly
+ * `targetSec`. Memory-flat: one clip per ffmpeg pass (vs concatScaled's N-input
+ * graph that OOMs with many clips), then a concat-copy.
+ */
+export async function assembleBeatBody(args: {
+  clipPaths: string[];
+  outPath: string;
+  targetSec: number;
+  tmpDir: string;
+  beats?: number[]; // narration sentence-end times (0-based) to snap cuts to
+  maxSegSec?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  preset?: string;
+}): Promise<string> {
+  const { clipPaths, targetSec, tmpDir } = args;
+  if (clipPaths.length === 0) throw new FfmpegError("assembleBeatBody: no clips");
+  const W = args.width ?? 1920;
+  const H = args.height ?? 1080;
+  const fps = args.fps ?? 30;
+  const maxSeg = args.maxSegSec ?? 9;
+  const n = clipPaths.length;
+  const numSeg = Math.max(n, Math.ceil(targetSec / maxSeg));
+  const beats = (args.beats ?? []).filter((b) => b > 0 && b < targetSec).sort((a, b) => a - b);
+  const snap = (t: number) => {
+    if (!beats.length) return t;
+    let best = t;
+    let bd = Infinity;
+    for (const b of beats) {
+      const d = Math.abs(b - t);
+      if (d < bd) {
+        bd = d;
+        best = b;
+      }
+    }
+    return bd <= maxSeg * 0.45 ? best : t;
+  };
+
+  const segFiles: string[] = [];
+  let prev = 0;
+  for (let j = 0; j < numSeg; j++) {
+    let end = j === numSeg - 1 ? targetSec : snap(((j + 1) * targetSec) / numSeg);
+    if (end <= prev + 0.5) end = Math.min(targetSec, prev + maxSeg);
+    const dur = +(end - prev).toFixed(3);
+    if (dur <= 0.1) break;
+    const sf = join(tmpDir, `beatseg_${j}.mp4`);
+    await run(FFMPEG, [
+      "-y",
+      "-stream_loop",
+      "-1",
+      "-i",
+      clipPaths[j % n],
+      "-t",
+      dur.toFixed(3),
+      "-vf",
+      `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps}`,
+      "-an",
+      "-c:v",
+      "libx264",
+      "-preset",
+      args.preset ?? "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      sf,
+    ]);
+    segFiles.push(sf);
+    prev = end;
+    if (prev >= targetSec) break;
+  }
+
+  const listFile = join(tmpDir, "beatsegs.txt");
+  await writeFile(
+    listFile,
+    segFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"),
+  );
+  await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  return args.outPath;
 }
 
 /**

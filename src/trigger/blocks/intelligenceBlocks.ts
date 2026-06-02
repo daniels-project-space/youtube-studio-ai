@@ -22,6 +22,7 @@ import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { titleCard, thumbnailText, imageToJpeg, solidImage } from "@/lib/ffmpeg";
 import { generateFluxImage } from "@/lib/replicate";
+import { generateKeyframe } from "@/lib/higgsfield";
 import { generateIdeogramThumbnail, hasIdeogramKey } from "@/lib/ideogram";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { geminiVision, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
@@ -491,15 +492,28 @@ export const thumbnailGen: Block = {
             "(boolean), visual_rationale (1 sentence).",
         });
 
-        // Phase 2 — Flux base render (text-free).
-        const fluxUrl = await generateFluxImage({
-          prompt: `${concept.flux_prompt}. No text, no words, no letters, no watermark.`,
-          aspectRatio: "16:9",
-        });
+        // Phase 2 — base render (text-free): GPT Image 2.0 via Higgsfield
+        // (sharper, better composition than Flux). Falls back to Flux/Replicate.
+        const basePrompt = `${concept.flux_prompt}. No text, no words, no letters, no watermark.`;
+        let baseUrl: string;
+        try {
+          const r = await generateKeyframe({
+            model: "gpt_image_2",
+            prompt: basePrompt,
+            aspectRatio: "16:9",
+            resolution: "2k",
+          });
+          if (!r.url) throw new Error("gpt_image_2 returned no url");
+          baseUrl = r.url;
+          ctx.log("thumbnail_gen: base via gpt_image_2 (Higgsfield)");
+        } catch (e) {
+          ctx.log(`thumbnail_gen: gpt_image_2 failed (${e instanceof Error ? e.message : e}) — Flux fallback`);
+          baseUrl = await generateFluxImage({ prompt: basePrompt, aspectRatio: "16:9" });
+        }
 
-        // Phase 3 — overlay title text via ffmpeg.
+        // Phase 3 — overlay title text via ffmpeg (v1-style).
         const tmp = await makeRunTempDir(ctx.runId);
-        const base = await downloadTo(fluxUrl, join(tmp, "flux_base.png"));
+        const base = await downloadTo(baseUrl, join(tmp, "thumb_base.png"));
         const outJpg = join(tmp, "thumbnail.jpg");
         await thumbnailText({
           basePath: base,

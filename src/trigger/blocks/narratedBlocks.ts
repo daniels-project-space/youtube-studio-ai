@@ -29,7 +29,7 @@ import {
 } from "@/lib/assemblyai";
 import {
   probe,
-  concatScaled,
+  assembleBeatBody,
   composeWithIntro,
   concatAudioWithGaps,
   applyQuoteOverlays,
@@ -606,7 +606,7 @@ export const timelineAssemble: Block = {
     "introCardPath",
     "musicUrl",
   ],
-  produces: ["videoKey", "videoLocalPath", "videoDurationSec"],
+  produces: ["videoKey", "videoLocalPath", "videoDurationSec", "quotesApplied"],
   run: async (ctx) => {
     const footage = ctx.store["footageClips"] as string[] | undefined;
     if (!footage || footage.length === 0) {
@@ -636,8 +636,20 @@ export const timelineAssemble: Block = {
     const videoSec = introSec + narrationSec + tailSec;
 
     const tmp = await makeRunTempDir(ctx.runId);
-    ctx.log(`timeline_assemble: concat ${clips.length} clips (${footage.length} footage + ${entity.length} entity) @ ${W}x${H}…`);
-    const concat = await concatScaled(clips, join(tmp, "footage.mp4"), W, H);
+    // Beat-aligned body: clips cut on sentence beats (changes with the narration,
+    // no global loop), built one clip per pass (memory-flat — concatScaled OOM'd
+    // with many clips). Covers narration+tail (+buffer) so the composer won't loop.
+    const beats = (ctx.store["sentenceTimings"] as { end: number }[] | undefined)?.map((s) => s.end) ?? [];
+    ctx.log(`timeline_assemble: beat-body from ${clips.length} clips (${footage.length} footage + ${entity.length} entity) @ ${W}x${H}…`);
+    const concat = await assembleBeatBody({
+      clipPaths: clips,
+      outPath: join(tmp, "body.mp4"),
+      targetSec: narrationSec + tailSec + 3,
+      tmpDir: tmp,
+      beats,
+      width: W,
+      height: H,
+    });
 
     // Music bed (full during the intro, ducked low under narration). Downloaded
     // from the music block's provider URL; looped by the composer to length.
@@ -665,15 +677,18 @@ export const timelineAssemble: Block = {
     // Quote overlays (Remotion): gradual-blur the bg + show the quote with yellow
     // highlights at each anchored timestamp. Optional — clean video if absent.
     let finalVideo = out;
+    let quotesApplied = 0;
     const overlays = ctx.store["quoteOverlays"] as QuoteOverlaySpec[] | undefined;
     if (overlays && overlays.length > 0) {
       const withQuotes = join(tmp, "video_quotes.mp4");
       try {
-        await applyQuoteOverlays(out, overlays, withQuotes, { blurSigma: 16 });
+        await applyQuoteOverlays(out, overlays, withQuotes, { blurSigma: 20 });
         finalVideo = withQuotes;
+        quotesApplied = overlays.length;
         ctx.log(`timeline_assemble: composited ${overlays.length} quote overlay(s)`);
       } catch (e) {
-        ctx.log(`timeline_assemble: quote overlay compositing failed (clean video): ${e instanceof Error ? e.message : e}`);
+        // Loud: feature_qa cross-checks quotesApplied vs expected and fails.
+        ctx.log(`timeline_assemble: ERROR quote overlay compositing FAILED (clean video): ${e instanceof Error ? e.message : e}`);
       }
     }
 
@@ -687,8 +702,8 @@ export const timelineAssemble: Block = {
       source: "stock_footage",
       clips: footage.length,
     });
-    ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s, quotes ${overlays?.length ?? 0})`);
-    return { videoKey, videoLocalPath: finalVideo, videoDurationSec: videoSec };
+    ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${overlays?.length ?? 0})`);
+    return { videoKey, videoLocalPath: finalVideo, videoDurationSec: videoSec, quotesApplied };
   },
 };
 
@@ -878,6 +893,17 @@ export const qaVisual: Block = {
       if (!v.skipped && v.score < 4) {
         critical.push(`${name} score ${v.score}: ${v.issues.slice(0, 2).join("; ")}`);
       }
+    }
+    // FEATURE-PRESENCE gate — fail loud when an intended feature silently didn't
+    // land (these were the "no thumbnail" / "no quotes" bugs). Assert the
+    // artifacts we meant to ship actually exist.
+    if (!opt(ctx, "thumbnailKey")) {
+      critical.push("thumbnail missing: no thumbnailKey produced");
+    }
+    const quotesExpected = (ctx.store["quoteOverlays"] as unknown[] | undefined)?.length ?? 0;
+    const quotesApplied = Number(ctx.store["quotesApplied"] ?? 0);
+    if (quotesExpected > 0 && quotesApplied === 0) {
+      critical.push(`quotes missing: ${quotesExpected} generated but 0 composited onto the video`);
     }
     if (critical.length > 0) {
       throw new Error(`qa_visual FAILED: ${critical.join(" | ")} | ${JSON.stringify(report)}`);
