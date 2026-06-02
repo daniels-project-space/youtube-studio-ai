@@ -20,8 +20,9 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
-import { titleCard, thumbnailText } from "@/lib/ffmpeg";
+import { titleCard, thumbnailText, imageToJpeg, solidImage } from "@/lib/ffmpeg";
 import { generateFluxImage } from "@/lib/replicate";
+import { generateIdeogramThumbnail, hasIdeogramKey } from "@/lib/ideogram";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { geminiVision, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { agentJson } from "@/agents/mastra";
@@ -367,13 +368,22 @@ async function titleCardFallback(ctx: StageContext): Promise<string> {
   const baseUrl = (ctx.store["f1Url"] as string | undefined) ?? "";
   const tmp = await makeRunTempDir(ctx.runId);
   const outJpg = join(tmp, "thumbnail.jpg");
+  let base: string;
   if (baseUrl) {
-    const base = await downloadTo(baseUrl, join(tmp, "thumb_base.png"));
-    await titleCard({ basePath: base, outJpg, title: channelName, subtitle: topic });
+    base = await downloadTo(baseUrl, join(tmp, "thumb_base.png"));
   } else {
-    // No keyframe — synthesise a flat base via flux if possible, else a solid.
-    throw new Error("thumbnail_gen: no f1Url available for title_card fallback");
+    // No keyframe (narrated archetypes) — synthesise a base: Flux, else solid.
+    try {
+      const fluxUrl = await generateFluxImage({
+        prompt: `cinematic background image for a video about "${topic}", no text, no words, no letters`,
+        aspectRatio: "16:9",
+      });
+      base = await downloadTo(fluxUrl, join(tmp, "thumb_base.png"));
+    } catch {
+      base = await solidImage(join(tmp, "thumb_base.jpg"));
+    }
   }
+  await titleCard({ basePath: base, outJpg, title: channelName, subtitle: topic });
   const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
   await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
   await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "title_card_fallback" });
@@ -395,6 +405,52 @@ export const thumbnailGen: Block = {
       (ctx.store["thumbnailer"] as string | undefined) ??
       (ctx.params["thumbnailer"] as string | undefined) ??
       "claude_flux";
+    const niche = (ctx.store["niche"] as string | undefined) ?? "";
+
+    // PREFERRED: Ideogram 3.0 text-first thumbnail (great headlines, ~95% text
+    // accuracy). Director vision QA gates legibility/CTR; retry once on fail.
+    // Falls through to claude_flux / title_card on absence or failure.
+    if (hasIdeogramKey() && thumbnailer !== "title_card") {
+      for (let attempt = 1; attempt <= 2; attempt++) {
+        try {
+          const url = await generateIdeogramThumbnail({ title, niche });
+          if (!url) break;
+          const tmp = await makeRunTempDir(ctx.runId);
+          const raw = await downloadTo(url, join(tmp, "ideogram.png"));
+          const outJpg = join(tmp, "thumbnail.jpg");
+          await imageToJpeg(raw, outJpg);
+          const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
+          await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
+          if (hasGeminiKey() && attempt < 2) {
+            try {
+              const qraw = await geminiVision({
+                prompt:
+                  `You are a thumbnail QA reviewer. Judge this YouTube thumbnail for "${title}". ` +
+                  `Is the text legible at small size and the composition click-worthy + on-brand` +
+                  (niche ? ` for a ${niche} channel` : "") +
+                  `? Return ONLY JSON {"pass":true|false,"reason":"..."}.`,
+                imageUrls: [publicUrl(thumbnailKey)],
+                json: true,
+                maxTokens: 200,
+              });
+              const qa = parseJsonLoose<{ pass?: boolean; reason?: string }>(qraw);
+              if (qa.pass === false) {
+                ctx.log(`thumbnail_gen: ideogram QA fail (${qa.reason ?? ""}) — retry`);
+                continue;
+              }
+            } catch (e) {
+              ctx.log(`thumbnail_gen: ideogram QA errored (accepting): ${e instanceof Error ? e.message : e}`);
+            }
+          }
+          await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "ideogram" });
+          ctx.log("thumbnail_gen: ideogram thumbnail ✓");
+          return { thumbnailKey };
+        } catch (e) {
+          ctx.log(`thumbnail_gen: ideogram attempt ${attempt} failed: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+      ctx.log("thumbnail_gen: ideogram unavailable/failed — falling back to claude_flux");
+    }
 
     // Honour explicit non-flux selection, or degrade if Claude/Replicate absent.
     if (thumbnailer === "title_card" || !hasAnthropicKey()) {

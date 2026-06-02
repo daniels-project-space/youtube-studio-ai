@@ -423,6 +423,54 @@ export async function kenBurns(
   return outPath;
 }
 
+/**
+ * Normalize any image to a 1280x720 JPEG (YouTube thumbnail spec). Scales to
+ * cover then center-crops. Used for the Ideogram thumbnail (text already baked).
+ */
+export async function imageToJpeg(
+  inPath: string,
+  outJpg: string,
+  width = 1280,
+  height = 720,
+): Promise<string> {
+  await run(FFMPEG, [
+    "-y",
+    "-i",
+    inPath,
+    "-vf",
+    `scale=${width}:${height}:force_original_aspect_ratio=increase,crop=${width}:${height}`,
+    "-frames:v",
+    "1",
+    "-q:v",
+    "2",
+    outJpg,
+  ]);
+  return outJpg;
+}
+
+/** Solid-colour JPEG (last-resort thumbnail base when no keyframe/Flux). */
+export async function solidImage(
+  outJpg: string,
+  width = 1280,
+  height = 720,
+  color = "#101418",
+): Promise<string> {
+  const c = color.replace(/^#/, "0x");
+  await run(FFMPEG, [
+    "-y",
+    "-f",
+    "lavfi",
+    "-i",
+    `color=c=${c}:s=${width}x${height}`,
+    "-frames:v",
+    "1",
+    "-q:v",
+    "2",
+    outJpg,
+  ]);
+  return outJpg;
+}
+
 /** Extract a single frame at `offsetSec` to a JPEG. */
 export async function grabFrame(
   videoPath: string,

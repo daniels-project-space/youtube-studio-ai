@@ -14,10 +14,10 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
 import { synthScript } from "@/lib/scriptGen";
-import { geminiJson, hasGeminiKey } from "@/lib/gemini";
+import { geminiJson, geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey } from "@/lib/tts";
-import { searchFootage, hasPexelsKey } from "@/lib/footage";
+import { searchFootage, scoreClip, hasPexelsKey } from "@/lib/footage";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
 import { putObject, getObjectBytes, publicUrl } from "@/lib/storage";
@@ -258,17 +258,64 @@ export const stockFootage: Block = {
     }
     ctx.log(`stock_footage: queries = ${queries.join(" | ")}`);
 
+    // Pick the BEST + RELEVANT clip per query (not the first): rank candidates
+    // by technical score (v1), dedup across queries, then a Gemini-vision
+    // relevance gate rejects off-topic footage. Falls back to the best-scored
+    // candidate if none pass (never drop a query → keeps the timeline full).
     const tmp = await makeRunTempDir(ctx.runId);
+    const niche = opt(ctx, "niche");
+    const relevanceGate = hasGeminiKey();
     const clips: string[] = [];
-    let n = 0;
+    const usedUrls = new Set<string>();
+    let dl = 0;
+    let gated = 0;
     for (const q of queries) {
       try {
-        const found = await searchFootage(q, 1, orientation);
-        for (const f of found) {
-          const local = join(tmp, `footage_${n}.mp4`);
-          await downloadTo(f.url, local);
-          clips.push(local);
-          n++;
+        const cands = (await searchFootage(q, 5, orientation))
+          .filter((c) => !usedUrls.has(c.url))
+          .sort((a, b) => scoreClip(b) - scoreClip(a))
+          .slice(0, 3);
+        if (cands.length === 0) continue;
+        let picked: string | null = null;
+        let fallback: string | null = null;
+        for (const cand of cands) {
+          const local = join(tmp, `footage_${dl++}.mp4`);
+          await downloadTo(cand.url, local);
+          usedUrls.add(cand.url);
+          if (!fallback) fallback = local;
+          if (!relevanceGate) {
+            picked = local;
+            break;
+          }
+          let ok = true;
+          try {
+            const frame = `${local}.jpg`;
+            await grabFrame(local, 1, frame);
+            const raw = await geminiVisionLocal({
+              prompt:
+                `This is a frame from a stock clip chosen for the query "${q}" in a video about "${topic}"` +
+                (niche ? ` (${niche})` : "") +
+                `. Is it clearly relevant and on-topic (not random/off-subject)? ` +
+                `Return STRICT JSON {"relevant":boolean,"score":0-10}.`,
+              imagePaths: [frame],
+              json: true,
+              maxTokens: 150,
+            });
+            const v = parseJsonLoose<{ relevant?: boolean; score?: number }>(raw);
+            ok = v.relevant !== false && (typeof v.score !== "number" || v.score >= 6);
+          } catch {
+            ok = true; // vision failed → don't block
+          }
+          if (ok) {
+            picked = local;
+            gated++;
+            break;
+          }
+        }
+        if (picked) clips.push(picked);
+        else if (fallback) {
+          clips.push(fallback);
+          ctx.log(`stock_footage: no on-topic clip for "${q}" — best-scored fallback`);
         }
       } catch (e) {
         ctx.log(`stock_footage: query "${q}" failed (skip): ${e instanceof Error ? e.message : e}`);
@@ -277,7 +324,7 @@ export const stockFootage: Block = {
     if (clips.length === 0) {
       throw new Error("stock_footage: no clips found for any query");
     }
-    ctx.log(`stock_footage: ${clips.length} clips from ${queries.length} queries`);
+    ctx.log(`stock_footage: ${clips.length} clips from ${queries.length} queries (${gated} passed relevance gate, gate=${relevanceGate})`);
     return { footageClips: clips };
   },
 };
@@ -326,9 +373,31 @@ export const entityImagery: Block = {
           continue;
         }
         const img = await downloadTo(url, join(tmp, `entity_${i}.jpg`));
+        // Verify the Wikimedia image actually depicts the entity (search can
+        // return the wrong person/place). Reject mismatches rather than show a
+        // wrong face. Verify failure (not mismatch) keeps the image.
+        if (hasGeminiKey()) {
+          try {
+            const raw = await geminiVisionLocal({
+              prompt:
+                `Does this image clearly depict "${e}"? Be strict about identity for ` +
+                `people and specific places. Return STRICT JSON {"match":boolean,"reason":string}.`,
+              imagePaths: [img],
+              json: true,
+              maxTokens: 120,
+            });
+            const v = parseJsonLoose<{ match?: boolean; reason?: string }>(raw);
+            if (v.match === false) {
+              ctx.log(`entity_imagery: image for "${e}" did NOT verify (${v.reason ?? ""}) — skipping`);
+              continue;
+            }
+          } catch {
+            /* verification failed → keep the image rather than drop the entity */
+          }
+        }
         const clip = await kenBurns(img, join(tmp, `entity_${i}.mp4`), 5, W, H);
         clips.push(clip);
-        ctx.log(`entity_imagery: "${e}" → Ken Burns clip`);
+        ctx.log(`entity_imagery: "${e}" → verified Ken Burns clip`);
         i++;
       } catch (err) {
         ctx.log(`entity_imagery: "${e}" failed (${err instanceof Error ? err.message : err})`);

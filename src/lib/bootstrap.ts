@@ -27,6 +27,7 @@ const SERVICES = [
   "anthropic", // ANTHROPIC_API_KEY (claude_flux thumbnail concept, qa_script)
   "langfuse", // LANGFUSE_PUBLIC_KEY/SECRET_KEY (Mastra agent tracing; optional)
   "assemblyai", // ASSEMBLYAI_API_KEY (captions SRT; optional — chapters work without)
+  "ideogram", // IDEOGRAM_API_KEY (preferred text-first thumbnailer; optional)
 ];
 
 let done = false;

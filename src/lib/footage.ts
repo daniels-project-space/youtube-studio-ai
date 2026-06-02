@@ -40,6 +40,23 @@ function bestFile(v: PexelsVideo, maxW = 1920): PexelsFile | null {
 }
 
 /**
+ * Technical quality score (v1 method): prefer HD+ and clips long enough to give
+ * trim room. Used to RANK candidates before the relevance gate, so we pick the
+ * best clip per query instead of the first.
+ */
+export function scoreClip(c: FootageClip, minDurationSec = 4): number {
+  let s = 0;
+  const h = c.height ?? 0;
+  if (h >= 1080) s += 40;
+  else if (h >= 720) s += 25;
+  else s += 10;
+  if (c.durationSec >= minDurationSec * 2) s += 30;
+  else if (c.durationSec >= minDurationSec) s += 20;
+  else if (c.durationSec >= minDurationSec * 0.5) s += 10;
+  return s;
+}
+
+/**
  * Search Pexels for up to `count` clips matching `query`. orientation:
  * "landscape" (16:9) or "portrait" (9:16). Returns mp4 links + dimensions.
  */
