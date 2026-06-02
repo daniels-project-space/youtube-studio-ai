@@ -14,6 +14,8 @@ const identityValidator = v.object({
   topicPool: v.array(v.string()),
   cadence: v.string(),
   niche: v.optional(v.string()),
+  imageKey: v.optional(v.string()),
+  bannerKey: v.optional(v.string()),
   thumbnailIdentity: v.optional(
     v.object({
       colorPalette: v.array(v.string()),

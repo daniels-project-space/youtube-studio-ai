@@ -30,6 +30,9 @@ export default defineSchema({
       cadence: v.string(),
       // The niche this channel competes in (drives competitor research).
       niche: v.optional(v.string()),
+      // Generated channel art (R2 keys): square avatar + 16:9 banner.
+      imageKey: v.optional(v.string()),
+      bannerKey: v.optional(v.string()),
       // Thumbnail identity for the claude_flux thumbnailer (all optional).
       thumbnailIdentity: v.optional(
         v.object({
