@@ -159,50 +159,110 @@ export async function loopUnderAudio(args: {
   preset?: string;
   /** Hard timeout (ms) — default 45min for long/large encodes. */
   timeoutMs?: number;
+  /**
+   * Extra video AFTER the audio ends, so the narration finishes BEFORE the video
+   * does (no voice talking over the very end). The tail is silent video.
+   */
+  tailSec?: number;
+  /** Fade video to black + fade the audio out over the last N seconds. */
+  fadeOutSec?: number;
 }): Promise<string> {
   const maxHeight = args.maxHeight ?? 2160;
-  // Downscale only if taller than the cap; always force even dims for yuv420p.
-  const vf = `scale=-2:'min(${maxHeight},ih)':flags=lanczos,scale=trunc(iw/2)*2:trunc(ih/2)*2`;
-  await run(
-    FFMPEG,
-    [
-      "-y",
-      "-stream_loop",
-      "-1",
-      "-i",
-      args.loopUnitPath,
-      "-i",
-      args.audioPath,
-      "-map",
-      "0:v:0",
-      "-map",
-      "1:a:0",
-      "-t",
-      String(args.durationSec),
-      "-vf",
-      vf,
-      "-c:v",
-      "libx264",
-      "-preset",
-      args.preset ?? "veryfast",
-      "-crf",
-      "20",
-      "-pix_fmt",
-      "yuv420p",
-      "-c:a",
-      "aac",
-      "-b:a",
-      // Highest-quality AAC-LC delivery (YouTube's recommended stereo ceiling).
-      // Source is the lossless FLAC master when the provider offers one.
-      "384k",
-      "-movflags",
-      "+faststart",
-      "-shortest",
-      args.outPath,
-    ],
-    args.timeoutMs ?? 2_700_000,
+  const tail = Math.max(0, args.tailSec ?? 0);
+  const fade = Math.max(0, args.fadeOutSec ?? 0);
+  const audioSec = args.durationSec;
+  const totalSec = audioSec + tail; // video length (≥ audio when tail > 0)
+
+  // Scale chain (cap height, force even dims) + optional end fade-to-black.
+  let vf = `scale=-2:'min(${maxHeight},ih)':flags=lanczos,scale=trunc(iw/2)*2:trunc(ih/2)*2`;
+  if (fade > 0) {
+    vf += `,fade=t=out:st=${(totalSec - fade).toFixed(2)}:d=${fade.toFixed(2)}`;
+  }
+
+  const a: string[] = [
+    "-y",
+    "-stream_loop",
+    "-1",
+    "-i",
+    args.loopUnitPath,
+    "-i",
+    args.audioPath,
+    "-map",
+    "0:v:0",
+    "-map",
+    "1:a:0",
+    "-t",
+    String(totalSec),
+    "-vf",
+    vf,
+  ];
+  // Fade the narration out as it ends (kept within the audio's own length).
+  if (fade > 0) {
+    a.push("-af", `afade=t=out:st=${Math.max(0, audioSec - fade).toFixed(2)}:d=${fade.toFixed(2)}`);
+  }
+  a.push(
+    "-c:v",
+    "libx264",
+    "-preset",
+    args.preset ?? "veryfast",
+    "-crf",
+    "20",
+    "-pix_fmt",
+    "yuv420p",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "384k", // YouTube's recommended AAC-LC stereo ceiling
+    "-movflags",
+    "+faststart",
   );
+  // -shortest only when there's no tail (otherwise it would cut at the audio).
+  if (tail === 0) a.push("-shortest");
+  a.push(args.outPath);
+
+  await run(FFMPEG, a, args.timeoutMs ?? 2_700_000);
   return args.outPath;
+}
+
+/**
+ * Ken Burns clip from a still image (slow zoom-in), normalized to the canvas.
+ * Brings entity/concept images to life (e.g. a Marcus Aurelius portrait).
+ */
+export async function kenBurns(
+  imagePath: string,
+  outPath: string,
+  durationSec = 5,
+  width = 1920,
+  height = 1080,
+): Promise<string> {
+  const fps = 30;
+  const frames = Math.max(1, Math.round(durationSec * fps));
+  const vf =
+    `scale=${width * 2}:-2,` +
+    `zoompan=z='min(zoom+0.0008,1.25)':x='iw/2-(iw/zoom/2)':y='ih/2-(ih/zoom/2)':` +
+    `d=${frames}:s=${width}x${height}:fps=${fps},setsar=1`;
+  await run(FFMPEG, [
+    "-y",
+    "-loop",
+    "1",
+    "-i",
+    imagePath,
+    "-vf",
+    vf,
+    "-t",
+    String(durationSec),
+    "-c:v",
+    "libx264",
+    "-preset",
+    "veryfast",
+    "-crf",
+    "20",
+    "-pix_fmt",
+    "yuv420p",
+    "-an",
+    outPath,
+  ]);
+  return outPath;
 }
 
 /** Extract a single frame at `offsetSec` to a JPEG. */

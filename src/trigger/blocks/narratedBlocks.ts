@@ -18,9 +18,10 @@ import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey } from "@/lib/tts";
 import { searchFootage, hasPexelsKey } from "@/lib/footage";
+import { searchWikimediaImageUrl } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
 import { putObject, getObjectBytes } from "@/lib/storage";
-import { probe, concatScaled, loopUnderAudio, grabFrame } from "@/lib/ffmpeg";
+import { probe, concatScaled, loopUnderAudio, grabFrame, kenBurns } from "@/lib/ffmpeg";
 import {
   evaluateVisualFrames,
   evaluateThumbnail,
@@ -274,43 +275,117 @@ export const stockFootage: Block = {
   },
 };
 
+export const entityImagery: Block = {
+  id: "entity_imagery",
+  consumes: ["narrationText"],
+  produces: ["entityClips"],
+  run: async (ctx) => {
+    const clips: string[] = [];
+    if (!hasGeminiKey()) {
+      ctx.log("entity_imagery: no Gemini key — skipping");
+      return { entityClips: clips };
+    }
+    const narration = str(ctx, "narrationText");
+    const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
+    const W = portrait ? 1080 : 1920;
+    const H = portrait ? 1920 : 1080;
+
+    // Pull SPECIFIC named entities that have real imagery (people/places/artworks).
+    let entities: string[] = [];
+    try {
+      const out = await geminiJson<{ entities?: string[] }>({
+        prompt:
+          "From this narration, list up to 4 SPECIFIC named entities with well-known " +
+          'real photographs/portraits (e.g. "Marcus Aurelius", "the Colosseum"). ' +
+          "Skip abstract concepts. Return STRICT JSON {\"entities\":string[]}.\n\n" +
+          narration.slice(0, 3000),
+        maxTokens: 250,
+        temperature: 0.3,
+      });
+      entities = (out.entities ?? [])
+        .filter((e): e is string => typeof e === "string" && e.trim().length > 0)
+        .slice(0, 4);
+    } catch (e) {
+      ctx.log(`entity_imagery: extraction failed (${e instanceof Error ? e.message : e})`);
+    }
+
+    const tmp = await makeRunTempDir(ctx.runId);
+    let i = 0;
+    for (const e of entities) {
+      try {
+        const url = await searchWikimediaImageUrl(e);
+        if (!url) {
+          ctx.log(`entity_imagery: no Wikimedia image for "${e}"`);
+          continue;
+        }
+        const img = await downloadTo(url, join(tmp, `entity_${i}.jpg`));
+        const clip = await kenBurns(img, join(tmp, `entity_${i}.mp4`), 5, W, H);
+        clips.push(clip);
+        ctx.log(`entity_imagery: "${e}" → Ken Burns clip`);
+        i++;
+      } catch (err) {
+        ctx.log(`entity_imagery: "${e}" failed (${err instanceof Error ? err.message : err})`);
+      }
+    }
+    ctx.log(`entity_imagery: ${clips.length} entity clip(s)`);
+    return { entityClips: clips };
+  },
+};
+
 export const timelineAssemble: Block = {
   id: "timeline_assemble",
-  consumes: ["footageClips", "narrationLocalPath", "narrationDurationSec"],
+  consumes: ["footageClips", "entityClips", "narrationLocalPath", "narrationDurationSec"],
   produces: ["videoKey", "videoLocalPath", "videoDurationSec"],
   run: async (ctx) => {
     const footage = ctx.store["footageClips"] as string[] | undefined;
     if (!footage || footage.length === 0) {
       throw new Error("timeline_assemble: no footageClips");
     }
+    // Interleave entity images (Ken Burns) amongst the stock b-roll so named
+    // figures (e.g. Marcus Aurelius) appear when relevant.
+    const entity = (ctx.store["entityClips"] as string[] | undefined) ?? [];
+    const clips: string[] = [];
+    const maxn = Math.max(footage.length, entity.length);
+    for (let k = 0; k < maxn; k++) {
+      if (footage[k]) clips.push(footage[k]);
+      if (entity[k]) clips.push(entity[k]);
+    }
     const narration = str(ctx, "narrationLocalPath");
-    const durationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
+    const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
     const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
     const W = portrait ? 1080 : 1920;
     const H = portrait ? 1920 : 1080;
+    // The video runs a few seconds PAST the narration and fades to black at the
+    // end (no voice over the tail, clean ending, no end text).
+    const tailSec = Number(ctx.params["tailSec"] ?? 3);
+    const fadeOutSec = Number(ctx.params["fadeOutSec"] ?? 2);
+    const videoSec = narrationSec + tailSec;
 
     const tmp = await makeRunTempDir(ctx.runId);
-    ctx.log(`timeline_assemble: concat ${footage.length} clips @ ${W}x${H}…`);
-    const concat = await concatScaled(footage, join(tmp, "footage.mp4"), W, H);
-    ctx.log(`timeline_assemble: loop under narration (${durationSec}s)…`);
+    ctx.log(`timeline_assemble: concat ${clips.length} clips (${footage.length} footage + ${entity.length} entity) @ ${W}x${H}…`);
+    const concat = await concatScaled(clips, join(tmp, "footage.mp4"), W, H);
+    ctx.log(`timeline_assemble: narration ${narrationSec}s + ${tailSec}s fade tail → ${videoSec}s…`);
     const out = join(tmp, "video.mp4");
     await loopUnderAudio({
       loopUnitPath: concat,
       audioPath: narration,
       outPath: out,
-      durationSec,
+      durationSec: narrationSec,
+      tailSec,
+      fadeOutSec,
       maxHeight: H,
     });
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObject(videoKey, await readBytes(out), { contentType: "video/mp4" });
     await recordAsset(ctx, "video", videoKey, {
-      durationSec,
+      durationSec: videoSec,
+      narrationSec,
       source: "stock_footage",
       clips: footage.length,
     });
-    ctx.log(`timeline_assemble ok: ${durationSec}s`);
-    return { videoKey, videoLocalPath: out, videoDurationSec: durationSec };
+    ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s)`);
+    return { videoKey, videoLocalPath: out, videoDurationSec: videoSec };
   },
 };
 
@@ -479,6 +554,7 @@ export const narratedBlocks: Block[] = [
   qaScript,
   narrationTts,
   stockFootage,
+  entityImagery,
   timelineAssemble,
   lengthCheck,
   qaVisual,
