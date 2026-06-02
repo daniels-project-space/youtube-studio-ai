@@ -8,6 +8,7 @@ import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline } from "@/engine/validate";
 import { synthScript } from "@/lib/scriptGen";
 import { synthNarration, hasFishKey, resolveVoiceId } from "@/lib/tts";
+import { searchFootage, hasPexelsKey } from "@/lib/footage";
 
 async function main() {
   await bootstrapSecrets((m) => console.log(`[boot] ${m}`));
@@ -53,7 +54,23 @@ async function main() {
   } else {
     console.log("SKIP: no Fish Audio key hydrated (cannot live-test TTS)");
   }
-  console.log("\nALL NARRATED 3a+3b CHECKS PASSED");
+  // 4. Footage graph + live Pexels (3c).
+  validatePipeline([
+    { block: "topic_select" },
+    { block: "script_gen" },
+    { block: "stock_footage" },
+  ]);
+  console.log("PASS: footage graph valid (topic→script→stock_footage)");
+  if (hasPexelsKey()) {
+    const clips = await searchFootage("rainy city street night", 2, "landscape");
+    if (clips.length === 0 || !clips[0].url.includes("http")) {
+      throw new Error("FAIL: Pexels returned no clips");
+    }
+    console.log(`PASS: Pexels returned ${clips.length} clips (${clips[0].width}x${clips[0].height}, ${clips[0].durationSec}s)`);
+  } else {
+    console.log("SKIP: no Pexels key hydrated");
+  }
+  console.log("\nALL NARRATED 3a+3b+3c CHECKS PASSED");
 }
 
 main().catch((e) => {

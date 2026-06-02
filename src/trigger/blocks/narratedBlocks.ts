@@ -17,7 +17,8 @@ import { synthScript } from "@/lib/scriptGen";
 import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey } from "@/lib/tts";
-import { makeRunTempDir, writeBytes } from "@/lib/files";
+import { searchFootage, hasPexelsKey } from "@/lib/footage";
+import { makeRunTempDir, writeBytes, downloadTo } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { probe } from "@/lib/ffmpeg";
 
@@ -187,5 +188,64 @@ export const narrationTts: Block = {
   },
 };
 
-export const narratedBlocks: Block[] = [scriptGen, hookCraft, qaScript, narrationTts];
+export const stockFootage: Block = {
+  id: "stock_footage",
+  consumes: ["topic", "script"],
+  produces: ["footageClips"],
+  run: async (ctx) => {
+    if (!hasPexelsKey()) {
+      throw new Error("stock_footage: PEXELS_API_KEY missing (vault service 'pexels')");
+    }
+    const topic = str(ctx, "topic");
+    const script = ctx.store["script"] as
+      | { sections?: { heading?: string }[] }
+      | undefined;
+    const orientation =
+      (ctx.params["aspect"] as string | undefined) === "9:16"
+        ? ("portrait" as const)
+        : ("landscape" as const);
+
+    // Build search queries from topic + section headings + niche fallback.
+    const queries = [
+      topic,
+      ...(script?.sections ?? []).map((s) => s.heading ?? "").filter(Boolean),
+      opt(ctx, "niche") ?? "cinematic background",
+    ]
+      .map((q) => q.trim())
+      .filter(Boolean)
+      .filter((q, i, a) => a.indexOf(q) === i)
+      .slice(0, 6);
+
+    const tmp = await makeRunTempDir(ctx.runId);
+    const clips: string[] = [];
+    let n = 0;
+    for (const q of queries) {
+      try {
+        const found = await searchFootage(q, 1, orientation);
+        for (const f of found) {
+          const local = join(tmp, `footage_${n}.mp4`);
+          await downloadTo(f.url, local);
+          clips.push(local);
+          n++;
+        }
+      } catch (e) {
+        ctx.log(`stock_footage: query "${q}" failed (skip): ${e instanceof Error ? e.message : e}`);
+      }
+    }
+    if (clips.length === 0) {
+      throw new Error("stock_footage: no clips found for any query");
+    }
+    ctx.log(`stock_footage: ${clips.length} clips from ${queries.length} queries`);
+    return { footageClips: clips };
+  },
+};
+
+export const narratedBlocks: Block[] = [
+  scriptGen,
+  hookCraft,
+  qaScript,
+  narrationTts,
+  stockFootage,
+];
+
 

@@ -40,22 +40,21 @@ const LOFI: PipelineEntry[] = [
   { block: "notify" },
 ];
 
-// Narrated base (Stage-3 blocks). Hook + footage variants layer on top.
+// Narrated base (Stage-3 blocks). Footage-driven; metadata + qa precede
+// thumbnail/upload (which consume title + qaPassed). Crime adds a hook.
 const NARRATED: PipelineEntry[] = [
   { block: "competitor_research" },
   { block: "topic_select" },
   { block: "script_gen" },
   { block: "qa_script" },
-  { block: "scene_planner" },
   { block: "narration_tts" },
   { block: "stock_footage" },
-  { block: "broll_clips" },
   { block: "timeline_assemble" },
   { block: "intro_card", params: { introMode: "overlay" } },
   { block: "length_check" },
+  { block: "metadata" },
   { block: "qa_visual" },
   { block: "thumbnail_gen" },
-  { block: "metadata" },
   { block: "upload_draft" },
   { block: "notify" },
 ];
@@ -89,11 +88,11 @@ export const ARCHETYPES: Record<string, Archetype> = {
     defaultVoiceId: "psychological",
     thumbnailTemplate: "claude_flux",
     pipeline: [
-      NARRATED[0],
-      NARRATED[1],
+      { block: "competitor_research" },
+      { block: "topic_select" },
       { block: "script_gen", params: { style: "crime" } },
       { block: "hook_craft" },
-      ...NARRATED.slice(3),
+      ...NARRATED.slice(4),
     ],
   },
   shorts: {
