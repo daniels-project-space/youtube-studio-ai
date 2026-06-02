@@ -529,67 +529,58 @@ export async function applyQuoteOverlays(
     await copyFile(videoPath, outPath);
     return outPath;
   }
-  const sigma = opts.blurSigma ?? 22;
+  const sigma = opts.blurSigma ?? 20;
   const ramp = opts.rampSec ?? 0.6;
-  const n = overlays.length;
-  const inputs: string[] = ["-i", videoPath];
-  for (const o of overlays) inputs.push("-i", o.path);
-
-  const parts: string[] = [];
-  // One base + one trimmed source per window.
-  parts.push(`[0:v]split=${n + 1}[base]${overlays.map((_, i) => `[bsrc${i}]`).join("")}`);
-  let prev = "[base]";
-  // Gradual blur (alpha-faded blurred slice) per window.
-  overlays.forEach((o, i) => {
+  // SEQUENTIAL — one light ffmpeg pass per quote (split into base + a single
+  // trimmed/blurred window + the card). Avoids the OOM of N simultaneous gblur
+  // branches in one graph. Audio is stream-copied each pass.
+  let cur = videoPath;
+  for (let i = 0; i < overlays.length; i++) {
+    const o = overlays[i];
     const s = o.startSec.toFixed(3);
     const e = (o.startSec + o.durSec).toFixed(3);
     const outEdge = Math.max(0, o.durSec - ramp).toFixed(3);
-    parts.push(
-      `[bsrc${i}]trim=${s}:${e},setpts=PTS-STARTPTS,gblur=sigma=${sigma},format=yuva420p,` +
-        `fade=t=in:st=0:d=${ramp}:alpha=1,fade=t=out:st=${outEdge}:d=${ramp}:alpha=1,` +
-        `setpts=PTS+${s}/TB[bf${i}]`,
+    const stepOut = i === overlays.length - 1 ? outPath : `${outPath}.step${i}.mp4`;
+    const filter = [
+      `[0:v]split[base][b]`,
+      `[b]trim=${s}:${e},setpts=PTS-STARTPTS,gblur=sigma=${sigma},format=yuva420p,` +
+        `fade=t=in:st=0:d=${ramp}:alpha=1,fade=t=out:st=${outEdge}:d=${ramp}:alpha=1,setpts=PTS+${s}/TB[bf]`,
+      `[base][bf]overlay=0:0:enable='between(t,${s},${e})'[bg]`,
+      `[1:v]setpts=PTS+${s}/TB[c]`,
+      `[bg][c]overlay=0:0:enable='between(t,${s},${e})'[vout]`,
+    ].join(";");
+    await run(
+      FFMPEG,
+      [
+        "-y",
+        "-i",
+        cur,
+        "-i",
+        o.path,
+        "-filter_complex",
+        filter,
+        "-map",
+        "[vout]",
+        "-map",
+        "0:a?",
+        "-c:v",
+        "libx264",
+        "-preset",
+        "veryfast",
+        "-crf",
+        "19",
+        "-pix_fmt",
+        "yuv420p",
+        "-c:a",
+        "copy",
+        "-movflags",
+        "+faststart",
+        stepOut,
+      ],
+      opts.timeoutMs ?? 1_800_000,
     );
-    const out = `[bb${i}]`;
-    parts.push(`${prev}[bf${i}]overlay=0:0:enable='between(t,${s},${e})'${out}`);
-    prev = out;
-  });
-  // Quote cards on top.
-  overlays.forEach((o, i) => {
-    const s = o.startSec.toFixed(3);
-    const e = (o.startSec + o.durSec).toFixed(3);
-    parts.push(`[${i + 1}:v]setpts=PTS+${s}/TB[c${i}]`);
-    const out = i === n - 1 ? "[vout]" : `[cc${i}]`;
-    parts.push(`${prev}[c${i}]overlay=0:0:enable='between(t,${s},${e})'${out}`);
-    prev = out;
-  });
-
-  await run(
-    FFMPEG,
-    [
-      "-y",
-      ...inputs,
-      "-filter_complex",
-      parts.join(";"),
-      "-map",
-      "[vout]",
-      "-map",
-      "0:a?",
-      "-c:v",
-      "libx264",
-      "-preset",
-      "veryfast",
-      "-crf",
-      "20",
-      "-pix_fmt",
-      "yuv420p",
-      "-c:a",
-      "copy",
-      "-movflags",
-      "+faststart",
-      outPath,
-    ],
-    opts.timeoutMs ?? 2_700_000,
-  );
+    cur = stepOut;
+  }
   return outPath;
 }
 

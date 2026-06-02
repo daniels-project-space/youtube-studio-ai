@@ -36,9 +36,9 @@ export interface RunPipelineInput {
 
 export const runPipelineTask = task({
   id: "run-pipeline",
-  // Video encodes (ffmpeg concat/loop at 1080p) need real memory — the default
-  // small machine OOM-kills on multi-minute renders.
-  machine: "large-1x",
+  // Video encodes + Chromium (Remotion) + multi-pass overlay compositing need
+  // real memory — large-1x OOM-killed on the quote-overlay + xfade pass.
+  machine: "large-2x",
   maxDuration: 3000,
   // On a crash/OOM/timeout, retry the whole task — the runner's resume restores
   // completed blocks (no double-spend). Cap parallel renders so they don't
