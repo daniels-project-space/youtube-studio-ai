@@ -15,6 +15,7 @@
 import assert from "node:assert/strict";
 import { _resetBlocks, registerAllBlocks } from "@/engine/blocks";
 import { register } from "@/engine/registry";
+import { echoSeed, echoSink } from "@/trigger/blocks/echoBlocks";
 import {
   validatePipeline,
   preflight,
@@ -52,6 +53,8 @@ function memSink(): { sink: RunStageSink; rows: Recorded[] } {
 async function positive(): Promise<void> {
   _resetBlocks();
   registerAllBlocks();
+  register(echoSeed);
+  register(echoSink);
 
   const entries = [
     { block: "echo_seed", params: { topic: "rainy night jazz" } },
@@ -87,6 +90,8 @@ async function positive(): Promise<void> {
 async function negativeValidation(): Promise<void> {
   _resetBlocks();
   registerAllBlocks();
+  register(echoSeed);
+  register(echoSink);
   // echo_sink consumes "topic" but we omit the producing echo_seed → invalid.
   let threw = false;
   try {

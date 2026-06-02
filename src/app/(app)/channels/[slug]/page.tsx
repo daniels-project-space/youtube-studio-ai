@@ -263,6 +263,8 @@ function OverviewTab({
     .map((r) => ({ ...r, channelName: channel.name, channelSlug: channel.slug }))
     .sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0))
     .slice(0, 8);
+  const overBudget =
+    kpis.costPerVideo !== null && kpis.costPerVideo > channel.budget;
 
   return (
     <>
@@ -285,9 +287,16 @@ function OverviewTab({
         <StatCard
           label="Cost / video"
           value={kpis.costPerVideo === null ? "—" : fmtUsd(kpis.costPerVideo)}
-          accent="var(--color-accent)"
-          hint={kpis.costPerVideo === null ? "no measured runs yet" : "measured from runs"}
+          accent={overBudget ? "var(--color-failed)" : "var(--color-accent)"}
+          hint={
+            kpis.costPerVideo === null
+              ? "no measured runs yet"
+              : overBudget
+                ? `over ${fmtUsd(channel.budget)} budget`
+                : `within ${fmtUsd(channel.budget)} budget`
+          }
         />
+        <StatCard label="Budget / run" value={fmtUsd(channel.budget)} />
       </div>
 
       {channel.identity?.persona && (

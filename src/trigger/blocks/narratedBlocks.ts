@@ -288,13 +288,12 @@ export const lengthCheck: Block = {
     const dur = Number(ctx.store["videoDurationSec"] ?? 0);
     const min = Number(ctx.params["minSeconds"] ?? 10);
     const max = Number(ctx.params["maxSeconds"] ?? 36000);
-    const ok = dur >= min && dur <= max;
-    ctx.log(
-      ok
-        ? `length_check ok: ${dur}s`
-        : `length_check WARN: ${dur}s outside [${min}, ${max}]`,
-    );
-    return { lengthOk: ok };
+    if (dur < min || dur > max) {
+      // Hard gate (Stage 4): don't ship an off-spec runtime.
+      throw new Error(`length_check FAILED: ${dur}s outside [${min}, ${max}]`);
+    }
+    ctx.log(`length_check ok: ${dur}s (bounds ${min}–${max})`);
+    return { lengthOk: true };
   },
 };
 
@@ -313,12 +312,16 @@ export const qaVisual: Block = {
       hasVideo: p.hasVideo,
       hasAudio: p.hasAudio,
     };
+    // Hard gate (Stage 4): a structurally-broken render never ships.
     if (!structural) {
-      ctx.log("qa_visual: structural FAIL", report);
-      return { qaPassed: false, qaReport: report };
+      throw new Error(
+        `qa_visual FAILED (structural): video=${p.hasVideo} audio=${p.hasAudio} dur=${p.durationSec}s`,
+      );
     }
 
-    let visionPass = true;
+    // Vision grade (best-effort call; the GATE decision runs outside the try so a
+    // real low-score failure propagates while an API hiccup only skips vision).
+    let vision: { pass?: boolean; score?: number; issues?: string[] } | undefined;
     if (hasGeminiKey()) {
       try {
         const tmp = await makeRunTempDir(ctx.runId);
@@ -338,17 +341,26 @@ export const qaVisual: Block = {
           json: true,
           maxTokens: 500,
         });
-        const v = parseJsonLoose<{ pass?: boolean; score?: number; issues?: string[] }>(raw);
-        visionPass = v.pass !== false && (v.score ?? 10) >= 6;
-        report.vision = v;
-        ctx.log(`qa_visual: vision pass=${visionPass} score=${v.score}`, {
-          issues: (v.issues ?? []).slice(0, 4),
-        });
+        vision = parseJsonLoose(raw);
       } catch (e) {
-        ctx.log(`qa_visual: vision skipped (${e instanceof Error ? e.message : e})`);
+        ctx.log(`qa_visual: vision check skipped (${e instanceof Error ? e.message : e})`);
       }
     }
-    return { qaPassed: structural && visionPass, qaReport: report };
+    if (vision) {
+      report.vision = vision;
+      const score = vision.score ?? 10;
+      // Hard gate only on egregious failures; tolerate subjective mid-scores so
+      // an over-strict model never blocks every render.
+      if (score < 4) {
+        throw new Error(
+          `qa_visual FAILED (visual score ${score}): ${(vision.issues ?? []).slice(0, 4).join("; ")}`,
+        );
+      }
+      ctx.log(`qa_visual ok: score=${score}`, { issues: (vision.issues ?? []).slice(0, 3) });
+    } else {
+      ctx.log("qa_visual ok: structural-only (no vision grade)");
+    }
+    return { qaPassed: true, qaReport: report };
   },
 };
 
