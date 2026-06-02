@@ -25,6 +25,7 @@ const SERVICES = [
   "gemini", // GEMINI_API_KEY (Gemini 2.5 Flash + Vision) — script_gen, research, metadata
   "google", // GOOGLE_* (places / app credentials)
   "anthropic", // ANTHROPIC_API_KEY (claude_flux thumbnail concept, qa_script)
+  "langfuse", // LANGFUSE_PUBLIC_KEY/SECRET_KEY (Mastra agent tracing; optional)
 ];
 
 let done = false;
@@ -46,6 +47,13 @@ export async function bootstrapSecrets(
   // Default telegram chat to the admin chat id if not explicitly set.
   if (!process.env.TELEGRAM_CHAT_ID && process.env.TELEGRAM_ADMIN_CHAT_ID) {
     process.env.TELEGRAM_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
+  }
+  // Mastra producer (Gemini): the model router reads GOOGLE_API_KEY; the raw
+  // @ai-sdk/google provider reads GOOGLE_GENERATIVE_AI_API_KEY. Set both.
+  if (process.env.GEMINI_API_KEY) {
+    if (!process.env.GOOGLE_API_KEY) process.env.GOOGLE_API_KEY = process.env.GEMINI_API_KEY;
+    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY)
+      process.env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GEMINI_API_KEY;
   }
   // Higgsfield: hydrate the CLI credential so it runs hostless (in the Trigger
   // image) on your SUBSCRIPTION credits — replacing the old `higgsfield auth

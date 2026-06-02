@@ -35,7 +35,19 @@ export default defineConfig({
     // image, which then fails `npm i` on the Linux builder (EBADPLATFORM).
     // External → Trigger installs them fresh in the Linux image, resolving the
     // correct platform binaries; remotionRender.ts imports them dynamically.
-    external: ["@remotion/bundler", "@remotion/renderer", "remotion"],
+    external: [
+      "@remotion/bundler",
+      "@remotion/renderer",
+      "remotion",
+      // Mastra agent stack + AI SDK — large dep trees with their own native/ESM
+      // quirks; install in-image instead of bundling (mirrors the Remotion fix).
+      "@mastra/core",
+      "@mastra/langfuse",
+      "@mastra/observability",
+      "ai",
+      "@ai-sdk/google",
+      "@ai-sdk/anthropic",
+    ],
     extensions: [
       ffmpeg(),
       additionalPackages({ packages: ["@higgsfield/cli@0.1.40"] }),

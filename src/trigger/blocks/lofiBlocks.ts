@@ -42,9 +42,23 @@ import { generateMusic, type MusicProvider } from "@/lib/music";
 import { uploadPrivateDraft } from "@/lib/youtube";
 import { notifyDraftReady } from "@/lib/telegram";
 import { concatClips, composeWithIntro, probe } from "@/lib/ffmpeg";
-import { geminiJson, hasGeminiKey } from "@/lib/gemini";
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { hasGeminiKey } from "@/lib/gemini";
+import { hasAnthropicKey } from "@/lib/anthropic";
 import { produceAndCritique } from "@/engine/critiqueLoop";
+import { agentJson } from "@/agents/mastra";
+import { z } from "zod";
+
+/** Topic-chunk structured-output schemas (validated on both Mastra + REST). */
+const producerTopicSchema = z.object({
+  candidates: z
+    .array(z.object({ topic: z.string(), angle: z.string().optional().default("") }))
+    .optional()
+    .default([]),
+});
+const directorScoreSchema = z.object({
+  score: z.number().optional(),
+  issues: z.array(z.string()).optional().default([]),
+});
 import {
   makeRunTempDir,
   downloadTo,
@@ -232,9 +246,10 @@ export const topicSelect: Block = {
       maxIters: 3,
       log: ctx.log,
       produce: async (priorIssues) => {
-        const out = await geminiJson<{
-          candidates?: Array<{ topic?: string; angle?: string }>;
-        }>({
+        const out = await agentJson({
+          role: "producer",
+          schema: producerTopicSchema,
+          log: ctx.log,
           prompt:
             `You are the topic PRODUCER for the YouTube channel "${channelName}".\n` +
             `Persona: ${persona || "n/a"}\nNiche: ${niche || "n/a"}\nStyle: ${style || "n/a"}\n` +
@@ -275,7 +290,10 @@ export const topicSelect: Block = {
         let dirIssues: string[] = [];
         if (hasAnthropicKey()) {
           try {
-            const v = await claudeJson<{ score?: number; issues?: string[] }>({
+            const v = await agentJson({
+              role: "director",
+              schema: directorScoreSchema,
+              log: ctx.log,
               system: "You are the DIRECTOR: a YouTube content strategist. Return ONLY JSON.",
               prompt:
                 `Channel "${channelName}" — persona: ${persona || "n/a"}; niche: ${niche || "n/a"}; style: ${style || "n/a"}.\n` +
