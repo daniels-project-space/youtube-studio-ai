@@ -213,16 +213,42 @@ export const stockFootage: Block = {
         ? ("portrait" as const)
         : ("landscape" as const);
 
-    // Build search queries from topic + section headings + niche fallback.
-    const queries = [
-      topic,
-      ...(script?.sections ?? []).map((s) => s.heading ?? "").filter(Boolean),
-      opt(ctx, "niche") ?? "cinematic background",
-    ]
-      .map((q) => q.trim())
-      .filter(Boolean)
-      .filter((q, i, a) => a.indexOf(q) === i)
-      .slice(0, 6);
+    // Derive CONCRETE, filmable b-roll queries (abstract topics like philosophy
+    // have no literal stock footage — turn them into visual terms a camera can
+    // actually show, so the footage is relevant). Falls back to topic+headings.
+    let queries: string[] = [];
+    if (hasGeminiKey()) {
+      try {
+        const out = await geminiJson<{ queries?: string[] }>({
+          prompt:
+            `Give 6 CONCRETE, filmable stock-footage search queries (2-4 words each, ` +
+            `things a camera can literally show) that visually evoke a video about ` +
+            `"${topic}"${opt(ctx, "niche") ? ` (${opt(ctx, "niche")})` : ""}. ` +
+            `Prefer evocative scenes (e.g. "rain on window", "candle flame", ` +
+            `"person walking alone dusk", "calm ocean waves"). Avoid abstract words. ` +
+            `Return STRICT JSON {"queries":string[]}.`,
+          maxTokens: 300,
+          temperature: 0.6,
+        });
+        queries = (out.queries ?? [])
+          .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
+          .slice(0, 6);
+      } catch (e) {
+        ctx.log(`stock_footage: query-gen failed (${e instanceof Error ? e.message : e})`);
+      }
+    }
+    if (queries.length === 0) {
+      queries = [
+        topic,
+        ...(script?.sections ?? []).map((s) => s.heading ?? "").filter(Boolean),
+        opt(ctx, "niche") ?? "cinematic background",
+      ]
+        .map((q) => q.trim())
+        .filter(Boolean)
+        .filter((q, i, a) => a.indexOf(q) === i)
+        .slice(0, 6);
+    }
+    ctx.log(`stock_footage: queries = ${queries.join(" | ")}`);
 
     const tmp = await makeRunTempDir(ctx.runId);
     const clips: string[] = [];
