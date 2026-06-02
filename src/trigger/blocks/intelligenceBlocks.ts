@@ -23,7 +23,23 @@ import { putObject } from "@/lib/storage";
 import { titleCard, thumbnailText } from "@/lib/ffmpeg";
 import { generateFluxImage } from "@/lib/replicate";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
-import { geminiJson, geminiVision, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { geminiVision, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { agentJson } from "@/agents/mastra";
+import { produceAndCritique } from "@/engine/critiqueLoop";
+import { z } from "zod";
+
+/** SEO chunk structured-output schemas (validated on Mastra + REST). */
+const seoSchema = z.object({
+  title: z.string(),
+  description: z.string(),
+  tags: z.array(z.string()).optional().default([]),
+});
+const seoDirectorSchema = z.object({
+  score: z.number().optional(),
+  issues: z.array(z.string()).optional().default([]),
+});
+/** lofi/study-music framing — flagged when the channel niche is NOT music. */
+const LOFI_LEAK = /lo-?fi|beats to (relax|study)|study music|chill beats/i;
 import { refreshNicheResearchCore } from "@/lib/nicheResearch";
 import { publicUrl } from "@/lib/storage";
 import { join } from "node:path";
@@ -168,84 +184,157 @@ export const metadataOptimized: Block = {
   ],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
-    const channelName = (ctx.store["channelName"] as string | undefined) ?? "Lofi";
+    const channelName = (ctx.store["channelName"] as string | undefined) ?? "this channel";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
-
-    // Base (lofi-style) metadata — same shape the legacy block produced.
-    let title = `${topic} — Lofi Beats to Relax / Study To 🎧 ${channelName}`;
-    const baseTags = [
-      "lofi",
-      "lofi hip hop",
-      "study music",
-      "relaxing music",
-      "focus music",
-      "chill beats",
-      "ambient",
-      topic.toLowerCase(),
-    ];
+    const persona = (ctx.store["persona"] as string | undefined) ?? "";
 
     const nicheIntel = (ctx.store["nicheIntel"] as NicheIntel | null) ?? null;
     const databank = (ctx.store["seoDatabank"] as SeoDatabank | null) ?? null;
     const competitors = (ctx.store["competitors"] as CompetitorRow[] | null) ?? [];
+    const competitorTitles = competitors
+      .flatMap((c) => c.topVideos)
+      .sort((a, b) => b.views - a.views)
+      .slice(0, 12)
+      .map((v) => v.title);
+    const powerWords = (nicheIntel?.powerWords ?? []).map((p) => p.word).slice(0, 12);
+    const titleMax = nicheIntel?.optimalTitleLen ?? 70;
+    // Music niches legitimately use "lofi / study / relax" framing; others don't.
+    const isMusicNiche = /lofi|lo-fi|study|chill|ambient|sleep|relax|music|beats/i.test(niche);
 
-    // Optimise the title against competitor intelligence (Gemini Flash).
-    if (hasGeminiKey() && (databank || competitors.length)) {
-      const competitorTitles = competitors
-        .flatMap((c) => c.topVideos)
-        .sort((a, b) => b.views - a.views)
-        .slice(0, 15)
-        .map((v) => v.title);
-      const powerWords = (nicheIntel?.powerWords ?? [])
-        .map((p) => p.word)
-        .slice(0, 12);
-      try {
-        const out = await geminiJson<{ title?: string }>({
+    // Script context grounds the SEO in the ACTUAL video (narrated archetypes).
+    let scriptExcerpt = "";
+    const nt = ctx.store["narrationText"];
+    if (typeof nt === "string" && nt.length > 0) {
+      scriptExcerpt = nt.slice(0, 800);
+    } else {
+      const sc = ctx.store["script"] as { sections?: { heading?: string }[] } | undefined;
+      if (sc?.sections?.length) {
+        scriptExcerpt = sc.sections.map((s) => s.heading).filter(Boolean).join("; ").slice(0, 800);
+      }
+    }
+
+    const viewEstimate = async (tags: string[]) => {
+      let estimatedViews = nicheIntel?.medianViewsTop50 ?? nicheIntel?.avgViewsTop50 ?? 0;
+      let estimatedViewsSource = "niche_fallback";
+      if (niche) {
+        try {
+          const est = await convex().query(api.seo.viewEstimate, {
+            ownerId: ctx.ownerId,
+            niche,
+            tags,
+          });
+          estimatedViews = est.estimatedViews;
+          estimatedViewsSource = est.source;
+        } catch (e) {
+          ctx.log(`metadata: viewEstimate failed (using fallback): ${e instanceof Error ? e.message : e}`);
+        }
+      }
+      if (estimatedViews === undefined || estimatedViews === null) estimatedViews = 0;
+      return { estimatedViews, estimatedViewsSource };
+    };
+
+    // Degrade: no model available → niche-correct (NOT lofi) static metadata.
+    if (!hasGeminiKey()) {
+      const title = topic.slice(0, titleMax);
+      const description = `${topic}.\n\n${persona || channelName}.`;
+      const tags = [topic.toLowerCase(), niche].filter(Boolean) as string[];
+      const ve = await viewEstimate(tags);
+      ctx.log(`metadata (degraded, no Gemini): "${title}"`);
+      return { title, description, tags, ...ve };
+    }
+
+    // Producer ↔ Director SEO loop: niche-aware, script-grounded, high-CTR.
+    const loop = await produceAndCritique<{
+      title: string;
+      description: string;
+      tags: string[];
+    }>({
+      label: "metadata/seo",
+      threshold: 0.8,
+      maxIters: 3,
+      log: ctx.log,
+      produce: async (priorIssues) => {
+        const out = await agentJson({
+          role: "producer",
+          schema: seoSchema,
+          log: ctx.log,
+          maxTokens: 900,
+          temperature: 0.8,
           prompt:
-            "You are a YouTube title optimisation expert. Write ONE high-CTR " +
-            `title for a video about "${topic}" on a ${niche || "lofi"} channel ` +
-            `named "${channelName}". Use the proven patterns below. Keep it ` +
-            `under ${nicheIntel?.optimalTitleLen ?? 70} characters. Return ONLY ` +
-            'JSON: {"title": "..."}.\n\n' +
-            `TITLE TEMPLATES:\n${(databank?.titleTemplates ?? []).join("\n")}\n\n` +
-            `TOP COMPETITOR TITLES:\n${competitorTitles.join("\n")}\n\n` +
-            `POWER WORDS TO CONSIDER: ${powerWords.join(", ")}`,
-          maxTokens: 200,
+            `Write YouTube SEO metadata for a video about "${topic}" on the channel "${channelName}".\n` +
+            `NICHE: ${niche || "general"}\nPERSONA: ${persona || "n/a"}\n` +
+            (scriptExcerpt ? `SCRIPT EXCERPT:\n${scriptExcerpt}\n` : "") +
+            (competitorTitles.length ? `TOP COMPETITOR TITLES:\n${competitorTitles.join("\n")}\n` : "") +
+            (powerWords.length ? `POWER WORDS: ${powerWords.join(", ")}\n` : "") +
+            (databank?.titleTemplates?.length ? `TITLE TEMPLATES:\n${databank.titleTemplates.join("\n")}\n` : "") +
+            `RULES:\n` +
+            `- title: high-CTR, <= ${titleMax} chars, main keyword + hook in the first ~40 chars.\n` +
+            `- description: the FIRST 150 chars must stand alone as a compelling summary (shown above the fold); then 150-350 words with natural keywords; end with 3-5 hashtags.\n` +
+            `- tags: 10-15 relevant tags.\n` +
+            `- MATCH THE NICHE. Do NOT use "lofi" / "beats to relax / study" / study-music framing unless the niche actually IS lofi/study/ambient music.\n` +
+            (priorIssues.length ? `FIX these issues from the last attempt: ${priorIssues.join("; ")}\n` : "") +
+            `Return STRICT JSON {"title":string,"description":string,"tags":string[]}.`,
         });
-        if (out.title && out.title.trim()) title = out.title.trim();
-      } catch (e) {
-        ctx.log(`metadata: title optimise failed (using base): ${e instanceof Error ? e.message : e}`);
-      }
-    }
+        return {
+          title: (out.title ?? "").trim(),
+          description: (out.description ?? "").trim(),
+          tags: (out.tags ?? []).filter(Boolean),
+        };
+      },
+      critique: async (cand) => {
+        // DETERMINISTIC checks (computed, not model-judged).
+        const issues: string[] = [];
+        if (!cand.title) issues.push("empty title");
+        if (cand.title.length > titleMax + 5) issues.push(`title ${cand.title.length} chars > ${titleMax}`);
+        if (cand.description.length < 120) issues.push("description too short (<120 chars; first 150 must summarize)");
+        if (cand.tags.length < 5) issues.push("fewer than 5 tags");
+        const lofiLeak =
+          !isMusicNiche && (LOFI_LEAK.test(cand.title) || LOFI_LEAK.test(cand.description));
+        if (lofiLeak) issues.push(`off-niche lofi/study-music framing for a "${niche}" video — remove it`);
 
-    // Merge top niche tags into the tag set (dedup, cap 15).
+        // SUBJECTIVE: Director scores CTR + on-brand fit + clarity.
+        let dirScore = 0.7;
+        let dirIssues: string[] = [];
+        if (hasAnthropicKey()) {
+          try {
+            const v = await agentJson({
+              role: "director",
+              schema: seoDirectorSchema,
+              log: ctx.log,
+              maxTokens: 500,
+              temperature: 0.3,
+              system: "You are the DIRECTOR: a YouTube SEO + CTR strategist. Return ONLY JSON.",
+              prompt:
+                `Channel "${channelName}" — niche: ${niche || "n/a"}; persona: ${persona || "n/a"}.\n` +
+                `TITLE: ${cand.title}\nDESCRIPTION (first 200): ${cand.description.slice(0, 200)}\nTAGS: ${cand.tags.join(", ")}\n\n` +
+                `Score 0..1 on click appeal, on-niche/on-brand fit, and clarity. Penalize generic or off-niche framing. Return JSON {"score":number,"issues":string[]}.`,
+            });
+            dirScore = typeof v.score === "number" ? Math.max(0, Math.min(1, v.score)) : 0.7;
+            dirIssues = Array.isArray(v.issues) ? v.issues : [];
+          } catch (e) {
+            ctx.log(`metadata: director failed (continuing): ${e instanceof Error ? e.message : e}`);
+          }
+        }
+        const hardFail = !cand.title || lofiLeak;
+        return {
+          score: hardFail ? Math.min(dirScore, 0.4) : dirScore,
+          pass: !hardFail && issues.length === 0 && dirScore >= 0.8,
+          issues: [...issues, ...dirIssues],
+        };
+      },
+    });
+
+    let { title, description, tags } = loop.value;
+    // Merge top niche tags (dedup, cap 15); never ship empty.
     const nicheTags = (nicheIntel?.topTags ?? []).map((t) => t.tag);
-    const tags = Array.from(new Set([...baseTags, ...nicheTags])).slice(0, 15);
+    tags = Array.from(new Set([...tags, ...nicheTags])).slice(0, 15);
+    if (tags.length === 0) tags = [topic.toLowerCase()];
 
-    const description =
-      `${topic}.\n\nLofi beats to relax, study, and focus. Seamless ambient loop with calm instrumentals.\n\n` +
-      `Generated by ${channelName}. New uploads regularly — subscribe for more.\n\n#lofi #studymusic #relax`;
-
-    // Overlap-weighted view estimate (Convex query ports the predictor).
-    let estimatedViews = nicheIntel?.medianViewsTop50 ?? nicheIntel?.avgViewsTop50 ?? 0;
-    let estimatedViewsSource = "niche_fallback";
-    if (niche) {
-      try {
-        const est = await convex().query(api.seo.viewEstimate, {
-          ownerId: ctx.ownerId,
-          niche,
-          tags,
-        });
-        estimatedViews = est.estimatedViews;
-        estimatedViewsSource = est.source;
-      } catch (e) {
-        ctx.log(`metadata: viewEstimate failed (using fallback): ${e instanceof Error ? e.message : e}`);
-      }
-    }
-    // The runner forbids null/undefined produced values — always emit numbers.
-    if (estimatedViews === undefined || estimatedViews === null) estimatedViews = 0;
-
-    ctx.log(`metadata: title="${title.slice(0, 60)}…" est=${estimatedViews} (${estimatedViewsSource})`);
-    return { title, description, tags, estimatedViews, estimatedViewsSource };
+    const ve = await viewEstimate(tags);
+    ctx.log(
+      `metadata: title="${title.slice(0, 60)}…" (score=${loop.critique.score.toFixed(2)}, accepted=${loop.accepted}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
+    );
+    return { title, description, tags, ...ve };
   },
 };
 
