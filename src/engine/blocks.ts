@@ -8,6 +8,7 @@ import { lofiBlocks } from "@/trigger/blocks/lofiBlocks";
 import { intelligenceBlocks } from "@/trigger/blocks/intelligenceBlocks";
 import { narratedBlocks } from "@/trigger/blocks/narratedBlocks";
 import { complianceBlocks } from "@/trigger/blocks/complianceBlocks";
+import { growthBlocks } from "@/trigger/blocks/growthBlocks";
 
 let registered = false;
 
@@ -24,6 +25,8 @@ export function registerAllBlocks(): void {
   for (const b of narratedBlocks) register(b);
   // Compliance gates (Phase 4): originality_gate + compliance_check.
   for (const b of complianceBlocks) register(b);
+  // Growth blocks (Phase 8, opt-in): crosspost.
+  for (const b of growthBlocks) register(b);
   registered = true;
 }
 

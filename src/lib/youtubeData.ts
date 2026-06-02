@@ -21,15 +21,33 @@ export function hasYouTubeDataKey(): boolean {
   return Boolean(process.env.YOUTUBE_DATA_API_KEY);
 }
 
-function key(): string {
-  const k = process.env.YOUTUBE_DATA_API_KEY;
-  if (!k) throw new YouTubeDataError("YOUTUBE_DATA_API_KEY is not configured");
-  return k;
+/**
+ * Read access exists via EITHER an API key (public read) OR the OAuth refresh
+ * token (needs the youtube.readonly scope — see scripts/youtube-oauth.ts). This
+ * lets a scope re-consent unblock competitor SEO without a separate API key.
+ */
+export function hasYouTubeDataAccess(): boolean {
+  return (
+    Boolean(process.env.YOUTUBE_DATA_API_KEY) ||
+    Boolean(process.env.YOUTUBE_REFRESH_TOKEN && process.env.YOUTUBE_CLIENT_ID)
+  );
 }
 
 async function get<T>(path: string, params: Record<string, string>): Promise<T> {
-  const qs = new URLSearchParams({ ...params, key: key() }).toString();
-  const res = await fetch(`${BASE}/${path}?${qs}`);
+  // Prefer the API key (simple, public). Else use the OAuth token (readonly).
+  const apiKey = process.env.YOUTUBE_DATA_API_KEY;
+  let url: string;
+  const headers: Record<string, string> = {};
+  if (apiKey) {
+    url = `${BASE}/${path}?${new URLSearchParams({ ...params, key: apiKey }).toString()}`;
+  } else if (process.env.YOUTUBE_REFRESH_TOKEN) {
+    const { getAccessToken } = await import("@/lib/youtube");
+    headers.Authorization = `Bearer ${await getAccessToken()}`;
+    url = `${BASE}/${path}?${new URLSearchParams(params).toString()}`;
+  } else {
+    throw new YouTubeDataError("no YouTube Data access (set YOUTUBE_DATA_API_KEY or OAuth)");
+  }
+  const res = await fetch(url, { headers });
   const json = (await res.json()) as T & { error?: { message?: string } };
   if (!res.ok) {
     throw new YouTubeDataError(

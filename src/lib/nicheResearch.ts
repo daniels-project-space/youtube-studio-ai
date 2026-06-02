@@ -16,7 +16,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import {
-  hasYouTubeDataKey,
+  hasYouTubeDataAccess,
   searchVideoIds,
   fetchVideoDetails,
   type VideoDetail,
@@ -83,8 +83,8 @@ export async function refreshNicheResearchCore(
     }
   }
 
-  if (!hasYouTubeDataKey()) {
-    log("YOUTUBE_DATA_API_KEY missing — skipping niche research gracefully");
+  if (!hasYouTubeDataAccess()) {
+    log("no YouTube Data access (API key or OAuth) — skipping niche research gracefully");
     return { ok: true, skipped: "no_youtube_key", niche: args.niche };
   }
 

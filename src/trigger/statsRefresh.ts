@@ -21,7 +21,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
-  hasYouTubeDataKey,
+  hasYouTubeDataAccess,
   fetchVideoStats,
   fetchChannelStats,
 } from "@/lib/youtubeData";
@@ -62,8 +62,8 @@ export async function statsRefreshCore(
   const ownerId =
     args.ownerId ?? process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel";
 
-  if (!hasYouTubeDataKey()) {
-    log("YOUTUBE_DATA_API_KEY missing — skipping stats refresh gracefully");
+  if (!hasYouTubeDataAccess()) {
+    log("no YouTube Data access (API key or OAuth) — skipping stats refresh gracefully");
     return {
       ok: true,
       skipped: "no_youtube_key",
