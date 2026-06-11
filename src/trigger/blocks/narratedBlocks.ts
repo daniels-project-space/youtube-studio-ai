@@ -1,9 +1,9 @@
-/**
- * Narrated-archetype text blocks (Stage 3a) — the "brain" shared by essay /
+﻿/**
+ * Narrated-archetype text blocks (Stage 3a) â€” the "brain" shared by essay /
  * crime / shorts / meditation:
- *   script_gen  → script + narrationText   (Gemini)
- *   hook_craft  → hook + narrationText'     (Gemini; prepends a punchy opener)
- *   qa_script   → scriptApproved            (Claude critique; soft gate)
+ *   script_gen  â†’ script + narrationText   (Gemini)
+ *   hook_craft  â†’ hook + narrationText'     (Gemini; prepends a punchy opener)
+ *   qa_script   â†’ scriptApproved            (Claude critique; soft gate)
  *
  * All degrade gracefully on a missing key so the pipeline never hard-fails.
  */
@@ -59,7 +59,7 @@ import type { ValidationSpec, ValidationAssertion } from "@/engine/creative/type
 function splitSentences(text: string): string[] {
   return text
     .replace(/\s+/g, " ")
-    .split(/(?<=[.!?])\s+(?=[A-Z"'“‘])/)
+    .split(/(?<=[.!?])\s+(?=[A-Z"'â€œâ€˜])/)
     .map((s) => s.trim())
     .filter((s) => s.length > 0);
 }
@@ -100,7 +100,7 @@ async function recordAsset(
 
 /**
  * The body's per-clip screen time. SHARED by stock_footage (coverage credit)
- * and timeline_assemble (actual cutting) — if these two disagree, the body
+ * and timeline_assemble (actual cutting) â€” if these two disagree, the body
  * either loops footage (credit > reality) or wastes downloads. The Editor
  * crew's cutSheet cadence wins; else the legacy duration split.
  */
@@ -116,7 +116,7 @@ function bodySegSeconds(
   return narrationSec > 600 ? 25 : 10;
 }
 
-/** Ordered concurrency pool — results in input order, `limit` in flight. */
+/** Ordered concurrency pool â€” results in input order, `limit` in flight. */
 async function mapPool<T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
@@ -156,7 +156,7 @@ export const scriptGen: Block = {
     if (reuseScript && Array.isArray(reuseScript.sections)) {
       const lang = ctx.params["language"] as string | undefined;
       const translated = await translateScript(reuseScript, lang, ctx.log);
-      ctx.log(`script_gen: reused + translated base script → ${lang ?? "en"} (${translated.sections.length} sections)`);
+      ctx.log(`script_gen: reused + translated base script â†’ ${lang ?? "en"} (${translated.sections.length} sections)`);
       return { script: translated, narrationText: translated.narrationText };
     }
     const req = {
@@ -173,33 +173,33 @@ export const scriptGen: Block = {
       // word budget accounts for real pauses AND voice speed, not just words.
       sentenceGapSec: ctx.params["sentenceGapSec"] as number | undefined,
       ttsSpeed: ctx.params["ttsSpeed"] as number | undefined,
-      // Channel voice performs ElevenLabs v3 [audio tags] — the writer places
+      // Channel voice performs ElevenLabs v3 [audio tags] â€” the writer places
       // them inline (mirrored from narration_tts.ttsProvider by the designer/
       // architect invariants).
       voiceTags: ctx.params["voiceTags"] === true,
-      // The channel has a data-viz insert layer — the script must speak the
+      // The channel has a data-viz insert layer â€” the script must speak the
       // numbers the inserts will render.
       dataRich: ctx.params["dataRich"] as boolean | undefined,
       structure: ctx.store["structure"] as
         | { hook?: string; beats?: { name: string; note?: string }[] }
         | undefined,
-      // The channel's locked narrative register (Style DNA) — outranks the
+      // The channel's locked narrative register (Style DNA) â€” outranks the
       // generic archetype tone in the prompt.
       narrative: (ctx.store["styleDNA"] as
         | { narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string } }
         | null)?.narrative,
       // Script Lab playbook (distilled from WATCHING the niche's top videos).
-      // The opening device rotates deterministically per run — openings never
+      // The opening device rotates deterministically per run â€” openings never
       // feel same-y across the channel's library.
       playbook: ctx.store["scriptPlaybook"] as import("@/lib/scriptLab").ScriptPlaybook | undefined,
       openingDeviceIdx: [...ctx.runId].reduce((s, c) => s + c.charCodeAt(0), 0),
     };
     let script = await synthScript(req, ctx.log);
 
-    // EVALUATOR-OPTIMIZER (short-form only — regenerating a 30-min chunked
+    // EVALUATOR-OPTIMIZER (short-form only â€” regenerating a 30-min chunked
     // script doubles cost): Claude critiques the draft; a rejected draft is
     // regenerated ONCE with the issues injected. Keep the informed second
-    // attempt either way — never a generic fallback, and the critique signal
+    // attempt either way â€” never a generic fallback, and the critique signal
     // actually feeds back instead of evaporating in qa_script.
     const maxSec = Number(req.maxSeconds ?? 240);
     if (hasAnthropicKey() && maxSec <= 420) {
@@ -210,7 +210,7 @@ export const scriptGen: Block = {
             `Critique this YouTube narration draft for quality and on-brand voice` +
             (persona ? ` (channel persona: ${persona})` : "") +
             `. Flag dull sections, off-brand language, factual hedging, weak structure, or generic ` +
-            `templated writing. Return STRICT JSON {"pass": boolean, "issues": string[]} — at most 5 ` +
+            `templated writing. Return STRICT JSON {"pass": boolean, "issues": string[]} â€” at most 5 ` +
             `issues, each under 140 characters.\n\n` +
             script.narrationText.slice(0, 6000),
           maxTokens: 1200,
@@ -218,7 +218,7 @@ export const scriptGen: Block = {
         });
         const issues = (Array.isArray(crit.issues) ? crit.issues : []).filter(Boolean).slice(0, 6);
         if (crit.pass === false && issues.length) {
-          ctx.log(`script_gen: draft rejected by critic — regenerating once`, { issues });
+          ctx.log(`script_gen: draft rejected by critic â€” regenerating once`, { issues });
           script = await synthScript({ ...req, priorIssues: issues }, ctx.log);
         }
       } catch (e) {
@@ -256,7 +256,7 @@ export const hookCraft: Block = {
       ctx.log(`hook_craft: gemini failed (${e instanceof Error ? e.message : e})`);
     }
     if (!hook) hook = firstLine();
-    ctx.log(`hook_craft: "${hook.slice(0, 60)}…"`);
+    ctx.log(`hook_craft: "${hook.slice(0, 60)}â€¦"`);
     return { hook };
   },
 };
@@ -270,7 +270,7 @@ export const qaScript: Block = {
     if (!hasAnthropicKey()) {
       // HONEST: unverified is not the same as approved. Nothing downstream hard-
       // gates on this yet, but the flag must not lie to the run record/Doctor.
-      ctx.log("qa_script: no Anthropic key — script UNVERIFIED (scriptApproved=false)");
+      ctx.log("qa_script: no Anthropic key â€” script UNVERIFIED (scriptApproved=false)");
       return { scriptApproved: false };
     }
     try {
@@ -280,10 +280,10 @@ export const qaScript: Block = {
           `Critique this YouTube narration for quality and on-brand voice` +
           (persona ? ` (channel persona: ${persona})` : "") +
           `. Flag dull sections, off-brand language, factual hedging, or weak structure. ` +
-          `CRITICALLY: require a genuine, specific POINT OF VIEW / original angle — not ` +
-          `just narrated facts — and flag generic, formulaic, or templated writing that ` +
+          `CRITICALLY: require a genuine, specific POINT OF VIEW / original angle â€” not ` +
+          `just narrated facts â€” and flag generic, formulaic, or templated writing that ` +
           `could read as mass-produced (YouTube demonetizes "inauthentic" content). ` +
-          `Return STRICT JSON {"pass": boolean, "issues": string[]} — at most 5 issues, ` +
+          `Return STRICT JSON {"pass": boolean, "issues": string[]} â€” at most 5 issues, ` +
           `each under 140 characters (a truncated reply is unusable).\n\n` +
           narration.slice(0, 6000),
         maxTokens: 1200,
@@ -311,7 +311,7 @@ export const narrationTts: Block = {
   ],
   paid: true,
   run: async (ctx) => {
-    // TTS engine: fish (default) or elevenlabs (v3 expressive — PERFORMS inline
+    // TTS engine: fish (default) or elevenlabs (v3 expressive â€” PERFORMS inline
     // [audio tags] the script writer placed; tags survive sanitization here but
     // are stripped from all DISPLAY surfaces below).
     const ttsProvider = (ctx.params["ttsProvider"] as string) || "fish";
@@ -329,7 +329,7 @@ export const narrationTts: Block = {
     const niche = opt(ctx, "niche");
     const baseGap = Number(ctx.params["sentenceGapSec"] ?? 0.85);
     const jitter = Number(ctx.params["sentenceGapJitter"] ?? 0.2);
-    // SPEAKING RATE — the "too fast narration" knob. Explicit param wins; else
+    // SPEAKING RATE â€” the "too fast narration" knob. Explicit param wins; else
     // derived from the channel's Style DNA narrative pacing; else native pace.
     const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { pacing?: string; delivery?: string } } | null)
       ?.narrative;
@@ -341,8 +341,8 @@ export const narrationTts: Block = {
         : /measured|deliberate|contemplative|documentary/.test(pacingText) ? 0.96
         : /fast|energetic|punchy|rapid|urgent/.test(pacingText) ? 1.05
         : 1);
-    if (speed !== 1) ctx.log(`narration_tts: speaking rate ×${speed} (${ctx.params["ttsSpeed"] ? "param" : "Style DNA pacing"})`);
-    // Optional stylized voice filter (e.g. "radio" → vintage AM set). Applied to
+    if (speed !== 1) ctx.log(`narration_tts: speaking rate Ã—${speed} (${ctx.params["ttsSpeed"] ? "param" : "Style DNA pacing"})`);
+    // Optional stylized voice filter (e.g. "radio" â†’ vintage AM set). Applied to
     // the finished narration track before upload; no-op when unset. The Composer
     // (crew) brief can set it when the operator didn't pin one.
     const voiceFx =
@@ -350,7 +350,7 @@ export const narrationTts: Block = {
       (ctx.store["musicBrief"] as { audio?: { voiceFx?: string } } | undefined)?.audio?.voiceFx;
     const tmp = await makeRunTempDir(ctx.runId);
 
-    // CHAPTER MODE — speak each section heading as a spoken "chapter card" (the
+    // CHAPTER MODE â€” speak each section heading as a spoken "chapter card" (the
     // card holds while it's read, then a short break, then the section narration
     // resumes). Emits `chapterPlan` (the body layout: alternating card/footage
     // windows) so timeline_assemble splices the heading cards into the body.
@@ -366,7 +366,7 @@ export const narrationTts: Block = {
       const items: Item[] = [];
       if (script.hook) for (const s of splitSentences(sanitizeSpoken(script.hook))) items.push({ kind: "narration", text: s });
       // The FINAL section is the conclusion: it gets NO chapter card / "Chapter N:"
-      // read-out — it just flows as the closing narration that rounds off the topic
+      // read-out â€” it just flows as the closing narration that rounds off the topic
       // (per request). Every earlier section still gets its heading card.
       const lastIdx = script.sections.length - 1;
       script.sections.forEach((sec, idx) => {
@@ -382,7 +382,7 @@ export const narrationTts: Block = {
       let footAccum = 0;
       let chap = 0;
       const flush = () => { if (footAccum > 0.1) { chapterPlan.push({ kind: "footage", durSec: footAccum }); footAccum = 0; } };
-      // PARALLEL synthesis (small pool — Fish concurrency limit; see sentence mode).
+      // PARALLEL synthesis (small pool â€” Fish concurrency limit; see sentence mode).
       const speakOf = (it: Item) =>
         it.kind === "heading" ? `Chapter ${it.chap}: ${it.text.replace(/[.:;,\s]+$/, "")}.` : it.text;
       const chPool = Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2));
@@ -412,7 +412,7 @@ export const narrationTts: Block = {
         } else {
           sentenceTimings.push({ text: stripAudioTags(it.text), start: cursor, end: cursor + dur });
           if (nextIsHeading) {
-            // this gap is the upcoming card's PRE-silence — belongs to the card, not footage
+            // this gap is the upcoming card's PRE-silence â€” belongs to the card, not footage
             gapAfter = preSec;
             footAccum += dur;
           } else {
@@ -444,17 +444,17 @@ export const narrationTts: Block = {
       };
     }
 
-    // Synth PER SENTENCE and concat with a silence gap → organic pauses, plus
+    // Synth PER SENTENCE and concat with a silence gap â†’ organic pauses, plus
     // exact per-sentence timings (used to anchor quote overlays). Gaps are
     // jittered per sentence so the pacing feels human, not metronomic.
     const sentences = splitSentences(text);
     const gaps = sentences.map(() => Math.max(0.2, baseGap + (Math.random() * 2 - 1) * jitter));
-    ctx.log(`narration_tts: ${sentences.length} sentences, ~${baseGap}s (±${jitter}) pauses…`);
+    ctx.log(`narration_tts: ${sentences.length} sentences, ~${baseGap}s (Â±${jitter}) pausesâ€¦`);
 
-    // PARALLEL synthesis (order preserved) — sequential per-sentence HTTP calls
-    // made TTS the slowest non-encode stage (~140 calls × ~5s). Pool kept SMALL:
-    // Fish Audio enforces a plan-level CONCURRENCY limit (pool of 6 → instant
-    // 429 "exceeded your current concurrency limit" → failed render).
+    // PARALLEL synthesis (order preserved) â€” sequential per-sentence HTTP calls
+    // made TTS the slowest non-encode stage (~140 calls Ã— ~5s). Pool kept SMALL:
+    // Fish Audio enforces a plan-level CONCURRENCY limit (pool of 6 â†’ instant
+    // 429 "exceeded your current concurrency limit" â†’ failed render).
     const ttsPool = Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2));
     const parts = await mapPool(sentences, ttsPool, async (s, i) => {
       const bytes = await synthNarration({ text: s, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId });
@@ -465,7 +465,7 @@ export const narrationTts: Block = {
       return { p, dur };
     });
     const partPaths: string[] = parts.map((x) => x.p);
-    // Timings carry the DISPLAY text — audio tags are performed by the voice,
+    // Timings carry the DISPLAY text â€” audio tags are performed by the voice,
     // never shown in captions/quote cards/insert matching.
     const sentenceTimings: { text: string; start: number; end: number }[] = [];
     let cursor = 0;
@@ -497,7 +497,7 @@ export const narrationTts: Block = {
       narrationDurationSec: durationSec,
       narrationLocalPath: local,
       sentenceTimings,
-      // Declared in `produces`, so it must ALWAYS be returned — an empty plan
+      // Declared in `produces`, so it must ALWAYS be returned â€” an empty plan
       // means "no chapter cards". (chapterCards:false channels hit the engine's
       // undefined-produce guard here on their very first render.)
       chapterPlan: [],
@@ -512,7 +512,7 @@ export const stockFootage: Block = {
   produces: ["footageClips"],
   run: async (ctx) => {
     // RENDER-GROUP REUSE: a language sibling reuses the base render's footage from
-    // the durable group bundle (no Pexels query/download/AI-gate — the visuals are
+    // the durable group bundle (no Pexels query/download/AI-gate â€” the visuals are
     // identical across languages; only narration/captions/text differ).
     const reuseKeys = ctx.store["reuseFootageKeys"] as string[] | undefined;
     if (reuseKeys?.length) {
@@ -531,7 +531,7 @@ export const stockFootage: Block = {
         ctx.log(`stock_footage: REUSED ${clips.length} footage clips from base render (no Pexels)`);
         return { footageClips: clips };
       }
-      ctx.log("stock_footage(reuse): no clips fetched — falling back to fresh sourcing");
+      ctx.log("stock_footage(reuse): no clips fetched â€” falling back to fresh sourcing");
     }
     if (!hasPexelsKey()) {
       throw new Error("stock_footage: PEXELS_API_KEY missing (vault service 'pexels')");
@@ -551,9 +551,9 @@ export const stockFootage: Block = {
     const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 120;
     const targetSec = narrationSec + 18; // body must cover narration + ~15s outro
     // Beat-body shows each clip ~SEG seconds, so we need ~targetSec/SEG DISTINCT
-    // clips (not a few long ones) — count coverage at the per-segment rate.
+    // clips (not a few long ones) â€” count coverage at the per-segment rate.
     // SHARED bodySegSeconds keeps this in lockstep with timeline_assemble's
-    // actual cutting (including the Editor cutSheet cadence) — when the editor
+    // actual cutting (including the Editor cutSheet cadence) â€” when the editor
     // cuts at 8s but coverage was credited at 25s/clip, the body looped its
     // whole footage sequence to fill the video.
     const bodyMaxSeg = bodySegSeconds(
@@ -575,10 +575,10 @@ export const stockFootage: Block = {
       .replace(/\s+/g, " ")
       .slice(0, 900);
 
-    // Footage theme: "nature" → ONLY serene nature / landscape / water / ancient
+    // Footage theme: "nature" â†’ ONLY serene nature / landscape / water / ancient
     // ruins (+ slow motion), no people/cities/objects/interiors. Per-channel param.
     const natureMode = (ctx.params["footageTheme"] as string | undefined) === "nature";
-    // A BIG, varied pool of nature/landscape/water/ruins scenes — shuffled per
+    // A BIG, varied pool of nature/landscape/water/ruins scenes â€” shuffled per
     // render and mixed into the queries so videos don't all reuse the same shots.
     const NATURE_POOL = [
       "forest pathway", "misty forest morning", "sunlight through trees", "dense pine forest",
@@ -605,7 +605,7 @@ export const stockFootage: Block = {
     };
 
     // Derive CONCRETE, filmable b-roll queries (abstract topics like philosophy
-    // have no literal stock footage — turn them into visual terms a camera can
+    // have no literal stock footage â€” turn them into visual terms a camera can
     // actually show, so the footage is relevant). Falls back to topic+headings.
     let queries: string[] = [];
     if (hasGeminiKey()) {
@@ -614,15 +614,15 @@ export const stockFootage: Block = {
           `A calm narrated video about "${topic}"${opt(ctx, "niche") ? ` (${opt(ctx, "niche")})` : ""}.` +
           (narrationExcerpt ? `\n\nNarration excerpt:\n"${narrationExcerpt}"\n\n` : " ") +
           `Give ${nQueries} CONCRETE, VISUALLY DISTINCT stock-footage search queries (2-4 words each) ` +
-          `that are STRICTLY serene NATURE / LANDSCAPE / WATER shots — many in SLOW MOTION. ` +
+          `that are STRICTLY serene NATURE / LANDSCAPE / WATER shots â€” many in SLOW MOTION. ` +
           `Allowed only: forest pathways, misty forest, tall trees, mountains, valleys, rivers, streams, ` +
           `waterfalls, ocean waves, lakes, rain, mist/fog, clouds, sky, sunrise, sunset, fields, meadows, ` +
-          `snow, deserts, autumn leaves — AND ancient Greek/Roman ruins, weathered stone temples, columns. ` +
+          `snow, deserts, autumn leaves â€” AND ancient Greek/Roman ruins, weathered stone temples, columns. ` +
           `Add "slow motion" or "cinematic" to many. ` +
           `ABSOLUTELY NO people, faces, figures, hands, MODERN cities, streets, modern buildings, interiors, ` +
           `rooms, objects, books, candles, vehicles, or text. ONLY natural outdoor landscapes, water, and ` +
           `ancient ruins. Vary the scenes so no two look alike. Return STRICT JSON {"queries":string[]}.`;
-        // Channel Style-DNA visual world — the queries must live in IT, not in a
+        // Channel Style-DNA visual world â€” the queries must live in IT, not in a
         // generic "calm b-roll" space (this prompt previously hardcoded stoic
         // guidance for every channel).
         const dnaV = ctx.store["styleDNA"] as
@@ -644,9 +644,9 @@ export const stockFootage: Block = {
           dnaAvoidClause +
           `Give ${nQueries} CONCRETE, filmable, VISUALLY DISTINCT stock-footage search ` +
           `queries (2-4 words each, things a camera can literally show) whose MOOD and SUBJECT ` +
-          `match this specific narration — not generic decorative b-roll. Every query must connect ` +
+          `match this specific narration â€” not generic decorative b-roll. Every query must connect ` +
           `to the video's actual themes and emotional tone AND fit the channel's visual world above. ` +
-          `Vary scenes/subjects/settings so no two look alike. Avoid abstract words and avoid clichéd ` +
+          `Vary scenes/subjects/settings so no two look alike. Avoid abstract words and avoid clichÃ©d ` +
           `filler like a random park bench. Return STRICT JSON {"queries":string[]}.`;
         const out = await geminiJson<{ queries?: string[] }>({
           prompt: natureMode ? naturePrompt : defaultPrompt,
@@ -663,7 +663,7 @@ export const stockFootage: Block = {
     }
     // In nature mode, BLEND in a shuffled slice of the big nature pool so every
     // render pulls a different mix of scenes (combined with the cross-video ledger
-    // → videos don't all look the same).
+    // â†’ videos don't all look the same).
     if (natureMode) {
       queries = [...queries, ...shuffle(NATURE_POOL)]
         .filter((q, i, a) => a.indexOf(q) === i)
@@ -679,8 +679,8 @@ export const stockFootage: Block = {
     }
     // Cinematographer (crew) brief: its concrete, on-vibe queries LEAD the pool so
     // the look matches the channel; the generated/nature queries backfill coverage.
-    // DEFENSE: DP agents sometimes return full scene descriptions — a 15-word
-    // query gets zero Pexels hits — so overlong queries are compressed to their
+    // DEFENSE: DP agents sometimes return full scene descriptions â€” a 15-word
+    // query gets zero Pexels hits â€” so overlong queries are compressed to their
     // first few meaningful words.
     const STOP = new Set(["a","an","the","of","with","and","or","in","on","at","to","for","over","under","by"]);
     const compressQuery = (q: string): string => {
@@ -701,7 +701,7 @@ export const stockFootage: Block = {
     // Pick the BEST + RELEVANT clip per query (not the first): rank candidates
     // by technical score (v1), dedup across queries, then a strict Gemini-vision
     // relevance gate (judged against the video's THEME, not the query string).
-    // Clips that miss the gate are NOT forced into the timeline — they go to a
+    // Clips that miss the gate are NOT forced into the timeline â€” they go to a
     // ranked `spare` pool used only at the end if coverage falls short. This
     // stops off-topic filler (the "random bench") from appearing.
     const tmp = await makeRunTempDir(ctx.runId);
@@ -723,9 +723,9 @@ export const stockFootage: Block = {
       for (const id of JSON.parse(Buffer.from(raw).toString("utf8")) as string[]) usedIds.add(id);
       ctx.log(`stock_footage: ${usedIds.size} clips in cross-video ledger (will be skipped)`);
     } catch {
-      /* no ledger yet — first run for this channel */
+      /* no ledger yet â€” first run for this channel */
     }
-    const pathId = new Map<string, string>(); // local path → clip id (for picked-clip recording)
+    const pathId = new Map<string, string>(); // local path â†’ clip id (for picked-clip recording)
     const pickedIds = new Set<string>(); // IN-VIDEO dedup: never download the same source video twice this render
     let dl = 0;
     let gated = 0;
@@ -767,7 +767,7 @@ export const stockFootage: Block = {
             : `A video about "${topic}"${niche ? ` (${niche})` : ""}.` +
               (narrationExcerpt ? ` Narration: "${narrationExcerpt.slice(0, 400)}".` : "") +
               (() => {
-                // The channel's own visual world/avoid-list judges fit — the old
+                // The channel's own visual world/avoid-list judges fit â€” the old
                 // prompt hardcoded Stoicism examples for every channel.
                 const d = ctx.store["styleDNA"] as
                   | { setting?: string; visualAvoid?: string[] }
@@ -779,7 +779,7 @@ export const stockFootage: Block = {
               })() +
               (() => {
                 const hh = ((ctx.store["healHints"] as Record<string, string[]> | undefined)?.["stock_footage"] ?? []);
-                return hh.length ? ` A previous attempt was REJECTED by QA for: ${hh.join("; ")} — be stricter about that.` : "";
+                return hh.length ? ` A previous attempt was REJECTED by QA for: ${hh.join("; ")} â€” be stricter about that.` : "";
               })() +
               ` This frame is a candidate b-roll clip (search query "${q}"). Judge whether it ` +
               `CLEARLY fits the subject and emotional mood of THIS video AND does not contradict its ` +
@@ -799,11 +799,11 @@ export const stockFootage: Block = {
           if (typeof v.score === "number") score = v.score;
           if (typeof v.relevant === "boolean") relevant = v.relevant;
         } catch (e) {
-          // Vision failed → REJECT to the spare pool (used only on coverage
+          // Vision failed â†’ REJECT to the spare pool (used only on coverage
           // shortfall). Accepting unseen clips is how off-topic footage shipped.
           relevant = false;
           score = 0;
-          ctx.log(`stock_footage: relevance vision failed for "${q}" — clip sent to spare pool: ${e instanceof Error ? e.message : e}`);
+          ctx.log(`stock_footage: relevance vision failed for "${q}" â€” clip sent to spare pool: ${e instanceof Error ? e.message : e}`);
         }
         if (relevant && score >= RELEVANCE_MIN) {
           clips.push(local);
@@ -816,7 +816,7 @@ export const stockFootage: Block = {
     };
 
     // PARALLEL sourcing in batches of 6 (search+download+vision-gate per query
-    // was fully sequential — the slowest stage of every narrated render).
+    // was fully sequential â€” the slowest stage of every narrated render).
     // Coverage is re-checked between batches; slight overshoot is fine.
     for (let b = 0; b < queries.length && coveredSec < targetSec; b += 6) {
       const batch = queries.slice(b, b + 6);
@@ -836,7 +836,7 @@ export const stockFootage: Block = {
       }
     }
 
-    // Coverage shortfall → fill with EVERGREEN, on-theme contemplative b-roll
+    // Coverage shortfall â†’ fill with EVERGREEN, on-theme contemplative b-roll
     // (always safe for stoic/philosophy/calm content) BEFORE ever touching the
     // rejected off-topic spares. This keeps footage on-message even when the
     // cross-video ledger has thinned the primary pool.
@@ -858,16 +858,16 @@ export const stockFootage: Block = {
           /* skip */
         }
       }
-      ctx.log(`stock_footage: evergreen fallback → ${coveredSec.toFixed(0)}s/${targetSec.toFixed(0)}s`);
+      ctx.log(`stock_footage: evergreen fallback â†’ ${coveredSec.toFixed(0)}s/${targetSec.toFixed(0)}s`);
     }
 
-    // RELAXED PASS — if we STILL can't cover the (long) video from the fresh pool,
+    // RELAXED PASS â€” if we STILL can't cover the (long) video from the fresh pool,
     // allow reusing clips from PAST videos (the cross-video ledger is starving the
     // pool). Covering the length without an in-video loop matters more than
     // perfect cross-video uniqueness. Re-run all queries with the ledger ignored.
     if (coveredSec < targetSec) {
       allowReuse = true;
-      ctx.log(`stock_footage: still ${coveredSec.toFixed(0)}/${targetSec.toFixed(0)}s — relaxing cross-video dedup to cover length`);
+      ctx.log(`stock_footage: still ${coveredSec.toFixed(0)}/${targetSec.toFixed(0)}s â€” relaxing cross-video dedup to cover length`);
       for (const q of [...queries, ...SAFE_FALLBACK]) {
         if (coveredSec >= targetSec || clips.length >= 160) break;
         try {
@@ -878,7 +878,7 @@ export const stockFootage: Block = {
         }
       }
       allowReuse = false;
-      ctx.log(`stock_footage: after relaxed pass → ${coveredSec.toFixed(0)}/${targetSec.toFixed(0)}s, ${clips.length} clips`);
+      ctx.log(`stock_footage: after relaxed pass â†’ ${coveredSec.toFixed(0)}/${targetSec.toFixed(0)}s, ${clips.length} clips`);
     }
     // Absolute last resort: best-scored rejected spares (rare; logged).
     if (coveredSec < targetSec && spare.length > 0) {
@@ -891,7 +891,7 @@ export const stockFootage: Block = {
         usedPaths.add(s.path);
         coveredSec += Math.min(s.dur, PER_CLIP);
       }
-      ctx.log(`stock_footage: LAST-RESORT spare fill (footage pool thin) → ${coveredSec.toFixed(0)}s`);
+      ctx.log(`stock_footage: LAST-RESORT spare fill (footage pool thin) â†’ ${coveredSec.toFixed(0)}s`);
     }
     if (clips.length === 0) {
       throw new Error("stock_footage: no clips found for any query");
@@ -902,7 +902,7 @@ export const stockFootage: Block = {
       for (const p of clips) { const id = pathId.get(p); if (id) usedIds.add(id); }
       const ledger = Array.from(usedIds).slice(-3000);
       await putObject(ledgerKey, Buffer.from(JSON.stringify(ledger), "utf8"), { contentType: "application/json" });
-      ctx.log(`stock_footage: ledger updated → ${ledger.length} used clip ids`);
+      ctx.log(`stock_footage: ledger updated â†’ ${ledger.length} used clip ids`);
     } catch (e) {
       ctx.log(`stock_footage: ledger save failed (non-fatal): ${e instanceof Error ? e.message : e}`);
     }
@@ -919,7 +919,7 @@ export const entityImagery: Block = {
     const clips: string[] = [];
     const attributions: string[] = []; // license ledger (Wikimedia credits)
     if (!hasGeminiKey()) {
-      ctx.log("entity_imagery: no Gemini key — skipping");
+      ctx.log("entity_imagery: no Gemini key â€” skipping");
       return { entityClips: clips, attributions };
     }
     const narration = str(ctx, "narrationText");
@@ -971,17 +971,17 @@ export const entityImagery: Block = {
             });
             const v = parseJsonLoose<{ match?: boolean; reason?: string }>(raw);
             if (v.match === false) {
-              ctx.log(`entity_imagery: image for "${e}" did NOT verify (${v.reason ?? ""}) — skipping`);
+              ctx.log(`entity_imagery: image for "${e}" did NOT verify (${v.reason ?? ""}) â€” skipping`);
               continue;
             }
           } catch {
-            /* verification failed → keep the image rather than drop the entity */
+            /* verification failed â†’ keep the image rather than drop the entity */
           }
         }
         const clip = await kenBurns(img, join(tmp, `entity_${i}.mp4`), 5, W, H);
         clips.push(clip);
         if (wi.attribution) attributions.push(`${e}: ${wi.attribution}`);
-        ctx.log(`entity_imagery: "${e}" → verified Ken Burns clip`);
+        ctx.log(`entity_imagery: "${e}" â†’ verified Ken Burns clip`);
         i++;
       } catch (err) {
         ctx.log(`entity_imagery: "${e}" failed (${err instanceof Error ? err.message : err})`);
@@ -1000,15 +1000,15 @@ export const introCard: Block = {
     // Universal Remotion title card (cloud-wired): renders the in-app TitleCard
     // composition (src/remotion) in-process via headless Chromium. It is
     // PREPENDED by the assembler so every video opens with a branded card over a
-    // music-only intro (no narration yet). Guarded — a render failure degrades to
+    // music-only intro (no narration yet). Guarded â€” a render failure degrades to
     // no-card (introApplied:false) and NEVER blocks the video.
-    // Card shows the VIDEO's subject (topic) — NOT the channel name (that belongs
+    // Card shows the VIDEO's subject (topic) â€” NOT the channel name (that belongs
     // on the channel page, not stamped on every intro). Keep it SHORT: take the
-    // lead clause (before a ':' / '—' / '-') and cap length so it fits the card.
+    // lead clause (before a ':' / 'â€”' / '-') and cap length so it fits the card.
     const rawTopic = (opt(ctx, "topic") ?? (ctx.store["topic"] as string | undefined) ?? "").trim();
-    let cardTitle = rawTopic.split(/\s*[:—–-]\s*/)[0].trim();
+    let cardTitle = rawTopic.split(/\s*[:â€”â€“-]\s*/)[0].trim();
     // The card wraps to two lines comfortably at ~60 chars. Trim on a word
-    // boundary AND drop a dangling article/preposition — the old 46-char cut
+    // boundary AND drop a dangling article/preposition â€” the old 46-char cut
     // produced "The Decades When Doing Nothing Was the" (QA-flagged, rightly).
     if (cardTitle.length > 60) cardTitle = cardTitle.slice(0, 60).replace(/\s+\S*$/, "").trim();
     cardTitle = cardTitle.replace(/\s+(the|a|an|of|to|in|on|for|and|or|was|is|with|by)$/i, "").trim() || cardTitle;
@@ -1021,7 +1021,7 @@ export const introCard: Block = {
     try {
       const tmp = await makeRunTempDir(ctx.runId);
       const out = join(tmp, "titlecard.mp4");
-      // BRAND bg: the channel's own avatar (its iconic motif) at card opacity —
+      // BRAND bg: the channel's own avatar (its iconic motif) at card opacity â€”
       // every channel used to open on the same baked stoic bust.
       let bgImagePath = join(process.cwd(), "src/assets/intro_bust.jpg");
       const avatarKey = ctx.store["channelAvatarKey"] as string | undefined;
@@ -1052,7 +1052,7 @@ export const introCard: Block = {
       };
     } catch (e) {
       ctx.log(
-        `intro_card: !!! title-card render FAILED (${e instanceof Error ? e.message : e}) — continuing without a card`,
+        `intro_card: !!! title-card render FAILED (${e instanceof Error ? e.message : e}) â€” continuing without a card`,
       );
       return { introCardPath: "", introApplied: false, introSec: 0, introMode: "none" };
     }
@@ -1094,7 +1094,7 @@ export const quoteOverlaysBlock: Block = {
     const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
     const W = portrait ? 1080 : 1920;
     const H = portrait ? 1920 : 1080;
-    // A quote card must NEVER overlap a chapter card — keep a gap on both sides.
+    // A quote card must NEVER overlap a chapter card â€” keep a gap on both sides.
     const cardWins = chapterCardWindows(
       ctx.store["chapterPlan"] as { kind: string; durSec: number; heading?: string }[] | undefined,
       introSec,
@@ -1112,9 +1112,9 @@ export const quoteOverlaysBlock: Block = {
         prompt:
           `From these narration sentences, choose the ${maxN} MOST quotable, aphoristic, or emotionally ` +
           `striking ones to show as on-screen quote cards. Pick EXACTLY ${maxN} (or all available if fewer than ` +
-          `${maxN} sentences) — always rank and return the strongest ${maxN}; do NOT return an empty list. ` +
+          `${maxN} sentences) â€” always rank and return the strongest ${maxN}; do NOT return an empty list. ` +
           `Favour the punchiest, most memorable lines and spread them across the video. ` +
-          `Each pick MUST be a COMPLETE, MEANINGFUL SENTENCE (roughly 8-22 words) that stands on its own — ` +
+          `Each pick MUST be a COMPLETE, MEANINGFUL SENTENCE (roughly 8-22 words) that stands on its own â€” ` +
           `NEVER a single word, a bare term, or a short fragment. ` +
           `For each chosen, list 1-3 important words to HIGHLIGHT in yellow (each must literally appear in that sentence). ` +
           `Return STRICT JSON {"quotes":[{"index":number,"highlights":string[]}]}.\n\n` +
@@ -1132,9 +1132,9 @@ export const quoteOverlaysBlock: Block = {
 
     // GUARANTEE the explicit philosopher quotes get on-screen cards: prepend any
     // sentence that names a philosopher AND reads as a quotation. Dedup by index,
-    // keep within maxN. (script_gen weaves in ≥2 attributed quotes.)
+    // keep within maxN. (script_gen weaves in â‰¥2 attributed quotes.)
     const PHILO = /\b(Marcus Aurelius|Aurelius|Seneca|Epictetus|Zeno|Chrysippus|Cato|Diogenes|Socrates|Plato|Aristotle)\b/;
-    const QUOTED = /["“”']|(\b(said|wrote|words|reminds us|put it|taught)\b)/i;
+    const QUOTED = /["â€œâ€']|(\b(said|wrote|words|reminds us|put it|taught)\b)/i;
     const philoIdx = timings
       .map((t, i) => ({ i, t }))
       .filter(({ t }) => PHILO.test(t.text) && QUOTED.test(t.text))
@@ -1146,7 +1146,7 @@ export const quoteOverlaysBlock: Block = {
     // sort by time so overlays appear in narration order, then cap
     picks = picks.sort((a, b) => a.index - b.index).slice(0, Math.max(maxN, Math.min(philoIdx.length, 4)));
 
-    // FLOOR GUARANTEE — quote cards (with their gradual blur) must reliably appear,
+    // FLOOR GUARANTEE â€” quote cards (with their gradual blur) must reliably appear,
     // not "randomly get skipped" when the Director under-picks. If we're short of
     // maxN, backfill with heuristically-quotable sentences (6-22 words, not a
     // transitional/question line) spread evenly across the video.
@@ -1176,7 +1176,7 @@ export const quoteOverlaysBlock: Block = {
     }
 
     // Show only the QUOTED span when present (e.g. just the words inside the
-    // quotation marks, not the "As Seneca wrote, …. This isn't…" wrapper), and
+    // quotation marks, not the "As Seneca wrote, â€¦. This isn'tâ€¦" wrapper), and
     // GATE quotes that are too long to fit a card legibly.
     const MAX_QUOTE_CHARS = Number(ctx.params["maxQuoteChars"] ?? 140);
     const MAX_QUOTE_WORDS = Number(ctx.params["maxQuoteWords"] ?? 24);
@@ -1184,16 +1184,16 @@ export const quoteOverlaysBlock: Block = {
     const MIN_QUOTE_WORDS = Number(ctx.params["minQuoteWords"] ?? 6);
     const extractQuote = (s: string): string => {
       // Prefer DOUBLE quotes (apostrophes inside contractions don't interfere).
-      let m = s.match(/["“”]\s*([^"“”]{6,}?)\s*["“”]/);
+      let m = s.match(/["â€œâ€]\s*([^"â€œâ€]{6,}?)\s*["â€œâ€]/);
       if (m) return m[1].trim();
       // SINGLE quotes only when used as real quote marks (boundary-delimited), so
       // an apostrophe in "It's" never splits the quote mid-word.
-      m = s.match(/(?:^|[\s,:—-])['‘]\s*(.+?)\s*['’](?=[\s.,!?;:)]|$)/);
+      m = s.match(/(?:^|[\s,:â€”-])['â€˜]\s*(.+?)\s*['â€™](?=[\s.,!?;:)]|$)/);
       if (m) return m[1].trim();
       return s.trim();
     };
 
-    // PHASE 1 — build timed candidates (gated for length + synced to speech).
+    // PHASE 1 â€” build timed candidates (gated for length + synced to speech).
     type Cand = { idx: number; display: string; words: number; startSec: number; dur: number; highlights: string[] };
     const cands: Cand[] = [];
     for (const p of picks) {
@@ -1201,11 +1201,11 @@ export const quoteOverlaysBlock: Block = {
       const display = extractQuote(t.text);
       const words = display.split(/\s+/).filter(Boolean).length;
       if (words < MIN_QUOTE_WORDS) {
-        ctx.log(`quote_overlays: GATED (too short: ${words} words, need ≥${MIN_QUOTE_WORDS}) "${display.slice(0, 40)}…"`);
+        ctx.log(`quote_overlays: GATED (too short: ${words} words, need â‰¥${MIN_QUOTE_WORDS}) "${display.slice(0, 40)}â€¦"`);
         continue;
       }
       if (display.length > MAX_QUOTE_CHARS || words > MAX_QUOTE_WORDS) {
-        ctx.log(`quote_overlays: GATED (too long: ${display.length} chars / ${words} words) "${display.slice(0, 40)}…"`);
+        ctx.log(`quote_overlays: GATED (too long: ${display.length} chars / ${words} words) "${display.slice(0, 40)}â€¦"`);
         continue;
       }
       // SYNC the card to when the QUOTE is actually spoken (it's spoken partway
@@ -1219,7 +1219,7 @@ export const quoteOverlaysBlock: Block = {
       const dur = Math.min(9.5, Math.max(4.5, Math.max(words * 0.38 + 1.6, spokenDur + 0.8)));
       const startSec = Math.max(introSec + t.start, cardStart);
       if (clashesCard(startSec, startSec + dur)) {
-        ctx.log(`quote_overlays: skipped (overlaps a chapter card) "${display.slice(0, 36)}…"`);
+        ctx.log(`quote_overlays: skipped (overlaps a chapter card) "${display.slice(0, 36)}â€¦"`);
         continue;
       }
       cands.push({
@@ -1232,8 +1232,8 @@ export const quoteOverlaysBlock: Block = {
       });
     }
 
-    // PHASE 2 — enforce a MINIMUM GAP between cards so they never overlap or
-    // crowd each other (≥5s between the end of one and the start of the next).
+    // PHASE 2 â€” enforce a MINIMUM GAP between cards so they never overlap or
+    // crowd each other (â‰¥5s between the end of one and the start of the next).
     const MIN_GAP = Number(ctx.params["minQuoteGapSec"] ?? 5);
     cands.sort((a, b) => a.startSec - b.startSec);
     const spaced: Cand[] = [];
@@ -1243,19 +1243,19 @@ export const quoteOverlaysBlock: Block = {
         spaced.push(c);
         lastEnd = c.startSec + c.dur;
       } else {
-        ctx.log(`quote_overlays: dropped (needs ≥${MIN_GAP}s gap) "${c.display.slice(0, 30)}…"`);
+        ctx.log(`quote_overlays: dropped (needs â‰¥${MIN_GAP}s gap) "${c.display.slice(0, 30)}â€¦"`);
       }
     }
 
-    // PHASE 2b — REFILL: if spacing left us under target (Director picks clustered
+    // PHASE 2b â€” REFILL: if spacing left us under target (Director picks clustered
     // and got dropped), add well-separated filler quotes from OTHER quotable
-    // sentences so cards reliably reach maxN — they must not "randomly" thin out.
+    // sentences so cards reliably reach maxN â€” they must not "randomly" thin out.
     // attributedOnly channels SKIP the refill: a quote card is an attributed
-    // event ("Buffett said…"), never a rhetorical script line dressed as one.
+    // event ("Buffett saidâ€¦"), never a rhetorical script line dressed as one.
     const attributedOnly = ctx.params["attributedOnly"] === true;
     const TARGET2 = Math.min(maxN, timings.length);
     if (attributedOnly && spaced.length < TARGET2) {
-      ctx.log(`quote_overlays: attributedOnly — ${spaced.length}/${TARGET2} attributed quotes, refill skipped (quotes are events, not wallpaper)`);
+      ctx.log(`quote_overlays: attributedOnly â€” ${spaced.length}/${TARGET2} attributed quotes, refill skipped (quotes are events, not wallpaper)`);
     }
     if (!attributedOnly && spaced.length < TARGET2) {
       const usedIdx = new Set(spaced.map((c) => c.idx));
@@ -1290,25 +1290,25 @@ export const quoteOverlaysBlock: Block = {
         if (spaced.length >= TARGET2) break;
         if (fits(f)) {
           spaced.push(f);
-          ctx.log(`quote_overlays: refilled "${f.display.slice(0, 30)}…" @ ${f.startSec.toFixed(1)}s (reach ${spaced.length}/${TARGET2})`);
+          ctx.log(`quote_overlays: refilled "${f.display.slice(0, 30)}â€¦" @ ${f.startSec.toFixed(1)}s (reach ${spaced.length}/${TARGET2})`);
         }
       }
       spaced.sort((a, b) => a.startSec - b.startSec);
     }
 
-    // PHASE 3 — render the spaced selection.
+    // PHASE 3 â€” render the spaced selection.
     const tmp = await makeRunTempDir(ctx.runId);
     for (const c of spaced) {
       try {
         const path = join(tmp, `quote_${c.idx}.webm`);
         await renderQuoteOverlay({ quote: c.display, highlights: c.highlights, outPath: path, durationSec: c.dur, width: W, height: H });
         out.push({ path, startSec: c.startSec, durSec: c.dur, text: c.display, highlights: c.highlights, width: W, height: H });
-        ctx.log(`quote_overlays: "${c.display.slice(0, 50)}…" @ ${c.startSec.toFixed(1)}s (${c.words}w, ${c.dur.toFixed(1)}s)`);
+        ctx.log(`quote_overlays: "${c.display.slice(0, 50)}â€¦" @ ${c.startSec.toFixed(1)}s (${c.words}w, ${c.dur.toFixed(1)}s)`);
       } catch (e) {
         ctx.log(`quote_overlays: render failed for #${c.idx} (${e instanceof Error ? e.message : e})`);
       }
     }
-    ctx.log(`quote_overlays: ${out.length} overlay(s) ready (≥${MIN_GAP}s apart)`);
+    ctx.log(`quote_overlays: ${out.length} overlay(s) ready (â‰¥${MIN_GAP}s apart)`);
     return { quoteOverlays: out };
   },
 };
@@ -1363,8 +1363,8 @@ export const timelineAssemble: Block = {
 
     const tmp = await makeRunTempDir(ctx.runId);
 
-    // SURGICAL HEAL — when the self-healer re-runs this block for an
-    // overlay/caption-class defect (cards, captions, inserts — anything the
+    // SURGICAL HEAL â€” when the self-healer re-runs this block for an
+    // overlay/caption-class defect (cards, captions, inserts â€” anything the
     // finishing pass owns), re-finish from the persisted PRE-OVERLAY video
     // instead of rebuilding the whole body: a ~40-min full re-compose becomes a
     // single ~4-min finishing encode. Footage/black/dead-air defects still get
@@ -1382,18 +1382,18 @@ export const timelineAssemble: Block = {
         const prePath = join(tmp, "pre_overlay.mp4");
         await writeBytes(prePath, preBytes);
         const preDur = (await probe(prePath)).durationSec || videoSec;
-        ctx.log(`timeline_assemble: SURGICAL HEAL — re-finishing from pre-overlay (${preDur.toFixed(1)}s) instead of full rebuild. Hints: ${healHints.slice(0, 160)}`);
+        ctx.log(`timeline_assemble: SURGICAL HEAL â€” re-finishing from pre-overlay (${preDur.toFixed(1)}s) instead of full rebuild. Hints: ${healHints.slice(0, 160)}`);
         return await finishFromComposed(ctx, prePath, tmp, { W, H, introSec, videoSec: preDur });
       } catch (e) {
-        ctx.log(`timeline_assemble: surgical heal unavailable (${e instanceof Error ? e.message : e}) — full rebuild`);
+        ctx.log(`timeline_assemble: surgical heal unavailable (${e instanceof Error ? e.message : e}) â€” full rebuild`);
       }
     }
 
     // Beat-aligned body: clips cut on sentence beats (changes with the narration,
-    // no global loop), built one clip per pass (memory-flat — concatScaled OOM'd
+    // no global loop), built one clip per pass (memory-flat â€” concatScaled OOM'd
     // with many clips). Covers narration+tail (+buffer) so the composer won't loop.
     const beats = (ctx.store["sentenceTimings"] as { end: number }[] | undefined)?.map((s) => s.end) ?? [];
-    // EDITOR BRAIN: the Editor crew's cutSheet drives the cut cadence — a
+    // EDITOR BRAIN: the Editor crew's cutSheet drives the cut cadence â€” a
     // channel cut at 6 cuts/min gets ~10s segments, a contemplative one at
     // 2 cuts/min holds shots ~30s. Same shared calc as stock_footage's
     // coverage credit so the pool always covers the body at this cadence.
@@ -1403,7 +1403,7 @@ export const timelineAssemble: Block = {
     const bodyMaxSeg = bodySegSeconds(narrationSec, cutSheet);
     ctx.log(`timeline_assemble: per-clip screen time ${bodyMaxSeg}s${cutSheet?.sections?.length ? " (editor cutSheet cadence)" : ""}`);
 
-    // CHAPTER MODE — narration_tts emitted a chapterPlan (alternating card/footage
+    // CHAPTER MODE â€” narration_tts emitted a chapterPlan (alternating card/footage
     // windows). Render each heading as a card and splice it into the body so it
     // shows WHILE the heading is read out, then fades and footage resumes.
     const chapterPlan = ctx.store["chapterPlan"] as
@@ -1411,7 +1411,7 @@ export const timelineAssemble: Block = {
       | undefined;
     let concat: string;
     // BRAND bg for chapter + outro cards: the channel's avatar, not the baked
-    // stoic bust (the outro card was the last bust hold-out — seen live on the
+    // stoic bust (the outro card was the last bust hold-out â€” seen live on the
     // Investory trial render).
     let brandCardBg = join(process.cwd(), "src/assets/intro_bust.jpg");
     const brandAvatarKey = ctx.store["channelAvatarKey"] as string | undefined;
@@ -1422,7 +1422,7 @@ export const timelineAssemble: Block = {
     }
 
     if (chapterPlan && chapterPlan.length > 0) {
-      ctx.log(`timeline_assemble: chapter mode — ${chapterPlan.filter((w) => w.kind === "card").length} chapter cards`);
+      ctx.log(`timeline_assemble: chapter mode â€” ${chapterPlan.filter((w) => w.kind === "card").length} chapter cards`);
       const chapBg = brandCardBg;
       let chapNo = 0;
       const windows: { kind: "footage" | "card"; durSec: number; cardPath?: string }[] = [];
@@ -1443,7 +1443,7 @@ export const timelineAssemble: Block = {
               chapter: true, // gently fade in from black / out to black on both ends
             });
           } catch (e) {
-            cardPath = undefined; // card render failed → fall back to footage for this window
+            cardPath = undefined; // card render failed â†’ fall back to footage for this window
             ctx.log(`timeline_assemble: chapter card ${chapNo} render failed: ${e instanceof Error ? e.message : e}`);
           }
           windows.push({ kind: cardPath ? "card" : "footage", durSec: w.durSec, cardPath });
@@ -1461,7 +1461,7 @@ export const timelineAssemble: Block = {
         maxSegSec: bodyMaxSeg,
       });
     } else {
-      ctx.log(`timeline_assemble: beat-body from ${clips.length} clips (${footage.length} footage + ${entity.length} entity) @ ${W}x${H}…`);
+      ctx.log(`timeline_assemble: beat-body from ${clips.length} clips (${footage.length} footage + ${entity.length} entity) @ ${W}x${H}â€¦`);
       concat = await assembleBeatBody({
         clipPaths: clips,
         outPath: join(tmp, "body.mp4"),
@@ -1490,7 +1490,7 @@ export const timelineAssemble: Block = {
     }
 
     ctx.log(
-      `timeline_assemble: compose intro ${introSec}s + narration ${narrationSec}s + ${tailSec}s tail → ${videoSec}s…`,
+      `timeline_assemble: compose intro ${introSec}s + narration ${narrationSec}s + ${tailSec}s tail â†’ ${videoSec}sâ€¦`,
     );
     const out = join(tmp, "video.mp4");
     await composeWithIntro({
@@ -1506,14 +1506,14 @@ export const timelineAssemble: Block = {
       audioFadeOutSec,
       width: W,
       height: H,
-      // music bed a further 5% quieter (intro 0.54→0.513, under-voice 0.108→0.1026)
+      // music bed a further 5% quieter (intro 0.54â†’0.513, under-voice 0.108â†’0.1026)
       introMusicVol: Number(ctx.params["introMusicVol"] ?? 0.513),
       bodyMusicVol: Number(ctx.params["bodyMusicVol"] ?? 0.1026),
       // slower, gentler duck into/out of the narration bed
       musicDuckRampSec: Number(ctx.params["musicDuckRampSec"] ?? 4),
     });
 
-    // DEFINED OUTRO — crossfade the footage into an outro card (the script's
+    // DEFINED OUTRO â€” crossfade the footage into an outro card (the script's
     // closing line + channel sign-off over the bust, fading to black) across the
     // tail, so the video ends on a deliberate beat timed to the narration's end
     // rather than footage drifting into a fade.
@@ -1521,7 +1521,7 @@ export const timelineAssemble: Block = {
     if (tailSec >= 2) {
       try {
         const sc = ctx.store["script"] as { closingLine?: string } | undefined;
-        // Neutral fallback — "Master your mind." was a stoic-channel default
+        // Neutral fallback â€” "Master your mind." was a stoic-channel default
         // that leaked onto every channel without a closingLine.
         const closing = (sc?.closingLine || "").trim() || "Until next time.";
         const chName = (ctx.store["channelName"] as string | undefined) ?? "";
@@ -1539,7 +1539,7 @@ export const timelineAssemble: Block = {
         const withOutro = join(tmp, "video_outro.mp4");
         // Anchor the outro to the ACTUAL composed-body duration (probe it), NOT
         // introSec+narrationSec. In chapter mode the chapter cards add time, so that
-        // computed offset drifts EARLY — it was dropping the outro mid-video (~52s)
+        // computed offset drifts EARLY â€” it was dropping the outro mid-video (~52s)
         // and overlaying the Chapter-2 card (the "missing chapter"). Probing the real
         // body length makes the outro always land on the true tail, in every mode.
         const bodyDur = (await probe(out)).durationSec || introSec + narrationSec + tailSec;
@@ -1565,7 +1565,7 @@ export const timelineAssemble: Block = {
  * captions + composite every overlay card in ONE filter graph / ONE x264
  * encode, persist final + pre-overlay videos, return the block patch. The old
  * sequence (caption burn + one full re-encode PER overlay) cost 2 quotes +
- * 3 inserts = 6 full-length passes on a 14-min video — the dominating
+ * 3 inserts = 6 full-length passes on a 14-min video â€” the dominating
  * assembly cost. Falls back to the proven sequential path on any failure.
  */
 async function finishFromComposed(
@@ -1588,7 +1588,7 @@ async function finishFromComposed(
       try {
         const pad = 0.2;
         const qWindows = qoForWindows.map((q) => [q.startSec - pad, q.startSec + q.durSec + pad] as [number, number]);
-        // Hide captions only while the chapter HEADING is actually read — NOT the
+        // Hide captions only while the chapter HEADING is actually read â€” NOT the
         // 3s silent pre/post gaps (no captions there anyway). Insetting by the
         // gaps stops the wide window from clipping adjacent narration captions.
         const preGap = Number(ctx.params["chapterPreSec"] ?? 3);
@@ -1618,7 +1618,7 @@ async function finishFromComposed(
   let insertsApplied = 0;
   const overlays = ctx.store["quoteOverlays"] as QuoteOverlaySpec[] | undefined;
   // Script-synced data-viz inserts (visual_inserts) ride the SAME alpha-
-  // compositing pass — same spec shape, same blur-under treatment.
+  // compositing pass â€” same spec shape, same blur-under treatment.
   const inserts = (ctx.store["insertOverlays"] as QuoteOverlaySpec[] | undefined) ?? [];
   const allOverlays = [...(overlays ?? []), ...inserts].sort((a, b) => a.startSec - b.startSec);
   if (allOverlays.length > 0 || assPath) {
@@ -1628,9 +1628,9 @@ async function finishFromComposed(
       finalVideo = finished;
       quotesApplied = overlays?.length ?? 0;
       insertsApplied = inserts.length;
-      ctx.log(`timeline_assemble: SINGLE-PASS finished — ${cueCount} caption cue(s) + ${quotesApplied} quote(s) + ${insertsApplied} insert(s) in one encode`);
+      ctx.log(`timeline_assemble: SINGLE-PASS finished â€” ${cueCount} caption cue(s) + ${quotesApplied} quote(s) + ${insertsApplied} insert(s) in one encode`);
     } catch (e) {
-      ctx.log(`timeline_assemble: single-pass finish failed — sequential fallback: ${e instanceof Error ? e.message : e}`);
+      ctx.log(`timeline_assemble: single-pass finish failed â€” sequential fallback: ${e instanceof Error ? e.message : e}`);
       try {
         let base = composed;
         if (preparedCues.length > 0) {
@@ -1680,7 +1680,7 @@ async function finishFromComposed(
     quotesApplied,
     insertsApplied,
     preOverlayKey,
-    // The composed body INCLUDING the outro — overlays re-apply on top of it.
+    // The composed body INCLUDING the outro â€” overlays re-apply on top of it.
     preOverlayLocalPath: composed,
   };
 }
@@ -1697,7 +1697,7 @@ export const lengthCheck: Block = {
       // Hard gate (Stage 4): don't ship an off-spec runtime.
       throw new Error(`length_check FAILED: ${dur}s outside [${min}, ${max}]`);
     }
-    ctx.log(`length_check ok: ${dur}s (bounds ${min}–${max})`);
+    ctx.log(`length_check ok: ${dur}s (bounds ${min}â€“${max})`);
     return { lengthOk: true };
   },
 };
@@ -1715,19 +1715,19 @@ export const captions: Block = {
     const sections = script?.sections ?? [];
 
     // Chapters: derived from script sections + narration timing + intro offset.
-    // No external dependency — works today (lands in the video description).
+    // No external dependency â€” works today (lands in the video description).
     const chaptersText = buildChapters(sections, narrationSec, introSec);
     if (chaptersText) ctx.log(`captions: ${chaptersText.split("\n").length} chapters`);
 
-    // Captions (SRT) — built DETERMINISTICALLY from the ground-truth sentenceTimings
+    // Captions (SRT) â€” built DETERMINISTICALLY from the ground-truth sentenceTimings
     // we already produced in narration_tts (chunked to short cues, shifted by the
     // intro offset). No more re-transcribing our OWN TTS audio via AssemblyAI (an
-    // external poll-until-done service that could time out) — we already know the
+    // external poll-until-done service that could time out) â€” we already know the
     // exact words and their timing. No external dependency, instant, never flaky.
     let captionsKey = "";
     const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
     if (!capTimings?.length) {
-      ctx.log("captions: no sentenceTimings — chapters only");
+      ctx.log("captions: no sentenceTimings â€” chapters only");
       return { captionsKey, chaptersText };
     }
     try {
@@ -1741,7 +1741,7 @@ export const captions: Block = {
       captionsKey = `${ctx.keyPrefix}runs/${ctx.runId}/captions.srt`;
       await putObject(captionsKey, Buffer.from(srt, "utf8"), { contentType: "application/x-subrip" });
       await recordAsset(ctx, "captions", captionsKey, { cues: cues.length });
-      ctx.log(`captions: SRT ${cues.length} cues from ground-truth timings → ${captionsKey}`);
+      ctx.log(`captions: SRT ${cues.length} cues from ground-truth timings â†’ ${captionsKey}`);
     } catch (e) {
       ctx.log(`captions: SRT build failed (continuing, chapters only): ${e instanceof Error ? e.message : e}`);
     }
@@ -1761,7 +1761,7 @@ export const qaVisual: Block = {
     const niche = opt(ctx, "niche");
     const tmp = await makeRunTempDir(ctx.runId);
 
-    // 1) Structural + resolution (hard) — never ship a broken file.
+    // 1) Structural + resolution (hard) â€” never ship a broken file.
     const p = await probe(video);
     if (!p.hasVideo || !p.hasAudio || p.durationSec < 1) {
       throw new Error(
@@ -1772,7 +1772,7 @@ export const qaVisual: Block = {
       throw new Error(`qa_visual FAILED (resolution): ${p.width}x${p.height}`);
     }
 
-    // 2) Script ↔ film length: narration sets the target for narrated archetypes.
+    // 2) Script â†” film length: narration sets the target for narrated archetypes.
     const target = Number(ctx.store["narrationDurationSec"] ?? dur) || dur;
     const ratio = target > 0 ? p.durationSec / target : 1;
     const lengthOk = ratio >= 0.5 && ratio <= 2.0;
@@ -1793,14 +1793,14 @@ export const qaVisual: Block = {
     }
     const video_ = await evaluateVisualFrames(vframes, { topic, niche });
 
-    // 3b) HOLISTIC WATCH — the reliable core of post-render QA. One intent-grounded
+    // 3b) HOLISTIC WATCH â€” the reliable core of post-render QA. One intent-grounded
     // reviewer watches the FULL timeline (guaranteed first frame = title card, last =
     // outro card) instead of 3 blind spot-checks + boolean presence flags. This is
     // what catches the real defects the legacy checks missed: a missing title card,
     // a mid-video / empty outro, a missing or mis-numbered chapter, irrelevant inserts,
     // duplicate clips, and broken/obscured overlays. (The per-frame checks above are
     // now superseded by this; kept only as cheap advisory signals.)
-    // AUDIO QA (advisory, opt-in — the ear vision QA never had): Meta's
+    // AUDIO QA (advisory, opt-in â€” the ear vision QA never had): Meta's
     // audiobox-aesthetics scores production quality/enjoyment of the final
     // audio. Music channels default it on (audio IS the product).
     if (ctx.params["audioQa"] === true) {
@@ -1809,7 +1809,7 @@ export const qaVisual: Block = {
         const tmpA = await makeRunTempDir(ctx.runId);
         const aq = await scoreAudio(video, tmpA, p.durationSec, (m) => ctx.log(`qa_visual: ${m}`));
         if (aq && aq.productionQuality > 0 && aq.productionQuality < 5) {
-          ctx.log(`qa_visual: LOW AUDIO production quality ${aq.productionQuality}/10 (ADVISORY — check the mix/mastering)`);
+          ctx.log(`qa_visual: LOW AUDIO production quality ${aq.productionQuality}/10 (ADVISORY â€” check the mix/mastering)`);
         }
       } catch (e) {
         ctx.log(`qa_visual: audio scoring skipped: ${e instanceof Error ? e.message : e}`);
@@ -1831,8 +1831,8 @@ export const qaVisual: Block = {
             .join("; ")
         : undefined,
     };
-    // NATIVE FULL-WATCH first (sees motion, HEARS music/narration — two-pass
-    // blind-index→compare with a coverage guard); frame sampling is the
+    // NATIVE FULL-WATCH first (sees motion, HEARS music/narration â€” two-pass
+    // blind-indexâ†’compare with a coverage guard); frame sampling is the
     // fallback when the native pass can't complete honestly.
     let watch: Awaited<ReturnType<typeof watchRender>> & {
       moodMatch?: number; pacing?: number; musicFit?: number;
@@ -1845,14 +1845,14 @@ export const qaVisual: Block = {
           (watch.pacing ?? 10) < 6 ? `pacing ${watch.pacing}/10` : "",
           (watch.musicFit ?? 10) < 6 ? `music fit ${watch.musicFit}/10` : "",
         ].filter(Boolean);
-        if (low.length) ctx.log(`qa_visual: LOW FEEL SCORES (ADVISORY): ${low.join(", ")} — ${watch.summary.slice(0, 120)}`);
+        if (low.length) ctx.log(`qa_visual: LOW FEEL SCORES (ADVISORY): ${low.join(", ")} â€” ${watch.summary.slice(0, 120)}`);
       }
     }
     if (!watch) {
       watch = await watchRender(video, p.durationSec, watchIntent, { runId: ctx.runId, log: ctx.log });
     }
 
-    // 4) Thumbnail (vision, separate) — download from R2.
+    // 4) Thumbnail (vision, separate) â€” download from R2.
     let thumbnail: Verdict = { score: 10, issues: [], skipped: true };
     try {
       const tk = opt(ctx, "thumbnailKey");
@@ -1869,7 +1869,7 @@ export const qaVisual: Block = {
       ctx.log(`qa_visual: thumbnail check skipped (${e instanceof Error ? e.message : e})`);
     }
 
-    // 5) Stock-footage appropriateness (vision, separate) — narrated only.
+    // 5) Stock-footage appropriateness (vision, separate) â€” narrated only.
     let footage: Verdict = { score: 10, issues: [], skipped: true };
     const footageClips = ctx.store["footageClips"] as string[] | undefined;
     if (footageClips?.length) {
@@ -1925,7 +1925,7 @@ export const qaVisual: Block = {
 
     // Hard-gate on egregious VISUAL defects (video frames + thumbnail). Footage
     // relevance is enforced at the SOURCE (stock_footage gate + evergreen
-    // fallback), so here it's ADVISORY — a single borderline clip must not nuke a
+    // fallback), so here it's ADVISORY â€” a single borderline clip must not nuke a
     // fully-rendered, paid video. SEO/identity are advisory too (logged).
     const critical: string[] = [];
     for (const [name, v] of [
@@ -1941,7 +1941,7 @@ export const qaVisual: Block = {
     }
     // PRIMARY GATE = DETERMINISTIC validateRender (no LLM, never flaky): it decides
     // the hard pass/fail from signals + plan facts (dead-air/black segments, intro
-    // presence). The Gemini holistic watch is ADVISORY ONLY now — its 503s must never
+    // presence). The Gemini holistic watch is ADVISORY ONLY now â€” its 503s must never
     // block a finished, paid render (that flakiness was the whole problem).
     const rv = await validateRender({
       videoPath: video,
@@ -1955,7 +1955,7 @@ export const qaVisual: Block = {
       critical.push(`render-validate: ${rv.defects.filter((d) => d.severity === "critical").map((d) => d.issue).join(" | ")}`);
     }
     if (watch.ran && watch.verdict === "fail") {
-      // CRITICAL watch findings BLOCK — except TITLE/OUTRO-card text claims,
+      // CRITICAL watch findings BLOCK â€” except TITLE/OUTRO-card text claims,
       // which are ADVISORY: the watcher mis-called cards twice in live trials
       // (claimed a frame-verified outro was "blank"; demanded the full SEO
       // title on the deliberately short intro card). Card PRESENCE is owned by
@@ -1975,7 +1975,7 @@ export const qaVisual: Block = {
         ctx.log(`qa_visual: watch ADVISORY flagged (NOT blocking): ${[...advisoryCards, ...watch.defects.filter((d) => d.severity !== "critical")].slice(0, 6).map((d) => `[${d.severity}@${d.tSec ?? "?"}s] ${d.issue}`).join(" | ")}`);
       }
     }
-    // FEATURE-PRESENCE gate — fail loud when an intended feature silently didn't
+    // FEATURE-PRESENCE gate â€” fail loud when an intended feature silently didn't
     // land (these were the "no thumbnail" / "no quotes" bugs). Assert the
     // artifacts we meant to ship actually exist.
     if (!opt(ctx, "thumbnailKey")) {
@@ -1991,7 +1991,7 @@ export const qaVisual: Block = {
     if (insertsExpected > 0 && insertsApplied === 0) {
       critical.push(`data inserts missing: ${insertsExpected} rendered but 0 composited onto the video`);
     }
-    // 8) Critic (crew) VALIDATION SPEC — the per-video checklist this content must
+    // 8) Critic (crew) VALIDATION SPEC â€” the per-video checklist this content must
     // pass. Deterministic assertions compare metrics we computed; vision ones are
     // judged on the sampled frames. A failed BLOCK-severity assertion fails QA;
     // un-measurable metrics are skipped (never a silent dealbreaker).
@@ -2025,8 +2025,8 @@ export const qaVisual: Block = {
               `You are the QA Critic. Judge EACH requirement against the sampled video frames:\n` +
               visionAssertions.map((a) => `- id "${a.id}": ${a.description}`).join("\n") +
               `\nFor any requirement that CANNOT be judged from still frames (audio, music, loudness, voice, ` +
-              `pacing, anything non-visual), use pass:null — never guess a fail. ` +
-              `Return STRICT JSON {"verdicts":[{"id":string,"pass":boolean|null,"why":"<80 chars"}]} — judge every id.`,
+              `pacing, anything non-visual), use pass:null â€” never guess a fail. ` +
+              `Return STRICT JSON {"verdicts":[{"id":string,"pass":boolean|null,"why":"<80 chars"}]} â€” judge every id.`,
             imagePaths: judgeFrames,
             json: true,
             maxTokens: 1600,
@@ -2047,9 +2047,9 @@ export const qaVisual: Block = {
       if (!specOutcome.passed) {
         const failed = specOutcome.results.filter((r) => !r.passed && !r.skipped && r.severity === "block");
         // SPLIT VERDICT: DETERMINISTIC block-severity assertions are trustworthy
-        // math (durationSec, caption coverage, overlap…) — those now BLOCK.
+        // math (durationSec, caption coverage, overlapâ€¦) â€” those now BLOCK.
         // Vision-judged assertions stay ADVISORY (LLM-authored spec judged by an
-        // LLM — the flaky half that caused the original false rejections).
+        // LLM â€” the flaky half that caused the original false rejections).
         const detFailed = failed.filter(
           (r) => spec.assertions.find((a) => a.id === r.id)?.check === "deterministic",
         );
@@ -2087,12 +2087,12 @@ export const qaVisual: Block = {
 
 /* ----------------------------- qa_refine -------------------------------- *
  * Closed-loop quality control: GEMINI WATCHES THE WHOLE RENDERED VIDEO against
- * a do/don't rubric → structured findings → a Mastra EDITOR agent maps the
- * fixable ones to bounded ops (drop/shorten/retime quote cards) → an executor
+ * a do/don't rubric â†’ structured findings â†’ a Mastra EDITOR agent maps the
+ * fixable ones to bounded ops (drop/shorten/retime quote cards) â†’ an executor
  * re-applies the corrected overlays onto the persisted PRE-OVERLAY video and
  * overwrites the canonical output (no full re-render). Non-fixable findings are
  * recorded (refineNotes) so source-level gates can absorb them next run. Runs
- * after timeline_assemble, before qa_visual/upload. Fully guarded — any failure
+ * after timeline_assemble, before qa_visual/upload. Fully guarded â€” any failure
  * leaves the original video untouched. */
 const REFINE_RUBRIC =
   `You are the QUALITY DIRECTOR for a faceless Stoic-philosophy YouTube channel. WATCH the entire video and ` +
@@ -2106,7 +2106,7 @@ const REFINE_RUBRIC =
   `4. NO repeated/looped/duplicate footage; clips should feel distinct.\n` +
   `5. TEXT must never overlap a face/subject and must have strong contrast.\n` +
   `6. The intro should dissolve into the body; the video must END on a deliberate OUTRO CARD (a closing line over ` +
-  `the bust) that fades cleanly to black with the music — flag if the ending feels abrupt or is just footage ` +
+  `the bust) that fades cleanly to black with the music â€” flag if the ending feels abrupt or is just footage ` +
   `cutting off.\n` +
   `7. MUSIC after the intro must duck DOWN GRADUALLY (a smooth ~3s ease, never an instant drop) when the voice ` +
   `starts.\n` +
@@ -2129,272 +2129,8 @@ export const qaRefine: Block = {
     // existing channel pipelines that reference it still validate.
     ctx.log("qa_refine: skipped (superseded by qa_visual deterministic gate)");
     return { refineNotes: { skipped: "superseded_by_qa_visual" } };
-    // --- legacy auto-refine below is intentionally unreachable (kept for reference) ---
-    // eslint-disable-next-line no-unreachable
-    if (!hasGeminiKey()) {
-      ctx.log("qa_refine: no Gemini key — skipping");
-      return { refineNotes: { skipped: true } };
-    }
-    // Long-form videos: watching the full video + re-encoding it is too costly /
-    // slow to be worth it; the source gates already enforce quality. Skip.
-    const vdur = Number(ctx.store["videoDurationSec"] ?? 0);
-    if (vdur > 900) {
-      ctx.log(`qa_refine: skipping for long video (${Math.round(vdur)}s) — full-video watch + re-encode too costly`);
-      return { refineNotes: { skipped: "long_video", durationSec: vdur } };
-    }
-    const tmp = await makeRunTempDir(ctx.runId);
-    const videoKey = str(ctx, "videoKey");
-    let videoLocal = ctx.store["videoLocalPath"] as string | undefined;
-    if (!videoLocal || !existsSync(videoLocal)) {
-      videoLocal = join(tmp, "refine_in.mp4");
-      await writeBytes(videoLocal, await getObjectBytes(videoKey));
-    }
-
-    // 1) WATCH the whole video — TIME-BOXED. geminiVideo uploads the full file to
-    // Gemini and waits for processing+generation with no internal timeout, so under
-    // Gemini overload it can hang the whole render indefinitely. This is an OPTIONAL
-    // refine pass and qa_visual (holistic watchRender) is the real gate, so a stall
-    // must degrade gracefully: race against a hard cap and skip on timeout.
-    const REFINE_TIMEOUT_MS = Number(process.env.QA_REFINE_TIMEOUT_MS ?? 180_000);
-    let findings: { issue: string; severity?: string; atSec?: number; fix?: string }[] = [];
-    let overall = "";
-    try {
-      const raw = (await Promise.race([
-        geminiVideo({ path: videoLocal, json: true, maxTokens: 1500, prompt: REFINE_RUBRIC }),
-        new Promise<never>((_, rej) =>
-          setTimeout(() => rej(new Error(`qa_refine watch timed out after ${REFINE_TIMEOUT_MS}ms`)), REFINE_TIMEOUT_MS),
-        ),
-      ])) as string;
-      const parsed = parseJsonLoose<{ findings?: typeof findings; overall?: string }>(raw);
-      findings = parsed.findings ?? [];
-      overall = parsed.overall ?? "";
-      ctx.log(`qa_refine: ${findings.length} finding(s) — ${overall.slice(0, 160)}`);
-    } catch (e) {
-      // Degrade-safe: skip the refine pass and let the render proceed to qa_visual.
-      ctx.log(`qa_refine: watch failed/timed out — skipping refine, render continues: ${e instanceof Error ? e.message : e}`);
-      return { refineNotes: { skipped: "watch_timeout", error: String(e instanceof Error ? e.message : e) } };
-    }
-    // WATCH-ONLY (advisory). The former auto-patch + full re-composite phase below was
-    // slow and UNBOUNDED — a single footage patch / quote re-render / re-encode could
-    // hang a render for 20+ min — and it is now SUPERSEDED by the holistic qa_visual
-    // gate (watchRender). Real defects fail QA and get fixed at the SOURCE (better
-    // footage selection / regen) instead of risky mid-pipeline surgery. Fewer rules,
-    // far more reliable. Findings are returned as advisory signal for source gates.
-    return { refineNotes: { findings, overall, edited: false, mode: "advisory" } };
-
-    // 2) EDITOR agent → bounded edit plan (only quote-card ops are auto-fixable).
-    const overlays = (ctx.store["quoteOverlays"] as QuoteOverlaySpec[] | undefined) ?? [];
-    const planSchema = z.object({
-      ops: z
-        .array(
-          z.object({
-            type: z.enum(["drop_quote", "shorten_quote", "retime_quote", "replace_clip"]),
-            atSec: z.number(),
-            newText: z.string().optional(),
-            newDurSec: z.number().optional(),
-            query: z.string().optional(),
-            reason: z.string().optional(),
-          }),
-        )
-        .default([]),
-      unfixable: z.array(z.string()).default([]),
-    });
-    type EditOp = {
-      type: "drop_quote" | "shorten_quote" | "retime_quote" | "replace_clip";
-      atSec: number;
-      newText?: string;
-      newDurSec?: number;
-      query?: string;
-      reason?: string;
-    };
-    type EditPlan = { ops?: EditOp[]; unfixable?: string[] };
-    let plan: EditPlan = { ops: [], unfixable: [] };
-    try {
-      plan = (await agentJson({
-        role: "director",
-        schema: planSchema,
-        log: ctx.log,
-        maxTokens: 800,
-        temperature: 0.2,
-        system:
-          "You are a VIDEO EDITOR. The QUOTE CARDS list in the user message is GROUND TRUTH (each card's real " +
-          "start time and exact text). The QA findings come from watching the video and their timestamps may be " +
-          "IMPRECISE — always reconcile against the ground-truth card list.\n" +
-          "Ops:\n" +
-          "- QUOTE CARDS: drop_quote, shorten_quote (newText MUST be a shortened version of THAT card's existing " +
-          "text — same quote/meaning, fewer words; NEVER substitute a different quote), retime_quote (newDurSec 3-9). " +
-          "For every quote op, atSec MUST equal one of the card start times from the list. ONLY emit a quote op if " +
-          "that card's LISTED text genuinely violates a rule; if the listed text is already short and clear, leave it.\n" +
-          "- FOOTAGE: replace_clip — for findings about footage that is off-theme, contradicts the message, out of " +
-          "place, or repeated. Set atSec to where it appears and `query` to a SHORT on-theme filmable replacement " +
-          "(e.g. \"misty mountains\", \"ancient stone ruins\", \"candle flame\", \"calm ocean\", \"forest light\"); " +
-          "avoid anything materialistic.\n" +
-          "Anything you cannot fix with these ops goes in 'unfixable'. Be conservative — do nothing rather than " +
-          "guess. Return ONLY JSON.",
-        prompt:
-          `Quote cards currently in the video (startSec → text, duration):\n` +
-          (overlays.length
-            ? overlays.map((o) => `${o.startSec.toFixed(0)}s: "${o.text ?? ""}" (${o.durSec.toFixed(1)}s)`).join("\n")
-            : "(none)") +
-          `\n\nQA findings from watching the video:\n` +
-          findings.map((f) => `[${f.severity ?? "?"}] @${f.atSec ?? "?"}s: ${f.issue} → ${f.fix ?? ""}`).join("\n"),
-      })) as EditPlan;
-    } catch (e) {
-      ctx.log(`qa_refine: editor agent failed: ${e instanceof Error ? e.message : e}`);
-    }
-
-    // 3) EXECUTE. We re-composite from the persisted PRE-OVERLAY body when
-    // available: apply footage PATCHES (replace_clip) to the body, then re-apply
-    // the (edited) quote overlays on top. Without a pre-overlay video we can only
-    // patch footage onto the final cut.
-    const preLocal = await (async (): Promise<string | null> => {
-      const p = ctx.store["preOverlayLocalPath"] as string | undefined;
-      if (p && existsSync(p)) return p;
-      const k = ctx.store["preOverlayKey"] as string | undefined;
-      if (!k) return null;
-      try {
-        const dst = join(tmp, "pre_overlay.mp4");
-        await writeBytes(dst, await getObjectBytes(k));
-        return dst;
-      } catch {
-        return null;
-      }
-    })();
-    const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
-    const W = portrait ? 1080 : 1920;
-    const H = portrait ? 1920 : 1080;
-    const videoDur = Number(ctx.store["videoDurationSec"] ?? 0) || 0;
-
-    const fixable = plan.ops ?? [];
-
-    // 3a) QUOTE ops → an edited overlay list (only when we can re-apply them).
-    let work = overlays.map((o) => ({ ...o }));
-    let quoteChanged = false;
-    if (preLocal && overlays.length && fixable.some((o) => o.type !== "replace_clip")) {
-      const nearest = (atSec: number): number => {
-        let bi = -1;
-        let bd = Infinity;
-        work.forEach((o, i) => {
-          const d = Math.abs(o.startSec - atSec);
-          if (d < bd) { bd = d; bi = i; }
-        });
-        return bd <= 8 ? bi : -1;
-      };
-      const drop = new Set<number>();
-      for (const op of fixable) {
-        if (op.type === "replace_clip") continue;
-        const i = nearest(op.atSec);
-        if (i < 0) continue;
-        if (op.type === "drop_quote") { drop.add(i); continue; }
-        const o = work[i];
-        // shorten_quote must be a SHORTENING of this card — reject substitutions.
-        if (op.type === "shorten_quote" && op.newText) {
-          const orig = (o.text ?? "").toLowerCase();
-          const nw = op.newText.toLowerCase().split(/\s+/).filter((w) => w.length > 3);
-          const overlap = nw.length ? nw.filter((w) => orig.includes(w)).length / nw.length : 0;
-          if (overlap < 0.5) {
-            ctx.log(`qa_refine: rejected shorten_quote @${o.startSec.toFixed(0)}s (different quote, overlap ${overlap.toFixed(2)})`);
-            continue;
-          }
-        }
-        const text = op.type === "shorten_quote" && op.newText ? op.newText.trim() : o.text ?? "";
-        const words = text.split(/\s+/).filter(Boolean).length;
-        if (!text || words > 18) { if (op.type === "shorten_quote") drop.add(i); continue; }
-        const dur =
-          op.type === "retime_quote" && op.newDurSec
-            ? Math.min(9, Math.max(3, op.newDurSec))
-            : Math.min(9, Math.max(3, words * 0.38 + 1.6));
-        const path = join(tmp, `requote_${i}.webm`);
-        try {
-          await renderQuoteOverlay({
-            quote: text,
-            highlights: (o.highlights ?? []).filter((h) => text.toLowerCase().includes(h.toLowerCase())),
-            outPath: path,
-            durationSec: dur,
-            width: o.width ?? W,
-            height: o.height ?? H,
-          });
-          work[i] = { ...o, path, text, durSec: dur };
-          quoteChanged = true;
-        } catch (e) {
-          ctx.log(`qa_refine: re-render quote #${i} failed: ${e instanceof Error ? e.message : e}`);
-        }
-      }
-      if (drop.size) { work = work.filter((_, i) => !drop.has(i)); quoteChanged = true; }
-    }
-
-    // 3b) REPLACE_CLIP ops → fetch a fresh on-theme clip + patch the base body.
-    const replaceOps = fixable.filter((o) => o.type === "replace_clip").slice(0, 4);
-    let base = preLocal ?? videoLocal;
-    let patched = false;
-    if (replaceOps.length && hasPexelsKey() && base) {
-      const orientation = portrait ? ("portrait" as const) : ("landscape" as const);
-      const clipId = (url: string): string => url.match(/video-files\/(\d+)/)?.[1] ?? url;
-      const ledgerKey = `${ctx.keyPrefix}footage/used_clips.json`;
-      const usedIds = new Set<string>();
-      try {
-        for (const id of JSON.parse(Buffer.from(await getObjectBytes(ledgerKey)).toString("utf8")) as string[]) usedIds.add(id);
-      } catch { /* no ledger */ }
-      let ri = 0;
-      let cur = base;
-      for (const op of replaceOps) {
-        const q = (op.query || "").trim() || "misty mountains dawn";
-        try {
-          const cands = (await searchFootage(q, 6, orientation))
-            .filter((c) => !usedIds.has(clipId(c.url)))
-            .sort((a, b) => scoreClip(b) - scoreClip(a))
-            .slice(0, 4);
-          if (!cands.length) { ctx.log(`qa_refine: no fresh clip for "${q}"`); continue; }
-          const c = cands[0];
-          const local = join(tmp, `repl_${ri++}.mp4`);
-          await downloadTo(c.url, local);
-          usedIds.add(clipId(c.url));
-          const start = Math.max(0, Math.min(op.atSec, Math.max(0, videoDur - 3)));
-          const dur = Math.min(8, c.durationSec || 8, Math.max(2, videoDur - start - 1));
-          const outp = join(tmp, `patched_${ri}.mp4`);
-          await patchSegment(cur, local, start, dur, outp, { width: W, height: H });
-          cur = outp;
-          patched = true;
-          ctx.log(`qa_refine: replaced footage @${start.toFixed(0)}s (${dur.toFixed(1)}s) with "${q}"`);
-        } catch (e) {
-          ctx.log(`qa_refine: replace_clip @${op.atSec}s failed: ${e instanceof Error ? e.message : e}`);
-        }
-      }
-      if (patched) {
-        base = cur;
-        try {
-          await putObject(ledgerKey, Buffer.from(JSON.stringify(Array.from(usedIds).slice(-3000)), "utf8"), { contentType: "application/json" });
-        } catch { /* non-fatal */ }
-      }
-    }
-
-    // 3c) compose the refined output.
-    let edited = patched || (preLocal != null && quoteChanged);
-    if (edited) {
-      try {
-        const refined = join(tmp, "refined.mp4");
-        if (preLocal) {
-          // base is the (possibly patched) BODY → re-apply the edited overlay set
-          if (work.length) await applyQuoteOverlays(base, work, refined, { blurSigma: 20 });
-          else await copyFile(base, refined);
-        } else {
-          // no pre-overlay video — base is the final cut with overlays already baked
-          await copyFile(base, refined);
-        }
-        await putObject(videoKey, await readBytes(refined), { contentType: "video/mp4" });
-        if (videoLocal) await copyFile(refined, videoLocal);
-        ctx.log(`qa_refine: APPLIED edits (footage patches=${patched}, quote edits=${quoteChanged}); refined video re-uploaded`);
-      } catch (e) {
-        ctx.log(`qa_refine: compose refined failed (keeping original): ${e instanceof Error ? e.message : e}`);
-        edited = false;
-      }
-    }
-
-    const unfixable = plan.unfixable ?? [];
-    if (unfixable.length) {
-      ctx.log(`qa_refine: ${unfixable.length} unfixable note(s) (source-gate next run): ${unfixable.slice(0, 3).join(" | ")}`);
-    }
-    return { refineNotes: { findings, overall, ops: fixable, unfixable, edited } };
+    // (legacy auto-refine implementation deleted — it was unreachable dead code
+    // that still type-checked and broke the Vercel build. git history has it.)
   },
 };
 
