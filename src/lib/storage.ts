@@ -20,6 +20,8 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  ListObjectsV2Command,
+  DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
 import type { PutObjectCommandInput } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
@@ -151,6 +153,41 @@ export async function putObject(
   });
   await getR2Client().send(command);
   return key;
+}
+
+/** List every object key under a prefix (handles pagination). */
+export async function listObjects(prefix: string, bucket?: string): Promise<string[]> {
+  const client = getR2Client();
+  const Bucket = getBucket(bucket);
+  const keys: string[] = [];
+  let ContinuationToken: string | undefined;
+  do {
+    const res = await client.send(
+      new ListObjectsV2Command({ Bucket, Prefix: prefix, ContinuationToken }),
+    );
+    for (const o of res.Contents ?? []) if (o.Key) keys.push(o.Key);
+    ContinuationToken = res.IsTruncated ? res.NextContinuationToken : undefined;
+  } while (ContinuationToken);
+  return keys;
+}
+
+/** Delete objects by key (batched in groups of 1000). Returns the count deleted. */
+export async function deleteObjects(keys: string[], bucket?: string): Promise<number> {
+  if (keys.length === 0) return 0;
+  const client = getR2Client();
+  const Bucket = getBucket(bucket);
+  let deleted = 0;
+  for (let i = 0; i < keys.length; i += 1000) {
+    const batch = keys.slice(i, i + 1000);
+    await client.send(
+      new DeleteObjectsCommand({
+        Bucket,
+        Delete: { Objects: batch.map((Key) => ({ Key })), Quiet: true },
+      }),
+    );
+    deleted += batch.length;
+  }
+  return deleted;
 }
 
 /** Fetch an object's bytes from R2 as a Uint8Array. */

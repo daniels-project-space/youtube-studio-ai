@@ -23,21 +23,29 @@ export interface Archetype {
   pipeline: PipelineEntry[];
 }
 
+// Lofi (Template C) — 100% CLOUD engine (fal.ai stills + i2v, no local CLI):
+// scene → fal flux-pro still → fal i2v clip → seamless crossfade loop → Topaz
+// upscale of the loop unit → Suno music → deblur-title assemble (stream_loop the
+// unit under looped music). No narration, no separate intro card (the deblur
+// title IS the intro). durationSec is the only knob to scale length.
 const LOFI: PipelineEntry[] = [
   { block: "competitor_research" },
   { block: "topic_select" },
   { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 5 } },
-  { block: "keyframes", params: { aspectRatio: "16:9", resolution: "2k", visualStyle: "lofi" } },
-  { block: "loop_clips", params: { clipDurationSec: 5, visualStyle: "lofi" } },
+  { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
+  // 10s i2v clip + 1.2s crossfade self-loop → the seam blends real moving frames
+  // (not a near-frozen pop), which is the difference between a "real" seamless
+  // lofi loop and an obvious AI one.
+  { block: "loop_clips", params: { clipDurationSec: 10, visualStyle: "lofi", crossfadeSec: 2.5 } },
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
-  { block: "music", params: { provider: "mureka" } },
+  { block: "music", params: { provider: "suno" } },
   { block: "metadata" },
-  { block: "intro_card", params: { introSec: 5 } },
-  { block: "assemble", params: { durationSec: 90 } },
+  { block: "assemble", params: { durationSec: 180, deblurIntro: true } }, // 3-min test; raise for production
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },
   { block: "notify" },
+  { block: "cleanup" }, // keep only the finished video + thumbnail; drop all intermediates
 ];
 
 // Narrated base (Stage-3 blocks). Footage-driven; metadata + qa precede
@@ -48,11 +56,17 @@ const LOFI: PipelineEntry[] = [
 const NARRATED: PipelineEntry[] = [
   { block: "competitor_research" },
   { block: "topic_select", params: { policy: "no_repeat" } },
-  { block: "script_gen", params: { maxSeconds: 180 } }, // ~3 min
+  { block: "script_gen", params: { maxSeconds: 1800 } }, // ~30 min (long-form)
   { block: "qa_script" },
   { block: "originality_gate" },
   { block: "compliance_check" },
-  { block: "narration_tts", params: { sentenceGapSec: 0.85, sentenceGapJitter: 0.25 } }, // longer organic pauses
+  // chapterCards: "Chapter N:" read on a card that gently fades in/out, with a 3s
+  // pause before and after the heading. Sentence pauses lengthened (~1.35s).
+  { block: "narration_tts", params: { sentenceGapSec: 1.35, sentenceGapJitter: 0.25, chapterCards: true, chapterPreSec: 3, chapterPostSec: 3 } },
+  // Footage is TOPIC/DNA-matched by default. The serene-nature lock is a per-
+  // niche/per-channel choice (NICHE_PRESETS.footageTheme or the wizard) — it was
+  // a stoic-channel default that silently leaked onto every narrated channel and
+  // made the relevance gate reject on-brand city/office/desk footage.
   { block: "stock_footage" },
   { block: "entity_imagery" },
   {
@@ -60,19 +74,23 @@ const NARRATED: PipelineEntry[] = [
     params: {
       provider: "mureka",
       prompt:
-        "calm cinematic ambient underscore, soft strings and piano, slow and contemplative, no drums, no vocals",
+        "very calm, gentle ambient underscore — soft sustained strings and sparse, slow piano, warm and " +
+        "contemplative, minimal and unobtrusive, low dynamics, no percussion, no drums, no build-ups, no vocals",
     },
   },
   { block: "intro_card", params: { introSec: 5 } },
-  { block: "quote_overlays", params: { maxQuotes: 3 } },
-  { block: "timeline_assemble" },
-  { block: "length_check" },
+  { block: "quote_overlays", params: { maxQuotes: 3, minQuoteWords: 6 } },
+  // 15s held outro card; music fades over the full 15s, video stays on the card.
+  { block: "timeline_assemble", params: { tailSec: 15, fadeOutSec: 2, audioFadeOutSec: 15, burnCaptions: true } },
+  { block: "qa_refine" }, // Gemini watches the full video → editor agent fixes quote cards
+  { block: "length_check", params: { minSeconds: 900, maxSeconds: 2100 } }, // 15-35 min
   { block: "captions" },
   { block: "metadata" },
   { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },
   { block: "notify" },
+  { block: "cleanup" }, // keep only the finished video + thumbnail; drop all intermediates
 ];
 
 export const ARCHETYPES: Record<string, Archetype> = {
@@ -143,6 +161,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "qa_visual" },
       { block: "upload_draft" },
       { block: "notify" },
+      { block: "cleanup" },
     ],
   },
   meditation: {
@@ -177,6 +196,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "qa_visual" },
       { block: "upload_draft" },
       { block: "notify" },
+      { block: "cleanup" },
     ],
   },
 };

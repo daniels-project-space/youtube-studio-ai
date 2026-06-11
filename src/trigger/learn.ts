@@ -11,16 +11,78 @@
 import { schedules, task } from "@trigger.dev/sdk";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
+import type { Id, Doc } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix } from "@/lib/storage";
 import { fetchVideoAnalytics, hasAnalyticsAccess } from "@/lib/youtubeAnalytics";
-import { loadLedger, saveLedger, type PerfEntry } from "@/lib/performance";
+import { loadLedger, saveLedger, loadPerformanceContext, type PerfEntry } from "@/lib/performance";
+import { agentJson } from "@/agents/mastra";
+import { z } from "zod";
 
 const SETTLE_MS = 72 * 3_600_000;
 const ymd = (ms: number) => new Date(ms).toISOString().slice(0, 10);
 
 type Logger = (m: string) => void;
+
+const InsightsSchema = z.object({
+  worksInSpace: z.array(z.string()).max(8),
+  avoidInSpace: z.array(z.string()).max(8),
+});
+
+type Identity = NonNullable<Doc<"channels">["identity"]>;
+type Brief = NonNullable<Identity["creativeBrief"]>;
+
+/**
+ * Close the creative loop: turn the performance ledger's winners/losers into an
+ * updated Show Bible doctrine (worksInSpace / avoidInSpace) so the film crew leans
+ * toward what actually performed. Only fires when there's a Bible AND ≥4 measured
+ * videos (loadPerformanceContext returns "" below that, so we never bias on noise).
+ */
+async function adaptShowBible(
+  convex: ConvexHttpClient,
+  ch: { _id: Id<"channels">; name: string; identity?: Identity },
+  prefix: string,
+  log: Logger,
+): Promise<boolean> {
+  const identity = ch.identity;
+  const brief: Brief | undefined = identity?.creativeBrief;
+  if (!identity || !brief) return false;
+  const perf = await loadPerformanceContext(prefix, { minViews: 50 });
+  if (!perf) return false;
+  try {
+    const insights = await agentJson({
+      role: "showrunner",
+      schema: InsightsSchema,
+      maxTokens: 600,
+      system: "You refine a channel's creative doctrine from REAL performance data. Be concrete and brand-true; only assert what the data + existing doctrine support.",
+      prompt:
+        `Refine the creative doctrine for "${ch.name}" (${(identity.niche as string) ?? ""}).\n` +
+        `Positioning: ${brief.positioning}\n` +
+        `Current worksInSpace: ${(brief.worksInSpace ?? []).join("; ") || "(none)"}\n` +
+        `Current avoidInSpace: ${(brief.avoidInSpace ?? []).join("; ") || "(none)"}\n\n` +
+        `${perf}\n\n` +
+        `Update worksInSpace (concrete choices to DO MORE of) and avoidInSpace (to do LESS of), grounded in the ` +
+        `performance above + the existing doctrine. Short, concrete, actionable entries. STRICT JSON ` +
+        `{worksInSpace:string[], avoidInSpace:string[]}.`,
+      log,
+    });
+    const nextBrief: Brief = {
+      ...brief,
+      worksInSpace: insights.worksInSpace?.length ? insights.worksInSpace : brief.worksInSpace,
+      avoidInSpace: insights.avoidInSpace?.length ? insights.avoidInSpace : brief.avoidInSpace,
+      refreshedAt: Date.now(),
+    };
+    await convex.mutation(api.channels.updateChannel, {
+      channelId: ch._id,
+      identity: { ...identity, creativeBrief: nextBrief },
+    });
+    log(`learning-refresh: adapted Show Bible for ${ch.name} (works=${nextBrief.worksInSpace.length}, avoid=${nextBrief.avoidInSpace.length})`);
+    return true;
+  } catch (e) {
+    log(`adaptShowBible failed (${e instanceof Error ? e.message : e})`);
+    return false;
+  }
+}
 
 async function refresh(ownerId: string, log: Logger) {
   await bootstrapSecrets((m) => log(m));
@@ -36,8 +98,10 @@ async function refresh(ownerId: string, log: Logger) {
     _id: Id<"channels">;
     slug: string;
     name: string;
+    identity?: Identity;
   }>;
   let videos = 0;
+  let adapted = 0;
   for (const ch of channels) {
     const prefix = channelPrefix(ownerId, ch.slug);
     const runs = (await convex.query(api.runs.listRunsByChannel, {
@@ -87,9 +151,11 @@ async function refresh(ownerId: string, log: Logger) {
     }
     await saveLedger(prefix, [...byId.values()]);
     log(`learning-refresh: ${ch.name} → ${byId.size} videos in ledger`);
+    // Close the creative loop — adapt the Show Bible from the refreshed ledger.
+    if (await adaptShowBible(convex, ch, prefix, log)) adapted++;
   }
-  log(`learning-refresh: done — ${videos} video(s) updated across ${channels.length} channel(s)`);
-  return { ok: true, channels: channels.length, videos };
+  log(`learning-refresh: done — ${videos} video(s) updated, ${adapted} Show Bible(s) adapted across ${channels.length} channel(s)`);
+  return { ok: true, channels: channels.length, videos, adapted };
 }
 
 export const learningRefreshSchedule = schedules.task({

@@ -60,6 +60,7 @@ export async function synthChannelConcept(
     "coherent channel identity. Reply with STRICT JSON only, no prose.";
   const prompt = [
     `Seed idea: "${seed}".`,
+    `Today's date is ${new Date().toISOString().slice(0, 10)}. If a topic references a year, use the current year (or none) — never a past year.`,
     nicheContext ? `Competitor research context:\n${nicheContext}` : "",
     `Choose the best archetype for this content from: ${ARCHETYPE_KEYS.join(", ")}.`,
     "Return JSON with exactly these keys:",

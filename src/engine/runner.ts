@@ -112,6 +112,22 @@ function assertProduced(block: Block, patch: Record<string, unknown>): void {
   }
 }
 
+/**
+ * VERIFIED parallel groups: contiguous pipeline blocks proven (by reading their
+ * store access, not just `consumes`) to never read each other's products. These
+ * are the ONLY blocks the runner co-schedules — everything else stays strictly
+ * sequential, because blocks may read store keys beyond their declared
+ * consumes (e.g. quote_overlays reads introSec; visual_inserts reads the quote
+ * windows), so a general inferred-DAG scheduler would be unsound here.
+ */
+const PARALLEL_GROUPS: string[][] = [
+  ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec"],
+  ["qa_script", "originality_gate", "compliance_check"],
+  ["stock_footage", "entity_imagery", "music", "intro_card"],
+];
+const GROUP_OF = new Map<string, number>();
+PARALLEL_GROUPS.forEach((g, i) => g.forEach((id) => GROUP_OF.set(id, i)));
+
 export async function runPipeline(
   resolved: ResolvedPipeline,
   opts: RunPipelineOptions,
@@ -137,11 +153,16 @@ export async function runPipeline(
     }
   }
 
-  for (const block of resolved.blocks) {
+  /**
+   * Execute one block end-to-end (resume-restore | run+retry), persist its
+   * stage, merge its patch into the shared store. Returns the outcome instead
+   * of throwing so group execution can collect every member's result.
+   */
+  const executeBlock = async (
+    block: Block,
+  ): Promise<{ status: "ok" | "failed"; cost: number; error?: string }> => {
     const params = opts.paramsByBlock?.[block.id] ?? {};
-    const inputs = Object.fromEntries(
-      block.consumes.map((k) => [k, store[k]]),
-    );
+    const inputs = Object.fromEntries(block.consumes.map((k) => [k, store[k]]));
 
     // RESUME: restore a previously-completed block instead of re-running it
     // (no double-spend on paid blocks). Re-run if its files can't be rehydrated.
@@ -164,7 +185,7 @@ export async function runPipeline(
           });
           stages.push({ block: block.id, status: "ok" });
           log(`block resumed (cached, no re-spend): ${block.id}`);
-          continue;
+          return { status: "ok", cost: 0 };
         }
         log(`block ${block.id}: cached outputs not rehydratable — re-running`);
       } catch (e) {
@@ -211,22 +232,7 @@ export async function runPipeline(
       });
       stages.push({ block: block.id, status: "ok" });
       log(`block ok: ${block.id}`, { produced: block.produces, costUsd: cost });
-
-      // Enforce the per-run budget ceiling. The block that tipped over has
-      // already run; aborting here prevents every subsequent (paid) block from
-      // spending more. A boolean preflight alone can't do this.
-      if (opts.budgetUsd > 0 && spentUsd > opts.budgetUsd) {
-        const message = `budget ceiling exceeded: spent $${spentUsd.toFixed(2)} > budget $${opts.budgetUsd.toFixed(2)} after block "${block.id}" — aborting before further paid blocks`;
-        log(message);
-        return {
-          ok: false,
-          store,
-          failedBlock: block.id,
-          error: message,
-          costTotal: spentUsd,
-          stages,
-        };
-      }
+      return { status: "ok", cost };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       await opts.sink.upsert({
@@ -239,16 +245,63 @@ export async function runPipeline(
       });
       stages.push({ block: block.id, status: "failed" });
       log(`block failed: ${block.id}`, { error: message });
-      // Stop loud — do not continue the pipeline.
-      return {
-        ok: false,
-        store,
-        failedBlock: block.id,
-        error: message,
-        costTotal: spentUsd,
-        stages,
-      };
+      return { status: "failed", cost: 0, error: message };
     }
+  };
+
+  const fail = (block: string, error: string): RunResult => ({
+    ok: false,
+    store,
+    failedBlock: block,
+    error,
+    costTotal: spentUsd,
+    stages,
+  });
+
+  /** Budget ceiling check — abort before any further paid block can spend. */
+  const overBudget = (after: string): RunResult | null => {
+    if (opts.budgetUsd > 0 && spentUsd > opts.budgetUsd) {
+      const message = `budget ceiling exceeded: spent $${spentUsd.toFixed(2)} > budget $${opts.budgetUsd.toFixed(2)} after block "${after}" — aborting before further paid blocks`;
+      log(message);
+      return fail(after, message);
+    }
+    return null;
+  };
+
+  let i = 0;
+  while (i < resolved.blocks.length) {
+    const block = resolved.blocks[i];
+    const gid = GROUP_OF.get(block.id);
+
+    // Maximal contiguous run of same-group blocks → co-schedule. Members that
+    // fail don't cancel siblings: completed work persists for resume/heal.
+    if (gid !== undefined) {
+      const group: Block[] = [];
+      let j = i;
+      while (j < resolved.blocks.length && GROUP_OF.get(resolved.blocks[j].id) === gid) {
+        group.push(resolved.blocks[j]);
+        j++;
+      }
+      if (group.length > 1) {
+        log(`parallel group: ${group.map((b) => b.id).join(" ∥ ")}`);
+        const results = await Promise.all(group.map((b) => executeBlock(b)));
+        for (let k = 0; k < group.length; k++) {
+          if (results[k].status === "failed") {
+            return fail(group[k].id, results[k].error ?? "block failed");
+          }
+        }
+        const ob = overBudget(group[group.length - 1].id);
+        if (ob) return ob;
+        i = j;
+        continue;
+      }
+    }
+
+    const res = await executeBlock(block);
+    if (res.status === "failed") return fail(block.id, res.error ?? "block failed");
+    const ob = overBudget(block.id);
+    if (ob) return ob;
+    i++;
   }
 
   return { ok: true, store, costTotal: spentUsd, stages };

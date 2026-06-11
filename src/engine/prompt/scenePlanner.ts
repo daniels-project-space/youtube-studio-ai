@@ -15,6 +15,7 @@
  * style constitution is appended later by {@link composeKlingPrompt} at the
  * loop_clips block, so this layer stays template-agnostic.
  */
+import type { StyleDNA } from "../creative/types";
 
 export interface SceneSpec {
   /** Full FLUX still prompt (already style-composed) for the keyframe. */
@@ -42,6 +43,20 @@ export interface ScenePlanInput {
   topic: string;
   styleGrammar?: string;
   visualStyle?: string;
+  /**
+   * On-brand SETTING hint for the loop scene (from the channel persona / niche /
+   * cinematographer brief). Drives WHAT is in the frame so the loop matches the
+   * channel's goal instead of a one-size template. e.g. "rainy neon Tokyo alley",
+   * "sunlit autumn study with a cat", "misty mountain cabin at dawn".
+   */
+  settingHint?: string;
+  /**
+   * The channel's frozen Style DNA (Phase 1). When present + grounded (a locked
+   * recurringSubject/setting), the loop scene is built to render the channel's
+   * actual identity — its subject, setting, color grade, motifs, and the exact
+   * elements allowed to move — instead of a generic cozy template.
+   */
+  styleDNA?: StyleDNA | null;
   /** Optional pre-authored library keyed by topic (exact match wins). */
   sceneLibrary?: Record<string, SceneLibraryEntry>;
   /** Default per-clip duration when not specified by a library entry. */
@@ -63,21 +78,65 @@ export interface ScenePlan {
  */
 function synthesizeLofiScene(input: ScenePlanInput): SceneSpec {
   const { topic } = input;
-  // Build the FLUX still prompt via the shared composer to stay consistent with
-  // the keyframes block. Imported lazily to avoid a cycle at module init.
-  // (Plain composition here keeps the planner pure & sync.)
-  const sceneDescription =
-    `${topic}, cozy lofi scene, a calm framed view, ` +
-    `warm rain-streaked window or neon-lit interior, soft bokeh, no people`;
+
+  // GROUNDED PATH: when the channel has a locked Style DNA, render ITS identity —
+  // the recurring subject/scenes, color grade, motifs, and only the elements the
+  // DNA permits to move. This is what makes every video read as the same channel
+  // instead of a generic cozy loop. Multi-scene channels rotate through their
+  // signatureScenes (one per video), unified by the art style + grade.
+  const d = input.styleDNA;
+  const sigScenes = (d?.signatureScenes ?? []).filter((s) => s?.setting?.trim());
+  if (d && (sigScenes.length > 0 || (d.recurringSubject?.trim() && d.setting?.trim()))) {
+    const pick = sigScenes.length ? sigScenes[Math.floor(Math.random() * sigScenes.length)] : null;
+    const sceneSetting = pick ? pick.setting.trim() : `${d.setting}. ${d.recurringSubject}.`;
+    const sceneMotion = (pick?.motion?.trim()) || (d.motionVocabulary?.length ? d.motionVocabulary.join("; ") : "");
+
+    const fluxPrompt = [
+      `${sceneSetting}.`,
+      d.composition ? `Composition: ${d.composition}.` : "",
+      d.colorGrade ? `Art style + color grade: ${d.colorGrade}.` : "",
+      d.motifs?.length ? `Signature motifs where they naturally fit: ${d.motifs.join(", ")}.` : "",
+      `A single calm, beautifully composed held frame evoking "${topic}". Cozy lofi mood, painterly atmospheric depth.`,
+      d.visualAvoid?.length ? `Do NOT include: ${d.visualAvoid.slice(0, 6).join(", ")}.` : "",
+    ].filter(Boolean).join(" ");
+
+    const klingMotionPrompt =
+      (sceneMotion
+        ? `Animate ONLY these ambient elements, each subtle and independently looping: ${sceneMotion}. `
+        : `slow gentle ambient motion only — subtle atmospheric drift, everything else still. `) +
+      `${d.motionDiscipline || "Camera perfectly locked on a tripod, zero movement."} ` +
+      `Seamlessly loopable motion that gently returns to the starting state.`;
+
+    return {
+      fluxPrompt,
+      klingMotionPrompt,
+      durationSec: input.defaultDurationSec ?? 5,
+    };
+  }
+
+  // FALLBACK PATH (no grounded DNA): the SETTING comes from the channel's
+  // brief/persona (settingHint) so the loop matches the channel goal; only when
+  // none is given do we use a tasteful generic cozy lofi setting (no forced
+  // rain/neon — that biased every channel toward the same look).
+  const setting = (input.settingHint ?? "").trim();
+  const sceneDescription = setting
+    ? `${setting}. A single calm, beautifully composed framed view evoking "${topic}", ` +
+      `cozy lofi mood, soft bokeh, atmospheric depth, no people`
+    : `A cozy lofi scene evoking "${topic}", a calm beautifully framed view, ` +
+      `warm inviting light, soft bokeh, atmospheric depth, no people`;
 
   // FLUX still: the keyframes block will re-compose with the channel visualStyle,
   // but we provide a fully usable still prompt for templates that consume it raw.
   const fluxPrompt = sceneDescription;
 
-  // Kling MOTION-ONLY: describe what should move, never the camera or style.
+  // Kling MOTION-ONLY: describe what should move, never the camera or style. Keep
+  // it generic + subtle so the scene-director vision pass (keyframes) can refine
+  // it to what's actually in the frame.
   const klingMotionPrompt =
-    `slow gentle ambient motion: ${topic} — drifting rain, soft steam, ` +
-    `flickering neon glow, faint swaying, seamless calm loop`;
+    `slow gentle ambient motion only — the natural atmospheric elements of the ` +
+    `scene drift and shimmer subtly (steam, light, foliage, water, particles), ` +
+    `everything else perfectly still, seamlessly loopable motion that gently ` +
+    `returns to the starting state, seamless calm loop`;
 
   return {
     fluxPrompt,

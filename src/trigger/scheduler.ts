@@ -3,11 +3,12 @@
  * cron, it triggers a new video run for each ACTIVE, opted-in channel that is
  * due per its cadence (daily/weekly/biweekly/monthly).
  *
- * OPT-IN by design (no surprise auto-spend): a channel only auto-runs if its
- * slug or id is listed in the STUDIO_AUTO_CHANNELS env var (comma-separated).
- * Empty list → the scheduler does nothing. Set it on the Trigger env when ready.
- *
- * Publish behaviour is per-channel via the upload_draft `publishMode` param
+ * CONTROL = the channel's ACTIVE toggle (no surprise auto-spend): new channels are
+ * created "paused", so the scheduler ignores them until the operator flips them on.
+ * Safety valves: STUDIO_AUTOPILOT="off" disables everything globally; if
+ * STUDIO_AUTO_CHANNELS is set (comma-separated slugs/ids) it acts as an extra
+ * allow-LIST filter, but when empty ALL active channels are eligible (the toggle is
+ * the control). Uploads are PRIVATE-first via the upload_draft `publishMode` param
  * (draft|scheduled|public) — this scheduler only kicks off GENERATION.
  */
 import { schedules, tasks } from "@trigger.dev/sdk";
@@ -50,14 +51,17 @@ export const generationScheduler = schedules.task({
   run: async () => {
     await bootstrapSecrets((m) => console.log(`[scheduler] ${m}`));
     const owner = process.env.STUDIO_OWNER_ID ?? "owner_daniel";
+    // Global kill switch.
+    if ((process.env.STUDIO_AUTOPILOT ?? "").toLowerCase() === "off") {
+      console.log("[scheduler] STUDIO_AUTOPILOT=off — disabled globally. Nothing to do.");
+      return { triggered: 0, enabled: 0 };
+    }
+    // Optional extra allow-list FILTER. Empty → every active channel is eligible
+    // (the per-channel Active toggle is the real control).
     const allow = (process.env.STUDIO_AUTO_CHANNELS ?? "")
       .split(",")
       .map((s) => s.trim())
       .filter(Boolean);
-    if (allow.length === 0) {
-      console.log("[scheduler] STUDIO_AUTO_CHANNELS empty — auto-run disabled (opt-in). Nothing to do.");
-      return { triggered: 0, enabled: 0 };
-    }
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
     const convex = new ConvexHttpClient(url);
@@ -68,7 +72,7 @@ export const generationScheduler = schedules.task({
     let triggered = 0;
     let enabled = 0;
     for (const ch of channels) {
-      const isOn = ch.status === "active" && (allow.includes(ch.slug) || allow.includes(ch._id));
+      const isOn = ch.status === "active" && (allow.length === 0 || allow.includes(ch.slug) || allow.includes(ch._id));
       if (!isOn) continue;
       enabled++;
 
@@ -88,7 +92,8 @@ export const generationScheduler = schedules.task({
         ownerId: owner,
         channelId: ch._id,
       });
-      await tasks.trigger("run-pipeline", { channelId: ch._id, runId });
+      // concurrencyKey: one render at a time PER CHANNEL; channels in parallel.
+      await tasks.trigger("run-pipeline", { channelId: ch._id, runId }, { concurrencyKey: String(ch._id) });
       triggered++;
       console.log(`[scheduler] triggered run for "${ch.name}" (cadence=${ch.identity?.cadence ?? "weekly"})`);
     }

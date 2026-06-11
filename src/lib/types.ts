@@ -29,6 +29,21 @@ export type ChannelIdentity = {
   /** Generated channel art (R2 keys) — presign via /api/asset-url. */
   imageKey?: string;
   bannerKey?: string;
+  /** Show Bible — the film-crew creative brief written by the Showrunner. */
+  creativeBrief?: {
+    positioning: string;
+    vibe: string;
+    iconicMotif: string;
+    worksInSpace: string[];
+    avoidInSpace: string[];
+    activeCrew: string[];
+    directorDoctrine?: string;
+    dpDoctrine?: string;
+    editorDoctrine?: string;
+    composerDoctrine?: string;
+    criticDoctrine?: string;
+    refreshedAt: number;
+  };
 };
 
 export type ChannelRow = {
@@ -40,6 +55,7 @@ export type ChannelRow = {
   budget: number;
   identity?: ChannelIdentity;
   pipeline?: { block: string; params?: unknown }[];
+  youtubeCreated?: { ytChannelId?: string; handle?: string; url?: string; createdAt: number; status?: string };
 };
 
 /**

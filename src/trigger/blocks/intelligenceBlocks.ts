@@ -18,14 +18,23 @@ import type { Block, StageContext } from "@/engine/types";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
-import { putObject } from "@/lib/storage";
-import { titleCard, thumbnailText, imageToJpeg, solidImage } from "@/lib/ffmpeg";
+import { makeRunTempDir, downloadTo, readBytes, writeBytes } from "@/lib/files";
+import { putObject, getObjectBytes } from "@/lib/storage";
+import { titleCard, thumbnailText, guardedThumbnailDesign, planSubjectLayout, imageToJpeg, solidImage } from "@/lib/ffmpeg";
 import { generateFluxImage } from "@/lib/replicate";
+import { generateFalFluxProImage, hasFalKey } from "@/lib/falImage";
 import { generateKeyframe } from "@/lib/higgsfield";
+import {
+  resolveThumbnailStyle,
+  styleFromDNA,
+  artDirectorBrief,
+  buildBasePrompt,
+  shortTitleFallback,
+  TEXT_FREE_SUFFIX,
+} from "@/lib/thumbnailFormula";
 import { generateIdeogramThumbnail, hasIdeogramKey } from "@/lib/ideogram";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
-import { geminiVision, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { geminiVision, geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { agentJson } from "@/agents/mastra";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { loadPerformanceContext } from "@/lib/performance";
@@ -204,6 +213,17 @@ export const metadataOptimized: Block = {
     // Music niches legitimately use "lofi / study / relax" framing; others don't.
     const isMusicNiche = /lofi|lo-fi|study|chill|ambient|sleep|relax|music|beats/i.test(niche);
 
+    // Localization: write title/description/tags in the channel's spoken language.
+    const language = ctx.params["language"] as string | undefined;
+    const LANG_NAMES: Record<string, string> = {
+      es: "Spanish", de: "German", fr: "French", pt: "Portuguese", it: "Italian", nl: "Dutch",
+    };
+    const langDirective =
+      language && language !== "en"
+        ? `- LANGUAGE: Write the title, description, and tags in ${LANG_NAMES[language] ?? language} ` +
+          `(keep proper names/quotes in their original form). Hashtags and keywords should be in that language too.\n`
+        : "";
+
     // Script context grounds the SEO in the ACTUAL video (narrated archetypes).
     let scriptExcerpt = "";
     const nt = ctx.store["narrationText"];
@@ -249,8 +269,104 @@ export const metadataOptimized: Block = {
     // Phase 7: bias titles toward past high-CTR/retention winners ("" until data).
     const perfCtx = await loadPerformanceContext(ctx.keyPrefix);
 
+    // Style-DNA SEO spec — the channel's own research-distilled title formula /
+    // description structure (previously generated at inception and never read).
+    const dnaSeo = (ctx.store["styleDNA"] as
+      | { seo?: { titleFormula?: string; descriptionStructure?: string; playlistStrategy?: string } }
+      | null)?.seo;
+    const dnaSeoClause =
+      (dnaSeo?.titleFormula ? `CHANNEL TITLE FORMULA (Style DNA — prefer this shape): ${dnaSeo.titleFormula}\n` : "") +
+      (dnaSeo?.descriptionStructure ? `CHANNEL DESCRIPTION STRUCTURE (Style DNA): ${dnaSeo.descriptionStructure}\n` : "");
+
+    // TITLE TOURNAMENT — the comparative path: 5 candidates across DISTINCT
+    // high-CTR frames, judged against the niche's REAL top titles WITH their
+    // view counts ("would it win the click in this feed"). Iterating a single
+    // candidate deadlocked at sub-bar scores; competition against evidence
+    // converges. Falls back to the legacy loop on any failure.
+    let tournament: { title: string; description: string; tags: string[]; score: number } | null = null;
+    if (competitorTitles.length >= 5) {
+      try {
+        const titlesWithViews = competitors
+          .flatMap((c) => c.topVideos)
+          .sort((a, b) => b.views - a.views)
+          .slice(0, 12)
+          .map((v) => `${(v.views / 1e6).toFixed(1)}M views — "${v.title}"`);
+        const genSchema = z.object({
+          candidates: z.array(z.object({
+            frame: z.string(),
+            title: z.string(),
+            description: z.string(),
+            tagsCsv: z.string(),
+          })).default([]),
+        });
+        const gen = await agentJson({
+          role: "producer",
+          schema: genSchema,
+          log: ctx.log,
+          maxTokens: 2200,
+          temperature: 0.85,
+          prompt:
+            `Write FIVE complete SEO metadata candidates for a video about "${topic}" on "${channelName}" — ` +
+            `one per frame: (1) specific-number, (2) curiosity-gap, (3) contrarian/counterintuitive, ` +
+            `(4) how/why-mechanism, (5) stakes/warning.\n` +
+            `NICHE: ${niche || "general"} | PERSONA: ${persona || "n/a"}\n` +
+            (scriptExcerpt ? `SCRIPT EXCERPT:\n${scriptExcerpt}\n` : "") +
+            dnaSeoClause +
+            (powerWords.length ? `POWER WORDS: ${powerWords.join(", ")}\n` : "") +
+            langDirective +
+            `Each candidate: title (obey the channel formula above when given; never the channel name; one clear ` +
+            `honest promise), description (hook line + ≤60-word paragraph + "Subscribe for more:" CTA + ` +
+            `"Keywords: " line + hashtags line), tagsCsv (25-30 comma-separated tags relevant to THIS video).\n` +
+            `Return STRICT JSON {"candidates":[{"frame","title","description","tagsCsv"}]}.`,
+        });
+        const cands = (gen.candidates ?? [])
+          .map((c) => ({ ...c, tags: (c.tagsCsv ?? "").split(",").map((t) => t.trim()).filter(Boolean) }))
+          .filter((c) =>
+            c.title && c.title.length >= 25 && c.title.length <= 100 &&
+            c.description && c.description.length >= 40 &&
+            (isMusicNiche || !LOFI_LEAK.test(`${c.title} ${c.description}`)),
+          );
+        if (cands.length >= 3) {
+          const judgeSchema = z.object({
+            rankings: z.array(z.object({ idx: z.number(), clickScore: z.number(), why: z.string() })).default([]),
+            winner: z.number().optional(),
+          });
+          const judged = await agentJson({
+            role: "director",
+            schema: judgeSchema,
+            log: ctx.log,
+            maxTokens: 1200,
+            temperature: 0.3,
+            system: "You are the DIRECTOR: a YouTube CTR strategist judging a real feed. Return ONLY JSON.",
+            prompt:
+              `THE FEED — this niche's top performers (real views):\n${titlesWithViews.join("\n")}\n\n` +
+              `CANDIDATE TITLES for "${topic}":\n` +
+              cands.map((c, i) => `${i + 1}. [${c.frame}] ${c.title}`).join("\n") +
+              `\n\nScore each candidate 1-10: would it WIN the click placed in this exact feed (against those ` +
+              `titles), while staying honest and on the channel formula${dnaSeoClause ? " given above" : ""}? ` +
+              `Penalize hype that breaks a premium register. Return STRICT JSON ` +
+              `{"rankings":[{"idx":1-based,"clickScore":1-10,"why":string}],"winner":1-based}.`,
+          });
+          const wIdx = Math.min(cands.length - 1, Math.max(0, (judged.winner ?? 1) - 1));
+          const wScore = (judged.rankings ?? []).find((r) => (r.idx ?? 0) - 1 === wIdx)?.clickScore ?? 0;
+          tournament = {
+            title: cands[wIdx].title.trim(),
+            description: cands[wIdx].description.trim(),
+            tags: cands[wIdx].tags,
+            score: wScore / 10,
+          };
+          ctx.log(
+            `metadata TOURNAMENT: ${cands.length} frames judged vs ${titlesWithViews.length} real top titles → ` +
+            `winner [${cands[wIdx].frame}] ${wScore}/10: "${tournament.title.slice(0, 70)}"`,
+          );
+        }
+      } catch (e) {
+        ctx.log(`metadata tournament failed (legacy loop): ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
     // Producer ↔ Director SEO loop: niche-aware, script-grounded, high-CTR.
-    const loop = await produceAndCritique<{
+    const loop = tournament ? null : await produceAndCritique<{
       title: string;
       description: string;
       tags: string[];
@@ -274,11 +390,35 @@ export const metadataOptimized: Block = {
             (powerWords.length ? `POWER WORDS: ${powerWords.join(", ")}\n` : "") +
             (databank?.titleTemplates?.length ? `TITLE TEMPLATES:\n${databank.titleTemplates.join("\n")}\n` : "") +
             (perfCtx ? perfCtx + "\n" : "") +
+            dnaSeoClause +
             `RULES:\n` +
-            `- title: high-CTR, <= ${titleMax} chars, main keyword + hook in the first ~40 chars.\n` +
-            `- description: the FIRST 150 chars must stand alone as a compelling summary (shown above the fold); then 150-350 words with natural keywords; end with 3-5 hashtags.\n` +
-            `- tags: 10-15 relevant tags.\n` +
+            // The channel's own DNA title formula is AUTHORITATIVE when present —
+            // appending it under contradictory generic rules (60-90 chars +
+            // "(NICHE) in caps" vs the DNA's "<60 chars, no all-caps") deadlocked
+            // the producer↔Director loop at sub-bar scores forever.
+            (dnaSeo?.titleFormula
+              ? `- title: FOLLOW THE CHANNEL TITLE FORMULA above EXACTLY — its length/case/shape constraints WIN ` +
+                `over any generic advice. Front-load the PRIMARY KEYWORD, use a CURIOSITY GAP (show the WHAT, hide ` +
+                `the HOW), address the viewer with "you" where natural, ONE clear promise per title. ` +
+                `NEVER promise something the video doesn't deliver. Do NOT include the channel name ("${channelName}").\n`
+              : `- title: 60-90 characters (aim LONG — 70-100 char titles earn +10-14% CTR; no fluff). Front-load the ` +
+                `PRIMARY KEYWORD in the first ~40 chars. Strongly prefer a NUMBER/LIST framing when the topic suits it ` +
+                `(e.g. "9 Keys to …", "7 Daily Habits …"), put the NICHE in caps in parentheses near the end, and append ` +
+                `"| <relevant figure>" when one fits. ` +
+                `Use a CURIOSITY GAP (show the WHAT, hide the HOW — +CTR), address the viewer with "you" where natural ` +
+                `(personal pronouns lift CTR), and lean on a proven high-CTR frame: specific-number list, curiosity gap, ` +
+                `transformation promise, warning ("…That Kill…"), versus, or "Why …". An end bracket like "(Explained)" / ` +
+                `"[2026]" can add a click. ONE clear promise per title. ` +
+                `NEVER promise something the video doesn't deliver. Do NOT include the channel name ("${channelName}").\n`) +
+            `- description: SEO-RICH but NOT the script. Structure exactly: (1) 2-3 punchy emotional HOOK lines, with ` +
+            `the PRIMARY KEYWORD worked into the VERY FIRST sentence (above-the-fold text is weighted most by search); ` +
+            `(2) ONE short paragraph (≤60 words) summarizing the value; (3) a "Subscribe for more:" call-to-action ` +
+            `line; (4) a line starting "Keywords: " with 14-20 comma-separated SEO keywords/phrases; (5) a final ` +
+            `line of 8-12 relevant #hashtags. Do NOT paste the script, transcript, narration, or quotes.\n` +
+            `- tags: 25-30 relevant tags (include the niche, the key figures/entities THIS video actually mentions, ` +
+            `and long-tail phrases).\n` +
             `- MATCH THE NICHE. Do NOT use "lofi" / "beats to relax / study" / study-music framing unless the niche actually IS lofi/study/ambient music.\n` +
+            langDirective +
             (priorIssues.length ? `FIX these issues from the last attempt: ${priorIssues.join("; ")}\n` : "") +
             `Return STRICT JSON {"title":string,"description":string,"tags":string[]}.`,
         });
@@ -292,8 +432,13 @@ export const metadataOptimized: Block = {
         // DETERMINISTIC checks (computed, not model-judged).
         const issues: string[] = [];
         if (!cand.title) issues.push("empty title");
-        if (cand.title.length > titleMax + 5) issues.push(`title ${cand.title.length} chars > ${titleMax}`);
-        if (cand.description.length < 120) issues.push("description too short (<120 chars; first 150 must summarize)");
+        if (cand.title.length > 100) issues.push(`title ${cand.title.length} chars > 100 (YouTube hard limit)`);
+        if (cand.title.length < 30) issues.push(`title ${cand.title.length} chars — too short (aim 60-90)`);
+        // hook + one short paragraph: enforce a sane floor AND ceiling so the
+        // model never dumps the script into the description.
+        const descNoTags = cand.description.replace(/#\w+/g, "").trim();
+        if (descNoTags.length < 40) issues.push("description too short (need hook + paragraph + CTA + keywords)");
+        if (descNoTags.length > 1800) issues.push("description too long — trim toward the structured SEO template (no script/transcript)");
         if (cand.tags.length < 5) issues.push("fewer than 5 tags");
         const lofiLeak =
           !isMusicNiche && (LOFI_LEAK.test(cand.title) || LOFI_LEAK.test(cand.description));
@@ -331,10 +476,35 @@ export const metadataOptimized: Block = {
       },
     });
 
-    let { title, description, tags } = loop.value;
-    // Merge top niche tags (dedup, cap 15); never ship empty.
+    let { title, description, tags } = tournament ?? loop!.value;
+    // Deterministically strip the channel name from the title (it's the channel,
+    // not part of the video title) — handles separators like "… | Channel".
+    if (channelName && channelName !== "this channel") {
+      const esc = channelName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+      title = title
+        .replace(new RegExp(`\\s*[|\\-–—:•]\\s*${esc}\\s*$`, "i"), "")
+        .replace(new RegExp(`^\\s*${esc}\\s*[|\\-–—:•]\\s*`, "i"), "")
+        .replace(new RegExp(`\\b${esc}\\b`, "gi"), "")
+        .replace(/\s{2,}/g, " ")
+        .replace(/\s*[|\-–—:•]\s*$/, "")
+        .trim();
+    }
+    // Merge tags: curated subcategory SEED tags first (the v1 catalog defaults),
+    // then the AI tags, then live niche tags. Dedup, cap 30; never ship empty.
+    // BANNED-WORD FILTER: the niche catalog's seed tags can contradict the
+    // channel's own identity (Investory's bible bans "hustle" while its finance
+    // seed tags included "side hustle"/"make money online") — every tag source
+    // is screened against identity.bannedWords.
+    const bannedWords = ((ctx.store["bannedWords"] as string[] | undefined) ?? [])
+      .map((w) => w.toLowerCase().trim())
+      .filter(Boolean);
+    const notBanned = (t: string) => !bannedWords.some((w) => t.toLowerCase().includes(w));
+    const baseTags = (Array.isArray(ctx.params["baseTags"]) ? (ctx.params["baseTags"] as unknown[]) : [])
+      .filter((t): t is string => typeof t === "string" && t.trim().length > 0);
     const nicheTags = (nicheIntel?.topTags ?? []).map((t) => t.tag);
-    tags = Array.from(new Set([...tags, ...nicheTags])).slice(0, 15);
+    const dropped = [...baseTags, ...nicheTags].filter((t) => !notBanned(t));
+    if (dropped.length) ctx.log(`metadata: dropped banned-word tags: ${dropped.join(", ")}`);
+    tags = Array.from(new Set([...baseTags, ...tags, ...nicheTags].filter(notBanned))).slice(0, 30);
     if (tags.length === 0) tags = [topic.toLowerCase()];
 
     // Append chapters (from the captions block) to the description if present.
@@ -350,7 +520,7 @@ export const metadataOptimized: Block = {
 
     const ve = await viewEstimate(tags);
     ctx.log(
-      `metadata: title="${title.slice(0, 60)}…" (score=${loop.critique.score.toFixed(2)}, accepted=${loop.accepted}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
+      `metadata: title="${title.slice(0, 60)}…" (${tournament ? `tournament ${(tournament.score * 10).toFixed(0)}/10` : `score=${loop!.critique.score.toFixed(2)}, accepted=${loop!.accepted}`}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
     );
     return { title, description, tags, ...ve };
   },
@@ -370,6 +540,24 @@ interface ThumbIdentity {
   visualStyle?: string;
   textPosition?: string;
   avoid?: string[];
+}
+
+/** Base-image fallback when fal.ai is unavailable: gpt_image_2 → Replicate Flux. */
+async function fallbackBase(ctx: StageContext, basePrompt: string): Promise<string> {
+  try {
+    const r = await generateKeyframe({
+      model: "gpt_image_2",
+      prompt: basePrompt,
+      aspectRatio: "16:9",
+      resolution: "2k",
+    });
+    if (!r.url) throw new Error("gpt_image_2 returned no url");
+    ctx.log("thumbnail_gen: base via gpt_image_2 (Higgsfield)");
+    return r.url;
+  } catch (e) {
+    ctx.log(`thumbnail_gen: gpt_image_2 failed (${e instanceof Error ? e.message : e}) — Replicate Flux fallback`);
+    return generateFluxImage({ prompt: basePrompt, aspectRatio: "16:9" });
+  }
 }
 
 /** Legacy title_card fallback — guaranteed to yield a thumbnailKey. */
@@ -418,6 +606,208 @@ export const thumbnailGen: Block = {
       "claude_flux";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
 
+    // CHANNEL GROUNDING that previously never reached generation:
+    //  - styleDNA.thumbnail — the research-distilled per-channel thumbnail spec
+    //    (subject/composition/textRule/contrast-pushed palette);
+    //  - seoDatabank.thumbnailRules — imperative rules scraped from top
+    //    performers in the niche;
+    //  - competitor thumbnail URLs — the actual reference images the candidate
+    //    must rival (used in the QA comparison below).
+    type DnaLite = {
+      thumbnail?: { composition?: string; textRule?: string; palette?: string[]; subject?: string };
+      palette?: string[];
+      recurringSubject?: string;
+      setting?: string;
+      colorGrade?: string;
+    };
+    const dna = (ctx.store["styleDNA"] as DnaLite | null) ?? null;
+    const dnaThumb = dna?.thumbnail;
+    const thumbnailRules = (
+      (ctx.store["seoDatabank"] as { thumbnailRules?: string[] } | null)?.thumbnailRules ?? []
+    ).filter((r) => typeof r === "string").slice(0, 8);
+    const referenceThumbs = (
+      (ctx.store["competitors"] as { topVideos?: { views?: number; thumbnailUrl?: string }[] }[] | null) ?? []
+    )
+      .flatMap((c) => c.topVideos ?? [])
+      .filter((v) => typeof v.thumbnailUrl === "string" && (v.thumbnailUrl as string).length > 0)
+      .sort((a, b) => (b.views ?? 0) - (a.views ?? 0))
+      .slice(0, 4)
+      .map((v) => v.thumbnailUrl as string);
+    const dnaSpecClause =
+      dnaThumb || dna?.recurringSubject
+        ? `Channel Style-DNA thumbnail spec (FOLLOW IT — this is the locked brand): ${JSON.stringify({
+            subject: dnaThumb?.subject || dna?.recurringSubject || undefined,
+            composition: dnaThumb?.composition,
+            textRule: dnaThumb?.textRule,
+            palette: dnaThumb?.palette?.length ? dnaThumb.palette : dna?.palette,
+            setting: dna?.setting,
+            colorGrade: dna?.colorGrade,
+          })}.\n`
+        : "";
+    const rulesClause = thumbnailRules.length
+      ? `Niche thumbnail rules (scraped from this niche's top performers): ${thumbnailRules.join("; ")}.\n`
+      : "";
+    // Self-heal guidance: when the healer re-runs this block over a QA defect,
+    // the defect text steers the regeneration instead of rolling the same dice.
+    const healHints = ((ctx.store["healHints"] as Record<string, string[]> | undefined)?.["thumbnail_gen"] ?? []);
+    const healClause = healHints.length
+      ? `PREVIOUS ATTEMPT WAS REJECTED BY QA FOR: ${healHints.join("; ")} — the new design MUST fix this.\n`
+      : "";
+
+    /**
+     * REFERENCE + MOBILE QA — the missing half of validation: (1) downscale the
+     * candidate to real browse-strip size (~168px) and check legibility there,
+     * (2) judge it SIDE-BY-SIDE against the scraped top competitor thumbnails.
+     * Returns null when it can't run (no key/refs) — never blocks on infra.
+     */
+    const referenceMobileQA = async (
+      tmp: string,
+      outJpg: string,
+    ): Promise<{ pass: boolean; reason: string } | null> => {
+      if (!hasGeminiKey()) return null;
+      try {
+        const mobileJpg = join(tmp, "thumb_mobile.jpg");
+        await imageToJpeg(outJpg, mobileJpg, 168, 94);
+        const refPaths: string[] = [];
+        for (let i = 0; i < referenceThumbs.length; i++) {
+          try {
+            refPaths.push(await downloadTo(referenceThumbs[i], join(tmp, `ref_${i}.jpg`)));
+          } catch { /* unreachable reference — skip it */ }
+        }
+        const raw = await geminiVisionLocal({
+          prompt:
+            `Image 1 is a CANDIDATE YouTube thumbnail rendered at real mobile browse size (~168px wide). ` +
+            (refPaths.length
+              ? `Images 2-${refPaths.length + 1} are thumbnails of the TOP-PERFORMING videos in the same niche (the bar to beat). `
+              : "") +
+            `Video title: "${title}"${niche ? `, niche: ${niche}` : ""}. Judge the candidate:\n` +
+            `(1) Is every word of overlay text still easily readable at THIS size?\n` +
+            `(2) Does it have a single clear focal subject that reads instantly at this size?\n` +
+            (refPaths.length
+              ? `(3) Placed next to the reference thumbnails in a browse feed, would it hold its own or look amateur? Rate competitiveness 1-10.\n`
+              : `(3) Rate overall click-appeal 1-10.\n`) +
+            `Return ONLY JSON {"legible":true|false,"focal":true|false,"score":1-10,"reason":"..."}.`,
+          imagePaths: [mobileJpg, ...refPaths],
+          json: true,
+          maxTokens: 250,
+        });
+        const v = parseJsonLoose<{ legible?: boolean; focal?: boolean; score?: number; reason?: string }>(raw);
+        const pass = v.legible !== false && v.focal !== false && (typeof v.score !== "number" || v.score >= 6);
+        return { pass, reason: `${v.reason ?? ""} (score ${v.score ?? "?"})` };
+      } catch (e) {
+        ctx.log(`thumbnail_gen: reference/mobile QA errored (skipping): ${e instanceof Error ? e.message : e}`);
+        return null;
+      }
+    };
+
+    // Resolve the channel's locked thumbnail STYLE (brand consistency). Source:
+    // explicit param → channel.identity.thumbnailStyle → archetype template
+    // letter (A/B/C/D/E) → generic default. Used by the claude_flux path below.
+    const channelDoc = await loadChannel(ctx);
+    const explicitStyleKey =
+      (ctx.params["thumbnailStyle"] as string | undefined) ??
+      (channelDoc?.identity as { thumbnailStyle?: string } | undefined)?.thumbnailStyle;
+    const styleKey =
+      explicitStyleKey ??
+      (channelDoc as { template?: string } | null)?.template ??
+      undefined;
+    let style = resolveThumbnailStyle(styleKey);
+    // STYLE DNA WINS over the template-letter preset: every template-A channel
+    // used to inherit the stoic marble bust regardless of what it was about.
+    // An explicit per-channel thumbnailStyle still overrides everything.
+    // (Shared styleFromDNA — the SAME source the week-ahead planner uses.)
+    if (!explicitStyleKey) {
+      const dnaStyle = styleFromDNA(dna);
+      if (dnaStyle) {
+        style = dnaStyle;
+        ctx.log(`thumbnail_gen: style derived from Style DNA (template preset "${styleKey ?? "?"}" overridden)`);
+      }
+    }
+
+    // PLAYBOOK PATH — the Thumbnail Lab's distilled patterns (evidence-derived
+    // rules from VERIFIED high-view references + Remotion typography). Patterns
+    // rotate per run for anti-repetition; the comparative reference QA still
+    // gates the result. Falls through to the legacy paths on any failure.
+    const playbook = (channelDoc as { thumbnailPlaybook?: import("@/lib/thumbnailLab").ThumbnailPlaybook } | null)
+      ?.thumbnailPlaybook;
+    if (playbook?.patterns?.length && hasAnthropicKey() && hasFalKey() && thumbnailer !== "title_card") {
+      try {
+        const { renderCandidate } = await import("@/lib/thumbnailLab");
+        const tmp = await makeRunTempDir(ctx.runId);
+        // Deterministic per-run rotation (no Math.random in resumable runs).
+        const idx =
+          [...ctx.runId].reduce((s, c) => s + c.charCodeAt(0), 0) % playbook.patterns.length;
+        const pattern = playbook.patterns[idx];
+        const outJpg = join(tmp, "thumbnail.jpg");
+        const scriptHint = String(ctx.store["narrationText"] ?? "").slice(0, 500);
+        await renderCandidate({
+          pattern, title, scriptHint, playbook, outJpg, tmpDir: tmp, idx, log: ctx.log,
+        });
+        const refQA = await referenceMobileQA(tmp, outJpg);
+        if (refQA && !refQA.pass) {
+          ctx.log(`thumbnail_gen: playbook candidate rejected (${refQA.reason}) — falling through`);
+        } else {
+          const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
+          await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
+          await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook", pattern: pattern.name });
+          ctx.log(`thumbnail_gen: PLAYBOOK thumbnail ✓ (pattern "${pattern.name}")${refQA ? ` — ref QA: ${refQA.reason}` : ""}`);
+          return { thumbnailKey };
+        }
+      } catch (e) {
+        ctx.log(`thumbnail_gen: playbook path failed (${e instanceof Error ? e.message : e}) — falling through`);
+      }
+    }
+
+    // REAL-SCENE PATH (music_loop/lofi): the run's own keyframe still IS the
+    // most on-brand thumbnail base — it is literally the video. Use it (free,
+    // perfectly DNA-grounded) with a styled contrasty title overlay; only fall
+    // through to generated bases if QA rejects the composite.
+    const sceneStillKey = ctx.store["f1Key"] as string | undefined;
+    if (sceneStillKey && thumbnailer !== "title_card") {
+      try {
+        const tmp = await makeRunTempDir(ctx.runId);
+        const base = await writeBytes(join(tmp, "scene_base.png"), await getObjectBytes(sceneStillKey));
+        let ttl = shortTitleFallback(title);
+        if (hasAnthropicKey()) {
+          try {
+            const c = await claudeJson<{ thumbnail_title?: string }>({
+              maxTokens: 200,
+              system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
+              prompt:
+                `The thumbnail base is the video's own scene (a ${style.label} still). Video title: "${title}"` +
+                (niche ? ` (niche: ${niche})` : "") +
+                `.\n${dnaSpecClause}${rulesClause}` +
+                `Write the overlay text: 2-4 punchy words, high curiosity, storybook-warm but BOLD ` +
+                `(it must pop against a cozy illustrated scene). Return JSON {"thumbnail_title": string}.`,
+            });
+            if (c.thumbnail_title?.trim()) ttl = c.thumbnail_title.trim();
+          } catch { /* fallback title below */ }
+        }
+        const outJpg = join(tmp, "thumbnail.jpg");
+        await thumbnailText({
+          basePath: base,
+          outJpg,
+          title: ttl,
+          subtitle: (ctx.store["channelName"] as string | undefined) ?? "",
+          font: style.title.font,
+          uppercase: style.title.uppercase,
+          textShadow: true,
+        });
+        const refQA = await referenceMobileQA(tmp, outJpg);
+        if (refQA && !refQA.pass) {
+          ctx.log(`thumbnail_gen: real-scene composite rejected (${refQA.reason}) — generating a fresh base`);
+        } else {
+          const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
+          await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
+          await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "scene_still", thumbnailTitle: ttl });
+          ctx.log(`thumbnail_gen: real-scene thumbnail ✓ ("${ttl}")${refQA ? ` — ref QA: ${refQA.reason}` : ""}`);
+          return { thumbnailKey };
+        }
+      } catch (e) {
+        ctx.log(`thumbnail_gen: real-scene path failed (${e instanceof Error ? e.message : e}) — falling through`);
+      }
+    }
+
     // PREFERRED: Ideogram 3.0 text-first thumbnail (great headlines, ~95% text
     // accuracy). Director vision QA gates legibility/CTR; retry once on fail.
     // Falls through to claude_flux / title_card on absence or failure.
@@ -432,22 +822,32 @@ export const thumbnailGen: Block = {
           await imageToJpeg(raw, outJpg);
           const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
           await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
-          if (hasGeminiKey() && attempt < 2) {
+          // QA runs on EVERY attempt now (it previously skipped the final
+          // attempt, so a retried thumbnail shipped unvalidated). A final-
+          // attempt failure falls through to claude_flux instead of shipping.
+          if (hasGeminiKey()) {
             try {
-              const qraw = await geminiVision({
+              const qraw = await geminiVisionLocal({
                 prompt:
                   `You are a thumbnail QA reviewer. Judge this YouTube thumbnail for "${title}". ` +
                   `Is the text legible at small size and the composition click-worthy + on-brand` +
                   (niche ? ` for a ${niche} channel` : "") +
-                  `? Return ONLY JSON {"pass":true|false,"reason":"..."}.`,
-                imageUrls: [publicUrl(thumbnailKey)],
+                  `? ${dnaSpecClause}Return ONLY JSON {"pass":true|false,"reason":"..."} — reason under 120 chars.`,
+                imagePaths: [outJpg],
                 json: true,
-                maxTokens: 200,
+                maxTokens: 400,
               });
               const qa = parseJsonLoose<{ pass?: boolean; reason?: string }>(qraw);
               if (qa.pass === false) {
-                ctx.log(`thumbnail_gen: ideogram QA fail (${qa.reason ?? ""}) — retry`);
-                continue;
+                ctx.log(`thumbnail_gen: ideogram QA fail attempt ${attempt} (${qa.reason ?? ""})`);
+                if (attempt < 2) continue;
+                break; // exhausted → claude_flux
+              }
+              const refQA = await referenceMobileQA(tmp, outJpg);
+              if (refQA && !refQA.pass) {
+                ctx.log(`thumbnail_gen: ideogram ref/mobile QA fail attempt ${attempt} (${refQA.reason})`);
+                if (attempt < 2) continue;
+                break;
               }
             } catch (e) {
               ctx.log(`thumbnail_gen: ideogram QA errored (accepting): ${e instanceof Error ? e.message : e}`);
@@ -472,56 +872,109 @@ export const thumbnailGen: Block = {
       return { thumbnailKey };
     }
 
-    const maxAttempts = 2;
+    const maxAttempts = 3;
     for (let attempt = 1; attempt <= maxAttempts + 1; attempt++) {
       try {
-        // Phase 1 — Claude Sonnet concept.
-        const concept = await claudeJson<ThumbConcept>({
-          maxTokens: 600,
-          system:
-            "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
-          prompt:
-            `Design a click-worthy 16:9 thumbnail for the video titled "${title}".\n` +
-            `Channel persona: ${persona || "n/a"}.\n` +
-            `Thumbnail identity: ${JSON.stringify(thumbId ?? {})}.\n` +
-            `Niche style guide: ${JSON.stringify(styleGuide ?? {})}.\n\n` +
-            "Return JSON with keys: flux_prompt (a vivid, TEXT-FREE image " +
-            "generation prompt — never request words/letters in the image), " +
-            "thumbnail_title (<= 8 words, punchy overlay text), text_color " +
-            "(hex like #FFEE00 with high contrast vs the scene), text_shadow " +
-            "(boolean), visual_rationale (1 sentence).",
-        });
-
-        // Phase 2 — base render (text-free): GPT Image 2.0 via Higgsfield
-        // (sharper, better composition than Flux). Falls back to Flux/Replicate.
-        const basePrompt = `${concept.flux_prompt}. No text, no words, no letters, no watermark.`;
-        let baseUrl: string;
-        try {
-          const r = await generateKeyframe({
-            model: "gpt_image_2",
-            prompt: basePrompt,
-            aspectRatio: "16:9",
-            resolution: "2k",
+        // Phase 1 — Claude Sonnet concept, constrained to the channel STYLE +
+        // the high-CTR thumbnail formula. Degrades to a deterministic prompt.
+        let concept: ThumbConcept;
+        if (hasAnthropicKey()) {
+          concept = await claudeJson<ThumbConcept>({
+            maxTokens: 600,
+            system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
+            prompt:
+              `Design a click-worthy 16:9 thumbnail for the video titled "${title}"` +
+              (niche ? ` (niche: ${niche})` : "") +
+              `.\nChannel persona: ${persona || "n/a"}.\n` +
+              dnaSpecClause +
+              rulesClause +
+              healClause +
+              `Thumbnail identity: ${JSON.stringify(thumbId ?? {})}.\n` +
+              `Niche style guide: ${JSON.stringify(styleGuide ?? {})}.\n\n` +
+              artDirectorBrief(style) +
+              "\n\nReturn JSON with keys: flux_prompt (a vivid, TEXT-FREE image " +
+              "generation prompt that REALISES the locked style above — never request " +
+              "words/letters in the image), thumbnail_title (3-5 words, punchy overlay " +
+              "text that adds curiosity), text_color (hex with high contrast vs the " +
+              "scene), text_shadow (boolean), visual_rationale (1 sentence).",
           });
-          if (!r.url) throw new Error("gpt_image_2 returned no url");
-          baseUrl = r.url;
-          ctx.log("thumbnail_gen: base via gpt_image_2 (Higgsfield)");
-        } catch (e) {
-          ctx.log(`thumbnail_gen: gpt_image_2 failed (${e instanceof Error ? e.message : e}) — Flux fallback`);
-          baseUrl = await generateFluxImage({ prompt: basePrompt, aspectRatio: "16:9" });
+        } else {
+          concept = {
+            flux_prompt: buildBasePrompt(style, title, niche),
+            thumbnail_title: shortTitleFallback(title),
+            text_color: "#FFFFFF",
+            text_shadow: true,
+            visual_rationale: "deterministic style preset (no Anthropic key)",
+          };
         }
 
-        // Phase 3 — overlay title text via ffmpeg (v1-style).
+        // Phase 2 — base render (TEXT-FREE). PRIMARY: FLUX1.1 [pro] via fal.ai
+        // (cinematic, controllable, no CLI session). Falls back to gpt_image_2
+        // (Higgsfield) then Replicate Flux.
+        const basePrompt = `${concept.flux_prompt} ${TEXT_FREE_SUFFIX}`;
+        let baseUrl: string;
+        if (hasFalKey()) {
+          try {
+            baseUrl = await generateFalFluxProImage({ prompt: basePrompt });
+            ctx.log("thumbnail_gen: base via FLUX1.1 [pro] (fal.ai)");
+          } catch (e) {
+            ctx.log(`thumbnail_gen: fal flux-pro failed (${e instanceof Error ? e.message : e}) — gpt_image_2 fallback`);
+            baseUrl = await fallbackBase(ctx, basePrompt);
+          }
+        } else {
+          baseUrl = await fallbackBase(ctx, basePrompt);
+        }
+
+        // Phase 3 — overlay the title. Styles with a `design` use the richer
+        // brush-swash composite (approved "Option B" stoic look); others get the
+        // plain bold overlay.
         const tmp = await makeRunTempDir(ctx.runId);
         const base = await downloadTo(baseUrl, join(tmp, "thumb_base.png"));
         const outJpg = join(tmp, "thumbnail.jpg");
-        await thumbnailText({
-          basePath: base,
-          outJpg,
-          title: concept.thumbnail_title || title,
-          subtitle: (ctx.store["channelName"] as string | undefined) ?? "",
-          textShadow: true,
-        });
+        const ttl = concept.thumbnail_title || shortTitleFallback(title);
+        const channelName = (ctx.store["channelName"] as string | undefined) ?? "";
+        if (style.design?.treatment === "brush_swash") {
+          // GUARANTEE statue-right / text-left DETERMINISTICALLY by brightness
+          // (the marble bust is bright, the bg near-black) — vision-model side
+          // detection false-positived. Mirror so the subject is on the right; if
+          // the subject is centered/spanning (left text-zone not dark), regenerate.
+          const layout = await planSubjectLayout(base);
+          const flipBase = layout.flip;
+          if (!layout.leftZoneClean && attempt <= maxAttempts) {
+            ctx.log(`thumbnail_gen: subject not cleanly right (L${layout.left}/R${layout.right}) — regenerating base`);
+            continue;
+          }
+          // Compose with the shared DETERMINISTIC overlap guard: it measures the
+          // statue's left edge, caps the title to the clear gap, and reports if the
+          // title sits CLEAR of the subject. Regenerate a wider base if not.
+          const design = await guardedThumbnailDesign({
+            basePath: base,
+            outJpg,
+            brushPath: join(process.cwd(), "src/assets/thumb_brush_swash.png"),
+            title: ttl,
+            tagline: style.design.tagline,
+            channel: channelName,
+            badge: style.design.badge,
+            accentHex: style.design.accentHex,
+            font: style.title.font,
+            flipBase,
+          });
+          ctx.log(`thumbnail_gen: flip=${flipBase} subjLeft=${design.subjectLeftPx}px textRight=${design.textRightPx}px clear=${design.clear} (leftClean=${layout.leftZoneClean})`);
+          if (!design.clear && attempt <= maxAttempts) {
+            ctx.log(`thumbnail_gen: title would touch the subject — regenerating base`);
+            continue;
+          }
+        } else {
+          await thumbnailText({
+            basePath: base,
+            outJpg,
+            title: ttl,
+            subtitle: channelName,
+            font: style.title.font,
+            uppercase: style.title.uppercase,
+            textShadow: true,
+          });
+        }
 
         // Upload first (so QA can fetch the rendered image by URL).
         const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
@@ -529,25 +982,60 @@ export const thumbnailGen: Block = {
           contentType: "image/jpeg",
         });
 
-        // Phase 3b — Gemini Vision QA (legibility / brand). Retry on fail
-        // while attempts remain; otherwise accept the render.
+        // Phase 3b — Gemini Vision QA on the LOCAL rendered image (publicUrl isn't
+        // configured, so URL-based QA silently no-oped before). Strict checks:
+        // text must NOT overlap the subject/face, must be fully legible at small
+        // size, uncluttered, and on-brand for the channel identity. Retry on fail.
         if (hasGeminiKey() && attempt <= maxAttempts) {
           try {
-            const raw = await geminiVision({
+            // ARCHETYPE-CONDITIONAL rubric: the statue-right/text-left layout
+            // criteria only apply to the brush_swash composite — judging a lofi
+            // or crime thumbnail against the stoic layout produced nonsense
+            // verdicts for every non-statue channel.
+            const layoutCriteria =
+              style.design?.treatment === "brush_swash"
+                ? `(a) the main subject/statue is NOT clearly on the RIGHT side, OR the title text is NOT clearly on ` +
+                  `the LEFT side; ` +
+                  `(b) ANY text overlaps, touches, or sits on top of the statue/subject/face; `
+                : `(a) there is no single dominant focal subject (the scene reads cluttered/busy at a glance); ` +
+                  `(b) the title text overlaps or crowds the focal subject, or sits over a busy area that hurts legibility; `;
+            const dnaCriteria =
+              dnaThumb?.subject || dna?.recurringSubject
+                ? `(f) it ignores the channel's locked thumbnail identity (expected subject: "${dnaThumb?.subject || dna?.recurringSubject}"` +
+                  ((dnaThumb?.palette ?? dna?.palette)?.length ? `, palette: ${(dnaThumb?.palette ?? dna?.palette ?? []).join(", ")}` : "") +
+                  `). `
+                : "";
+            const raw = await geminiVisionLocal({
               prompt:
-                "You are a thumbnail QA reviewer. Judge this YouTube thumbnail " +
-                `for the title "${title}". Is the overlay text legible at small ` +
-                "size and is the composition on-brand and click-worthy? Return " +
-                'ONLY JSON: {"pass": true|false, "reason": "..."}.',
-              imageUrls: [publicUrl(thumbnailKey)],
+                `You are a STRICT thumbnail QA reviewer for the YouTube channel "${ctx.store["channelName"] ?? "this channel"}"` +
+                (niche ? ` (niche: ${niche})` : "") +
+                (persona ? `, persona: ${persona}` : "") +
+                `. Inspect this thumbnail for the video "${title}". FAIL it if ANY of these are true: ` +
+                layoutCriteria +
+                `(c) the title is not big, bold, high-contrast, and easily readable at small mobile size (it should ` +
+                `look clickbait-worthy); ` +
+                `(d) the composition looks cluttered, amateur, or poorly balanced; ` +
+                `(e) it does not fit the channel's identity/persona/niche. ` +
+                dnaCriteria +
+                `Otherwise pass. Return ONLY JSON {"pass":true|false,"reason":"..."} — reason under 120 chars.`,
+              imagePaths: [outJpg],
               json: true,
-              maxTokens: 200,
+              maxTokens: 400,
             });
             const qa = parseJsonLoose<{ pass?: boolean; reason?: string }>(raw);
             if (qa.pass === false) {
               ctx.log(`thumbnail_gen: QA fail (attempt ${attempt}): ${qa.reason ?? ""} — retrying`);
               continue;
             }
+            // SECOND GATE — the comparison the operator actually cares about:
+            // legible at browse-strip size AND competitive next to the scraped
+            // top thumbnails of the niche.
+            const refQA = await referenceMobileQA(tmp, outJpg);
+            if (refQA && !refQA.pass && attempt <= maxAttempts) {
+              ctx.log(`thumbnail_gen: reference/mobile QA fail (attempt ${attempt}): ${refQA.reason} — retrying`);
+              continue;
+            }
+            ctx.log(`thumbnail_gen: QA pass (attempt ${attempt})${refQA ? ` — ref QA: ${refQA.reason}` : ""}`);
           } catch (e) {
             ctx.log(`thumbnail_gen: QA errored (accepting): ${e instanceof Error ? e.message : e}`);
           }

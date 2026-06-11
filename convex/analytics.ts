@@ -122,6 +122,50 @@ export const channelSummary = query({
   },
 });
 
+/**
+ * Owner-wide daily analytics rows across ALL channels, joined with channel name.
+ * Drives the main-overview growth charts (subscriber growth, monetization
+ * progress, estimated revenue). Sorted by date asc.
+ */
+export const ownerTrends = query({
+  args: { ownerId: v.string(), days: v.optional(v.number()) },
+  handler: async (ctx, args) => {
+    const channels = await ctx.db
+      .query("channels")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .collect();
+    const out: Array<{
+      date: string; channelId: string; channelName: string;
+      subscriberCount: number; subscriberDelta: number; totalViews: number;
+      totalWatchHours: number; estimatedRevenueUsd: number;
+    }> = [];
+    for (const ch of channels) {
+      const rows = (
+        await ctx.db
+          .query("channelAnalytics")
+          .withIndex("by_channel_date", (q) => q.eq("channelId", ch._id))
+          .collect()
+      )
+        .filter((r) => r.ownerId === args.ownerId)
+        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+      const sliced = args.days && args.days > 0 ? rows.slice(-args.days) : rows;
+      for (const r of sliced) {
+        out.push({
+          date: r.date,
+          channelId: ch._id,
+          channelName: ch.name,
+          subscriberCount: r.subscriberCount,
+          subscriberDelta: r.subscriberDelta,
+          totalViews: r.totalViews,
+          totalWatchHours: r.totalWatchHours ?? 0,
+          estimatedRevenueUsd: r.estimatedRevenueUsd ?? 0,
+        });
+      }
+    }
+    return out.sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
+  },
+});
+
 /** Latest (most recent date) channelAnalytics row for a channel, or null. */
 async function latestChannelDay(ctx: QueryCtx, channelId: Id<"channels">) {
   const rows = await ctx.db

@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
+import type { Id } from "../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
 import { useSelectedChannel } from "@/lib/channel-context";
 import type { ChannelRow, RunRow } from "@/lib/types";
@@ -13,6 +14,10 @@ import { StageBadge } from "@/components/StageBadge";
 import { Elapsed } from "@/components/Elapsed";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
+import { RecentVideos } from "@/components/RecentVideos";
+import { StatsCharts } from "@/components/StatsCharts";
+import { GrowthCharts } from "@/components/GrowthCharts";
+import { StatusBanner } from "@/components/StatusBanner";
 import {
   IconChannels,
   IconRuns,
@@ -61,6 +66,9 @@ export default function OverviewPage() {
             : `Live pipeline state across all channels`
         }
       />
+
+      {/* Failed-render pills (main overview only) */}
+      <StatusBanner />
 
       {/* Stat row */}
       <div
@@ -117,6 +125,15 @@ export default function OverviewPage() {
           hint={latestVideo ? latestVideo.channelName : "No published video yet"}
         />
       </div>
+
+      {/* Recent videos + activity graphs (real data) */}
+      <RecentVideos
+        ownerId={ownerId}
+        channelId={selectedSlug && channelsFiltered?.[0] ? (channelsFiltered[0]._id as unknown as Id<"channels">) : undefined}
+        limit={5}
+      />
+      <GrowthCharts ownerId={ownerId} />
+      <StatsCharts runs={recentFiltered ?? []} showByChannel={!selectedSlug} />
 
       {/* Active runs board */}
       <section style={{ marginBottom: "2.25rem" }}>

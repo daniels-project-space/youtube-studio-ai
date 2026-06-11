@@ -12,15 +12,15 @@ import { OWNER_ID } from "@/lib/config";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
-  let body: { seed?: string };
+  let body: { seed?: string; design?: Record<string, unknown> };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
   const seed = body.seed?.trim();
-  if (!seed) {
-    return NextResponse.json({ error: "missing seed" }, { status: 400 });
+  if (!seed && !body.design) {
+    return NextResponse.json({ error: "missing seed or design" }, { status: 400 });
   }
   if (!process.env.TRIGGER_SECRET_KEY) {
     return NextResponse.json(
@@ -30,10 +30,17 @@ export async function POST(request: Request) {
   }
   try {
     const { tasks } = await import("@trigger.dev/sdk");
-    const handle = await tasks.trigger("build-channel-package", {
-      seed,
-      ownerId: OWNER_ID,
-    });
+    // Structured wizard design → modular `design-channel`; legacy single seed →
+    // `build-channel-package`. Advanced-editor param overrides are sanitized
+    // (unknown blocks/keys dropped, numbers clamped) before reaching the task.
+    let design = body.design;
+    if (design && design.paramOverrides) {
+      const { sanitizeParamOverrides } = await import("@/engine/moduleCatalog");
+      design = { ...design, paramOverrides: sanitizeParamOverrides(design.paramOverrides) };
+    }
+    const handle = design
+      ? await tasks.trigger("design-channel", { ...design, ownerId: OWNER_ID })
+      : await tasks.trigger("build-channel-package", { seed, ownerId: OWNER_ID });
     return NextResponse.json({ id: handle.id });
   } catch (err) {
     return NextResponse.json(

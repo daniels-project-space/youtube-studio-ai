@@ -17,9 +17,13 @@ const SERVICES = [
   "mureka", // MUREKA_API_KEY
   "suno", // SUNO_API_KEY
   "fish-audio", // FISH_AUDIO_API_KEY (narration_tts)
+  "elevenlabs", // ELEVENLABS_API_KEY (narration_tts v3 expressive tier; Trigger env var holds the CURRENT key — vault entry may be stale, env wins)
   "pexels", // PEXELS_API_KEY (stock_footage)
   "replicate", // REPLICATE_API_TOKEN
+  "fal", // FAL_KEY (FLUX1.1 [pro] thumbnail base via fal.ai)
+  "higgsfield", // HIGGSFIELD_CREDENTIALS_JSON / HIGGSFIELD_ACCESS_TOKEN+REFRESH_TOKEN (CLI auth → seamless loop engine)
   "telegram", // TELEGRAM_BOT_TOKEN (+ admin chat id)
+  "browserbase", // BROWSERBASE_API_KEY/PROJECT_ID (+ optional CONTEXT_ID) — headless YouTube channel creation
   // Competitor-intelligence engine. hydrateEnv tolerates a missing service
   // (logs + continues), so these are safe even before the vault entries exist.
   "gemini", // GEMINI_API_KEY (Gemini 2.5 Flash + Vision) — script_gen, research, metadata
@@ -33,11 +37,31 @@ const SERVICES = [
 
 let done = false;
 
-/** Hydrate vault secrets once per process. Returns loaded key names. */
+/** Throw when quality-critical keys are absent after hydration. */
+function requireKeys(keys: string[]): void {
+  const missing = keys.filter((k) => !process.env[k]);
+  if (missing.length) {
+    throw new Error(
+      `bootstrap: CRITICAL keys missing after vault hydration: ${missing.join(", ")} — ` +
+        `refusing to run in silent-degrade mode (every downstream block would fall back to generic output). ` +
+        `Check the vault services + network, then re-run.`,
+    );
+  }
+}
+
+/**
+ * Hydrate vault secrets once per process. Returns loaded key names.
+ * `opts.required` — env keys that MUST be present afterwards; missing → throw
+ * (the alternative is a full run of silent generic fallbacks).
+ */
 export async function bootstrapSecrets(
   log: (msg: string, extra?: Record<string, unknown>) => void = () => {},
+  opts?: { required?: string[] },
 ): Promise<string[]> {
-  if (done) return [];
+  if (done) {
+    if (opts?.required) requireKeys(opts.required);
+    return [];
+  }
   const loaded: string[] = [];
   for (const svc of SERVICES) {
     try {
@@ -67,6 +91,7 @@ export async function bootstrapSecrets(
   if (!process.env.HIGGSFIELD_LIVE) process.env.HIGGSFIELD_LIVE = "1";
   done = true;
   log(`bootstrap: hydrated ${loaded.length} keys`, { keys: loaded });
+  if (opts?.required) requireKeys(opts.required);
   return loaded;
 }
 

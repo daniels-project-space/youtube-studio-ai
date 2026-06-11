@@ -70,11 +70,25 @@ export async function searchFootage(
   const url =
     `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}` +
     `&per_page=${Math.max(1, Math.min(count, 10))}&orientation=${orientation}&size=medium`;
-  const res = await fetch(url, { headers: { Authorization: key } });
-  if (!res.ok) {
-    throw new Error(`Pexels HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 160)}`);
+  // Retry transient failures (429 / 5xx / network) so one blip doesn't fail the run.
+  const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
+  let json: { videos?: PexelsVideo[] } | null = null;
+  let lastErr = "";
+  for (let attempt = 0; attempt < 3 && !json; attempt++) {
+    try {
+      const res = await fetch(url, { headers: { Authorization: key } });
+      if (!res.ok) {
+        lastErr = `Pexels HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 160)}`;
+        if (res.status === 429 || res.status >= 500) { await sleep(1500 * (attempt + 1)); continue; }
+        throw new Error(lastErr);
+      }
+      json = (await res.json()) as { videos?: PexelsVideo[] };
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : String(e);
+      if (attempt < 2) await sleep(1500 * (attempt + 1));
+    }
   }
-  const json = (await res.json()) as { videos?: PexelsVideo[] };
+  if (!json) throw new Error(`Pexels failed after 3 attempts: ${lastErr}`);
   const out: FootageClip[] = [];
   for (const v of json.videos ?? []) {
     const f = bestFile(v, orientation === "portrait" ? 1080 : 1920);

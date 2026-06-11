@@ -47,17 +47,30 @@ export default defineConfig({
       "ai",
       "@ai-sdk/google",
       "@ai-sdk/anthropic",
+      // Browserbase + Stagehand (cloud-browser channel creation) — heavy dep tree
+      // with playwright/puppeteer-core natives; install in-image, import dynamically.
+      "@browserbasehq/stagehand",
+      "playwright",
+      "playwright-core",
+      "puppeteer-core",
+      // pino-pretty transport spawns a worker that requires the module from disk.
+      "pino",
+      "pino-pretty",
     ],
     extensions: [
       ffmpeg(),
       additionalPackages({ packages: ["@higgsfield/cli@0.1.40"] }),
-      additionalFiles({ files: ["src/remotion/**"] }),
+      additionalFiles({ files: ["src/remotion/**", "src/assets/**"] }),
       // Headless-Chromium system libraries (Remotion renderTitleCard). The image
       // ships chrome-headless-shell but not its shared libs — without these the
       // browser fails to launch (libnspr4.so / libnss3 missing). Remotion's
       // documented Debian set.
       aptGet({
         packages: [
+          // Python for audiobox-aesthetics (qa audio scoring; pip installs the
+          // package at first use per machine — see src/lib/audioQa.ts).
+          "python3",
+          "python3-pip",
           "libnss3",
           "libnspr4",
           "libdbus-1-3",
@@ -78,5 +91,5 @@ export default defineConfig({
       }),
     ],
   },
-  maxDuration: 3600, // 1h ceiling; raised per-task for long renders in P2.
+  maxDuration: 7200, // 2h ceiling; long-form (15-35 min) renders re-encode a lot.
 });

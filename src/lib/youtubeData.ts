@@ -85,6 +85,7 @@ export async function searchVideoIds(args: {
 export interface VideoDetail {
   youtubeVideoId: string;
   title: string;
+  channelId: string;
   channelTitle: string;
   views: number;
   likes: number;
@@ -142,6 +143,7 @@ export async function fetchVideoDetails(ids: string[]): Promise<VideoDetail[]> {
       out.push({
         youtubeVideoId: it.id,
         title: sn.title ?? "",
+        channelId: sn.channelId ?? "",
         channelTitle: sn.channelTitle ?? "Unknown",
         views: Number(st.viewCount) || 0,
         likes: Number(st.likeCount) || 0,

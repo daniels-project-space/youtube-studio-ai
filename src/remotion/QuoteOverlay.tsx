@@ -26,13 +26,14 @@ export const QuoteOverlay: React.FC<QuoteOverlayProps> = ({ quote, highlights })
   const { fps, durationInFrames, width } = useVideoConfig();
   const hi = new Set((highlights ?? []).map(norm).filter(Boolean));
 
-  const scrim = interpolate(frame, [0, 20], [0, 0.38], { extrapolateRight: "clamp" });
-  const rise = interpolate(spring({ frame, fps, config: { damping: 200 } }), [0, 1], [36, 0]);
-  const appear = interpolate(frame, [8, 26], [0, 1], {
+  // Very slow, calm fades (≈2s at 30fps) so the quote eases in and out gently.
+  const scrim = interpolate(frame, [0, 60], [0, 0.38], { extrapolateRight: "clamp" });
+  const rise = interpolate(spring({ frame, fps, config: { damping: 200, stiffness: 45 } }), [0, 1], [44, 0]);
+  const appear = interpolate(frame, [14, 60], [0, 1], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  const fadeOut = interpolate(frame, [durationInFrames - 16, durationInFrames], [1, 0], {
+  const fadeOut = interpolate(frame, [durationInFrames - 50, durationInFrames], [1, 0], {
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });

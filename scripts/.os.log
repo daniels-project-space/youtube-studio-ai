@@ -1,0 +1,276 @@
+
+Trigger.dev (4.4.6)
+------------------------------------------------------
+[90m┌[39m  Deploying project
+[90m│[39m
+[32m◇[39m  Building trigger code
+[90m│[39m
+[90m│[39m  Successfully built code
+[90m│[39m
+[32m◇[39m  Building version 20260608.2
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #1 [depot] launching amd64 machine
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #1 DONE 0.3s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #2 [depot] connecting to amd64 machine
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #2 DONE 0.6s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #3 [internal] fetching git attributes
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #3 DONE 0.7s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #4 [internal] load build definition from Containerfile
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #4 transferring dockerfile:
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #4 transferring dockerfile: 3.21kB 0.3s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #4 DONE 0.4s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #5 resolve image config for docker-image://docker.io/docker/dockerfile:1
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #5 DONE 0.4s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #6 docker-image://docker.io/docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #6 resolve docker.io/docker/dockerfile:1@sha256:87999aa3d42bdc6bea60565083ee17e86d1f3339802f543c0d03998580f9cb89 0.0s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #6 CACHED
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #4 [internal] load build definition from Containerfile
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #4 transferring dockerfile: 3.21kB 0.3s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #4 DONE 0.4s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #7 [internal] load build definition from Containerfile
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #7 Deduplicating step ID [internal] load build definition from Containerfile, another build is calculating it done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #7 DONE 0.0s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #8 [internal] load metadata for docker.io/library/node:21.7.3-bookworm-slim@sha256:dfc05dee209a1d7adf2ef189bd97396daad4e97c6eaa85778d6f75205ba1b0fb
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #8 DONE 0.0s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #9 [internal] load .dockerignore
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #9 transferring context: 0.1s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #9 transferring context: 2B 0.2s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #9 DONE 0.3s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #10 [base 1/2] FROM docker.io/library/node:21.7.3-bookworm-slim@sha256:dfc05dee209a1d7adf2ef189bd97396daad4e97c6eaa85778d6f75205ba1b0fb
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #10 resolve docker.io/library/node:21.7.3-bookworm-slim@sha256:dfc05dee209a1d7adf2ef189bd97396daad4e97c6eaa85778d6f75205ba1b0fb 0.0s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #10 DONE 0.0s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #11 [internal] load build context
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #11 transferring context: 8.42MB 4.5s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #11 transferring context: 15.11MB 9.6s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #11 transferring context: 23.95MB 13.4s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #11 DONE 13.5s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #12 [base 2/2] RUN apt-get update &&   apt-get --fix-broken install -y &&   apt-get install -y --no-install-recommends busybox ca-certificates dumb-init git openssl ffmpeg libnss3 libnspr4 libdbus-1-3 libatk1.0-0 libatk-bridge2.0-0 libgbm1 libasound2 libxrandr2 libxkbcommon0 libxfixes3 libxcomposite1 libxdamage1 libpango-1.0-0 libcairo2 libcups2 libatspi2.0-0 &&   apt-get clean && rm -rf /var/lib/apt/lists/*
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #12 CACHED
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #13 [build 1/6] RUN apt-get update &&   apt-get install -y --no-install-recommends python3 make g++ &&   apt-get clean &&   rm -rf /var/lib/apt/lists/*
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #13 CACHED
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #14 [build 2/6] WORKDIR /app
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #14 CACHED
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #15 [build 3/6] COPY --chown=node:node package.json ./
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #15 CACHED
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #16 [build 4/6] RUN npm i --no-audit --no-fund --no-save --no-package-lock
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #16 CACHED
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #17 [build 5/6] COPY --chown=node:node . .
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #17 DONE 0.1s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #18 [build 6/6] COPY --chown=node:node . .
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #18 DONE 0.9s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #19 [indexer 1/2] WORKDIR /app
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #19 DONE 0.1s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #20 [indexer 2/2] RUN node /app/AppData/Local/npm-cache/_npx/c685fe487f03c925/node_modules/trigger.dev/dist/esm/entryPoints/managed-index-controller.mjs
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #20 0.680 Writing index.json /app
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #20 ...
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #21 [final 1/3] WORKDIR /app
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #21 CACHED
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #22 [final 2/3] COPY --from=build --chown=node:node /app ./
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #22 ...
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #20 [indexer 2/2] RUN node /app/AppData/Local/npm-cache/_npx/c685fe487f03c925/node_modules/trigger.dev/dist/esm/entryPoints/managed-index-controller.mjs
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #20 1.614 {"message":"Background worker created","buildPlatform":"linux/amd64","targetPlatform":"linux/amd64","createResponse":{"id":"worker_cmq4ibtkv2l3l0un5aw422rv6","version":"20260608.2","contentHash":"d7a9268ddb07a501581c88875fc02264"}}
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #20 DONE 1.9s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #22 [final 2/3] COPY --from=build --chown=node:node /app ./
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #22 DONE 1.4s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #23 [final 3/3] COPY --from=indexer --chown=node:node /app/index.json ./
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #23 DONE 0.2s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 exporting to image
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 exporting layers
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 exporting layers 2.0s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 rewriting layers with source-date-epoch 0 (1970-01-01 00:00:00 +0000 UTC)
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 rewriting layers with source-date-epoch 0 (1970-01-01 00:00:00 +0000 UTC) 3.1s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 exporting manifest sha256:acc062e4df43fe51bb98333543e6578d5d63bc60cd2a9bb3df50260990c4b0e9 0.0s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 exporting config sha256:4e0c9ba04f6e5ed18556138675c505f6a9ba8d5ed58aa6a58765d6525e261541 0.0s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layers for registry.depot.dev/0rqdzkzf7w:7wkzp0f86r@sha256:acc062e4df43fe51bb98333543e6578d5d63bc60cd2a9bb3df50260990c4b0e9
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:4e0c9ba04f6e5ed18556138675c505f6a9ba8d5ed58aa6a58765d6525e261541
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:67979aa501f2009c8d125389cf59a55c3c86cff679c72c140302de7c21b308a4
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:f304b4a41daadb2e344f335057c71d612cb60027408bce6e2f368530478f0c7b
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:5c288477bc58cad135aaff9b27580f617e25daa92f171dca3610c984d2af6104
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:e515f2236c81e25096cb4253b6003de942c91b2256f7bfd12285e93ad88cc690
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:2d75cf493b45287f365fcc6330ae68dff1a857ca09b62caf95bde44e33a4eaae
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:ee5f447b414e35eb93aa9645b225df21e7a6b6a5b4f77b1fb4b24f650298efbf
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:dac03fe0186ea04077a014a9e0f873dc323e4008cf201570d46855ff6419efa8
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:8c72aebf8925d07cd46f712ca8b82999d86dc875a310038b9725aa4f2c220cfe
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:dde5360d7a53b3c7a179388037b2f93c35cd800f60ae4dded56ca07008e288c6
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:5c288477bc58cad135aaff9b27580f617e25daa92f171dca3610c984d2af6104 0.3s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:67979aa501f2009c8d125389cf59a55c3c86cff679c72c140302de7c21b308a4 0.4s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:dac03fe0186ea04077a014a9e0f873dc323e4008cf201570d46855ff6419efa8 0.5s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:f304b4a41daadb2e344f335057c71d612cb60027408bce6e2f368530478f0c7b 0.6s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:ee5f447b414e35eb93aa9645b225df21e7a6b6a5b4f77b1fb4b24f650298efbf 0.8s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:dde5360d7a53b3c7a179388037b2f93c35cd800f60ae4dded56ca07008e288c6 0.8s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:e515f2236c81e25096cb4253b6003de942c91b2256f7bfd12285e93ad88cc690 1.1s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:2d75cf493b45287f365fcc6330ae68dff1a857ca09b62caf95bde44e33a4eaae 1.0s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:4e0c9ba04f6e5ed18556138675c505f6a9ba8d5ed58aa6a58765d6525e261541 1.2s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layers for registry.depot.dev/0rqdzkzf7w:7wkzp0f86r@sha256:acc062e4df43fe51bb98333543e6578d5d63bc60cd2a9bb3df50260990c4b0e9 2.7s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing layer sha256:8c72aebf8925d07cd46f712ca8b82999d86dc875a310038b9725aa4f2c220cfe 2.7s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing manifest for registry.depot.dev/0rqdzkzf7w:7wkzp0f86r@sha256:acc062e4df43fe51bb98333543e6578d5d63bc60cd2a9bb3df50260990c4b0e9
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 pushing manifest for registry.depot.dev/0rqdzkzf7w:7wkzp0f86r@sha256:acc062e4df43fe51bb98333543e6578d5d63bc60cd2a9bb3df50260990c4b0e9 0.4s done
+[90m│[39m
+[90m│[39m  Building version 20260608.2: #24 DONE 8.2s
+[90m│[39m
+[90m│[39m  Building version 20260608.2: Saved target: 
+[90m│[39m
+[90m│[39m  Building version 20260608.2: 	To pull: depot pull --project 0rqdzkzf7w 7wkzp0f86r
+[90m│[39m
+[90m│[39m  Building version 20260608.2: 	To push: depot push --project 0rqdzkzf7w --tag <REPOSITORY:TAG> 7wkzp0f86r
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 [depot] Pushing build 7wkzp0f86r as 878915883288.dkr.ecr.us-east-1.amazonaws.com/deployments-prod/proj_vorkjqmnnpkzoiqqgbuu:20260608.2.production.4hvk752p
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Resolving registry.depot.dev/0rqdzkzf7w:7wkzp0f86r 0.1s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Fetching manifest sha256:acc062e4df43fe51bb98333543e6578d5d63bc60cd2a9bb3df50260990c4b0e9
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Fetching manifest sha256:acc062e4df43fe51bb98333543e6578d5d63bc60cd2a9bb3df50260990c4b0e9 0.2s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Fetching auth token done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:4e0c9ba04f6e5ed18556138675c505f6a9ba8d5ed58aa6a58765d6525e261541
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:dde5360d7a53b3c7a179388037b2f93c35cd800f60ae4dded56ca07008e288c6
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:5c288477bc58cad135aaff9b27580f617e25daa92f171dca3610c984d2af6104
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:dac03fe0186ea04077a014a9e0f873dc323e4008cf201570d46855ff6419efa8
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:e515f2236c81e25096cb4253b6003de942c91b2256f7bfd12285e93ad88cc690
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:ee5f447b414e35eb93aa9645b225df21e7a6b6a5b4f77b1fb4b24f650298efbf
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:f304b4a41daadb2e344f335057c71d612cb60027408bce6e2f368530478f0c7b 0.1s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:2d75cf493b45287f365fcc6330ae68dff1a857ca09b62caf95bde44e33a4eaae
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:67979aa501f2009c8d125389cf59a55c3c86cff679c72c140302de7c21b308a4
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:8c72aebf8925d07cd46f712ca8b82999d86dc875a310038b9725aa4f2c220cfe
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:dde5360d7a53b3c7a179388037b2f93c35cd800f60ae4dded56ca07008e288c6 0.1s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:5c288477bc58cad135aaff9b27580f617e25daa92f171dca3610c984d2af6104 0.1s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:dac03fe0186ea04077a014a9e0f873dc323e4008cf201570d46855ff6419efa8 0.1s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:e515f2236c81e25096cb4253b6003de942c91b2256f7bfd12285e93ad88cc690 0.1s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:ee5f447b414e35eb93aa9645b225df21e7a6b6a5b4f77b1fb4b24f650298efbf 0.1s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:2d75cf493b45287f365fcc6330ae68dff1a857ca09b62caf95bde44e33a4eaae 0.1s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:67979aa501f2009c8d125389cf59a55c3c86cff679c72c140302de7c21b308a4 0.1s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:4e0c9ba04f6e5ed18556138675c505f6a9ba8d5ed58aa6a58765d6525e261541 0.5s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing blob sha256:8c72aebf8925d07cd46f712ca8b82999d86dc875a310038b9725aa4f2c220cfe 1.9s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing manifest sha256:acc062e4df43fe51bb98333543e6578d5d63bc60cd2a9bb3df50260990c4b0e9
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 Pushing manifest sha256:acc062e4df43fe51bb98333543e6578d5d63bc60cd2a9bb3df50260990c4b0e9 0.3s done
+[90m│[39m
+[90m│[39m  Deploying version 20260608.2: #1 DONE 2.6s
+[90m│[39m
+[90m│[39m  Successfully deployed version 20260608.2
+[90m│[39m
+[90m└[39m  Version 20260608.2 deployed with 23 detected tasks 
+
+View deployment
+https://cloud.trigger.dev/projects/v3/proj_vorkjqmnnpkzoiqqgbuu/deployments/4hvk752p
+
+Test tasks
+https://cloud.trigger.dev/projects/v3/proj_vorkjqmnnpkzoiqqgbuu/test?environment=prod

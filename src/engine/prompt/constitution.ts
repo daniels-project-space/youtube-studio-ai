@@ -50,8 +50,9 @@ export const AI_VIDEO_POSITIVE =
  */
 export const LOFI_POSITIVE =
   "preserve hand-painted anime/lofi aesthetic, soft cel shading, warm ambient glow, " +
-  "animate only atmospheric elements (falling rain, drifting steam, flickering neon signs, " +
-  "swaying foliage, rising smoke, shimmering reflections), keep all structures perfectly still, " +
+  "animate ONLY the natural atmospheric elements actually present in the scene " +
+  "(such as light, particles, water, steam, or foliage where they exist), " +
+  "do NOT add new elements, keep all structures and the composition perfectly still, " +
   "slow gentle looping motion, cozy and calm";
 
 /**
@@ -143,7 +144,8 @@ const FLUX_STYLE_CLAUSE: Record<string, string> = {
   ai_video: "photoreal cinematic still, natural lighting, high detail",
   lofi:
     "hand-painted anime/lofi illustration, soft cel shading, warm cozy ambient lighting, " +
-    "cinematic composition, atmospheric depth, highly detailed background, no people",
+    "cinematic composition, atmospheric depth, highly detailed background, " +
+    "no people, no text, no signs, no letters, no watermark, no UI",
 };
 
 const FLUX_QUALITY_SUFFIX =

@@ -8,11 +8,13 @@ import {
   IconSeo,
   IconSettings,
   IconSpark,
+  IconCalendar,
 } from "./icons";
 
 const NAV = [
   { href: "/", label: "Overview", icon: <IconOverview /> },
   { href: "/channels", label: "Channels", icon: <IconChannels /> },
+  { href: "/schedule", label: "Schedule", icon: <IconCalendar /> },
   { href: "/runs", label: "Runs", icon: <IconRuns /> },
   { href: "/library", label: "Library", icon: <IconLibrary /> },
   { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },

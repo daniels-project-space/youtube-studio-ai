@@ -40,6 +40,8 @@ export const generateChannelArtTask = task({
         styleGrammar: channel.identity?.styleGrammar,
         palette: channel.identity?.palette,
         niche: channel.identity?.niche,
+        iconicMotif: channel.identity?.creativeBrief?.iconicMotif,
+        vibe: channel.identity?.creativeBrief?.vibe,
       },
       log,
     );

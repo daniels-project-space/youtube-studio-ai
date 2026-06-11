@@ -28,6 +28,11 @@ export const LOFI_BLOCK_IDS: readonly string[] = [
 export const BLOCK_LABELS: Record<string, string> = {
   competitor_research: "Research",
   topic_select: "Topic Select",
+  director_brief: "Crew · Director",
+  dp_brief: "Crew · Cinematographer",
+  editor_brief: "Crew · Editor",
+  composer_brief: "Crew · Composer",
+  critic_spec: "Crew · Critic",
   scene_planner: "Scene Planner",
   script_gen: "Script",
   hook_craft: "Hook",

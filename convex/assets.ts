@@ -36,3 +36,29 @@ export const listForRun = query({
       .collect();
   },
 });
+
+/**
+ * Delete a run's asset rows EXCEPT the given kinds (default keeps the finished
+ * video + its thumbnail). Used by the `cleanup` block after upload so the library
+ * holds only the final video — the intermediate audio/captions rows are removed
+ * alongside their R2 objects.
+ */
+export const pruneRun = mutation({
+  args: { runId: v.id("runs"), keepKinds: v.optional(v.array(v.string())) },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const keep = new Set(args.keepKinds ?? ["video", "thumbnail"]);
+    const rows = await ctx.db
+      .query("assets")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId))
+      .collect();
+    let removed = 0;
+    for (const r of rows) {
+      if (!keep.has(r.kind)) {
+        await ctx.db.delete(r._id);
+        removed++;
+      }
+    }
+    return removed;
+  },
+});

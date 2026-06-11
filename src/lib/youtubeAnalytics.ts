@@ -34,6 +34,55 @@ async function query(
   return { headers, row };
 }
 
+export interface RetentionPoint {
+  /** 0..1 position in the video (elapsedVideoTimeRatio). */
+  ratio: number;
+  /** audienceWatchRatio — fraction of views still watching at this point. */
+  watch: number;
+  /** relativeRetentionPerformance vs similar-length videos (0..1), if returned. */
+  relative?: number;
+}
+
+/**
+ * The SECOND-BY-SECOND retention curve (audienceWatchRatio per
+ * elapsedVideoTimeRatio) — the ground truth the learning loop joins against
+ * the run's known timeline (opening device, cards, inserts, chapters).
+ */
+export async function fetchRetentionCurve(args: {
+  videoId: string;
+  startDate: string;
+  endDate: string;
+}): Promise<RetentionPoint[] | null> {
+  if (!hasAnalyticsAccess()) return null;
+  const { getAccessToken } = await import("@/lib/youtube");
+  let accessToken: string;
+  try { accessToken = await getAccessToken(); } catch { return null; }
+  const url = `${BASE}?${new URLSearchParams({
+    ids: "channel==MINE",
+    startDate: args.startDate,
+    endDate: args.endDate,
+    metrics: "audienceWatchRatio,relativeRetentionPerformance",
+    dimensions: "elapsedVideoTimeRatio",
+    filters: `video==${args.videoId};audienceType==ORGANIC`,
+  }).toString()}`;
+  const res = await fetch(url, { headers: { Authorization: `Bearer ${accessToken}` } });
+  if (!res.ok) return null;
+  const j = (await res.json()) as { columnHeaders?: { name: string }[]; rows?: number[][] };
+  const headers = (j.columnHeaders ?? []).map((h) => h.name);
+  const ri = headers.indexOf("elapsedVideoTimeRatio");
+  const wi = headers.indexOf("audienceWatchRatio");
+  const pi = headers.indexOf("relativeRetentionPerformance");
+  const rows = j.rows ?? [];
+  if (ri < 0 || wi < 0 || rows.length === 0) return null;
+  return rows
+    .map((r) => ({
+      ratio: Number(r[ri]) || 0,
+      watch: Number(r[wi]) || 0,
+      ...(pi >= 0 ? { relative: Number(r[pi]) || 0 } : {}),
+    }))
+    .sort((a, b) => a.ratio - b.ratio);
+}
+
 /** Fetch retention/watch metrics for one video over [startDate, endDate] (YYYY-MM-DD). */
 export async function fetchVideoAnalytics(args: {
   videoId: string;

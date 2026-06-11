@@ -42,6 +42,24 @@ export default defineSchema({
           avoid: v.array(v.string()),
         }),
       ),
+      // Show Bible — the film-crew creative brief (written once by the Showrunner).
+      // All optional → existing channels keep working with no Bible.
+      creativeBrief: v.optional(
+        v.object({
+          positioning: v.string(),
+          vibe: v.string(),
+          iconicMotif: v.string(),
+          worksInSpace: v.array(v.string()),
+          avoidInSpace: v.array(v.string()),
+          activeCrew: v.array(v.string()),
+          directorDoctrine: v.optional(v.string()),
+          dpDoctrine: v.optional(v.string()),
+          editorDoctrine: v.optional(v.string()),
+          composerDoctrine: v.optional(v.string()),
+          criticDoctrine: v.optional(v.string()),
+          refreshedAt: v.number(),
+        }),
+      ),
     }),
     // Which thumbnail strategy this channel uses (default claude_flux).
     thumbnailer: v.optional(
@@ -60,11 +78,65 @@ export default defineSchema({
     ),
     modelRouting: v.optional(v.any()),
     qaRubric: v.optional(v.any()),
+    // Frozen, machine-readable Style DNA (visual/audio/narrative spec) the
+    // Inception research distills once and every block must conform to. Flexible
+    // (v.any) — the TS `StyleDNA` interface is the real contract. Carries a
+    // confidence + groundingGaps so the Pipeline Doctor knows what to heal.
+    styleDNA: v.optional(v.any()),
+    // The LLM Pipeline Architect's decision report (applied/rejected ops,
+    // missing capabilities, grounding actions) — the audit trail for WHY this
+    // channel's pipeline looks the way it does. v.any: TS owns the contract.
+    architectReport: v.optional(v.any()),
+    // Thumbnail Lab output: per-channel playbook (rules + executable patterns)
+    // distilled from VERIFIED high-view competitor thumbnails + the latest
+    // tournament verdict. thumbnail_gen executes its patterns at render time.
+    thumbnailPlaybook: v.optional(v.any()),
+    // Script Lab output: hook rules + rotated opening devices distilled from
+    // WATCHING the niche's top-view videos. script_gen executes it per video.
+    scriptPlaybook: v.optional(v.any()),
     budget: v.number(), // per-run USD ceiling
     status: v.string(), // draft|active|paused|archived
+    // Operator organization: name of the channelFolders folder this channel is
+    // filed in (drag & drop on the Channels page). Unset/"" = unfiled.
+    folder: v.optional(v.string()),
+    // Upload schedule the operator edits in the Scheduler UI (drives calendar
+    // projection + autonomous scheduler). days = weekdays 0(Sun)-6(Sat).
+    schedule: v.optional(
+      v.object({
+        frequency: v.string(), // daily|weekly|biweekly|monthly
+        days: v.optional(v.array(v.number())),
+      }),
+    ),
+    // Multi-language group link. groupId = the base channel's _id; the base + its
+    // language siblings share it. All optional → standalone channels are ungrouped.
+    groupId: v.optional(v.string()),
+    language: v.optional(v.string()), // "en" | "de" | "es" …
+    groupRole: v.optional(v.string()), // "base" | "sibling"
+    // Browserbase agent records the YouTube channel it created here so the UI can
+    // show it + prompt the operator to Connect (link the per-channel OAuth token).
+    youtubeCreated: v.optional(
+      v.object({
+        ytChannelId: v.optional(v.string()),
+        handle: v.optional(v.string()),
+        url: v.optional(v.string()),
+        createdAt: v.number(),
+        // "creating" while the agent runs, "created" when done, "failed" on error.
+        status: v.optional(v.string()),
+        // True if the avatar was set during the create flow (onboarding photo step).
+        avatarSet: v.optional(v.boolean()),
+      }),
+    ),
   })
     .index("by_owner", ["ownerId"])
-    .index("by_owner_slug", ["ownerId", "slug"]),
+    .index("by_owner_slug", ["ownerId", "slug"])
+    .index("by_group", ["groupId"]),
+
+  // Operator-created folders on the Channels page (channels reference them by
+  // name via channels.folder; a folder can exist empty).
+  channelFolders: defineTable({
+    ownerId: v.string(),
+    name: v.string(),
+  }).index("by_owner", ["ownerId"]),
 
   // -------------------- Competitor-intelligence engine --------------------
   // Aggregated niche signals mined from YouTube Data API v3 + Gemini Vision.
@@ -225,4 +297,33 @@ export default defineSchema({
     videoCount: v.number(),
     estimatedRevenueUsd: v.optional(v.number()),
   }).index("by_channel_date", ["channelId", "date"]),
+
+  // Week-ahead content plan (upcoming videos per channel). `order` ascending =
+  // soonest; `scheduledAt` pins a calendar date (drag-to-reschedule / date field).
+  contentPlan: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    order: v.number(),
+    topic: v.string(),
+    title: v.optional(v.string()),
+    description: v.optional(v.string()),
+    thumbnailKey: v.optional(v.string()),
+    status: v.string(), // "generating" | "ready" | "used"
+    createdAt: v.number(),
+    scheduledAt: v.optional(v.number()), // pinned publish date (ms epoch)
+  })
+    .index("by_channel_order", ["channelId", "order"])
+    .index("by_owner", ["ownerId"]),
+
+  // Per-channel YouTube OAuth tokens — so each channel uploads to its OWN
+  // YouTube channel. Onboarding a channel = one consent → one row here. Read
+  // server-side by upload_draft; never surfaced to the client.
+  youtubeAuth: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    refreshToken: v.string(),
+    ytChannelId: v.optional(v.string()),
+    ytTitle: v.optional(v.string()),
+    updatedAt: v.number(),
+  }).index("by_channel", ["channelId"]),
 });

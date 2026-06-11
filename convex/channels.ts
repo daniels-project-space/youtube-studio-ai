@@ -24,6 +24,22 @@ const identityValidator = v.object({
       avoid: v.array(v.string()),
     }),
   ),
+  creativeBrief: v.optional(
+    v.object({
+      positioning: v.string(),
+      vibe: v.string(),
+      iconicMotif: v.string(),
+      worksInSpace: v.array(v.string()),
+      avoidInSpace: v.array(v.string()),
+      activeCrew: v.array(v.string()),
+      directorDoctrine: v.optional(v.string()),
+      dpDoctrine: v.optional(v.string()),
+      editorDoctrine: v.optional(v.string()),
+      composerDoctrine: v.optional(v.string()),
+      criticDoctrine: v.optional(v.string()),
+      refreshedAt: v.number(),
+    }),
+  ),
 });
 
 const thumbnailerValidator = v.union(
@@ -50,8 +66,12 @@ export const createChannel = mutation({
     pipeline: pipelineValidator,
     modelRouting: v.optional(v.any()),
     qaRubric: v.optional(v.any()),
+    styleDNA: v.optional(v.any()),
     budget: v.number(),
     status: v.optional(v.string()),
+    groupId: v.optional(v.string()),
+    language: v.optional(v.string()),
+    groupRole: v.optional(v.string()),
   },
   returns: v.id("channels"),
   handler: async (ctx, args) => {
@@ -75,8 +95,12 @@ export const createChannel = mutation({
       pipeline: args.pipeline,
       modelRouting: args.modelRouting,
       qaRubric: args.qaRubric,
+      styleDNA: args.styleDNA,
       budget: args.budget,
       status: args.status ?? "draft",
+      groupId: args.groupId,
+      language: args.language,
+      groupRole: args.groupRole,
     };
 
     if (existing) {
@@ -144,8 +168,30 @@ export const updateChannel = mutation({
     pipeline: v.optional(pipelineValidator),
     modelRouting: v.optional(v.any()),
     qaRubric: v.optional(v.any()),
+    styleDNA: v.optional(v.any()),
+    architectReport: v.optional(v.any()),
+    thumbnailPlaybook: v.optional(v.any()),
+    scriptPlaybook: v.optional(v.any()),
+    // Folder filing ("" = unfile).
+    folder: v.optional(v.string()),
     budget: v.optional(v.number()),
     status: v.optional(v.string()),
+    schedule: v.optional(
+      v.object({ frequency: v.string(), days: v.optional(v.array(v.number())) }),
+    ),
+    groupId: v.optional(v.string()),
+    language: v.optional(v.string()),
+    groupRole: v.optional(v.string()),
+    youtubeCreated: v.optional(
+      v.object({
+        ytChannelId: v.optional(v.string()),
+        handle: v.optional(v.string()),
+        url: v.optional(v.string()),
+        createdAt: v.number(),
+        status: v.optional(v.string()),
+        avatarSet: v.optional(v.boolean()),
+      }),
+    ),
   },
   returns: v.null(),
   handler: async (ctx, args) => {
@@ -156,7 +202,20 @@ export const updateChannel = mutation({
     for (const [k, val] of Object.entries(rest)) {
       if (val !== undefined) patch[k] = val;
     }
+    // "" means UNFILE (optional args can't carry null).
+    if (rest.folder === "") patch.folder = undefined;
     await ctx.db.patch(channelId, patch);
     return null;
+  },
+});
+
+/** All channels in a multi-language group (base + siblings), for the group UI. */
+export const listGroup = query({
+  args: { groupId: v.string() },
+  handler: async (ctx, args) => {
+    return await ctx.db
+      .query("channels")
+      .withIndex("by_group", (q) => q.eq("groupId", args.groupId))
+      .collect();
   },
 });

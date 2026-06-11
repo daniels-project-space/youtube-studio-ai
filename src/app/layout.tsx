@@ -22,9 +22,10 @@ const jetbrainsMono = JetBrains_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Studio AI",
+  title: { default: "AutoStudio — AI YouTube", template: "%s · AutoStudio" },
   description:
-    "Autonomous YouTube channel pipeline — channels, runs, and outputs.",
+    "AutoStudio — autonomous AI YouTube channel pipeline. Channels, schedule, runs, analytics.",
+  applicationName: "AutoStudio",
 };
 
 export default function RootLayout({

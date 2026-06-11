@@ -21,6 +21,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline, preflight } from "@/engine/validate";
 import { runPipeline as runEngine } from "@/engine/runner";
+import { planHeal } from "@/engine/healer";
 import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix } from "@/lib/storage";
@@ -32,6 +33,26 @@ import type { PipelineEntry } from "@/engine/types";
 export interface RunPipelineInput {
   channelId: string;
   runId: string;
+  /**
+   * Optional one-off pipeline for THIS run only (e.g. a short test render).
+   * When set, it is used instead of the channel's persisted pipeline so the
+   * channel config is never clobbered and there is no read race. Identity/seed
+   * still come from the channel.
+   */
+  pipelineOverride?: PipelineEntry[];
+  /**
+   * Render-group reuse: when a language sibling is fanned out by the base run's
+   * emit_bundle, the base assets are passed here and seeded into the store so the
+   * expensive blocks (topic_select / script_gen / stock_footage / music) reuse
+   * them instead of regenerating. Only narration/captions/text/metadata re-run.
+   */
+  reuse?: {
+    language?: string;
+    topic?: string;
+    script?: unknown;
+    footageKeys?: string[];
+    musicKey?: string;
+  };
 }
 
 export const runPipelineTask = task({
@@ -39,16 +60,25 @@ export const runPipelineTask = task({
   // Video encodes + Chromium (Remotion) + multi-pass overlay compositing need
   // real memory — large-1x OOM-killed on the quote-overlay + xfade pass.
   machine: "large-2x",
-  maxDuration: 3000,
+  // Long-form (15-35 min) renders do many full-video re-encodes; allow up to ~2h.
+  maxDuration: 7200,
   // On a crash/OOM/timeout, retry the whole task — the runner's resume restores
-  // completed blocks (no double-spend). Cap parallel renders so they don't
-  // contend for memory.
+  // completed blocks (no double-spend).
   retry: { maxAttempts: 2, minTimeoutInMs: 5000, maxTimeoutInMs: 30000, factor: 2 },
-  queue: { concurrencyLimit: 3 },
+  // PER-CHANNEL serialization, CROSS-CHANNEL concurrency: every trigger site
+  // passes concurrencyKey=channelId, so each channel renders one video at a
+  // time (topic no-repeat + schedule stay race-free) while different channels
+  // render fully in parallel (each run gets its own machine; the old global
+  // limit of 3 throttled the whole fleet).
+  queue: { concurrencyLimit: 1 },
   run: async (payload: RunPipelineInput) => {
     registerAllBlocks();
-    await bootstrapSecrets((m, x) =>
-      console.log(`[run-pipeline] ${m}`, x ?? ""),
+    // CRITICAL-KEY GATE: without the core model keys every creative block falls
+    // back to generic output (the "basic and stale" failure mode). Fail the run
+    // at minute 0 instead of silently producing a degraded video.
+    await bootstrapSecrets(
+      (m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""),
+      { required: ["GEMINI_API_KEY", "ANTHROPIC_API_KEY"] },
     );
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -61,7 +91,10 @@ export const runPipelineTask = task({
     if (!channel) throw new Error(`channel not found: ${payload.channelId}`);
 
     const ownerId = channel.ownerId;
-    const entries = (channel.pipeline ?? []) as PipelineEntry[];
+    const entries = (payload.pipelineOverride ?? channel.pipeline ?? []) as PipelineEntry[];
+    if (payload.pipelineOverride) {
+      console.log(`[run-pipeline] using one-off pipelineOverride (${entries.length} blocks) — channel config untouched`);
+    }
 
     // Per-block idempotency keys (used when blocks become child tasks in P2).
     const blockKeys: Record<string, string> = {};
@@ -100,17 +133,46 @@ export const runPipelineTask = task({
         palette: channel.identity?.palette ?? [],
         persona: channel.identity?.persona ?? "",
         niche: channel.identity?.niche ?? "",
+        // The channel's chosen narrator — previously identity.voiceId was set at
+        // inception but never reached narration_tts, so most channels spoke in
+        // the same default voice.
+        ...(channel.identity?.voiceId ? { voiceId: channel.identity.voiceId } : {}),
+        // Identity guardrails + brand art for blocks that consume them
+        // (metadata tag screening; intro/chapter cards use the channel's own
+        // avatar instead of the baked stoic bust).
+        bannedWords: channel.identity?.bannedWords ?? [],
+        ...(channel.identity?.imageKey ? { channelAvatarKey: channel.identity.imageKey } : {}),
+        // Lab playbooks (evidence-distilled per-channel rules) — script_gen and
+        // thumbnail_gen execute them when present.
+        ...((channel as { scriptPlaybook?: unknown }).scriptPlaybook
+          ? { scriptPlaybook: (channel as { scriptPlaybook?: unknown }).scriptPlaybook }
+          : {}),
+        // Phase 2 grounding: the frozen Style DNA + per-channel Quality Bar that
+        // Inception distilled. Every block generates AGAINST these and the critic
+        // scores conformance TO them (the channel's definition of "good").
+        styleDNA: (channel as { styleDNA?: unknown }).styleDNA ?? null,
+        qualityBar: (channel as { qaRubric?: unknown }).qaRubric ?? null,
       };
 
+      // Render-group reuse: seed cached base assets so the expensive blocks reuse
+      // them (see the reuse guards in topic_select / script_gen / stock_footage / music).
+      if (payload.reuse) {
+        if (payload.reuse.topic) seedStore["reuseTopic"] = payload.reuse.topic;
+        if (payload.reuse.script) seedStore["reuseScript"] = payload.reuse.script;
+        if (payload.reuse.footageKeys?.length) seedStore["reuseFootageKeys"] = payload.reuse.footageKeys;
+        if (payload.reuse.musicKey) seedStore["reuseMusicKey"] = payload.reuse.musicKey;
+        if (payload.reuse.language) seedStore["reuseLanguage"] = payload.reuse.language;
+        log(`run-pipeline: render-group REUSE active (lang=${payload.reuse.language}, ${payload.reuse.footageKeys?.length ?? 0} clips)`);
+      }
+
       const sink = makeConvexSink(convex, ownerId);
-      const result = await runEngine(resolved, {
+      const engineOpts = {
         ownerId,
         runId: payload.runId,
         channelId: payload.channelId,
         keyPrefix: channelPrefix(ownerId, channel.slug),
         budgetUsd: channel.budget ?? 0,
         paramsByBlock,
-        seedStore,
         sink,
         log,
         // Reliability (Phase 5): per-block retry on transient errors + resume —
@@ -119,8 +181,52 @@ export const runPipelineTask = task({
         // blocks never re-spend.
         resume: true,
         defaultRetries: 2,
-        rehydrate: (block, outputs) => rehydrateOutputs(block, outputs, payload.runId),
-      });
+        rehydrate: (block: string, outputs: Record<string, unknown>) =>
+          rehydrateOutputs(block, outputs, payload.runId),
+      };
+      let result = await runEngine(resolved, { ...engineOpts, seedStore });
+
+      // SELF-HEALER (Pipeline Doctor, run-level): a QA failure over a defect a
+      // cheap block owns must not discard the run's paid artifacts. Diagnose →
+      // supersede exactly the owning block + its downstream consumers → resume
+      // (everything else restores from the stage cache). Max 2 heals; unknown
+      // or unhealable failures fall through and fail honestly.
+      const MAX_HEALS = 2;
+      const healable = resolved.blocks.map((b) => ({
+        id: b.id,
+        produces: b.produces,
+        consumes: b.consumes,
+        paid: (b as { paid?: boolean }).paid,
+      }));
+      let heals = 0;
+      while (!result.ok && heals < MAX_HEALS) {
+        const plan = planHeal(result.error ?? "", healable, (m) => log(m));
+        if (!plan) break;
+        heals++;
+        log(
+          `SELF-HEAL ${heals}/${MAX_HEALS}: ${plan.reason} — superseding [${plan.rerunBlocks.join(", ")}] and resuming from the stage cache`,
+        );
+        await safeAlert(
+          `self-heal ${heals} (${channel.slug})`,
+          `${plan.reason} → re-running ${plan.rerunBlocks.length} block(s), paid artifacts preserved`,
+        );
+        for (const b of plan.rerunBlocks) {
+          await convex.mutation(api.runStages.upsertRunStage, {
+            ownerId,
+            runId: payload.runId as Id<"runs">,
+            block: b,
+            status: "superseded",
+            error: `superseded by self-heal #${heals}: ${plan.reason}`,
+          });
+        }
+        result = await runEngine(resolved, {
+          ...engineOpts,
+          seedStore: { ...seedStore, healHints: plan.hints, healAttempt: heals },
+        });
+      }
+      if (heals > 0 && result.ok) {
+        log(`SELF-HEAL succeeded after ${heals} cycle(s) — run recovered without re-spending paid blocks`);
+      }
 
       // Drain any buffered log lines before resolving the run state.
       await logSink.flush();
@@ -146,6 +252,14 @@ export const runPipelineTask = task({
         finishedAt: Date.now(),
         costTotal: result.costTotal,
       });
+      // Budget guard: warn (don't block) when a run overshoots the channel's
+      // per-video budget, so runaway spend surfaces immediately.
+      if (channel.budget && result.costTotal > channel.budget) {
+        await safeAlert(
+          `budget exceeded (${channel.slug})`,
+          `run cost $${result.costTotal.toFixed(2)} > budget $${channel.budget.toFixed(2)}`,
+        );
+      }
       return { ok: true, stages: result.stages, costTotal: result.costTotal };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);

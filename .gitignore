@@ -52,3 +52,4 @@ next-env.d.ts
 /motion-graphics/node_modules
 /motion-graphics/output
 /motion-graphics/.cache
+scripts/.yt-refresh-token.txt

@@ -16,6 +16,8 @@ export interface PerfEntry {
   avgViewPct: number; // audience retention 0..100
   ctr?: number; // thumbnail CTR 0..100 (if available)
   updatedAt: number;
+  /** When the SEO re-optimizer last rewrote this video's title/tags (epoch ms). */
+  reoptimizedAt?: number;
 }
 
 function ledgerKey(keyPrefix: string): string {
