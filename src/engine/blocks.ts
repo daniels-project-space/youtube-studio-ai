@@ -11,6 +11,7 @@ import { complianceBlocks } from "@/trigger/blocks/complianceBlocks";
 import { growthBlocks } from "@/trigger/blocks/growthBlocks";
 import { CREW_BLOCKS } from "@/trigger/blocks/crewBlocks";
 import { insertBlocks } from "@/trigger/blocks/insertBlocks";
+import { genFootageBlocks } from "@/trigger/blocks/genFootageBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
 
 let registered = false;
@@ -36,6 +37,9 @@ export function registerAllBlocks(): void {
   // Script-synced motion-graphics inserts (visual_inserts): Remotion data viz
   // planned from the numbers the narration actually speaks.
   for (const b of insertBlocks) register(b);
+  // Generated b-roll (gen_footage): DNA-locked flux stills → i2v, producer-
+  // compatible with stock_footage (whiteboard/painted/signature-scene worlds).
+  for (const b of genFootageBlocks) register(b);
   // Render-group reuse: emit_bundle (persist assets + fan out to language siblings).
   register(emitBundle);
   registered = true;

@@ -219,9 +219,22 @@ export default function ChannelsPage() {
                     radius={12}
                   />
                   <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.5rem" }}>
-                      <h3 style={{ fontSize: "1.05rem", lineHeight: 1.2 }}>{c.name}</h3>
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.45rem" }}>
+                      <h3
+                        style={{
+                          fontSize: "0.98rem",
+                          lineHeight: 1.25,
+                          minWidth: 0,
+                          overflow: "hidden",
+                          display: "-webkit-box",
+                          WebkitLineClamp: 2,
+                          WebkitBoxOrient: "vertical",
+                          wordBreak: "break-word",
+                        }}
+                      >
+                        {c.name}
+                      </h3>
+                      <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", flexShrink: 0 }}>
                         <ChannelToggle id={c._id} active={c.status === "active"} />
                         <StageBadge status={c.status === "active" ? "ok" : "queued"} size="sm" />
                         <DeleteChannelX id={c._id} name={c.name} />
@@ -296,8 +309,8 @@ function DeleteChannelX({ id, name }: { id: string; name: string }) {
       disabled={busy}
       title={armed ? `Click again to permanently delete "${name}"` : `Delete "${name}"…`}
       style={{
-        minWidth: armed ? 52 : 22,
-        height: 22,
+        minWidth: armed ? 44 : 20,
+        height: 20,
         padding: armed ? "0 0.45rem" : 0,
         borderRadius: 6,
         cursor: busy ? "default" : "pointer",
@@ -339,16 +352,17 @@ function ChannelToggle({ id, active }: { id: string; active: boolean }) {
         ? "Autopilot ON — builds + uploads (private) on the channel's cadence. Click to pause."
         : "Paused — no auto-builds. Click to enable autopilot."}
       style={{
-        width: 50,
-        height: 24,
+        width: 38,
+        height: 20,
         borderRadius: 999,
+        flexShrink: 0,
         cursor: busy ? "default" : "pointer",
         border: "1px solid var(--color-border)",
         background: active ? "rgba(52,211,153,0.20)" : "rgba(148,148,148,0.15)",
         color: active ? "var(--color-ok)" : "var(--color-muted)",
         fontWeight: 700,
-        fontSize: "0.6rem",
-        letterSpacing: "0.05em",
+        fontSize: "0.55rem",
+        letterSpacing: "0.04em",
         opacity: busy ? 0.6 : 1,
       }}
     >
@@ -372,11 +386,15 @@ function LinkYouTubeButton({ channelId, created }: { channelId: string; created:
         background: "rgba(248,113,113,0.15)",
         color: "#fca5a5",
         border: "1px solid rgba(248,113,113,0.6)",
-        borderRadius: 9,
-        padding: "0.5rem",
-        fontSize: "0.8rem",
+        borderRadius: 7,
+        padding: "0.35rem 0.5rem",
+        fontSize: "0.72rem",
         fontWeight: 700,
         cursor: "pointer",
+        maxWidth: "100%",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
       }}
     >
       🔗 Link to YouTube
@@ -424,12 +442,16 @@ function SetAvatarButton({ imageKey, ytChannelId, slug }: { imageKey: string; yt
         background: "rgba(125,211,252,0.12)",
         color: "#7dd3fc",
         border: "1px solid rgba(125,211,252,0.5)",
-        borderRadius: 9,
-        padding: "0.5rem",
-        fontSize: "0.8rem",
+        borderRadius: 7,
+        padding: "0.35rem 0.5rem",
+        fontSize: "0.72rem",
         fontWeight: 700,
         cursor: busy ? "default" : "pointer",
         opacity: busy ? 0.6 : 1,
+        maxWidth: "100%",
+        whiteSpace: "nowrap",
+        overflow: "hidden",
+        textOverflow: "ellipsis",
       }}
     >
       🖼️ {busy ? "Opening…" : "Set profile picture"}

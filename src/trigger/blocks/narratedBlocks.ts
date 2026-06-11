@@ -907,6 +907,23 @@ export const stockFootage: Block = {
       ctx.log(`stock_footage: ledger save failed (non-fatal): ${e instanceof Error ? e.message : e}`);
     }
     ctx.log(`stock_footage: ${clips.length} clips covering ~${coveredSec.toFixed(0)}s/${targetSec.toFixed(0)}s (${gated} passed strict relevance gate)`);
+    // HYBRID MODE (architect knob): prepend K GENERATED signature establishing
+    // shots (the channel's canonical world, DNA-locked) to the stock body —
+    // brand anchors stock can't provide, at a fraction of full generation.
+    const sigN = Math.max(0, Math.min(6, Number(ctx.params["signatureGenClips"] ?? 0)));
+    if (sigN > 0) {
+      try {
+        const { generateSignatureClips } = await import("@/trigger/blocks/genFootageBlocks");
+        const sig = await generateSignatureClips(ctx, sigN);
+        if (sig.clips.length) {
+          clips.unshift(...sig.clips);
+          ctx.log(`stock_footage: HYBRID — ${sig.clips.length} signature generated clip(s) prepended (~$${sig.cost.toFixed(2)})`);
+          return { footageClips: clips, [COST_PATCH_KEY]: sig.cost };
+        }
+      } catch (e) {
+        ctx.log(`stock_footage: signature clips failed (stock-only, non-fatal): ${e instanceof Error ? e.message : e}`);
+      }
+    }
     return { footageClips: clips };
   },
 };
@@ -1620,7 +1637,10 @@ async function finishFromComposed(
   // Script-synced data-viz inserts (visual_inserts) ride the SAME alpha-
   // compositing pass â€” same spec shape, same blur-under treatment.
   const inserts = (ctx.store["insertOverlays"] as QuoteOverlaySpec[] | undefined) ?? [];
-  const allOverlays = [...(overlays ?? []), ...inserts].sort((a, b) => a.startSec - b.startSec);
+  // FORGED modules (architect-authored, interpreter-run) emit here — their
+  // media composites through this same proven pass.
+  const forgedOv = (ctx.store["extraOverlays"] as QuoteOverlaySpec[] | undefined) ?? [];
+  const allOverlays = [...(overlays ?? []), ...inserts, ...forgedOv].sort((a, b) => a.startSec - b.startSec);
   if (allOverlays.length > 0 || assPath) {
     const finished = join(tmp, "video_finished.mp4");
     try {

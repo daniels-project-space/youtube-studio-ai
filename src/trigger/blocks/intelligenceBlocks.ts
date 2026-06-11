@@ -735,9 +735,13 @@ export const thumbnailGen: Block = {
         const { renderCandidate } = await import("@/lib/thumbnailLab");
         const tmp = await makeRunTempDir(ctx.runId);
         // Deterministic per-run rotation (no Math.random in resumable runs).
-        const idx =
-          [...ctx.runId].reduce((s, c) => s + c.charCodeAt(0), 0) % playbook.patterns.length;
-        const pattern = playbook.patterns[idx];
+        // patternBias (architect knob): rotate within the favored subset.
+        const bias = (ctx.params["patternBias"] as string[] | undefined)?.filter((n) =>
+          playbook.patterns.some((p) => p.name === n),
+        );
+        const pool = bias?.length ? playbook.patterns.filter((p) => bias.includes(p.name)) : playbook.patterns;
+        const idx = [...ctx.runId].reduce((s, c) => s + c.charCodeAt(0), 0) % pool.length;
+        const pattern = pool[idx];
         const outJpg = join(tmp, "thumbnail.jpg");
         const scriptHint = String(ctx.store["narrationText"] ?? "").slice(0, 500);
         await renderCandidate({

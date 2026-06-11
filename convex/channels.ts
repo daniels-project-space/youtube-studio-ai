@@ -153,6 +153,76 @@ export const deleteChannel = mutation({
   args: { channelId: v.id("channels") },
   returns: v.null(),
   handler: async (ctx, args) => {
+    const ch = await ctx.db.get(args.channelId);
+    if (!ch) return null;
+
+    // 1. TOMBSTONE: a compact structural print (identity/pipeline/DNA/playbook
+    // shapes — never run data or media) survives as the only residue.
+    const compact = {
+      name: ch.name,
+      slug: ch.slug,
+      template: ch.template,
+      folder: ch.folder,
+      identity: ch.identity,
+      pipeline: ch.pipeline,
+      schedule: ch.schedule,
+      styleDNA: ch.styleDNA,
+      architectReport: ch.architectReport
+        ? { summary: (ch.architectReport as { summary?: string }).summary, applied: (ch.architectReport as { applied?: unknown[] }).applied }
+        : undefined,
+      thumbnailPlaybook: ch.thumbnailPlaybook
+        ? { rules: (ch.thumbnailPlaybook as { rules?: unknown }).rules, patterns: (ch.thumbnailPlaybook as { patterns?: unknown }).patterns }
+        : undefined,
+      scriptPlaybook: ch.scriptPlaybook
+        ? {
+            hookRules: (ch.scriptPlaybook as { hookRules?: unknown }).hookRules,
+            openingDevices: (ch.scriptPlaybook as { openingDevices?: unknown }).openingDevices,
+            voiceRules: (ch.scriptPlaybook as { voiceRules?: unknown }).voiceRules,
+          }
+        : undefined,
+      youtubeCreated: ch.youtubeCreated,
+    };
+    let snapshot = JSON.stringify(compact);
+    if (snapshot.length > 60_000) {
+      snapshot = JSON.stringify({ ...compact, styleDNA: undefined, thumbnailPlaybook: undefined, scriptPlaybook: undefined });
+    }
+    await ctx.db.insert("channelArchives", {
+      ownerId: ch.ownerId,
+      slug: ch.slug,
+      name: ch.name,
+      archivedAt: Date.now(),
+      snapshot,
+    });
+
+    // 2. CASCADE: remove every row that references the channel — runs and
+    // their stages/logs/assets, plan, topic memory, analytics, the YT link.
+    const runs = await ctx.db
+      .query("runs")
+      .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
+      .collect();
+    for (const r of runs) {
+      for (const s of await ctx.db.query("runStages").withIndex("by_run", (q) => q.eq("runId", r._id)).collect()) {
+        await ctx.db.delete(s._id);
+      }
+      for (const lg of await ctx.db.query("runLogs").withIndex("by_run", (q) => q.eq("runId", r._id)).collect()) {
+        await ctx.db.delete(lg._id);
+      }
+      await ctx.db.delete(r._id);
+    }
+    const sweep = async (table: "assets" | "topicMemory" | "videoAnalytics" | "channelAnalytics" | "contentPlan" | "youtubeAuth", index: string) => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const rows = await (ctx.db.query(table as any) as any)
+        .withIndex(index, (q: { eq: (f: string, v: unknown) => unknown }) => q.eq("channelId", args.channelId))
+        .collect();
+      for (const row of rows as { _id: Parameters<typeof ctx.db.delete>[0] }[]) await ctx.db.delete(row._id);
+    };
+    await sweep("assets", "by_channel");
+    await sweep("topicMemory", "by_channel");
+    await sweep("videoAnalytics", "by_channel");
+    await sweep("channelAnalytics", "by_channel_date");
+    await sweep("contentPlan", "by_channel_order");
+    await sweep("youtubeAuth", "by_channel");
+
     await ctx.db.delete(args.channelId);
     return null;
   },

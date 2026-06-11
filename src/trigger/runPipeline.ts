@@ -117,6 +117,22 @@ export const runPipelineTask = task({
     );
 
     try {
+      // FORGED modules: interpreter-backed blocks the architect authored. Load
+      // their validated specs and register before pipeline resolution.
+      const forgedIds = entries.filter((e) => e.block.startsWith("forged_")).map((e) => e.block);
+      if (forgedIds.length) {
+        const { registerForgedSpecs } = await import("@/engine/forge/runtime");
+        const { forgedModuleSchema } = await import("@/engine/forge/spec");
+        for (const id of forgedIds) {
+          const row = await convex.query(api.forgedModules.getByBlock, { ownerId, blockId: id });
+          if (!row || row.status !== "active") {
+            throw new Error(`pipeline references unknown/disabled forged module "${id}"`);
+          }
+          registerForgedSpecs([forgedModuleSchema.parse(row.spec)]);
+          log(`forge: registered ${id}`);
+        }
+      }
+
       const resolved = validatePipeline(entries);
       preflight(resolved, { budgetUsd: channel.budget ?? 0 });
 

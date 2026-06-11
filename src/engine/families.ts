@@ -82,12 +82,12 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     key: "whiteboard",
     label: "Whiteboard explainer",
     description:
-      "Hand-drawing whiteboard animation synced to narration (history, finance basics, explainers). Visual engine in progress.",
-    visualEngine: "whiteboard_anim",
+      "Hand-drawing whiteboard animation synced to narration (history, finance basics, explainers). Generated visuals: DNA-locked stills → image-to-video draw-ons.",
+    visualEngine: "gen_footage",
     archetypeKey: "narrated-essay",
-    available: false,
+    available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "fal"],
+    requiresKeys: ["fish-audio", "fal", "gemini"],
     defaultThumbnailStyle: "brush_swash",
   },
   cinematic: {

@@ -336,6 +336,28 @@ export async function geminiVision(args: {
  * Like {@link geminiVision} but inlines LOCAL image files (e.g. ffmpeg-grabbed
  * frames) instead of fetching URLs. Used by the qa_visual gate.
  */
+/**
+ * Native AUDIO judging — Gemini hears the clips (base64 mp3) and returns a
+ * structured verdict. Used by voice casting (auditions vs the DNA register).
+ */
+export async function geminiAudioJudge(args: {
+  audios: string[]; // base64 mp3
+  prompt: string;
+  model?: string;
+  maxTokens?: number;
+}): Promise<{ takes?: { idx?: number; score?: number; note?: string }[]; winner?: number; why?: string }> {
+  const parts: GeminiPart[] = [{ text: args.prompt }];
+  for (const b64 of args.audios.slice(0, 6)) {
+    parts.push({ inlineData: { mimeType: "audio/mpeg", data: b64 } });
+  }
+  const raw = await generate(args.model ?? "gemini-2.5-flash", parts, {
+    json: true,
+    maxTokens: args.maxTokens ?? 800,
+    temperature: 0.2,
+  });
+  return parseJsonLoose(raw);
+}
+
 export async function geminiVisionLocal(args: {
   prompt: string;
   imagePaths: string[];

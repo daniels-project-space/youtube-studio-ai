@@ -138,6 +138,31 @@ export default defineSchema({
     name: v.string(),
   }).index("by_owner", ["ownerId"]),
 
+  // Tombstones of deleted channels: a COMPACT structural print (identity,
+  // pipeline, DNA, playbook shapes — no run data, no media) so a deleted
+  // channel's design is never lost while its data residue is fully removed.
+  channelArchives: defineTable({
+    ownerId: v.string(),
+    slug: v.string(),
+    name: v.string(),
+    archivedAt: v.number(),
+    /** JSON string, capped small (~≤60KB). */
+    snapshot: v.string(),
+  }).index("by_owner", ["ownerId"]),
+
+  // MODULE FORGE: architect-authored modules as declarative specs (the TS
+  // `ForgedModuleSpec` schema is the contract; the interpreter is the trust
+  // boundary). status: active|disabled. Forged for one channel but reusable
+  // fleet-wide once proven.
+  forgedModules: defineTable({
+    ownerId: v.string(),
+    blockId: v.string(), // forged_<slug>, unique per owner
+    spec: v.any(),
+    status: v.string(),
+    forChannelId: v.optional(v.string()),
+    capability: v.optional(v.string()), // the missingCapability it answers
+  }).index("by_owner", ["ownerId"]).index("by_owner_block", ["ownerId", "blockId"]),
+
   // -------------------- Competitor-intelligence engine --------------------
   // Aggregated niche signals mined from YouTube Data API v3 + Gemini Vision.
   nicheIntelligence: defineTable({

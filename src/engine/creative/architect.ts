@@ -29,6 +29,7 @@
 import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
 import { registerAllBlocks } from "@/engine/blocks";
+import { get as getBlock } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
 import type { PipelineEntry } from "@/engine/types";
 import type { ShowBible, StyleDNA, QualityBar } from "./types";
@@ -174,13 +175,32 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   },
   {
     block: "stock_footage",
-    purpose: "Sources distinct, vision-gated b-roll matching the channel's visual world (DNA setting/grade drive the gate).",
-    whenToUse: "Core for narrated channels.",
-    addable: false,
-    removable: false,
+    purpose: "Sources distinct, vision-gated REAL b-roll matching the channel's visual world (DNA setting/grade drive the gate).",
+    whenToUse:
+      "Core for narrated channels whose world EXISTS on film (cities, nature, offices, archive-adjacent). SWAPPABLE: when the channel's world is drawn/painted/impossible-to-film, propose `remove stock_footage` + `add gen_footage` IN THE SAME PLAN (the executor performs it as one swap).",
+    addable: true,
+    removable: true,
+    anchorAfter: ["narration_tts"],
     appliesTo: "narrated",
     params: [
       { key: "footageTheme", type: "enum", options: ["", "nature"], describe: "'' = topic/DNA-matched (default, correct for almost everyone). 'nature' = HARD-LOCK to serene nature/ruins only — exclusively for contemplative nature-aesthetic channels." },
+      { key: "signatureGenClips", type: "number", min: 0, max: 6, describe: "HYBRID: prepend K GENERATED signature establishing shots of the channel's canonical world (~$0.17 each) to the stock body — brand anchors stock can't provide. 2-3 for channels with a strong proprietary visual world; 0 when stock covers the world fine." },
+    ],
+  },
+  {
+    block: "gen_footage",
+    purpose:
+      "GENERATED b-roll: the Scene Director plans one scene per script beat in the channel's locked visual world; each scene = DNA-styled still → image-to-video clip (model env-swappable: Kling default, Veo-class optional). Same footageClips contract as stock_footage.",
+    whenToUse:
+      "Channels whose visual identity CANNOT come from a stock library: whiteboard/drawn explainers, painted or stylized worlds, signature recurring scenes, historical reconstructions. Costs ~$0.15-0.20/clip — use maxClips to budget. Must REPLACE stock_footage (propose both ops in one plan: remove stock_footage + add gen_footage).",
+    addable: true,
+    removable: true,
+    anchorAfter: ["narration_tts"],
+    appliesTo: "narrated",
+    params: [
+      { key: "maxClips", type: "number", min: 6, max: 24, describe: "Generated clips per video (coverage vs cost — ~1 per 22s of narration)." },
+      { key: "clipSec", type: "number", min: 5, max: 10, describe: "Seconds per generated clip (5 = cheaper, 10 = longer holds)." },
+      { key: "i2vModel", type: "enum", options: ["kling", "kling_pro", "veo3_fast"], describe: "Fidelity tier vs cost: kling ~$0.13/clip (default), kling_pro ~$0.45, veo3_fast ~$0.80 — choose from the quality bar AND the channel budget; veo-class only when the bar demands cinema-grade motion." },
     ],
   },
   {
@@ -193,6 +213,16 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
       { key: "provider", type: "enum", options: ["suno", "mureka"], describe: "Primary provider (auto-failover to the other on quota death)." },
       { key: "model", type: "string", maxLen: 12, describe: "Suno model, e.g. V5 (highest quality)." },
       { key: "trackCount", type: "number", min: 1, max: 8, describe: "Distinct clips crossfaded into the mix. ~1 per 5-7 min of video; 2 minimum for variety." },
+    ],
+  },
+  {
+    block: "thumbnail_gen",
+    purpose: "Executes the channel's thumbnail playbook (evidence-distilled patterns, Remotion typography, comparative reference QA).",
+    whenToUse: "Core. patternBias steers the rotation toward tournament-proven patterns.",
+    addable: false,
+    removable: false,
+    params: [
+      { key: "patternBias", type: "string_list", maxLen: 40, describe: "Playbook pattern NAMES to favor in rotation (subset of the channel's thumbnailPlaybook patterns — bias toward the tournament winners)." },
     ],
   },
   {
@@ -270,11 +300,14 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
 /** Blocks the architect may NEVER remove (validated backbone). */
 const CORE_BLOCKS = new Set([
   "competitor_research", "topic_select", "script_gen", "qa_script", "originality_gate",
-  "compliance_check", "narration_tts", "stock_footage", "music", "intro_card",
+  "compliance_check", "narration_tts", "music", "intro_card",
   "timeline_assemble", "length_check", "captions", "metadata", "thumbnail_gen",
   "qa_visual", "upload_draft", "cleanup", "scene_planner", "keyframes", "loop_clips",
   "upscale", "assemble", "director_brief", "dp_brief", "editor_brief", "composer_brief",
   "critic_spec",
+  // stock_footage is NOT core: it is swappable with gen_footage (same
+  // footageClips contract) — the incremental graph validation prevents a
+  // remove without a replacement producer.
 ]);
 
 /* ------------------------------- Plan ---------------------------------- */
@@ -302,6 +335,10 @@ const planSchema = z.object({
     .array(z.object({ name: z.string(), description: z.string(), wouldEnable: z.string() }))
     .default([]),
   groundingActions: z.array(z.string()).default([]),
+  /** Channel-level: upload schedule from niche watch patterns (operator wins). */
+  schedule: z.object({ frequency: z.enum(["daily", "weekly", "biweekly"]), days: z.array(z.number().min(0).max(6)).optional() }).optional(),
+  /** Where this channel's budget earns most (advisory, shown to operator). */
+  budgetAllocation: z.string().optional(),
 });
 
 export interface ArchitectDecision {
@@ -317,6 +354,8 @@ export interface ArchitectPlan {
   antiRepetition: string[];
   missingCapabilities: { name: string; description: string; wouldEnable: string }[];
   groundingActions: string[];
+  schedule?: { frequency: "daily" | "weekly" | "biweekly"; days?: number[] };
+  budgetAllocation?: string;
 }
 
 export interface ArchitectInput {
@@ -330,7 +369,35 @@ export interface ArchitectInput {
   qualityBar?: QualityBar | null;
   /** Grounding state — competitor evidence the intelligence is built on. */
   competitorCount?: number;
+  /**
+   * Blocks the OPERATOR explicitly disabled in the wizard (hard rail: the
+   * architect may never add these, however good its reasoning).
+   */
+  disabledBlocks?: string[];
+  /** FORGED modules (architect-authored specs, interpreter-run) available to add. */
+  forgedTools?: Tool[];
+  /** Voice casting verdict (real auditions judged by an audio model). */
+  voiceCasting?: { voiceId: string; name: string; character: string; why: string } | null;
+  /** PROBE RENDER outcome — the fix pass must address this failure. */
+  probeReport?: { ok: boolean; error?: string; failedBlock?: string; notes?: string } | null;
   log?: Logger;
+}
+
+/** Convert a forged module spec into an architect Tool. */
+export function toolFromForgedSpec(spec: {
+  id: string; description: string; whenToUse: string; anchorAfter: string[];
+  params: { key: string; min: number; max: number; describe: string }[];
+}): Tool {
+  return {
+    block: spec.id,
+    purpose: `FORGED MODULE (authored for this fleet): ${spec.description}`,
+    whenToUse: spec.whenToUse,
+    addable: true,
+    removable: true,
+    anchorAfter: spec.anchorAfter,
+    appliesTo: "narrated",
+    params: spec.params.map((p) => ({ key: p.key, type: "number" as const, min: p.min, max: p.max, describe: p.describe })),
+  };
 }
 
 export interface ArchitectResult {
@@ -340,6 +407,8 @@ export interface ArchitectResult {
     summary: string;
     applied: { action: string; block: string; params?: Record<string, unknown>; why: string }[];
     rejected: { action: string; block: string; reason: string }[];
+    schedule?: { frequency: string; days?: number[] };
+    budgetAllocation?: string;
     antiRepetition: string[];
     missingCapabilities: { name: string; description: string; wouldEnable: string }[];
     groundingActions: string[];
@@ -427,12 +496,13 @@ function enforceInvariants(pipeline: PipelineEntry[]): void {
 export function applyArchitectPlan(
   base: PipelineEntry[],
   plan: ArchitectPlan,
-  opts: { family: string; log?: Logger },
+  opts: { family: string; disabledBlocks?: string[]; extraTools?: Tool[]; log?: Logger },
 ): ArchitectResult {
+  const disabled = new Set(opts.disabledBlocks ?? []);
   registerAllBlocks();
   const log = opts.log ?? (() => {});
   const kind = familyKind(opts.family);
-  const byBlock = new Map(ARCHITECT_TOOLBOX.map((t) => [t.block, t]));
+  const byBlock = new Map([...ARCHITECT_TOOLBOX, ...(opts.extraTools ?? [])].map((t) => [t.block, t]));
 
   let pipeline: PipelineEntry[] = base.map((e) => ({
     block: e.block,
@@ -457,7 +527,43 @@ export function applyArchitectPlan(
     }
   };
 
-  for (const d of plan.decisions) {
+  // SWAP pre-pass: an (add A, remove B) pair whose blocks produce the SAME key
+  // (e.g. gen_footage ⇄ stock_footage → footageClips) can never apply
+  // sequentially — adding first duplicates the producer, removing first
+  // orphans the consumers. Execute as ONE in-place replacement.
+  const decisions = [...plan.decisions];
+  for (const add of [...decisions].filter((d) => d.action === "add")) {
+    const addProduces = (() => { try { return getBlock(add.block)?.produces ?? []; } catch { return []; } })();
+    if (!addProduces.length) continue;
+    const rem = decisions.find((d) => {
+      if (d.action !== "remove" || d.block === add.block) return false;
+      try { return (getBlock(d.block)?.produces ?? []).some((k) => addProduces.includes(k)); } catch { return false; }
+    });
+    if (!rem) continue;
+    const drop = () => {
+      decisions.splice(decisions.indexOf(add), 1);
+      decisions.splice(decisions.indexOf(rem), 1);
+    };
+    if (disabled.has(add.block)) {
+      rejected.push({ action: "swap", block: add.block, reason: "OPERATOR explicitly disabled this module (hard rail)" });
+      drop();
+      continue;
+    }
+    const idx = pipeline.findIndex((e) => e.block === rem.block);
+    if (idx < 0) { drop(); continue; }
+    const swapTool = byBlock.get(add.block);
+    const { clean } = swapTool ? validateParams(swapTool, add.params ?? {}) : { clean: {} as Record<string, unknown> };
+    const next = pipeline.map((e, i) =>
+      i === idx ? { block: add.block, params: Object.keys(clean).length ? clean : undefined } : e,
+    );
+    if (tryValidated(next, { action: "swap", block: `${rem.block}→${add.block}` }, "swap breaks the graph")) {
+      applied.push({ action: "swap", block: `${rem.block}→${add.block}`, params: clean, why: add.why });
+      log(`architect: SWAP ${rem.block} → ${add.block}`);
+    }
+    drop();
+  }
+
+  for (const d of decisions) {
     const tool = byBlock.get(d.block);
     const has = pipeline.some((e) => e.block === d.block);
 
@@ -475,6 +581,10 @@ export function applyArchitectPlan(
     }
 
     if (d.action === "add") {
+      if (disabled.has(d.block)) {
+        rejected.push({ action: d.action, block: d.block, reason: "OPERATOR explicitly disabled this module in the wizard (hard rail)" });
+        continue;
+      }
       if (!tool?.addable) { rejected.push({ action: d.action, block: d.block, reason: "not an addable tool" }); continue; }
       if (has) { rejected.push({ action: d.action, block: d.block, reason: "already present" }); continue; }
       if (tool.appliesTo && tool.appliesTo !== kind) {
@@ -549,14 +659,16 @@ export function applyArchitectPlan(
       antiRepetition: plan.antiRepetition,
       missingCapabilities: plan.missingCapabilities,
       groundingActions: plan.groundingActions,
+      schedule: plan.schedule,
+      budgetAllocation: plan.budgetAllocation,
     },
   };
 }
 
 /* ------------------------------ The agent ------------------------------ */
 
-function renderToolbox(kind: "narrated" | "loop"): string {
-  return ARCHITECT_TOOLBOX.filter((t) => !t.appliesTo || t.appliesTo === kind)
+function renderToolbox(kind: "narrated" | "loop", extra: Tool[] = []): string {
+  return [...ARCHITECT_TOOLBOX, ...extra].filter((t) => !t.appliesTo || t.appliesTo === kind)
     .map((t) => {
       const params = t.params
         .map((p) => {
@@ -623,9 +735,21 @@ export async function architectPipeline(input: ArchitectInput): Promise<Architec
     ``,
     `CURRENT PIPELINE (the validated floor — change only what identity justifies):`,
     current,
+    ...(input.disabledBlocks?.length
+      ? [``, `OPERATOR HARD CONSTRAINTS: the operator explicitly DISABLED these modules in the wizard — you may NOT add them, regardless of identity fit: ${input.disabledBlocks.join(", ")}.`]
+      : []),
+    ...(input.voiceCasting
+      ? [``, `VOICE CASTING (real auditions were performed and judged by an audio model): WINNER = ${input.voiceCasting.name} (${input.voiceCasting.character}) — ${input.voiceCasting.why}. If this channel deserves the premium voice tier, set narration_tts ttsProvider="elevenlabs" AND elevenVoiceId="${input.voiceCasting.voiceId}".`]
+      : []),
+    ...(input.probeReport && !input.probeReport.ok
+      ? [``, `⚠ PROBE RENDER FAILED — a real 60s end-to-end test of THIS pipeline just ran and broke:` +
+          `\nfailed block: ${input.probeReport.failedBlock ?? "?"}\nerror: ${(input.probeReport.error ?? "").slice(0, 400)}` +
+          (input.probeReport.notes ? `\nnotes: ${input.probeReport.notes.slice(0, 300)}` : "") +
+          `\nYour PRIMARY job in this pass is to FIX this: adjust the responsible module's params (or swap/remove the module) so the next probe succeeds. Every decision must serve the fix.`]
+      : []),
     ``,
     `YOUR TOOLBOX (the ONLY modules and params that exist — bounds are enforced):`,
-    renderToolbox(kind),
+    renderToolbox(kind, input.forgedTools),
     ``,
     `INTERROGATE THE IDENTITY (answer each through your decisions):`,
     `1. Which optional modules does THIS content actually need (data viz? quotes? portraits? shorts?) — and which present ones don't fit and should be REMOVED?`,
@@ -635,10 +759,12 @@ export async function architectPipeline(input: ArchitectInput): Promise<Architec
     `5. Length/structure: does the template length fit this niche's watch pattern?`,
     `6. GROUNDING: if confidence is low, gaps exist, or competitor evidence is thin — order the repair in groundingActions (e.g. "re-run niche research: thumbnail references off-niche"). Do NOT configure confidently on weak evidence.`,
     `7. MISSING TOOLS: if this channel needs a capability the toolbox lacks (e.g. map animations, recipe cards, code-snippet renders, whiteboard) put it in missingCapabilities — NEVER bend an ill-fitting module instead.`,
+    `8. SCHEDULE: propose the upload schedule (frequency + weekdays 0=Sun..6=Sat) this niche's watch pattern rewards (the operator's explicit choice overrides yours).`,
+    `9. BUDGET ALLOCATION: one sentence — where this channel's per-video budget earns the most (e.g. "spend on generated signature clips + premium voice; keep inserts lean").`,
     ``,
     `RULES: be conservative — only changes the identity JUSTIFIES, with a concrete "why" each. Numbers within bounds. params for add/set_params only from the listed keys. Quality bar is the standard: configure to MEET it, and say in groundingActions what must heal before the channel can.`,
     ``,
-    `Return STRICT JSON {"summary":string,"decisions":[{"action":"add"|"remove"|"set_params","block":string,"paramsJson"?:string,"why":string}],"antiRepetition":string[],"missingCapabilities":[{"name","description","wouldEnable"}],"groundingActions":string[]}.`,
+    `Return STRICT JSON {"summary":string,"decisions":[{"action":"add"|"remove"|"set_params","block":string,"paramsJson"?:string,"why":string}],"antiRepetition":string[],"missingCapabilities":[{"name","description","wouldEnable"}],"groundingActions":string[],"schedule"?:{"frequency":"daily"|"weekly"|"biweekly","days":number[]},"budgetAllocation"?:string}.`,
     `IMPORTANT: paramsJson is a JSON-ENCODED OBJECT STRING of the param values, e.g. "{\\"sentenceGapSec\\":1.6,\\"ttsSpeed\\":0.94}" — every add/set_params decision MUST carry its concrete values there (a set_params with no paramsJson is rejected).`,
   ].join("\n");
 
@@ -670,9 +796,11 @@ export async function architectPipeline(input: ArchitectInput): Promise<Architec
       antiRepetition: raw.antiRepetition ?? [],
       missingCapabilities: raw.missingCapabilities ?? [],
       groundingActions: raw.groundingActions ?? [],
+      schedule: raw.schedule,
+      budgetAllocation: raw.budgetAllocation,
     };
     log(`architect: plan — ${plan.decisions.length} decision(s), ${plan.missingCapabilities.length} missing capability(ies), ${plan.groundingActions.length} grounding action(s)`);
-    return applyArchitectPlan(input.pipeline, plan, { family: input.family, log });
+    return applyArchitectPlan(input.pipeline, plan, { family: input.family, disabledBlocks: input.disabledBlocks, extraTools: input.forgedTools, log });
   } catch (e) {
     log(`architect: agent failed (${e instanceof Error ? e.message : e}) — keeping the floor pipeline`);
     return null;

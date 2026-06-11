@@ -12,6 +12,7 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { synthChannelConcept } from "@/lib/conceptSynth";
 import { generateChannelArt } from "@/lib/channelArt";
 import { designPipeline, type DesignOptions } from "@/engine/designer";
+import type { PipelineEntry } from "@/engine/types";
 import { nichePreset } from "@/engine/golden";
 import { FAMILIES, type FamilyKey } from "@/engine/families";
 import { getArchetype } from "@/engine/archetypes";
@@ -49,7 +50,10 @@ function slugify(name: string, now: number): string {
 
 export const designChannelTask = task({
   id: "design-channel",
-  maxDuration: 600,
+  // Inception now includes up to TWO end-to-end probe renders (~10-20 min
+  // each at 60s scale) — the channel isn't "ready" until it has PROVEN it can
+  // finish a video.
+  maxDuration: 3600,
   run: async (payload: DesignChannelArgs) => {
     const log = (m: string, x?: Record<string, unknown>) => console.log(`[design-channel] ${m}`, x ?? "");
     // Channel inception without the model keys yields a skeleton identity/DNA
@@ -80,6 +84,9 @@ export const designChannelTask = task({
       seriesTitle: payload.seriesTitle,
       seriesCount: payload.seriesCount,
       toggles: payload.toggles,
+      // AUDIT FIX: the wizard's Advanced-editor per-block overrides were sent
+      // but never forwarded — every advanced knob silently did nothing.
+      paramOverrides: payload.paramOverrides,
     });
     log(`designed ${design.pipeline.length}-block pipeline (available=${design.available})`);
 
@@ -293,6 +300,31 @@ export const designChannelTask = task({
       (async () => {
         try {
           if (!styleDNA) return;
+          // Operator hard rail: wizard toggles set to OFF may never be re-added
+          // by the architect, however good its identity reasoning.
+          const t = payload.toggles ?? {};
+          const disabledBlocks = [
+            t.shorts === false ? "shorts_spinoff" : "",
+            t.crosspost === false ? "crosspost" : "",
+            t.quotes === false ? "quote_overlays" : "",
+            t.notify === false ? "notify" : "",
+          ].filter(Boolean);
+          // VOICE CASTING — audition real ElevenLabs voices against the DNA
+          // register, judged by a model that LISTENS; the architect casts the
+          // winner when the channel deserves the premium tier.
+          let voiceCasting = null;
+          if (fam.narrated && styleDNA) {
+            try {
+              const { castVoice } = await import("@/lib/voiceCasting");
+              voiceCasting = await castVoice({ channelName: name, niche: identity.niche, dna: styleDNA, log });
+              if (voiceCasting) {
+                await convex.mutation(api.channels.updateChannel, {
+                  channelId,
+                  identity: { ...identity, voiceCasting } as typeof identity,
+                });
+              }
+            } catch (e) { log(`voiceCasting skipped: ${e instanceof Error ? e.message : e}`); }
+          }
           const arch = await architectPipeline({
             family: payload.family,
             channelName: name,
@@ -303,6 +335,8 @@ export const designChannelTask = task({
             bible: creativeBrief,
             qualityBar,
             competitorCount,
+            disabledBlocks,
+            voiceCasting,
             log,
           });
           if (arch) {
@@ -314,6 +348,47 @@ export const designChannelTask = task({
             log(`architect: ${arch.report.applied.length} applied / ${arch.report.rejected.length} rejected — ${arch.report.summary.slice(0, 160)}`);
             for (const m of arch.report.missingCapabilities) log(`architect MISSING CAPABILITY: ${m.name} — ${m.description}`);
             for (const g of arch.report.groundingActions) log(`architect GROUNDING ACTION: ${g}`);
+
+            // MODULE FORGE: instead of leaving missing capabilities as wishes,
+            // AUTHOR them — Claude writes a declarative spec over the trusted
+            // primitives (schema-gated), it persists fleet-wide, and the
+            // architect re-runs ONCE with the new tools so it can wire them in.
+            const forgeable = arch.report.missingCapabilities.slice(0, 2);
+            if (forgeable.length) {
+              try {
+                const { authorForgedModule } = await import("@/engine/forge/forge");
+                const { registerForgedSpecs } = await import("@/engine/forge/runtime");
+                const { toolFromForgedSpec } = await import("@/engine/creative/architect");
+                const forgedTools = [];
+                for (const cap of forgeable) {
+                  const res = await authorForgedModule({
+                    capability: cap, channelName: name, niche: identity.niche, dna: styleDNA, log,
+                  });
+                  if ("error" in res) { log(`forge: ${cap.name} — ${res.error.slice(0, 160)}`); continue; }
+                  await convex.mutation(api.forgedModules.save, {
+                    ownerId, blockId: res.spec.id, spec: res.spec, status: "active",
+                    forChannelId: channelId, capability: cap.name,
+                  });
+                  registerForgedSpecs([res.spec]);
+                  forgedTools.push(toolFromForgedSpec(res.spec));
+                  log(`forge: CREATED ${res.spec.id} for "${cap.name}" (${res.spec.steps.length} steps, ceiling $${res.spec.maxCostUsd})`);
+                }
+                if (forgedTools.length) {
+                  const arch2 = await architectPipeline({
+                    family: payload.family, channelName: name, niche: identity.niche,
+                    persona: identity.persona, pipeline: arch.pipeline, dna: styleDNA,
+                    bible: creativeBrief, qualityBar, competitorCount, disabledBlocks, forgedTools, log,
+                  });
+                  if (arch2) {
+                    await convex.mutation(api.channels.updateChannel, {
+                      channelId, pipeline: arch2.pipeline,
+                      architectReport: { ...arch2.report, forged: forgedTools.map((t) => t.block) },
+                    });
+                    log(`architect (post-forge): ${arch2.report.applied.length} applied — forged modules wired in`);
+                  }
+                }
+              } catch (e) { log(`forge loop failed (non-fatal): ${e instanceof Error ? e.message : e}`); }
+            }
           }
         } catch (e) { log(`architect failed (non-fatal, floor kept): ${e instanceof Error ? e.message : e}`); }
       })(),
@@ -388,9 +463,104 @@ export const designChannelTask = task({
       } catch (e) { log(`auto-create trigger failed (non-fatal): ${e instanceof Error ? e.message : e}`); }
     }
 
+    // 8. ARCHITECT CHANNEL-LEVEL OUTPUTS: apply the proposed upload schedule
+    // when the operator didn't pin one (operator choice always wins).
+    try {
+      const chNow = await convex.query(api.channels.getChannel, { channelId });
+      const archReport = (chNow as { architectReport?: { schedule?: { frequency: string; days?: number[] }; budgetAllocation?: string } } | null)?.architectReport;
+      if (!payload.cadence && archReport?.schedule) {
+        await convex.mutation(api.channels.updateChannel, {
+          channelId,
+          schedule: { frequency: archReport.schedule.frequency, days: archReport.schedule.days },
+        });
+        log(`architect schedule applied: ${archReport.schedule.frequency} (days ${archReport.schedule.days?.join(",") ?? "any"})`);
+      }
+      if (archReport?.budgetAllocation) log(`architect budget allocation: ${archReport.budgetAllocation}`);
+    } catch (e) { log(`schedule apply skipped: ${e instanceof Error ? e.message : e}`); }
+
+    // 9. PROBE RENDER — prove the architected pipeline can START AND FINISH a
+    // video end-to-end BEFORE the channel is declared ready. A cheap ~60s test
+    // exercises every module (script→voice→visuals→music→assembly→QA, upload
+    // skipped). On failure the architect gets the error and FIXES its own
+    // config; one re-probe. Still failing → channel stays DRAFT with the
+    // report (never "ready" on hope).
+    let probeOutcome: { ok: boolean; attempts: number; error?: string } = { ok: !design.available, attempts: 0 };
+    if (design.available) {
+      try {
+        const { tasks } = await import("@trigger.dev/sdk");
+        for (let attempt = 1; attempt <= 2; attempt++) {
+          const chNow = await convex.query(api.channels.getChannel, { channelId });
+          const probePipe = buildProbePipeline((chNow?.pipeline ?? design.pipeline) as PipelineEntry[]);
+          const probeRunId = await convex.mutation(api.runs.createRun, { ownerId, channelId });
+          log(`probe: attempt ${attempt} — 60s end-to-end test (${probePipe.length} blocks, upload skipped)`);
+          await tasks.triggerAndWait(
+            "run-pipeline",
+            { channelId, runId: probeRunId, pipelineOverride: probePipe },
+            { concurrencyKey: String(channelId) },
+          );
+          const run = await convex.query(api.runs.getRun, { runId: probeRunId as Id<"runs"> });
+          if (run?.status === "ok") {
+            probeOutcome = { ok: true, attempts: attempt };
+            log(`probe PASSED on attempt ${attempt} — pipeline proven end-to-end ✓`);
+            break;
+          }
+          const error = String((run as { error?: string } | null)?.error ?? "unknown failure");
+          const stages = await convex.query(api.runStages.listRunStages, { runId: probeRunId as Id<"runs"> });
+          const failedBlock = (stages as { block: string; status: string }[]).find((s) => s.status === "failed")?.block;
+          probeOutcome = { ok: false, attempts: attempt, error: error.slice(0, 300) };
+          log(`probe FAILED at ${failedBlock ?? "?"}: ${error.slice(0, 200)}`);
+          if (attempt === 1 && styleDNA) {
+            // FIX PASS: the architect sees the real failure and corrects itself.
+            const fix = await architectPipeline({
+              family: payload.family, channelName: name, niche: identity.niche,
+              persona: identity.persona, pipeline: (chNow?.pipeline ?? design.pipeline) as PipelineEntry[],
+              dna: styleDNA, bible: creativeBrief, qualityBar, competitorCount,
+              probeReport: { ok: false, error, failedBlock }, log,
+            });
+            if (fix) {
+              await convex.mutation(api.channels.updateChannel, {
+                channelId, pipeline: fix.pipeline,
+                architectReport: { ...fix.report, probeFix: { attempt, error: error.slice(0, 200), failedBlock } },
+              });
+              log(`probe FIX applied: ${fix.report.applied.length} change(s) — re-probing`);
+            }
+          }
+        }
+        if (!probeOutcome.ok) {
+          await convex.mutation(api.channels.updateChannel, { channelId, status: "draft" });
+          log(`probe: FAILED after ${probeOutcome.attempts} attempt(s) — channel stays DRAFT (honest: it cannot yet finish a video)`);
+        }
+      } catch (e) { log(`probe loop error (channel kept as designed): ${e instanceof Error ? e.message : e}`); }
+    }
+
     return {
       ok: true, channelId, slug, name, family: payload.family,
-      status: design.available ? "paused" : "draft", warnings: design.warnings,
+      status: !design.available ? "draft" : probeOutcome.ok ? "paused" : "draft",
+      probe: probeOutcome, warnings: design.warnings,
     };
   },
 });
+
+/**
+ * Shrink a production pipeline into a cheap ~60s END-TO-END probe: every
+ * module still runs (the point is proving the whole machine), but short,
+ * single-track, few-clips, and WITHOUT publishing (upload/notify/cleanup and
+ * spin-offs dropped).
+ */
+function buildProbePipeline(pipe: PipelineEntry[]): PipelineEntry[] {
+  const DROP = new Set(["upload_draft", "notify", "cleanup", "shorts_spinoff", "crosspost", "emit_bundle"]);
+  return pipe
+    .filter((e) => !DROP.has(e.block))
+    .map((e) => {
+      const p: Record<string, unknown> = { ...(e.params ?? {}) };
+      if (e.block === "script_gen") { p.maxSeconds = 60; p.endWithSummary = false; }
+      if (e.block === "length_check") { p.minSeconds = 20; p.maxSeconds = 220; }
+      if (e.block === "music") { p.trackCount = 1; }
+      if (e.block === "gen_footage") { p.maxClips = 6; }
+      if (e.block === "stock_footage") { p.signatureGenClips = 0; }
+      if (e.block === "visual_inserts") { p.maxInserts = 1; }
+      if (e.block === "quote_overlays") { p.maxQuotes = 1; }
+      if (e.block === "assemble") { p.durationSec = 120; }
+      return { block: e.block, params: Object.keys(p).length ? p : undefined };
+    });
+}

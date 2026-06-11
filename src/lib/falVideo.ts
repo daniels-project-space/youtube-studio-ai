@@ -36,6 +36,8 @@ function falKey(): string {
 export interface FalI2VRequest {
   /** Motion/scene prompt (already constitution-composed by the caller). */
   prompt: string;
+  /** Per-call model override (else FAL_I2V_MODEL env, else Kling standard). */
+  model?: string;
   /** Negative prompt (locked-camera STATIC_CAMERA_NEGATIVE). */
   negativePrompt?: string;
   /** Source still: a publicly fetchable URL (R2 public url or provider CDN). */
@@ -94,7 +96,7 @@ function extractVideoUrl(payload: unknown): string | undefined {
  * silent fake media.
  */
 export async function generateFalI2V(req: FalI2VRequest): Promise<FalI2VResult> {
-  const model = FAL_I2V_MODEL;
+  const model = req.model || FAL_I2V_MODEL;
   // Kling exposes duration as a string enum "5"|"10".
   const dur = (req.durationSec ?? 5) >= 8 ? "10" : "5";
   const body: Record<string, unknown> = {

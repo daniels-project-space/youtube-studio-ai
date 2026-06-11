@@ -96,6 +96,24 @@ async function sweep(ownerId: string, log: (m: string) => void) {
         log(`retention queue failed for ${r._id}: ${e instanceof Error ? e.message : e}`);
       }
     }
+
+    // LEARNING → STRUCTURE: when real-audience evidence accumulates (≥3
+    // high-confidence retention rules newer than the last architect pass),
+    // re-run the architect so the data re-tunes pacing/inserts/structure —
+    // not just the script playbook.
+    try {
+      const playbook = (ch as { scriptPlaybook?: { retentionLearnings?: { confidence?: string; at?: number }[] } }).scriptPlaybook;
+      const lastArch = Number((ch as { architectReport?: { at?: number } }).architectReport?.at ?? 0);
+      const freshHigh = (playbook?.retentionLearnings ?? []).filter(
+        (l) => l.confidence === "high" && (l.at ?? 0) > lastArch,
+      );
+      if (freshHigh.length >= 3) {
+        await tasks.trigger("architect-pipeline", { channelId: ch._id });
+        log(`re-architect queued for "${ch.name}" — ${freshHigh.length} high-confidence retention rules since last pass`);
+      }
+    } catch (e) {
+      log(`re-architect check failed for ${ch.name}: ${e instanceof Error ? e.message : e}`);
+    }
   }
 
   log(`sweep: ${failures.length} failure(s), ${healed.length} healed run(s), ${retentionQueued.length} retention job(s), ${missingCaps.size} missing capability(ies)`);

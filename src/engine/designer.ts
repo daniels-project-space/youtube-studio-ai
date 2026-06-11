@@ -140,6 +140,16 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       return { block: e.block, params: Object.keys(params).length ? params : undefined };
     });
 
+  // GENERATED-VISUALS families (whiteboard, cinematic): the world cannot come
+  // from a stock library — swap stock_footage for gen_footage IN PLACE (same
+  // footageClips contract, timeline unchanged). entity_imagery (photoreal
+  // portraits) is dropped too: real photographs break a drawn/painted world.
+  if (fam.visualEngine === "gen_footage" || fam.visualEngine === "ai_scenes") {
+    pipeline = pipeline
+      .filter((e) => e.block !== "entity_imagery")
+      .map((e) => (e.block === "stock_footage" ? { block: "gen_footage", params: e.params } : e));
+  }
+
   // Mirror the narration pacing into script_gen so the word budget accounts for
   // the real inter-sentence pauses AND voice speed (length math in scriptGen).
   const narrParams = pipeline.find((e) => e.block === "narration_tts")?.params;
