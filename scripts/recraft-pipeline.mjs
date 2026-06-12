@@ -29,6 +29,7 @@ const SAMURAI_DNA = {
 
 const JOBS = [
   { key: "stoic", find: "Stoic", niche: "Stoicism / Philosophy", title: "The Stoic Rule That Kills All Anxiety" },
+  { key: "invest", find: "Investory", niche: "Finance", title: "The $50 Trillion Wealth Transfer Has Already Started" },
   {
     key: "samurai",
     inline: { name: "Blossom & Blade", dna: SAMURAI_DNA, positioning: "elegant watercolor storyteller of Asian history - samurai, shoguns, the moments that ended eras" },

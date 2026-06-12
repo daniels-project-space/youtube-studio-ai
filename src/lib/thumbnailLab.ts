@@ -287,6 +287,7 @@ export async function distillPlaybook(args: {
       `${JSON.stringify(decon).slice(0, 6000)}\n\n` +
       `CHANNEL DNA: palette ${palette.join(", ")} (accent ${accent}); thumbnail subject: ` +
       `${args.dna?.thumbnail?.subject ?? args.dna?.recurringSubject ?? "n/a"}; world: ${args.dna?.setting ?? "n/a"}.\n\n` +
+      `${(args.dna as { thumbnailAnchors?: string[] } | null)?.thumbnailAnchors?.length ? `OPERATOR-ANCHORED REFERENCE THUMBNAILS (the operator personally chose these as THE BAR for this channel - weight them ABOVE the scraped evidence when they conflict):\n- ${(args.dna as { thumbnailAnchors?: string[] }).thumbnailAnchors!.join("\n- ")}\n\n` : ""}` +
       `RESEARCH PRINCIPLES (hard constraints):\n- ${RESEARCH_PRINCIPLES.join("\n- ")}\n\n` +
       `Synthesize:\n` +
       `0. energy: the channel's clickbait tier Ã¢â‚¬â€ "spectacle" (over-the-top impossible-scale drama: finance/tech/` +
@@ -412,6 +413,11 @@ export async function renderCandidate(args: {
       `Hyper-saturated, volumetric light. COMPOSED FOR THE LAYOUT: the subject occupies the side OPPOSITE the ` +
       `textZone (large, partially cropped for scale); the textZone 40% is clean darker negative space. ` +
       `TEXT-FREE image (no words/letters).\n` +
+      `NARRATIVE COHERENCE (hard requirement): the scene must LITERALLY ENACT the topic so a viewer instantly ` +
+      `reads what the video is about - subjects ACTING OUT the idea (for "conquering anxiety": a stoic statue ` +
+      `laying a steadying hand on a crumbling statue shoulder; for "market crash": a figure watching a collapsing ` +
+      `red line tear through the floor). NEVER decorative abstraction (random dust, glows, floating objects) that ` +
+      `does not tell the story. Test: cover the text - does the image alone communicate the topic?\n` +
       `STEP 3 Ã¢â‚¬â€ textPropsJson: the template as a JSON-ENCODED STRING with placeholders replaced (line texts: 1-3 ` +
       `punchy words each, Ã¢â€°Â¤5 words total, NOT restating the title - every line must be a real English hook word, NEVER meta-words like "omit"/"none"; ` +
       `numberCallout: a REAL number from the topic, or LEAVE THE KEY OUT of the JSON entirely when none exists; set "position" to your chosen textZone).\n` +
@@ -485,7 +491,7 @@ export async function renderCandidate(args: {
           `STYLE (obey strictly): ${vl.imageStyle ?? "cinematic"}. ` +
           `Headline ${wordList}${callout} in the ${plannedZone} area on clean negative space, ` +
           `VERY LARGE bold lettering in ${vl.accentColor ?? "#ffffff"} or white for contrast, ` +
-          `extremely high contrast, readable at 120px, spelling EXACTLY as quoted. ` +
+          `extremely high contrast, RAZOR-SHARP crisp in-focus lettering (never soft or blurred), readable at 120px, spelling EXACTLY as quoted. ` +
           `Small channel mark "${String(textProps["badge"] ?? "")}". Subject LARGE on the opposite side.${fixNote}`;
         let recraftPrompt = buildPrompt(inst.fluxPrompt ?? "");
         const budget = RECRAFT_PROMPT_MAX - 90; // NO_UI clause + safety margin
@@ -507,16 +513,17 @@ export async function renderCandidate(args: {
             `2. punch 1-10 (scroll-stopping for tier "${args.playbook.energy ?? "bold"}")? 3. readable at 120px? ` +
             `4. uiClean: true ONLY if there are NO fake play buttons, video-player icons, progress bars or other ` +
             `baked-in UI chrome in the artwork. ` +
-            `5. badgeOk: is EVERY other word in the image (channel mark "${String(textProps["badge"] ?? "")}", labels) ` +
-            `a correctly spelled real word - no garbled/invented strings? ` +
+            `5. badgeOk: find the small channel mark text and transcribe it LETTER BY LETTER. badgeOk=true ONLY if it ` +
+            `reads EXACTLY "${String(textProps["badge"] ?? "")}" - any swapped/missing/garbled letters = false. ` +
+            `Also false if ANY other word in the image is misspelled or invented. ` +
             `6. styleMatch 1-10: does the rendering obey the channel style "${vl.imageStyle ?? "cinematic"}"? ` +
-            `Return STRICT JSON {"textOk":bool,"punch":n,"readable":bool,"uiClean":bool,"badgeOk":bool,"styleMatch":n,"fix":"<=15 words"}.`,
+            `7. storyMatch 1-10: ignoring the text, does the IMAGE alone visually tell the story of the topic "${args.title}" (subjects enacting the idea, not decorative abstraction)? 8. crisp: is ALL text razor-sharp and in focus (soft/blurry lettering = false)? ` + `Return STRICT JSON {"textOk":bool,"punch":n,"readable":bool,"uiClean":bool,"badgeOk":bool,"styleMatch":n,"storyMatch":n,"crisp":bool,"fix":"<=15 words"}.`,
           imagePaths: [args.outJpg],
           json: true,
           maxTokens: 250,
         }).catch(() => "");
-        const v = raw ? parseJsonLoose<{ textOk?: boolean; punch?: number; readable?: boolean; uiClean?: boolean; badgeOk?: boolean; styleMatch?: number; fix?: string }>(raw) : {};
-        if (v.textOk !== false && v.readable !== false && v.uiClean !== false && v.badgeOk !== false && (v.styleMatch ?? 10) >= 7 && (v.punch ?? 10) >= 7) {
+        const v = raw ? parseJsonLoose<{ textOk?: boolean; punch?: number; readable?: boolean; uiClean?: boolean; badgeOk?: boolean; styleMatch?: number; storyMatch?: number; crisp?: boolean; fix?: string }>(raw) : {};
+        if (v.textOk !== false && v.readable !== false && v.uiClean !== false && v.badgeOk !== false && v.crisp !== false && (v.styleMatch ?? 10) >= 7 && (v.storyMatch ?? 10) >= 7 && (v.punch ?? 10) >= 7) {
           args.log?.(`thumbnailLab: RECRAFT render OK (one-pass design, punch ${v.punch ?? "?"}/10)`);
           return args.outJpg;
         }
@@ -524,7 +531,7 @@ export async function renderCandidate(args: {
           ` CRITICAL FIX: ${v.fix ?? "text larger and exact, higher contrast"}.` +
           `${v.uiClean === false ? " REMOVE all fake play buttons / player UI from the artwork." : ""}` +
           `${v.badgeOk === false ? ` The channel mark must read EXACTLY "${String(textProps["badge"] ?? "")}" - no other invented words.` : ""}` +
-          `${(v.styleMatch ?? 10) < 7 ? ` The image MUST follow the style: ${vl.imageStyle}.` : ""}`;
+          `${(v.styleMatch ?? 10) < 7 ? ` The image MUST follow the style: ${vl.imageStyle}.` : ""}` + `${(v.storyMatch ?? 10) < 7 ? ` The scene must LITERALLY enact the topic "${args.title}" - subjects acting out the idea, no decorative abstraction.` : ""}` + `${v.crisp === false ? " ALL lettering must be razor-sharp and in focus." : ""}`;
         args.log?.(`thumbnailLab: recraft attempt ${attempt + 1} - textOk=${v.textOk} punch=${v.punch} uiClean=${v.uiClean} badgeOk=${v.badgeOk} styleMatch=${v.styleMatch} -> ${attempt === 0 ? "regenerating with fix" : "falling through"}`);
       }
     }
