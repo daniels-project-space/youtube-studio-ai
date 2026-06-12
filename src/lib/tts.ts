@@ -43,11 +43,34 @@ export function stripAudioTags(text: string): string {
 }
 
 /**
+ * Prosody continuity across CHUNKED synthesis — without it every request is
+ * an independent "take" and v3 re-interprets emotion from scratch, producing
+ * a jarring voice change at every joint. previous_text/next_text condition
+ * the delivery on the surrounding script (parallel-safe); previousRequestIds
+ * chain actual audio context (sequential callers only, ElevenLabs keeps ids
+ * usable for ~2h, max 3 per request).
+ */
+export interface TtsStitch {
+  previousText?: string;
+  nextText?: string;
+  previousRequestIds?: string[];
+}
+
+/** eleven_v3 doesn't support request stitching yet (verified live) — see above. */
+const V3_STITCH = process.env.ELEVENLABS_V3_STITCH === "1";
+
+/**
  * ElevenLabs v3 — the expressive voice tier. PERFORMS inline bracketed audio
  * tags ([pause], [sighs], [whispers], [chuckles]…) instead of reading them;
  * the script writer emits them only when the channel runs this provider.
  */
-async function synthElevenLabs(args: { text: string; elevenVoiceId?: string }): Promise<Uint8Array> {
+async function synthElevenLabs(args: {
+  text: string;
+  elevenVoiceId?: string;
+  stitch?: TtsStitch;
+  /** Receives the response request-id so sequential callers can chain takes. */
+  onRequestId?: (id: string) => void;
+}): Promise<Uint8Array> {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) throw new TtsError("ELEVENLABS_API_KEY is not configured");
   // Default: George — warm, documentary-grade narrator.
@@ -65,12 +88,28 @@ async function synthElevenLabs(args: { text: string; elevenVoiceId?: string }): 
             text: args.text,
             model_id: "eleven_v3",
             voice_settings: { stability: 0.5, similarity_boost: 0.8 },
+            // Fixed seed = the same stylistic draw across chunked requests —
+            // v3's main take-to-take consistency lever today.
+            seed: 4242,
+            // VERIFIED LIVE 2026-06-12: eleven_v3 rejects previous_text /
+            // next_text ("unsupported_model"). The stitch plumbing stays
+            // dormant until ElevenLabs ships v3 request stitching — flip
+            // V3_STITCH then.
+            ...(V3_STITCH && args.stitch?.previousText ? { previous_text: args.stitch.previousText.slice(-600) } : {}),
+            ...(V3_STITCH && args.stitch?.nextText ? { next_text: args.stitch.nextText.slice(0, 600) } : {}),
+            ...(V3_STITCH && args.stitch?.previousRequestIds?.length
+              ? { previous_request_ids: args.stitch.previousRequestIds.slice(-3) }
+              : {}),
           }),
         },
       );
       if (res.ok) {
         const bytes = new Uint8Array(await res.arrayBuffer());
-        if (bytes.length >= 1000) return bytes;
+        if (bytes.length >= 1000) {
+          const rid = res.headers.get("request-id");
+          if (rid) args.onRequestId?.(rid);
+          return bytes;
+        }
         lastErr = "ElevenLabs returned empty/tiny audio";
       } else {
         const body = await res.text().catch(() => "");
@@ -95,6 +134,9 @@ export async function synthNarration(args: {
   /** TTS engine: fish (default) | elevenlabs (v3 expressive, audio tags). */
   provider?: string;
   elevenVoiceId?: string;
+  /** ElevenLabs continuity across chunked requests (ignored by Fish). */
+  stitch?: TtsStitch;
+  onRequestId?: (id: string) => void;
 }): Promise<Uint8Array> {
   if (args.provider === "elevenlabs") return synthElevenLabs(args);
   const key = process.env.FISH_AUDIO_API_KEY;
