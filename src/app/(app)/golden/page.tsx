@@ -1,5 +1,22 @@
+import type { CSSProperties } from "react";
 import { GOLDEN_MODULES, GOLDEN_SPINE, type GoldenModule } from "@/engine/golden";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
+
+/**
+ * Real banana-engine output (public/golden/*.jpg, downscaled) — every one a
+ * first-try judge-gated SHIP across wildly different channel identities.
+ * Fanned out on the golden hero card as the quality proof.
+ */
+const PROOFS: { src: string; alt: string }[] = [
+  { src: "drawn.jpg", alt: "The Drawn Past — The Dancing Plague" },
+  { src: "samurai.jpg", alt: "Steel & Silk — Kyoto Burns" },
+  { src: "stoic_anger.jpg", alt: "The Quiet Stoic — Anger Is Weakness" },
+  { src: "stoic_still.jpg", alt: "The Quiet Stoic — Stillness Is Power" },
+  { src: "stoic_memento.jpg", alt: "The Quiet Stoic — Remember You Must Die" },
+  { src: "hannibal.jpg", alt: "Empires at War — Hannibal" },
+  { src: "scandal.jpg", alt: "Spotlight Rot — tabloid collage" },
+  { src: "rich.jpg", alt: "Gilded Lies — evil." },
+];
 
 /**
  * Golden Pipeline — the template every channel inherits, module by module.
@@ -131,6 +148,46 @@ function ModuleCard({
           </span>
         ))}
       </div>
+
+      {hero && (
+        <>
+          <div className="golden-fan">
+            {PROOFS.map((p, i) => {
+              const off = i - (PROOFS.length - 1) / 2;
+              return (
+                // eslint-disable-next-line @next/next/no-img-element -- static proof strip, no optimization needed
+                <img
+                  key={p.src}
+                  src={`/golden/${p.src}`}
+                  alt={p.alt}
+                  title={p.alt}
+                  loading="lazy"
+                  className="golden-fan-item"
+                  style={
+                    {
+                      "--rot": `${off * 4}deg`,
+                      "--ty": `${Math.round(off * off * 3.2)}px`,
+                      zIndex: i + 1,
+                    } as CSSProperties
+                  }
+                />
+              );
+            })}
+          </div>
+          <p
+            style={{
+              margin: "0.5rem 0 0",
+              textAlign: "center",
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.72rem",
+              letterSpacing: "0.05em",
+              color: "var(--color-faint)",
+            }}
+          >
+            real engine output — eight channels, every render a first-try judge-gated SHIP
+          </p>
+        </>
+      )}
     </article>
   );
 }
