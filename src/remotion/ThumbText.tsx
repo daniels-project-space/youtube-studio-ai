@@ -22,8 +22,11 @@ export type ThumbTextProps = {
   glow?: boolean;
   underlineAccent?: boolean;
   badge?: string;
-  /** Badge placement: center = bottom-center wordmark; pill = top-right pill. */
+  /** Badge placement: center = bottom-center wordmark; pill = corner pill. */
   badgeStyle?: "center" | "pill";
+  /** Pill corner. Default: top corner on the side OPPOSITE the text, so the
+   * badge can never collide with the headline. */
+  badgeCorner?: "tl" | "tr" | "bl" | "br";
   scrim?: boolean;
   /**
    * Typeface personality: impact (Anton, bold modern) | marker (hand-drawn) |
@@ -72,6 +75,7 @@ export const ThumbText: React.FC<ThumbTextProps> = ({
   underlineAccent = true,
   badge,
   badgeStyle = "center",
+  badgeCorner,
   scrim = true,
   font = "impact",
   treatment = "plate",
@@ -195,7 +199,7 @@ export const ThumbText: React.FC<ThumbTextProps> = ({
       <div
         style={{
           position: "absolute",
-          ...(isUpper ? { top: numberCallout ? "28%" : "8%" } : { bottom: badge && badgeStyle === "center" ? "13%" : "9%" }),
+          ...(isUpper ? { top: numberCallout ? "28%" : "15%" } : { bottom: badge && badgeStyle === "center" ? "13%" : "9%" }),
           ...sideAnchor,
           maxWidth: isSide ? "58%" : "88%",
           marginLeft: isSide ? undefined : "auto",
@@ -237,7 +241,14 @@ export const ThumbText: React.FC<ThumbTextProps> = ({
         badgeStyle === "pill" ? (
           <div
             style={{
-              position: "absolute", top: "4.5%", right: "3.5%",
+              position: "absolute",
+              ...((badgeCorner ?? (isRight ? "tl" : "tr")) === "tl"
+                ? { top: "4.5%", left: "3.5%" }
+                : (badgeCorner ?? (isRight ? "tl" : "tr")) === "bl"
+                  ? { bottom: "4.5%", left: "3.5%" }
+                  : (badgeCorner ?? (isRight ? "tl" : "tr")) === "br"
+                    ? { bottom: "4.5%", right: "3.5%" }
+                    : { top: "4.5%", right: "3.5%" }),
               fontSize: Math.round(W * 0.018), fontWeight: 700, letterSpacing: "0.18em",
               color: "#ffffff", background: "rgba(8,8,14,0.72)",
               border: `2px solid ${accentColor}`, borderRadius: 999,
