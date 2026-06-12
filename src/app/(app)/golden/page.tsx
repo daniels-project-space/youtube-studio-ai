@@ -62,6 +62,20 @@ const SCRIPT_PROOFS: { device: string; channel: string; line: string; note: stri
 ];
 
 /**
+ * Real metacraft output — autocomplete + real-feed grounded, claims-linted,
+ * judge-gated titles from the certification duel (8-9/10 on click AND
+ * directness), fanned on the SEO Metadata golden card.
+ */
+const META_PROOFS: { device: string; channel: string; line: string; note: string }[] = [
+  { device: "direct_verdict", channel: "The Quiet Stoic", line: "Anger is the ultimate form of self-destruction.", note: "click 9 · direct 9" },
+  { device: "contrarian", channel: "Empires at War", line: "Barbarian Hordes Did Not Destroy the Roman Empire", note: "claims grounded in the fact-checked script" },
+  { device: "contrarian", channel: "Steel & Silk", line: "Japan's Deadliest War Started Over Nothing", note: "judged vs 10 real competitor titles" },
+  { device: "direct_verdict", channel: "The Drawn Past", line: "Strasbourg's medical cure killed the dancers", note: "real-feed evidence · avg 48 chars" },
+  { device: "direct_verdict", channel: "Spotlight Rot", line: "Every public downfall is a manufactured PR extraction", note: "click 9 · chaos register" },
+  { device: "direct_verdict", channel: "The Takeover Log", line: "The AI takeover is a corporate restructuring.", note: "runner-up stored for CTR swap" },
+];
+
+/**
  * Golden Pipeline — the template every channel inherits, module by module.
  * Pure static render of the GOLDEN_MODULES registry (src/engine/golden.ts):
  * the engine and this page share one source of truth, so certifying a module
@@ -249,6 +263,37 @@ function ModuleCard({
             })}
           </div>
           <FanCaption>real engine output — judge-gated cold opens, claims search-verified before they ship</FanCaption>
+        </>
+      )}
+
+      {hero && m.key === "metadata" && (
+        <>
+          <div className="golden-fan">
+            {META_PROOFS.map((p, i) => {
+              const off = i - (META_PROOFS.length - 1) / 2;
+              return (
+                <div
+                  key={`${p.channel}-${i}`}
+                  className="golden-fan-item golden-fan-card"
+                  title={`${p.channel} — ${p.note}`}
+                  style={
+                    {
+                      "--rot": `${off * 4}deg`,
+                      "--ty": `${Math.round(off * off * 3.2)}px`,
+                      zIndex: i + 1,
+                    } as CSSProperties
+                  }
+                >
+                  <span className="golden-fan-card-device">{p.device}</span>
+                  <span className="golden-fan-card-line">{p.line}</span>
+                  <span className="golden-fan-card-meta">
+                    {p.channel} · {p.note}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <FanCaption>real engine output — titles grounded in live search + the real feed, gated on click and directness</FanCaption>
         </>
       )}
     </article>

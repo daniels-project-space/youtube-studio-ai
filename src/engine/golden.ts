@@ -419,8 +419,8 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "truncation), no filler starts, register-aware hype rules. A feed judge gates clickScore ≥7 under " +
       "the title-promise contract; the runner-up is stored for CTR-swap learning. THE QUOTE opens the " +
       "description, auto-chapters land at upload, and a comment-seeding pinned comment is emitted.",
-    gates: ["claims grounded in fact-checked script", "payoff in first ~50 chars", "clickScore ≥ 7 vs real feed", "title-promise contract", "banned words / register"],
-    status: "active",
+    gates: ["claims grounded in fact-checked script", "direct ≥ 7 (no setup prefixes, 40-70 chars)", "clickScore ≥ 7 vs the real feed", "payoff in first ~50 chars", "title-promise contract", "banned words / register"],
+    status: "golden",
   },
   {
     key: "verify",
