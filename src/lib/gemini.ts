@@ -314,6 +314,53 @@ export async function geminiJson<T = unknown>(args: {
 }
 
 /**
+ * The LATEST Gemini Pro text model — the narration writer (Daniel: "they are
+ * the best at narration"). Env-pinnable via GEMINI_SCRIPT_MODEL; the chain in
+ * geminiJsonPro degrades LOUDLY through older Pros if the preview rotates away.
+ */
+export function scriptProModel(): string {
+  return process.env.GEMINI_SCRIPT_MODEL || "gemini-3.1-pro-preview";
+}
+
+const PRO_FALLBACKS = ["gemini-3-pro-preview", "gemini-2.5-pro"];
+
+/**
+ * Strict JSON via the latest Gemini PRO (scriptProModel), with a loud model
+ * fallback chain when a preview id stops existing. PRO GOTCHA: thinking eats
+ * maxOutputTokens first — small budgets return truncated JSON with
+ * finishReason MAX_TOKENS (verified live on gemini-3.1-pro-preview) — so the
+ * budget is floored at 6000.
+ */
+export async function geminiJsonPro<T = unknown>(args: {
+  prompt: string;
+  maxTokens?: number;
+  temperature?: number;
+  log?: (msg: string) => void;
+}): Promise<T> {
+  const chain = [scriptProModel(), ...PRO_FALLBACKS.filter((m) => m !== scriptProModel())];
+  const maxTokens = Math.max(6000, args.maxTokens ?? 0);
+  let lastErr: unknown;
+  for (const model of chain) {
+    try {
+      const text = await generate(model, [{ text: args.prompt }], {
+        json: true,
+        maxTokens,
+        temperature: args.temperature,
+      });
+      return parseJsonLoose<T>(text);
+    } catch (e) {
+      lastErr = e;
+      const msg = e instanceof Error ? e.message : String(e);
+      // Only a missing/forbidden MODEL falls through the chain — content and
+      // transient errors (already retried in generate) must surface honestly.
+      if (!/not[ _]?found|404|permission|unsupported|does not exist/i.test(msg)) throw e;
+      args.log?.(`geminiJsonPro: model ${model} unavailable (${msg.slice(0, 120)}) — trying next in chain`);
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new GeminiError(String(lastErr));
+}
+
+/**
  * Analyse one or more images (by URL) with a text prompt. Downloads each image,
  * inlines it as base64, and returns the model's text answer. Used for the
  * thumbnail style guide and the thumbnail QA gate.

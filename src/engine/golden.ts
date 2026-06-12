@@ -24,12 +24,6 @@ export const CRAFT_RULES = [
   "- DIRECT ADDRESS: speak to \"you\" where natural; make abstract ideas concrete and felt before explaining them.",
 ].join("\n");
 
-/** Hook-specific guidance for the dedicated hook/opening generation step. */
-export const HOOK_RULES =
-  "Write a scroll-stopping HOOK that lands in the first ~7 seconds: open a curiosity gap, " +
-  "make a bold or contrarian claim, or address the viewer directly with \"you\". No preamble, " +
-  "no \"in this video\", no restating the title â€” drop the viewer straight into tension or intrigue.";
-
 /**
  * GOLDEN_SPINE â€” the canonical ordered stages every narrated channel inherits.
  * Documentation + reference for designer.ts alignment (the visual stage swaps per
@@ -125,12 +119,15 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "script",
     stage: "write",
     title: "Script + Hook",
-    engine: "Model-routed LLM under CRAFT_RULES",
+    engine: "Hookcraft cold-open engine + latest Gemini Pro narration (gemini-3.1-pro-preview)",
     how:
-      "Hook-first writing under research-backed retention law: the hook lands within ~7 seconds, sentences " +
-      "average under 15 words, one idea per 60-90s, and a deliberate midpoint re-hook recovers the " +
-      "attention dip. The Show Bible doctrine layers the channel's voice on top.",
-    gates: ["qa_script", "loud regeneration on failure"],
+      "The cold open comes FIRST: hookcraft writes three device-diverse candidates (cold-open scene, " +
+      "receipt, contrarian verdict, …) that must be SPECIFICALLY about the topic, runs a deterministic " +
+      "craft lint (first sentence ≤7s, banned filler openers, concrete anchor, <15-word sentences), then a " +
+      "judge gates punch/specificity/curiosity/voiceMatch ≥7 with one feedback retry — loud failure, never " +
+      "a could-open-any-video line. The latest Gemini Pro then writes the narration continuing from it " +
+      "under CRAFT_RULES (one idea per 60-90s, midpoint re-hook), in the Show Bible's register.",
+    gates: ["hook lint (≤7s, no filler, concrete)", "punch ≥ 7", "specificity ≥ 7", "curiosity ≥ 7", "voiceMatch ≥ 7", "qa_script"],
     status: "active",
   },
   {
