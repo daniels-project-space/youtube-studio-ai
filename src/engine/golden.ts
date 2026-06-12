@@ -232,6 +232,29 @@ export function resolveVoiceDoctrine(niche?: string): VoiceDoctrine | undefined 
 }
 
 /**
+ * ElevenLabs v3 audio-tag palettes per voice archetype — official v3 guidance:
+ * tags must match what the voice can CREDIBLY perform (a meditative voice
+ * won't convincingly shout; a professional voice shouldn't [giggle]). The
+ * script writer may only use the archetype's palette on v3-voiced channels.
+ */
+export const V3_TAG_PALETTES: Record<string, string> = {
+  "gentle-guide": "[whispers] [softly] [long pause] [pause] [inhales deeply] [exhales] [sighs]",
+  "chaos-commentator": "[laughs] [chuckles] [sarcastic] [appalled] [surprised] [exhales] [pause]",
+  investigator: "[pause] [long pause] [seriously] [slowly] [exhales]",
+  "narrator-teacher": "[pause] [long pause] [thoughtful] [curious] [emphatic] [slowly]",
+  "teacher-advisor": "[pause] [seriously] [thoughtful] [emphatic]",
+  "calm-analyst": "[pause] [long pause] [seriously] [slowly] [exhales]",
+  "insider-explainer": "[curious] [excited] [chuckles] [pause] [emphatic]",
+  "trusted-explainer": "[softly] [seriously] [pause] [thoughtful] [exhales]",
+  "enthusiast-critic": "[chuckles] [laughs] [excited] [curious] [sarcastic] [pause]",
+  "operator-mentor": "[pause] [seriously] [chuckles] [emphatic] [thoughtful]",
+  "quiet-mentor": "[pause] [long pause] [softly] [sighs] [thoughtful] [slowly]",
+  igniter: "[emphatic] [pause] [exhales] [seriously]",
+  teacher: "[curious] [excited] [pause] [emphatic] [chuckles] [thoughtful]",
+  dramatist: "[pause] [long pause] [whispers] [sighs] [seriously] [surprised]",
+};
+
+/**
  * GOLDEN_MODULES — the golden template, module by module, as shown on the
  * studio's "Golden Pipeline" tab. One entry per module of the spine with the
  * honest story of HOW it works and which gates protect it. `status: "golden"`

@@ -5,7 +5,7 @@
  * the `script_gen` block wraps it. Failures are loud — no thin-script fallback.
  */
 import { geminiJson, geminiJsonPro, scriptProModel, hasGeminiKey } from "@/lib/gemini";
-import { CRAFT_RULES, resolveVoiceDoctrine } from "@/engine/golden";
+import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { craftHook, type CraftedHook } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 
@@ -81,20 +81,32 @@ function spoken(req: ScriptRequest, text: string): string {
 
 /**
  * ElevenLabs v3 audio-tag writing guidance — emitted ONLY when the channel's
- * voice performs them (otherwise tags would be read aloud / stripped).
+ * voice performs them (otherwise tags would be read aloud / stripped). Built
+ * on the official v3 prompting guide: tags must match what the voice can
+ * CREDIBLY perform, pacing comes from punctuation/structure (v3 has no break
+ * tags), ellipses add weight, strategic caps add emphasis, and tags never
+ * describe physical actions or alter the text's meaning.
  */
 function voiceTagClause(req: ScriptRequest): string {
   if (!req.voiceTags) return "";
+  // Channel-aware gesture palette: the voice archetype decides which tags the
+  // narrator can credibly perform (a gentle guide whispers; it never [laughs]).
+  const doctrine = resolveVoiceDoctrine(req.niche);
+  const palette =
+    (doctrine && V3_TAG_PALETTES[doctrine.voice]) ||
+    "[pause] [long pause] [sighs] [exhales] [seriously] [slowly] [emphatic] [thoughtful]";
   return [
     `AUDIO DELIVERY TAGS: the narration voice (ElevenLabs v3) PERFORMS bracketed delivery directions placed ` +
-      `inline in the text — it never reads them aloud. Approved palette: [pause] [long pause] [sighs] [exhales] ` +
-      `[inhales deeply] [whispers] [softly] [seriously] [slowly] [emphatic] [curious] [chuckles] [laughs softly].`,
-    `Rules: place a tag immediately BEFORE the words it should color; at most ONE tag per 3-4 sentences and only ` +
-      `where the moment earns it (a number landing, a turn in the argument, a confession); never stack tags; ` +
-      `never invent tags outside the palette; never put a tag inside an attributed quote.`,
-    `Register fit — documentary/premium/finance: ONLY [pause] [long pause] [sighs] [exhales] [seriously] [slowly] ` +
-      `[emphatic]. Warm storytelling adds [softly] [curious] [chuckles]. Meditation/sleep: [whispers] [softly] ` +
-      `[long pause] [inhales deeply] [exhales] only. NEVER laughter or excitement tags on calm/authoritative channels.`,
+      `inline in the text — it never reads them aloud. This channel's voice can credibly perform ONLY this ` +
+      `palette${doctrine ? ` (its "${doctrine.voice}" character)` : ""}: ${palette}.`,
+    `Placement rules: a tag goes immediately BEFORE the words it should color; at most ONE tag per 3-4 ` +
+      `sentences and only where the moment earns it (a number landing, a turn in the argument, a confession, ` +
+      `the breath before a reveal); never stack tags; never invent tags outside the palette; never put a tag ` +
+      `inside an attributed quote; never tag physical actions or sounds ([standing], [music], [applause]).`,
+    `Pacing & emphasis (v3 has no break tags — the TEXT carries the rhythm): use ellipses (...) for weighted ` +
+      `pauses, sentence breaks and short paragraphs for pacing, and OCCASIONAL strategic capitalization of a ` +
+      `single load-bearing word for emphasis (sparingly — once per section at most). Tags color the delivery; ` +
+      `they must never replace or alter the spoken words themselves.`,
   ].join(" ");
 }
 
@@ -157,6 +169,11 @@ export function sanitizeSpoken(text: string, opts?: { keepAudioTags?: boolean })
     .replace(/\n{3,}/g, "\n\n")
     .trim()
   );
+}
+
+/** Strip structure-scaffold prefixes the model leaks into chapter headings. */
+function cleanHeading(h: string): string {
+  return h.replace(/^\s*(?:beat|section|part|chapter)\s*\d+\s*[:.\-–—]\s*/i, "").trim();
 }
 
 function assemble(hook: string, sections: ScriptSection[]): string {
@@ -305,7 +322,7 @@ async function synthFullScriptOneShot(
       new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`scriptGen one-shot timed out after ${ONE_SHOT_TIMEOUT_MS}ms`)), ONE_SHOT_TIMEOUT_MS)),
     ]) as { sections?: { heading?: string; narration?: string }[]; closing_line?: string };
     const sections: ScriptSection[] = (o.sections ?? [])
-      .map((s) => ({ heading: typeof s.heading === "string" ? s.heading : "", narration: spoken(req, typeof s.narration === "string" ? s.narration : "") }))
+      .map((s) => ({ heading: cleanHeading(typeof s.heading === "string" ? s.heading : ""), narration: spoken(req, typeof s.narration === "string" ? s.narration : "") }))
       .filter((s) => s.narration.length > 0);
     const wordCount = sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
     if (sections.length < 3 || wordCount < minWords) {
@@ -560,6 +577,7 @@ export async function synthScript(
     playbookDigest: playbookFull(req) || undefined,
     directorIdea: req.structure?.hook?.trim() || undefined,
     language: req.language,
+    voiceTags: req.voiceTags,
     log: (m) => log(m),
   });
 
@@ -632,7 +650,7 @@ export async function synthScript(
         .map((s) => {
           const o = s as { heading?: unknown; narration?: unknown };
           return {
-            heading: typeof o.heading === "string" ? o.heading : "",
+            heading: cleanHeading(typeof o.heading === "string" ? o.heading : ""),
             narration: typeof o.narration === "string" ? spoken(req, o.narration) : "",
           };
         })
