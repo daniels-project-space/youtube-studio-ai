@@ -121,13 +121,15 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     title: "Script + Hook",
     engine: "Hookcraft cold-open engine + latest Gemini Pro narration (gemini-3.1-pro-preview)",
     how:
-      "The cold open comes FIRST: hookcraft writes three device-diverse candidates (cold-open scene, " +
-      "receipt, contrarian verdict, …) that must be SPECIFICALLY about the topic, runs a deterministic " +
-      "craft lint (first sentence ≤7s, banned filler openers, concrete anchor, <15-word sentences), then a " +
-      "judge gates punch/specificity/curiosity/voiceMatch ≥7 with one feedback retry — loud failure, never " +
-      "a could-open-any-video line. The latest Gemini Pro then writes the narration continuing from it " +
-      "under CRAFT_RULES (one idea per 60-90s, midpoint re-hook), in the Show Bible's register.",
-    gates: ["hook lint (≤7s, no filler, concrete)", "punch ≥ 7", "specificity ≥ 7", "curiosity ≥ 7", "voiceMatch ≥ 7", "qa_script"],
+      "The cold open comes FIRST: hookcraft writes four device-diverse candidates (cold-open scene, " +
+      "receipt, contrarian verdict, flash-forward, result-first, …) that must be SPECIFICALLY about the " +
+      "topic, built on the researched 0-30s retention arc — capture and confirm the clicked promise in " +
+      "0-5s, explicit payoff promise by ~15s (52% vs 44% retention), stakes + open loop by 30s. A " +
+      "deterministic craft lint (first sentence ≤7s, banned filler/disclaimer openers, concrete anchor, " +
+      "<15-word sentences) runs before a judge gates punch/specificity/curiosity/voiceMatch/promise ≥7 " +
+      "with one feedback retry — loud failure, never a could-open-any-video line. The latest Gemini Pro " +
+      "then writes the narration continuing from it under CRAFT_RULES, in the Show Bible's register.",
+    gates: ["hook lint (≤7s, no filler, concrete)", "punch ≥ 7", "specificity ≥ 7", "curiosity ≥ 7", "voiceMatch ≥ 7", "promise-by-15s ≥ 7", "qa_script"],
     status: "active",
   },
   {
