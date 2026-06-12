@@ -1,0 +1,196 @@
+/**
+ * BANANA — the thumbnail engine. Nano Banana Pro (Gemini 3 Pro Image) renders
+ * the COMPLETE thumbnail in one pass from a rich design brief: dimensional
+ * material typography, photo-cutout collage, hero dominance, faces never
+ * covered, correct badges — proven 9/9 SHIP across wildly different channels.
+ *
+ * Fully standalone: brief in → judged jpg out. The only deps are the Gemini
+ * key (vault service "gemini") and the local vision judge.
+ *
+ *   const { path } = await bananaThumbnail({ brief: buildThumbBrief({...}), outJpg, log });
+ */
+import { writeFile } from "node:fs/promises";
+import { geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
+
+/** Primary, then graceful degrade (classic Nano Banana) if Pro is unavailable. */
+const MODELS = ["gemini-3-pro-image-preview", "gemini-2.5-flash-image"];
+
+export function hasBanana(): boolean {
+  return !!process.env.GEMINI_API_KEY;
+}
+
+/** The proven craft contract — prepended to EVERY brief. */
+export const BANANA_RULES =
+  "Rules: 1280x720 YouTube thumbnail. The hero fills 55-75% of the frame, aggressively cropped. " +
+  "Typography is HUGE (owns 25-40% of the frame), ultra-bold, rendered as a designed physical object " +
+  "(plate, smear, strip, slab or sticker) made of the scene's material world, with one PAYOFF word 2-4x " +
+  "larger than the rest. HARD RULE: text NEVER covers the hero's face or eyes - beside, above or across " +
+  "the body only. Spelling EXACTLY as quoted - every visible word must be a correctly spelled real word. " +
+  "Everything must read at 120px on a phone. No play buttons, no UI, no watermarks, no extra small text.";
+
+/** Channel-signature type treatments, described as physical material. */
+export const TEXT_OBJECT_LANGUAGE: Record<string, string> = {
+  torn_strip: "each word printed HUGE on its own torn newspaper strip, every strip a DIFFERENT bold tabloid serif, aged newsprint texture, strips rotated and interleaved - some BEHIND the hero, some IN FRONT - with hard drop shadows",
+  paint_smear: "in elegant wide-letterspaced serif capitals sitting ON TOP of a rough hand-swiped paint smear in the accent color, wet bristle texture and flicked droplets",
+  censor_bar: "in white stencil capitals printed on a solid accent-color censor bar laid straight across the frame (across the eyes if the hero is a face)",
+  grunge_sticker: "as ONE single lowercase word ending in a period, in a distressed punk typeface, white knockout on a rough black sticker box with peeling corners - deadpan, huge",
+  spaced_elegant: "in thin EXTREMELY wide-letterspaced capitals integrated into the artwork material, with a small quiet subtitle beneath",
+  block_plate: "in ultra-heavy condensed capitals on hard solid plates, the key word underlined with a rough hand-painted brush stroke in the accent color",
+  neon_sign: "as REAL glowing neon tubes mounted in the scene, casting colored light onto the hero, one tube flickering half-lit",
+  spray_paint: "stencil-sprayed onto the scene surface in the accent color, paint drips running from the letterforms, overspray haze",
+  stamp_ink: "as a HUGE rubber-stamp imprint slammed diagonally across the frame like a CLASSIFIED stamp, cracked dry ink, double-struck ghosting",
+  movie_poster: "as cinematic title-card lettering with metallic bevel and rim light, embedded in the scene atmosphere, blockbuster one-sheet gravity",
+  ransom_note: "with each letter cut from a different magazine page in a different font and color, glued unevenly with visible tape and shadows",
+  carved: "physically carved into the scene's dominant material (stone, wood, steel) with real chisel depth, the cuts catching the key light",
+};
+
+export interface ThumbBriefArgs {
+  channelName: string;
+  /** ≤12-word channel rendering style, e.g. "bold sumi-e ink wash on washi paper". */
+  imageStyle?: string;
+  palette?: string[];
+  accentColor?: string;
+  /** Signature type treatment key (TEXT_OBJECT_LANGUAGE) — omit for model's choice. */
+  textObject?: string;
+  /** "cutout_collage" forces die-cut-photo-over-collage (anti-AI-look for commentary channels). */
+  composition?: string;
+  /** The scene that ENACTS the topic: hero + background + story details. */
+  scene: string;
+  /** 1-3 headline lines; mark exactly one as the payoff (rendered 2-4x larger). */
+  lines: { text: string; payoff?: boolean; accent?: boolean }[];
+  badge: string;
+}
+
+/** Compose the proven brief shape (rules + identity + scene + headline + badge). */
+export function buildThumbBrief(a: ThumbBriefArgs): string {
+  const typeClause = a.textObject && TEXT_OBJECT_LANGUAGE[a.textObject]
+    ? ` Render the headline ${TEXT_OBJECT_LANGUAGE[a.textObject]}.`
+    : " Render the headline as a designed physical object belonging to the scene's material world.";
+  const collage = a.composition === "cutout_collage"
+    ? " COMPOSITION: the hero is a die-cut PHOTO cutout with a crisp edge pasted OVER a designed collage background (torn clippings, photos, graphic shapes, paper texture, hard cut shadows) - real photographic grain, magazine composite, NEVER a continuous smooth AI scene."
+    : "";
+  const headline = a.lines
+    .map((l) => `"${l.text.toUpperCase()}"${l.payoff ? " (the payoff word, HUGE)" : ""}${l.accent ? " (accent color)" : ""}`)
+    .join(" then ");
+  return (
+    `${BANANA_RULES} Channel "${a.channelName.toUpperCase()}"` +
+    `${a.imageStyle ? ` (signature look, obey strictly: ${a.imageStyle}` : " ("}` +
+    `${a.palette?.length ? `, palette ${a.palette.join(" / ")}` : ""}` +
+    `${a.accentColor ? `, accent ${a.accentColor}` : ""}).` +
+    `${collage} Scene: ${a.scene}` +
+    ` Headline: ${headline} - placed clear of all faces.${typeClause}` +
+    ` Small badge pill "${a.badge.toUpperCase()}" in a corner away from the text.`
+  );
+}
+
+/** One generation. Returns jpg/png bytes. Throws loud — never silent-degrades. */
+export async function generateBananaImage(args: {
+  prompt: string;
+  aspectRatio?: string;
+}): Promise<Buffer> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
+  let lastErr = "";
+  for (const model of MODELS) {
+    for (let attempt = 0; attempt < 2; attempt++) {
+      try {
+        const res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify({
+              contents: [{ parts: [{ text: args.prompt }] }],
+              generationConfig: {
+                responseModalities: ["IMAGE"],
+                imageConfig: { aspectRatio: args.aspectRatio ?? "16:9" },
+              },
+            }),
+            signal: AbortSignal.timeout(180_000),
+          },
+        );
+        const json = (await res.json()) as {
+          candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
+          error?: { message?: string };
+        };
+        if (!res.ok) {
+          lastErr = `${model} HTTP ${res.status}: ${json.error?.message ?? ""}`;
+          if ([429, 500, 503].includes(res.status) && attempt === 0) {
+            await new Promise((r) => setTimeout(r, 4000));
+            continue;
+          }
+          break; // non-transient → next model
+        }
+        const part = (json.candidates?.[0]?.content?.parts ?? []).find((p) => p.inlineData?.data);
+        if (!part?.inlineData?.data) { lastErr = `${model}: no image part in response`; break; }
+        return Buffer.from(part.inlineData.data, "base64");
+      } catch (e) {
+        lastErr = `${model}: ${e instanceof Error ? e.message : e}`;
+      }
+    }
+  }
+  throw new Error(`banana: generation failed (${lastErr})`);
+}
+
+export interface BananaVerdict {
+  textOk?: boolean;
+  faceClear?: boolean;
+  punch?: number;
+  styleMatch?: number;
+  storyMatch?: number;
+  uiClean?: boolean;
+  fix?: string;
+}
+
+/**
+ * The full engine: brief → render → vision judge → ONE feedback retry →
+ * judged jpg on disk. Throws when both attempts fail the gate (callers get
+ * an honest failure, never a silent bad thumbnail).
+ */
+export async function bananaThumbnail(args: {
+  brief: string;
+  outJpg: string;
+  /** for the judge: exact headline words + channel style to verify against */
+  expectWords?: string[];
+  imageStyle?: string;
+  title?: string;
+  log?: (msg: string) => void;
+}): Promise<{ path: string; verdict: BananaVerdict }> {
+  let fixNote = "";
+  let lastVerdict: BananaVerdict = {};
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const bytes = await generateBananaImage({ prompt: args.brief + fixNote });
+    await writeFile(args.outJpg, bytes);
+    const wordList = (args.expectWords ?? []).map((w) => `"${w.toUpperCase()}"`).join(" and ");
+    const raw = await geminiVisionLocal({
+      prompt:
+        `THUMBNAIL GATE. 1. textOk: ${wordList ? `exact words ${wordList} fully visible, spelled exactly, ` : ""}` +
+        `every visible word a correctly spelled real word? 2. faceClear: NO text covering any face or eyes? ` +
+        `3. punch 1-10 (scroll-stopping)? 4. styleMatch 1-10 vs "${args.imageStyle ?? "professional design"}"? ` +
+        `5. storyMatch 1-10: image alone evokes the topic${args.title ? ` "${args.title}"` : ""}? ` +
+        `(for analysis/essay/abstract topics, an ICONIC depiction of the subject matter IS the story - ` +
+        `judge subject relevance, not literal plot illustration) ` +
+        `6. uiClean: no fake play buttons/player UI/watermarks? ` +
+        `Return STRICT JSON {"textOk":bool,"faceClear":bool,"punch":n,"styleMatch":n,"storyMatch":n,"uiClean":bool,"fix":"<=15 words"}.`,
+      imagePaths: [args.outJpg],
+      json: true,
+      maxTokens: 250,
+    }).catch(() => "");
+    const v: BananaVerdict = raw ? parseJsonLoose<BananaVerdict>(raw) : {};
+    lastVerdict = v;
+    const pass =
+      v.textOk !== false && v.faceClear !== false && v.uiClean !== false &&
+      (v.punch ?? 10) >= 7 && (v.styleMatch ?? 10) >= 7 && (v.storyMatch ?? 10) >= 7;
+    if (pass) {
+      args.log?.(`banana: render OK (punch ${v.punch ?? "?"}/10, style ${v.styleMatch ?? "?"}/10)`);
+      return { path: args.outJpg, verdict: v };
+    }
+    fixNote = ` CRITICAL FIX FROM THE LAST ATTEMPT: ${v.fix ?? "stronger composition, exact spelling, text clear of faces"}.`;
+    args.log?.(
+      `banana: attempt ${attempt + 1} rejected (textOk=${v.textOk} faceClear=${v.faceClear} punch=${v.punch} style=${v.styleMatch} story=${v.storyMatch}) -> ${attempt === 0 ? "retrying with fix" : "FAILING LOUD"}`,
+    );
+  }
+  throw new Error(
+    `banana: both attempts failed the gate (last: punch=${lastVerdict.punch} style=${lastVerdict.styleMatch} fix="${lastVerdict.fix ?? ""}")`,
+  );
+}
