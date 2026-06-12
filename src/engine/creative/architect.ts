@@ -223,6 +223,7 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
     removable: false,
     params: [
       { key: "patternBias", type: "string_list", maxLen: 40, describe: "Playbook pattern NAMES to favor in rotation (subset of the channel's thumbnailPlaybook patterns — bias toward the tournament winners)." },
+      { key: "thumbEnergy", type: "enum", options: ["spectacle", "bold", "cozy_pop"], describe: "Clickbait ENERGY override: spectacle = over-the-top impossible-scale drama (finance/tech/drama); bold = grounded heroic punch (education/history); cozy_pop = charming saturated warmth (lofi/ambient). ALL are catchy — match what the identity can carry." },
     ],
   },
   {
@@ -378,8 +379,20 @@ export interface ArchitectInput {
   forgedTools?: Tool[];
   /** Voice casting verdict (real auditions judged by an audio model). */
   voiceCasting?: { voiceId: string; name: string; character: string; why: string } | null;
-  /** PROBE RENDER outcome — the fix pass must address this failure. */
-  probeReport?: { ok: boolean; error?: string; failedBlock?: string; notes?: string } | null;
+  /** PROBE RENDER outcome — failure = fix it; success = CRITICAL dial-in. */
+  probeReport?: {
+    ok: boolean;
+    error?: string;
+    failedBlock?: string;
+    notes?: string;
+    /** Native full-watch verdict on the probe video (it SAW and HEARD it). */
+    feel?: { moodMatch?: number; pacing?: number; musicFit?: number; summary?: string };
+    defects?: string[];
+    /** Vision critique of the probe thumbnail vs the DNA/playbook spec. */
+    thumbnailCritique?: string;
+    /** The probe's actual SEO output for auditing vs the DNA formula. */
+    seo?: { title?: string; description?: string; tags?: string[] };
+  } | null;
   log?: Logger;
 }
 
@@ -746,6 +759,19 @@ export async function architectPipeline(input: ArchitectInput): Promise<Architec
           `\nfailed block: ${input.probeReport.failedBlock ?? "?"}\nerror: ${(input.probeReport.error ?? "").slice(0, 400)}` +
           (input.probeReport.notes ? `\nnotes: ${input.probeReport.notes.slice(0, 300)}` : "") +
           `\nYour PRIMARY job in this pass is to FIX this: adjust the responsible module's params (or swap/remove the module) so the next probe succeeds. Every decision must serve the fix.`]
+      : []),
+    ...(input.probeReport?.ok
+      ? [``, `🔍 PROBE RENDER SUCCEEDED — now CRACK DOWN. A real 60s test video exists and was reviewed by a model that WATCHED AND LISTENED to it. Judge everything below against what this channel is SUPPOSED to be (the DNA above) and TUNE ruthlessly — every gap between intent and output is yours to close with set_params/add/remove/swap decisions:` +
+          (input.probeReport.feel
+            ? `\nFEEL (native watch, 1-10): mood coherence ${input.probeReport.feel.moodMatch ?? "?"} | pacing ${input.probeReport.feel.pacing ?? "?"} | music fit ${input.probeReport.feel.musicFit ?? "?"}\nwatch summary: ${(input.probeReport.feel.summary ?? "").slice(0, 300)}`
+            : "") +
+          (input.probeReport.defects?.length ? `\nDEFECTS SEEN: ${input.probeReport.defects.slice(0, 6).join(" | ").slice(0, 400)}` : "") +
+          (input.probeReport.thumbnailCritique ? `\nTHUMBNAIL CRITIQUE (vision, vs the DNA spec): ${input.probeReport.thumbnailCritique.slice(0, 350)}` : "") +
+          (input.probeReport.seo
+            ? `\nSEO THE PROBE ACTUALLY PRODUCED: title="${input.probeReport.seo.title ?? ""}" | tags=${(input.probeReport.seo.tags ?? []).slice(0, 10).join(",")}` +
+              `\n→ Audit vs the DNA titleFormula and the bible's bans: if the title pattern, register, or tags drift off-identity, fix metadata params (baseTags) and name the drift in groundingActions.`
+            : "") +
+          `\nLow feel scores have OWNERS: mood→music prompt/gen_footage style or footage params; pacing→sentenceGapSec/ttsSpeed/insert caps; music fit→music params. Tune the owner, not a bystander. Be CRITICAL — "fine" is not the bar, the channel's quality bar is.`]
       : []),
     ``,
     `YOUR TOOLBOX (the ONLY modules and params that exist — bounds are enforced):`,

@@ -1,19 +1,19 @@
 /**
- * THUMBNAIL LAB — evidence → rules → tournament → comparative validation.
+ * THUMBNAIL LAB Ã¢â‚¬â€ evidence Ã¢â€ â€™ rules Ã¢â€ â€™ tournament Ã¢â€ â€™ comparative validation.
  *
  * The one-shot "generate and pass/fail" approach produced competent-but-stale
  * thumbnails. The lab works the way winning channels work:
  *
- *  1. VERIFY EVIDENCE — pull the highest-VIEW competitor thumbnails the
+ *  1. VERIFY EVIDENCE Ã¢â‚¬â€ pull the highest-VIEW competitor thumbnails the
  *     research already scraped, then vision-screen them: only genuinely
  *     on-positioning, high-craft references survive (the architect flagged
- *     reference pollution as a BLOCKING gap — this is its repair).
- *  2. DISTILL RULES — vision-deconstruct WHY each verified winner clicks
+ *     reference pollution as a BLOCKING gap Ã¢â‚¬â€ this is its repair).
+ *  2. DISTILL RULES Ã¢â‚¬â€ vision-deconstruct WHY each verified winner clicks
  *     (composition, focal device, text treatment, color story), then have the
  *     showrunner synthesize a persistent per-channel PLAYBOOK: hard rules +
- *     three named, executable patterns. Stored on the channel — the "devises
+ *     three named, executable patterns. Stored on the channel Ã¢â‚¬â€ the "devises
  *     rules out of that" loop, made durable.
- *  3. TOURNAMENT — per video, instantiate ALL patterns into real candidates
+ *  3. TOURNAMENT Ã¢â‚¬â€ per video, instantiate ALL patterns into real candidates
  *     (FLUX base + Remotion typography layer, not drawtext) and judge them
  *     COMPARATIVELY against the verified references in a simulated feed.
  *     The winner ships; scores + reasons persist.
@@ -29,17 +29,20 @@ import type { StyleDNA } from "@/engine/creative/types";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
-/** Distilled 2026 CTR research — the judge's and synthesizer's ground truth. */
+/** Distilled 2026 CTR research Ã¢â‚¬â€ the judge's and synthesizer's ground truth. */
 export const RESEARCH_PRINCIPLES = [
-  "≤3 visual elements; the tone+topic must read in under 1 second (clutter costs ~23% CTR).",
+  "Ã¢â€°Â¤3 visual elements; the tone+topic must read in under 1 second (clutter costs ~23% CTR).",
   "2-3 bold complementary colors; the subject 30%+ brighter or darker than the background.",
-  "Faceless niches win with ONE dramatic hero object against a clean ground + a ≤4-word callout.",
-  "Finance: NUMBER-FORWARD — one specific number as the credibility trigger, occupying 15-20% of the canvas, upper third, white/gold on dark (data-literate audiences click specifics, not adjectives).",
+  "Faceless niches win with ONE dramatic hero object against a clean ground + a Ã¢â€°Â¤4-word callout.",
+  "Finance: NUMBER-FORWARD Ã¢â‚¬â€ one specific number as the credibility trigger, occupying 15-20% of the canvas, upper third, white/gold on dark (data-literate audiences click specifics, not adjectives).",
   "Navy/charcoal base + gold/white accents = institutional authority palette for finance.",
-  "Text: bold sans-serif ONLY, 1-3 words (5 absolute max), NEVER restating the title — it adds the curiosity the title doesn't.",
+  "Text: bold sans-serif ONLY, 1-3 words (5 absolute max), NEVER restating the title Ã¢â‚¬â€ it adds the curiosity the title doesn't.",
   "Documentary annotation language (Vox/Johnny Harris school): muted cinematic base + ONE editorial annotation device (accent underline, circled element, arrow) in the accent color.",
   "Consistent per-channel styling lifts subscriber CTR 15-20%: lock palette + text position family; vary the hero object and the number.",
-  "Honest framing only — false-promise thumbnails decay channel-wide recommendations.",
+  "Honest framing only Ã¢â‚¬â€ false-promise thumbnails decay channel-wide recommendations.",
+  "THE 120px SQUINT TEST: most first views are ~120px wide on mobile Ã¢â‚¬â€ mood, subject, and text must all survive there; if it's a muddy blur, the design is wrong.",
+  "SAFE ZONES: never place text/key elements in the bottom-right (duration timestamp) or bottom-left (chapter markers) corners; keep critical content off extreme edges.",
+  "Max 6 words on the image, and saturate beyond real life Ã¢â‚¬â€ thumbnails compete with bright UI.",
 ] as const;
 
 export interface VerifiedRef {
@@ -53,13 +56,39 @@ export interface VerifiedRef {
 export interface ThumbPattern {
   name: string;
   when: string;
-  /** Scene recipe for the FLUX base — text-free, with <PLACEHOLDERS>. */
+  /** Scene recipe for the FLUX base Ã¢â‚¬â€ text-free, with <PLACEHOLDERS>. */
   fluxRecipe: string;
   /** ThumbText prop template (placeholders in line texts / numberCallout). */
   textRecipe: Record<string, unknown>;
 }
 
+/** The channel's UNMISTAKABLE typographic + rendering identity. */
+export interface VisualLanguage {
+  font?: "impact" | "marker" | "bebas" | "serif" | "rounded";
+  treatment?: "plate" | "sticker" | "stamp" | "neon" | "clean";
+  baseColor?: string;
+  accentColor?: string;
+  /** Base-image rendering style, e.g. "vintage ink engraving on parchment". */
+  imageStyle?: string;
+  badgeStyle?: "center" | "pill";
+  uppercase?: boolean;
+  /** recraft = the FULL frame (art + typography + layout) designed as ONE
+   * generation by the design-tuned Recraft V3 model — the strongest one-pass
+   * path, kills the text-pasted-on-top look; integrated = words generated AS
+   * PART of the artwork (Ideogram typography engine); layered = compositor
+   * type on top (deterministic control). */
+  renderMode?: "recraft" | "integrated" | "layered" | "template";
+  /** Locked layout subset from the template pack (docs/THUMB_TEMPLATES.md). */
+  templates?: string[];
+}
+
 export interface ThumbnailPlaybook {
+  /** Clickbait ENERGY tier (identity-chosen): spectacle = over-the-top
+   * impossible-scale drama; bold = strong grounded punch; cozy_pop = charming
+   * saturated warmth. ALL are catchy Ã¢â‚¬â€ none are sleepy. */
+  energy?: "spectacle" | "bold" | "cozy_pop";
+  /** Channel-constant visual language (font/treatment/colors/image style). */
+  visualLanguage?: VisualLanguage;
   rules: string[];
   avoid: string[];
   patterns: ThumbPattern[];
@@ -70,7 +99,7 @@ export interface ThumbnailPlaybook {
 /* --------------------- 0. acquire fresh references --------------------- */
 
 /**
- * Direct, positioning-true reference acquisition — the repair for polluted
+ * Direct, positioning-true reference acquisition Ã¢â‚¬â€ the repair for polluted
  * niche scrapes (the catalog-keyword scrape returned 0 verifiable references
  * for Investory). The lab derives search queries from the channel's OWN
  * positioning, pulls top-VIEW videos straight from YouTube, and lets the
@@ -97,7 +126,7 @@ export async function acquireReferences(args: {
     system: "You are a YouTube competitive-research strategist. Return ONLY JSON.",
     prompt:
       `Channel: "${args.channelName}"${args.niche ? ` (${args.niche})` : ""}.\nPositioning: ${args.positioning}\n\n` +
-      `Write 4 YouTube SEARCH QUERIES that surface the videos of TRUE comparable channels — same tier, same ` +
+      `Write 4 YouTube SEARCH QUERIES that surface the videos of TRUE comparable channels Ã¢â‚¬â€ same tier, same ` +
       `format, same audience promise (NOT adjacent hustle/clickbait verticals). Concrete video-search phrasing ` +
       `(what a viewer of those channels actually searches), 2-5 words each. ` +
       `Return STRICT JSON {"queries":string[]}.`,
@@ -155,37 +184,56 @@ export async function verifyReferences(args: {
         url: top[i].url,
         views: top[i].views,
       });
-    } catch { /* unreachable url — skip */ }
+    } catch { /* unreachable url Ã¢â‚¬â€ skip */ }
   }
   if (paths.length < 3) throw new Error(`thumbnailLab: only ${paths.length} reference thumbnails reachable`);
 
   const raw = await geminiVisionLocal({
     prompt:
       `These are ${paths.length} thumbnails from the HIGHEST-VIEW videos scraped in this niche, in order.\n` +
-      `Channel being built: "${args.channelName}" — positioning: ${args.positioning}\n\n` +
+      `Channel being built: "${args.channelName}" Ã¢â‚¬â€ positioning: ${args.positioning}\n\n` +
       `For EACH image (1-${paths.length}): does it belong to the same PREMIUM/CINEMATIC tier and positioning ` +
       `(vs hustle-bro, crypto-pump, shocked-face tabloid, or low-craft clickbait)? Score craft 1-10 ` +
       `(composition, typography, color discipline). Return STRICT JSON ` +
-      `{"refs":[{"idx":1-based,"onBrand":boolean,"craft":1-10,"why":"<=15 words"}]} — judge every image.`,
+      `{"refs":[{"idx":1-based,"onBrand":boolean,"craft":1-10,"why":"<=15 words"}]} Ã¢â‚¬â€ judge every image.`,
     imagePaths: paths.map((p) => p.path),
     json: true,
-    maxTokens: 1600,
+    // 12 per-ref verdicts truncate at small budgets ("Expected ','" parse flake)
+    maxTokens: 3200,
   });
   const parsed = parseJsonLoose<{ refs?: { idx?: number; onBrand?: boolean; craft?: number; why?: string }[] }>(raw);
   const verdicts = parsed.refs ?? [];
   const verified: VerifiedRef[] = [];
+  const craftOnly: VerifiedRef[] = [];
   for (const v of verdicts) {
     const i = (v.idx ?? 0) - 1;
     if (i < 0 || i >= paths.length) continue;
     if (v.onBrand && (v.craft ?? 0) >= 6) {
       verified.push({ ...paths[i], craft: v.craft ?? 6, why: v.why ?? "" });
+    } else if ((v.craft ?? 0) >= 6) {
+      craftOnly.push({ ...paths[i], craft: v.craft ?? 6, why: `craft-only evidence (off-brand): ${v.why ?? ""}` });
     }
   }
   verified.sort((a, b) => b.craft - a.craft || b.views - a.views);
   log(`thumbnailLab: ${verified.length}/${paths.length} references VERIFIED on-brand+high-craft (rest rejected as pollution)`);
-  if (verified.length < 3) {
+  // BRAND-DIVERGENCE ESCAPE: a deliberately unique look (the whole point of the
+  // DNA) can mean NO niche thumbnail reads as on-brand. The playbook gets its
+  // look from the DNA; references only evidence what clickbait CRAFT wins in
+  // the niche - so top off with high-craft off-brand winners, loudly labelled.
+  if (verified.length < 3 && craftOnly.length) {
+    craftOnly.sort((a, b) => b.craft - a.craft || b.views - a.views);
+    const need = Math.min(3 - verified.length + 1, craftOnly.length);
+    verified.push(...craftOnly.slice(0, need));
+    log(`thumbnailLab: brand-divergent niche - grounding on ${need} high-craft OFF-BRAND winners as craft evidence (look stays DNA-locked)`);
+  }
+  // 2 refs + DNA still grounds a playbook (the DNA owns the look; refs only
+  // evidence niche craft) - below that the scrape is genuinely useless.
+  if (verified.length === 2) {
+    log("thumbnailLab: thin evidence (2 refs) - proceeding, playbook leans harder on DNA + craft principles");
+  }
+  if (verified.length < 2) {
     throw new Error(
-      `thumbnailLab: only ${verified.length} verified references — the scraped niche set is too polluted to ground a playbook (re-run niche research with corrected queries)`,
+      `thumbnailLab: only ${verified.length} verified references Ã¢â‚¬â€ the scraped niche set is too polluted to ground a playbook (re-run niche research with corrected queries)`,
     );
   }
   return verified.slice(0, 6);
@@ -201,7 +249,7 @@ export async function distillPlaybook(args: {
   log?: Logger;
 }): Promise<ThumbnailPlaybook> {
   const log = args.log ?? (() => {});
-  // Vision deconstruction — WHY each verified winner clicks.
+  // Vision deconstruction Ã¢â‚¬â€ WHY each verified winner clicks.
   const deconRaw = await geminiVisionLocal({
     prompt:
       `Deconstruct WHY each of these ${args.refs.length} proven high-view thumbnails wins the click. ` +
@@ -222,33 +270,53 @@ export async function distillPlaybook(args: {
   const accent = palette.length >= 2 ? palette[palette.length - 2] : "#ffd400";
 
   const play = await claudeJson<{
+    energy?: string;
+    visualLanguage?: VisualLanguage;
     rules?: string[];
     avoid?: string[];
     patterns?: { name?: string; when?: string; fluxRecipe?: string; textRecipeJson?: string }[];
   }>({
-    maxTokens: 3000,
+    // The visualLanguage-era schema is bigger â€” 3000 truncated mid-JSON
+    // ("Expected ',' or '}'") on two of four channels.
+    maxTokens: 6000,
     temperature: 0.5,
     system: "You are an elite YouTube thumbnail strategist. Return ONLY JSON.",
     prompt:
       `Build the THUMBNAIL PLAYBOOK for "${args.channelName}" (${args.positioning}).\n\n` +
-      `EVIDENCE — deconstruction of ${decon.length} verified high-view, on-positioning thumbnails:\n` +
+      `EVIDENCE Ã¢â‚¬â€ deconstruction of ${decon.length} verified high-view, on-positioning thumbnails:\n` +
       `${JSON.stringify(decon).slice(0, 6000)}\n\n` +
       `CHANNEL DNA: palette ${palette.join(", ")} (accent ${accent}); thumbnail subject: ` +
       `${args.dna?.thumbnail?.subject ?? args.dna?.recurringSubject ?? "n/a"}; world: ${args.dna?.setting ?? "n/a"}.\n\n` +
       `RESEARCH PRINCIPLES (hard constraints):\n- ${RESEARCH_PRINCIPLES.join("\n- ")}\n\n` +
       `Synthesize:\n` +
-      `1. rules: 6-8 HARD rules for this channel's thumbnails — specific (sizes, positions, counts, colors), ` +
+      `0. energy: the channel's clickbait tier Ã¢â‚¬â€ "spectacle" (over-the-top impossible-scale drama: finance/tech/` +
+      `drama channels), "bold" (grounded heroic punch: education/history/documentary), or "cozy_pop" (charming ` +
+      `saturated warmth: lofi/ambient/kids). ALL tiers are CATCHY Ã¢â‚¬â€ pick what this identity can carry.\n` +
+      `0b. visualLanguage: the channel's UNMISTAKABLE identity Ã¢â‚¬â€ {"font":"impact"|"marker"|"bebas"|"serif"|"rounded" ` +
+      `(impact=bold modern, marker=hand-drawn, bebas=tall minimal, serif=editorial premium, rounded=soft playful), ` +
+      `"treatment":"plate"|"sticker"|"stamp"|"neon"|"clean" (plate=filled box, sticker=white box+hard shadow pop, ` +
+      `stamp=hollow archival border, neon=glowing type for night/synth worlds, clean=pure premium type), ` +
+      `"baseColor":"#hex","accentColor":"#hex" Ã¢â‚¬â€ colors MUST come from THIS channel's palette; NEVER default to ` +
+      `gold/yellow unless it is genuinely this channel's color, ` +
+      `"imageStyle":"<=12 words Ã¢â‚¬â€ the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
+      `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill",` +
+      `"uppercase":boolean,"renderMode":"recraft"|"integrated"|"layered" (recraft = the ENTIRE frame - art, typography, layout - designed as ONE generation by a design-tuned model; the DEFAULT for most worlds (painterly, editorial, photographic, illustrated) because nothing looks pasted-on. integrated = words generated as part of the artwork via a typography engine; pick when type must physically exist in the scene as real neon/paint/print. layered = compositor type on top; pick ONLY for precision/data/clean-premium channels needing deterministic text control)}. THE RULE: if another channel could wear this language, it is WRONG Ã¢â‚¬â€ diverge hard.\n` +
+      `1. rules: 6-8 HARD rules for this channel's thumbnails Ã¢â‚¬â€ specific (sizes, positions, counts, colors), ` +
       `derived from the evidence + principles, honoring the DNA palette.\n` +
       `2. avoid: 4-6 anti-patterns seen in the rejected/owned space.\n` +
-      `3. patterns: EXACTLY 3 named, executable patterns (distinct compositions — e.g. number-forward / ` +
+      `3. patterns: EXACTLY 3 named, executable patterns (distinct compositions Ã¢â‚¬â€ e.g. number-forward / ` +
       `hero-object / annotated-chart). Each: name; when (which video topics); fluxRecipe = a TEXT-FREE ` +
       `image-generation scene recipe with <PLACEHOLDERS> for the topic-specific hero (palette + grade baked in, ` +
       `composition explicit incl. where negative space lives); textRecipeJson = a JSON-ENCODED STRING of the ` +
       `text-layer props: {"lines":[{"text":"<HOOK_WORD_1>","accent":false},{"text":"<HOOK_WORD_2>","accent":true}],` +
-      `"numberCallout":"<NUMBER_OR_OMIT>","position":"left|center|upperLeft|upperCenter","baseColor":"#hex",` +
-      `"accentColor":"#hex","uppercase":true,"underlineAccent":true,"badge":"${args.channelName.toUpperCase()}"} ` +
-      `— placeholders ONLY in line texts and numberCallout.\n` +
-      `Return STRICT JSON {"rules":string[],"avoid":string[],"patterns":[{"name","when","fluxRecipe","textRecipeJson"}]}.`,
+      `"numberCallout":"<NUMBER>" (include this key ONLY in number-led patterns; otherwise LEAVE THE KEY OUT of the ` +
+      `JSON entirely - NEVER write placeholder words like OMIT),"position":"left|center|upperLeft|upperCenter","baseColor":"#hex",` +
+      `"accentColor":"#hex","uppercase":true,"underlineAccent":true,` +
+      `"font":"impact"|"marker"|"bebas" (impact=bold modern default; marker=hand-drawn-but-readable Ã¢â‚¬â€ USE for ` +
+      `sketch/whiteboard/cozy/playful identities; bebas=tall minimal premium),` +
+      `"badge":"${args.channelName.toUpperCase()}"} ` +
+      `Ã¢â‚¬â€ placeholders ONLY in line texts and numberCallout.\n` +
+      `Return STRICT JSON {"energy":"spectacle"|"bold"|"cozy_pop","visualLanguage":{"font","treatment","baseColor","accentColor","imageStyle","badgeStyle","uppercase","renderMode"},"rules":string[],"avoid":string[],"patterns":[{"name","when","fluxRecipe","textRecipeJson"}]} - energy AND visualLanguage are REQUIRED keys.`,
   });
 
   const patterns: ThumbPattern[] = (play.patterns ?? [])
@@ -265,9 +333,19 @@ export async function distillPlaybook(args: {
     .filter((p) => p.fluxRecipe && Object.keys(p.textRecipe).length > 0)
     .slice(0, 3);
   if (patterns.length === 0) throw new Error("thumbnailLab: playbook synthesis produced no executable patterns");
+  // A playbook without its visual identity is a generic-thumbnail factory —
+  // refuse it loudly rather than persist undefined font/style to the channel.
+  const vlOut = play.visualLanguage;
+  if (!vlOut?.font || !vlOut?.imageStyle || !vlOut?.accentColor) {
+    throw new Error(
+      `thumbnailLab: playbook synthesis returned incomplete visualLanguage (font=${vlOut?.font} imageStyle=${vlOut?.imageStyle} accent=${vlOut?.accentColor}) — retry the distill`,
+    );
+  }
 
-  log(`thumbnailLab: playbook distilled — ${play.rules?.length ?? 0} rules, ${patterns.length} patterns (${patterns.map((p) => p.name).join(" / ")})`);
+  log(`thumbnailLab: playbook distilled Ã¢â‚¬â€ ${play.rules?.length ?? 0} rules, ${patterns.length} patterns (${patterns.map((p) => p.name).join(" / ")})`);
   return {
+    energy: (["spectacle", "bold", "cozy_pop"].includes(String(play.energy)) ? play.energy : "bold") as ThumbnailPlaybook["energy"],
+    visualLanguage: play.visualLanguage,
     rules: play.rules ?? [],
     avoid: play.avoid ?? [],
     patterns,
@@ -304,10 +382,12 @@ export async function renderCandidate(args: {
   log?: Logger;
 }): Promise<string> {
   if (!hasFalKey()) throw new Error("thumbnailLab: FAL_KEY required");
-  // Fill the placeholders with topic-specific concretes.
-  const inst = await claudeJson<{ fluxPrompt?: string; textPropsJson?: string }>({
-    maxTokens: 900,
-    temperature: 0.7,
+  // TWO-PASS DESIGN: the LAYOUT is decided FIRST (which zone the text owns),
+  // the image is generated WITH that zone deliberately reserved as negative
+  // space, then the text lands in its planned home Ã¢â‚¬â€ never fighting the image.
+  const inst = await claudeJson<{ fluxPrompt?: string; textPropsJson?: string; textZone?: string }>({
+    maxTokens: 1000,
+    temperature: 0.75,
     system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
     prompt:
       `Instantiate this thumbnail PATTERN for the video "${args.title}".\n` +
@@ -315,28 +395,366 @@ export async function renderCandidate(args: {
       `PATTERN "${args.pattern.name}": ${args.pattern.fluxRecipe}\n` +
       `TEXT TEMPLATE: ${JSON.stringify(args.pattern.textRecipe)}\n` +
       `HARD RULES:\n- ${args.playbook.rules.slice(0, 6).join("\n- ")}\n\n` +
-      `Produce: fluxPrompt = the recipe with every <PLACEHOLDER> replaced by a concrete, vivid choice for THIS ` +
-      `topic (keep it TEXT-FREE — no words/letters in the image); textPropsJson = the template as a JSON-ENCODED ` +
-      `STRING with placeholders replaced (line texts: 1-3 punchy words each, ≤5 words total, NOT restating the ` +
-      `title; numberCallout: a REAL specific number from the topic or omit the key entirely if none is honest).\n` +
-      `Return STRICT JSON {"fluxPrompt":string,"textPropsJson":string}.`,
+      `STEP 1 Ã¢â‚¬â€ LAYOUT: choose textZone ("left"|"right"|"upperLeft"|"upperRight") Ã¢â‚¬â€ where the typography will live.\n` +
+      `STEP 2 Ã¢â‚¬â€ fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY Ã¢â‚¬â€ ` +
+      `never reproduce its literal scene). ENERGY TIER = "${args.playbook.energy ?? "bold"}":\n` +
+      (args.playbook.energy === "spectacle"
+        ? `SPECTACLE: go to the edge of absurd Ã¢â‚¬â€ IMPOSSIBLE SCALE (a tsunami of coins crashing toward a tiny figure, ` +
+          `a banknote the size of a skyscraper), PHYSICS-DEFYING moments frozen mid-action, cinematic catastrophe/` +
+          `triumph. The viewer's reaction must be "WHAT?!".\n`
+        : args.playbook.energy === "cozy_pop"
+          ? `COZY-POP: irresistibly charming and warm Ã¢â‚¬â€ but PUNCHY: one adorable/magical focal moment (impossibly ` +
+            `cozy light, oversized moon, glowing window, a cat doing something delightful), saturated inviting ` +
+            `color, storybook wonder. Catchy and clickable, never sleepy or flat.\n`
+          : `BOLD: grounded but dramatic Ã¢â‚¬â€ one striking focal subject at heroic scale, charged atmosphere (storm ` +
+            `light, golden hour blaze, deep shadow), strong tension or payoff in the frame. Punchy, never generic.\n`) +
+      `Keep ONLY the channel's palette + grade + finish from its world Ã¢â‚¬â€ the SCENE must be new each time. ` +
+      `Hyper-saturated, volumetric light. COMPOSED FOR THE LAYOUT: the subject occupies the side OPPOSITE the ` +
+      `textZone (large, partially cropped for scale); the textZone 40% is clean darker negative space. ` +
+      `TEXT-FREE image (no words/letters).\n` +
+      `STEP 3 Ã¢â‚¬â€ textPropsJson: the template as a JSON-ENCODED STRING with placeholders replaced (line texts: 1-3 ` +
+      `punchy words each, Ã¢â€°Â¤5 words total, NOT restating the title - every line must be a real English hook word, NEVER meta-words like "omit"/"none"; ` +
+      `numberCallout: a REAL number from the topic, or LEAVE THE KEY OUT of the JSON entirely when none exists; set "position" to your chosen textZone).\n` +
+      `Return STRICT JSON {"fluxPrompt":string,"textPropsJson":string,"textZone":string}.`,
   });
   if (!inst.fluxPrompt || !inst.textPropsJson) throw new Error("pattern instantiation incomplete");
   let textProps: Record<string, unknown>;
   try { textProps = JSON.parse(inst.textPropsJson) as Record<string, unknown>; } catch {
     throw new Error("pattern textPropsJson unparseable");
   }
+  // The channel's VISUAL LANGUAGE is constant Ã¢â‚¬â€ it overrides whatever the
+  // pattern template carried (patterns vary composition, never identity).
+  const vl = args.playbook.visualLanguage ?? {};
+  textProps = {
+    ...textProps,
+    ...(vl.font ? { font: vl.font } : {}),
+    ...(vl.treatment ? { treatment: vl.treatment } : {}),
+    ...(vl.baseColor ? { baseColor: vl.baseColor } : {}),
+    ...(vl.accentColor ? { accentColor: vl.accentColor } : {}),
+    ...(vl.badgeStyle ? { badgeStyle: vl.badgeStyle } : {}),
+    ...(vl.uppercase !== undefined ? { uppercase: vl.uppercase } : {}),
+  };
 
-  const baseUrl = await generateFalFluxProImage({
-    prompt: `${inst.fluxPrompt} Absolutely NO text, NO words, NO letters, NO numbers, NO watermark.`,
-  });
+  // META-WORD GUARD (the "OMIT" class — template placeholders leaking as
+  // literal text): strip junk lines deterministically; a numberCallout must
+  // actually contain a digit; fall back to title hook words if all lines die.
+  const META = /^(omit|none|n\/?a|tbd|null|placeholder|number|text|word)$/i;
+  let cleanLines = (((textProps["lines"] as { text?: string; accent?: boolean }[] | undefined) ?? []))
+    .filter((l): l is { text: string; accent?: boolean } => Boolean(l.text && l.text.trim().length > 0 && !META.test(l.text.trim()) && !/[<>{}]/.test(l.text)));
+  if (!cleanLines.length) {
+    const hook = args.title.split(/[\s:—-]+/).filter((w) => w.length > 2).slice(0, 2);
+    cleanLines = [{ text: hook[0] ?? "WATCH", accent: false }, { text: hook[1] ?? "THIS", accent: true }];
+    args.log?.(`thumbnailLab: all text lines were meta-junk — fell back to title hook words`);
+  }
+  textProps = { ...textProps, lines: cleanLines };
+  if (textProps["numberCallout"] !== undefined && !/\d/.test(String(textProps["numberCallout"]))) {
+    delete textProps["numberCallout"];
+  }
+
+  const plannedZone = ["left", "right", "upperLeft", "upperRight"].includes(String(inst.textZone))
+    ? String(inst.textZone)
+    : "left";
+  const zoneSide = plannedZone.toLowerCase().includes("left") ? "left" : "right";
+  const subjectSide = zoneSide === "left" ? "right" : "left";
+  const basePrompt =
+    `${vl.imageStyle ? `RENDERING STYLE (the channel's signature look Ã¢â‚¬â€ obey strictly): ${vl.imageStyle}. ` : ""}` +
+    `${inst.fluxPrompt} COMPOSITION CONTRACT: the main subject is LARGE and dramatic on the ${subjectSide} side of ` +
+    `the frame; the ${zoneSide} 40% of the frame is clean, darker, uncluttered negative space with NO objects or ` +
+    `detail (reserved for typography). Top-1% YouTube thumbnail energy: hyper-saturated, dramatic rim lighting, ` +
+    `one compelling focal moment, rich deep contrast. Absolutely NO text, NO words, NO letters, NO numbers, NO watermark.`;
+
+    // RECRAFT MODE — design-tuned one-pass model (Recraft V3 via fal): the FULL
+  // frame (art + typography + layout) is designed as ONE generation, so type
+  // never looks pasted on. Vision-checked (text exact, readable, NO baked-in
+  // UI chrome) with one fix-regen; falls through to the other paths on failure.
+  args.log?.(`thumbnailLab: render mode = ${vl.renderMode ?? "layered"}`);
+  if (vl.renderMode === "recraft") {
+    const { hasRecraft, generateRecraft } = await import("@/lib/recraft");
+    if (!hasRecraft()) args.log?.("thumbnailLab: recraft mode requested but FAL_KEY missing - falling through");
+    if (hasRecraft()) {
+      const wordList = cleanLines.map((l) => `"${l.text.toUpperCase()}"`).join(" and ");
+      const callout = textProps["numberCallout"] ? ` plus the large number "${textProps["numberCallout"]}"` : "";
+      const style = /photo|cinema|realis|film|3d/i.test(vl.imageStyle ?? "") ? "realistic_image" : "digital_illustration";
+      let fixNote = "";
+      for (let attempt = 0; attempt < 2; attempt++) {
+        // Recraft hard-caps prompts at 1000 chars (422 otherwise). The scene is
+        // the only compressible part — headline/style/contract clauses survive.
+        const { RECRAFT_PROMPT_MAX } = await import("@/lib/recraft");
+        const buildPrompt = (scene: string) =>
+          `YouTube thumbnail, top-1% clickbait design. ${scene} ` +
+          `STYLE (obey strictly): ${vl.imageStyle ?? "cinematic"}. ` +
+          `Headline ${wordList}${callout} in the ${plannedZone} area on clean negative space, ` +
+          `VERY LARGE bold lettering in ${vl.accentColor ?? "#ffffff"} or white for contrast, ` +
+          `extremely high contrast, readable at 120px, spelling EXACTLY as quoted. ` +
+          `Small channel mark "${String(textProps["badge"] ?? "")}". Subject LARGE on the opposite side.${fixNote}`;
+        let recraftPrompt = buildPrompt(inst.fluxPrompt ?? "");
+        const budget = RECRAFT_PROMPT_MAX - 90; // NO_UI clause + safety margin
+        if (recraftPrompt.length > budget) {
+          const overflow = recraftPrompt.length - budget;
+          const scene = String(inst.fluxPrompt ?? "")
+            .slice(0, Math.max(120, String(inst.fluxPrompt ?? "").length - overflow))
+            .replace(/\s+\S*$/, "");
+          recraftPrompt = buildPrompt(`${scene}.`);
+        }
+        let url;
+        try { url = await generateRecraft({ prompt: recraftPrompt, style }); }
+        catch (e) { args.log?.(`thumbnailLab: recraft failed (falling through): ${e instanceof Error ? e.message : e}`); break; }
+        if (!url) { args.log?.("thumbnailLab: recraft COMPLETED but returned no image url - falling through"); break; }
+        await downloadTo(url, args.outJpg);
+        const raw = await geminiVisionLocal({
+          prompt:
+            `Check this thumbnail: 1. exact words ${wordList}${callout} fully visible and spelled exactly? ` +
+            `2. punch 1-10 (scroll-stopping for tier "${args.playbook.energy ?? "bold"}")? 3. readable at 120px? ` +
+            `4. uiClean: true ONLY if there are NO fake play buttons, video-player icons, progress bars or other ` +
+            `baked-in UI chrome in the artwork. ` +
+            `5. badgeOk: is EVERY other word in the image (channel mark "${String(textProps["badge"] ?? "")}", labels) ` +
+            `a correctly spelled real word - no garbled/invented strings? ` +
+            `6. styleMatch 1-10: does the rendering obey the channel style "${vl.imageStyle ?? "cinematic"}"? ` +
+            `Return STRICT JSON {"textOk":bool,"punch":n,"readable":bool,"uiClean":bool,"badgeOk":bool,"styleMatch":n,"fix":"<=15 words"}.`,
+          imagePaths: [args.outJpg],
+          json: true,
+          maxTokens: 250,
+        }).catch(() => "");
+        const v = raw ? parseJsonLoose<{ textOk?: boolean; punch?: number; readable?: boolean; uiClean?: boolean; badgeOk?: boolean; styleMatch?: number; fix?: string }>(raw) : {};
+        if (v.textOk !== false && v.readable !== false && v.uiClean !== false && v.badgeOk !== false && (v.styleMatch ?? 10) >= 7 && (v.punch ?? 10) >= 7) {
+          args.log?.(`thumbnailLab: RECRAFT render OK (one-pass design, punch ${v.punch ?? "?"}/10)`);
+          return args.outJpg;
+        }
+        fixNote =
+          ` CRITICAL FIX: ${v.fix ?? "text larger and exact, higher contrast"}.` +
+          `${v.uiClean === false ? " REMOVE all fake play buttons / player UI from the artwork." : ""}` +
+          `${v.badgeOk === false ? ` The channel mark must read EXACTLY "${String(textProps["badge"] ?? "")}" - no other invented words.` : ""}` +
+          `${(v.styleMatch ?? 10) < 7 ? ` The image MUST follow the style: ${vl.imageStyle}.` : ""}`;
+        args.log?.(`thumbnailLab: recraft attempt ${attempt + 1} - textOk=${v.textOk} punch=${v.punch} uiClean=${v.uiClean} badgeOk=${v.badgeOk} styleMatch=${v.styleMatch} -> ${attempt === 0 ? "regenerating with fix" : "falling through"}`);
+      }
+    }
+  }
+// INTEGRATED MODE — the most advanced path for stylized worlds: Ideogram's
+  // typography engine generates the WORDS AS PART OF THE ARTWORK (painted into
+  // the sketch, glowing as real neon, printed on the poster). Critiqued and
+  // regenerated with the judge's fix once; falls through to layered on failure.
+  if (vl.renderMode === "integrated") {
+    const { hasIdeogramKey, generateIdeogramRaw } = await import("@/lib/ideogram");
+    if (hasIdeogramKey()) {
+      const wordList = cleanLines.map((l) => `"${l.text.toUpperCase()}"`).join(" and ");
+      const callout = textProps["numberCallout"] ? ` plus the large number "${textProps["numberCallout"]}"` : "";
+      const fontFeel = { impact: "heavy condensed block", marker: "hand-drawn marker", bebas: "tall minimal", serif: "elegant editorial serif", rounded: "soft rounded playful" }[vl.font ?? "impact"];
+      const treatFeel = { plate: "on a bold filled banner", sticker: "as a die-cut sticker with hard shadow", stamp: "inside a hollow stamped border", neon: "as glowing neon tubes that light the scene", clean: "as clean integrated lettering" }[vl.treatment ?? "plate"];
+      let fixNote = "";
+      for (let attempt = 0; attempt < 2; attempt++) {
+        const ideoPrompt =
+          `YouTube thumbnail, 16:9. ${inst.fluxPrompt} ` +
+          `INTEGRATED TYPOGRAPHY (the text is PART of the artwork, native to the scene): the words ${wordList}${callout} ` +
+          `rendered ${treatFeel} in ${fontFeel} lettering, placed in the ${plannedZone} area of the frame, ` +
+          `colors ${vl.accentColor ?? "#ffffff"} and white, VERY LARGE and instantly readable at small size, ` +
+          `high contrast against the background. Small channel mark "${String(textProps["badge"] ?? "")}". ` +
+          `Style: ${vl.imageStyle ?? "cinematic"}. Spelling must be EXACTLY as quoted.${fixNote}`;
+        const url = await generateIdeogramRaw({ prompt: ideoPrompt });
+        if (!url) break;
+        await downloadTo(url, args.outJpg);
+        const raw = await geminiVisionLocal({
+          prompt:
+            `Check this thumbnail: 1. exact words ${wordList}${callout} fully visible and spelled exactly? ` +
+            `2. punch 1-10 (scroll-stopping for tier "${args.playbook.energy ?? "bold"}")? 3. readable at 120px? ` +
+            `Return STRICT JSON {"textOk":bool,"punch":n,"readable":bool,"fix":"<=15 words"}.`,
+          imagePaths: [args.outJpg],
+          json: true,
+          maxTokens: 200,
+        }).catch(() => "");
+        const v = raw ? parseJsonLoose<{ textOk?: boolean; punch?: number; readable?: boolean; fix?: string }>(raw) : {};
+        if (v.textOk !== false && v.readable !== false && (v.punch ?? 10) >= 7) {
+          args.log?.(`thumbnailLab: INTEGRATED render ✓ (Ideogram typography, punch ${v.punch ?? "?"}/10)`);
+          return args.outJpg;
+        }
+        fixNote = ` CRITICAL FIX: ${v.fix ?? "make the text larger, perfectly spelled, higher contrast"}.`;
+        args.log?.(`thumbnailLab: integrated attempt ${attempt + 1} — textOk=${v.textOk} punch=${v.punch} → ${attempt === 0 ? "regenerating with fix" : "falling back to layered"}`);
+      }
+    }
+  }
+
+  // BASE PROVIDER: Higgsfield image model when configured (subscription
+  // credits Ã¢â‚¬â€ set HIGGS_IMAGE_MODEL to the CLI model id); flux is the default.
+  let baseUrl: string | undefined;
+  const higgsImageModel = process.env.HIGGS_IMAGE_MODEL;
+  if (higgsImageModel && process.env.HIGGSFIELD_LIVE === "1") {
+    try {
+      const { runCli } = await import("@/lib/higgsfield");
+      const job = (await runCli([
+        "generate", "create", higgsImageModel,
+        "--prompt", basePrompt,
+        "--aspect_ratio", "16:9",
+        "--wait", "--wait-timeout", "5m", "--wait-interval", "3s",
+      ])) as Record<string, unknown>;
+      for (const k of ["url", "result_url", "image_url", "output_url"]) {
+        if (typeof job[k] === "string") { baseUrl = job[k] as string; break; }
+      }
+      if (baseUrl) args.log?.(`thumbnailLab: base via Higgsfield ${higgsImageModel} Ã¢Å“â€œ`);
+    } catch (e) {
+      args.log?.(`thumbnailLab: Higgsfield base failed (flux fallback): ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  if (!baseUrl) baseUrl = await generateFalFluxProImage({ prompt: basePrompt });
   const basePath = await downloadTo(baseUrl, join(args.tmpDir, `cand_${args.idx}_base.png`));
-  const textPng = await renderThumbTextLayer({
-    props: textProps,
-    outPng: join(args.tmpDir, `cand_${args.idx}_text.png`),
-  });
-  await overlayPngOnImage(basePath, textPng, args.outJpg);
-  args.log?.(`thumbnailLab: candidate ${args.idx + 1} "${args.pattern.name}" rendered`);
+
+  // VERIFY THE COMPOSITION CONTRACT: is the planned text zone actually clean?
+  // If the generator ignored the reservation, regenerate ONCE with a harder
+  // contract; if still dirty, fall back to whichever zone IS cleanest.
+  let zoneOk = false;
+  for (let zTry = 0; zTry < 2 && !zoneOk; zTry++) {
+    try {
+      const zoneRaw = await geminiVisionLocal({
+        prompt:
+          `Composition check. Is the ${zoneSide} ~40% of this image clean negative space suitable for large bold ` +
+          `text (no subject, no important detail there)? Also: which zone IS cleanest ("left"|"right"|"upperLeft"|"upperRight")? ` +
+          `Return STRICT JSON {"plannedClean":boolean,"cleanest":string}.`,
+        imagePaths: [basePath],
+        json: true,
+        maxTokens: 100,
+      });
+      const z = parseJsonLoose<{ plannedClean?: boolean; cleanest?: string }>(zoneRaw);
+      if (z.plannedClean) {
+        zoneOk = true;
+      } else if (zTry === 0) {
+        args.log?.(`thumbnailLab: ${zoneSide} zone NOT clean Ã¢â‚¬â€ regenerating base with harder composition contract`);
+        const url2 = await generateFalFluxProImage({
+          prompt: basePrompt + ` CRITICAL: the entire ${zoneSide} side must be empty dark space Ã¢â‚¬â€ nothing there at all.`,
+        });
+        await downloadTo(url2, basePath);
+      } else if (z.cleanest && ["left", "right", "upperLeft", "upperRight"].includes(z.cleanest)) {
+        args.log?.(`thumbnailLab: contract failed twice Ã¢â‚¬â€ moving text to actual cleanest zone (${z.cleanest})`);
+        textProps = { ...textProps, position: z.cleanest };
+        zoneOk = true;
+      }
+    } catch { zoneOk = true; /* vision unavailable Ã¢â€ â€™ trust the contract */ }
+  }
+  if (!textProps["position"] || !zoneOk) textProps = { ...textProps, position: plannedZone };
+  textProps = { ...textProps, position: textProps["position"] ?? plannedZone };
+
+  // TEMPLATE MODE - designed locked layouts (docs/THUMB_TEMPLATES.md): the AI
+  // art fills a slot in a professional layout; typography placement is owned
+  // by the design, so overlap/clipping are impossible by construction.
+  if (vl.renderMode === "template" || (vl as { templates?: string[] }).templates?.length) {
+    try {
+      const { renderThumbTemplate } = await import("@/lib/remotionRender");
+      const { readFile } = await import("node:fs/promises");
+      const LAYOUTS = ["diagonal_split", "number_burst", "circle_spotlight", "banner_bottom", "versus_split", "torn_reveal"];
+      const byTreatment: Record<string, string> = { plate: "diagonal_split", sticker: "circle_spotlight", stamp: "torn_reveal", neon: "banner_bottom", clean: "number_burst" };
+      const pool = ((vl as { templates?: string[] }).templates ?? []).filter((t) => LAYOUTS.includes(t));
+      const layout = pool.length ? pool[Math.abs(args.idx) % pool.length] : (byTreatment[vl.treatment ?? "plate"] ?? "diagonal_split");
+      const artSrc = `data:image/png;base64,${Buffer.from(await readFile(basePath)).toString("base64")}`;
+      const tProps = {
+        layout,
+        artSrc,
+        words: cleanLines.map((l) => l.text),
+        number: textProps["numberCallout"] ? String(textProps["numberCallout"]) : undefined,
+        badge: String(textProps["badge"] ?? ""),
+        panelColor: vl.baseColor && /^#/.test(vl.baseColor) ? vl.baseColor : "#101018",
+        accentColor: vl.accentColor ?? "#ffd400",
+        font: vl.font ?? "impact",
+        uppercase: vl.uppercase !== false,
+      };
+      for (let attempt = 0; attempt < 2; attempt++) {
+        await renderThumbTemplate({ props: tProps as unknown as Record<string, unknown>, outJpg: args.outJpg });
+        const raw = await geminiVisionLocal({
+          prompt:
+            `Check: words ${cleanLines.map((l) => `"${l.text}"`).join(", ")} fully visible+spelled? punch 1-10 for tier "${args.playbook.energy ?? "bold"}"? readable at 120px? ` +
+            `Return STRICT JSON {"textOk":bool,"punch":n,"readable":bool,"fix":"<=12 words"}.`,
+          imagePaths: [args.outJpg], json: true, maxTokens: 180,
+        }).catch(() => "");
+        const v = raw ? parseJsonLoose<{ textOk?: boolean; punch?: number; readable?: boolean; fix?: string }>(raw) : {};
+        if (v.textOk !== false && v.readable !== false && (v.punch ?? 10) >= 6) {
+          args.log?.(`thumbnailLab: TEMPLATE render (${layout}) PASS punch ${v.punch ?? "?"}/10`);
+          return args.outJpg;
+        }
+        if (attempt === 0) {
+          const url2 = await generateFalFluxProImage({ prompt: `${basePrompt} PUSH FURTHER: ${v.fix ?? "more drama"}.` });
+          await downloadTo(url2, basePath);
+          tProps.artSrc = `data:image/png;base64,${Buffer.from(await readFile(basePath)).toString("base64")}`;
+          args.log?.(`thumbnailLab: template critique ${v.punch}/10 - regenerating art`);
+        }
+      }
+      args.log?.(`thumbnailLab: TEMPLATE render (${layout}) shipped at ceiling`);
+      return args.outJpg;
+    } catch (e) {
+      args.log?.(`thumbnailLab: template mode failed (layered fallback): ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  // CRITIQUE Ã¢â€ â€™ ACT loop: one vision pass judges FIVE dimensions, and every
+  // failure maps to a concrete corrective action (re-render text smaller /
+  // reposition / harden contrast / regenerate the base with the judge's own
+  // fix note). Up to 3 iterations; only unfixable text-incompleteness fails.
+  const expectedWords = [
+    ...((textProps["lines"] as { text?: string }[] | undefined) ?? []).map((l) => l.text ?? ""),
+    String(textProps["numberCallout"] ?? ""),
+  ].filter(Boolean).join(" / ");
+  let curProps = textProps;
+  let baseRegens = 0;
+  for (let iter = 0; iter < 3; iter++) {
+    const textPng = await renderThumbTextLayer({
+      props: curProps,
+      outPng: join(args.tmpDir, `cand_${args.idx}_text_${iter}.png`),
+    });
+    await overlayPngOnImage(basePath, textPng, args.outJpg);
+    const raw = await geminiVisionLocal({
+      prompt:
+        `THUMBNAIL QUALITY CRITIQUE (channel energy tier: "${args.playbook.energy ?? "bold"}"). Judge this thumbnail on FIVE dimensions:\n` +
+        `1. textComplete: the exact text elements "${expectedWords}" all fully visible, nothing cut off, spelled exactly.\n` +
+        `2. overlapsSubject: does text cover the image's main subject or important detail?\n` +
+        `3. contrastOk: is every word instantly readable at 120px width?\n` +
+        `4. punch 1-10: would this STOP a scroller Ã¢â‚¬â€ catchy, energetic, curiosity-grabbing for its tier? (7+ = ships)\n` +
+        `5. styleMatch 1-10: does the whole image obey the channel's signature look${vl.imageStyle ? ` ("${vl.imageStyle}")` : ""}? (7+ = ships)\n` +
+        `Also: cleanestZone ("left"|"right"|"upperLeft"|"upperRight") and fix (<=15 words: the ONE highest-impact improvement).\n` +
+        `Return STRICT JSON {"textComplete":bool,"overlapsSubject":bool,"contrastOk":bool,"punch":n,"styleMatch":n,"cleanestZone":str,"fix":str}.`,
+      imagePaths: [args.outJpg],
+      json: true,
+      maxTokens: 300,
+    }).catch(() => "");
+    if (!raw) break; // vision unavailable Ã¢â€ â€™ deterministic render stands
+    const v = parseJsonLoose<{
+      textComplete?: boolean; overlapsSubject?: boolean; contrastOk?: boolean;
+      punch?: number; styleMatch?: number; cleanestZone?: string; fix?: string;
+    }>(raw);
+    const good =
+      v.textComplete !== false && v.overlapsSubject !== true && v.contrastOk !== false &&
+      (v.punch ?? 10) >= 7 && (v.styleMatch ?? 10) >= 7;
+    if (good) {
+      args.log?.(`thumbnailLab: critique PASS (punch ${v.punch ?? "?"}/10, style ${v.styleMatch ?? "?"}/10)`);
+      break;
+    }
+    if (iter === 2) {
+      if (v.textComplete === false) throw new Error(`thumbnail text incomplete after refinement: ${v.fix ?? "?"}`);
+      args.log?.(`thumbnailLab: shipping after refinement ceiling (punch ${v.punch}/10, style ${v.styleMatch}/10 Ã¢â‚¬â€ ${v.fix ?? ""})`);
+      break;
+    }
+    // ACT on each finding:
+    const actions: string[] = [];
+    if (v.textComplete === false) {
+      curProps = {
+        ...curProps,
+        lines: ((curProps["lines"] as { text?: string; size?: number }[] | undefined) ?? []).map((l) => ({ ...l, size: (l.size ?? 1) * 0.85 })),
+      };
+      actions.push("textÃ¢â€ â€œ15%");
+    }
+    if (v.overlapsSubject === true && v.cleanestZone && ["left", "right", "upperLeft", "upperRight"].includes(v.cleanestZone)) {
+      curProps = { ...curProps, position: v.cleanestZone };
+      actions.push(`textÃ¢â€ â€™${v.cleanestZone}`);
+    }
+    if (v.contrastOk === false) {
+      curProps = { ...curProps, strokePx: Math.min(10, Number(curProps["strokePx"] ?? 6) + 3), scrim: true };
+      actions.push("contrast+");
+    }
+    if (((v.punch ?? 10) < 7 || (v.styleMatch ?? 10) < 7) && baseRegens < 1) {
+      baseRegens++;
+      const ampUrl = await generateFalFluxProImage({
+        prompt: `${basePrompt} PUSH FURTHER: ${v.fix ?? "more drama, more saturation, stronger focal moment"}.`,
+      });
+      await downloadTo(ampUrl, basePath);
+      actions.push("base regen");
+    }
+    args.log?.(`thumbnailLab: critique iter ${iter + 1} Ã¢â‚¬â€ punch ${v.punch}/10 style ${v.styleMatch}/10 Ã¢â€ â€™ ${actions.join(", ") || "no actionable fix"}`);
+    if (!actions.length) break;
+  }
+  args.log?.(`thumbnailLab: candidate ${args.idx + 1} "${args.pattern.name}" rendered + critiqued`);
   return args.outJpg;
 }
 
@@ -350,7 +768,7 @@ export async function judgeTournament(args: {
 }): Promise<TournamentResult> {
   const n = args.candidates.length;
   const refPaths = args.refs.slice(0, 4).map((r) => r.path);
-  // Judge at FEED size — the size the click decision actually happens at.
+  // Judge at FEED size Ã¢â‚¬â€ the size the click decision actually happens at.
   const smalls: string[] = [];
   for (let i = 0; i < n; i++) {
     smalls.push(await imageToJpeg(args.candidates[i].path, join(args.tmpDir, `cand_${i}_small.jpg`), 480, 270));
@@ -363,7 +781,7 @@ export async function judgeTournament(args: {
       `For each candidate: clickScore 1-10 (would it WIN the click in this feed), beatsRefs = how many of the ` +
       `references it visually out-competes, strengths, and the ONE fix that would most raise its score. ` +
       `Judge composition, instant readability, number/text impact, color authority, and premium feel. ` +
-      `Be harsh — 8+ means it genuinely belongs among the winners.\n` +
+      `Be harsh Ã¢â‚¬â€ 8+ means it genuinely belongs among the winners.\n` +
       `Return STRICT JSON {"candidates":[{"idx":1-based,"clickScore":1-10,"beatsRefs":number,"strengths":string,"fix":string}],` +
       `"winner":1-based,"why":string}.`,
     imagePaths: [...smalls, ...refPaths],
@@ -387,7 +805,7 @@ export async function judgeTournament(args: {
   });
   const winnerIdx = Math.min(n - 1, Math.max(0, (parsed.winner ?? 1) - 1));
   args.log?.(
-    `thumbnailLab: tournament — ${out.map((c, i) => `#${i + 1} ${c.pattern}: ${c.clickScore ?? "?"}/10 (beats ${c.beatsRefs ?? "?"} refs)`).join("; ")} → winner #${winnerIdx + 1}`,
+    `thumbnailLab: tournament Ã¢â‚¬â€ ${out.map((c, i) => `#${i + 1} ${c.pattern}: ${c.clickScore ?? "?"}/10 (beats ${c.beatsRefs ?? "?"} refs)`).join("; ")} Ã¢â€ â€™ winner #${winnerIdx + 1}`,
   );
   return { candidates: out, winnerIdx, judgeWhy: parsed.why ?? "" };
 }

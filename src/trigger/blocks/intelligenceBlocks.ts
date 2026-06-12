@@ -744,8 +744,11 @@ export const thumbnailGen: Block = {
         const pattern = pool[idx];
         const outJpg = join(tmp, "thumbnail.jpg");
         const scriptHint = String(ctx.store["narrationText"] ?? "").slice(0, 500);
+        // Architect's per-channel energy override (param beats playbook tier).
+        const energyOverride = ctx.params["thumbEnergy"] as "spectacle" | "bold" | "cozy_pop" | undefined;
+        const pb = energyOverride ? { ...playbook, energy: energyOverride } : playbook;
         await renderCandidate({
-          pattern, title, scriptHint, playbook, outJpg, tmpDir: tmp, idx, log: ctx.log,
+          pattern, title, scriptHint, playbook: pb, outJpg, tmpDir: tmp, idx, log: ctx.log,
         });
         const refQA = await referenceMobileQA(tmp, outJpg);
         if (refQA && !refQA.pass) {

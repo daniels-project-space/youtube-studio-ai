@@ -154,14 +154,27 @@ async function generate(
   let json: GeminiResponse | undefined;
   let lastErr = "";
   for (let attempt = 0; attempt < 4; attempt++) {
-    const res = await fetch(
-      `${BASE}/models/${model}:generateContent?key=${key()}`,
-      {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify(body),
-      },
-    );
+    // Hard per-attempt deadline: a dead socket with no timeout once hung a
+    // render for 2+ hours. Timeouts/network drops are transient -> retry.
+    let res: Response;
+    try {
+      res = await fetch(
+        `${BASE}/models/${model}:generateContent?key=${key()}`,
+        {
+          method: "POST",
+          headers: { "Content-Type": "application/json" },
+          body: JSON.stringify(body),
+          signal: AbortSignal.timeout(120_000),
+        },
+      );
+    } catch (e) {
+      lastErr = `network/timeout: ${e instanceof Error ? e.message : e}`;
+      if (attempt < 3) {
+        await sleep(2000 * (attempt + 1) * (attempt + 1));
+        continue;
+      }
+      throw new GeminiError(`gemini ${model} -> ${lastErr}`);
+    }
     json = (await res.json()) as GeminiResponse;
     if (res.ok) break;
     const code = res.status;

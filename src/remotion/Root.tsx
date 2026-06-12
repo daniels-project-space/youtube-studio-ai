@@ -4,6 +4,7 @@ import { TitleCard, type TitleCardProps } from "./TitleCard";
 import { QuoteOverlay, type QuoteOverlayProps } from "./QuoteOverlay";
 import { DataInsert, type DataInsertProps } from "./DataInsert";
 import { ThumbText, type ThumbTextProps } from "./ThumbText";
+import { ThumbTemplate, type ThumbTemplateProps } from "./ThumbTemplate";
 
 /**
  * In-app Remotion root (registered by ./index.ts). Kept self-contained — only
@@ -46,6 +47,15 @@ export const RemotionRoot: React.FC = () => {
           height: (props as { height?: number }).height ?? 1080,
           props,
         })}
+      />
+      <Composition
+        id="ThumbTemplate"
+        component={ThumbTemplate}
+        durationInFrames={1}
+        fps={30}
+        width={1280}
+        height={720}
+        defaultProps={{ layout: "diagonal_split", artSrc: "", words: ["TITLE"] } as ThumbTemplateProps}
       />
       <Composition
         id="ThumbText"

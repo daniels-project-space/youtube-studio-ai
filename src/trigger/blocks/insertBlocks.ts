@@ -25,6 +25,8 @@ type InsertKind = (typeof KINDS)[number];
 
 interface InsertPlanItem {
   sentenceIdx: number;
+  /** Last sentence STILL discussing this data — the insert holds until then. */
+  endSentenceIdx?: number;
   kind: InsertKind;
   title?: string;
   value?: string;
@@ -145,15 +147,19 @@ export const visualInserts: Block = {
           `These narration sentences speak numbers (sentenceIdx: text):\n` +
           candidates.slice(0, 60).map((c) => `${c.i}: ${c.text}`).join("\n") +
           `\n\nPlan AT MOST ${maxInserts} on-screen data inserts that make the strongest spoken numbers VISUAL. ` +
-          `Pick only genuinely insert-worthy moments (a hero dollar figure, a growth curve, a this-vs-that) — ` +
-          `fewer great inserts beat many weak ones.\n` +
+          `STRATEGY: place inserts at the moments of maximal persuasion — the thesis-proof number, the comparison ` +
+          `that decides the argument, the payoff figure — never at passing mentions. Fewer great inserts beat many ` +
+          `weak ones; if the script is data-light, plan fewer or none.\n` +
+          `RELEVANCY WINDOW: for each insert also return endSentenceIdx — the LAST sentence still discussing that ` +
+          `data (same as sentenceIdx if one sentence; at most sentenceIdx+4). The visual HOLDS on screen for that ` +
+          `whole span so the viewer can actually read it while it is being talked about.\n` +
           `Available kinds:\n${kindDocs}\n\n` +
           `HARD RULES:\n` +
           `- anchorValues: list the EXACT numbers from the chosen sentence that the insert visualizes. ` +
           `You may NOT use numbers that are not spoken in that sentence (inserts are fact-checked against the script).\n` +
           `- title: <=8 words, no clickbait.\n` +
           `- One insert per sentence; spread them across the video.\n` +
-          `Return STRICT JSON {"inserts":[{"sentenceIdx":number,"kind":string,"title":string,"value"?:string,` +
+          `Return STRICT JSON {"inserts":[{"sentenceIdx":number,"endSentenceIdx":number,"kind":string,"title":string,"value"?:string,` +
           `"label"?:string,"series"?:number[],"xLabels"?:string[],"bars"?:[{"label":string,"value":number,"display"?:string}],` +
           `"anchorValues":number[]|string[]}]}.`,
         maxTokens: 1800,
@@ -210,7 +216,17 @@ export const visualInserts: Block = {
     for (const it of valid) {
       if (out.length >= maxInserts) break;
       const t = timings[it.sentenceIdx];
-      const durSec = it.kind === "lower_third" ? 4.5 : it.kind === "big_stat" ? 5 : 7;
+      // NARRATED-RELEVANCY DURATION: hold while the script is still talking
+      // about this data (+1s to land), with per-kind read-time floors —
+      // a chart that flashes for 5s was never actually read.
+      const endIdx = Math.min(
+        timings.length - 1,
+        Math.max(it.sentenceIdx, Math.min(Number(it.endSentenceIdx ?? it.sentenceIdx), it.sentenceIdx + 4)),
+      );
+      const spanSec = Math.max(0, timings[endIdx].end - t.start) + 1.0;
+      const floors = { lower_third: 4.5, big_stat: 6, line_chart: 8, annotated_line: 9, bar_compare: 8 } as const;
+      const caps = { lower_third: 9, big_stat: 14, line_chart: 18, annotated_line: 18, bar_compare: 16 } as const;
+      const durSec = Math.min(caps[it.kind], Math.max(floors[it.kind], spanSec));
       const startSec = Math.max(introSec + 1, introSec + t.start - 0.2);
       if (startSec < lastEnd + minGapSec) continue;
       if (quoteWindows.some(([a, b]) => startSec < b && startSec + durSec > a)) {

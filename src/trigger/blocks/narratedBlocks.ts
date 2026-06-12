@@ -1233,7 +1233,7 @@ export const quoteOverlaysBlock: Block = {
       const spokenDur = (display.length / Math.max(1, t.text.length)) * sentDur;
       const cardStart = introSec + t.start + startFrac * sentDur - 0.3;
       // floor 4.5s so the slow blur has room to ease fully in, hold, then ease out
-      const dur = Math.min(9.5, Math.max(4.5, Math.max(words * 0.38 + 1.6, spokenDur + 0.8)));
+      const dur = Math.min(12, Math.max(5, Math.max(words * 0.42 + 2, spokenDur + 2.2)));
       const startSec = Math.max(introSec + t.start, cardStart);
       if (clashesCard(startSec, startSec + dur)) {
         ctx.log(`quote_overlays: skipped (overlaps a chapter card) "${display.slice(0, 36)}â€¦"`);
@@ -1297,7 +1297,7 @@ export const quoteOverlaysBlock: Block = {
         const startFrac = ci / Math.max(1, t.text.length);
         const spokenDur = (display.length / Math.max(1, t.text.length)) * sentDur;
         const cardStart = introSec + t.start + startFrac * sentDur - 0.3;
-        const dur = Math.min(9.5, Math.max(4.5, Math.max(words * 0.38 + 1.6, spokenDur + 0.8)));
+        const dur = Math.min(12, Math.max(5, Math.max(words * 0.42 + 2, spokenDur + 2.2)));
         const startSec = Math.max(introSec + t.start, cardStart);
         if (clashesCard(startSec, startSec + dur)) continue; // never near a chapter card
         fillers.push({ idx: i, display, words, startSec, dur, highlights: [] });

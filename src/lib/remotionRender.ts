@@ -155,6 +155,28 @@ export async function renderDataInsert(args: {
  * typography: per-word accents, giant number callout, stroke/glow/scrim) —
  * the replacement for ffmpeg drawtext. Composite over the AI base with ffmpeg.
  */
+/** Render a FULL thumbnail from the designed template pack (jpeg, 1280x720). */
+export async function renderThumbTemplate(args: {
+  props: Record<string, unknown>;
+  outJpg: string;
+}): Promise<string> {
+  const { selectComposition, renderStill, ensureBrowser } = await import("@remotion/renderer");
+  await ensureBrowser();
+  const serveUrl = await getServeUrl();
+  const inputProps = { ...args.props };
+  const composition = await selectComposition({ serveUrl, id: "ThumbTemplate", inputProps });
+  await renderStill({
+    serveUrl,
+    composition: { ...composition, width: 1280, height: 720 },
+    inputProps,
+    output: args.outJpg,
+    imageFormat: "jpeg",
+    jpegQuality: 92,
+    chromiumOptions: { gl: "angle" },
+  });
+  return args.outJpg;
+}
+
 export async function renderThumbTextLayer(args: {
   props: Record<string, unknown>;
   outPng: string;

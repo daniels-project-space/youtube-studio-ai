@@ -60,7 +60,7 @@ export default defineConfig({
     extensions: [
       ffmpeg(),
       additionalPackages({ packages: ["@higgsfield/cli@0.1.40"] }),
-      additionalFiles({ files: ["src/remotion/**", "src/assets/**"] }),
+      additionalFiles({ files: ["src/remotion/**", "src/assets/**", "public/fonts/**"] }),
       // Headless-Chromium system libraries (Remotion renderTitleCard). The image
       // ships chrome-headless-shell but not its shared libs — without these the
       // browser fails to launch (libnspr4.so / libnss3 missing). Remotion's

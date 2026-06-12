@@ -74,7 +74,16 @@ export async function claudeText(args: {
   return text;
 }
 
-/** Single-turn completion parsed as JSON (tolerates code fences/prose). */
+/** True only for billing/credit exhaustion — NOT auth or model errors. */
+function isCreditError(e: unknown): boolean {
+  return e instanceof AnthropicError && /credit balance|HTTP 402/i.test(e.message);
+}
+
+/** Single-turn completion parsed as JSON (tolerates code fences/prose).
+ * BILLING-ONLY fallback: when the Anthropic account is out of credits the
+ * call reroutes to gemini-2.5-pro with a LOUD console warning — the run
+ * survives a credit drought instead of dying, but never degrades silently
+ * (auth/model/network errors still throw). */
 export async function claudeJson<T = unknown>(args: {
   prompt: string;
   system?: string;
@@ -82,6 +91,22 @@ export async function claudeJson<T = unknown>(args: {
   maxTokens?: number;
   temperature?: number;
 }): Promise<T> {
-  const text = await claudeText(args);
-  return parseJsonLoose<T>(text);
+  try {
+    const text = await claudeText(args);
+    return parseJsonLoose<T>(text);
+  } catch (e) {
+    if (!isCreditError(e) || !process.env.GEMINI_API_KEY) throw e;
+    console.warn(
+      "anthropic: OUT OF CREDITS — rerouting this call to gemini-2.5-pro (top up Anthropic to restore Claude concepts)",
+    );
+    const { geminiJson } = await import("@/lib/gemini");
+    return geminiJson<T>({
+      prompt: `${args.system ? `${args.system}\n\n` : ""}${args.prompt}`,
+      model: "gemini-2.5-pro",
+      // pro spends heavily on thinking before emitting text — small budgets
+      // come back as "gemini returned no text"
+      maxTokens: Math.max((args.maxTokens ?? 600) * 2, 6000),
+      temperature: args.temperature,
+    });
+  }
 }

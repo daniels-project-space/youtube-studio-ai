@@ -10,6 +10,7 @@
 
 import type * as analytics from "../analytics.js";
 import type * as assets from "../assets.js";
+import type * as channelArchives from "../channelArchives.js";
 import type * as channels from "../channels.js";
 import type * as competitors from "../competitors.js";
 import type * as contentPlan from "../contentPlan.js";
@@ -32,6 +33,7 @@ import type {
 declare const fullApi: ApiFromModules<{
   analytics: typeof analytics;
   assets: typeof assets;
+  channelArchives: typeof channelArchives;
   channels: typeof channels;
   competitors: typeof competitors;
   contentPlan: typeof contentPlan;

@@ -33,6 +33,36 @@ function buildPrompt(title: string, niche?: string, subtitle?: string): string {
 }
 
 /** Generate a thumbnail via Ideogram. Returns the image URL or null on any failure. */
+/** Raw-prompt Ideogram render (the caller owns the full typography prompt). */
+export async function generateIdeogramRaw(args: {
+  prompt: string;
+  model?: string;
+  timeoutMs?: number;
+}): Promise<string | null> {
+  const key = process.env.IDEOGRAM_API_KEY;
+  if (!key) return null;
+  try {
+    const res = await fetch(IDEOGRAM_URL, {
+      method: "POST",
+      headers: { "Api-Key": key, "Content-Type": "application/json" },
+      body: JSON.stringify({
+        image_request: {
+          prompt: args.prompt,
+          aspect_ratio: "ASPECT_16_9",
+          model: args.model ?? "V_3",
+          magic_prompt_option: "OFF",
+        },
+      }),
+      signal: AbortSignal.timeout(args.timeoutMs ?? 120_000),
+    });
+    if (!res.ok) return null;
+    const data = (await res.json()) as { data?: { url?: string }[] };
+    return data.data?.[0]?.url ?? null;
+  } catch {
+    return null;
+  }
+}
+
 export async function generateIdeogramThumbnail(args: {
   title: string;
   niche?: string;

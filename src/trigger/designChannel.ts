@@ -502,6 +502,29 @@ export const designChannelTask = task({
           if (run?.status === "ok") {
             probeOutcome = { ok: true, attempts: attempt };
             log(`probe PASSED on attempt ${attempt} — pipeline proven end-to-end ✓`);
+            // CRITICAL DIAL-IN: the architect now reviews the ACTUAL probe
+            // output — the video (native watch: vision+audio), the thumbnail
+            // (vision vs the DNA spec), and the SEO it really produced — and
+            // tunes the pipeline against what the channel is SUPPOSED to be.
+            try {
+              if (styleDNA) {
+                const review = await reviewProbeArtifacts(convex, probeRunId as Id<"runs">, name, styleDNA, log);
+                const tune = await architectPipeline({
+                  family: payload.family, channelName: name, niche: identity.niche,
+                  persona: identity.persona,
+                  pipeline: ((await convex.query(api.channels.getChannel, { channelId }))?.pipeline ?? design.pipeline) as PipelineEntry[],
+                  dna: styleDNA, bible: creativeBrief, qualityBar, competitorCount,
+                  probeReport: { ok: true, ...review }, log,
+                });
+                if (tune && (tune.report.applied.length || tune.report.groundingActions.length)) {
+                  await convex.mutation(api.channels.updateChannel, {
+                    channelId, pipeline: tune.pipeline,
+                    architectReport: { ...tune.report, probeDialIn: { feel: review.feel, thumbnailCritique: review.thumbnailCritique?.slice(0, 300) } },
+                  });
+                  log(`probe DIAL-IN: ${tune.report.applied.length} tuning change(s) applied from the critical review`);
+                }
+              }
+            } catch (e) { log(`probe dial-in skipped (non-fatal): ${e instanceof Error ? e.message : e}`); }
             break;
           }
           const error = String((run as { error?: string } | null)?.error ?? "unknown failure");
@@ -540,6 +563,96 @@ export const designChannelTask = task({
     };
   },
 });
+
+/**
+ * CRITICAL-REVIEW evidence for a successful probe: native full-watch of the
+ * probe video (Gemini sees motion AND hears audio), a vision critique of the
+ * thumbnail vs the DNA spec, and the SEO the run actually produced. All
+ * best-effort — a missing artifact just narrows the review.
+ */
+async function reviewProbeArtifacts(
+  convex: ConvexHttpClient,
+  runId: Id<"runs">,
+  channelName: string,
+  dna: { recurringSubject?: string; setting?: string; motifs?: string[]; thumbnail?: { subject?: string; palette?: string[] }; seo?: { titleFormula?: string } },
+  log: (m: string) => void,
+): Promise<{
+  feel?: { moodMatch?: number; pacing?: number; musicFit?: number; summary?: string };
+  defects?: string[];
+  thumbnailCritique?: string;
+  seo?: { title?: string; description?: string; tags?: string[] };
+  notes?: string;
+}> {
+  const stages = await convex.query(api.runStages.listRunStages, { runId });
+  const sOut = (block: string) =>
+    (stages.find((s: { block: string; status: string }) => s.block === block && s.status === "ok") as
+      | { outputs?: Record<string, unknown> }
+      | undefined)?.outputs ?? {};
+  const out: Awaited<ReturnType<typeof reviewProbeArtifacts>> = {};
+
+  // SEO as actually produced.
+  const meta = sOut("metadata");
+  if (meta["title"]) {
+    out.seo = {
+      title: String(meta["title"]),
+      description: String(meta["description"] ?? "").slice(0, 300),
+      tags: (meta["tags"] as string[] | undefined)?.slice(0, 15),
+    };
+  }
+
+  const { getObjectBytes } = await import("@/lib/storage");
+  const { writeBytes, makeRunTempDir } = await import("@/lib/files");
+  const { join } = await import("node:path");
+  const tmp = await makeRunTempDir(`probe_review_${runId}`);
+
+  // NATIVE WATCH of the probe video — sees motion, hears the mix.
+  try {
+    const videoKey = String(sOut("timeline_assemble")["videoKey"] ?? "");
+    const durationSec = Number(sOut("timeline_assemble")["videoDurationSec"] ?? 0);
+    if (videoKey && durationSec > 5) {
+      const vPath = join(tmp, "probe.mp4");
+      await writeBytes(vPath, await getObjectBytes(videoKey));
+      const { nativeWatchRender } = await import("@/lib/renderWatch");
+      const watch = await nativeWatchRender(
+        vPath, durationSec,
+        {
+          title: String(meta["title"] ?? channelName),
+          channelWorld: [dna.recurringSubject, dna.setting, ...(dna.motifs ?? []).slice(0, 3)].filter(Boolean).join("; "),
+        },
+        { log },
+      );
+      if (watch) {
+        out.feel = { moodMatch: watch.moodMatch, pacing: watch.pacing, musicFit: watch.musicFit, summary: watch.summary };
+        out.defects = watch.defects.map((d) => `[${d.severity}] ${d.issue}`).slice(0, 8);
+      }
+    }
+  } catch (e) { log(`probe review: native watch skipped: ${e instanceof Error ? e.message : e}`); }
+
+  // THUMBNAIL vision critique vs the DNA spec.
+  try {
+    const thumbKey = String(sOut("thumbnail_gen")["thumbnailKey"] ?? "");
+    if (thumbKey) {
+      const tPath = join(tmp, "probe_thumb.jpg");
+      await writeBytes(tPath, await getObjectBytes(thumbKey));
+      const { geminiVisionLocal, parseJsonLoose } = await import("@/lib/gemini");
+      const raw = await geminiVisionLocal({
+        prompt:
+          `CRITICAL thumbnail review for "${channelName}". The channel's locked thumbnail identity: ` +
+          `subject "${dna.thumbnail?.subject ?? dna.recurringSubject ?? "?"}", palette ${(dna.thumbnail?.palette ?? []).join(",") || "?"}.\n` +
+          `Judge HARSHLY: on-identity? instantly readable at feed size? premium craft or template-y? ` +
+          `Return STRICT JSON {"score":1-10,"critique":"<=60 words: the gaps vs the identity and what to change"}.`,
+        imagePaths: [tPath],
+        json: true,
+        maxTokens: 300,
+      });
+      const v = parseJsonLoose<{ score?: number; critique?: string }>(raw);
+      out.thumbnailCritique = `${v.score ?? "?"}/10 — ${v.critique ?? ""}`;
+      log(`probe review: thumbnail ${out.thumbnailCritique.slice(0, 100)}`);
+    }
+  } catch (e) { log(`probe review: thumbnail critique skipped: ${e instanceof Error ? e.message : e}`); }
+
+  return out;
+}
 
 /**
  * Shrink a production pipeline into a cheap ~60s END-TO-END probe: every
