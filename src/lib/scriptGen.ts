@@ -25,17 +25,63 @@ function assignRoles(sections: ScriptSection[]): ScriptSection[] {
 }
 
 /**
- * The three-act arc every script follows — sectioning as a pipeline law, not
- * a hope: a real INTRO after the cold open, developed BODY movements, and an
- * OUTRO that lands instead of stopping.
+ * The STORY-JOURNEY arc every script follows — sectioning as a pipeline law,
+ * modeled on how Calm structures its sessions and programs: arrival ritual →
+ * experience BEFORE explanation → one theme carried by one image → an
+ * integration step that lands in the viewer's actual day → ritual close with
+ * a quotable takeaway. Generalized for every channel archetype.
  */
 const ARC_RULES =
-  "STRUCTURE — write the sections as a deliberate three-act arc. The FIRST section is the INTRO: it follows " +
-  "the cold open (never repeats it), orients the viewer, honors where the journey stands (for episodic " +
-  "channels: the series thread), and lays out today's map in 60-120 words. The MIDDLE sections are the BODY: " +
-  "one fully developed movement each, in an order that builds — each opens with a clear turn, not a restart. " +
-  "The FINAL section is the OUTRO: the landing — explicitly pay off the loop the cold open opened, then close " +
-  "with the channel's ritual (a practice, a meditation, a recap, a sign-off). Never a flat stop.";
+  "STRUCTURE — write the sections as a STORY JOURNEY, not an essay outline:\n" +
+  "- INTRO (first section) = ARRIVAL: it follows the cold open (never repeats it), re-anchors the viewer " +
+  "in the channel's recognizable ritual shape, honors where the journey stands, and lays out today's path " +
+  "in 60-120 words.\n" +
+  "- BODY (middle sections) = THE JOURNEY: experience BEFORE explanation — drop the viewer into the " +
+  "concrete scene, story, or practice FIRST and distill the principle only once they are inside it; never " +
+  "open a movement with abstract theory. ONE theme and ONE carrying image/metaphor hold the entire episode " +
+  "together — every movement returns to it from one layer DEEPER (progression, never lateral restarts). " +
+  "Each movement is a story beat: a turn, a deepening, a small reveal.\n" +
+  "- INTEGRATION (the movement before the outro): turn today's lesson into the viewer's ACTUAL day — one " +
+  "concrete, immediately doable carry-out, stated plainly.\n" +
+  "- OUTRO (final section) = THE LANDING: explicitly pay off the loop the cold open opened, close with the " +
+  "channel's ritual (a practice, a meditation, a recap, a sign-off), and leave ONE quotable line that " +
+  "distills the whole episode — the takeaway the viewer carries. Never a flat stop.";
+
+/**
+ * Formal series/program support (Calm-style progressive curriculum): each
+ * episode is one facet of the program's theme, builds on yesterday, seeds
+ * tomorrow, and lives inside the SAME ritual shell as every other episode.
+ */
+export interface SeriesContext {
+  /** Program name, e.g. "7 Days of Gratitude". */
+  name: string;
+  /** 1-based episode number. */
+  episode: number;
+  total: number;
+  /** What the previous episode taught / where it left the viewer. */
+  previousSummary?: string;
+  /** The thread to seed for the next episode (omit → a soft forward thread). */
+  nextSeed?: string;
+}
+
+function seriesClause(series?: SeriesContext): string {
+  if (!series) return "";
+  const { episode, total } = series;
+  const phase =
+    episode === 1 ? "ORIENTATION: welcome the viewer into the program, establish the ritual shell and the journey's promise"
+    : episode === total ? "GRADUATION: gather every thread of the program, land its deepest lesson, and send the viewer onward changed"
+    : episode <= Math.ceil(total / 3) ? "FOUNDATION: build the core skill/idea one solid layer at a time"
+    : episode >= total - 1 ? "APPLICATION: turn the program's lessons toward real life — this is where practice becomes habit"
+    : "DEEPENING: go one honest layer deeper, including the uncomfortable part of the theme";
+  return (
+    `SERIES CONTEXT — this is episode ${episode} of ${total} of "${series.name}", an episodic program ` +
+    `(Calm-style progressive curriculum). Episode phase: ${phase}.\n` +
+    (series.previousSummary ? `The previous episode: ${series.previousSummary} — honor that thread early.\n` : "") +
+    `Keep the program's ritual shell recognizable (the same arrival and closing shape as every episode). ` +
+    `Near the end, seed the next episode: ${series.nextSeed ?? "leave one soft, curious thread forward"} — ` +
+    `an invitation, never a cliffhanger that cheats today's closure.`
+  );
+}
 
 export interface Script {
   hook: string;
@@ -95,6 +141,8 @@ export interface ScriptRequest {
    */
   playbook?: ScriptPlaybook;
   openingDeviceIdx?: number;
+  /** Episodic program context (Calm-style progressive curriculum). */
+  series?: SeriesContext;
 }
 
 /** Per-request sanitize that PRESERVES audio tags on v3-voiced channels. */
@@ -196,7 +244,10 @@ export function sanitizeSpoken(text: string, opts?: { keepAudioTags?: boolean })
 
 /** Strip structure-scaffold prefixes the model leaks into chapter headings. */
 function cleanHeading(h: string): string {
-  return h.replace(/^\s*(?:beat|section|part|chapter)\s*\d+\s*[:.\-–—]\s*/i, "").trim();
+  return h
+    .replace(/^\s*(?:beat|section|part|chapter)\s*\d+\s*[:.\-–—]\s*/i, "")
+    .replace(/^\s*(?:arrival|the journey|journey|integration|the landing|landing|intro|body|outro)\s*[:.\-–—]\s*/i, "")
+    .trim();
 }
 
 function assemble(hook: string, sections: ScriptSection[]): string {
@@ -329,6 +380,7 @@ async function synthFullScriptOneShot(
         req.persona ? `Channel voice/persona: ${req.persona}` : "",
         req.niche ? `Niche: ${req.niche}.` : "",
         hookMandate(crafted),
+        seriesClause(req.series),
         styleGuidance(req) + dataDiscipline(req.dataRich),
         playbookFull(req),
         voiceTagClause(req),
@@ -391,6 +443,7 @@ async function synthLongScript(
           `Plan ${n} DISTINCT, non-repeating sections for a long narrated video about "${req.topic}".`,
           req.persona ? `Persona: ${req.persona}` : "",
           req.niche ? `Niche: ${req.niche}` : "",
+          seriesClause(req.series),
           styleGuidance(req) + dataDiscipline(req.dataRich),
           exclude.length
             ? `Already covered (do NOT repeat): ${exclude.join("; ")}`
@@ -417,8 +470,9 @@ async function synthLongScript(
   try {
     const head = await geminiJson<{ closing_line?: string }>({
       prompt:
-        `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write a closing_line ` +
-        `(<=10 words) — a short, powerful sign-off. ${styleGuidance(req)}\n` +
+        `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write closing_line — ` +
+        `THE QUOTE of the episode: one resonant, quotable line (<=12 words) that distills its lesson, shown ` +
+        `on the outro card as the takeaway. ${styleGuidance(req)}\n` +
         `Return STRICT JSON {"closing_line":string}.`,
       maxTokens: 300,
       temperature: 0.85,
@@ -498,6 +552,7 @@ async function synthLongScript(
       log,
       prompt: [
         `Write the CLOSING CONCLUSION (about 180-260 words, 2-3 short paragraphs) for a long narrated video about "${req.topic}".`,
+        seriesClause(req.series),
         styleGuidance(req) + dataDiscipline(req.dataRich),
         `This is the emotional landing of the whole video — it must feel deliberate, rounded, and SATISFYING, never like it just stops. Build it as a clear arc:`,
         `1) A soft signal that we are arriving at the end (a reflective turn, NOT the words "in conclusion" / "to sum up" / "in summary").`,
@@ -604,6 +659,10 @@ export async function synthScript(
     style: req.style,
     playbookDigest: playbookFull(req) || undefined,
     directorIdea: req.structure?.hook?.trim() || undefined,
+    seriesNote: req.series
+      ? `episode ${req.series.episode} of ${req.series.total} of "${req.series.name}"` +
+        (req.series.previousSummary ? `; the previous episode: ${req.series.previousSummary}` : "")
+      : undefined,
     language: req.language,
     voiceTags: req.voiceTags,
     log: (m) => log(m),
@@ -631,6 +690,7 @@ export async function synthScript(
     req.persona ? `Channel voice/persona: ${req.persona}` : "",
     req.niche ? `Niche: ${req.niche}.` : "",
     hookMandate(crafted),
+    seriesClause(req.series),
     styleGuidance(req) + dataDiscipline(req.dataRich),
     playbookFull(req),
     voiceTagClause(req),
@@ -648,11 +708,12 @@ export async function synthScript(
       : "End with a FINAL section (heading like \"In Summary\") that recaps the key takeaway in 2-3 sentences.",
     "ENDING AWARENESS: the video holds a brief OUTRO card after the narration, so the narration must land on a " +
       "single DEFINITIVE closing sentence — a clean, conclusive final thought, never trailing off mid-idea. Then " +
-      "provide closing_line: a short, powerful sign-off (≤ 10 words) to show on that outro card.",
+      "provide closing_line: THE QUOTE of the episode — one resonant, quotable line (≤ 12 words) that distills " +
+      "today's lesson, shown on the outro card as the takeaway the viewer carries.",
     "Return STRICT JSON only:",
     `{
   "sections": [ { "heading": string (short label), "narration": string (the spoken words for this section) } ],
-  "closing_line": string (<= 10 words, the definitive sign-off for the outro card)
+  "closing_line": string (<= 12 words — THE QUOTE: the episode's lesson distilled, quotable)
 }`,
     "CRITICAL: the narration is fed directly to a text-to-speech voice. Output PLAIN SPOKEN text ONLY. " +
       "Do NOT use asterisks, slashes, underscores, hashes, backticks, bullet points, markdown, emphasis " +

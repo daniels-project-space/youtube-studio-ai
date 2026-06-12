@@ -330,7 +330,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "deterministic craft lint (first sentence ≤7s, banned filler/disclaimer openers, concrete anchor, " +
       "<15-word sentences) runs before a judge gates punch/specificity/curiosity/voiceMatch/promise ≥7 " +
       "with one feedback retry — loud failure, never a could-open-any-video line. The latest Gemini Pro " +
-      "then writes the narration continuing from it under CRAFT_RULES, in the Show Bible's register.",
+      "then writes the narration continuing from it under CRAFT_RULES, in the Show Bible's register, as a " +
+      "STORY JOURNEY (Calm-style): arrival ritual → experience-before-explanation movements carried by ONE " +
+      "image → integration into the viewer's day → a landing with a quotable takeaway. Episodic programs " +
+      "get formal series support (phase-aware curriculum, previous-episode thread, next-episode seed).",
     gates: ["hook lint (≤7s, no filler, concrete)", "punch / specificity / curiosity / voiceMatch / promise-by-15s ≥ 7", "grounded fact-check (search-verified claims, false = rejected)", "loop payoff verified by qa_script", "midpoint re-hook verified"],
     status: "active",
   },

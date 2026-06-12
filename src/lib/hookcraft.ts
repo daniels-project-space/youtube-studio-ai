@@ -213,6 +213,9 @@ export interface HookCraftArgs {
   playbookDigest?: string;
   /** Director (crew) hook idea — honored as intent, crafted for execution. */
   directorIdea?: string;
+  /** Episodic series note (e.g. "episode 4 of 7 of X; yesterday taught Y") —
+   * the cold open welcomes the RETURNING viewer and picks up the thread. */
+  seriesNote?: string;
   /** Spoken language directive (non-English channels). */
   language?: string;
   /** Channel voice is ElevenLabs v3 — the cold open may carry 1-2 performed
@@ -327,6 +330,11 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         registerClause(a),
         a.playbookDigest ?? "",
         a.directorIdea ? `Director's hook intent (honor the idea, craft the execution): "${a.directorIdea}"` : "",
+        a.seriesNote
+          ? `EPISODIC: ${a.seriesNote}. The cold open speaks to a RETURNING viewer — pick up the program's ` +
+            `thread inside the channel's ritual shape (still a real hook for a first-time viewer, never an ` +
+            `inside joke).`
+          : "",
         `FIRST, silently analyze the topic: its core tension, its single most surprising VERIFIED fact, the ` +
           `viewer's pain or fascination, and the emotional stakes. Write every candidate FROM that analysis.`,
         `Write 4 candidates, EACH using a DIFFERENT device from this list (pick the 4 that best fit this topic ` +

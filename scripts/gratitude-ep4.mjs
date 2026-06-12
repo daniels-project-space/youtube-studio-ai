@@ -16,12 +16,16 @@ const V3 = process.env.V3 === "1";
 
 const req = {
   topic:
-    `7 Days of Gratitude — Day 4 of 7: "The People We Never Thanked". This is an EPISODIC series; ` +
-    `Day 4 picks up exactly where Day 3 ended. Day 3's lesson was thanking the OBSTACLES — the ` +
-    `difficulties that quietly shaped us. Day 4 turns from things to PEOPLE: the near ones whose care ` +
-    `became invisible through familiarity, the web of strangers our ordinary morning rests on, and — ` +
-    `carrying Day 3's thread forward — the difficult people who turned out to be teachers. The episode ` +
-    `ends with a SMALL guided meditation and a soft bridge into Day 5.`,
+    `Day 4: "The People We Never Thanked" — gratitude turns from things to PEOPLE: the near ones whose ` +
+    `care became invisible through familiarity, the web of strangers our ordinary morning rests on, and ` +
+    `the difficult people who turned out to be teachers. The episode ends with a SMALL guided meditation.`,
+  series: {
+    name: "7 Days of Gratitude",
+    episode: 4,
+    total: 7,
+    previousSummary: "Day 3 taught thanking the OBSTACLES — the difficulties that quietly shaped us",
+    nextSeed: "Day 5 will turn gratitude inward — learning to thank ourselves",
+  },
   channelName: "Seven Quiet Days",
   persona:
     "a gentle, unhurried guide leading listeners through a 7-day gratitude journey; speaks to one " +
@@ -54,11 +58,26 @@ const req = {
   },
 };
 
-const script = await synthScript(req, (m, x) => console.error(`[script] ${m}`, x ?? ""));
+// RENDER_FROM_FILE=1: skip script generation, TTS the previously saved script
+// (so a good draft isn't re-rolled just to re-render the voice).
 const dir = join(tmpdir(), V3 ? "gratitude_ep4_v3" : "gratitude_ep4");
 await mkdir(dir, { recursive: true });
-await writeFile(join(dir, "day4_script.txt"), script.narrationText, "utf8");
+let script;
+if (process.env.RENDER_FROM_FILE === "1") {
+  const { readFile } = await import("node:fs/promises");
+  const narrationText = await readFile(join(dir, "day4_script.txt"), "utf8");
+  script = { narrationText, sections: [], estDurationSec: 0, hook: "", hookLoop: "", closingLine: "" };
+  console.error(`[script] reusing saved script (${narrationText.split(/\s+/).length} words)`);
+} else {
+  script = await synthScript(req, (m, x) => console.error(`[script] ${m}`, x ?? ""));
+  await writeFile(join(dir, "day4_script.txt"), script.narrationText, "utf8");
+}
 console.error(`[script] ready: ${script.sections.length} sections, ~${script.estDurationSec}s`);
+
+if (process.env.SKIP_TTS === "1") {
+  console.log(JSON.stringify({ scriptTxt: join(dir, "day4_script.txt"), hook: script.hook, loop: script.hookLoop, quote: script.closingLine, sections: script.sections.map((s) => `${s.role}: ${s.heading}`), estSec: script.estDurationSec }));
+  process.exit(0);
+}
 
 // TTS in LARGE paragraph chunks (<=2400 chars — fewer joints = fewer takes),
 // SEQUENTIAL with full ElevenLabs stitching (previous/next text conditioning
