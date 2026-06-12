@@ -308,7 +308,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "<15-word sentences) runs before a judge gates punch/specificity/curiosity/voiceMatch/promise ≥7 " +
       "with one feedback retry — loud failure, never a could-open-any-video line. The latest Gemini Pro " +
       "then writes the narration continuing from it under CRAFT_RULES, in the Show Bible's register.",
-    gates: ["hook lint (≤7s, no filler, concrete)", "punch ≥ 7", "specificity ≥ 7", "curiosity ≥ 7", "voiceMatch ≥ 7", "promise-by-15s ≥ 7", "qa_script"],
+    gates: ["hook lint (≤7s, no filler, concrete)", "punch / specificity / curiosity / voiceMatch / promise-by-15s ≥ 7", "grounded fact-check (search-verified claims, false = rejected)", "loop payoff verified by qa_script", "midpoint re-hook verified"],
     status: "active",
   },
   {
@@ -387,8 +387,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     engine: "Niche-databank title/description/tag generator",
     how:
       "Keyword-first titles built on curiosity-gap formulas (numbers, brackets, pronouns), descriptions " +
-      "with the keyword in the first 25 words, tags drawn from the niche's scraped databank.",
-    gates: ["banned words", "length limits"],
+      "with the keyword in the first 25 words, tags drawn from the niche's scraped databank. Title, " +
+      "thumbnail and cold open are ONE promise unit: the title generator receives the crafted cold open " +
+      "and must state the same promise it confirms.",
+    gates: ["banned words", "length limits", "title-promise contract vs cold open"],
     status: "active",
   },
   {

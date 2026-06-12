@@ -15,7 +15,7 @@
  *   const open = await craftHook({ topic, channelName, niche, ... });
  *   // open.hook (≤7s), open.opening (~20-30s), open.coldOpen (both)
  */
-import { geminiJson, geminiJsonPro, hasGeminiKey } from "@/lib/gemini";
+import { geminiJson, geminiJsonPro, geminiGroundedJson, hasGeminiKey } from "@/lib/gemini";
 import { resolveVoiceDoctrine } from "@/engine/golden";
 
 export function hasHookcraft(): boolean {
@@ -193,7 +193,9 @@ export interface CraftedHook {
   coldOpen: string;
   /** Which HOOK_DEVICES key won. */
   device: string;
-  verdict: HookVerdict & { lint: HookLint };
+  /** The exact promise/open loop this cold open creates — the script MUST pay it off. */
+  loop: string;
+  verdict: HookVerdict & { lint: HookLint; factCheck: "verified" | "skipped" | "unchecked" };
 }
 
 export interface HookCraftArgs {
@@ -217,6 +219,51 @@ export interface HookCraftArgs {
 }
 
 const GATE = 7;
+
+/** Channels that invent in-world facts by design skip grounding. */
+function isFictionRegister(niche?: string, style?: string): boolean {
+  return style === "meditation" || /fiction|sci-fi|speculative|fantasy/i.test(niche ?? "");
+}
+
+/**
+ * Grounded fact-check of a cold open's checkable claims (Google-Search-
+ * grounded Gemini). Specificity pressure invites confident invention — one
+ * wrong number in the first sentence costs the channel its credibility, so a
+ * "false" verdict on any claim rejects the candidate. "unverifiable" passes
+ * with a log (soft claims and paraphrases often won't ground cleanly); a dead
+ * fact-checker passes on the judge gates alone, loudly.
+ */
+async function factCheckColdOpen(
+  c: { hook: string; opening: string },
+  a: HookCraftArgs,
+): Promise<{ ok: boolean; problems: string[]; status: "verified" | "unchecked" }> {
+  try {
+    const v = await geminiGroundedJson<{ claims?: { claim?: string; status?: string; note?: string }[] }>({
+      prompt:
+        `Fact-check this YouTube cold open using web search. Topic: "${a.topic}".\n\n` +
+        `"${c.hook} ${c.opening}"\n\n` +
+        `List every independently checkable factual claim (numbers, dates, dollar amounts, named people/events, ` +
+        `attributed quotes). For each, search and mark status: "verified" (sources confirm it; minor rounding is ` +
+        `fine), "false" (sources contradict it), or "unverifiable" (no sources found either way). note: <=15 words ` +
+        `(the correction when false). Framing, opinion, and clearly-hypothetical lines are NOT claims. ` +
+        `Return STRICT JSON {"claims":[{"claim":string,"status":string,"note":string}]}.`,
+      maxTokens: 3000,
+    });
+    const claims = v.claims ?? [];
+    const problems = claims
+      .filter((x) => x.status === "false")
+      .map((x) => `"${(x.claim ?? "").slice(0, 80)}" is wrong — ${x.note ?? "sources contradict it"}`);
+    const unverifiable = claims.filter((x) => x.status === "unverifiable").length;
+    a.log?.(
+      `hookcraft: fact-check — ${claims.length} claims: ${claims.length - problems.length - unverifiable} verified, ` +
+      `${problems.length} false, ${unverifiable} unverifiable`,
+    );
+    return { ok: problems.length === 0, problems, status: "verified" as const };
+  } catch (e) {
+    a.log?.(`hookcraft: fact-checker unreachable (${e instanceof Error ? e.message : e}) — passing on judge gates alone`);
+    return { ok: true, problems: [], status: "unchecked" as const };
+  }
+}
 
 function passes(v: HookVerdict): boolean {
   return (
@@ -268,7 +315,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
   let fixNote = "";
   let lastIssues: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
-    const gen = await geminiJsonPro<{ candidates?: { device?: string; hook?: string; opening?: string }[] }>({
+    const gen = await geminiJsonPro<{ candidates?: { device?: string; hook?: string; opening?: string; loop?: string }[] }>({
       prompt: [
         `You are the cold-open director. Write the spoken COLD OPEN for a YouTube video.`,
         `VIDEO TOPIC — the open must be SPECIFICALLY about this; a line that could open any video is a failure:`,
@@ -301,7 +348,8 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           `${BANNED_OPENERS.join("; ")}.`,
         `Plain spoken text only — no markdown, brackets, or stage directions.${lang}`,
         fixNote,
-        `Return STRICT JSON {"candidates":[{"device":string,"hook":string,"opening":string}]}.`,
+        `Return STRICT JSON {"candidates":[{"device":string,"hook":string,"opening":string,` +
+          `"loop":string (ONE sentence: the exact promise this cold open makes — what the video must pay off)}]}.`,
       ].filter(Boolean).join("\n\n"),
       maxTokens: 9000,
       temperature: 0.95,
@@ -309,7 +357,12 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
     });
 
     const candidates = (gen.candidates ?? [])
-      .map((c) => ({ device: String(c.device ?? "unknown"), hook: String(c.hook ?? "").trim(), opening: String(c.opening ?? "").trim() }))
+      .map((c) => ({
+        device: String(c.device ?? "unknown"),
+        hook: String(c.hook ?? "").trim(),
+        opening: String(c.opening ?? "").trim(),
+        loop: String(c.loop ?? "").trim(),
+      }))
       .filter((c) => c.hook && c.opening)
       .map((c) => ({ ...c, lint: lintHook(c.hook, c.opening, { skipConcreteness }) }));
     const survivors = candidates.filter((c) => c.lint.pass);
@@ -348,17 +401,40 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         a.log?.(`hookcraft: judge unreachable (${e instanceof Error ? e.message : e}) — lint-only pass`);
       }
 
-      // Prefer the judge's pick if it gates; else any gating candidate.
+      // Prefer the judge's pick if it gates; else any gating candidate. The
+      // judge-gated pick must then survive the grounded fact-check — a false
+      // claim rejects the candidate and the next gating one gets its turn.
+      const fiction = isFictionRegister(a.niche, a.style);
       const order = [best, ...survivors.map((_, i) => i).filter((i) => i !== best)];
+      const factProblems: string[] = [];
       for (const i of order) {
         const v = verdicts[i] ?? {};
-        if (passes(v)) {
-          const c = survivors[i];
-          a.log?.(`hookcraft: "${c.device}" wins (punch ${v.punch ?? "?"}, specificity ${v.specificity ?? "?"}, curiosity ${v.curiosity ?? "?"}, promise ${v.promise ?? "?"})`);
-          return { hook: c.hook, opening: c.opening, coldOpen: `${c.hook}\n\n${c.opening}`, device: c.device, verdict: { ...v, lint: c.lint } };
+        if (!passes(v)) continue;
+        const c = survivors[i];
+        let factCheck: "verified" | "skipped" | "unchecked" = "skipped";
+        if (!fiction) {
+          const fc = await factCheckColdOpen(c, a);
+          if (!fc.ok) {
+            factProblems.push(...fc.problems);
+            a.log?.(`hookcraft: "${c.device}" rejected by fact-check (${fc.problems[0] ?? ""})`);
+            continue;
+          }
+          factCheck = fc.status;
         }
+        a.log?.(
+          `hookcraft: "${c.device}" wins (punch ${v.punch ?? "?"}, specificity ${v.specificity ?? "?"}, ` +
+          `curiosity ${v.curiosity ?? "?"}, promise ${v.promise ?? "?"}, facts ${factCheck})`,
+        );
+        return {
+          hook: c.hook,
+          opening: c.opening,
+          coldOpen: `${c.hook}\n\n${c.opening}`,
+          device: c.device,
+          loop: c.loop || `pay off the promise of: ${c.hook}`,
+          verdict: { ...v, lint: c.lint, factCheck },
+        };
       }
-      lastIssues = verdicts.map((v) => v.note ?? "").filter(Boolean);
+      lastIssues = [...factProblems, ...verdicts.map((v) => v.note ?? "").filter(Boolean)];
     }
 
     fixNote =
