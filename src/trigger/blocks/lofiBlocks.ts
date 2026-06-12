@@ -80,6 +80,7 @@ import {
   type SceneSpec,
   type SceneLibraryEntry,
 } from "@/engine/prompt/scenePlanner";
+import { buildChapters } from "@/lib/metacraft";
 
 /* ----------------------------- helpers --------------------------------- */
 
@@ -1036,21 +1037,15 @@ export const uploadDraft: Block = {
     let description = str(ctx, "description");
     const tags = (ctx.store["tags"] as string[]) ?? [];
 
-    // AUTO-CHAPTERS: the chapterPlan (narration_tts) knows exactly when each
-    // section card lands — write the timestamped chapter list into the
-    // description (YouTube indexes these as key moments). Skipped when the
-    // description already carries timestamps or there are <2 chapters.
-    const plan = (ctx.store["chapterPlan"] as { kind: string; durSec: number; heading?: string }[] | undefined) ?? [];
-    if (!/^\d{1,2}:\d{2}\s/m.test(description) && plan.filter((p) => p.kind === "card").length >= 2) {
-      const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
-      let t = 0;
-      const lines = ["0:00 Intro"];
-      for (const p of plan) {
-        if (p.kind === "card" && p.heading) lines.push(`${fmt(t)} ${p.heading}`);
-        t += p.durSec;
-      }
-      description = `${description}\n\nChapters:\n${lines.join("\n")}`;
-      ctx.log(`upload_draft: appended ${lines.length} chapters to the description`);
+    // AUTO-CHAPTERS (metacraft.buildChapters): the chapterPlan knows exactly
+    // when each section card lands — write the timestamped list into the
+    // description (YouTube key-moments indexing). Skipped when the description
+    // already carries timestamps or there are <2 chapters.
+    const plan = ctx.store["chapterPlan"] as { kind: string; durSec: number; heading?: string }[] | undefined;
+    const chapters = buildChapters(plan);
+    if (chapters && !/^\d{1,2}:\d{2}\s/m.test(description)) {
+      description = `${description}\n\nChapters:\n${chapters}`;
+      ctx.log(`upload_draft: appended ${chapters.split("\n").length} chapters to the description`);
     }
 
     // Publish mode (per-channel pipeline param; default "draft" = private, human

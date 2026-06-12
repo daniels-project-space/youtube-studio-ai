@@ -18,8 +18,18 @@
  * constructions (a short established format prefix like "Mission log:" is
  * fine); every number and name grounded in the fact-checked script.
  *
- * Deps: GEMINI_API_KEY (vault "gemini"); YOUTUBE_DATA_API_KEY (vault
- * "youtube") unlocks live competitor research when the niche databank is empty.
+ * Fully standalone: identity in → upload package out, importable by any
+ * surface (channels, shorts, external tools).
+ *
+ *   import { craftMetadata, buildChapters, hasMetacraft } from "@/lib/metacraft";
+ *   const meta = await craftMetadata({ topic, channelName, niche, coldOpen,
+ *     hookLoop, quote, competitorTitles, log });
+ *   // meta.title · meta.description · meta.tags · meta.titleAlternate (CTR
+ *   // swap) · meta.pinnedComment · meta.frame/clickScore/suggests/feed
+ *
+ * Deps: GEMINI_API_KEY (vault "gemini"); live competitor research rides
+ * youtubeData.ts (API key OR the vault's OAuth refresh token) and degrades
+ * loudly when the niche databank already supplies the feed.
  */
 import { geminiJson, geminiJsonPro, hasGeminiKey } from "@/lib/gemini";
 import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/youtubeData";
@@ -108,6 +118,27 @@ function numberVariants(tok: string): string[] {
     v.add(`${small(Math.floor(n / 1000))} thousand${n % 1000 ? ` ${small(n % 1000)}` : ""}`);
   }
   return [...v];
+}
+
+/**
+ * Timestamped chapter list from a narration chapterPlan (YouTube indexes these
+ * as key moments). Returns "" when there are <2 chapters or no plan — callers
+ * append `\n\nChapters:\n${text}` to the description only when non-empty.
+ */
+export function buildChapters(
+  plan: { kind: string; durSec: number; heading?: string }[] | undefined,
+  introLabel = "Intro",
+): string {
+  const cards = (plan ?? []).filter((p) => p.kind === "card" && p.heading);
+  if (cards.length < 2) return "";
+  const fmt = (s: number) => `${Math.floor(s / 60)}:${String(Math.floor(s % 60)).padStart(2, "0")}`;
+  let t = 0;
+  const lines = [`0:00 ${introLabel}`];
+  for (const p of plan ?? []) {
+    if (p.kind === "card" && p.heading) lines.push(`${fmt(t)} ${p.heading}`);
+    t += p.durSec;
+  }
+  return lines.join("\n");
 }
 
 export interface TitleLint {
