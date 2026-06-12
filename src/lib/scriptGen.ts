@@ -1,11 +1,12 @@
 /**
  * Script generation for narrated archetypes (essay / crime / shorts / meditation).
- * Gemini → a structured script (hook + sections + assembled narration text).
- * Pure helper; the `script_gen` block wraps it. Deterministic fallback so the
- * pipeline never hard-fails on a missing key (degrades to a thin script).
+ * The cold open comes FIRST from hookcraft (judge-gated, topic-specific); the
+ * latest Gemini Pro then writes the narration continuing from it. Pure helper;
+ * the `script_gen` block wraps it. Failures are loud — no thin-script fallback.
  */
-import { geminiJson, hasGeminiKey } from "@/lib/gemini";
-import { CRAFT_RULES, HOOK_RULES } from "@/engine/golden";
+import { geminiJson, geminiJsonPro, scriptProModel, hasGeminiKey } from "@/lib/gemini";
+import { CRAFT_RULES } from "@/engine/golden";
+import { craftHook, type CraftedHook } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 
 export interface ScriptSection {
@@ -98,6 +99,16 @@ function voiceTagClause(req: ScriptRequest): string {
 /** Full playbook guidance (hook + assigned device + retention + voice). */
 function playbookFull(req: ScriptRequest): string {
   return req.playbook ? scriptPlaybookDigest(req.playbook, req.openingDeviceIdx ?? 0) : "";
+}
+
+/** The hookcraft cold open is LAW for the script writer — continue, never repeat. */
+function hookMandate(crafted: CraftedHook): string {
+  return (
+    `THE COLD OPEN IS ALREADY WRITTEN (device: ${crafted.device}) and will be SPOKEN before your first ` +
+    `section — do NOT repeat, rephrase, or re-introduce it:\n"${crafted.coldOpen}"\n` +
+    `Your FIRST section must continue seamlessly from where it leaves off, and the script MUST pay off ` +
+    `the loop it opens.`
+  );
 }
 
 /** Slim slice for per-section calls (voice + never — the hook is already set). */
@@ -249,11 +260,12 @@ function styleGuidanceBase(style?: string): string {
  */
 async function synthFullScriptOneShot(
   req: ScriptRequest,
+  crafted: CraftedHook,
   maxSeconds: number,
   wordBudget: number,
   log: Logger,
 ): Promise<Script | null> {
-  const model = process.env.GEMINI_SCRIPT_MODEL || "gemini-2.5-pro";
+  const model = scriptProModel();
   const minWords = Math.round(wordBudget * 0.85);
   // Time-box the one-shot so a slow/overloaded Pro call can't stall script_gen for
   // 15+ min — on timeout we fall back to chunked generation. maxTokens sized to a
@@ -261,7 +273,7 @@ async function synthFullScriptOneShot(
   const ONE_SHOT_TIMEOUT_MS = Number(process.env.SCRIPT_ONESHOT_TIMEOUT_MS ?? 300_000);
   try {
     const o = await Promise.race([
-      geminiJson<{ hook?: string; sections?: { heading?: string; narration?: string }[]; closing_line?: string }>({
+      geminiJson<{ sections?: { heading?: string; narration?: string }[]; closing_line?: string }>({
       model,
       maxTokens: 22000,
       temperature: 0.8,
@@ -270,6 +282,7 @@ async function synthFullScriptOneShot(
         req.channelName ? `Channel: ${req.channelName}.` : "",
         req.persona ? `Channel voice/persona: ${req.persona}` : "",
         req.niche ? `Niche: ${req.niche}.` : "",
+        hookMandate(crafted),
         styleGuidance(req.style, req.language, req.narrative) + dataDiscipline(req.dataRich),
         playbookFull(req),
         voiceTagClause(req),
@@ -280,11 +293,11 @@ async function synthFullScriptOneShot(
           `(about 250-450 words each).`,
         `End with a CONCLUSION section that lands on a single, definitive closing sentence.`,
         `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
-          `Return STRICT JSON {"hook":string,"sections":[{"heading":string,"narration":string}],"closing_line":string}.`,
+          `Return STRICT JSON {"sections":[{"heading":string,"narration":string}],"closing_line":string}.`,
       ].filter(Boolean).join("\n\n"),
       }),
       new Promise<never>((_, rej) => setTimeout(() => rej(new Error(`scriptGen one-shot timed out after ${ONE_SHOT_TIMEOUT_MS}ms`)), ONE_SHOT_TIMEOUT_MS)),
-    ]) as { hook?: string; sections?: { heading?: string; narration?: string }[]; closing_line?: string };
+    ]) as { sections?: { heading?: string; narration?: string }[]; closing_line?: string };
     const sections: ScriptSection[] = (o.sections ?? [])
       .map((s) => ({ heading: typeof s.heading === "string" ? s.heading : "", narration: spoken(req, typeof s.narration === "string" ? s.narration : "") }))
       .filter((s) => s.narration.length > 0);
@@ -293,7 +306,7 @@ async function synthFullScriptOneShot(
       log(`scriptGen one-shot (${model}): ${wordCount}/${wordBudget} words, ${sections.length} sections — under target, falling back to chunked`);
       return null;
     }
-    const hook = spoken(req, typeof o.hook === "string" ? o.hook : "") || sections[0].narration.slice(0, 120);
+    const hook = spoken(req, crafted.coldOpen);
     const closingLine = typeof o.closing_line === "string" ? sanitizeSpoken(o.closing_line).replace(/\s+/g, " ").trim().slice(0, 80) : "";
     const narrationText = assemble(hook, sections);
     log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${estSeconds(narrationText)}s) ✓`);
@@ -311,12 +324,13 @@ async function synthFullScriptOneShot(
  */
 async function synthLongScript(
   req: ScriptRequest,
+  crafted: CraftedHook,
   maxSeconds: number,
   wordBudget: number,
   log: Logger,
 ): Promise<Script> {
   // PRIMARY: one capable-model call writes the whole script reliably.
-  const oneShot = await synthFullScriptOneShot(req, maxSeconds, wordBudget, log);
+  const oneShot = await synthFullScriptOneShot(req, crafted, maxSeconds, wordBudget, log);
   if (oneShot) return oneShot;
 
   const words = (t: string) => t.split(/\s+/).filter(Boolean).length;
@@ -344,23 +358,22 @@ async function synthLongScript(
     }
   };
 
-  // hook + closing_line + first outline
-  let hookRaw = "";
+  // The cold open comes pre-crafted and judge-gated (hookcraft); only the
+  // closing line is generated here. The director's hook intent was already
+  // honored INSIDE hookcraft as the directorIdea.
+  const hookRaw = crafted.coldOpen;
   let closingRaw = "";
   try {
-    const head = await geminiJson<{ hook?: string; closing_line?: string }>({
+    const head = await geminiJson<{ closing_line?: string }>({
       prompt:
-        `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write a curiosity HOOK (1-2 spoken sentences) ` +
-        `and a closing_line (<=10 words). ${HOOK_RULES} ${styleGuidance(req.style, req.language, req.narrative) + dataDiscipline(req.dataRich)}\n${playbookFull(req)}\nReturn STRICT JSON {"hook":string,"closing_line":string}.`,
-      maxTokens: 500,
+        `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write a closing_line ` +
+        `(<=10 words) — a short, powerful sign-off. ${styleGuidance(req.style, req.language, req.narrative)}\n` +
+        `Return STRICT JSON {"closing_line":string}.`,
+      maxTokens: 300,
       temperature: 0.85,
     });
-    hookRaw = typeof head.hook === "string" ? head.hook : "";
     closingRaw = typeof head.closing_line === "string" ? head.closing_line : "";
   } catch { /* fallback below */ }
-  // Director (crew) structure wins: its hook + beat map become the outline so the
-  // script follows the channel's intended arc instead of a generic one.
-  if (req.structure?.hook?.trim()) hookRaw = req.structure.hook.trim();
 
   const targetWords = Math.round(wordBudget * 0.95);
   const beats = req.structure?.beats?.filter((b) => b.name?.trim()) ?? [];
@@ -391,6 +404,7 @@ async function synthLongScript(
     const sectionPrompt = [
       `You are writing ONE section of a long narrated video about "${req.topic}".`,
       `Section: "${s.heading}". Focus: ${s.brief ?? s.heading}.`,
+      sections.length === 0 ? hookMandate(crafted) : "",
       styleGuidance(req.style, req.language, req.narrative) + dataDiscipline(req.dataRich),
       playbookSlim(req),
       voiceTagClause(req),
@@ -406,7 +420,9 @@ async function synthLongScript(
     let added = false;
     for (let attempt = 0; attempt < 3 && !added; attempt++) {
       try {
-        const r = await geminiJson<{ narration?: string }>({ prompt: sectionPrompt, maxTokens: 2600, temperature: 0.82 });
+        // Narration is written by the latest Gemini Pro (best at narration);
+        // the floored budget covers Pro's thinking overhead.
+        const r = await geminiJsonPro<{ narration?: string }>({ prompt: sectionPrompt, maxTokens: 6500, temperature: 0.82, log });
         const narration = spoken(req, typeof r.narration === "string" ? r.narration : "");
         if (narration.length > 0) {
           sections.push({ heading: s.heading, narration });
@@ -427,7 +443,8 @@ async function synthLongScript(
   // a chapter card, so this flows as the spoken ending (no "Chapter N:" separation).
   try {
     const covered = sections.map((s) => s.heading).filter(Boolean).slice(0, 12).join("; ");
-    const c = await geminiJson<{ narration?: string }>({
+    const c = await geminiJsonPro<{ narration?: string }>({
+      log,
       prompt: [
         `Write the CLOSING CONCLUSION (about 180-260 words, 2-3 short paragraphs) for a long narrated video about "${req.topic}".`,
         styleGuidance(req.style, req.language, req.narrative) + dataDiscipline(req.dataRich),
@@ -454,10 +471,8 @@ async function synthLongScript(
     log(`scriptGen long: conclusion failed (${e instanceof Error ? e.message : e})`);
   }
 
-  const outline = { hook: hookRaw, closing_line: closingRaw };
-  const hook = spoken(req, typeof outline.hook === "string" ? outline.hook : "") || sections[0].narration.slice(0, 120);
-  const closingLine =
-    typeof outline.closing_line === "string" ? sanitizeSpoken(outline.closing_line).replace(/\s+/g, " ").trim().slice(0, 80) : "";
+  const hook = spoken(req, hookRaw);
+  const closingLine = sanitizeSpoken(closingRaw).replace(/\s+/g, " ").trim().slice(0, 80);
   const narrationText = assemble(hook, sections);
   log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: estSeconds(narrationText) });
   return { hook, sections, narrationText, estDurationSec: estSeconds(narrationText), closingLine };
@@ -526,17 +541,32 @@ export async function synthScript(
     throw new Error("scriptGen: GEMINI_API_KEY missing — cannot write a real script (no fallback)");
   }
 
+  // THE COLD OPEN COMES FIRST — crafted and judge-gated by hookcraft (lint +
+  // punch/specificity/curiosity/voiceMatch gates, one retry, loud fail). The
+  // director's hook idea is honored INSIDE the craft as intent, never verbatim.
+  const crafted = await craftHook({
+    topic: req.topic,
+    channelName: req.channelName,
+    niche: req.niche,
+    persona: req.persona,
+    narrative: req.narrative,
+    style: req.style,
+    playbookDigest: playbookFull(req) || undefined,
+    directorIdea: req.structure?.hook?.trim() || undefined,
+    language: req.language,
+    log: (m) => log(m),
+  });
+
   // Long-form (>~7 min) needs chunked generation — one call can't write it.
   if (maxSeconds > 420) {
-    return synthLongScript(req, maxSeconds, wordBudget, log);
+    return synthLongScript(req, crafted, maxSeconds, wordBudget, log);
   }
 
-  // Director (crew) structure: respected in SHORT-form too (it previously only
-  // reached the long-form chunked path, so most videos ignored the beat map).
-  const structureClause = req.structure?.hook?.trim() || req.structure?.beats?.length
+  // Director (crew) structure: beats respected in SHORT-form too (the hook
+  // idea already went through hookcraft above).
+  const structureClause = req.structure?.beats?.length
     ? [
         "FOLLOW THIS DIRECTOR'S STRUCTURE:",
-        req.structure?.hook?.trim() ? `Open on this hook idea: "${req.structure.hook.trim()}"` : "",
         ...(req.structure?.beats ?? [])
           .filter((b) => b.name?.trim())
           .map((b, i) => `Beat ${i + 1}: ${b.name.trim()}${b.note?.trim() ? ` — ${b.note.trim()}` : ""}`),
@@ -548,6 +578,7 @@ export async function synthScript(
     req.channelName ? `Channel: ${req.channelName}.` : "",
     req.persona ? `Channel voice/persona: ${req.persona}` : "",
     req.niche ? `Niche: ${req.niche}.` : "",
+    hookMandate(crafted),
     styleGuidance(req.style, req.language, req.narrative) + dataDiscipline(req.dataRich),
     playbookFull(req),
     voiceTagClause(req),
@@ -567,7 +598,6 @@ export async function synthScript(
       "provide closing_line: a short, powerful sign-off (≤ 10 words) to show on that outro card.",
     "Return STRICT JSON only:",
     `{
-  "hook": string (the spoken opening line(s), <= 2 sentences, grabs attention),
   "sections": [ { "heading": string (short label), "narration": string (the spoken words for this section) } ],
   "closing_line": string (<= 10 words, the definitive sign-off for the outro card)
 }`,
@@ -580,17 +610,17 @@ export async function synthScript(
     .filter(Boolean)
     .join("\n\n");
 
-  // geminiJson already retries transient failures; a persistent failure must
-  // FAIL the block (runner retries) — never ship a one-line placeholder script.
-  const raw = (await geminiJson({ prompt, maxTokens: 4000, temperature: 0.8 })) as {
-    hook?: unknown;
+  // Latest Gemini Pro writes the narration (best at narration); the wrapper
+  // retries transients and floors the budget for Pro thinking. A persistent
+  // failure must FAIL the block — never ship a one-line placeholder script.
+  const raw = (await geminiJsonPro({ prompt, maxTokens: 8000, temperature: 0.8, log: (m) => log(m) })) as {
     sections?: unknown;
   };
 
   const rawClosing = (raw as { closing_line?: unknown }).closing_line;
   const closingLine =
     typeof rawClosing === "string" ? sanitizeSpoken(rawClosing).replace(/\s+/g, " ").trim().slice(0, 80) : "";
-  const hook = typeof raw.hook === "string" ? spoken(req, raw.hook) : "";
+  const hook = spoken(req, crafted.coldOpen);
   const sections: ScriptSection[] = Array.isArray(raw.sections)
     ? raw.sections
         .map((s) => {
@@ -608,7 +638,7 @@ export async function synthScript(
   }
   const narrationText = assemble(hook, sections);
   const script: Script = {
-    hook: hook || sections[0].narration.slice(0, 120),
+    hook,
     sections,
     narrationText,
     estDurationSec: estSeconds(narrationText, gapSec),
