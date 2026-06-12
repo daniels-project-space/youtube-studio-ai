@@ -8,11 +8,11 @@
  *   metadata_optimized  → base metadata + title optimised against the databank
  *                         + competitor titles + power words, plus an
  *                         overlap-weighted view estimate. Replaces `metadata`.
- *   thumbnail_gen       → claude_flux thumbnail (Claude concept → Flux base →
- *                         ffmpeg text overlay → Gemini QA), degrading to the
- *                         legacy title_card path. Produces `thumbnailKey`.
- *
- * All external calls are guarded: missing keys log + degrade, never crash.
+ *   thumbnail_gen       → BANANA thumbnail (playbook or DNA-direct brief →
+ *                         one-pass Nano Banana Pro → vision judge + retry),
+ *                         real-scene overlay for keyframe channels, title_card
+ *                         only as explicit operator choice. Produces
+ *                         `thumbnailKey`; failure is LOUD (heal loop retries).
  */
 import type { Block, StageContext } from "@/engine/types";
 import { ConvexHttpClient } from "convex/browser";
@@ -20,21 +20,13 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { makeRunTempDir, downloadTo, readBytes, writeBytes } from "@/lib/files";
 import { putObject, getObjectBytes } from "@/lib/storage";
-import { titleCard, thumbnailText, guardedThumbnailDesign, planSubjectLayout, imageToJpeg, solidImage } from "@/lib/ffmpeg";
+import { titleCard, thumbnailText, imageToJpeg, solidImage } from "@/lib/ffmpeg";
 import { generateFluxImage } from "@/lib/replicate";
 import { hasBanana } from "@/lib/banana";
 import { generateKeyframe } from "@/lib/higgsfield";
-import {
-  resolveThumbnailStyle,
-  styleFromDNA,
-  artDirectorBrief,
-  buildBasePrompt,
-  shortTitleFallback,
-  TEXT_FREE_SUFFIX,
-} from "@/lib/thumbnailFormula";
-import { generateIdeogramThumbnail, hasIdeogramKey } from "@/lib/ideogram";
+import { resolveThumbnailStyle, styleFromDNA, shortTitleFallback } from "@/lib/thumbnailFormula";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
-import { geminiVision, geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { agentJson } from "@/agents/mastra";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { loadPerformanceContext } from "@/lib/performance";
@@ -162,7 +154,7 @@ export const competitorResearch: Block = {
       competitors: competitors ?? [],
       thumbnailIdentity: channel?.identity?.thumbnailIdentity ?? null,
       persona: channel?.identity?.persona ?? "",
-      thumbnailer: (channel as { thumbnailer?: string } | null)?.thumbnailer ?? "claude_flux",
+      thumbnailer: (channel as { thumbnailer?: string } | null)?.thumbnailer ?? "banana",
     };
   },
 };
@@ -603,7 +595,7 @@ export const thumbnailGen: Block = {
     const thumbnailer =
       (ctx.store["thumbnailer"] as string | undefined) ??
       (ctx.params["thumbnailer"] as string | undefined) ??
-      "claude_flux";
+      "banana";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
 
     // CHANNEL GROUNDING that previously never reached generation:
@@ -702,7 +694,7 @@ export const thumbnailGen: Block = {
 
     // Resolve the channel's locked thumbnail STYLE (brand consistency). Source:
     // explicit param → channel.identity.thumbnailStyle → archetype template
-    // letter (A/B/C/D/E) → generic default. Used by the claude_flux path below.
+    // letter (A/B/C/D/E) → generic default. Used by the real-scene path below.
     const channelDoc = await loadChannel(ctx);
     const explicitStyleKey =
       (ctx.params["thumbnailStyle"] as string | undefined) ??
@@ -828,7 +820,7 @@ export const thumbnailGen: Block = {
     // one feedback retry; failure is LOUD (block heal retries - the legacy
     // ideogram/claude_flux/brush_swash machine is gone).
     const { buildThumbBrief, bananaThumbnail } = await import("@/lib/banana");
-    let bananaLines;
+    let bananaLines: { text: string; payoff: boolean }[] = [];
     try {
       const c = await claudeJson<{ lines?: { text?: string; payoff?: boolean }[] }>({
         maxTokens: 300,
@@ -843,7 +835,7 @@ export const thumbnailGen: Block = {
         .filter((l) => l.text && l.text.trim())
         .map((l) => ({ text: String(l.text).trim(), payoff: l.payoff === true }));
     } catch { /* hook fallback below */ }
-    if (!bananaLines?.length) {
+    if (!bananaLines.length) {
       const hook = title.split(/[\s:—-]+/).filter((w) => w.length > 2).slice(0, 2);
       bananaLines = [{ text: hook[0] ?? "WATCH", payoff: false }, { text: hook[1] ?? "THIS", payoff: true }];
     }

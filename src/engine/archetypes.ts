@@ -110,7 +110,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       "Researched script → narration → footage + b-roll, narration-synced cuts.",
     template: "A",
     defaultVoiceId: "sleepless_historian",
-    thumbnailTemplate: "claude_flux",
+    thumbnailTemplate: "banana",
     pipeline: NARRATED,
   },
   "crime-narrative": {
@@ -120,7 +120,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
       "Hook-forward narrated story with tension pacing and footage cuts.",
     template: "B",
     defaultVoiceId: "psychological",
-    thumbnailTemplate: "claude_flux",
+    thumbnailTemplate: "banana",
     pipeline: [
       { block: "competitor_research" },
       { block: "topic_select", params: { policy: "no_repeat" } },
@@ -135,7 +135,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
     description: "Short hook-driven vertical video with fast cuts + captions.",
     template: "D",
     defaultVoiceId: "sleepless_historian",
-    thumbnailTemplate: "claude_flux",
+    thumbnailTemplate: "banana",
     pipeline: [
       { block: "topic_select" },
       { block: "script_gen", params: { style: "shorts", maxSeconds: 50 } },
@@ -170,7 +170,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
     description: "Long calm narration over slow ambient visuals + music.",
     template: "E",
     defaultVoiceId: "psychological",
-    thumbnailTemplate: "claude_flux",
+    thumbnailTemplate: "banana",
     pipeline: [
       { block: "topic_select" },
       { block: "script_gen", params: { style: "meditation" } },

@@ -40,7 +40,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     available: true,
     narrated: true,
     requiresKeys: ["fish-audio", "pexels", "mureka", "fal"],
-    defaultThumbnailStyle: "brush_swash",
+    defaultThumbnailStyle: "banana",
   },
   music_loop: {
     key: "music_loop",
@@ -52,9 +52,9 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     available: true,
     narrated: false,
     requiresKeys: ["fal", "suno", "replicate"],
-    // claude_flux unlocks the real-scene thumbnail path (the run's own keyframe
-    // + styled title) — title_card was a plain drawtext frame-grab.
-    defaultThumbnailStyle: "claude_flux",
+    // Any non-title_card engine unlocks the real-scene thumbnail path (the
+    // run's own keyframe + styled title) — title_card is a plain drawtext card.
+    defaultThumbnailStyle: "banana",
   },
   sleep: {
     key: "sleep",
@@ -76,7 +76,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     available: true,
     narrated: true,
     requiresKeys: ["fish-audio", "pexels"],
-    defaultThumbnailStyle: "claude_flux",
+    defaultThumbnailStyle: "banana",
   },
   whiteboard: {
     key: "whiteboard",
@@ -88,7 +88,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     available: true,
     narrated: true,
     requiresKeys: ["fish-audio", "fal", "gemini"],
-    defaultThumbnailStyle: "brush_swash",
+    defaultThumbnailStyle: "banana",
   },
   cinematic: {
     key: "cinematic",
@@ -100,7 +100,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     available: false,
     narrated: true,
     requiresKeys: ["fish-audio", "fal", "mureka"],
-    defaultThumbnailStyle: "claude_flux",
+    defaultThumbnailStyle: "banana",
   },
 };
 

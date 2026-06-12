@@ -27,6 +27,7 @@
   --color-accent-soft: rgba(212, 165, 116, 0.14);
   --color-secondary: #7dd3c0; /* teal */
   --color-secondary-soft: rgba(125, 211, 192, 0.14);
+  --color-gold: #d4a017; /* golden-module certification */
 
   /* Status */
   --color-ok: #22c55e;
@@ -176,6 +177,26 @@
     animation: studio-shimmer 1.4s ease infinite;
     border-radius: 8px;
   }
+
+  /* A certified GOLDEN module — gold border + a slow breathing gold glow. */
+  .golden-glow {
+    border-color: rgba(212, 160, 23, 0.5);
+    animation: golden-glow 2.8s ease-in-out infinite;
+  }
+
+  .golden-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 0.3rem;
+    padding: 0.2rem 0.6rem;
+    border-radius: 999px;
+    font-size: 0.68rem;
+    font-weight: 700;
+    letter-spacing: 0.08em;
+    color: #0a0a0b;
+    background: linear-gradient(135deg, #f1c34d, #d4a017);
+    box-shadow: 0 0 12px rgba(212, 160, 23, 0.45);
+  }
 }
 
 @keyframes studio-pulse {
@@ -196,5 +217,21 @@
   }
   100% {
     background-position: 0% 50%;
+  }
+}
+
+@keyframes golden-glow {
+  0%,
+  100% {
+    box-shadow:
+      0 0 14px rgba(212, 160, 23, 0.16),
+      0 0 40px rgba(212, 160, 23, 0.08),
+      var(--shadow-card);
+  }
+  50% {
+    box-shadow:
+      0 0 26px rgba(212, 160, 23, 0.38),
+      0 0 70px rgba(212, 160, 23, 0.16),
+      var(--shadow-card);
   }
 }

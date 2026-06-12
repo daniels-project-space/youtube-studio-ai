@@ -30,7 +30,6 @@ const SERVICES = [
   "google", // GOOGLE_* (places / app credentials)
   "langfuse", // LANGFUSE_PUBLIC_KEY/SECRET_KEY (Mastra agent tracing; optional)
   "assemblyai", // ASSEMBLYAI_API_KEY (captions SRT; optional — chapters work without)
-  "ideogram", // IDEOGRAM_API_KEY (preferred text-first thumbnailer; optional)
   "ayrshare", // AYRSHARE_API_KEY (Phase 8 cross-post; optional)
 ];
 

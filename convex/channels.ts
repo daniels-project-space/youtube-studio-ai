@@ -42,10 +42,13 @@ const identityValidator = v.object({
   ),
 });
 
+// "banana" = the engine (src/lib/banana.ts); "title_card" = explicit operator
+// choice. claude_flux/ideogram are retired engines kept for existing rows.
 const thumbnailerValidator = v.union(
+  v.literal("banana"),
+  v.literal("title_card"),
   v.literal("claude_flux"),
   v.literal("ideogram"),
-  v.literal("title_card"),
 );
 
 const pipelineValidator = v.array(
