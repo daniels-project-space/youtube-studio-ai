@@ -16,6 +16,7 @@
  *   // open.hook (≤7s), open.opening (~20-30s), open.coldOpen (both)
  */
 import { geminiJson, geminiJsonPro, hasGeminiKey } from "@/lib/gemini";
+import { resolveVoiceDoctrine } from "@/engine/golden";
 
 export function hasHookcraft(): boolean {
   return hasGeminiKey();
@@ -230,17 +231,22 @@ function passes(v: HookVerdict): boolean {
 
 function registerClause(a: HookCraftArgs): string {
   const reg = a.narrative && (a.narrative.scriptStyle || a.narrative.hookStyle || a.narrative.delivery)
-    ? `LOCKED CHANNEL REGISTER (write inside it): ${[
+    ? `LOCKED CHANNEL REGISTER (write inside it — it outranks the archetype below): ${[
         a.narrative.scriptStyle ? `style: ${a.narrative.scriptStyle}` : "",
         a.narrative.hookStyle ? `hook style: ${a.narrative.hookStyle}` : "",
         a.narrative.delivery ? `delivery: ${a.narrative.delivery}` : "",
       ].filter(Boolean).join(" | ")}`
     : "";
+  const doctrine = resolveVoiceDoctrine(a.niche);
   return [
     a.channelName ? `Channel: "${a.channelName}".` : "",
     a.niche ? `Niche: ${a.niche}.` : "",
     a.persona ? `Persona: ${a.persona}` : "",
     reg,
+    doctrine
+      ? `VOICE ARCHETYPE "${doctrine.voice}" — how this kind of channel must SOUND: ${doctrine.tone}\n` +
+        `Cold-open doctrine for this voice: ${doctrine.hookStyle}`
+      : "",
   ].filter(Boolean).join("\n");
 }
 
@@ -324,7 +330,9 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
             `- punch: would a scroller STOP inside the first sentence?`,
             `- specificity: concrete THIS-topic detail vs generic filler that could open any video?`,
             `- curiosity: does it open a loop that DEMANDS the payoff?`,
-            `- voiceMatch: does it fit the channel register?`,
+            `- voiceMatch: does it fit the channel register AND its voice archetype (a history channel ` +
+              `teaches while it narrates; a finance channel sounds like a calm teacher-advisor; a ` +
+              `chaos/drama channel fires the loudest verified fact immediately)?`,
             `- promise: by ~15 seconds (the first ~45 spoken words), does the viewer know EXACTLY what they ` +
               `will get and why it is worth the runtime${a.title ? ", and that it honors the clicked title" : ""}?`,
             `- honest (boolean): no overclaim, and no fabricated first-person research ("we analyzed...")?`,
