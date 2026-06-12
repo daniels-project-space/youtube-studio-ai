@@ -233,6 +233,49 @@
       0 0 24px rgba(212, 160, 23, 0.3);
     z-index: 40 !important;
   }
+
+  /* Typographic proof cards (script cold opens) — same fan geometry as the
+     thumbnail images, but the artwork IS the writing. */
+  .golden-fan-card {
+    display: flex;
+    flex-direction: column;
+    gap: 0.3rem;
+    padding: 0.6rem 0.7rem;
+    background:
+      linear-gradient(160deg, rgba(212, 160, 23, 0.1), rgba(24, 24, 27, 0.96) 55%);
+    overflow: hidden;
+    aspect-ratio: 16 / 9;
+  }
+
+  .golden-fan-card-device {
+    font-family: var(--font-mono);
+    font-size: 0.56rem;
+    letter-spacing: 0.1em;
+    text-transform: uppercase;
+    color: var(--color-gold);
+  }
+
+  .golden-fan-card-line {
+    font-family: var(--font-display);
+    font-size: 0.66rem;
+    line-height: 1.35;
+    color: var(--color-fg);
+    display: -webkit-box;
+    -webkit-line-clamp: 4;
+    -webkit-box-orient: vertical;
+    overflow: hidden;
+  }
+
+  .golden-fan-card-meta {
+    margin-top: auto;
+    font-family: var(--font-mono);
+    font-size: 0.52rem;
+    letter-spacing: 0.05em;
+    color: var(--color-faint);
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
 }
 
 @keyframes studio-pulse {

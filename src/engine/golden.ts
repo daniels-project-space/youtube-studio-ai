@@ -335,7 +335,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "image → integration into the viewer's day → a landing with a quotable takeaway. Episodic programs " +
       "get formal series support (phase-aware curriculum, previous-episode thread, next-episode seed).",
     gates: ["hook lint (≤7s, no filler, concrete)", "punch / specificity / curiosity / voiceMatch / promise-by-15s ≥ 7", "grounded fact-check (search-verified claims, false = rejected)", "loop payoff verified by qa_script", "midpoint re-hook verified"],
-    status: "active",
+    status: "golden",
   },
   {
     key: "guard",

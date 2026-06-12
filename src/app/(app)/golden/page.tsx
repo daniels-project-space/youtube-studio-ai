@@ -1,4 +1,4 @@
-import type { CSSProperties } from "react";
+import type { CSSProperties, ReactNode } from "react";
 import { GOLDEN_MODULES, GOLDEN_SPINE, type GoldenModule } from "@/engine/golden";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
 
@@ -16,6 +16,49 @@ const PROOFS: { src: string; alt: string }[] = [
   { src: "hannibal.jpg", alt: "Empires at War — Hannibal" },
   { src: "scandal.jpg", alt: "Spotlight Rot — tabloid collage" },
   { src: "rich.jpg", alt: "Gilded Lies — evil." },
+];
+
+/**
+ * Real scriptcraft output — judge-gated, fact-checked cold opens and quotes
+ * from the certification runs, fanned on the Script + Hook golden card.
+ */
+const SCRIPT_PROOFS: { device: string; channel: string; line: string; note: string }[] = [
+  {
+    device: "myth_snap",
+    channel: "Empires at War",
+    line: "The Roman Empire did not fall in a fiery, apocalyptic battle. It bled out over two hundred years of self-inflicted wounds.",
+    note: "facts search-verified",
+  },
+  {
+    device: "countdown",
+    channel: "Empires at War",
+    line: "It is fifteen days until the winter snows seal the Alpine passes forever. Hannibal Barca has thirty-seven elephants, forty-thousand men, and no supply lines.",
+    note: "specificity 10 · curiosity 10",
+  },
+  {
+    device: "cold_open_scene",
+    channel: "The Drawn Past",
+    line: "Frau Troffea steps into a narrow Strasbourg street and begins to twitch. She will not stop for six days.",
+    note: "7/7 claims verified",
+  },
+  {
+    device: "receipt",
+    channel: "Spotlight Rot",
+    line: "One paparazzi photo of a shaved head in 2007 generated five hundred thousand dollars in a single hour.",
+    note: "chaos-commentator voice",
+  },
+  {
+    device: "cold_open_scene",
+    channel: "Gilded Lies",
+    line: "In July 2019, workers at the Louvre quietly unbolted the Sackler name from the walls.",
+    note: "judged 10 · 10 · 10 · 10",
+  },
+  {
+    device: "the quote",
+    channel: "Seven Quiet Days",
+    line: "“Familiarity breeds invisibility. Today, give someone the gift of being seen.”",
+    note: "episode takeaway artifact",
+  },
 ];
 
 /**
@@ -149,7 +192,7 @@ function ModuleCard({
         ))}
       </div>
 
-      {hero && (
+      {hero && m.key === "thumbnail" && (
         <>
           <div className="golden-fan">
             {PROOFS.map((p, i) => {
@@ -174,20 +217,57 @@ function ModuleCard({
               );
             })}
           </div>
-          <p
-            style={{
-              margin: "0.5rem 0 0",
-              textAlign: "center",
-              fontFamily: "var(--font-mono)",
-              fontSize: "0.72rem",
-              letterSpacing: "0.05em",
-              color: "var(--color-faint)",
-            }}
-          >
-            real engine output — eight channels, every render a first-try judge-gated SHIP
-          </p>
+          <FanCaption>real engine output — eight channels, every render a first-try judge-gated SHIP</FanCaption>
+        </>
+      )}
+
+      {hero && m.key === "script" && (
+        <>
+          <div className="golden-fan">
+            {SCRIPT_PROOFS.map((p, i) => {
+              const off = i - (SCRIPT_PROOFS.length - 1) / 2;
+              return (
+                <div
+                  key={`${p.channel}-${i}`}
+                  className="golden-fan-item golden-fan-card"
+                  title={`${p.channel} — ${p.note}`}
+                  style={
+                    {
+                      "--rot": `${off * 4}deg`,
+                      "--ty": `${Math.round(off * off * 3.2)}px`,
+                      zIndex: i + 1,
+                    } as CSSProperties
+                  }
+                >
+                  <span className="golden-fan-card-device">{p.device}</span>
+                  <span className="golden-fan-card-line">{p.line}</span>
+                  <span className="golden-fan-card-meta">
+                    {p.channel} · {p.note}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <FanCaption>real engine output — judge-gated cold opens, claims search-verified before they ship</FanCaption>
         </>
       )}
     </article>
+  );
+}
+
+function FanCaption({ children }: { children: ReactNode }) {
+  return (
+    <p
+      style={{
+        margin: "0.5rem 0 0",
+        textAlign: "center",
+        fontFamily: "var(--font-mono)",
+        fontSize: "0.72rem",
+        letterSpacing: "0.05em",
+        color: "var(--color-faint)",
+      }}
+    >
+      {children}
+    </p>
   );
 }
