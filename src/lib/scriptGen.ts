@@ -5,7 +5,7 @@
  * the `script_gen` block wraps it. Failures are loud — no thin-script fallback.
  */
 import { geminiJson, geminiJsonPro, scriptProModel, hasGeminiKey } from "@/lib/gemini";
-import { CRAFT_RULES } from "@/engine/golden";
+import { CRAFT_RULES, resolveVoiceDoctrine } from "@/engine/golden";
 import { craftHook, type CraftedHook } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 
@@ -194,11 +194,8 @@ function langDirective(language?: string): string {
   return ` IMPORTANT: Write ALL spoken narration text in ${name}. Names/quotes keep their original form but the surrounding narration is in ${name}.`;
 }
 
-function styleGuidance(
-  style?: string,
-  language?: string,
-  narrative?: ScriptRequest["narrative"],
-): string {
+function styleGuidance(req: ScriptRequest): string {
+  const { style, language, narrative, niche } = req;
   // The channel's OWN narrative DNA outranks the generic per-archetype tone —
   // a finance documentary channel must not inherit the stoic-essay register.
   const dnaClause = narrative && (narrative.scriptStyle || narrative.hookStyle || narrative.delivery)
@@ -210,7 +207,14 @@ function styleGuidance(
         narrative.pacing ? `pacing: ${narrative.pacing}` : "",
       ].filter(Boolean).join(" | ") + " "
     : "";
-  return dnaClause + styleGuidanceBase(style) + langDirective(language);
+  // The niche's voice ARCHETYPE — how this KIND of channel sounds (history =
+  // narrator who teaches, finance = calm teacher-advisor, chaos = loudest
+  // verified fact first). Sits beneath the DNA register, above the base tone.
+  const doctrine = resolveVoiceDoctrine(niche);
+  const doctrineClause = doctrine
+    ? `VOICE ARCHETYPE "${doctrine.voice}" — the whole narration must sound like this: ${doctrine.tone} `
+    : "";
+  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language);
 }
 
 /**
@@ -283,7 +287,7 @@ async function synthFullScriptOneShot(
         req.persona ? `Channel voice/persona: ${req.persona}` : "",
         req.niche ? `Niche: ${req.niche}.` : "",
         hookMandate(crafted),
-        styleGuidance(req.style, req.language, req.narrative) + dataDiscipline(req.dataRich),
+        styleGuidance(req) + dataDiscipline(req.dataRich),
         playbookFull(req),
         voiceTagClause(req),
         CRAFT_RULES,
@@ -344,7 +348,7 @@ async function synthLongScript(
           `Plan ${n} DISTINCT, non-repeating sections for a long narrated video about "${req.topic}".`,
           req.persona ? `Persona: ${req.persona}` : "",
           req.niche ? `Niche: ${req.niche}` : "",
-          styleGuidance(req.style, req.language, req.narrative) + dataDiscipline(req.dataRich),
+          styleGuidance(req) + dataDiscipline(req.dataRich),
           exclude.length ? `Already covered (do NOT repeat): ${exclude.join("; ")}` : "",
           `Each: a heading + a 1-2 sentence brief. Return STRICT JSON {"sections":[{"heading":string,"brief":string}]}.`,
         ].filter(Boolean).join("\n\n"),
@@ -367,7 +371,7 @@ async function synthLongScript(
     const head = await geminiJson<{ closing_line?: string }>({
       prompt:
         `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write a closing_line ` +
-        `(<=10 words) — a short, powerful sign-off. ${styleGuidance(req.style, req.language, req.narrative)}\n` +
+        `(<=10 words) — a short, powerful sign-off. ${styleGuidance(req)}\n` +
         `Return STRICT JSON {"closing_line":string}.`,
       maxTokens: 300,
       temperature: 0.85,
@@ -405,7 +409,7 @@ async function synthLongScript(
       `You are writing ONE section of a long narrated video about "${req.topic}".`,
       `Section: "${s.heading}". Focus: ${s.brief ?? s.heading}.`,
       sections.length === 0 ? hookMandate(crafted) : "",
-      styleGuidance(req.style, req.language, req.narrative) + dataDiscipline(req.dataRich),
+      styleGuidance(req) + dataDiscipline(req.dataRich),
       playbookSlim(req),
       voiceTagClause(req),
       CRAFT_RULES,
@@ -447,7 +451,7 @@ async function synthLongScript(
       log,
       prompt: [
         `Write the CLOSING CONCLUSION (about 180-260 words, 2-3 short paragraphs) for a long narrated video about "${req.topic}".`,
-        styleGuidance(req.style, req.language, req.narrative) + dataDiscipline(req.dataRich),
+        styleGuidance(req) + dataDiscipline(req.dataRich),
         `This is the emotional landing of the whole video — it must feel deliberate, rounded, and SATISFYING, never like it just stops. Build it as a clear arc:`,
         `1) A soft signal that we are arriving at the end (a reflective turn, NOT the words "in conclusion" / "to sum up" / "in summary").`,
         covered
@@ -579,7 +583,7 @@ export async function synthScript(
     req.persona ? `Channel voice/persona: ${req.persona}` : "",
     req.niche ? `Niche: ${req.niche}.` : "",
     hookMandate(crafted),
-    styleGuidance(req.style, req.language, req.narrative) + dataDiscipline(req.dataRich),
+    styleGuidance(req) + dataDiscipline(req.dataRich),
     playbookFull(req),
     voiceTagClause(req),
     structureClause,

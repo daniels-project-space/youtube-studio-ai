@@ -53,6 +53,185 @@ export const GOLDEN_SPINE: GoldenStage[] = [
 ];
 
 /**
+ * VOICE_DOCTRINES — per-niche voice ARCHETYPES: how a channel of this kind
+ * should SOUND, beyond what it says. A history channel narrates like a
+ * storyteller but teaches like a great teacher; a finance channel is a calm
+ * teacher-advisor; a social-chaos channel fires the loudest verified fact
+ * first. Consumed by hookcraft (cold-open device + register) and scriptGen
+ * (whole-narration tone). The channel's own Style-DNA narrative register
+ * still OUTRANKS this — the doctrine is the archetype baseline beneath it.
+ */
+export interface VoiceDoctrine {
+  /** Archetype label, e.g. "narrator-teacher". */
+  voice: string;
+  /** How the narration should sound — fed to every script prompt. */
+  tone: string;
+  /** Cold-open doctrine — fed to hookcraft's device selection. */
+  hookStyle: string;
+}
+
+/** Ordered matchers — earlier entries win (e.g. "sleep" → guide, not health). */
+const DOCTRINE_MATCHERS: { keywords: string[]; doctrine: VoiceDoctrine }[] = [
+  {
+    keywords: ["meditation", "sleep", "ambient", "lofi", "calm", "relax"],
+    doctrine: {
+      voice: "gentle-guide",
+      tone:
+        "A soft, unhurried guide speaking to one person: long gentle sentences, second person, generous " +
+        "pauses, zero urgency — the voice itself is the product.",
+      hookStyle: "No shock devices; a quiet you-stakes or serene scene invitation; the promise is the feeling.",
+    },
+  },
+  {
+    keywords: ["scandal", "celebrity", "gossip", "drama", "meltdown", "social media", "internet", "chaos", "commentary"],
+    doctrine: {
+      voice: "chaos-commentator",
+      tone:
+        "Outrageous but receipts-true: short jabbing sentences, incredulous energy, says the quiet part out " +
+        "loud — yet every claim stays sourced and verifiable; punch at the machine and the powerful, never " +
+        "at victims; irony allowed, invention never.",
+      hookStyle:
+        "Fire the single LOUDEST verified fact in the first sentence — no warmup, no context first. " +
+        "Receipt and shock devices, fast pace, biggest number or most absurd detail up front.",
+    },
+  },
+  {
+    keywords: ["crime", "mystery", "investigation", "conspiracy", "fraud", "exposé", "expose"],
+    doctrine: {
+      voice: "investigator",
+      tone:
+        "Controlled tension and procedural precision: facts land like evidence exhibits, withhold-then-reveal, " +
+        "no editorializing the conclusion before the proof has been laid out.",
+      hookStyle: "Open on the most damning piece of evidence or the moment before discovery; let it sit cold.",
+    },
+  },
+  {
+    keywords: ["history", "war", "empire", "ancient", "samurai", "medieval", "civilization", "dynasty"],
+    doctrine: {
+      voice: "narrator-teacher",
+      tone:
+        "A master storyteller who is also a great teacher: cinematic narration that keeps making the viewer " +
+        "SMARTER — explain WHY it mattered, connect cause to effect, define period terms in plain words the " +
+        "moment they appear, anchor scale with comparisons a modern viewer feels. The viewer should finish " +
+        "able to RETELL what happened and why.",
+      hookStyle:
+        "Open cinematic (scene, flash-forward, countdown) but plant a teacherly promise: what the viewer " +
+        "will UNDERSTAND by the end, not just witness.",
+    },
+  },
+  {
+    keywords: ["finance", "money", "invest", "economy", "market", "wealth", "tax", "real estate"],
+    doctrine: {
+      voice: "teacher-advisor",
+      tone:
+        "A calm, credible teacher of money: every number spoken precisely and immediately translated into " +
+        "consequences-for-you terms; no hype, no urgency theater, no get-rich promises; build the viewer's " +
+        "competence step by step like a great lecturer with skin in the game.",
+      hookStyle:
+        "Real numbers up front (receipt, result-first, wrong-way), then a clear learning promise: the " +
+        "MECHANISM the viewer will understand by the end.",
+    },
+  },
+  {
+    keywords: ["ai risk", "ai takeover", "speculative", "sci-fi", "future", "singularity"],
+    doctrine: {
+      voice: "calm-analyst",
+      tone:
+        "Clinical, measured, unsettling precisely BECAUSE it is calm: real sourced events and data first, " +
+        "speculation clearly framed as extrapolation, never breathless.",
+      hookStyle: "A real, verifiable event stated flat — the dread comes from how ordinary it sounds.",
+    },
+  },
+  {
+    keywords: ["technology", "tech", "software", "gadget", "ai tools", "automation"],
+    doctrine: {
+      voice: "insider-explainer",
+      tone:
+        "A senior engineer who loves teaching: sharp, current, demystifying — explains how it ACTUALLY works " +
+        "under the hood, kills hype with mechanism, concrete examples before abstractions.",
+      hookStyle: "Proof-based: a concrete result, benchmark, or failure up front, then the how-it-works promise.",
+    },
+  },
+  {
+    keywords: ["health", "fitness", "nutrition", "medical", "glp", "longevity"],
+    doctrine: {
+      voice: "trusted-explainer",
+      tone:
+        "Warm clinical credibility: precise about studies, doses and numbers, zero fear-mongering, always " +
+        "lands on what the viewer can actually DO; uncertainty stated honestly.",
+      hookStyle: "Problem-agitation or wrong-way on a real, common mistake; the promise is actionable clarity.",
+    },
+  },
+  {
+    keywords: ["film", "movie", "cinema", "reel", "tv", "series", "show"],
+    doctrine: {
+      voice: "enthusiast-critic",
+      tone:
+        "A film-literate fan with verdicts: affection plus craft detail (the cut, the budget, the casting " +
+        "fight), conversational and sharp, never a plot summary machine.",
+      hookStyle: "A production receipt or behind-the-scenes moment that reframes the thing everyone has seen.",
+    },
+  },
+  {
+    keywords: ["business", "startup", "entrepreneur", "ecommerce", "marketing"],
+    doctrine: {
+      voice: "operator-mentor",
+      tone:
+        "Practical and case-driven, like someone who has run things: numbers + decisions + what it cost, " +
+        "frameworks only AFTER the concrete story has earned them.",
+      hookStyle: "Result-first or wrong-way with a real company and real figures; promise the decision lesson.",
+    },
+  },
+  {
+    keywords: ["stoic", "philosophy", "wisdom", "mindset"],
+    doctrine: {
+      voice: "quiet-mentor",
+      tone:
+        "Calm, intimate, unhurried authority speaking to ONE person: modern stakes first, ancient sources as " +
+        "proof not decoration, never preachy, the power is in restraint.",
+      hookStyle: "You-stakes on a modern moment, or a source's own startling words; quiet confidence, no shouting.",
+    },
+  },
+  {
+    keywords: ["motivation", "discipline", "success", "self improvement"],
+    doctrine: {
+      voice: "igniter",
+      tone:
+        "Direct, rhythmic, second-person: short driving sentences, concrete challenges over platitudes, " +
+        "respect the viewer's intelligence while raising their pulse.",
+      hookStyle: "You-stakes or wrong-way, present tense, the cost of staying the same made concrete.",
+    },
+  },
+  {
+    keywords: ["education", "explained", "learning", "facts", "science"],
+    doctrine: {
+      voice: "teacher",
+      tone:
+        "Clear, structured, visibly delighted by the subject: one idea at a time, a concrete example before " +
+        "every abstraction, recap the aha moments as they land.",
+      hookStyle: "Question-on-the-viewer's-actual-confusion or result-first demo; promise the understanding.",
+    },
+  },
+  {
+    keywords: ["story", "stories", "storytelling", "narrative"],
+    doctrine: {
+      voice: "dramatist",
+      tone:
+        "Pure narrative command: scene, character, tension, reveal — emotion carried by concrete detail, " +
+        "never adjectives; the storyteller trusts the story.",
+      hookStyle: "Cold-open scene or flash-forward at the most charged moment; no framing, just the world.",
+    },
+  },
+];
+
+/** Resolve the voice archetype for a niche string (fuzzy keyword match). */
+export function resolveVoiceDoctrine(niche?: string): VoiceDoctrine | undefined {
+  if (!niche) return undefined;
+  const n = niche.toLowerCase();
+  return DOCTRINE_MATCHERS.find((m) => m.keywords.some((k) => n.includes(k)))?.doctrine;
+}
+
+/**
  * GOLDEN_MODULES — the golden template, module by module, as shown on the
  * studio's "Golden Pipeline" tab. One entry per module of the spine with the
  * honest story of HOW it works and which gates protect it. `status: "golden"`
