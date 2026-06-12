@@ -5,6 +5,11 @@
  * one feedback retry → loud failure. The hook is ALWAYS specifically about the
  * topic — generic could-open-any-video lines are structurally rejected.
  *
+ * Built on 2026 retention research (PrePublish/Miraflow + the claude-youtube
+ * hook skill's mechanisms): the 0-30s arc is capture (0-5s, confirm the
+ * clicked promise) → explicit payoff promise by ~15s (52% vs 44% retention at
+ * 1min) → stakes + open loop by 30s; the steepest drop is seconds 10-20.
+ *
  * Standalone: identity in → judged cold open out. Deps: Gemini key only.
  *
  *   const open = await craftHook({ topic, channelName, niche, ... });
@@ -37,6 +42,8 @@ export const BANNED_OPENERS = [
   "history is full of",
   "welcome back",
   "welcome to",
+  "hey guys",
+  "hey everyone",
   "let's dive in",
   "let's talk about",
   "buckle up",
@@ -44,6 +51,19 @@ export const BANNED_OPENERS = [
   "today we're going to",
   "today we are going to",
   "stop scrolling",
+  // Retention killers (PrePublish 2026 research: removing these alone lifts
+  // first-minute retention 4-10 points): disclaimers, apologies, and
+  // premature engagement asks have no place in a cold open.
+  "before we get started",
+  "before we begin",
+  "before we start",
+  "quick disclaimer",
+  "sorry for",
+  "like and subscribe",
+  "make sure to subscribe",
+  "don't forget to subscribe",
+  "hit that",
+  "smash that",
 ];
 
 /**
@@ -71,6 +91,21 @@ export const HOOK_DEVICES: Record<string, string> = {
     "then turn it against the comfortable reading.",
   myth_snap:
     "Name the precise myth everyone repeats about THIS topic, then snap it in one short sentence.",
+  problem_agitation:
+    "Name the viewer's existing pain around THIS topic precisely, twist it one turn deeper than they've " +
+    "admitted to themselves, then position the video as the way out.",
+  social_proof:
+    "Lead with the topic's strongest credibility marker (a real authority, study, track record, or scale " +
+    "number), then pivot immediately to what it means for the viewer.",
+  result_first:
+    "Show the finished result or end-state of THIS topic first - the transformation, the number, the " +
+    "after-photo in words - then promise the process that produced it.",
+  wrong_way:
+    "Open on the precise mistake most people make with THIS topic and its concrete cost, then promise the " +
+    "correction.",
+  flash_forward:
+    "Open on the most dramatic moment from LATER in this video's own story, mid-action, then rewind: " +
+    "'but hours earlier, nobody suspected...' - the viewer must watch to reach that moment again.",
 };
 
 export interface HookLint {
@@ -142,6 +177,8 @@ export interface HookVerdict {
   specificity?: number;
   curiosity?: number;
   voiceMatch?: number;
+  /** Payoff promise lands by ~15s — viewers who get it retain 52% vs 44% at 1min. */
+  promise?: number;
   honest?: boolean;
   note?: string;
 }
@@ -160,6 +197,8 @@ export interface CraftedHook {
 
 export interface HookCraftArgs {
   topic: string;
+  /** The video's (working) title — the cold open must confirm the clicked promise. */
+  title?: string;
   channelName?: string;
   niche?: string;
   persona?: string;
@@ -184,6 +223,7 @@ function passes(v: HookVerdict): boolean {
     (v.specificity ?? 10) >= GATE &&
     (v.curiosity ?? 10) >= GATE &&
     (v.voiceMatch ?? 10) >= GATE &&
+    (v.promise ?? 10) >= GATE &&
     v.honest !== false
   );
 }
@@ -227,26 +267,37 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         `You are the cold-open director. Write the spoken COLD OPEN for a YouTube video.`,
         `VIDEO TOPIC — the open must be SPECIFICALLY about this; a line that could open any video is a failure:`,
         `"${a.topic}"`,
+        a.title ? `VIDEO TITLE (the promise the viewer clicked): "${a.title}"` : "",
         registerClause(a),
         a.playbookDigest ?? "",
         a.directorIdea ? `Director's hook intent (honor the idea, craft the execution): "${a.directorIdea}"` : "",
-        `Write 3 candidates, EACH using a DIFFERENT device from this list (pick the 3 that best fit this topic and register):`,
+        `FIRST, silently analyze the topic: its core tension, its single most surprising VERIFIED fact, the ` +
+          `viewer's pain or fascination, and the emotional stakes. Write every candidate FROM that analysis.`,
+        `Write 4 candidates, EACH using a DIFFERENT device from this list (pick the 4 that best fit this topic ` +
+          `and register; for search-intent topics favor problem_agitation/wrong_way/result_first, for ` +
+          `browse/suggested-style topics favor curiosity, contrarian and scene devices):`,
         deviceList,
-        `Per candidate:`,
-        `- hook: 1-2 spoken sentences. FIRST sentence ≤ 20 words — it must land inside ~7 seconds.`,
-        `- opening: the NEXT 50-110 spoken words. Escalate the hook with at least one more concrete specific ` +
-          `(a name, number, date, place, object of THIS topic) and open a loop the video promises to close. ` +
-          `No meta ("in this video", "today we"), no greeting, no channel name, no restating the title.`,
+        `Per candidate, the proven 0-30s retention arc (the steepest drop is seconds 10-20 — viewers decide at ` +
+          `~15s whether the video honors its promise):`,
+        `- hook (seconds 0-7): 1-2 spoken sentences, FIRST sentence ≤ 20 words. Pattern-breaks AND confirms ` +
+          `the viewer clicked the right video — the topic must be unmistakable immediately.`,
+        `- opening (seconds 7-30): the NEXT 50-110 spoken words. By ~15 seconds total the PAYOFF must be ` +
+          `explicit — the viewer knows exactly what they will get and why it is worth the runtime (videos that ` +
+          `do this retain 52% vs 44% at the 1-minute mark). Then escalate with at least one more concrete ` +
+          `specific (a name, number, date, place, object of THIS topic) and close on an open loop the video ` +
+          `promises to pay off. No meta ("in this video", "today we"), no greeting, no channel name, no ` +
+          `restating the title verbatim.`,
         `HARD RULES: concrete over abstract — name the person/place/number/year of THIS topic within the first ` +
           `3 sentences${skipConcreteness ? " (soft for meditative register)" : ""}. Short spoken sentences, average ` +
           `under 15 words. The promise must be honest — never claim what the topic can't deliver, and NEVER invent ` +
           `first-person research the channel hasn't done ("we analyzed", "I reviewed the filings") — cite real ` +
-          `public facts instead. NEVER use these openers: ${BANNED_OPENERS.join("; ")}.`,
+          `public facts instead. No disclaimers, no apologies, no subscribe asks. NEVER use these openers: ` +
+          `${BANNED_OPENERS.join("; ")}.`,
         `Plain spoken text only — no markdown, brackets, or stage directions.${lang}`,
         fixNote,
         `Return STRICT JSON {"candidates":[{"device":string,"hook":string,"opening":string}]}.`,
       ].filter(Boolean).join("\n\n"),
-      maxTokens: 8000,
+      maxTokens: 9000,
       temperature: 0.95,
       log: a.log,
     });
@@ -267,17 +318,20 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         const j = await geminiJson<{ verdicts?: HookVerdict[]; best?: number }>({
           prompt: [
             `You are a brutal YouTube retention judge. Topic: "${a.topic}".`,
+            a.title ? `Video title (the clicked promise): "${a.title}".` : "",
             registerClause(a),
             `Score EACH candidate cold open 1-10 per dimension:`,
             `- punch: would a scroller STOP inside the first sentence?`,
             `- specificity: concrete THIS-topic detail vs generic filler that could open any video?`,
             `- curiosity: does it open a loop that DEMANDS the payoff?`,
             `- voiceMatch: does it fit the channel register?`,
-            `- honest (boolean): no overclaim the video can't deliver?`,
+            `- promise: by ~15 seconds (the first ~45 spoken words), does the viewer know EXACTLY what they ` +
+              `will get and why it is worth the runtime${a.title ? ", and that it honors the clicked title" : ""}?`,
+            `- honest (boolean): no overclaim, and no fabricated first-person research ("we analyzed...")?`,
             ...survivors.map((c, i) => `CANDIDATE ${i} (${c.device}):\n${c.hook}\n${c.opening}`),
-            `Return STRICT JSON {"verdicts":[{"punch":n,"specificity":n,"curiosity":n,"voiceMatch":n,"honest":bool,"note":"<=15 words"}],"best":n}.`,
-          ].join("\n\n"),
-          maxTokens: 1600,
+            `Return STRICT JSON {"verdicts":[{"punch":n,"specificity":n,"curiosity":n,"voiceMatch":n,"promise":n,"honest":bool,"note":"<=15 words"}],"best":n}.`,
+          ].filter(Boolean).join("\n\n"),
+          maxTokens: 2000,
           temperature: 0.2,
         });
         verdicts = j.verdicts ?? [];
@@ -292,7 +346,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         const v = verdicts[i] ?? {};
         if (passes(v)) {
           const c = survivors[i];
-          a.log?.(`hookcraft: "${c.device}" wins (punch ${v.punch ?? "?"}, specificity ${v.specificity ?? "?"}, curiosity ${v.curiosity ?? "?"})`);
+          a.log?.(`hookcraft: "${c.device}" wins (punch ${v.punch ?? "?"}, specificity ${v.specificity ?? "?"}, curiosity ${v.curiosity ?? "?"}, promise ${v.promise ?? "?"})`);
           return { hook: c.hook, opening: c.opening, coldOpen: `${c.hook}\n\n${c.opening}`, device: c.device, verdict: { ...v, lint: c.lint } };
         }
       }

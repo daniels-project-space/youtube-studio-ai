@@ -58,8 +58,11 @@ const THEMES = [
     topic: "How billionaires launder their reputations through philanthropy" },
 ];
 
+const only = (process.env.ONLY ?? "").split(",").map((s) => s.trim().toLowerCase()).filter(Boolean);
+const themes = only.length ? THEMES.filter((t) => only.some((o) => t.channelName.toLowerCase().includes(o))) : THEMES;
+
 const out = [];
-for (const t of THEMES) {
+for (const t of themes) {
   process.stderr.write(`${t.channelName}... `);
   // CURRENT (verbatim old production head call: default model, no gate)
   let current = "";
@@ -88,7 +91,7 @@ for (const t of THEMES) {
   out.push({
     channel: t.channelName, topic: t.topic,
     current, currentLintIssues: curLint.issues,
-    crafted: crafted ? { device: crafted.device, hook: crafted.hook, opening: crafted.opening, verdict: { punch: crafted.verdict.punch, specificity: crafted.verdict.specificity, curiosity: crafted.verdict.curiosity, voiceMatch: crafted.verdict.voiceMatch } } : { error: err },
+    crafted: crafted ? { device: crafted.device, hook: crafted.hook, opening: crafted.opening, verdict: { punch: crafted.verdict.punch, specificity: crafted.verdict.specificity, curiosity: crafted.verdict.curiosity, voiceMatch: crafted.verdict.voiceMatch, promise: crafted.verdict.promise } } : { error: err },
   });
   process.stderr.write(" done\n");
 }
