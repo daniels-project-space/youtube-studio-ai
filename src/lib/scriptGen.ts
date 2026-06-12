@@ -12,7 +12,30 @@ import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
 export interface ScriptSection {
   heading: string;
   narration: string;
+  /** Structural role in the three-act arc (assigned positionally). */
+  role?: "intro" | "body" | "outro";
 }
+
+/** Positional role assignment: first = intro, last = outro, rest = body. */
+function assignRoles(sections: ScriptSection[]): ScriptSection[] {
+  return sections.map((s, i) => ({
+    ...s,
+    role: i === 0 ? ("intro" as const) : i === sections.length - 1 ? ("outro" as const) : ("body" as const),
+  }));
+}
+
+/**
+ * The three-act arc every script follows — sectioning as a pipeline law, not
+ * a hope: a real INTRO after the cold open, developed BODY movements, and an
+ * OUTRO that lands instead of stopping.
+ */
+const ARC_RULES =
+  "STRUCTURE — write the sections as a deliberate three-act arc. The FIRST section is the INTRO: it follows " +
+  "the cold open (never repeats it), orients the viewer, honors where the journey stands (for episodic " +
+  "channels: the series thread), and lays out today's map in 60-120 words. The MIDDLE sections are the BODY: " +
+  "one fully developed movement each, in an order that builds — each opens with a clear turn, not a restart. " +
+  "The FINAL section is the OUTRO: the landing — explicitly pay off the loop the cold open opened, then close " +
+  "with the channel's ritual (a practice, a meditation, a recap, a sign-off). Never a flat stop.";
 
 export interface Script {
   hook: string;
@@ -310,6 +333,7 @@ async function synthFullScriptOneShot(
         playbookFull(req),
         voiceTagClause(req),
         CRAFT_RULES,
+        ARC_RULES,
         `TARGET LENGTH: about ${Math.round(maxSeconds / 60)} minutes of SPOKEN narration — roughly ${wordBudget} words ` +
           `TOTAL. This is a HARD requirement: the script MUST total at least ${minWords} words across the sections. Do ` +
           `NOT stop short — write the FULL length as 8-18 substantive sections, each developing a distinct idea in depth ` +
@@ -333,7 +357,7 @@ async function synthFullScriptOneShot(
     const closingLine = typeof o.closing_line === "string" ? sanitizeSpoken(o.closing_line).replace(/\s+/g, " ").trim().slice(0, 80) : "";
     const narrationText = assemble(hook, sections);
     log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${estSeconds(narrationText)}s) ✓`);
-    return { hook, sections, narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop };
+    return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop };
   } catch (e) {
     log(`scriptGen one-shot (${model}) failed (${e instanceof Error ? e.message : e}) — falling back to chunked`);
     return null;
@@ -368,7 +392,11 @@ async function synthLongScript(
           req.persona ? `Persona: ${req.persona}` : "",
           req.niche ? `Niche: ${req.niche}` : "",
           styleGuidance(req) + dataDiscipline(req.dataRich),
-          exclude.length ? `Already covered (do NOT repeat): ${exclude.join("; ")}` : "",
+          exclude.length
+            ? `Already covered (do NOT repeat): ${exclude.join("; ")}`
+            : `The FIRST planned section is the INTRO (orients the viewer and lays out the map after the ` +
+              `cold open); the rest are BODY movements that build in a deliberate order. (The outro/` +
+              `conclusion is written separately.)`,
           `Each: a heading + a 1-2 sentence brief. Return STRICT JSON {"sections":[{"heading":string,"brief":string}]}.`,
         ].filter(Boolean).join("\n\n"),
         maxTokens: 2000,
@@ -498,7 +526,7 @@ async function synthLongScript(
   const closingLine = sanitizeSpoken(closingRaw).replace(/\s+/g, " ").trim().slice(0, 80);
   const narrationText = assemble(hook, sections);
   log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: estSeconds(narrationText) });
-  return { hook, sections, narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop };
+  return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop };
 }
 
 /** Translate one spoken passage; keep names/quotes intact. Degrades to original. */
@@ -606,6 +634,7 @@ export async function synthScript(
     styleGuidance(req) + dataDiscipline(req.dataRich),
     playbookFull(req),
     voiceTagClause(req),
+    ARC_RULES,
     structureClause,
     req.priorIssues?.length
       ? `A previous draft was REJECTED by the channel's critic for these issues — this draft MUST fix every one:\n` +
@@ -663,7 +692,7 @@ export async function synthScript(
   const narrationText = assemble(hook, sections);
   const script: Script = {
     hook,
-    sections,
+    sections: assignRoles(sections),
     narrationText,
     estDurationSec: estSeconds(narrationText, gapSec),
     closingLine,

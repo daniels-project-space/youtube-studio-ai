@@ -60,29 +60,47 @@ await mkdir(dir, { recursive: true });
 await writeFile(join(dir, "day4_script.txt"), script.narrationText, "utf8");
 console.error(`[script] ready: ${script.sections.length} sections, ~${script.estDurationSec}s`);
 
-// TTS in paragraph chunks (<=1100 chars), then ffmpeg-concat to one MP3.
+// TTS in LARGE paragraph chunks (<=2400 chars — fewer joints = fewer takes),
+// SEQUENTIAL with full ElevenLabs stitching (previous/next text conditioning
+// + chained request ids) so consecutive chunks keep ONE prosody, then a
+// 0.5s breathing gap at each paragraph joint and a re-encode concat (the old
+// -c copy butt-joint of independent takes was the jarring-voice-change bug).
 const paras = script.narrationText.split(/\n\n+/).map((p) => p.trim()).filter(Boolean);
 const chunks = [];
 let cur = "";
 for (const p of paras) {
-  if ((cur + "\n\n" + p).length > 1100 && cur) { chunks.push(cur); cur = p; }
+  if ((cur + "\n\n" + p).length > 2400 && cur) { chunks.push(cur); cur = p; }
   else cur = cur ? cur + "\n\n" + p : p;
 }
 if (cur) chunks.push(cur);
 
+const silence = join(dir, "silence.mp3");
+execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "lavfi", "-i", "anullsrc=r=44100:cl=mono", "-t", "0.5", "-c:a", "libmp3lame", "-q:a", "2", silence]);
+
+const requestIds = [];
 const parts = [];
 for (let i = 0; i < chunks.length; i++) {
   console.error(`[tts] chunk ${i + 1}/${chunks.length} (${chunks[i].length} chars)`);
+  const stitch = {
+    previousText: i > 0 ? chunks[i - 1] : undefined,
+    nextText: i < chunks.length - 1 ? chunks[i + 1] : undefined,
+    previousRequestIds: requestIds.slice(-3),
+  };
   const bytes = V3
-    ? await synthNarration({ text: chunks[i], provider: "elevenlabs" })
+    ? await synthNarration({ text: chunks[i], provider: "elevenlabs", stitch, onRequestId: (id) => requestIds.push(id) })
     : await synthNarration({ text: chunks[i], voiceId: "psychological", speed: 0.92 });
   const f = join(dir, `part_${String(i).padStart(2, "0")}.mp3`);
   await writeFile(f, bytes);
   parts.push(f);
 }
 const listFile = join(dir, "list.txt");
-await writeFile(listFile, parts.map((p) => `file '${p.replace(/\\/g, "/").replace(/'/g, "'\\''")}'`).join("\n"), "utf8");
+const esc = (p) => p.replace(/\\/g, "/").replace(/'/g, "'\\''");
+await writeFile(
+  listFile,
+  parts.flatMap((p, i) => (i < parts.length - 1 ? [`file '${esc(p)}'`, `file '${esc(silence)}'`] : [`file '${esc(p)}'`])).join("\n"),
+  "utf8",
+);
 const out = join(dir, V3 ? "gratitude_day4_v3.mp3" : "gratitude_day4.mp3");
-execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", out]);
+execFileSync("ffmpeg", ["-y", "-v", "error", "-f", "concat", "-safe", "0", "-i", listFile, "-af", "aresample=44100", "-c:a", "libmp3lame", "-q:a", "2", out]);
 console.error(`[done] ${out}`);
 console.log(JSON.stringify({ out, scriptTxt: join(dir, "day4_script.txt"), hook: script.hook, loop: script.hookLoop, sections: script.sections.map((s) => s.heading), estSec: script.estDurationSec }));

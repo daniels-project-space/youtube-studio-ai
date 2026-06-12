@@ -389,12 +389,13 @@ export const narrationTts: Block = {
       type Item = { kind: "narration" | "heading"; text: string; chap?: number };
       const items: Item[] = [];
       if (script.hook) for (const s of splitSentences(sanitizeSpoken(script.hook))) items.push({ kind: "narration", text: s });
-      // The FINAL section is the conclusion: it gets NO chapter card / "Chapter N:"
-      // read-out â€” it just flows as the closing narration that rounds off the topic
-      // (per request). Every earlier section still gets its heading card.
+      // Chapter cards belong to the BODY only: the INTRO (first section) flows
+      // straight out of the cold open with no "Chapter 1" interrupt, and the
+      // OUTRO (final section) lands as the closing narration with no card.
       const lastIdx = script.sections.length - 1;
       script.sections.forEach((sec, idx) => {
-        if (idx !== lastIdx) items.push({ kind: "heading", text: sec.heading, chap: idx + 1 });
+        const isIntro = idx === 0 && script.sections!.length >= 3;
+        if (idx !== lastIdx && !isIntro) items.push({ kind: "heading", text: sec.heading, chap: items.filter((x) => x.kind === "heading").length + 1 });
         for (const s of splitSentences(sanitizeSpoken(sec.narration))) items.push({ kind: "narration", text: s });
       });
 
@@ -412,7 +413,15 @@ export const narrationTts: Block = {
       const chPool = Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2));
       const synthed = await mapPool(items, chPool, async (it, i) => {
         const speak = speakOf(it);
-        const bytes = await synthNarration({ text: speak, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId });
+        // v3 continuity: condition each take on its neighbors so consecutive
+        // sentences keep one prosody instead of jarring independent "takes".
+        const stitch = ttsProvider === "elevenlabs"
+          ? {
+              previousText: i > 0 ? speakOf(items[i - 1]) : undefined,
+              nextText: i < items.length - 1 ? speakOf(items[i + 1]) : undefined,
+            }
+          : undefined;
+        const bytes = await synthNarration({ text: speak, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId, stitch });
         const p = join(tmp, `utt_${i}.mp3`);
         await writeBytes(p, bytes);
         let dur = 0;
@@ -481,7 +490,15 @@ export const narrationTts: Block = {
     // 429 "exceeded your current concurrency limit" â†’ failed render).
     const ttsPool = Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2));
     const parts = await mapPool(sentences, ttsPool, async (s, i) => {
-      const bytes = await synthNarration({ text: s, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId });
+      // v3 continuity: neighbor conditioning kills the per-sentence "new take"
+      // voice jump (the cause of jarring instant voice changes between lines).
+      const stitch = ttsProvider === "elevenlabs"
+        ? {
+            previousText: i > 0 ? sentences[i - 1] : undefined,
+            nextText: i < sentences.length - 1 ? sentences[i + 1] : undefined,
+          }
+        : undefined;
+      const bytes = await synthNarration({ text: s, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId, stitch });
       const p = join(tmp, `sent_${i}.mp3`);
       await writeBytes(p, bytes);
       let dur = 0;
