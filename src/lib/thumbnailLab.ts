@@ -376,6 +376,8 @@ export async function renderCandidate(args: {
   pattern: ThumbPattern;
   title: string;
   scriptHint?: string;
+  /** DNA/operator-locked scene: the heroProp MUST be this subject (hard rail, not inspiration). */
+  sceneMandate?: string;
   playbook: ThumbnailPlaybook;
   outJpg: string;
   tmpDir: string;
@@ -386,12 +388,13 @@ export async function renderCandidate(args: {
   // TWO-PASS DESIGN: the LAYOUT is decided FIRST (which zone the text owns),
   // the image is generated WITH that zone deliberately reserved as negative
   // space, then the text lands in its planned home Ã¢â‚¬â€ never fighting the image.
-  const inst = await claudeJson<{ fluxPrompt?: string; textPropsJson?: string; textZone?: string }>({
+  const inst = await claudeJson<{ heroProp?: string; background?: string; details?: string[]; fluxPrompt?: string; textPropsJson?: string; textZone?: string }>({
     maxTokens: 1000,
     temperature: 0.75,
     system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
     prompt:
       `Instantiate this thumbnail PATTERN for the video "${args.title}".\n` +
+      `${args.sceneMandate ? `MANDATORY SCENE (operator/DNA-locked - NOT inspiration, NOT optional): the heroProp MUST be exactly this subject, adapted to this topic: ${args.sceneMandate}. Invent background and details AROUND it - never replace it.\n` : ""}` +
       (args.scriptHint ? `Video content hint: ${args.scriptHint.slice(0, 500)}\n` : "") +
       `PATTERN "${args.pattern.name}": ${args.pattern.fluxRecipe}\n` +
       `TEXT TEMPLATE: ${JSON.stringify(args.pattern.textRecipe)}\n` +
@@ -418,12 +421,29 @@ export async function renderCandidate(args: {
       `laying a steadying hand on a crumbling statue shoulder; for "market crash": a figure watching a collapsing ` +
       `red line tear through the floor). NEVER decorative abstraction (random dust, glows, floating objects) that ` +
       `does not tell the story. Test: cover the text - does the image alone communicate the topic?\n` +
+      `STEP 2b - BUILD THE SCENE IN NAMED STAGES (how the top 1% compose):\n` +
+      `heroProp: the ONE dominant subject - 30-50% of the frame, emotionally charged, cropped close for scale ` +
+      `(a cracked marble face glaring, a grumpy mogul portrait, a war elephant chest-on). Hero sits on the side ` +
+      `OPPOSITE the textZone.\n` +
+      `background: a SEPARATE supporting layer behind the hero - darker, simpler, with depth (torn tabloid strips, ` +
+      `a blurred crowd in red, a burning skyline, a storm sky). It frames the hero, never competes.\n` +
+      `details: 1-3 SYMBOLIC story-carrying additions ON or AROUND the hero that make the click irresistible ` +
+      `(fire reflected in glasses lenses, a glowing crack across the chest, torn headline strips reading into ` +
+      `frame, a red zigzag crash line). Each detail must deepen the SAME story - nothing random.\n` +
       `STEP 3 Ã¢â‚¬â€ textPropsJson: the template as a JSON-ENCODED STRING with placeholders replaced (line texts: 1-3 ` +
       `punchy words each, Ã¢â€°Â¤5 words total, NOT restating the title - every line must be a real English hook word, NEVER meta-words like "omit"/"none"; ` +
       `numberCallout: a REAL number from the topic, or LEAVE THE KEY OUT of the JSON entirely when none exists; set "position" to your chosen textZone).\n` +
-      `Return STRICT JSON {"fluxPrompt":string,"textPropsJson":string,"textZone":string}.`,
+      `Return STRICT JSON {"heroProp":string,"background":string,"details":string[],"textPropsJson":string,"textZone":string}.`,
   });
-  if (!inst.fluxPrompt || !inst.textPropsJson) throw new Error("pattern instantiation incomplete");
+  // STAGED COMPOSITION: hero prop -> background -> story details, assembled
+  // deterministically so generators receive named layers, not a prose blob.
+  if (inst.heroProp) {
+    inst.fluxPrompt =
+      `HERO PROP (dominant, 30-50% of frame, cropped close): ${inst.heroProp}. ` +
+      `BACKGROUND (separate supporting layer behind the hero - darker, simpler, depth): ${inst.background ?? "deep dark gradient"}. ` +
+      `STORY DETAILS (symbolic, on/around the hero): ${(inst.details ?? []).join("; ") || "none"}.`;
+  }
+  if (!inst.fluxPrompt || !inst.textPropsJson) throw new Error("pattern instantiation incomplete (need heroProp or fluxPrompt + textPropsJson)");
   let textProps: Record<string, unknown>;
   try { textProps = JSON.parse(inst.textPropsJson) as Record<string, unknown>; } catch {
     throw new Error("pattern textPropsJson unparseable");
@@ -490,6 +510,7 @@ export async function renderCandidate(args: {
           `YouTube thumbnail, top-1% clickbait design. ${scene} ` +
           `STYLE (obey strictly): ${vl.imageStyle ?? "cinematic"}. ` +
           `Headline ${wordList}${callout} in the ${plannedZone} area on clean negative space, ` +
+          `the single most important word underlined with a rough hand-painted BRUSH STROKE in the accent color, ` +
           `VERY LARGE bold lettering in ${vl.accentColor ?? "#ffffff"} or white for contrast, ` +
           `extremely high contrast, RAZOR-SHARP crisp in-focus lettering (never soft or blurred), readable at 120px, spelling EXACTLY as quoted. ` +
           `Small channel mark "${String(textProps["badge"] ?? "")}". Subject LARGE on the opposite side.${fixNote}`;
@@ -501,6 +522,10 @@ export async function renderCandidate(args: {
             .slice(0, Math.max(120, String(inst.fluxPrompt ?? "").length - overflow))
             .replace(/\s+\S*$/, "");
           recraftPrompt = buildPrompt(`${scene}.`);
+        }
+        // final guard: a long fixNote can defeat scene truncation - never 422
+        if (recraftPrompt.length > budget) {
+          recraftPrompt = recraftPrompt.slice(0, budget).replace(/\s+\S*$/, "") + ".";
         }
         let url;
         try { url = await generateRecraft({ prompt: recraftPrompt, style }); }
@@ -517,13 +542,13 @@ export async function renderCandidate(args: {
             `reads EXACTLY "${String(textProps["badge"] ?? "")}" - any swapped/missing/garbled letters = false. ` +
             `Also false if ANY other word in the image is misspelled or invented. ` +
             `6. styleMatch 1-10: does the rendering obey the channel style "${vl.imageStyle ?? "cinematic"}"? ` +
-            `7. storyMatch 1-10: ignoring the text, does the IMAGE alone visually tell the story of the topic "${args.title}" (subjects enacting the idea, not decorative abstraction)? 8. crisp: is ALL text razor-sharp and in focus (soft/blurry lettering = false)? ` + `Return STRICT JSON {"textOk":bool,"punch":n,"readable":bool,"uiClean":bool,"badgeOk":bool,"styleMatch":n,"storyMatch":n,"crisp":bool,"fix":"<=15 words"}.`,
+            `7. storyMatch 1-10: ignoring the text, does the IMAGE alone visually tell the story of the topic "${args.title}" (subjects enacting the idea, not decorative abstraction)? 8. crisp: is ALL text razor-sharp and in focus (soft/blurry lettering = false)? 9. heroOk: is there ONE dominant hero subject (30-50% of frame, clearly in front of a separate supporting background) rather than a flat or cluttered scene? ` + `Return STRICT JSON {"textOk":bool,"punch":n,"readable":bool,"uiClean":bool,"badgeOk":bool,"styleMatch":n,"storyMatch":n,"crisp":bool,"heroOk":bool,"fix":"<=15 words"}.`,
           imagePaths: [args.outJpg],
           json: true,
           maxTokens: 250,
         }).catch(() => "");
-        const v = raw ? parseJsonLoose<{ textOk?: boolean; punch?: number; readable?: boolean; uiClean?: boolean; badgeOk?: boolean; styleMatch?: number; storyMatch?: number; crisp?: boolean; fix?: string }>(raw) : {};
-        if (v.textOk !== false && v.readable !== false && v.uiClean !== false && v.badgeOk !== false && v.crisp !== false && (v.styleMatch ?? 10) >= 7 && (v.storyMatch ?? 10) >= 7 && (v.punch ?? 10) >= 7) {
+        const v = raw ? parseJsonLoose<{ textOk?: boolean; punch?: number; readable?: boolean; uiClean?: boolean; badgeOk?: boolean; styleMatch?: number; storyMatch?: number; crisp?: boolean; heroOk?: boolean; fix?: string }>(raw) : {};
+        if (v.textOk !== false && v.readable !== false && v.uiClean !== false && v.badgeOk !== false && v.crisp !== false && v.heroOk !== false && (v.styleMatch ?? 10) >= 7 && (v.storyMatch ?? 10) >= 7 && (v.punch ?? 10) >= 7) {
           args.log?.(`thumbnailLab: RECRAFT render OK (one-pass design, punch ${v.punch ?? "?"}/10)`);
           return args.outJpg;
         }
@@ -531,7 +556,7 @@ export async function renderCandidate(args: {
           ` CRITICAL FIX: ${v.fix ?? "text larger and exact, higher contrast"}.` +
           `${v.uiClean === false ? " REMOVE all fake play buttons / player UI from the artwork." : ""}` +
           `${v.badgeOk === false ? ` The channel mark must read EXACTLY "${String(textProps["badge"] ?? "")}" - no other invented words.` : ""}` +
-          `${(v.styleMatch ?? 10) < 7 ? ` The image MUST follow the style: ${vl.imageStyle}.` : ""}` + `${(v.storyMatch ?? 10) < 7 ? ` The scene must LITERALLY enact the topic "${args.title}" - subjects acting out the idea, no decorative abstraction.` : ""}` + `${v.crisp === false ? " ALL lettering must be razor-sharp and in focus." : ""}`;
+          `${(v.styleMatch ?? 10) < 7 ? ` The image MUST follow the style: ${vl.imageStyle}.` : ""}` + `${(v.storyMatch ?? 10) < 7 ? ` The scene must LITERALLY enact the topic "${args.title}" - subjects acting out the idea, no decorative abstraction.` : ""}` + `${v.crisp === false ? " ALL lettering must be razor-sharp and in focus." : ""}` + `${v.heroOk === false ? " ONE hero subject must dominate 30-50% of the frame in front of a separate background." : ""}`;
         args.log?.(`thumbnailLab: recraft attempt ${attempt + 1} - textOk=${v.textOk} punch=${v.punch} uiClean=${v.uiClean} badgeOk=${v.badgeOk} styleMatch=${v.styleMatch} -> ${attempt === 0 ? "regenerating with fix" : "falling through"}`);
       }
     }

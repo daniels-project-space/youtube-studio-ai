@@ -747,8 +747,10 @@ export const thumbnailGen: Block = {
         // Architect's per-channel energy override (param beats playbook tier).
         const energyOverride = ctx.params["thumbEnergy"] as "spectacle" | "bold" | "cozy_pop" | undefined;
         const pb = energyOverride ? { ...playbook, energy: energyOverride } : playbook;
+        const dnaSubject = (ctx.store["styleDNA"] as { thumbnail?: { subject?: string } } | null)?.thumbnail?.subject;
         await renderCandidate({
           pattern, title, scriptHint, playbook: pb, outJpg, tmpDir: tmp, idx, log: ctx.log,
+          ...(dnaSubject ? { sceneMandate: dnaSubject } : {}),
         });
         const refQA = await referenceMobileQA(tmp, outJpg);
         if (refQA && !refQA.pass) {
