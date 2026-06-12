@@ -22,6 +22,7 @@
  * "youtube") unlocks live competitor research when the niche databank is empty.
  */
 import { geminiJson, geminiJsonPro, hasGeminiKey } from "@/lib/gemini";
+import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/youtubeData";
 import { resolveVoiceDoctrine } from "@/engine/golden";
 
 export function hasMetacraft(): boolean {
@@ -65,28 +66,17 @@ export async function fetchCompetitorTitles(
   seed: string,
   log?: (m: string) => void,
 ): Promise<{ title: string; views: number }[]> {
-  const key = process.env.YOUTUBE_DATA_API_KEY;
-  if (!key) {
-    log?.("metacraft: no YOUTUBE_DATA_API_KEY — skipping live competitor research");
+  // youtubeData.ts reads via API key OR the OAuth refresh token (both vault-
+  // hydrated) — the same client the competitor-research block uses.
+  if (!hasYouTubeDataAccess()) {
+    log?.("metacraft: no YouTube Data access (key or OAuth) — skipping live competitor research");
     return [];
   }
   try {
-    const sr = await fetch(
-      `https://www.googleapis.com/youtube/v3/search?part=snippet&type=video&maxResults=15&q=${encodeURIComponent(seed)}&key=${key}`,
-      { signal: AbortSignal.timeout(10000) },
-    );
-    if (!sr.ok) throw new Error(`search HTTP ${sr.status}`);
-    const sj = (await sr.json()) as { items?: { id?: { videoId?: string } }[] };
-    const ids = (sj.items ?? []).map((i) => i.id?.videoId).filter(Boolean).join(",");
-    if (!ids) return [];
-    const vr = await fetch(
-      `https://www.googleapis.com/youtube/v3/videos?part=snippet,statistics&id=${ids}&key=${key}`,
-      { signal: AbortSignal.timeout(10000) },
-    );
-    if (!vr.ok) throw new Error(`videos HTTP ${vr.status}`);
-    const vj = (await vr.json()) as { items?: { snippet?: { title?: string }; statistics?: { viewCount?: string } }[] };
-    return (vj.items ?? [])
-      .map((v) => ({ title: v.snippet?.title ?? "", views: Number(v.statistics?.viewCount ?? 0) }))
+    const ids = await searchVideoIds({ query: seed, maxResults: 15 });
+    const details = await fetchVideoDetails(ids);
+    return details
+      .map((d) => ({ title: d.title, views: d.views }))
       .filter((v) => v.title)
       .sort((x, y) => y.views - x.views)
       .slice(0, 10);
