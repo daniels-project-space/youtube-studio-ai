@@ -727,7 +727,9 @@ export async function synthScript(
   // Latest Gemini Pro writes the narration (best at narration); the wrapper
   // retries transients and floors the budget for Pro thinking. A persistent
   // failure must FAIL the block — never ship a one-line placeholder script.
-  const raw = (await geminiJsonPro({ prompt, maxTokens: 8000, temperature: 0.8, log: (m) => log(m) })) as {
+  // 13k: Pro's thinking eats the budget first — at 8k a ~1300-word script's
+  // JSON came back truncated mid-string (unrepairable).
+  const raw = (await geminiJsonPro({ prompt, maxTokens: 13000, temperature: 0.8, log: (m) => log(m) })) as {
     sections?: unknown;
   };
 
