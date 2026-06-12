@@ -123,6 +123,15 @@ export function IconSpark(props: IconProps) {
   );
 }
 
+export function IconGolden(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <path d="M4 17.5l-1.3-9L8.5 12 12 5.5 15.5 12l5.8-3.5-1.3 9z" />
+      <path d="M5 20.5h14" />
+    </svg>
+  );
+}
+
 export function IconTerminal(props: IconProps) {
   return (
     <svg {...base(props)}>

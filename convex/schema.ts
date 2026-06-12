@@ -61,12 +61,14 @@ export default defineSchema({
         }),
       ),
     }),
-    // Which thumbnail strategy this channel uses (default claude_flux).
+    // Which thumbnail strategy this channel uses (default "banana" — the
+    // engine). claude_flux/ideogram are retired, kept only for existing rows.
     thumbnailer: v.optional(
       v.union(
+        v.literal("banana"),
+        v.literal("title_card"),
         v.literal("claude_flux"),
         v.literal("ideogram"),
-        v.literal("title_card"),
       ),
     ),
     template: v.string(), // archetype A|B|C|D|E

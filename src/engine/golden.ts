@@ -53,9 +53,190 @@ export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "visual", blocks: ["stock_footage", "entity_imagery", "keyframes", "loop_clips"], note: "Family delta swaps the engine here." },
   { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card"], note: "Word-level captions + overlays." },
   { stage: "build", blocks: ["timeline_assemble", "length_check"], note: "Remotion assembly + length gate." },
-  { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO + thumbnail (N-variant + CTR pick when enabled)." },
+  { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + BANANA thumbnail (one-pass Nano Banana Pro, judge-gated)." },
   { stage: "verify", blocks: ["qa_visual", "qa_refine"], note: "Critic ValidationSpec â†’ refine loop." },
   { stage: "ship", blocks: ["upload_draft", "emit_bundle", "crosspost", "notify"], note: "PRIVATE-first upload + multilang reuse + multi-platform + shorts." },
+];
+
+/**
+ * GOLDEN_MODULES — the golden template, module by module, as shown on the
+ * studio's "Golden Pipeline" tab. One entry per module of the spine with the
+ * honest story of HOW it works and which gates protect it. `status: "golden"`
+ * marks a module certified at the golden bar (operator-approved output quality,
+ * judge-gated, no silent fallbacks) — the thumbnail engine is the first.
+ * Order = display order: golden modules lead, then the spine in stage order.
+ */
+export type GoldenModuleStatus = "golden" | "active";
+
+export interface GoldenModule {
+  key: string;
+  /** Spine stage this module belongs to. */
+  stage: string;
+  title: string;
+  /** What powers it (engine/provider/library). */
+  engine: string;
+  /** How it actually works, honestly, in 2-4 sentences. */
+  how: string;
+  /** The QA gates that protect its output. */
+  gates: string[];
+  status: GoldenModuleStatus;
+}
+
+export const GOLDEN_MODULES: GoldenModule[] = [
+  {
+    key: "thumbnail",
+    stage: "package",
+    title: "Thumbnail — Banana Engine",
+    engine: "Nano Banana Pro (gemini-3-pro-image-preview), one-pass design-native render",
+    how:
+      "A rich design brief — channel identity, signature type treatment, a scene that literally enacts the " +
+      "topic, a 2-3 line headline with one HUGE payoff word, badge — renders the COMPLETE thumbnail in a " +
+      "single pass: dimensional material typography, photo-cutout collage, hero at 55-75% of frame, text " +
+      "never covering faces, exact spelling. A vision judge scores six dimensions; one feedback retry, then " +
+      "loud failure into the heal loop. ~15s and ~$0.13 per render, standalone in src/lib/banana.ts.",
+    gates: ["exact-spelling textOk", "faceClear", "punch ≥ 7", "styleMatch ≥ 7", "storyMatch ≥ 7", "uiClean"],
+    status: "golden",
+  },
+  {
+    key: "topic-intel",
+    stage: "intel",
+    title: "Topic Intel",
+    engine: "Self-hosted outlier intel + competitor research + learning-weighted topic_select",
+    how:
+      "Scrapes the niche's outlier videos and competitor uploads into a free self-hosted databank, blends " +
+      "the analytics learning loop's weights, and picks fresh topics inside the channel identity (topic " +
+      "pool, banned words) while avoiding everything already done or planned.",
+    gates: ["dedupe vs done + planned topics", "identity constraints"],
+    status: "active",
+  },
+  {
+    key: "show-bible",
+    stage: "brief",
+    title: "Show Bible + Crew",
+    engine: "Showrunner + addable crew blocks (director / DP / editor / composer / critic)",
+    how:
+      "The Show Bible distills the channel's frozen Style DNA into working doctrine; per-video crew briefs " +
+      "set visual grammar, cut rhythm and score palette, and the critic authors a ValidationSpec the verify " +
+      "stage enforces. Missing crew throws — no silent skips.",
+    gates: ["crew throws on missing inputs", "per-video ValidationSpec authored"],
+    status: "active",
+  },
+  {
+    key: "script",
+    stage: "write",
+    title: "Script + Hook",
+    engine: "Model-routed LLM under CRAFT_RULES",
+    how:
+      "Hook-first writing under research-backed retention law: the hook lands within ~7 seconds, sentences " +
+      "average under 15 words, one idea per 60-90s, and a deliberate midpoint re-hook recovers the " +
+      "attention dip. The Show Bible doctrine layers the channel's voice on top.",
+    gates: ["qa_script", "loud regeneration on failure"],
+    status: "active",
+  },
+  {
+    key: "guard",
+    stage: "guard",
+    title: "Guard Gates",
+    engine: "qa_script + originality_gate + compliance_check",
+    how:
+      "Three gates between script and spend: craft QA against the rules, an originality pass so the channel " +
+      "never re-treads itself or competitors, and a compliance floor before any paid generation starts.",
+    gates: ["craft", "originality", "compliance"],
+    status: "active",
+  },
+  {
+    key: "narration",
+    stage: "voice",
+    title: "Narration",
+    engine: "Tiered TTS per niche (Fish w/ prosody control)",
+    how:
+      "Voice is the #1 retention factor: per-niche voice mapping, prosody/speed control, and word-level " +
+      "timing that the caption and assembly stages consume downstream. No silent fallback voice — a dead " +
+      "provider fails loud.",
+    gates: ["duration sanity", "loud failure (no fallback voice)"],
+    status: "active",
+  },
+  {
+    key: "visuals",
+    stage: "visual",
+    title: "Visuals",
+    engine: "Family-swapped: stock footage / entity imagery / flux keyframes / boomerang loops",
+    how:
+      "The family delta picks the visual engine per channel: curated stock + entity imagery for narrated " +
+      "essays, generated keyframes + image-to-video for cinematic families, seamless boomerang loops + " +
+      "Topaz upscale for lofi. Style DNA grounds every query and prompt.",
+    gates: ["per-artifact qa_visual", "coverage contract vs cut sheet"],
+    status: "active",
+  },
+  {
+    key: "inserts",
+    stage: "layer",
+    title: "Data-Viz Inserts",
+    engine: "Remotion motion graphics (visual_inserts)",
+    how:
+      "Script-synced data visualizations — big stats, line charts, bar comparisons — selected per niche and " +
+      "rendered in Remotion, timed to the narration. The integrity gate only visualizes numbers the " +
+      "narration actually speaks, verbatim.",
+    gates: ["verbatim-number integrity"],
+    status: "active",
+  },
+  {
+    key: "layer",
+    stage: "layer",
+    title: "Captions + Overlays",
+    engine: "Word-level captions, quote overlays, intro card (Remotion)",
+    how:
+      "Word-timed captions, quote overlays and the intro card are composited over the edit, styled by the " +
+      "channel's DNA typography so every layer stays on brand.",
+    gates: ["timing sync vs narration"],
+    status: "active",
+  },
+  {
+    key: "assemble",
+    stage: "build",
+    title: "Assembly",
+    engine: "Remotion timeline + ffmpeg master",
+    how:
+      "The cut sheet drives assembly: per-section footage, inserts and captions on one timeline over the " +
+      "mastered audio mix, then a hard length gate against the niche target and a black-segment guard.",
+    gates: ["length_check", "black-segment guard"],
+    status: "active",
+  },
+  {
+    key: "metadata",
+    stage: "package",
+    title: "SEO Metadata",
+    engine: "Niche-databank title/description/tag generator",
+    how:
+      "Keyword-first titles built on curiosity-gap formulas (numbers, brackets, pronouns), descriptions " +
+      "with the keyword in the first 25 words, tags drawn from the niche's scraped databank.",
+    gates: ["banned words", "length limits"],
+    status: "active",
+  },
+  {
+    key: "verify",
+    stage: "verify",
+    title: "Verify + Heal",
+    engine: "Per-artifact qa_visual + critic ValidationSpec + self-heal loop",
+    how:
+      "Every artifact is vision-checked — the thumbnail at real 168px browse size against scraped top " +
+      "competitors — and the critic's ValidationSpec is enforced. Failures route back through the heal " +
+      "loop with defect hints instead of shipping degraded output.",
+    gates: ["ValidationSpec", "mobile-size legibility", "reference comparison"],
+    status: "active",
+  },
+  {
+    key: "ship",
+    stage: "ship",
+    title: "Ship",
+    engine: "YouTube upload (PRIVATE-first) + Ayrshare crosspost + Telegram",
+    how:
+      "Uploads land PRIVATE on paused channels — autopilot only goes public when the operator flips Active. " +
+      "Bundles emit for multilang reuse, crossposting is one API key away, and Telegram carries budget " +
+      "alerts and completion notifications.",
+    gates: ["PRIVATE-first safety", "budget alert"],
+    status: "active",
+  },
 ];
 
 /**
@@ -74,8 +255,12 @@ export interface NichePreset {
    * nicheCatalog.defaultFamily â€” not duplicated here.)
    */
   crew?: string[];
-  /** Optional per-niche thumbnail engine override (else the family default). */
-  thumbnailer?: "claude_flux" | "ideogram" | "title_card";
+  /**
+   * Optional per-niche thumbnail engine override. "banana" (the engine —
+   * src/lib/banana.ts) is the default everywhere; "title_card" is the only
+   * explicit operator alternative (deterministic ffmpeg card).
+   */
+  thumbnailer?: "banana" | "title_card";
   /** Optional per-niche footage theme (e.g. "nature" hard-locks serene b-roll). */
   footageTheme?: string;
   /**
@@ -87,8 +272,9 @@ export interface NichePreset {
 }
 
 export const NICHE_PRESETS: Record<string, NichePreset> = {
-  // claude_flux on lofi unlocks the real-scene thumbnail path (run keyframe + title).
-  lofi: { targetSeconds: 3600, scriptStyle: "meditation", thumbnailer: "claude_flux" },
+  // lofi rides the real-scene thumbnail path (run keyframe + title overlay) —
+  // any non-title_card engine unlocks it, so the banana default is right.
+  lofi: { targetSeconds: 3600, scriptStyle: "meditation" },
   educational: { targetSeconds: 480, scriptStyle: "generic", insertTypes: ["big_stat", "bar_compare"] },
   finance: { targetSeconds: 600, scriptStyle: "generic", insertTypes: ["big_stat", "line_chart", "bar_compare", "annotated_line", "lower_third"] },
   technology: { targetSeconds: 420, scriptStyle: "generic", insertTypes: ["big_stat", "bar_compare"] },
@@ -106,9 +292,9 @@ export const NICHE_PRESETS: Record<string, NichePreset> = {
   // 2026 breakout niches â€” drama leans on the crime style's tension/withhold-reveal.
   // Crew tailored per niche: drama wants narrative+visuals+pacing (no music director);
   // explainers run a lean director+editor+critic crew (cheaper, focused).
-  stories: { targetSeconds: 720, scriptStyle: "crime", crew: ["director", "cinematographer", "editor", "critic"], thumbnailer: "claude_flux", insertTypes: ["big_stat"] },
-  health: { targetSeconds: 480, scriptStyle: "generic", crew: ["director", "editor", "critic"], thumbnailer: "claude_flux", insertTypes: ["big_stat", "bar_compare"] },
-  business: { targetSeconds: 420, scriptStyle: "generic", crew: ["director", "editor", "critic"], thumbnailer: "claude_flux", insertTypes: ["big_stat", "line_chart", "bar_compare", "lower_third"] },
+  stories: { targetSeconds: 720, scriptStyle: "crime", crew: ["director", "cinematographer", "editor", "critic"], insertTypes: ["big_stat"] },
+  health: { targetSeconds: 480, scriptStyle: "generic", crew: ["director", "editor", "critic"], insertTypes: ["big_stat", "bar_compare"] },
+  business: { targetSeconds: 420, scriptStyle: "generic", crew: ["director", "editor", "critic"], insertTypes: ["big_stat", "line_chart", "bar_compare", "lower_third"] },
 };
 
 export function nichePreset(key?: string): NichePreset | undefined {

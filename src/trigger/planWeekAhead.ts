@@ -1,9 +1,10 @@
 /**
  * `plan-week-ahead` — pre-build the upcoming-videos queue for a channel: pick N
  * fresh topics, then for each generate an SEO title, a short description, and a
- * thumbnail (same Flux-Pro / statue-right pipeline as a real render), and store
- * them in the `contentPlan` table for the channel page's "Week ahead" section.
- * Cheap relative to a full render (no video/TTS) — just stills + text.
+ * thumbnail (the SAME banana engine as a real render: one-pass Nano Banana Pro
+ * from a design brief, judge-gated), and store them in the `contentPlan` table
+ * for the channel page's "Week ahead" section. Cheap relative to a full render
+ * (no video/TTS) — just stills + text.
  */
 import { task } from "@trigger.dev/sdk";
 import { ConvexHttpClient } from "convex/browser";
@@ -12,19 +13,14 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix, putObject } from "@/lib/storage";
 import { geminiJson, hasGeminiKey } from "@/lib/gemini";
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
-import { generateFalFluxProImage, hasFalKey } from "@/lib/falImage";
 import { optimizeTopics } from "@/lib/topicOptimizer";
-import { guardedThumbnailDesign, thumbnailText, planSubjectLayout } from "@/lib/ffmpeg";
+import { buildThumbBrief, bananaThumbnail, hasBanana } from "@/lib/banana";
 import {
   resolveThumbnailStyle,
   styleFromDNA,
-  buildBasePrompt,
-  artDirectorBrief,
   shortTitleFallback,
-  TEXT_FREE_SUFFIX,
 } from "@/lib/thumbnailFormula";
-import { readFileSync, writeFileSync, mkdirSync } from "node:fs";
+import { readFileSync, mkdirSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -86,7 +82,6 @@ export const planWeekAheadTask = task({
 
     const dir = join(tmpdir(), `plan_${channelId}_${ids.length}`);
     mkdirSync(dir, { recursive: true });
-    const brush = join(process.cwd(), "src/assets/thumb_brush_swash.png");
 
     // 2) per topic: title + description + thumbnail
     for (let i = 0; i < topics.length; i++) {
@@ -115,7 +110,7 @@ export const planWeekAheadTask = task({
 
       let thumbnailKey: string | undefined;
       try {
-        thumbnailKey = await genThumb({ id, topic, title, style, channelName, niche, ownerId, slug: channel.slug, dir, brush });
+        thumbnailKey = await genThumb({ id, topic, title, style, channelName, niche, ownerId, slug: channel.slug, dir, log });
       } catch (e) {
         log(`thumbnail failed for "${topic}": ${e instanceof Error ? e.message : e}`);
       }
@@ -127,7 +122,13 @@ export const planWeekAheadTask = task({
   },
 });
 
-/* eslint-disable @typescript-eslint/no-explicit-any */
+/**
+ * One plan thumbnail through the banana engine: a Gemini concept pass turns the
+ * channel's locked look + topic into a scene, a distilled <=12-word render
+ * style, and a 2-3 line headline with one payoff word; bananaThumbnail renders
+ * and judge-gates it (one feedback retry, then throws — the caller logs and the
+ * plan item ships without a thumbnail rather than with a bad one).
+ */
 async function genThumb(o: {
   id: string;
   topic: string;
@@ -138,60 +139,56 @@ async function genThumb(o: {
   ownerId: string;
   slug: string;
   dir: string;
-  brush: string;
+  log: (m: string) => void;
 }): Promise<string | undefined> {
-  if (!hasFalKey()) return undefined;
-  let thumbTitle = shortTitleFallback(o.title);
-  let basePrompt = buildBasePrompt(o.style, o.topic, o.niche);
-  if (hasAnthropicKey()) {
-    try {
-      const c = await claudeJson<{ flux_prompt?: string; thumbnail_title?: string }>({
-        maxTokens: 500,
-        system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
-        prompt:
-          `Design a click-worthy 16:9 thumbnail for "${o.title}".\n` +
-          artDirectorBrief(o.style) +
-          `\nReturn JSON {"flux_prompt":string (TEXT-FREE), "thumbnail_title":string (3-5 words)}.`,
-      });
-      if (c.flux_prompt) basePrompt = `${c.flux_prompt} ${TEXT_FREE_SUFFIX}`;
-      if (c.thumbnail_title) thumbTitle = c.thumbnail_title;
-    } catch {
-      /* deterministic fallback */
-    }
+  if (!hasBanana()) return undefined;
+  let scene = `a dramatic scene that literally enacts "${o.title}"${o.niche ? ` for a ${o.niche} channel` : ""}.`;
+  let look = o.style.label === "Style DNA" ? undefined : o.style.label;
+  let lines: { text: string; payoff?: boolean }[] = [{ text: shortTitleFallback(o.title), payoff: true }];
+  try {
+    const c = await geminiJson<{
+      scene?: string;
+      look?: string;
+      lines?: { text?: string; payoff?: boolean }[];
+    }>({
+      prompt:
+        `Thumbnail concept for the video "${o.title}"${o.niche ? ` (${o.niche})` : ""} on channel "${o.channelName}".\n` +
+        `The channel's locked look: ${o.style.art} Palette: ${o.style.palette}.\n` +
+        `- scene: ONE sentence — hero subject + background + one story-carrying detail, literally enacting the ` +
+        `topic INSIDE the locked look (never a generic scene).\n` +
+        `- look: the rendering style distilled to <=12 words (medium, material, grade).\n` +
+        `- lines: 2-3 headline lines, 1-3 punchy words each, <=5 words total, NOT restating the title, ` +
+        `exactly ONE marked as the payoff.\n` +
+        `Return STRICT JSON {"scene":string,"look":string,"lines":[{"text":string,"payoff":boolean}]}.`,
+      maxTokens: 600,
+      temperature: 0.8,
+    });
+    if (c.scene?.trim()) scene = c.scene.trim();
+    if (c.look?.trim()) look = c.look.trim();
+    const got = (c.lines ?? [])
+      .filter((l) => l.text && l.text.trim())
+      .map((l) => ({ text: String(l.text).trim(), payoff: l.payoff === true }));
+    if (got.length) lines = got;
+  } catch {
+    /* deterministic fallback above */
   }
-  // Generate the base and compose with the SAME deterministic overlap guard the
-  // render pipeline uses — regenerate a wider base until the title sits CLEAR of
-  // the statue (no text-over-head). Accept the last attempt as a fallback.
   const outJpg = join(o.dir, `t_${o.id}.jpg`);
-  const MAX = 4;
-  for (let k = 0; k < MAX; k++) {
-    const last = k === MAX - 1;
-    const url = await generateFalFluxProImage({ prompt: basePrompt });
-    const base = join(o.dir, `b_${o.id}_${k}.jpg`);
-    writeFileSync(base, Buffer.from(await (await fetch(url)).arrayBuffer()));
-    const layout = await planSubjectLayout(base);
-    // The statue-right/left-dark layout contract only applies to the brush
-    // composite — DNA styles use their own composition (often centered).
-    if (o.style.design && !layout.leftZoneClean && !last) continue; // subject not cleanly on the right → regen
-    if (o.style.design?.treatment === "brush_swash") {
-      const d = await guardedThumbnailDesign({
-        basePath: base,
-        outJpg,
-        brushPath: o.brush,
-        title: thumbTitle,
-        tagline: o.style.design.tagline,
-        channel: o.channelName,
-        badge: o.style.design.badge,
-        accentHex: o.style.design.accentHex,
-        font: o.style.title.font,
-        flipBase: layout.flip,
-      });
-      if (!d.clear && !last) continue; // title would touch the statue → regen
-    } else {
-      await thumbnailText({ basePath: base, outJpg, title: thumbTitle, subtitle: o.channelName, font: o.style.title.font, uppercase: o.style.title.uppercase });
-    }
-    break;
-  }
+  await bananaThumbnail({
+    brief: buildThumbBrief({
+      channelName: o.channelName,
+      imageStyle: look,
+      palette: [o.style.palette],
+      accentColor: o.style.title.accent ?? undefined,
+      scene,
+      lines,
+      badge: o.channelName,
+    }),
+    outJpg,
+    expectWords: lines.map((l) => l.text),
+    imageStyle: look,
+    title: o.title,
+    log: o.log,
+  });
   const key = `${channelPrefix(o.ownerId, o.slug)}plan/${o.id}.jpg`;
   await putObject(key, readFileSync(outJpg), { contentType: "image/jpeg" });
   return key;

@@ -92,7 +92,7 @@ export const buildChannelPackageTask = task({
       name: concept.name,
       identity,
       thumbnailer:
-        archetype.thumbnailTemplate === "claude_flux" ? "claude_flux" : "title_card",
+        archetype.thumbnailTemplate === "title_card" ? "title_card" : "banana",
       template: archetype.template,
       pipeline,
       budget: payload.budget ?? 5,

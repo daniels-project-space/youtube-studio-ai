@@ -28,10 +28,9 @@ const SERVICES = [
   // (logs + continues), so these are safe even before the vault entries exist.
   "gemini", // GEMINI_API_KEY (Gemini 2.5 Flash + Vision) — script_gen, research, metadata
   "google", // GOOGLE_* (places / app credentials)
-  "anthropic", // ANTHROPIC_API_KEY (claude_flux thumbnail concept, qa_script)
+  "anthropic", // ANTHROPIC_API_KEY (headline concepts, qa_script)
   "langfuse", // LANGFUSE_PUBLIC_KEY/SECRET_KEY (Mastra agent tracing; optional)
   "assemblyai", // ASSEMBLYAI_API_KEY (captions SRT; optional — chapters work without)
-  "ideogram", // IDEOGRAM_API_KEY (preferred text-first thumbnailer; optional)
   "ayrshare", // AYRSHARE_API_KEY (Phase 8 cross-post; optional)
 ];
 

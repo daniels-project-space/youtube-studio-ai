@@ -116,7 +116,7 @@ export const designChannelTask = task({
       ownerId, slug, name, identity,
       // Niche preset thumbnail engine wins over the family default when set.
       thumbnailer: nichePreset(payload.nicheKey)?.thumbnailer
-        ?? (fam.defaultThumbnailStyle === "title_card" ? "title_card" : "claude_flux"),
+        ?? (fam.defaultThumbnailStyle === "title_card" ? "title_card" : "banana"),
       template: archetype.template,
       pipeline: design.pipeline,
       budget: payload.budget ?? 5,

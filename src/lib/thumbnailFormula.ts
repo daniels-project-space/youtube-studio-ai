@@ -1,9 +1,9 @@
 /**
  * Thumbnail art-direction formula — researched YouTube CTR best practices baked
- * into reusable prompt scaffolding, plus per-archetype style presets so EVERY
- * channel gets an on-brand, eye-catching, consistent thumbnail (not just the
- * stoic channel). Pure data + string builders; no I/O. Consumed by the
- * `thumbnail_gen` block to build the Flux base prompt + constrain the overlay.
+ * into per-archetype style presets + the Style-DNA style builder, so EVERY
+ * channel gets an on-brand, consistent look. Pure data; no I/O. Consumed by the
+ * banana engine surfaces (thumbnail_gen real-scene path + the week-ahead
+ * planner) as scene/look grounding for the design brief.
  *
  * The formula (high-CTR thumbnail fundamentals):
  *  1. ONE dominant focal subject — no clutter; the eye lands instantly.
@@ -39,30 +39,7 @@ export interface ThumbnailStyle {
     /** Hex accent for an optional highlighted keyword (or null = all white). */
     accent: string | null;
   };
-  /**
-   * When set, `thumbnail_gen` uses the richer brush-swash composite
-   * (ffmpeg.thumbnailDesign) instead of the plain title overlay: a painterly
-   * accent swash behind the punch line + tagline + corner badge. The
-   * approved "Option B" stoic look.
-   */
-  design?: {
-    treatment: "brush_swash";
-    /** Bulleted tagline under the title. */
-    tagline: string;
-    /** Accent hex for swash + tagline + badge. */
-    accentHex: string;
-    /** Corner badge label (e.g. "4K"). */
-    badge: string;
-  };
 }
-
-/** Shared TEXT-FREE / composition suffix appended to every base prompt. */
-export const TEXT_FREE_SUFFIX =
-  "Single dominant subject, off-center using the rule of thirds with deep clean " +
-  "negative space on one side for a title. Dramatic high-contrast lighting, strong " +
-  "rim light, cinematic depth and atmosphere. Ultra detailed, photorealistic unless " +
-  "the style says otherwise. Absolutely NO text, NO words, NO letters, NO numbers, " +
-  "NO watermark, NO logo.";
 
 /**
  * Per-archetype style presets. `default` is the general formula any new channel
@@ -70,26 +47,16 @@ export const TEXT_FREE_SUFFIX =
  */
 export const THUMBNAIL_STYLES: Record<string, ThumbnailStyle> = {
   // A — narrated essay (philosophy / stoicism): the look Daniel approved.
+  // (The old left-two-thirds negative-space contract is gone — the banana
+  // engine owns text layout and that contract caused the timid look.)
   "narrated-essay": {
     label: "Stoic sculpture",
     art:
-      "A pristine ancient Greco-Roman bust of a bearded stoic philosopher carved from " +
-      "LUMINOUS light-grey and bright white marble, the pale polished stone clearly lit " +
-      "so it glows softly (NOT dark, NOT heavy shadow). The bust is pushed FAR to the " +
-      "RIGHT edge of the frame — the entire head sits within the right third, in profile " +
-      "facing left. Behind and around the bust on the RIGHT, a VOLUMETRIC atmosphere: soft " +
-      "god rays / light shafts streaming down, floating luminous light dust and gentle haze " +
-      "catching the light, cinematic depth. Crucially, this atmosphere stays on the right " +
-      "around the statue — the LEFT TWO-THIRDS of the image MUST remain almost pure black, " +
-      "empty negative space with NO rays, NO bright dust, NO objects (reserved for text).",
+      "A pristine ancient Greco-Roman marble bust of a bearded stoic philosopher, luminous " +
+      "light-grey and white marble glowing softly against a near-black void, volumetric god " +
+      "rays and floating light dust, cinematic chiaroscuro depth.",
     palette: "near-black background, bright light-grey / white marble, warm volumetric god-ray glow, amber accent",
     title: { font: "serif", uppercase: true, accent: null },
-    design: {
-      treatment: "brush_swash",
-      tagline: "Ancient Wisdom for Modern Life",
-      accentHex: "#C8862E",
-      badge: "4K",
-    },
   },
   // B — crime / mystery.
   "crime-narrative": {
@@ -184,38 +151,6 @@ export function resolveThumbnailStyle(key?: string): ThumbnailStyle {
   };
   const mapped = byTemplate[key.toUpperCase()];
   return (mapped && THUMBNAIL_STYLES[mapped]) || THUMBNAIL_STYLES.default;
-}
-
-/**
- * Deterministic TEXT-FREE base prompt (no Claude needed). Combines the style's
- * art direction with the formula suffix. The video topic biases the scene only
- * lightly so brand consistency wins over literal illustration.
- */
-export function buildBasePrompt(style: ThumbnailStyle, videoTitle: string, niche?: string): string {
-  return (
-    `Dramatic, eye-catching 16:9 YouTube thumbnail background. ${style.art} ` +
-    `Mood/topic context: "${videoTitle}"${niche ? ` (${niche})` : ""}. ` +
-    `Palette: ${style.palette}. ${TEXT_FREE_SUFFIX}`
-  );
-}
-
-/**
- * The art-director brief handed to Claude so it follows the formula AND the
- * channel's style. Claude returns a refined text-free prompt + a punchy title.
- */
-export function artDirectorBrief(style: ThumbnailStyle): string {
-  return (
-    `Follow this channel's locked thumbnail STYLE for brand consistency: ${style.label} — ${style.art} ` +
-    `Palette: ${style.palette}.\n\n` +
-    `Apply these high-CTR thumbnail rules:\n` +
-    `- ONE dominant focal subject; no clutter.\n` +
-    `- Strong emotion / evocative subject; high contrast + dramatic lighting so it reads as a tiny mobile tile.\n` +
-    `- Off-center (rule of thirds) leaving clean NEGATIVE SPACE for the title.\n` +
-    `- Depth & atmosphere (haze/smoke/bokeh/particles where the style fits).\n` +
-    `- Limited palette + ONE accent pop.\n` +
-    `- The image must be TEXT-FREE (no words/letters/numbers/watermark) — text is overlaid later.\n` +
-    `- thumbnail_title: 3-5 words MAX, punchy, adds curiosity (do NOT just repeat the video title).`
-  );
 }
 
 /** Punchy 3-4 word fallback title derived from the full video title. */

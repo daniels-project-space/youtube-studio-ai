@@ -23,7 +23,7 @@ export function registerAllBlocks(): void {
   // competitor-intelligence engine below, NOT from lofiBlocks.
   for (const b of lofiBlocks) register(b);
   // Competitor-intelligence engine: competitor_research, metadata (optimised),
-  // thumbnail_gen (claude_flux).
+  // thumbnail_gen (banana engine).
   for (const b of intelligenceBlocks) register(b);
   // Narrated archetypes (essay/crime/shorts/meditation) — text "brain" (3a).
   for (const b of narratedBlocks) register(b);
