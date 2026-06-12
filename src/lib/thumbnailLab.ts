@@ -74,7 +74,13 @@ export interface VisualLanguage {
   /** TYPE-AS-OBJECT treatment: typography rendered as a physical designed
    * object in the scene (torn strips / paint smear / censor bar / sticker),
    * never plain floating text. The single biggest craft lever. */
-  textObject?: "torn_strip" | "paint_smear" | "censor_bar" | "grunge_sticker" | "spaced_elegant" | "block_plate";
+  textObject?:
+    | "torn_strip" | "paint_smear" | "censor_bar" | "grunge_sticker" | "spaced_elegant" | "block_plate"
+    | "neon_sign" | "spray_paint" | "stamp_ink" | "movie_poster" | "ransom_note" | "carved";
+  /** cutout_collage = hero is a die-cut PHOTO cutout over a designed collage
+   * background (the anti-AI-look device for commentary/persona channels);
+   * full_scene = one continuous rendered scene. */
+  composition?: "cutout_collage" | "full_scene";
   uppercase?: boolean;
   /** recraft = the FULL frame (art + typography + layout) designed as ONE
    * generation by the design-tuned Recraft V3 model — the strongest one-pass
@@ -307,7 +313,7 @@ export async function distillPlaybook(args: {
       `"baseColor":"#hex","accentColor":"#hex" Ã¢â‚¬â€ colors MUST come from THIS channel's palette; NEVER default to ` +
       `gold/yellow unless it is genuinely this channel's color, ` +
       `"textObject":"torn_strip"|"paint_smear"|"censor_bar"|"grunge_sticker"|"spaced_elegant"|"block_plate"|"neon_sign"|"spray_paint"|"stamp_ink"|"movie_poster"|"ransom_note"|"carved" (the channel SIGNATURE type-as-object treatment - ALSO available: neon_sign=real glowing tubes in the scene; spray_paint=stencil graffiti with drips; stamp_ink=huge CLASSIFIED-style rubber stamp slammed diagonally; movie_poster=cinematic beveled title card in the scene atmosphere; ransom_note=letters cut from different magazines; carved=letters chiseled into the scene material with real depth - torn_strip: each word HUGE on its own torn newspaper strip in mixed tabloid serifs layered in front of/behind the hero; paint_smear: elegant wide-tracked capitals sitting ON a rough hand-swiped accent paint smear crossing the hero; censor_bar: white stencil caps on a solid accent censor bar laid across the frame or the hero eyes; grunge_sticker: ONE lowercase word ending in a period, distressed punk type, white knockout on a rough black sticker; spaced_elegant: thin extremely wide-tracked caps integrated into the artwork material; block_plate: ultra-heavy condensed caps on hard solid plates, key word underlined with a rough brush stroke), "imageStyle":"<=12 words Ã¢â‚¬â€ the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
-      `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill",` +
+      `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill","composition":"cutout_collage"|"full_scene" (cutout_collage = the hero is a clean die-cut PHOTO cutout with crisp edges pasted OVER a designed collage background of torn clippings/photos/graphic shapes - real photographic grain, magazine-composite feel; PICK THIS for commentary/persona/drama/expose channels because continuous AI scenes read fake there. full_scene = one continuous rendered scene for painterly/cinematic worlds),` +
       `"uppercase":boolean,"renderMode":"recraft"|"integrated"|"layered" (recraft = the ENTIRE frame - art, typography, layout - designed as ONE generation by a design-tuned model; the DEFAULT for most worlds (painterly, editorial, photographic, illustrated) because nothing looks pasted-on. integrated = words generated as part of the artwork via a typography engine; pick when type must physically exist in the scene as real neon/paint/print. layered = compositor type on top; pick ONLY for precision/data/clean-premium channels needing deterministic text control)}. THE RULE: if another channel could wear this language, it is WRONG Ã¢â‚¬â€ diverge hard.\n` +
       `1. rules: 6-8 HARD rules for this channel's thumbnails Ã¢â‚¬â€ specific (sizes, positions, counts, colors), ` +
       `derived from the evidence + principles, honoring the DNA palette.\n` +
@@ -533,12 +539,15 @@ export async function renderCandidate(args: {
           `YouTube thumbnail, top-1% clickbait design, composed for a small PHONE screen. ${scene} ` +
           `STYLE (obey strictly): ${vl.imageStyle ?? "cinematic"}. ` +
           `HERO DOMINANCE: the hero fills 55-75% of the frame, aggressively cropped with edges bleeding off frame, centered or near-center - nothing timid. ` +
+          `${(vl as { composition?: string }).composition === "cutout_collage" ? "COMPOSITION: photographic CUTOUT COLLAGE - the hero is a real-photo die-cut cutout with a crisp edge, pasted OVER a separate designed collage background (torn newspaper clippings, photos, graphic shapes, paper texture, hard cut shadows) like a magazine composite. Real photographic grain - NEVER a continuous smooth AI-rendered scene. " : ""}` +
           `TYPOGRAPHY ${wordList}${callout} rendered ${typeObj}, accent color ${vl.accentColor ?? "#ffffff"}. ` +
           `TYPE HIERARCHY (non-negotiable): never set all words the same size - the single PAYOFF word is 2-4x ` +
           `larger than the rest and is the loudest thing after the hero face. The type may tilt 2-6 degrees and ` +
           `may bleed off the frame edge mid-letter for urgency. Where natural, interleave type with the hero ` +
           `(a strip behind the head, a smear across the chest) for physical depth. ` +
           `SCALE FOR A PHONE: the type block owns 25-40% of the frame; every element must survive a 120px lock-screen glance - if it would not read there, make it BIGGER. ` +
+          `LETTERFORMS ULTRA-BOLD heavy weight (thin/light weights ONLY for spaced_elegant), the type sits IN FRONT of the scene at full opacity - foreground presence, never washed out. ` +
+          `VERTICAL PLACEMENT: the text block sits in the upper-to-middle band of its side with generous breathing margin - NEVER crammed into the extreme corner or pinned to the very top edge. ` +
           `RAZOR-SHARP, spelling EXACTLY as quoted, extreme contrast, readable at 120px. ` +
           `ABSOLUTELY NO other text anywhere - no small labels, no captions, no channel marks: ONLY the headline words (the channel badge is composited afterwards).${fixNote}`;
         let recraftPrompt = buildPrompt(inst.fluxPrompt ?? "");
@@ -580,7 +589,7 @@ export async function renderCandidate(args: {
           // the channel badge is composited deterministically, crisp by construction.
           try {
             const badgePng = await renderThumbTextLayer({
-              props: { lines: [], badge: String(textProps["badge"] ?? ""), badgeStyle: vl.badgeStyle ?? "pill", font: vl.font ?? "impact", accentColor: vl.accentColor, uppercase: true },
+              props: { lines: [], badge: String(textProps["badge"] ?? ""), badgeStyle: vl.badgeStyle ?? "pill", badgeCorner: plannedZone.toLowerCase().includes("right") ? "tl" : "tr", font: vl.font ?? "impact", accentColor: vl.accentColor, uppercase: true },
               outPng: join(args.tmpDir, `cand_${args.idx}_badge.png`),
             });
             const finalJpg = join(args.tmpDir, `cand_${args.idx}_badged.jpg`);

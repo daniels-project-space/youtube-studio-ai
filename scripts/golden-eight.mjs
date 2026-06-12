@@ -92,7 +92,7 @@ const JOBS = [
   },
   {
     key: "rich",
-    vlOverride: { textObject: "grunge_sticker" },
+    vlOverride: { textObject: "grunge_sticker", composition: "cutout_collage", font: "impact", imageStyle: "gritty photographic tabloid composite, real photo grain, harsh flash, never 3D render" },
     name: "Gilded Lies",
     niche: "Finance / Documentary",
     title: "Why Bill Gates Isn't Your Friend",
