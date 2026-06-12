@@ -22,7 +22,7 @@ import { makeRunTempDir, downloadTo, readBytes, writeBytes } from "@/lib/files";
 import { putObject, getObjectBytes } from "@/lib/storage";
 import { titleCard, thumbnailText, guardedThumbnailDesign, planSubjectLayout, imageToJpeg, solidImage } from "@/lib/ffmpeg";
 import { generateFluxImage } from "@/lib/replicate";
-import { generateFalFluxProImage, hasFalKey } from "@/lib/falImage";
+import { hasBanana } from "@/lib/banana";
 import { generateKeyframe } from "@/lib/higgsfield";
 import {
   resolveThumbnailStyle,
@@ -730,7 +730,7 @@ export const thumbnailGen: Block = {
     // gates the result. Falls through to the legacy paths on any failure.
     const playbook = (channelDoc as { thumbnailPlaybook?: import("@/lib/thumbnailLab").ThumbnailPlaybook } | null)
       ?.thumbnailPlaybook;
-    if (playbook?.patterns?.length && hasAnthropicKey() && hasFalKey() && thumbnailer !== "title_card") {
+    if (playbook?.patterns?.length && hasBanana() && thumbnailer !== "title_card") {
       try {
         const { renderCandidate } = await import("@/lib/thumbnailLab");
         const tmp = await makeRunTempDir(ctx.runId);
@@ -817,253 +817,60 @@ export const thumbnailGen: Block = {
       }
     }
 
-    // PREFERRED: Ideogram 3.0 text-first thumbnail (great headlines, ~95% text
-    // accuracy). Director vision QA gates legibility/CTR; retry once on fail.
-    // Falls through to claude_flux / title_card on absence or failure.
-    if (hasIdeogramKey() && thumbnailer !== "title_card") {
-      for (let attempt = 1; attempt <= 2; attempt++) {
-        try {
-          const url = await generateIdeogramThumbnail({ title, niche });
-          if (!url) break;
-          const tmp = await makeRunTempDir(ctx.runId);
-          const raw = await downloadTo(url, join(tmp, "ideogram.png"));
-          const outJpg = join(tmp, "thumbnail.jpg");
-          await imageToJpeg(raw, outJpg);
-          const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-          await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
-          // QA runs on EVERY attempt now (it previously skipped the final
-          // attempt, so a retried thumbnail shipped unvalidated). A final-
-          // attempt failure falls through to claude_flux instead of shipping.
-          if (hasGeminiKey()) {
-            try {
-              const qraw = await geminiVisionLocal({
-                prompt:
-                  `You are a thumbnail QA reviewer. Judge this YouTube thumbnail for "${title}". ` +
-                  `Is the text legible at small size and the composition click-worthy + on-brand` +
-                  (niche ? ` for a ${niche} channel` : "") +
-                  `? ${dnaSpecClause}Return ONLY JSON {"pass":true|false,"reason":"..."} — reason under 120 chars.`,
-                imagePaths: [outJpg],
-                json: true,
-                maxTokens: 400,
-              });
-              const qa = parseJsonLoose<{ pass?: boolean; reason?: string }>(qraw);
-              if (qa.pass === false) {
-                ctx.log(`thumbnail_gen: ideogram QA fail attempt ${attempt} (${qa.reason ?? ""})`);
-                if (attempt < 2) continue;
-                break; // exhausted → claude_flux
-              }
-              const refQA = await referenceMobileQA(tmp, outJpg);
-              if (refQA && !refQA.pass) {
-                ctx.log(`thumbnail_gen: ideogram ref/mobile QA fail attempt ${attempt} (${refQA.reason})`);
-                if (attempt < 2) continue;
-                break;
-              }
-            } catch (e) {
-              ctx.log(`thumbnail_gen: ideogram QA errored (accepting): ${e instanceof Error ? e.message : e}`);
-            }
-          }
-          await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "ideogram" });
-          ctx.log("thumbnail_gen: ideogram thumbnail ✓");
-          return { thumbnailKey };
-        } catch (e) {
-          ctx.log(`thumbnail_gen: ideogram attempt ${attempt} failed: ${e instanceof Error ? e.message : e}`);
-        }
-      }
-      ctx.log("thumbnail_gen: ideogram unavailable/failed — falling back to claude_flux");
-    }
-
-    // Honour explicit non-flux selection, or degrade if Claude/Replicate absent.
-    if (thumbnailer === "title_card" || !hasAnthropicKey()) {
-      if (!hasAnthropicKey()) {
-        ctx.log("thumbnail_gen: ANTHROPIC_API_KEY missing — using title_card fallback");
-      }
+    // Operator explicitly selected the deterministic title card.
+    if (thumbnailer === "title_card") {
       const thumbnailKey = await titleCardFallback(ctx);
       return { thumbnailKey };
     }
 
-    const maxAttempts = 3;
-    for (let attempt = 1; attempt <= maxAttempts + 1; attempt++) {
-      try {
-        // Phase 1 — Claude Sonnet concept, constrained to the channel STYLE +
-        // the high-CTR thumbnail formula. Degrades to a deterministic prompt.
-        let concept: ThumbConcept;
-        if (hasAnthropicKey()) {
-          concept = await claudeJson<ThumbConcept>({
-            maxTokens: 600,
-            system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
-            prompt:
-              `Design a click-worthy 16:9 thumbnail for the video titled "${title}"` +
-              (niche ? ` (niche: ${niche})` : "") +
-              `.\nChannel persona: ${persona || "n/a"}.\n` +
-              dnaSpecClause +
-              rulesClause +
-              healClause +
-              `Thumbnail identity: ${JSON.stringify(thumbId ?? {})}.\n` +
-              `Niche style guide: ${JSON.stringify(styleGuide ?? {})}.\n\n` +
-              artDirectorBrief(style) +
-              "\n\nReturn JSON with keys: flux_prompt (a vivid, TEXT-FREE image " +
-              "generation prompt that REALISES the locked style above — never request " +
-              "words/letters in the image), thumbnail_title (3-5 words, punchy overlay " +
-              "text that adds curiosity), text_color (hex with high contrast vs the " +
-              "scene), text_shadow (boolean), visual_rationale (1 sentence).",
-          });
-        } else {
-          concept = {
-            flux_prompt: buildBasePrompt(style, title, niche),
-            thumbnail_title: shortTitleFallback(title),
-            text_color: "#FFFFFF",
-            text_shadow: true,
-            visual_rationale: "deterministic style preset (no Anthropic key)",
-          };
-        }
-
-        // Phase 2 — base render (TEXT-FREE). PRIMARY: FLUX1.1 [pro] via fal.ai
-        // (cinematic, controllable, no CLI session). Falls back to gpt_image_2
-        // (Higgsfield) then Replicate Flux.
-        const basePrompt = `${concept.flux_prompt} ${TEXT_FREE_SUFFIX}`;
-        let baseUrl: string;
-        if (hasFalKey()) {
-          try {
-            baseUrl = await generateFalFluxProImage({ prompt: basePrompt });
-            ctx.log("thumbnail_gen: base via FLUX1.1 [pro] (fal.ai)");
-          } catch (e) {
-            ctx.log(`thumbnail_gen: fal flux-pro failed (${e instanceof Error ? e.message : e}) — gpt_image_2 fallback`);
-            baseUrl = await fallbackBase(ctx, basePrompt);
-          }
-        } else {
-          baseUrl = await fallbackBase(ctx, basePrompt);
-        }
-
-        // Phase 3 — overlay the title. Styles with a `design` use the richer
-        // brush-swash composite (approved "Option B" stoic look); others get the
-        // plain bold overlay.
-        const tmp = await makeRunTempDir(ctx.runId);
-        const base = await downloadTo(baseUrl, join(tmp, "thumb_base.png"));
-        const outJpg = join(tmp, "thumbnail.jpg");
-        const ttl = concept.thumbnail_title || shortTitleFallback(title);
-        const channelName = (ctx.store["channelName"] as string | undefined) ?? "";
-        if (style.design?.treatment === "brush_swash") {
-          // GUARANTEE statue-right / text-left DETERMINISTICALLY by brightness
-          // (the marble bust is bright, the bg near-black) — vision-model side
-          // detection false-positived. Mirror so the subject is on the right; if
-          // the subject is centered/spanning (left text-zone not dark), regenerate.
-          const layout = await planSubjectLayout(base);
-          const flipBase = layout.flip;
-          if (!layout.leftZoneClean && attempt <= maxAttempts) {
-            ctx.log(`thumbnail_gen: subject not cleanly right (L${layout.left}/R${layout.right}) — regenerating base`);
-            continue;
-          }
-          // Compose with the shared DETERMINISTIC overlap guard: it measures the
-          // statue's left edge, caps the title to the clear gap, and reports if the
-          // title sits CLEAR of the subject. Regenerate a wider base if not.
-          const design = await guardedThumbnailDesign({
-            basePath: base,
-            outJpg,
-            brushPath: join(process.cwd(), "src/assets/thumb_brush_swash.png"),
-            title: ttl,
-            tagline: style.design.tagline,
-            channel: channelName,
-            badge: style.design.badge,
-            accentHex: style.design.accentHex,
-            font: style.title.font,
-            flipBase,
-          });
-          ctx.log(`thumbnail_gen: flip=${flipBase} subjLeft=${design.subjectLeftPx}px textRight=${design.textRightPx}px clear=${design.clear} (leftClean=${layout.leftZoneClean})`);
-          if (!design.clear && attempt <= maxAttempts) {
-            ctx.log(`thumbnail_gen: title would touch the subject — regenerating base`);
-            continue;
-          }
-        } else {
-          await thumbnailText({
-            basePath: base,
-            outJpg,
-            title: ttl,
-            subtitle: channelName,
-            font: style.title.font,
-            uppercase: style.title.uppercase,
-            textShadow: true,
-          });
-        }
-
-        // Upload first (so QA can fetch the rendered image by URL).
-        const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-        await putObject(thumbnailKey, await readBytes(outJpg), {
-          contentType: "image/jpeg",
-        });
-
-        // Phase 3b — Gemini Vision QA on the LOCAL rendered image (publicUrl isn't
-        // configured, so URL-based QA silently no-oped before). Strict checks:
-        // text must NOT overlap the subject/face, must be fully legible at small
-        // size, uncluttered, and on-brand for the channel identity. Retry on fail.
-        if (hasGeminiKey() && attempt <= maxAttempts) {
-          try {
-            // ARCHETYPE-CONDITIONAL rubric: the statue-right/text-left layout
-            // criteria only apply to the brush_swash composite — judging a lofi
-            // or crime thumbnail against the stoic layout produced nonsense
-            // verdicts for every non-statue channel.
-            const layoutCriteria =
-              style.design?.treatment === "brush_swash"
-                ? `(a) the main subject/statue is NOT clearly on the RIGHT side, OR the title text is NOT clearly on ` +
-                  `the LEFT side; ` +
-                  `(b) ANY text overlaps, touches, or sits on top of the statue/subject/face; `
-                : `(a) there is no single dominant focal subject (the scene reads cluttered/busy at a glance); ` +
-                  `(b) the title text overlaps or crowds the focal subject, or sits over a busy area that hurts legibility; `;
-            const dnaCriteria =
-              dnaThumb?.subject || dna?.recurringSubject
-                ? `(f) it ignores the channel's locked thumbnail identity (expected subject: "${dnaThumb?.subject || dna?.recurringSubject}"` +
-                  ((dnaThumb?.palette ?? dna?.palette)?.length ? `, palette: ${(dnaThumb?.palette ?? dna?.palette ?? []).join(", ")}` : "") +
-                  `). `
-                : "";
-            const raw = await geminiVisionLocal({
-              prompt:
-                `You are a STRICT thumbnail QA reviewer for the YouTube channel "${ctx.store["channelName"] ?? "this channel"}"` +
-                (niche ? ` (niche: ${niche})` : "") +
-                (persona ? `, persona: ${persona}` : "") +
-                `. Inspect this thumbnail for the video "${title}". FAIL it if ANY of these are true: ` +
-                layoutCriteria +
-                `(c) the title is not big, bold, high-contrast, and easily readable at small mobile size (it should ` +
-                `look clickbait-worthy); ` +
-                `(d) the composition looks cluttered, amateur, or poorly balanced; ` +
-                `(e) it does not fit the channel's identity/persona/niche. ` +
-                dnaCriteria +
-                `Otherwise pass. Return ONLY JSON {"pass":true|false,"reason":"..."} — reason under 120 chars.`,
-              imagePaths: [outJpg],
-              json: true,
-              maxTokens: 400,
-            });
-            const qa = parseJsonLoose<{ pass?: boolean; reason?: string }>(raw);
-            if (qa.pass === false) {
-              ctx.log(`thumbnail_gen: QA fail (attempt ${attempt}): ${qa.reason ?? ""} — retrying`);
-              continue;
-            }
-            // SECOND GATE — the comparison the operator actually cares about:
-            // legible at browse-strip size AND competitive next to the scraped
-            // top thumbnails of the niche.
-            const refQA = await referenceMobileQA(tmp, outJpg);
-            if (refQA && !refQA.pass && attempt <= maxAttempts) {
-              ctx.log(`thumbnail_gen: reference/mobile QA fail (attempt ${attempt}): ${refQA.reason} — retrying`);
-              continue;
-            }
-            ctx.log(`thumbnail_gen: QA pass (attempt ${attempt})${refQA ? ` — ref QA: ${refQA.reason}` : ""}`);
-          } catch (e) {
-            ctx.log(`thumbnail_gen: QA errored (accepting): ${e instanceof Error ? e.message : e}`);
-          }
-        }
-
-        await recordAsset(ctx, "thumbnail", thumbnailKey, {
-          strategy: "claude_flux",
-          visualRationale: concept.visual_rationale,
-          thumbnailTitle: concept.thumbnail_title,
-        });
-        return { thumbnailKey };
-      } catch (e) {
-        ctx.log(`thumbnail_gen: claude_flux attempt ${attempt} failed: ${e instanceof Error ? e.message : e}`);
-        // fall through to retry; on final failure, degrade to title_card.
-      }
+    // THE ENGINE (no playbook yet): DNA-direct Nano Banana Pro brief - the
+    // same one-pass design-native render the playbook path uses. Judged with
+    // one feedback retry; failure is LOUD (block heal retries - the legacy
+    // ideogram/claude_flux/brush_swash machine is gone).
+    const { buildThumbBrief, bananaThumbnail } = await import("@/lib/banana");
+    let bananaLines;
+    try {
+      const c = await claudeJson<{ lines?: { text?: string; payoff?: boolean }[] }>({
+        maxTokens: 300,
+        system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
+        prompt:
+          `Headline for a YouTube thumbnail. Video: "${title}"${niche ? ` (niche ${niche})` : ""}. ` +
+          `2-3 lines, 1-3 punchy words each, <=5 words total, NOT restating the title, real English hook ` +
+          `words, never meta-words. Mark exactly ONE line as the payoff. ` +
+          `Return STRICT JSON {"lines":[{"text":string,"payoff":boolean}]}.`,
+      });
+      bananaLines = (c.lines ?? [])
+        .filter((l) => l.text && l.text.trim())
+        .map((l) => ({ text: String(l.text).trim(), payoff: l.payoff === true }));
+    } catch { /* hook fallback below */ }
+    if (!bananaLines?.length) {
+      const hook = title.split(/[\s:—-]+/).filter((w) => w.length > 2).slice(0, 2);
+      bananaLines = [{ text: hook[0] ?? "WATCH", payoff: false }, { text: hook[1] ?? "THIS", payoff: true }];
     }
-
-    ctx.log("thumbnail_gen: claude_flux exhausted — degrading to title_card");
-    const thumbnailKey = await titleCardFallback(ctx);
+    const btmp = await makeRunTempDir(ctx.runId);
+    const bOut = join(btmp, "thumbnail.jpg");
+    const bScene = dnaThumb?.subject || dna?.recurringSubject
+      ? `${dnaThumb?.subject ?? dna?.recurringSubject} - staged to literally dramatize "${title}".`
+      : `a dramatic scene that literally enacts "${title}"${niche ? ` for a ${niche} channel` : ""}.`;
+    const { verdict } = await bananaThumbnail({
+      brief: buildThumbBrief({
+        channelName: String(ctx.store["channelName"] ?? "channel"),
+        imageStyle: dna?.colorGrade ?? undefined,
+        palette: dnaThumb?.palette ?? dna?.palette,
+        scene: bScene,
+        lines: bananaLines,
+        badge: String(ctx.store["channelName"] ?? ""),
+      }),
+      outJpg: bOut,
+      expectWords: bananaLines.map((w) => w.text),
+      imageStyle: dna?.colorGrade ?? undefined,
+      title,
+      log: ctx.log,
+    });
+    const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
+    await putObject(thumbnailKey, await readBytes(bOut), { contentType: "image/jpeg" });
+    await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "banana_dna", punch: verdict.punch });
+    ctx.log(`thumbnail_gen: BANANA thumbnail OK (DNA-direct, punch ${verdict.punch ?? "?"}/10)`);
     return { thumbnailKey };
   },
 };

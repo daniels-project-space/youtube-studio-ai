@@ -217,8 +217,14 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   },
   {
     block: "thumbnail_gen",
-    purpose: "Executes the channel's thumbnail playbook (evidence-distilled patterns, Remotion typography, comparative reference QA).",
-    whenToUse: "Core. patternBias steers the rotation toward tournament-proven patterns.",
+    purpose:
+      "Renders thumbnails with the BANANA ENGINE (Nano Banana Pro / Gemini 3 Pro Image): ONE design-native " +
+      "generation from a rich brief - the channel's visual language (imageStyle, palette, textObject type " +
+      "treatment, cutout_collage composition), a scene that literally enacts the topic, payoff-word headline " +
+      "hierarchy, badge - then a vision gate (text exact, faces never covered, punch/style/story >=7) with one " +
+      "feedback retry. Typography comes out as physical material (carved slabs, torn strips, paint smears). " +
+      "Playbook patterns rotate per run for anti-repetition; without a playbook it renders DNA-direct.",
+    whenToUse: "Core. patternBias steers the rotation toward tournament-proven patterns; thumbEnergy sets the clickbait tier.",
     addable: false,
     removable: false,
     params: [
