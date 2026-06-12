@@ -16,7 +16,7 @@
  *   // open.hook (≤7s), open.opening (~20-30s), open.coldOpen (both)
  */
 import { geminiJson, geminiJsonPro, geminiGroundedJson, hasGeminiKey } from "@/lib/gemini";
-import { resolveVoiceDoctrine } from "@/engine/golden";
+import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 
 export function hasHookcraft(): boolean {
   return hasGeminiKey();
@@ -215,6 +215,9 @@ export interface HookCraftArgs {
   directorIdea?: string;
   /** Spoken language directive (non-English channels). */
   language?: string;
+  /** Channel voice is ElevenLabs v3 — the cold open may carry 1-2 performed
+   * audio tags from the archetype's palette (otherwise brackets are banned). */
+  voiceTags?: boolean;
   log?: (msg: string) => void;
 }
 
@@ -346,7 +349,15 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           `first-person research the channel hasn't done ("we analyzed", "I reviewed the filings") — cite real ` +
           `public facts instead. No disclaimers, no apologies, no subscribe asks. NEVER use these openers: ` +
           `${BANNED_OPENERS.join("; ")}.`,
-        `Plain spoken text only — no markdown, brackets, or stage directions.${lang}`,
+        a.voiceTags
+          ? `The narration voice (ElevenLabs v3) PERFORMS bracketed delivery tags. The cold open may carry ` +
+            `AT MOST 1-2 tags from this palette, placed immediately before the words they color (the breath ` +
+            `before the reveal, the turn): ${
+              (resolveVoiceDoctrine(a.niche) && V3_TAG_PALETTES[resolveVoiceDoctrine(a.niche)!.voice]) ||
+              "[pause] [long pause] [exhales] [seriously]"
+            }. No other brackets. Ellipses (...) carry weighted pauses.`
+          : `Plain spoken text only — no markdown, brackets, or stage directions.`,
+        `${lang}`,
         fixNote,
         `Return STRICT JSON {"candidates":[{"device":string,"hook":string,"opening":string,` +
           `"loop":string (ONE sentence: the exact promise this cold open makes — what the video must pay off)}]}.`,
