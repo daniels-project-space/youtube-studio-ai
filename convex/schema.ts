@@ -220,6 +220,26 @@ export default defineSchema({
     refreshedAt: v.number(),
   }).index("by_owner_niche", ["ownerId", "niche"]),
 
+  // Per-niche cached breakout-video scans (topicraft's quota-immune outlier
+  // signal — live YouTube search quota dies daily, so the hot path reads here).
+  outlierBank: defineTable({
+    ownerId: v.string(),
+    niche: v.string(),
+    fetchedAt: v.number(),
+    outliers: v.array(
+      v.object({
+        title: v.string(),
+        channelTitle: v.string(),
+        views: v.number(),
+        subs: v.number(),
+        score: v.number(),
+        videoId: v.string(),
+        publishedAt: v.string(),
+        durationSec: v.number(),
+      }),
+    ),
+  }).index("by_owner_niche", ["ownerId", "niche"]),
+
   // One execution of a channel's pipeline.
   runs: defineTable({
     ownerId: v.string(),

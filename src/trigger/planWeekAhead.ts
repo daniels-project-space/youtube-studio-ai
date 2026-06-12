@@ -72,6 +72,7 @@ export const planWeekAheadTask = task({
         bannedWords: channel.identity?.bannedWords,
         requiredCallbacks: channel.identity?.requiredCallbacks,
       },
+      channelName,
       alsoAvoid: existing.map((r) => r.topic),
       log,
     });
@@ -83,25 +84,32 @@ export const planWeekAheadTask = task({
     const dir = join(tmpdir(), `plan_${channelId}_${ids.length}`);
     mkdirSync(dir, { recursive: true });
 
-    // 2) per topic: title + description + thumbnail
+    // 2) per topic: title + description + thumbnail. Topicraft bets arrive
+    // with a judged provisional title + thumbnail moment — use them instead of
+    // re-deriving (one less LLM call per item, and the plan shows the same
+    // promise unit the judge gated).
     for (let i = 0; i < topics.length; i++) {
       const topic = topics[i];
+      const bet = optimized[i];
       const id = ids[i] as Id<"contentPlan">;
-      let title = topic;
+      let title = bet?.title?.trim() || topic;
       let description = "";
       try {
         if (hasGeminiKey()) {
           const meta = await geminiJson<{ title?: string; description?: string }>({
             prompt:
-              `For a ${niche || "YouTube"} video about "${topic}" on "${channelName}":\n` +
-              `- title: high-CTR, 60-90 chars, front-load the main keyword in the first ~40 chars, a number or ` +
-              `bracket if natural, NO channel name, no clickbait that the video can't honour.\n` +
+              `For a ${niche || "YouTube"} video about "${topic}" on "${channelName}"` +
+              (bet?.title ? ` (title is ALREADY locked: "${title}" — do NOT return a title)` : "") + `:\n` +
+              (bet?.title
+                ? ""
+                : `- title: high-CTR, 60-90 chars, front-load the main keyword in the first ~40 chars, a number or ` +
+                  `bracket if natural, NO channel name, no clickbait that the video can't honour.\n`) +
               `- description: ONE hook line + ONE short paragraph (<=60 words) with the keyword in the first 25 words, ` +
               `then 3 hashtags. No script.\nReturn STRICT JSON {"title":string,"description":string}.`,
             maxTokens: 500,
             temperature: 0.7,
           });
-          if (meta.title) title = meta.title.trim().slice(0, 100);
+          if (!bet?.title && meta.title) title = meta.title.trim().slice(0, 100);
           if (meta.description) description = meta.description.trim();
         }
       } catch (e) {
@@ -110,7 +118,7 @@ export const planWeekAheadTask = task({
 
       let thumbnailKey: string | undefined;
       try {
-        thumbnailKey = await genThumb({ id, topic, title, style, channelName, niche, ownerId, slug: channel.slug, dir, log });
+        thumbnailKey = await genThumb({ id, topic, title, style, channelName, niche, ownerId, slug: channel.slug, dir, log, sceneSeed: bet?.thumbnailMoment });
       } catch (e) {
         log(`thumbnail failed for "${topic}": ${e instanceof Error ? e.message : e}`);
       }
@@ -140,9 +148,11 @@ async function genThumb(o: {
   slug: string;
   dir: string;
   log: (m: string) => void;
+  /** Topicraft's judged thumbnail moment — the scene the bet was gated on. */
+  sceneSeed?: string;
 }): Promise<string | undefined> {
   if (!hasBanana()) return undefined;
-  let scene = `a dramatic scene that literally enacts "${o.title}"${o.niche ? ` for a ${o.niche} channel` : ""}.`;
+  let scene = o.sceneSeed?.trim() || `a dramatic scene that literally enacts "${o.title}"${o.niche ? ` for a ${o.niche} channel` : ""}.`;
   let look = o.style.label === "Style DNA" ? undefined : o.style.label;
   let lines: { text: string; payoff?: boolean }[] = [{ text: shortTitleFallback(o.title), payoff: true }];
   try {
@@ -154,6 +164,7 @@ async function genThumb(o: {
       prompt:
         `Thumbnail concept for the video "${o.title}"${o.niche ? ` (${o.niche})` : ""} on channel "${o.channelName}".\n` +
         `The channel's locked look: ${o.style.art} Palette: ${o.style.palette}.\n` +
+        (o.sceneSeed?.trim() ? `The PLANNED thumbnail moment (build the scene ON this, restyled into the locked look): ${o.sceneSeed.trim()}\n` : "") +
         `- scene: ONE sentence — hero subject + background + one story-carrying detail, literally enacting the ` +
         `topic INSIDE the locked look (never a generic scene).\n` +
         `- look: the rendering style distilled to <=12 words (medium, material, grade).\n` +

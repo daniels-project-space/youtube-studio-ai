@@ -16,6 +16,7 @@ import type * as competitors from "../competitors.js";
 import type * as contentPlan from "../contentPlan.js";
 import type * as folders from "../folders.js";
 import type * as forgedModules from "../forgedModules.js";
+import type * as outlierBank from "../outlierBank.js";
 import type * as runLogs from "../runLogs.js";
 import type * as runStages from "../runStages.js";
 import type * as runs from "../runs.js";
@@ -39,6 +40,7 @@ declare const fullApi: ApiFromModules<{
   contentPlan: typeof contentPlan;
   folders: typeof folders;
   forgedModules: typeof forgedModules;
+  outlierBank: typeof outlierBank;
   runLogs: typeof runLogs;
   runStages: typeof runStages;
   runs: typeof runs;

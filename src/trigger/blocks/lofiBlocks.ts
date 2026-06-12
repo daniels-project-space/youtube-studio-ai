@@ -45,7 +45,7 @@ import { notifyDraftReady } from "@/lib/telegram";
 import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
 import { hasGeminiKey, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
-import { hasAnthropicKey } from "@/lib/anthropic";
+import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
 import { loadPerformanceContext } from "@/lib/performance";
@@ -57,10 +57,6 @@ const producerTopicSchema = z.object({
     .array(z.object({ topic: z.string(), angle: z.string().optional().default("") }))
     .optional()
     .default([]),
-});
-const directorScoreSchema = z.object({
-  score: z.number().optional(),
-  issues: z.array(z.string()).optional().default([]),
 });
 import {
   makeRunTempDir,
@@ -290,104 +286,51 @@ export const topicSelect: Block = {
       ctx.log(`topic_select(series): "${seriesTitle}" complete (${doneCount}/${seriesCount}) — falling through to normal topics`);
     }
 
-    // Degrade: no Gemini → legacy static-pool first-fresh pick.
+    // TOPICRAFT — the golden topic-intel engine: evidence-cited, judged BETS.
+    // No silent pool fallback: a missing key fails loud (heal loop's job).
     if (!hasGeminiKey()) {
-      const fresh = pool.filter((t) => !usedNorm.has(normalizeTopic(t)));
-      const topic = (fresh.length > 0 ? fresh : pool)[0];
-      if (!topic) {
-        throw new Error("topic_select: no Gemini key and empty topicPool");
-      }
-      await recordTopicMemory(c, ctx, topic);
-      ctx.log(`topic_select (degraded, no Gemini): ${topic}`);
-      return { topic };
+      throw new Error("topic_select: GEMINI_API_KEY missing — refusing silent pool fallback");
     }
+    const competitorRows = niche
+      ? await c.query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche }).catch(() => [])
+      : [];
+    const competitorTitles = (competitorRows as { topVideos?: { title: string; views: number }[] }[])
+      .flatMap((r) => r.topVideos ?? [])
+      .sort((a, b) => b.views - a.views)
+      .slice(0, 12)
+      .map((v) => ({ title: v.title, views: v.views }));
+    const outliers = niche
+      ? await loadOutlierBank({
+          convex: c,
+          ownerId: ctx.ownerId,
+          niche,
+          query: [niche, ...pool.slice(0, 2)].filter(Boolean).join(" "),
+          log: (m) => ctx.log(m),
+        })
+      : [];
 
-    const loop = await produceAndCritique<{ topic: string; angle: string }>({
-      label: "topic_select",
-      threshold: 0.8,
-      maxIters: 3,
+    const crafted = await craftTopics({
+      channelName,
+      niche,
+      persona,
+      styleGrammar: style,
+      topicPool: pool,
+      bannedWords,
+      count: 1,
+      avoid: usedRows.map((r) => r.key),
+      perfContext: perfCtx || undefined,
+      competitorTitles,
+      outliers,
       log: ctx.log,
-      produce: async (priorIssues) => {
-        const out = await agentJson({
-          role: "producer",
-          schema: producerTopicSchema,
-          log: ctx.log,
-          prompt:
-            `You are the topic PRODUCER for the YouTube channel "${channelName}".\n` +
-            `Persona: ${persona || "n/a"}\nNiche: ${niche || "n/a"}\nStyle: ${style || "n/a"}\n` +
-            (bannedWords.length ? `Avoid these words/themes: ${bannedWords.join(", ")}\n` : "") +
-            (pool.length ? `Inspiration pool (NOT a limit): ${pool.slice(0, 30).join(" | ")}\n` : "") +
-            `ALREADY USED — do NOT repeat or trivially rephrase any of these:\n${recentList.join("\n") || "(none yet)"}\n\n` +
-            (policy === "no_repeat"
-              ? "This channel must NEVER repeat a topic. Invent genuinely NEW, specific, on-identity video topics absent from the used list.\n"
-              : "Prefer fresh topics not in the used list.\n") +
-            (perfCtx ? perfCtx + "\n" : "") +
-            (priorIssues.length ? `Fix these problems from the last attempt: ${priorIssues.join("; ")}\n` : "") +
-            `Propose 5 DISTINCT candidate topics — each a specific, compelling video topic (not a broad category) plus a one-line unique ANGLE.\n` +
-            `Return STRICT JSON {"candidates":[{"topic":string,"angle":string}]}.`,
-          maxTokens: 700,
-          temperature: 0.9,
-        });
-        const cands = (out.candidates ?? [])
-          .map((x) => ({ topic: (x.topic ?? "").trim(), angle: (x.angle ?? "").trim() }))
-          .filter((x) => x.topic.length > 0);
-        if (cands.length === 0) {
-          throw new Error("topic_select: producer returned no candidates");
-        }
-        // Prefer a candidate that is fresh at the code level.
-        const fresh = cands.filter((x) => !usedNorm.has(normalizeTopic(x.topic)));
-        return fresh[0] ?? cands[0];
-      },
-      critique: async (cand) => {
-        const issues: string[] = [];
-        // DETERMINISTIC gates (computed, not model-judged).
-        const dup = usedNorm.has(normalizeTopic(cand.topic));
-        if (dup) issues.push(`"${cand.topic}" duplicates an already-used topic — choose something genuinely new`);
-        const banned = bannedWords.find((w) =>
-          cand.topic.toLowerCase().includes(w.toLowerCase()),
-        );
-        if (banned) issues.push(`contains banned term "${banned}"`);
-
-        // SUBJECTIVE: the Director scores fit / freshness / appeal.
-        let dirScore = 0.7;
-        let dirIssues: string[] = [];
-        if (hasAnthropicKey()) {
-          try {
-            const v = await agentJson({
-              role: "director",
-              schema: directorScoreSchema,
-              log: ctx.log,
-              system: "You are the DIRECTOR: a YouTube content strategist. Return ONLY JSON.",
-              prompt:
-                `Channel "${channelName}" — persona: ${persona || "n/a"}; niche: ${niche || "n/a"}; style: ${style || "n/a"}.\n` +
-                `Proposed topic: "${cand.topic}" (angle: ${cand.angle || "n/a"}).\n` +
-                `Recently used:\n${recentList.slice(-20).join("\n") || "(none)"}\n\n` +
-                `Score 0..1 on on-identity fit, distinctiveness vs used topics, and click/watch appeal. ` +
-                `List concrete issues. Return JSON {"score":number,"issues":string[]}.`,
-              maxTokens: 400,
-              temperature: 0.3,
-            });
-            dirScore = typeof v.score === "number" ? Math.max(0, Math.min(1, v.score)) : 0.7;
-            dirIssues = Array.isArray(v.issues) ? v.issues : [];
-          } catch (e) {
-            ctx.log(`topic_select: director failed (continuing): ${e instanceof Error ? e.message : e}`);
-          }
-        }
-        const hardFail = dup || Boolean(banned);
-        return {
-          score: hardFail ? 0 : dirScore,
-          pass: !hardFail && dirScore >= 0.8,
-          issues: [...issues, ...dirIssues],
-        };
-      },
     });
+    const bet = crafted.bets[0];
 
-    let topic = loop.value.topic;
+    let topic = bet.topic;
     // FINAL hard guarantee (code, not model).
     if (usedNorm.has(normalizeTopic(topic))) {
       if (policy === "no_repeat") {
         throw new Error(
-          `topic_select: could not produce a non-repeating topic for a no_repeat channel after ${loop.iterations} iters`,
+          "topic_select: could not produce a non-repeating topic for a no_repeat channel",
         );
       }
       const fresh = pool.filter((t) => !usedNorm.has(normalizeTopic(t)));
@@ -396,9 +339,12 @@ export const topicSelect: Block = {
     // dryRun = preview a topic without committing it to history (UI preview/tests).
     if (ctx.params["dryRun"] !== true) await recordTopicMemory(c, ctx, topic);
     ctx.log(
-      `topic_select: "${topic}" (policy=${policy}, accepted=${loop.accepted}, score=${loop.critique.score.toFixed(2)}, angle="${loop.value.angle.slice(0, 60)}")`,
+      `topic_select: "${topic}" [${bet.betType}] title="${bet.provisionalTitle}" ` +
+        `evidence=${bet.evidence.slice(0, 90)}`,
     );
-    return { topic };
+    // The full bet rides the store: provisionalTitle/thumbnailMoment/hookPromise
+    // are judged warm starts for metacraft, banana and hookcraft downstream.
+    return { topic, topicBet: bet };
   },
 };
 

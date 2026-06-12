@@ -46,6 +46,7 @@ const seoDirectorSchema = z.object({
 /** lofi/study-music framing — flagged when the channel niche is NOT music. */
 const LOFI_LEAK = /lo-?fi|beats to (relax|study)|study music|chill beats/i;
 import { refreshNicheResearchCore } from "@/lib/nicheResearch";
+import { loadOutlierBank } from "@/lib/topicraft";
 import { publicUrl } from "@/lib/storage";
 import { join } from "node:path";
 
@@ -137,6 +138,18 @@ export const competitorResearch: Block = {
       ctx.log(`competitor_research: refresh failed (continuing): ${e instanceof Error ? e.message : e}`);
     }
 
+
+    // Keep the niche's outlier scan fresh alongside the databank — topicraft's
+    // hot path then reads the bank instead of burning daily YouTube quota.
+    await loadOutlierBank({
+      convex: convex(),
+      ownerId: ctx.ownerId,
+      niche,
+      query: niche,
+      log: (m) => ctx.log(`competitor_research: ${m}`),
+    }).catch((e) =>
+      ctx.log(`competitor_research: outlier bank refresh failed (continuing): ${e instanceof Error ? e.message : e}`),
+    );
     // Load cached intelligence into the store for downstream blocks.
     const c = convex();
     const [nicheIntel, databank, competitors] = await Promise.all([

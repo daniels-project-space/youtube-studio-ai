@@ -296,13 +296,19 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "topic-intel",
     stage: "intel",
-    title: "Topic Intel",
-    engine: "Self-hosted outlier intel + competitor research + learning-weighted topic_select",
+    title: "Topic Intel — Topicraft",
+    engine: "Topicraft — evidence-cited topic BETS (outlier bank + Reddit + autocomplete + competitor gaps), judge-gated portfolio",
     how:
-      "Scrapes the niche's outlier videos and competitor uploads into a free self-hosted databank, blends " +
-      "the analytics learning loop's weights, and picks fresh topics inside the channel identity (topic " +
-      "pool, banned words) while avoiding everything already done or planned.",
-    gates: ["dedupe vs done + planned topics", "identity constraints"],
+      "Topics are placed as BETS, not ideas: one Pro call writes a hero/hub/help portfolio where every " +
+      "candidate is a complete promise unit (topic + angle + provisional title + thumbnail moment + hook " +
+      "promise) and must CITE the real signal it rides — a cached outlier scan, a live Reddit discussion, " +
+      "a real autocomplete query, or a competitor gap. A deterministic lint verifies every citation " +
+      "against the supplied evidence, dedupes semantically vs everything done or planned (embeddings + " +
+      "token overlap), and runs each provisional title through metacraft's title lint. A judge gates " +
+      "demand/freshness/fit/packageability ≥7; winners ship with a judged bench and warm-start the " +
+      "metadata, thumbnail and hook engines downstream. Two LLM calls per slate; loud failure; " +
+      "quota-immune outlier reads.",
+    gates: ["evidence citation verified vs real signals", "semantic dedupe vs done + planned", "metacraft title lint on every bet", "demand / freshness / fit / packageability ≥ 7", "banned words / stale years"],
     status: "active",
   },
   {
