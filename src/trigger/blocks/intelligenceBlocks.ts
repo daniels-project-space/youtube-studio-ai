@@ -23,6 +23,7 @@ import { putObject, getObjectBytes } from "@/lib/storage";
 import { titleCard, thumbnailText, imageToJpeg, solidImage } from "@/lib/ffmpeg";
 import { generateFluxImage } from "@/lib/replicate";
 import { hasBanana } from "@/lib/banana";
+import { craftMetadata } from "@/lib/metacraft";
 import { generateKeyframe } from "@/lib/higgsfield";
 import { resolveThumbnailStyle, styleFromDNA, shortTitleFallback } from "@/lib/thumbnailFormula";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
@@ -176,6 +177,45 @@ interface CompetitorRow {
   topVideos: { title: string; views: number; tags: string[] }[];
 }
 
+/**
+ * Shared metadata finishing pass (metacraft + legacy paths): strip the channel
+ * name from the title, merge/screen tags against identity.bannedWords, append
+ * chapters + CC attributions to the description.
+ */
+function finishMetadata(
+  ctx: StageContext,
+  o: { title: string; description: string; tags: string[]; channelName: string; nicheIntel: NicheIntel | null },
+): { title: string; description: string; tags: string[] } {
+  let { title, description, tags } = o;
+  if (o.channelName && o.channelName !== "this channel") {
+    const esc = o.channelName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
+    title = title
+      .replace(new RegExp(`\\s*[|\\-–—:•]\\s*${esc}\\s*$`, "i"), "")
+      .replace(new RegExp(`^\\s*${esc}\\s*[|\\-–—:•]\\s*`, "i"), "")
+      .replace(new RegExp(`\\b${esc}\\b`, "gi"), "")
+      .replace(/\s{2,}/g, " ")
+      .replace(/\s*[|\-–—:•]\s*$/, "")
+      .trim();
+  }
+  const bannedWords = ((ctx.store["bannedWords"] as string[] | undefined) ?? [])
+    .map((w) => w.toLowerCase().trim())
+    .filter(Boolean);
+  const notBanned = (t: string) => !bannedWords.some((w) => t.toLowerCase().includes(w));
+  const baseTags = (Array.isArray(ctx.params["baseTags"]) ? (ctx.params["baseTags"] as unknown[]) : [])
+    .filter((t): t is string => typeof t === "string" && t.trim().length > 0);
+  const nicheTags = (o.nicheIntel?.topTags ?? []).map((t) => t.tag);
+  const dropped = [...baseTags, ...nicheTags].filter((t) => !notBanned(t));
+  if (dropped.length) ctx.log(`metadata: dropped banned-word tags: ${dropped.join(", ")}`);
+  tags = Array.from(new Set([...baseTags, ...tags, ...nicheTags].filter(notBanned))).slice(0, 30);
+  if (tags.length === 0) tags = [title.toLowerCase()];
+
+  const chaptersText = ctx.store["chaptersText"] as string | undefined;
+  if (chaptersText && chaptersText.trim()) description = `${description}\n\nChapters:\n${chaptersText}`;
+  const attributions = ctx.store["attributions"] as string[] | undefined;
+  if (attributions && attributions.length) description = `${description}\n\nImage credits:\n${attributions.join("\n")}`;
+  return { title, description, tags };
+}
+
 export const metadataOptimized: Block = {
   id: "metadata",
   consumes: ["topic"],
@@ -185,6 +225,8 @@ export const metadataOptimized: Block = {
     "tags",
     "estimatedViews",
     "estimatedViewsSource",
+    "pinnedComment",
+    "titleAlternate",
   ],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
@@ -268,7 +310,7 @@ export const metadataOptimized: Block = {
       const tags = [topic.toLowerCase(), niche].filter(Boolean) as string[];
       const ve = await viewEstimate(tags);
       ctx.log(`metadata (degraded, no Gemini): "${title}"`);
-      return { title, description, tags, ...ve };
+      return { title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
     }
 
     // Phase 7: bias titles toward past high-CTR/retention winners ("" until data).
@@ -279,6 +321,43 @@ export const metadataOptimized: Block = {
     const dnaSeo = (ctx.store["styleDNA"] as
       | { seo?: { titleFormula?: string; descriptionStructure?: string; playlistStrategy?: string } }
       | null)?.seo;
+
+    // METACRAFT — the engine: live autocomplete evidence + 7 framed candidates
+    // (latest Pro) + deterministic lint (claims grounded in the fact-checked
+    // script, mobile truncation, register) + feed judge with the title-promise
+    // contract. Falls through to the legacy tournament/loop only on failure.
+    try {
+      const m = await craftMetadata({
+        topic,
+        channelName,
+        niche,
+        persona,
+        language,
+        scriptExcerpt,
+        coldOpen: scriptDoc?.hook ?? undefined,
+        hookLoop: scriptDoc?.hookLoop ?? undefined,
+        quote: (ctx.store["script"] as { closingLine?: string } | undefined)?.closingLine ?? undefined,
+        competitorTitles: competitors
+          .flatMap((c) => c.topVideos)
+          .sort((x, y) => y.views - x.views)
+          .slice(0, 12)
+          .map((v) => ({ title: v.title, views: v.views })),
+        powerWords,
+        titleFormula: dnaSeo?.titleFormula,
+        descriptionStructure: dnaSeo?.descriptionStructure,
+        perfContext: perfCtx || undefined,
+        isMusicNiche,
+        log: ctx.log,
+      });
+      let { title, description, tags } = m;
+      ({ title, description, tags } = finishMetadata(ctx, { title, description, tags, channelName, nicheIntel }));
+      const ve = await viewEstimate(tags);
+      ctx.log(`metadata: METACRAFT [${m.frame}] click ${m.clickScore}/10 — "${title.slice(0, 60)}" est=${ve.estimatedViews} (${ve.estimatedViewsSource})`);
+      return { title, description, tags, pinnedComment: m.pinnedComment, titleAlternate: m.titleAlternate, ...ve };
+    } catch (e) {
+      ctx.log(`metadata: metacraft failed (${e instanceof Error ? e.message : e}) — legacy tournament fallback`);
+    }
+
     const dnaSeoClause =
       (dnaSeo?.titleFormula ? `CHANNEL TITLE FORMULA (Style DNA — prefer this shape): ${dnaSeo.titleFormula}\n` : "") +
       (dnaSeo?.descriptionStructure ? `CHANNEL DESCRIPTION STRUCTURE (Style DNA): ${dnaSeo.descriptionStructure}\n` : "");
@@ -486,52 +565,13 @@ export const metadataOptimized: Block = {
     });
 
     let { title, description, tags } = tournament ?? loop!.value;
-    // Deterministically strip the channel name from the title (it's the channel,
-    // not part of the video title) — handles separators like "… | Channel".
-    if (channelName && channelName !== "this channel") {
-      const esc = channelName.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");
-      title = title
-        .replace(new RegExp(`\\s*[|\\-–—:•]\\s*${esc}\\s*$`, "i"), "")
-        .replace(new RegExp(`^\\s*${esc}\\s*[|\\-–—:•]\\s*`, "i"), "")
-        .replace(new RegExp(`\\b${esc}\\b`, "gi"), "")
-        .replace(/\s{2,}/g, " ")
-        .replace(/\s*[|\-–—:•]\s*$/, "")
-        .trim();
-    }
-    // Merge tags: curated subcategory SEED tags first (the v1 catalog defaults),
-    // then the AI tags, then live niche tags. Dedup, cap 30; never ship empty.
-    // BANNED-WORD FILTER: the niche catalog's seed tags can contradict the
-    // channel's own identity (Investory's bible bans "hustle" while its finance
-    // seed tags included "side hustle"/"make money online") — every tag source
-    // is screened against identity.bannedWords.
-    const bannedWords = ((ctx.store["bannedWords"] as string[] | undefined) ?? [])
-      .map((w) => w.toLowerCase().trim())
-      .filter(Boolean);
-    const notBanned = (t: string) => !bannedWords.some((w) => t.toLowerCase().includes(w));
-    const baseTags = (Array.isArray(ctx.params["baseTags"]) ? (ctx.params["baseTags"] as unknown[]) : [])
-      .filter((t): t is string => typeof t === "string" && t.trim().length > 0);
-    const nicheTags = (nicheIntel?.topTags ?? []).map((t) => t.tag);
-    const dropped = [...baseTags, ...nicheTags].filter((t) => !notBanned(t));
-    if (dropped.length) ctx.log(`metadata: dropped banned-word tags: ${dropped.join(", ")}`);
-    tags = Array.from(new Set([...baseTags, ...tags, ...nicheTags].filter(notBanned))).slice(0, 30);
-    if (tags.length === 0) tags = [topic.toLowerCase()];
-
-    // Append chapters (from the captions block) to the description if present.
-    const chaptersText = ctx.store["chaptersText"] as string | undefined;
-    if (chaptersText && chaptersText.trim()) {
-      description = `${description}\n\nChapters:\n${chaptersText}`;
-    }
-    // License/attribution ledger (Wikimedia CC credits) → required for CC-BY.
-    const attributions = ctx.store["attributions"] as string[] | undefined;
-    if (attributions && attributions.length) {
-      description = `${description}\n\nImage credits:\n${attributions.join("\n")}`;
-    }
+    ({ title, description, tags } = finishMetadata(ctx, { title, description, tags, channelName, nicheIntel }));
 
     const ve = await viewEstimate(tags);
     ctx.log(
       `metadata: title="${title.slice(0, 60)}…" (${tournament ? `tournament ${(tournament.score * 10).toFixed(0)}/10` : `score=${loop!.critique.score.toFixed(2)}, accepted=${loop!.accepted}`}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
     );
-    return { title, description, tags, ...ve };
+    return { title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
   },
 };
 

@@ -410,13 +410,16 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "metadata",
     stage: "package",
     title: "SEO Metadata",
-    engine: "Niche-databank title/description/tag generator",
+    engine: "Metacraft — autocomplete-grounded candidates (latest Gemini Pro) + claims lint + feed judge",
     how:
-      "Keyword-first titles built on curiosity-gap formulas (numbers, brackets, pronouns), descriptions " +
-      "with the keyword in the first 25 words, tags drawn from the niche's scraped databank. Title, " +
-      "thumbnail and cold open are ONE promise unit: the title generator receives the crafted cold open " +
-      "and must state the same promise it confirms.",
-    gates: ["banned words", "length limits", "title-promise contract vs cold open"],
+      "Seven title candidates across distinct frames, grounded in LIVE YouTube autocomplete (what people " +
+      "actually type) and the niche's real top titles. A deterministic lint then enforces what the old " +
+      "rules only asked for: every number and name in the title must exist in the fact-checked script " +
+      "(grounded = verified, transitively), the payoff lands inside the first ~50 chars (mobile " +
+      "truncation), no filler starts, register-aware hype rules. A feed judge gates clickScore ≥7 under " +
+      "the title-promise contract; the runner-up is stored for CTR-swap learning. THE QUOTE opens the " +
+      "description, auto-chapters land at upload, and a comment-seeding pinned comment is emitted.",
+    gates: ["claims grounded in fact-checked script", "payoff in first ~50 chars", "clickScore ≥ 7 vs real feed", "title-promise contract", "banned words / register"],
     status: "active",
   },
   {
