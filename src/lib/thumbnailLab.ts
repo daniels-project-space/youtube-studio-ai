@@ -71,6 +71,10 @@ export interface VisualLanguage {
   /** Base-image rendering style, e.g. "vintage ink engraving on parchment". */
   imageStyle?: string;
   badgeStyle?: "center" | "pill";
+  /** TYPE-AS-OBJECT treatment: typography rendered as a physical designed
+   * object in the scene (torn strips / paint smear / censor bar / sticker),
+   * never plain floating text. The single biggest craft lever. */
+  textObject?: "torn_strip" | "paint_smear" | "censor_bar" | "grunge_sticker" | "spaced_elegant" | "block_plate";
   uppercase?: boolean;
   /** recraft = the FULL frame (art + typography + layout) designed as ONE
    * generation by the design-tuned Recraft V3 model — the strongest one-pass
@@ -250,7 +254,10 @@ export async function distillPlaybook(args: {
 }): Promise<ThumbnailPlaybook> {
   const log = args.log ?? (() => {});
   // Vision deconstruction Ã¢â‚¬â€ WHY each verified winner clicks.
-  const deconRaw = await geminiVisionLocal({
+  if (args.refs.length === 0) {
+    log("thumbnailLab: ZERO references (search quota dead?) - distilling from DNA + craft principles only");
+  }
+  const deconRaw = args.refs.length === 0 ? '{"decon":[]}' : await geminiVisionLocal({
     prompt:
       `Deconstruct WHY each of these ${args.refs.length} proven high-view thumbnails wins the click. ` +
       `For each (1-${args.refs.length}): composition (focal placement, negative space), hero device ` +
@@ -299,7 +306,7 @@ export async function distillPlaybook(args: {
       `stamp=hollow archival border, neon=glowing type for night/synth worlds, clean=pure premium type), ` +
       `"baseColor":"#hex","accentColor":"#hex" Ã¢â‚¬â€ colors MUST come from THIS channel's palette; NEVER default to ` +
       `gold/yellow unless it is genuinely this channel's color, ` +
-      `"imageStyle":"<=12 words Ã¢â‚¬â€ the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
+      `"textObject":"torn_strip"|"paint_smear"|"censor_bar"|"grunge_sticker"|"spaced_elegant"|"block_plate"|"neon_sign"|"spray_paint"|"stamp_ink"|"movie_poster"|"ransom_note"|"carved" (the channel SIGNATURE type-as-object treatment - ALSO available: neon_sign=real glowing tubes in the scene; spray_paint=stencil graffiti with drips; stamp_ink=huge CLASSIFIED-style rubber stamp slammed diagonally; movie_poster=cinematic beveled title card in the scene atmosphere; ransom_note=letters cut from different magazines; carved=letters chiseled into the scene material with real depth - torn_strip: each word HUGE on its own torn newspaper strip in mixed tabloid serifs layered in front of/behind the hero; paint_smear: elegant wide-tracked capitals sitting ON a rough hand-swiped accent paint smear crossing the hero; censor_bar: white stencil caps on a solid accent censor bar laid across the frame or the hero eyes; grunge_sticker: ONE lowercase word ending in a period, distressed punk type, white knockout on a rough black sticker; spaced_elegant: thin extremely wide-tracked caps integrated into the artwork material; block_plate: ultra-heavy condensed caps on hard solid plates, key word underlined with a rough brush stroke), "imageStyle":"<=12 words Ã¢â‚¬â€ the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
       `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill",` +
       `"uppercase":boolean,"renderMode":"recraft"|"integrated"|"layered" (recraft = the ENTIRE frame - art, typography, layout - designed as ONE generation by a design-tuned model; the DEFAULT for most worlds (painterly, editorial, photographic, illustrated) because nothing looks pasted-on. integrated = words generated as part of the artwork via a typography engine; pick when type must physically exist in the scene as real neon/paint/print. layered = compositor type on top; pick ONLY for precision/data/clean-premium channels needing deterministic text control)}. THE RULE: if another channel could wear this language, it is WRONG Ã¢â‚¬â€ diverge hard.\n` +
       `1. rules: 6-8 HARD rules for this channel's thumbnails Ã¢â‚¬â€ specific (sizes, positions, counts, colors), ` +
@@ -317,7 +324,7 @@ export async function distillPlaybook(args: {
       `sketch/whiteboard/cozy/playful identities; bebas=tall minimal premium),` +
       `"badge":"${args.channelName.toUpperCase()}"} ` +
       `Ã¢â‚¬â€ placeholders ONLY in line texts and numberCallout.\n` +
-      `Return STRICT JSON {"energy":"spectacle"|"bold"|"cozy_pop","visualLanguage":{"font","treatment","baseColor","accentColor","imageStyle","badgeStyle","uppercase","renderMode"},"rules":string[],"avoid":string[],"patterns":[{"name","when","fluxRecipe","textRecipeJson"}]} - energy AND visualLanguage are REQUIRED keys.`,
+      `Return STRICT JSON {"energy":"spectacle"|"bold"|"cozy_pop","visualLanguage":{"font","treatment","baseColor","accentColor","textObject","imageStyle","badgeStyle","uppercase","renderMode"},"rules":string[],"avoid":string[],"patterns":[{"name","when","fluxRecipe","textRecipeJson"}]} - energy AND visualLanguage are REQUIRED keys.`,
   });
 
   const patterns: ThumbPattern[] = (play.patterns ?? [])
@@ -422,7 +429,7 @@ export async function renderCandidate(args: {
       `red line tear through the floor). NEVER decorative abstraction (random dust, glows, floating objects) that ` +
       `does not tell the story. Test: cover the text - does the image alone communicate the topic?\n` +
       `STEP 2b - BUILD THE SCENE IN NAMED STAGES (how the top 1% compose):\n` +
-      `heroProp: the ONE dominant subject - 30-50% of the frame, emotionally charged, cropped close for scale ` +
+      `heroProp: the ONE dominant subject - 55-75% of the frame, emotionally charged, AGGRESSIVELY cropped with edges bleeding off frame (phone-screen scale) ` +
       `(a cracked marble face glaring, a grumpy mogul portrait, a war elephant chest-on). Hero sits on the side ` +
       `OPPOSITE the textZone.\n` +
       `background: a SEPARATE supporting layer behind the hero - darker, simpler, with depth (torn tabloid strips, ` +
@@ -506,14 +513,34 @@ export async function renderCandidate(args: {
         // Recraft hard-caps prompts at 1000 chars (422 otherwise). The scene is
         // the only compressible part — headline/style/contract clauses survive.
         const { RECRAFT_PROMPT_MAX } = await import("@/lib/recraft");
+        const TEXT_OBJECTS: Record<string, string> = {
+          torn_strip: "each word printed HUGE on its own torn newspaper strip, every strip a DIFFERENT bold tabloid serif, aged newsprint texture with rough torn edges catching the light, strips rotated 2-6 degrees and interleaved - some BEHIND the hero, some IN FRONT - with hard drop shadows",
+          paint_smear: "in elegant wide-letterspaced serif capitals sitting ON TOP of a rough hand-swiped paint smear in the accent color that crosses straight over the hero, wet bristle texture and flicked droplets at the smear ends",
+          censor_bar: "in white stencil capitals printed on a solid accent-color censor bar laid straight across the frame (across the eyes if the hero is a face), hard edges, slight ink misregistration like government documents",
+          grunge_sticker: "as ONE single lowercase word ending in a period, in a distressed punk typeface with chipped edges, white knockout on a rough black sticker box with peeling corners - deadpan, huge, menacing",
+          spaced_elegant: "in thin EXTREMELY wide-letterspaced capitals integrated into the artwork material with a small quiet subtitle beneath, museum-plate restraint against a violent or emotional image",
+          block_plate: "in ultra-heavy condensed capitals stacked tight on hard solid plates, the key word underlined with a rough hand-painted brush stroke in the accent color, brutal Swiss-poster contrast",
+          neon_sign: "as REAL glowing neon tubes physically mounted in the scene, casting their colored light onto the hero and wet surfaces, one tube section flickering half-lit",
+          spray_paint: "stencil-sprayed directly onto the scene surface in the accent color, paint drips running from the letterforms, overspray haze, one letter half-finished",
+          stamp_ink: "as a HUGE rubber-stamp imprint slammed diagonally across the frame like a CLASSIFIED stamp, cracked dry ink, double-struck ghosting on one edge",
+          movie_poster: "as cinematic title-card lettering with metallic bevel and rim light, embedded in the scene atmosphere (haze drifting in front of the letters), blockbuster one-sheet gravity",
+          ransom_note: "with each letter cut from a different magazine page in a different font and color, glued unevenly with visible tape and shadows, unhinged and urgent",
+          carved: "physically carved into the scene dominant material (stone, wood, steel) with real chisel depth, the cuts catching the scene key light, dust or splinters still falling from the last letter",
+        };
+        const typeObj = TEXT_OBJECTS[String((vl as { textObject?: string }).textObject ?? "")] ??
+          "as a PHYSICAL DESIGNED OBJECT belonging to the scene (a torn paper strip, a rough paint smear, a solid censor bar, a sticker plate, carved letters or real neon) with true texture, shadow and material presence - NEVER plain floating text with an outline";
         const buildPrompt = (scene: string) =>
-          `YouTube thumbnail, top-1% clickbait design. ${scene} ` +
+          `YouTube thumbnail, top-1% clickbait design, composed for a small PHONE screen. ${scene} ` +
           `STYLE (obey strictly): ${vl.imageStyle ?? "cinematic"}. ` +
-          `Headline ${wordList}${callout} in the ${plannedZone} area on clean negative space, ` +
-          `the single most important word underlined with a rough hand-painted BRUSH STROKE in the accent color, ` +
-          `VERY LARGE bold lettering in ${vl.accentColor ?? "#ffffff"} or white for contrast, ` +
-          `extremely high contrast, RAZOR-SHARP crisp in-focus lettering (never soft or blurred), readable at 120px, spelling EXACTLY as quoted. ` +
-          `Small channel mark "${String(textProps["badge"] ?? "")}". Subject LARGE on the opposite side.${fixNote}`;
+          `HERO DOMINANCE: the hero fills 55-75% of the frame, aggressively cropped with edges bleeding off frame, centered or near-center - nothing timid. ` +
+          `TYPOGRAPHY ${wordList}${callout} rendered ${typeObj}, accent color ${vl.accentColor ?? "#ffffff"}. ` +
+          `TYPE HIERARCHY (non-negotiable): never set all words the same size - the single PAYOFF word is 2-4x ` +
+          `larger than the rest and is the loudest thing after the hero face. The type may tilt 2-6 degrees and ` +
+          `may bleed off the frame edge mid-letter for urgency. Where natural, interleave type with the hero ` +
+          `(a strip behind the head, a smear across the chest) for physical depth. ` +
+          `SCALE FOR A PHONE: the type block owns 25-40% of the frame; every element must survive a 120px lock-screen glance - if it would not read there, make it BIGGER. ` +
+          `RAZOR-SHARP, spelling EXACTLY as quoted, extreme contrast, readable at 120px. ` +
+          `ABSOLUTELY NO other text anywhere - no small labels, no captions, no channel marks: ONLY the headline words (the channel badge is composited afterwards).${fixNote}`;
         let recraftPrompt = buildPrompt(inst.fluxPrompt ?? "");
         const budget = RECRAFT_PROMPT_MAX - 90; // NO_UI clause + safety margin
         if (recraftPrompt.length > budget) {
@@ -538,25 +565,38 @@ export async function renderCandidate(args: {
             `2. punch 1-10 (scroll-stopping for tier "${args.playbook.energy ?? "bold"}")? 3. readable at 120px? ` +
             `4. uiClean: true ONLY if there are NO fake play buttons, video-player icons, progress bars or other ` +
             `baked-in UI chrome in the artwork. ` +
-            `5. badgeOk: find the small channel mark text and transcribe it LETTER BY LETTER. badgeOk=true ONLY if it ` +
-            `reads EXACTLY "${String(textProps["badge"] ?? "")}" - any swapped/missing/garbled letters = false. ` +
-            `Also false if ANY other word in the image is misspelled or invented. ` +
+            `5. badgeOk: true if EVERY word visible in the image is a correctly spelled real English word - extra ` +
+            `DESIGN words on torn strips/stamps are welcome; false ONLY on garbled or invented letter-strings. ` +
+            
             `6. styleMatch 1-10: does the rendering obey the channel style "${vl.imageStyle ?? "cinematic"}"? ` +
-            `7. storyMatch 1-10: ignoring the text, does the IMAGE alone visually tell the story of the topic "${args.title}" (subjects enacting the idea, not decorative abstraction)? 8. crisp: is ALL text razor-sharp and in focus (soft/blurry lettering = false)? 9. heroOk: is there ONE dominant hero subject (30-50% of frame, clearly in front of a separate supporting background) rather than a flat or cluttered scene? ` + `Return STRICT JSON {"textOk":bool,"punch":n,"readable":bool,"uiClean":bool,"badgeOk":bool,"styleMatch":n,"storyMatch":n,"crisp":bool,"heroOk":bool,"fix":"<=15 words"}.`,
+            `7. storyMatch 1-10: ignoring the text, does the IMAGE alone visually tell the story of the topic "${args.title}" (subjects enacting the idea, not decorative abstraction)? 8. crisp: is ALL text razor-sharp and in focus (soft/blurry lettering = false)? 9. heroOk: does ONE hero subject dominate AT LEAST HALF the frame (aggressively cropped, in front of a separate background) rather than a small/timid or cluttered scene? 10. typeQuality 1-10: is the typography a DESIGNED PHYSICAL OBJECT (torn strips / paint smear / censor bar / sticker plate) with real texture and presence, owning at least 20% of the frame - not plain floating text? ` + `Return STRICT JSON {"textOk":bool,"punch":n,"readable":bool,"uiClean":bool,"badgeOk":bool,"styleMatch":n,"storyMatch":n,"crisp":bool,"heroOk":bool,"typeQuality":n,"fix":"<=15 words"}.`,
           imagePaths: [args.outJpg],
           json: true,
           maxTokens: 250,
         }).catch(() => "");
-        const v = raw ? parseJsonLoose<{ textOk?: boolean; punch?: number; readable?: boolean; uiClean?: boolean; badgeOk?: boolean; styleMatch?: number; storyMatch?: number; crisp?: boolean; heroOk?: boolean; fix?: string }>(raw) : {};
-        if (v.textOk !== false && v.readable !== false && v.uiClean !== false && v.badgeOk !== false && v.crisp !== false && v.heroOk !== false && (v.styleMatch ?? 10) >= 7 && (v.storyMatch ?? 10) >= 7 && (v.punch ?? 10) >= 7) {
+        const v = raw ? parseJsonLoose<{ textOk?: boolean; punch?: number; readable?: boolean; uiClean?: boolean; badgeOk?: boolean; styleMatch?: number; storyMatch?: number; crisp?: boolean; heroOk?: boolean; typeQuality?: number; fix?: string }>(raw) : {};
+        if (v.textOk !== false && v.readable !== false && v.uiClean !== false && v.badgeOk !== false && v.crisp !== false && v.heroOk !== false && (v.typeQuality ?? 10) >= 7 && (v.styleMatch ?? 10) >= 7 && (v.storyMatch ?? 10) >= 7 && (v.punch ?? 10) >= 7) {
+          // STAGED FINISH: the model never renders small text (it garbles it) -
+          // the channel badge is composited deterministically, crisp by construction.
+          try {
+            const badgePng = await renderThumbTextLayer({
+              props: { lines: [], badge: String(textProps["badge"] ?? ""), badgeStyle: vl.badgeStyle ?? "pill", font: vl.font ?? "impact", accentColor: vl.accentColor, uppercase: true },
+              outPng: join(args.tmpDir, `cand_${args.idx}_badge.png`),
+            });
+            const finalJpg = join(args.tmpDir, `cand_${args.idx}_badged.jpg`);
+            await overlayPngOnImage(args.outJpg, badgePng, finalJpg);
+            await (await import("node:fs/promises")).copyFile(finalJpg, args.outJpg);
+          } catch (e) {
+            args.log?.(`thumbnailLab: badge composite failed (shipping without badge): ${e instanceof Error ? e.message : e}`);
+          }
           args.log?.(`thumbnailLab: RECRAFT render OK (one-pass design, punch ${v.punch ?? "?"}/10)`);
           return args.outJpg;
         }
         fixNote =
           ` CRITICAL FIX: ${v.fix ?? "text larger and exact, higher contrast"}.` +
           `${v.uiClean === false ? " REMOVE all fake play buttons / player UI from the artwork." : ""}` +
-          `${v.badgeOk === false ? ` The channel mark must read EXACTLY "${String(textProps["badge"] ?? "")}" - no other invented words.` : ""}` +
-          `${(v.styleMatch ?? 10) < 7 ? ` The image MUST follow the style: ${vl.imageStyle}.` : ""}` + `${(v.storyMatch ?? 10) < 7 ? ` The scene must LITERALLY enact the topic "${args.title}" - subjects acting out the idea, no decorative abstraction.` : ""}` + `${v.crisp === false ? " ALL lettering must be razor-sharp and in focus." : ""}` + `${v.heroOk === false ? " ONE hero subject must dominate 30-50% of the frame in front of a separate background." : ""}`;
+          `${v.badgeOk === false ? " REMOVE all words except the headline - no labels or small text." : ""}` +
+          `${(v.styleMatch ?? 10) < 7 ? ` The image MUST follow the style: ${vl.imageStyle}.` : ""}` + `${(v.storyMatch ?? 10) < 7 ? ` The scene must LITERALLY enact the topic "${args.title}" - subjects acting out the idea, no decorative abstraction.` : ""}` + `${v.crisp === false ? " ALL lettering must be razor-sharp and in focus." : ""}` + `${v.heroOk === false ? " The hero must dominate AT LEAST HALF the frame, aggressively cropped." : ""}` + `${(v.typeQuality ?? 10) < 7 ? " The typography must be a designed PHYSICAL object (torn strip / paint smear / censor bar / sticker) with texture, owning 25% of the frame." : ""}`;
         args.log?.(`thumbnailLab: recraft attempt ${attempt + 1} - textOk=${v.textOk} punch=${v.punch} uiClean=${v.uiClean} badgeOk=${v.badgeOk} styleMatch=${v.styleMatch} -> ${attempt === 0 ? "regenerating with fix" : "falling through"}`);
       }
     }
