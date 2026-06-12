@@ -21,8 +21,12 @@ export class AnthropicError extends Error {
   }
 }
 
+// NOTE: Anthropic was removed for cost (2026-06-12). This now reports whether a
+// JSON-capable LLM is available — Gemini is the backend (`claudeJson` reroutes to
+// it). Kept under the old name so the ~20 `hasAnthropicKey()` feature gates across
+// the codebase stay ON (and never throw) with only a GEMINI_API_KEY configured.
 export function hasAnthropicKey(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY);
+  return Boolean(process.env.ANTHROPIC_API_KEY || process.env.GEMINI_API_KEY);
 }
 
 function key(): string {
@@ -74,16 +78,12 @@ export async function claudeText(args: {
   return text;
 }
 
-/** True only for billing/credit exhaustion — NOT auth or model errors. */
-function isCreditError(e: unknown): boolean {
-  return e instanceof AnthropicError && /credit balance|HTTP 402/i.test(e.message);
-}
-
 /** Single-turn completion parsed as JSON (tolerates code fences/prose).
- * BILLING-ONLY fallback: when the Anthropic account is out of credits the
- * call reroutes to gemini-2.5-pro with a LOUD console warning — the run
- * survives a credit drought instead of dying, but never degrades silently
- * (auth/model/network errors still throw). */
+ *
+ * ANTHROPIC REMOVED FOR COST (2026-06-12): every call routes to Gemini
+ * (gemini-2.5-pro) whenever a GEMINI_API_KEY is present — which is always true
+ * in prod. The legacy Anthropic path below is dead unless someone runs with NO
+ * Gemini key. Callers are unchanged; the provider swap is entirely inside here. */
 export async function claudeJson<T = unknown>(args: {
   prompt: string;
   system?: string;
@@ -91,14 +91,7 @@ export async function claudeJson<T = unknown>(args: {
   maxTokens?: number;
   temperature?: number;
 }): Promise<T> {
-  try {
-    const text = await claudeText(args);
-    return parseJsonLoose<T>(text);
-  } catch (e) {
-    if (!isCreditError(e) || !process.env.GEMINI_API_KEY) throw e;
-    console.warn(
-      "anthropic: OUT OF CREDITS — rerouting this call to gemini-2.5-pro (top up Anthropic to restore Claude concepts)",
-    );
+  if (process.env.GEMINI_API_KEY) {
     const { geminiJson } = await import("@/lib/gemini");
     return geminiJson<T>({
       prompt: `${args.system ? `${args.system}\n\n` : ""}${args.prompt}`,
@@ -109,4 +102,7 @@ export async function claudeJson<T = unknown>(args: {
       temperature: args.temperature,
     });
   }
+  // Legacy Anthropic path — only reached if NO Gemini key is configured.
+  const text = await claudeText(args);
+  return parseJsonLoose<T>(text);
 }

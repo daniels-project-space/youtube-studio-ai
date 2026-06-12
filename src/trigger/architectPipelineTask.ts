@@ -24,7 +24,7 @@ export const architectPipelineTask = task({
   maxDuration: 600,
   run: async (payload: { channelId: string; dryRun?: boolean }) => {
     const log = (m: string, x?: Record<string, unknown>) => console.log(`[architect] ${m}`, x ?? "");
-    await bootstrapSecrets(log, { required: ["ANTHROPIC_API_KEY", "GEMINI_API_KEY"] });
+    await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");

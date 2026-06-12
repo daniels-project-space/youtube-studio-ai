@@ -11,8 +11,6 @@
  * Dynamic import so a missing/heavy dep can never break the Trigger bundle at
  * deploy time — only a task that actually calls this pays the cost.
  */
-import { CLAUDE_THUMBNAIL_MODEL } from "@/lib/anthropic";
-
 export interface StagehandRunResult<T> {
   value: T;
   /** Browserbase live-view / replay session id (watch + debug the run). */
@@ -47,9 +45,9 @@ export async function withStagehand<T>(
     env: "BROWSERBASE",
     apiKey: process.env.BROWSERBASE_API_KEY,
     projectId: process.env.BROWSERBASE_PROJECT_ID,
-    // Stagehand's LLM for act/extract — reuse our Anthropic key.
-    modelName: `anthropic/${CLAUDE_THUMBNAIL_MODEL}`,
-    modelClientOptions: { apiKey: process.env.ANTHROPIC_API_KEY },
+    // Stagehand's LLM for act/extract — Gemini (Anthropic removed for cost).
+    modelName: "google/gemini-2.5-flash",
+    modelClientOptions: { apiKey: process.env.GEMINI_API_KEY },
     // Route Stagehand logs through OUR logger so it never spins up pino-pretty
     // (that transport isn't in the Trigger image → "unable to determine transport").
     verbose: 0,

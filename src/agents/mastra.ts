@@ -19,7 +19,7 @@
  */
 import type { z } from "zod";
 import { geminiJson, hasGeminiKey } from "@/lib/gemini";
-import { claudeJson, hasAnthropicKey, CLAUDE_THUMBNAIL_MODEL } from "@/lib/anthropic";
+import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 
 /**
  * Agent roles. `producer` + `director` are the original generate/critique pair;
@@ -39,8 +39,9 @@ export type AgentRole =
   | "critic";
 
 const GEMINI_MODEL = process.env.MASTRA_PRODUCER_MODEL ?? "google/gemini-2.5-flash";
-const CLAUDE_MODEL =
-  process.env.MASTRA_DIRECTOR_MODEL ?? `anthropic/${CLAUDE_THUMBNAIL_MODEL}`;
+// Anthropic removed for cost (2026-06-12): the Director + Showrunner now run on
+// Gemini like the rest of the crew. MASTRA_DIRECTOR_MODEL can still override.
+const DIRECTOR_MODEL = process.env.MASTRA_DIRECTOR_MODEL ?? GEMINI_MODEL;
 
 interface RoleConfig {
   /** REST-fallback provider when Mastra is unavailable. */
@@ -65,8 +66,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "constraints. Always return valid structured output and nothing else.",
   },
   director: {
-    provider: "claude",
-    model: CLAUDE_MODEL,
+    provider: "gemini",
+    model: DIRECTOR_MODEL,
     instructions:
       "You are the Director: a senior YouTube content strategist and critic. You " +
       "judge candidates against channel identity, freshness/distinctiveness, and " +
@@ -74,8 +75,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "issues as structured output.",
   },
   showrunner: {
-    provider: "claude",
-    model: CLAUDE_MODEL,
+    provider: "gemini",
+    model: DIRECTOR_MODEL,
     instructions:
       "You are the Showrunner: you define a YouTube channel's creative essence. From a " +
       "niche + format + competitor signals you write the show bible — positioning, the " +

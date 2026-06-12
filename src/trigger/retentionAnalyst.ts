@@ -33,7 +33,7 @@ export const retentionAnalystTask = task({
   maxDuration: 600,
   run: async (payload: { runId: string; dryRun?: boolean }) => {
     const log = (m: string) => console.log(`[retention] ${m}`);
-    await bootstrapSecrets(log, { required: ["ANTHROPIC_API_KEY"] });
+    await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
     if (!hasAnalyticsAccess()) return { ok: false, reason: "no yt-analytics OAuth access" };
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;

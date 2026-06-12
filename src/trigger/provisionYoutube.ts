@@ -14,7 +14,6 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { withStagehand, hasBrowserbase } from "@/lib/browserbase";
-import { CLAUDE_THUMBNAIL_MODEL } from "@/lib/anthropic";
 
 export interface ProvisionYoutubeArgs {
   /** App channel id to link the new YouTube channel to. */
@@ -59,7 +58,7 @@ export const provisionYoutubeTask = task({
         const sh = shU as SH;
         const page = await sh.context.newPage("https://www.youtube.com/channel_switcher");
         await page.waitForTimeout(3000);
-        const agent = sh.agent({ mode: "hybrid", model: `anthropic/${CLAUDE_THUMBNAIL_MODEL}` });
+        const agent = sh.agent({ mode: "hybrid", model: "google/gemini-2.5-flash" });
 
         // 1+2: create the brand channel (if needed) and make it the ACTIVE channel.
         const create = await agent.execute({

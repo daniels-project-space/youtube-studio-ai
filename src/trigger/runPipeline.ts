@@ -78,7 +78,7 @@ export const runPipelineTask = task({
     // at minute 0 instead of silently producing a degraded video.
     await bootstrapSecrets(
       (m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""),
-      { required: ["GEMINI_API_KEY", "ANTHROPIC_API_KEY"] },
+      { required: ["GEMINI_API_KEY"] },
     );
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;

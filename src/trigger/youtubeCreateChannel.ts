@@ -24,7 +24,6 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { withStagehand, hasBrowserbase } from "@/lib/browserbase";
-import { CLAUDE_THUMBNAIL_MODEL } from "@/lib/anthropic";
 
 export interface CreateChannelArgs {
   /** Display name for the new YouTube channel. */
@@ -96,7 +95,7 @@ export const youtubeCreateChannelTask = task({
         await page.waitForTimeout(3500);
         // Hybrid mode (DOM + vision): faster + more reliable than CUA vision-only,
         // so the session finishes well within the timeout.
-        const agent = sh.agent({ mode: "hybrid", model: `anthropic/${CLAUDE_THUMBNAIL_MODEL}` });
+        const agent = sh.agent({ mode: "hybrid", model: "google/gemini-2.5-flash" });
 
         // Create the channel with a name + clean @handle (both plain text fields in
         // the "Your profile" dialog). Skip the photo (its picker is unreachable).

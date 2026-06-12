@@ -23,7 +23,7 @@ import { sendMessage } from "@/lib/telegram";
 const DAY = 86_400_000;
 
 async function sweep(ownerId: string, log: (m: string) => void) {
-  await bootstrapSecrets(log, { required: ["ANTHROPIC_API_KEY"] });
+  await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = new ConvexHttpClient(url);

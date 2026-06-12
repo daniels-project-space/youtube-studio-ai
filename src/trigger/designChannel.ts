@@ -58,7 +58,7 @@ export const designChannelTask = task({
     const log = (m: string, x?: Record<string, unknown>) => console.log(`[design-channel] ${m}`, x ?? "");
     // Channel inception without the model keys yields a skeleton identity/DNA
     // that poisons every future render — fail loudly instead.
-    await bootstrapSecrets(log, { required: ["GEMINI_API_KEY", "ANTHROPIC_API_KEY"] });
+    await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
 
     const ownerId = payload.ownerId ?? process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel";
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
