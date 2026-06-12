@@ -228,6 +228,19 @@ export const metadataOptimized: Block = {
       }
     }
 
+    // TITLE-PROMISE CONTRACT: title, thumbnail and the first 15 seconds are ONE
+    // promise unit — the title must state the SAME promise/loop the crafted
+    // cold open makes (the research's "topic confirmation": the hook confirms
+    // the clicked promise, so the title must BE that promise).
+    const scriptDoc = ctx.store["script"] as { hook?: string; hookLoop?: string } | undefined;
+    const promiseContract =
+      scriptDoc?.hook || scriptDoc?.hookLoop
+        ? `THE VIDEO'S COLD OPEN (the first thing a clicking viewer hears):\n"${(scriptDoc.hook ?? "").slice(0, 400)}"\n` +
+          (scriptDoc.hookLoop ? `Its promise: "${scriptDoc.hookLoop}"\n` : "") +
+          `TITLE-PROMISE CONTRACT: the title must state the SAME promise this cold open makes (different ` +
+          `words welcome, same contract) — never promise anything the cold open doesn't set up.\n`
+        : "";
+
     const viewEstimate = async (tags: string[]) => {
       let estimatedViews = nicheIntel?.medianViewsTop50 ?? nicheIntel?.avgViewsTop50 ?? 0;
       let estimatedViewsSource = "niche_fallback";
@@ -303,6 +316,7 @@ export const metadataOptimized: Block = {
             `(4) how/why-mechanism, (5) stakes/warning.\n` +
             `NICHE: ${niche || "general"} | PERSONA: ${persona || "n/a"}\n` +
             (scriptExcerpt ? `SCRIPT EXCERPT:\n${scriptExcerpt}\n` : "") +
+            promiseContract +
             dnaSeoClause +
             (powerWords.length ? `POWER WORDS: ${powerWords.join(", ")}\n` : "") +
             langDirective +
@@ -334,8 +348,10 @@ export const metadataOptimized: Block = {
               `THE FEED — this niche's top performers (real views):\n${titlesWithViews.join("\n")}\n\n` +
               `CANDIDATE TITLES for "${topic}":\n` +
               cands.map((c, i) => `${i + 1}. [${c.frame}] ${c.title}`).join("\n") +
+              (promiseContract ? `\n\n${promiseContract}` : "") +
               `\n\nScore each candidate 1-10: would it WIN the click placed in this exact feed (against those ` +
-              `titles), while staying honest and on the channel formula${dnaSeoClause ? " given above" : ""}? ` +
+              `titles), while staying honest, on the channel formula${dnaSeoClause ? " given above" : ""}` +
+              `${promiseContract ? ", AND keeping the title-promise contract (a title whose promise the cold open doesn't confirm bleeds retention)" : ""}? ` +
               `Penalize hype that breaks a premium register. Return STRICT JSON ` +
               `{"rankings":[{"idx":1-based,"clickScore":1-10,"why":string}],"winner":1-based}.`,
           });
@@ -378,6 +394,7 @@ export const metadataOptimized: Block = {
             `Write YouTube SEO metadata for a video about "${topic}" on the channel "${channelName}".\n` +
             `NICHE: ${niche || "general"}\nPERSONA: ${persona || "n/a"}\n` +
             (scriptExcerpt ? `SCRIPT EXCERPT:\n${scriptExcerpt}\n` : "") +
+            promiseContract +
             (competitorTitles.length ? `TOP COMPETITOR TITLES:\n${competitorTitles.join("\n")}\n` : "") +
             (powerWords.length ? `POWER WORDS: ${powerWords.join(", ")}\n` : "") +
             (databank?.titleTemplates?.length ? `TITLE TEMPLATES:\n${databank.titleTemplates.join("\n")}\n` : "") +

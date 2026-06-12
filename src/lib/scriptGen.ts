@@ -22,6 +22,8 @@ export interface Script {
   estDurationSec: number;
   /** A short, definitive closing line for the outro card (≤ 10 words). */
   closingLine?: string;
+  /** The promise the cold open made — qa_script verifies the script pays it off. */
+  hookLoop?: string;
 }
 
 export interface ScriptRequest {
@@ -106,8 +108,8 @@ function hookMandate(crafted: CraftedHook): string {
   return (
     `THE COLD OPEN IS ALREADY WRITTEN (device: ${crafted.device}) and will be SPOKEN before your first ` +
     `section — do NOT repeat, rephrase, or re-introduce it:\n"${crafted.coldOpen}"\n` +
-    `Your FIRST section must continue seamlessly from where it leaves off, and the script MUST pay off ` +
-    `the loop it opens.`
+    `Your FIRST section must continue seamlessly from where it leaves off, and the script MUST explicitly ` +
+    `pay off this promise the cold open made: "${crafted.loop}".`
   );
 }
 
@@ -314,7 +316,7 @@ async function synthFullScriptOneShot(
     const closingLine = typeof o.closing_line === "string" ? sanitizeSpoken(o.closing_line).replace(/\s+/g, " ").trim().slice(0, 80) : "";
     const narrationText = assemble(hook, sections);
     log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${estSeconds(narrationText)}s) ✓`);
-    return { hook, sections, narrationText, estDurationSec: estSeconds(narrationText), closingLine };
+    return { hook, sections, narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop };
   } catch (e) {
     log(`scriptGen one-shot (${model}) failed (${e instanceof Error ? e.message : e}) — falling back to chunked`);
     return null;
@@ -479,7 +481,7 @@ async function synthLongScript(
   const closingLine = sanitizeSpoken(closingRaw).replace(/\s+/g, " ").trim().slice(0, 80);
   const narrationText = assemble(hook, sections);
   log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: estSeconds(narrationText) });
-  return { hook, sections, narrationText, estDurationSec: estSeconds(narrationText), closingLine };
+  return { hook, sections, narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop };
 }
 
 /** Translate one spoken passage; keep names/quotes intact. Degrades to original. */
@@ -647,6 +649,7 @@ export async function synthScript(
     narrationText,
     estDurationSec: estSeconds(narrationText, gapSec),
     closingLine,
+    hookLoop: crafted.loop,
   };
   log("scriptGen: script ready", {
     sections: sections.length,

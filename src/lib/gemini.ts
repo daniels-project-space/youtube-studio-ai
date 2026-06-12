@@ -131,10 +131,11 @@ interface GeminiResponse {
 async function generate(
   model: string,
   parts: GeminiPart[],
-  opts: { json?: boolean; maxTokens?: number; temperature?: number } = {},
+  opts: { json?: boolean; maxTokens?: number; temperature?: number; tools?: unknown[] } = {},
 ): Promise<string> {
   const body: Record<string, unknown> = {
     contents: [{ role: "user", parts }],
+    ...(opts.tools ? { tools: opts.tools } : {}),
     generationConfig: {
       maxOutputTokens: opts.maxTokens ?? 2048,
       temperature: opts.temperature ?? 0.7,
@@ -309,6 +310,29 @@ export async function geminiJson<T = unknown>(args: {
     args.model ?? "gemini-2.5-flash",
     [{ text: args.prompt }],
     { json: true, maxTokens: args.maxTokens, temperature: args.temperature },
+  );
+  return parseJsonLoose<T>(text);
+}
+
+/**
+ * JSON via Gemini WITH Google Search grounding — for verifying real-world
+ * claims against live sources. JSON response mode is incompatible with the
+ * search tool, so the JSON contract is prompt-enforced and parsed loosely.
+ */
+export async function geminiGroundedJson<T = unknown>(args: {
+  prompt: string;
+  model?: string;
+  maxTokens?: number;
+  temperature?: number;
+}): Promise<T> {
+  const text = await generate(
+    args.model ?? "gemini-2.5-flash",
+    [{ text: args.prompt + '\nReturn ONLY the JSON object, no prose around it.' }],
+    {
+      maxTokens: args.maxTokens ?? 2500,
+      temperature: args.temperature ?? 0.2,
+      tools: [{ google_search: {} }],
+    },
   );
   return parseJsonLoose<T>(text);
 }

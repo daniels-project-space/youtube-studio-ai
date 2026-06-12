@@ -210,9 +210,16 @@ export const scriptGen: Block = {
             `Critique this YouTube narration draft for quality and on-brand voice` +
             (persona ? ` (channel persona: ${persona})` : "") +
             `. Flag dull sections, off-brand language, factual hedging, weak structure, or generic ` +
-            `templated writing. Return STRICT JSON {"pass": boolean, "issues": string[]} â€” at most 5 ` +
+            `templated writing.` +
+            (script.hookLoop
+              ? ` CRITICAL: the cold open promised "${script.hookLoop}" — flag it as an issue if the script ` +
+                `does not EXPLICITLY pay that promise off.`
+              : "") +
+            ` Return STRICT JSON {"pass": boolean, "issues": string[]} â€” at most 5 ` +
             `issues, each under 140 characters.\n\n` +
-            script.narrationText.slice(0, 6000),
+            (script.narrationText.length <= 9000
+              ? script.narrationText
+              : script.narrationText.slice(0, 4000) + `\n\n[... OMITTED ...]\n\n` + script.narrationText.slice(-3500)),
           maxTokens: 1200,
           temperature: 0.3,
         });
@@ -275,6 +282,9 @@ export const qaScript: Block = {
     }
     try {
       const persona = opt(ctx, "persona") ?? "";
+      // The hookcraft contract: the cold open's promise + the midpoint re-hook
+      // are CRAFT_RULES law — verify them here instead of hoping.
+      const hookLoop = (ctx.store["script"] as { hookLoop?: string } | undefined)?.hookLoop ?? "";
       const res = await claudeJson<{ pass?: boolean; issues?: string[] }>({
         prompt:
           `Critique this YouTube narration for quality and on-brand voice` +
@@ -283,9 +293,23 @@ export const qaScript: Block = {
           `CRITICALLY: require a genuine, specific POINT OF VIEW / original angle â€” not ` +
           `just narrated facts â€” and flag generic, formulaic, or templated writing that ` +
           `could read as mass-produced (YouTube demonetizes "inauthentic" content). ` +
+          (hookLoop
+            ? `THE HOOK'S CONTRACT: the cold open promised "${hookLoop}" — FAIL the script if it does not ` +
+              `explicitly pay that promise off (a vague gesture at it is a fail). `
+            : "") +
+          `Also verify a deliberate MIDPOINT RE-HOOK exists in the middle third (a pointed question to the ` +
+          `viewer, a vivid concrete example, or a tonal shift) — flag its absence as an issue. ` +
           `Return STRICT JSON {"pass": boolean, "issues": string[]} â€” at most 5 issues, ` +
           `each under 140 characters (a truncated reply is unusable).\n\n` +
-          narration.slice(0, 6000),
+          // Head + middle + tail sample: a head-only slice HID the midpoint and
+          // the payoff from the critic on anything longer than ~2 minutes.
+          (narration.length <= 9000
+            ? narration
+            : narration.slice(0, 3500) +
+              `\n\n[... OMITTED ...]\n\n` +
+              narration.slice(Math.floor(narration.length / 2) - 1500, Math.floor(narration.length / 2) + 1500) +
+              `\n\n[... OMITTED ...]\n\n` +
+              narration.slice(-2500)),
         maxTokens: 1200,
         temperature: 0.3,
       });
