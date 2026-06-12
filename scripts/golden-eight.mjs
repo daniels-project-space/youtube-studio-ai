@@ -4,7 +4,7 @@
 // ONLY env accepts a comma list of keys for parallel split runs.
 import { acquireReferences, verifyReferences, distillPlaybook, renderCandidate } from "../src/lib/thumbnailLab.ts";
 import { bootstrapSecrets } from "../src/lib/bootstrap.ts";
-import { mkdirSync } from "node:fs";
+import { mkdirSync, existsSync, readFileSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
@@ -19,7 +19,7 @@ const JOBS = [
     name: "Marble Mind",
     niche: "Stoicism / Philosophy",
     title: "How Stoics Defeat Anxiety",
-    vlOverride: { font: "impact", treatment: "clean" },
+    vlOverride: { font: "impact", treatment: "clean", textObject: "paint_smear" },
     positioning: "cinematic stoic philosophy told through living marble statues — calm guidance for anxious modern minds",
     dna: {
       recurringSubject: "Two classical marble statues in deeply human moments — one laying a steadying hand on the shoulder of another whose form is cracking. Stoic comfort made literal, never abstract.",
@@ -92,6 +92,7 @@ const JOBS = [
   },
   {
     key: "rich",
+    vlOverride: { textObject: "grunge_sticker" },
     name: "Gilded Lies",
     niche: "Finance / Documentary",
     title: "Why Bill Gates Isn't Your Friend",
@@ -103,6 +104,22 @@ const JOBS = [
       palette: ["#0a0a0a", "#e3b341", "#d21f1f"],
       thumbnail: { subject: "a smiling billionaire in glasses and a knit sweater whose shadow becomes a giant puppet-master, golden marionette strings descending onto a tiny crowd of people below", palette: ["#0a0a0a", "#e3b341", "#d21f1f"] },
       visualAvoid: ["photographic celebrity likeness", "crypto-bro aesthetics", "clutter"],
+    },
+  },
+  {
+    key: "scandal",
+    name: "Spotlight Rot",
+    niche: "Celebrity / Drama commentary",
+    title: "How Fame Destroyed Hollywood Golden Girl",
+    vlOverride: { textObject: "torn_strip" },
+    positioning: "unflinching commentary on how the fame machine chews up its stars - tabloid energy, documentary spine",
+    dna: {
+      recurringSubject: "A distressed starlet face huge in center frame, surrounded by layered torn tabloid headline strips that tell the story",
+      setting: "dark paparazzi-flash void, red zigzag accents, torn newsprint texture",
+      colorGrade: "desaturated skin tones against black, harsh white strips with black tabloid serifs, alarm-red accents",
+      palette: ["#0d0d0d", "#f2f0ea", "#d21f1f"],
+      thumbnail: { subject: "a beautiful distressed actress face filling the center (fictional, no real celebrity likeness), worried eyes to camera, surrounded by huge torn newspaper strips layered before and behind her head", palette: ["#0d0d0d", "#f2f0ea", "#d21f1f"] },
+      visualAvoid: ["real celebrity likeness", "gore", "clutter beyond the strips"],
     },
   },
   {
@@ -141,9 +158,22 @@ const only = process.env.ONLY ? process.env.ONLY.split(",").map((s) => s.trim())
 for (const job of JOBS.filter((j) => !only || only.includes(j.key))) {
   console.log(`\n=== ${job.key.toUpperCase()} (${job.name}) ===`);
   try {
-    const fresh = await acquireReferences({ channelName: job.name, positioning: job.positioning, niche: job.niche, log });
-    const refs = await verifyReferences({ candidates: fresh, channelName: job.name, positioning: job.positioning, tmpDir: tmp, log });
-    const playbook = await distillPlaybook({ refs, dna: job.dna, channelName: job.name, positioning: job.positioning, log });
+    const cacheFile = join(tmp, `playbook_${job.key}.json`);
+    let playbook;
+    if (existsSync(cacheFile) && process.env.FRESH !== "1") {
+      playbook = JSON.parse(readFileSync(cacheFile, "utf8"));
+      log(`playbook from cache (${cacheFile}) - FRESH=1 to re-distill`);
+    } else {
+      let refs = [];
+      try {
+        const fresh = await acquireReferences({ channelName: job.name, positioning: job.positioning, niche: job.niche, log });
+        refs = await verifyReferences({ candidates: fresh, channelName: job.name, positioning: job.positioning, tmpDir: tmp, log });
+      } catch (e) {
+        log(`reference acquisition failed (${e.message}) - DNA-only distill`);
+      }
+      playbook = await distillPlaybook({ refs, dna: job.dna, channelName: job.name, positioning: job.positioning, log });
+      writeFileSync(cacheFile, JSON.stringify(playbook));
+    }
     playbook.visualLanguage = { ...(playbook.visualLanguage ?? {}), renderMode: "recraft", ...(job.vlOverride ?? {}) };
     console.log(`language: font=${playbook.visualLanguage?.font} accent=${playbook.visualLanguage?.accentColor} energy=${playbook.energy}`);
     console.log(`imageStyle: ${playbook.visualLanguage?.imageStyle}`);
