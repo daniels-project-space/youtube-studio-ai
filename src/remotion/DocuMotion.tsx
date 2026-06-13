@@ -97,15 +97,27 @@ const useDocuFonts = (fontCss: string, probe: [string, string, string]) => {
       link.setAttribute("data-docu", id);
       document.head.appendChild(link);
     }
-    const started = Date.now();
-    const checks = probe.map((f) => `700 64px "${f}"`);
-    const tick = () => {
-      const ready = checks.every((c) => document.fonts.check(c));
-      if (ready || Date.now() - started > 8000) continueRender(handle);
-      else setTimeout(tick, 120);
+    let done = false;
+    const finish = () => {
+      if (done) return;
+      done = true;
+      continueRender(handle);
     };
-    checks.forEach((c) => document.fonts.load(c).catch(() => undefined));
-    tick();
+    // Load each family at BOTH weights we use (400 + 700). load() resolves a
+    // requested weight to the nearest available face, so a single-weight font
+    // (e.g. "Special Elite", 400 only) never hangs the way a 700-only check
+    // would. Then wait for the font set to settle before rendering.
+    Promise.all(
+      probe.flatMap((f) => [
+        document.fonts.load(`400 64px "${f}"`).catch(() => undefined),
+        document.fonts.load(`700 64px "${f}"`).catch(() => undefined),
+      ]),
+    )
+      .then(() => document.fonts.ready)
+      .then(finish)
+      .catch(finish);
+    // Safety net so a slow CDN can never stall the render forever.
+    setTimeout(finish, 9000);
   }, [handle, fontCss, probe]);
 };
 
@@ -473,10 +485,12 @@ const TapedPhoto: React.FC<{ src: string; width: number; rotate: number; sepia?:
   );
 };
 
+// Neutral die-cut separation: layered drop shadows only — NO pale halo (read as
+// "glow") and NO sepia tint (let each style's own grade dominate).
 const cutoutFilter =
-  "sepia(0.18) contrast(1.07) brightness(1.02) " +
-  "drop-shadow(0 0 1.6px rgba(242,234,214,0.95)) drop-shadow(0 0 1.6px rgba(242,234,214,0.85)) " +
-  "drop-shadow(22px 10px 44px rgba(0,0,0,0.65)) drop-shadow(0 4px 10px rgba(0,0,0,0.45))";
+  "contrast(1.05) " +
+  "drop-shadow(0 2px 2px rgba(0,0,0,0.55)) " +
+  "drop-shadow(22px 12px 42px rgba(0,0,0,0.62)) drop-shadow(0 4px 10px rgba(0,0,0,0.45))";
 
 /* ----------------------------------------------------------------- shots -- */
 
@@ -510,16 +524,16 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ 
   const cam = useCam(shot.camera, dur, seed);
   const title = shot.title ?? "";
   const boost = shot.titleBoost ?? 1;
-  // autofit: title must fit between the hero cutout and the right margin.
-  // available width ≈ 0.73w; glyph width is font-specific (Anton ≈ 0.52, Oswald ≈ 0.64).
-  const titleSize = Math.min(width * 0.115 * boost, (width * 0.73) / Math.max(6, title.length * t.displayCharW));
+  // autofit: title sits between the hero cutout (~38% wide) and the right
+  // margin. Starting at 0.28w keeps the payoff readable instead of swallowed.
+  const titleSize = Math.min(width * 0.115 * boost, (width * 0.68) / Math.max(6, title.length * t.displayCharW));
   return (
     <AbsoluteFill>
       <ShotBg src={shot.bg} cam={cam} recede={Boolean(shot.fg)} />
       {title ? (
         <>
-          <TextScrim cx={52} cy={46} w={70} h={42} opacity={0.46 * boost} />
-          <AbsoluteFill style={{ justifyContent: "center", paddingLeft: width * 0.23, paddingBottom: height * 0.16 }}>
+          <TextScrim cx={56} cy={46} w={66} h={42} opacity={0.46 * boost} />
+          <AbsoluteFill style={{ justifyContent: "center", paddingLeft: width * 0.28, paddingBottom: height * 0.16 }}>
             <div style={{ whiteSpace: "nowrap", transform: camTransform(cam, 1.18), transformOrigin: "center" }}>
               <KineticTitle text={title} kicker={shot.kicker} size={Math.round(titleSize)} />
             </div>
@@ -535,7 +549,7 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ 
               left: "-1%",
               bottom: "-6%",
               height: "106%",
-              maxWidth: "44%",
+              maxWidth: "40%",
               objectFit: "contain",
               objectPosition: "left bottom",
               transform: camTransform(cam, 1.5),
@@ -942,7 +956,7 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, s
   return (
     <AbsoluteFill style={{ backgroundColor: t.base }}>
       {shot.bg ? (
-        <Img src={shot.bg} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.3, transform: camTransform(cam, 1), filter: `${t.plateFilter} brightness(0.62)` }} />
+        <Img src={shot.bg} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.5, transform: camTransform(cam, 1.04), filter: `${t.plateFilter} brightness(0.92)` }} />
       ) : (
         <AbsoluteFill style={{ backgroundImage: `url("${paperUri(9)}")`, opacity: 0.35 }} />
       )}

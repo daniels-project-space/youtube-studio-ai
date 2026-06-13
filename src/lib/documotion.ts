@@ -479,7 +479,9 @@ const VERIFIER_DOCTRINE =
   `• If a TITLE/LABEL/QUOTE is too small or low-contrast, use emphasize_text (the engine enlarges it + strengthens ` +
   `its scrim). Titles are AUTO-FIT to the frame, so do not report truncation unless text is genuinely unreadable.\n` +
   `• evidence_board / collage_pan stills are a moving camera — a still may frame ONE pinned photo or part of the ` +
-  `board; that is correct. Judge the photo + red-string + cutout quality, not "missing" other elements.`;
+  `board; that is correct. Judge the photo + red-string + cutout quality, not "missing" other elements.\n` +
+  `• Do NOT nitpick photographic taste. regen_asset ONLY for a CLEAR defect: wrong subject, a ragged/half-cut ` +
+  `cutout edge, baked-in text, or a plate that is essentially black/empty. A merely "stylised" or "staged" photo is fine.`;
 
 const VERIFIER_CHECKLIST =
   `THE CRAFT CHECKLIST:\n` +
