@@ -83,6 +83,61 @@ export function buildThumbBrief(a: ThumbBriefArgs): string {
   );
 }
 
+/**
+ * BANANA TYPE CARD — generate a bespoke DESIGNED-TYPOGRAPHY card (a film
+ * title/end card) for a hero line, instead of a generic web font. Spelling is
+ * gated by the vision judge with one retry; returns the jpg path, or null so
+ * the caller falls back to rendered CSS type. (Daniel: "fonts especially at the
+ * end need to be more unique — maybe nano banana?")
+ */
+export async function bananaTypeCard(args: {
+  text: string;
+  /** Words to emphasise in the accent colour. */
+  emphasis?: string[];
+  /** World/type art-direction, e.g. "distressed cinematic crime-thriller title". */
+  styleDesc: string;
+  accent: string;
+  outJpg: string;
+  log?: (m: string) => void;
+}): Promise<string | null> {
+  const { writeFile } = await import("node:fs/promises");
+  const emph = args.emphasis?.length ? ` Set the words ${args.emphasis.map((w) => `"${w}"`).join(", ")} in the accent colour ${args.accent}.` : "";
+  const base =
+    `A cinematic 16:9 TITLE CARD built ENTIRELY from beautiful designed typography. Render this exact line as the ` +
+    `hero lettering: "${args.text}". Art direction: ${args.styleDesc}; expressive, premium, magazine/film-poster ` +
+    `quality, dramatic scale contrast and layout, atmospheric dark background with subtle texture and depth.${emph} ` +
+    `HARD RULES: every word present and spelled EXACTLY as written; it must read perfectly; NO watermark, NO UI, NO ` +
+    `extra words, NO gibberish letters.`;
+  let fix = "";
+  let last: string | null = null;
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      const bytes = await generateBananaImage({ prompt: base + fix, aspectRatio: "16:9" });
+      await writeFile(args.outJpg, bytes);
+      last = args.outJpg;
+      const raw = await geminiVisionLocal({
+        prompt:
+          `TYPOGRAPHY GATE. Does this card show the EXACT line "${args.text}" — every word present, correctly ` +
+          `spelled, fully legible, no gibberish or extra words? Return STRICT JSON {"exact":bool,"legible":bool,"fix":"<=12 words"}.`,
+        imagePaths: [args.outJpg],
+        json: true,
+        maxTokens: 150,
+      }).catch(() => "");
+      const v = raw ? parseJsonLoose<{ exact?: boolean; legible?: boolean; fix?: string }>(raw) : {};
+      if (v.exact !== false && v.legible !== false) {
+        args.log?.(`banana type card OK: "${args.text.slice(0, 40)}"`);
+        return args.outJpg;
+      }
+      fix = ` PREVIOUS ATTEMPT WRONG: ${v.fix ?? "spell every word exactly, no gibberish"}. Render the line letter-for-letter: "${args.text}".`;
+      args.log?.(`banana type card rejected (exact=${v.exact} legible=${v.legible}) — ${attempt === 0 ? "retry" : "fallback to CSS"}`);
+    } catch (e) {
+      args.log?.(`banana type card error: ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  void last;
+  return null; // unconfirmed spelling → caller renders crisp CSS type instead
+}
+
 /** One generation. Returns jpg/png bytes. Throws loud — never silent-degrades. */
 export async function generateBananaImage(args: {
   prompt: string;

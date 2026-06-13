@@ -15,6 +15,7 @@
 export type DocuShotKind =
   | "parallax_portrait"
   | "depth_parallax"
+  | "geo_map"
   | "map_zoom"
   | "photo_slide"
   | "matte_sequence"
@@ -73,6 +74,8 @@ export interface DocuStyleDef {
   cinematography: string;
   /** Free-prose creative direction — how this world tells a story visually. */
   creativeDirection: string;
+  /** Art direction for Banana-designed hero typography (end card). */
+  typeStyle: string;
   /** Shot kinds this world LEANS ON (soft bias, not a whitelist — the planner
    *  may use any capability when it serves the story). */
   preferredKinds: DocuShotKind[];
@@ -128,7 +131,9 @@ const ARCHIVAL: DocuStyleDef = {
     "Tell history like a prestige documentary: open on the protagonist, establish the world and the stakes with maps " +
     "and archival photos, build through the rise and the reversal, land on the irony. Lean on cutout portraits, taped " +
     "photographs and big confident type.",
-  preferredKinds: ["parallax_portrait", "map_zoom", "photo_slide", "matte_sequence", "collage_pan", "object_drop", "quote_card"],
+  typeStyle:
+    "vintage distressed letterpress headline typography, bold condensed serif + sans mix, aged ink on textured paper, editorial poster scale.",
+  preferredKinds: ["parallax_portrait", "geo_map", "photo_slide", "matte_sequence", "collage_pan", "object_drop", "quote_card"],
   hookKind: "parallax_portrait",
   closerKind: "quote_card",
   fontCss: "https://fonts.googleapis.com/css2?family=Anton&family=Oswald:wght@500;600;700&family=Caveat:wght@600;700&display=block",
@@ -185,7 +190,9 @@ const DETECTIVE: DocuStyleDef = {
     "Build the case like a detective: open on the evidence board, introduce the victim and the scene, walk the clues " +
     "and suspects connected by red string, drop the key piece of evidence, land on the unanswered question. Lean on " +
     "the evidence board and suspect portraits.",
-  preferredKinds: ["evidence_board", "parallax_portrait", "photo_slide", "map_zoom", "matte_sequence", "object_drop", "quote_card"],
+  typeStyle:
+    "noir true-crime title typography, bold condensed sans + typewriter, redacted-bar and stamp accents, harsh contrast on dark.",
+  preferredKinds: ["evidence_board", "parallax_portrait", "photo_slide", "geo_map", "matte_sequence", "object_drop", "quote_card"],
   hookKind: "evidence_board",
   closerKind: "quote_card",
   fontCss:
@@ -242,7 +249,9 @@ const ROBBERY: DocuStyleDef = {
     "Tell the heist as a reconstruction thriller: establish the target, walk the plan with depth_parallax scenes, " +
     "show the crew and the take, then the fallout. Lean on depth_parallax for the cinematic reconstructions, " +
     "object_drop for the loot/tools, map_zoom for the location, evidence_board for the investigation.",
-  preferredKinds: ["depth_parallax", "object_drop", "map_zoom", "evidence_board", "parallax_portrait", "matte_sequence", "quote_card"],
+  typeStyle:
+    "cinematic heist-thriller title typography, sharp stencil + sleek serif, metallic gold accents, deep filmic shadows.",
+  preferredKinds: ["depth_parallax", "object_drop", "geo_map", "evidence_board", "parallax_portrait", "matte_sequence", "quote_card"],
   hookKind: "depth_parallax",
   closerKind: "quote_card",
   fontCss:
