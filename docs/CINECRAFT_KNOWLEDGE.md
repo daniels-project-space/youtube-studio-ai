@@ -97,3 +97,10 @@ hero shots with cheaper stills/stock for connective tissue to control cost.
 → `renderShot()` (hero-anchored keyframe + vision gate → Seedance/Kling i2v) →
 Remotion assembly. PoC scripts: `scripts/cinecraft-shotplan.ts`,
 `scripts/cinecraft-render.mjs`.
+
+## Generality (2026-06-13 refactor)
+The module is GENERAL, not photoreal-period-drama only:
+- **Subjects, not just people**: `SubjectKind = character | location | object | creature`. `extractSubjects()` pulls people + recurring locations + key objects (kind-tagged); each is designed + anchored the SAME way (hero image + vision gate). `extractCast`/`designCharacter`/`CinematicCharacter`/`CastMember` are back-compat aliases.
+- **Any style**: `CINEMATIC_DOCTRINE` (golden.ts) per niche → style/look/cameraGrammar/pace (true-crime noir, history epic-warm, tech sleek-3D, fantasy, gentle painterly…); `resolveLook(brief)` = brief override → doctrine. Style threads through hero + keyframe + establishing prompts (no hardcoded "photoreal").
+- **Establishing + multi-subject shots**: shots carry `subjects: string[]` (empty = pure atmosphere/location establishing; 2+ = anchor to the primary character/location and NAME the others + their markers in the prompt). `craftCinematicShots` renders subject-less shots too.
+- Consistency lock adapts to kind (same person / same place / same object). Per-shot `i2vModel` override. Soul only for character/creature.

@@ -417,6 +417,57 @@ export function footageDoctrineFor(niche?: string): FootageDoctrine & { archetyp
 }
 
 /**
+ * CINEMATIC DOCTRINE — how a GENERATED-cinematic channel (cinecraft) should
+ * LOOK and move: the visual style/medium, the grade, the camera grammar, and
+ * the edit pace. Lets the character-video engine adapt across the full range of
+ * channels (gritty true-crime vs epic history vs stylized fantasy vs clean
+ * explainer) instead of assuming photoreal period-drama. Resolved per niche via
+ * the voice archetype; the brief can override any field.
+ */
+export interface CinematicDoctrine {
+  /** Visual medium/style, e.g. "photoreal cinematic", "2D anime", "3D animated", "graphic-novel ink". */
+  style: string;
+  /** Grade / lighting / atmosphere. */
+  look: string;
+  /** Camera-language tendencies (movement + framing the director favors). */
+  cameraGrammar: string;
+  /** Shot/edit energy. */
+  pace: "slow" | "measured" | "dynamic";
+}
+
+export const CINEMATIC_DOCTRINE: Record<string, CinematicDoctrine> = {
+  investigator:        { style: "photoreal cinematic", look: "dark gritty high-contrast noir, cold desaturated, deep shadow", cameraGrammar: "slow push-ins, locked-off tension, evidentiary close-ups", pace: "slow" },
+  "chaos-commentator": { style: "photoreal cinematic with bold graphic overlays", look: "punchy saturated, harsh flash, tabloid energy", cameraGrammar: "fast whip-pans, snap zooms, handheld", pace: "dynamic" },
+  "narrator-teacher":  { style: "photoreal cinematic", look: "epic warm tungsten, painterly volumetric light, period-accurate", cameraGrammar: "sweeping crane + slow dolly, wide establishing then push-in", pace: "measured" },
+  "calm-analyst":      { style: "photoreal cinematic, restrained", look: "clean cold clinical, controlled contrast", cameraGrammar: "static + slow precise moves", pace: "slow" },
+  "quiet-mentor":      { style: "photoreal cinematic, minimal", look: "moody chiaroscuro, candlelit warmth, sparse", cameraGrammar: "slow drift, intimate framing, stillness", pace: "slow" },
+  "teacher-advisor":   { style: "clean photoreal or light 3D", look: "bright credible, modern, soft contrast", cameraGrammar: "steady dolly, clear medium shots, simple inserts", pace: "measured" },
+  "trusted-explainer": { style: "clean photoreal or light 3D", look: "warm clinical, friendly, even light", cameraGrammar: "steady, clear, calm", pace: "measured" },
+  "insider-explainer": { style: "sleek 3D / photoreal tech", look: "sharp modern, cool accent light, glassy", cameraGrammar: "smooth gimbal, parallax reveals, macro detail", pace: "dynamic" },
+  "enthusiast-critic": { style: "photoreal cinematic", look: "stylish lively, rich contrast", cameraGrammar: "expressive moves, cut-on-action", pace: "dynamic" },
+  "operator-mentor":   { style: "clean photoreal", look: "professional, confident, even", cameraGrammar: "steady, decisive framing", pace: "measured" },
+  igniter:             { style: "photoreal cinematic, heightened", look: "intense, high-contrast, dramatic rim light", cameraGrammar: "driving push-ins, low angles, energy", pace: "dynamic" },
+  dramatist:           { style: "photoreal or painterly cinematic", look: "atmospheric, emotional, rich shadow", cameraGrammar: "scene-led blocking, reveal-timed moves", pace: "measured" },
+  teacher:             { style: "clean photoreal or 3D animated", look: "bright clear delighted, inviting", cameraGrammar: "clear medium shots, gentle moves, demonstrative inserts", pace: "measured" },
+  "gentle-guide":      { style: "soft photoreal or painterly", look: "serene, warm, diffuse, dreamlike", cameraGrammar: "very slow drift, wide calm framing", pace: "slow" },
+};
+
+/** Measured photoreal default when no archetype resolves. */
+export const DEFAULT_CINEMATIC_DOCTRINE: CinematicDoctrine = {
+  style: "photoreal cinematic",
+  look: "rich cinematic grade, motivated lighting, shallow depth of field",
+  cameraGrammar: "wide establishing then a slow push-in, steady moves",
+  pace: "measured",
+};
+
+/** Resolve the cinematic doctrine for a niche (via its voice archetype). */
+export function cinematicDoctrineFor(niche?: string): CinematicDoctrine & { archetype: string } {
+  const key = resolveVoiceDoctrine(niche)?.voice ?? "";
+  const d = CINEMATIC_DOCTRINE[key];
+  return d ? { ...d, archetype: key } : { ...DEFAULT_CINEMATIC_DOCTRINE, archetype: key || "default" };
+}
+
+/**
  * GOLDEN_MODULES — the golden template, module by module, as shown on the
  * studio's "Golden Pipeline" tab. One entry per module of the spine with the
  * honest story of HOW it works and which gates protect it. `status: "golden"`
