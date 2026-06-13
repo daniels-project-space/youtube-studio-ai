@@ -150,6 +150,25 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       .map((e) => (e.block === "stock_footage" ? { block: "gen_footage", params: e.params } : e));
   }
 
+  // DRAWN-CINEMA self-contained engine (whiteboard_scribe): it writes its own
+  // layered storyboard + narration and draws the synced video itself, so it
+  // REPLACES the script -> narration -> footage -> assemble chain with one
+  // visual-engine block placed right after the topic/crew briefs.
+  if (fam.visualEngine === "whiteboard_scribe") {
+    const replaced = new Set([
+      "script_gen", "hook_craft", "qa_script", "originality_gate", "compliance_check",
+      "narration_tts", "stock_footage", "gen_footage", "entity_imagery", "intro_card",
+      "visual_inserts", "quote_overlays", "captions", "length_check", "timeline_assemble",
+    ]);
+    pipeline = pipeline.filter((e) => !replaced.has(e.block));
+    const briefBlocks = ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec"];
+    const anchor = Math.max(
+      pipeline.findIndex((e) => e.block === "topic_select"),
+      ...briefBlocks.map((b) => pipeline.findIndex((e) => e.block === b)),
+    );
+    pipeline.splice(anchor + 1, 0, { block: "whiteboard_scribe", params: {} });
+  }
+
   // Mirror the narration pacing into script_gen so the word budget accounts for
   // the real inter-sentence pauses AND voice speed (length math in scriptGen).
   const narrParams = pipeline.find((e) => e.block === "narration_tts")?.params;

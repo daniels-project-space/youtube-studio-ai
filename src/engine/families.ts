@@ -80,14 +80,14 @@ export const FAMILIES: Record<FamilyKey, Family> = {
   },
   whiteboard: {
     key: "whiteboard",
-    label: "Whiteboard explainer",
+    label: "Whiteboard explainer (drawn cinema)",
     description:
-      "Hand-drawing whiteboard animation synced to narration (history, finance basics, explainers). Generated visuals: DNA-locked stills → image-to-video draw-ons.",
-    visualEngine: "gen_footage",
+      "Narration-synced hand-drawn whiteboard explainer (history, finance, explainers). DRAWN-CINEMA engine: Gemini storyboards layered scenes, Fish narrates, Whisper aligns, and a deterministic hand draws each beat in time with the voice — zero render credits. 1080p / 2K.",
+    visualEngine: "whiteboard_scribe",
     archetypeKey: "narrated-essay",
     available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "fal", "gemini"],
+    requiresKeys: ["fish-audio", "gemini"],
     defaultThumbnailStyle: "banana",
   },
   cinematic: {
