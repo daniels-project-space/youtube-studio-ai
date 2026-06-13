@@ -137,15 +137,15 @@ function planContract(brief: WhiteboardSyncBrief, nPanels: number, words: number
     `Design a punchy, INFORMATIVE ~60-second WHITEBOARD explainer. TOPIC: ${brief.topic}\n${facts}` +
     `Think like a motion-designer. Each panel is a STACK OF LAYERS drawn one at a time on a whiteboard, building an argument.\n` +
     `Output STRICT JSON: {"title":"...","panels":[ {"narration":"<~2 spoken sentences (~${Math.round(words / nPanels)} words), end with a small beat>",` +
-    `"layers":[ {"kind":"art","draw":"<a SMALL iconic line-art SKETCH of ONE concrete thing the narration names (a railroad, a coin, a soldier, a ship, a government building, a banana). NO text/words in the art.>",` +
+    `"layers":[ {"kind":"art","draw":"<EITHER the panel's larger composed SCENE (its main objects AND how they relate) OR a small iconic sketch of one concrete thing the narration names. NO text/words in the art.>",` +
     `"cue":"<verbatim phrase from THIS narration marking when to draw it>","box":[x,y,w,h]} , ` +
     `{"kind":"label","text":"<EXACT short words/number to hand-letter>","cue":"<verbatim phrase>","box":[x,y,w,h],"color":"black|red"} ]} ]}\n\n` +
     `RULES:\n- Output STRICTLY VALID minified JSON: double-quote every key and string, no comments, no trailing commas, escape any quotes inside strings.\n` +
     `- EXACTLY ${nPanels} panels. ~${words} words TOTAL. Plain spoken narration, NO audio tags. Never stop early.\n` +
-    `- DENSITY (important): turn EVERY concrete drawable thing the narration names into its OWN small art SKETCH, cued to that exact word, so the board keeps FILLING as the voice speaks — 3 to 6 sketches per panel; never leave it static. For a list ("the railroads, the government, and taxes") make a SEPARATE sketch for EACH item (railroad / government building / coins), each cued to its word. Add label layers for dates + numbers. List layers IN THE ORDER their cue appears; every label needs non-empty "text".\n` +
+    `- MIX OF SCALES (important): each panel has ONE larger composed SCENE — the hero visual for the beat (its main objects AND how they relate, designed and informative) — PLUS 2-4 SMALLER keyword sketches for other concrete things the narration names, each cued to its exact word and spread around the hero so the board keeps FILLING as the voice speaks (never leave it static). For a list ("railroads, government, taxes") make a separate small sketch for EACH item, cued to its word. Add label layers for dates + numbers. List layers IN THE ORDER their cue appears; every label needs non-empty "text".\n` +
     `- Every "cue" MUST be an exact substring of that panel's narration. Don't put the last cue at the very end (leave a trailing clause).\n` +
     `- A persistent TITLE HEADER lives in the top strip: ALL boxes (art + labels) MUST have y >= 0.17 (nothing in the top 0.16).\n` +
-    `- box=[x,y,w,h] in 0..1 on a 16:9 board. Art SKETCHES are SMALL (w,h ~ 0.16-0.30) and SPREAD across the board — vary x AND y in a loose grid so several sit side by side and accumulate into a rich full board WITHOUT overlapping; place each near where it makes sense. Labels smaller, beside the thing they name. y >= 0.17 for everything.\n` +
+    `- box=[x,y,w,h] in 0..1 on a 16:9 board. The hero SCENE is LARGER (w ~ 0.34-0.52, center/left); the keyword SKETCHES are SMALL (w,h ~ 0.13-0.24) spread around it (vary x AND y) so they accumulate WITHOUT overlapping the scene. Labels smaller, beside the thing they name. y >= 0.17 for everything.\n` +
     `- ART HAS NO TEXT — all words/numbers are label layers. color:"red" for money/danger emphasis, else black. Be accurate.${beats}`
   );
 }
@@ -167,29 +167,52 @@ function normalize(raw: RawPlan): NPanel[] {
   }));
 }
 
+/** Generate ONE chunk of panels (retry on short/invalid output). */
+async function genChunk(brief: WhiteboardSyncBrief, beats: string[], nP: number, words: number, cont: string, log: Logger): Promise<{ title: string; panels: NPanel[] }> {
+  const sub: WhiteboardSyncBrief = { ...brief, beats, panels: nP, targetWords: words };
+  for (let attempt = 0; attempt < 3; attempt++) {
+    const extra =
+      (cont ? `\n\nThis is PART of a longer video already in progress; the previous panel's narration ended: "${cont.slice(-160)}". Continue naturally — do NOT repeat the intro or title.` : "") +
+      (attempt ? `\n\nFIX: output EXACTLY ${nP} panels as STRICTLY VALID minified JSON.` : "");
+    try {
+      const raw = await geminiJsonPro<RawPlan>({ prompt: planContract(sub, nP, words) + extra, maxTokens: 14000, temperature: 0.5 });
+      const panels = normalize(raw);
+      if (panels.length >= nP) return { title: String(raw.title ?? brief.topic), panels };
+      log(`  chunk got ${panels.length}/${nP} panels — retry`);
+      if (attempt === 2 && panels.length) return { title: String(raw.title ?? brief.topic), panels };
+    } catch (e) {
+      log(`  chunk failed (${(e instanceof Error ? e.message : String(e)).slice(0, 90)}) — retry`);
+    }
+  }
+  return { title: brief.topic, panels: [] };
+}
+
 async function buildStoryboard(brief: WhiteboardSyncBrief, log: Logger): Promise<{ title: string; panels: NPanel[]; fullText: string }> {
   const nPanels = brief.panels ?? 6;
   const words = brief.targetWords ?? 150;
-  let title = brief.topic, panels: NPanel[] = [], fullText = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
-    const extra = attempt ? `\n\nFIX THE PREVIOUS ATTEMPT (it was too short or invalid JSON). Output EXACTLY ${nPanels} panels and ~${words} words covering every beat, as STRICTLY VALID minified JSON. Do not stop early.` : "";
-    let raw: RawPlan;
-    try {
-      raw = await geminiJsonPro<RawPlan>({ prompt: planContract(brief, nPanels, words) + extra, maxTokens: 9000, temperature: 0.5 });
-    } catch (e) {
-      log(`storyboard attempt ${attempt + 1} failed (${(e instanceof Error ? e.message : String(e)).slice(0, 100)}) — retry`);
-      continue;
+  const beats = brief.beats ?? [];
+  const CHUNK = 4;
+  let title = brief.topic;
+  const all: NPanel[] = [];
+  if (beats.length > 6) {
+    // CHUNKED: one LLM call can't reliably emit many dense panels — build in groups.
+    for (let i = 0; i < beats.length; i += CHUNK) {
+      const grp = beats.slice(i, i + CHUNK);
+      const cont = all.length ? all[all.length - 1].narration : "";
+      const { title: t, panels } = await genChunk(brief, grp, grp.length, Math.round((words * grp.length) / beats.length), cont, log);
+      if (i === 0 && t) title = t;
+      all.push(...panels);
+      log(`storyboard chunk ${Math.floor(i / CHUNK) + 1}: +${panels.length} panels (total ${all.length})`);
     }
-    title = String(raw.title ?? brief.topic);
-    panels = normalize(raw);
-    panels.forEach((p, i) => (p.idx = i));
-    fullText = panels.map((p) => p.narration).join(" ");
-    const wc = fullText.split(/\s+/).filter(Boolean).length;
-    log(`storyboard attempt ${attempt + 1}: ${panels.length} panels, ${wc} words, ${panels.reduce((n, p) => n + p.layers.length, 0)} layers`);
-    if (panels.length >= nPanels && wc >= words * 0.8) break;
+  } else {
+    const { title: t, panels } = await genChunk(brief, beats, nPanels, words, "", log);
+    if (t) title = t;
+    all.push(...panels);
+    log(`storyboard: ${all.length} panels, ${all.reduce((n, p) => n + p.layers.length, 0)} layers`);
   }
-  if (!panels.length) throw new Error("whiteboardSync: storyboard produced no panels");
-  return { title, panels, fullText };
+  all.forEach((p, i) => (p.idx = i));
+  if (!all.length) throw new Error("whiteboardSync: storyboard produced no panels");
+  return { title, panels: all, fullText: all.map((p) => p.narration).join(" ") };
 }
 
 /* ------------------------------ timing --------------------------------- */
@@ -236,9 +259,16 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
   if (!process.env.FISH_AUDIO_API_KEY) throw new Error("whiteboardSync: FISH_AUDIO_API_KEY missing");
   await mkdir(args.runDir, { recursive: true });
 
-  // 1. storyboard
-  const { title, panels, fullText } = await buildStoryboard(brief, log);
-  await writeFile(join(args.runDir, "plan.json"), JSON.stringify({ title, panels, fullText }, null, 2), "utf8");
+  // 1. storyboard (cached → resumable reruns)
+  const planPath = join(args.runDir, "plan.json");
+  let title: string, panels: NPanel[], fullText: string;
+  if (existsSync(planPath)) {
+    ({ title, panels, fullText } = JSON.parse(await readFile(planPath, "utf8")) as { title: string; panels: NPanel[]; fullText: string });
+    log(`storyboard: loaded cached plan (${panels.length} panels)`);
+  } else {
+    ({ title, panels, fullText } = await buildStoryboard(brief, log));
+    await writeFile(planPath, JSON.stringify({ title, panels, fullText }, null, 2), "utf8");
+  }
 
   // 2. art layers (style-locked, no text, pure white)
   const refPath = join(ASSET_DIR, `${brief.styleId ?? "history"}_ref.png`);
@@ -246,24 +276,39 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
   const artJobs: { p: NPanel; l: NLayer }[] = [];
   for (const p of panels) for (const l of p.layers) if (l.kind === "art") artJobs.push({ p, l });
   await pool(artJobs, 3, async ({ p, l }) => {
-    const prompt =
-      `A single clear whiteboard marker line-art SKETCH on a PURE WHITE (#ffffff) background, nothing else, the subject centered and filling the frame with a small margin. ` +
-      (refB64 ? `CRITICAL: match the EXACT clean black marker line-art style and single stroke weight of the REFERENCE image (copy STYLE only). ` : "") +
-      `Draw: ${l.draw}. (Context for tone, do NOT write any text: "${p.narration}".) Bold simple iconic line-art, instantly readable, NOT photorealistic, no shading. ` +
-      `Use red for at most one or two accent marks. ABSOLUTELY NO text, words, numbers or letters anywhere. No watermark, pure white background.`;
     const fn = `art_${p.idx}_${p.layers.indexOf(l)}.png`;
-    await writeFile(join(args.runDir, fn), refB64 ? await styledScene(prompt, refB64) : await styledScene(prompt, ""));
-    l.art = fn;
-    log(`art ${fn} ✓`);
+    const out = join(args.runDir, fn);
+    if (existsSync(out)) { l.art = fn; return; }            // cached (resumable)
+    const isScene = Number(l.box?.[2] ?? 0) >= 0.32;
+    const prompt =
+      `A whiteboard marker line-art ${isScene ? "SCENE" : "SKETCH"} on a PURE WHITE (#ffffff) background, nothing else, filling the frame with a small margin. ` +
+      (refB64 ? `CRITICAL: match the EXACT clean black marker line-art style and single stroke weight of the REFERENCE image (copy STYLE only). ` : "") +
+      (isScene
+        ? `Draw a COMPOSED, designed scene: ${l.draw} — show the objects AND how they relate, clear and informative. `
+        : `Draw a single bold iconic sketch of: ${l.draw}, instantly readable. `) +
+      `(Context for tone, do NOT write any text: "${p.narration}".) Simple line-art, NOT photorealistic, no shading. ` +
+      `Use red for at most one or two accent marks. ABSOLUTELY NO text, words, numbers or letters anywhere. No watermark, pure white background.`;
+    try {
+      await writeFile(out, refB64 ? await styledScene(prompt, refB64) : await styledScene(prompt, ""));
+      l.art = fn;
+      log(`art ${fn} ✓`);
+    } catch (e) {
+      log(`art ${fn} skipped (${(e instanceof Error ? e.message : String(e)).slice(0, 70)})`); // 1 bad gen must not kill the run
+    }
   });
 
-  // 3. narration + alignment
-  log("TTS (Fish)…");
-  const mp3 = await synthNarration({ text: fullText, voiceId: brief.voiceId ?? "sleepless_historian", speed: 0.95 });
-  await writeFile(join(args.runDir, "narration.mp3"), Buffer.from(mp3));
-  log("aligning (Whisper)…");
+  // 3. narration + alignment (cached → resumable)
+  const mp3Path = join(args.runDir, "narration.mp3");
   const wpath = join(args.runDir, "wwords.json");
-  await runPy([join("scripts", "whisper_align.py"), join(args.runDir, "narration.mp3"), wpath], log);
+  if (!existsSync(mp3Path)) {
+    log("TTS (Fish)…");
+    const mp3 = await synthNarration({ text: fullText, voiceId: brief.voiceId ?? "sleepless_historian", speed: 0.95 });
+    await writeFile(mp3Path, Buffer.from(mp3));
+  } else log("TTS cached");
+  if (!existsSync(wpath)) {
+    log("aligning (Whisper)…");
+    await runPy([join("scripts", "whisper_align.py"), mp3Path, wpath], log);
+  } else log("alignment cached");
   const words = JSON.parse(await readFile(wpath, "utf8")) as { text: string; start: number; end: number }[];
   const { audioEnd } = alignCues(panels, fullText, words);
 
