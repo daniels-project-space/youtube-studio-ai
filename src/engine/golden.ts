@@ -686,7 +686,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   },
   {
     key: "whiteboard",
-    stage: "visuals",
+    stage: "visual",
     title: "Whiteboard — Drawn Cinema (synced scribe)",
     engine: "whiteboardSync — narration-synced deterministic write-on: Gemini layered storyboard + 2K Nano-Banana scenes + Fish narration, Whisper-aligned, drawn by a real hand in time with the voice. ZERO render credits.",
     how:
@@ -698,7 +698,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "persistent topic header + frame are drawn once, words letter in reading order, then ffmpeg muxes the narration. No video " +
       "model = $0 render credits; spend is the 2K Banana art + Fish TTS. Resolution-configurable (1080p / 2K).",
     gates: ["storyboard retry until full beat coverage", "cue → ms via Whisper word-alignment (interpolated)", "per-layer pixels (no segmentation): nothing shown before its cue", "minimum draw time + guaranteed panel HOLD: nothing pops or cuts early", "number-integrity: labels grounded in the narration"],
-    status: "active",
+    status: "golden",
   },
   {
     key: "ship",
