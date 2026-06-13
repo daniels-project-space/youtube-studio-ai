@@ -36,6 +36,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { geminiJsonPro, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
 import { generateBananaImage } from "@/lib/banana";
+import { getDepthMap } from "@/lib/depth";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
 import { renderDocuMotion, renderDocuStills } from "@/lib/remotionRender";
 import {
@@ -123,6 +124,7 @@ export interface DocuPlan {
 /** Per-kind asset contract: role → [min, max] count. */
 const KIND_ASSETS: Record<DocuShotKind, Partial<Record<DocuAssetRole, [number, number]>>> = {
   parallax_portrait: { bg: [1, 1], fg: [1, 1] },
+  depth_parallax: { image: [1, 1] }, // one scene; near depth layers are DERIVED
   map_zoom: { bg: [1, 1] },
   photo_slide: { bg: [1, 1], image: [2, 3] },
   matte_sequence: { image: [3, 4] },
@@ -132,19 +134,34 @@ const KIND_ASSETS: Record<DocuShotKind, Partial<Record<DocuAssetRole, [number, n
   quote_card: { bg: [0, 1] },
 };
 
+/** What each capability does + when to use it — the planner's palette. */
+const CAPABILITY_CATALOG =
+  `CAPABILITY PALETTE (use any when it serves the story; the style says which to LEAN on):\n` +
+  `- parallax_portrait: a die-cut person over a plate with a huge NAME title — introduce a person.\n` +
+  `- depth_parallax: ONE cinematic scene given living 2.5D depth, camera drifts THROUGH it — reconstructed moments / ` +
+  `establishing a place (brief MUST describe a clear foreground subject and a separated background).\n` +
+  `- map_zoom: an aged map/chart with a ringed location word — geography.\n` +
+  `- photo_slide: 2-3 taped photographs sliding over a plate — a handful of evidence/photos.\n` +
+  `- matte_sequence: 3-4 full-frame scenes with torn-paper cuts between them — a list of places/moments.\n` +
+  `- collage_pan: 6-8 small photos on a board, slow rostrum pan — a broad sweep.\n` +
+  `- evidence_board: cork board of pinned photos joined by RED STRING, camera prowls and HOLDS on each clue — ` +
+  `investigations and webs of connection.\n` +
+  `- object_drop: 1-3 objects drop onto a plate under a huge number/title — money, loot, a key object.\n` +
+  `- quote_card: a single closing line — the landing.`;
+
 const CAMERA_MOVES = ["push_in", "pull_back", "pan_left", "pan_right", "drift"];
 const CAMERA_INTENSITIES = ["subtle", "medium", "strong"];
 
-function validatePlan(plan: DocuPlan, durationSec: number, style: DocuStyleDef): string[] {
+function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef): string[] {
   const problems: string[] = [];
   if (!plan.shots?.length || plan.shots.length < 5) problems.push("need 6-8 shots");
-  const allowed = new Set(style.shotKinds);
+  // Any KNOWN capability is allowed — a style biases selection, it does not
+  // restrict it (the planner composes freely).
   for (const [i, s] of (plan.shots ?? []).entries()) {
     if (!KIND_ASSETS[s.kind]) {
-      problems.push(`shot ${i}: unknown kind "${s.kind}"`);
+      problems.push(`shot ${i}: unknown kind "${s.kind}" (use one of: ${Object.keys(KIND_ASSETS).join(", ")})`);
       continue;
     }
-    if (!allowed.has(s.kind)) problems.push(`shot ${i}: kind "${s.kind}" not in this style (use ${style.shotKinds.join("|")})`);
     if (!s.beat?.trim()) problems.push(`shot ${i}: empty beat`);
     if (!(s.durationSec >= 3 && s.durationSec <= 10)) problems.push(`shot ${i}: durationSec must be 3-10`);
     if (!s.camera || !CAMERA_MOVES.includes(s.camera.move) || !CAMERA_INTENSITIES.includes(s.camera.intensity))
@@ -169,7 +186,7 @@ function planContract(style: DocuStyleDef): string {
  "styleId": "${style.id}",
  "shots": [
    {
-     "kind": one of [${style.shotKinds.join(", ")}],
+     "kind": one of [${Object.keys(KIND_ASSETS).join(", ")}] — LEAN ON [${style.preferredKinds.join(", ")}] for this world,
      "beat": "one sentence: what this shot communicates",
      "durationSec": n (3-10),
      "camera": {"move": "push_in|pull_back|pan_left|pan_right|drift", "intensity": "subtle|medium|strong"},
@@ -186,7 +203,7 @@ function planContract(style: DocuStyleDef): string {
    }
  ]
 }
-ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 bg.
+ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). depth_parallax: exactly 1 image (a cinematic scene with a CLEAR foreground subject and a separated background — the engine derives the 2.5D depth layers). map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 bg.
 SOURCE: use "archival" with a precise "query" ONLY for a real, famous, named person/place that Wikimedia certainly has (e.g. fg of "Henry Ford"); otherwise "generate".`;
 }
 
@@ -202,10 +219,14 @@ export async function planDocu(args: {
   const shotsWanted = Math.max(6, Math.min(8, Math.round(durationSec / 8)));
   const base =
     `You are the showrunner + director of photography of ${style.worldDescription}\n` +
+    `CREATIVE DIRECTION: ${style.creativeDirection}\n` +
     `Design the first ${durationSec} seconds of a video about: ${topic}.\n` +
     (referenceNotes ? `REFERENCE (recreate this beat structure and visual grammar): ${referenceNotes}\n` : "") +
-    `RULES: exactly ${shotsWanted} shots. Shot 1 = ${style.hookKind} HOOK. Last shot = ${style.closerKind} landing the ` +
-    `point. Vary the kinds in between. CINEMATOGRAPHY: ${style.cinematography}\n` +
+    `${CAPABILITY_CATALOG}\n` +
+    `RULES: exactly ${shotsWanted} shots. Compose freely from the palette to tell THIS story — lean on the world's ` +
+    `preferred capabilities but use any when it serves the beat. Shot 1 = ${style.hookKind} HOOK. Last shot = ` +
+    `${style.closerKind} landing the point. Vary the kinds (avoid repeating the same kind back-to-back unless it is ` +
+    `the spine of the world). CINEMATOGRAPHY: ${style.cinematography}\n` +
     `Asset briefs must be vivid, specific, world-correct, with strong tonal separation between subject and ` +
     `surroundings, and contain NO text/lettering in the image itself.\n${planContract(style)}`;
 
@@ -266,6 +287,43 @@ async function removeBackground(imgPath: string, outPng: string, log?: Logger): 
     }
   }
   throw new Error(`documotion: background removal failed (${lastErr})`);
+}
+
+/**
+ * Turn ONE still into 2.5D: get its depth map, then cut a feathered NEAR layer
+ * (alpha PNG) from the brightest (nearest) depth band over the full base. The
+ * renderer parallaxes near-over-base for a camera-through-photo move. Best
+ * effort — returns [] on any failure so the shot degrades to a Ken Burns push.
+ */
+async function deriveDepthLayers(baseImg: string, outDir: string, shotIdx: number, log?: Logger): Promise<string[]> {
+  if (!process.env.FAL_KEY) return [];
+  try {
+    const dataUri = `data:image/jpeg;base64,${(await readFile(baseImg)).toString("base64")}`;
+    const depthPath = join(outDir, `s${shotIdx}_depth.png`);
+    await getDepthMap(dataUri, depthPath, log ?? (() => {}));
+    const nearPng = join(outDir, `s${shotIdx}_near.png`);
+    // depth.ts convention: BRIGHTER = NEARER. Threshold the near band, feather,
+    // scale the mask to the base, alpha-merge onto the base.
+    await run(ffmpegBin(), [
+      "-y",
+      "-i",
+      baseImg,
+      "-i",
+      depthPath,
+      "-filter_complex",
+      "[1:v]format=gray,lutyuv=y='if(gt(val,135),255,0)',gblur=sigma=6[mtmp];" +
+        "[mtmp][0:v]scale2ref=flags=bilinear[m][base];" +
+        "[base][m]alphamerge,format=rgba[o]",
+      "-map",
+      "[o]",
+      nearPng,
+    ]);
+    log?.(`documotion depth: near layer for shot ${shotIdx}`);
+    return [nearPng];
+  } catch (e) {
+    log?.(`documotion depth: shot ${shotIdx} fell back to Ken Burns (${e instanceof Error ? e.message : e})`);
+    return [];
+  }
 }
 
 interface AssetGate {
@@ -380,6 +438,21 @@ export async function generateDocuAssets(
     }
     return { shotIdx: i, id: a.id, role: a.role, path: finalPath };
   });
+
+  // depth_parallax: derive the near 2.5D layer from each scene's base image and
+  // append it (after the base) so buildShotSpecs orders [base, near]. Cached.
+  for (const [i, shot] of plan.shots.entries()) {
+    if (shot.kind !== "depth_parallax") continue;
+    const baseFile = out.find((a) => a.shotIdx === i && a.role === "image");
+    if (!baseFile) continue;
+    const nearPath = join(assetsDir, `s${i}_near.png`);
+    if (existsSync(nearPath) && !fixNotes?.[`${i}:${baseFile.id}`]) {
+      out.push({ shotIdx: i, id: `${baseFile.id}_near`, role: "image", path: nearPath });
+      continue;
+    }
+    const layers = await deriveDepthLayers(baseFile.path, assetsDir, i, log);
+    for (const p of layers) out.push({ shotIdx: i, id: `${baseFile.id}_near`, role: "image", path: p });
+  }
 
   log?.(`documotion assets: ${out.length} ready`);
   return out;

@@ -531,10 +531,12 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ 
     <AbsoluteFill>
       <ShotBg src={shot.bg} cam={cam} recede={Boolean(shot.fg)} />
       {title ? (
+        // Title block lives in the LOWER third; the label rail owns the upper
+        // right. Disjoint zones = the kicker can never collide with the labels.
         <>
-          <TextScrim cx={56} cy={46} w={66} h={42} opacity={0.46 * boost} />
-          <AbsoluteFill style={{ justifyContent: "center", paddingLeft: width * 0.28, paddingBottom: height * 0.16 }}>
-            <div style={{ whiteSpace: "nowrap", transform: camTransform(cam, 1.18), transformOrigin: "center" }}>
+          <TextScrim cx={56} cy={74} w={72} h={40} opacity={0.5 * boost} />
+          <AbsoluteFill style={{ justifyContent: "flex-end", paddingLeft: width * 0.28, paddingBottom: height * 0.09 }}>
+            <div style={{ whiteSpace: "nowrap", transform: camTransform(cam, 1.18), transformOrigin: "left bottom" }}>
               <KineticTitle text={title} kicker={shot.kicker} size={Math.round(titleSize)} />
             </div>
           </AbsoluteFill>
@@ -560,6 +562,52 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ 
         </AbsoluteFill>
       ) : null}
       <LabelRail shot={shot} />
+    </AbsoluteFill>
+  );
+};
+
+/**
+ * DEPTH PARALLAX — turns ONE generated still into a living 2.5D shot. The
+ * engine supplies images[0] = the full base plate and images[1..] = near depth
+ * layers (alpha PNGs cut from the same image via its depth map). Each layer
+ * parallaxes at a deeper rate than the base, so the camera appears to move
+ * THROUGH the photograph. With no near layers it degrades to a clean Ken Burns.
+ */
+const DepthParallaxShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
+  const { width, height } = useVideoConfig();
+  const t = useTheme();
+  const dur = shot.durationInFrames;
+  const cam = useCam(shot.camera ?? { move: "push_in", intensity: "medium" }, dur, seed);
+  const layers = shot.images ?? [];
+  const base = layers[0];
+  const near = layers.slice(1);
+  const title = shot.title ?? "";
+  const boost = shot.titleBoost ?? 1;
+  const titleSize = Math.min(width * 0.105 * boost, (width * 0.86) / Math.max(6, title.length * t.displayCharW));
+  return (
+    <AbsoluteFill style={{ backgroundColor: t.base, overflow: "hidden" }}>
+      {base ? (
+        <Img src={base} style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", transform: camTransform(cam, 1.0), filter: t.plateFilter }} />
+      ) : null}
+      {near.map((src, i) => (
+        <Img
+          key={i}
+          src={src}
+          style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", transform: camTransform(cam, 1.55 + i * 0.45), filter: t.plateFilter }}
+        />
+      ))}
+      <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(8,8,6,0.28) 0%, rgba(8,8,6,0) 34%, rgba(8,8,6,0.5) 100%)" }} />
+      {title ? (
+        <>
+          <TextScrim cx={50} cy={76} w={82} h={40} opacity={0.5 * boost} />
+          <AbsoluteFill style={{ alignItems: "center", justifyContent: "flex-end", paddingBottom: height * 0.09 }}>
+            <div style={{ transform: camTransform(cam, 1.1), whiteSpace: "nowrap" }}>
+              <KineticTitle text={title} kicker={shot.kicker} delay={12} align="center" size={Math.round(titleSize)} />
+            </div>
+          </AbsoluteFill>
+        </>
+      ) : null}
+      <LabelRail shot={shot} baseDelay={18} />
     </AbsoluteFill>
   );
 };
@@ -829,23 +877,42 @@ const EvidenceBoardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ sho
         ...(n >= 4 ? [{ from: 0, to: n - 1 }] : []),
       ];
 
-  // Camera path: wide → each node (cap 4) → wide. Center node at frame, zoom.
+  // Camera path: open WIDE, then visit a FEW clues — but HOLD on each one long
+  // enough to read its index card before moving on (prowl, don't strobe).
   const fitZoom = width / boardW; // shows full board width
-  const visit = nodes.slice(0, Math.min(4, n));
+  const visit = nodes.slice(0, Math.min(3, n));
   const stops = [
     { x: boardW / 2, y: boardH / 2, z: fitZoom * 1.02 },
-    ...visit.map((node) => ({ x: node.cx, y: node.cy - node.w * 0.12, z: 1.16 })),
-    { x: boardW / 2, y: boardH / 2, z: fitZoom * 1.06 },
+    ...visit.map((node) => ({ x: node.cx, y: node.cy + node.w * 0.18, z: 1.06 })),
+    { x: boardW / 2, y: boardH / 2, z: fitZoom * 1.04 },
   ];
-  const segs = stops.length - 1;
-  const tp = interpolate(frame, [0, dur], [0, segs], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  const si = Math.min(segs - 1, Math.floor(tp));
-  const local = Easing.inOut(Easing.cubic)(clamp01(tp - si));
-  const a = stops[si];
-  const b = stops[si + 1];
-  const camX = a.x + (b.x - a.x) * local;
-  const camY = a.y + (b.y - a.y) * local;
-  const camZ = a.z + (b.z - a.z) * local;
+  // Build a hold/travel timeline. Holds are weighted heavier than travels so
+  // the camera lingers on each clue. Easing only applies to travel phases.
+  const HOLD_W = 2.0;
+  const TRAVEL_W = 1.1;
+  const phases: { a: (typeof stops)[number]; b: (typeof stops)[number]; hold: boolean; w: number }[] = [];
+  for (let i = 0; i < stops.length; i++) {
+    phases.push({ a: stops[i], b: stops[i], hold: true, w: HOLD_W });
+    if (i < stops.length - 1) phases.push({ a: stops[i], b: stops[i + 1], hold: false, w: TRAVEL_W });
+  }
+  const totalW = phases.reduce((s, p) => s + p.w, 0);
+  let cursor = 0;
+  let camX = stops[0].x;
+  let camY = stops[0].y;
+  let camZ = stops[0].z;
+  for (let i = 0; i < phases.length; i++) {
+    const p = phases[i];
+    const segLen = (p.w / totalW) * dur;
+    if (frame < cursor + segLen || i === phases.length - 1) {
+      const lp = clamp01((frame - cursor) / segLen);
+      const e = p.hold ? 0 : Easing.inOut(Easing.cubic)(lp);
+      camX = p.a.x + (p.b.x - p.a.x) * e;
+      camY = p.a.y + (p.b.y - p.a.y) * e;
+      camZ = p.a.z + (p.b.z - p.a.z) * e;
+      break;
+    }
+    cursor += segLen;
+  }
   const nx = noise2D(`ebx${seed}`, frame * 0.013, 0) * width * 0.004;
   const ny = noise2D(`eby${seed}`, frame * 0.011, 5) * height * 0.004;
   const tx = width / 2 - camX * camZ + nx;
@@ -1019,6 +1086,8 @@ const renderShot = (shot: DocuShotSpec, i: number) => {
   switch (shot.kind) {
     case "parallax_portrait":
       return <ParallaxPortraitShot shot={shot} seed={i + 1} />;
+    case "depth_parallax":
+      return <DepthParallaxShot shot={shot} seed={i + 1} />;
     case "map_zoom":
       return <MapZoomShot shot={shot} seed={i + 1} />;
     case "photo_slide":
