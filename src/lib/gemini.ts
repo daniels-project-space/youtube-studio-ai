@@ -442,6 +442,28 @@ export async function geminiAudioJudge(args: {
   return parseJsonLoose(raw);
 }
 
+/**
+ * Generic audio-grounded JSON: Gemini LISTENS to the supplied mp3s and
+ * returns the prompt's JSON contract (voicecraft profiling/casting/gating).
+ */
+export async function geminiAudioJson<T = unknown>(args: {
+  audios: string[]; // base64 mp3
+  prompt: string;
+  model?: string;
+  maxTokens?: number;
+}): Promise<T> {
+  const parts: GeminiPart[] = [{ text: args.prompt }];
+  for (const b64 of args.audios.slice(0, 6)) {
+    parts.push({ inlineData: { mimeType: "audio/mpeg", data: b64 } });
+  }
+  const raw = await generate(args.model ?? "gemini-2.5-flash", parts, {
+    json: true,
+    maxTokens: args.maxTokens ?? 1000,
+    temperature: 0.2,
+  });
+  return parseJsonLoose<T>(raw);
+}
+
 export async function geminiVisionLocal(args: {
   prompt: string;
   imagePaths: string[];

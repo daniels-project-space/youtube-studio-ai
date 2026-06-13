@@ -21,6 +21,7 @@ import { existsSync } from "node:fs";
 import { copyFile } from "node:fs/promises";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
+import { narrationPhysics, gateColdOpen } from "@/lib/voicecraft";
 import { sanitizeSpoken } from "@/lib/scriptGen";
 import { searchFootage, scoreClip, hasPexelsKey } from "@/lib/footage";
 import { searchWikimediaImage } from "@/lib/wikimedia";
@@ -351,21 +352,51 @@ export const narrationTts: Block = {
     const voiceId =
       opt(ctx, "voiceId") ?? (ctx.params["voiceId"] as string | undefined);
     const niche = opt(ctx, "niche");
-    const baseGap = Number(ctx.params["sentenceGapSec"] ?? 0.85);
+    // NARRATION PHYSICS — the archetype's delivery doctrine (voicecraft):
+    // per-channel-kind speed, v3 stability/style, sentence air. Explicit
+    // params and Style-DNA pacing still outrank the archetype baseline.
+    const physics = narrationPhysics(niche);
+    const baseGap = Number(ctx.params["sentenceGapSec"] ?? physics.sentenceGap ?? 0.85);
     const jitter = Number(ctx.params["sentenceGapJitter"] ?? 0.2);
-    // SPEAKING RATE â€” the "too fast narration" knob. Explicit param wins; else
-    // derived from the channel's Style DNA narrative pacing; else native pace.
+    // SPEAKING RATE — param > Style-DNA pacing > archetype physics > native.
     const dnaPacing = (ctx.store["styleDNA"] as { narrative?: { pacing?: string; delivery?: string } } | null)
       ?.narrative;
     const pacingText = `${dnaPacing?.pacing ?? ""} ${dnaPacing?.delivery ?? ""}`.toLowerCase();
-    const speed =
-      Number(ctx.params["ttsSpeed"] ?? 0) ||
-      (/sleep|meditat|hypnot|very slow|drowsy/.test(pacingText) ? 0.88
+    const dnaSpeed =
+      /sleep|meditat|hypnot|very slow|drowsy/.test(pacingText) ? 0.88
         : /slow|gentle|calm|soothing|unhurried/.test(pacingText) ? 0.93
         : /measured|deliberate|contemplative|documentary/.test(pacingText) ? 0.96
         : /fast|energetic|punchy|rapid|urgent/.test(pacingText) ? 1.05
-        : 1);
-    if (speed !== 1) ctx.log(`narration_tts: speaking rate Ã—${speed} (${ctx.params["ttsSpeed"] ? "param" : "Style DNA pacing"})`);
+        : 0;
+    const speed = Number(ctx.params["ttsSpeed"] ?? 0) || dnaSpeed || physics.speed;
+    if (speed !== 1)
+      ctx.log(
+        `narration_tts: speaking rate x${speed} (${ctx.params["ttsSpeed"] ? "param" : dnaSpeed ? "Style DNA pacing" : `physics:${physics.archetype}`})`,
+      );
+    // ElevenLabs render settings from the physics (v3 stability/style/seed).
+    let elevenSeed = 4242;
+    const elevenSettings = ttsProvider === "elevenlabs"
+      ? { stability: physics.stability, ...(physics.style ? { style: physics.style } : {}) }
+      : undefined;
+
+    // COLD-OPEN GATE — render the first lines once and let Gemini LISTEN
+    // before the full-script spend: a wrong cast or wrong physics fails loud
+    // HERE, not after the whole paid render. ~250 chars; voiceGate=false opts out.
+    if (ttsProvider === "elevenlabs" && hasGeminiKey() && ctx.params["voiceGate"] !== false) {
+      const probe = splitSentences(text).slice(0, 2).join(" ");
+      if (probe.trim()) {
+        const gate = await gateColdOpen({
+          text: probe,
+          elevenVoiceId: elevenVoiceId ?? "JBFqnCBsd6RMkjVDRZzb",
+          physics,
+          log: (m) => ctx.log(m),
+        });
+        elevenSeed = gate.seed;
+        ctx.log(
+          `narration_tts: cold-open gate PASSED (register ${gate.verdict.register} | pace ${gate.verdict.pace} | performance ${gate.verdict.performance} | clean ${gate.verdict.clean}, seed ${gate.seed})`,
+        );
+      }
+    }
     // Optional stylized voice filter (e.g. "radio" â†’ vintage AM set). Applied to
     // the finished narration track before upload; no-op when unset. The Composer
     // (crew) brief can set it when the operator didn't pin one.
@@ -421,7 +452,7 @@ export const narrationTts: Block = {
               nextText: i < items.length - 1 ? speakOf(items[i + 1]) : undefined,
             }
           : undefined;
-        const bytes = await synthNarration({ text: speak, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId, stitch });
+        const bytes = await synthNarration({ text: speak, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId, eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined, stitch });
         const p = join(tmp, `utt_${i}.mp3`);
         await writeBytes(p, bytes);
         let dur = 0;
@@ -498,7 +529,7 @@ export const narrationTts: Block = {
             nextText: i < sentences.length - 1 ? sentences[i + 1] : undefined,
           }
         : undefined;
-      const bytes = await synthNarration({ text: s, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId, stitch });
+      const bytes = await synthNarration({ text: s, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId, eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined, stitch });
       const p = join(tmp, `sent_${i}.mp3`);
       await writeBytes(p, bytes);
       let dur = 0;

@@ -309,14 +309,24 @@ export const designChannelTask = task({
             t.quotes === false ? "quote_overlays" : "",
             t.notify === false ? "notify" : "",
           ].filter(Boolean);
-          // VOICE CASTING — audition real ElevenLabs voices against the DNA
-          // register, judged by a model that LISTENS; the architect casts the
-          // winner when the channel deserves the premium tier.
+          // VOICE CASTING — voicecraft: the profiled voice bank (operator's
+          // real ElevenLabs voices, heard + carded) is prefiltered by the
+          // archetype's casting law and auditioned by a model that LISTENS;
+          // the architect casts the winner when the channel deserves the
+          // premium tier.
           let voiceCasting = null;
           if (fam.narrated && styleDNA) {
             try {
-              const { castVoice } = await import("@/lib/voiceCasting");
-              voiceCasting = await castVoice({ channelName: name, niche: identity.niche, dna: styleDNA, log });
+              const { castVoice } = await import("@/lib/voicecraft");
+              voiceCasting = await castVoice({
+                convex,
+                ownerId,
+                channelName: name,
+                niche: identity.niche,
+                persona: identity.persona,
+                register: JSON.stringify(styleDNA.narrative ?? {}),
+                log,
+              });
               if (voiceCasting) {
                 await convex.mutation(api.channels.updateChannel, {
                   channelId,

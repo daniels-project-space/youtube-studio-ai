@@ -64,9 +64,24 @@ const V3_STITCH = process.env.ELEVENLABS_V3_STITCH === "1";
  * tags ([pause], [sighs], [whispers], [chuckles]…) instead of reading them;
  * the script writer emits them only when the channel runs this provider.
  */
+/** Per-channel ElevenLabs render settings (narration physics → API knobs). */
+export interface ElevenSettings {
+  /** v3 stability: 0.0 creative | 0.5 natural | 1.0 robust. */
+  stability?: number;
+  /** Style exaggeration 0..1. */
+  style?: number;
+  /** Stylistic draw — fixed per run for take-to-take consistency. */
+  seed?: number;
+  modelId?: string;
+}
+
 async function synthElevenLabs(args: {
   text: string;
   elevenVoiceId?: string;
+  /** Speaking-rate multiplier — VERIFIED LIVE 2026-06-13: v3 accepts
+   *  voice_settings.speed (0.7–1.2). The same knob Fish gets via prosody. */
+  speed?: number;
+  eleven?: ElevenSettings;
   stitch?: TtsStitch;
   /** Receives the response request-id so sequential callers can chain takes. */
   onRequestId?: (id: string) => void;
@@ -75,6 +90,7 @@ async function synthElevenLabs(args: {
   if (!key) throw new TtsError("ELEVENLABS_API_KEY is not configured");
   // Default: George — warm, documentary-grade narrator.
   const voice = args.elevenVoiceId || "JBFqnCBsd6RMkjVDRZzb";
+  const speed = Math.max(0.7, Math.min(1.2, args.speed ?? 1));
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
   let lastErr = "";
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -86,11 +102,16 @@ async function synthElevenLabs(args: {
           headers: { "xi-api-key": key, "content-type": "application/json" },
           body: JSON.stringify({
             text: args.text,
-            model_id: "eleven_v3",
-            voice_settings: { stability: 0.5, similarity_boost: 0.8 },
+            model_id: args.eleven?.modelId ?? "eleven_v3",
+            voice_settings: {
+              stability: args.eleven?.stability ?? 0.5,
+              similarity_boost: 0.8,
+              ...(speed !== 1 ? { speed } : {}),
+              ...(args.eleven?.style ? { style: args.eleven.style } : {}),
+            },
             // Fixed seed = the same stylistic draw across chunked requests —
             // v3's main take-to-take consistency lever today.
-            seed: 4242,
+            seed: args.eleven?.seed ?? 4242,
             // VERIFIED LIVE 2026-06-12: eleven_v3 rejects previous_text /
             // next_text ("unsupported_model"). The stitch plumbing stays
             // dormant until ElevenLabs ships v3 request stitching — flip
@@ -134,6 +155,8 @@ export async function synthNarration(args: {
   /** TTS engine: fish (default) | elevenlabs (v3 expressive, audio tags). */
   provider?: string;
   elevenVoiceId?: string;
+  /** ElevenLabs render settings (narration physics) — ignored by Fish. */
+  eleven?: ElevenSettings;
   /** ElevenLabs continuity across chunked requests (ignored by Fish). */
   stitch?: TtsStitch;
   onRequestId?: (id: string) => void;

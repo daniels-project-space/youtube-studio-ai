@@ -255,6 +255,112 @@ export const V3_TAG_PALETTES: Record<string, string> = {
 };
 
 /**
+ * NARRATION PHYSICS — per-archetype delivery doctrine: what the voice must BE
+ * (casting spec) and how it must MOVE (speed / stability / style / tag
+ * density / sentence air). The operator's voice law (2026-06-13): stoic =
+ * deep dark male, slow; finance = energetic-or-smooth male, faster; social
+ * chaos = younger female, fast; meditation/gratitude = calm controlled
+ * professional mature female, slow — extended to every archetype.
+ *
+ * Knobs (verified live on eleven_v3 2026-06-13): voice_settings.speed
+ * 0.7-1.2 WORKS on v3 (also maps to Fish prosody.speed); stability is
+ * DISCRETE on v3 (0.0 creative / 0.5 natural / 1.0 robust); style accepted.
+ * Consumed by voicecraft (casting + render) and narration_tts (defaults).
+ */
+export interface NarrationPhysics {
+  /** Casting spec — matched against profiled voice cards, judged on real audio. */
+  cast: {
+    gender: "male" | "female" | "any";
+    age: "young" | "middle_aged" | "old" | "any";
+    /** The REQUIRED sound, judge-facing. */
+    character: string;
+  };
+  /** Speaking-rate multiplier (eleven voice_settings.speed AND Fish prosody.speed). */
+  speed: number;
+  /** v3 stability: 0.0 creative | 0.5 natural | 1.0 robust. */
+  stability: 0 | 0.5 | 1;
+  /** Style exaggeration 0..1 — keep low; raises instability and latency. */
+  style?: number;
+  /** How densely the writer may deploy the archetype's V3 tag palette. */
+  tagDensity: "none" | "sparse" | "moderate" | "rich";
+  /** Default silence between sentences (sec) — the archetype's air. */
+  sentenceGap: number;
+}
+
+export const NARRATION_PHYSICS: Record<string, NarrationPhysics> = {
+  "quiet-mentor": {
+    cast: { gender: "male", age: "middle_aged", character: "deep, dark, low-register male; unhurried gravel; intimate quiet authority — never bright, never hurried" },
+    speed: 0.9, stability: 1, tagDensity: "sparse", sentenceGap: 1.0,
+  },
+  "teacher-advisor": {
+    cast: { gender: "male", age: "middle_aged", character: "confident male money-teacher: either crisp energetic tenor or smooth low-key trust — clear diction, zero hype-shout" },
+    speed: 1.06, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.4,
+  },
+  "chaos-commentator": {
+    cast: { gender: "female", age: "young", character: "younger female, bright and quick, sassy receipts-energy; incredulous but articulate" },
+    speed: 1.1, stability: 0.5, style: 0.3, tagDensity: "rich", sentenceGap: 0.25,
+  },
+  "gentle-guide": {
+    cast: { gender: "female", age: "middle_aged", character: "calm, controlled, professional mature female; warm low register, slow even breath — the voice IS the product" },
+    speed: 0.8, stability: 1, tagDensity: "moderate", sentenceGap: 1.4,
+  },
+  "narrator-teacher": {
+    cast: { gender: "male", age: "middle_aged", character: "warm storyteller baritone with teacherly clarity; cinematic but never breathless" },
+    speed: 0.96, stability: 0.5, tagDensity: "moderate", sentenceGap: 0.6,
+  },
+  investigator: {
+    cast: { gender: "male", age: "middle_aged", character: "low, controlled, deliberate; evidence-exhibit calm with an unsettling edge" },
+    speed: 0.93, stability: 1, tagDensity: "sparse", sentenceGap: 0.8,
+  },
+  "calm-analyst": {
+    cast: { gender: "any", age: "middle_aged", character: "neutral, clinical, measured; unsettling precisely because it stays flat" },
+    speed: 0.95, stability: 1, tagDensity: "sparse", sentenceGap: 0.7,
+  },
+  "insider-explainer": {
+    cast: { gender: "any", age: "young", character: "bright, current, engaged senior-engineer energy; demystifies at speed without gabbling" },
+    speed: 1.05, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.35,
+  },
+  "trusted-explainer": {
+    cast: { gender: "any", age: "middle_aged", character: "warm clinical credibility; precise, kind, zero fear-mongering" },
+    speed: 1.0, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.5,
+  },
+  "enthusiast-critic": {
+    cast: { gender: "male", age: "middle_aged", character: "film-literate fan with verdicts: lively, conversational, affectionately sharp" },
+    speed: 1.05, stability: 0.5, style: 0.25, tagDensity: "moderate", sentenceGap: 0.4,
+  },
+  "operator-mentor": {
+    cast: { gender: "male", age: "middle_aged", character: "confident operator who has run things: direct, case-driven, numbers land like decisions" },
+    speed: 1.03, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.45,
+  },
+  igniter: {
+    cast: { gender: "male", age: "middle_aged", character: "driving, rhythmic second-person push; raises the pulse without shouting" },
+    speed: 1.05, stability: 0.5, style: 0.3, tagDensity: "moderate", sentenceGap: 0.35,
+  },
+  teacher: {
+    cast: { gender: "any", age: "middle_aged", character: "clear, friendly, visibly delighted by the subject; one idea at a time" },
+    speed: 1.0, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.5,
+  },
+  dramatist: {
+    cast: { gender: "any", age: "middle_aged", character: "rich expressive narrative command: scene, tension, reveal — emotion in concrete detail" },
+    speed: 0.95, stability: 0.5, style: 0.35, tagDensity: "moderate", sentenceGap: 0.7,
+  },
+};
+
+/** Default physics when no archetype resolves — measured documentary neutral. */
+export const DEFAULT_NARRATION_PHYSICS: NarrationPhysics = {
+  cast: { gender: "any", age: "middle_aged", character: "warm, clear, documentary-grade narrator" },
+  speed: 1.0, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.6,
+};
+
+/** Resolve the narration physics for a niche (via its voice archetype). */
+export function narrationPhysicsFor(niche?: string): NarrationPhysics & { archetype: string } {
+  const doctrine = resolveVoiceDoctrine(niche);
+  const key = doctrine?.voice ?? "";
+  const phys = NARRATION_PHYSICS[key];
+  return phys ? { ...phys, archetype: key } : { ...DEFAULT_NARRATION_PHYSICS, archetype: key || "default" };
+}
+
+/**
  * GOLDEN_MODULES — the golden template, module by module, as shown on the
  * studio's "Golden Pipeline" tab. One entry per module of the spine with the
  * honest story of HOW it works and which gates protect it. `status: "golden"`
@@ -357,13 +463,20 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "narration",
     stage: "voice",
-    title: "Narration",
-    engine: "Tiered TTS per niche (Fish w/ prosody control)",
+    title: "Narration — Voicecraft",
+    engine: "Voicecraft — profiled voice bank + archetype casting law + narration physics + audio-judged cold open (ElevenLabs v3 / Fish)",
     how:
-      "Voice is the #1 retention factor: per-niche voice mapping, prosody/speed control, and word-level " +
-      "timing that the caption and assembly stages consume downstream. No silent fallback voice — a dead " +
-      "provider fails loud.",
-    gates: ["duration sanity", "loud failure (no fallback voice)"],
+      "The operator's real ElevenLabs voices are LISTENED to by an audio model and distilled into profiled " +
+      "voice cards (gender / age-feel / register / pace / energy / texture / best-fit archetypes) in a Convex " +
+      "bank. Casting is law, not vibes: each archetype carries a casting spec (stoic = deep dark male, slow; " +
+      "finance = energetic-or-smooth male, faster; social chaos = younger female, fast; meditation = calm " +
+      "professional mature female, slow) that prefilters the bank deterministically before the judge AUDITIONS " +
+      "the top cards on their real audio and gates the winner ≥7 — no fit fails loud with voice-library " +
+      "candidates to add. Delivery rides NARRATION_PHYSICS: per-archetype speaking rate (v3 voice_settings." +
+      "speed, verified live), v3 stability, style, tag density and sentence air. Before every full-script " +
+      "spend a cold-open probe is rendered once and judged on register / pace / tag performance / cleanliness " +
+      "≥7 with one seed-bumped retry — a wrong cast dies in ~250 characters, not after the whole paid render.",
+    gates: ["casting spec prefilter (gender / age / register law)", "audition judge ≥ 7 on real audio", "cold-open gate: register / pace / performance / clean ≥ 7", "loud failure (no fallback voice)"],
     status: "active",
   },
   {

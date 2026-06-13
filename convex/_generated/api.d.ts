@@ -23,6 +23,7 @@ import type * as runs from "../runs.js";
 import type * as seo from "../seo.js";
 import type * as topicMemory from "../topicMemory.js";
 import type * as videos from "../videos.js";
+import type * as voiceBank from "../voiceBank.js";
 import type * as youtubeAuth from "../youtubeAuth.js";
 
 import type {
@@ -47,6 +48,7 @@ declare const fullApi: ApiFromModules<{
   seo: typeof seo;
   topicMemory: typeof topicMemory;
   videos: typeof videos;
+  voiceBank: typeof voiceBank;
   youtubeAuth: typeof youtubeAuth;
 }>;
 

@@ -240,6 +240,30 @@ export default defineSchema({
     ),
   }).index("by_owner_niche", ["ownerId", "niche"]),
 
+  // Profiled voice cards for the operator's ElevenLabs account (voicecraft
+  // casting source — profiles produced by Gemini audio analysis of previews).
+  voiceProfiles: defineTable({
+    ownerId: v.string(),
+    voiceId: v.string(),
+    name: v.string(),
+    provider: v.string(),
+    category: v.string(),
+    labels: v.optional(v.any()),
+    previewUrl: v.optional(v.string()),
+    profile: v.object({
+      gender: v.string(),
+      ageFeel: v.string(),
+      register: v.string(),
+      pace: v.string(),
+      energy: v.string(),
+      texture: v.string(),
+      character: v.string(),
+      bestFor: v.array(v.string()),
+      confidence: v.number(),
+    }),
+    profiledAt: v.number(),
+  }).index("by_owner_voice", ["ownerId", "voiceId"]),
+
   // One execution of a channel's pipeline.
   runs: defineTable({
     ownerId: v.string(),
