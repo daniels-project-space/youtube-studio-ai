@@ -272,6 +272,8 @@ export interface NarrationPhysics {
   cast: {
     gender: "male" | "female" | "any";
     age: "young" | "middle_aged" | "old" | "any";
+    /** Required accent family (vendor-label match), e.g. "american" — a labeled mismatch disqualifies at prefilter. */
+    accent?: string;
     /** The REQUIRED sound, judge-facing. */
     character: string;
   };
@@ -289,67 +291,67 @@ export interface NarrationPhysics {
 
 export const NARRATION_PHYSICS: Record<string, NarrationPhysics> = {
   "quiet-mentor": {
-    cast: { gender: "male", age: "middle_aged", character: "deep, dark, low-register male; unhurried gravel; intimate quiet authority — never bright, never hurried" },
-    speed: 0.9, stability: 1, tagDensity: "sparse", sentenceGap: 1.0,
+    cast: { gender: "male", age: "middle_aged", accent: "american", character: "VERY deep, dark, low-register male — the deepest credible voice available; unhurried gravel, intimate quiet authority. NEUTRAL AMERICAN accent ONLY: a British or any regional accent DISQUALIFIES regardless of quality. Never bright, never hurried" },
+    speed: 0.95, stability: 1, tagDensity: "sparse", sentenceGap: 0.9,
   },
   "teacher-advisor": {
     cast: { gender: "male", age: "middle_aged", character: "confident male money-teacher: either crisp energetic tenor or smooth low-key trust — clear diction, zero hype-shout" },
-    speed: 1.06, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.4,
+    speed: 1.1, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.35,
   },
   "chaos-commentator": {
     cast: { gender: "female", age: "young", character: "younger female, bright and quick, sassy receipts-energy; incredulous but articulate" },
-    speed: 1.1, stability: 0.5, style: 0.3, tagDensity: "rich", sentenceGap: 0.25,
+    speed: 1.15, stability: 0.5, style: 0.3, tagDensity: "rich", sentenceGap: 0.22,
   },
   "gentle-guide": {
     cast: { gender: "female", age: "middle_aged", character: "calm, controlled, professional mature female; warm low register, slow even breath — the voice IS the product" },
-    speed: 0.8, stability: 1, tagDensity: "moderate", sentenceGap: 1.4,
+    speed: 0.85, stability: 1, tagDensity: "moderate", sentenceGap: 1.25,
   },
   "narrator-teacher": {
     cast: { gender: "male", age: "middle_aged", character: "warm storyteller baritone with teacherly clarity; cinematic but never breathless" },
-    speed: 0.96, stability: 0.5, tagDensity: "moderate", sentenceGap: 0.6,
+    speed: 1.0, stability: 0.5, tagDensity: "moderate", sentenceGap: 0.55,
   },
   investigator: {
     cast: { gender: "male", age: "middle_aged", character: "low, controlled, deliberate; evidence-exhibit calm with an unsettling edge" },
-    speed: 0.93, stability: 1, tagDensity: "sparse", sentenceGap: 0.8,
+    speed: 0.97, stability: 1, tagDensity: "sparse", sentenceGap: 0.7,
   },
   "calm-analyst": {
     cast: { gender: "any", age: "middle_aged", character: "neutral, clinical, measured; unsettling precisely because it stays flat" },
-    speed: 0.95, stability: 1, tagDensity: "sparse", sentenceGap: 0.7,
+    speed: 1.0, stability: 1, tagDensity: "sparse", sentenceGap: 0.6,
   },
   "insider-explainer": {
     cast: { gender: "any", age: "young", character: "bright, current, engaged senior-engineer energy; demystifies at speed without gabbling" },
-    speed: 1.05, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.35,
+    speed: 1.1, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.3,
   },
   "trusted-explainer": {
     cast: { gender: "any", age: "middle_aged", character: "warm clinical credibility; precise, kind, zero fear-mongering" },
-    speed: 1.0, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.5,
+    speed: 1.05, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.45,
   },
   "enthusiast-critic": {
     cast: { gender: "male", age: "middle_aged", character: "film-literate fan with verdicts: lively, conversational, affectionately sharp" },
-    speed: 1.05, stability: 0.5, style: 0.25, tagDensity: "moderate", sentenceGap: 0.4,
+    speed: 1.1, stability: 0.5, style: 0.25, tagDensity: "moderate", sentenceGap: 0.35,
   },
   "operator-mentor": {
     cast: { gender: "male", age: "middle_aged", character: "confident operator who has run things: direct, case-driven, numbers land like decisions" },
-    speed: 1.03, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.45,
+    speed: 1.08, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.4,
   },
   igniter: {
     cast: { gender: "male", age: "middle_aged", character: "driving, rhythmic second-person push; raises the pulse without shouting" },
-    speed: 1.05, stability: 0.5, style: 0.3, tagDensity: "moderate", sentenceGap: 0.35,
+    speed: 1.1, stability: 0.5, style: 0.3, tagDensity: "moderate", sentenceGap: 0.3,
   },
   teacher: {
     cast: { gender: "any", age: "middle_aged", character: "clear, friendly, visibly delighted by the subject; one idea at a time" },
-    speed: 1.0, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.5,
+    speed: 1.05, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.45,
   },
   dramatist: {
     cast: { gender: "any", age: "middle_aged", character: "rich expressive narrative command: scene, tension, reveal — emotion in concrete detail" },
-    speed: 0.95, stability: 0.5, style: 0.35, tagDensity: "moderate", sentenceGap: 0.7,
+    speed: 1.0, stability: 0.5, style: 0.35, tagDensity: "moderate", sentenceGap: 0.6,
   },
 };
 
 /** Default physics when no archetype resolves — measured documentary neutral. */
 export const DEFAULT_NARRATION_PHYSICS: NarrationPhysics = {
   cast: { gender: "any", age: "middle_aged", character: "warm, clear, documentary-grade narrator" },
-  speed: 1.0, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.6,
+  speed: 1.05, stability: 0.5, tagDensity: "sparse", sentenceGap: 0.55,
 };
 
 /** Resolve the narration physics for a niche (via its voice archetype). */

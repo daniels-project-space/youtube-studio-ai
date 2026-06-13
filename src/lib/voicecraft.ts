@@ -237,6 +237,7 @@ export interface LibraryVoice {
 export async function searchVoiceLibrary(o: {
   gender?: string;
   age?: string;
+  accent?: string;
   useCase?: string;
   search?: string;
   pageSize?: number;
@@ -244,6 +245,7 @@ export async function searchVoiceLibrary(o: {
   const q = new URLSearchParams();
   if (o.gender && o.gender !== "any") q.set("gender", o.gender);
   if (o.age && o.age !== "any") q.set("age", o.age);
+  if (o.accent) q.set("accent", o.accent);
   if (o.useCase) q.set("use_cases", o.useCase);
   if (o.search) q.set("search", o.search);
   q.set("page_size", String(o.pageSize ?? 8));
@@ -263,14 +265,16 @@ export async function searchVoiceLibrary(o: {
   }));
 }
 
-/** Add a library voice to the operator's bank (then re-profile to use it). */
-export async function addLibraryVoice(v: LibraryVoice, newName?: string): Promise<void> {
+/** Add a library voice to the operator's bank; returns its NEW account voice id. */
+export async function addLibraryVoice(v: LibraryVoice, newName?: string): Promise<string> {
   const res = await fetch(`${ELEVEN}/voices/add/${v.publicOwnerId}/${v.voiceId}`, {
     method: "POST",
     headers: { "xi-api-key": elevenKey(), "content-type": "application/json" },
     body: JSON.stringify({ new_name: newName ?? v.name }),
   });
   if (!res.ok) throw new Error(`voicecraft: add library voice HTTP ${res.status}: ${(await res.text()).slice(0, 160)}`);
+  const j = (await res.json()) as { voice_id?: string };
+  return j.voice_id ?? v.voiceId;
 }
 
 /* -------------------------------- casting ------------------------------- */
@@ -330,10 +334,13 @@ export async function castVoice(o: {
   if (cards.length === 0) throw new Error("voicecraft: voice bank is empty — no ElevenLabs voices reachable");
 
   // Deterministic prefilter (profile first, vendor labels as tiebreak data).
+  // Accent is LAW when the spec sets one: a labeled mismatch is out before
+  // the audition — audio judges hallucinate accents under multi-take load.
   const fits = cards.filter(
     (c) =>
       (spec.gender === "any" || c.profile.gender === spec.gender || c.profile.gender === "neutral") &&
-      ageCompatible(spec.age, c.profile.ageFeel),
+      ageCompatible(spec.age, c.profile.ageFeel) &&
+      (!spec.accent || !c.labels["accent"] || c.labels["accent"].toLowerCase().includes(spec.accent.toLowerCase())),
   );
   const pool = (fits.length >= 2 ? fits : cards)
     .map((c) => ({
@@ -380,9 +387,11 @@ export async function castVoice(o: {
       `Target delivery: ~${physics.speed}x pace feel, ${physics.tagDensity} expressiveness.\n` +
       (o.register ? `CHANNEL REGISTER (outranks the baseline): ${o.register}\n` : "") +
       (o.persona ? `PERSONA: ${o.persona}\n` : "") +
-      `You will hear ${heard.length} voice samples, in order: ${heard.map((c, i) => `${i + 1}=${c.name}`).join(", ")}.\n` +
-      `Judge each 1-10 on fit to the REQUIRED SOUND (gender/age/register/darkness/energy as specified — a bright ` +
-      `voice cannot win a "deep dark" spec regardless of quality). ` +
+      `You will hear ${heard.length} voice samples, in order: ` +
+      `${heard.map((c, i) => `${i + 1}=${c.name} [${[c.labels["gender"], c.labels["age"], c.labels["accent"]].filter(Boolean).join(", ") || "no labels"}]`).join("; ")}.\n` +
+      `Vendor labels are FACTS — trust them for accent and age over your own impression. ` +
+      `Judge each 1-10 on fit to the REQUIRED SOUND (gender/age/accent/register/darkness/energy as specified — a ` +
+      `bright voice cannot win a "deep dark" spec, and a spec'd accent mismatch caps the score at 4). ` +
       `Return STRICT JSON {"takes":[{"idx":1-based,"score":n,"note":"<=12 words"}],"winner":1-based,"why":"<=35 words"}.`,
   });
   const takes = (verdict.takes ?? []).filter((t) => typeof t.idx === "number");
@@ -449,13 +458,29 @@ export interface TakeVerdict {
   why: string;
 }
 
-/** Gemini LISTENS to one rendered take and gates it against the physics. */
+/**
+ * Gemini LISTENS to one rendered take and gates it against the physics.
+ * Pass `durationSec` when known: a DETERMINISTIC duration gate runs first —
+ * v3 can produce runaway takes (a tag-heavy slow script once rendered 13
+ * minutes for 65 words) and an audio model fed truncated inline audio will
+ * happily pass them. Code catches what ears cannot.
+ */
 export async function judgeNarrationTake(o: {
   mp3: Uint8Array;
   physics: NarrationPhysics & { archetype?: string };
   text: string;
+  durationSec?: number;
   log?: (m: string) => void;
 }): Promise<TakeVerdict> {
+  if (o.durationSec) {
+    const words = stripAudioTags(o.text).split(/\s+/).filter(Boolean).length;
+    const expected = words / 2.5 / Math.max(0.7, o.physics.speed) + (o.text.match(/\[(long )?pause\]/g)?.length ?? 0) * 1.5;
+    if (o.durationSec > expected * 2.5 + 12 || o.durationSec < expected * 0.35) {
+      const why = `duration blowout: ${o.durationSec.toFixed(0)}s rendered vs ~${expected.toFixed(0)}s expected (${words} words) — runaway take`;
+      o.log?.(`voicecraft: take judged — ${why}`);
+      return { register: 0, pace: 0, performance: 0, clean: 0, why, pass: false };
+    }
+  }
   const paceWord = o.physics.speed <= 0.85 ? "slow and spacious" : o.physics.speed <= 0.95 ? "measured, unhurried" : o.physics.speed <= 1.02 ? "natural" : "brisk and energetic";
   const v = await geminiAudioJson<Partial<TakeVerdict> & { scores?: Partial<TakeVerdict> }>({
     audios: [Buffer.from(o.mp3).toString("base64")],

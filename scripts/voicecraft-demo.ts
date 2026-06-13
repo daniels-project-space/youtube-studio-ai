@@ -17,6 +17,7 @@ import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { ConvexHttpClient } from "convex/browser";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { probe } from "@/lib/ffmpeg";
 import { synthNarration, stripAudioTags } from "@/lib/tts";
 import {
   profileVoiceBank,
@@ -133,14 +134,16 @@ async function main() {
     lines.push(`## ${ch.label} — "${ch.channelName}" (${ch.niche})`, ``);
 
     // BEFORE — exact current production defaults (Fish, tags stripped, native pace).
-    try {
-      const before = await synthNarration({ text: stripAudioTags(ch.script), niche: ch.niche, speed: 1 });
-      writeFileSync(join(OUT, `${ch.slug}_before.mp3`), Buffer.from(before));
-      log(`BEFORE rendered (${(before.length / 1024).toFixed(0)} KB, Fish niche default)`);
-      lines.push(`- BEFORE: Fish niche-map default voice, native pace, tags stripped.`);
-    } catch (e) {
-      log(`BEFORE failed: ${e instanceof Error ? e.message : e}`);
-      lines.push(`- BEFORE: FAILED — ${e instanceof Error ? e.message : e}`);
+    if (process.env.SKIP_BEFORE !== "1") {
+      try {
+        const before = await synthNarration({ text: stripAudioTags(ch.script), niche: ch.niche, speed: 1 });
+        writeFileSync(join(OUT, `${ch.slug}_before.mp3`), Buffer.from(before));
+        log(`BEFORE rendered (${(before.length / 1024).toFixed(0)} KB, Fish niche default)`);
+        lines.push(`- BEFORE: Fish niche-map default voice, native pace, tags stripped.`);
+      } catch (e) {
+        log(`BEFORE failed: ${e instanceof Error ? e.message : e}`);
+        lines.push(`- BEFORE: FAILED — ${e instanceof Error ? e.message : e}`);
+      }
     }
 
     // AFTER — voicecraft cast + physics + judged take.
@@ -153,13 +156,23 @@ async function main() {
         persona: ch.persona,
         log,
       });
-      const after = await renderNarration({
-        text: ch.script,
-        elevenVoiceId: cast.voiceId,
-        physics: cast.physics,
-      });
-      writeFileSync(join(OUT, `${ch.slug}_after.mp3`), Buffer.from(after));
-      const verdict = await judgeNarrationTake({ mp3: after, physics: cast.physics, text: ch.script, log });
+      // Render + judge with the deterministic duration gate; one seed-bumped
+      // retry on a runaway/failed take, then loud failure.
+      let after!: Uint8Array;
+      let verdict!: Awaited<ReturnType<typeof judgeNarrationTake>>;
+      for (let attempt = 0; attempt < 2; attempt++) {
+        after = await renderNarration({
+          text: ch.script,
+          elevenVoiceId: cast.voiceId,
+          physics: cast.physics,
+          seed: 4242 + attempt,
+        });
+        writeFileSync(join(OUT, `${ch.slug}_after.mp3`), Buffer.from(after));
+        const durationSec = (await probe(join(OUT, `${ch.slug}_after.mp3`))).durationSec;
+        verdict = await judgeNarrationTake({ mp3: after, physics: cast.physics, text: ch.script, durationSec, log });
+        if (verdict.pass) break;
+        log(`take attempt ${attempt + 1} FAILED (${verdict.why}) -> ${attempt === 0 ? "seed-bumped retry" : "keeping last take, marked FAIL"}`);
+      }
       log(`AFTER rendered (${(after.length / 1024).toFixed(0)} KB) — ${cast.name}, ${cast.physics.speed}x, stability ${cast.physics.stability}`);
       lines.push(
         `- AFTER: **${cast.name}** (cast ${cast.score}/10 — ${cast.why})`,

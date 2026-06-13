@@ -457,6 +457,12 @@ export const narrationTts: Block = {
         await writeBytes(p, bytes);
         let dur = 0;
         try { dur = (await probe(p)).durationSec; } catch { dur = Math.max(1, speak.split(/\s+/).length / 2.5); }
+        // Runaway-take guard (deterministic): v3 once rendered 13 minutes for
+        // 65 words on a tag-heavy slow script. Code catches what ears cannot.
+        const wcnt = speak.split(/\s+/).filter(Boolean).length;
+        if (dur > Math.max(12, wcnt * 1.3)) {
+          throw new Error(`narration_tts: runaway take (${dur.toFixed(0)}s for ${wcnt} words) — v3 blowout`);
+        }
         return { p, dur };
       });
       for (let i = 0; i < items.length; i++) {
@@ -534,6 +540,11 @@ export const narrationTts: Block = {
       await writeBytes(p, bytes);
       let dur = 0;
       try { dur = (await probe(p)).durationSec; } catch { dur = Math.max(1, s.split(/\s+/).length / 2.5); }
+      // Runaway-take guard (deterministic) — see chapter mode.
+      const wcnt2 = s.split(/\s+/).filter(Boolean).length;
+      if (dur > Math.max(12, wcnt2 * 1.3)) {
+        throw new Error(`narration_tts: runaway take (${dur.toFixed(0)}s for ${wcnt2} words) — v3 blowout`);
+      }
       return { p, dur };
     });
     const partPaths: string[] = parts.map((x) => x.p);
