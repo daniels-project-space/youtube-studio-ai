@@ -1,18 +1,29 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext } from "react";
 import {
   AbsoluteFill,
   Easing,
   Img,
   Series,
-  continueRender,
-  delayRender,
   interpolate,
   spring,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
 import { noise2D } from "@remotion/noise";
+import { loadFont as loadAnton } from "@remotion/google-fonts/Anton";
+import { loadFont as loadOswald } from "@remotion/google-fonts/Oswald";
+import { loadFont as loadCaveat } from "@remotion/google-fonts/Caveat";
+import { loadFont as loadSpecialElite } from "@remotion/google-fonts/SpecialElite";
 import { type DocuTheme, type DocuShotKind, getStyle } from "./docuStyles";
+
+// Load every face the styles use via Remotion's native loader — it ties font
+// readiness into delayRender deterministically (no CDN race), so text NEVER
+// renders before its font is ready. This replaced a hand-rolled loader that
+// raced intermittently in the long-lived pipeline browser (invisible quotes).
+loadAnton();
+loadOswald("normal", { weights: ["500", "600", "700"], subsets: ["latin"] });
+loadCaveat("normal", { weights: ["600", "700"], subsets: ["latin"] });
+loadSpecialElite("normal", { weights: ["400"], subsets: ["latin"] });
 
 /**
  * DOCUMOTION — the documentary-collage shot kit. A themeable kit of motion
@@ -83,43 +94,6 @@ export type DocuMotionProps = {
 const DEFAULT_THEME = getStyle("archival_collage").theme;
 const ThemeCtx = createContext<DocuTheme>(DEFAULT_THEME);
 const useTheme = () => useContext(ThemeCtx);
-
-/* ---------------------------------------------------------------- fonts -- */
-
-const useDocuFonts = (fontCss: string, probe: [string, string, string]) => {
-  const [handle] = useState(() => delayRender("documotion fonts"));
-  useEffect(() => {
-    const id = `docu-fonts-${btoa(fontCss).slice(0, 12)}`;
-    if (!document.querySelector(`link[data-docu="${id}"]`)) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = fontCss;
-      link.setAttribute("data-docu", id);
-      document.head.appendChild(link);
-    }
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      continueRender(handle);
-    };
-    // Load each family at BOTH weights we use (400 + 700). load() resolves a
-    // requested weight to the nearest available face, so a single-weight font
-    // (e.g. "Special Elite", 400 only) never hangs the way a 700-only check
-    // would. Then wait for the font set to settle before rendering.
-    Promise.all(
-      probe.flatMap((f) => [
-        document.fonts.load(`400 64px "${f}"`).catch(() => undefined),
-        document.fonts.load(`700 64px "${f}"`).catch(() => undefined),
-      ]),
-    )
-      .then(() => document.fonts.ready)
-      .then(finish)
-      .catch(finish);
-    // Safety net so a slow CDN can never stall the render forever.
-    setTimeout(finish, 9000);
-  }, [handle, fontCss, probe]);
-};
 
 /* ----------------------------------------------------------------- utils -- */
 
@@ -1107,10 +1081,8 @@ const renderShot = (shot: DocuShotSpec, i: number) => {
   }
 };
 
-export const DocuMotion: React.FC<DocuMotionProps> = ({ shots, theme, fontCss, fontProbe }) => {
+export const DocuMotion: React.FC<DocuMotionProps> = ({ shots, theme }) => {
   const th = theme ?? DEFAULT_THEME;
-  const arch = getStyle("archival_collage");
-  useDocuFonts(fontCss ?? arch.fontCss, fontProbe ?? arch.fontProbe);
   return (
     <ThemeCtx.Provider value={th}>
       <AbsoluteFill style={{ backgroundColor: th.base }}>
