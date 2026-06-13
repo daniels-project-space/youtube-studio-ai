@@ -107,7 +107,7 @@ function validatePlan(plan: DocuPlan, durationSec: number): string[] {
     if (s.kind === "quote_card" && !s.quote?.trim()) problems.push(`shot ${i}: quote_card without quote`);
   }
   const words = (plan.shots ?? []).map((s) => s.narration ?? "").join(" ").split(/\s+/).filter(Boolean).length;
-  const target = Math.round(durationSec * 2.6);
+  const target = Math.round(durationSec * 2.2);
   if (Math.abs(words - target) > target * 0.3) problems.push(`narration ${words} words, target ~${target}`);
   return problems;
 }
@@ -144,7 +144,7 @@ export async function planDocu(args: {
 }): Promise<DocuPlan> {
   const { topic, referenceNotes, durationSec, log } = args;
   const shotsWanted = Math.max(6, Math.min(8, Math.round(durationSec / 8)));
-  const wordsTarget = Math.round(durationSec * 2.6);
+  const wordsTarget = Math.round(durationSec * 2.2);
   const base =
     `You are the showrunner of a premium archival-documentary explainer channel (the "collage motion" style: ` +
     `sepia cutout portraits over illustrated plates, huge distressed type, yellow highlight boxes, taped photos, ` +
@@ -153,7 +153,7 @@ export async function planDocu(args: {
     `RULES: exactly ${shotsWanted} shots. Shot 1 = parallax_portrait HOOK introducing the protagonist with their name as the title. ` +
     `Last shot = quote_card landing the irony/lesson. Vary the kinds in between (use map_zoom when geography enters, ` +
     `matte_sequence for "they built X, Y, Z" lists, collage_pan for the broad sweep, object_drop for money/objects). ` +
-    `NARRATION: tight present-tense documentary VO, concrete numbers and dates, no filler, TOTAL ${wordsTarget} words (~2.6 words/sec), ` +
+    `NARRATION: tight present-tense documentary VO, concrete numbers and dates, no filler, TOTAL ${wordsTarget} words (~2.2 words/sec), ` +
     `1-3 sentences per shot, each shot's narration must SPEAK to what is on screen. ` +
     `Asset briefs must be vivid, specific, period-correct, and contain NO text/lettering in the image itself. ` +
     `Labels/titles: punchy, ALL real correctly-spelled words.\n${PLAN_CONTRACT}`;

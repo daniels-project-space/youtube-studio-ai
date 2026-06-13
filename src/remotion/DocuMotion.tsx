@@ -409,13 +409,19 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec }> = ({ shot }) => {
   const { width, height } = useVideoConfig();
   const dur = shot.durationInFrames;
   const fgScale = interpolate(frame, [0, dur], [1.0, 1.13]);
+  // ONE line, auto-fit: the headline starts behind the hero (reference look)
+  // but must end inside the frame. Anton caps average ~0.5em per char.
+  const title = shot.title ?? "";
+  const titleSize = Math.min(width * 0.095, (width * 0.66) / Math.max(6, title.length * 0.5));
   return (
     <AbsoluteFill>
       <ShotBg src={shot.bg} dur={dur} />
       {/* headline sits BETWEEN plate and hero — the hero overlaps the type */}
-      {shot.title ? (
-        <AbsoluteFill style={{ justifyContent: "center", paddingLeft: width * 0.3, paddingBottom: height * 0.22 }}>
-          <KineticTitle text={shot.title} kicker={shot.kicker} size={Math.round(width * 0.105)} />
+      {title ? (
+        <AbsoluteFill style={{ justifyContent: "center", paddingLeft: width * 0.24, paddingBottom: height * 0.18 }}>
+          <div style={{ whiteSpace: "nowrap" }}>
+            <KineticTitle text={title} kicker={shot.kicker} size={Math.round(titleSize)} />
+          </div>
         </AbsoluteFill>
       ) : null}
       {shot.fg ? (
@@ -427,6 +433,10 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec }> = ({ shot }) => {
               left: "-2%",
               bottom: "-6%",
               height: "108%",
+              // Wide group cutouts get capped so they never swallow the type.
+              maxWidth: "44%",
+              objectFit: "contain",
+              objectPosition: "left bottom",
               transform: `scale(${fgScale})`,
               transformOrigin: "bottom left",
               filter: "sepia(0.25) contrast(1.06) drop-shadow(18px 0 50px rgba(0,0,0,0.6))",
@@ -435,11 +445,13 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec }> = ({ shot }) => {
         </AbsoluteFill>
       ) : null}
       {shot.labels?.length ? (
+        // top-right rail — clear of the center headline row AND the hero
         <AbsoluteFill
           style={{
             alignItems: "flex-end",
-            justifyContent: "center",
+            justifyContent: "flex-start",
             paddingRight: width * 0.06,
+            paddingTop: height * 0.11,
           }}
         >
           <div style={{ display: "flex", flexDirection: "column", alignItems: "flex-start" }}>
@@ -462,7 +474,7 @@ const MapZoomShot: React.FC<{ shot: DocuShotSpec }> = ({ shot }) => {
   const dur = shot.durationInFrames;
   const ring = spring({ frame: frame - 8, fps, config: { damping: 13, stiffness: 90 } });
   const accent = shot.accent ?? "#5ad27e";
-  const size = Math.round(height * 0.52);
+  const size = Math.round(height * 0.58);
   return (
     <AbsoluteFill>
       <ShotBg src={shot.bg} dur={dur} from={1.0} to={1.2} dark={0.2} />
@@ -573,7 +585,7 @@ const MatteSequenceShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ sho
   const images = shot.images ?? [];
   const n = Math.max(1, images.length);
   const per = Math.floor(dur / n);
-  const WIPE = 11;
+  const WIPE = 16;
 
   const teeth = (i: number) => {
     const rnd = mulberry32(seed * 31 + i * 7 + 11);
@@ -586,7 +598,8 @@ const MatteSequenceShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ sho
         const start = i * per;
         if (frame < start) return null;
         const local = frame - start;
-        const p = i === 0 ? 1 : clamp01(local / WIPE);
+        const lin = i === 0 ? 1 : clamp01(local / WIPE);
+        const p = lin * lin * (3 - 2 * lin); // smoothstep — no abrupt edge snap
         const t = teeth(i);
         const edge = -12 + p * 130; // percent across, overshoots so teeth clear
         const dirDown = i % 2 === 1;
@@ -603,19 +616,30 @@ const MatteSequenceShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ sho
               "-20% 100%", "-20% 0%",
             ];
         const zoom = interpolate(local, [0, per + WIPE], [1.04, 1.13]);
+        // Torn-paper rim: a pale fill clipped slightly AHEAD of the image edge
+        // so the wipe reads as a physical tear, not a render seam.
+        const rim = 1.8;
+        const rimPts = dirDown
+          ? pts.map((pt, k) => (k < 8 ? `${pt.split(" ")[0]} ${parseFloat(pt.split(" ")[1]) + rim}%` : pt))
+          : pts.map((pt, k) => (k < 8 ? `${parseFloat(pt.split(" ")[0]) + rim}% ${pt.split(" ")[1]}` : pt));
         return (
-          <AbsoluteFill key={i} style={{ clipPath: p >= 1 ? undefined : `polygon(${pts.join(", ")})` }}>
-            <Img
-              src={src}
-              style={{
-                width: "100%",
-                height: "100%",
-                objectFit: "cover",
-                transform: `scale(${zoom})`,
-                filter: "sepia(0.3) contrast(1.05) saturate(0.85)",
-              }}
-            />
-          </AbsoluteFill>
+          <React.Fragment key={i}>
+            {p > 0 && p < 1 ? (
+              <AbsoluteFill style={{ clipPath: `polygon(${rimPts.join(", ")})`, backgroundColor: "rgba(236,226,204,0.9)" }} />
+            ) : null}
+            <AbsoluteFill style={{ clipPath: p >= 1 ? undefined : `polygon(${pts.join(", ")})` }}>
+              <Img
+                src={src}
+                style={{
+                  width: "100%",
+                  height: "100%",
+                  objectFit: "cover",
+                  transform: `scale(${zoom})`,
+                  filter: "sepia(0.3) contrast(1.05) saturate(0.85)",
+                }}
+              />
+            </AbsoluteFill>
+          </React.Fragment>
         );
       })}
       <AbsoluteFill
@@ -740,9 +764,11 @@ const ObjectDropShot: React.FC<{ shot: DocuShotSpec }> = ({ shot }) => {
       ) : null}
       {cutouts.slice(0, 3).map((src, i) => {
         const slot = slots[i % slots.length];
-        const drop = spring({ frame: frame - 8 - i * 9, fps, config: { damping: 12, stiffness: 70 } });
-        const yPos = interpolate(drop, [0, 1], [-height * 0.6, 0]);
-        const rot = interpolate(drop, [0, 1], [slot.rot * 3, slot.rot]);
+        const drop = spring({ frame: frame - 8 - i * 9, fps, config: { damping: 11, stiffness: 68 } });
+        const yPos = interpolate(drop, [0, 1], [-height * 0.7, 0]);
+        // settle sway after landing keeps the frame alive
+        const sway = drop >= 0.99 ? Math.sin((frame - 8 - i * 9) * 0.09 + i) * 1.4 : 0;
+        const rot = interpolate(drop, [0, 1], [slot.rot * 3, slot.rot]) + sway;
         return (
           <Img
             key={i}
@@ -751,9 +777,10 @@ const ObjectDropShot: React.FC<{ shot: DocuShotSpec }> = ({ shot }) => {
               position: "absolute",
               left: width * slot.left,
               top: height * slot.top,
-              width: width * slot.w,
+              width: width * (slot.w * 1.25),
               transform: `translateY(${yPos}px) rotate(${rot}deg)`,
-              filter: "sepia(0.2) contrast(1.05) drop-shadow(0 24px 40px rgba(0,0,0,0.55))",
+              filter:
+                "sepia(0.2) contrast(1.05) drop-shadow(0 30px 36px rgba(0,0,0,0.65)) drop-shadow(0 6px 10px rgba(0,0,0,0.4))",
             }}
           />
         );
@@ -795,14 +822,29 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec }> = ({ shot }) => {
             width: "100%",
             height: "100%",
             objectFit: "cover",
-            opacity: 0.22,
+            opacity: 0.3,
             transform: `scale(${zoom})`,
-            filter: "sepia(0.4) brightness(0.7)",
+            filter: "sepia(0.4) brightness(0.65)",
           }}
         />
       ) : (
         <AbsoluteFill style={{ backgroundImage: `url("${paperUri(9)}")`, opacity: 0.35 }} />
       )}
+      {/* giant ghost quotation mark anchors the card */}
+      <AbsoluteFill style={{ alignItems: "center", justifyContent: "flex-start" }}>
+        <div
+          style={{
+            fontFamily: "Georgia, serif",
+            fontSize: Math.round(height * 0.62),
+            lineHeight: 1,
+            color: "rgba(242,234,216,0.08)",
+            marginTop: -height * 0.06,
+            opacity: interpolate(frame, [0, 16], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }),
+          }}
+        >
+          &ldquo;
+        </div>
+      </AbsoluteFill>
       <AbsoluteFill
         style={{
           alignItems: "center",
@@ -826,6 +868,7 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec }> = ({ shot }) => {
             <span
               key={i}
               style={{
+                color: i >= words.length - 2 ? (shot.accent ?? YELLOW) : PAPER,
                 opacity: interpolate(frame, [6 + i * 2, 12 + i * 2], [0, 1], {
                   extrapolateLeft: "clamp",
                   extrapolateRight: "clamp",
@@ -836,10 +879,22 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec }> = ({ shot }) => {
             </span>
           ))}
         </div>
+        <div
+          style={{
+            width: interpolate(frame, [10 + words.length * 2, 26 + words.length * 2], [0, width * 0.16], {
+              extrapolateLeft: "clamp",
+              extrapolateRight: "clamp",
+            }),
+            height: 3,
+            marginTop: height * 0.035,
+            backgroundColor: shot.accent ?? YELLOW,
+            opacity: 0.85,
+          }}
+        />
         {shot.attribution ? (
           <div
             style={{
-              marginTop: height * 0.05,
+              marginTop: height * 0.035,
               fontFamily: "Oswald, sans-serif",
               fontWeight: 600,
               fontSize: Math.round(width * 0.018),
