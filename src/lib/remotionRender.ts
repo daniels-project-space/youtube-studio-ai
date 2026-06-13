@@ -92,11 +92,28 @@ export async function renderTitleCard(args: {
  * H.264 body. Shot specs carry data-URI assets; duration comes from the sum of
  * shot durations (calculateMetadata). Audio is muxed afterwards by the engine.
  */
-export async function renderDocuMotion(args: {
+export interface DocuRenderProps {
   shots: unknown[];
-  outPath: string;
   width?: number;
   height?: number;
+  theme?: unknown;
+  fontCss?: string;
+  fontProbe?: [string, string, string];
+}
+
+function docuInputProps(args: DocuRenderProps) {
+  return {
+    shots: args.shots,
+    width: args.width ?? 1920,
+    height: args.height ?? 1080,
+    ...(args.theme ? { theme: args.theme } : {}),
+    ...(args.fontCss ? { fontCss: args.fontCss } : {}),
+    ...(args.fontProbe ? { fontProbe: args.fontProbe } : {}),
+  };
+}
+
+export async function renderDocuMotion(args: DocuRenderProps & {
+  outPath: string;
   /** Renderer parallelism (defaults to Remotion's choice). */
   concurrency?: number;
   log?: (msg: string) => void;
@@ -106,11 +123,7 @@ export async function renderDocuMotion(args: {
   );
   await ensureBrowser();
   const serveUrl = await getServeUrl();
-  const inputProps = {
-    shots: args.shots,
-    width: args.width ?? 1920,
-    height: args.height ?? 1080,
-  };
+  const inputProps = docuInputProps(args);
   const composition = await selectComposition({ serveUrl, id: "DocuMotion", inputProps });
   let lastPct = -10;
   await renderMedia({
@@ -130,6 +143,39 @@ export async function renderDocuMotion(args: {
     },
   });
   return args.outPath;
+}
+
+/**
+ * Render single STILLS at given absolute frame numbers — the fast verifier
+ * path (8 stills in seconds vs a full ~1800-frame draft video). The
+ * composition spans the whole timeline so any frame index is valid.
+ */
+export async function renderDocuStills(args: DocuRenderProps & {
+  frames: number[];
+  outPaths: string[];
+  log?: (msg: string) => void;
+}): Promise<string[]> {
+  const { selectComposition, renderStill, ensureBrowser } = await import("@remotion/renderer");
+  await ensureBrowser();
+  const serveUrl = await getServeUrl();
+  const inputProps = docuInputProps(args);
+  const composition = await selectComposition({ serveUrl, id: "DocuMotion", inputProps });
+  const out: string[] = [];
+  for (let i = 0; i < args.frames.length; i++) {
+    await renderStill({
+      serveUrl,
+      composition: { ...composition, width: args.width ?? 960, height: args.height ?? 540 },
+      inputProps,
+      frame: Math.max(0, Math.min(composition.durationInFrames - 1, args.frames[i])),
+      output: args.outPaths[i],
+      imageFormat: "jpeg",
+      jpegQuality: 80,
+      chromiumOptions: { gl: "angle" },
+    });
+    out.push(args.outPaths[i]);
+  }
+  args.log?.(`documotion stills: ${out.length} rendered`);
+  return out;
 }
 
 /**
