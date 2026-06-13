@@ -96,18 +96,21 @@ export async function bananaTypeCard(args: {
   emphasis?: string[];
   /** World/type art-direction, e.g. "distressed cinematic crime-thriller title". */
   styleDesc: string;
+  /** Tone/framing note from the reasonability pass (keeps it tasteful). */
+  framing?: string;
   accent: string;
   outJpg: string;
   log?: (m: string) => void;
 }): Promise<string | null> {
   const { writeFile } = await import("node:fs/promises");
   const emph = args.emphasis?.length ? ` Set the words ${args.emphasis.map((w) => `"${w}"`).join(", ")} in the accent colour ${args.accent}.` : "";
+  const tone = args.framing ? ` TONE/FRAMING: ${args.framing}` : "";
   const base =
     `A cinematic 16:9 TITLE CARD built ENTIRELY from beautiful designed typography. Render this exact line as the ` +
     `hero lettering: "${args.text}". Art direction: ${args.styleDesc}; expressive, premium, magazine/film-poster ` +
-    `quality, dramatic scale contrast and layout, atmospheric dark background with subtle texture and depth.${emph} ` +
-    `HARD RULES: every word present and spelled EXACTLY as written; it must read perfectly; NO watermark, NO UI, NO ` +
-    `extra words, NO gibberish letters.`;
+    `quality, considered scale contrast and layout, atmospheric dark background with subtle texture and depth.${emph}${tone} ` +
+    `HARD RULES: every word present and spelled EXACTLY as written; it must read perfectly; PURE TYPOGRAPHY ONLY — ` +
+    `NO icons, NO illustrations, NO drawings, NO emoji; NO watermark, NO UI, NO extra words, NO gibberish letters.`;
   let fix = "";
   let last: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {

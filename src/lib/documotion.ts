@@ -34,7 +34,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { geminiJsonPro, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
+import { geminiJson, geminiJsonPro, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
 import { generateBananaImage, bananaTypeCard } from "@/lib/banana";
 import { getDepthMap } from "@/lib/depth";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
@@ -422,10 +422,18 @@ export async function generateDocuAssets(
 
     // GENERATE source (default + archival fallback): Banana behind the gate.
     if (!got) {
+      // Crisp by default; depth_parallax plates must be FULLY in focus so the
+      // engine's 2.5D parallax supplies the depth (baked bokeh fights it +
+      // leaves focus-edge artefacts when the layers move).
+      const QUALITY = " Ultra-sharp, crisp, high detail, no motion blur.";
+      const focus =
+        plan.shots[i].kind === "depth_parallax"
+          ? " CRITICAL: the ENTIRE frame is in SHARP focus front-to-back (deep depth of field) — NO bokeh, NO background blur, NO lens blur; the depth must read from layout/scale, never from focus."
+          : "";
       let fix = externalFix ?? "";
       let accepted = false;
       for (let attempt = 0; attempt < 2; attempt++) {
-        const prompt = `${framing.prefix}${a.brief}.${style.stillStyle}` + (fix ? ` CRITICAL FIX FROM THE LAST ATTEMPT: ${fix}.` : "");
+        const prompt = `${framing.prefix}${a.brief}.${style.stillStyle}${QUALITY}${focus}` + (fix ? ` CRITICAL FIX FROM THE LAST ATTEMPT: ${fix}.` : "");
         log?.(`documotion asset s${i}/${a.id} (${a.role})${fix ? ` [retry]` : ""}…`);
         const bytes = await generateBananaImage({ prompt, aspectRatio: framing.ar });
         await writeFile(rawPath, bytes);
@@ -754,18 +762,35 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   for (const [i, s] of plan.shots.entries()) {
     if (s.kind !== "quote_card" || !s.quote) continue;
     const out = join(runDir, "assets", `type_${i}.jpg`);
-    const cached = existsSync(out);
-    const words = s.quote.split(/\s+/).filter(Boolean);
-    const made = cached
-      ? out
-      : await bananaTypeCard({
-          text: s.quote,
-          emphasis: words.slice(-2),
-          styleDesc: style.typeStyle,
-          accent: s.accent ?? style.theme.accent,
-          outJpg: out,
-          log,
-        });
+    if (existsSync(out)) {
+      typeByShot[i] = out;
+      continue;
+    }
+    // REASONABILITY PASS — choose emphasis + framing so the card lands with the
+    // right TONE: a mundane/comical detail must not become the epic gold payoff;
+    // emphasise the words carrying the irony or stakes, frame the rest deadpan.
+    const reason = await geminiJson<{ emphasis?: string[]; framing?: string }>({
+      prompt:
+        `A documentary CLOSING TYPE CARD will render this exact line as bold designed typography (style: ${style.typeStyle}): ` +
+        `"${s.quote}". Decide how to frame it TASTEFULLY. Pick EMPHASIS = the 1-3 words that should be largest/accented — ` +
+        `the words carrying the IRONY, STAKES or turn — NOT a mundane or comical noun blown up comically. Write a FRAMING ` +
+        `note (<=22 words) so the tone is right: if part of the line is deliberately mundane/absurd, render it deadpan and ` +
+        `smaller so the CONTRAST lands instead of reading as slapstick. ` +
+        `Return STRICT JSON {"emphasis":["..."],"framing":"..."}.`,
+      maxTokens: 300,
+      temperature: 0.3,
+    }).catch(() => ({ emphasis: undefined, framing: undefined }) as { emphasis?: string[]; framing?: string });
+    const emphasis = reason.emphasis?.length ? reason.emphasis : s.quote.split(/\s+/).filter(Boolean).slice(0, 2);
+    log(`documotion type card: emphasis [${emphasis.join(", ")}]${reason.framing ? ` — ${reason.framing}` : ""}`);
+    const made = await bananaTypeCard({
+      text: s.quote,
+      emphasis,
+      framing: reason.framing,
+      styleDesc: style.typeStyle,
+      accent: s.accent ?? style.theme.accent,
+      outJpg: out,
+      log,
+    });
     if (made) typeByShot[i] = made;
   }
 

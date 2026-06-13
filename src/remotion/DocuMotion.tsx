@@ -481,6 +481,15 @@ const cutoutFilter =
 
 /* ----------------------------------------------------------------- shots -- */
 
+/**
+ * MODULE RULE — TEXT / CUTOUT SEPARATION (applies to EVERY shot):
+ * foreground cutouts (hero portraits, dropped objects, pinned photos) render
+ * BEFORE the title/label text, so headlines are ALWAYS on top and can never be
+ * hidden by a cutout's parallax; and titles are positioned in a zone clear of
+ * the hero (e.g. parallax_portrait starts the title ~0.41w, right of the ≤38%
+ * hero). Keep this invariant when adding shots: render order = plate → cutouts
+ * → text overlays, with text in a non-overlapping zone.
+ */
 const ShotBg: React.FC<{ src?: string; cam: CamState; dark?: number; recede?: boolean }> = ({ src, cam, dark = 0.3, recede }) => {
   const t = useTheme();
   return (
