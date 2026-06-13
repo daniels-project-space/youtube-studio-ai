@@ -90,7 +90,7 @@ export default function GoldenPipelinePage() {
       <SectionTitle>Active — the rest of the spine</SectionTitle>
       <div style={GRID}>
         {active.map((m) => (
-          <ModuleCard key={m.key} module={m} stageIndex={stageOrder.indexOf(m.stage) + 1} />
+          <ModuleCard key={m.key} module={m} hero={m.key === "whiteboard"} stageIndex={stageOrder.indexOf(m.stage) + 1} />
         ))}
       </div>
     </>
@@ -218,6 +218,17 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
               <span style={METAT}>{p.meta}</span>
             </div>
           ))}
+        </div>
+      );
+    case "whiteboard":
+      return (
+        <div style={STRIP}>
+          <div style={{ ...CARD, gridColumn: "1 / -1" }}>
+            <span style={DEVICE}>drawn cinema · narration-synced · 2K · $0 render</span>
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+            <video controls preload="none" poster="/golden/whiteboard/chiquita.jpg" src="/golden/whiteboard/chiquita.mp4" style={{ width: "100%", borderRadius: 6, background: "#000" }} />
+            <span style={METAT}>Chiquita and the Banana Republic — every beat drawn in time with the voice</span>
+          </div>
         </div>
       );
     default: return null;
