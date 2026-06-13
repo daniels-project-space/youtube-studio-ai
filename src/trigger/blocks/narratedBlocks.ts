@@ -838,14 +838,23 @@ export const stockFootage: Block = {
         let score = 5;
         let relevant = true;
         try {
-          const frame = `${local}.jpg`;
-          await grabFrame(local, 1, frame);
+          // MULTI-FRAME gate: a clip can be on-theme at 1s and ruined later (a
+          // watermark/logo reveal, burned-in captions, or a hard cut to another
+          // scene). Sample start / middle / late and judge them together so any
+          // bad frame rejects the clip.
+          const gd = cand.durationSec || 8;
+          const frames: string[] = [];
+          for (const [fi, frac] of [0.12, 0.5, 0.82].entries()) {
+            const fp = `${local}.${fi}.jpg`;
+            try { await grabFrame(local, Math.max(0.5, gd * frac), fp); frames.push(fp); } catch { /* skip a bad frame */ }
+          }
+          if (frames.length === 0) { const f0 = `${local}.0.jpg`; await grabFrame(local, 1, f0); frames.push(f0); }
           const gatePrompt = natureMode
-            ? `This frame is a candidate b-roll clip. ACCEPT it ONLY if it is a serene NATURE / LANDSCAPE / ` +
+            ? `These ${frames.length} frames are sampled across ONE candidate b-roll clip (start, middle, end). ACCEPT only if EVERY frame is a serene NATURE / LANDSCAPE / ` +
               `WATER scene (forest, trees, mountains, river, waterfall, ocean, lake, rain, mist, clouds, sky, ` +
               `sunrise/sunset, fields, snow, desert) OR ancient Greek/Roman stone ruins/temples/columns. ` +
               `REJECT anything containing people, faces, figures, hands, modern cities, streets, modern ` +
-              `buildings, interiors, rooms, objects, books, candles, vehicles, screens, or text. ` +
+              `buildings, interiors, rooms, objects, books, candles, vehicles, screens, or text — and REJECT if ANY frame shows a watermark, logo, or burned-in caption. ` +
               `Return STRICT JSON {"relevant":boolean,"score":0-10} (score = how cleanly it is pure nature/ruins).`
             : `A video about "${topic}"${niche ? ` (${niche})` : ""}.` +
               (narrationExcerpt ? ` Narration: "${narrationExcerpt.slice(0, 400)}".` : "") +
@@ -864,7 +873,7 @@ export const stockFootage: Block = {
                 const hh = ((ctx.store["healHints"] as Record<string, string[]> | undefined)?.["stock_footage"] ?? []);
                 return hh.length ? ` A previous attempt was REJECTED by QA for: ${hh.join("; ")} â€” be stricter about that.` : "";
               })() +
-              ` This frame is a candidate b-roll clip (search query "${q}"). Judge whether it ` +
+              ` These ${frames.length} frames are sampled across ONE candidate b-roll clip (start, middle, end; search query "${q}"). REJECT the clip if ANY frame shows a watermark, stock-site logo, or burned-in caption/text. Judge whether it ` +
               `CLEARLY fits the subject and emotional mood of THIS video AND does not contradict its ` +
               `message or the channel's visual world. CRITICALLY also judge the LIGHTING/GRADE: reject ` +
               `clips whose look clashes with the channel's grade (e.g. bright white studio/product shots ` +
@@ -874,9 +883,9 @@ export const stockFootage: Block = {
               `Return STRICT JSON {"relevant":boolean,"score":0-10} where score is how well it fits.`;
           const raw = await geminiVisionLocal({
             prompt: gatePrompt,
-            imagePaths: [frame],
+            imagePaths: frames,
             json: true,
-            maxTokens: 150,
+            maxTokens: 200,
           });
           const v = parseJsonLoose<{ relevant?: boolean; score?: number }>(raw);
           if (typeof v.score === "number") score = v.score;
