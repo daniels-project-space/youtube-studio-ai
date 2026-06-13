@@ -91,6 +91,19 @@ const TOPIC_PROOFS: { device: string; channel: string; line: string; note: strin
 ];
 
 /**
+ * Real voicecraft output — the certification clips (same scripts the operator
+ * approved): cast by law from the profiled bank, physics-tuned, judged by
+ * ears AND code. Played inline on the Narration golden card.
+ */
+const VOICE_PROOFS: { file: string; device: string; meta: string }[] = [
+  { file: "stoic.mp3", device: "quiet-mentor · 0.95x", meta: "Brian — deep resonant neutral-US · accent is casting LAW" },
+  { file: "meditation.mp3", device: "gentle-guide · 0.85x", meta: "Autumn Veil — calm mature female · performed breaths" },
+  { file: "social.mp3", device: "chaos-commentator · 1.15x", meta: "Jessica — young female · rich performed tags" },
+  { file: "finance.mp3", device: "teacher-advisor · 1.1x", meta: "Bill — wise mature male · judged 9/10 cast" },
+  { file: "history.mp3", device: "narrator-teacher · 1.0x", meta: "George — warm storyteller · cold-open gated" },
+];
+
+/**
  * Golden Pipeline — the template every channel inherits, module by module.
  * Pure static render of the GOLDEN_MODULES registry (src/engine/golden.ts):
  * the engine and this page share one source of truth, so certifying a module
@@ -340,6 +353,22 @@ function ModuleCard({
             })}
           </div>
           <FanCaption>real engine output — every topic is a bet citing the live signal it rides, judged on demand · freshness · fit · packageability</FanCaption>
+        </>
+      )}
+
+      {hero && m.key === "narration" && (
+        <>
+          <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(220px, 1fr))", gap: "0.6rem", marginTop: "0.8rem" }}>
+            {VOICE_PROOFS.map((p) => (
+              <div key={p.file} className="golden-fan-card" style={{ position: "static", transform: "none" }}>
+                <span className="golden-fan-card-device">{p.device}</span>
+                {/* eslint-disable-next-line jsx-a11y/media-has-caption -- narration proof clips */}
+                <audio controls preload="none" src={`/golden/voice/${p.file}`} style={{ width: "100%", margin: "0.4rem 0" }} />
+                <span className="golden-fan-card-meta">{p.meta}</span>
+              </div>
+            ))}
+          </div>
+          <FanCaption>real engine output — cast by law from the profiled voice bank, physics-tuned, judged by ears AND code</FanCaption>
         </>
       )}
     </article>

@@ -53,3 +53,29 @@ export const listProfiles = query({
       .collect();
   },
 });
+
+/** Attach the rendered 10s audition clip (R2 key) to a voice card. */
+export const setAudition = mutation({
+  args: { ownerId: v.string(), voiceId: v.string(), auditionKey: v.string() },
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query("voiceProfiles")
+      .withIndex("by_owner_voice", (q) => q.eq("ownerId", args.ownerId).eq("voiceId", args.voiceId))
+      .first();
+    if (!row) throw new Error(`voiceBank.setAudition: no profile for ${args.voiceId}`);
+    await ctx.db.patch(row._id, { auditionKey: args.auditionKey });
+  },
+});
+
+/** Evict a voice from the bank (recruit validation failure / operator removal). */
+export const deleteProfile = mutation({
+  args: { ownerId: v.string(), voiceId: v.string() },
+  handler: async (ctx, args) => {
+    const row = await ctx.db
+      .query("voiceProfiles")
+      .withIndex("by_owner_voice", (q) => q.eq("ownerId", args.ownerId).eq("voiceId", args.voiceId))
+      .first();
+    if (row) await ctx.db.delete(row._id);
+    return Boolean(row);
+  },
+});

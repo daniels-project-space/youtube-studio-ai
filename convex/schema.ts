@@ -261,6 +261,8 @@ export default defineSchema({
       bestFor: v.array(v.string()),
       confidence: v.number(),
     }),
+    /** R2 key of the 10s same-text audition clip (channel settings picker). */
+    auditionKey: v.optional(v.string()),
     profiledAt: v.number(),
   }).index("by_owner_voice", ["ownerId", "voiceId"]),
 

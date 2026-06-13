@@ -21,6 +21,7 @@ import { LatestVideoWidget } from "@/components/LatestVideoWidget";
 import { StatsCharts } from "@/components/StatsCharts";
 import { fmtUsd } from "@/lib/format";
 import { VOICES } from "@/lib/voices";
+import { useAssetUrl } from "@/lib/asset-url";
 import { NICHES, subcategoryTags } from "@/lib/nicheCatalog";
 
 type ChannelDoc = {
@@ -806,13 +807,15 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
     <section>
       <SectionTitle>Production controls</SectionTitle>
       <div className="glass" style={{ padding: "1.2rem", display: "grid", gap: "1.1rem" }}>
-        <Row label="Narration voice" hint="Fish Audio reference voice used for the voiceover">
+        <Row label="Narration voice (Fish tier)" hint="Fish reference voice — used when no ElevenLabs narrator is cast below">
           <select value={voice} disabled={busy} onChange={(e) => setVoice(e.target.value)} style={sel}>
             {VOICES.map((v) => (
               <option key={v.id} value={v.id}>{v.label}{v.note ? ` — ${v.note}` : ""}</option>
             ))}
           </select>
         </Row>
+
+        <NarratorPicker channel={channel} />
 
         <Row label="Upload cadence" hint="How often this channel publishes">
           <select value={cadence} disabled={busy} onChange={(e) => setCadence(e.target.value)} style={sel}>
@@ -1533,4 +1536,133 @@ function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"
       )}
     </>
   );
+}
+
+/**
+ * NARRATOR PICKER — voicecraft's profiled bank inside channel settings: every
+ * saved ElevenLabs voice plays the SAME ~10s audition line so the operator
+ * picks by ear. Selecting one patches the channel pipeline (narration_tts
+ * ttsProvider/elevenVoiceId + script_gen voiceTags) so the next render speaks
+ * with it. Renders only on channels whose pipeline has the narration module.
+ */
+function NarratorPicker({ channel }: { channel: ChannelDoc }) {
+  const update = useMutation(api.channels.updateChannel);
+  const bank = useQuery(api.voiceBank.listProfiles, { ownerId: channel.ownerId });
+  const [busy, setBusy] = useState(false);
+  const [msg, setMsg] = useState<string | null>(null);
+  const narr = (channel.pipeline ?? []).find((p) => p.block === "narration_tts");
+  if (!narr) return null;
+  const params = (narr.params ?? {}) as Record<string, unknown>;
+  const current = params["ttsProvider"] === "elevenlabs" ? (params["elevenVoiceId"] as string | undefined) : undefined;
+
+  const pick = async (voiceId: string | null) => {
+    setBusy(true);
+    setMsg(null);
+    try {
+      const pipeline = (channel.pipeline ?? []).map((p) => {
+        const ps = { ...((p.params as Record<string, unknown>) ?? {}) };
+        if (p.block === "narration_tts") {
+          if (voiceId) {
+            ps["ttsProvider"] = "elevenlabs";
+            ps["elevenVoiceId"] = voiceId;
+          } else {
+            ps["ttsProvider"] = "fish";
+            delete ps["elevenVoiceId"];
+          }
+          return { ...p, params: ps };
+        }
+        if (p.block === "script_gen") {
+          // v3 PERFORMS inline [audio tags] — the writer only emits them on this tier.
+          ps["voiceTags"] = Boolean(voiceId);
+          return { ...p, params: ps };
+        }
+        return p;
+      });
+      await update({ channelId: channel._id as Id<"channels">, pipeline } as Parameters<typeof update>[0]);
+      setMsg(voiceId ? "Narrator cast — the next render speaks with this voice." : "Reverted to the Fish tier voice above.");
+    } catch (e) {
+      setMsg(e instanceof Error ? e.message : "Save failed.");
+    } finally {
+      setBusy(false);
+    }
+  };
+
+  const card = (active: boolean): CSSProperties => ({
+    background: active ? "rgba(110,231,168,0.08)" : "var(--color-bg-elev, #16161a)",
+    border: `1px solid ${active ? "rgba(110,231,168,0.5)" : "var(--color-border)"}`,
+    borderRadius: 10,
+    padding: "0.65rem",
+    display: "grid",
+    gap: "0.4rem",
+    alignContent: "start",
+  });
+  const pickBtn = (active: boolean): CSSProperties => ({
+    background: active ? "transparent" : "var(--color-accent)",
+    color: active ? "var(--color-muted)" : "#0a0a0b",
+    border: active ? "1px solid var(--color-border)" : "none",
+    borderRadius: 8,
+    padding: "0.35rem 0.7rem",
+    fontSize: "0.76rem",
+    fontWeight: 600,
+    cursor: active ? "default" : "pointer",
+    justifySelf: "start",
+  });
+
+  const voices = (bank ?? [])
+    .slice()
+    .sort((a, b) => (b.category === "professional" ? 1 : 0) - (a.category === "professional" ? 1 : 0) || a.name.localeCompare(b.name));
+
+  return (
+    <div style={{ display: "grid", gap: "0.6rem", borderTop: "1px solid var(--color-border)", paddingTop: "1rem" }}>
+      <div>
+        <div style={{ fontSize: "0.86rem", fontWeight: 600 }}>ElevenLabs narrator</div>
+        <div style={{ fontSize: "0.74rem", color: "var(--color-muted)", marginTop: 2 }}>
+          Every saved voice reads the same 10-second line — pick by ear. Selecting casts it for all future renders (v3 expressive tier, performed audio tags).
+        </div>
+      </div>
+      {bank === undefined && <div style={{ fontSize: "0.8rem", color: "var(--color-muted)" }}>Loading the voice bank…</div>}
+      {bank !== undefined && voices.length === 0 && (
+        <div style={{ fontSize: "0.8rem", color: "var(--color-muted)" }}>The voice bank is empty — run the bank profiler first.</div>
+      )}
+      {voices.length > 0 && (
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(250px, 1fr))", gap: "0.55rem" }}>
+          <div style={card(!current)}>
+            <div style={{ fontWeight: 600, fontSize: "0.82rem" }}>Fish tier (default)</div>
+            <div style={{ fontSize: "0.72rem", color: "var(--color-muted)" }}>Uses the Fish voice selected above — no performed audio tags.</div>
+            <button disabled={busy || !current} onClick={() => pick(null)} style={pickBtn(!current)}>
+              {!current ? "Active" : "Use Fish"}
+            </button>
+          </div>
+          {voices.map((v) => {
+            const active = current === v.voiceId;
+            const [first, ...rest] = v.name.split(" - ");
+            return (
+              <div key={v.voiceId} style={card(active)}>
+                <div style={{ fontWeight: 600, fontSize: "0.82rem" }}>
+                  {first}
+                  {rest.length > 0 && <span style={{ fontWeight: 400, color: "var(--color-muted)" }}> — {rest.join(" - ")}</span>}
+                </div>
+                <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", minHeight: "2.1em" }}>
+                  {v.profile.character.length > 110 ? `${v.profile.character.slice(0, 110)}…` : v.profile.character}
+                </div>
+                <AuditionClip k={v.auditionKey} />
+                <button disabled={busy || active} onClick={() => pick(v.voiceId)} style={pickBtn(active)}>
+                  {active ? "Cast for this channel" : "Cast this voice"}
+                </button>
+              </div>
+            );
+          })}
+        </div>
+      )}
+      {msg && <div style={{ fontSize: "0.78rem", color: "var(--color-muted)" }}>{msg}</div>}
+    </div>
+  );
+}
+
+/** Streams a voice's audition clip through the presigning asset route. */
+function AuditionClip({ k }: { k?: string }) {
+  const url = useAssetUrl(k ?? null);
+  if (!k) return <div style={{ fontSize: "0.72rem", color: "var(--color-muted)" }}>no audition clip yet</div>;
+  if (!url) return <div style={{ fontSize: "0.72rem", color: "var(--color-muted)" }}>loading clip…</div>;
+  return <audio controls preload="none" src={url} style={{ width: "100%", height: 30 }} />;
 }

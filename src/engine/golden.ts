@@ -479,7 +479,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "spend a cold-open probe is rendered once and judged on register / pace / tag performance / cleanliness " +
       "≥7 with one seed-bumped retry — a wrong cast dies in ~250 characters, not after the whole paid render.",
     gates: ["casting spec prefilter (gender / age / register law)", "audition judge ≥ 7 on real audio", "cold-open gate: register / pace / performance / clean ≥ 7", "loud failure (no fallback voice)"],
-    status: "active",
+    status: "golden",
   },
   {
     key: "visuals",

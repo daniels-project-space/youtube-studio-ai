@@ -26,17 +26,30 @@
  *      lines are rendered once and JUDGED (register / pace / tag performance /
  *      clean ≥7); one seed-bumped retry, then loud failure.
  *
- * Deps: ELEVENLABS_API_KEY + GEMINI_API_KEY (vault). Convex is an injected
- * client (bank persistence) — never required by the render path. The only
- * engine import is pure-data golden.ts doctrine.
+ *   5. RECRUIT — recruitVoice(): quality-gated library expansion (reviewed
+ *      professional clones, ≥100 saves or ≥2M chars/yr, preview judged on fit
+ *      AND production quality ≥8, then VALIDATED on our own render post-add —
+ *      a failure removes the voice and tries the next candidate).
+ *   6. AUDITIONS — auditionBank(): every banked voice renders the ONE
+ *      standard ~10s line (AUDITION_LINE) to R2; the channel-settings picker
+ *      streams the clips so the operator hears identical text per voice and
+ *      recasts a channel in one click (pipeline narration_tts params).
  *
- *   import { castVoice, profileVoiceBank, narrationPhysics, renderNarration,
- *            gateColdOpen, hasVoicecraft } from "@/lib/voicecraft";
+ * FULLY STANDALONE — one import surface, same shape as banana / scriptcraft /
+ * metacraft / topicraft. Deps: ELEVENLABS_API_KEY + GEMINI_API_KEY (vault);
+ * R2 storage only for audition clips. Convex is an injected client (bank
+ * persistence) — never required by the render path. The only engine import
+ * is pure-data golden.ts doctrine.
+ *
+ *   import { castVoice, profileVoiceBank, auditionBank, recruitVoice,
+ *            narrationPhysics, renderNarration, gateColdOpen,
+ *            judgeNarrationTake, hasVoicecraft } from "@/lib/voicecraft";
  *   const cast = await castVoice({ convex, ownerId, channelName, niche, log });
  *   const bytes = await renderNarration({ text, elevenVoiceId: cast.voiceId,
  *     physics: cast.physics });
  *
- * Consumers: design-channel casting · narration_tts physics + cold-open gate.
+ * Consumers: design-channel casting · narration_tts physics + cold-open gate ·
+ * channel-settings narrator picker (voiceBank rows + audition clips).
  */
 import type { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
@@ -220,6 +233,53 @@ export async function profileVoiceBank(o: {
   return cards;
 }
 
+/* ---------------------------- audition clips ---------------------------- */
+
+/**
+ * The ONE standard audition line every bank voice renders (~10s) so the
+ * channel-settings picker compares voices on identical text.
+ */
+export const AUDITION_LINE =
+  "Here is how this channel could sound. [pause] A story begins quietly, gathers weight, and lands exactly where it should — every single time.";
+
+export const AUDITION_PREFIX = "voicebank/auditions/";
+
+/**
+ * Render the standard audition clip for every banked voice missing one and
+ * attach its R2 key to the voice card (the settings picker streams these via
+ * /api/asset-url). One-time ~150 chars per voice; skips fresh rows.
+ */
+export async function auditionBank(o: {
+  convex: ConvexHttpClient;
+  ownerId: string;
+  force?: boolean;
+  log?: (m: string) => void;
+}): Promise<number> {
+  const log = o.log ?? (() => {});
+  const rows = (await o.convex.query(api.voiceBank.listProfiles, { ownerId: o.ownerId })) as {
+    voiceId: string;
+    name: string;
+    auditionKey?: string;
+  }[];
+  let made = 0;
+  for (const r of rows) {
+    if (r.auditionKey && !o.force) continue;
+    try {
+      const bytes = await synthNarration({ text: AUDITION_LINE, provider: "elevenlabs", elevenVoiceId: r.voiceId });
+      const key = `${AUDITION_PREFIX}${r.voiceId}.mp3`;
+      const { putObject } = await import("@/lib/storage");
+      await putObject(key, bytes, { contentType: "audio/mpeg" });
+      await o.convex.mutation(api.voiceBank.setAudition, { ownerId: o.ownerId, voiceId: r.voiceId, auditionKey: key });
+      made++;
+      log(`voicecraft: audition clip rendered — ${r.name}`);
+    } catch (e) {
+      log(`voicecraft: audition clip FAILED for ${r.name} (${e instanceof Error ? e.message.slice(0, 90) : e}) — continuing`);
+    }
+  }
+  log(`voicecraft: audition bank — ${made} new clip(s), ${rows.length} voices total`);
+  return made;
+}
+
 /* ----------------------------- voice library ---------------------------- */
 
 export interface LibraryVoice {
@@ -231,6 +291,12 @@ export interface LibraryVoice {
   accent?: string;
   useCase?: string;
   previewUrl?: string;
+  /** "professional" = ElevenLabs-reviewed Professional Voice Clone. */
+  category?: string;
+  /** How many accounts saved this voice — the library's strongest quality proxy. */
+  clonedByCount?: number;
+  /** Characters rendered with it in the last year. */
+  usage1y?: number;
 }
 
 /** Search the ElevenLabs community voice library (bank expansion source). */
@@ -252,7 +318,7 @@ export async function searchVoiceLibrary(o: {
   q.set("language", "en");
   const res = await fetch(`${ELEVEN}/shared-voices?${q}`, { headers: { "xi-api-key": elevenKey() } });
   if (!res.ok) return [];
-  const j = (await res.json()) as { voices?: { public_owner_id: string; voice_id: string; name: string; gender?: string; age?: string; accent?: string; use_case?: string; preview_url?: string }[] };
+  const j = (await res.json()) as { voices?: { public_owner_id: string; voice_id: string; name: string; gender?: string; age?: string; accent?: string; use_case?: string; preview_url?: string; category?: string; cloned_by_count?: number; usage_character_count_1y?: number }[] };
   return (j.voices ?? []).map((v) => ({
     publicOwnerId: v.public_owner_id,
     voiceId: v.voice_id,
@@ -262,6 +328,9 @@ export async function searchVoiceLibrary(o: {
     accent: v.accent,
     useCase: v.use_case,
     previewUrl: v.preview_url,
+    category: v.category,
+    clonedByCount: v.cloned_by_count ?? 0,
+    usage1y: v.usage_character_count_1y ?? 0,
   }));
 }
 
@@ -275,6 +344,124 @@ export async function addLibraryVoice(v: LibraryVoice, newName?: string): Promis
   if (!res.ok) throw new Error(`voicecraft: add library voice HTTP ${res.status}: ${(await res.text()).slice(0, 160)}`);
   const j = (await res.json()) as { voice_id?: string };
   return j.voice_id ?? v.voiceId;
+}
+
+/** Remove a voice from the operator's account (failed validation / eviction). */
+export async function removeAccountVoice(voiceId: string): Promise<void> {
+  const res = await fetch(`${ELEVEN}/voices/${voiceId}`, {
+    method: "DELETE",
+    headers: { "xi-api-key": elevenKey() },
+  });
+  if (!res.ok) throw new Error(`voicecraft: delete voice HTTP ${res.status}: ${(await res.text()).slice(0, 160)}`);
+}
+
+/**
+ * RECRUIT — quality-gated bank expansion (operator law 2026-06-13 after a
+ * low-quality library add: "new voices from the library have to be highly
+ * rated and validated"). Three gates, in order:
+ *   1. METRICS — ElevenLabs-reviewed professional clones only, genuinely
+ *      popular (cloned_by_count ≥ 100 OR ≥ 2M chars rendered in the last year).
+ *   2. PREVIEW JUDGE — Gemini hears the previews and scores BOTH spec fit and
+ *      production quality ≥ 8.
+ *   3. POST-ADD VALIDATION — the voice is added, OUR calibration line is
+ *      rendered through it, and the take must pass judgeNarrationTake; a
+ *      failure REMOVES the voice from the account and tries the next one.
+ * Returns the profiled VoiceCard of the recruit (already in the Convex bank).
+ */
+export async function recruitVoice(o: {
+  convex: ConvexHttpClient;
+  ownerId: string;
+  physics: NarrationPhysics & { archetype?: string };
+  searchTerms?: string[];
+  useCase?: string;
+  log?: (m: string) => void;
+}): Promise<VoiceCard> {
+  const log = o.log ?? (() => {});
+  const spec = o.physics.cast;
+  const useCase = o.useCase ?? "narrative_story";
+  const searches = await Promise.all([
+    searchVoiceLibrary({ gender: spec.gender, accent: spec.accent, useCase, pageSize: 12 }),
+    ...(o.searchTerms ?? []).map((s) => searchVoiceLibrary({ gender: spec.gender, accent: spec.accent, useCase, search: s, pageSize: 10 })),
+  ]);
+  const seen = new Set<string>();
+  const candidates = searches
+    .flat()
+    .filter((v) => {
+      if (seen.has(v.voiceId)) return false;
+      seen.add(v.voiceId);
+      return Boolean(v.previewUrl) && v.category === "professional" && ((v.clonedByCount ?? 0) >= 100 || (v.usage1y ?? 0) >= 2_000_000);
+    })
+    .sort((a, b) => (b.clonedByCount ?? 0) - (a.clonedByCount ?? 0))
+    .slice(0, 6);
+  log(`voicecraft: recruit — ${candidates.length} metric-gated candidates: ${candidates.map((c) => `${c.name} (${c.clonedByCount} saves)`).join(", ") || "none"}`);
+  if (candidates.length === 0) throw new Error("voicecraft: recruit found no metric-gated library candidates — widen the search");
+
+  const audios: string[] = [];
+  const heard: LibraryVoice[] = [];
+  for (const c of candidates) {
+    try {
+      const res = await fetch(c.previewUrl!, { signal: AbortSignal.timeout(20000) });
+      if (!res.ok) continue;
+      audios.push(Buffer.from(await res.arrayBuffer()).toString("base64"));
+      heard.push(c);
+    } catch {
+      /* skip */
+    }
+  }
+  if (heard.length === 0) throw new Error("voicecraft: recruit — no candidate previews reachable");
+  const verdict = await geminiAudioJson<{ takes?: { idx?: number; fit?: number; quality?: number; note?: string }[] }>({
+    audios,
+    maxTokens: 900,
+    prompt:
+      `You are recruiting a narrator. REQUIRED SOUND: ${spec.character}.\n` +
+      `You will hear ${heard.length} samples, in order: ` +
+      `${heard.map((c, i) => `${i + 1}=${c.name} [${[c.gender, c.age, c.accent].filter(Boolean).join(", ")}]`).join("; ")}.\n` +
+      `Vendor labels are FACTS — trust them for accent and age. Score each 1-10 on BOTH: fit (the required sound; a ` +
+      `spec'd accent mismatch caps fit at 4) AND quality (recording/production quality: clean studio capture, no ` +
+      `muddiness, hiss, room echo, clipping or low-bitrate artifacts — be HARSH, this voice must carry whole videos).\n` +
+      `Return STRICT JSON {"takes":[{"idx":1-based,"fit":n,"quality":n,"note":"<=12 words"}]}.`,
+  });
+  const ranked = (verdict.takes ?? [])
+    .filter((t) => typeof t.idx === "number" && (t.fit ?? 0) >= 8 && (t.quality ?? 0) >= 8)
+    .sort((x, y) => (y.fit ?? 0) + (y.quality ?? 0) - ((x.fit ?? 0) + (x.quality ?? 0)));
+  log(`voicecraft: recruit auditions — ${heard.map((c, i) => { const t = (verdict.takes ?? []).find((x) => x.idx === i + 1); return `${c.name}: fit ${t?.fit ?? "?"} q ${t?.quality ?? "?"}`; }).join(" · ")}`);
+  if (ranked.length === 0) throw new Error("voicecraft: recruit — no candidate gated fit+quality ≥8 on preview");
+
+  for (const r of ranked) {
+    const cand = heard[r.idx! - 1];
+    const newId = await addLibraryVoice(cand);
+    log(`voicecraft: recruit — added "${cand.name}" as ${newId}, validating on our own render…`);
+    try {
+      const take = await synthNarration({ text: AUDITION_LINE, provider: "elevenlabs", elevenVoiceId: newId, speed: o.physics.speed, eleven: { stability: o.physics.stability } });
+      const v = await judgeNarrationTake({ mp3: take, physics: o.physics, text: AUDITION_LINE, log });
+      if (!v.pass || v.clean < 8) throw new Error(`validation take failed (clean ${v.clean}, ${v.why})`);
+      const accountVoice: AccountVoice = {
+        voiceId: newId,
+        name: cand.name,
+        category: "professional",
+        labels: { gender: cand.gender ?? "", age: cand.age ?? "", accent: cand.accent ?? "", use_case: cand.useCase ?? useCase },
+        previewUrl: cand.previewUrl,
+      };
+      const profile = await profileVoice(accountVoice, log);
+      if (!profile) throw new Error("profiling failed");
+      await o.convex.mutation(api.voiceBank.upsertProfile, {
+        ownerId: o.ownerId,
+        voiceId: newId,
+        name: cand.name,
+        provider: "elevenlabs",
+        category: "professional",
+        labels: accountVoice.labels,
+        previewUrl: cand.previewUrl,
+        profile,
+      });
+      log(`voicecraft: RECRUITED "${cand.name}" (${cand.clonedByCount} saves) — validated and banked`);
+      return { ...accountVoice, profile };
+    } catch (e) {
+      log(`voicecraft: recruit — "${cand.name}" FAILED validation (${e instanceof Error ? e.message.slice(0, 100) : e}) — removing and trying next`);
+      await removeAccountVoice(newId).catch(() => {});
+    }
+  }
+  throw new Error("voicecraft: recruit — every preview-gated candidate failed post-add validation");
 }
 
 /* -------------------------------- casting ------------------------------- */
@@ -472,11 +659,14 @@ export async function judgeNarrationTake(o: {
   durationSec?: number;
   log?: (m: string) => void;
 }): Promise<TakeVerdict> {
-  if (o.durationSec) {
+  // Duration gate runs ALWAYS: when no measured duration is given, estimate
+  // from the byte length (our renders are CBR mp3_44100_128 ≈ 16 KB/s).
+  const durationSec = o.durationSec ?? o.mp3.length / 16000;
+  {
     const words = stripAudioTags(o.text).split(/\s+/).filter(Boolean).length;
     const expected = words / 2.5 / Math.max(0.7, o.physics.speed) + (o.text.match(/\[(long )?pause\]/g)?.length ?? 0) * 1.5;
-    if (o.durationSec > expected * 2.5 + 12 || o.durationSec < expected * 0.35) {
-      const why = `duration blowout: ${o.durationSec.toFixed(0)}s rendered vs ~${expected.toFixed(0)}s expected (${words} words) — runaway take`;
+    if (durationSec > expected * 2.5 + 12 || durationSec < expected * 0.3) {
+      const why = `duration blowout: ${durationSec.toFixed(0)}s rendered vs ~${expected.toFixed(0)}s expected (${words} words) — runaway take`;
       o.log?.(`voicecraft: take judged — ${why}`);
       return { register: 0, pace: 0, performance: 0, clean: 0, why, pass: false };
     }
