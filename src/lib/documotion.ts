@@ -571,7 +571,11 @@ const VERIFIER_DOCTRINE =
   `• evidence_board / collage_pan stills are a moving camera — a still may frame ONE pinned photo or part of the ` +
   `board; that is correct. Judge the photo + red-string + cutout quality, not "missing" other elements.\n` +
   `• Do NOT nitpick photographic taste. regen_asset ONLY for a CLEAR defect: wrong subject, a ragged/half-cut ` +
-  `cutout edge, baked-in text, or a plate that is essentially black/empty. A merely "stylised" or "staged" photo is fine.`;
+  `cutout edge, baked-in text on a PHOTO/PLATE, or a plate that is essentially black/empty. A merely "stylised" or ` +
+  `"staged" photo is fine.\n` +
+  `• EXCEPTION — a quote_card / closing card MAY be a fully DESIGNED TYPOGRAPHIC image (the closing line rendered as ` +
+  `bespoke lettering). Baked lettering is INTENTIONAL there — judge it as typography (legible? on-style?), NEVER flag ` +
+  `it as a baked-text violation and never try to regen it.`;
 
 const VERIFIER_CHECKLIST =
   `THE CRAFT CHECKLIST:\n` +
