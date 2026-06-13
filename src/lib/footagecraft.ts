@@ -269,7 +269,8 @@ export async function motionScore(localPath: string, log: (m: string) => void = 
     c.on("error", () => { clearTimeout(t); resolve(null); });
     c.on("close", () => {
       clearTimeout(t);
-      const vals = [...err.matchAll(/YAVG:([0-9.]+)/g)].map((mm) => Number(mm[1])).filter((n) => !Number.isNaN(n));
+      // ffmpeg metadata=print emits "lavfi.signalstats.YAVG=2.82" (equals).
+      const vals = [...err.matchAll(/YAVG[=:]\s*([0-9.]+)/g)].map((mm) => Number(mm[1])).filter((n) => !Number.isNaN(n));
       if (vals.length === 0) { log("footagecraft: motion score unavailable (no YAVG)"); resolve(null); return; }
       resolve(vals.reduce((s, v) => s + v, 0) / vals.length);
     });
