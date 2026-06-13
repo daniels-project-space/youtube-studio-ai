@@ -180,22 +180,25 @@
 
   /* A certified GOLDEN module — gold border + a slow breathing gold glow. */
   .golden-glow {
-    border-color: rgba(212, 160, 23, 0.5);
-    animation: golden-glow 2.8s ease-in-out infinite;
+    border-color: rgba(212, 160, 23, 0.38);
+    box-shadow:
+      0 0 0 1px rgba(212, 160, 23, 0.1),
+      var(--shadow-card);
   }
 
   .golden-chip {
     display: inline-flex;
     align-items: center;
     gap: 0.3rem;
-    padding: 0.2rem 0.6rem;
-    border-radius: 999px;
-    font-size: 0.68rem;
-    font-weight: 700;
-    letter-spacing: 0.08em;
-    color: #0a0a0b;
-    background: linear-gradient(135deg, #f1c34d, #d4a017);
-    box-shadow: 0 0 12px rgba(212, 160, 23, 0.45);
+    padding: 0.18rem 0.55rem;
+    border-radius: 7px;
+    font-family: var(--font-mono);
+    font-size: 0.64rem;
+    font-weight: 600;
+    letter-spacing: 0.12em;
+    color: var(--color-gold);
+    background: rgba(212, 160, 23, 0.1);
+    border: 1px solid rgba(212, 160, 23, 0.3);
   }
 
   /* Fanned-out proof renders on the golden hero card. Per-item rotation/arc

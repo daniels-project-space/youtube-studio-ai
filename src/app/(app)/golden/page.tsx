@@ -171,7 +171,7 @@ function ModuleCard({
   return (
     <article
       className={`glass glass-shine lift${isGolden ? " golden-glow" : ""}`}
-      style={{ padding: hero ? "1.5rem 1.6rem" : "1.15rem 1.25rem" }}
+      style={{ padding: hero ? "1.6rem 1.75rem" : "1.3rem 1.4rem" }}
     >
       <div
         style={{
@@ -185,8 +185,8 @@ function ModuleCard({
         <span
           style={{
             fontFamily: "var(--font-mono)",
-            fontSize: "0.7rem",
-            letterSpacing: "0.08em",
+            fontSize: "0.66rem",
+            letterSpacing: "0.1em",
             textTransform: "uppercase",
             color: "var(--color-faint)",
           }}
@@ -199,13 +199,14 @@ function ModuleCard({
         ) : (
           <span
             style={{
-              padding: "0.2rem 0.6rem",
-              borderRadius: 999,
-              fontSize: "0.68rem",
+              padding: "0.18rem 0.55rem",
+              borderRadius: 7,
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.64rem",
               fontWeight: 600,
-              letterSpacing: "0.08em",
-              color: "var(--color-muted)",
-              border: "1px solid var(--color-border-strong)",
+              letterSpacing: "0.12em",
+              color: "var(--color-faint)",
+              border: "1px solid var(--color-border)",
             }}
           >
             ACTIVE
@@ -213,32 +214,44 @@ function ModuleCard({
         )}
       </div>
 
-      <h3 style={{ fontSize: hero ? "1.45rem" : "1.08rem", fontWeight: 600 }}>{m.title}</h3>
+      <h3 style={{ margin: 0, fontSize: hero ? "1.5rem" : "1.12rem", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: 1.2 }}>{m.title}</h3>
       <p
         style={{
-          margin: "0.35rem 0 0.7rem",
+          margin: "0.45rem 0 0.9rem",
           fontFamily: "var(--font-mono)",
-          fontSize: "0.74rem",
+          fontSize: "0.72rem",
+          letterSpacing: "0.01em",
           color: isGolden ? "var(--color-gold)" : "var(--color-secondary)",
         }}
       >
         {m.engine}
       </p>
-      <p style={{ margin: 0, fontSize: "0.88rem", lineHeight: 1.55, color: "var(--color-muted)" }}>
+      <p style={{ margin: 0, fontSize: "0.875rem", lineHeight: 1.6, color: "var(--color-muted)", maxWidth: "70ch" }}>
         {m.how}
       </p>
 
-      <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginTop: "0.85rem" }}>
+      <div
+        style={{
+          display: "flex",
+          flexWrap: "wrap",
+          gap: "0.4rem",
+          marginTop: "1.05rem",
+          paddingTop: "0.95rem",
+          borderTop: "1px solid var(--color-border)",
+        }}
+      >
         {m.gates.map((g) => (
           <span
             key={g}
             style={{
-              padding: "0.16rem 0.55rem",
-              borderRadius: 999,
-              fontSize: "0.7rem",
-              color: "var(--color-fg)",
-              background: isGolden ? "rgba(212, 160, 23, 0.13)" : "var(--color-surface-solid)",
-              border: `1px solid ${isGolden ? "rgba(212, 160, 23, 0.35)" : "var(--color-border)"}`,
+              padding: "0.22rem 0.55rem",
+              borderRadius: 7,
+              fontFamily: "var(--font-mono)",
+              fontSize: "0.68rem",
+              letterSpacing: "0.01em",
+              color: "var(--color-muted)",
+              background: isGolden ? "rgba(212, 160, 23, 0.07)" : "rgba(255, 255, 255, 0.03)",
+              border: `1px solid ${isGolden ? "rgba(212, 160, 23, 0.2)" : "var(--color-border)"}`,
             }}
           >
             {g}
