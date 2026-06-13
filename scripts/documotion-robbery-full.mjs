@@ -13,7 +13,6 @@ import { synthNarration } from "../src/lib/tts.ts";
 import { generateSuno } from "../src/lib/music.ts";
 import { craftMetadata } from "../src/lib/metacraft.ts";
 import { buildThumbBrief, bananaThumbnail } from "../src/lib/banana.ts";
-import { putObject, presignDownload } from "../src/lib/storage.ts";
 
 const log = (m) => console.error(`[robbery] ${m}`);
 await bootstrapSecrets((m) => console.error(`[boot] ${m}`), { required: ["GEMINI_API_KEY", "FAL_KEY", "SUNO_API_KEY"] });
@@ -76,9 +75,10 @@ const full = join(RUN, "robbery_full.mp4");
 await sh([
   "-y", "-i", body, "-i", narrPath, "-i", musicPath,
   "-filter_complex",
-  `[1:a]adelay=300|300,apad[nar];` +
-  `[2:a]aloop=loop=-1:size=2147483647,atrim=0:${D.toFixed(2)},volume=0.42,afade=t=in:st=0:d=1.2,afade=t=out:st=${Math.max(0, D - 3).toFixed(2)}:d=3[mus];` +
-  `[mus][nar]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=420[musd];` +
+  // narration → stereo, delayed, split into the mix copy + the sidechain key
+  `[1:a]aformat=sample_rates=48000:channel_layouts=stereo,adelay=300:all=1,apad,asplit=2[nar][narkey];` +
+  `[2:a]aformat=sample_rates=48000:channel_layouts=stereo,aloop=loop=-1:size=2147483647,atrim=0:${D.toFixed(2)},volume=0.42,afade=t=in:st=0:d=1.2,afade=t=out:st=${Math.max(0, D - 3).toFixed(2)}:d=3[mus];` +
+  `[mus][narkey]sidechaincompress=threshold=0.05:ratio=12:attack=15:release=380[musd];` +
   `[nar][musd]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,loudnorm=I=-14:TP=-1.5:LRA=11,aresample=48000[a]`,
   "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", "-t", D.toFixed(2), full,
 ]);
@@ -99,16 +99,9 @@ const brief = buildThumbBrief({
 });
 const tr = await bananaThumbnail({ brief, outJpg: thumb, expectWords: ["10 LAYERS", "1 MISTAKE"], imageStyle: "cinematic heist-thriller noir still", title, log }).catch((e) => { log(`thumb failed: ${e.message}`); return null; });
 
-// 7. PUBLISH
-let share = null;
-if (process.env.R2_ACCESS_KEY_ID) {
-  const key = `documotion/robbery/${Date.now()}.mp4`;
-  await putObject(key, await readFile(full), { contentType: "video/mp4", bucket: process.env.R2_BUCKET });
-  share = await presignDownload(key, { expiresIn: 604800, bucket: process.env.R2_BUCKET });
-}
-
+// 7. OUTPUT — local artifacts only (serve via the VPS; no external publishing)
 console.log(JSON.stringify({
-  video: full, share, thumbnail: tr?.path ?? null, thumbVerdict: tr?.verdict ?? null,
+  video: full, thumbnail: tr?.path ?? null, thumbVerdict: tr?.verdict ?? null,
   title, titleAlternate: meta?.titleAlternate ?? null, description: meta?.description ?? null,
   planTitle: visual.plan.title, verdict: visual.verdict,
 }, null, 2));

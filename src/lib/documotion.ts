@@ -311,7 +311,9 @@ async function deriveDepthLayers(baseImg: string, outDir: string, shotIdx: numbe
       "-i",
       depthPath,
       "-filter_complex",
-      "[1:v]format=gray,lutyuv=y='if(gt(val,135),255,0)',gblur=sigma=6[mtmp];" +
+      // Soft, wide feather on the near/far boundary so the depth cut never
+      // reads as a hard seam; scale the mask to the base, then alpha-merge.
+      "[1:v]format=gray,lutyuv=y='if(gt(val,130),255,0)',gblur=sigma=14[mtmp];" +
         "[mtmp][0:v]scale2ref=flags=bilinear[m][base];" +
         "[base][m]alphamerge,format=rgba[o]",
       "-map",
