@@ -28,28 +28,45 @@ const topic =
   "two floors underground and stole over 100 million dollars in diamonds and gold — then a bag of half-eaten sandwiches " +
   "and a partial DNA trace undid them.";
 
-// 1. VISUAL BODY (reuses cached plan + assets in RUN; re-renders clean fonts)
-const visual = await craftDocuMotion({ topic, style: "robbery_noir", durationSec: 60, runDir: RUN, maxRefineRounds: 1, log });
-const body = visual.outPath;
+// 1. VISUAL BODY — reuse a finished render if present (cheap recovery), else
+// craft it. Set DOCU_FORCE=1 to always re-render.
+const cachedBody = join(RUN, "final.mp4");
+let plan, body;
+if (process.env.DOCU_FORCE !== "1" && existsSync(cachedBody) && existsSync(join(RUN, "plan.json"))) {
+  plan = JSON.parse(await readFile(join(RUN, "plan.json"), "utf8"));
+  body = cachedBody;
+  log("reusing cached visual body (final.mp4)");
+} else {
+  const visual = await craftDocuMotion({ topic, style: "robbery_noir", durationSec: 60, runDir: RUN, maxRefineRounds: 1, log });
+  plan = visual.plan;
+  body = visual.outPath;
+}
 const D = await dur(body);
-log(`visual body ${D.toFixed(1)}s — ${visual.plan.title}`);
+log(`visual body ${D.toFixed(1)}s — ${plan.title}`);
 
 // 2. GOLDEN TITLE (metacraft)
 const meta = await craftMetadata({
   topic,
   channelName: "Vault Files",
   niche: "true crime",
-  scriptExcerpt: visual.plan.shots.map((s) => s.beat).join(" "),
+  scriptExcerpt: plan.shots.map((s) => s.beat).join(" "),
   log,
 }).catch((e) => { log(`metacraft failed: ${e.message}`); return null; });
-const title = meta?.title || visual.plan.title;
+const title = meta?.title || plan.title;
 log(`TITLE: ${title}`);
 
 // 3. NARRATION — the plan's per-shot narration IS the script (visuals were
 // planned to illustrate these exact lines), so the VO is perfectly synced.
-const narration = visual.plan.shots.map((s) => s.narration).filter(Boolean).join(" ");
+const narration = plan.shots.map((s) => s.narration).filter(Boolean).join(" ");
 const narrPath = join(RUN, "narration.mp3");
-await writeFile(narrPath, await synthNarration({ text: narration, provider: "elevenlabs" }));
+let narrBytes;
+try {
+  narrBytes = await synthNarration({ text: narration, provider: "elevenlabs" });
+} catch (e) {
+  log(`elevenlabs failed (${e.message}) — Fish fallback`);
+  narrBytes = await synthNarration({ text: narration, voiceId: "psychological", speed: 0.97 });
+}
+await writeFile(narrPath, narrBytes);
 const narrDur = await dur(narrPath);
 log(`narration ${narrDur.toFixed(1)}s (${narration.split(/\s+/).length} words)`);
 
@@ -94,5 +111,5 @@ const tr = await bananaThumbnail({ brief, outJpg: thumb, expectWords: ["10 LAYER
 console.log(JSON.stringify({
   video: full, thumbnail: tr?.path ?? null, thumbVerdict: tr?.verdict ?? null,
   title, titleAlternate: meta?.titleAlternate ?? null, description: meta?.description ?? null,
-  planTitle: visual.plan.title, verdict: visual.verdict,
+  planTitle: plan.title,
 }, null, 2));
