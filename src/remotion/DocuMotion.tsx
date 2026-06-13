@@ -1,18 +1,29 @@
-import React, { createContext, useContext, useEffect, useState } from "react";
+import React, { createContext, useContext } from "react";
 import {
   AbsoluteFill,
   Easing,
   Img,
   Series,
-  continueRender,
-  delayRender,
   interpolate,
   spring,
   useCurrentFrame,
   useVideoConfig,
 } from "remotion";
 import { noise2D } from "@remotion/noise";
+import { loadFont as loadAnton } from "@remotion/google-fonts/Anton";
+import { loadFont as loadOswald } from "@remotion/google-fonts/Oswald";
+import { loadFont as loadCaveat } from "@remotion/google-fonts/Caveat";
+import { loadFont as loadSpecialElite } from "@remotion/google-fonts/SpecialElite";
 import { type DocuTheme, type DocuShotKind, getStyle } from "./docuStyles";
+
+// Load every face the styles use via Remotion's native loader — it ties font
+// readiness into delayRender deterministically (no CDN race), so text NEVER
+// renders before its font is ready. This replaced a hand-rolled loader that
+// raced intermittently in the long-lived pipeline browser (invisible quotes).
+loadAnton();
+loadOswald("normal", { weights: ["500", "600", "700"], subsets: ["latin"] });
+loadCaveat("normal", { weights: ["600", "700"], subsets: ["latin"] });
+loadSpecialElite("normal", { weights: ["400"], subsets: ["latin"] });
 
 /**
  * DOCUMOTION — the documentary-collage shot kit. A themeable kit of motion
@@ -47,6 +58,15 @@ export interface DocuThread {
   to: number;
 }
 
+/** Projected real-world map geometry (from geoMap.ts) for the geo_map shot. */
+export interface DocuGeo {
+  label: string;
+  pin: [number, number];
+  streets: { p: [number, number][]; m: boolean }[];
+  buildings: [number, number][][];
+  synthetic?: boolean;
+}
+
 export interface DocuShotSpec {
   kind: DocuShotKind;
   durationInFrames: number;
@@ -67,6 +87,10 @@ export interface DocuShotSpec {
   titleBoost?: number;
   /** evidence_board: explicit connections (else auto-chained). */
   threads?: DocuThread[];
+  /** geo_map: projected street/building geometry. */
+  geo?: DocuGeo;
+  /** quote_card: a Banana-designed type card (data URI) — overrides CSS type. */
+  typeImage?: string;
 }
 
 export type DocuMotionProps = {
@@ -83,43 +107,6 @@ export type DocuMotionProps = {
 const DEFAULT_THEME = getStyle("archival_collage").theme;
 const ThemeCtx = createContext<DocuTheme>(DEFAULT_THEME);
 const useTheme = () => useContext(ThemeCtx);
-
-/* ---------------------------------------------------------------- fonts -- */
-
-const useDocuFonts = (fontCss: string, probe: [string, string, string]) => {
-  const [handle] = useState(() => delayRender("documotion fonts"));
-  useEffect(() => {
-    const id = `docu-fonts-${btoa(fontCss).slice(0, 12)}`;
-    if (!document.querySelector(`link[data-docu="${id}"]`)) {
-      const link = document.createElement("link");
-      link.rel = "stylesheet";
-      link.href = fontCss;
-      link.setAttribute("data-docu", id);
-      document.head.appendChild(link);
-    }
-    let done = false;
-    const finish = () => {
-      if (done) return;
-      done = true;
-      continueRender(handle);
-    };
-    // Load each family at BOTH weights we use (400 + 700). load() resolves a
-    // requested weight to the nearest available face, so a single-weight font
-    // (e.g. "Special Elite", 400 only) never hangs the way a 700-only check
-    // would. Then wait for the font set to settle before rendering.
-    Promise.all(
-      probe.flatMap((f) => [
-        document.fonts.load(`400 64px "${f}"`).catch(() => undefined),
-        document.fonts.load(`700 64px "${f}"`).catch(() => undefined),
-      ]),
-    )
-      .then(() => document.fonts.ready)
-      .then(finish)
-      .catch(finish);
-    // Safety net so a slow CDN can never stall the render forever.
-    setTimeout(finish, 9000);
-  }, [handle, fontCss, probe]);
-};
 
 /* ----------------------------------------------------------------- utils -- */
 
@@ -526,30 +513,21 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ 
   const boost = shot.titleBoost ?? 1;
   // autofit: title sits between the hero cutout (~38% wide) and the right
   // margin. Starting at 0.28w keeps the payoff readable instead of swallowed.
-  const titleSize = Math.min(width * 0.115 * boost, (width * 0.68) / Math.max(6, title.length * t.displayCharW));
+  const titleSize = Math.min(width * 0.1 * boost, (width * 0.55) / Math.max(6, title.length * t.displayCharW));
   return (
     <AbsoluteFill>
       <ShotBg src={shot.bg} cam={cam} recede={Boolean(shot.fg)} />
-      {title ? (
-        <>
-          <TextScrim cx={56} cy={46} w={66} h={42} opacity={0.46 * boost} />
-          <AbsoluteFill style={{ justifyContent: "center", paddingLeft: width * 0.28, paddingBottom: height * 0.16 }}>
-            <div style={{ whiteSpace: "nowrap", transform: camTransform(cam, 1.18), transformOrigin: "center" }}>
-              <KineticTitle text={title} kicker={shot.kicker} size={Math.round(titleSize)} />
-            </div>
-          </AbsoluteFill>
-        </>
-      ) : null}
+      {/* hero cutout FIRST so the title renders ABOVE it (never hidden) */}
       {shot.fg ? (
         <AbsoluteFill>
           <Img
             src={shot.fg}
             style={{
               position: "absolute",
-              left: "-1%",
+              left: "-2%",
               bottom: "-6%",
               height: "106%",
-              maxWidth: "40%",
+              maxWidth: "38%",
               objectFit: "contain",
               objectPosition: "left bottom",
               transform: camTransform(cam, 1.5),
@@ -559,7 +537,166 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ 
           />
         </AbsoluteFill>
       ) : null}
+      {title ? (
+        // Title block: lower third, starting CLEAR of the hero (≈0.4w) and
+        // rendered ON TOP of the cutout so it is never hidden by the parallax.
+        <>
+          <TextScrim cx={62} cy={74} w={70} h={40} opacity={0.52 * boost} />
+          <AbsoluteFill style={{ justifyContent: "flex-end", paddingLeft: width * 0.41, paddingBottom: height * 0.1 }}>
+            <div style={{ whiteSpace: "nowrap", transform: camTransform(cam, 1.12), transformOrigin: "left bottom" }}>
+              <KineticTitle text={title} kicker={shot.kicker} size={Math.round(titleSize)} />
+            </div>
+          </AbsoluteFill>
+        </>
+      ) : null}
       <LabelRail shot={shot} />
+    </AbsoluteFill>
+  );
+};
+
+/**
+ * DEPTH PARALLAX — turns ONE generated still into a living 2.5D shot. The
+ * engine supplies images[0] = the full base plate and images[1..] = near depth
+ * layers (alpha PNGs cut from the same image via its depth map). Each layer
+ * parallaxes at a deeper rate than the base, so the camera appears to move
+ * THROUGH the photograph. With no near layers it degrades to a clean Ken Burns.
+ */
+const DepthParallaxShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
+  const { width, height } = useVideoConfig();
+  const t = useTheme();
+  const dur = shot.durationInFrames;
+  const cam = useCam(shot.camera ?? { move: "push_in", intensity: "medium" }, dur, seed);
+  const layers = shot.images ?? [];
+  const base = layers[0];
+  const near = layers.slice(1);
+  const title = shot.title ?? "";
+  const boost = shot.titleBoost ?? 1;
+  const titleSize = Math.min(width * 0.105 * boost, (width * 0.86) / Math.max(6, title.length * t.displayCharW));
+  return (
+    <AbsoluteFill style={{ backgroundColor: t.base, overflow: "hidden" }}>
+      {base ? (
+        <Img src={base} style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", transform: camTransform(cam, 1.0), filter: t.plateFilter }} />
+      ) : null}
+      {near.map((src, i) => (
+        <Img
+          key={i}
+          src={src}
+          style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", transform: camTransform(cam, 1.55 + i * 0.45), filter: t.plateFilter }}
+        />
+      ))}
+      <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(8,8,6,0.28) 0%, rgba(8,8,6,0) 34%, rgba(8,8,6,0.5) 100%)" }} />
+      {title ? (
+        <>
+          <TextScrim cx={50} cy={76} w={82} h={40} opacity={0.5 * boost} />
+          <AbsoluteFill style={{ alignItems: "center", justifyContent: "flex-end", paddingBottom: height * 0.09 }}>
+            <div style={{ transform: camTransform(cam, 1.1), whiteSpace: "nowrap" }}>
+              <KineticTitle text={title} kicker={shot.kicker} delay={12} align="center" size={Math.round(titleSize)} />
+            </div>
+          </AbsoluteFill>
+        </>
+      ) : null}
+      <LabelRail shot={shot} baseDelay={18} />
+    </AbsoluteFill>
+  );
+};
+
+/**
+ * GEO MAP — a fully RENDERED, animated map of a real place: streets draw on,
+ * building footprints rise in, and a glowing geo-pin drops with radar pulses
+ * while the camera pushes into the location. Geometry comes from geoMap.ts
+ * (live OSM → projected coords). No image plate — pure motion graphics.
+ */
+const GeoMapShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
+  const frame = useCurrentFrame();
+  const { fps, width, height } = useVideoConfig();
+  const t = useTheme();
+  const dur = shot.durationInFrames;
+  const geo = shot.geo;
+  const accent = shot.accent ?? t.accent;
+
+  // camera: slow push toward the pin
+  const px = (geo?.pin?.[0] ?? 0.5) * width;
+  const py = (geo?.pin?.[1] ?? 0.5) * height;
+  const zoom = interpolate(frame, [0, dur], [1.0, 1.12], { easing: Easing.inOut(Easing.cubic), extrapolateRight: "clamp" });
+  const nx = noise2D(`gmx${seed}`, frame * 0.012, 0) * width * 0.004;
+  const ny = noise2D(`gmy${seed}`, frame * 0.01, 5) * height * 0.004;
+
+  const streets = geo?.streets ?? [];
+  const buildings = geo?.buildings ?? [];
+  const segLen = (p: [number, number][]) => {
+    let L = 0;
+    for (let i = 1; i < p.length; i++) L += Math.hypot((p[i][0] - p[i - 1][0]) * width, (p[i][1] - p[i - 1][1]) * height);
+    return Math.max(1, L);
+  };
+  const toPath = (p: [number, number][]) => p.map(([x, y], i) => `${i ? "L" : "M"} ${(x * width).toFixed(1)} ${(y * height).toFixed(1)}`).join(" ");
+  const toPoly = (p: [number, number][]) => p.map(([x, y]) => `${(x * width).toFixed(1)},${(y * height).toFixed(1)}`).join(" ");
+
+  const pinDrop = spring({ frame: frame - Math.min(dur * 0.5, 70), fps, config: { damping: 12, stiffness: 90 } });
+  const labelOp = interpolate(frame, [Math.min(dur * 0.5, 70) + 8, Math.min(dur * 0.5, 70) + 20], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+
+  return (
+    <AbsoluteFill style={{ backgroundColor: t.base, overflow: "hidden" }}>
+      {/* faint coordinate grid */}
+      <AbsoluteFill style={{ backgroundImage: `linear-gradient(${accent}22 1px, transparent 1px), linear-gradient(90deg, ${accent}22 1px, transparent 1px)`, backgroundSize: "64px 64px", opacity: 0.25 }} />
+      <AbsoluteFill style={{ transform: `translate(${nx.toFixed(1)}px, ${ny.toFixed(1)}px) scale(${zoom.toFixed(4)})`, transformOrigin: `${(geo?.pin?.[0] ?? 0.5) * 100}% ${(geo?.pin?.[1] ?? 0.5) * 100}%` }}>
+        <svg width={width} height={height} style={{ position: "absolute", inset: 0 }}>
+          {/* buildings rise + fade in */}
+          {buildings.map((b, i) => {
+            const d = 4 + i * 0.35;
+            const op = interpolate(frame, [d, d + 14], [0, 0.5], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+            const rise = interpolate(frame, [d, d + 14], [6, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+            if (op <= 0) return null;
+            return <polygon key={i} points={toPoly(b)} fill={t.paper} opacity={op * 0.5} transform={`translate(0 ${rise.toFixed(1)})`} />;
+          })}
+          {/* streets draw on (major thicker + glow) */}
+          {streets.map((s, i) => {
+            const L = segLen(s.p);
+            const d = 8 + i * 1.1;
+            const prog = interpolate(frame, [d, d + 24], [0, 1], { easing: Easing.out(Easing.cubic), extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+            if (prog <= 0) return null;
+            return (
+              <path
+                key={i}
+                d={toPath(s.p)}
+                fill="none"
+                stroke={s.m ? accent : t.paper}
+                strokeWidth={s.m ? 3.8 : 1.9}
+                strokeOpacity={s.m ? 0.98 : 0.66}
+                strokeLinecap="round"
+                strokeLinejoin="round"
+                strokeDasharray={L}
+                strokeDashoffset={L * (1 - prog)}
+                style={s.m ? { filter: `drop-shadow(0 0 6px ${accent}cc)` } : undefined}
+              />
+            );
+          })}
+        </svg>
+        {/* glowing geo-pin + radar pulses */}
+        <div style={{ position: "absolute", left: px, top: py, transform: "translate(-50%, -50%)" }}>
+          {[0, 1, 2].map((k) => {
+            const t0 = Math.min(dur * 0.5, 70) + 6 + k * 16;
+            const ring = ((frame - t0) % 48) / 48;
+            const show = frame > t0 && ring >= 0;
+            const sz = interpolate(ring, [0, 1], [0, width * 0.16]);
+            return show ? (
+              <div key={k} style={{ position: "absolute", left: 0, top: 0, width: sz, height: sz, borderRadius: "50%", border: `2px solid ${accent}`, transform: "translate(-50%, -50%)", opacity: (1 - ring) * 0.6 }} />
+            ) : null;
+          })}
+          <div style={{ width: width * 0.03, height: width * 0.03, borderRadius: "50%", background: accent, transform: `translate(-50%, -50%) scale(${pinDrop})`, boxShadow: `0 0 ${width * 0.03}px ${accent}, 0 0 ${width * 0.06}px ${accent}99` }} />
+        </div>
+      </AbsoluteFill>
+      {/* location label (fixed, not zoomed) */}
+      {(shot.circleLabel || geo?.label) ? (
+        <AbsoluteFill style={{ alignItems: "center", justifyContent: "flex-end", paddingBottom: height * 0.12, pointerEvents: "none" }}>
+          <div style={{ opacity: labelOp, transform: `translateY(${interpolate(labelOp, [0, 1], [16, 0])}px)`, textAlign: "center" }}>
+            <div style={{ fontFamily: t.fontLabel, fontWeight: 600, fontSize: Math.round(width * 0.016), letterSpacing: "0.5em", textTransform: "uppercase", color: accent, marginBottom: 8 }}>◉ LOCATION</div>
+            <div style={{ fontFamily: t.fontDisplay, fontWeight: 700, fontSize: Math.round(width * 0.058), letterSpacing: "0.04em", textTransform: "uppercase", color: t.paper, WebkitTextStroke: `1.5px rgba(8,6,4,0.6)`, textShadow: `0 2px 18px rgba(0,0,0,0.8), 0 0 30px ${accent}55` }}>
+              {shot.circleLabel || geo?.label}
+            </div>
+          </div>
+        </AbsoluteFill>
+      ) : null}
+      <LabelRail shot={shot} baseDelay={26} />
     </AbsoluteFill>
   );
 };
@@ -829,23 +966,42 @@ const EvidenceBoardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ sho
         ...(n >= 4 ? [{ from: 0, to: n - 1 }] : []),
       ];
 
-  // Camera path: wide → each node (cap 4) → wide. Center node at frame, zoom.
+  // Camera path: open WIDE, then visit a FEW clues — but HOLD on each one long
+  // enough to read its index card before moving on (prowl, don't strobe).
   const fitZoom = width / boardW; // shows full board width
-  const visit = nodes.slice(0, Math.min(4, n));
+  const visit = nodes.slice(0, Math.min(3, n));
   const stops = [
     { x: boardW / 2, y: boardH / 2, z: fitZoom * 1.02 },
-    ...visit.map((node) => ({ x: node.cx, y: node.cy - node.w * 0.12, z: 1.16 })),
-    { x: boardW / 2, y: boardH / 2, z: fitZoom * 1.06 },
+    ...visit.map((node) => ({ x: node.cx, y: node.cy + node.w * 0.18, z: 1.06 })),
+    { x: boardW / 2, y: boardH / 2, z: fitZoom * 1.04 },
   ];
-  const segs = stops.length - 1;
-  const tp = interpolate(frame, [0, dur], [0, segs], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-  const si = Math.min(segs - 1, Math.floor(tp));
-  const local = Easing.inOut(Easing.cubic)(clamp01(tp - si));
-  const a = stops[si];
-  const b = stops[si + 1];
-  const camX = a.x + (b.x - a.x) * local;
-  const camY = a.y + (b.y - a.y) * local;
-  const camZ = a.z + (b.z - a.z) * local;
+  // Build a hold/travel timeline. Holds are weighted heavier than travels so
+  // the camera lingers on each clue. Easing only applies to travel phases.
+  const HOLD_W = 2.0;
+  const TRAVEL_W = 1.1;
+  const phases: { a: (typeof stops)[number]; b: (typeof stops)[number]; hold: boolean; w: number }[] = [];
+  for (let i = 0; i < stops.length; i++) {
+    phases.push({ a: stops[i], b: stops[i], hold: true, w: HOLD_W });
+    if (i < stops.length - 1) phases.push({ a: stops[i], b: stops[i + 1], hold: false, w: TRAVEL_W });
+  }
+  const totalW = phases.reduce((s, p) => s + p.w, 0);
+  let cursor = 0;
+  let camX = stops[0].x;
+  let camY = stops[0].y;
+  let camZ = stops[0].z;
+  for (let i = 0; i < phases.length; i++) {
+    const p = phases[i];
+    const segLen = (p.w / totalW) * dur;
+    if (frame < cursor + segLen || i === phases.length - 1) {
+      const lp = clamp01((frame - cursor) / segLen);
+      const e = p.hold ? 0 : Easing.inOut(Easing.cubic)(lp);
+      camX = p.a.x + (p.b.x - p.a.x) * e;
+      camY = p.a.y + (p.b.y - p.a.y) * e;
+      camZ = p.a.z + (p.b.z - p.a.z) * e;
+      break;
+    }
+    cursor += segLen;
+  }
   const nx = noise2D(`ebx${seed}`, frame * 0.013, 0) * width * 0.004;
   const ny = noise2D(`eby${seed}`, frame * 0.011, 5) * height * 0.004;
   const tx = width / 2 - camX * camZ + nx;
@@ -953,6 +1109,19 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, s
   const cam = useCam(shot.camera ?? { move: "drift", intensity: "subtle" }, dur, seed);
   const words = (shot.quote ?? "").split(/\s+/).filter(Boolean);
   const fadeOut = interpolate(frame, [dur - 18, dur - 2], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+
+  // BANANA-DESIGNED end card: a bespoke typographic image, slow push + fade.
+  if (shot.typeImage) {
+    const zoom = interpolate(frame, [0, dur], [1.04, 1.12], { easing: Easing.inOut(Easing.cubic), extrapolateRight: "clamp" });
+    const fin = interpolate(frame, [0, 14], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+    return (
+      <AbsoluteFill style={{ backgroundColor: t.base }}>
+        <Img src={shot.typeImage} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${zoom.toFixed(4)})`, opacity: fin }} />
+        <AbsoluteFill style={{ background: "radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(6,6,4,0.5) 100%)" }} />
+        <AbsoluteFill style={{ backgroundColor: "#000", opacity: fadeOut }} />
+      </AbsoluteFill>
+    );
+  }
   return (
     <AbsoluteFill style={{ backgroundColor: t.base }}>
       {shot.bg ? (
@@ -1019,6 +1188,10 @@ const renderShot = (shot: DocuShotSpec, i: number) => {
   switch (shot.kind) {
     case "parallax_portrait":
       return <ParallaxPortraitShot shot={shot} seed={i + 1} />;
+    case "depth_parallax":
+      return <DepthParallaxShot shot={shot} seed={i + 1} />;
+    case "geo_map":
+      return <GeoMapShot shot={shot} seed={i + 1} />;
     case "map_zoom":
       return <MapZoomShot shot={shot} seed={i + 1} />;
     case "photo_slide":
@@ -1038,10 +1211,8 @@ const renderShot = (shot: DocuShotSpec, i: number) => {
   }
 };
 
-export const DocuMotion: React.FC<DocuMotionProps> = ({ shots, theme, fontCss, fontProbe }) => {
+export const DocuMotion: React.FC<DocuMotionProps> = ({ shots, theme }) => {
   const th = theme ?? DEFAULT_THEME;
-  const arch = getStyle("archival_collage");
-  useDocuFonts(fontCss ?? arch.fontCss, fontProbe ?? arch.fontProbe);
   return (
     <ThemeCtx.Provider value={th}>
       <AbsoluteFill style={{ backgroundColor: th.base }}>

@@ -35,7 +35,9 @@ import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { geminiJsonPro, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
-import { generateBananaImage } from "@/lib/banana";
+import { generateBananaImage, bananaTypeCard } from "@/lib/banana";
+import { getDepthMap } from "@/lib/depth";
+import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
 import { renderDocuMotion, renderDocuStills } from "@/lib/remotionRender";
 import {
@@ -111,6 +113,8 @@ export interface DocuShotPlan {
   attribution?: string;
   accent?: string;
   threads?: DocuThread[];
+  /** geo_map: the real place to render (e.g. "Antwerp, Belgium"). */
+  geoQuery?: string;
   assets: DocuAssetBrief[];
 }
 
@@ -123,6 +127,8 @@ export interface DocuPlan {
 /** Per-kind asset contract: role → [min, max] count. */
 const KIND_ASSETS: Record<DocuShotKind, Partial<Record<DocuAssetRole, [number, number]>>> = {
   parallax_portrait: { bg: [1, 1], fg: [1, 1] },
+  depth_parallax: { image: [1, 1] }, // one scene; near depth layers are DERIVED
+  geo_map: {}, // no images — real street geometry is FETCHED from geoQuery
   map_zoom: { bg: [1, 1] },
   photo_slide: { bg: [1, 1], image: [2, 3] },
   matte_sequence: { image: [3, 4] },
@@ -132,19 +138,37 @@ const KIND_ASSETS: Record<DocuShotKind, Partial<Record<DocuAssetRole, [number, n
   quote_card: { bg: [0, 1] },
 };
 
+/** What each capability does + when to use it — the planner's palette. */
+const CAPABILITY_CATALOG =
+  `CAPABILITY PALETTE (use any when it serves the story; the style says which to LEAN on):\n` +
+  `- parallax_portrait: a die-cut person over a plate with a huge NAME title — introduce a person.\n` +
+  `- depth_parallax: ONE cinematic scene given living 2.5D depth, camera drifts THROUGH it — reconstructed moments / ` +
+  `establishing a place (brief MUST describe a clear foreground subject and a separated background).\n` +
+  `- geo_map: a FULLY RENDERED animated map of a REAL place — streets draw on, buildings rise, a glowing geo-pin ` +
+  `drops with radar pulses, camera pushes into the location. Needs a real "geoQuery" (e.g. "Antwerp, Belgium"). ` +
+  `Use this to pin a story to a real location.\n` +
+  `- map_zoom: a simpler aged map/chart with a ringed location word — geography when geo_map is overkill.\n` +
+  `- photo_slide: 2-3 taped photographs sliding over a plate — a handful of evidence/photos.\n` +
+  `- matte_sequence: 3-4 full-frame scenes with torn-paper cuts between them — a list of places/moments.\n` +
+  `- collage_pan: 6-8 small photos on a board, slow rostrum pan — a broad sweep.\n` +
+  `- evidence_board: cork board of pinned photos joined by RED STRING, camera prowls and HOLDS on each clue — ` +
+  `investigations and webs of connection.\n` +
+  `- object_drop: 1-3 objects drop onto a plate under a huge number/title — money, loot, a key object.\n` +
+  `- quote_card: a single closing line — the landing.`;
+
 const CAMERA_MOVES = ["push_in", "pull_back", "pan_left", "pan_right", "drift"];
 const CAMERA_INTENSITIES = ["subtle", "medium", "strong"];
 
-function validatePlan(plan: DocuPlan, durationSec: number, style: DocuStyleDef): string[] {
+function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef): string[] {
   const problems: string[] = [];
   if (!plan.shots?.length || plan.shots.length < 5) problems.push("need 6-8 shots");
-  const allowed = new Set(style.shotKinds);
+  // Any KNOWN capability is allowed — a style biases selection, it does not
+  // restrict it (the planner composes freely).
   for (const [i, s] of (plan.shots ?? []).entries()) {
     if (!KIND_ASSETS[s.kind]) {
-      problems.push(`shot ${i}: unknown kind "${s.kind}"`);
+      problems.push(`shot ${i}: unknown kind "${s.kind}" (use one of: ${Object.keys(KIND_ASSETS).join(", ")})`);
       continue;
     }
-    if (!allowed.has(s.kind)) problems.push(`shot ${i}: kind "${s.kind}" not in this style (use ${style.shotKinds.join("|")})`);
     if (!s.beat?.trim()) problems.push(`shot ${i}: empty beat`);
     if (!(s.durationSec >= 3 && s.durationSec <= 10)) problems.push(`shot ${i}: durationSec must be 3-10`);
     if (!s.camera || !CAMERA_MOVES.includes(s.camera.move) || !CAMERA_INTENSITIES.includes(s.camera.intensity))
@@ -156,6 +180,7 @@ function validatePlan(plan: DocuPlan, durationSec: number, style: DocuStyleDef):
       if (n < min || n > max) problems.push(`shot ${i} (${s.kind}): needs ${min}-${max} ${role}, got ${n}`);
     }
     if (s.kind === "quote_card" && !s.quote?.trim()) problems.push(`shot ${i}: quote_card without quote`);
+    if (s.kind === "geo_map" && !s.geoQuery?.trim()) problems.push(`shot ${i}: geo_map without geoQuery (a real place name)`);
   }
   const total = (plan.shots ?? []).reduce((a, s) => a + (s.durationSec || 0), 0);
   if (Math.abs(total - durationSec) > durationSec * 0.15) problems.push(`durations sum ${total}s, target ${durationSec}s (±15%)`);
@@ -169,7 +194,7 @@ function planContract(style: DocuStyleDef): string {
  "styleId": "${style.id}",
  "shots": [
    {
-     "kind": one of [${style.shotKinds.join(", ")}],
+     "kind": one of [${Object.keys(KIND_ASSETS).join(", ")}] — LEAN ON [${style.preferredKinds.join(", ")}] for this world,
      "beat": "one sentence: what this shot communicates",
      "durationSec": n (3-10),
      "camera": {"move": "push_in|pull_back|pan_left|pan_right|drift", "intensity": "subtle|medium|strong"},
@@ -182,11 +207,12 @@ function planContract(style: DocuStyleDef): string {
      "attribution": "quote_card byline",
      "accent": "optional hex accent for this shot",
      "threads": [{"from": photoIndex, "to": photoIndex}]  (evidence_board only — connections between its images),
+     "geoQuery": "Real place name, geo_map ONLY (e.g. \\"Antwerp, Belgium\\")",
      "assets": [{"id":"bg","role":"bg|fg|image|cutout","brief":"vivid period/world-correct description, NO text in image","source":"generate|archival","query":"<entity name if source=archival>"}]
    }
  ]
 }
-ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 bg.
+ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). depth_parallax: exactly 1 image (a cinematic scene with a CLEAR foreground subject and a separated background — the engine derives the 2.5D depth layers). geo_map: ZERO assets — supply "geoQuery" (a real place); the map is rendered from live street data. map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 bg.
 SOURCE: use "archival" with a precise "query" ONLY for a real, famous, named person/place that Wikimedia certainly has (e.g. fg of "Henry Ford"); otherwise "generate".`;
 }
 
@@ -202,10 +228,14 @@ export async function planDocu(args: {
   const shotsWanted = Math.max(6, Math.min(8, Math.round(durationSec / 8)));
   const base =
     `You are the showrunner + director of photography of ${style.worldDescription}\n` +
+    `CREATIVE DIRECTION: ${style.creativeDirection}\n` +
     `Design the first ${durationSec} seconds of a video about: ${topic}.\n` +
     (referenceNotes ? `REFERENCE (recreate this beat structure and visual grammar): ${referenceNotes}\n` : "") +
-    `RULES: exactly ${shotsWanted} shots. Shot 1 = ${style.hookKind} HOOK. Last shot = ${style.closerKind} landing the ` +
-    `point. Vary the kinds in between. CINEMATOGRAPHY: ${style.cinematography}\n` +
+    `${CAPABILITY_CATALOG}\n` +
+    `RULES: exactly ${shotsWanted} shots. Compose freely from the palette to tell THIS story — lean on the world's ` +
+    `preferred capabilities but use any when it serves the beat. Shot 1 = ${style.hookKind} HOOK. Last shot = ` +
+    `${style.closerKind} landing the point. Vary the kinds (avoid repeating the same kind back-to-back unless it is ` +
+    `the spine of the world). CINEMATOGRAPHY: ${style.cinematography}\n` +
     `Asset briefs must be vivid, specific, world-correct, with strong tonal separation between subject and ` +
     `surroundings, and contain NO text/lettering in the image itself.\n${planContract(style)}`;
 
@@ -266,6 +296,45 @@ async function removeBackground(imgPath: string, outPng: string, log?: Logger): 
     }
   }
   throw new Error(`documotion: background removal failed (${lastErr})`);
+}
+
+/**
+ * Turn ONE still into 2.5D: get its depth map, then cut a feathered NEAR layer
+ * (alpha PNG) from the brightest (nearest) depth band over the full base. The
+ * renderer parallaxes near-over-base for a camera-through-photo move. Best
+ * effort — returns [] on any failure so the shot degrades to a Ken Burns push.
+ */
+async function deriveDepthLayers(baseImg: string, outDir: string, shotIdx: number, log?: Logger): Promise<string[]> {
+  if (!process.env.FAL_KEY) return [];
+  try {
+    const dataUri = `data:image/jpeg;base64,${(await readFile(baseImg)).toString("base64")}`;
+    const depthPath = join(outDir, `s${shotIdx}_depth.png`);
+    await getDepthMap(dataUri, depthPath, log ?? (() => {}));
+    const nearPng = join(outDir, `s${shotIdx}_near.png`);
+    // depth.ts convention: BRIGHTER = NEARER. Threshold the near band, feather,
+    // scale the mask to the base, alpha-merge onto the base.
+    await run(ffmpegBin(), [
+      "-y",
+      "-i",
+      baseImg,
+      "-i",
+      depthPath,
+      "-filter_complex",
+      // Soft, wide feather on the near/far boundary so the depth cut never
+      // reads as a hard seam; scale the mask to the base, then alpha-merge.
+      "[1:v]format=gray,lutyuv=y='if(gt(val,130),255,0)',gblur=sigma=14[mtmp];" +
+        "[mtmp][0:v]scale2ref=flags=bilinear[m][base];" +
+        "[base][m]alphamerge,format=rgba[o]",
+      "-map",
+      "[o]",
+      nearPng,
+    ]);
+    log?.(`documotion depth: near layer for shot ${shotIdx}`);
+    return [nearPng];
+  } catch (e) {
+    log?.(`documotion depth: shot ${shotIdx} fell back to Ken Burns (${e instanceof Error ? e.message : e})`);
+    return [];
+  }
 }
 
 interface AssetGate {
@@ -381,6 +450,21 @@ export async function generateDocuAssets(
     return { shotIdx: i, id: a.id, role: a.role, path: finalPath };
   });
 
+  // depth_parallax: derive the near 2.5D layer from each scene's base image and
+  // append it (after the base) so buildShotSpecs orders [base, near]. Cached.
+  for (const [i, shot] of plan.shots.entries()) {
+    if (shot.kind !== "depth_parallax") continue;
+    const baseFile = out.find((a) => a.shotIdx === i && a.role === "image");
+    if (!baseFile) continue;
+    const nearPath = join(assetsDir, `s${i}_near.png`);
+    if (existsSync(nearPath) && !fixNotes?.[`${i}:${baseFile.id}`]) {
+      out.push({ shotIdx: i, id: `${baseFile.id}_near`, role: "image", path: nearPath });
+      continue;
+    }
+    const layers = await deriveDepthLayers(baseFile.path, assetsDir, i, log);
+    for (const p of layers) out.push({ shotIdx: i, id: `${baseFile.id}_near`, role: "image", path: p });
+  }
+
   log?.(`documotion assets: ${out.length} ready`);
   return out;
 }
@@ -406,6 +490,8 @@ export async function buildShotSpecs(
   assets: DocuAssetFile[],
   durationSec: number,
   overrides: DocuOverrides = {},
+  geoByShot: Record<number, CityGeo> = {},
+  typeByShot: Record<number, string> = {},
 ): Promise<DocuShotSpec[]> {
   const cache = new Map<string, string>();
   const uri = async (p: string) => {
@@ -439,6 +525,8 @@ export async function buildShotSpecs(
       accent: s.accent,
       titleBoost: o.titleBoost,
       threads: s.threads,
+      geo: geoByShot[i],
+      typeImage: typeByShot[i] ? await uri(typeByShot[i]) : undefined,
     });
   }
   return specs;
@@ -483,7 +571,11 @@ const VERIFIER_DOCTRINE =
   `• evidence_board / collage_pan stills are a moving camera — a still may frame ONE pinned photo or part of the ` +
   `board; that is correct. Judge the photo + red-string + cutout quality, not "missing" other elements.\n` +
   `• Do NOT nitpick photographic taste. regen_asset ONLY for a CLEAR defect: wrong subject, a ragged/half-cut ` +
-  `cutout edge, baked-in text, or a plate that is essentially black/empty. A merely "stylised" or "staged" photo is fine.`;
+  `cutout edge, baked-in text on a PHOTO/PLATE, or a plate that is essentially black/empty. A merely "stylised" or ` +
+  `"staged" photo is fine.\n` +
+  `• EXCEPTION — a quote_card / closing card MAY be a fully DESIGNED TYPOGRAPHIC image (the closing line rendered as ` +
+  `bespoke lettering). Baked lettering is INTENTIONAL there — judge it as typography (legible? on-style?), NEVER flag ` +
+  `it as a baked-text violation and never try to regen it.`;
 
 const VERIFIER_CHECKLIST =
   `THE CRAFT CHECKLIST:\n` +
@@ -578,7 +670,8 @@ async function renderVerifySet(args: {
   // Sample at the most REPRESENTATIVE moment per kind: panning/board shots are
   // sampled early (wide establishing — title + whole composition visible),
   // others mid-shot once everything has animated in.
-  const sampleFrac = (k: DocuShotKind): number => (k === "evidence_board" ? 0.16 : k === "collage_pan" ? 0.22 : 0.55);
+  const sampleFrac = (k: DocuShotKind): number =>
+    k === "evidence_board" ? 0.16 : k === "collage_pan" ? 0.22 : k === "geo_map" ? 0.78 : 0.55;
   let cursor = 0;
   for (const [i, spec] of specs.entries()) {
     frames.push(Math.round(cursor + spec.durationInFrames * sampleFrac(plan.shots[i].kind)));
@@ -649,8 +742,32 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
   }
 
-  // 2. ASSETS (gated, pooled, cached)
+  // 2. ASSETS (gated, pooled, cached) + GEO geometry for any geo_map shots
   let assets = await generateDocuAssets(plan, style, join(runDir, "assets"), log);
+  const geoByShot: Record<number, CityGeo> = {};
+  for (const [i, s] of plan.shots.entries()) {
+    if (s.kind === "geo_map" && s.geoQuery) geoByShot[i] = await fetchCityGeo(s.geoQuery, join(runDir, "geo"), log);
+  }
+  // Bespoke Banana-designed typography for the hero end card(s) — unique
+  // lettering instead of a web font; gated for spelling, CSS fallback.
+  const typeByShot: Record<number, string> = {};
+  for (const [i, s] of plan.shots.entries()) {
+    if (s.kind !== "quote_card" || !s.quote) continue;
+    const out = join(runDir, "assets", `type_${i}.jpg`);
+    const cached = existsSync(out);
+    const words = s.quote.split(/\s+/).filter(Boolean);
+    const made = cached
+      ? out
+      : await bananaTypeCard({
+          text: s.quote,
+          emphasis: words.slice(-2),
+          styleDesc: style.typeStyle,
+          accent: s.accent ?? style.theme.accent,
+          outJpg: out,
+          log,
+        });
+    if (made) typeByShot[i] = made;
+  }
 
   // 3. VERIFY & REFINE on fast stills
   const overridesPath = join(runDir, "overrides.json");
@@ -658,7 +775,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   let verdict: DocuVerdict = {};
   let rounds = 0;
   for (let round = 1; round <= maxRounds + 1; round++) {
-    const specs = await buildShotSpecs(plan, assets, durationSec, overrides);
+    const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, typeByShot);
     const { framePaths, labels } = await renderVerifySet({ plan, specs, style, framesDir: join(runDir, `verify_r${round}`), log });
     verdict = await verifyDocu({ framePaths, labels, worldHint: style.label, log });
     rounds = round;
@@ -671,7 +788,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   if (!verdict.pass) log(`documotion: verifier unsatisfied after ${rounds} rounds — shipping with honest verdict`);
 
   // 4. FINAL 1080p master
-  const specs = await buildShotSpecs(plan, assets, durationSec, overrides);
+  const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, typeByShot);
   const outPath = args.outPath ?? join(runDir, "final.mp4");
   await renderDocuMotion({
     shots: specs,
