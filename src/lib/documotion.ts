@@ -104,6 +104,9 @@ export interface DocuShotPlan {
   /** The spoken VOICEOVER line for this shot — the narrative spine; the visual
    *  ILLUSTRATES it, and the deliverable's VO is these lines in order. */
   narration: string;
+  /** Documentary shot SCALE — drives the framing of the asset brief and the
+   *  scene-setting rhythm (establish wide → tighten to detail). */
+  scale: "establishing" | "wide" | "medium" | "close";
   /** Short note on the visual intent (what to show). */
   beat: string;
   durationSec: number;
@@ -148,8 +151,10 @@ const KIND_ASSETS: Record<DocuShotKind, Partial<Record<DocuAssetRole, [number, n
 const CAPABILITY_CATALOG =
   `CAPABILITY PALETTE (use any when it serves the story; the style says which to LEAN on):\n` +
   `- parallax_portrait: a die-cut person over a plate with a huge NAME title — introduce a person.\n` +
-  `- depth_parallax: ONE cinematic scene given living 2.5D depth, camera drifts THROUGH it — reconstructed moments / ` +
-  `establishing a place (brief MUST describe a clear foreground subject and a separated background). Optional ` +
+  `- depth_parallax: ONE cinematic scene given living 2.5D depth, camera drifts THROUGH it — the WORKHORSE for ` +
+  `ESTABLISHING/WIDE scene-setting (a city skyline, a bank exterior at night, the insider standing across the street, ` +
+  `the crew around a table) AND reconstructed moments (the safe being cracked). Render people IN the scene here, not ` +
+  `as cutouts. (brief MUST describe a clear foreground subject and a separated background). Optional ` +
   `"rackFocus": a cinematic FOCUS PULL — "near_to_far" (start on the foreground subject, pull focus to the depths) or ` +
   `"far_to_near" (reveal the foreground). Use it when the line shifts attention between a close thing and a deeper ` +
   `one (e.g. "a gloved hand on the dial — then the vault yawning behind"); only on a brief with a STRONG close ` +
@@ -180,6 +185,7 @@ function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef)
       continue;
     }
     if (!s.narration?.trim()) problems.push(`shot ${i}: missing narration (the spoken VO line)`);
+    if (!["establishing", "wide", "medium", "close"].includes(s.scale)) problems.push(`shot ${i}: scale must be establishing|wide|medium|close`);
     if (!s.beat?.trim()) problems.push(`shot ${i}: empty beat`);
     if (!(s.durationSec >= 3 && s.durationSec <= 10)) problems.push(`shot ${i}: durationSec must be 3-10`);
     if (!s.camera || !CAMERA_MOVES.includes(s.camera.move) || !CAMERA_INTENSITIES.includes(s.camera.intensity))
@@ -198,6 +204,13 @@ function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef)
   const words = (plan.shots ?? []).map((s) => s.narration ?? "").join(" ").split(/\s+/).filter(Boolean).length;
   const wTarget = Math.round(durationSec * 2.0);
   if (words < wTarget * 0.6 || words > wTarget * 1.4) problems.push(`narration ${words} words, target ~${wTarget} (≈2 words/sec of ${durationSec}s)`);
+  // Documentary shot grammar: SET THE SCENE first, then have scale variety.
+  const scales = (plan.shots ?? []).map((s) => s.scale);
+  const opensWide = scales.slice(0, 2).some((sc) => sc === "establishing" || sc === "wide");
+  if (!opensWide) problems.push("shots 1-2 must ESTABLISH the scene (scale establishing/wide) before any close detail");
+  const wideCount = scales.filter((sc) => sc === "establishing" || sc === "wide").length;
+  if (wideCount < 2) problems.push(`need >=2 establishing/wide scene-setting shots (got ${wideCount})`);
+  if (new Set(scales).size < 2) problems.push("vary the shot scale (don't use one scale for everything)");
   return problems;
 }
 
@@ -209,7 +222,8 @@ function planContract(style: DocuStyleDef): string {
  "shots": [
    {
      "narration": "the EXACT voiceover sentence spoken over this shot (present tense, concrete, cinematic) — the visual must SHOW what this says",
-     "kind": one of [${Object.keys(KIND_ASSETS).join(", ")}] — LEAN ON [${style.preferredKinds.join(", ")}]; pick the one that best SHOWS this line,
+     "scale": "establishing|wide|medium|close — shot 1-2 establish the world; tighten over the video",
+     "kind": one of [${Object.keys(KIND_ASSETS).join(", ")}] — LEAN ON [${style.preferredKinds.join(", ")}]; pick the one that best SHOWS this line at this scale,
      "beat": "<=8 words: the visual intent (what we literally see)",
      "durationSec": n (3-10),
      "camera": {"move": "push_in|pull_back|pan_left|pan_right|drift", "intensity": "subtle|medium|strong"},
@@ -255,12 +269,20 @@ export async function planDocu(args: {
     `coherent arc (hook → who/where → how it unfolds → the turn → the payoff), ~${wordsTarget} words total across ` +
     `exactly ${shotsWanted} beats (one beat = one shot, ~${Math.round(wordsTarget / shotsWanted)} words each). Present ` +
     `tense, concrete, cinematic, no filler. Each beat must flow from the last.\n` +
-    `STEP 2 — VISUALISE each beat: choose the capability that best SHOWS what that line says, and write asset brief(s) ` +
-    `that depict EXACTLY that image. Detect the showable cue in the words and render it: a named real person → ` +
-    `parallax_portrait (archival photo if famous); a real place, especially "from above"/"the city"/"the building" → ` +
-    `geo_map (real streets) or an aerial depth_parallax; a reconstructed MOMENT (the crew at night, the safe being ` +
-    `cracked, a person standing before a building) → depth_parallax of that exact scene; a web of clues/suspects → ` +
-    `evidence_board; a sum/object → object_drop. The viewer should always SEE what they HEAR.\n` +
+    `STEP 2 — SET THE SCENE FIRST (documentary shot grammar): a documentary ESTABLISHES the world before any detail. ` +
+    `Shot 1 (and usually shot 2) must be ESTABLISHING/WIDE — place the viewer in the location: a wide aerial or ` +
+    `exterior of the city/skyline/building, the atmosphere of the place. Introduce PEOPLE IN THEIR ENVIRONMENT as ` +
+    `WIDE/MEDIUM scenes (the lone figure across the street from the bank at night; the crew gathered around a table in ` +
+    `a dim room) — render them INSIDE the scene with depth_parallax, NOT as a floating cutout. Then move WIDE → MEDIUM ` +
+    `→ CLOSE as the story tightens (establish the building → the vault door → the hand on the dial). Vary the scale; ` +
+    `never string together only tight close-ups. Give each shot a "scale".\n` +
+    `STEP 3 — VISUALISE each beat: choose the capability that best SHOWS that line + write asset brief(s) depicting ` +
+    `EXACTLY that image at that SCALE (establishing/wide briefs = lots of environment + the whole place; close briefs ` +
+    `= tight detail). Cue→capability: a real place / "the city" / "the building" / "from above" → geo_map (real ` +
+    `streets) or a WIDE aerial depth_parallax; a person IN a place, the crew, a reconstructed MOMENT → depth_parallax ` +
+    `of that exact wide/medium scene; a deliberate single face-forward REVEAL of a named person → parallax_portrait ` +
+    `(archival photo if famous) — use this sparingly, NOT for every person; a web of clues → evidence_board; a ` +
+    `sum/object → object_drop. The viewer must always SEE what they HEAR.\n` +
     `${CAPABILITY_CATALOG}\n` +
     `RULES: exactly ${shotsWanted} shots. Shot 1 = a strong HOOK (prefer ${style.hookKind}). Last shot = ` +
     `${style.closerKind}. Lean on this world's preferred capabilities but pick whatever SHOWS the line best; vary the ` +
