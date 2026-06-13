@@ -1,16 +1,26 @@
 "use client";
 
 import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import { createPortal } from "react-dom";
 
 export interface ProofImage { src: string; alt: string }
 
 /**
  * Golden proof images — a wrapping grid (everything visible at once, no
- * carousel) where each image opens a full-screen lightbox with prev/next side
- * buttons, a close button, backdrop-click and keyboard (Esc / ← / →).
+ * carousel). Each image opens a full-screen lightbox with prev/next side
+ * buttons, close, backdrop-click and keyboard (Esc / ← / →).
+ *
+ * The overlay is PORTALED to document.body: the cards use backdrop-filter
+ * (.glass), which makes position:fixed anchor to the card, not the viewport —
+ * the portal escapes that containing block so the overlay covers the screen
+ * cleanly and toggling it never shifts the page (no twitch/flicker). The scroll
+ * lock compensates for the scrollbar width so the layout doesn't jump either.
  */
 export function GoldenImages({ images }: { images: ProofImage[] }) {
   const [idx, setIdx] = useState<number | null>(null);
+  const [mounted, setMounted] = useState(false);
+  useEffect(() => setMounted(true), []);
+
   const close = useCallback(() => setIdx(null), []);
   const prev = useCallback(() => setIdx((i) => (i === null ? i : (i - 1 + images.length) % images.length)), [images.length]);
   const next = useCallback(() => setIdx((i) => (i === null ? i : (i + 1) % images.length)), [images.length]);
@@ -23,13 +33,36 @@ export function GoldenImages({ images }: { images: ProofImage[] }) {
       else if (e.key === "ArrowRight") next();
     };
     window.addEventListener("keydown", onKey);
-    const prevOverflow = document.body.style.overflow;
-    document.body.style.overflow = "hidden";
+    // Lock scroll WITHOUT a layout jump: compensate the scrollbar width.
+    const body = document.body;
+    const sbw = window.innerWidth - document.documentElement.clientWidth;
+    const prevOverflow = body.style.overflow;
+    const prevPad = body.style.paddingRight;
+    body.style.overflow = "hidden";
+    if (sbw > 0) body.style.paddingRight = `${sbw}px`;
     return () => {
       window.removeEventListener("keydown", onKey);
-      document.body.style.overflow = prevOverflow;
+      body.style.overflow = prevOverflow;
+      body.style.paddingRight = prevPad;
     };
   }, [idx, close, prev, next]);
+
+  const overlay =
+    idx !== null ? (
+      <div onClick={close} style={OVERLAY} role="dialog" aria-modal="true">
+        <button onClick={(e) => { e.stopPropagation(); prev(); }} style={{ ...NAV, left: 12 }} aria-label="Previous">‹</button>
+        {/* eslint-disable-next-line @next/next/no-img-element -- lightbox image */}
+        <img
+          src={`/golden/${images[idx].src}`}
+          alt={images[idx].alt}
+          onClick={(e) => e.stopPropagation()}
+          style={{ maxWidth: "90vw", maxHeight: "84vh", borderRadius: 10, boxShadow: "0 24px 70px rgba(0,0,0,0.6)" }}
+        />
+        <button onClick={(e) => { e.stopPropagation(); next(); }} style={{ ...NAV, right: 12 }} aria-label="Next">›</button>
+        <button onClick={(e) => { e.stopPropagation(); close(); }} style={CLOSE} aria-label="Close">×</button>
+        <div style={CAPTION}>{images[idx].alt} · {idx + 1}/{images.length}</div>
+      </div>
+    ) : null;
 
   return (
     <>
@@ -56,22 +89,7 @@ export function GoldenImages({ images }: { images: ProofImage[] }) {
           />
         ))}
       </div>
-
-      {idx !== null && (
-        <div onClick={close} style={OVERLAY} role="dialog" aria-modal="true">
-          <button onClick={(e) => { e.stopPropagation(); prev(); }} style={{ ...NAV, left: 12 }} aria-label="Previous">‹</button>
-          {/* eslint-disable-next-line @next/next/no-img-element -- lightbox image */}
-          <img
-            src={`/golden/${images[idx].src}`}
-            alt={images[idx].alt}
-            onClick={(e) => e.stopPropagation()}
-            style={{ maxWidth: "90vw", maxHeight: "84vh", borderRadius: 10, boxShadow: "0 24px 70px rgba(0,0,0,0.6)" }}
-          />
-          <button onClick={(e) => { e.stopPropagation(); next(); }} style={{ ...NAV, right: 12 }} aria-label="Next">›</button>
-          <button onClick={(e) => { e.stopPropagation(); close(); }} style={CLOSE} aria-label="Close">×</button>
-          <div style={CAPTION}>{images[idx].alt} · {idx + 1}/{images.length}</div>
-        </div>
-      )}
+      {mounted && overlay ? createPortal(overlay, document.body) : null}
     </>
   );
 }
@@ -80,9 +98,9 @@ const OVERLAY: CSSProperties = {
   position: "fixed",
   inset: 0,
   zIndex: 1000,
-  background: "rgba(8, 8, 10, 0.88)",
-  backdropFilter: "blur(8px)",
-  WebkitBackdropFilter: "blur(8px)",
+  background: "rgba(8, 8, 10, 0.92)",
+  backdropFilter: "blur(6px)",
+  WebkitBackdropFilter: "blur(6px)",
   display: "flex",
   alignItems: "center",
   justifyContent: "center",
