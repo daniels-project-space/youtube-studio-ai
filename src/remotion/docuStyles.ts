@@ -38,6 +38,8 @@ export interface DocuTheme {
   accent2: string;
   /** Big headline font-family stack. */
   fontDisplay: string;
+  /** Avg glyph width as a fraction of font-size for fontDisplay (autofit). */
+  displayCharW: number;
   /** Label / tag font-family stack. */
   fontLabel: string;
   /** Handwritten note font-family stack. */
@@ -130,6 +132,7 @@ const ARCHIVAL: DocuStyleDef = {
     accent: "#f2c230",
     accent2: "#5ad27e",
     fontDisplay: "Anton, sans-serif",
+    displayCharW: 0.52,
     fontLabel: "Oswald, sans-serif",
     fontHand: "Caveat, cursive",
     plateFilter: "sepia(0.3) contrast(1.04) saturate(0.82)",
@@ -182,6 +185,7 @@ const DETECTIVE: DocuStyleDef = {
     accent: "#c81e25",
     accent2: "#d9a441",
     fontDisplay: "Oswald, sans-serif",
+    displayCharW: 0.64,
     fontLabel: "Special Elite, monospace",
     fontHand: "Caveat, cursive",
     plateFilter: "saturate(0.72) contrast(1.12) brightness(0.92)",

@@ -505,11 +505,14 @@ const ShotBg: React.FC<{ src?: string; cam: CamState; dark?: number; recede?: bo
 
 const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
   const { width, height } = useVideoConfig();
+  const t = useTheme();
   const dur = shot.durationInFrames;
   const cam = useCam(shot.camera, dur, seed);
   const title = shot.title ?? "";
   const boost = shot.titleBoost ?? 1;
-  const titleSize = Math.min(width * 0.115 * boost, (width * 0.68) / Math.max(6, title.length * 0.5));
+  // autofit: title must fit between the hero cutout and the right margin.
+  // available width ≈ 0.73w; glyph width is font-specific (Anton ≈ 0.52, Oswald ≈ 0.64).
+  const titleSize = Math.min(width * 0.115 * boost, (width * 0.73) / Math.max(6, title.length * t.displayCharW));
   return (
     <AbsoluteFill>
       <ShotBg src={shot.bg} cam={cam} recede={Boolean(shot.fg)} />
@@ -724,6 +727,7 @@ const ObjectDropShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, 
   const { fps, width, height } = useVideoConfig();
   const dur = shot.durationInFrames;
   const cam = useCam(shot.camera ?? { move: "push_in", intensity: "medium" }, dur, seed);
+  const t = useTheme();
   const cutouts = shot.cutouts ?? [];
   const boost = shot.titleBoost ?? 1;
   const slots = [
@@ -732,7 +736,7 @@ const ObjectDropShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, 
     { left: 0.42, top: 0.0, w: 0.18, rot: -4 },
   ];
   const title = shot.title ?? "";
-  const titleSize = Math.min(width * 0.105 * boost, (width * 0.86) / Math.max(6, title.length * 0.5));
+  const titleSize = Math.min(width * 0.105 * boost, (width * 0.9) / Math.max(6, title.length * t.displayCharW));
   return (
     <AbsoluteFill>
       <ShotBg src={shot.bg} cam={cam} />
@@ -947,9 +951,25 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, s
           &ldquo;
         </div>
       </AbsoluteFill>
-      <TextScrim cx={50} cy={50} w={74} h={56} opacity={0.4} />
-      <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", padding: `0 ${width * 0.13}px`, transform: camTransform(cam, 1.06) }}>
-        <div style={{ fontFamily: t.fontHand, fontWeight: 700, fontSize: Math.round(width * 0.056), lineHeight: 1.25, color: t.paper, textAlign: "center", textShadow: "0 4px 26px rgba(0,0,0,0.95), 0 2px 6px rgba(0,0,0,0.8)" }}>
+      <TextScrim cx={50} cy={50} w={74} h={56} opacity={0.55} />
+      <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", padding: `0 ${width * 0.11}px`, transform: camTransform(cam, 1.06) }}>
+        {/* dark panel so the quote reads on ANY plate */}
+        <div
+          style={{
+            fontFamily: t.fontHand,
+            fontWeight: 700,
+            fontSize: Math.round(width * 0.058),
+            lineHeight: 1.3,
+            color: t.paper,
+            textAlign: "center",
+            padding: `${height * 0.05}px ${width * 0.05}px`,
+            background: "rgba(8,7,5,0.5)",
+            borderRadius: width * 0.02,
+            boxShadow: "0 0 0 1px rgba(247,241,226,0.08), 0 20px 60px rgba(0,0,0,0.6)",
+            WebkitTextStroke: "0.6px rgba(8,6,4,0.55)",
+            textShadow: "0 4px 26px rgba(0,0,0,0.98), 0 2px 6px rgba(0,0,0,0.9)",
+          }}
+        >
           {words.map((w, i) => (
             <span key={i} style={{ color: i >= words.length - 2 ? (shot.accent ?? t.accent) : t.paper, opacity: interpolate(frame, [6 + i * 2, 12 + i * 2], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }}>
               {w}{" "}

@@ -468,16 +468,27 @@ export interface DocuVerdict {
   note?: string;
 }
 
+const VERIFIER_DOCTRINE =
+  `HOW THIS ENGINE WORKS (critical): the ONLY assets are PHOTOGRAPHS and background PLATES. ALL text — titles, ` +
+  `kickers, labels, evidence tags, quotes, attributions — and the red string, pushpins, highlight boxes, dividers, ` +
+  `torn edges and tape are rendered by the ENGINE on TOP of the images. They are NEVER part of any image. So:\n` +
+  `• NEVER use regen_asset to add, fix, spell or change TEXT — no image should ever contain text.\n` +
+  `• regen_asset is ONLY for a PHOTOGRAPH/PLATE whose subject, style or framing is wrong (wrong content, glossy/` +
+  `modern look, a person awkwardly cropped, a half-dissolved/ragged cutout edge). Reference only asset ids that ` +
+  `exist for that shot (bg, fg, img1, img2…, cutout1…). Do not invent ids.\n` +
+  `• If a TITLE/LABEL/QUOTE is too small or low-contrast, use emphasize_text (the engine enlarges it + strengthens ` +
+  `its scrim). Titles are AUTO-FIT to the frame, so do not report truncation unless text is genuinely unreadable.\n` +
+  `• evidence_board / collage_pan stills are a moving camera — a still may frame ONE pinned photo or part of the ` +
+  `board; that is correct. Judge the photo + red-string + cutout quality, not "missing" other elements.`;
+
 const VERIFIER_CHECKLIST =
   `THE CRAFT CHECKLIST:\n` +
-  `1. TYPE: headlines HUGE (>=12% of frame height), readable at a glance via stroke/shadow/scrim, never lost in a ` +
-  `busy plate; a headline's first characters may tuck behind a foreground cutout (the style) but stay recognisable; ` +
-  `labels/notes legible. 2. CUTOUTS: hero/object/board cutouts read as INTENTIONAL die-cut pieces — clean edges, ` +
-  `no half-dissolved subjects, no awkward truncation, clear separation from the plate. 3. COMPOSITION: one clear ` +
-  `focal point, breathing room, nothing important buried, labels not colliding with faces/titles; on an evidence ` +
-  `board the red string connects pinned photos and the camera rests on a clear clue. 4. STYLE: cohesive world — ` +
-  `same palette/grade/grain across shots. 5. Each frame is labelled with shot index, kind and camera move — flag a ` +
-  `layout that can't survive its move (e.g. title at the frame edge on a strong push_in).`;
+  `1. TYPE: engine headlines HUGE (>=12% of frame height), readable at a glance, never lost in a busy plate; a ` +
+  `headline's first characters may tuck behind a foreground cutout (the style) but stay recognisable. 2. CUTOUTS: ` +
+  `hero/object cutouts read as INTENTIONAL die-cut pieces — clean edges, no half-dissolved subjects, clear ` +
+  `separation from the plate. 3. COMPOSITION: one clear focal point, breathing room, nothing important buried, ` +
+  `labels not colliding with faces/titles. 4. STYLE: cohesive world — same palette/grade/grain across shots. ` +
+  `5. Each frame is labelled with shot index, kind and camera move.`;
 
 /** Score one still per shot and emit typed, actionable critique. */
 export async function verifyDocu(args: {
@@ -489,10 +500,10 @@ export async function verifyDocu(args: {
   const raw = await geminiVisionLocal({
     prompt:
       `You are the FILM VERIFIER for a ${args.worldHint} motion engine. One frame per shot, in order:\n` +
-      `${args.labels.join("\n")}\n${VERIFIER_CHECKLIST}\n` +
+      `${args.labels.join("\n")}\n${VERIFIER_DOCTRINE}\n${VERIFIER_CHECKLIST}\n` +
       `Score 1-10: typeCraft, cutoutCraft, composition, styleMatch, cohesion. pass = every score >=7.\n` +
-      `Then emit ACTIONS — only real problems, max 6, the MOST actionable fix per problem:\n` +
-      `- {"type":"regen_asset","shot":n,"asset":"<id like bg/fg/img1/cutout1>","fix":"<=14 words"}\n` +
+      `Then emit ACTIONS — only real problems, max 6, the MOST actionable fix per problem (obey the doctrine above):\n` +
+      `- {"type":"regen_asset","shot":n,"asset":"<existing id: bg/fg/img1/cutout1>","fix":"<=14 words, PHOTO content/style/framing only, never text"}\n` +
       `- {"type":"emphasize_text","shot":n}  (type too small / weak contrast)\n` +
       `- {"type":"reposition_labels","shot":n,"to":"top_right|bottom_left|bottom_center"}\n` +
       `- {"type":"retime","shot":n,"durationSec":n}\n` +
@@ -513,10 +524,19 @@ export async function verifyDocu(args: {
 /** Apply verifier actions: mutate overrides + collect asset regen notes. */
 export function applyActions(actions: RefineAction[], overrides: DocuOverrides, log?: Logger): { overrides: DocuOverrides; assetFixes: Record<string, string> } {
   const assetFixes: Record<string, string> = {};
+  // Hard guard: text lives in engine overlays, never in images. A regen whose
+  // fix is about text would make Banana bake letters into a plate — convert it
+  // to a text emphasis instead.
+  const TEXT_FIX = /\b(text|title|label|caption|word|words|spell|spelling|letter|heading|headline|quote|name|legible|readable|truncat)/i;
   for (const a of actions ?? []) {
     if (typeof a.shot !== "number") continue;
     const o = (overrides[a.shot] ??= {});
-    switch (a.type) {
+    let type = a.type;
+    if (type === "regen_asset" && (!a.asset || (a.fix && TEXT_FIX.test(a.fix)))) {
+      type = "emphasize_text";
+      log?.(`documotion refine: regen_asset on shot ${a.shot} rewritten to emphasize_text (text is an overlay, not an image)`);
+    }
+    switch (type) {
       case "regen_asset":
         if (a.asset && a.fix) assetFixes[`${a.shot}:${a.asset}`] = a.fix;
         break;
@@ -533,7 +553,7 @@ export function applyActions(actions: RefineAction[], overrides: DocuOverrides, 
         if (a.move && a.intensity) o.camera = { move: a.move, intensity: a.intensity };
         break;
     }
-    log?.(`documotion refine: ${a.type} shot ${a.shot}${a.asset ? `/${a.asset}` : ""}${a.fix ? ` (${a.fix})` : ""}`);
+    log?.(`documotion refine: ${type} shot ${a.shot}${type === "regen_asset" && a.asset ? `/${a.asset}` : ""}${type === "regen_asset" && a.fix ? ` (${a.fix})` : ""}`);
   }
   return { overrides, assetFixes };
 }
@@ -551,9 +571,13 @@ async function renderVerifySet(args: {
   const frames: number[] = [];
   const outPaths: string[] = [];
   const labels: string[] = [];
+  // Sample at the most REPRESENTATIVE moment per kind: panning/board shots are
+  // sampled early (wide establishing — title + whole composition visible),
+  // others mid-shot once everything has animated in.
+  const sampleFrac = (k: DocuShotKind): number => (k === "evidence_board" ? 0.16 : k === "collage_pan" ? 0.22 : 0.55);
   let cursor = 0;
   for (const [i, spec] of specs.entries()) {
-    frames.push(Math.round(cursor + spec.durationInFrames * 0.55));
+    frames.push(Math.round(cursor + spec.durationInFrames * sampleFrac(plan.shots[i].kind)));
     cursor += spec.durationInFrames;
     outPaths.push(join(framesDir, `s${i}.jpg`));
     const s = plan.shots[i];
