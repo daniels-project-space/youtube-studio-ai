@@ -20,7 +20,6 @@ const SERVICES = [
   "elevenlabs", // ELEVENLABS_API_KEY (narration_tts v3 expressive tier; Trigger env var holds the CURRENT key — vault entry may be stale, env wins)
   "pexels", // PEXELS_API_KEY (stock_footage — always-on baseline)
   "pixabay", // PIXABAY_API_KEY (federated stock — free, self-serve)
-  "coverr", // COVERR_API_KEY (federated stock — free, self-serve, api.coverr.co)
   "videvo", // VIDEVO_API_KEY (federated stock — partner; VIDEVO_API_BASE overridable)
   "replicate", // REPLICATE_API_TOKEN
   "fal", // FAL_KEY (FLUX1.1 [pro] thumbnail base via fal.ai)
