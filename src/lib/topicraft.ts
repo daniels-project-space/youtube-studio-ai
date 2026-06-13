@@ -24,14 +24,25 @@
  *   topic_select loop spent up to six per single topic, with its subjective
  *   gate silently dead (it scored via an Anthropic key with no credits).
  *
- * Deps: GEMINI_API_KEY only (vault "gemini"). Outliers/competitors ride
- * youtubeData access when present and degrade LOUDLY to the cached bank.
+ * FULLY STANDALONE — one import surface, like banana/scriptcraft/metacraft:
+ * identity in → judged bet portfolio out. Deps: GEMINI_API_KEY only (vault
+ * "gemini"). Outliers ride youtubeData access when present and degrade LOUDLY
+ * to the Convex bank (loadOutlierBank — the only optional Convex touchpoint,
+ * injected as a client, never required by craftTopics itself). The only
+ * engine import is pure-data golden.ts doctrine; the title gate reuses the
+ * golden metadata module's lintTitle (golden modules may stand on each
+ * other). The evidence fetchers (outliers / Reddit / autocomplete) re-export
+ * from here so ANY surface — pipeline blocks, plan-week-ahead, shorts,
+ * external tools — integrates with this single import:
  *
  *   import { craftTopics, loadOutlierBank, hasTopicraft } from "@/lib/topicraft";
  *   const { bets, bench, evidence } = await craftTopics({ channelName, niche,
  *     persona, topicPool, count, avoid, outliers, competitorTitles, log });
  *   // bets[i]: topic · angle · betType · provisionalTitle · thumbnailMoment ·
  *   //          hookPromise · evidence ("outlier: …") · scores
+ *
+ * Consumers: topic_select (lofiBlocks) · topicOptimizer wrapper
+ * (plan-week-ahead, design-channel) · competitor_research bank refresh.
  */
 import type { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
@@ -41,6 +52,11 @@ import { fetchNicheOutliers, type OutlierVideo } from "@/lib/outliers";
 import { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
 import { embedText, cosine } from "@/lib/embeddings";
 import { resolveVoiceDoctrine } from "@/engine/golden";
+
+// The complete topic-intel surface, re-exported for standalone consumers.
+export { fetchNicheOutliers, type OutlierVideo } from "@/lib/outliers";
+export { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
+export { youtubeSuggest } from "@/lib/metacraft";
 
 export function hasTopicraft(): boolean {
   return hasGeminiKey();
