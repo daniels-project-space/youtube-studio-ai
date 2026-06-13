@@ -477,7 +477,9 @@ const VERIFIER_DOCTRINE =
   `modern look, a person awkwardly cropped, a half-dissolved/ragged cutout edge). Reference only asset ids that ` +
   `exist for that shot (bg, fg, img1, img2…, cutout1…). Do not invent ids.\n` +
   `• If a TITLE/LABEL/QUOTE is too small or low-contrast, use emphasize_text (the engine enlarges it + strengthens ` +
-  `its scrim). Titles are AUTO-FIT to the frame, so do not report truncation unless text is genuinely unreadable.\n` +
+  `its scrim). Titles are AUTO-FIT to the frame. A hero cutout that tucks the FIRST 1-3 characters of a name/title ` +
+  `behind it is the INTENDED style — never call that truncation or a type defect; only flag if the PAYOFF (last) ` +
+  `word is cut off at the frame edge.\n` +
   `• evidence_board / collage_pan stills are a moving camera — a still may frame ONE pinned photo or part of the ` +
   `board; that is correct. Judge the photo + red-string + cutout quality, not "missing" other elements.\n` +
   `• Do NOT nitpick photographic taste. regen_asset ONLY for a CLEAR defect: wrong subject, a ragged/half-cut ` +
