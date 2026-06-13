@@ -119,6 +119,8 @@ export interface DocuShotPlan {
   threads?: DocuThread[];
   /** geo_map: the real place to render (e.g. "Antwerp, Belgium"). */
   geoQuery?: string;
+  /** depth_parallax: a cinematic focus pull between near + far planes. */
+  rackFocus?: "near_to_far" | "far_to_near";
   assets: DocuAssetBrief[];
 }
 
@@ -147,7 +149,11 @@ const CAPABILITY_CATALOG =
   `CAPABILITY PALETTE (use any when it serves the story; the style says which to LEAN on):\n` +
   `- parallax_portrait: a die-cut person over a plate with a huge NAME title — introduce a person.\n` +
   `- depth_parallax: ONE cinematic scene given living 2.5D depth, camera drifts THROUGH it — reconstructed moments / ` +
-  `establishing a place (brief MUST describe a clear foreground subject and a separated background).\n` +
+  `establishing a place (brief MUST describe a clear foreground subject and a separated background). Optional ` +
+  `"rackFocus": a cinematic FOCUS PULL — "near_to_far" (start on the foreground subject, pull focus to the depths) or ` +
+  `"far_to_near" (reveal the foreground). Use it when the line shifts attention between a close thing and a deeper ` +
+  `one (e.g. "a gloved hand on the dial — then the vault yawning behind"); only on a brief with a STRONG close ` +
+  `subject AND a clearly deeper, separated background.\n` +
   `- geo_map: a FULLY RENDERED animated map of a REAL place — streets draw on, buildings rise, a glowing geo-pin ` +
   `drops with radar pulses, camera pushes into the location. Needs a real "geoQuery" (e.g. "Antwerp, Belgium"). ` +
   `Use this to pin a story to a real location.\n` +
@@ -217,6 +223,7 @@ function planContract(style: DocuStyleDef): string {
      "accent": "optional hex accent for this shot",
      "threads": [{"from": photoIndex, "to": photoIndex}]  (evidence_board only — connections between its images),
      "geoQuery": "Real place name, geo_map ONLY (e.g. \\"Antwerp, Belgium\\")",
+     "rackFocus": "depth_parallax ONLY, optional: near_to_far | far_to_near (a cinematic focus pull)",
      "assets": [{"id":"bg","role":"bg|fg|image|cutout","brief":"vivid period/world-correct description, NO text in image","source":"generate|archival","query":"<entity name if source=archival>"}]
    }
  ]
@@ -609,6 +616,7 @@ export async function buildShotSpecs(
       threads: s.threads,
       geo: geoByShot[i],
       typeImage: typeByShot[i] ? await uri(typeByShot[i]) : undefined,
+      rackFocus: s.rackFocus,
     });
   }
   return specs;
