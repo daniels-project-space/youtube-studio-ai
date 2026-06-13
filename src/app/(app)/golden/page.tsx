@@ -76,6 +76,21 @@ const META_PROOFS: { device: string; channel: string; line: string; note: string
 ];
 
 /**
+ * Real topicraft output — evidence-cited, judge-gated BETS from the
+ * certification A/B (legacy engine vs craftTopics across five synthetic
+ * channels, run with YouTube quota dead — autocomplete alone still grounded
+ * every bet). Fanned on the Topic Intel golden card.
+ */
+const TOPIC_PROOFS: { device: string; channel: string; line: string; note: string }[] = [
+  { device: "hero · search", channel: "War Annals: East", line: "The real history behind a Battle of Red Cliffs movie", note: "demand 9 · rides \"battle of red cliffs movie\"" },
+  { device: "help · search", channel: "Cutaway Critique", line: "Why Davy Jones CGI still beats modern VFX", note: "demand 9 · rides \"davy jones cgi\"" },
+  { device: "help · search", channel: "Plain Money", line: "The real difference between index funds vs ETFs", note: "rides the verbatim query people type" },
+  { device: "hero · search", channel: "Antiquity Files", line: "Eric Cline's perfect storm that ended the Bronze Age", note: "demand 9 · rides \"bronze age collapse eric cline\"" },
+  { device: "help · search", channel: "The Quiet Stoa", line: "Marcus Aurelius advice for mornings you dread", note: "demand 8 · fit 9 · ships title + thumb + hook" },
+  { device: "hub · identity", channel: "The Quiet Stoa", line: "Detaching from the opinions of others", note: "fresh 9 · second-slate accumulate, zero repeats" },
+];
+
+/**
  * Golden Pipeline — the template every channel inherits, module by module.
  * Pure static render of the GOLDEN_MODULES registry (src/engine/golden.ts):
  * the engine and this page share one source of truth, so certifying a module
@@ -294,6 +309,37 @@ function ModuleCard({
             })}
           </div>
           <FanCaption>real engine output — titles grounded in live search + the real feed, gated on click and directness</FanCaption>
+        </>
+      )}
+
+      {hero && m.key === "topic-intel" && (
+        <>
+          <div className="golden-fan">
+            {TOPIC_PROOFS.map((p, i) => {
+              const off = i - (TOPIC_PROOFS.length - 1) / 2;
+              return (
+                <div
+                  key={`${p.channel}-${i}`}
+                  className="golden-fan-item golden-fan-card"
+                  title={`${p.channel} — ${p.note}`}
+                  style={
+                    {
+                      "--rot": `${off * 4}deg`,
+                      "--ty": `${Math.round(off * off * 3.2)}px`,
+                      zIndex: i + 1,
+                    } as CSSProperties
+                  }
+                >
+                  <span className="golden-fan-card-device">{p.device}</span>
+                  <span className="golden-fan-card-line">{p.line}</span>
+                  <span className="golden-fan-card-meta">
+                    {p.channel} · {p.note}
+                  </span>
+                </div>
+              );
+            })}
+          </div>
+          <FanCaption>real engine output — every topic is a bet citing the live signal it rides, judged on demand · freshness · fit · packageability</FanCaption>
         </>
       )}
     </article>

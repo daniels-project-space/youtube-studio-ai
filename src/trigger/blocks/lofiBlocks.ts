@@ -108,20 +108,22 @@ function normalizeTopic(s: string): string {
     .replace(/\s+/g, " ");
 }
 
+/**
+ * Record the chosen topic in topic memory — FATAL on failure. An unrecorded
+ * topic silently breaks the no-repeat guarantee on every future run, so the
+ * run must not proceed past selection without the write confirmed.
+ */
 async function recordTopicMemory(
   c: ConvexHttpClient,
   ctx: StageContext,
   topic: string,
 ): Promise<void> {
-  try {
-    await c.mutation(api.topicMemory.recordTopic, {
-      ownerId: ctx.ownerId,
-      channelId: ctx.channelId as Id<"channels">,
-      key: topic,
-    });
-  } catch (e) {
-    ctx.log(`topic_select: recordTopic failed (non-fatal): ${e instanceof Error ? e.message : e}`);
-  }
+  await c.mutation(api.topicMemory.recordTopic, {
+    ownerId: ctx.ownerId,
+    channelId: ctx.channelId as Id<"channels">,
+    key: topic,
+  });
+  ctx.log(`topic_select: recorded "${topic.slice(0, 80)}" in topic memory`);
 }
 
 function styleGrammar(ctx: StageContext): string {
@@ -227,16 +229,23 @@ export const topicSelect: Block = {
     const pool = (ctx.store["topicPool"] as string[] | undefined) ?? id.topicPool ?? [];
     const bannedWords = (id.bannedWords ?? []).filter(Boolean);
 
-    // Used-topic history (hard dedup set + a recent list for prompts).
-    let usedRows: Array<{ key: string }> = [];
-    try {
-      usedRows = (await c.query(api.topicMemory.listForChannel, {
-        channelId,
-      })) as Array<{ key: string }>;
-    } catch (e) {
-      ctx.log(`topic_select: history query failed (continuing): ${e instanceof Error ? e.message : e}`);
-    }
-    const usedNorm = new Set(usedRows.map((r) => normalizeTopic(r.key)));
+    // Used-topic history — FATAL if unreadable: selecting blind against an
+    // unknown history is how channels repeat themselves. The content plan
+    // (plan-week-ahead queue) is committed intent and counts as taken too.
+    const [usedRows, planRows] = await Promise.all([
+      c.query(api.topicMemory.listForChannel, { channelId }) as Promise<Array<{ key: string }>>,
+      c
+        .query(api.contentPlan.listPlan, { ownerId: ctx.ownerId, channelId })
+        .catch((e) => {
+          ctx.log(`topic_select: plan query failed (continuing without plan): ${e instanceof Error ? e.message : e}`);
+          return [] as Array<{ topic: string }>;
+        }),
+    ]);
+    const plannedTopics = (planRows as Array<{ topic: string }>).map((p) => p.topic);
+    const usedNorm = new Set([
+      ...usedRows.map((r) => normalizeTopic(r.key)),
+      ...plannedTopics.map(normalizeTopic),
+    ]);
     const recentList = usedRows.map((r) => r.key).slice(-40);
     // Phase 7: bias toward topics like past high-retention winners ("" until enough data).
     const perfCtx = await loadPerformanceContext(ctx.keyPrefix);
@@ -317,7 +326,7 @@ export const topicSelect: Block = {
       topicPool: pool,
       bannedWords,
       count: 1,
-      avoid: usedRows.map((r) => r.key),
+      avoid: [...usedRows.map((r) => r.key), ...plannedTopics],
       perfContext: perfCtx || undefined,
       competitorTitles,
       outliers,

@@ -309,7 +309,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "metadata, thumbnail and hook engines downstream. Two LLM calls per slate; loud failure; " +
       "quota-immune outlier reads.",
     gates: ["evidence citation verified vs real signals", "semantic dedupe vs done + planned", "metacraft title lint on every bet", "demand / freshness / fit / packageability ≥ 7", "banned words / stale years"],
-    status: "active",
+    status: "golden",
   },
   {
     key: "show-bible",
