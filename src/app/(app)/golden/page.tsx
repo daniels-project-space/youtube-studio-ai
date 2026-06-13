@@ -1,6 +1,7 @@
 import type { CSSProperties } from "react";
 import { GOLDEN_MODULES, GOLDEN_SPINE, type GoldenModule } from "@/engine/golden";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
+import { GoldenImages } from "./GoldenImages";
 
 /** Real banana-engine thumbnails — every one a first-try judge-gated SHIP. */
 const PROOFS: { src: string; alt: string }[] = [
@@ -175,21 +176,14 @@ function ModuleCard({ module: m, hero = false, stageIndex }: { module: GoldenMod
 
 /* ----------------------------- proof strips ---------------------------- */
 
-const STRIP: CSSProperties = { display: "flex", gap: "0.5rem", overflowX: "auto", marginTop: "0.9rem", paddingTop: "0.85rem", paddingBottom: "0.2rem", borderTop: "1px solid var(--color-border)" };
-const CARD: CSSProperties = { flex: "0 0 188px", background: "var(--color-surface-solid)", border: "1px solid var(--color-border)", borderRadius: 8, padding: "0.5rem 0.6rem", display: "grid", gap: "0.25rem" };
+const STRIP: CSSProperties = { display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(180px, 1fr))", gap: "0.5rem", marginTop: "0.9rem", paddingTop: "0.85rem", borderTop: "1px solid var(--color-border)" };
+const CARD: CSSProperties = { background: "var(--color-surface-solid)", border: "1px solid var(--color-border)", borderRadius: 8, padding: "0.5rem 0.6rem", display: "grid", gap: "0.25rem" };
 const DEVICE: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "0.58rem", letterSpacing: "0.04em", color: "var(--color-gold)", textTransform: "uppercase" };
 const LINE3: CSSProperties = { fontSize: "0.74rem", lineHeight: 1.32, display: "-webkit-box", WebkitLineClamp: 3, WebkitBoxOrient: "vertical", overflow: "hidden" };
 const METAT: CSSProperties = { fontFamily: "var(--font-mono)", fontSize: "0.58rem", color: "var(--color-faint)" };
 
 function imageStrip(srcs: { src: string; alt: string }[]) {
-  return (
-    <div style={STRIP}>
-      {srcs.map((p) => (
-        // eslint-disable-next-line @next/next/no-img-element -- static proof strip
-        <img key={p.src} src={`/golden/${p.src}`} alt={p.alt} title={p.alt} loading="lazy" style={{ height: 72, borderRadius: 7, flex: "0 0 auto", border: "1px solid var(--color-border)" }} />
-      ))}
-    </div>
-  );
+  return <GoldenImages images={srcs} />;
 }
 
 function textStrip(items: TextProof[]) {
