@@ -41,6 +41,22 @@ export function activeProviders(): string[] {
   return PROVIDERS.filter((p) => p.hasKey()).map((p) => p.name);
 }
 
+/** A clip counts as 4K when its long edge is UHD/DCI (≈3840+). */
+export function is4k(c: { width: number; height: number }): boolean {
+  return Math.max(c.width, c.height) >= 3800;
+}
+
+/**
+ * 4K-only is the DEFAULT for every channel (operator law 2026-06-13: "only 4k
+ * footage gets taken"). Flip with FOOTAGE_4K_ONLY=0 to fall back to
+ * highest-available (so 1080p sources like Pixabay/Coverr-free contribute).
+ * NOTE: under 4K-only, free Pixabay (1080p cap) and free Coverr (4K is paid)
+ * are filtered out — Pexels carries 4K.
+ */
+export function fourKOnly(): boolean {
+  return process.env.FOOTAGE_4K_ONLY !== "0";
+}
+
 /**
  * Technical quality score (v1 method + UHD bonus): prefer 4K/HD and clips long
  * enough to give trim room. Ranks candidates before the relevance gate.
@@ -154,7 +170,16 @@ const pixabay: Provider = {
 /* -------------------------------- Coverr ------------------------------- */
 
 interface CoverrUrls { mp4?: string; mp4_download?: string; mp4_preview?: string }
-interface CoverrVideo { id?: string; urls?: CoverrUrls; max_height?: number; max_width?: number; aspect_ratio?: string; duration?: number }
+interface CoverrRendition { width?: number; height?: number; url?: string; is_plus?: boolean }
+interface CoverrVideo {
+  id?: string;
+  urls?: CoverrUrls;
+  max_height?: number;
+  max_width?: number;
+  aspect_ratio?: string;
+  duration?: number | string;
+  default_variant?: { renditions?: CoverrRendition[] };
+}
 
 const coverr: Provider = {
   name: "coverr",
@@ -173,13 +198,23 @@ const coverr: Provider = {
     const rows = json.hits ?? json.data ?? [];
     const out: FootageClip[] = [];
     for (const v of rows) {
-      const link = v.urls?.mp4_download ?? v.urls?.mp4 ?? v.urls?.mp4_preview;
+      // Prefer an explicit is_plus:false rendition when the response carries
+      // renditions (single-video shape); the search response usually does not.
+      const free = (v.default_variant?.renditions ?? [])
+        .filter((r) => r.is_plus !== true && r.url && r.width && r.height)
+        .sort((a, b) => (b.width ?? 0) - (a.width ?? 0))[0];
+      const link = free?.url ?? v.urls?.mp4_download ?? v.urls?.mp4 ?? v.urls?.mp4_preview;
       if (!link) continue;
-      const w = v.max_width ?? 0;
-      const h = v.max_height ?? 0;
-      // Coverr clips are predominantly landscape; honor an explicit portrait ask.
-      if (orientation === "portrait" && w && h && w > h) continue;
-      out.push({ url: link, width: w, height: h, durationSec: v.duration ?? 0, query, provider: "coverr" });
+      // TRUE downloaded resolution: Coverr embeds the rendition in the file
+      // name (/{base}/1080p.mp4). The search response's max_height is the
+      // SOURCE max, but the free default is ≤1080p (the 4K "original" is
+      // is_plus/paid) — so the URL height is what actually downloads. Never
+      // trust max_height here, or 1080p files masquerade as 4K.
+      const m = link.match(/\/(\d+)p\.mp4/);
+      const h = free?.height ?? (m ? Number(m[1]) : Math.min(v.max_height ?? 1080, 1080));
+      const w = free?.width ?? (v.aspect_ratio === "16:9" || !v.aspect_ratio ? Math.round((h * 16) / 9) : Math.round((h * 9) / 16));
+      if (orientation === "portrait" && w > h) continue;
+      out.push({ url: link, width: w, height: h, durationSec: Number(v.duration) || 0, query, provider: "coverr" });
     }
     return out;
   },
@@ -245,7 +280,17 @@ export async function searchFootage(
       }),
     ),
   );
-  // Merge, drop empties, rank best-first so the block's top-N slice spans
-  // providers (a great Pixabay 4K clip can outrank a soft Pexels one).
-  return results.flat().filter((c) => c.url).sort((a, b) => scoreClip(b) - scoreClip(a));
+  // Merge, drop empties. 4K-only by default (every channel): keep only UHD
+  // clips so a 1080p source never sneaks into the timeline.
+  let merged = results.flat().filter((c) => c.url);
+  if (fourKOnly()) {
+    const before = merged.length;
+    merged = merged.filter(is4k);
+    if (before > merged.length && merged.length === 0) {
+      console.warn(`footage: 4K-only dropped all ${before} candidate(s) for "${query}" (no UHD across providers)`);
+    }
+  }
+  // Rank best-first so the block's top-N slice spans providers (a great 4K
+  // clip from any source outranks a soft one).
+  return merged.sort((a, b) => scoreClip(b) - scoreClip(a));
 }
