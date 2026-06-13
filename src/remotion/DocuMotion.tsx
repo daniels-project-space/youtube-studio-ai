@@ -91,6 +91,8 @@ export interface DocuShotSpec {
   geo?: DocuGeo;
   /** quote_card: a Banana-designed type card (data URI) — overrides CSS type. */
   typeImage?: string;
+  /** depth_parallax: animate a focus pull between the near and far planes. */
+  rackFocus?: "near_to_far" | "far_to_near";
 }
 
 export type DocuMotionProps = {
@@ -481,6 +483,15 @@ const cutoutFilter =
 
 /* ----------------------------------------------------------------- shots -- */
 
+/**
+ * MODULE RULE — TEXT / CUTOUT SEPARATION (applies to EVERY shot):
+ * foreground cutouts (hero portraits, dropped objects, pinned photos) render
+ * BEFORE the title/label text, so headlines are ALWAYS on top and can never be
+ * hidden by a cutout's parallax; and titles are positioned in a zone clear of
+ * the hero (e.g. parallax_portrait starts the title ~0.41w, right of the ≤38%
+ * hero). Keep this invariant when adding shots: render order = plate → cutouts
+ * → text overlays, with text in a non-overlapping zone.
+ */
 const ShotBg: React.FC<{ src?: string; cam: CamState; dark?: number; recede?: boolean }> = ({ src, cam, dark = 0.3, recede }) => {
   const t = useTheme();
   return (
@@ -562,6 +573,7 @@ const ParallaxPortraitShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ 
  * THROUGH the photograph. With no near layers it degrades to a clean Ken Burns.
  */
 const DepthParallaxShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
+  const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
   const t = useTheme();
   const dur = shot.durationInFrames;
@@ -572,16 +584,29 @@ const DepthParallaxShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ sho
   const title = shot.title ?? "";
   const boost = shot.titleBoost ?? 1;
   const titleSize = Math.min(width * 0.105 * boost, (width * 0.86) / Math.max(6, title.length * t.displayCharW));
+
+  // RACK FOCUS — animate depth-of-field driven by the depth layers: hold focus,
+  // then pull it from the near plane to the far plane (or vice-versa). Needs a
+  // near layer; parallax is gentled while racking so the planes stay aligned.
+  const canRack = Boolean(shot.rackFocus) && near.length > 0;
+  const maxBlur = width * 0.011;
+  const fp = interpolate(frame, [dur * 0.22, dur * 0.62], [0, 1], { easing: Easing.inOut(Easing.cubic), extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const focusFar = shot.rackFocus === "far_to_near" ? 1 - fp : fp; // 0 = focus near, 1 = focus far
+  const nearBlur = canRack ? maxBlur * focusFar : 0;
+  const baseBlur = canRack ? maxBlur * (1 - focusFar) : 0;
+  const nearDepth = canRack ? 1.3 : 1.55;
+  const blur = (px: number) => (px > 0.2 ? ` blur(${px.toFixed(2)}px)` : "");
+
   return (
     <AbsoluteFill style={{ backgroundColor: t.base, overflow: "hidden" }}>
       {base ? (
-        <Img src={base} style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", transform: camTransform(cam, 1.0), filter: t.plateFilter }} />
+        <Img src={base} style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", transform: camTransform(cam, 1.0), filter: `${t.plateFilter}${blur(baseBlur)}` }} />
       ) : null}
       {near.map((src, i) => (
         <Img
           key={i}
           src={src}
-          style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", transform: camTransform(cam, 1.55 + i * 0.45), filter: t.plateFilter }}
+          style={{ position: "absolute", width: "100%", height: "100%", objectFit: "cover", transform: camTransform(cam, nearDepth + i * 0.45), filter: `${t.plateFilter}${blur(nearBlur)}` }}
         />
       ))}
       <AbsoluteFill style={{ background: "linear-gradient(180deg, rgba(8,8,6,0.28) 0%, rgba(8,8,6,0) 34%, rgba(8,8,6,0.5) 100%)" }} />

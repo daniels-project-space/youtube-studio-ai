@@ -34,7 +34,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { geminiJsonPro, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
+import { geminiJson, geminiJsonPro, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
 import { generateBananaImage, bananaTypeCard } from "@/lib/banana";
 import { getDepthMap } from "@/lib/depth";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
@@ -101,6 +101,13 @@ export interface DocuAssetBrief {
 
 export interface DocuShotPlan {
   kind: DocuShotKind;
+  /** The spoken VOICEOVER line for this shot — the narrative spine; the visual
+   *  ILLUSTRATES it, and the deliverable's VO is these lines in order. */
+  narration: string;
+  /** Documentary shot SCALE — drives the framing of the asset brief and the
+   *  scene-setting rhythm (establish wide → tighten to detail). */
+  scale: "establishing" | "wide" | "medium" | "close";
+  /** Short note on the visual intent (what to show). */
   beat: string;
   durationSec: number;
   camera: DocuCamera;
@@ -115,6 +122,8 @@ export interface DocuShotPlan {
   threads?: DocuThread[];
   /** geo_map: the real place to render (e.g. "Antwerp, Belgium"). */
   geoQuery?: string;
+  /** depth_parallax: a cinematic focus pull between near + far planes. */
+  rackFocus?: "near_to_far" | "far_to_near";
   assets: DocuAssetBrief[];
 }
 
@@ -142,8 +151,14 @@ const KIND_ASSETS: Record<DocuShotKind, Partial<Record<DocuAssetRole, [number, n
 const CAPABILITY_CATALOG =
   `CAPABILITY PALETTE (use any when it serves the story; the style says which to LEAN on):\n` +
   `- parallax_portrait: a die-cut person over a plate with a huge NAME title — introduce a person.\n` +
-  `- depth_parallax: ONE cinematic scene given living 2.5D depth, camera drifts THROUGH it — reconstructed moments / ` +
-  `establishing a place (brief MUST describe a clear foreground subject and a separated background).\n` +
+  `- depth_parallax: ONE cinematic scene given living 2.5D depth, camera drifts THROUGH it — the WORKHORSE for ` +
+  `ESTABLISHING/WIDE scene-setting (a city skyline, a bank exterior at night, the insider standing across the street, ` +
+  `the crew around a table) AND reconstructed moments (the safe being cracked). Render people IN the scene here, not ` +
+  `as cutouts. (brief MUST describe a clear foreground subject and a separated background). Optional ` +
+  `"rackFocus": a cinematic FOCUS PULL — "near_to_far" (start on the foreground subject, pull focus to the depths) or ` +
+  `"far_to_near" (reveal the foreground). Use it when the line shifts attention between a close thing and a deeper ` +
+  `one (e.g. "a gloved hand on the dial — then the vault yawning behind"); only on a brief with a STRONG close ` +
+  `subject AND a clearly deeper, separated background.\n` +
   `- geo_map: a FULLY RENDERED animated map of a REAL place — streets draw on, buildings rise, a glowing geo-pin ` +
   `drops with radar pulses, camera pushes into the location. Needs a real "geoQuery" (e.g. "Antwerp, Belgium"). ` +
   `Use this to pin a story to a real location.\n` +
@@ -169,6 +184,8 @@ function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef)
       problems.push(`shot ${i}: unknown kind "${s.kind}" (use one of: ${Object.keys(KIND_ASSETS).join(", ")})`);
       continue;
     }
+    if (!s.narration?.trim()) problems.push(`shot ${i}: missing narration (the spoken VO line)`);
+    if (!["establishing", "wide", "medium", "close"].includes(s.scale)) problems.push(`shot ${i}: scale must be establishing|wide|medium|close`);
     if (!s.beat?.trim()) problems.push(`shot ${i}: empty beat`);
     if (!(s.durationSec >= 3 && s.durationSec <= 10)) problems.push(`shot ${i}: durationSec must be 3-10`);
     if (!s.camera || !CAMERA_MOVES.includes(s.camera.move) || !CAMERA_INTENSITIES.includes(s.camera.intensity))
@@ -184,6 +201,16 @@ function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef)
   }
   const total = (plan.shots ?? []).reduce((a, s) => a + (s.durationSec || 0), 0);
   if (Math.abs(total - durationSec) > durationSec * 0.15) problems.push(`durations sum ${total}s, target ${durationSec}s (±15%)`);
+  const words = (plan.shots ?? []).map((s) => s.narration ?? "").join(" ").split(/\s+/).filter(Boolean).length;
+  const wTarget = Math.round(durationSec * 2.0);
+  if (words < wTarget * 0.6 || words > wTarget * 1.4) problems.push(`narration ${words} words, target ~${wTarget} (≈2 words/sec of ${durationSec}s)`);
+  // Documentary shot grammar: SET THE SCENE first, then have scale variety.
+  const scales = (plan.shots ?? []).map((s) => s.scale);
+  const opensWide = scales.slice(0, 2).some((sc) => sc === "establishing" || sc === "wide");
+  if (!opensWide) problems.push("shots 1-2 must ESTABLISH the scene (scale establishing/wide) before any close detail");
+  const wideCount = scales.filter((sc) => sc === "establishing" || sc === "wide").length;
+  if (wideCount < 2) problems.push(`need >=2 establishing/wide scene-setting shots (got ${wideCount})`);
+  if (new Set(scales).size < 2) problems.push("vary the shot scale (don't use one scale for everything)");
   return problems;
 }
 
@@ -194,8 +221,10 @@ function planContract(style: DocuStyleDef): string {
  "styleId": "${style.id}",
  "shots": [
    {
-     "kind": one of [${Object.keys(KIND_ASSETS).join(", ")}] — LEAN ON [${style.preferredKinds.join(", ")}] for this world,
-     "beat": "one sentence: what this shot communicates",
+     "narration": "the EXACT voiceover sentence spoken over this shot (present tense, concrete, cinematic) — the visual must SHOW what this says",
+     "scale": "establishing|wide|medium|close — shot 1-2 establish the world; tighten over the video",
+     "kind": one of [${Object.keys(KIND_ASSETS).join(", ")}] — LEAN ON [${style.preferredKinds.join(", ")}]; pick the one that best SHOWS this line at this scale,
+     "beat": "<=8 words: the visual intent (what we literally see)",
      "durationSec": n (3-10),
      "camera": {"move": "push_in|pull_back|pan_left|pan_right|drift", "intensity": "subtle|medium|strong"},
      "title": "BIG headline <=3 words (parallax_portrait / object_drop / evidence_board)",
@@ -208,12 +237,15 @@ function planContract(style: DocuStyleDef): string {
      "accent": "optional hex accent for this shot",
      "threads": [{"from": photoIndex, "to": photoIndex}]  (evidence_board only — connections between its images),
      "geoQuery": "Real place name, geo_map ONLY (e.g. \\"Antwerp, Belgium\\")",
+     "rackFocus": "depth_parallax ONLY, optional: near_to_far | far_to_near (a cinematic focus pull)",
      "assets": [{"id":"bg","role":"bg|fg|image|cutout","brief":"vivid period/world-correct description, NO text in image","source":"generate|archival","query":"<entity name if source=archival>"}]
    }
  ]
 }
 ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). depth_parallax: exactly 1 image (a cinematic scene with a CLEAR foreground subject and a separated background — the engine derives the 2.5D depth layers). geo_map: ZERO assets — supply "geoQuery" (a real place); the map is rendered from live street data. map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 bg.
-SOURCE: use "archival" with a precise "query" ONLY for a real, famous, named person/place that Wikimedia certainly has (e.g. fg of "Henry Ford"); otherwise "generate".`;
+SOURCE: use "archival" with a precise "query" ONLY for a real, famous, named person/place that Wikimedia certainly has (e.g. fg of "Henry Ford"); otherwise "generate".
+CUE-DRIVEN ASSETS: every asset brief must depict EXACTLY what its shot's narration line says — render the concrete image the words evoke. If the line names the crew → a scene of the crew (e.g. dark-clad figures in a dim vault corridor at night); a place from above → an aerial/overhead scene of that place; a person at a location → that person in front of that location; an object → that object. Do NOT use generic filler.
+ON-SCREEN TEXT TONE: titles/kickers/labels/circleLabels must be SHORT, dramatic and tonally on-point for a premium documentary — evocative, never awkward, literal, redundant or accidentally COMICAL. (Bad: an evidence shot titled "THE TRASH". Good: "THE SLIP", "ONE MISTAKE", "THE INSIDER".) When unsure, omit the title and let the imagery speak.`;
 }
 
 /** Gemini Pro plans the shot list for the chosen style. One retry, then loud. */
@@ -226,18 +258,39 @@ export async function planDocu(args: {
 }): Promise<DocuPlan> {
   const { topic, style, referenceNotes, durationSec, log } = args;
   const shotsWanted = Math.max(6, Math.min(8, Math.round(durationSec / 8)));
+  const wordsTarget = Math.round(durationSec * 2.0);
   const base =
-    `You are the showrunner + director of photography of ${style.worldDescription}\n` +
+    `You are the writer + director of ${style.worldDescription}\n` +
     `CREATIVE DIRECTION: ${style.creativeDirection}\n` +
-    `Design the first ${durationSec} seconds of a video about: ${topic}.\n` +
-    (referenceNotes ? `REFERENCE (recreate this beat structure and visual grammar): ${referenceNotes}\n` : "") +
+    `Make the first ${durationSec} seconds of a documentary about: ${topic}.\n` +
+    (referenceNotes ? `REFERENCE (beats + visual grammar to honour): ${referenceNotes}\n` : "") +
+    `WORK IN THIS ORDER:\n` +
+    `STEP 1 — write the NARRATION: a gripping, FACTUAL voiceover that carries the viewer through the story as ONE ` +
+    `coherent arc (hook → who/where → how it unfolds → the turn → the payoff), ~${wordsTarget} words total across ` +
+    `exactly ${shotsWanted} beats (one beat = one shot, ~${Math.round(wordsTarget / shotsWanted)} words each). Present ` +
+    `tense, concrete, cinematic, no filler. Each beat must flow from the last.\n` +
+    `STEP 2 — SET THE SCENE FIRST (documentary shot grammar): a documentary ESTABLISHES the world before any detail. ` +
+    `Shot 1 (and usually shot 2) must be ESTABLISHING/WIDE — place the viewer in the location: a wide aerial or ` +
+    `exterior of the city/skyline/building, the atmosphere of the place. Introduce PEOPLE IN THEIR ENVIRONMENT as ` +
+    `WIDE/MEDIUM scenes (the lone figure across the street from the bank at night; the crew gathered around a table in ` +
+    `a dim room) — render them INSIDE the scene with depth_parallax, NOT as a floating cutout. Then move WIDE → MEDIUM ` +
+    `→ CLOSE as the story tightens (establish the building → the vault door → the hand on the dial). Vary the scale; ` +
+    `never string together only tight close-ups. Give each shot a "scale".\n` +
+    `STEP 3 — VISUALISE each beat: choose the capability that best SHOWS that line + write asset brief(s) depicting ` +
+    `EXACTLY that image at that SCALE (establishing/wide briefs = lots of environment + the whole place; close briefs ` +
+    `= tight detail). Cue→capability: a real place / "the city" / "the building" / "from above" → geo_map (real ` +
+    `streets) or a WIDE aerial depth_parallax; a person IN a place, the crew, a reconstructed MOMENT → depth_parallax ` +
+    `of that exact wide/medium scene; a deliberate single face-forward REVEAL of a named person → parallax_portrait ` +
+    `(archival photo if famous) — use this sparingly, NOT for every person; a web of clues → evidence_board; a ` +
+    `sum/object → object_drop. The viewer must always SEE what they HEAR.\n` +
     `${CAPABILITY_CATALOG}\n` +
-    `RULES: exactly ${shotsWanted} shots. Compose freely from the palette to tell THIS story — lean on the world's ` +
-    `preferred capabilities but use any when it serves the beat. Shot 1 = ${style.hookKind} HOOK. Last shot = ` +
-    `${style.closerKind} landing the point. Vary the kinds (avoid repeating the same kind back-to-back unless it is ` +
-    `the spine of the world). CINEMATOGRAPHY: ${style.cinematography}\n` +
-    `Asset briefs must be vivid, specific, world-correct, with strong tonal separation between subject and ` +
-    `surroundings, and contain NO text/lettering in the image itself.\n${planContract(style)}`;
+    `RULES: exactly ${shotsWanted} shots. Shot 1 = a strong HOOK (prefer ${style.hookKind}). Last shot = ` +
+    `${style.closerKind}. Lean on this world's preferred capabilities but pick whatever SHOWS the line best; vary the ` +
+    `kinds (no identical kind back-to-back unless it is the world's spine). Only choose a visual you can render ` +
+    `CONVINCINGLY — if a beat is abstract, reframe its narration to a concrete, showable image. CINEMATOGRAPHY: ` +
+    `${style.cinematography}\n` +
+    `Asset briefs: vivid, specific, world-correct, strong subject/background separation, NO text/lettering in the ` +
+    `image.\n${planContract(style)}`;
 
   let feedback = "";
   let lastProblems: string[] = [];
@@ -246,13 +299,63 @@ export async function planDocu(args: {
     plan.styleId = style.id;
     lastProblems = validatePlan(plan, durationSec, style);
     if (!lastProblems.length) {
-      log?.(`documotion plan [${style.id}]: "${plan.title}" — ${plan.shots.length} shots OK`);
+      await lintLabels(plan, style, log);
+      log?.(`documotion plan [${style.id}]: "${plan.title}" — ${plan.shots.length} shots, narration-driven`);
       return plan;
     }
     log?.(`documotion plan attempt ${attempt + 1} rejected: ${lastProblems.join("; ")}`);
     feedback = `\nYOUR PREVIOUS ATTEMPT FAILED VALIDATION — fix exactly these: ${lastProblems.join("; ")}`;
   }
   throw new Error(`documotion: plan failed validation twice (${lastProblems.join("; ")})`);
+}
+
+/**
+ * On-screen TEXT tonal lint — review every title/kicker/label/circleLabel in
+ * the context of its shot's narration and rewrite anything awkward, literal,
+ * redundant or accidentally comical (the "THE TRASH" problem). Mutates the plan
+ * in place; never throws (the plan is already valid).
+ */
+async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Promise<void> {
+  const items = plan.shots.map((s, i) => ({
+    i,
+    kind: s.kind,
+    narration: s.narration,
+    title: s.title ?? "",
+    kicker: s.kicker ?? "",
+    circleLabel: s.circleLabel ?? "",
+    labels: (s.labels ?? []).map((l) => l.text),
+  }));
+  const hasText = items.some((it) => it.title || it.kicker || it.circleLabel || it.labels.length);
+  if (!hasText) return;
+  try {
+    const res = await geminiJson<{ fixes?: { i: number; title?: string; kicker?: string; circleLabel?: string; labels?: string[] }[] }>({
+      prompt:
+        `You are the typography editor of a premium ${style.label} documentary. Below is the on-screen TEXT for each ` +
+        `shot with its voiceover. A title/label is a DRAMATIC card — it must name the SIGNIFICANCE or stakes, never a ` +
+        `mundane object literally. HARD RULE: if a title literally names something ordinary (trash, sandwich, bag, ` +
+        `crumbs, food), it reads as accidentally COMICAL at huge scale — you MUST replace it with the dramatic meaning ` +
+        `(e.g. title "THE TRASH" over a discarded-evidence shot → "ONE MISTAKE" or "THE SLIP"; "THE SANDWICH" → ` +
+        `"THE EVIDENCE"). Also fix anything clunky, redundant or off-tone. Keep genuinely strong text unchanged. Set a ` +
+        `field to "" to drop it and let the image speak. Titles <=3 words, labels <=3 words, circleLabel one word.\n` +
+        `SHOTS:\n${JSON.stringify(items)}\n` +
+        `Return STRICT JSON {"fixes":[{"i":n,"title":"...","kicker":"...","circleLabel":"...","labels":["..."]}]} — ` +
+        `include EVERY shot you changed; you MUST change any literal mundane-object title.`,
+      maxTokens: 1500,
+      temperature: 0.2,
+    });
+    let n = 0;
+    for (const f of res.fixes ?? []) {
+      const s = plan.shots[f.i];
+      if (!s) continue;
+      if (f.title !== undefined) { s.title = f.title || undefined; n++; }
+      if (f.kicker !== undefined) { s.kicker = f.kicker || undefined; n++; }
+      if (f.circleLabel !== undefined) { s.circleLabel = f.circleLabel || undefined; n++; }
+      if (f.labels !== undefined && s.labels) { s.labels = f.labels.map((t, k) => ({ ...s.labels![k], text: t })).filter((l) => l.text); n++; }
+    }
+    if (n) log?.(`documotion label lint: rewrote ${n} on-screen text item(s)`);
+  } catch (e) {
+    log?.(`documotion label lint skipped (${e instanceof Error ? e.message : e})`);
+  }
 }
 
 /* ---------------------------------------------------------------- assets -- */
@@ -422,10 +525,18 @@ export async function generateDocuAssets(
 
     // GENERATE source (default + archival fallback): Banana behind the gate.
     if (!got) {
+      // Crisp by default; depth_parallax plates must be FULLY in focus so the
+      // engine's 2.5D parallax supplies the depth (baked bokeh fights it +
+      // leaves focus-edge artefacts when the layers move).
+      const QUALITY = " Ultra-sharp, crisp, high detail, no motion blur.";
+      const focus =
+        plan.shots[i].kind === "depth_parallax"
+          ? " CRITICAL: the ENTIRE frame is in SHARP focus front-to-back (deep depth of field) — NO bokeh, NO background blur, NO lens blur; the depth must read from layout/scale, never from focus."
+          : "";
       let fix = externalFix ?? "";
       let accepted = false;
       for (let attempt = 0; attempt < 2; attempt++) {
-        const prompt = `${framing.prefix}${a.brief}.${style.stillStyle}` + (fix ? ` CRITICAL FIX FROM THE LAST ATTEMPT: ${fix}.` : "");
+        const prompt = `${framing.prefix}${a.brief}.${style.stillStyle}${QUALITY}${focus}` + (fix ? ` CRITICAL FIX FROM THE LAST ATTEMPT: ${fix}.` : "");
         log?.(`documotion asset s${i}/${a.id} (${a.role})${fix ? ` [retry]` : ""}…`);
         const bytes = await generateBananaImage({ prompt, aspectRatio: framing.ar });
         await writeFile(rawPath, bytes);
@@ -527,6 +638,7 @@ export async function buildShotSpecs(
       threads: s.threads,
       geo: geoByShot[i],
       typeImage: typeByShot[i] ? await uri(typeByShot[i]) : undefined,
+      rackFocus: s.rackFocus,
     });
   }
   return specs;
@@ -754,18 +866,35 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   for (const [i, s] of plan.shots.entries()) {
     if (s.kind !== "quote_card" || !s.quote) continue;
     const out = join(runDir, "assets", `type_${i}.jpg`);
-    const cached = existsSync(out);
-    const words = s.quote.split(/\s+/).filter(Boolean);
-    const made = cached
-      ? out
-      : await bananaTypeCard({
-          text: s.quote,
-          emphasis: words.slice(-2),
-          styleDesc: style.typeStyle,
-          accent: s.accent ?? style.theme.accent,
-          outJpg: out,
-          log,
-        });
+    if (existsSync(out)) {
+      typeByShot[i] = out;
+      continue;
+    }
+    // REASONABILITY PASS — choose emphasis + framing so the card lands with the
+    // right TONE: a mundane/comical detail must not become the epic gold payoff;
+    // emphasise the words carrying the irony or stakes, frame the rest deadpan.
+    const reason = await geminiJson<{ emphasis?: string[]; framing?: string }>({
+      prompt:
+        `A documentary CLOSING TYPE CARD will render this exact line as bold designed typography (style: ${style.typeStyle}): ` +
+        `"${s.quote}". Decide how to frame it TASTEFULLY. Pick EMPHASIS = the 1-3 words that should be largest/accented — ` +
+        `the words carrying the IRONY, STAKES or turn — NOT a mundane or comical noun blown up comically. Write a FRAMING ` +
+        `note (<=22 words) so the tone is right: if part of the line is deliberately mundane/absurd, render it deadpan and ` +
+        `smaller so the CONTRAST lands instead of reading as slapstick. ` +
+        `Return STRICT JSON {"emphasis":["..."],"framing":"..."}.`,
+      maxTokens: 300,
+      temperature: 0.3,
+    }).catch(() => ({ emphasis: undefined, framing: undefined }) as { emphasis?: string[]; framing?: string });
+    const emphasis = reason.emphasis?.length ? reason.emphasis : s.quote.split(/\s+/).filter(Boolean).slice(0, 2);
+    log(`documotion type card: emphasis [${emphasis.join(", ")}]${reason.framing ? ` — ${reason.framing}` : ""}`);
+    const made = await bananaTypeCard({
+      text: s.quote,
+      emphasis,
+      framing: reason.framing,
+      styleDesc: style.typeStyle,
+      accent: s.accent ?? style.theme.accent,
+      outJpg: out,
+      log,
+    });
     if (made) typeByShot[i] = made;
   }
 
@@ -798,7 +927,9 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     theme: style.theme,
     fontCss: style.fontCss,
     fontProbe: style.fontProbe,
-    concurrency: args.concurrency,
+    // Cap concurrency (env override) — geo_map/parallax frames are RAM-heavy at
+    // 1080p and the default (half-cores) can OOM a shared box.
+    concurrency: args.concurrency ?? (process.env.DOCU_RENDER_CONCURRENCY ? Number(process.env.DOCU_RENDER_CONCURRENCY) : 3),
     log,
   });
   log(`documotion: final rendered ${outPath}`);
