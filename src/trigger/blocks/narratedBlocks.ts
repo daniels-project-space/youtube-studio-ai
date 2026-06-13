@@ -23,7 +23,7 @@ import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
 import { narrationPhysics, gateColdOpen } from "@/lib/voicecraft";
 import { sanitizeSpoken } from "@/lib/scriptGen";
-import { searchFootage, scoreClip, hasPexelsKey } from "@/lib/footage";
+import { buildFootageQueries, castFootage, hasAnyFootageProvider, type FootageBrief } from "@/lib/footagecraft";
 import { searchWikimediaImage } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
 import { putObject, getObjectBytes, publicUrl } from "@/lib/storage";
@@ -616,8 +616,8 @@ export const stockFootage: Block = {
       }
       ctx.log("stock_footage(reuse): no clips fetched â€” falling back to fresh sourcing");
     }
-    if (!hasPexelsKey()) {
-      throw new Error("stock_footage: PEXELS_API_KEY missing (vault service 'pexels')");
+    if (!hasAnyFootageProvider()) {
+      throw new Error("stock_footage: no footage provider configured (vault service 'pexels' at minimum)");
     }
     const topic = str(ctx, "topic");
     const script = ctx.store["script"] as
@@ -663,142 +663,37 @@ export const stockFootage: Block = {
     const natureMode = (ctx.params["footageTheme"] as string | undefined) === "nature";
     // A BIG, varied pool of nature/landscape/water/ruins scenes â€” shuffled per
     // render and mixed into the queries so videos don't all reuse the same shots.
-    const NATURE_POOL = [
-      "forest pathway", "misty forest morning", "sunlight through trees", "dense pine forest",
-      "autumn forest path", "forest stream slow motion", "fern forest floor", "tall redwood trees",
-      "foggy woodland", "bamboo forest wind", "moss covered forest", "forest canopy looking up",
-      "calm ocean waves", "waves crashing slow motion", "mountain river flowing", "waterfall slow motion",
-      "still lake reflection", "rain falling slow motion", "raindrops on leaves", "river over rocks",
-      "ocean horizon sunset", "lake mist morning", "stream through forest", "sea foam on shore",
-      "underwater sunlight rays", "gentle waterfall pool", "coastal cliffs waves",
-      "mountain peak clouds", "snowy mountain range", "rolling green hills", "valley fog sunrise",
-      "alpine meadow flowers", "cliff overlooking sea", "desert dunes wind", "canyon landscape",
-      "rolling fields wind", "lavender field breeze", "terraced rice fields", "highland moors",
-      "sunrise over mountains", "sunset clouds timelapse", "starry night sky", "milky way night",
-      "storm clouds rolling", "northern lights aurora", "golden hour clouds", "moon over clouds",
-      "autumn leaves falling", "snow falling slow motion", "cherry blossoms falling", "frost on branches",
-      "wheat field golden hour", "wildflower meadow wind", "dew on grass macro",
-      "ancient greek ruins", "weathered stone temple", "marble columns ruins", "roman ruins sunset",
-      "old stone archway", "ancient amphitheater", "crumbling stone pillars", "ruins in mist",
-    ];
-    const shuffle = <T,>(a: T[]): T[] => {
-      const r = [...a];
-      for (let i = r.length - 1; i > 0; i--) { const j = Math.floor(Math.random() * (i + 1)); [r[i], r[j]] = [r[j], r[i]]; }
-      return r;
+    // Channel + topic aware brief — the picker AND the gate judge against it.
+    const dna = ctx.store["styleDNA"] as { setting?: string; colorGrade?: string; motifs?: string[]; visualAvoid?: string[] } | null;
+    const brief: FootageBrief = {
+      topic,
+      niche: opt(ctx, "niche"),
+      narrationExcerpt,
+      orientation,
+      visualWorld: dna?.setting ? { setting: dna.setting, colorGrade: dna.colorGrade, motifs: dna.motifs } : undefined,
+      visualAvoid: dna?.visualAvoid,
+      natureMode,
+      healHints: (ctx.store["healHints"] as Record<string, string[]> | undefined)?.["stock_footage"],
     };
 
-    // Derive CONCRETE, filmable b-roll queries (abstract topics like philosophy
-    // have no literal stock footage â€” turn them into visual terms a camera can
-    // actually show, so the footage is relevant). Falls back to topic+headings.
-    let queries: string[] = [];
-    if (hasGeminiKey()) {
-      try {
-        const naturePrompt =
-          `A calm narrated video about "${topic}"${opt(ctx, "niche") ? ` (${opt(ctx, "niche")})` : ""}.` +
-          (narrationExcerpt ? `\n\nNarration excerpt:\n"${narrationExcerpt}"\n\n` : " ") +
-          `Give ${nQueries} CONCRETE, VISUALLY DISTINCT stock-footage search queries (2-4 words each) ` +
-          `that are STRICTLY serene NATURE / LANDSCAPE / WATER shots â€” many in SLOW MOTION. ` +
-          `Allowed only: forest pathways, misty forest, tall trees, mountains, valleys, rivers, streams, ` +
-          `waterfalls, ocean waves, lakes, rain, mist/fog, clouds, sky, sunrise, sunset, fields, meadows, ` +
-          `snow, deserts, autumn leaves â€” AND ancient Greek/Roman ruins, weathered stone temples, columns. ` +
-          `Add "slow motion" or "cinematic" to many. ` +
-          `ABSOLUTELY NO people, faces, figures, hands, MODERN cities, streets, modern buildings, interiors, ` +
-          `rooms, objects, books, candles, vehicles, or text. ONLY natural outdoor landscapes, water, and ` +
-          `ancient ruins. Vary the scenes so no two look alike. Return STRICT JSON {"queries":string[]}.`;
-        // Channel Style-DNA visual world â€” the queries must live in IT, not in a
-        // generic "calm b-roll" space (this prompt previously hardcoded stoic
-        // guidance for every channel).
-        const dnaV = ctx.store["styleDNA"] as
-          | { setting?: string; colorGrade?: string; motifs?: string[]; visualAvoid?: string[] }
-          | null;
-        const dnaWorldClause = dnaV?.setting
-          ? `THE CHANNEL'S LOCKED VISUAL WORLD (queries must clearly belong to it): setting: ${dnaV.setting}` +
-            (dnaV.colorGrade ? `; look/grade: ${dnaV.colorGrade}` : "") +
-            (dnaV.motifs?.length ? `; recurring motifs: ${dnaV.motifs.slice(0, 5).join("; ")}` : "") +
-            `.\n`
-          : "";
-        const dnaAvoidClause = dnaV?.visualAvoid?.length
-          ? `NEVER suggest: ${dnaV.visualAvoid.slice(0, 8).join("; ")}.\n`
-          : `CRITICAL: never suggest scenes that CONTRADICT the message or the channel's tone.\n`;
-        const defaultPrompt =
-          `A narrated video about "${topic}"${opt(ctx, "niche") ? ` (${opt(ctx, "niche")})` : ""}.` +
-          (narrationExcerpt ? `\n\nNarration excerpt:\n"${narrationExcerpt}"\n\n` : " ") +
-          dnaWorldClause +
-          dnaAvoidClause +
-          `Give ${nQueries} CONCRETE, filmable, VISUALLY DISTINCT stock-footage search ` +
-          `queries (2-4 words each, things a camera can literally show) whose MOOD and SUBJECT ` +
-          `match this specific narration â€” not generic decorative b-roll. Every query must connect ` +
-          `to the video's actual themes and emotional tone AND fit the channel's visual world above. ` +
-          `Vary scenes/subjects/settings so no two look alike. Avoid abstract words and avoid clichÃ©d ` +
-          `filler like a random park bench. Return STRICT JSON {"queries":string[]}.`;
-        const out = await geminiJson<{ queries?: string[] }>({
-          prompt: natureMode ? naturePrompt : defaultPrompt,
-          maxTokens: 500,
-          temperature: 0.7,
-        });
-        queries = (out.queries ?? [])
-          .filter((q): q is string => typeof q === "string" && q.trim().length > 0)
-          .filter((q, i, a) => a.indexOf(q) === i)
-          .slice(0, nQueries);
-      } catch (e) {
-        ctx.log(`stock_footage: query-gen failed (${e instanceof Error ? e.message : e})`);
-      }
-    }
-    // In nature mode, BLEND in a shuffled slice of the big nature pool so every
-    // render pulls a different mix of scenes (combined with the cross-video ledger
-    // â†’ videos don't all look the same).
-    if (natureMode) {
-      queries = [...queries, ...shuffle(NATURE_POOL)]
-        .filter((q, i, a) => a.indexOf(q) === i)
-        .slice(0, nQueries);
-    }
-    if (queries.length < nQueries) {
-      const extra = [
-        topic,
-        ...(script?.sections ?? []).map((s) => s.heading ?? "").filter(Boolean),
-        opt(ctx, "niche") ?? "cinematic background",
-      ].map((q) => q.trim());
-      queries = [...queries, ...extra].filter(Boolean).filter((q, i, a) => a.indexOf(q) === i).slice(0, nQueries);
-    }
-    // Cinematographer (crew) brief: its concrete, on-vibe queries LEAD the pool so
-    // the look matches the channel; the generated/nature queries backfill coverage.
-    // DEFENSE: DP agents sometimes return full scene descriptions â€” a 15-word
-    // query gets zero Pexels hits â€” so overlong queries are compressed to their
-    // first few meaningful words.
+    // DP-brief footage queries LEAD (the channel look); buildFootageQueries
+    // fills the rest from topic + narration + the DNA world. Overlong DP scene
+    // descriptions are compressed (a 15-word query gets zero stock hits).
     const STOP = new Set(["a","an","the","of","with","and","or","in","on","at","to","for","over","under","by"]);
     const compressQuery = (q: string): string => {
-      const words = q.trim().split(/\s+/);
-      if (words.length <= 6) return q.trim();
-      return words.filter((w) => !STOP.has(w.toLowerCase())).slice(0, 4).join(" ");
+      const w = q.trim().split(/\s+/);
+      return w.length <= 6 ? q.trim() : w.filter((x) => !STOP.has(x.toLowerCase())).slice(0, 4).join(" ");
     };
     const dpQueries = ((ctx.store["visualBrief"] as { footageQueries?: string[] } | undefined)?.footageQueries ?? [])
-      .map((q) => compressQuery(q))
-      .filter(Boolean);
-    if (dpQueries.length) {
-      queries = [...dpQueries, ...queries]
-        .filter((q, i, a) => a.indexOf(q) === i).slice(0, nQueries);
-      ctx.log(`stock_footage: led with ${dpQueries.length} DP brief queries (overlong ones compressed)`);
-    }
+      .map(compressQuery).filter(Boolean);
+    const extras = [topic, ...((script?.sections ?? []).map((sec) => sec.heading ?? "").filter(Boolean)), opt(ctx, "niche") ?? "cinematic background"];
+    const built = await buildFootageQueries(brief, nQueries, extras);
+    const queries = [...dpQueries, ...built].filter((q, i, a) => q && a.indexOf(q) === i).slice(0, nQueries);
+    if (dpQueries.length) ctx.log(`stock_footage: led with ${dpQueries.length} DP brief queries`);
     ctx.log(`stock_footage: ${queries.length} queries, target ${targetSec.toFixed(0)}s coverage`);
 
-    // Pick the BEST + RELEVANT clip per query (not the first): rank candidates
-    // by technical score (v1), dedup across queries, then a strict Gemini-vision
-    // relevance gate (judged against the video's THEME, not the query string).
-    // Clips that miss the gate are NOT forced into the timeline â€” they go to a
-    // ranked `spare` pool used only at the end if coverage falls short. This
-    // stops off-topic filler (the "random bench") from appearing.
+    // Worker scratch dir (NEVER a dev box / VPS) + cross-video ledger from R2.
     const tmp = await makeRunTempDir(ctx.runId);
-    const niche = opt(ctx, "niche");
-    const relevanceGate = hasGeminiKey();
-    const RELEVANCE_MIN = 7; // strict: clearly on-theme, not loosely related
-    const clips: string[] = [];
-    const spare: { path: string; dur: number; score: number }[] = [];
-    const usedUrls = new Set<string>();
-
-    // CROSS-VIDEO dedup: a persistent per-channel ledger of clip ids already used
-    // in PAST renders, so footage is never reused between videos. Stable id =
-    // the Pexels video id from the file url; fallback to the full url.
-    const clipId = (url: string): string => url.match(/video-files\/(\d+)/)?.[1] ?? url;
     const ledgerKey = `${ctx.keyPrefix}footage/used_clips.json`;
     const usedIds = new Set<string>();
     try {
@@ -806,199 +701,31 @@ export const stockFootage: Block = {
       for (const id of JSON.parse(Buffer.from(raw).toString("utf8")) as string[]) usedIds.add(id);
       ctx.log(`stock_footage: ${usedIds.size} clips in cross-video ledger (will be skipped)`);
     } catch {
-      /* no ledger yet â€” first run for this channel */
-    }
-    const pathId = new Map<string, string>(); // local path â†’ clip id (for picked-clip recording)
-    const pickedIds = new Set<string>(); // IN-VIDEO dedup: never download the same source video twice this render
-    let dl = 0;
-    let gated = 0;
-    let coveredSec = 0;
-    let allowReuse = false; // relaxed mode: reuse OLD-video clips to reach coverage
-
-    // Pick the best RELEVANT, non-reused clip for one query. Rejected candidates
-    // go to the `spare` pool (absolute last resort only). Returns the picked
-    // clip's duration, or null if nothing on-theme was found.
-    const pickForQuery = async (q: string): Promise<number | null> => {
-      const cands = (await searchFootage(q, 8, orientation))
-        .filter((c) => !usedUrls.has(c.url) && !pickedIds.has(clipId(c.url)) && (allowReuse || !usedIds.has(clipId(c.url))))
-        .sort((a, b) => scoreClip(b) - scoreClip(a))
-        .slice(0, 3);
-      if (cands.length === 0) return null;
-      for (const cand of cands) {
-        const local = join(tmp, `footage_${dl++}.mp4`);
-        await downloadTo(cand.url, local);
-        usedUrls.add(cand.url);
-        pickedIds.add(clipId(cand.url));
-        pathId.set(local, clipId(cand.url));
-        const dur = cand.durationSec || 8;
-        if (!relevanceGate) {
-          clips.push(local);
-          return dur;
-        }
-        let score = 5;
-        let relevant = true;
-        try {
-          // MULTI-FRAME gate: a clip can be on-theme at 1s and ruined later (a
-          // watermark/logo reveal, burned-in captions, or a hard cut to another
-          // scene). Sample start / middle / late and judge them together so any
-          // bad frame rejects the clip.
-          const gd = cand.durationSec || 8;
-          const frames: string[] = [];
-          for (const [fi, frac] of [0.12, 0.5, 0.82].entries()) {
-            const fp = `${local}.${fi}.jpg`;
-            try { await grabFrame(local, Math.max(0.5, gd * frac), fp); frames.push(fp); } catch { /* skip a bad frame */ }
-          }
-          if (frames.length === 0) { const f0 = `${local}.0.jpg`; await grabFrame(local, 1, f0); frames.push(f0); }
-          const gatePrompt = natureMode
-            ? `These ${frames.length} frames are sampled across ONE candidate b-roll clip (start, middle, end). ACCEPT only if EVERY frame is a serene NATURE / LANDSCAPE / ` +
-              `WATER scene (forest, trees, mountains, river, waterfall, ocean, lake, rain, mist, clouds, sky, ` +
-              `sunrise/sunset, fields, snow, desert) OR ancient Greek/Roman stone ruins/temples/columns. ` +
-              `REJECT anything containing people, faces, figures, hands, modern cities, streets, modern ` +
-              `buildings, interiors, rooms, objects, books, candles, vehicles, screens, or text — and REJECT if ANY frame shows a watermark, logo, or burned-in caption. ` +
-              `Return STRICT JSON {"relevant":boolean,"score":0-10} (score = how cleanly it is pure nature/ruins).`
-            : `A video about "${topic}"${niche ? ` (${niche})` : ""}.` +
-              (narrationExcerpt ? ` Narration: "${narrationExcerpt.slice(0, 400)}".` : "") +
-              (() => {
-                // The channel's own visual world/avoid-list judges fit â€” the old
-                // prompt hardcoded Stoicism examples for every channel.
-                const d = ctx.store["styleDNA"] as
-                  | { setting?: string; visualAvoid?: string[] }
-                  | null;
-                return (
-                  (d?.setting ? ` The channel's visual world: ${d.setting}.` : "") +
-                  (d?.visualAvoid?.length ? ` The channel NEVER shows: ${d.visualAvoid.slice(0, 6).join("; ")}.` : "")
-                );
-              })() +
-              (() => {
-                const hh = ((ctx.store["healHints"] as Record<string, string[]> | undefined)?.["stock_footage"] ?? []);
-                return hh.length ? ` A previous attempt was REJECTED by QA for: ${hh.join("; ")} â€” be stricter about that.` : "";
-              })() +
-              ` These ${frames.length} frames are sampled across ONE candidate b-roll clip (start, middle, end; search query "${q}"). REJECT the clip if ANY frame shows a watermark, stock-site logo, or burned-in caption/text. Judge whether it ` +
-              `CLEARLY fits the subject and emotional mood of THIS video AND does not contradict its ` +
-              `message or the channel's visual world. CRITICALLY also judge the LIGHTING/GRADE: reject ` +
-              `clips whose look clashes with the channel's grade (e.g. bright white studio/product shots ` +
-              `or flat daylight office stock inside a dark, moody, cinematic channel) even when the ` +
-              `subject matches. Reject footage that is only loosely related, generic decorative filler, ` +
-              `visually out of place, or on the channel's never-show list. ` +
-              `Return STRICT JSON {"relevant":boolean,"score":0-10} where score is how well it fits.`;
-          const raw = await geminiVisionLocal({
-            prompt: gatePrompt,
-            imagePaths: frames,
-            json: true,
-            maxTokens: 200,
-          });
-          const v = parseJsonLoose<{ relevant?: boolean; score?: number }>(raw);
-          if (typeof v.score === "number") score = v.score;
-          if (typeof v.relevant === "boolean") relevant = v.relevant;
-        } catch (e) {
-          // Vision failed â†’ REJECT to the spare pool (used only on coverage
-          // shortfall). Accepting unseen clips is how off-topic footage shipped.
-          relevant = false;
-          score = 0;
-          ctx.log(`stock_footage: relevance vision failed for "${q}" â€” clip sent to spare pool: ${e instanceof Error ? e.message : e}`);
-        }
-        if (relevant && score >= RELEVANCE_MIN) {
-          clips.push(local);
-          gated++;
-          return dur;
-        }
-        spare.push({ path: local, dur, score }); // last-resort filler only
-      }
-      return null;
-    };
-
-    // PARALLEL sourcing in batches of 6 (search+download+vision-gate per query
-    // was fully sequential â€” the slowest stage of every narrated render).
-    // Coverage is re-checked between batches; slight overshoot is fine.
-    for (let b = 0; b < queries.length && coveredSec < targetSec; b += 6) {
-      const batch = queries.slice(b, b + 6);
-      const results = await Promise.all(
-        batch.map(async (q) => {
-          try {
-            return { q, d: await pickForQuery(q) };
-          } catch (e) {
-            ctx.log(`stock_footage: query "${q}" failed (skip): ${e instanceof Error ? e.message : e}`);
-            return { q, d: null };
-          }
-        }),
-      );
-      for (const r of results) {
-        if (r.d != null) coveredSec += Math.min(r.d, PER_CLIP);
-        else ctx.log(`stock_footage: no on-topic clip for "${r.q}"`);
-      }
+      /* no ledger yet — first run for this channel */
     }
 
-    // Coverage shortfall â†’ fill with EVERGREEN, on-theme contemplative b-roll
-    // (always safe for stoic/philosophy/calm content) BEFORE ever touching the
-    // rejected off-topic spares. This keeps footage on-message even when the
-    // cross-video ledger has thinned the primary pool.
-    const SAFE_FALLBACK = natureMode
-      ? shuffle(NATURE_POOL)
-      : [
-          "misty mountains dawn", "calm ocean waves", "ancient stone ruins", "candle flame darkness",
-          "rain on window", "sunrise clouds timelapse", "forest light fog", "starry night sky",
-          "lone figure silhouette dusk", "old book pages", "stormy sea", "snowy mountain peak",
-          "desert dunes wind", "waterfall slow motion", "moonlit clouds",
-        ];
-    if (coveredSec < targetSec) {
-      for (const q of SAFE_FALLBACK) {
-        if (coveredSec >= targetSec) break;
-        try {
-          const d = await pickForQuery(q);
-          if (d != null) coveredSec += Math.min(d, PER_CLIP);
-        } catch {
-          /* skip */
-        }
-      }
-      ctx.log(`stock_footage: evergreen fallback â†’ ${coveredSec.toFixed(0)}s/${targetSec.toFixed(0)}s`);
-    }
+    // FOOTAGECRAFT — federated 4K search + CONCURRENT download/gate + coverage.
+    const cast = await castFootage({
+      brief,
+      queries,
+      targetSec,
+      perClipSec: PER_CLIP,
+      usedClipIds: usedIds,
+      tmpDir: tmp,
+      log: (m) => ctx.log(m),
+    });
+    const clips = cast.clips.map((c) => c.path);
+    if (clips.length === 0) throw new Error("stock_footage: no clips found for any query");
 
-    // RELAXED PASS â€” if we STILL can't cover the (long) video from the fresh pool,
-    // allow reusing clips from PAST videos (the cross-video ledger is starving the
-    // pool). Covering the length without an in-video loop matters more than
-    // perfect cross-video uniqueness. Re-run all queries with the ledger ignored.
-    if (coveredSec < targetSec) {
-      allowReuse = true;
-      ctx.log(`stock_footage: still ${coveredSec.toFixed(0)}/${targetSec.toFixed(0)}s â€” relaxing cross-video dedup to cover length`);
-      for (const q of [...queries, ...SAFE_FALLBACK]) {
-        if (coveredSec >= targetSec || clips.length >= 160) break;
-        try {
-          const d = await pickForQuery(q);
-          if (d != null) coveredSec += Math.min(d, PER_CLIP);
-        } catch {
-          /* skip */
-        }
-      }
-      allowReuse = false;
-      ctx.log(`stock_footage: after relaxed pass â†’ ${coveredSec.toFixed(0)}/${targetSec.toFixed(0)}s, ${clips.length} clips`);
-    }
-    // Absolute last resort: best-scored rejected spares (rare; logged).
-    if (coveredSec < targetSec && spare.length > 0) {
-      spare.sort((a, b) => b.score - a.score);
-      const usedPaths = new Set(clips);
-      for (const s of spare) {
-        if (coveredSec >= targetSec) break;
-        if (usedPaths.has(s.path)) continue;
-        clips.push(s.path);
-        usedPaths.add(s.path);
-        coveredSec += Math.min(s.dur, PER_CLIP);
-      }
-      ctx.log(`stock_footage: LAST-RESORT spare fill (footage pool thin) â†’ ${coveredSec.toFixed(0)}s`);
-    }
-    if (clips.length === 0) {
-      throw new Error("stock_footage: no clips found for any query");
-    }
-    // Persist the ids of the clips actually USED so they're never reused in a
-    // future video. Keep the last ~3000 (bounded) to avoid unbounded growth.
+    // Persist the ids actually used (bounded) so they're never reused later.
     try {
-      for (const p of clips) { const id = pathId.get(p); if (id) usedIds.add(id); }
+      for (const id of cast.pickedIds) usedIds.add(id);
       const ledger = Array.from(usedIds).slice(-3000);
       await putObject(ledgerKey, Buffer.from(JSON.stringify(ledger), "utf8"), { contentType: "application/json" });
-      ctx.log(`stock_footage: ledger updated â†’ ${ledger.length} used clip ids`);
+      ctx.log(`stock_footage: ledger updated -> ${ledger.length} used clip ids`);
     } catch (e) {
       ctx.log(`stock_footage: ledger save failed (non-fatal): ${e instanceof Error ? e.message : e}`);
     }
-    ctx.log(`stock_footage: ${clips.length} clips covering ~${coveredSec.toFixed(0)}s/${targetSec.toFixed(0)}s (${gated} passed strict relevance gate)`);
     // HYBRID MODE (architect knob): prepend K GENERATED signature establishing
     // shots (the channel's canonical world, DNA-locked) to the stock body —
     // brand anchors stock can't provide, at a fraction of full generation.

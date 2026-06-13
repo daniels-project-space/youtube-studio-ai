@@ -485,7 +485,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "visuals",
     stage: "visual",
     title: "Visuals",
-    engine: "Family-swapped: FEDERATED stock (Pexels + Pixabay + Coverr + Videvo, 4K-first) / entity imagery / flux keyframes / boomerang loops",
+    engine: "Family-swapped: FOOTAGECRAFT standalone stock engine (federated Pexels + Pixabay, 4K-ONLY, concurrent) / entity imagery / flux keyframes / boomerang loops",
     how:
       "The family delta picks the visual engine per channel: federated stock + entity imagery for narrated " +
       "essays, generated keyframes + image-to-video for cinematic families, seamless boomerang loops + " +
@@ -493,7 +493,9 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "highest-resolution file each offers (up to UHD) so the 1080p canvas downscales crisply and Ken-Burns " +
       "push-ins stay sharp. A multi-frame relevance gate samples start / middle / end of each candidate and " +
       "rejects the clip if ANY frame drifts off-theme or shows a watermark, logo or burned-in caption. Style " +
-      "DNA grounds every query and prompt; a cross-video ledger keeps footage unique between uploads.",
+      "DNA grounds every query and prompt; a cross-video ledger keeps footage unique between uploads. The stock " +
+      "engine is the standalone src/lib/footagecraft.ts module (channel+topic-aware query-gen, concurrent download + " +
+      "gate, cloud-worker temp -> R2 only, never a dev box).",
     gates: ["multi-frame relevance + watermark gate (>=7)", "per-artifact qa_visual", "coverage contract vs cut sheet", "cross-video dedup"],
     status: "active",
   },

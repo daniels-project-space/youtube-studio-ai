@@ -36,9 +36,9 @@ export function hasAnyFootageProvider(): boolean {
   return PROVIDERS.some((p) => p.hasKey());
 }
 
-/** Names of the currently-configured providers (for logging). */
+/** Names of the providers that will actually be queried now (4K-only aware). */
 export function activeProviders(): string[] {
-  return PROVIDERS.filter((p) => p.hasKey()).map((p) => p.name);
+  return PROVIDERS.filter((p) => p.hasKey() && (!fourKOnly() || p.serves4k !== false)).map((p) => p.name);
 }
 
 /** A clip counts as 4K when its long edge is UHD/DCI (≈3840+). */
@@ -100,6 +100,9 @@ type Orientation = "landscape" | "portrait";
 interface Provider {
   name: string;
   hasKey: () => boolean;
+  /** False = the provider's FREE tier serves no 4K, so it's skipped under
+   *  4K-only (don't burn its rate limit on clips that get filtered out). */
+  serves4k?: boolean;
   search: (query: string, count: number, orientation: Orientation) => Promise<FootageClip[]>;
 }
 
@@ -184,6 +187,10 @@ interface CoverrVideo {
 const coverr: Provider = {
   name: "coverr",
   hasKey: () => Boolean(process.env.COVERR_API_KEY),
+  // Free Coverr tops out at 1080p (its 4K rendition is is_plus/paid), so it is
+  // EXCLUDED whenever 4K-only is on (the default) — never queried, never in
+  // the selection list. It rejoins automatically if 4K-only is turned off.
+  serves4k: false,
   async search(query, count, orientation) {
     const key = process.env.COVERR_API_KEY!;
     const url =
@@ -270,7 +277,9 @@ export async function searchFootage(
   count = 2,
   orientation: Orientation = "landscape",
 ): Promise<FootageClip[]> {
-  const active = PROVIDERS.filter((p) => p.hasKey());
+  // Under 4K-only (default) skip providers whose free tier serves no 4K, so we
+  // never spend their rate limit on clips the 4K filter would drop anyway.
+  const active = PROVIDERS.filter((p) => p.hasKey() && (!fourKOnly() || p.serves4k !== false));
   if (active.length === 0) throw new Error("searchFootage: no footage provider configured (need at least PEXELS_API_KEY)");
   const results = await Promise.all(
     active.map((p) =>
