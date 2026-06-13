@@ -823,7 +823,9 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     theme: style.theme,
     fontCss: style.fontCss,
     fontProbe: style.fontProbe,
-    concurrency: args.concurrency,
+    // Cap concurrency (env override) — geo_map/parallax frames are RAM-heavy at
+    // 1080p and the default (half-cores) can OOM a shared box.
+    concurrency: args.concurrency ?? (process.env.DOCU_RENDER_CONCURRENCY ? Number(process.env.DOCU_RENDER_CONCURRENCY) : 3),
     log,
   });
   log(`documotion: final rendered ${outPath}`);
