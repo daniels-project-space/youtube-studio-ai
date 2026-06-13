@@ -137,14 +137,15 @@ function planContract(brief: WhiteboardSyncBrief, nPanels: number, words: number
     `Design a punchy, INFORMATIVE ~60-second WHITEBOARD explainer. TOPIC: ${brief.topic}\n${facts}` +
     `Think like a motion-designer. Each panel is a STACK OF LAYERS drawn one at a time on a whiteboard, building an argument.\n` +
     `Output STRICT JSON: {"title":"...","panels":[ {"narration":"<~2 spoken sentences (~${Math.round(words / nPanels)} words), end with a small beat>",` +
-    `"layers":[ {"kind":"art","draw":"<a COMPOSED, designed line-art SCENE — objects AND how they relate. NO text/words in the art.>",` +
+    `"layers":[ {"kind":"art","draw":"<a SMALL iconic line-art SKETCH of ONE concrete thing the narration names (a railroad, a coin, a soldier, a ship, a government building, a banana). NO text/words in the art.>",` +
     `"cue":"<verbatim phrase from THIS narration marking when to draw it>","box":[x,y,w,h]} , ` +
     `{"kind":"label","text":"<EXACT short words/number to hand-letter>","cue":"<verbatim phrase>","box":[x,y,w,h],"color":"black|red"} ]} ]}\n\n` +
-    `RULES:\n- EXACTLY ${nPanels} panels. ~${words} words TOTAL. Plain spoken narration, NO audio tags. Never stop early.\n` +
-    `- Each panel: 1-2 art layers + 1-2 label layers, listed IN THE ORDER their cue appears in the narration. Every label needs non-empty "text".\n` +
+    `RULES:\n- Output STRICTLY VALID minified JSON: double-quote every key and string, no comments, no trailing commas, escape any quotes inside strings.\n` +
+    `- EXACTLY ${nPanels} panels. ~${words} words TOTAL. Plain spoken narration, NO audio tags. Never stop early.\n` +
+    `- DENSITY (important): turn EVERY concrete drawable thing the narration names into its OWN small art SKETCH, cued to that exact word, so the board keeps FILLING as the voice speaks — 3 to 6 sketches per panel; never leave it static. For a list ("the railroads, the government, and taxes") make a SEPARATE sketch for EACH item (railroad / government building / coins), each cued to its word. Add label layers for dates + numbers. List layers IN THE ORDER their cue appears; every label needs non-empty "text".\n` +
     `- Every "cue" MUST be an exact substring of that panel's narration. Don't put the last cue at the very end (leave a trailing clause).\n` +
     `- A persistent TITLE HEADER lives in the top strip: ALL boxes (art + labels) MUST have y >= 0.17 (nothing in the top 0.16).\n` +
-    `- box=[x,y,w,h] in 0..1 on a 16:9 board. Art scenes are large (e.g. [0.07,0.18,0.86,0.64]); labels small, placed where they belong.\n` +
+    `- box=[x,y,w,h] in 0..1 on a 16:9 board. Art SKETCHES are SMALL (w,h ~ 0.16-0.30) and SPREAD across the board — vary x AND y in a loose grid so several sit side by side and accumulate into a rich full board WITHOUT overlapping; place each near where it makes sense. Labels smaller, beside the thing they name. y >= 0.17 for everything.\n` +
     `- ART HAS NO TEXT — all words/numbers are label layers. color:"red" for money/danger emphasis, else black. Be accurate.${beats}`
   );
 }
@@ -171,8 +172,14 @@ async function buildStoryboard(brief: WhiteboardSyncBrief, log: Logger): Promise
   const words = brief.targetWords ?? 150;
   let title = brief.topic, panels: NPanel[] = [], fullText = "";
   for (let attempt = 0; attempt < 3; attempt++) {
-    const extra = attempt ? `\n\nYOUR PREVIOUS ATTEMPT WAS TOO SHORT. Output EXACTLY ${nPanels} panels and ~${words} words covering every beat. Do not stop early.` : "";
-    const raw = await geminiJsonPro<RawPlan>({ prompt: planContract(brief, nPanels, words) + extra, maxTokens: 8000, temperature: 0.55 });
+    const extra = attempt ? `\n\nFIX THE PREVIOUS ATTEMPT (it was too short or invalid JSON). Output EXACTLY ${nPanels} panels and ~${words} words covering every beat, as STRICTLY VALID minified JSON. Do not stop early.` : "";
+    let raw: RawPlan;
+    try {
+      raw = await geminiJsonPro<RawPlan>({ prompt: planContract(brief, nPanels, words) + extra, maxTokens: 9000, temperature: 0.5 });
+    } catch (e) {
+      log(`storyboard attempt ${attempt + 1} failed (${(e instanceof Error ? e.message : String(e)).slice(0, 100)}) — retry`);
+      continue;
+    }
     title = String(raw.title ?? brief.topic);
     panels = normalize(raw);
     panels.forEach((p, i) => (p.idx = i));
@@ -240,9 +247,9 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
   for (const p of panels) for (const l of p.layers) if (l.kind === "art") artJobs.push({ p, l });
   await pool(artJobs, 3, async ({ p, l }) => {
     const prompt =
-      `A single COMPOSED whiteboard marker line-art SCENE on a PURE WHITE (#ffffff) background, nothing else, filling the frame with a small margin. ` +
+      `A single clear whiteboard marker line-art SKETCH on a PURE WHITE (#ffffff) background, nothing else, the subject centered and filling the frame with a small margin. ` +
       (refB64 ? `CRITICAL: match the EXACT clean black marker line-art style and single stroke weight of the REFERENCE image (copy STYLE only). ` : "") +
-      `Draw this designed scene: ${l.draw}. It illustrates: "${p.narration}". Simple iconic line-art, clear and informative, NOT photorealistic, no shading. ` +
+      `Draw: ${l.draw}. (Context for tone, do NOT write any text: "${p.narration}".) Bold simple iconic line-art, instantly readable, NOT photorealistic, no shading. ` +
       `Use red for at most one or two accent marks. ABSOLUTELY NO text, words, numbers or letters anywhere. No watermark, pure white background.`;
     const fn = `art_${p.idx}_${p.layers.indexOf(l)}.png`;
     await writeFile(join(args.runDir, fn), refB64 ? await styledScene(prompt, refB64) : await styledScene(prompt, ""));
