@@ -209,6 +209,33 @@ const videvo: Provider = {
 const PROVIDERS: Provider[] = [pexels, pixabay, videvo];
 
 /**
+ * LEGACY search — the exact pre-footagecraft behavior for A/B renders: Pexels
+ * ONLY, size=medium, capped at 1920 (no federation, no 4K). Not used by the
+ * pipeline; the stock_footage block's `legacyFootage` param routes here so an
+ * "old vs new" render isolates the federation + 4K + concurrency change.
+ */
+export async function searchFootageLegacy(
+  query: string,
+  count = 8,
+  orientation: Orientation = "landscape",
+): Promise<FootageClip[]> {
+  if (!process.env.PEXELS_API_KEY) return [];
+  const url =
+    `https://api.pexels.com/videos/search?query=${encodeURIComponent(query)}` +
+    `&per_page=${Math.max(1, Math.min(count, 10))}&orientation=${orientation}&size=medium`;
+  const json = await getJson<{ videos?: PexelsVideo[] }>(url, { headers: { Authorization: process.env.PEXELS_API_KEY! } }, "pexels(legacy)");
+  if (!json) return [];
+  const maxW = orientation === "portrait" ? 1080 : 1920;
+  const out: FootageClip[] = [];
+  for (const v of json.videos ?? []) {
+    const f = bestPexelsFile(v, maxW);
+    if (!f) continue;
+    out.push({ url: f.link, width: f.width ?? v.width ?? 0, height: f.height ?? v.height ?? 0, durationSec: v.duration ?? 0, query, provider: "pexels(legacy)" });
+  }
+  return out;
+}
+
+/**
  * Federated search: query EVERY configured provider in parallel for `query`,
  * merge the results, and return them ranked by technical score (best first).
  * Caller-facing signature unchanged from the single-provider version, so the

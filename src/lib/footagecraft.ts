@@ -39,6 +39,7 @@ import { grabFrame } from "@/lib/ffmpeg";
 import { geminiJson, geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import {
   searchFootage,
+  searchFootageLegacy,
   hasAnyFootageProvider,
   activeProviders,
   is4k,
@@ -232,11 +233,14 @@ export async function gateClip(
   query: string,
   brief: FootageBrief,
   log: (m: string) => void = () => {},
+  singleFrame = false,
 ): Promise<{ relevant: boolean; score: number }> {
   if (!hasGeminiKey()) return { relevant: true, score: 8 };
   const dur = durationSec || 8;
   const frames: string[] = [];
-  for (const [i, frac] of [0.12, 0.5, 0.82].entries()) {
+  // Legacy (old pipeline) judged ONE frame at ~1s; the new gate samples three.
+  const fracs = singleFrame ? [0.08] : [0.12, 0.5, 0.82];
+  for (const [i, frac] of fracs.entries()) {
     const f = `${localPath}.${i}.jpg`;
     try {
       await grabFrame(localPath, Math.max(0.5, dur * frac), f);
@@ -302,6 +306,8 @@ export interface CastFootageArgs {
   gateConcurrency?: number;
   /** Add the evergreen + ledger-relaxed fallback passes (default true). */
   fallbacks?: boolean;
+  /** Emulate the OLD pipeline: Pexels-only 1080p, single-frame gate, sequential. */
+  legacy?: boolean;
   log?: (m: string) => void;
 }
 
@@ -314,8 +320,9 @@ export interface CastFootageArgs {
  */
 export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
   const log = a.log ?? (() => {});
-  const dl = semaphore(a.downloadConcurrency ?? 6);
-  const gate = semaphore(a.gateConcurrency ?? 6);
+  // Legacy emulation runs strictly sequential (concurrency 1) like the old path.
+  const dl = semaphore(a.legacy ? 1 : a.downloadConcurrency ?? 6);
+  const gate = semaphore(a.legacy ? 1 : a.gateConcurrency ?? 6);
   const clips: PickedClip[] = [];
   const pickedIds = new Set<string>();
   const usedUrls = new Set<string>();
@@ -332,7 +339,10 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
   const castQuery = async (q: string, allowReuse: boolean): Promise<void> => {
     if (!need()) return;
     queriesRun++;
-    const cands = (await searchFootage(q, 6, a.brief.orientation).catch(() => [] as FootageClip[]))
+    const found = a.legacy
+      ? await searchFootageLegacy(q, 8, a.brief.orientation).catch(() => [] as FootageClip[])
+      : await searchFootage(q, 6, a.brief.orientation).catch(() => [] as FootageClip[]);
+    const cands = found
       .filter((c) => !usedUrls.has(c.url) && !pickedIds.has(clipId(c.url, c.provider)) && (allowReuse || !a.usedClipIds.has(clipId(c.url, c.provider))))
       .sort((x, y) => scoreClip(y) - scoreClip(x))
       .slice(0, 3);
@@ -348,7 +358,7 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
         return false;
       }));
       if (!ok) continue;
-      const verdict = await gate(() => gateClip(local, cand.durationSec, q, a.brief, log));
+      const verdict = await gate(() => gateClip(local, cand.durationSec, q, a.brief, log, a.legacy));
       const dur = cand.durationSec || a.perClipSec;
       if (verdict.relevant && verdict.score >= RELEVANCE_MIN) {
         clips.push({ path: local, query: q, provider: cand.provider, clipId: id, score: verdict.score, durationSec: dur });
@@ -361,7 +371,11 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
   };
 
   if (!hasAnyFootageProvider()) throw new Error("footagecraft: no footage provider configured");
-  log(`footagecraft: casting ${a.queries.length} queries across [${activeProviders().join(", ")}] (4K-only) → target ${a.targetSec.toFixed(0)}s`);
+  log(
+    a.legacy
+      ? `footagecraft: LEGACY mode (Pexels 1080p · single-frame gate · sequential) — ${a.queries.length} queries → target ${a.targetSec.toFixed(0)}s`
+      : `footagecraft: casting ${a.queries.length} queries across [${activeProviders().join(", ")}] (4K-only, concurrent) → target ${a.targetSec.toFixed(0)}s`,
+  );
 
   // Primary pass — queries in a worker pool; downloads/gates share semaphores.
   await mapPool(a.queries, 8, (q) => castQuery(q, false));

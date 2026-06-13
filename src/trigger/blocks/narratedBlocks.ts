@@ -712,6 +712,7 @@ export const stockFootage: Block = {
       perClipSec: PER_CLIP,
       usedClipIds: usedIds,
       tmpDir: tmp,
+      legacy: ctx.params["legacyFootage"] === true,
       log: (m) => ctx.log(m),
     });
     const clips = cast.clips.map((c) => c.path);
