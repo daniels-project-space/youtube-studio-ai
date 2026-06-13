@@ -19,6 +19,18 @@ const PROOFS: { src: string; alt: string }[] = [
 ];
 
 /**
+ * Real cinecraft output — the SAME generated character across four cinematic
+ * shots (vision-scored 10/10 consistency via the hero-image anchor), fanned on
+ * the Cinematic golden card.
+ */
+const CINEMATIC_PROOFS: { src: string; alt: string }[] = [
+  { src: "cinematic/cash.jpg", alt: "Victor Lustig — counting the cash (1925 hotel suite)" },
+  { src: "cinematic/handshake.jpg", alt: "Victor Lustig — the handshake" },
+  { src: "cinematic/corridor.jpg", alt: "Victor Lustig — walking out" },
+  { src: "cinematic/taxi.jpg", alt: "Victor Lustig — the taxi smile" },
+];
+
+/**
  * Real scriptcraft output — judge-gated, fact-checked cold opens and quotes
  * from the certification runs, fanned on the Script + Hook golden card.
  */
@@ -369,6 +381,34 @@ function ModuleCard({
             ))}
           </div>
           <FanCaption>real engine output — cast by law from the profiled voice bank, physics-tuned, judged by ears AND code</FanCaption>
+        </>
+      )}
+      {hero && m.key === "cinematic" && (
+        <>
+          <div className="golden-fan">
+            {CINEMATIC_PROOFS.map((p, i) => {
+              const off = i - (CINEMATIC_PROOFS.length - 1) / 2;
+              return (
+                // eslint-disable-next-line @next/next/no-img-element -- static proof strip
+                <img
+                  key={p.src}
+                  src={`/golden/${p.src}`}
+                  alt={p.alt}
+                  title={p.alt}
+                  loading="lazy"
+                  className="golden-fan-item"
+                  style={
+                    {
+                      "--rot": `${off * 4}deg`,
+                      "--ty": `${Math.round(off * off * 3.2)}px`,
+                      zIndex: i + 1,
+                    } as CSSProperties
+                  }
+                />
+              );
+            })}
+          </div>
+          <FanCaption>real engine output — the SAME generated character across four cinematic shots, hero-anchored, vision-scored 10/10</FanCaption>
         </>
       )}
     </article>

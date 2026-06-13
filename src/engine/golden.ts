@@ -605,6 +605,24 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "active",
   },
   {
+    key: "cinematic",
+    stage: "visual",
+    title: "Cinematic — Cinecraft",
+    engine: "Cinecraft — generated character/location-consistent cinematic shots (Nano Banana hero-anchor + Higgsfield Soul + Seedance/Kling i2v)",
+    how:
+      "The cinematic family GENERATES the screen instead of sourcing it — the Cipher / \"ago.\" true-crime / history look, " +
+      "where the same people, places and objects recur across many reconstructed shots. extractSubjects pulls the story's " +
+      "essential characters + recurring locations + key objects; each is designed into a Nano Banana reference sheet and " +
+      "becomes the ONE canonical anchor. A director pass scripts each beat with real camera grammar (move, lens, mood, " +
+      "transition) in the channel's CINEMATIC_DOCTRINE style. The consistency LAW: every keyframe is the subject's hero " +
+      "image as a DIRECT reference, the prompt leads with the identity lock and names the distinctive features (never a " +
+      "generic re-description — that's what made early renders \"four different people\"), a vision gate re-rolls drift, " +
+      "then Seedance/Kling animates the locked keyframe. Establishing + multi-subject shots supported; any style. Operator " +
+      "approves the hero before any Soul. Standalone src/lib/cinecraft.ts, visual-only (a pipeline adds audio + assembly).",
+    gates: ["hero-image identity anchor (not the soul)", "vision consistency gate \u2265 8 (re-roll on drift)", "per-kind lock: same person / place / object", "operator-approved hero before Soul"],
+    status: "golden",
+  },
+  {
     key: "inserts",
     stage: "layer",
     title: "Data-Viz Inserts",
