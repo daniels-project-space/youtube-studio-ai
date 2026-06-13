@@ -5,6 +5,7 @@ import { QuoteOverlay, type QuoteOverlayProps } from "./QuoteOverlay";
 import { DataInsert, type DataInsertProps } from "./DataInsert";
 import { ThumbText, type ThumbTextProps } from "./ThumbText";
 import { ThumbTemplate, type ThumbTemplateProps } from "./ThumbTemplate";
+import { DocuMotion, type DocuMotionProps } from "./DocuMotion";
 
 /**
  * In-app Remotion root (registered by ./index.ts). Kept self-contained — only
@@ -65,6 +66,29 @@ export const RemotionRoot: React.FC = () => {
         width={1280}
         height={720}
         defaultProps={{ lines: [{ text: "TITLE" }] } as ThumbTextProps}
+      />
+      <Composition
+        id="DocuMotion"
+        component={DocuMotion}
+        durationInFrames={300}
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={{ shots: [] } as DocuMotionProps}
+        calculateMetadata={({ props }) => {
+          const p = props as DocuMotionProps & { width?: number; height?: number };
+          const total = (p.shots ?? []).reduce(
+            (sum, s) => sum + Math.max(1, s.durationInFrames),
+            0,
+          );
+          return {
+            durationInFrames: Math.max(1, total),
+            fps: 30,
+            width: p.width ?? 1920,
+            height: p.height ?? 1080,
+            props,
+          };
+        }}
       />
       <Composition
         id="DataInsert"
