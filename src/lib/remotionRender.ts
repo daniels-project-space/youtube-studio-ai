@@ -88,6 +88,51 @@ export async function renderTitleCard(args: {
 }
 
 /**
+ * Render the DOCUMOTION timeline (documentary-collage shot kit) to an opaque
+ * H.264 body. Shot specs carry data-URI assets; duration comes from the sum of
+ * shot durations (calculateMetadata). Audio is muxed afterwards by the engine.
+ */
+export async function renderDocuMotion(args: {
+  shots: unknown[];
+  outPath: string;
+  width?: number;
+  height?: number;
+  /** Renderer parallelism (defaults to Remotion's choice). */
+  concurrency?: number;
+  log?: (msg: string) => void;
+}): Promise<string> {
+  const { selectComposition, renderMedia, ensureBrowser } = await import(
+    "@remotion/renderer"
+  );
+  await ensureBrowser();
+  const serveUrl = await getServeUrl();
+  const inputProps = {
+    shots: args.shots,
+    width: args.width ?? 1920,
+    height: args.height ?? 1080,
+  };
+  const composition = await selectComposition({ serveUrl, id: "DocuMotion", inputProps });
+  let lastPct = -10;
+  await renderMedia({
+    serveUrl,
+    composition,
+    inputProps,
+    codec: "h264",
+    outputLocation: args.outPath,
+    chromiumOptions: { gl: "angle" },
+    ...(args.concurrency ? { concurrency: args.concurrency } : {}),
+    onProgress: ({ progress }) => {
+      const pct = Math.round(progress * 100);
+      if (pct >= lastPct + 10) {
+        lastPct = pct;
+        args.log?.(`documotion render ${pct}%`);
+      }
+    },
+  });
+  return args.outPath;
+}
+
+/**
  * Render a transparent (VP8/alpha) quote overlay — the QuoteOverlay composition
  * (bold quote, important words yellow, scrim fade-in). ffmpeg composites it over
  * the (blurred) body video. width/height should match the body canvas.
