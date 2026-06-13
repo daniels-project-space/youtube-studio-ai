@@ -8,7 +8,6 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { bootstrapSecrets } from "../src/lib/bootstrap.ts";
 import { craftDocuMotion } from "../src/lib/documotion.ts";
-import { geminiJson } from "../src/lib/gemini.ts";
 import { synthNarration } from "../src/lib/tts.ts";
 import { generateSuno } from "../src/lib/music.ts";
 import { craftMetadata } from "../src/lib/metacraft.ts";
@@ -46,17 +45,9 @@ const meta = await craftMetadata({
 const title = meta?.title || visual.plan.title;
 log(`TITLE: ${title}`);
 
-// 3. NARRATION — one tight VO take from the shot beats, then ElevenLabs
-const beats = visual.plan.shots.map((s, i) => `${i + 1}. ${s.beat}`).join("\n");
-const { narration } = await geminiJson({
-  prompt:
-    `Write a tense, cinematic true-crime NARRATION for a 60-second video titled "${title}" about the Antwerp Diamond ` +
-    `Heist. Follow these ${visual.plan.shots.length} visual beats IN ORDER, ~1 sentence each, present tense, concrete, ` +
-    `no filler, building suspense and landing on the irony of the sandwiches. TOTAL about 135 words.\nBEATS:\n${beats}\n` +
-    `Return STRICT JSON {"narration":"the full voiceover as one string"}.`,
-  maxTokens: 1200,
-  temperature: 0.6,
-});
+// 3. NARRATION — the plan's per-shot narration IS the script (visuals were
+// planned to illustrate these exact lines), so the VO is perfectly synced.
+const narration = visual.plan.shots.map((s) => s.narration).filter(Boolean).join(" ");
 const narrPath = join(RUN, "narration.mp3");
 await writeFile(narrPath, await synthNarration({ text: narration, provider: "elevenlabs" }));
 const narrDur = await dur(narrPath);

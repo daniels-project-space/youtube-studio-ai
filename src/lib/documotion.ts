@@ -101,6 +101,10 @@ export interface DocuAssetBrief {
 
 export interface DocuShotPlan {
   kind: DocuShotKind;
+  /** The spoken VOICEOVER line for this shot — the narrative spine; the visual
+   *  ILLUSTRATES it, and the deliverable's VO is these lines in order. */
+  narration: string;
+  /** Short note on the visual intent (what to show). */
   beat: string;
   durationSec: number;
   camera: DocuCamera;
@@ -169,6 +173,7 @@ function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef)
       problems.push(`shot ${i}: unknown kind "${s.kind}" (use one of: ${Object.keys(KIND_ASSETS).join(", ")})`);
       continue;
     }
+    if (!s.narration?.trim()) problems.push(`shot ${i}: missing narration (the spoken VO line)`);
     if (!s.beat?.trim()) problems.push(`shot ${i}: empty beat`);
     if (!(s.durationSec >= 3 && s.durationSec <= 10)) problems.push(`shot ${i}: durationSec must be 3-10`);
     if (!s.camera || !CAMERA_MOVES.includes(s.camera.move) || !CAMERA_INTENSITIES.includes(s.camera.intensity))
@@ -184,6 +189,9 @@ function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef)
   }
   const total = (plan.shots ?? []).reduce((a, s) => a + (s.durationSec || 0), 0);
   if (Math.abs(total - durationSec) > durationSec * 0.15) problems.push(`durations sum ${total}s, target ${durationSec}s (±15%)`);
+  const words = (plan.shots ?? []).map((s) => s.narration ?? "").join(" ").split(/\s+/).filter(Boolean).length;
+  const wTarget = Math.round(durationSec * 2.0);
+  if (words < wTarget * 0.6 || words > wTarget * 1.4) problems.push(`narration ${words} words, target ~${wTarget} (≈2 words/sec of ${durationSec}s)`);
   return problems;
 }
 
@@ -194,8 +202,9 @@ function planContract(style: DocuStyleDef): string {
  "styleId": "${style.id}",
  "shots": [
    {
-     "kind": one of [${Object.keys(KIND_ASSETS).join(", ")}] — LEAN ON [${style.preferredKinds.join(", ")}] for this world,
-     "beat": "one sentence: what this shot communicates",
+     "narration": "the EXACT voiceover sentence spoken over this shot (present tense, concrete, cinematic) — the visual must SHOW what this says",
+     "kind": one of [${Object.keys(KIND_ASSETS).join(", ")}] — LEAN ON [${style.preferredKinds.join(", ")}]; pick the one that best SHOWS this line,
+     "beat": "<=8 words: the visual intent (what we literally see)",
      "durationSec": n (3-10),
      "camera": {"move": "push_in|pull_back|pan_left|pan_right|drift", "intensity": "subtle|medium|strong"},
      "title": "BIG headline <=3 words (parallax_portrait / object_drop / evidence_board)",
@@ -213,7 +222,9 @@ function planContract(style: DocuStyleDef): string {
  ]
 }
 ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). depth_parallax: exactly 1 image (a cinematic scene with a CLEAR foreground subject and a separated background — the engine derives the 2.5D depth layers). geo_map: ZERO assets — supply "geoQuery" (a real place); the map is rendered from live street data. map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 bg.
-SOURCE: use "archival" with a precise "query" ONLY for a real, famous, named person/place that Wikimedia certainly has (e.g. fg of "Henry Ford"); otherwise "generate".`;
+SOURCE: use "archival" with a precise "query" ONLY for a real, famous, named person/place that Wikimedia certainly has (e.g. fg of "Henry Ford"); otherwise "generate".
+CUE-DRIVEN ASSETS: every asset brief must depict EXACTLY what its shot's narration line says — render the concrete image the words evoke. If the line names the crew → a scene of the crew (e.g. dark-clad figures in a dim vault corridor at night); a place from above → an aerial/overhead scene of that place; a person at a location → that person in front of that location; an object → that object. Do NOT use generic filler.
+ON-SCREEN TEXT TONE: titles/kickers/labels/circleLabels must be SHORT, dramatic and tonally on-point for a premium documentary — evocative, never awkward, literal, redundant or accidentally COMICAL. (Bad: an evidence shot titled "THE TRASH". Good: "THE SLIP", "ONE MISTAKE", "THE INSIDER".) When unsure, omit the title and let the imagery speak.`;
 }
 
 /** Gemini Pro plans the shot list for the chosen style. One retry, then loud. */
@@ -226,18 +237,31 @@ export async function planDocu(args: {
 }): Promise<DocuPlan> {
   const { topic, style, referenceNotes, durationSec, log } = args;
   const shotsWanted = Math.max(6, Math.min(8, Math.round(durationSec / 8)));
+  const wordsTarget = Math.round(durationSec * 2.0);
   const base =
-    `You are the showrunner + director of photography of ${style.worldDescription}\n` +
+    `You are the writer + director of ${style.worldDescription}\n` +
     `CREATIVE DIRECTION: ${style.creativeDirection}\n` +
-    `Design the first ${durationSec} seconds of a video about: ${topic}.\n` +
-    (referenceNotes ? `REFERENCE (recreate this beat structure and visual grammar): ${referenceNotes}\n` : "") +
+    `Make the first ${durationSec} seconds of a documentary about: ${topic}.\n` +
+    (referenceNotes ? `REFERENCE (beats + visual grammar to honour): ${referenceNotes}\n` : "") +
+    `WORK IN THIS ORDER:\n` +
+    `STEP 1 — write the NARRATION: a gripping, FACTUAL voiceover that carries the viewer through the story as ONE ` +
+    `coherent arc (hook → who/where → how it unfolds → the turn → the payoff), ~${wordsTarget} words total across ` +
+    `exactly ${shotsWanted} beats (one beat = one shot, ~${Math.round(wordsTarget / shotsWanted)} words each). Present ` +
+    `tense, concrete, cinematic, no filler. Each beat must flow from the last.\n` +
+    `STEP 2 — VISUALISE each beat: choose the capability that best SHOWS what that line says, and write asset brief(s) ` +
+    `that depict EXACTLY that image. Detect the showable cue in the words and render it: a named real person → ` +
+    `parallax_portrait (archival photo if famous); a real place, especially "from above"/"the city"/"the building" → ` +
+    `geo_map (real streets) or an aerial depth_parallax; a reconstructed MOMENT (the crew at night, the safe being ` +
+    `cracked, a person standing before a building) → depth_parallax of that exact scene; a web of clues/suspects → ` +
+    `evidence_board; a sum/object → object_drop. The viewer should always SEE what they HEAR.\n` +
     `${CAPABILITY_CATALOG}\n` +
-    `RULES: exactly ${shotsWanted} shots. Compose freely from the palette to tell THIS story — lean on the world's ` +
-    `preferred capabilities but use any when it serves the beat. Shot 1 = ${style.hookKind} HOOK. Last shot = ` +
-    `${style.closerKind} landing the point. Vary the kinds (avoid repeating the same kind back-to-back unless it is ` +
-    `the spine of the world). CINEMATOGRAPHY: ${style.cinematography}\n` +
-    `Asset briefs must be vivid, specific, world-correct, with strong tonal separation between subject and ` +
-    `surroundings, and contain NO text/lettering in the image itself.\n${planContract(style)}`;
+    `RULES: exactly ${shotsWanted} shots. Shot 1 = a strong HOOK (prefer ${style.hookKind}). Last shot = ` +
+    `${style.closerKind}. Lean on this world's preferred capabilities but pick whatever SHOWS the line best; vary the ` +
+    `kinds (no identical kind back-to-back unless it is the world's spine). Only choose a visual you can render ` +
+    `CONVINCINGLY — if a beat is abstract, reframe its narration to a concrete, showable image. CINEMATOGRAPHY: ` +
+    `${style.cinematography}\n` +
+    `Asset briefs: vivid, specific, world-correct, strong subject/background separation, NO text/lettering in the ` +
+    `image.\n${planContract(style)}`;
 
   let feedback = "";
   let lastProblems: string[] = [];
@@ -246,13 +270,63 @@ export async function planDocu(args: {
     plan.styleId = style.id;
     lastProblems = validatePlan(plan, durationSec, style);
     if (!lastProblems.length) {
-      log?.(`documotion plan [${style.id}]: "${plan.title}" — ${plan.shots.length} shots OK`);
+      await lintLabels(plan, style, log);
+      log?.(`documotion plan [${style.id}]: "${plan.title}" — ${plan.shots.length} shots, narration-driven`);
       return plan;
     }
     log?.(`documotion plan attempt ${attempt + 1} rejected: ${lastProblems.join("; ")}`);
     feedback = `\nYOUR PREVIOUS ATTEMPT FAILED VALIDATION — fix exactly these: ${lastProblems.join("; ")}`;
   }
   throw new Error(`documotion: plan failed validation twice (${lastProblems.join("; ")})`);
+}
+
+/**
+ * On-screen TEXT tonal lint — review every title/kicker/label/circleLabel in
+ * the context of its shot's narration and rewrite anything awkward, literal,
+ * redundant or accidentally comical (the "THE TRASH" problem). Mutates the plan
+ * in place; never throws (the plan is already valid).
+ */
+async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Promise<void> {
+  const items = plan.shots.map((s, i) => ({
+    i,
+    kind: s.kind,
+    narration: s.narration,
+    title: s.title ?? "",
+    kicker: s.kicker ?? "",
+    circleLabel: s.circleLabel ?? "",
+    labels: (s.labels ?? []).map((l) => l.text),
+  }));
+  const hasText = items.some((it) => it.title || it.kicker || it.circleLabel || it.labels.length);
+  if (!hasText) return;
+  try {
+    const res = await geminiJson<{ fixes?: { i: number; title?: string; kicker?: string; circleLabel?: string; labels?: string[] }[] }>({
+      prompt:
+        `You are the typography editor of a premium ${style.label} documentary. Below is the on-screen TEXT for each ` +
+        `shot with its voiceover. A title/label is a DRAMATIC card — it must name the SIGNIFICANCE or stakes, never a ` +
+        `mundane object literally. HARD RULE: if a title literally names something ordinary (trash, sandwich, bag, ` +
+        `crumbs, food), it reads as accidentally COMICAL at huge scale — you MUST replace it with the dramatic meaning ` +
+        `(e.g. title "THE TRASH" over a discarded-evidence shot → "ONE MISTAKE" or "THE SLIP"; "THE SANDWICH" → ` +
+        `"THE EVIDENCE"). Also fix anything clunky, redundant or off-tone. Keep genuinely strong text unchanged. Set a ` +
+        `field to "" to drop it and let the image speak. Titles <=3 words, labels <=3 words, circleLabel one word.\n` +
+        `SHOTS:\n${JSON.stringify(items)}\n` +
+        `Return STRICT JSON {"fixes":[{"i":n,"title":"...","kicker":"...","circleLabel":"...","labels":["..."]}]} — ` +
+        `include EVERY shot you changed; you MUST change any literal mundane-object title.`,
+      maxTokens: 1500,
+      temperature: 0.2,
+    });
+    let n = 0;
+    for (const f of res.fixes ?? []) {
+      const s = plan.shots[f.i];
+      if (!s) continue;
+      if (f.title !== undefined) { s.title = f.title || undefined; n++; }
+      if (f.kicker !== undefined) { s.kicker = f.kicker || undefined; n++; }
+      if (f.circleLabel !== undefined) { s.circleLabel = f.circleLabel || undefined; n++; }
+      if (f.labels !== undefined && s.labels) { s.labels = f.labels.map((t, k) => ({ ...s.labels![k], text: t })).filter((l) => l.text); n++; }
+    }
+    if (n) log?.(`documotion label lint: rewrote ${n} on-screen text item(s)`);
+  } catch (e) {
+    log?.(`documotion label lint skipped (${e instanceof Error ? e.message : e})`);
+  }
 }
 
 /* ---------------------------------------------------------------- assets -- */
