@@ -33,10 +33,12 @@
  *     usedClipIds, tmpDir, log });
  *   // cast.clips[i].path (worker temp) · .clipId (for the ledger) · .score
  */
+import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { downloadTo } from "@/lib/files";
 import { grabFrame } from "@/lib/ffmpeg";
 import { geminiJson, geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { footageDoctrineFor, type FootageDoctrine } from "@/engine/golden";
 import {
   searchFootage,
   searchFootageLegacy,
@@ -48,6 +50,7 @@ import {
 } from "@/lib/footage";
 
 export { searchFootage, is4k, scoreClip, activeProviders, hasAnyFootageProvider, type FootageClip } from "@/lib/footage";
+export { footageDoctrineFor, FOOTAGE_DOCTRINE, type FootageDoctrine } from "@/engine/golden";
 
 export function hasFootagecraft(): boolean {
   return hasGeminiKey() && hasAnyFootageProvider();
@@ -71,6 +74,17 @@ export interface FootageBrief {
   natureMode?: boolean;
   /** Defect hints from a prior rejected attempt — the gate gets stricter on them. */
   healHints?: string[];
+  /**
+   * The channel's MOTION need (footage doctrine). Calm channels reject shaky /
+   * drone / fast clips; dynamic channels welcome them. Omit → resolved from the
+   * niche archetype. Set `{ character: "any" }` to disable the motion gate.
+   */
+  motion?: FootageDoctrine & { archetype?: string };
+}
+
+/** Resolve the brief's motion doctrine (explicit → niche archetype → default). */
+function motionOf(brief: FootageBrief): FootageDoctrine & { archetype?: string } {
+  return brief.motion ?? footageDoctrineFor(brief.niche);
 }
 
 export interface PickedClip {
@@ -184,12 +198,24 @@ export async function buildFootageQueries(brief: FootageBrief, count: number, ex
     const avoidClause = brief.visualAvoid?.length
       ? `NEVER suggest: ${brief.visualAvoid.slice(0, 8).join("; ")}.\n`
       : `CRITICAL: never suggest scenes that CONTRADICT the message or the channel's tone.\n`;
+    // MOTION doctrine — the channel's pace must be in the QUERY, not just the
+    // gate (4K stock skews to drone/aerial/fast; a calm channel must steer away
+    // from it at search time). Weave the desired movement in, ban the wrong one.
+    const m = motionOf(brief);
+    const motionClause =
+      m.motion === "calm"
+        ? `MOVEMENT (non-negotiable): this is a CALM, SLOW channel. Every query must imply SLOW, STEADY, ` +
+          `LOCKED-OFF or gently-drifting footage — weave in terms like ${m.prefer.slice(0, 5).join(", ")}. ` +
+          `NEVER suggest drone, aerial, timelapse, hyperlapse, fast, action, racing, whip-pan or shaky handheld shots.\n`
+        : m.motion === "dynamic"
+          ? `MOVEMENT: this is an ENERGETIC channel — favor ${m.prefer.slice(0, 4).join(", ")} footage.\n`
+          : `MOVEMENT: favor steady, cinematic footage (${m.prefer.slice(0, 3).join(", ")}); avoid shaky or frenetic shots.\n`;
     const defaultPrompt =
-      `A narrated video about "${brief.topic}"${nicheBit}.${narr}${worldClause}${avoidClause}` +
+      `A narrated video about "${brief.topic}"${nicheBit}.${narr}${worldClause}${avoidClause}${motionClause}` +
       `Give ${count} CONCRETE, filmable, VISUALLY DISTINCT stock-footage search queries (2-4 words each, ` +
-      `things a camera can literally show) whose MOOD and SUBJECT match THIS narration — not generic ` +
+      `things a camera can literally show) whose MOOD, SUBJECT and MOVEMENT match THIS narration — not generic ` +
       `decorative b-roll. Every query must connect to the video's actual themes and fit the channel's ` +
-      `visual world above. Vary scenes so no two look alike. Avoid abstract words and clichéd filler. ` +
+      `visual world AND its movement above. Vary scenes so no two look alike. Avoid abstract words and filler. ` +
       `Return STRICT JSON {"queries":string[]}.`;
     try {
       const out = await geminiJson<{ queries?: string[] }>({
@@ -217,6 +243,37 @@ export function evergreenQueries(natureMode?: boolean): string[] {
         "lone figure silhouette dusk", "old book pages", "stormy sea", "snowy mountain peak",
         "desert dunes wind", "waterfall slow motion", "moonlit clouds",
       ];
+}
+
+/* ------------------------------- motion --------------------------------- */
+
+/**
+ * MOTION score — a cheap, deterministic measure of how much a clip MOVES, so a
+ * calm channel can reject shaky / fast / drone footage that 4K stock is full
+ * of. Runs ffmpeg on a low-res proxy: tblend(difference) makes each frame the
+ * delta from the previous, signalstats reads its average luma — low = static /
+ * calm, high = fast pan / shake / busy. Averaged over a 40s window. Returns
+ * null when ffmpeg is unavailable (the gate then skips motion, never blocks).
+ */
+export async function motionScore(localPath: string, log: (m: string) => void = () => {}): Promise<number | null> {
+  return new Promise((resolve) => {
+    const args = [
+      "-i", localPath, "-t", "40",
+      "-vf", "scale=128:72,tblend=all_mode=difference,signalstats,metadata=print:key=lavfi.signalstats.YAVG",
+      "-f", "null", "-",
+    ];
+    const c = spawn("ffmpeg", args, { stdio: ["ignore", "ignore", "pipe"] });
+    let err = "";
+    const t = setTimeout(() => { c.kill("SIGKILL"); }, 25_000);
+    c.stderr.on("data", (d) => (err += d.toString()));
+    c.on("error", () => { clearTimeout(t); resolve(null); });
+    c.on("close", () => {
+      clearTimeout(t);
+      const vals = [...err.matchAll(/YAVG:([0-9.]+)/g)].map((mm) => Number(mm[1])).filter((n) => !Number.isNaN(n));
+      if (vals.length === 0) { log("footagecraft: motion score unavailable (no YAVG)"); resolve(null); return; }
+      resolve(vals.reduce((s, v) => s + v, 0) / vals.length);
+    });
+  });
 }
 
 /* -------------------------------- gate ---------------------------------- */
@@ -265,6 +322,12 @@ export async function gateClip(
       (w?.colorGrade ? ` The channel's grade/look: ${w.colorGrade}.` : "") +
       (brief.visualAvoid?.length ? ` The channel NEVER shows: ${brief.visualAvoid.slice(0, 6).join("; ")}.` : "") +
       (brief.healHints?.length ? ` A previous attempt was REJECTED by QA for: ${brief.healHints.join("; ")} — be stricter about that.` : "") +
+      (motionOf(brief).motion === "calm"
+        ? ` This is a CALM, SLOW-MOVING channel: also REJECT footage that looks fast, shaky, frenetic, or like a ` +
+          `sweeping drone/aerial shot — it must feel still or gently drifting.`
+        : motionOf(brief).motion === "dynamic"
+          ? ` This is an ENERGETIC channel: favor dynamic, lively footage.`
+          : "") +
       ` These ${frames.length} frames are sampled across ONE candidate b-roll clip (start, middle, end; search ` +
       `query "${query}"). REJECT the clip if ANY frame shows a watermark, stock-site logo, or burned-in ` +
       `caption/text. Judge whether it CLEARLY fits the subject and emotional mood of THIS video AND does not ` +
@@ -331,6 +394,8 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
   let gated = 0;
   let dlCounter = 0;
   let queriesRun = 0;
+  const mot = motionOf(a.brief);
+  const motionLogged: number[] = [];
 
   const need = () => coveredSec < a.targetSec;
 
@@ -361,6 +426,19 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
       const verdict = await gate(() => gateClip(local, cand.durationSec, q, a.brief, log, a.legacy));
       const dur = cand.durationSec || a.perClipSec;
       if (verdict.relevant && verdict.score >= RELEVANCE_MIN) {
+        // MOTION gate — only on a subject-passing clip (don't analyze rejects).
+        // A shaky/fast/drone clip is wrong for a calm channel even when the
+        // subject fits; reject it to the spare pool (used only if coverage
+        // starves). Skipped for legacy/dynamic/any and when ffmpeg is absent.
+        if (!a.legacy && mot.motion !== "dynamic") {
+          const ms = await motionScore(local, log);
+          if (ms !== null && ms > mot.maxMotion) {
+            log(`footagecraft: motion reject "${q}" — ${ms.toFixed(1)} > ${mot.maxMotion} (${mot.motion} channel, too dynamic/shaky)`);
+            spares.push({ path: local, dur, score: verdict.score });
+            continue;
+          }
+          if (ms !== null) motionLogged.push(ms);
+        }
         clips.push({ path: local, query: q, provider: cand.provider, clipId: id, score: verdict.score, durationSec: dur });
         coveredSec += Math.min(dur, a.perClipSec);
         gated++;
@@ -374,7 +452,7 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
   log(
     a.legacy
       ? `footagecraft: LEGACY mode (Pexels 1080p · single-frame gate · sequential) — ${a.queries.length} queries → target ${a.targetSec.toFixed(0)}s`
-      : `footagecraft: casting ${a.queries.length} queries across [${activeProviders().join(", ")}] (4K-only, concurrent) → target ${a.targetSec.toFixed(0)}s`,
+      : `footagecraft: casting ${a.queries.length} queries across [${activeProviders().join(", ")}] (4K-only, concurrent, motion=${mot.motion} ≤${mot.maxMotion}) → target ${a.targetSec.toFixed(0)}s`,
   );
 
   // Primary pass — queries in a worker pool; downloads/gates share semaphores.
@@ -401,7 +479,8 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
     log(`footagecraft: last-resort spare fill → ${coveredSec.toFixed(0)}s`);
   }
 
-  log(`footagecraft: ${clips.length} clips covering ~${coveredSec.toFixed(0)}/${a.targetSec.toFixed(0)}s (${gated} passed the gate, ${queriesRun} queries run)`);
+  const motAvg = motionLogged.length ? (motionLogged.reduce((s, v) => s + v, 0) / motionLogged.length).toFixed(1) : "n/a";
+  log(`footagecraft: ${clips.length} clips covering ~${coveredSec.toFixed(0)}/${a.targetSec.toFixed(0)}s (${gated} passed the gate, ${queriesRun} queries run, avg motion ${motAvg}/${mot.maxMotion})`);
   return {
     clips,
     coveredSec,

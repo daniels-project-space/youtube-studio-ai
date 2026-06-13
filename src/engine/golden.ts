@@ -363,6 +363,60 @@ export function narrationPhysicsFor(niche?: string): NarrationPhysics & { archet
 }
 
 /**
+ * FOOTAGE DOCTRINE — what each kind of channel NEEDS from its b-roll beyond the
+ * subject: MOTION character and camera energy. A calm stoic/meditation channel
+ * needs slow, steady, locked-off or gently-drifting shots — NOT shaky handheld
+ * or fast drone/aerial sweeps (which 4K stock is heavily skewed toward, since
+ * that's what gets shot in 4K). A chaos/hype channel wants the opposite. Used
+ * by footagecraft to (a) bias the search queries and (b) gate each clip on a
+ * deterministic motion score, so footage matches the channel's pace, not just
+ * its topic. `maxMotion` is the ceiling on the avg low-res inter-frame luma
+ * difference (ffmpeg tblend-difference YAVG): calm ≈ low, dynamic ≈ high.
+ */
+export interface FootageDoctrine {
+  /** Desired energy: calm (slow/static) | moderate (cinematic-steady) | dynamic (fast/energetic). */
+  motion: "calm" | "moderate" | "dynamic";
+  /** Motion-score ceiling (avg inter-frame luma diff). Clips above it are rejected. */
+  maxMotion: number;
+  /** Terms to weave into queries (the desired look/movement). */
+  prefer: string[];
+  /** Terms to keep OUT of queries AND scenes the gate rejects (wrong energy). */
+  avoid: string[];
+}
+
+const CALM_AVOID = ["drone", "aerial", "fast", "timelapse", "hyperlapse", "fast-paced", "whip pan", "action", "racing", "shaky", "handheld chase", "frenetic", "speeding"];
+const CALM_PREFER = ["slow motion", "static shot", "locked off", "gentle drift", "still", "calm", "slow", "tranquil"];
+
+export const FOOTAGE_DOCTRINE: Record<string, FootageDoctrine> = {
+  "quiet-mentor":   { motion: "calm",     maxMotion: 6.0,  prefer: CALM_PREFER,                                         avoid: CALM_AVOID },
+  "gentle-guide":   { motion: "calm",     maxMotion: 5.0,  prefer: ["very slow", "still water", "gentle drift", "soft light", "locked off", "slow motion"], avoid: CALM_AVOID },
+  "narrator-teacher":{ motion: "moderate", maxMotion: 9.0,  prefer: ["cinematic", "slow push in", "sweeping but steady", "epic landscape"], avoid: ["shaky", "whip pan", "frenetic", "fast cut"] },
+  "investigator":   { motion: "calm",     maxMotion: 6.5,  prefer: ["slow", "static", "moody", "locked off", "dim"],    avoid: CALM_AVOID },
+  "calm-analyst":   { motion: "calm",     maxMotion: 6.5,  prefer: ["slow", "clinical", "steady", "static"],            avoid: CALM_AVOID },
+  "teacher-advisor":{ motion: "moderate", maxMotion: 9.5,  prefer: ["clean", "steady", "modern", "bright but calm"],    avoid: ["shaky", "frenetic", "whip pan"] },
+  "trusted-explainer":{ motion: "moderate", maxMotion: 9.0, prefer: ["clean", "steady", "clinical", "calm"],            avoid: ["shaky", "frenetic"] },
+  "insider-explainer":{ motion: "moderate", maxMotion: 11.0, prefer: ["modern", "sharp", "dynamic but steady", "tech"], avoid: ["shaky"] },
+  "enthusiast-critic":{ motion: "moderate", maxMotion: 11.0, prefer: ["cinematic", "lively", "stylish"],               avoid: ["shaky", "amateur"] },
+  "operator-mentor":{ motion: "moderate", maxMotion: 10.0, prefer: ["clean", "professional", "steady"],                avoid: ["shaky"] },
+  "chaos-commentator":{ motion: "dynamic", maxMotion: 99.0, prefer: ["fast", "energetic", "punchy", "dynamic"],        avoid: [] },
+  "igniter":        { motion: "dynamic",  maxMotion: 99.0, prefer: ["intense", "fast", "powerful", "dynamic"],         avoid: [] },
+  "dramatist":      { motion: "moderate", maxMotion: 10.0, prefer: ["cinematic", "dramatic", "atmospheric"],           avoid: ["shaky amateur"] },
+  "teacher":        { motion: "moderate", maxMotion: 9.5,  prefer: ["clear", "clean", "steady", "bright"],             avoid: ["shaky"] },
+};
+
+/** Measured-neutral default when no archetype resolves. */
+export const DEFAULT_FOOTAGE_DOCTRINE: FootageDoctrine = {
+  motion: "moderate", maxMotion: 10.0, prefer: ["cinematic", "steady"], avoid: ["shaky", "frenetic"],
+};
+
+/** Resolve the footage doctrine for a niche (via its voice archetype). */
+export function footageDoctrineFor(niche?: string): FootageDoctrine & { archetype: string } {
+  const key = resolveVoiceDoctrine(niche)?.voice ?? "";
+  const d = FOOTAGE_DOCTRINE[key];
+  return d ? { ...d, archetype: key } : { ...DEFAULT_FOOTAGE_DOCTRINE, archetype: key || "default" };
+}
+
+/**
  * GOLDEN_MODULES — the golden template, module by module, as shown on the
  * studio's "Golden Pipeline" tab. One entry per module of the spine with the
  * honest story of HOW it works and which gates protect it. `status: "golden"`
