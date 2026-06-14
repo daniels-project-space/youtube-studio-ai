@@ -623,6 +623,42 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "golden",
   },
   {
+    key: "documotion",
+    stage: "visual",
+    title: "Documentary — Documotion",
+    engine: "Documotion — themeable documentary-collage motion engine (Remotion + Banana stills & typography + real OSM geo, narration-first planner, vision still-verifier)",
+    how:
+      "The motion-graphics family for narrated documentary and true-crime: archival sepia collage, a detective evidence-board " +
+      "with red string, a robbery-noir heist reconstruction — each a channel WORLD in one style registry. The planner is " +
+      "narration-first: it writes the voiceover as one coherent arc, then composes each beat from a CAPABILITY palette " +
+      "(parallax portrait, a real rendered geo_map from OSM streets and buildings, 2.5D depth-parallax camera-through-photo " +
+      "with rack focus, evidence board, object drop, a designed quote card). A style biases that mix, it never whitelists it, " +
+      "so new looks emerge from config. Every closing card is bespoke Nano Banana letterpress typography, not a web font. The " +
+      "LAW: all text, the red string and the pins are ENGINE OVERLAYS, never baked into an image. A still-verifier renders one " +
+      "frame per shot and a vision judge scores it, applying typed fixes until it passes. Standalone src/lib/documotion.ts, " +
+      "visual-only (a pipeline wraps narration, music, thumbnail and title around the body).",
+    gates: ["still-verifier type / cutout / composition / style / cohesion >= 7", "HARD legibility gate: no overlapping text (deterministic pass, self-corrects)", "text is an overlay, never baked into images", "narration-cue match + tonal label lint"],
+    status: "golden",
+  },
+  {
+    key: "speech-tv",
+    stage: "visual",
+    title: "Speech-TV — Vintage Overlay",
+    engine:
+      "Remotion full-frame composition (B&W/VHS grayscale + grain + glitch) + word-synced captions + segment channel bug + LLM cue-track motion graphics",
+    how:
+      "The motivational-speech repost look: real speech footage is wrapped in a vintage broadcast frame — " +
+      "desaturated, blue-tinted, film-grained, vignetted — with a top-right segment 'channel bug' (n/total + " +
+      "progress ring), word-by-word captions that snap in exactly when each word is spoken, and motion graphics " +
+      "(animated underlines, spike line-graphs, icon pops, pixelated step-boxes, lower-thirds, VHS glitch cuts) " +
+      "that mount ONLY within their [start,end] window so each stays on screen for exactly as long as it is " +
+      "script-relevant. Driven by a typed contract — words + segments + an LLM cue-track — so the source/" +
+      "transcribe/cue-gen stages plug in later with zero rework. One opaque H.264 render via " +
+      "src/lib/remotionRender.ts (renderMotivationalSpeech); the look is cloned from the reference compilation.",
+    gates: ["caption timing sync vs word-level transcript", "cue windows clamped to script relevance", "segment bug matches part boundaries"],
+    status: "active",
+  },
+  {
     key: "inserts",
     stage: "layer",
     title: "Data-Viz Inserts",

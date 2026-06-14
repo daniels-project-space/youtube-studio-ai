@@ -23,6 +23,11 @@ const CINEMATIC_PROOFS: { src: string; alt: string }[] = [
   { src: "cinematic/taxi.jpg", alt: "Victor Lustig — the taxi smile" },
 ];
 
+const DOCU_PROOFS: { file: string; device: string; meta: string }[] = [
+  { file: "fordlandia", device: "archival collage · narrated · 1080p", meta: "Fordlandia: The Jungle City — Ford's failed Amazon rubber town" },
+  { file: "robbery", device: "robbery noir · depth-parallax · 1080p", meta: "The Vault — the Antwerp diamond heist reconstruction" },
+];
+
 interface TextProof { device: string; channel: string; line: string; note: string }
 
 const SCRIPT_PROOFS: TextProof[] = [
@@ -215,6 +220,19 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
               <span style={DEVICE}>{p.device}</span>
               {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
               <audio controls preload="none" src={`/golden/voice/${p.file}`} style={{ width: "100%", height: 30 }} />
+              <span style={METAT}>{p.meta}</span>
+            </div>
+          ))}
+        </div>
+      );
+    case "documotion":
+      return (
+        <div style={{ ...STRIP, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
+          {DOCU_PROOFS.map((p) => (
+            <div key={p.file} style={CARD}>
+              <span style={DEVICE}>{p.device}</span>
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+              <video controls preload="none" poster={`/golden/documotion/${p.file}.jpg`} src={`/golden/documotion/${p.file}.mp4`} style={{ width: "100%", borderRadius: 6, background: "#000" }} />
               <span style={METAT}>{p.meta}</span>
             </div>
           ))}

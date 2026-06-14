@@ -18,7 +18,8 @@
  *     DocuMotion Remotion composition (eased camera + 2.5D parallax, stroked
  *     type on scrims, red-string evidence boards, torn mattes, film grade).
  *   • HOW TO JUDGE & FIX — a craft VERIFIER renders one STILL per shot (fast),
- *     scores type/cutout/composition/style/cohesion, and emits TYPED ACTIONS
+ *     scores type/cutout/composition/legibility/style/cohesion (legibility = a hard
+ *     text-collision gate), and emits TYPED ACTIONS
  *     the engine APPLIES (regen_asset, emphasize_text, reposition_labels,
  *     retime, camera) before re-checking, then renders the 1080p master.
  *
