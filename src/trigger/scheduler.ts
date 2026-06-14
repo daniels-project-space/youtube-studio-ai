@@ -47,7 +47,7 @@ interface RunRow {
 export const generationScheduler = schedules.task({
   id: "generation-scheduler",
   // Every 6h; the per-channel cadence + due-check decides what actually fires.
-  cron: "0 */6 * * *",
+  // cron: "0 */6 * * *", // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
   run: async () => {
     await bootstrapSecrets((m) => console.log(`[scheduler] ${m}`));
     const owner = process.env.STUDIO_OWNER_ID ?? "owner_daniel";

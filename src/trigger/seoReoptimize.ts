@@ -95,7 +95,7 @@ async function reoptimize(ownerId: string, log: Logger) {
 
 export const seoReoptimizeSchedule = schedules.task({
   id: "seo-reoptimize",
-  cron: "0 9 * * 1", // weekly, Monday 09:00 — after the weekend's metrics settle
+  // cron: "0 9 * * 1", // weekly, Monday 09:00 — after the weekend's metrics settle // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
   run: async () => reoptimize(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[seo-reopt] ${m}`)),
 });
 

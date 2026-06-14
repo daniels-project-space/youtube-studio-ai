@@ -48,7 +48,7 @@ export const refreshNicheResearchTask = task({
  */
 export const refreshNicheResearchSchedule = schedules.task({
   id: "refresh-niche-research-weekly",
-  cron: "0 6 * * 1", // Mondays 06:00 UTC
+  // cron: "0 6 * * 1", // Mondays 06:00 UTC // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
   maxDuration: 1800,
   run: async () => {
     const log: Logger = (m, x) =>

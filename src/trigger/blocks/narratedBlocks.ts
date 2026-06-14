@@ -1198,6 +1198,30 @@ export const timelineAssemble: Block = {
     const audioFadeOutSec = Number(ctx.params["audioFadeOutSec"] ?? fadeOutSec);
     const videoSec = introSec + narrationSec + tailSec;
 
+    // EARLY LENGTH GATE: videoSec is the EXACT runtime this block is about to
+    // render. If it already lands outside the channel's [minSeconds, maxSeconds]
+    // band, abort HERE — before the multi-minute Remotion render + encode —
+    // instead of rendering in full only for the post-render length_check to
+    // reject it. Quality-neutral (an off-length video fails the hard gate
+    // either way); this just stops paying ~$0.5-0.7 of render compute per
+    // reject. TOL absorbs caption/overlay rounding so it never trips a video
+    // that would have passed (passing ⇒ actual≈videoSec ∈ [min,max]).
+    {
+      const lcMin = Number(ctx.params["minSeconds"] ?? 0);
+      const lcMax = Number(ctx.params["maxSeconds"] ?? 0);
+      const TOL = 30;
+      if (lcMax > 0 && videoSec > lcMax + TOL) {
+        throw new Error(
+          `length_precheck FAILED: projected ${Math.round(videoSec)}s > max ${lcMax}s — narration too long; aborting before render`,
+        );
+      }
+      if (lcMin > 0 && videoSec < lcMin - TOL) {
+        throw new Error(
+          `length_precheck FAILED: projected ${Math.round(videoSec)}s < min ${lcMin}s — narration too short; aborting before render`,
+        );
+      }
+    }
+
     const tmp = await makeRunTempDir(ctx.runId);
 
     // SURGICAL HEAL â€” when the self-healer re-runs this block for an

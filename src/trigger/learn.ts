@@ -160,7 +160,7 @@ async function refresh(ownerId: string, log: Logger) {
 
 export const learningRefreshSchedule = schedules.task({
   id: "learning-refresh",
-  cron: "0 7 * * *", // daily, after metrics settle
+  // cron: "0 7 * * *", // daily, after metrics settle // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
   run: async () => refresh(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[learn] ${m}`)),
 });
 

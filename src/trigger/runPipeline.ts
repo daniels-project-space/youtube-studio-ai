@@ -61,7 +61,7 @@ export const runPipelineTask = task({
   // real memory — large-1x OOM-killed on the quote-overlay + xfade pass.
   machine: "large-2x",
   // Long-form (15-35 min) renders do many full-video re-encodes; allow up to ~2h.
-  maxDuration: 7200,
+  maxDuration: 4200, // was 7200; real successful renders p95=2817s/max=3634s, 4200s halves the hung-run ceiling without risking legit long-form
   // On a crash/OOM/timeout, retry the whole task — the runner's resume restores
   // completed blocks (no double-spend).
   retry: { maxAttempts: 2, minTimeoutInMs: 5000, maxTimeoutInMs: 30000, factor: 2 },

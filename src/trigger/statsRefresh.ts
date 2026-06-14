@@ -205,7 +205,7 @@ export const statsRefreshTask = task({
 /** Scheduled refresh every 6 hours for the operator's channels. */
 export const statsRefreshSchedule = schedules.task({
   id: "stats-refresh-6h",
-  cron: "0 */6 * * *", // every 6 hours
+  // cron: "0 */6 * * *", // every 6 hours // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
   maxDuration: 1800,
   run: async () => {
     const log: Logger = (m, x) => console.log(`[stats-refresh-6h] ${m}`, x ?? "");

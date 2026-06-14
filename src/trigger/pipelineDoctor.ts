@@ -213,7 +213,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
 
 export const pipelineDoctorSchedule = schedules.task({
   id: "pipeline-doctor",
-  cron: "30 7 * * *", // daily, after learning-refresh (07:00) so metrics are settled
+  // cron: "30 7 * * *", // daily, after learning-refresh (07:00) so metrics are settled // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
   run: async () => sweep(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[doctor] ${m}`)),
 });
 
