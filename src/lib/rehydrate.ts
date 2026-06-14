@@ -60,6 +60,34 @@ export async function rehydrateOutputs(
       }
     }
   }
+  // Arrays of local clip paths restored from a sibling array of R2 keys
+  // (footageClips←footageKeys, entityClips←entityKeys). This is what lets the
+  // render run on a SEPARATE worker from the one that downloaded the footage
+  // (the P1→P2 render-split), and also makes these blocks resume-restorable
+  // instead of forcing a re-download.
+  for (const [k, val] of Object.entries(outputs)) {
+    if (
+      Array.isArray(val) &&
+      val.some((p) => isLocalPath(p) && !existsSync(p as string))
+    ) {
+      const keys = outputs[`${k.replace(/Clips$/, "")}Keys`]; // footageClips→footageKeys
+      if (Array.isArray(keys) && keys.length === val.length && keys.every(looksLikeR2Key)) {
+        try {
+          if (!tmp) tmp = await makeRunTempDir(runId);
+          const restored: string[] = [];
+          for (let i = 0; i < keys.length; i++) {
+            const ext = (typeof val[i] === "string" ? (val[i] as string).match(/\.[a-z0-9]+$/i)?.[0] : "") ?? "";
+            const dest = join(tmp, `resume_${k}_${i}${ext}`);
+            await writeBytes(dest, await getObjectBytes(keys[i] as string));
+            restored.push(dest);
+          }
+          outputs[k] = restored;
+        } catch {
+          return { ok: false, outputs };
+        }
+      }
+    }
+  }
   // Then: if ANY value (including nested in arrays/objects, e.g. quoteOverlays
   // [{path}], footageClips[]) still points at a missing local file, we cannot
   // restore it → re-run the block (correctness over a skipped re-run).

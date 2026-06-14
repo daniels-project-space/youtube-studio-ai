@@ -592,8 +592,21 @@ export const narrationTts: Block = {
 export const stockFootage: Block = {
   id: "stock_footage",
   consumes: ["topic", "script"],
-  produces: ["footageClips"],
+  produces: ["footageClips", "footageKeys"],
   run: async (ctx) => {
+    // Upload the gated clips to run-scoped R2 keys alongside the local paths. This
+    // is what lets timeline_assemble run on a SEPARATE large-2x worker (the P1→P2
+    // render-split) — the render child rehydrates footageClips from footageKeys —
+    // and it also makes this block resume-restorable instead of re-downloading.
+    const uploadFootageKeys = async (paths: string[]): Promise<string[]> => {
+      const keys: string[] = [];
+      for (let i = 0; i < paths.length; i++) {
+        const key = `${ctx.keyPrefix}footage/run/${ctx.runId}/clip_${i}.mp4`;
+        await putObject(key, await readBytes(paths[i]), { contentType: "video/mp4" });
+        keys.push(key);
+      }
+      return keys;
+    };
     // RENDER-GROUP REUSE: a language sibling reuses the base render's footage from
     // the durable group bundle (no Pexels query/download/AI-gate â€” the visuals are
     // identical across languages; only narration/captions/text differ).
@@ -601,18 +614,20 @@ export const stockFootage: Block = {
     if (reuseKeys?.length) {
       const tmp = await makeRunTempDir(ctx.runId);
       const clips: string[] = [];
+      const okKeys: string[] = [];
       for (let i = 0; i < reuseKeys.length; i++) {
         try {
           const p = join(tmp, `reuse_${i}.mp4`);
           await writeBytes(p, await getObjectBytes(reuseKeys[i]));
           clips.push(p);
+          okKeys.push(reuseKeys[i]);
         } catch (e) {
           ctx.log(`stock_footage(reuse): clip ${i} fetch failed: ${e instanceof Error ? e.message : e}`);
         }
       }
       if (clips.length) {
         ctx.log(`stock_footage: REUSED ${clips.length} footage clips from base render (no Pexels)`);
-        return { footageClips: clips };
+        return { footageClips: clips, footageKeys: okKeys };
       }
       ctx.log("stock_footage(reuse): no clips fetched â€” falling back to fresh sourcing");
     }
@@ -738,26 +753,37 @@ export const stockFootage: Block = {
         if (sig.clips.length) {
           clips.unshift(...sig.clips);
           ctx.log(`stock_footage: HYBRID — ${sig.clips.length} signature generated clip(s) prepended (~$${sig.cost.toFixed(2)})`);
-          return { footageClips: clips, [COST_PATCH_KEY]: sig.cost };
+          return { footageClips: clips, footageKeys: await uploadFootageKeys(clips), [COST_PATCH_KEY]: sig.cost };
         }
       } catch (e) {
         ctx.log(`stock_footage: signature clips failed (stock-only, non-fatal): ${e instanceof Error ? e.message : e}`);
       }
     }
-    return { footageClips: clips };
+    return { footageClips: clips, footageKeys: await uploadFootageKeys(clips) };
   },
 };
 
 export const entityImagery: Block = {
   id: "entity_imagery",
   consumes: ["narrationText"],
-  produces: ["entityClips", "attributions"],
+  produces: ["entityClips", "entityKeys", "attributions"],
   run: async (ctx) => {
     const clips: string[] = [];
     const attributions: string[] = []; // license ledger (Wikimedia credits)
+    // Upload entity images to run-scoped R2 keys so the render child (P1→P2
+    // split) can rehydrate entityClips from entityKeys on its own worker.
+    const uploadEntityKeys = async (paths: string[]): Promise<string[]> => {
+      const keys: string[] = [];
+      for (let i = 0; i < paths.length; i++) {
+        const key = `${ctx.keyPrefix}entity/run/${ctx.runId}/img_${i}.jpg`;
+        await putObject(key, await readBytes(paths[i]), { contentType: "image/jpeg" });
+        keys.push(key);
+      }
+      return keys;
+    };
     if (!hasGeminiKey()) {
       ctx.log("entity_imagery: no Gemini key â€” skipping");
-      return { entityClips: clips, attributions };
+      return { entityClips: clips, entityKeys: [], attributions };
     }
     const narration = str(ctx, "narrationText");
     const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
@@ -825,14 +851,14 @@ export const entityImagery: Block = {
       }
     }
     ctx.log(`entity_imagery: ${clips.length} entity clip(s), ${attributions.length} attribution(s)`);
-    return { entityClips: clips, attributions };
+    return { entityClips: clips, entityKeys: await uploadEntityKeys(clips), attributions };
   },
 };
 
 export const introCard: Block = {
   id: "intro_card",
   consumes: ["topic"],
-  produces: ["introCardPath", "introApplied", "introSec", "introMode"],
+  produces: ["introCardPath", "introCardKey", "introApplied", "introSec", "introMode"],
   run: async (ctx) => {
     // Universal Remotion title card (cloud-wired): renders the in-app TitleCard
     // composition (src/remotion) in-process via headless Chromium. It is
@@ -881,8 +907,13 @@ export const introCard: Block = {
         bgImagePath,
       });
       ctx.log(`intro_card: title card rendered (${introSec}s @ ${W}x${H}, "${cardTitle.slice(0, 50)}")`);
+      // R2-back the card so the render child (P1→P2 split) can rehydrate
+      // introCardPath from introCardKey on its own worker (also fixes resume).
+      const introCardKey = `${ctx.keyPrefix}runs/${ctx.runId}/introcard.mp4`;
+      await putObject(introCardKey, await readBytes(out), { contentType: "video/mp4" });
       return {
         introCardPath: out,
+        introCardKey,
         introApplied: true,
         introSec,
         introMode: "prepend",
@@ -891,7 +922,7 @@ export const introCard: Block = {
       ctx.log(
         `intro_card: !!! title-card render FAILED (${e instanceof Error ? e.message : e}) â€” continuing without a card`,
       );
-      return { introCardPath: "", introApplied: false, introSec: 0, introMode: "none" };
+      return { introCardPath: "", introCardKey: "", introApplied: false, introSec: 0, introMode: "none" };
     }
   },
 };
@@ -1522,11 +1553,18 @@ async function finishFromComposed(
   await putObject(videoKey, await readBytes(finalVideo), { contentType: "video/mp4" });
   // Persist the PRE-OVERLAY composed video (body + outro, NO captions/cards) so
   // the surgical heal can re-finish without re-rendering the whole timeline.
-  const preOverlayKey = `${ctx.keyPrefix}runs/${ctx.runId}/pre_overlay.mp4`;
+  // If the upload fails, BLANK the key+path: an advertised R2 key whose object
+  // doesn't exist makes rehydrate (resume + the render-split child) report a
+  // hard failure for the WHOLE block — re-rendering needlessly. preOverlay is
+  // heal-only, so a blank just means "heal does a full rebuild" (safe).
+  let preOverlayKey = `${ctx.keyPrefix}runs/${ctx.runId}/pre_overlay.mp4`;
+  let preOverlayLocalPathOut = composed;
   try {
     await putObject(preOverlayKey, await readBytes(composed), { contentType: "video/mp4" });
   } catch (e) {
     ctx.log(`timeline_assemble: pre-overlay save failed (surgical heal unavailable): ${e instanceof Error ? e.message : e}`);
+    preOverlayKey = "";
+    preOverlayLocalPathOut = "";
   }
   await recordAsset(ctx, "video", videoKey, {
     durationSec: videoSec,
@@ -1545,7 +1583,7 @@ async function finishFromComposed(
     insertsApplied,
     preOverlayKey,
     // The composed body INCLUDING the outro â€” overlays re-apply on top of it.
-    preOverlayLocalPath: composed,
+    preOverlayLocalPath: preOverlayLocalPathOut,
   };
 }
 

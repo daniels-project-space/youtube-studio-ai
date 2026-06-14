@@ -21,6 +21,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline, preflight } from "@/engine/validate";
 import { runPipeline as runEngine } from "@/engine/runner";
+import { renderBlockTask } from "@/trigger/render-block";
 import { planHeal } from "@/engine/healer";
 import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
@@ -57,9 +58,12 @@ export interface RunPipelineInput {
 
 export const runPipelineTask = task({
   id: "run-pipeline",
-  // Video encodes + Chromium (Remotion) + multi-pass overlay compositing need
-  // real memory — large-1x OOM-killed on the quote-overlay + xfade pass.
-  machine: "large-2x",
+  // P1→P2 SPLIT: the memory-heavy render (timeline_assemble) now runs on a
+  // large-2x CHILD task (render-block); this orchestrator runs every other block
+  // (LLM/TTS/footage/idle waits) and SUSPENDS during the render. So it no longer
+  // pays the large-2x rate to sit idle ~50% of the run waiting on external APIs.
+  // large-1x (8GB) comfortably handles footage gating + captions + qa_visual.
+  machine: "large-1x",
   // Long-form (15-35 min) renders do many full-video re-encodes; allow up to ~2h.
   maxDuration: 4200, // was 7200; real successful renders p95=2817s/max=3634s, 4200s halves the hung-run ceiling without risking legit long-form
   // On a crash/OOM/timeout, retry the whole task — the runner's resume restores
@@ -199,6 +203,26 @@ export const runPipelineTask = task({
         defaultRetries: 2,
         rehydrate: (block: string, outputs: Record<string, unknown>) =>
           rehydrateOutputs(block, outputs, payload.runId),
+        // P1→P2 SPLIT: run the memory-heavy render on a large-2x child task so
+        // this orchestrator (large-1x) suspends — unbilled — during the render
+        // instead of paying the big-machine rate to wait on external APIs.
+        remoteBlocks: new Set(["timeline_assemble"]),
+        runRemoteBlock: async (blockId: string, params: Record<string, unknown>) => {
+          const res = await renderBlockTask.triggerAndWait({
+            runId: payload.runId,
+            ownerId,
+            channelId: payload.channelId,
+            keyPrefix: channelPrefix(ownerId, channel.slug),
+            blockId,
+            params,
+            budgetUsd: channel.budget ?? 0,
+            seedStore,
+          });
+          if (!res.ok) {
+            throw new Error(`render-block child failed: ${JSON.stringify(res.error)?.slice(0, 300)}`);
+          }
+          return (res.output as { patch: Record<string, unknown> }).patch;
+        },
       };
       let result = await runEngine(resolved, { ...engineOpts, seedStore });
 

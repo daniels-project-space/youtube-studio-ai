@@ -51,6 +51,18 @@ export interface RunPipelineOptions {
   ) => Promise<{ ok: boolean; outputs: Record<string, unknown> }>;
   /** Default per-block retries on TRANSIENT errors (block param `retries` wins). */
   defaultRetries?: number;
+  /**
+   * Blocks to execute on a dedicated CHILD task instead of inline — e.g. the
+   * memory-heavy render on large-2x while the orchestrator + idle-waiting blocks
+   * (LLM/TTS/footage) run on a cheaper machine. The orchestrator SUSPENDS
+   * (unbilled) during the child, so it stops paying the big-machine rate to wait
+   * on external APIs. The child returns the block's patch (R2-keyed outputs).
+   */
+  remoteBlocks?: Set<string>;
+  runRemoteBlock?: (
+    blockId: string,
+    params: Record<string, unknown>,
+  ) => Promise<Record<string, unknown>>;
 }
 
 export interface RunResult {
@@ -215,7 +227,26 @@ export async function runPipeline(
 
     try {
       const retries = Number(params["retries"] ?? opts.defaultRetries ?? 2);
-      const patch = await runBlockWithRetry(block, ctx, retries, log);
+      let patch: Record<string, unknown>;
+      if (opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock) {
+        // Dispatch to a child task (large-2x render). Orchestrator suspends here.
+        log(`block remote-dispatch: ${block.id}`);
+        patch = await opts.runRemoteBlock(block.id, params);
+        // The child uploaded its outputs to R2 and returned R2 keys; materialize
+        // local paths so downstream blocks on THIS worker can consume them. Take
+        // the BEST-EFFORT restored outputs even when rehydrate reports ok:false:
+        // it restores each file independently (videoLocalPath←videoKey succeeds),
+        // and a not-fully-restorable sibling (e.g. preOverlayLocalPath, used only
+        // by timeline_assemble's own surgical heal) must not discard the real
+        // render output that downstream blocks consume.
+        if (opts.rehydrate) {
+          const r = await opts.rehydrate(block.id, { ...patch });
+          patch = r.outputs;
+          if (!r.ok) log(`remote block ${block.id}: partial rehydrate (downstream-consumed outputs restored; a heal-only sibling may be absent)`);
+        }
+      } else {
+        patch = await runBlockWithRetry(block, ctx, retries, log);
+      }
       const cost = takeCost(patch);
       spentUsd += cost;
       assertProduced(block, patch);
