@@ -110,7 +110,32 @@ def raster_label(text, box, color):
     col = np.zeros((H, W, 3), np.uint8); col[m] = rgb
     return m, col
 
+def fit_panel_boxes(layers, grow=1.22, x0=0.045, y0=0.175, x1=0.955, y1=0.96, max_scale=1.4):
+    """Better use of space: enlarge each drawing a bit, then scale the whole
+    panel layout to fill the board (only expand), then clamp into bounds."""
+    have = [l for l in layers if l.get("box") and len(l["box"]) == 4]
+    if not have:
+        return
+    for l in have:                                       # 1) grow each element about its own center
+        b = l["box"]; cx, cy = b[0] + b[2] / 2, b[1] + b[3] / 2
+        nw, nh = b[2] * grow, b[3] * grow
+        l["box"] = [cx - nw / 2, cy - nh / 2, nw, nh]
+    bs = [l["box"] for l in have]                         # 2) scale layout to fill the board
+    ux0 = min(b[0] for b in bs); uy0 = min(b[1] for b in bs)
+    ux1 = max(b[0] + b[2] for b in bs); uy1 = max(b[1] + b[3] for b in bs)
+    uw = max(1e-3, ux1 - ux0); uh = max(1e-3, uy1 - uy0)
+    s = max(1.0, min((x1 - x0) / uw, (y1 - y0) / uh, max_scale))
+    nw, nh = uw * s, uh * s
+    ox = x0 + ((x1 - x0) - nw) / 2; oy = y0 + ((y1 - y0) - nh) / 2
+    for l in have:
+        b = l["box"]
+        nb = [ox + (b[0] - ux0) * s, oy + (b[1] - uy0) * s, b[2] * s, b[3] * s]
+        nb[0] = min(max(nb[0], x0), x1 - 0.03); nb[1] = min(max(nb[1], y0), y1 - 0.03)
+        nb[2] = min(nb[2], x1 - nb[0]); nb[3] = min(nb[3], y1 - nb[1])
+        l["box"] = nb
+
 def build_panel(p):
+    fit_panel_boxes(p["layers"])
     layers = []
     for l in p["layers"]:
         res = raster_art(os.path.join(DIR, l["art"]), l["box"]) if l["kind"] == "art" and l.get("art") else \
