@@ -64,7 +64,9 @@ export interface SyncLayer { kind: "art" | "label"; art?: string; text?: string;
 export interface SyncPanel { idx: number; startMs: number; endMs: number; layers: SyncLayer[] }
 export interface WhiteboardSyncResult { outPath: string; timelinePath: string; title: string; narrationText: string; panels: SyncPanel[]; durationMs: number }
 
-const ART_MODELS = ["gemini-3-pro-image-preview", "gemini-2.5-flash-image"];
+// Flash Image first: ~4x cheaper, same style-ref mechanism, and dodges the Pro
+// image quota that heavy/long renders hit. Pro stays as a higher-fidelity fallback.
+const ART_MODELS = ["gemini-2.5-flash-image", "gemini-3-pro-image-preview"];
 const ASSET_DIR = join(process.cwd(), "src", "assets", "whiteboard");
 
 export function hasWhiteboardSync(): boolean {
@@ -81,13 +83,15 @@ async function styledScene(prompt: string, refB64: string): Promise<Buffer> {
   const key = process.env.GEMINI_API_KEY;
   let lastErr = "";
   for (const model of ART_MODELS) {
+    // Flash Image maxes ~1K and rejects imageSize; Pro takes 2K.
+    const imageConfig = model.includes("flash") ? { aspectRatio: "16:9" } : { aspectRatio: "16:9", imageSize: "2K" };
     try {
       const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
         method: "POST",
         headers: { "content-type": "application/json" },
         body: JSON.stringify({
           contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/png", data: refB64 } }] }],
-          generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: "16:9", imageSize: "2K" } },
+          generationConfig: { responseModalities: ["IMAGE"], imageConfig },
         }),
         signal: AbortSignal.timeout(180_000),
       });
@@ -287,7 +291,7 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
         ? `Draw a COMPOSED, designed scene: ${l.draw} — show the objects AND how they relate, clear and informative. `
         : `Draw a single bold iconic sketch of: ${l.draw}, instantly readable. `) +
       `(Context for tone, do NOT write any text: "${p.narration}".) Simple line-art, NOT photorealistic, no shading. ` +
-      `Use red for at most one or two accent marks. ABSOLUTELY NO text, words, numbers or letters anywhere. No watermark, pure white background.`;
+      `Use red for at most one or two accent marks. ABSOLUTELY NO text, words, numbers or letters anywhere. No watermark, NO whiteboard, NO frame, NO border, NO grey edges — pure white #ffffff background ONLY.`;
     try {
       await writeFile(out, refB64 ? await styledScene(prompt, refB64) : await styledScene(prompt, ""));
       l.art = fn;
@@ -327,7 +331,7 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
   const header = brief.header ?? title.toUpperCase().slice(0, 40);
   const timeline = {
     title, header, headerBox: [0.14, 0.035, 0.72, 0.092], dir: args.runDir, audio: "narration.mp3",
-    width: brief.width ?? 1920, height: brief.height ?? 1080,
+    width: brief.width ?? 1920, height: brief.height ?? Math.round((brief.width ?? 1920) * 9 / 16),
     prerollSec: 2.6, fps: 25, audioEndMs: audioEnd, tailMs: 1800, panels: tlPanels,
   };
   const timelinePath = join(args.runDir, "timeline.json");
