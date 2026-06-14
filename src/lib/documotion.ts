@@ -661,6 +661,7 @@ export interface DocuVerdict {
   typeCraft?: number;
   cutoutCraft?: number;
   composition?: number;
+  legibility?: number;
   styleMatch?: number;
   cohesion?: number;
   pass?: boolean;
@@ -696,7 +697,13 @@ const VERIFIER_CHECKLIST =
   `hero/object cutouts read as INTENTIONAL die-cut pieces — clean edges, no half-dissolved subjects, clear ` +
   `separation from the plate. 3. COMPOSITION: one clear focal point, breathing room, nothing important buried, ` +
   `labels not colliding with faces/titles. 4. STYLE: cohesive world — same palette/grade/grain across shots. ` +
-  `5. Each frame is labelled with shot index, kind and camera move.`;
+  `5. TEXT LAYOUT (legibility): NO two text blocks may overlap, touch or stack on top of one another — the engine ` +
+  `headline/title, the kicker, every label and annotation, the quote and its attribution each sit in their OWN clear ` +
+  `space with a visible gap. The lower-third title must never run into the label rail or bury a cutout's readable ` +
+  `face; stacked labels must not overprint. ANY overlap, touching or unreadable pile-up of text = legibility <=4 + a ` +
+  `reposition_labels action. (A headline whose first 1-3 characters tuck behind a hero cutout is the intended style, ` +
+  `NOT an overlap.) ` +
+  `6. Each frame is labelled with shot index, kind and camera move.`;
 
 /** Score one still per shot and emit typed, actionable critique. */
 export async function verifyDocu(args: {
@@ -709,22 +716,28 @@ export async function verifyDocu(args: {
     prompt:
       `You are the FILM VERIFIER for a ${args.worldHint} motion engine. One frame per shot, in order:\n` +
       `${args.labels.join("\n")}\n${VERIFIER_DOCTRINE}\n${VERIFIER_CHECKLIST}\n` +
-      `Score 1-10: typeCraft, cutoutCraft, composition, styleMatch, cohesion. pass = every score >=7.\n` +
+      `Score 1-10: typeCraft, cutoutCraft, composition, legibility, styleMatch, cohesion. pass = every score >=7 ` +
+      `(legibility drops below 7 whenever any two text blocks overlap or touch).\n` +
       `Then emit ACTIONS — only real problems, max 6, the MOST actionable fix per problem (obey the doctrine above):\n` +
       `- {"type":"regen_asset","shot":n,"asset":"<existing id: bg/fg/img1/cutout1>","fix":"<=14 words, PHOTO content/style/framing only, never text"}\n` +
       `- {"type":"emphasize_text","shot":n}  (type too small / weak contrast)\n` +
-      `- {"type":"reposition_labels","shot":n,"to":"top_right|bottom_left|bottom_center"}\n` +
+      `- {"type":"reposition_labels","shot":n,"to":"top_right|bottom_left|bottom_center"}  (text overlap / colliding labels — move the rail to clear space)\n` +
       `- {"type":"retime","shot":n,"durationSec":n}\n` +
       `- {"type":"camera","shot":n,"move":"push_in|pull_back|pan_left|pan_right|drift","intensity":"subtle|medium|strong"}\n` +
-      `Return STRICT JSON {"typeCraft":n,"cutoutCraft":n,"composition":n,"styleMatch":n,"cohesion":n,"pass":bool,"actions":[...],"note":"<=25 words"}.`,
+      `Return STRICT JSON {"typeCraft":n,"cutoutCraft":n,"composition":n,"legibility":n,"styleMatch":n,"cohesion":n,"pass":bool,"actions":[...],"note":"<=25 words"}.`,
     imagePaths: args.framePaths,
     json: true,
     model: "gemini-3.1-pro-preview",
     maxTokens: 6000,
   }).catch(() => "");
   const v: DocuVerdict = raw ? parseJsonLoose<DocuVerdict>(raw) : {};
+  // HARD legibility gate — overlapping text must never ship silently. Recompute
+  // pass from all six craft scores so a generous model-assigned pass can't mask
+  // a text collision (the failure mode that let a stale render go out).
+  const scores = [v.typeCraft, v.cutoutCraft, v.composition, v.legibility, v.styleMatch, v.cohesion];
+  if (scores.every((s) => typeof s === "number")) v.pass = (scores as number[]).every((s) => s >= 7);
   args.log?.(
-    `documotion verify: type=${v.typeCraft} cutout=${v.cutoutCraft} comp=${v.composition} style=${v.styleMatch} cohesion=${v.cohesion} pass=${v.pass} actions=${v.actions?.length ?? 0}${v.note ? ` — ${v.note}` : ""}`,
+    `documotion verify: type=${v.typeCraft} cutout=${v.cutoutCraft} comp=${v.composition} legib=${v.legibility} style=${v.styleMatch} cohesion=${v.cohesion} pass=${v.pass} actions=${v.actions?.length ?? 0}${v.note ? ` — ${v.note}` : ""}`,
   );
   return v;
 }
