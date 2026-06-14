@@ -64,9 +64,9 @@ export interface SyncLayer { kind: "art" | "label"; art?: string; text?: string;
 export interface SyncPanel { idx: number; startMs: number; endMs: number; layers: SyncLayer[] }
 export interface WhiteboardSyncResult { outPath: string; timelinePath: string; title: string; narrationText: string; panels: SyncPanel[]; durationMs: number }
 
-// Flash Image first: ~4x cheaper, same style-ref mechanism, and dodges the Pro
-// image quota that heavy/long renders hit. Pro stays as a higher-fidelity fallback.
-const ART_MODELS = ["gemini-2.5-flash-image", "gemini-3-pro-image-preview"];
+// Nano Banana Pro (Gemini 3 Pro Image) is the primary art model — preferred for
+// its fidelity. Flash Image stays as a cheaper fallback when Pro is unavailable.
+const ART_MODELS = ["gemini-3-pro-image-preview", "gemini-2.5-flash-image"];
 const ASSET_DIR = join(process.cwd(), "src", "assets", "whiteboard");
 
 export function hasWhiteboardSync(): boolean {
