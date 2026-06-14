@@ -641,6 +641,25 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "golden",
   },
   {
+    key: "motioncraft",
+    stage: "layer",
+    title: "Motion Graphics — Motioncraft",
+    engine:
+      "Motioncraft — an LLM reads the script, decides which beats earn a motion graphic, picks the best free tool per beat, and renders each (MapLibre · Remotion · Nano Banana · p5.js)",
+    how:
+      "A standalone motion layer for any narrated video. analyzeForMotion reads the whole script with the tool " +
+      "catalog and returns a short list of opportunities — it EARNS each graphic (3-6 per video, never one per line), " +
+      "routes every one to the best tool, and extracts the content. geo_map renders a real location from OSM streets " +
+      "in MapLibre with a gold target push-in; data_stats animates only the numbers the narration actually speaks, " +
+      "verbatim, in Remotion; hero_title renders a thumbnail-grade Nano Banana scene, lifts a depth-parallax cutout " +
+      "(Marigold + feathered alpha) and flies a camera through it in Remotion with a kinetic title overlaid — never " +
+      "baked in; generative paints a drifting intel-network background in p5.js. One tool contract (__ready / __dur / " +
+      "__frame / __settle) drives a single generic Playwright capture, so new tools plug in with zero rework. Clips are " +
+      "timed to each narration cue and per-clip failures stay isolated. Standalone src/lib/motioncraft.ts, visual-only.",
+    gates: ["the LLM earns each graphic (3-6 / video, never per line)", "best-tool routing per beat", "verbatim numbers only (stats)", "no text baked into the hero image — the title is a crisp overlay", "per-clip failure isolated"],
+    status: "golden",
+  },
+  {
     key: "speech-tv",
     stage: "visual",
     title: "Speech-TV — Vintage Overlay",

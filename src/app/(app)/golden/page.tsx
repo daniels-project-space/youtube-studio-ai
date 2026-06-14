@@ -28,6 +28,14 @@ const DOCU_PROOFS: { file: string; device: string; meta: string }[] = [
   { file: "robbery", device: "robbery noir · depth-parallax · 1080p", meta: "The Vault — the Antwerp diamond heist reconstruction" },
 ];
 
+/** Real motioncraft renders — one heist script, four beats, four tools the LLM picked itself. */
+const MOTION_PROOFS: { file: string; device: string; meta: string }[] = [
+  { file: "hero", device: "hero_title · Nano Banana + Remotion · 1080p", meta: "\"Never fully solved\" — a camera flies through a depth-parallax hero render, title overlaid" },
+  { file: "map", device: "geo_map · MapLibre · 1080p", meta: "Antwerp diamond district — real OSM streets, a gold target push-in" },
+  { file: "stats", device: "data_stats · Remotion · 1080p", meta: "Ten layers · $100M · zero alarms — only the spoken numbers, verbatim" },
+  { file: "crew", device: "generative · p5.js · 1080p", meta: "The School of Turin — a drifting intel-network background" },
+];
+
 interface TextProof { device: string; channel: string; line: string; note: string }
 
 const SCRIPT_PROOFS: TextProof[] = [
@@ -233,6 +241,19 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
               <span style={DEVICE}>{p.device}</span>
               {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
               <video controls preload="none" poster={`/golden/documotion/${p.file}.jpg`} src={`/golden/documotion/${p.file}.mp4`} style={{ width: "100%", borderRadius: 6, background: "#000" }} />
+              <span style={METAT}>{p.meta}</span>
+            </div>
+          ))}
+        </div>
+      );
+    case "motioncraft":
+      return (
+        <div style={{ ...STRIP, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
+          {MOTION_PROOFS.map((p) => (
+            <div key={p.file} style={CARD}>
+              <span style={DEVICE}>{p.device}</span>
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+              <video controls preload="none" poster={`/golden/motioncraft/${p.file}.jpg`} src={`/golden/motioncraft/${p.file}.mp4`} style={{ width: "100%", borderRadius: 6, background: "#000" }} />
               <span style={METAT}>{p.meta}</span>
             </div>
           ))}
