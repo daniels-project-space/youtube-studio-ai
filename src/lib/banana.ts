@@ -145,11 +145,18 @@ export async function bananaTypeCard(args: {
 export async function generateBananaImage(args: {
   prompt: string;
   aspectRatio?: string;
+  /** "1K" | "2K" | "4K" — Pro model only; defaults to "2K". */
+  imageSize?: string;
 }): Promise<Buffer> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
   let lastErr = "";
   for (const model of MODELS) {
+    // Nano Banana Pro (gemini-3-pro-image) honours imageConfig.imageSize for 2K/4K
+    // output; the classic gemini-2.5-flash-image fallback rejects it (400) and caps
+    // ~1024px anyway, so it silently degrades.
+    const imageConfig: Record<string, string> = { aspectRatio: args.aspectRatio ?? "16:9" };
+    if (model.includes("gemini-3-pro-image")) imageConfig.imageSize = args.imageSize ?? "2K";
     for (let attempt = 0; attempt < 2; attempt++) {
       try {
         const res = await fetch(
@@ -161,7 +168,7 @@ export async function generateBananaImage(args: {
               contents: [{ parts: [{ text: args.prompt }] }],
               generationConfig: {
                 responseModalities: ["IMAGE"],
-                imageConfig: { aspectRatio: args.aspectRatio ?? "16:9" },
+                imageConfig,
               },
             }),
             signal: AbortSignal.timeout(180_000),
