@@ -1,0 +1,142 @@
+<!doctype html><html><head><meta charset="utf8"><style>
+  html,body{margin:0;background:#0e0b09;overflow:hidden}#c{display:block;width:1920px;height:1080px}
+</style></head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script type="importmap">{ "imports": { "three":"https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
+<script type="module">
+import * as THREE from "three";
+const W=1920,H=1080;                              // aspect only; render at 720p (CSS-stretched) for speed in software GL
+const renderer=new THREE.WebGLRenderer({canvas:document.getElementById("c"),antialias:true});
+renderer.setSize(1920,1080,false); renderer.setPixelRatio(1);
+renderer.toneMapping=THREE.ACESFilmicToneMapping; renderer.toneMappingExposure=1.04; renderer.outputColorSpace=THREE.SRGBColorSpace;
+const scene=new THREE.Scene(); scene.background=new THREE.Color(0x17120f);
+const camera=new THREE.PerspectiveCamera(30,W/H,0.05,200); camera.up.set(0,0,1);
+
+const key=new THREE.DirectionalLight(0xfff2de,2.5); key.position.set(0.7,-1.1,2.4); scene.add(key);
+scene.add(new THREE.HemisphereLight(0xc2cdda,0x241c16,0.6)); scene.add(new THREE.AmbientLight(0xffffff,0.18));
+const desk=new THREE.Mesh(new THREE.PlaneGeometry(14,14),new THREE.MeshStandardMaterial({color:0x271f19,roughness:0.95}));
+desk.position.set(0,0.6,-0.05); scene.add(desk);
+
+const NP=8;                                    // max panels per page (shader array size)
+const WP=1.0;                                  // page width in world units
+const smooth=t=>{t=Math.max(0,Math.min(1,t));return t*t*(3-2*t);};
+const tl=new THREE.TextureLoader();
+let pending=0; const need=()=>pending++; const fin=()=>{pending--; if(pending<=0 && META) window.__ready=true;};
+function texSRGB(p){need(); const t=tl.load(p,fin,undefined,fin); t.colorSpace=THREE.SRGBColorSpace; t.anisotropy=4; return t;}
+function texData(p){need(); const t=tl.load(p,fin,undefined,fin); t.colorSpace=THREE.NoColorSpace; t.minFilter=THREE.NearestFilter; t.magFilter=THREE.NearestFilter; t.generateMipmaps=false; return t;}
+
+// hand sprite
+const handTex=texSRGB("hand_rgba.png");
+const hand=new THREE.Sprite(new THREE.SpriteMaterial({map:handTex,depthTest:false,transparent:true,alphaTest:0.35}));
+hand.center.set(0.22,0.72); hand.visible=false; hand.renderOrder=10; scene.add(hand);   // anchor = pen-tip (nib)
+
+let META=null, PAGES=[];
+function buildPage(pg,pi){
+  const Hp=WP*pg.hpx/pg.wpx, z=-pi*0.004;
+  const full=texSRGB(`page${pi}_full.png`), empty=texSRGB(`page${pi}_empty.png`), order=texData(`page${pi}_order.png`);
+  const mat=new THREE.MeshStandardMaterial({map:full,roughness:0.9});
+  const uProg={value:new Array(NP).fill(0)};
+  mat.onBeforeCompile=(sh)=>{
+    sh.uniforms.emptyTex={value:empty}; sh.uniforms.orderTex={value:order}; sh.uniforms.uProg=uProg;
+    sh.fragmentShader="uniform sampler2D emptyTex;uniform sampler2D orderTex;uniform float uProg["+NP+"];\n"+
+      sh.fragmentShader.replace("#include <map_fragment>",
+      `#ifdef USE_MAP
+        vec4 fC=texture2D(map,vMapUv); vec4 eC=texture2D(emptyTex,vMapUv); vec4 oC=texture2D(orderTex,vMapUv);
+        int pidx=int(oC.g*255.0+0.5); float pr=1.0; for(int k=0;k<${NP};k++){ if(k==pidx) pr=uProg[k]; }
+        float rv=step(oC.r,pr); diffuseColor*=mix(eC,fC,rv);
+       #endif`);
+  };
+  const geo=new THREE.PlaneGeometry(WP,Hp,60,84); geo.translate(WP/2,Hp/2,z);
+  const base=Float32Array.from(geo.attributes.position.array);
+  const baseN=Float32Array.from(geo.attributes.normal.array);
+  const mesh=new THREE.Mesh(geo,mat); scene.add(mesh);
+  const back=new THREE.Mesh(geo,new THREE.MeshStandardMaterial({color:0xeee3cd,roughness:0.96,side:THREE.BackSide})); scene.add(back);
+  const shadow=new THREE.Mesh(new THREE.PlaneGeometry(WP*1.03,Hp*1.03),new THREE.MeshBasicMaterial({color:0x000000,transparent:true,opacity:0.35}));
+  shadow.position.set(WP/2+0.02,Hp/2-0.025,z-0.0015); scene.add(shadow);   // cheap drop-shadow to ground the page
+  // world position of a panel point given image-UV (u, v_from_top)
+  const uvW=(u,v)=>new THREE.Vector3(u*WP,(1.0-v)*Hp,z+0.001);
+  return {pg,pi,Hp,z,mat,uProg,geo,base,baseN,mesh,shadow,uvW};
+}
+
+// camera keyframe (pos,target) for framing a panel of this page, mostly top-down + slight tilt/azimuth
+function panelKey(P,li){
+  const b=P.pg.panels[li].box, w=P.pg.wpx, h=P.pg.hpx;
+  const cx=(b[0]+b[2]/2)/w*WP, cy=(1-(b[1]+b[3]/2)/h)*P.Hp;
+  const bw=b[2]/w*WP, bh=b[3]/h*P.Hp;
+  const fov=camera.fov*Math.PI/180;
+  const dist=Math.max(bh, bw*H/W)/ (2*Math.tan(fov/2)) /0.80;
+  const az=((li%2)?1:-1)*0.08*dist;
+  return {pos:new THREE.Vector3(cx+az, cy-0.30*dist, P.z+0.95*dist), tgt:new THREE.Vector3(cx,cy,P.z)};
+}
+function topKey(P){                              // top view of the whole page
+  const cx=WP/2, cy=P.Hp/2, fov=camera.fov*Math.PI/180;
+  const dist=Math.max(P.Hp, WP*H/W)/(2*Math.tan(fov/2))/0.92;
+  return {pos:new THREE.Vector3(cx, cy-0.30*dist, P.z+1.02*dist), tgt:new THREE.Vector3(cx,cy,P.z)};
+}
+function turnKey(P){                              // proven angle from the standalone turn demo
+  return {pos:new THREE.Vector3(0.46, -1.42, P.z+1.62), tgt:new THREE.Vector3(0.40, 0.66, P.z+0.04)};
+}
+function lerpKey(a,b,s){return {pos:a.pos.clone().lerp(b.pos,s), tgt:a.tgt.clone().lerp(b.tgt,s)};}
+function applyKey(k){camera.position.copy(k.pos); camera.lookAt(k.tgt);}
+
+// page-turn deform (spine rotate + billow) of page P, q 0..1
+function deform(P,q){
+  const beta=smooth(q)*Math.PI, pos=P.geo.attributes.position.array, base=P.base, bow=0.16*WP;
+  const sb=Math.sin(beta),cb=Math.cos(beta),fl=Math.sin(beta);
+  for(let i=0;i<pos.length;i+=3){const x=base[i],y=base[i+1],z0=base[i+2],u=x/WP;const bz=bow*Math.sin(Math.PI*u)*fl;
+    pos[i]=x*cb-bz*sb; pos[i+1]=y; pos[i+2]=z0+x*sb+bz*cb;}
+  P.geo.attributes.position.needsUpdate=true; P.geo.computeVertexNormals();
+}
+function flat(P){ P.geo.attributes.position.array.set(P.base); P.geo.attributes.normal.array.set(P.baseN); P.geo.attributes.position.needsUpdate=true; P.geo.attributes.normal.needsUpdate=true; }
+
+fetch("mc3d_meta.json").then(r=>r.json()).then(m=>{ META=m; PAGES=m.pages.map(buildPage); window.__dur=m.total; if(pending<=0) window.__ready=true; });
+
+const MOVE=()=>META.move, EST=()=>META.est, PT=()=>META.turn, TAIL=()=>META.tail, DF=()=>META.drawFrac;
+window.__frame=(tn)=>{
+  if(!META) return;
+  const T=tn*META.total;
+  // per-panel reveal progress (every page), + locate the active page/panel
+  let active=null;
+  PAGES.forEach((P)=>{ const arr=P.uProg.value;
+    P.pg.panels.forEach((pm,li)=>{ const p=Math.max(0,Math.min(1,(T-pm.start-MOVE())/Math.max(0.3,pm.dur-MOVE()))); arr[li]=p;
+      if(T>=pm.start && T<pm.start+pm.dur){ active={P,li,pm,local:T-pm.start,p}; } });
+    // a page that has started its turn stays DEFORMED (turning, or flipped flat to
+    // the left once done) so it never falls back on top of the next page.
+    const turned=(P.pg.turnAt!=null && T>=P.pg.turnAt);
+    if(turned) deform(P, Math.min(1,(T-P.pg.turnAt)/PT()));
+    else flat(P);
+    P.shadow.visible=!turned;   // a turned page's drop-shadow must not darken the page beneath
+  });
+  // schedule: establishing -> panels (with page-turns) -> tail
+  hand.visible=false;
+  const turns=PAGES.map(P=>P.pg.turnAt).filter(v=>v!=null);
+  let cam;
+  if(T<EST()){ const tk=topKey(PAGES[0]); const from={pos:tk.pos.clone().add(new THREE.Vector3(0,-0.15,0.4)),tgt:tk.tgt}; cam=lerpKey(from,tk,smooth(T/EST())); }
+  else if(active){
+    const P=active.P, li=active.li, local=active.local;
+    const prev= li>0 ? panelKey(P,li-1) : (P.pi>0 ? turnKey(P) : topKey(P));
+    const here=panelKey(P,li);
+    if(local<MOVE()) cam=lerpKey(prev,here,smooth(local/MOVE()));
+    else { const hf=Math.min(1,(local-MOVE())/Math.max(0.1,active.pm.dur-MOVE())); cam={pos:here.pos.clone().lerp(here.tgt,0.05*hf),tgt:here.tgt}; }
+    // hand at the draw frontier
+    const dp=Math.min(1, active.p/DF());
+    if(active.p>0.001 && dp<1 && active.pm.traj.length>1){
+      const tr=active.pm.traj, idx=Math.min(tr.length-1, Math.floor(dp*(tr.length-1)));
+      const wp=P.uvW(tr[idx][0],tr[idx][1]); hand.position.copy(wp);
+      const bhw=active.pm.box[3]/P.pg.hpx*P.Hp*1.55; hand.scale.set(bhw,bhw,1); hand.visible=true;
+    }
+  } else {
+    // in a page-turn window?
+    let turning=null;
+    PAGES.forEach((P)=>{ if(P.pg.turnAt!=null && T>=P.pg.turnAt && T<P.pg.turnAt+PT()){ turning={P,q:(T-P.pg.turnAt)/PT()}; }});
+    if(turning){ const P0=turning.P; const lastLi=P0.pg.panels.length-1; cam=lerpKey(panelKey(P0,lastLi), turnKey(P0), smooth(Math.min(1,turning.q*2.4))); }   // deform handled above
+    else if(T>=META.total-TAIL()){ const P=PAGES[PAGES.length-1]; const k=topKey(P); cam={pos:k.pos.clone().add(new THREE.Vector3(0,0,0.5)),tgt:k.tgt}; }
+    else cam=topKey(PAGES[0]);
+  }
+  applyKey(cam);
+  renderer.render(scene,camera);
+};
+function camDistScale(wp){ return 1.0; }
+window.__settle=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+const kick=setInterval(()=>{ if(window.__ready){clearInterval(kick); window.__frame(0);} },60);
+</script></body></html>

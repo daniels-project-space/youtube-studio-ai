@@ -756,6 +756,23 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "golden",
   },
   {
+    key: "comic",
+    stage: "visual",
+    title: "Comic — Motion-Comic 3D Engine",
+    engine: "motionComic — a narrated comic that DRAWS ITSELF OUT IN 3D: Gemini story → Nano-Banana character-consistent panels at each tile's aspect → ElevenLabs multi-voice → vision letterer → Three.js comic-page render. ZERO render credits.",
+    how:
+      "A standalone engine (src/lib/motionComic.ts + the mc3d render path). Gemini-Pro writes a tight story; each panel renders " +
+      "image-to-image from per-character MODEL SHEETS at the EXACT aspect ratio of the page tile it will occupy — so heads are " +
+      "never cropped — composed with reserved caption space. ElevenLabs voices every line; a vision letterer derives each " +
+      "speaker's mouth from a TIGHT face box (never a guessed point on a held gun or hand). A Three.js scene then tours an open " +
+      "comic page with a real 3D camera — top-down establish, zoom into each empty panel, the HAND draws it in (the scribe " +
+      "pixel-reveal ported to a GPU order-map shader), speech bubbles pop on cue, the page TURNS to a fresh sheet — rendered " +
+      "headless and muxed with the voices + a Suno score. Bubbles are placed by HARD face-exclusion + adaptive sizing with an " +
+      "elegant slim tail that stops at the face edge. No video model = $0 render credits.",
+    gates: ["per-panel geometric check: bubble face_overlap = 0 (faces are a hard constraint)", "adaptive bubble sizing until it fits a face-free gap (clear_fit)", "elegant tail stops at the face edge — never crosses the face", "panels generated at the exact tile aspect — no cropped heads", "vision letterer scores clear / tail / proximity / legibility per bubble", "character consistency via model-sheet image-to-image"],
+    status: "golden",
+  },
+  {
     key: "ship",
     stage: "ship",
     title: "Ship",

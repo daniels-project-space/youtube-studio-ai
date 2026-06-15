@@ -270,6 +270,17 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
           </div>
         </div>
       );
+    case "comic":
+      return (
+        <div style={STRIP}>
+          <div style={{ ...CARD, gridColumn: "1 / -1" }}>
+            <span style={DEVICE}>3D drawn comic · real camera · multi-voice · 1080p · $0 render</span>
+            {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+            <video controls preload="none" poster="/golden/comic/comic3d.jpg" src="/golden/comic/comic3d.mp4" style={{ width: "100%", borderRadius: 6, background: "#000" }} />
+            <span style={METAT}>The Silent Night — the comic draws itself out in 3D, the page turns, every line voiced</span>
+          </div>
+        </div>
+      );
     default: return null;
   }
 }
