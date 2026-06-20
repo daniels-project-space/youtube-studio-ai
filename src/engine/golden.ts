@@ -493,6 +493,31 @@ export interface GoldenModule {
 
 export const GOLDEN_MODULES: GoldenModule[] = [
   {
+    key: "loreshort",
+    stage: "visual",
+    title: "Lore Short — Loreshort Engine",
+    engine:
+      "Loreshort — Gemini first-person lore script + Nano Banana art + ElevenLabs per-line TTS + image-to-video camera moves (Seedance-1-lite / LTX) + 4K Real-ESRGAN — two cost/quality lanes",
+    how:
+      "A single figure narrates history in FIRST PERSON (GoT \"Histories & Lore\" style): one Gemini-Pro call writes a paced " +
+      "narration arc plus per-beat layered-depth SCENE prompts; Nano Banana paints each beat; ElevenLabs voices each line " +
+      "separately so every shot is cut to its exact spoken length. A vision pass reads each painting and writes a motion brief " +
+      "(subject + particles + a DEPTH camera move, scaled to honest intensity), which drives image-to-video into a GENUINE 3D " +
+      "shot — real perspective and parallax, never a 2D pan. Two lanes: BUDGET (LTX-distilled + free ffmpeg 2K, ~$0.4/video) " +
+      "and PREMIUM (Seedance-1-lite 480p → Real-ESRGAN 4K, ~$1.35/video, far richer figures). A title card plays before the " +
+      "narration; ffmpeg fits each shot to its beat, dissolves, titles and grades. Self-describing (LORESHORT_MODULE contract), " +
+      "fail-proof (data-URI inputs, no nginx dependency, retries, no cross-engine fallback), fully resumable. src/lib/loreshort.ts.",
+    gates: [
+      "required inputs validated (topic / narrator / title / kicker / slug)",
+      "de-branded visuals (content-policy safe)",
+      "intensity-aware motion — depth camera leads, never forced",
+      "title card BEFORE narration",
+      "no cross-engine fallback — retry same engine or fail loud",
+      "genuine-3D camera move (not a 2D pan)",
+    ],
+    status: "golden",
+  },
+  {
     key: "thumbnail",
     stage: "package",
     title: "Thumbnail — Banana Engine",

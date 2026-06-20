@@ -70,6 +70,13 @@ const VOICE_PROOFS: { file: string; device: string; meta: string }[] = [
   { file: "history.mp3", device: "narrator · 1.0x", meta: "George — storyteller" },
 ];
 
+/** Real loreshort renders — first-person lore micro-docs with genuine 3D camera moves. */
+const LORESHORT_PROOFS: { file: string; device: string; meta: string }[] = [
+  { file: "lotr", device: "watercolour+pencil · Seedance → 4K · narrated", meta: "The Rings of Power — first-person elven loremaster, depth-led 3D camera" },
+  { file: "starwars", device: "cinematic concept-art · 2K · narrated", meta: "The Empire — how the old order fell, title card + intensity-aware motion" },
+  { file: "smith4k", device: "premium lane · Seedance 480p → Real-ESRGAN 4K", meta: "One beat at true 4K — the smith forges the ring, detail recovered" },
+];
+
 /**
  * Golden Pipeline — a static render of the GOLDEN_MODULES registry: a pipeline
  * progress bar of the spine, then compact tiles (golden first), each with a
@@ -279,6 +286,19 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
             <video controls preload="none" poster="/golden/comic/comic3d.jpg" src="/golden/comic/comic3d.mp4" style={{ width: "100%", borderRadius: 6, background: "#000" }} />
             <span style={METAT}>The Silent Night — the comic draws itself out in 3D, the page turns, every line voiced</span>
           </div>
+        </div>
+      );
+    case "loreshort":
+      return (
+        <div style={{ ...STRIP, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
+          {LORESHORT_PROOFS.map((p) => (
+            <div key={p.file} style={CARD}>
+              <span style={DEVICE}>{p.device}</span>
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+              <video controls preload="none" poster={`/golden/loreshort/${p.file}.jpg`} src={`/golden/loreshort/${p.file}.mp4`} style={{ width: "100%", borderRadius: 6, background: "#000" }} />
+              <span style={METAT}>{p.meta}</span>
+            </div>
+          ))}
         </div>
       );
     default: return null;

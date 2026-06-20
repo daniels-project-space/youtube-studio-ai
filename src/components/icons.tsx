@@ -141,3 +141,13 @@ export function IconTerminal(props: IconProps) {
     </svg>
   );
 }
+
+export function IconLore(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <rect x="3" y="4" width="18" height="16" rx="2.5" />
+      <path d="M3 9h18" />
+      <path d="M10 12.4l4.2 2.6-4.2 2.6z" />
+    </svg>
+  );
+}

@@ -10,12 +10,14 @@ import {
   IconSpark,
   IconCalendar,
   IconGolden,
+  IconLore,
 } from "./icons";
 
 const NAV = [
   { href: "/", label: "Overview", icon: <IconOverview /> },
   { href: "/channels", label: "Channels", icon: <IconChannels /> },
   { href: "/golden", label: "Golden Pipeline", icon: <IconGolden /> },
+  { href: "/loreshort", label: "Lore Short", icon: <IconLore /> },
   { href: "/schedule", label: "Schedule", icon: <IconCalendar /> },
   { href: "/runs", label: "Runs", icon: <IconRuns /> },
   { href: "/library", label: "Library", icon: <IconLibrary /> },
