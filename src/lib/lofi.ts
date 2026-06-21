@@ -46,6 +46,8 @@ export interface LofiScene {
   spatial: Record<string, string>;
   /** covered / interior scene — enforces the HARD no-rain-inside rule (rain only outside the glass) */
   indoor?: boolean;
+  /** still generator: 'flux' (default, richest) | 'nano' (Nano Banana Pro — obeys negative rules like no-rain-inside; Flux ignores them) */
+  imageModel?: "flux" | "nano";
 }
 
 const NOTEXT = " No text, no letters, no signs, no watermark.";
@@ -231,7 +233,7 @@ export const LOFI_MODULE = {
     "Seamless loop = 2×15s: clip A animates freely (max life), clip B animates BACK to the origin frame → 30s unit whose last frame == first frame → plain stream_loop, an invisible seam. NEVER crossfade, NEVER boomerang.",
     "Motion is ENSURED, not hoped: each scene declares ranked animation priorities + forbidden motion + spatial rules, and a Gemini-Vision pass writes the motion prompt grounded in the actual painting.",
     "STATIC CAMERA is locked at the source: a hard tripod-lock clause is appended to every Kling prompt — the wind moves the SUBJECTS, never the viewpoint.",
-    "HARD RULE — it NEVER rains inside: covered/indoor scenes (scene.indoor) get a no-rain-inside clause on both the still and the Kling prompt; rain falls only outside the glass, the interior stays bone dry.",
+    "HARD RULE — it NEVER rains inside: covered/indoor scenes (scene.indoor) get a no-rain-inside clause on the still + Kling prompt AND render the still on Nano Banana Pro (imageModel: 'nano'), which obeys the negative rule — Flux paints rain indoors regardless. Rain only outside the glass; interior bone dry.",
     "Camera shake is also removed in post: a motion-aware temporal de-warble cleans AI shimmer from the loop unit (seam preserved), since AI i2v adds a frame-to-frame warble even on a locked camera.",
     "NO upscale is baked in — the render is native resolution; Topaz 4K is a separate optional pass on the short loop unit only.",
     "Every stage caches to output/lofi/<slug>/ → fully resumable.",
@@ -298,11 +300,24 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
     return (await r.json()).urls.get as string;
   }
 
-  // 1 ── STILL (Flux 1.1 Pro Ultra, native res, aspect_ratio only) ───────────────
+  // 1 ── STILL — Flux 1.1 Pro Ultra (default), or Nano Banana Pro for scenes that need strict
+  //      instruction-following (the no-rain-inside rule: Flux paints rain indoors anyway; Nano obeys). ──
   const still = rd("still.png");
   if (!existsSync(still)) {
-    const url = await replicate(FLUX_MODEL, { prompt: scene.flux + dry, aspect_ratio: "16:9", output_format: "png", safety_tolerance: 4, raw: false }, "Flux");
-    await dl(url, still);
+    if (scene.imageModel === "nano") {
+      const r = await rfetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent?key=${GK}`, {
+        method: "POST", headers: { "content-type": "application/json" },
+        body: JSON.stringify({ contents: [{ parts: [{ text: scene.flux + dry }] }], generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: "16:9", imageSize: "2K" } } }),
+        signal: AbortSignal.timeout(200000),
+      });
+      const j: any = await r.json();
+      const part = (j?.candidates?.[0]?.content?.parts ?? []).find((x: any) => x?.inlineData?.data);
+      if (!part) throw new Error(`lofi: Nano Banana still failed: ${JSON.stringify(j?.candidates?.[0]?.finishReason || j?.error || j).slice(0, 160)}`);
+      await writeFile(still, Buffer.from(part.inlineData.data, "base64"));
+    } else {
+      const url = await replicate(FLUX_MODEL, { prompt: scene.flux + dry, aspect_ratio: "16:9", output_format: "png", safety_tolerance: 4, raw: false }, "Flux");
+      await dl(url, still);
+    }
     log("still ✓");
   }
   await copyFile(still, join(WEB, `${cfg.slug}_still.png`));
