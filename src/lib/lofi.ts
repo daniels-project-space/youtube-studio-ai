@@ -44,6 +44,8 @@ export interface LofiScene {
   forbidden: string[];
   /** spatial depth rules (foreground moves most, background ~still) */
   spatial: Record<string, string>;
+  /** covered / interior scene — enforces the HARD no-rain-inside rule (rain only outside the glass) */
+  indoor?: boolean;
 }
 
 const NOTEXT = " No text, no letters, no signs, no watermark.";
@@ -96,6 +98,7 @@ export const LOFI_SCENES: Record<string, LofiScene> = {
       midground: "windowsill, cat, plants — gentle movement",
       background: "sea, sky, sailboats through the window — clouds drift, land stays still",
     },
+    indoor: true,
   },
   sunsetpier: {
     setting: "a wooden pier over a calm asian mountain lake at golden-hour sunset",
@@ -164,6 +167,13 @@ const STATIC_CAMERA =
   "ONLY the objects in the scene — it never moves, rocks, pushes or shakes the camera. Animate the " +
   "subjects; keep the viewpoint absolutely locked and still.";
 
+/** HARD RULE for covered/indoor scenes — appended to the still AND the Kling prompt. */
+export const NO_RAIN_INSIDE =
+  " HARD RULE: this space is COVERED and completely DRY — rain falls ONLY outside, beyond the glass / window, " +
+  "over the distant city or garden. There are absolutely NO raindrops, rain streaks, puddles, mist or wet " +
+  "surfaces inside; every interior surface (couches, table, floor, tatami) is warm and bone dry. It NEVER rains " +
+  "inside — rain is visible only outside, never within the room.";
+
 export interface LofiCfg {
   slug: string;
   scene: keyof typeof LOFI_SCENES | string;
@@ -221,6 +231,7 @@ export const LOFI_MODULE = {
     "Seamless loop = 2×15s: clip A animates freely (max life), clip B animates BACK to the origin frame → 30s unit whose last frame == first frame → plain stream_loop, an invisible seam. NEVER crossfade, NEVER boomerang.",
     "Motion is ENSURED, not hoped: each scene declares ranked animation priorities + forbidden motion + spatial rules, and a Gemini-Vision pass writes the motion prompt grounded in the actual painting.",
     "STATIC CAMERA is locked at the source: a hard tripod-lock clause is appended to every Kling prompt — the wind moves the SUBJECTS, never the viewpoint.",
+    "HARD RULE — it NEVER rains inside: covered/indoor scenes (scene.indoor) get a no-rain-inside clause on both the still and the Kling prompt; rain falls only outside the glass, the interior stays bone dry.",
     "Camera shake is also removed in post: a motion-aware temporal de-warble cleans AI shimmer from the loop unit (seam preserved), since AI i2v adds a frame-to-frame warble even on a locked camera.",
     "NO upscale is baked in — the render is native resolution; Topaz 4K is a separate optional pass on the short loop unit only.",
     "Every stage caches to output/lofi/<slug>/ → fully resumable.",
@@ -249,6 +260,7 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
   const scene: LofiScene = LOFI_SCENES[cfg.scene];
   if (!scene) throw new Error(`lofi: unknown scene '${cfg.scene}'. Known: ${Object.keys(LOFI_SCENES).join(", ")}`);
   if (!existsSync(cfg.music)) throw new Error(`lofi: music bed not found: ${cfg.music}`);
+  const dry = scene.indoor ? NO_RAIN_INSIDE : ""; // HARD RULE: covered/indoor scenes never rain inside
 
   await bootstrapSecrets(() => {}, { required: ["GEMINI_API_KEY", "REPLICATE_API_TOKEN"] });
   const GK = process.env.GEMINI_API_KEY as string, RT = process.env.REPLICATE_API_TOKEN as string;
@@ -289,7 +301,7 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
   // 1 ── STILL (Flux 1.1 Pro Ultra, native res, aspect_ratio only) ───────────────
   const still = rd("still.png");
   if (!existsSync(still)) {
-    const url = await replicate(FLUX_MODEL, { prompt: scene.flux, aspect_ratio: "16:9", output_format: "png", safety_tolerance: 4, raw: false }, "Flux");
+    const url = await replicate(FLUX_MODEL, { prompt: scene.flux + dry, aspect_ratio: "16:9", output_format: "png", safety_tolerance: 4, raw: false }, "Flux");
     await dl(url, still);
     log("still ✓");
   }
@@ -325,7 +337,7 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
     log(`motion: ${motion.length} chars, ${nTypes} element types${nTypes < 5 ? " (LOW — proceeding)" : ""}`);
     await writeFile(rd("motion.txt"), motion);
   }
-  const klingPrompt = motion.trim() + STATIC_CAMERA;
+  const klingPrompt = motion.trim() + STATIC_CAMERA + dry;
 
   // 3 ── CLIP A (15s, start-only = MAX animation) ─────────────────────────────────
   const clipA = rd("clipA.mp4");
@@ -341,7 +353,7 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
     await sh("ffmpeg", ["-y", "-sseof", "-0.1", "-i", clipA, "-vframes", "1", "-q:v", "2", rd("last.png")]);
     const originUrl = await uploadFile(rd("origin.png"), "origin.png");
     const lastUrl = await uploadFile(rd("last.png"), "last.png");
-    const returnPrompt = motion.trim() + " Everything gently and naturally settles back to the original resting position, very smooth continuous looping motion that returns to the start." + STATIC_CAMERA;
+    const returnPrompt = motion.trim() + " Everything gently and naturally settles back to the original resting position, very smooth continuous looping motion that returns to the start." + STATIC_CAMERA + dry;
     const url = await replicate(KLING_MODEL, { mode: "pro", start_image: lastUrl, end_image: originUrl, prompt: returnPrompt, duration: 15, aspect_ratio: "16:9", generate_audio: false }, "ClipB");
     await dl(url, clipB); log("clipB ✓");
   }

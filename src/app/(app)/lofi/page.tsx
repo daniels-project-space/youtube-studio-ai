@@ -31,6 +31,7 @@ const RULES = [
   "Seamless loop = 2×15s: clip A animates freely, clip B animates BACK to the origin frame → the 30s unit's last frame == first frame → a plain stream_loop is invisible. Never a crossfade, never a boomerang.",
   "Motion is ENSURED, not hoped: each scene declares ranked animation priorities + forbidden motion + spatial rules, and a Gemini-Vision pass writes the motion prompt grounded in the actual painting (≥5 moving element types).",
   "Static camera is locked at the source — a hard tripod-lock clause on every Kling prompt: the wind moves the SUBJECTS, never the viewpoint.",
+  "It never rains inside — covered/indoor scenes get a hard no-rain-inside clause on the still and the Kling prompt; rain falls only outside the glass, the interior stays bone dry.",
   "Camera shake is also removed in post — a motion-aware temporal de-warble cleans AI shimmer from the loop unit, with the seam preserved.",
   "NO upscale is baked in — the render is native resolution; Topaz 4K is a separate, optional pass on the short loop unit only.",
   "Every stage caches to output/lofi/<slug>/ → fully resumable.",
