@@ -77,6 +77,14 @@ const LORESHORT_PROOFS: { file: string; device: string; meta: string }[] = [
   { file: "smith4k", device: "premium lane · Seedance 480p → Real-ESRGAN 4K", meta: "One beat at true 4K — the smith forges the ring, detail recovered" },
 ];
 
+/** Real lofi renders + the scene catalogue — one coherent Ghibli sunny-seaside world. */
+const LOFI_PROOFS: { file: string; kind: "video" | "image"; device: string; meta: string }[] = [
+  { file: "meadow", kind: "video", device: "ghibli meadow · 2×15s seamless · de-warbled · 1080p", meta: "Hillside meadow — grass, clouds, birds and hair all move on a locked camera, the loop seam invisible" },
+  { file: "beachcafe", kind: "image", device: "scene · beach cafe", meta: "Sunny terrace over a turquoise bay — host + cat, parasol, sailboats, lanterns" },
+  { file: "seasideroom", kind: "image", device: "scene · seaside room", meta: "Open windows, curtains in the sea breeze, feet dangling off the bed" },
+  { file: "sunsetpier", kind: "image", device: "scene · sunset pier", meta: "Golden-hour asian lake — lanterns, misty mountains, mirror-still water" },
+];
+
 /**
  * Golden Pipeline — a static render of the GOLDEN_MODULES registry: a pipeline
  * progress bar of the spine, then compact tiles (golden first), each with a
@@ -296,6 +304,24 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
               <span style={DEVICE}>{p.device}</span>
               {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
               <video controls preload="none" poster={`/golden/loreshort/${p.file}.jpg`} src={`/golden/loreshort/${p.file}.mp4`} style={{ width: "100%", borderRadius: 6, background: "#000" }} />
+              <span style={METAT}>{p.meta}</span>
+            </div>
+          ))}
+        </div>
+      );
+    case "lofi":
+      return (
+        <div style={{ ...STRIP, gridTemplateColumns: "repeat(auto-fit, minmax(280px, 1fr))" }}>
+          {LOFI_PROOFS.map((p) => (
+            <div key={p.file} style={CARD}>
+              <span style={DEVICE}>{p.device}</span>
+              {p.kind === "video" ? (
+                // eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip
+                <video controls preload="none" poster={`/golden/lofi/${p.file}.jpg`} src={`/golden/lofi/${p.file}.mp4`} style={{ width: "100%", borderRadius: 6, background: "#000" }} />
+              ) : (
+                // eslint-disable-next-line @next/next/no-img-element -- static proof still
+                <img src={`/golden/lofi/${p.file}.jpg`} alt={p.meta} style={{ width: "100%", borderRadius: 6, background: "#000", display: "block" }} />
+              )}
               <span style={METAT}>{p.meta}</span>
             </div>
           ))}

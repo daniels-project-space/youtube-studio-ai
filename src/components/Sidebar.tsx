@@ -11,6 +11,7 @@ import {
   IconCalendar,
   IconGolden,
   IconLore,
+  IconLofi,
 } from "./icons";
 
 const NAV = [
@@ -18,6 +19,7 @@ const NAV = [
   { href: "/channels", label: "Channels", icon: <IconChannels /> },
   { href: "/golden", label: "Golden Pipeline", icon: <IconGolden /> },
   { href: "/loreshort", label: "Lore Short", icon: <IconLore /> },
+  { href: "/lofi", label: "Lofi Loop", icon: <IconLofi /> },
   { href: "/schedule", label: "Schedule", icon: <IconCalendar /> },
   { href: "/runs", label: "Runs", icon: <IconRuns /> },
   { href: "/library", label: "Library", icon: <IconLibrary /> },

@@ -518,6 +518,34 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "golden",
   },
   {
+    key: "lofi",
+    stage: "visual",
+    title: "Lofi Loop — Seaside Engine",
+    engine:
+      "Lofi — Flux 1.1 Pro Ultra still + Gemini-Vision grounded motion prompt + Kling v3 Omni pro 2×15s seamless loop + temporal de-warble + optional Topaz 4K — a coherent Ghibli sunny-seaside world",
+    how:
+      "A single Flux painting (one of a coherent Ghibli seaside catalogue — beach cafe, seaside room, sunset " +
+      "pier, hillside meadow) is brought to life as an HOURS-loopable lofi video. Each scene declares ranked " +
+      "animation priorities + forbidden motion + spatial rules, and a Gemini-Vision pass writes the motion " +
+      "prompt grounded in the actual painting, so clouds, water, foliage, a calm dark-haired host and her cat " +
+      "all move while the distance stays still. The SEAMLESS loop is the 2×15s method: clip A animates freely, " +
+      "clip B animates BACK to the origin frame, so the 30s unit's last frame == first frame and a plain " +
+      "stream_loop has an invisible seam — never a crossfade or boomerang. The camera is locked twice over: a " +
+      "hard tripod-lock clause on every Kling prompt (wind moves the subjects, never the viewpoint) AND a " +
+      "motion-aware temporal de-warble that strips AI shimmer from the loop unit (seam preserved). No upscale " +
+      "is baked in — Topaz 4K is a separate optional pass on the short loop unit. A deblur title intro + lofi " +
+      "music finish it. Self-describing (LOFI_MODULE contract), fully resumable. src/lib/lofi.ts.",
+    gates: [
+      "required inputs validated (scene / channel / title / music / slug)",
+      "motion ensured — ranked priorities + forbidden + spatial, ≥5 element types",
+      "seamless 2×15s loop — last frame == first frame (no crossfade, no boomerang)",
+      "static camera locked in-prompt (wind moves subjects, not the viewpoint)",
+      "temporal de-warble removes AI camera shimmer (seam preserved)",
+      "no baked-in upscale — native res; Topaz 4K is a separate optional pass",
+    ],
+    status: "golden",
+  },
+  {
     key: "thumbnail",
     stage: "package",
     title: "Thumbnail — Banana Engine",

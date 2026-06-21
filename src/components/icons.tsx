@@ -151,3 +151,13 @@ export function IconLore(props: IconProps) {
     </svg>
   );
 }
+
+export function IconLofi(props: IconProps) {
+  return (
+    <svg {...base(props)}>
+      <circle cx="12" cy="9" r="3.2" />
+      <path d="M3 15c1.6 0 1.6 1.5 3.2 1.5S7.8 15 9.4 15s1.6 1.5 3.2 1.5S14.2 15 15.8 15s1.6 1.5 3.2 1.5" />
+      <path d="M3 19c1.6 0 1.6 1.5 3.2 1.5S7.8 19 9.4 19s1.6 1.5 3.2 1.5S14.2 19 15.8 19s1.6 1.5 3.2 1.5" />
+    </svg>
+  );
+}
