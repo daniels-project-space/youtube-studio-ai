@@ -522,9 +522,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     stage: "visual",
     title: "Lofi Loop — Seaside Engine",
     engine:
-      "Lofi — Flux 1.1 Pro Ultra still + Gemini-Vision grounded motion prompt + Kling v3 Omni pro 2×15s seamless loop + temporal de-warble + optional Topaz 4K — a coherent Ghibli sunny-seaside world",
+      "Lofi — Nano Banana Pro still + Gemini-Vision grounded motion prompt + Kling v3 Omni pro 2×15s seamless loop + temporal de-warble + optional Topaz 4K — a coherent Ghibli sunny-seaside world",
     how:
-      "A single Flux painting (one of a coherent Ghibli seaside catalogue — beach cafe, seaside room, sunset " +
+      "A single Nano Banana Pro painting (gemini-3-pro-image-preview — the standard still engine because it " +
+      "obeys negative rules like no-rain-inside; Flux is opt-in) from a coherent Ghibli seaside catalogue (beach cafe, seaside room, sunset " +
       "pier, hillside meadow) is brought to life as an HOURS-loopable lofi video. Each scene declares ranked " +
       "animation priorities + forbidden motion + spatial rules, and a Gemini-Vision pass writes the motion " +
       "prompt grounded in the actual painting, so clouds, water, foliage, a calm dark-haired host and her cat " +

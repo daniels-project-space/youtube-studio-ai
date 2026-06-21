@@ -1,7 +1,8 @@
 /**
  * LOFI — standalone Ghibli-seaside lofi loop engine, as a reusable module.
  *
- * Flux 1.1 Pro Ultra still → Gemini-Vision GROUNDED motion prompt (per-scene
+ * Nano Banana Pro still (gemini-3-pro-image-preview; Flux 1.1 Pro Ultra opt-in) →
+ * Gemini-Vision GROUNDED motion prompt (per-scene
  * animation priorities + forbidden + spatial rules + character interaction + a
  * hard STATIC-CAMERA lock) → Kling v3 Omni pro 2×15s SEAMLESS loop (clip A = max
  * animation, clip B animates back to the origin frame → 30s unit whose last frame
@@ -46,7 +47,7 @@ export interface LofiScene {
   spatial: Record<string, string>;
   /** covered / interior scene — enforces the HARD no-rain-inside rule (rain only outside the glass) */
   indoor?: boolean;
-  /** still generator: 'flux' (default, richest) | 'nano' (Nano Banana Pro — obeys negative rules like no-rain-inside; Flux ignores them) */
+  /** still generator: 'nano' = Nano Banana Pro (STANDARD — obeys negative rules like no-rain-inside) | 'flux' = Flux 1.1 Pro Ultra (opt-in; ignores negative rules) */
   imageModel?: "flux" | "nano";
 }
 
@@ -233,7 +234,8 @@ export const LOFI_MODULE = {
     "Seamless loop = 2×15s: clip A animates freely (max life), clip B animates BACK to the origin frame → 30s unit whose last frame == first frame → plain stream_loop, an invisible seam. NEVER crossfade, NEVER boomerang.",
     "Motion is ENSURED, not hoped: each scene declares ranked animation priorities + forbidden motion + spatial rules, and a Gemini-Vision pass writes the motion prompt grounded in the actual painting.",
     "STATIC CAMERA is locked at the source: a hard tripod-lock clause is appended to every Kling prompt — the wind moves the SUBJECTS, never the viewpoint.",
-    "HARD RULE — it NEVER rains inside: covered/indoor scenes (scene.indoor) get a no-rain-inside clause on the still + Kling prompt AND render the still on Nano Banana Pro (imageModel: 'nano'), which obeys the negative rule — Flux paints rain indoors regardless. Rain only outside the glass; interior bone dry.",
+    "Stills render on Nano Banana Pro (gemini-3-pro-image-preview) by STANDARD — it obeys negative rules; Flux 1.1 Pro Ultra is opt-in (imageModel:'flux').",
+    "HARD RULE — it NEVER rains inside: covered/indoor scenes (scene.indoor) add a no-rain-inside clause to the still + Kling prompt; rain falls only outside the glass, the interior stays bone dry. (Nano Banana Pro respects this; Flux paints rain indoors regardless — another reason Nano is the standard.)",
     "Camera shake is also removed in post: a motion-aware temporal de-warble cleans AI shimmer from the loop unit (seam preserved), since AI i2v adds a frame-to-frame warble even on a locked camera.",
     "NO upscale is baked in — the render is native resolution; Topaz 4K is a separate optional pass on the short loop unit only.",
     "Every stage caches to output/lofi/<slug>/ → fully resumable.",
@@ -300,11 +302,11 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
     return (await r.json()).urls.get as string;
   }
 
-  // 1 ── STILL — Flux 1.1 Pro Ultra (default), or Nano Banana Pro for scenes that need strict
-  //      instruction-following (the no-rain-inside rule: Flux paints rain indoors anyway; Nano obeys). ──
+  // 1 ── STILL — Nano Banana Pro (STANDARD: obeys negative rules like no-rain-inside, which Flux ignores).
+  //      Opt out to Flux 1.1 Pro Ultra with scene.imageModel === "flux". ──
   const still = rd("still.png");
   if (!existsSync(still)) {
-    if (scene.imageModel === "nano") {
+    if (scene.imageModel !== "flux") {
       const r = await rfetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent?key=${GK}`, {
         method: "POST", headers: { "content-type": "application/json" },
         body: JSON.stringify({ contents: [{ parts: [{ text: scene.flux + dry }] }], generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: "16:9", imageSize: "2K" } } }),

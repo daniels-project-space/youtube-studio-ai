@@ -15,7 +15,7 @@ const SCENES = [
 ];
 
 const PATHS = [
-  { name: "Standard", spec: "Flux + Kling 2×15s + de-warble, native 1080p", cost: "~$1 / render", note: "No upscale baked in. The default lane." },
+  { name: "Standard", spec: "Nano Banana Pro + Kling 2×15s + de-warble, native 1080p", cost: "~$1 / render", note: "No upscale baked in. The default lane." },
   { name: "Premium", spec: "Topaz 4K pass on the 30s loop unit → 3840×2160", cost: "~$3 / render", note: "Separate Topaz pass on the short unit only, then re-assembled at 4K." },
 ];
 
