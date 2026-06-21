@@ -151,6 +151,59 @@ export const LOFI_SCENES: Record<string, LofiScene> = {
       background: "distant airship, clouds, sky — slow drift only (parallax)",
     },
   },
+  samurai: {
+    setting: "a traditional wooden teahouse at night, a samurai on dry tatami watching the rain in the garden",
+    flux:
+      "Atmospheric hand-painted anime lofi illustration, moody cinematic night, old Japan edo-period, deep " +
+      "teal-blue night with warm amber lantern glow, ukiyo-e influence, painterly, calm melancholic lofi mood. " +
+      "Interior of a traditional wooden Japanese teahouse at night, a lone samurai seated cross-legged on the dry " +
+      "tatami by an open shoji screen watching the rain, a low table with a steaming cup of tea, a glowing brazier " +
+      "and paper lantern, his katana resting beside him. Beyond the open screen, rain falls in a lantern-lit garden " +
+      "with a stone bridge, a koi pond and dripping foliage." + NOTEXT,
+    priorities: [
+      "rain falls steadily in the garden beyond the open screen, dimpling the koi pond",
+      "the paper lantern and brazier flames flicker warmly, casting gently shifting light",
+      "thin steam curls up slowly from the cup of tea",
+      "the samurai sits calmly, breathing slowly, with small natural shifts of weight",
+      "koi drift under the rippling pond surface and the foliage drips outside",
+      "warm reflections shimmer on the wet garden stones beyond the screen",
+    ],
+    forbidden: ["any rain, raindrops or wet surfaces inside the room or on the tatami", "the room or screens shifting position", "the samurai standing or moving fast"],
+    spatial: {
+      foreground: "the samurai, tatami, low table, tea — most movement here",
+      midground: "shoji screens, lanterns, the brazier — gentle flicker",
+      background: "rainy garden, koi pond, bridge — rain falls and koi drift, the structures stay still",
+    },
+    indoor: true,
+    imageModel: "nano",
+  },
+  cyber: {
+    setting: "a covered wood-and-glass cyberpunk penthouse balcony lounge over a rainy neon megacity at night",
+    flux:
+      "Detailed anime cyberpunk lofi illustration, cinematic neon-noir night, a luxurious COVERED rooftop balcony " +
+      "lounge under a solid wood-beamed ceiling with soft recessed downlights, dominant purple violet and magenta " +
+      "neon glow with warm amber accents, soft bloom, a glass-panel balustrade railing, calm relaxing late-night " +
+      "lofi mood. A plush L-shaped sofa with cushions, a low wooden coffee table with a small warm candle and a " +
+      "drink, a modern fire pit, potted palms, a glowing wall TV and a small dining table. Beyond the glass railing, " +
+      "a vast cyberpunk megacity skyline at night in the rain — towering neon skyscrapers, a purple hazy rainy sky, " +
+      "glowing light trails on elevated highways far below. A young person relaxing on the sofa with headphones." + NOTEXT,
+    priorities: [
+      "rain falls over the neon megacity beyond the glass and the rainy purple haze drifts slowly",
+      "the fire pit flames flicker and dance warmly",
+      "the neon signs and skyscraper window lights shimmer and pulse, light trails crawl along the highways far below",
+      "the person on the sofa relaxes, breathing slowly and lifting the drink for a slow sip",
+      "the candle flame flickers, faint steam rises from the drink, the wall TV glows softly",
+      "potted palm fronds sway slightly in the night air",
+    ],
+    forbidden: ["any rain, raindrops, wet surfaces or mist inside the covered lounge", "the balcony, railing or building shifting position", "the city skyline changing position"],
+    spatial: {
+      foreground: "the sofa, person, coffee table, fire pit — most movement here",
+      midground: "glass railing, palms, dining table — gentle movement",
+      background: "neon megacity + rainy sky beyond the glass — lights shimmer and rain falls, the skyline stays still",
+    },
+    indoor: true,
+    imageModel: "nano",
+  },
 };
 
 /** Detect objects near the character and script a SPECIFIC action — never a generic still figure. */
@@ -214,7 +267,7 @@ export const LOFI_MODULE = {
   },
   requires: {
     slug: "string — unique id; names the output folder + published file",
-    scene: "key of LOFI_SCENES — 'beachcafe' | 'seasideroom' | 'sunsetpier' | 'meadow'",
+    scene: "key of LOFI_SCENES — 'beachcafe' | 'seasideroom' | 'sunsetpier' | 'meadow' | 'samurai' | 'cyber'",
     channel: "string — on-screen channel name",
     title: "string — on-screen lofi title",
     music: "string — local path to the lofi music bed",

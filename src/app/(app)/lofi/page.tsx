@@ -12,6 +12,8 @@ const SCENES = [
   { file: "beachcafe", kind: "image" as const, title: "Beach Cafe", device: "scene · sunny shore", meta: "A cosy terrace over a sparkling turquoise bay — host + cat, parasol, sailboats, lanterns." },
   { file: "seasideroom", kind: "image" as const, title: "Seaside Room", device: "scene · open windows", meta: "Curtains billowing in the sea breeze, the host relaxed on the bed with feet dangling off the edge." },
   { file: "sunsetpier", kind: "image" as const, title: "Sunset Pier", device: "scene · asian lake", meta: "Golden-hour over a mirror-still mountain lake — lanterns, fireflies, misty peaks." },
+  { file: "samurai", kind: "image" as const, title: "Samurai Night Rain", device: "scene · old asia · indoor", meta: "A samurai on dry tatami watching the rain in the garden — it never rains inside, only beyond the open screen." },
+  { file: "cyber", kind: "image" as const, title: "Cyberpunk Penthouse", device: "scene · neon city · indoor", meta: "A covered wood-and-glass balcony over a rainy neon megacity — fire pit, couches, dry interior, rain only outside the glass." },
 ];
 
 const PATHS = [

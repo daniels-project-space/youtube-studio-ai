@@ -83,6 +83,8 @@ const LOFI_PROOFS: { file: string; kind: "video" | "image"; device: string; meta
   { file: "beachcafe", kind: "image", device: "scene · beach cafe", meta: "Sunny terrace over a turquoise bay — host + cat, parasol, sailboats, lanterns" },
   { file: "seasideroom", kind: "image", device: "scene · seaside room", meta: "Open windows, curtains in the sea breeze, feet dangling off the bed" },
   { file: "sunsetpier", kind: "image", device: "scene · sunset pier", meta: "Golden-hour asian lake — lanterns, misty mountains, mirror-still water" },
+  { file: "samurai", kind: "image", device: "scene · samurai night rain · indoor", meta: "Samurai on dry tatami watching the rain — it NEVER rains inside, only in the garden beyond the screen" },
+  { file: "cyber", kind: "image", device: "scene · cyberpunk penthouse · indoor", meta: "Covered wood-and-glass balcony, fire pit, neon megacity in the rainy haze — dry interior, rain only outside the glass" },
 ];
 
 /**
