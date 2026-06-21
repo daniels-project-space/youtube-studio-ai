@@ -318,7 +318,7 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
       body: JSON.stringify({ contents: [{ parts: [{ text: tmpl }, { inline_data: { mime_type: "image/png", data: b64 } }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 1024, thinkingConfig: { thinkingBudget: 0 } } }),
     });
     const j: any = await r.json();
-    let raw = (j?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text).join("").trim().replace(/^```json?\n?/, "").replace(/`+$/, "").trim();
+    const raw = (j?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text).join("").trim().replace(/^```json?\n?/, "").replace(/`+$/, "").trim();
     let parsed: any = {}; try { parsed = JSON.parse(raw.startsWith("{") ? raw : (raw.match(/\{[\s\S]*\}/)?.[0] || "{}")); } catch { parsed = {}; }
     motion = (parsed.motion_prompt && String(parsed.motion_prompt).length > 40) ? parsed.motion_prompt : scene.priorities.join(". ") + ".";
     const nTypes = Array.isArray(parsed.element_types) ? parsed.element_types.length : 0;
