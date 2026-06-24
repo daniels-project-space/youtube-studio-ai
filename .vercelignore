@@ -1,0 +1,9 @@
+# Keep the Vercel upload small — these are NOT part of the Next.js app build.
+# (Hobby-plan deployments BLOCK when oversized; the repo otherwise carries ~38GB
+#  of render output that the app does not need.)
+output/
+motion-graphics/
+.next/
+*.log
+# stray Windows temp-path artifacts
+UsersdanieAppDataLocalTempt_*
