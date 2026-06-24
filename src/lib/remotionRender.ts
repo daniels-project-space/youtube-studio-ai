@@ -9,6 +9,13 @@
  * extension) so bundle() can read the entry at runtime.
  */
 import path from "node:path";
+import type {
+  MotionCue,
+  SpeechSegment,
+  SpeechTheme,
+  SpeechWord,
+} from "../remotion/speech/types";
+import type { CinematicTheme } from "../remotion/speech/CinematicFrame";
 
 let serveUrlCache: string | null = null;
 
@@ -331,4 +338,234 @@ export async function renderQuoteOverlay(args: {
     chromiumOptions: { gl: "angle" },
   });
   return args.outPath;
+}
+
+/**
+ * Render the SPEECH-TV golden module (MotivationalSpeech composition) — real
+ * speech footage in a vintage broadcast look with word-synced captions, a
+ * segment channel bug, and script-timed motion graphics. Full-frame OPAQUE
+ * H.264 body (the grayscale/grain/glitch must envelop the footage), so this is
+ * a standalone clip, not an alpha overlay. Duration is derived from the span of
+ * the words / segments / cues (overridable via durationSec). Returns outPath.
+ */
+export async function renderMotivationalSpeech(args: {
+  words: SpeechWord[];
+  segments: SpeechSegment[];
+  cues: MotionCue[];
+  /** http(s) R2 url (pipeline) or file:// (local). Absent → vintage dark bg. */
+  sourceVideoSrc?: string;
+  musicSrc?: string;
+  musicVolume?: number;
+  muteSource?: boolean;
+  theme?: Partial<SpeechTheme>;
+  showChannelBug?: boolean;
+  outPath: string;
+  /** Explicit duration override (s). Otherwise derived from the content span. */
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  concurrency?: number;
+  log?: (msg: string) => void;
+}): Promise<string> {
+  const { selectComposition, renderMedia, ensureBrowser } = await import(
+    "@remotion/renderer"
+  );
+  await ensureBrowser();
+  const serveUrl = await getServeUrl();
+  const fps = 30;
+  const width = args.width ?? 1920;
+  const height = args.height ?? 1080;
+
+  const maxEnd = (xs: { end: number }[]) =>
+    xs.length ? Math.max(...xs.map((x) => x.end)) : 0;
+  const spanMs = Math.max(
+    maxEnd(args.words),
+    maxEnd(args.segments),
+    maxEnd(args.cues),
+    (args.durationSec ?? 0) * 1000,
+  );
+  const durationInFrames = Math.max(
+    1,
+    Math.round(((spanMs > 0 ? spanMs : (args.durationSec ?? 10) * 1000) / 1000) * fps),
+  );
+
+  const inputProps = {
+    words: args.words,
+    segments: args.segments,
+    cues: args.cues,
+    ...(args.sourceVideoSrc ? { sourceVideoSrc: args.sourceVideoSrc } : {}),
+    ...(args.musicSrc ? { musicSrc: args.musicSrc } : {}),
+    ...(args.musicVolume != null ? { musicVolume: args.musicVolume } : {}),
+    ...(args.muteSource != null ? { muteSource: args.muteSource } : {}),
+    ...(args.theme ? { theme: args.theme } : {}),
+    ...(args.showChannelBug != null ? { showChannelBug: args.showChannelBug } : {}),
+    durationInFrames,
+    width,
+    height,
+  };
+
+  const composition = await selectComposition({
+    serveUrl,
+    id: "MotivationalSpeech",
+    inputProps,
+  });
+  let lastPct = -10;
+  await renderMedia({
+    serveUrl,
+    composition,
+    inputProps,
+    codec: "h264",
+    outputLocation: args.outPath,
+    chromiumOptions: { gl: "angle" },
+    ...(args.concurrency ? { concurrency: args.concurrency } : {}),
+    onProgress: ({ progress }) => {
+      const pct = Math.round(progress * 100);
+      if (pct >= lastPct + 10) {
+        lastPct = pct;
+        args.log?.(`motivational-speech render ${pct}%`);
+      }
+    },
+  });
+  return args.outPath;
+}
+
+/** Shared duration (frames) from the content span. */
+function speechDurationInFrames(
+  fps: number,
+  words: { end: number }[],
+  segments: { end: number }[],
+  durationSec?: number,
+): number {
+  const maxEnd = (xs: { end: number }[]) =>
+    xs.length ? Math.max(...xs.map((x) => x.end)) : 0;
+  const spanMs = Math.max(maxEnd(words), maxEnd(segments), (durationSec ?? 0) * 1000);
+  const ms = spanMs > 0 ? spanMs : (durationSec ?? 10) * 1000;
+  return Math.max(1, Math.round((ms / 1000) * fps));
+}
+
+function cinematicInputProps(args: {
+  words: SpeechWord[];
+  segments: SpeechSegment[];
+  sourceVideoSrc?: string;
+  musicSrc?: string;
+  musicVolume?: number;
+  muteSource?: boolean;
+  theme?: Partial<CinematicTheme>;
+  durationInFrames: number;
+  width: number;
+  height: number;
+}) {
+  return {
+    words: args.words,
+    segments: args.segments,
+    ...(args.sourceVideoSrc ? { sourceVideoSrc: args.sourceVideoSrc } : {}),
+    ...(args.musicSrc ? { musicSrc: args.musicSrc } : {}),
+    ...(args.musicVolume != null ? { musicVolume: args.musicVolume } : {}),
+    ...(args.muteSource != null ? { muteSource: args.muteSource } : {}),
+    ...(args.theme ? { theme: args.theme } : {}),
+    durationInFrames: args.durationInFrames,
+    width: args.width,
+    height: args.height,
+  };
+}
+
+/**
+ * Render the CINEMATIC speech module (CinematicSpeech composition) — cinematic
+ * grade + letterbox + grain + halation + karaoke captions over speech footage.
+ * Opaque H.264. Duration derived from the content span (overridable). Returns outPath.
+ */
+export async function renderCinematicSpeech(args: {
+  words: SpeechWord[];
+  segments: SpeechSegment[];
+  sourceVideoSrc?: string;
+  musicSrc?: string;
+  musicVolume?: number;
+  muteSource?: boolean;
+  theme?: Partial<CinematicTheme>;
+  outPath: string;
+  durationSec?: number;
+  width?: number;
+  height?: number;
+  concurrency?: number;
+  log?: (msg: string) => void;
+}): Promise<string> {
+  const { selectComposition, renderMedia, ensureBrowser } = await import(
+    "@remotion/renderer"
+  );
+  await ensureBrowser();
+  const serveUrl = await getServeUrl();
+  const fps = 30;
+  const width = args.width ?? 1920;
+  const height = args.height ?? 1080;
+  const durationInFrames = speechDurationInFrames(fps, args.words, args.segments, args.durationSec);
+  const inputProps = cinematicInputProps({ ...args, durationInFrames, width, height });
+  const composition = await selectComposition({ serveUrl, id: "CinematicSpeech", inputProps });
+  let lastPct = -10;
+  await renderMedia({
+    serveUrl,
+    composition,
+    inputProps,
+    codec: "h264",
+    outputLocation: args.outPath,
+    chromiumOptions: { gl: "angle" },
+    timeoutInMilliseconds: 180000, // tolerate occasional slow frames under RAM pressure
+    ...(args.concurrency ? { concurrency: args.concurrency } : {}),
+    onProgress: ({ progress }) => {
+      const pct = Math.round(progress * 100);
+      if (pct >= lastPct + 10) {
+        lastPct = pct;
+        args.log?.(`cinematic-speech render ${pct}%`);
+      }
+    },
+  });
+  return args.outPath;
+}
+
+/**
+ * Fast review path — render single stills of CinematicSpeech at given absolute
+ * frames (no full video). Use to approve the look before a long render.
+ */
+export async function renderCinematicSpeechStills(args: {
+  words: SpeechWord[];
+  segments: SpeechSegment[];
+  sourceVideoSrc?: string;
+  theme?: Partial<CinematicTheme>;
+  durationSec: number;
+  frames: number[];
+  outPaths: string[];
+  width?: number;
+  height?: number;
+}): Promise<string[]> {
+  const { selectComposition, renderStill, ensureBrowser } = await import("@remotion/renderer");
+  await ensureBrowser();
+  const serveUrl = await getServeUrl();
+  const fps = 30;
+  const width = args.width ?? 1920;
+  const height = args.height ?? 1080;
+  const durationInFrames = speechDurationInFrames(fps, args.words, args.segments, args.durationSec);
+  const inputProps = cinematicInputProps({
+    words: args.words,
+    segments: args.segments,
+    sourceVideoSrc: args.sourceVideoSrc,
+    theme: args.theme,
+    durationInFrames,
+    width,
+    height,
+  });
+  const composition = await selectComposition({ serveUrl, id: "CinematicSpeech", inputProps });
+  const out: string[] = [];
+  for (let i = 0; i < args.frames.length; i++) {
+    await renderStill({
+      serveUrl,
+      composition,
+      inputProps,
+      frame: Math.max(0, Math.min(durationInFrames - 1, args.frames[i])),
+      output: args.outPaths[i],
+      imageFormat: "jpeg",
+      jpegQuality: 90,
+      chromiumOptions: { gl: "angle" },
+    });
+    out.push(args.outPaths[i]);
+  }
+  return out;
 }

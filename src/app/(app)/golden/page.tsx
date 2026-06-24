@@ -36,6 +36,18 @@ const MOTION_PROOFS: { file: string; device: string; meta: string }[] = [
   { file: "crew", device: "generative · p5.js · 1080p", meta: "The School of Turin — a drifting intel-network background" },
 ];
 
+/** Real quizcraft renders — one engine, three capabilities, copyright-safe content. */
+const QUIZ_PROOFS: { file: string; device: string; meta: string }[] = [
+  { file: "trivia", device: "common-knowledge · +image reveal · 1080p", meta: "\"Capital of France?\" — depleting timer, then the answer card + a vision-verified image" },
+  { file: "flag", device: "flag-guess · EASY→IMPOSSIBLE · 1080p", meta: "195 CC0 flags, deterministic country reveal — a dataset can't hallucinate the answer" },
+  { file: "music", device: "music-guess · PD-classical · 1080p", meta: "A film's public-domain theme plays behind a countdown ring, then the poster + title" },
+];
+
+/** Real Speechcraft render — the Steve Jobs 2005 Stanford address, motivation-edit framed. */
+const SPEECH_PROOFS: { file: string; device: string; meta: string }[] = [
+  { file: "steve-jobs", device: "motivation-speech · word-synced · 1080p", meta: "Steve Jobs · Stanford 2005 — vintage broadcast grade, karaoke captions, segment channel bug" },
+];
+
 interface TextProof { device: string; channel: string; line: string; note: string }
 
 const SCRIPT_PROOFS: TextProof[] = [
@@ -234,6 +246,32 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
   switch (moduleKey) {
     case "thumbnail": return imageStrip(PROOFS);
     case "cinematic": return imageStrip(CINEMATIC_PROOFS);
+    case "quiz":
+      return (
+        <div style={{ ...STRIP, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
+          {QUIZ_PROOFS.map((p) => (
+            <div key={p.file} style={CARD}>
+              <span style={DEVICE}>{p.device}</span>
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+              <video controls preload="none" poster={`/golden/quiz/${p.file}.jpg`} src={`/golden/quiz/${p.file}.mp4`} style={{ width: "100%", borderRadius: 6, background: "#000" }} />
+              <span style={METAT}>{p.meta}</span>
+            </div>
+          ))}
+        </div>
+      );
+    case "speech-tv":
+      return (
+        <div style={{ ...STRIP, gridTemplateColumns: "repeat(auto-fit, minmax(300px, 1fr))" }}>
+          {SPEECH_PROOFS.map((p) => (
+            <div key={p.file} style={CARD}>
+              <span style={DEVICE}>{p.device}</span>
+              {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+              <video controls preload="none" poster={`/golden/speech/${p.file}.jpg`} src={`/golden/speech/${p.file}.mp4`} style={{ width: "100%", borderRadius: 6, background: "#000" }} />
+              <span style={METAT}>{p.meta}</span>
+            </div>
+          ))}
+        </div>
+      );
     case "script": return textStrip(SCRIPT_PROOFS);
     case "metadata": return textStrip(META_PROOFS);
     case "topic-intel": return textStrip(TOPIC_PROOFS);

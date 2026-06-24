@@ -6,6 +6,9 @@ import { DataInsert, type DataInsertProps } from "./DataInsert";
 import { ThumbText, type ThumbTextProps } from "./ThumbText";
 import { ThumbTemplate, type ThumbTemplateProps } from "./ThumbTemplate";
 import { DocuMotion, type DocuMotionProps } from "./DocuMotion";
+import { MotivationalSpeech } from "./speech/MotivationalSpeech";
+import type { MotivationalSpeechProps } from "./speech/types";
+import { CinematicSpeech, type CinematicSpeechProps } from "./speech/CinematicSpeech";
 
 /**
  * In-app Remotion root (registered by ./index.ts). Kept self-contained — only
@@ -89,6 +92,40 @@ export const RemotionRoot: React.FC = () => {
             props,
           };
         }}
+      />
+      <Composition
+        id="CinematicSpeech"
+        component={CinematicSpeech}
+        durationInFrames={900}
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={{ words: [], segments: [] } as CinematicSpeechProps}
+        calculateMetadata={({ props }) => ({
+          durationInFrames:
+            (props as { durationInFrames?: number }).durationInFrames ?? 900,
+          fps: 30,
+          width: (props as { width?: number }).width ?? 1920,
+          height: (props as { height?: number }).height ?? 1080,
+          props,
+        })}
+      />
+      <Composition
+        id="MotivationalSpeech"
+        component={MotivationalSpeech}
+        durationInFrames={900}
+        fps={30}
+        width={1920}
+        height={1080}
+        defaultProps={{ words: [], segments: [], cues: [] } as MotivationalSpeechProps}
+        calculateMetadata={({ props }) => ({
+          durationInFrames:
+            (props as { durationInFrames?: number }).durationInFrames ?? 900,
+          fps: 30,
+          width: (props as { width?: number }).width ?? 1920,
+          height: (props as { height?: number }).height ?? 1080,
+          props,
+        })}
       />
       <Composition
         id="DataInsert"

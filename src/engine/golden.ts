@@ -547,6 +547,28 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "golden",
   },
   {
+    key: "quiz",
+    stage: "visual",
+    title: "Quiz — Quizcraft (standalone multi-type quiz engine)",
+    engine:
+      "Quizcraft — a standalone quiz-channel engine: trivia / flag-guess / music-guess → a deterministic dataset-backed answer → an isolated Remotion composition (depleting timer, answer reveal + image/poster), cloud-rendered",
+    how:
+      "One engine, three capabilities, all copyright-safe. TRIVIA asks a common-knowledge question, counts down a " +
+      "depleting timer, then reveals the answer card plus a vision-verified image. FLAG-GUESS draws from 195 CC0 flags " +
+      "on an EASY→IMPOSSIBLE ramp with a deterministic country reveal — a dataset can't hallucinate the answer. " +
+      "MUSIC-GUESS plays a film's public-domain theme behind a countdown ring, then shows the poster + title. Every " +
+      "question is answered from a dataset (never a model guess), deduped by key, and laid out by a per-capability " +
+      "timing + layout pass. Renders through an ISOLATED Remotion bundle so a quiz render can't be broken by sibling " +
+      "compositions. The proofs below are real first-try renders.",
+    gates: [
+      "deterministic dataset answer (never model-guessed)",
+      "dedupe by question key",
+      "per-capability timing + layout",
+      "isolated Remotion bundle",
+    ],
+    status: "golden",
+  },
+  {
     key: "thumbnail",
     stage: "package",
     title: "Thumbnail — Banana Engine",
@@ -716,9 +738,9 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "speech-tv",
     stage: "visual",
-    title: "Speech-TV — Vintage Overlay",
+    title: "Motivation Speech — Speechcraft",
     engine:
-      "Remotion full-frame composition (B&W/VHS grayscale + grain + glitch) + word-synced captions + segment channel bug + LLM cue-track motion graphics",
+      "Speechcraft — real public speeches → word-level transcript → best-segment plan → a self-contained Remotion vintage-broadcast composition (VintageFilter grain/scanlines/desaturation + KaraokeCaptions word-sync + ChannelBug segment marker + MotionCues), with a letterboxed CinematicSpeech variant, cloud-rendered",
     how:
       "The motivational-speech repost look: real speech footage is wrapped in a vintage broadcast frame — " +
       "desaturated, blue-tinted, film-grained, vignetted — with a top-right segment 'channel bug' (n/total + " +
@@ -727,9 +749,15 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "that mount ONLY within their [start,end] window so each stays on screen for exactly as long as it is " +
       "script-relevant. Driven by a typed contract — words + segments + an LLM cue-track — so the source/" +
       "transcribe/cue-gen stages plug in later with zero rework. One opaque H.264 render via " +
-      "src/lib/remotionRender.ts (renderMotivationalSpeech); the look is cloned from the reference compilation.",
-    gates: ["caption timing sync vs word-level transcript", "cue windows clamped to script relevance", "segment bug matches part boundaries"],
-    status: "active",
+      "src/lib/remotionRender.ts (renderMotivationalSpeech) into both a full-frame MotivationalSpeech look and a " +
+      "letterboxed CinematicSpeech variant. Proof: the Steve Jobs 2005 Stanford commencement, motivation-edited.",
+    gates: [
+      "caption highlight synced to word-level timings",
+      "segment channel bug matches plan boundaries",
+      "deterministic from a typed plan (no per-frame LLM)",
+      "cues clamped to their [start,end] window",
+    ],
+    status: "golden",
   },
   {
     key: "inserts",
