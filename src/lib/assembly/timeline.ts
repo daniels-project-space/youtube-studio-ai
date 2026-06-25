@@ -162,6 +162,10 @@ export function validateTimeline(raw: unknown): { ok: boolean; timeline?: Timeli
     if (o.endSec > total + 0.5) errors.push(`overlay[${i}] (${o.kind}): endSec ${o.endSec} exceeds runtime ${Math.round(total)}s`);
   }
 
+  // real media: a clip segment with an empty src is dead-air, not coverage (0-footage trap)
+  for (const [i, s] of t.segments.entries()) {
+    if (s.kind !== "card" && !(s.src && s.src.trim())) errors.push(`segment[${i}] (${s.kind}): empty media src (dead-air, not coverage)`);
+  }
   // body coverage: footage/entity segment time should cover the narration body
   const clipCoverage = t.segments.filter((s) => s.kind !== "card").reduce((a, s) => a + s.durSec, 0);
   if (clipCoverage + 0.5 < t.audio.bodySec) errors.push(`coverage: clips total ${clipCoverage.toFixed(1)}s < body ${t.audio.bodySec}s (would loop / dead-air)`);

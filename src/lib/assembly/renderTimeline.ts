@@ -76,10 +76,12 @@ export interface RenderBackend {
 
 /** Deterministic canonical stringify (recursively key-sorted) → stable hash input. */
 function canonical(v: unknown): string {
+  if (v === undefined) return "null"; // undefined and a JSON round-trip (which drops it) hash the same
   if (v === null || typeof v !== "object") return JSON.stringify(v) ?? "null";
   if (Array.isArray(v)) return "[" + v.map(canonical).join(",") + "]";
   const o = v as Record<string, unknown>;
-  return "{" + Object.keys(o).sort().map((k) => JSON.stringify(k) + ":" + canonical(o[k])).join(",") + "}";
+  // skip undefined-valued keys so hash(plan) === hash(JSON.parse(JSON.stringify(plan))) — stable across persistence
+  return "{" + Object.keys(o).filter((k) => o[k] !== undefined).sort().map((k) => JSON.stringify(k) + ":" + canonical(o[k])).join(",") + "}";
 }
 
 /** Content-addressed key for a Timeline (idempotency). Same plan + version ⇒ same key. */

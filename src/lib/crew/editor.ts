@@ -73,11 +73,12 @@ export interface EditorDirectives {
   transitions?: string;
   cutsPerMin?: number;
   captionStyle?: string;
+  overlayDensity?: string;
 }
 
 /** Map an EditorConfig to the directives Assembly's planTimeline consumes. */
 export function editorDirectives(cfg: EditorConfig): EditorDirectives {
-  return { transitions: cfg.transitions, cutsPerMin: cfg.cutsPerMin, captionStyle: cfg.captionStyle };
+  return { transitions: cfg.transitions, cutsPerMin: cfg.cutsPerMin, captionStyle: cfg.captionStyle, overlayDensity: cfg.overlayDensity };
 }
 
 export const EDITOR_MODULE = {

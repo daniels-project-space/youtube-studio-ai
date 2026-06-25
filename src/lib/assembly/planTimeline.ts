@@ -29,13 +29,13 @@ export interface PlanInput {
   cardBgSrc?: string;
   /** Optional precomputed overlay windows (captions/quotes/inserts). */
   overlays?: Overlay[];
-  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle. */
-  editor?: { transitions?: string; cutsPerMin?: number; captionStyle?: string };
+  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle + overlayDensity. */
+  editor?: { transitions?: string; cutsPerMin?: number; captionStyle?: string; overlayDensity?: string };
 }
 
 /** Per-account assemble params (resolved from a ChannelProfile or passed directly). */
 export interface AssembleParams {
-  aspect: "16:9" | "9:16";
+  aspect: "16:9" | "9:16" | "1:1";
   introSec: number;
   tailSec: number;
   fadeOutSec: number;
@@ -133,7 +133,7 @@ export function resolveAssembleParams(profile: ChannelProfile, block = "timeline
   const fadeOutSec = num("fadeOutSec", ASSEMBLE_DEFAULTS.fadeOutSec);
 
   return {
-    aspect: k.aspect === "9:16" ? "9:16" : "16:9",
+    aspect: k.aspect === "9:16" ? "9:16" : k.aspect === "1:1" ? "1:1" : "16:9",
     introSec: num("introSec", INTRO_STYLE_SEC[String(k.introStyle)] ?? 5),
     tailSec: Number(k.tailSec),
     fadeOutSec,
@@ -170,14 +170,24 @@ function fillBody(clips: string[], entitySet: Set<string>, target: number, seg: 
   const out: Segment[] = [];
   let filled = 0;
   let i = 0;
+  const safeSeg = seg > 0.05 ? seg : 4; // never 0 → no infinite loop
   while (filled + 0.001 < target) {
-    const dur = Math.min(seg, target - filled);
+    const dur = Math.min(safeSeg, target - filled);
     const src = clips.length ? clips[i % clips.length] : "";
     out.push({ kind: entitySet.has(src) ? "entity" : "footage", src, durSec: dur, onBeat });
     i++;
     filled += dur;
+    if (out.length > 20000) break; // defensive cap (the narration guard already bounds this)
   }
   return out;
+}
+
+/** Editor overlayDensity caps quote/insert overlay count (captions are never capped). */
+function capOverlays(overlays: Overlay[], density?: string): Overlay[] {
+  const cap = density === "sparse" ? 2 : density === "standard" ? 6 : Infinity; // rich / undefined ⇒ all
+  if (!Number.isFinite(cap)) return overlays;
+  let n = 0;
+  return overlays.filter((o) => (o.kind === "caption" ? true : ++n <= cap));
 }
 
 /**
@@ -186,11 +196,18 @@ function fillBody(clips: string[], entitySet: Set<string>, target: number, seg: 
  */
 export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE_DEFAULTS): Timeline {
   const narrationSec = input.narrationDurationSec;
+  // Guard BEFORE any body fill — Infinity/NaN/huge would loop fillBody unbounded (OOM). Fail loud.
+  if (!Number.isFinite(narrationSec) || narrationSec < 0 || narrationSec > 36000) {
+    throw new Error(`planTimeline: narrationDurationSec must be finite and within [0, 36000]s, got ${narrationSec}`);
+  }
+  if (!Number.isFinite(params.tailSec) || params.tailSec < 0) {
+    throw new Error(`planTimeline: tailSec must be finite and >= 0, got ${params.tailSec}`);
+  }
   const introSec = input.introCardSrc && input.introCardSrc.length > 0 ? params.introSec : 0;
   const hasIntro = introSec > 0; // introStyle 'none'/'cold_open' collapses introSec to 0
   const tailSec = params.tailSec;
   const total = introSec + narrationSec + tailSec;
-  const [w, h] = params.aspect === "9:16" ? [1080, 1920] : [1920, 1080];
+  const [w, h] = params.aspect === "9:16" ? [1080, 1920] : params.aspect === "1:1" ? [1080, 1080] : [1920, 1080];
   // Cadence priority: editor crew directive → cutEnergy knob → explicit cutSheet → legacy length-based (parity).
   const cpm = input.editor?.cutsPerMin ?? params.cutsPerMin;
   const bodyMaxSeg = bodySegSeconds(
@@ -260,11 +277,14 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
       audioFadeOutSec: params.audioFadeOutSec,
       targetLufs: params.targetLufs,
     },
-    // captions toggle (onboarding/settings) — off ⇒ drop caption overlays from the plan
-    overlays: (input.overlays ?? []).filter((o) => params.captions || o.kind !== "caption"),
+    // captions toggle (off ⇒ drop caption overlays) + editor overlayDensity caps quote/insert count.
+    overlays: capOverlays(
+      (input.overlays ?? []).filter((o) => params.captions || o.kind !== "caption"),
+      input.editor?.overlayDensity,
+    ),
     lengthBand: { minSec: params.minSeconds, maxSec: params.maxSeconds, tolSec: params.tolSec },
     checkpoints: { preOverlaySec: total },
-    ...(params.aspect === "9:16" ? { reframe: { aspect: "9:16" } } : {}),
+    ...(params.aspect !== "16:9" ? { reframe: { aspect: params.aspect } } : {}),
     renderHints: {
       transitions: TRANSITION_HINTS.has(transitions) ? transitions : "hardcut",
       reframe: REFRAME_HINTS.has(params.reframe ?? "none") ? (params.reframe ?? "none") : "none",
