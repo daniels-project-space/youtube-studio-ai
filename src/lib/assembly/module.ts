@@ -27,14 +27,15 @@ export const ASSEMBLY_SURFACE: CustomizationSurface = {
     { id: "transitions", type: "enum", values: ["hardcut", "crossfade", "dip_to_black"], default: "hardcut", describes: "between-shot transition", servesStyles: ["documentary", "hype"] },
     { id: "reframe", type: "enum", values: ["none", "center", "subject_track"], default: "none", describes: "repurpose horizontal → vertical", servesStyles: ["shorts", "social"] },
     { id: "tailSec", type: "number", range: [0, 8], default: 3, describes: "silent fade-out tail", servesStyles: ["shorts", "ambient"] },
+    { id: "captions", type: "boolean", default: true, describes: "burn word-level captions over the video (toggle off to ship caption-free)", servesStyles: ["accessibility", "shorts", "social"] },
   ],
   presets: {
     documentary: { cutEnergy: "slow", chapterCards: true, transitions: "crossfade", introStyle: "title_card", outroStyle: "closing_card", musicDuckProfile: "standard", aspect: "16:9", targetLufs: -14 },
     essay: { cutEnergy: "steady", chapterCards: false, introStyle: "title_card", outroStyle: "closing_card", musicDuckProfile: "standard" },
     hype: { cutEnergy: "dynamic", transitions: "hardcut", musicDuckProfile: "aggressive", introStyle: "cold_open" },
     shorts: { aspect: "9:16", cutEnergy: "frenetic", introStyle: "none", outroStyle: "none", reframe: "subject_track", tailSec: 1, chapterCards: false },
-    meditation: { cutEnergy: "still", transitions: "crossfade", musicDuckProfile: "gentle", tailSec: 6, targetLufs: -16 },
-    lofi: { cutEnergy: "still", musicDuckProfile: "none", introStyle: "title_card", outroStyle: "none" },
+    meditation: { cutEnergy: "still", transitions: "crossfade", musicDuckProfile: "gentle", tailSec: 6, targetLufs: -16, captions: false },
+    lofi: { cutEnergy: "still", musicDuckProfile: "none", introStyle: "title_card", outroStyle: "none", captions: false },
   },
 };
 

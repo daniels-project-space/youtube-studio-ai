@@ -53,6 +53,8 @@ export interface AssembleParams {
   chapterCards: boolean;
   /** Between-shot transition style (render hint). */
   transitions: string;
+  /** Burn captions; false ⇒ caption overlays are dropped from the plan (toggle in onboarding/settings). */
+  captions: boolean;
   /** Repurpose horizontal → vertical strategy (render hint): none | center | subject_track. */
   reframe?: string;
 }
@@ -73,6 +75,7 @@ export const ASSEMBLE_DEFAULTS: AssembleParams = {
   outroCard: true,
   chapterCards: true,
   transitions: "hardcut",
+  captions: true,
   reframe: "none",
   // cutsPerMin omitted ⇒ legacy length-based cadence (god-block parity for the default/essay path)
 };
@@ -143,6 +146,7 @@ export function resolveAssembleParams(profile: ChannelProfile, block = "timeline
     outroCard: k.outroStyle !== "none",
     chapterCards: Boolean(k.chapterCards),
     transitions: String(k.transitions),
+    captions: Boolean(k.captions),
     reframe: k.reframe !== undefined ? String(k.reframe) : ASSEMBLE_DEFAULTS.reframe,
   };
 }
@@ -249,7 +253,8 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
       audioFadeOutSec: params.audioFadeOutSec,
       targetLufs: params.targetLufs,
     },
-    overlays: input.overlays ?? [],
+    // captions toggle (onboarding/settings) — off ⇒ drop caption overlays from the plan
+    overlays: (input.overlays ?? []).filter((o) => params.captions || o.kind !== "caption"),
     lengthBand: { minSec: params.minSeconds, maxSec: params.maxSeconds, tolSec: params.tolSec },
     checkpoints: { preOverlaySec: total },
     ...(params.aspect === "9:16" ? { reframe: { aspect: "9:16" } } : {}),
