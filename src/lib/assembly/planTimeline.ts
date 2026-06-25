@@ -29,8 +29,8 @@ export interface PlanInput {
   cardBgSrc?: string;
   /** Optional precomputed overlay windows (captions/quotes/inserts). */
   overlays?: Overlay[];
-  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle + overlayDensity. */
-  editor?: { transitions?: string; cutsPerMin?: number; captionStyle?: string; overlayDensity?: string };
+  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle + overlayDensity + a pacing CURVE. */
+  editor?: { transitions?: string; cutsPerMin?: number; captionStyle?: string; overlayDensity?: string; pacingCurve?: { atFrac: number; cutsPerMin: number }[] };
   /** Composer crew directives (the WIRE from the Composer sub-module): duck level + loudness + voiceFx. */
   composer?: { bodyMusicVol?: number; targetLufs?: number; voiceFx?: string };
 }
@@ -167,13 +167,38 @@ function interleave(footage: string[], entity: string[]): string[] {
   return out;
 }
 
-/** Lay clips end-to-end at `seg` seconds each until `target` is covered, cycling the pool. */
-function fillBody(clips: string[], entitySet: Set<string>, target: number, seg: number, onBeat: boolean): Segment[] {
+/** cuts/min interpolated along a pacing curve at body position `frac` (0–1). */
+function cpmAtFrac(curve: { atFrac: number; cutsPerMin: number }[], frac: number): number {
+  const pts = [...curve].sort((a, b) => a.atFrac - b.atFrac);
+  if (pts.length === 0) return 6;
+  if (frac <= pts[0].atFrac) return pts[0].cutsPerMin;
+  if (frac >= pts[pts.length - 1].atFrac) return pts[pts.length - 1].cutsPerMin;
+  for (let i = 1; i < pts.length; i++) {
+    if (frac <= pts[i].atFrac) {
+      const a = pts[i - 1], b = pts[i];
+      const t = (frac - a.atFrac) / Math.max(1e-6, b.atFrac - a.atFrac);
+      return a.cutsPerMin + t * (b.cutsPerMin - a.cutsPerMin);
+    }
+  }
+  return pts[pts.length - 1].cutsPerMin;
+}
+/** Per-clip screen time from a cuts/min (clamped like bodySegSeconds: 2–30s). */
+function segSecondsFromCpm(cpm: number): number {
+  return Math.max(2, Math.min(30, 60 / Math.max(1, cpm)));
+}
+
+/**
+ * Lay clips end-to-end until `target` is covered, cycling the pool. `segAt(posFrac)`
+ * gives the per-clip screen time at the current body fraction — a CONSTANT for flat
+ * cadence (parity) or a varying value along the editor's pacing curve (P1/P2).
+ */
+function fillBody(clips: string[], entitySet: Set<string>, target: number, segAt: (posFrac: number) => number, onBeat: boolean): Segment[] {
   const out: Segment[] = [];
   let filled = 0;
   let i = 0;
-  const safeSeg = seg > 0.05 ? seg : 4; // never 0 → no infinite loop
   while (filled + 0.001 < target) {
+    const raw = segAt(target > 0 ? filled / target : 0);
+    const safeSeg = raw > 0.05 ? raw : 4; // never 0 → no infinite loop
     const dur = Math.min(safeSeg, target - filled);
     const src = clips.length ? clips[i % clips.length] : "";
     out.push({ kind: entitySet.has(src) ? "entity" : "footage", src, durSec: dur, onBeat });
@@ -243,13 +268,17 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
       } else {
         // footage window: fill from the (rotating) pool at the cut cadence
         const rotated = clips.length ? clips.slice(ci % clips.length).concat(clips.slice(0, ci % clips.length)) : [];
-        segments.push(...fillBody(rotated, entitySet, wndw.durSec, bodyMaxSeg, true));
+        segments.push(...fillBody(rotated, entitySet, wndw.durSec, () => bodyMaxSeg, true));
         ci += Math.max(1, Math.ceil(wndw.durSec / bodyMaxSeg));
       }
     }
   } else {
-    // beat body: cover narration + tail at the cut cadence
-    segments.push(...fillBody(clips, entitySet, narrationSec + tailSec, bodyMaxSeg, onBeat));
+    // beat body: cover narration + tail at the cut cadence. A pacing CURVE (from the
+    // editor) varies the per-clip length over the body; absent one, the constant
+    // bodyMaxSeg is used (flat cadence = parity with the old averaged behaviour).
+    const curve = input.editor?.pacingCurve;
+    const segAt = curve && curve.length ? (f: number) => segSecondsFromCpm(cpmAtFrac(curve, f)) : () => bodyMaxSeg;
+    segments.push(...fillBody(clips, entitySet, narrationSec + tailSec, segAt, onBeat));
   }
 
   if (params.outroCard && tailSec >= 2) {

@@ -22,12 +22,13 @@ export const EDITOR_SURFACE: CustomizationSurface = {
     { id: "transitions", type: "enum", values: ["hardcut", "crossfade", "dip_to_black"], default: "hardcut", describes: "between-shot transition (→ Assembly renderHints)", servesStyles: ["documentary", "hype"] },
     { id: "captionStyle", type: "enum", values: ["none", "minimal", "karaoke", "bold"], default: "minimal", describes: "caption look (→ Assembly caption pass)", servesStyles: ["shorts", "accessibility"] },
     { id: "overlayDensity", type: "enum", values: ["sparse", "standard", "rich"], default: "standard", describes: "how many quote/insert overlays", servesStyles: ["explainer"] },
+    { id: "pacingShape", type: "enum", values: ["flat", "accelerate", "frontload"], default: "flat", describes: "cut-pacing CURVE over the body — flat / build-to-climax / front-loaded hook (not one constant cuts/min)", servesStyles: ["hype", "shorts", "documentary"] },
   ],
   presets: {
     documentary: { cadence: "slow", transitions: "crossfade", captionStyle: "minimal", overlayDensity: "rich" },
     essay: { cadence: "measured", transitions: "hardcut", captionStyle: "minimal", overlayDensity: "standard" },
-    hype: { cadence: "frenetic", transitions: "hardcut", captionStyle: "bold", overlayDensity: "rich" },
-    shorts: { cadence: "frenetic", transitions: "hardcut", captionStyle: "karaoke", overlayDensity: "sparse" },
+    hype: { cadence: "frenetic", transitions: "hardcut", captionStyle: "bold", overlayDensity: "rich", pacingShape: "accelerate" },
+    shorts: { cadence: "frenetic", transitions: "hardcut", captionStyle: "karaoke", overlayDensity: "sparse", pacingShape: "frontload" },
     meditation: { cadence: "still", transitions: "crossfade", captionStyle: "none", overlayDensity: "sparse" },
     lofi: { cadence: "still", transitions: "crossfade", captionStyle: "none", overlayDensity: "sparse" },
   },
@@ -43,6 +44,19 @@ export interface EditorConfig {
   transitions: string;
   captionStyle: string;
   overlayDensity: string;
+  /** Pacing curve shape over the body: flat / accelerate (build) / frontload (hook). */
+  pacingShape: string;
+}
+
+/** Base cuts/min used to anchor the pacing CURVE (measured → 6 for curve math). */
+const CADENCE_BASE: Record<string, number> = { still: 2, slow: 3, measured: 6, snappy: 8, frenetic: 15 };
+
+/** Build a pacing curve ({atFrac,cutsPerMin}[]) from a base cuts/min + a shape. `flat` ⇒ undefined (Assembly keeps its constant cadence = parity). */
+export function buildPacingCurve(shape: string, baseCpm: number): { atFrac: number; cutsPerMin: number }[] | undefined {
+  const b = Math.max(1, baseCpm);
+  if (shape === "accelerate") return [{ atFrac: 0, cutsPerMin: b }, { atFrac: 1, cutsPerMin: Math.round(b * 1.6) }]; // build to climax
+  if (shape === "frontload") return [{ atFrac: 0, cutsPerMin: Math.round(b * 1.6) }, { atFrac: 0.15, cutsPerMin: Math.round(b * 1.6) }, { atFrac: 0.22, cutsPerMin: b }, { atFrac: 1, cutsPerMin: b }]; // fast hook, settle
+  return undefined; // flat
 }
 
 export const EDITOR_BLOCK = "editor_brief";
@@ -65,6 +79,7 @@ export function resolveEditorConfig(profile: ChannelProfile, block = EDITOR_BLOC
     transitions: String(k.transitions),
     captionStyle: String(k.captionStyle),
     overlayDensity: String(k.overlayDensity),
+    pacingShape: String(k.pacingShape),
   };
 }
 
@@ -74,11 +89,20 @@ export interface EditorDirectives {
   cutsPerMin?: number;
   captionStyle?: string;
   overlayDensity?: string;
+  /** Pacing CURVE (0–1 body position → cuts/min). Present only when pacingShape != flat. */
+  pacingCurve?: { atFrac: number; cutsPerMin: number }[];
 }
 
 /** Map an EditorConfig to the directives Assembly's planTimeline consumes. */
 export function editorDirectives(cfg: EditorConfig): EditorDirectives {
-  return { transitions: cfg.transitions, cutsPerMin: cfg.cutsPerMin, captionStyle: cfg.captionStyle, overlayDensity: cfg.overlayDensity };
+  const baseCpm = cfg.cutsPerMin ?? CADENCE_BASE[cfg.cadence] ?? 6;
+  return {
+    transitions: cfg.transitions,
+    cutsPerMin: cfg.cutsPerMin,
+    captionStyle: cfg.captionStyle,
+    overlayDensity: cfg.overlayDensity,
+    pacingCurve: buildPacingCurve(cfg.pacingShape, baseCpm),
+  };
 }
 
 export const EDITOR_MODULE = {

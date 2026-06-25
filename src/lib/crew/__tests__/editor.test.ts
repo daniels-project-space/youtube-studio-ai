@@ -68,6 +68,31 @@ function noEditorParity(): void {
   console.log("PARITY PASS: no editor directive ⇒ Assembly unchanged");
 }
 
+function bodyDurs(t: ReturnType<typeof planTimeline>): number[] {
+  return t.segments.filter((s) => s.kind === "footage" || s.kind === "entity").map((s) => (s as { durSec: number }).durSec);
+}
+
+function pacingCurveShapesBody(): void {
+  // P1/P2: the editor's pacingShape produces a CURVE that varies per-clip length over
+  // the body — replacing the single averaged cuts/min. Proven end-to-end through Assembly.
+  const front = planTimeline({ ...body, editor: editorDirectives(resolveEditorConfig(profileWith({ preset: "shorts" }))) }, ASSEMBLE_DEFAULTS);
+  const fd = bodyDurs(front);
+  assert.ok(fd.length >= 4, "frontload produced enough body clips");
+  assert.ok(fd[0] < fd[fd.length - 2], `frontload: first clip (${fd[0]}s) faster/shorter than settled clip (${fd[fd.length - 2]}s)`);
+
+  const accel = planTimeline({ ...body, editor: editorDirectives(resolveEditorConfig(profileWith({ preset: "hype" }))) }, ASSEMBLE_DEFAULTS);
+  const ad = bodyDurs(accel);
+  assert.ok(ad.length >= 4, "accelerate produced enough body clips");
+  assert.ok(ad[0] > ad[ad.length - 2], `accelerate: first clip (${ad[0]}s) slower/longer than late clip (${ad[ad.length - 2]}s)`);
+
+  // flat (documentary has no pacingShape) ⇒ constant cadence = parity (no curve emitted)
+  assert.equal(editorDirectives(resolveEditorConfig(profileWith({ preset: "documentary" }))).pacingCurve, undefined, "flat ⇒ no pacingCurve (parity)");
+  const flat = planTimeline({ ...body, editor: editorDirectives(resolveEditorConfig(profileWith({ preset: "documentary" }))) }, ASSEMBLE_DEFAULTS);
+  const fullLen = bodyDurs(flat).slice(0, -1); // drop the final remainder clip
+  assert.ok(fullLen.length > 0 && fullLen.every((d) => d === fullLen[0]), "flat ⇒ all full body clips identical (parity, no curve)");
+  console.log("CURVE PASS: pacingShape varies per-clip length (frontload fast→settle, accelerate build); flat = parity");
+}
+
 function surfaceAndRegistry(): void {
   for (const name of Object.keys(EDITOR_SURFACE.presets)) assert.ok(resolveKnobs(EDITOR_SURFACE, name).ok, `editor preset '${name}' valid`);
   assert.ok(configurableModules().some((m) => m.blockId === "editor_brief"), "editor registered in MODULE_REGISTRY");
@@ -81,6 +106,7 @@ function main(): void {
   wiredIntoAssembly();
   editorBeatsChannelDefault();
   noEditorParity();
+  pacingCurveShapesBody();
   surfaceAndRegistry();
   console.log("\nALL EDITOR TESTS PASSED");
 }
