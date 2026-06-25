@@ -60,6 +60,12 @@ export interface RenderBackend {
      * Optional; a backend may ignore it and fall back to crossfadeSec alone.
      */
     transition?: "hardcut" | "crossfade" | "dip_to_black";
+    /**
+     * Editor silence-trim: ordered KEEP ranges (raw narration time) to concatenate
+     * before composing — the complement is dead air carved out. bodySec already reflects
+     * the trimmed length. Optional; a backend may ignore it (⇒ narration plays whole).
+     */
+    narrationKeepRanges?: { startSec: number; endSec: number }[];
     fmt: Format;
   }): Promise<string>;
   /** Crossfade an outro card over the tail → local path. */
@@ -211,6 +217,7 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
       musicDuckRampSec: t.audio.duck.rampSec,
       crossfadeSec: crossfadeSecFromHints(t.renderHints?.transitions),
       transition: transitionFromHints(t.renderHints?.transitions),
+      ...(t.audio.narrationKeepRanges ? { narrationKeepRanges: t.audio.narrationKeepRanges } : {}),
       fmt,
     });
 

@@ -23,12 +23,13 @@ export const EDITOR_SURFACE: CustomizationSurface = {
     { id: "captionStyle", type: "enum", values: ["none", "minimal", "karaoke", "bold"], default: "minimal", describes: "caption look (→ Assembly caption pass)", servesStyles: ["shorts", "accessibility"] },
     { id: "overlayDensity", type: "enum", values: ["sparse", "standard", "rich"], default: "standard", describes: "how many quote/insert overlays", servesStyles: ["explainer"] },
     { id: "pacingShape", type: "enum", values: ["flat", "accelerate", "frontload"], default: "flat", describes: "cut-pacing CURVE over the body — flat / build-to-climax / front-loaded hook (not one constant cuts/min)", servesStyles: ["hype", "shorts", "documentary"] },
+    { id: "silenceTrim", type: "enum", values: ["off", "gentle", "aggressive"], default: "off", describes: "carve dead air out of the narration (auto-editor) → shorter, tighter video", servesStyles: ["shorts", "hype", "explainer"] },
   ],
   presets: {
     documentary: { cadence: "slow", transitions: "crossfade", captionStyle: "minimal", overlayDensity: "rich" },
     essay: { cadence: "measured", transitions: "hardcut", captionStyle: "minimal", overlayDensity: "standard" },
-    hype: { cadence: "frenetic", transitions: "hardcut", captionStyle: "bold", overlayDensity: "rich", pacingShape: "accelerate" },
-    shorts: { cadence: "frenetic", transitions: "hardcut", captionStyle: "karaoke", overlayDensity: "sparse", pacingShape: "frontload" },
+    hype: { cadence: "frenetic", transitions: "hardcut", captionStyle: "bold", overlayDensity: "rich", pacingShape: "accelerate", silenceTrim: "gentle" },
+    shorts: { cadence: "frenetic", transitions: "hardcut", captionStyle: "karaoke", overlayDensity: "sparse", pacingShape: "frontload", silenceTrim: "aggressive" },
     meditation: { cadence: "still", transitions: "crossfade", captionStyle: "none", overlayDensity: "sparse" },
     lofi: { cadence: "still", transitions: "crossfade", captionStyle: "none", overlayDensity: "sparse" },
   },
@@ -46,7 +47,16 @@ export interface EditorConfig {
   overlayDensity: string;
   /** Pacing curve shape over the body: flat / accelerate (build) / frontload (hook). */
   pacingShape: string;
+  /** Silence-trim aggressiveness: off / gentle / aggressive (auto-editor dead-air removal). */
+  silenceTrim: string;
 }
+
+/** silenceTrim → detector thresholds. `off` ⇒ undefined (no trim = parity). minSilenceSec = ignore gaps shorter than this; padSec = breathing room kept around speech. */
+const SILENCE_TRIM_PROFILES: Record<string, { minSilenceSec: number; padSec: number } | undefined> = {
+  off: undefined,
+  gentle: { minSilenceSec: 0.8, padSec: 0.15 },
+  aggressive: { minSilenceSec: 0.4, padSec: 0.08 },
+};
 
 /** Base cuts/min used to anchor the pacing CURVE (measured → 6 for curve math). */
 const CADENCE_BASE: Record<string, number> = { still: 2, slow: 3, measured: 6, snappy: 8, frenetic: 15 };
@@ -80,6 +90,7 @@ export function resolveEditorConfig(profile: ChannelProfile, block = EDITOR_BLOC
     captionStyle: String(k.captionStyle),
     overlayDensity: String(k.overlayDensity),
     pacingShape: String(k.pacingShape),
+    silenceTrim: String(k.silenceTrim),
   };
 }
 
@@ -91,6 +102,8 @@ export interface EditorDirectives {
   overlayDensity?: string;
   /** Pacing CURVE (0–1 body position → cuts/min). Present only when pacingShape != flat. */
   pacingCurve?: { atFrac: number; cutsPerMin: number }[];
+  /** Silence-trim thresholds (auto-editor). Present only when silenceTrim != off — the WIRE that tells Assembly + the probe to carve dead air. */
+  trim?: { minSilenceSec: number; padSec: number };
 }
 
 /** Map an EditorConfig to the directives Assembly's planTimeline consumes. */
@@ -102,6 +115,7 @@ export function editorDirectives(cfg: EditorConfig): EditorDirectives {
     captionStyle: cfg.captionStyle,
     overlayDensity: cfg.overlayDensity,
     pacingCurve: buildPacingCurve(cfg.pacingShape, baseCpm),
+    trim: SILENCE_TRIM_PROFILES[cfg.silenceTrim],
   };
 }
 

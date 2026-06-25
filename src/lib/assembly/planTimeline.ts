@@ -29,10 +29,12 @@ export interface PlanInput {
   cardBgSrc?: string;
   /** Optional precomputed overlay windows (captions/quotes/inserts). */
   overlays?: Overlay[];
-  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle + overlayDensity + a pacing CURVE. */
-  editor?: { transitions?: string; cutsPerMin?: number; captionStyle?: string; overlayDensity?: string; pacingCurve?: { atFrac: number; cutsPerMin: number }[] };
+  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle + overlayDensity + a pacing CURVE + silence-trim thresholds. */
+  editor?: { transitions?: string; cutsPerMin?: number; captionStyle?: string; overlayDensity?: string; pacingCurve?: { atFrac: number; cutsPerMin: number }[]; trim?: { minSilenceSec: number; padSec: number } };
   /** Composer crew directives (the WIRE from the Composer sub-module): duck level + loudness + voiceFx. */
   composer?: { bodyMusicVol?: number; targetLufs?: number; voiceFx?: string };
+  /** Measured silence intervals in the RAW narration (from the injected probe). Combined with editor.trim ⇒ the renderer carves these out. */
+  silenceIntervals?: { startSec: number; endSec: number }[];
 }
 
 /** Per-account assemble params (resolved from a ChannelProfile or passed directly). */
@@ -95,6 +97,59 @@ export function bodySegSeconds(narrationSec: number, cutSheet?: { sections?: { c
     return Math.max(4, Math.min(30, Math.round(60 / avg)));
   }
   return narrationSec > 600 ? 25 : 10;
+}
+
+/** A half-open time range [startSec, endSec) in seconds. */
+export interface TimeRange {
+  startSec: number;
+  endSec: number;
+}
+
+/**
+ * Silence-trim math (pure). Given the raw narration length, detected silence intervals,
+ * and the editor's thresholds, return the ordered KEEP ranges (the complement of the
+ * dead air we carve out). Silences shorter than `minSilenceSec` are left alone; each
+ * removed gap keeps `padSec` of breathing room on both sides so cuts aren't clipped.
+ */
+export function computeKeepRanges(totalSec: number, silences: TimeRange[], opts: { minSilenceSec: number; padSec: number }): TimeRange[] {
+  if (!(totalSec > 0)) return [];
+  const removable: TimeRange[] = [];
+  for (const z of silences) {
+    const s = Math.max(0, Math.min(totalSec, z.startSec));
+    const e = Math.max(0, Math.min(totalSec, z.endSec));
+    if (e - s < opts.minSilenceSec) continue; // too short to bother
+    const rs = s + opts.padSec;
+    const re = e - opts.padSec;
+    if (re - rs > 0.01) removable.push({ startSec: rs, endSec: re });
+  }
+  removable.sort((a, b) => a.startSec - b.startSec);
+  const keep: TimeRange[] = [];
+  let cursor = 0;
+  for (const r of removable) {
+    if (r.startSec > cursor + 0.01) keep.push({ startSec: cursor, endSec: r.startSec });
+    cursor = Math.max(cursor, r.endSec);
+  }
+  if (cursor < totalSec - 0.01) keep.push({ startSec: cursor, endSec: totalSec });
+  return keep;
+}
+
+/** Total kept (trimmed) duration of a keep-range set. */
+export function sumRanges(ranges: TimeRange[]): number {
+  return ranges.reduce((a, r) => a + Math.max(0, r.endSec - r.startSec), 0);
+}
+
+/**
+ * Map a timestamp in RAW narration time → its position after silence-trim. A time that
+ * falls inside a removed gap snaps to the cut point (the accumulated kept length so far).
+ */
+export function mapTimeThroughKeep(t: number, keep: TimeRange[]): number {
+  let acc = 0;
+  for (const k of keep) {
+    if (t < k.startSec) return acc; // in a removed gap before this kept range
+    if (t <= k.endSec) return acc + (t - k.startSec);
+    acc += k.endSec - k.startSec;
+  }
+  return acc;
 }
 
 /** Knob → behavior maps (the module's customization surface, applied). */
@@ -233,12 +288,30 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
   const introSec = input.introCardSrc && input.introCardSrc.length > 0 ? params.introSec : 0;
   const hasIntro = introSec > 0; // introStyle 'none'/'cold_open' collapses introSec to 0
   const tailSec = params.tailSec;
-  const total = introSec + narrationSec + tailSec;
+
+  // Silence-trim (editor): carve dead air out of the narration. Beat-body path only —
+  // chapter timing is the director's lane, so trim sits out when a chapterPlan drives it.
+  // Needs BOTH the editor directive (thresholds) and measured intervals (the probe).
+  const inChapterMode = !!(params.chapterCards && input.chapterPlan && input.chapterPlan.length > 0);
+  const trim = input.editor?.trim;
+  let keepRanges: TimeRange[] | undefined;
+  let effectiveNarrationSec = narrationSec;
+  if (trim && input.silenceIntervals && input.silenceIntervals.length > 0 && !inChapterMode) {
+    const kr = computeKeepRanges(narrationSec, input.silenceIntervals, trim);
+    const trimmed = sumRanges(kr);
+    // only adopt the trim if it actually shortens AND leaves real content (no zero-length narration)
+    if (kr.length > 0 && trimmed > 0.5 && trimmed < narrationSec - 0.25) {
+      keepRanges = kr;
+      effectiveNarrationSec = trimmed;
+    }
+  }
+
+  const total = introSec + effectiveNarrationSec + tailSec;
   const [w, h] = params.aspect === "9:16" ? [1080, 1920] : params.aspect === "1:1" ? [1080, 1080] : [1920, 1080];
   // Cadence priority: editor crew directive → cutEnergy knob → explicit cutSheet → legacy length-based (parity).
   const cpm = input.editor?.cutsPerMin ?? params.cutsPerMin;
   const bodyMaxSeg = bodySegSeconds(
-    narrationSec,
+    effectiveNarrationSec,
     input.cutSheet ?? (cpm ? { sections: [{ cutsPerMin: cpm }] } : undefined),
   );
   // Transitions/captions: the EDITOR directs, falling back to the channel's own assemble knobs.
@@ -278,7 +351,7 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
     // bodyMaxSeg is used (flat cadence = parity with the old averaged behaviour).
     const curve = input.editor?.pacingCurve;
     const segAt = curve && curve.length ? (f: number) => segSecondsFromCpm(cpmAtFrac(curve, f)) : () => bodyMaxSeg;
-    segments.push(...fillBody(clips, entitySet, narrationSec + tailSec, segAt, onBeat));
+    segments.push(...fillBody(clips, entitySet, effectiveNarrationSec + tailSec, segAt, onBeat));
   }
 
   if (params.outroCard && tailSec >= 2) {
@@ -293,6 +366,28 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
     });
   }
 
+  // captions toggle (off ⇒ drop caption overlays) + editor overlayDensity caps quote/insert count.
+  let planOverlays = capOverlays(
+    (input.overlays ?? []).filter((o) => params.captions || o.kind !== "caption"),
+    input.editor?.overlayDensity,
+  );
+  // When narration is trimmed, overlay windows (absolute video time) shift with the
+  // content: intro-time overlays unchanged, body-time overlays mapped through the keep
+  // ranges, tail-time overlays slid earlier by the total carved amount. Windows that
+  // collapse into removed silence are dropped (their referenced moment is gone).
+  if (keepRanges) {
+    const carved = narrationSec - effectiveNarrationSec;
+    const remap = (t: number): number => {
+      if (t <= introSec) return t;
+      const rel = t - introSec;
+      if (rel <= narrationSec) return introSec + mapTimeThroughKeep(rel, keepRanges as TimeRange[]);
+      return t - carved;
+    };
+    planOverlays = planOverlays
+      .map((o) => ({ ...o, startSec: remap(o.startSec), endSec: remap(o.endSec) }))
+      .filter((o) => o.endSec - o.startSec >= 0.1);
+  }
+
   // parse() applies schema normalization + fails loud on a structurally bad plan.
   return TimelineSchema.parse({
     format: { w, h, fps: 30 },
@@ -301,7 +396,7 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
       narrationSrc: input.narrationSrc,
       musicSrc: input.musicSrc,
       introSec,
-      bodySec: narrationSec,
+      bodySec: effectiveNarrationSec,
       tailSec,
       // Composer DIRECTS the mix: duck depth + master loudness fall back to the channel's assemble knobs.
       duck: { introVol: params.introMusicVol, bodyVol: input.composer?.bodyMusicVol ?? params.bodyMusicVol, rampSec: params.musicDuckRampSec },
@@ -309,12 +404,9 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
       audioFadeOutSec: params.audioFadeOutSec,
       targetLufs: input.composer?.targetLufs ?? params.targetLufs,
       ...(input.composer?.voiceFx ? { voiceFx: input.composer.voiceFx } : {}),
+      ...(keepRanges ? { narrationKeepRanges: keepRanges } : {}),
     },
-    // captions toggle (off ⇒ drop caption overlays) + editor overlayDensity caps quote/insert count.
-    overlays: capOverlays(
-      (input.overlays ?? []).filter((o) => params.captions || o.kind !== "caption"),
-      input.editor?.overlayDensity,
-    ),
+    overlays: planOverlays,
     lengthBand: { minSec: params.minSeconds, maxSec: params.maxSeconds, tolSec: params.tolSec },
     checkpoints: { preOverlaySec: total },
     ...(params.aspect !== "16:9" ? { reframe: { aspect: params.aspect } } : {}),

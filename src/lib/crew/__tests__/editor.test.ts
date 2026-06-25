@@ -93,6 +93,21 @@ function pacingCurveShapesBody(): void {
   console.log("CURVE PASS: pacingShape varies per-clip length (frontload fast→settle, accelerate build); flat = parity");
 }
 
+function silenceTrimWires(): void {
+  const sh = resolveEditorConfig(profileWith({ preset: "shorts" }));
+  assert.equal(sh.silenceTrim, "aggressive", "shorts trims dead air aggressively");
+  const d = editorDirectives(sh);
+  assert.ok(d.trim && d.trim.minSilenceSec === 0.4 && d.trim.padSec === 0.08, "aggressive → trim thresholds directive");
+
+  const hype = editorDirectives(resolveEditorConfig(profileWith({ preset: "hype" })));
+  assert.ok(hype.trim && hype.trim.minSilenceSec === 0.8, "hype → gentle trim");
+
+  const doc = resolveEditorConfig(profileWith({ preset: "documentary" }));
+  assert.equal(doc.silenceTrim, "off", "documentary default = no trim");
+  assert.equal(editorDirectives(doc).trim, undefined, "off ⇒ no trim directive (parity)");
+  console.log("TRIM PASS: silenceTrim knob → trim thresholds directive (off ⇒ none)");
+}
+
 function surfaceAndRegistry(): void {
   for (const name of Object.keys(EDITOR_SURFACE.presets)) assert.ok(resolveKnobs(EDITOR_SURFACE, name).ok, `editor preset '${name}' valid`);
   assert.ok(configurableModules().some((m) => m.blockId === "editor_brief"), "editor registered in MODULE_REGISTRY");
@@ -107,6 +122,7 @@ function main(): void {
   editorBeatsChannelDefault();
   noEditorParity();
   pacingCurveShapesBody();
+  silenceTrimWires();
   surfaceAndRegistry();
   console.log("\nALL EDITOR TESTS PASSED");
 }

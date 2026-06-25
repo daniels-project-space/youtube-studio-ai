@@ -60,6 +60,12 @@ export const AudioPlanSchema = z.object({
   targetLufs: z.number().optional(),
   /** Composer's narration voice FX (radio / warm / telephone). Carried for the audio pass. */
   voiceFx: z.string().optional(),
+  /**
+   * Editor's silence-trim plan: ordered KEEP ranges (in RAW narration time) the renderer
+   * concatenates — the complement is the dead-air carved out. Absent ⇒ narration plays
+   * whole (parity). bodySec already reflects the trimmed length when this is present.
+   */
+  narrationKeepRanges: z.array(z.object({ startSec: z.number().nonnegative(), endSec: z.number().nonnegative() })).optional(),
 });
 
 /** A timed overlay window. Captions/quotes/inserts mount only within [startSec,endSec]. */

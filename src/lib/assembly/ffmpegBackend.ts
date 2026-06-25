@@ -180,7 +180,23 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
           "-t", total.toFixed(3), "-c:a", "aac", "-b:a", "128k", musicPath,
         ]);
       }
-      const narrationPath = args.narrationSrc ? await resolverInst.resolve(args.narrationSrc) : undefined;
+      let narrationPath = args.narrationSrc ? await resolverInst.resolve(args.narrationSrc) : undefined;
+
+      // Editor silence-trim: concat only the KEEP ranges (the complement is dead air).
+      // `aselect` keeps the union of [start,end] windows; `asetpts` repacks timestamps so
+      // the output is gapless. bodySec already reflects this trimmed length (planTimeline).
+      if (narrationPath && args.narrationKeepRanges && args.narrationKeepRanges.length > 0) {
+        const expr = args.narrationKeepRanges
+          .map((r) => `between(t,${r.startSec.toFixed(3)},${r.endSec.toFixed(3)})`)
+          .join("+");
+        const trimmedPath = await out("narration_trimmed.m4a");
+        await execFileP(process.env.FFMPEG_BIN ?? "ffmpeg", [
+          "-y", "-i", narrationPath,
+          "-af", `aselect='${expr}',asetpts=N/SR/TB`,
+          "-c:a", "aac", "-b:a", "192k", trimmedPath,
+        ]);
+        narrationPath = trimmedPath;
+      }
 
       // dip_to_black is NOT a dissolve: compose with a HARD cut at the title→body
       // boundary (crossfadeSec 0), then a dedicated post pass fades DOWN to black

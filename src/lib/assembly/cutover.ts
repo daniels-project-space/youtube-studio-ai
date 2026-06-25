@@ -26,6 +26,7 @@ import type { ChannelProfile } from "@/engine/channelProfile";
 import type { QuoteOverlaySpec } from "@/lib/ffmpeg";
 import { resolveEditorConfig, editorDirectives } from "@/lib/crew/editor";
 import { createFfmpegBackend } from "./ffmpegBackend";
+import { detectNarrationSilence } from "./silenceProbe";
 import {
   planTimeline,
   resolveAssembleParams,
@@ -208,6 +209,15 @@ export async function assembleViaEdl(args: AssembleViaEdlArgs): Promise<Assemble
   const assembleParams = profile ? resolveAssembleParams(profile) : paramsToAssemble(params);
   if (profile) {
     planInput.editor = editorDirectives(resolveEditorConfig(profile));
+  }
+
+  // Editor silence-trim: when the profile's editor asks for it, probe the (local)
+  // narration for dead air now so the PURE planner can carve it. Fail-soft: a probe
+  // miss just leaves silenceIntervals unset ⇒ no trim (planTimeline = parity).
+  if (planInput.editor?.trim && planInput.narrationSrc) {
+    planInput.silenceIntervals = await detectNarrationSilence(planInput.narrationSrc, {
+      durationSec: planInput.narrationDurationSec,
+    });
   }
 
   const timeline = planTimeline(planInput, assembleParams);
