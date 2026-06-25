@@ -11,3 +11,5 @@ export type { ResolvedCrew, ResolvedCrewMember, CriticStrictness } from "./crewP
 // Crew sub-modules (per-member). Editor first — director/dp/composer/critic to follow.
 export { EDITOR_SURFACE, EDITOR_MODULE, EDITOR_BLOCK, resolveEditorConfig, editorDirectives } from "./editor";
 export type { EditorConfig, EditorDirectives } from "./editor";
+export { COMPOSER_SURFACE, COMPOSER_MODULE, COMPOSER_BLOCK, resolveComposerConfig, composerDirectives } from "./composer";
+export type { ComposerConfig, ComposerDirectives } from "./composer";

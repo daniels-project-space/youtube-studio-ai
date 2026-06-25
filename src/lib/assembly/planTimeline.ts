@@ -31,6 +31,8 @@ export interface PlanInput {
   overlays?: Overlay[];
   /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle + overlayDensity. */
   editor?: { transitions?: string; cutsPerMin?: number; captionStyle?: string; overlayDensity?: string };
+  /** Composer crew directives (the WIRE from the Composer sub-module): duck level + loudness + voiceFx. */
+  composer?: { bodyMusicVol?: number; targetLufs?: number; voiceFx?: string };
 }
 
 /** Per-account assemble params (resolved from a ChannelProfile or passed directly). */
@@ -272,10 +274,12 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
       introSec,
       bodySec: narrationSec,
       tailSec,
-      duck: { introVol: params.introMusicVol, bodyVol: params.bodyMusicVol, rampSec: params.musicDuckRampSec },
+      // Composer DIRECTS the mix: duck depth + master loudness fall back to the channel's assemble knobs.
+      duck: { introVol: params.introMusicVol, bodyVol: input.composer?.bodyMusicVol ?? params.bodyMusicVol, rampSec: params.musicDuckRampSec },
       fadeOutSec: params.fadeOutSec,
       audioFadeOutSec: params.audioFadeOutSec,
-      targetLufs: params.targetLufs,
+      targetLufs: input.composer?.targetLufs ?? params.targetLufs,
+      ...(input.composer?.voiceFx ? { voiceFx: input.composer.voiceFx } : {}),
     },
     // captions toggle (off ⇒ drop caption overlays) + editor overlayDensity caps quote/insert count.
     overlays: capOverlays(

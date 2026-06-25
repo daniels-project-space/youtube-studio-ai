@@ -58,6 +58,8 @@ export const AudioPlanSchema = z.object({
   audioFadeOutSec: z.number().nonnegative().optional(),
   /** Integrated loudness target (e.g. -14 LUFS for YouTube). Renderer normalizes to this. */
   targetLufs: z.number().optional(),
+  /** Composer's narration voice FX (radio / warm / telephone). Carried for the audio pass. */
+  voiceFx: z.string().optional(),
 });
 
 /** A timed overlay window. Captions/quotes/inserts mount only within [startSec,endSec]. */
