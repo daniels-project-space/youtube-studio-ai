@@ -8,6 +8,7 @@
  */
 import type { CustomizationSurface } from "./customization";
 import { ASSEMBLY_MODULE } from "@/lib/assembly/module";
+import { CREW_MODULE } from "@/lib/crew/module";
 
 export interface ModuleCard {
   /** Module key (e.g. "assemble"). */
@@ -22,7 +23,8 @@ export interface ModuleCard {
 /** Pipeline BLOCK ID (as it appears in a channel's pipeline[]) → its card. */
 export const MODULE_REGISTRY: Record<string, ModuleCard> = {
   timeline_assemble: ASSEMBLY_MODULE,
-  // ← register Crew, Guard, Thumbnail, Visuals, … here as each is leveled up.
+  "show-bible": CREW_MODULE,
+  // ← register Guard, Thumbnail, Visuals, … here as each is leveled up.
 };
 
 export function moduleCard(blockId: string): ModuleCard | undefined {

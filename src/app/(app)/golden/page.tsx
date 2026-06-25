@@ -84,6 +84,16 @@ const ASSEMBLY_PROOFS: TextProof[] = [
   { device: "preset · lofi", channel: "lofi loop", line: "single-loop · music-forward · no captions", note: "minimal assembly" },
 ];
 
+/** Crew's proof = per-style crew composition (not every channel needs every role). */
+const CREW_PROOFS: TextProof[] = [
+  { device: "preset · documentary", channel: "full crew", line: "director · DP · editor · composer · critic", note: "strict critic · slow cadence" },
+  { device: "preset · essay", channel: "full crew", line: "all 5 roles · standard critic", note: "the default" },
+  { device: "preset · hype", channel: "full crew", line: "bold director · frenetic editor", note: "high-energy" },
+  { device: "preset · shorts", channel: "no DP", line: "director · editor · composer · critic", note: "kinetic · frenetic cuts" },
+  { device: "preset · meditation", channel: "composer-led", line: "director · composer · critic (no DP / editor)", note: "lenient critic" },
+  { device: "preset · lofi", channel: "minimal", line: "director · composer only", note: "no editor / critic" },
+];
+
 const VOICE_PROOFS: { file: string; device: string; meta: string }[] = [
   { file: "stoic.mp3", device: "quiet-mentor · 0.95x", meta: "Brian — deep neutral-US" },
   { file: "meditation.mp3", device: "gentle-guide · 0.85x", meta: "Autumn Veil — mature female" },
@@ -286,6 +296,7 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
     case "metadata": return textStrip(META_PROOFS);
     case "topic-intel": return textStrip(TOPIC_PROOFS);
     case "assemble": return textStrip(ASSEMBLY_PROOFS);
+    case "show-bible": return textStrip(CREW_PROOFS);
     case "narration":
       return (
         <div style={STRIP}>

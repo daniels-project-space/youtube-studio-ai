@@ -604,13 +604,26 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "show-bible",
     stage: "brief",
     title: "Show Bible + Crew",
-    engine: "Showrunner + addable crew blocks (director / DP / editor / composer / critic)",
+    engine:
+      "Standalone Crew module — crew as DATA: a declarative role registry (director / cinematographer / editor / composer / critic) + a pure resolveCrew over the channel's Show Bible (authored doctrines) + a CustomizationSurface (role toggles + 6 style presets). Critic authors the ValidationSpec the verify stage enforces",
     how:
-      "The Show Bible distills the channel's frozen Style DNA into working doctrine; per-video crew briefs " +
-      "set visual grammar, cut rhythm and score palette, and the critic authors a ValidationSpec the verify " +
-      "stage enforces. Missing crew throws — no silent skips.",
-    gates: ["crew throws on missing inputs", "per-video ValidationSpec authored"],
-    status: "active",
+      "The Show Bible distills the channel's frozen Style-DNA into per-role doctrine; the leveled-up Crew module " +
+      "turns the crew into DATA. resolveCrew (pure, no LLM) reads which roles are ACTIVE for the channel (not every " +
+      "channel needs every role — shorts drop the DP, meditation is composer-led, lofi runs director+composer only) " +
+      "+ each active role's authored doctrine, via the CustomizationSurface (preset + per-channel overrides on " +
+      "moduleConfig['show-bible']) — one resolver, ZERO per-role code branches. A role active without an authored " +
+      "doctrine surfaces a typed warning (never a silent generic brief); the critic's doctrine becomes the " +
+      "ValidationSpec verify enforces, and marketAwareCritic judges vs scraped real competitors. Standalone + " +
+      "unit-tested; reuses VIDEO_CREW_ROLES + ShowBible (src/lib/crew, registered in MODULE_REGISTRY) so the " +
+      "Architect/Director compose the crew straight from the card.",
+    gates: [
+      "crew is data (no per-role code branches)",
+      "opt-in roles (resolveCrew never assumes a fixed crew)",
+      "no silent gaps (role w/o doctrine → typed warning)",
+      "critic doctrine → verify ValidationSpec",
+      "per-account (preset + overrides) configurable",
+    ],
+    status: "golden",
   },
   {
     key: "script",
