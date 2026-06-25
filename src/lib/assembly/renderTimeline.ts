@@ -52,6 +52,14 @@ export interface RenderBackend {
     musicDuckRampSec: number;
     /** Crossfade (xfade) seconds title→body. From renderHints.transitions; optional (backend may ignore). */
     crossfadeSec?: number;
+    /**
+     * Transition TYPE title→body (renderHints.transitions). Lets the backend BRANCH:
+     *   crossfade    → xfade dissolve (default)
+     *   dip_to_black → fade DOWN to black then back up (a real visual difference)
+     *   hardcut      → straight cut (crossfadeSec 0)
+     * Optional; a backend may ignore it and fall back to crossfadeSec alone.
+     */
+    transition?: "hardcut" | "crossfade" | "dip_to_black";
     fmt: Format;
   }): Promise<string>;
   /** Crossfade an outro card over the tail → local path. */
@@ -63,8 +71,29 @@ export interface RenderBackend {
    * AND the plan asks for a non-"none" reframe on a portrait target.
    */
   reframe?(basePath: string, fmt: Format, strategy: string): Promise<{ path: string; warnings: string[] }>;
-  /** Burn captions/quotes/inserts → { path, applied, warnings }. Drops surface as warnings, never silent. */
-  applyOverlays(basePath: string, overlays: Overlay[], fmt: Format): Promise<{ path: string; applied: number; warnings: string[] }>;
+  /**
+   * OPTIONAL loudness normalize to an integrated LUFS target (AudioPlan.targetLufs).
+   * renderTimeline calls this AFTER compose (and after the optional reframe) only
+   * when targetLufs is set AND the backend implements it — mirroring the optional
+   * `reframe` pattern so fake backends (which omit it) are an exact no-op.
+   */
+  normalizeLoudness?(path: string, lufs: number): Promise<{ path: string; warnings: string[] }>;
+  /**
+   * Burn captions/quotes/inserts → { path, applied, warnings }. Drops surface as
+   * warnings, never silent. The optional `opts.captionStyle` (renderHints.captionStyle)
+   * lets the backend restyle / suppress the caption burn:
+   *   none    → skip caption burn entirely (quote/insert specs still composite)
+   *   minimal → smaller, low-key captions
+   *   karaoke → active-word highlight colour
+   *   bold    → large, heavy outline (default-ish look, louder)
+   * Omitting it ⇒ the backend's standard caption style (back-compatible).
+   */
+  applyOverlays(
+    basePath: string,
+    overlays: Overlay[],
+    fmt: Format,
+    opts?: { captionStyle?: "none" | "minimal" | "karaoke" | "bold" },
+  ): Promise<{ path: string; applied: number; warnings: string[] }>;
   /** Probe a local video's duration (sec). */
   probe(path: string): Promise<number>;
   /** Content-addressed artifact cache (idempotency + heal checkpoint). */
@@ -100,6 +129,17 @@ const isCard = (s: Segment): s is Extract<Segment, { kind: "card" }> => s.kind =
 function crossfadeSecFromHints(transitions?: string): number {
   if (transitions === "crossfade" || transitions === "dip_to_black") return 0.8;
   return 0; // hardcut / undefined
+}
+
+/**
+ * renderHints.transitions → the typed transition the backend BRANCHES on. Normalizes
+ * anything unknown to "crossfade" only when a crossfade time is present; otherwise
+ * "hardcut". Keeps dip_to_black DISTINCT from crossfade (the backend renders a real
+ * fade-to-black instead of a dissolve).
+ */
+function transitionFromHints(transitions?: string): "hardcut" | "crossfade" | "dip_to_black" | undefined {
+  if (transitions === "hardcut" || transitions === "crossfade" || transitions === "dip_to_black") return transitions;
+  return undefined;
 }
 
 /** Execute a Timeline → finished video Receipt. Deterministic, idempotent, heal-aware. */
@@ -170,6 +210,7 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
       bodyMusicVol: t.audio.duck.bodyVol,
       musicDuckRampSec: t.audio.duck.rampSec,
       crossfadeSec: crossfadeSecFromHints(t.renderHints?.transitions),
+      transition: transitionFromHints(t.renderHints?.transitions),
       fmt,
     });
 
@@ -184,7 +225,8 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
   }
 
   // 4. OVERLAYS (finishing pass) — always run; this is where overlay-class heals re-finish.
-  const fin = await backend.applyOverlays(composed, t.overlays, fmt);
+  // renderHints.captionStyle threads through so the backend can restyle / suppress captions.
+  const fin = await backend.applyOverlays(composed, t.overlays, fmt, { captionStyle: t.renderHints?.captionStyle });
   warnings.push(...fin.warnings);
   let finalPath = fin.path;
 
@@ -197,6 +239,17 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
     const rf = await backend.reframe(finalPath, fmt, reframeStrategy);
     finalPath = rf.path;
     warnings.push(...rf.warnings);
+  }
+
+  // 4c. OPTIONAL LOUDNESS NORMALIZE — bring the mix to AudioPlan.targetLufs (e.g.
+  // -14 LUFS for YouTube). Runs LAST so it normalizes the final mix (post-overlay,
+  // post-reframe). Only when targetLufs is set AND the backend implements it; fake
+  // backends omit normalizeLoudness ⇒ no-op (exactly like reframe).
+  const targetLufs = t.audio.targetLufs;
+  if (backend.normalizeLoudness && typeof targetLufs === "number") {
+    const ln = await backend.normalizeLoudness(finalPath, targetLufs);
+    finalPath = ln.path;
+    warnings.push(...ln.warnings);
   }
 
   // 5. PUBLISH + cache the final.

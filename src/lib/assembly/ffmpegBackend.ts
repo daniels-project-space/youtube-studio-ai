@@ -27,7 +27,7 @@
  *     true subject tracking is pending.
  */
 import { existsSync } from "node:fs";
-import { copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir, writeFile as writeFileP } from "node:fs/promises";
 import { dirname, join } from "node:path";
 import {
   assembleBeatBody,
@@ -182,7 +182,12 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
       }
       const narrationPath = args.narrationSrc ? await resolverInst.resolve(args.narrationSrc) : undefined;
 
-      return composeWithIntro({
+      // dip_to_black is NOT a dissolve: compose with a HARD cut at the title→body
+      // boundary (crossfadeSec 0), then a dedicated post pass fades DOWN to black
+      // and back UP across that boundary — a real, visible difference from the
+      // xfade crossfade. (crossfade/hardcut keep composeWithIntro's xfade/cut.)
+      const isDip = args.transition === "dip_to_black";
+      const composedPath = await composeWithIntro({
         introCardPath: args.introCardPath,
         loopBodyPath: args.bodyPath,
         musicPath,
@@ -198,9 +203,30 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
         introMusicVol: args.introMusicVol,
         bodyMusicVol: args.bodyMusicVol,
         musicDuckRampSec: args.musicDuckRampSec,
-        // hardcut ⇒ 0 (composeWithIntro treats 0 as a hard cut); crossfade/dip ⇒ 0.8s.
-        ...(typeof args.crossfadeSec === "number" ? { crossfadeSec: args.crossfadeSec } : {}),
+        // hardcut ⇒ 0 (composeWithIntro treats 0 as a hard cut); crossfade ⇒ 0.8s.
+        // dip_to_black ⇒ 0 here (we render the dip ourselves below, post-compose).
+        ...(isDip ? { crossfadeSec: 0 } : typeof args.crossfadeSec === "number" ? { crossfadeSec: args.crossfadeSec } : {}),
       });
+
+      if (!isDip) return composedPath;
+
+      // ----- dip_to_black post pass -----
+      // Fade the VIDEO down to black ending at the boundary, then up from black after
+      // it. Boundary = introSec when there's a title card, else a short dip at t=0.
+      const dipSec = Math.min(0.6, Math.max(0.3, (args.crossfadeSec ?? 0.8) / 2));
+      const boundary = args.introCardPath ? Math.max(0, args.introSec) : dipSec;
+      const dipOut = await out("dipped.mp4");
+      const fadeOutSt = Math.max(0, boundary - dipSec).toFixed(3);
+      const fadeInSt = boundary.toFixed(3);
+      const vf = `fade=t=out:st=${fadeOutSt}:d=${dipSec.toFixed(3)}:color=black,fade=t=in:st=${fadeInSt}:d=${dipSec.toFixed(3)}:color=black`;
+      await execFileP(process.env.FFMPEG_BIN ?? "ffmpeg", [
+        "-y", "-i", composedPath,
+        "-vf", vf,
+        "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
+        "-c:a", "copy", "-movflags", "+faststart",
+        dipOut,
+      ]);
+      return dipOut;
     },
 
     async patchOutro(basePath, outroCardPath, startSec, durSec, fmt): Promise<string> {
@@ -211,12 +237,23 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
       });
     },
 
-    async applyOverlays(basePath: string, overlays: Overlay[], fmt: Format) {
+    async applyOverlays(basePath: string, overlays: Overlay[], fmt: Format, ovOpts?: { captionStyle?: CaptionStyle }) {
       if (overlays.length === 0) return { path: basePath, applied: 0, warnings: [] };
 
       // EDL → the two god-block primitives (cues + alpha specs). Drops (text-less
       // caption / media-less quote/insert) come back as warnings — never silent.
-      const { cues, specs, warnings } = overlaysToCuesAndSpecs(overlays);
+      const mapped = overlaysToCuesAndSpecs(overlays);
+      let cues = mapped.cues;
+      const { specs, warnings } = mapped;
+
+      // captionStyle === "none" ⇒ suppress the caption burn entirely (quote/insert
+      // alpha specs still composite). Surface as a warning so it's never silent.
+      const captionStyle: CaptionStyle = ovOpts?.captionStyle ?? "default";
+      if (captionStyle === "none" && cues.length > 0) {
+        warnings.push(`captionStyle=none — ${cues.length} caption(s) suppressed (not burned)`);
+        cues = [];
+      }
+
       if (cues.length === 0 && specs.length === 0) {
         // Everything was dropped; nothing to burn. Surface why (don't fake a pass).
         return { path: basePath, applied: 0, warnings };
@@ -225,9 +262,16 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
       const tmp = await getTmp();
       const W = fmt.w;
       const H = fmt.h;
-      // Caption .ass (null when no cues) — shared by both the single-pass and the
-      // sequential fallback, exactly like finishFromComposed.
-      const assPath = await writeCaptionsAss(cues, tmp, { width: W, height: H });
+      // Caption .ass (null when no cues). When a NON-default captionStyle is set we
+      // write our OWN styled header (size / outline / active-word colour / position)
+      // — proving the style actually changes the render; otherwise fall back to the
+      // shared writeCaptionsAss (back-compatible default look).
+      const assPath =
+        cues.length === 0
+          ? null
+          : captionStyle === "default"
+            ? await writeCaptionsAss(cues, tmp, { width: W, height: H })
+            : await writeStyledCaptionsAss(cues, tmp, { width: W, height: H, style: captionStyle });
       const outPath = await out("finished.mp4");
 
       try {
@@ -243,7 +287,13 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
           let base = basePath;
           if (cues.length > 0) {
             const capPath = await out("captioned.mp4");
-            await burnCaptions(base, cues, capPath, { tmpDir: tmp, width: W, height: H });
+            // Honor the styled ASS in the fallback too: burn it directly when we
+            // wrote a custom (non-default) header; otherwise use the proven helper.
+            if (assPath && captionStyle !== "default") {
+              await burnAssFile(base, assPath, capPath);
+            } else {
+              await burnCaptions(base, cues, capPath, { tmpDir: tmp, width: W, height: H });
+            }
             base = capPath;
           }
           if (specs.length > 0) {
@@ -276,6 +326,26 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
       if (strategy === "subject_track") {
         warnings.push("reframe: subject_track not yet implemented — center-cropped (true subject tracking pending)");
       }
+      return { path: outPath, warnings };
+    },
+
+    async normalizeLoudness(basePath: string, lufs: number) {
+      // Single-pass EBU R128 loudnorm to the integrated target. TP=-1.5 (true-peak
+      // ceiling) + LRA=11 match masterAudio's broadcast recipe; we clamp the target
+      // to the same sane window. VIDEO is stream-copied (audio-only re-encode), so
+      // this is cheap and never re-transcodes the picture.
+      const warnings: string[] = [];
+      const target = Math.max(-24, Math.min(-9, lufs));
+      if (target !== lufs) warnings.push(`normalizeLoudness: targetLufs ${lufs} clamped to ${target} (sane [-24,-9] window)`);
+      const outPath = await out("loudnorm.mp4");
+      await execFileP(process.env.FFMPEG_BIN ?? "ffmpeg", [
+        "-y", "-i", basePath,
+        "-af", `loudnorm=I=${target}:TP=-1.5:LRA=11`,
+        "-c:v", "copy",
+        "-c:a", "aac", "-b:a", "256k", "-ar", "44100",
+        "-movflags", "+faststart",
+        outPath,
+      ]);
       return { path: outPath, warnings };
     },
 
@@ -344,6 +414,97 @@ function execFileP(bin: string, args: string[]): Promise<void> {
   return new Promise((resolve, reject) => {
     execFile(bin, args, { maxBuffer: 16 * 1024 * 1024 }, (err) => (err ? reject(err) : resolve()));
   });
+}
+
+/** Caption styling intent (renderHints.captionStyle) + the internal "default" look. */
+type CaptionStyle = "default" | "none" | "minimal" | "karaoke" | "bold";
+
+/** A burnable caption window (mirrors ffmpeg.ts CaptionCue — kept local, not exported). */
+interface OvCue { startSec: number; endSec: number; text: string }
+
+/** ASS timestamp H:MM:SS.cc (local copy — ffmpeg.ts's assTs is module-private). */
+function assTsLocal(sec: number): string {
+  const s = Math.max(0, sec);
+  const h = Math.floor(s / 3600);
+  const m = Math.floor((s % 3600) / 60);
+  const ss = Math.floor(s % 60);
+  const cc = Math.round((s - Math.floor(s)) * 100);
+  return `${h}:${String(m).padStart(2, "0")}:${String(ss).padStart(2, "0")}.${String(Math.min(99, cc)).padStart(2, "0")}`;
+}
+const assTextLocal = (t: string) => t.replace(/[{}]/g, "").replace(/\r?\n/g, " ").trim();
+
+/**
+ * Per-style ASS V4+ style line + optional inline override. Colours are &HAABBGGRR.
+ *   minimal → smaller font, thin outline, lower-key
+ *   bold    → large font, heavy outline, top-aligned-bottom (louder presence)
+ *   karaoke → mid font + a yellow active-word tint via an inline \c override
+ * Returns { styleLine, inline } — inline is prepended to each Dialogue Text.
+ */
+function styleSpec(style: CaptionStyle, W: number, H: number): { styleLine: string; inline: string } {
+  // base proportions (match writeCaptionsAss): font 0.053H, sideM 0.08W, marginV 0.06H
+  const side = Math.round(W * 0.08);
+  switch (style) {
+    case "minimal": {
+      const fs = Math.round(H * 0.040);
+      const mv = Math.round(H * 0.05);
+      // PrimaryColour slightly translucent white, thin outline (1), no shadow, Bold off.
+      return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H10FFFFFF,&H00000000,&H64000000,0,1,1,0,2,${side},${side},${mv},1`, inline: "" };
+    }
+    case "bold": {
+      const fs = Math.round(H * 0.072);
+      const mv = Math.round(H * 0.08);
+      // Heavy: Bold on, thick outline (5) + shadow (3).
+      return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H00FFFFFF,&H00000000,&H96000000,1,1,5,3,2,${side},${side},${mv},1`, inline: "" };
+    }
+    case "karaoke": {
+      const fs = Math.round(H * 0.056);
+      const mv = Math.round(H * 0.06);
+      // Mid weight + a yellow active-word tint (inline \c&H0000FFFF& = yellow in BGR).
+      return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H00FFFFFF,&H00000000,&H64000000,1,1,4,2,2,${side},${side},${mv},1`, inline: "{\\c&H0000FFFF&}" };
+    }
+    default: {
+      const fs = Math.round(H * 0.053);
+      const mv = Math.round(H * 0.06);
+      return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H00FFFFFF,&H00000000,&H64000000,1,1,4,2,2,${side},${side},${mv},1`, inline: "" };
+    }
+  }
+}
+
+/**
+ * Write a STYLED caption .ass (own header) so renderHints.captionStyle actually
+ * changes the burn (font size / outline / weight / active-word colour). Proves ≥2
+ * styles ⇒ different ffmpeg input. Returns null when there are no cues.
+ */
+async function writeStyledCaptionsAss(
+  cues: OvCue[],
+  tmpDir: string,
+  opts: { width?: number; height?: number; style: CaptionStyle },
+): Promise<string | null> {
+  if (cues.length === 0) return null;
+  const W = opts.width ?? 1920;
+  const H = opts.height ?? 1080;
+  const { styleLine, inline } = styleSpec(opts.style, W, H);
+  const head =
+    `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n` +
+    `[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
+    `${styleLine}\n\n` +
+    `[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
+  const body = cues
+    .map((c) => `Dialogue: 0,${assTsLocal(c.startSec)},${assTsLocal(c.endSec)},Cap,,0,0,0,,${inline}${assTextLocal(c.text)}`)
+    .join("\n");
+  const assPath = join(tmpDir, `captions_${opts.style}.ass`);
+  await writeFileP(assPath, head + body + "\n");
+  return assPath;
+}
+
+/** Burn an already-written .ass onto a video in one ffmpeg pass (styled-fallback path). */
+async function burnAssFile(videoPath: string, assPath: string, outPath: string): Promise<void> {
+  const p = assPath.replace(/\\/g, "/").replace(/:/g, "\\:");
+  await execFileP(process.env.FFMPEG_BIN ?? "ffmpeg", [
+    "-y", "-i", videoPath, "-vf", `ass='${p}'`,
+    "-c:v", "libx264", "-preset", "veryfast", "-crf", "19", "-pix_fmt", "yuv420p",
+    "-c:a", "copy", "-movflags", "+faststart", outPath,
+  ]);
 }
 
 /** storage.ts throws "Missing required R2 environment variable: ..." when creds absent. */
