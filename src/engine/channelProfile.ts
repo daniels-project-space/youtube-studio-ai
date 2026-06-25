@@ -79,6 +79,16 @@ export function moduleParams(p: ChannelProfile, block: string): Record<string, u
  * (optional) distilled StyleDNA. PURE — no I/O. This is the single adapter that
  * will replace the ~14-key store fan-out: a module calls this once and reads the
  * typed object instead of reaching into `ctx.store`. Validates on build (fail loud).
+ *
+ * TODO(server-loop / module-config UI): the prod run pipeline does NOT yet call
+ * this. When run-pipeline is cut over to ChannelProfile, pass the channel row's
+ * operator config: `buildChannelProfile({ ..., moduleOverrides: row.moduleConfig })`
+ * (channels.moduleConfig = { [blockId]: { preset?, ...knobValues } }, written by
+ * the onboarding "Pipeline style" step + Settings "Pipeline modules" section) and
+ * lift each block's `preset` into its pipeline entry params so resolveX
+ * (resolveAssembleParams / resolveEditorConfig) applies preset + overrides. The
+ * UI + Convex (channels.setModuleConfig) layer is complete + validated today;
+ * only this call site is pending (the module chain isn't cut over yet).
  */
 export function buildChannelProfile(args: {
   row: Pick<ChannelRow, "_id" | "name" | "slug" | "status" | "template" | "budget" | "identity">;

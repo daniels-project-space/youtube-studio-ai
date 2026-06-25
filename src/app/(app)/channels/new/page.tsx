@@ -8,6 +8,7 @@ import { nichePreset } from "@/engine/golden";
 import { FAMILIES, FAMILY_KEYS, FAMILY_CREW, CREW_ROLE_BLOCK, getFamily, type FamilyKey } from "@/engine/families";
 import { ARCHETYPES } from "@/engine/archetypes";
 import { MODULE_CATALOG, type ParamField } from "@/engine/moduleCatalog";
+import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 
 type Phase = "form" | "building" | "error";
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -79,6 +80,9 @@ export default function NewChannelWizard() {
   // Advanced per-module param editor: paramOverrides[blockId][key] = value.
   const [paramOverrides, setParamOverrides] = useState<Record<string, Record<string, unknown>>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
+  // Pipeline style — per-module presets/knobs the new channel starts with
+  // (validated server-side by channels.setModuleConfig in design-channel).
+  const [moduleConfig, setModuleConfig] = useState<ModuleConfigMap>({});
   // example-clip analysis
   const [analyzing, setAnalyzing] = useState(false);
   const [clipNote, setClipNote] = useState<string | null>(null);
@@ -160,6 +164,7 @@ export default function NewChannelWizard() {
           seriesCount: seriesTitle.trim() && seriesCount > 0 ? seriesCount : undefined,
           cadence, days, budget, publishMode, toggles, autoYoutube,
           paramOverrides: Object.keys(paramOverrides).length ? paramOverrides : undefined,
+          moduleConfig: Object.keys(moduleConfig).length ? moduleConfig : undefined,
           exampleClipUrl: clipUrl.trim() || undefined,
         } }),
       });
@@ -385,6 +390,17 @@ export default function NewChannelWizard() {
                 <div style={{ fontSize: "0.72rem", color: "var(--color-faint)" }}>Blank fields keep the smart default. Numbers are clamped to safe bounds on save.</div>
               </div>
             )}
+          </div>
+
+          {/* Pipeline style — per-module presets/knobs (e.g. captions on/off). */}
+          <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.85rem" }}>
+            <div>
+              <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Pipeline style</div>
+              <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginTop: 2 }}>
+                Pick a preset per module and flip toggles — wired into every render. Editable later in Settings.
+              </div>
+            </div>
+            <ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} />
           </div>
         </div>
       )}

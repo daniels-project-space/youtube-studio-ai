@@ -18,7 +18,13 @@
     "forceConsistentCasingInFileNames": true,
     "module": "ESNext",
     "isolatedModules": true,
-    "noEmit": true
+    "noEmit": true,
+
+    /* Allow Convex functions to import the pure engine catalog (moduleRegistry/
+     * customization) via the same "@/..." alias the app uses, so the
+     * channels.setModuleConfig validator shares ONE source of truth. */
+    "baseUrl": "..",
+    "paths": { "@/*": ["./src/*"] }
   },
   "include": ["./**/*"],
   "exclude": ["./_generated"]

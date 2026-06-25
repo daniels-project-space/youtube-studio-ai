@@ -1,5 +1,7 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
+import { moduleSurface, configurableModules } from "@/engine/moduleRegistry";
+import { validateKnobs, type KnobValues, type KnobValue } from "@/engine/customization";
 
 const identityValidator = v.object({
   persona: v.string(),
@@ -58,6 +60,61 @@ const pipelineValidator = v.array(
   }),
 );
 
+/**
+ * Validate ONE module's operator config (`{ preset?, ...knobValues }`) against
+ * its CustomizationSurface. Returns the cleaned config (preset preserved,
+ * knob values defaulted/validated) or throws on illegal preset/value — so no
+ * silent bad config is ever written. Unknown blockId (no surface) ⇒ rejected.
+ */
+function validateModuleConfig(
+  blockId: string,
+  config: Record<string, unknown>,
+): Record<string, unknown> {
+  const surface = moduleSurface(blockId);
+  if (!surface) throw new Error(`setModuleConfig: unknown/non-configurable module '${blockId}'`);
+
+  const { preset, ...rest } = config as { preset?: unknown } & Record<string, unknown>;
+  if (preset !== undefined) {
+    if (typeof preset !== "string" || !(preset in surface.presets)) {
+      throw new Error(`setModuleConfig: '${blockId}' has no preset '${String(preset)}'`);
+    }
+  }
+  // Only knob-typed scalars are validatable; reject anything else loudly.
+  const knobValues: KnobValues = {};
+  for (const [k, val] of Object.entries(rest)) {
+    if (typeof val === "string" || typeof val === "number" || typeof val === "boolean") {
+      knobValues[k] = val as KnobValue;
+    } else {
+      throw new Error(`setModuleConfig: '${blockId}.${k}' is not a scalar knob value`);
+    }
+  }
+  const r = validateKnobs(surface, knobValues);
+  if (!r.ok) throw new Error(`setModuleConfig: '${blockId}' invalid — ${r.errors.join("; ")}`);
+
+  // Store ONLY the operator's explicit choices (preset + overrides), not the
+  // full defaulted bag — resolveKnobs re-applies defaults at read time.
+  const cleaned: Record<string, unknown> = {};
+  if (typeof preset === "string") cleaned.preset = preset;
+  for (const k of Object.keys(knobValues)) cleaned[k] = knobValues[k];
+  return cleaned;
+}
+
+/** Validate a whole `moduleConfig` map; drops blocks that aren't configurable. */
+function validateModuleConfigMap(
+  map: Record<string, unknown> | undefined,
+): Record<string, unknown> | undefined {
+  if (!map) return undefined;
+  const configurable = new Set(configurableModules().map((m) => m.blockId));
+  const out: Record<string, unknown> = {};
+  for (const [blockId, cfg] of Object.entries(map)) {
+    if (!configurable.has(blockId)) continue; // ignore stale/unknown blocks silently
+    if (cfg && typeof cfg === "object") {
+      out[blockId] = validateModuleConfig(blockId, cfg as Record<string, unknown>);
+    }
+  }
+  return Object.keys(out).length ? out : undefined;
+}
+
 export const createChannel = mutation({
   args: {
     ownerId: v.string(),
@@ -70,6 +127,10 @@ export const createChannel = mutation({
     modelRouting: v.optional(v.any()),
     qaRubric: v.optional(v.any()),
     styleDNA: v.optional(v.any()),
+    // Initial per-module operator config from the onboarding "Pipeline style"
+    // step: { [blockId]: { preset?, ...knobValues } }. Validated per block
+    // against its CustomizationSurface (illegal config dropped, never stored).
+    moduleConfig: v.optional(v.record(v.string(), v.any())),
     budget: v.number(),
     status: v.optional(v.string()),
     groupId: v.optional(v.string()),
@@ -99,6 +160,8 @@ export const createChannel = mutation({
       modelRouting: args.modelRouting,
       qaRubric: args.qaRubric,
       styleDNA: args.styleDNA,
+      // Validate the onboarding-supplied module config (illegal → throws).
+      moduleConfig: validateModuleConfigMap(args.moduleConfig),
       budget: args.budget,
       status: args.status ?? "draft",
       groupId: args.groupId,
@@ -278,6 +341,41 @@ export const updateChannel = mutation({
     // "" means UNFILE (optional args can't carry null).
     if (rest.folder === "") patch.folder = undefined;
     await ctx.db.patch(channelId, patch);
+    return null;
+  },
+});
+
+/**
+ * Set ONE module's operator config on a channel. Validates `config`
+ * (`{ preset?, ...knobValues }`) against the module's CustomizationSurface via
+ * validateKnobs BEFORE writing — an illegal preset/knob throws and nothing is
+ * persisted (no silent bad config). Powers the Settings "Pipeline modules"
+ * section ("toggle captions with a click") + the onboarding step.
+ *
+ * Pass an empty object (`{}`) to reset the block to module defaults (the entry
+ * is removed from moduleConfig, so resolveKnobs falls back to its preset/defaults).
+ */
+export const setModuleConfig = mutation({
+  args: {
+    channelId: v.id("channels"),
+    blockId: v.string(),
+    config: v.record(v.string(), v.any()),
+  },
+  returns: v.null(),
+  handler: async (ctx, args) => {
+    const existing = await ctx.db.get(args.channelId);
+    if (!existing) throw new Error(`channel not found: ${args.channelId}`);
+
+    const next: Record<string, unknown> = { ...(existing.moduleConfig ?? {}) };
+    const cleaned = validateModuleConfig(args.blockId, args.config); // throws on illegal
+    if (Object.keys(cleaned).length === 0) {
+      delete next[args.blockId]; // reset → fall back to defaults at read time
+    } else {
+      next[args.blockId] = cleaned;
+    }
+    await ctx.db.patch(args.channelId, {
+      moduleConfig: Object.keys(next).length ? next : undefined,
+    });
     return null;
   },
 });

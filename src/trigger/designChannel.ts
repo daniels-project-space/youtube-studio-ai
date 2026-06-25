@@ -41,6 +41,12 @@ export interface DesignChannelArgs extends Omit<DesignOptions, "family"> {
    * and silently dropped here).
    */
   exampleClipUrl?: string;
+  /**
+   * Onboarding "Pipeline style" step: per-module operator config
+   * ({ [blockId]: { preset?, ...knobValues } }). Persisted (validated) onto the
+   * new channel and threaded into the pipeline via buildChannelProfile.
+   */
+  moduleConfig?: Record<string, Record<string, unknown>>;
 }
 
 function slugify(name: string, now: number): string {
@@ -126,6 +132,30 @@ export const designChannelTask = task({
       status: design.available ? "paused" : "draft",
     })) as Id<"channels">;
     log("channel created", { channelId, slug, family: payload.family, status: design.available ? "paused" : "draft" });
+
+    // 2b. Onboarding "Pipeline style" — persist the operator's per-module config.
+    // Written through setModuleConfig so each block is VALIDATED against its
+    // CustomizationSurface (illegal preset/knob is rejected, never stored). One
+    // call per block; a bad block logs + is skipped (non-fatal to the build).
+    //
+    // TODO(server-loop): this moduleConfig is the operator's source of truth for
+    // module knobs, but the run pipeline does NOT yet call buildChannelProfile()
+    // — the module chain (resolveAssembleParams/resolveEditorConfig via
+    // moduleOverrides) is not cut over to ChannelProfile in the prod run path.
+    // When run-pipeline builds a ChannelProfile, pass the channel row's
+    // moduleConfig: buildChannelProfile({ ..., moduleOverrides: row.moduleConfig })
+    // and lift any per-block `preset` into that block's pipeline entry params so
+    // resolveKnobs(preset, overrides) applies it. Until then this persists + is
+    // surfaced/edited in Settings, but does not yet alter the render.
+    if (payload.moduleConfig && Object.keys(payload.moduleConfig).length) {
+      for (const [blockId, config] of Object.entries(payload.moduleConfig)) {
+        try {
+          await convex.mutation(api.channels.setModuleConfig, { channelId, blockId, config });
+        } catch (e) {
+          log(`moduleConfig[${blockId}] skipped (invalid, non-fatal): ${e instanceof Error ? e.message : e}`);
+        }
+      }
+    }
 
     // 3. Schedule (cadence + days) if provided.
     if (payload.cadence) {

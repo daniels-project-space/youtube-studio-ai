@@ -80,6 +80,13 @@ export default defineSchema({
     ),
     modelRouting: v.optional(v.any()),
     qaRubric: v.optional(v.any()),
+    // Per-module operator config: { [blockId]: { preset?, ...knobValues } }. Set
+    // from the onboarding "Pipeline style" step + the channel Settings "Pipeline
+    // modules" section, validated against the module's CustomizationSurface
+    // (engine/customization.validateKnobs) before write. Flows into the pipeline
+    // via buildChannelProfile({ moduleOverrides }). v.any per-block → the typed
+    // Knob contract (engine/moduleRegistry) is the real validator.
+    moduleConfig: v.optional(v.record(v.string(), v.any())),
     // Frozen, machine-readable Style DNA (visual/audio/narrative spec) the
     // Inception research distills once and every block must conform to. Flexible
     // (v.any) — the TS `StyleDNA` interface is the real contract. Carries a

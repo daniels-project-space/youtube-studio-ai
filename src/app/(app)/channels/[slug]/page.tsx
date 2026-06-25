@@ -8,6 +8,7 @@ import type { Id } from "../../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
 import type { ChannelIdentity, RunRow, VideoRow } from "@/lib/types";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
+import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 import { RunCard } from "@/components/RunCard";
 import { StageBadge } from "@/components/StageBadge";
 import { StatCard } from "@/components/StatCard";
@@ -34,6 +35,7 @@ type ChannelDoc = {
   budget: number;
   identity?: ChannelIdentity;
   pipeline?: { block: string; params?: unknown }[];
+  moduleConfig?: Record<string, Record<string, unknown>>;
   schedule?: { frequency: string; days?: number[] };
   groupId?: string;
   language?: string;
@@ -519,10 +521,33 @@ function SettingsTab({ channel }: { channel: ChannelDoc }) {
   return (
     <div style={{ display: "grid", gap: "1.6rem" }}>
       <ChannelSettingsCard channel={channel} />
+      <PipelineModulesCard channel={channel} />
       <YouTubeConnectCard channel={channel} />
       <AdvancedControls channel={channel} />
       <MultiLanguageCard channel={channel} />
     </div>
+  );
+}
+
+/**
+ * Pipeline modules — per-module operator toggles (presets + knobs) that persist
+ * on the channel and flow into the pipeline (buildChannelProfile → moduleOverrides).
+ * Editable, saves on change via channels.setModuleConfig ("toggle captions with
+ * a click"). Generic over MODULE_REGISTRY — new modules appear automatically.
+ */
+function PipelineModulesCard({ channel }: { channel: ChannelDoc }) {
+  const cid = channel._id as Id<"channels">;
+  return (
+    <section style={{ marginBottom: "1.6rem" }}>
+      <SectionTitle>Pipeline modules</SectionTitle>
+      <p style={{ margin: "-0.4rem 0 0.85rem", fontSize: "0.78rem", color: "var(--color-muted)" }}>
+        Tune each module&apos;s style — changes save instantly and shape every future render.
+      </p>
+      <ModuleConfigSection
+        channelId={cid}
+        moduleConfig={channel.moduleConfig as ModuleConfigMap | undefined}
+      />
+    </section>
   );
 }
 
