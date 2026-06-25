@@ -785,13 +785,29 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "assemble",
     stage: "build",
-    title: "Assembly",
-    engine: "Remotion timeline + ffmpeg master",
+    title: "Assembly — EDL Engine",
+    engine:
+      "Standalone Assembly module — a typed Timeline/EDL (planTimeline, the brain) rendered deterministically (renderTimeline over the ffmpeg primitives, the hands), per-account via a CustomizationSurface (10 knobs · 6 style presets), idempotent + heal-aware",
     how:
-      "The cut sheet drives assembly: per-section footage, inserts and captions on one timeline over the " +
-      "mastered audio mix, then a hard length gate against the niche target and a black-segment guard.",
-    gates: ["length_check", "black-segment guard"],
-    status: "active",
+      "Assembly is split BRAIN from HANDS. planTimeline emits a pure, inspectable, hashable Timeline (segments + " +
+      "ducked audio + overlays + length band + a declared heal checkpoint); renderTimeline executes it over the " +
+      "ffmpeg primitives with VALIDATE-BEFORE-SPEND (length band, footage coverage, overlay windows — fail loud, " +
+      "never render an off-length/dead-air cut), CONTENT-ADDRESSED IDEMPOTENCY (a retry re-uses cached output, never " +
+      "double-renders), HEAL from the declared checkpoint (not a regex on hints), and NO SILENT SKIPS (a dropped " +
+      "card/overlay is a typed warning the verify stage gates on). Every style choice — cut energy, aspect, intro/" +
+      "outro, music-duck profile, captions on/off, vertical reframe — comes from the channel's CustomizationSurface: " +
+      "one preset (documentary / essay / hype / shorts / meditation / lofi) configures the whole module, and the " +
+      "'essay' preset reproduces the legacy renderer EXACTLY (parity). One model serves narrated AND lofi. Standalone " +
+      "+ unit-tested (6 suites) with a real ffmpeg smoke render proving the body/compose/caption path; the module " +
+      "guides the Architect/Director (src/lib/assembly, registered in MODULE_REGISTRY).",
+    gates: [
+      "validate-before-spend (length band · coverage · overlay windows)",
+      "content-addressed idempotency (no double-render)",
+      "heal from a declared checkpoint (no regex)",
+      "no silent skips (dropped overlays → typed warnings)",
+      "'essay' preset == legacy renderer (parity)",
+    ],
+    status: "golden",
   },
   {
     key: "metadata",

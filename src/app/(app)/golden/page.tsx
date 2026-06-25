@@ -74,6 +74,16 @@ const TOPIC_PROOFS: TextProof[] = [
   { device: "hub · identity", channel: "The Quiet Stoa", line: "Detaching from the opinions of others", note: "fresh 9 · zero repeats" },
 ];
 
+/** Assembly's proof = its customization surface — one preset configures the whole EDL engine per channel style. */
+const ASSEMBLY_PROOFS: TextProof[] = [
+  { device: "preset · documentary", channel: "history / doc", line: "slow cuts · chapter cards · crossfade transitions", note: "16:9 · −14 LUFS" },
+  { device: "preset · essay", channel: "narrated essay", line: "steady cuts · title + outro cards · standard duck", note: "== legacy renderer (parity)" },
+  { device: "preset · hype", channel: "high-energy", line: "dynamic cuts · hardcut · aggressive music duck", note: "cold-open intro" },
+  { device: "preset · shorts", channel: "vertical shorts", line: "9:16 · frenetic ~4s cuts · no cards · subject reframe", note: "tail 1s" },
+  { device: "preset · meditation", channel: "sleep / ambient", line: "long holds · gentle duck · captions OFF", note: "−16 LUFS · 6s tail" },
+  { device: "preset · lofi", channel: "lofi loop", line: "single-loop · music-forward · no captions", note: "minimal assembly" },
+];
+
 const VOICE_PROOFS: { file: string; device: string; meta: string }[] = [
   { file: "stoic.mp3", device: "quiet-mentor · 0.95x", meta: "Brian — deep neutral-US" },
   { file: "meditation.mp3", device: "gentle-guide · 0.85x", meta: "Autumn Veil — mature female" },
@@ -275,6 +285,7 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
     case "script": return textStrip(SCRIPT_PROOFS);
     case "metadata": return textStrip(META_PROOFS);
     case "topic-intel": return textStrip(TOPIC_PROOFS);
+    case "assemble": return textStrip(ASSEMBLY_PROOFS);
     case "narration":
       return (
         <div style={STRIP}>
