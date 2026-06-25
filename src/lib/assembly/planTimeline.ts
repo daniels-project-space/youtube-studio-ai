@@ -7,6 +7,8 @@
  * chapter windows, intro/outro cards, music-duck levels.
  */
 import { moduleParams, type ChannelProfile } from "@/engine/channelProfile";
+import { resolveKnobs, type KnobValue } from "@/engine/customization";
+import { ASSEMBLY_SURFACE } from "./module";
 import { TimelineSchema, type Timeline, type Segment, type Overlay } from "./timeline";
 
 /** The raw decision inputs (mirrors what the god-block pulled from ctx.store). */
@@ -43,6 +45,14 @@ export interface AssembleParams {
   bodyMusicVol: number;
   musicDuckRampSec: number;
   targetLufs?: number;
+  /** Explicit cuts/min (from cutEnergy); undefined ⇒ legacy length-based cadence (god-block parity). */
+  cutsPerMin?: number;
+  /** Render the outro card (outroStyle !== "none"). */
+  outroCard: boolean;
+  /** Allow chapter-card splicing when a chapterPlan is present. */
+  chapterCards: boolean;
+  /** Between-shot transition style (render hint). */
+  transitions: string;
 }
 
 /** God-block defaults, preserved verbatim. */
@@ -58,6 +68,10 @@ export const ASSEMBLE_DEFAULTS: AssembleParams = {
   introMusicVol: 0.513,
   bodyMusicVol: 0.1026,
   musicDuckRampSec: 4,
+  outroCard: true,
+  chapterCards: true,
+  transitions: "hardcut",
+  // cutsPerMin omitted ⇒ legacy length-based cadence (god-block parity for the default/essay path)
 };
 
 /**
@@ -73,24 +87,56 @@ export function bodySegSeconds(narrationSec: number, cutSheet?: { sections?: { c
   return narrationSec > 600 ? 25 : 10;
 }
 
-/** Resolve per-account assemble params from a ChannelProfile (god-block defaults preserved). */
+/** Knob → behavior maps (the module's customization surface, applied). */
+const DUCK_PROFILES: Record<string, { introVol: number; bodyVol: number }> = {
+  none: { introVol: 0.5, bodyVol: 0.5 },
+  gentle: { introVol: 0.55, bodyVol: 0.25 },
+  standard: { introVol: 0.513, bodyVol: 0.1026 }, // == god-block default (parity)
+  aggressive: { introVol: 0.5, bodyVol: 0.05 },
+};
+/** cutEnergy → cuts/min. `steady` is undefined ⇒ legacy length-based cadence (god-block parity). */
+const CUT_ENERGY_CPM: Record<string, number | undefined> = { still: 2, slow: 3, steady: undefined, dynamic: 10, frenetic: 15 };
+const INTRO_STYLE_SEC: Record<string, number> = { none: 0, cold_open: 0, title_card: 5, logo_sting: 2 };
+
+/**
+ * Resolve per-account assemble params from a ChannelProfile via the CustomizationSurface:
+ * read the Architect's `preset` + the channel's knob overrides → validated knob values →
+ * AssembleParams. Raw numeric params (minSeconds/maxSeconds, or a direct introMusicVol etc.)
+ * still win as fine-grained overrides. The `essay`/default path reproduces the god-block.
+ */
 export function resolveAssembleParams(profile: ChannelProfile, block = "timeline_assemble"): AssembleParams {
-  const p = moduleParams(profile, block);
-  const num = (k: string, d: number) => (typeof p[k] === "number" ? (p[k] as number) : d);
+  const raw = moduleParams(profile, block);
+  const num = (key: string, d: number): number => (typeof raw[key] === "number" ? (raw[key] as number) : d);
+  const preset = typeof raw["preset"] === "string" ? (raw["preset"] as string) : undefined;
+
+  const overrides: Record<string, KnobValue> = {};
+  for (const k of ASSEMBLY_SURFACE.knobs) {
+    const v = raw[k.id];
+    if (typeof v === "string" || typeof v === "number" || typeof v === "boolean") overrides[k.id] = v;
+  }
+  const resolved = resolveKnobs(ASSEMBLY_SURFACE, preset, overrides);
+  if (!resolved.ok) throw new Error(`resolveAssembleParams: ${resolved.errors.join("; ")}`);
+  const k = resolved.values;
+  const duck = DUCK_PROFILES[String(k.musicDuckProfile)] ?? DUCK_PROFILES.standard;
   const fadeOutSec = num("fadeOutSec", ASSEMBLE_DEFAULTS.fadeOutSec);
+
   return {
-    aspect: p["aspect"] === "9:16" ? "9:16" : "16:9",
-    introSec: num("introSec", ASSEMBLE_DEFAULTS.introSec),
-    tailSec: num("tailSec", ASSEMBLE_DEFAULTS.tailSec),
+    aspect: k.aspect === "9:16" ? "9:16" : "16:9",
+    introSec: num("introSec", INTRO_STYLE_SEC[String(k.introStyle)] ?? 5),
+    tailSec: Number(k.tailSec),
     fadeOutSec,
     audioFadeOutSec: num("audioFadeOutSec", fadeOutSec),
     minSeconds: num("minSeconds", 0),
     maxSeconds: num("maxSeconds", 0),
     tolSec: 30,
-    introMusicVol: num("introMusicVol", ASSEMBLE_DEFAULTS.introMusicVol),
-    bodyMusicVol: num("bodyMusicVol", ASSEMBLE_DEFAULTS.bodyMusicVol),
+    introMusicVol: num("introMusicVol", duck.introVol),
+    bodyMusicVol: num("bodyMusicVol", duck.bodyVol),
     musicDuckRampSec: num("musicDuckRampSec", ASSEMBLE_DEFAULTS.musicDuckRampSec),
-    targetLufs: typeof p["targetLufs"] === "number" ? (p["targetLufs"] as number) : undefined,
+    targetLufs: Number(k.targetLufs),
+    cutsPerMin: CUT_ENERGY_CPM[String(k.cutEnergy)],
+    outroCard: k.outroStyle !== "none",
+    chapterCards: Boolean(k.chapterCards),
+    transitions: String(k.transitions),
   };
 }
 
@@ -126,12 +172,16 @@ function fillBody(clips: string[], entitySet: Set<string>, target: number, seg: 
  */
 export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE_DEFAULTS): Timeline {
   const narrationSec = input.narrationDurationSec;
-  const hasIntro = !!(input.introCardSrc && input.introCardSrc.length > 0);
-  const introSec = hasIntro ? params.introSec : 0;
+  const introSec = input.introCardSrc && input.introCardSrc.length > 0 ? params.introSec : 0;
+  const hasIntro = introSec > 0; // introStyle 'none'/'cold_open' collapses introSec to 0
   const tailSec = params.tailSec;
   const total = introSec + narrationSec + tailSec;
   const [w, h] = params.aspect === "9:16" ? [1080, 1920] : [1920, 1080];
-  const bodyMaxSeg = bodySegSeconds(narrationSec, input.cutSheet);
+  // cutEnergy → explicit cuts/min; else the editor cutSheet; else legacy length-based (parity).
+  const bodyMaxSeg = bodySegSeconds(
+    narrationSec,
+    input.cutSheet ?? (params.cutsPerMin ? { sections: [{ cutsPerMin: params.cutsPerMin }] } : undefined),
+  );
   const clips = interleave(input.footageClips, input.entityClips ?? []);
   const entitySet = new Set(input.entityClips ?? []);
   const onBeat = (input.sentenceTimings?.length ?? 0) > 0;
@@ -139,7 +189,7 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
   const segments: Segment[] = [];
   if (hasIntro) segments.push({ kind: "card", role: "intro", durSec: introSec, bgSrc: input.cardBgSrc });
 
-  if (input.chapterPlan && input.chapterPlan.length > 0) {
+  if (params.chapterCards && input.chapterPlan && input.chapterPlan.length > 0) {
     let chapNo = 0;
     let ci = 0;
     for (const wndw of input.chapterPlan) {
@@ -165,7 +215,7 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
     segments.push(...fillBody(clips, entitySet, narrationSec + tailSec, bodyMaxSeg, onBeat));
   }
 
-  if (tailSec >= 2) {
+  if (params.outroCard && tailSec >= 2) {
     segments.push({
       kind: "card",
       role: "outro",

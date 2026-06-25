@@ -16,7 +16,7 @@ export {
   projectedDurationSec,
 } from "./timeline";
 export type { Timeline, Segment, AudioPlan, Overlay, Format, Receipt } from "./timeline";
-export { ASSEMBLY_MODULE } from "./module";
+export { ASSEMBLY_MODULE, ASSEMBLY_SURFACE } from "./module";
 export {
   planTimeline,
   resolveAssembleParams,
