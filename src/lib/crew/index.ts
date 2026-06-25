@@ -8,3 +8,6 @@ export type { CrewRoleId, CrewRoleDef } from "./roles";
 export { CREW_MODULE, CREW_SURFACE } from "./module";
 export { resolveCrew, crewHasRole, CREW_BLOCK } from "./crewProfile";
 export type { ResolvedCrew, ResolvedCrewMember, CriticStrictness } from "./crewProfile";
+// Crew sub-modules (per-member). Editor first — director/dp/composer/critic to follow.
+export { EDITOR_SURFACE, EDITOR_MODULE, EDITOR_BLOCK, resolveEditorConfig, editorDirectives } from "./editor";
+export type { EditorConfig, EditorDirectives } from "./editor";

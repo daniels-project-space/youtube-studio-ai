@@ -9,6 +9,7 @@
 import type { CustomizationSurface } from "./customization";
 import { ASSEMBLY_MODULE } from "@/lib/assembly/module";
 import { CREW_MODULE } from "@/lib/crew/module";
+import { EDITOR_MODULE } from "@/lib/crew/editor";
 
 export interface ModuleCard {
   /** Module key (e.g. "assemble"). */
@@ -24,6 +25,7 @@ export interface ModuleCard {
 export const MODULE_REGISTRY: Record<string, ModuleCard> = {
   timeline_assemble: ASSEMBLY_MODULE,
   "show-bible": CREW_MODULE,
+  editor_brief: EDITOR_MODULE, // crew sub-module (director/dp/composer/critic to follow)
   // ← register Guard, Thumbnail, Visuals, … here as each is leveled up.
 };
 

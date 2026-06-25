@@ -623,7 +623,9 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "critic doctrine → verify ValidationSpec",
       "per-account (preset + overrides) configurable",
     ],
-    status: "golden",
+    // Active while crew is leveled up member-by-member into wired sub-modules (Editor done →
+    // Assembly; director/dp/composer/critic + dead-loop closures to follow). Re-golden when complete.
+    status: "active",
   },
   {
     key: "script",

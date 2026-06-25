@@ -29,6 +29,8 @@ export interface PlanInput {
   cardBgSrc?: string;
   /** Optional precomputed overlay windows (captions/quotes/inserts). */
   overlays?: Overlay[];
+  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle. */
+  editor?: { transitions?: string; cutsPerMin?: number; captionStyle?: string };
 }
 
 /** Per-account assemble params (resolved from a ChannelProfile or passed directly). */
@@ -106,6 +108,7 @@ const INTRO_STYLE_SEC: Record<string, number> = { none: 0, cold_open: 0, title_c
 /** Valid renderHints enum values (anything else normalizes to the safe default). */
 const TRANSITION_HINTS = new Set(["hardcut", "crossfade", "dip_to_black"]);
 const REFRAME_HINTS = new Set(["none", "center", "subject_track"]);
+const CAPTION_STYLE_HINTS = new Set(["none", "minimal", "karaoke", "bold"]);
 
 /**
  * Resolve per-account assemble params from a ChannelProfile via the CustomizationSurface:
@@ -188,11 +191,15 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
   const tailSec = params.tailSec;
   const total = introSec + narrationSec + tailSec;
   const [w, h] = params.aspect === "9:16" ? [1080, 1920] : [1920, 1080];
-  // cutEnergy → explicit cuts/min; else the editor cutSheet; else legacy length-based (parity).
+  // Cadence priority: editor crew directive → cutEnergy knob → explicit cutSheet → legacy length-based (parity).
+  const cpm = input.editor?.cutsPerMin ?? params.cutsPerMin;
   const bodyMaxSeg = bodySegSeconds(
     narrationSec,
-    input.cutSheet ?? (params.cutsPerMin ? { sections: [{ cutsPerMin: params.cutsPerMin }] } : undefined),
+    input.cutSheet ?? (cpm ? { sections: [{ cutsPerMin: cpm }] } : undefined),
   );
+  // Transitions/captions: the EDITOR directs, falling back to the channel's own assemble knobs.
+  const transitions = input.editor?.transitions ?? params.transitions;
+  const captionStyle = input.editor?.captionStyle;
   const clips = interleave(input.footageClips, input.entityClips ?? []);
   const entitySet = new Set(input.entityClips ?? []);
   const onBeat = (input.sentenceTimings?.length ?? 0) > 0;
@@ -259,8 +266,9 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
     checkpoints: { preOverlaySec: total },
     ...(params.aspect === "9:16" ? { reframe: { aspect: "9:16" } } : {}),
     renderHints: {
-      transitions: TRANSITION_HINTS.has(params.transitions) ? params.transitions : "hardcut",
+      transitions: TRANSITION_HINTS.has(transitions) ? transitions : "hardcut",
       reframe: REFRAME_HINTS.has(params.reframe ?? "none") ? (params.reframe ?? "none") : "none",
+      ...(captionStyle && CAPTION_STYLE_HINTS.has(captionStyle) ? { captionStyle } : {}),
     },
   });
 }

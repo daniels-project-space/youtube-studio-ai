@@ -101,6 +101,8 @@ export const TimelineSchema = z.object({
     .object({
       transitions: z.enum(["hardcut", "crossfade", "dip_to_black"]).optional(),
       reframe: z.enum(["none", "center", "subject_track"]).optional(),
+      /** Editor's caption-style intent (→ caption pass). none/minimal/karaoke/bold. */
+      captionStyle: z.enum(["none", "minimal", "karaoke", "bold"]).optional(),
     })
     .optional(),
   meta: z.object({ channelSlug: z.string().optional(), runId: z.string().optional(), archetype: z.string().optional() }).optional(),
