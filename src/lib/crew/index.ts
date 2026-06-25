@@ -15,3 +15,5 @@ export { COMPOSER_SURFACE, COMPOSER_MODULE, COMPOSER_BLOCK, resolveComposerConfi
 export type { ComposerConfig, ComposerDirectives } from "./composer";
 export { DIRECTOR_SURFACE, DIRECTOR_MODULE, DIRECTOR_BLOCK, resolveDirectorConfig, directorChapterPlan } from "./director";
 export type { DirectorConfig, StructureBeat, ChapterWindow } from "./director";
+export { CRITIC_SURFACE, CRITIC_MODULE, CRITIC_BLOCK, resolveCriticConfig, applyCriticPolicy } from "./critic";
+export type { CriticConfig, CriticStrictnessLevel } from "./critic";

@@ -12,6 +12,7 @@ import { CREW_MODULE } from "@/lib/crew/module";
 import { EDITOR_MODULE } from "@/lib/crew/editor";
 import { COMPOSER_MODULE } from "@/lib/crew/composer";
 import { DIRECTOR_MODULE } from "@/lib/crew/director";
+import { CRITIC_MODULE } from "@/lib/crew/critic";
 
 export interface ModuleCard {
   /** Module key (e.g. "assemble"). */
@@ -29,7 +30,8 @@ export const MODULE_REGISTRY: Record<string, ModuleCard> = {
   "show-bible": CREW_MODULE,
   editor_brief: EDITOR_MODULE, // crew sub-module
   composer_brief: COMPOSER_MODULE, // crew sub-module
-  director_brief: DIRECTOR_MODULE, // crew sub-module (dp/critic to follow)
+  director_brief: DIRECTOR_MODULE, // crew sub-module
+  critic_spec: CRITIC_MODULE, // crew sub-module (cinematographer → needs Visuals module)
   // ← register Guard, Thumbnail, Visuals, … here as each is leveled up.
 };
 
