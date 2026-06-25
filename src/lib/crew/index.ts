@@ -13,3 +13,5 @@ export { EDITOR_SURFACE, EDITOR_MODULE, EDITOR_BLOCK, resolveEditorConfig, edito
 export type { EditorConfig, EditorDirectives } from "./editor";
 export { COMPOSER_SURFACE, COMPOSER_MODULE, COMPOSER_BLOCK, resolveComposerConfig, composerDirectives } from "./composer";
 export type { ComposerConfig, ComposerDirectives } from "./composer";
+export { DIRECTOR_SURFACE, DIRECTOR_MODULE, DIRECTOR_BLOCK, resolveDirectorConfig, directorChapterPlan } from "./director";
+export type { DirectorConfig, StructureBeat, ChapterWindow } from "./director";
