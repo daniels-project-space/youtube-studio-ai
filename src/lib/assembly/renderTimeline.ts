@@ -50,10 +50,19 @@ export interface RenderBackend {
     introMusicVol: number;
     bodyMusicVol: number;
     musicDuckRampSec: number;
+    /** Crossfade (xfade) seconds title→body. From renderHints.transitions; optional (backend may ignore). */
+    crossfadeSec?: number;
     fmt: Format;
   }): Promise<string>;
   /** Crossfade an outro card over the tail → local path. */
   patchOutro(basePath: string, outroCardPath: string, startSec: number, durSec: number, fmt: Format): Promise<string>;
+  /**
+   * OPTIONAL post-compose reframe to the target aspect (portrait repurpose).
+   * `strategy` is the renderHints.reframe value (center | subject_track). Omitting
+   * this method (fake backends) is fine — renderTimeline only calls it when present
+   * AND the plan asks for a non-"none" reframe on a portrait target.
+   */
+  reframe?(basePath: string, fmt: Format, strategy: string): Promise<{ path: string; warnings: string[] }>;
   /** Burn captions/quotes/inserts → { path, applied, warnings }. Drops surface as warnings, never silent. */
   applyOverlays(basePath: string, overlays: Overlay[], fmt: Format): Promise<{ path: string; applied: number; warnings: string[] }>;
   /** Probe a local video's duration (sec). */
@@ -84,6 +93,12 @@ export interface RenderOpts {
 }
 
 const isCard = (s: Segment): s is Extract<Segment, { kind: "card" }> => s.kind === "card";
+
+/** renderHints.transitions → composeIntro crossfade seconds. hardcut=0, crossfade/dip=0.8. */
+function crossfadeSecFromHints(transitions?: string): number {
+  if (transitions === "crossfade" || transitions === "dip_to_black") return 0.8;
+  return 0; // hardcut / undefined
+}
 
 /** Execute a Timeline → finished video Receipt. Deterministic, idempotent, heal-aware. */
 export async function renderTimeline(timeline: Timeline, backend: RenderBackend, opts: RenderOpts = {}): Promise<Receipt> {
@@ -152,6 +167,7 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
       introMusicVol: t.audio.duck.introVol,
       bodyMusicVol: t.audio.duck.bodyVol,
       musicDuckRampSec: t.audio.duck.rampSec,
+      crossfadeSec: crossfadeSecFromHints(t.renderHints?.transitions),
       fmt,
     });
 
@@ -168,15 +184,27 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
   // 4. OVERLAYS (finishing pass) — always run; this is where overlay-class heals re-finish.
   const fin = await backend.applyOverlays(composed, t.overlays, fmt);
   warnings.push(...fin.warnings);
+  let finalPath = fin.path;
+
+  // 4b. OPTIONAL REFRAME — portrait repurpose. Only when the plan declares a
+  // portrait target (reframe.aspect 9:16/1:1) AND a non-"none" strategy AND the
+  // backend implements it. Fake backends omit reframe() ⇒ this is a no-op.
+  const reframeStrategy = t.renderHints?.reframe;
+  const portrait = t.reframe?.aspect === "9:16" || t.reframe?.aspect === "1:1";
+  if (backend.reframe && portrait && reframeStrategy && reframeStrategy !== "none") {
+    const rf = await backend.reframe(finalPath, fmt, reframeStrategy);
+    finalPath = rf.path;
+    warnings.push(...rf.warnings);
+  }
 
   // 5. PUBLISH + cache the final.
-  const videoKey = await backend.publish(fin.path);
-  const durationSec = await backend.probe(fin.path);
-  await backend.cachePut(finalKey, fin.path);
+  const videoKey = await backend.publish(finalPath);
+  const durationSec = await backend.probe(finalPath);
+  await backend.cachePut(finalKey, finalPath);
 
   return ReceiptSchema.parse({
     videoKey,
-    videoLocalPath: fin.path,
+    videoLocalPath: finalPath,
     durationSec,
     segmentsRendered: clipCount,
     cardsRendered: healedFrom === "preOverlay" ? 0 : cardsRendered,

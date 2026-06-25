@@ -12,10 +12,19 @@
  * ADDITIVE ONLY — nothing in the live pipeline imports this. It is wired in by
  * the smoke test (scripts/assembly-smoke.ts) and, later, the real channel run.
  *
- * NOT-YET-PORTED (flagged honestly, never faked):
- *   - overlay burn-in (captions/quotes/inserts). applyOverlays returns the base
- *     untouched and surfaces a warning when overlays exist. Parity with the
- *     god-block's finishFromComposed overlay pass is a separate later step.
+ * OVERLAY BURN-IN (ported from the god-block's finishFromComposed pass):
+ *   applyOverlays maps the EDL Overlay[] via overlaysToCuesAndSpecs → writes the
+ *   caption .ass → single-pass applyOverlaysAndCaptions(base, specs, ass, …,
+ *   {blurSigma:20}), with the proven sequential fallback (burnCaptions then
+ *   applyQuoteOverlays) on any failure. Mapping drops (a text-less caption, a
+ *   quote/insert with no renderable media) surface as warnings, never silent.
+ *
+ * STILL NEEDS A REAL RENDER (flagged honestly, never faked):
+ *   - quote/insert media: the alpha card must be a Remotion-rendered .webm/.mov.
+ *     overlaysToCuesAndSpecs warns + skips any spec lacking a media path; we do
+ *     NOT invent one. Captions are pure ffmpeg (libass) → hermetically provable.
+ *   - reframe "subject_track": v1 falls back to a center-crop + a warning that
+ *     true subject tracking is pending.
  */
 import { existsSync } from "node:fs";
 import { copyFile, mkdir } from "node:fs/promises";
@@ -26,6 +35,11 @@ import {
   composeWithIntro,
   patchSegment,
   probe as ffprobe,
+  applyOverlaysAndCaptions,
+  applyQuoteOverlays,
+  burnCaptions,
+  writeCaptionsAss,
+  makeVerticalClip,
 } from "@/lib/ffmpeg";
 import { renderTitleCard } from "@/lib/remotionRender";
 import { getObjectBytes, putObject } from "@/lib/storage";
@@ -34,6 +48,7 @@ import { execFile } from "node:child_process";
 import type { CardSpec, RenderBackend } from "./renderTimeline";
 import type { Format, Overlay, Segment } from "./timeline";
 import { SourceResolver } from "./__fetch";
+import { overlaysToCuesAndSpecs } from "./overlays";
 
 export interface FfmpegBackendOpts {
   /** Run id — namespaces the published artifact. */
@@ -183,6 +198,8 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
         introMusicVol: args.introMusicVol,
         bodyMusicVol: args.bodyMusicVol,
         musicDuckRampSec: args.musicDuckRampSec,
+        // hardcut ⇒ 0 (composeWithIntro treats 0 as a hard cut); crossfade/dip ⇒ 0.8s.
+        ...(typeof args.crossfadeSec === "number" ? { crossfadeSec: args.crossfadeSec } : {}),
       });
     },
 
@@ -194,16 +211,72 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
       });
     },
 
-    async applyOverlays(basePath: string, overlays: Overlay[], _fmt: Format) {
+    async applyOverlays(basePath: string, overlays: Overlay[], fmt: Format) {
       if (overlays.length === 0) return { path: basePath, applied: 0, warnings: [] };
-      // Overlay burn-in is NOT yet ported from the god-block's finishFromComposed
-      // pass. Surface it honestly rather than silently shipping a video missing
-      // its captions/quotes/inserts.
-      return {
-        path: basePath,
-        applied: 0,
-        warnings: ["overlay burn-in not yet ported from finishFromComposed"],
-      };
+
+      // EDL → the two god-block primitives (cues + alpha specs). Drops (text-less
+      // caption / media-less quote/insert) come back as warnings — never silent.
+      const { cues, specs, warnings } = overlaysToCuesAndSpecs(overlays);
+      if (cues.length === 0 && specs.length === 0) {
+        // Everything was dropped; nothing to burn. Surface why (don't fake a pass).
+        return { path: basePath, applied: 0, warnings };
+      }
+
+      const tmp = await getTmp();
+      const W = fmt.w;
+      const H = fmt.h;
+      // Caption .ass (null when no cues) — shared by both the single-pass and the
+      // sequential fallback, exactly like finishFromComposed.
+      const assPath = await writeCaptionsAss(cues, tmp, { width: W, height: H });
+      const outPath = await out("finished.mp4");
+
+      try {
+        // SINGLE-PASS: captions (ass) + every alpha spec in one filter graph / encode.
+        await applyOverlaysAndCaptions(basePath, specs, assPath, outPath, { blurSigma: 20 });
+        return { path: outPath, applied: cues.length + specs.length, warnings };
+      } catch (e) {
+        // PROVEN sequential fallback: burn captions, then composite specs.
+        warnings.push(
+          `single-pass overlay finish failed — sequential fallback: ${(e as Error).message}`,
+        );
+        try {
+          let base = basePath;
+          if (cues.length > 0) {
+            const capPath = await out("captioned.mp4");
+            await burnCaptions(base, cues, capPath, { tmpDir: tmp, width: W, height: H });
+            base = capPath;
+          }
+          if (specs.length > 0) {
+            const quotesPath = await out("quotes.mp4");
+            await applyQuoteOverlays(base, specs, quotesPath, { blurSigma: 20 });
+            base = quotesPath;
+          }
+          return { path: base, applied: cues.length + specs.length, warnings };
+        } catch (e2) {
+          // Loud: keep the clean (pre-overlay) video, report the failure as a warning.
+          warnings.push(`overlay compositing FAILED (clean video kept): ${(e2 as Error).message}`);
+          return { path: basePath, applied: 0, warnings };
+        }
+      }
+    },
+
+    async reframe(basePath: string, fmt: Format, strategy: string) {
+      // Portrait repurpose. v1 = scale-to-cover + center-crop to the target canvas
+      // (makeVerticalClip, the same primitive the Shorts spinoff uses). "subject_track"
+      // is NOT yet implemented — it center-crops AND warns that true tracking is pending.
+      const warnings: string[] = [];
+      const durationSec = (await ffprobe(basePath)).durationSec;
+      const outPath = await out("reframed.mp4");
+      await makeVerticalClip(basePath, outPath, {
+        startSec: 0,
+        durSec: Math.max(1, durationSec),
+        width: fmt.w,
+        height: fmt.h,
+      });
+      if (strategy === "subject_track") {
+        warnings.push("reframe: subject_track not yet implemented — center-cropped (true subject tracking pending)");
+      }
+      return { path: outPath, warnings };
     },
 
     async probe(path: string): Promise<number> {

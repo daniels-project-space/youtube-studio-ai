@@ -91,6 +91,18 @@ export const TimelineSchema = z.object({
   checkpoints: z.object({ preOverlaySec: z.number().nonnegative().optional() }).default({}),
   /** Optional vertical/social reframe. */
   reframe: z.object({ aspect: z.enum(["16:9", "9:16", "1:1"]), strategy: z.string().optional() }).optional(),
+  /**
+   * Optional render hints — declarative knobs the backend reads to choose between
+   * proven primitives (kept OPTIONAL so pre-existing plans/tests validate unchanged).
+   *   transitions → composeIntro crossfade seconds (hardcut=0, crossfade/dip=0.8)
+   *   reframe     → post-compose center-crop strategy for portrait targets
+   */
+  renderHints: z
+    .object({
+      transitions: z.enum(["hardcut", "crossfade", "dip_to_black"]).optional(),
+      reframe: z.enum(["none", "center", "subject_track"]).optional(),
+    })
+    .optional(),
   meta: z.object({ channelSlug: z.string().optional(), runId: z.string().optional(), archetype: z.string().optional() }).optional(),
 });
 

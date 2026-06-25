@@ -53,6 +53,8 @@ export interface AssembleParams {
   chapterCards: boolean;
   /** Between-shot transition style (render hint). */
   transitions: string;
+  /** Repurpose horizontal → vertical strategy (render hint): none | center | subject_track. */
+  reframe?: string;
 }
 
 /** God-block defaults, preserved verbatim. */
@@ -71,6 +73,7 @@ export const ASSEMBLE_DEFAULTS: AssembleParams = {
   outroCard: true,
   chapterCards: true,
   transitions: "hardcut",
+  reframe: "none",
   // cutsPerMin omitted ⇒ legacy length-based cadence (god-block parity for the default/essay path)
 };
 
@@ -97,6 +100,9 @@ const DUCK_PROFILES: Record<string, { introVol: number; bodyVol: number }> = {
 /** cutEnergy → cuts/min. `steady` is undefined ⇒ legacy length-based cadence (god-block parity). */
 const CUT_ENERGY_CPM: Record<string, number | undefined> = { still: 2, slow: 3, steady: undefined, dynamic: 10, frenetic: 15 };
 const INTRO_STYLE_SEC: Record<string, number> = { none: 0, cold_open: 0, title_card: 5, logo_sting: 2 };
+/** Valid renderHints enum values (anything else normalizes to the safe default). */
+const TRANSITION_HINTS = new Set(["hardcut", "crossfade", "dip_to_black"]);
+const REFRAME_HINTS = new Set(["none", "center", "subject_track"]);
 
 /**
  * Resolve per-account assemble params from a ChannelProfile via the CustomizationSurface:
@@ -137,6 +143,7 @@ export function resolveAssembleParams(profile: ChannelProfile, block = "timeline
     outroCard: k.outroStyle !== "none",
     chapterCards: Boolean(k.chapterCards),
     transitions: String(k.transitions),
+    reframe: k.reframe !== undefined ? String(k.reframe) : ASSEMBLE_DEFAULTS.reframe,
   };
 }
 
@@ -246,5 +253,9 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
     lengthBand: { minSec: params.minSeconds, maxSec: params.maxSeconds, tolSec: params.tolSec },
     checkpoints: { preOverlaySec: total },
     ...(params.aspect === "9:16" ? { reframe: { aspect: "9:16" } } : {}),
+    renderHints: {
+      transitions: TRANSITION_HINTS.has(params.transitions) ? params.transitions : "hardcut",
+      reframe: REFRAME_HINTS.has(params.reframe ?? "none") ? (params.reframe ?? "none") : "none",
+    },
   });
 }
