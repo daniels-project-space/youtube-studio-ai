@@ -27,28 +27,32 @@ function coerce(raw: unknown): Verdict {
   return { score, issues };
 }
 
+/**
+ * Shared vision-grade: guard → Gemini vision (the centralized geminiVisionLocal)
+ * → coerced {score, issues} Verdict, returning SKIP on no-key / no-images / error.
+ * The per-artifact evaluators below differ ONLY in their rubric prompt.
+ */
+async function gradeImage(imagePaths: string[], prompt: string, maxTokens = 400): Promise<Verdict> {
+  if (!hasGeminiKey() || imagePaths.length === 0) return SKIP;
+  try {
+    return coerce(parseJsonLoose(await geminiVisionLocal({ prompt, imagePaths, json: true, maxTokens })));
+  } catch {
+    return SKIP;
+  }
+}
+
 /** Video frames: clarity, relevance to the topic, no glitches/black/artifacts. */
 export async function evaluateVisualFrames(
   imagePaths: string[],
   ctx: { topic: string; niche?: string },
 ): Promise<Verdict> {
-  if (!hasGeminiKey() || imagePaths.length === 0) return SKIP;
-  try {
-    const raw = await geminiVisionLocal({
-      prompt:
-        `These are frames from a video about "${ctx.topic}"` +
-        (ctx.niche ? ` (niche: ${ctx.niche})` : "") +
-        ". Grade visual quality: clarity, relevance to the topic, and absence of " +
-        "glitches/black frames/distortion. " +
-        'Return STRICT JSON {"score":0-10,"issues":string[]}.',
-      imagePaths,
-      json: true,
-      maxTokens: 500,
-    });
-    return coerce(parseJsonLoose(raw));
-  } catch {
-    return SKIP;
-  }
+  const prompt =
+    `These are frames from a video about "${ctx.topic}"` +
+    (ctx.niche ? ` (niche: ${ctx.niche})` : "") +
+    ". Grade visual quality: clarity, relevance to the topic, and absence of " +
+    "glitches/black frames/distortion. " +
+    'Return STRICT JSON {"score":0-10,"issues":string[]}.';
+  return gradeImage(imagePaths, prompt, 500);
 }
 
 /** Thumbnail: clickability, legible text, on-brand (palette/persona), title match. */
@@ -56,24 +60,14 @@ export async function evaluateThumbnail(
   imagePath: string,
   ctx: { title: string; persona?: string; palette?: string[] },
 ): Promise<Verdict> {
-  if (!hasGeminiKey()) return SKIP;
-  try {
-    const raw = await geminiVisionLocal({
-      prompt:
-        `This is a YouTube thumbnail for the video titled "${ctx.title}".` +
-        (ctx.persona ? ` Channel persona: ${ctx.persona}.` : "") +
-        (ctx.palette?.length ? ` Brand palette: ${ctx.palette.join(", ")}.` : "") +
-        " Grade it: visual click-appeal, legibility of any text, on-brand colour/mood, " +
-        "and whether it fits the title. " +
-        'Return STRICT JSON {"score":0-10,"issues":string[]}.',
-      imagePaths: [imagePath],
-      json: true,
-      maxTokens: 400,
-    });
-    return coerce(parseJsonLoose(raw));
-  } catch {
-    return SKIP;
-  }
+  const prompt =
+    `This is a YouTube thumbnail for the video titled "${ctx.title}".` +
+    (ctx.persona ? ` Channel persona: ${ctx.persona}.` : "") +
+    (ctx.palette?.length ? ` Brand palette: ${ctx.palette.join(", ")}.` : "") +
+    " Grade it: visual click-appeal, legibility of any text, on-brand colour/mood, " +
+    "and whether it fits the title. " +
+    'Return STRICT JSON {"score":0-10,"issues":string[]}.';
+  return gradeImage([imagePath], prompt);
 }
 
 /** Stock footage: is the chosen footage appropriate/relevant to the topic? */
@@ -81,22 +75,12 @@ export async function evaluateFootage(
   imagePaths: string[],
   ctx: { topic: string; niche?: string },
 ): Promise<Verdict> {
-  if (!hasGeminiKey() || imagePaths.length === 0) return SKIP;
-  try {
-    const raw = await geminiVisionLocal({
-      prompt:
-        `These are sample frames from the STOCK FOOTAGE chosen for a video about ` +
-        `"${ctx.topic}"${ctx.niche ? ` (${ctx.niche})` : ""}. ` +
-        "Is the footage relevant and appropriate to the subject (not random/off-topic)? " +
-        'Return STRICT JSON {"score":0-10,"issues":string[]}.',
-      imagePaths,
-      json: true,
-      maxTokens: 400,
-    });
-    return coerce(parseJsonLoose(raw));
-  } catch {
-    return SKIP;
-  }
+  const prompt =
+    `These are sample frames from the STOCK FOOTAGE chosen for a video about ` +
+    `"${ctx.topic}"${ctx.niche ? ` (${ctx.niche})` : ""}. ` +
+    "Is the footage relevant and appropriate to the subject (not random/off-topic)? " +
+    'Return STRICT JSON {"score":0-10,"issues":string[]}.';
+  return gradeImage(imagePaths, prompt);
 }
 
 /** SEO: title/description/tags quality, length, niche-fit, power words. */
