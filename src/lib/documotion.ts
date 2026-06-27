@@ -554,8 +554,16 @@ export async function generateDocuAssets(
 
     if (needsAlpha) {
       const cutRaw = join(assetsDir, `s${i}_${a.id}_cut.png`);
-      await removeBackground(rawPath, cutRaw, log);
-      await normalizeAsset(cutRaw, finalPath, 1100);
+      try {
+        await removeBackground(rawPath, cutRaw, log);
+        await normalizeAsset(cutRaw, finalPath, 1100);
+      } catch (e) {
+        // Best-effort cutout (mirrors deriveDepthLayers): a bg-removal failure
+        // (e.g. fal 403 / no credits) degrades this fg to the full image rather
+        // than killing the whole render.
+        log?.(`documotion asset s${i}/${a.id}: bg-removal failed (${e instanceof Error ? e.message : e}) — using full image`);
+        await normalizeAsset(rawPath, finalPath, 1100);
+      }
     } else {
       await normalizeAsset(rawPath, finalPath, 1280);
     }
