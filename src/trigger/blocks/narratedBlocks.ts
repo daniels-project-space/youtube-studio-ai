@@ -742,22 +742,13 @@ export const stockFootage: Block = {
     } catch (e) {
       ctx.log(`stock_footage: ledger save failed (non-fatal): ${e instanceof Error ? e.message : e}`);
     }
-    // HYBRID MODE (architect knob): prepend K GENERATED signature establishing
-    // shots (the channel's canonical world, DNA-locked) to the stock body —
-    // brand anchors stock can't provide, at a fraction of full generation.
-    const sigN = Math.max(0, Math.min(6, Number(ctx.params["signatureGenClips"] ?? 0)));
-    if (sigN > 0) {
-      try {
-        const { generateSignatureClips } = await import("@/trigger/blocks/genFootageBlocks");
-        const sig = await generateSignatureClips(ctx, sigN);
-        if (sig.clips.length) {
-          clips.unshift(...sig.clips);
-          ctx.log(`stock_footage: HYBRID — ${sig.clips.length} signature generated clip(s) prepended (~$${sig.cost.toFixed(2)})`);
-          return { footageClips: clips, footageKeys: await uploadFootageKeys(clips), [COST_PATCH_KEY]: sig.cost };
-        }
-      } catch (e) {
-        ctx.log(`stock_footage: signature clips failed (stock-only, non-fatal): ${e instanceof Error ? e.message : e}`);
-      }
+    // HYBRID: prepend any pre-generated signature establishing shots (produced by
+    // the separate signature_clips block when the architect enabled it). Footage
+    // SELECTION lives here; signature GENERATION is its own block.
+    const sigClips = (ctx.store["signatureClips"] as string[] | undefined) ?? [];
+    if (sigClips.length) {
+      clips.unshift(...sigClips);
+      ctx.log(`stock_footage: HYBRID — ${sigClips.length} signature clip(s) prepended`);
     }
     return { footageClips: clips, footageKeys: await uploadFootageKeys(clips) };
   },
