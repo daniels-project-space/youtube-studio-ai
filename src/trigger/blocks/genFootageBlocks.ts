@@ -175,4 +175,25 @@ export const genFootage: Block = {
   },
 };
 
-export const genFootageBlocks: Block[] = [genFootage];
+/**
+ * SIGNATURE CLIPS — the channel's canonical, DNA-locked establishing shots
+ * (Flux still → i2v), generated to PREPEND to the stock body. Extracted from
+ * stock_footage so footage SELECTION and signature GENERATION are separate
+ * single-responsibility blocks. Produces `signatureClips`; stock_footage (the
+ * next block) prepends them. Default count 0 → no-op (produces []).
+ */
+export const signatureClipsBlock: Block = {
+  id: "signature_clips",
+  consumes: ["topic"], // also reads styleDNA from the store
+  produces: ["signatureClips"],
+  paid: true,
+  run: async (ctx) => {
+    const k = Math.max(0, Math.min(6, Number(ctx.params["count"] ?? ctx.params["signatureGenClips"] ?? 0)));
+    if (k <= 0) return { signatureClips: [], [COST_PATCH_KEY]: 0 };
+    const sig = await generateSignatureClips(ctx, k);
+    ctx.log(`signature_clips: ${sig.clips.length} DNA-locked establishing shot(s) (~$${sig.cost.toFixed(2)})`);
+    return { signatureClips: sig.clips, [COST_PATCH_KEY]: sig.cost };
+  },
+};
+
+export const genFootageBlocks: Block[] = [genFootage, signatureClipsBlock];

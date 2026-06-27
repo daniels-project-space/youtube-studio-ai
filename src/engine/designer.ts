@@ -150,6 +150,23 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       .map((e) => (e.block === "stock_footage" ? { block: "gen_footage", params: e.params } : e));
   }
 
+  // SIGNATURE CLIPS as an explicit block: if the architect set signatureGenClips
+  // on stock_footage, run a dedicated signature_clips block BEFORE it — footage
+  // SELECTION and signature GENERATION are separate concerns. The count moves to
+  // the new block; stock_footage just prepends what it produced. (After the
+  // gen_footage swap above, so gen-visual families never trigger this.)
+  {
+    const sf = pipeline.findIndex((e) => e.block === "stock_footage");
+    const sfParams = sf >= 0 ? (pipeline[sf].params as Record<string, unknown> | undefined) : undefined;
+    const k = Number(sfParams?.["signatureGenClips"] ?? 0);
+    if (sf >= 0 && k > 0) {
+      const stripped = { ...sfParams };
+      delete stripped.signatureGenClips;
+      pipeline[sf] = { block: "stock_footage", params: Object.keys(stripped).length ? stripped : undefined };
+      pipeline.splice(sf, 0, { block: "signature_clips", params: { count: k } });
+    }
+  }
+
   // DRAWN-CINEMA self-contained engine (whiteboard_scribe): it writes its own
   // layered storyboard + narration and draws the synced video itself, so it
   // REPLACES the script -> narration -> footage -> assemble chain with one
