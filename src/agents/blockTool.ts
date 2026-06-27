@@ -6,8 +6,9 @@
  * AND to a `createStep` that threads the shared store — both proven at PARITY
  * with the bespoke runner (a Block→Step chain produces the identical store).
  * That proves the existing engine is already tool/workflow-shaped, so the
- * migration is a translation, not a rewrite. (P3 — assembling the steps into a
- * runnable createWorkflow — needs the Mastra run engine; see blockSteps.)
+ * migration is a translation, not a rewrite. A Block[] also assembles into a
+ * RUNNABLE createWorkflow (buildPipelineWorkflow / runPipelineWorkflow) whose
+ * final store is at PARITY with the bespoke sequential runner.
  *
  * Resilient like agentJson(): @mastra packages are dynamically imported so a
  * bundle problem surfaces here, not at module-load time on the Trigger worker.
@@ -84,14 +85,43 @@ export async function blockStep(block: Block) {
   });
 }
 
-/**
- * Block[] (a pipeline order) → Mastra steps, ready to chain into a createWorkflow.
- * NOTE (P3): assembling these into a *runnable* `createWorkflow(...).then(...).commit()`
- * + executing it needs the Mastra run engine/runtime (a Mastra instance, the
- * execution engine, store threading as workflow state) — that's the next phase.
- * The steps themselves are proven at parity with the bespoke runner (see the
- * blockStep chain test), so the remaining work is wiring, not redesign.
- */
+/** Block[] (pipeline order) → Mastra steps. */
 export async function blockSteps(blocks: Block[]) {
   return Promise.all(blocks.map(blockStep));
+}
+
+interface MastraWorkflow {
+  createRun: () => Promise<{
+    start: (a: { inputData: { store: Store } }) => Promise<{ status: string; result?: { store: Store }; error?: unknown }>;
+  }>;
+}
+
+/**
+ * Block[] → a committed Mastra workflow that threads the store through each step.
+ * Returns it WRAPPED ({ workflow }) on purpose: a Mastra workflow is *thenable*
+ * (it has a `.then()` builder method), so returning it bare from an async fn
+ * makes the await machinery try to resolve it as a promise and deadlocks. The
+ * wrapper keeps the thenable off the resolution path.
+ */
+export async function buildPipelineWorkflow(id: string, blocks: Block[]): Promise<{ workflow: MastraWorkflow }> {
+  const { createWorkflow } = await import("@mastra/core/workflows");
+  const steps = await blockSteps(blocks);
+  // The builder is heavily generic; `any` lets us chain .then() over a dynamic list.
+  let wf: { then: (s: unknown) => typeof wf; commit: () => MastraWorkflow } =
+    createWorkflow({ id, inputSchema: STORE_SCHEMA, outputSchema: STORE_SCHEMA }) as never;
+  for (const s of steps) wf = wf.then(s) as typeof wf;
+  return { workflow: wf.commit() };
+}
+
+/**
+ * Run a pipeline as a Mastra workflow end-to-end and return the final store —
+ * at PARITY with the bespoke sequential runner. (Sequential .then() chain; the
+ * runner's verified parallel groups map to .parallel() as a later refinement.)
+ */
+export async function runPipelineWorkflow(blocks: Block[], seedStore: Store = {}, id = "pipeline"): Promise<Store> {
+  const { workflow } = await buildPipelineWorkflow(id, blocks);
+  const run = await workflow.createRun();
+  const res = await run.start({ inputData: { store: seedStore } });
+  if (res.status !== "success") throw new Error(`workflow "${id}" failed: ${res.status} ${JSON.stringify(res.error ?? "")}`);
+  return res.result!.store;
 }
