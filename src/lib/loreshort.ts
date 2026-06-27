@@ -19,6 +19,7 @@ import { bootstrapSecrets } from "./bootstrap";
 import { geminiJsonPro, geminiVisionLocal, parseJsonLoose } from "./gemini";
 import { synthNarration } from "./tts";
 import { generateBananaImage } from "./banana";
+import { ffprobeDuration } from "./ffmpeg";
 
 export interface LoreSubStyle {
   /** image-prompt style prefix fed to every scene render */
@@ -176,7 +177,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
   const PRESET = is4k ? "fast" : "medium"; // 4K encodes are heavy on CPU — faster x264 preset
   const log = (m: string) => console.error("[loreshort]", m);
   const sh = (c: string, a: string[]) => new Promise<void>((res, rej) => { const p = spawn(c, a, { stdio: ["ignore", "inherit", "inherit"] }); p.on("close", (x) => (x === 0 ? res() : rej(new Error(c + " " + x)))); });
-  const probe = (f: string) => new Promise<number>((res) => { let o = ""; const c = spawn("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", f]); c.stdout.on("data", (d) => (o += d)); c.on("close", () => res(parseFloat(o.trim()) || 0)); });
+  const probe = ffprobeDuration; // shared (was a local ffprobe-duration one-liner)
   // VPS DNS/network flakes (EAI_AGAIN); retry with backoff so a blip can't kill a long run
   const rfetch = async (url: string, opts?: any, tries = 6): Promise<Response> => { for (let a = 0; ; a++) { try { return await fetch(url, opts); } catch (e) { if (a >= tries - 1) throw e; await new Promise((r) => setTimeout(r, 4000 * (a + 1))); } } };
   // bounded concurrency — burst-submitting 9 predictions trips Replicate rate limits; keep a few in flight

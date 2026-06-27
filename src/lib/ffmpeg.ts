@@ -54,6 +54,22 @@ const FFMPEG = process.env.FFMPEG_BIN ?? "ffmpeg";
 const FFPROBE = process.env.FFPROBE_BIN ?? "ffprobe";
 
 /**
+ * Lightweight duration probe (seconds); returns 0 on any failure and never
+ * throws. The shared version of the one-liner several render libs each
+ * re-implemented (lofi/loreshort/motionComic). Respects FFPROBE_BIN.
+ */
+export async function ffprobeDuration(path: string): Promise<number> {
+  try {
+    const { stdout } = await run(FFPROBE, [
+      "-v", "error", "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", path,
+    ]);
+    return parseFloat(stdout.trim()) || 0;
+  } catch {
+    return 0;
+  }
+}
+
+/**
  * Concat two clips (re-encoded for safe joins of differently-encoded inputs)
  * into a single seamless loop-unit mp4. We re-encode rather than stream-copy
  * because Kling outputs may not be concat-demuxer-safe.

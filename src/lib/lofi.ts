@@ -22,6 +22,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { bootstrapSecrets } from "./bootstrap";
 import { generateBananaImage } from "./banana";
+import { ffprobeDuration } from "./ffmpeg";
 
 /** The channel character — kept identical across every scene for a consistent host. */
 export const CHARACTER =
@@ -329,7 +330,7 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
   const rd = (f: string) => join(RUN, f);
   const log = (m: string) => console.error("[lofi]", m);
   const sh = (c: string, a: string[]) => new Promise<void>((res, rej) => { const p = spawn(c, a, { stdio: ["ignore", "inherit", "inherit"] }); p.on("close", (x) => (x === 0 ? res() : rej(new Error(c + " exit " + x)))); });
-  const probe = (f: string) => new Promise<number>((res) => { let o = ""; const c = spawn("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=nk=1:nw=1", f]); c.stdout.on("data", (d) => (o += d)); c.on("close", () => res(parseFloat(o.trim()) || 0)); });
+  const probe = ffprobeDuration; // shared (was a local ffprobe-duration one-liner)
   const rfetch = async (url: string, opts?: any, tries = 6): Promise<Response> => { for (let a = 0; ; a++) { try { return await fetch(url, opts); } catch (e) { if (a >= tries - 1) throw e; await new Promise((r) => setTimeout(r, 4000 * (a + 1))); } } };
 
   // Replicate official-model prediction → returns first output url (Flux/Kling). Retries + polls.
