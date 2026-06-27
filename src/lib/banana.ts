@@ -147,9 +147,14 @@ export async function generateBananaImage(args: {
   aspectRatio?: string;
   /** "1K" | "2K" | "4K" — Pro model only; defaults to "2K". */
   imageSize?: string;
+  /** Optional input images (base64) for img2img / style-reference conditioning. */
+  images?: { data: string; mimeType?: string }[];
 }): Promise<Buffer> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
+  // Text first, then any conditioning images (img2img / style reference).
+  const parts: Record<string, unknown>[] = [{ text: args.prompt }];
+  for (const im of args.images ?? []) parts.push({ inlineData: { mimeType: im.mimeType ?? "image/png", data: im.data } });
   let lastErr = "";
   for (const model of MODELS) {
     // Nano Banana Pro (gemini-3-pro-image) honours imageConfig.imageSize for 2K/4K
@@ -165,7 +170,7 @@ export async function generateBananaImage(args: {
             method: "POST",
             headers: { "content-type": "application/json" },
             body: JSON.stringify({
-              contents: [{ parts: [{ text: args.prompt }] }],
+              contents: [{ parts }],
               generationConfig: {
                 responseModalities: ["IMAGE"],
                 imageConfig,

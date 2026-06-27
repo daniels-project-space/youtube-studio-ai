@@ -18,6 +18,7 @@ import { spawn } from "node:child_process";
 import { bootstrapSecrets } from "./bootstrap";
 import { geminiJsonPro, geminiVisionLocal, parseJsonLoose } from "./gemini";
 import { synthNarration } from "./tts";
+import { generateBananaImage } from "./banana";
 
 export interface LoreSubStyle {
   /** image-prompt style prefix fed to every scene render */
@@ -216,15 +217,12 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
     const out = rd(`scene_${i}.png`);
     if (existsSync(out)) return;
     const text = `${scenes[i].shot ? scenes[i].shot.toUpperCase() + " SHOT. " : ""}${style.art}\nCompose in THREE clear depth layers (close foreground / midground subject / deep background). SCENE: ${scenes[i].visual}`;
-    const res = await rfetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent?key=${GK}`, {
-      method: "POST", headers: { "content-type": "application/json" },
-      body: JSON.stringify({ contents: [{ parts: [{ text }] }], generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: "16:9", imageSize: "2K" } } }),
-      signal: AbortSignal.timeout(180000),
-    });
-    const j = await res.json();
-    const p = (j?.candidates?.[0]?.content?.parts ?? []).find((x: any) => x?.inlineData?.data);
-    if (!p) { log(`scene ${i} art FAILED: ${JSON.stringify(j?.candidates?.[0]?.finishReason || j?.error || j).slice(0, 100)}`); return; }
-    await writeFile(out, Buffer.from(p.inlineData.data, "base64")); log(`art ${i} ✓`);
+    try {
+      await writeFile(out, await generateBananaImage({ prompt: text, aspectRatio: "16:9", imageSize: "2K" }));
+      log(`art ${i} ✓`);
+    } catch (e) {
+      log(`scene ${i} art FAILED: ${e instanceof Error ? e.message : e}`);
+    }
   }
   await pool(4, scenes, (_: any, i: number) => genArt(i));
   for (let i = 0; i < scenes.length; i++) if (!existsSync(rd(`scene_${i}.png`))) throw new Error(`art ${i} missing (likely content-policy refusal — de-brand the topic)`);

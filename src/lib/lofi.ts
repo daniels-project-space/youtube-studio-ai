@@ -21,6 +21,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { bootstrapSecrets } from "./bootstrap";
+import { generateBananaImage } from "./banana";
 
 /** The channel character — kept identical across every scene for a consistent host. */
 export const CHARACTER =
@@ -360,15 +361,7 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
   const still = rd("still.png");
   if (!existsSync(still)) {
     if (scene.imageModel !== "flux") {
-      const r = await rfetch(`https://generativelanguage.googleapis.com/v1beta/models/gemini-3-pro-image-preview:generateContent?key=${GK}`, {
-        method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ contents: [{ parts: [{ text: scene.flux + dry }] }], generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: "16:9", imageSize: "2K" } } }),
-        signal: AbortSignal.timeout(200000),
-      });
-      const j: any = await r.json();
-      const part = (j?.candidates?.[0]?.content?.parts ?? []).find((x: any) => x?.inlineData?.data);
-      if (!part) throw new Error(`lofi: Nano Banana still failed: ${JSON.stringify(j?.candidates?.[0]?.finishReason || j?.error || j).slice(0, 160)}`);
-      await writeFile(still, Buffer.from(part.inlineData.data, "base64"));
+      await writeFile(still, await generateBananaImage({ prompt: scene.flux + dry, aspectRatio: "16:9", imageSize: "2K" }));
     } else {
       const url = await replicate(FLUX_MODEL, { prompt: scene.flux + dry, aspect_ratio: "16:9", output_format: "png", safety_tolerance: 4, raw: false }, "Flux");
       await dl(url, still);
