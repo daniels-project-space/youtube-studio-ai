@@ -149,7 +149,109 @@ const MUSIC_MODULE: ModuleCard = {
   },
 };
 
-/** Core narrated-pipeline surfaces — registered into MODULE_REGISTRY. */
+const WHITEBOARD_MODULE: ModuleCard = {
+  key: "whiteboard_scribe",
+  title: "Whiteboard Scribe",
+  stage: "visual",
+  does: "Self-contained drawn-cinema whiteboard explainer (storyboard → narrate → hand-draw each beat).",
+  customization: {
+    capabilities: ["resolution", "whiteboard style pack"],
+    knobs: [
+      { id: "width", type: "enum", values: ["1920", "2560"], default: "1920", describes: "output resolution (1080p / 2K)", servesStyles: ["explainer"] },
+      { id: "styleId", type: "enum", values: ["history", "finance"], default: "history", describes: "whiteboard art style pack", servesStyles: ["history", "finance"] },
+    ],
+    presets: {},
+  },
+};
+
+const LENGTH_MODULE: ModuleCard = {
+  key: "length_check",
+  title: "Length Check",
+  stage: "verify",
+  does: "Gates the final video to an acceptable duration band.",
+  customization: {
+    capabilities: ["min/max duration gate"],
+    knobs: [
+      { id: "minSeconds", type: "number", range: [0, 3600], default: 180, describes: "minimum acceptable video length", servesStyles: ["platform"] },
+      { id: "maxSeconds", type: "number", range: [0, 5400], default: 1800, describes: "maximum acceptable video length", servesStyles: ["platform"] },
+    ],
+    presets: {},
+  },
+};
+
+const SCENE_PLANNER_MODULE: ModuleCard = {
+  key: "scene_planner",
+  title: "Scene Planner",
+  stage: "visual",
+  does: "Plans the looping visual scenes (lofi / ambient).",
+  customization: {
+    capabilities: ["clip length"],
+    knobs: [
+      { id: "clipDurationSec", type: "number", range: [3, 15], default: 5, describes: "per-clip length for the loop", servesStyles: ["lofi", "ambient"] },
+    ],
+    presets: {},
+  },
+};
+
+const LOOP_CLIPS_MODULE: ModuleCard = {
+  key: "loop_clips",
+  title: "Loop Clips",
+  stage: "visual",
+  does: "Generates the seamless looping clips.",
+  customization: {
+    capabilities: ["clip length"],
+    knobs: [
+      { id: "clipDurationSec", type: "number", range: [3, 15], default: 5, describes: "per-clip length for the loop", servesStyles: ["lofi", "ambient"] },
+    ],
+    presets: {},
+  },
+};
+
+const UPSCALE_MODULE: ModuleCard = {
+  key: "upscale",
+  title: "Upscale",
+  stage: "build",
+  does: "Upscales and frame-interpolates the loop.",
+  customization: {
+    capabilities: ["target resolution", "frame-interpolation fps"],
+    knobs: [
+      { id: "targetResolution", type: "enum", values: ["2k", "4k"], default: "4k", describes: "output resolution", servesStyles: ["premium"] },
+      { id: "targetFps", type: "number", range: [24, 60], default: 30, describes: "frame-interpolation target fps", servesStyles: ["premium"] },
+    ],
+    presets: {},
+  },
+};
+
+const LOOP_ASSEMBLE_MODULE: ModuleCard = {
+  key: "assemble",
+  title: "Assemble (Loop)",
+  stage: "build",
+  does: "Loops the clip to the full runtime with a deblur intro.",
+  customization: {
+    capabilities: ["runtime length", "deblur intro"],
+    knobs: [
+      { id: "durationSec", type: "number", range: [30, 36000], default: 600, describes: "total runtime the loop is extended to", servesStyles: ["lofi", "ambient"] },
+      { id: "deblurIntro", type: "boolean", default: true, describes: "open on a focus-pull from blur with the title", servesStyles: ["lofi"] },
+    ],
+    presets: {},
+  },
+};
+
+const UPLOAD_MODULE: ModuleCard = {
+  key: "upload_draft",
+  title: "Upload",
+  stage: "ship",
+  does: "Uploads to YouTube (private draft, scheduled, or public).",
+  customization: {
+    capabilities: ["publish mode (draft / scheduled / public)"],
+    knobs: [
+      { id: "publishMode", type: "enum", values: ["draft", "scheduled", "public"], default: "draft", describes: "how the upload publishes", servesStyles: ["safety", "platform"] },
+    ],
+    presets: {},
+  },
+};
+
+/** Core pipeline surfaces — registered into MODULE_REGISTRY. */
 export const CORE_MODULE_SURFACES: ModuleCard[] = [
   TOPIC_MODULE,
   SCRIPT_MODULE,
@@ -159,4 +261,11 @@ export const CORE_MODULE_SURFACES: ModuleCard[] = [
   INTRO_MODULE,
   INSERTS_MODULE,
   QUOTES_MODULE,
+  WHITEBOARD_MODULE,
+  LENGTH_MODULE,
+  SCENE_PLANNER_MODULE,
+  LOOP_CLIPS_MODULE,
+  UPSCALE_MODULE,
+  LOOP_ASSEMBLE_MODULE,
+  UPLOAD_MODULE,
 ];
