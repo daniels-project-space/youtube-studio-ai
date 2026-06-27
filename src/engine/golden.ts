@@ -897,6 +897,43 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     gates: ["PRIVATE-first safety", "budget alert"],
     status: "active",
   },
+  {
+    key: "channel-planner",
+    stage: "plan",
+    title: "Channel Planner",
+    engine: "plan-week-ahead Trigger task → contentPlan board (topic + thumbnail + description) + scheduled native-publish",
+    how:
+      "Pre-builds the next N videos for a channel — each item's topic, thumbnail and description staged into the " +
+      "contentPlan board with a generating → ready → used lifecycle. A pinned scheduledAt becomes the video's native " +
+      "YouTube publish date, so scheduled-mode channels release on a fixed calendar. The autopilot scheduler consumes " +
+      "the next READY item — its exact topic — instead of picking fresh each run.",
+    gates: [
+      "topic + thumbnail + description pre-built per slot",
+      "scheduledAt = native publish date",
+      "status lifecycle (generating → ready → used)",
+      "scheduler consumes next ready item",
+    ],
+    status: "active",
+  },
+  {
+    key: "shorts",
+    stage: "visual",
+    title: "Shorts (vertical)",
+    engine: "9:16 short-form archetype (template D) + shorts_cuts assembly + long-form → Short repurposer",
+    how:
+      "A dedicated vertical archetype: a sub-50s shorts-style script, hook_craft, the originality + compliance gates, " +
+      "then narration and 9:16 footage / entity imagery assembled at a frenetic ~4s cadence with word-level karaoke " +
+      "captions and no chapter cards. A separate repurposer can cut the hook window of any long-form into a 9:16 Short " +
+      "and upload it PRIVATE alongside (default OFF). The whole vertical surface — aspect, subject reframe, caption " +
+      "emphasis — is one assembly preset.",
+    gates: [
+      "9:16 throughout (footage + imagery + assembly)",
+      "originality + compliance gated",
+      "word-level karaoke captions",
+      "PENDING golden: validated proof render + verified subject-reframe",
+    ],
+    status: "active",
+  },
 ];
 
 /**
