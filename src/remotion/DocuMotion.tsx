@@ -62,8 +62,21 @@ export interface DocuThread {
 export interface DocuGeo {
   label: string;
   pin: [number, number];
+  kind?: "waterway" | "area" | "city";
+  /** True centre [lat, lon] of the framed window (coordinate readout). */
+  center?: [number, number];
+  /** Degree span [latDeg, lonDeg] of the framed window (graticule + scale). */
+  span?: [number, number];
   streets: { p: [number, number][]; m: boolean }[];
   buildings: [number, number][][];
+  /** Filled water polygons (seas / lakes / bays). */
+  water?: [number, number][][];
+  /** Waterway lines (rivers / canals) — ambient texture. */
+  waterways?: [number, number][][];
+  /** The SUBJECT as line geometry (the hero route, e.g. a canal). */
+  route?: [number, number][][];
+  /** The SUBJECT as area polygons (country / lake / city outline). */
+  area?: [number, number][][];
   synthetic?: boolean;
 }
 
@@ -625,11 +638,26 @@ const DepthParallaxShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ sho
   );
 };
 
+/** Largest "nice" degree step that yields ~3-4 graticule lines across a span. */
+const niceDegStep = (range: number) => {
+  for (const s of [0.005, 0.01, 0.02, 0.05, 0.1, 0.25, 0.5, 1, 2, 5, 10, 20]) if (range / s <= 4.5) return s;
+  return 30;
+};
+/** Round down to 1/2/5 ×10ⁿ — for the scale bar. */
+const niceMetres = (x: number) => {
+  const e = Math.pow(10, Math.floor(Math.log10(Math.max(1, x))));
+  const f = x / e;
+  return (f >= 5 ? 5 : f >= 2 ? 2 : 1) * e;
+};
+
 /**
- * GEO MAP — a fully RENDERED, animated map of a real place: streets draw on,
- * building footprints rise in, and a glowing geo-pin drops with radar pulses
- * while the camera pushes into the location. Geometry comes from geoMap.ts
- * (live OSM → projected coords). No image plate — pure motion graphics.
+ * GEO MAP — a cinematic CARTOGRAPHIC reveal of a real place. Not a street grid:
+ * the SUBJECT is the hero. A canal/river draws on as a glowing channel between
+ * its endpoints; a country/lake/city reveals its outline. Around it sit real
+ * water bodies, a true lat/lon graticule with coordinate labels, a GPS-lock
+ * readout that settles onto the actual coordinates, a sweeping radar, a compass
+ * and a metric scale bar — over a deep map base with grain + vignette. Layers
+ * parallax as the camera pushes in. Geometry + coords come from geoMap.ts.
  */
 const GeoMapShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
   const frame = useCurrentFrame();
@@ -639,88 +667,339 @@ const GeoMapShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed
   const geo = shot.geo;
   const accent = shot.accent ?? t.accent;
 
-  // camera: slow push toward the pin
-  const px = (geo?.pin?.[0] ?? 0.5) * width;
-  const py = (geo?.pin?.[1] ?? 0.5) * height;
-  const zoom = interpolate(frame, [0, dur], [1.0, 1.12], { easing: Easing.inOut(Easing.cubic), extrapolateRight: "clamp" });
-  const nx = noise2D(`gmx${seed}`, frame * 0.012, 0) * width * 0.004;
-  const ny = noise2D(`gmy${seed}`, frame * 0.01, 5) * height * 0.004;
-
   const streets = geo?.streets ?? [];
-  const buildings = geo?.buildings ?? [];
+  const water = geo?.water ?? [];
+  const waterways = geo?.waterways ?? [];
+  const route = geo?.route ?? [];
+  const area = geo?.area ?? [];
+  const pinX = geo?.pin?.[0] ?? 0.5;
+  const pinY = geo?.pin?.[1] ?? 0.5;
+
+  // ---- geometry helpers (normalized → px) ----
+  const X = (x: number) => x * width;
+  const Y = (y: number) => y * height;
+  const toPath = (p: [number, number][]) => p.map(([x, y], i) => `${i ? "L" : "M"} ${X(x).toFixed(1)} ${Y(y).toFixed(1)}`).join(" ");
+  const toPoly = (p: [number, number][]) => p.map(([x, y]) => `${X(x).toFixed(1)},${Y(y).toFixed(1)}`).join(" ");
   const segLen = (p: [number, number][]) => {
     let L = 0;
     for (let i = 1; i < p.length; i++) L += Math.hypot((p[i][0] - p[i - 1][0]) * width, (p[i][1] - p[i - 1][1]) * height);
     return Math.max(1, L);
   };
-  const toPath = (p: [number, number][]) => p.map(([x, y], i) => `${i ? "L" : "M"} ${(x * width).toFixed(1)} ${(y * height).toFixed(1)}`).join(" ");
-  const toPoly = (p: [number, number][]) => p.map(([x, y]) => `${(x * width).toFixed(1)},${(y * height).toFixed(1)}`).join(" ");
 
-  const pinDrop = spring({ frame: frame - Math.min(dur * 0.5, 70), fps, config: { damping: 12, stiffness: 90 } });
-  const labelOp = interpolate(frame, [Math.min(dur * 0.5, 70) + 8, Math.min(dur * 0.5, 70) + 20], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  // ---- camera: establish, then slow push toward the pin with layered parallax ----
+  const push = interpolate(frame, [0, dur], [1.015, 1.15], { easing: Easing.inOut(Easing.cubic), extrapolateRight: "clamp" });
+  const driftX = noise2D(`gx${seed}`, frame * 0.01, 0) * width * 0.005;
+  const driftY = noise2D(`gy${seed}`, frame * 0.009, 5) * height * 0.005;
+  const origin = `${pinX * 100}% ${pinY * 100}%`;
+  const layer = (depth: number): React.CSSProperties => ({
+    transformOrigin: origin,
+    transform: `translate(${(driftX * depth).toFixed(1)}px, ${(driftY * depth).toFixed(1)}px) scale(${(1 + (push - 1) * depth).toFixed(4)})`,
+  });
+
+  // ---- timeline ----
+  const tWater = 4;
+  const tGrid = 10;
+  const tRoute = Math.round(dur * 0.16);
+  const tPin = Math.min(dur * 0.46, 64);
+  const lock = interpolate(frame, [tPin, tPin + 24], [0, 1], { easing: Easing.out(Easing.cubic), extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const labelOp = interpolate(frame, [tPin + 10, tPin + 24], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+  const introWipe = interpolate(frame, [0, 18], [0, 1], { easing: Easing.out(Easing.cubic), extrapolateRight: "clamp" });
+
+  // ---- real coordinates → graticule, readout, scale bar ----
+  const center = geo?.center;
+  const span = geo?.span;
+  const grat: { o: "lat" | "lon"; at: number; label: string }[] = [];
+  let scaleFrac = 0.16;
+  let scaleLabel = "";
+  if (center && span && span[0] > 0 && span[1] > 0) {
+    const [cLat, cLon] = center;
+    const [sLat, sLon] = span;
+    const yOf = (lat: number) => 0.5 - (lat - cLat) / sLat;
+    const xOf = (lon: number) => 0.5 + (lon - cLon) / sLon;
+    const stepLat = niceDegStep(sLat);
+    const stepLon = niceDegStep(sLon);
+    const dp = (s: number) => (s < 0.1 ? 2 : s < 1 ? 1 : 0);
+    for (let v = Math.ceil((cLat - sLat / 2) / stepLat) * stepLat, k = 0; v <= cLat + sLat / 2 && k < 8; v += stepLat, k++) {
+      const y = yOf(v);
+      if (y > 0.04 && y < 0.96) grat.push({ o: "lat", at: y, label: `${Math.abs(v).toFixed(dp(stepLat))}°${v >= 0 ? "N" : "S"}` });
+    }
+    for (let v = Math.ceil((cLon - sLon / 2) / stepLon) * stepLon, k = 0; v <= cLon + sLon / 2 && k < 8; v += stepLon, k++) {
+      const x = xOf(v);
+      if (x > 0.04 && x < 0.96) grat.push({ o: "lon", at: x, label: `${Math.abs(v).toFixed(dp(stepLon))}°${v >= 0 ? "E" : "W"}` });
+    }
+    const winWm = sLon * 111320 * (Math.cos((cLat * Math.PI) / 180) || 1);
+    const barM = niceMetres(winWm / 4);
+    scaleFrac = Math.max(0.05, Math.min(0.34, barM / winWm));
+    scaleLabel = barM >= 1000 ? `${barM % 1000 ? (barM / 1000).toFixed(1) : barM / 1000} km` : `${Math.round(barM)} m`;
+  }
+  // GPS-lock readout: scrambles, then settles on the true coordinates
+  const fmtCoord = (real: number, hemis: [string, string], settle: number, salt: number) => {
+    const jitter = noise2D(`co${seed}_${salt}`, frame * 0.4, salt) * 0.06;
+    const v = real + (1 - settle) * jitter;
+    return `${Math.abs(v).toFixed(4)}° ${v >= 0 ? hemis[0] : hemis[1]}`;
+  };
+
+  const px = pinX * width;
+  const py = pinY * height;
+  const radarR = Math.min(width, height) * 0.42;
+  const sweepDeg = interpolate(frame, [tPin, tPin + Math.min(dur - tPin, 120)], [-90, 270], { extrapolateRight: "clamp" });
+  const isWater = (geo?.kind ?? "city") === "waterway";
 
   return (
-    <AbsoluteFill style={{ backgroundColor: t.base, overflow: "hidden" }}>
-      {/* faint coordinate grid */}
-      <AbsoluteFill style={{ backgroundImage: `linear-gradient(${accent}22 1px, transparent 1px), linear-gradient(90deg, ${accent}22 1px, transparent 1px)`, backgroundSize: "64px 64px", opacity: 0.25 }} />
-      <AbsoluteFill style={{ transform: `translate(${nx.toFixed(1)}px, ${ny.toFixed(1)}px) scale(${zoom.toFixed(4)})`, transformOrigin: `${(geo?.pin?.[0] ?? 0.5) * 100}% ${(geo?.pin?.[1] ?? 0.5) * 100}%` }}>
+    <AbsoluteFill style={{ overflow: "hidden", background: `radial-gradient(125% 100% at ${pinX * 100}% ${pinY * 100}%, #16242f 0%, #0d1820 52%, #070d12 100%)` }}>
+      {/* deep land texture — faint topographic dot field */}
+      <AbsoluteFill style={{ backgroundImage: "radial-gradient(rgba(120,150,170,0.06) 1px, transparent 1.6px)", backgroundSize: "13px 13px", opacity: introWipe }} />
+
+      {/* ---------- WATER + WATERWAYS (deepest parallax) ---------- */}
+      <AbsoluteFill style={layer(0.55)}>
         <svg width={width} height={height} style={{ position: "absolute", inset: 0 }}>
-          {/* buildings rise + fade in */}
-          {buildings.map((b, i) => {
-            const d = 4 + i * 0.35;
-            const op = interpolate(frame, [d, d + 14], [0, 0.5], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-            const rise = interpolate(frame, [d, d + 14], [6, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+          <defs>
+            <linearGradient id={`wf${seed}`} x1="0" y1="0" x2="0" y2="1">
+              <stop offset="0%" stopColor="#21536f" stopOpacity="0.5" />
+              <stop offset="100%" stopColor="#0f2f44" stopOpacity="0.62" />
+            </linearGradient>
+          </defs>
+          {water.map((w, i) => {
+            const op = interpolate(frame, [tWater + i * 0.6, tWater + i * 0.6 + 16], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
             if (op <= 0) return null;
-            return <polygon key={i} points={toPoly(b)} fill={t.paper} opacity={op * 0.5} transform={`translate(0 ${rise.toFixed(1)})`} />;
+            return <polygon key={i} points={toPoly(w)} fill={`url(#wf${seed})`} stroke="#5aa6c8" strokeWidth={1} strokeOpacity={0.5} opacity={op} />;
           })}
-          {/* streets draw on (major thicker + glow) */}
-          {streets.map((s, i) => {
-            const L = segLen(s.p);
-            const d = 8 + i * 1.1;
-            const prog = interpolate(frame, [d, d + 24], [0, 1], { easing: Easing.out(Easing.cubic), extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+          {waterways.map((w, i) => {
+            const L = segLen(w);
+            const prog = interpolate(frame, [tWater + 4 + i * 0.8, tWater + 4 + i * 0.8 + 20], [0, 1], { easing: Easing.out(Easing.cubic), extrapolateLeft: "clamp", extrapolateRight: "clamp" });
             if (prog <= 0) return null;
-            return (
-              <path
-                key={i}
-                d={toPath(s.p)}
-                fill="none"
-                stroke={s.m ? accent : t.paper}
-                strokeWidth={s.m ? 3.8 : 1.9}
-                strokeOpacity={s.m ? 0.98 : 0.66}
-                strokeLinecap="round"
-                strokeLinejoin="round"
-                strokeDasharray={L}
-                strokeDashoffset={L * (1 - prog)}
-                style={s.m ? { filter: `drop-shadow(0 0 6px ${accent}cc)` } : undefined}
-              />
-            );
+            return <path key={i} d={toPath(w)} fill="none" stroke="#5aa6c8" strokeWidth={2} strokeOpacity={0.55} strokeLinecap="round" strokeDasharray={L} strokeDashoffset={L * (1 - prog)} />;
           })}
         </svg>
-        {/* glowing geo-pin + radar pulses */}
-        <div style={{ position: "absolute", left: px, top: py, transform: "translate(-50%, -50%)" }}>
+      </AbsoluteFill>
+
+      {/* ---------- GRATICULE (mid parallax) ---------- */}
+      <AbsoluteFill style={layer(0.7)}>
+        <svg width={width} height={height} style={{ position: "absolute", inset: 0, opacity: interpolate(frame, [tGrid, tGrid + 16], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }}>
+          {grat.map((g, i) =>
+            g.o === "lat" ? (
+              <line key={i} x1={0} y1={Y(g.at)} x2={width} y2={Y(g.at)} stroke={accent} strokeWidth={1} strokeOpacity={0.14} strokeDasharray="2 10" />
+            ) : (
+              <line key={i} x1={X(g.at)} y1={0} x2={X(g.at)} y2={height} stroke={accent} strokeWidth={1} strokeOpacity={0.14} strokeDasharray="2 10" />
+            ),
+          )}
+        </svg>
+      </AbsoluteFill>
+
+      {/* ---------- ROADS + SUBJECT (front parallax) ---------- */}
+      <AbsoluteFill style={layer(0.85)}>
+        <svg width={width} height={height} style={{ position: "absolute", inset: 0 }}>
+          {/* roads draw on — quiet, the route is the hero */}
+          {streets.map((s, i) => {
+            const L = segLen(s.p);
+            const d = tGrid + 4 + i * 0.7;
+            const prog = interpolate(frame, [d, d + 20], [0, 1], { easing: Easing.out(Easing.cubic), extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+            if (prog <= 0) return null;
+            return (
+              <path key={i} d={toPath(s.p)} fill="none" stroke={s.m ? accent : "#9fb0bd"} strokeWidth={s.m ? 2.4 : 1.2} strokeOpacity={s.m ? 0.65 : 0.34} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={L} strokeDashoffset={L * (1 - prog)} />
+            );
+          })}
+          {/* subject AREA outline (country / lake / city) */}
+          {area.map((a, i) => {
+            const L = segLen(a);
+            const prog = interpolate(frame, [tRoute, tRoute + 32], [0, 1], { easing: Easing.out(Easing.cubic), extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+            const fillOp = interpolate(frame, [tRoute + 20, tRoute + 44], [0, 0.14], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+            if (prog <= 0) return null;
+            return (
+              <g key={i}>
+                <polygon points={toPoly(a)} fill={accent} opacity={fillOp} />
+                <path d={`${toPath(a)} Z`} fill="none" stroke={accent} strokeWidth={3} strokeOpacity={0.95} strokeLinejoin="round" strokeDasharray={L} strokeDashoffset={L * (1 - prog)} style={{ filter: `drop-shadow(0 0 7px ${accent}cc)` }} />
+              </g>
+            );
+          })}
+          {/* subject ROUTE — the hero channel traced as ONE continuous stroke,
+              segments drawn sequentially north→south, only the true endpoints marked */}
+          {(() => {
+            if (!route.length) return null;
+            const ordered = route.map((rl) => ({ rl, midY: rl.reduce((a, p) => a + p[1], 0) / rl.length, len: segLen(rl) })).sort((a, b) => a.midY - b.midY);
+            const totalLen = ordered.reduce((a, s) => a + s.len, 0) || 1;
+            const drawSpan = Math.min(48, dur - tRoute - 6);
+            // global endpoints: northernmost (min y) + southernmost (max y) point across all segments
+            const allPts = route.flat();
+            const north = allPts.reduce((a, p) => (p[1] < a[1] ? p : a), allPts[0]);
+            const south = allPts.reduce((a, p) => (p[1] > a[1] ? p : a), allPts[0]);
+            let acc = 0;
+            const seg = ordered.map((s) => {
+              const start = tRoute + (acc / totalLen) * drawSpan;
+              const end = tRoute + ((acc + s.len) / totalLen) * drawSpan + 2;
+              acc += s.len;
+              return { ...s, start, end };
+            });
+            return (
+              <g>
+                {seg.map((s, i) => {
+                  const prog = interpolate(frame, [s.start, s.end], [0, 1], { easing: Easing.inOut(Easing.cubic), extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+                  if (prog <= 0) return null;
+                  const d = toPath(s.rl);
+                  return (
+                    <g key={i}>
+                      <path d={d} fill="none" stroke={accent} strokeWidth={11} strokeOpacity={0.18} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={s.len} strokeDashoffset={s.len * (1 - prog)} style={{ filter: `blur(4px)` }} />
+                      <path d={d} fill="none" stroke={accent} strokeWidth={4.2} strokeOpacity={0.98} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={s.len} strokeDashoffset={s.len * (1 - prog)} style={{ filter: `drop-shadow(0 0 6px ${accent})` }} />
+                      <path d={d} fill="none" stroke="#ffffff" strokeWidth={1.3} strokeOpacity={0.85} strokeLinecap="round" strokeLinejoin="round" strokeDasharray={s.len} strokeDashoffset={s.len * (1 - prog)} />
+                    </g>
+                  );
+                })}
+                {north && frame > tRoute + 2 ? <circle cx={X(north[0])} cy={Y(north[1])} r={6} fill={t.base} stroke={accent} strokeWidth={2.5} /> : null}
+                {south && frame > tRoute + drawSpan * 0.85 ? <circle cx={X(south[0])} cy={Y(south[1])} r={6} fill={t.base} stroke={accent} strokeWidth={2.5} /> : null}
+              </g>
+            );
+          })()}
+        </svg>
+      </AbsoluteFill>
+
+      {/* ---------- RADAR SWEEP + PIN (tracks the location) ---------- */}
+      <AbsoluteFill style={layer(1)}>
+        <div style={{ position: "absolute", left: px, top: py, width: 0, height: 0 }}>
+          {/* radar wedge */}
+          {frame > tPin ? (
+            <div
+              style={{
+                position: "absolute",
+                left: -radarR,
+                top: -radarR,
+                width: radarR * 2,
+                height: radarR * 2,
+                borderRadius: "50%",
+                background: `conic-gradient(from ${sweepDeg.toFixed(1)}deg, ${accent}00 0deg, ${accent}26 26deg, ${accent}00 56deg)`,
+                WebkitMaskImage: "radial-gradient(circle, #000 0%, #000 62%, transparent 100%)",
+                maskImage: "radial-gradient(circle, #000 0%, #000 62%, transparent 100%)",
+                opacity: lock * 0.9,
+              }}
+            />
+          ) : null}
+          {/* expanding pulse rings */}
           {[0, 1, 2].map((k) => {
-            const t0 = Math.min(dur * 0.5, 70) + 6 + k * 16;
-            const ring = ((frame - t0) % 48) / 48;
+            const t0 = tPin + 4 + k * 16;
+            const ring = ((frame - t0) % 52) / 52;
             const show = frame > t0 && ring >= 0;
-            const sz = interpolate(ring, [0, 1], [0, width * 0.16]);
+            const sz = interpolate(ring, [0, 1], [0, width * 0.18]);
             return show ? (
-              <div key={k} style={{ position: "absolute", left: 0, top: 0, width: sz, height: sz, borderRadius: "50%", border: `2px solid ${accent}`, transform: "translate(-50%, -50%)", opacity: (1 - ring) * 0.6 }} />
+              <div key={k} style={{ position: "absolute", left: -sz / 2, top: -sz / 2, width: sz, height: sz, borderRadius: "50%", border: `1.5px solid ${accent}`, opacity: (1 - ring) * 0.5 }} />
             ) : null;
           })}
-          <div style={{ width: width * 0.03, height: width * 0.03, borderRadius: "50%", background: accent, transform: `translate(-50%, -50%) scale(${pinDrop})`, boxShadow: `0 0 ${width * 0.03}px ${accent}, 0 0 ${width * 0.06}px ${accent}99` }} />
+          {/* crosshair + core */}
+          {(["h", "v"] as const).map((o) => (
+            <div
+              key={o}
+              style={{
+                position: "absolute",
+                left: o === "h" ? -18 : -1,
+                top: o === "h" ? -1 : -18,
+                width: o === "h" ? 36 : 2,
+                height: o === "h" ? 2 : 36,
+                background: accent,
+                opacity: lock * 0.8,
+              }}
+            />
+          ))}
+          <div
+            style={{
+              position: "absolute",
+              left: -width * 0.011,
+              top: -width * 0.011,
+              width: width * 0.022,
+              height: width * 0.022,
+              borderRadius: "50%",
+              background: accent,
+              transform: `scale(${spring({ frame: frame - tPin, fps, config: { damping: 11, stiffness: 95 } })})`,
+              boxShadow: `0 0 ${width * 0.024}px ${accent}, 0 0 ${width * 0.05}px ${accent}88`,
+            }}
+          />
+          {/* GPS-lock coordinate chip */}
+          {center ? (
+            <div
+              style={{
+                position: "absolute",
+                left: width * 0.02,
+                top: -height * 0.02,
+                opacity: interpolate(frame, [tPin + 2, tPin + 14], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }),
+                fontFamily: t.fontLabel,
+                fontSize: Math.round(width * 0.0125),
+                letterSpacing: "0.18em",
+                color: accent,
+                background: "rgba(7,13,18,0.72)",
+                border: `1px solid ${accent}66`,
+                borderRadius: 3,
+                padding: "5px 9px",
+                whiteSpace: "nowrap",
+                lineHeight: 1.5,
+              }}
+            >
+              <div>{fmtCoord(center[0], ["N", "S"], lock, 1)}</div>
+              <div>{fmtCoord(center[1], ["E", "W"], lock, 2)}</div>
+            </div>
+          ) : null}
         </div>
       </AbsoluteFill>
-      {/* location label (fixed, not zoomed) */}
+
+      {/* horizontal scan line during establish (data-load feel) */}
+      {frame < 30 ? (
+        <AbsoluteFill style={{ pointerEvents: "none" }}>
+          <div style={{ position: "absolute", left: 0, right: 0, top: `${interpolate(frame, [0, 26], [0, 100], { extrapolateRight: "clamp" })}%`, height: 2, background: `linear-gradient(90deg, transparent, ${accent}aa, transparent)`, opacity: interpolate(frame, [22, 30], [0.7, 0], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }} />
+        </AbsoluteFill>
+      ) : null}
+
+      {/* ---------- HUD: graticule labels, compass, scale bar (fixed) ---------- */}
+      <AbsoluteFill style={{ pointerEvents: "none", opacity: interpolate(frame, [tGrid + 4, tGrid + 18], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }}>
+        {grat.map((g, i) => (
+          <div
+            key={i}
+            style={{
+              position: "absolute",
+              ...(g.o === "lat"
+                ? { left: width * 0.014, top: Y(g.at) - 7 }
+                : { left: X(g.at) - 22, top: height * 0.018 }),
+              fontFamily: t.fontLabel,
+              fontSize: Math.round(width * 0.0092),
+              letterSpacing: "0.14em",
+              color: `${accent}`,
+              opacity: 0.66,
+              textShadow: "0 1px 3px rgba(0,0,0,0.9)",
+            }}
+          >
+            {g.label}
+          </div>
+        ))}
+        {/* compass rose */}
+        <div style={{ position: "absolute", right: width * 0.035, top: height * 0.06, width: width * 0.05, height: width * 0.05 }}>
+          <svg width="100%" height="100%" viewBox="-56 -62 112 124">
+            <circle r="44" fill="rgba(7,13,18,0.45)" stroke={`${accent}55`} strokeWidth="1.5" />
+            <polygon points="0,-38 7,4 0,-6 -7,4" fill={accent} />
+            <polygon points="0,38 7,-4 0,6 -7,-4" fill={`${accent}55`} />
+            <text x="0" y="-48" fill={accent} fontSize="13" textAnchor="middle" fontFamily={t.fontLabel} style={{ letterSpacing: "0.1em" }}>N</text>
+          </svg>
+        </div>
+        {/* scale bar */}
+        {scaleLabel ? (
+          <div style={{ position: "absolute", left: width * 0.035, bottom: height * 0.07 }}>
+            <div style={{ width: scaleFrac * width, height: 9, borderTop: `3px solid ${accent}`, borderLeft: `2px solid ${accent}`, borderRight: `2px solid ${accent}`, opacity: 0.85 }} />
+            <div style={{ fontFamily: t.fontLabel, fontSize: Math.round(width * 0.01), letterSpacing: "0.16em", color: accent, marginTop: 5, textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}>{scaleLabel}</div>
+          </div>
+        ) : null}
+      </AbsoluteFill>
+
+      {/* location title */}
       {(shot.circleLabel || geo?.label) ? (
-        <AbsoluteFill style={{ alignItems: "center", justifyContent: "flex-end", paddingBottom: height * 0.12, pointerEvents: "none" }}>
+        <AbsoluteFill style={{ alignItems: "center", justifyContent: "flex-end", paddingBottom: height * 0.11, pointerEvents: "none" }}>
           <div style={{ opacity: labelOp, transform: `translateY(${interpolate(labelOp, [0, 1], [16, 0])}px)`, textAlign: "center" }}>
-            <div style={{ fontFamily: t.fontLabel, fontWeight: 600, fontSize: Math.round(width * 0.016), letterSpacing: "0.5em", textTransform: "uppercase", color: accent, marginBottom: 8 }}>◉ LOCATION</div>
-            <div style={{ fontFamily: t.fontDisplay, fontWeight: 700, fontSize: Math.round(width * 0.058), letterSpacing: "0.04em", textTransform: "uppercase", color: t.paper, WebkitTextStroke: `1.5px rgba(8,6,4,0.6)`, textShadow: `0 2px 18px rgba(0,0,0,0.8), 0 0 30px ${accent}55` }}>
+            <div style={{ fontFamily: t.fontLabel, fontWeight: 600, fontSize: Math.round(width * 0.015), letterSpacing: "0.5em", textTransform: "uppercase", color: accent, marginBottom: 8 }}>
+              {isWater ? "◉ WATERWAY" : "◉ LOCATION"}
+            </div>
+            <div style={{ fontFamily: t.fontDisplay, fontWeight: 700, fontSize: Math.round(width * 0.056), letterSpacing: "0.04em", textTransform: "uppercase", color: t.paper, WebkitTextStroke: `1.5px rgba(8,6,4,0.6)`, textShadow: `0 2px 18px rgba(0,0,0,0.85), 0 0 30px ${accent}55` }}>
               {shot.circleLabel || geo?.label}
             </div>
           </div>
         </AbsoluteFill>
       ) : null}
+
+      {/* film grade: vignette + grain to match the documentary plates */}
+      <AbsoluteFill style={{ pointerEvents: "none", background: "radial-gradient(125% 100% at 50% 45%, transparent 52%, rgba(0,0,0,0.55) 100%)" }} />
+      <AbsoluteFill style={{ pointerEvents: "none", opacity: 0.05 + (t.grain ?? 0.06) * 0.5, backgroundImage: "radial-gradient(rgba(255,255,255,0.5) 0.5px, transparent 0.5px)", backgroundSize: "3px 3px", mixBlendMode: "overlay", transform: `translate(${(noise2D(`gn${seed}`, frame * 0.7, 0) * 4).toFixed(1)}px, ${(noise2D(`gn${seed}`, 0, frame * 0.7) * 4).toFixed(1)}px)` }} />
       <LabelRail shot={shot} baseDelay={26} />
     </AbsoluteFill>
   );

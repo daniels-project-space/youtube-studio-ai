@@ -222,9 +222,11 @@ const CAPABILITY_CATALOG =
   `"far_to_near" (reveal the foreground). Use it when the line shifts attention between a close thing and a deeper ` +
   `one (e.g. "a gloved hand on the dial — then the vault yawning behind"); only on a brief with a STRONG close ` +
   `subject AND a clearly deeper, separated background.\n` +
-  `- geo_map: a FULLY RENDERED animated map of a REAL place — streets draw on, buildings rise, a glowing geo-pin ` +
-  `drops with radar pulses, camera pushes into the location. Needs a real "geoQuery" (e.g. "Antwerp, Belgium"). ` +
-  `Use this to pin a story to a real location.\n` +
+  `- geo_map: a FULLY RENDERED cinematic CARTOGRAPHIC reveal of a REAL place — the subject is the hero: a canal/` +
+  `river/strait draws on as a glowing channel between its endpoints, a country/region/lake/city reveals its OUTLINE, ` +
+  `over real water bodies + a true lat/lon graticule with coordinate labels, a GPS-lock readout, radar sweep, compass ` +
+  `and metric scale bar; the camera pushes in with parallax. Needs a real "geoQuery" — a place ("Antwerp, Belgium"), ` +
+  `a waterway ("Suez Canal"), a region or a country. Use this to pin a story to a real location or trace a route.\n` +
   `- map_zoom: a simpler aged map/chart with a ringed location word — geography when geo_map is overkill.\n` +
   `- photo_slide: 2-3 taped photographs sliding over a plate — a handful of evidence/photos.\n` +
   `- matte_sequence: 3-4 full-frame scenes with torn-paper cuts between them — a list of places/moments.\n` +
