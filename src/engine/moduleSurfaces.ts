@@ -117,11 +117,45 @@ const QUOTES_MODULE: ModuleCard = {
   },
 };
 
+const TOPIC_MODULE: ModuleCard = {
+  key: "topic_select",
+  title: "Topic Select",
+  stage: "topic",
+  does: "Picks the next on-identity topic (or the next episode of a series), honoring the repeat policy.",
+  customization: {
+    capabilities: ["fresh-vs-recycle repeat policy", "ordered numbered series"],
+    knobs: [
+      { id: "policy", type: "enum", values: ["prefer_fresh", "no_repeat"], default: "prefer_fresh", describes: "repeat behavior when the topic pool is exhausted", servesStyles: ["evergreen", "series"] },
+      { id: "seriesTitle", type: "text", maxLength: 120, default: "", describes: "run an ordered numbered series under this title (blank = standalone)", servesStyles: ["series"] },
+      { id: "seriesCount", type: "number", range: [0, 100], default: 0, describes: "episodes in the series (0 = open-ended)", servesStyles: ["series"] },
+    ],
+    presets: {},
+  },
+};
+
+const MUSIC_MODULE: ModuleCard = {
+  key: "music",
+  title: "Music",
+  stage: "audio",
+  does: "Generates the background score, crossfading distinct tracks into the mix.",
+  customization: {
+    capabilities: ["provider choice", "style-prompt steering", "multi-track crossfade mix"],
+    knobs: [
+      { id: "provider", type: "enum", values: ["mureka", "suno"], default: "mureka", describes: "music generation provider", servesStyles: ["platform"] },
+      { id: "prompt", type: "text", maxLength: 300, default: "", describes: "music style/mood prompt (e.g. 'calm ambient, soft pads, no drums')", servesStyles: ["lofi", "ambient"] },
+      { id: "trackCount", type: "number", range: [1, 8], default: 2, describes: "distinct tracks crossfaded (variety vs cost)", servesStyles: ["lofi", "long-form"] },
+    ],
+    presets: { lofi: { provider: "suno", trackCount: 4 } },
+  },
+};
+
 /** Core narrated-pipeline surfaces — registered into MODULE_REGISTRY. */
 export const CORE_MODULE_SURFACES: ModuleCard[] = [
+  TOPIC_MODULE,
   SCRIPT_MODULE,
   NARRATION_MODULE,
   FOOTAGE_MODULE,
+  MUSIC_MODULE,
   INTRO_MODULE,
   INSERTS_MODULE,
   QUOTES_MODULE,
