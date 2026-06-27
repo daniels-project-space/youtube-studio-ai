@@ -87,6 +87,8 @@ export default function NewChannelWizard() {
   const [analyzing, setAnalyzing] = useState(false);
   const [clipNote, setClipNote] = useState<string | null>(null);
   const analyzeRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [concept, setConcept] = useState("");
+  const [suggesting, setSuggesting] = useState(false);
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;
@@ -108,6 +110,30 @@ export default function NewChannelWizard() {
   };
 
   const preview = useMemo(() => (family ? previewBlocks(family, toggles, nicheKey) : []), [family, toggles, nicheKey]);
+
+  // Describe the channel in words → suggest a format + crew (operator confirms).
+  function suggest() {
+    const c = concept.trim();
+    if (!c || suggesting) return;
+    setSuggesting(true); setClipNote(null);
+    (async () => {
+      try {
+        const res = await fetch("/api/suggest-format", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ concept: c, niche: nicheKey || undefined }) });
+        const d = await res.json();
+        if (!res.ok || !d.family) { setClipNote(d.error ?? "Could not suggest a format."); setSuggesting(false); return; }
+        setFamily(d.family as FamilyKey);
+        const fam = FAMILIES[d.family as FamilyKey]?.label ?? d.family;
+        const alts = Array.isArray(d.alternates) && d.alternates.length
+          ? ` Alternates: ${d.alternates.map((a: { family: string }) => FAMILIES[a.family as FamilyKey]?.label ?? a.family).join(", ")}.`
+          : "";
+        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (draft — engine not built yet)"} · crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}`);
+      } catch {
+        setClipNote("Suggestion failed — pick a format manually below.");
+      } finally {
+        setSuggesting(false);
+      }
+    })();
+  }
 
   // Analyze a pasted example clip → suggest a family + style (operator confirms).
   function analyze() {
@@ -275,6 +301,12 @@ export default function NewChannelWizard() {
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <input value={clipUrl} onChange={(e) => setClipUrl(e.target.value)} placeholder="paste a YouTube link you like" style={{ ...inpStyle, flex: 1 }} />
               <button onClick={analyze} disabled={!clipUrl.trim() || analyzing} style={{ ...btnGhost, opacity: !clipUrl.trim() || analyzing ? 0.5 : 1, whiteSpace: "nowrap" }}>{analyzing ? "Analyzing…" : "Analyze"}</button>
+            </div>
+          </label>
+          <label style={lblStyle}><span style={capStyle}>Or describe the channel in words (Gemini suggests a format + the crew it needs)</span>
+            <div style={{ display: "flex", gap: "0.5rem" }}>
+              <input value={concept} onChange={(e) => setConcept(e.target.value)} placeholder="e.g. calm daily stoicism lessons over cinematic nature b-roll" style={{ ...inpStyle, flex: 1 }} />
+              <button onClick={suggest} disabled={!concept.trim() || suggesting} style={{ ...btnGhost, opacity: !concept.trim() || suggesting ? 0.5 : 1, whiteSpace: "nowrap" }}>{suggesting ? "Thinking…" : "Suggest"}</button>
             </div>
           </label>
           {clipNote && <div className="glass" style={{ padding: "0.7rem 0.9rem", fontSize: "0.8rem", color: "var(--color-muted)", border: "1px solid var(--color-accent)" }}>{clipNote}</div>}
