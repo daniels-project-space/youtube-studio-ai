@@ -28,6 +28,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { geminiJsonPro, geminiVisionLocal } from "@/lib/gemini";
+import { generateBananaImage } from "@/lib/banana";
 import { generateMusic } from "@/lib/music";
 
 type Logger = (msg: string) => void;
@@ -64,7 +65,6 @@ const DEFAULT_STYLE =
   "rich but moody colour, expressive faces, dynamic compositions, film-grain texture. ABSOLUTELY NO speech bubbles, NO " +
   "captions, NO lettering, NO text of any kind anywhere in the image.";
 
-const ART_MODEL = "gemini-3-pro-image-preview";
 const ASSET_DIR = join(process.cwd(), "src", "assets", "whiteboard");
 const PREROLL_MS = 1700; // must match EST in mc_page_render.py
 const PER_PAGE = 6;      // panels per comic page (must match per_page in the renderer)
@@ -156,18 +156,13 @@ async function probeDur(file: string, log: Logger): Promise<number> {
 }
 
 async function genImage(prompt: string, refs: string[]): Promise<Buffer> {
-  const key = process.env.GEMINI_API_KEY;
-  const parts: Record<string, unknown>[] = [{ text: prompt }];
-  for (const r of refs) parts.push({ inlineData: { mimeType: "image/png", data: r } });
-  const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${ART_MODEL}:generateContent?key=${key}`, {
-    method: "POST", headers: { "content-type": "application/json" },
-    body: JSON.stringify({ contents: [{ parts }], generationConfig: { responseModalities: ["IMAGE"], imageConfig: { aspectRatio: "4:3", imageSize: "2K" } } }),
-    signal: AbortSignal.timeout(180_000),
+  // 4:3 comic panels, optionally conditioned on character-sheet refs (img2img).
+  return generateBananaImage({
+    prompt,
+    aspectRatio: "4:3",
+    imageSize: "2K",
+    images: refs.map((r) => ({ data: r, mimeType: "image/png" })),
   });
-  const j = (await res.json()) as { candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[]; error?: { message?: string } };
-  const part = (j.candidates?.[0]?.content?.parts ?? []).find((x) => x.inlineData?.data);
-  if (part?.inlineData?.data) return Buffer.from(part.inlineData.data, "base64");
-  throw new Error(j.error?.message ?? "no image part");
 }
 
 /** ElevenLabs v3 Text-to-Dialogue — one or more (text, voice) lines → one mp3. */

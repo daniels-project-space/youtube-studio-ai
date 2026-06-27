@@ -36,6 +36,7 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { geminiJsonPro } from "@/lib/gemini";
+import { generateBananaImage } from "@/lib/banana";
 import { synthNarration } from "@/lib/tts";
 
 type Logger = (msg: string) => void;
@@ -64,9 +65,6 @@ export interface SyncLayer { kind: "art" | "label"; art?: string; text?: string;
 export interface SyncPanel { idx: number; startMs: number; endMs: number; layers: SyncLayer[] }
 export interface WhiteboardSyncResult { outPath: string; timelinePath: string; title: string; narrationText: string; panels: SyncPanel[]; durationMs: number }
 
-// Nano Banana Pro (Gemini 3 Pro Image) is the primary art model — preferred for
-// its fidelity. Flash Image stays as a cheaper fallback when Pro is unavailable.
-const ART_MODELS = ["gemini-3-pro-image-preview", "gemini-2.5-flash-image"];
 const ASSET_DIR = join(process.cwd(), "src", "assets", "whiteboard");
 
 export function hasWhiteboardSync(): boolean {
@@ -80,30 +78,13 @@ function clampBox(b: unknown): number[] {
 }
 
 async function styledScene(prompt: string, refB64: string): Promise<Buffer> {
-  const key = process.env.GEMINI_API_KEY;
-  let lastErr = "";
-  for (const model of ART_MODELS) {
-    // Flash Image maxes ~1K and rejects imageSize; Pro takes 2K.
-    const imageConfig = model.includes("flash") ? { aspectRatio: "16:9" } : { aspectRatio: "16:9", imageSize: "2K" };
-    try {
-      const res = await fetch(`https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`, {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({
-          contents: [{ parts: [{ text: prompt }, { inlineData: { mimeType: "image/png", data: refB64 } }] }],
-          generationConfig: { responseModalities: ["IMAGE"], imageConfig },
-        }),
-        signal: AbortSignal.timeout(180_000),
-      });
-      const j = (await res.json()) as { candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[]; error?: { message?: string } };
-      const part = (j.candidates?.[0]?.content?.parts ?? []).find((x) => x.inlineData?.data);
-      if (part?.inlineData?.data) return Buffer.from(part.inlineData.data, "base64");
-      lastErr = j.error?.message ?? "no image part";
-    } catch (e) {
-      lastErr = e instanceof Error ? e.message : String(e);
-    }
-  }
-  throw new Error(`whiteboardSync art failed: ${lastErr}`);
+  // Line-art still conditioned on the channel's style-reference image (img2img).
+  return generateBananaImage({
+    prompt,
+    aspectRatio: "16:9",
+    imageSize: "2K",
+    images: [{ data: refB64, mimeType: "image/png" }],
+  });
 }
 
 async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>): Promise<void> {
