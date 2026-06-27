@@ -664,7 +664,9 @@ export async function judgeNarrationTake(o: {
   const durationSec = o.durationSec ?? o.mp3.length / 16000;
   {
     const words = stripAudioTags(o.text).split(/\s+/).filter(Boolean).length;
-    const expected = words / 2.5 / Math.max(0.7, o.physics.speed) + (o.text.match(/\[(long )?pause\]/g)?.length ?? 0) * 1.5;
+    // Use the calibrated TTS word-rate (scriptGen's NARRATION_WPS, default 3.1) so the
+    // runaway-take gate matches reality — 2.5 over-estimated `expected` and loosened the gate.
+    const expected = words / (Number(process.env.NARRATION_WPS) || 3.1) / Math.max(0.7, o.physics.speed) + (o.text.match(/\[(long )?pause\]/g)?.length ?? 0) * 1.5;
     if (durationSec > expected * 2.5 + 12 || durationSec < expected * 0.3) {
       const why = `duration blowout: ${durationSec.toFixed(0)}s rendered vs ~${expected.toFixed(0)}s expected (${words} words) — runaway take`;
       o.log?.(`voicecraft: take judged — ${why}`);

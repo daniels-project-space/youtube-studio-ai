@@ -102,7 +102,6 @@ export async function bananaTypeCard(args: {
   outJpg: string;
   log?: (m: string) => void;
 }): Promise<string | null> {
-  const { writeFile } = await import("node:fs/promises");
   const emph = args.emphasis?.length ? ` Set the words ${args.emphasis.map((w) => `"${w}"`).join(", ")} in the accent colour ${args.accent}.` : "";
   const tone = args.framing ? ` TONE/FRAMING: ${args.framing}` : "";
   const base =
@@ -112,12 +111,10 @@ export async function bananaTypeCard(args: {
     `HARD RULES: every word present and spelled EXACTLY as written; it must read perfectly; PURE TYPOGRAPHY ONLY — ` +
     `NO icons, NO illustrations, NO drawings, NO emoji; NO watermark, NO UI, NO extra words, NO gibberish letters.`;
   let fix = "";
-  let last: string | null = null;
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const bytes = await generateBananaImage({ prompt: base + fix, aspectRatio: "16:9" });
       await writeFile(args.outJpg, bytes);
-      last = args.outJpg;
       const raw = await geminiVisionLocal({
         prompt:
           `TYPOGRAPHY GATE. Does this card show the EXACT line "${args.text}" — every word present, correctly ` +
@@ -137,7 +134,6 @@ export async function bananaTypeCard(args: {
       args.log?.(`banana type card error: ${e instanceof Error ? e.message : e}`);
     }
   }
-  void last;
   return null; // unconfirmed spelling → caller renders crisp CSS type instead
 }
 
