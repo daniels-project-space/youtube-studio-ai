@@ -21,6 +21,7 @@ import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { getVisualBrief } from "@/engine/creative/brief";
 import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { castWhiteboardSync, hasWhiteboardSync } from "@/lib/whiteboardSync";
@@ -66,7 +67,7 @@ export const whiteboardScribe: Block = {
       (ctx.store["researchNotes"] as string | undefined) ||
       (ctx.store["factSheet"] as string | undefined) ||
       undefined;
-    const visualBrief = ctx.store["visualBrief"] as { header?: string } | undefined;
+    const visualBrief = getVisualBrief(ctx.store);
 
     const styleId = String(ctx.params["styleId"] ?? "history");
     const voiceId = String(ctx.params["voiceId"] ?? ctx.store["voiceId"] ?? "sleepless_historian");

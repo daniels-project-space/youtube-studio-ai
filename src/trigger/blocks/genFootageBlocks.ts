@@ -12,6 +12,7 @@
  * Style-DNA subject/setting/grade so clip #1 and clip #14 belong to one world.
  */
 import type { Block } from "@/engine/types";
+import { getVisualBrief } from "@/engine/creative/brief";
 import { join } from "node:path";
 import { makeRunTempDir, downloadTo } from "@/lib/files";
 import { geminiJson, hasGeminiKey } from "@/lib/gemini";
@@ -93,7 +94,7 @@ export const genFootage: Block = {
       recurringSubject?: string; setting?: string; colorGrade?: string;
       motifs?: string[]; visualAvoid?: string[];
     } | null;
-    const visualBrief = ctx.store["visualBrief"] as { look?: string } | undefined;
+    const visualBrief = getVisualBrief(ctx.store);
     const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 300;
 
     const clipSec = Math.min(10, Math.max(5, Number(ctx.params["clipSec"] ?? 5)));
