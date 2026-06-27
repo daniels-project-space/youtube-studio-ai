@@ -52,6 +52,7 @@ import {
 } from "@/lib/ffmpeg";
 import { renderTitleCard, renderQuoteOverlay } from "@/lib/remotionRender";
 import { runValidationSpec } from "@/engine/creative/validate";
+import { getVisualBrief, getMusicBrief, getValidationSpec } from "@/engine/creative/brief";
 import { watchRender, nativeWatchRender } from "@/lib/renderWatch";
 import { validateRender } from "@/lib/renderValidate";
 import type { ValidationSpec, ValidationAssertion } from "@/engine/creative/types";
@@ -402,7 +403,7 @@ export const narrationTts: Block = {
     // (crew) brief can set it when the operator didn't pin one.
     const voiceFx =
       (ctx.params["voiceFx"] as string | undefined) ??
-      (ctx.store["musicBrief"] as { audio?: { voiceFx?: string } } | undefined)?.audio?.voiceFx;
+      getMusicBrief(ctx.store)?.audio?.voiceFx;
     const tmp = await makeRunTempDir(ctx.runId);
 
     // CHAPTER MODE â€” speak each section heading as a spoken "chapter card" (the
@@ -699,7 +700,7 @@ export const stockFootage: Block = {
       const w = q.trim().split(/\s+/);
       return w.length <= 6 ? q.trim() : w.filter((x) => !STOP.has(x.toLowerCase())).slice(0, 4).join(" ");
     };
-    const dpQueries = ((ctx.store["visualBrief"] as { footageQueries?: string[] } | undefined)?.footageQueries ?? [])
+    const dpQueries = ((getVisualBrief(ctx.store)?.footageQueries) ?? [])
       .map(compressQuery).filter(Boolean);
     const extras = [topic, ...((script?.sections ?? []).map((sec) => sec.heading ?? "").filter(Boolean)), opt(ctx, "niche") ?? "cinematic background"];
     const built = await buildFootageQueries(brief, nQueries, extras);
@@ -1889,7 +1890,7 @@ export const qaVisual: Block = {
     // judged on the sampled frames. A failed BLOCK-severity assertion fails QA;
     // un-measurable metrics are skipped (never a silent dealbreaker).
     let specOutcome: Awaited<ReturnType<typeof runValidationSpec>> | undefined;
-    const spec = ctx.store["validationSpec"] as ValidationSpec | undefined;
+    const spec = getValidationSpec(ctx.store);
     if (spec?.assertions?.length) {
       const metrics: Record<string, number> = { durationSec: p.durationSec };
       const timings = ctx.store["sentenceTimings"] as { start: number; end: number }[] | undefined;

@@ -31,6 +31,7 @@
  * (and `music.params.durationSec`) — set them to 7200 for a 2h render.
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
 import { PRICE } from "@/engine/pricing";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
@@ -130,7 +131,7 @@ function styleGrammar(ctx: StageContext): string {
   const sg = (ctx.store["styleGrammar"] as string | undefined) ?? "";
   // Cinematographer (crew) brief blends its look + motion language into every
   // keyframe/scene prompt so the visuals match the channel's vibe.
-  const vb = ctx.store["visualBrief"] as { promptStyle?: string; motion?: string } | undefined;
+  const vb = getVisualBrief(ctx.store);
   const extra = [vb?.promptStyle, vb?.motion].map((s) => (s ?? "").trim()).filter(Boolean).join(". ");
   return [sg, extra].filter(Boolean).join(". ");
 }
@@ -382,7 +383,7 @@ export const scenePlanner: Block = {
     // on-brand WORLD descriptor (e.g. "rain-soaked Tokyo street at night");
     // styleGrammar is the channel's synthesized visual descriptor. Either is a
     // far better scene setting than the bare niche label.
-    const vb = ctx.store["visualBrief"] as { setting?: string; world?: string; footageQueries?: string[] } | undefined;
+    const vb = getVisualBrief(ctx.store);
     const settingHint = [
       vb?.setting,
       vb?.world,
@@ -719,7 +720,7 @@ export const music: Block = {
     // Style DNA audio spec (genre/instrumentation/textures/BPM/loop) is the
     // channel's locked SOUND and WINS. Priority: DNA spec > Composer crew brief
     // (per-video nuance, only when there is no DNA) > explicit param > default.
-    const composerPrompt = (ctx.store["musicBrief"] as { musicPrompt?: string } | undefined)?.musicPrompt;
+    const composerPrompt = getMusicBrief(ctx.store)?.musicPrompt;
     const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
     const a = dna?.audio;
     const dnaPrompt = a?.genre?.trim()

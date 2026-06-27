@@ -203,6 +203,11 @@ export interface VisualBrief {
   motion: string;
   /** Visual things to avoid for this channel. */
   avoid: string[];
+  /** Family-specific extras some visual engines add to the brief (all optional). */
+  look?: string;     // gen_footage — establishing look
+  setting?: string;  // lofi — scene setting
+  world?: string;    // lofi — world description
+  header?: string;   // whiteboard — header text
 }
 
 export interface CutSheet {
