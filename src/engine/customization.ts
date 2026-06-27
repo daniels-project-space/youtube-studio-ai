@@ -12,11 +12,13 @@ export type KnobValues = Record<string, KnobValue>;
 
 export interface Knob {
   id: string;
-  type: "enum" | "number" | "boolean";
+  type: "enum" | "number" | "boolean" | "text";
   /** enum options (required when type === "enum"). */
   values?: readonly string[];
   /** [min,max] inclusive (number knobs). */
   range?: readonly [number, number];
+  /** max characters (text knobs); omit for unbounded. */
+  maxLength?: number;
   default: KnobValue;
   /** Human- + LLM-readable description of what it controls. */
   describes: string;
@@ -51,6 +53,9 @@ function checkKnob(k: Knob, v: KnobValue): string | null {
     if (k.range && (v < k.range[0] || v > k.range[1])) return `${k.id}: ${v} out of range [${k.range[0]},${k.range[1]}]`;
   } else if (k.type === "boolean") {
     if (typeof v !== "boolean") return `${k.id}: not a boolean`;
+  } else if (k.type === "text") {
+    if (typeof v !== "string") return `${k.id}: not a string`;
+    if (k.maxLength != null && v.length > k.maxLength) return `${k.id}: exceeds ${k.maxLength} chars`;
   }
   return null;
 }
