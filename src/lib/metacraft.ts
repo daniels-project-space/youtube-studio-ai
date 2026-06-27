@@ -113,7 +113,7 @@ function numberVariants(tok: string): string[] {
     if (n % 100) v.add(`${ones[Math.floor(n / 100)]} ${small(n % 100)}`); // "four seventy-six"
   }
   if (n >= 1000 && n < 10000) {
-    const h = Math.floor(n / 100) % 10 === 0 ? null : `${small(Math.floor(n / 100))} ${small(n % 100) || "hundred"}`;
+    const h = Math.floor(n / 100) % 10 === 0 ? null : `${small(Math.floor(n / 100))}${n % 100 ? ` ${small(n % 100)}` : " hundred"}`;
     if (h) v.add(h); // "fifteen eighteen"
     v.add(`${small(Math.floor(n / 1000))} thousand${n % 1000 ? ` ${small(n % 1000)}` : ""}`);
   }

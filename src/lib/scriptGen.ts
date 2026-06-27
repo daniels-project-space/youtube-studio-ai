@@ -618,15 +618,17 @@ export async function translateScript(
   if (!language || language === "en" || !hasGeminiKey()) return script;
   const name = LANG_NAMES[language] ?? language;
   log(`scriptGen: translating ${script.sections.length}-section script → ${name}`);
-  const hook = await translateText(script.hook, name, log);
-  const sections: ScriptSection[] = [];
-  for (const s of script.sections) {
-    sections.push({
-      heading: await translateText(s.heading, name, log),
-      narration: await translateText(s.narration, name, log),
-    });
-  }
-  const closingLine = script.closingLine ? await translateText(script.closingLine, name, log) : undefined;
+  // Translations are independent → run concurrently; Promise.all + map preserve order.
+  const [hook, sections, closingLine] = await Promise.all([
+    translateText(script.hook, name, log),
+    Promise.all(
+      script.sections.map(async (s): Promise<ScriptSection> => ({
+        heading: await translateText(s.heading, name, log),
+        narration: await translateText(s.narration, name, log),
+      })),
+    ),
+    script.closingLine ? translateText(script.closingLine, name, log) : Promise.resolve(undefined),
+  ]);
   const narrationText = assemble(hook, sections);
   return { hook, sections, narrationText, estDurationSec: estSeconds(narrationText), closingLine };
 }

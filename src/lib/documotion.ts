@@ -572,18 +572,21 @@ export async function generateDocuAssets(
 
   // depth_parallax: derive the near 2.5D layer from each scene's base image and
   // append it (after the base) so buildShotSpecs orders [base, near]. Cached.
-  for (const [i, shot] of plan.shots.entries()) {
-    if (shot.kind !== "depth_parallax") continue;
-    const baseFile = out.find((a) => a.shotIdx === i && a.role === "image");
-    if (!baseFile) continue;
+  // Each shot's derivation is independent (own base image, own files, no ordering
+  // dependency — consumers find by shotIdx+role), so derive them concurrently.
+  const depthJobs = plan.shots
+    .map((shot, i) => ({ shot, i, base: out.find((a) => a.shotIdx === i && a.role === "image") }))
+    .filter((j) => j.shot.kind === "depth_parallax" && j.base);
+  const depthAdds = await pool(depthJobs, ASSET_CONCURRENCY, async ({ i, base }) => {
+    const baseFile = base!;
     const nearPath = join(assetsDir, `s${i}_near.png`);
     if (existsSync(nearPath) && !fixNotes?.[`${i}:${baseFile.id}`]) {
-      out.push({ shotIdx: i, id: `${baseFile.id}_near`, role: "image", path: nearPath });
-      continue;
+      return [{ shotIdx: i, id: `${baseFile.id}_near`, role: "image" as const, path: nearPath }];
     }
     const layers = await deriveDepthLayers(baseFile.path, assetsDir, i, log);
-    for (const p of layers) out.push({ shotIdx: i, id: `${baseFile.id}_near`, role: "image", path: p });
-  }
+    return layers.map((p) => ({ shotIdx: i, id: `${baseFile.id}_near`, role: "image" as const, path: p }));
+  });
+  for (const adds of depthAdds) for (const a of adds) out.push(a);
 
   log?.(`documotion assets: ${out.length} ready`);
   return out;
