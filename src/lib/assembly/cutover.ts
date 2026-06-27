@@ -25,6 +25,7 @@
 import type { ChannelProfile } from "@/engine/channelProfile";
 import type { QuoteOverlaySpec } from "@/lib/ffmpeg";
 import { resolveEditorConfig, editorDirectives } from "@/lib/crew/editor";
+import { getCutSheet } from "@/engine/creative/brief";
 import { createFfmpegBackend } from "./ffmpegBackend";
 import { detectNarrationSilence } from "./silenceProbe";
 import {
@@ -111,9 +112,7 @@ export function buildPlanInput(store: StoreBag, _params: ParamsBag = {}): PlanIn
   const sentenceTimings = (store["sentenceTimings"] as { end: number }[] | undefined)?.map((s) => ({
     end: s.end,
   }));
-  const cutSheet = store["cutSheet"] as
-    | { sections?: { name?: string; cutsPerMin: number }[] }
-    | undefined;
+  const cutSheet = getCutSheet(store);
   const chapterPlan = store["chapterPlan"] as
     | { kind: "footage" | "card"; durSec: number; heading?: string }[]
     | undefined;

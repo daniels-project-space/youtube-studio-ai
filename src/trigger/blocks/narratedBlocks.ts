@@ -52,7 +52,7 @@ import {
 } from "@/lib/ffmpeg";
 import { renderTitleCard, renderQuoteOverlay } from "@/lib/remotionRender";
 import { runValidationSpec } from "@/engine/creative/validate";
-import { getVisualBrief, getMusicBrief, getValidationSpec } from "@/engine/creative/brief";
+import { getVisualBrief, getMusicBrief, getValidationSpec, getStructure, getCutSheet } from "@/engine/creative/brief";
 import { watchRender, nativeWatchRender } from "@/lib/renderWatch";
 import { validateRender } from "@/lib/renderValidate";
 import type { ValidationSpec, ValidationAssertion } from "@/engine/creative/types";
@@ -182,9 +182,7 @@ export const scriptGen: Block = {
       // The channel has a data-viz insert layer â€” the script must speak the
       // numbers the inserts will render.
       dataRich: ctx.params["dataRich"] as boolean | undefined,
-      structure: ctx.store["structure"] as
-        | { hook?: string; beats?: { name: string; note?: string }[] }
-        | undefined,
+      structure: getStructure(ctx.store),
       // The channel's locked narrative register (Style DNA) â€” outranks the
       // generic archetype tone in the prompt.
       narrative: (ctx.store["styleDNA"] as
@@ -657,7 +655,7 @@ export const stockFootage: Block = {
     // whole footage sequence to fill the video.
     const bodyMaxSeg = bodySegSeconds(
       narrationSec,
-      ctx.store["cutSheet"] as { sections?: { name?: string; cutsPerMin: number }[] } | undefined,
+      getCutSheet(ctx.store),
     );
     const PER_CLIP = bodyMaxSeg;
     // Size the query count assuming clips are OFTEN SHORTER than the cap, so we
@@ -1281,9 +1279,7 @@ export const timelineAssemble: Block = {
     // channel cut at 6 cuts/min gets ~10s segments, a contemplative one at
     // 2 cuts/min holds shots ~30s. Same shared calc as stock_footage's
     // coverage credit so the pool always covers the body at this cadence.
-    const cutSheet = ctx.store["cutSheet"] as
-      | { sections?: { name: string; cutsPerMin: number }[] }
-      | undefined;
+    const cutSheet = getCutSheet(ctx.store);
     const bodyMaxSeg = bodySegSeconds(narrationSec, cutSheet);
     ctx.log(`timeline_assemble: per-clip screen time ${bodyMaxSeg}s${cutSheet?.sections?.length ? " (editor cutSheet cadence)" : ""}`);
 
