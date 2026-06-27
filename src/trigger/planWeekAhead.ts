@@ -14,6 +14,8 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix, putObject } from "@/lib/storage";
 import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { optimizeTopics } from "@/lib/topicOptimizer";
+import { loadLedger } from "@/lib/performance";
+import { detectFollowups, type FollowupCandidate } from "@/lib/followups";
 import { buildThumbBrief, bananaThumbnail, hasBanana } from "@/lib/banana";
 import {
   resolveThumbnailStyle,
@@ -56,27 +58,52 @@ export const planWeekAheadTask = task({
       resolveThumbnailStyle((channel as { template?: string }).template);
     log(`thumbnail style source: ${style.label === "Style DNA" ? "Style DNA" : `template preset (${style.label})`}`);
 
-    // 1) fresh topics via the reusable optimizer (competitor + analytics + SEO +
-    // done-topics, all within channel identity). Avoids the current plan too.
     const existing = await convex.query(api.contentPlan.listPlan, { ownerId, channelId });
-    const optimized = await optimizeTopics({
-      convex,
-      ownerId,
-      channelId,
-      keyPrefix: channelPrefix(ownerId, channel.slug),
-      count,
-      identity: {
-        niche,
-        persona,
-        topicPool: channel.identity?.topicPool,
-        bannedWords: channel.identity?.bannedWords,
-        requiredCallbacks: channel.identity?.requiredCallbacks,
-      },
-      channelName,
-      alsoAvoid: existing.map((r) => r.topic),
-      log,
-    });
-    const topics = optimized.map((o) => o.topic);
+    const keyPrefix = channelPrefix(ownerId, channel.slug);
+
+    // 1a) PERFORMANCE FOLLOW-UPS — turn the channel's OWN over-performers into
+    // scheduled sequels before filling the rest with fresh topics. detectFollowups
+    // flags winners (views vs the channel's normal baseline; a cluster = a
+    // replicable format); each yields a concrete follow-up topic grounded in the
+    // winner. Capped at ~1/3 of the plan so fresh topics still dominate.
+    const followups = detectFollowups(await loadLedger(keyPrefix));
+    const quota = followups.length ? Math.min(followups.length, Math.max(1, Math.round(count / 3))) : 0;
+    const followupTopics: string[] = [];
+    for (const fu of followups.slice(0, quota)) {
+      const t = hasGeminiKey() ? await followupTopic(fu, { niche, channelName }, log) : null;
+      if (t) {
+        followupTopics.push(t);
+        log(`follow-up of ${fu.outlierScore}x winner "${fu.fromTitle.slice(0, 40)}" → "${t.slice(0, 50)}"`);
+      }
+    }
+
+    // 1b) fresh topics via the reusable optimizer (competitor + analytics + SEO +
+    // done-topics, all within channel identity). Avoids the current plan AND the
+    // follow-ups just chosen; freshCount backfills any follow-up that didn't resolve.
+    const freshCount = Math.max(0, count - followupTopics.length);
+    const optimized = freshCount
+      ? await optimizeTopics({
+          convex,
+          ownerId,
+          channelId,
+          keyPrefix,
+          count: freshCount,
+          identity: {
+            niche,
+            persona,
+            topicPool: channel.identity?.topicPool,
+            bannedWords: channel.identity?.bannedWords,
+            requiredCallbacks: channel.identity?.requiredCallbacks,
+          },
+          channelName,
+          alsoAvoid: [...existing.map((r) => r.topic), ...followupTopics],
+          log,
+        })
+      : [];
+    // Follow-ups lead the plan (capitalise on a winner fast), then fresh topics.
+    // `bets` aligns with `topics` by index; follow-ups carry no topicraft bet.
+    const topics = [...followupTopics, ...optimized.map((o) => o.topic)];
+    const bets = [...followupTopics.map(() => undefined), ...optimized];
     if (topics.length === 0) throw new Error("plan-week-ahead: no topics");
 
     const ids = await convex.mutation(api.contentPlan.addItems, { ownerId, channelId, topics });
@@ -90,7 +117,7 @@ export const planWeekAheadTask = task({
     // promise unit the judge gated).
     for (let i = 0; i < topics.length; i++) {
       const topic = topics[i];
-      const bet = optimized[i];
+      const bet = bets[i];
       const id = ids[i] as Id<"contentPlan">;
       let title = bet?.title?.trim() || topic;
       let description = "";
@@ -129,6 +156,35 @@ export const planWeekAheadTask = task({
     return { ok: true, planned: topics.length };
   },
 });
+
+/**
+ * Turn a flagged over-performer into ONE concrete follow-up topic, grounded in the
+ * winner and its seed direction. Returns null on any failure — the caller's
+ * freshCount then backfills that slot with a normal optimized topic, so a weak
+ * follow-up is never forced into the plan.
+ */
+async function followupTopic(
+  fu: FollowupCandidate,
+  ctx: { niche: string; channelName: string },
+  log: (m: string) => void,
+): Promise<string | null> {
+  try {
+    const out = await geminiJson<{ topic?: string }>({
+      prompt:
+        `On the ${ctx.niche || "YouTube"} channel "${ctx.channelName}", this video over-performed: ` +
+        `"${fu.fromTitle}" (topic: ${fu.fromTopic}). DIRECTION: ${fu.seed}\n` +
+        `Propose ONE concrete NEW video topic that follows up on it — a distinct subject, NOT a re-upload, ` +
+        `staying firmly in the channel's lane. Return STRICT JSON {"topic":"<a specific topic line>"}.`,
+      maxTokens: 200,
+      temperature: 0.8,
+    });
+    const t = out.topic?.trim();
+    return t && t.length > 3 ? t : null;
+  } catch (e) {
+    log(`follow-up topic gen failed for "${fu.fromTitle.slice(0, 30)}": ${e instanceof Error ? e.message : e}`);
+    return null;
+  }
+}
 
 /**
  * One plan thumbnail through the banana engine: a Gemini concept pass turns the
