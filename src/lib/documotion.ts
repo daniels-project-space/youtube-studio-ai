@@ -40,6 +40,8 @@ import { generateBananaImage, bananaTypeCard } from "@/lib/banana";
 import { getDepthMap } from "@/lib/depth";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
+import { synthNarration } from "@/lib/tts";
+import { generateMusic } from "@/lib/music";
 import { renderDocuMotion, renderDocuStills } from "@/lib/remotionRender";
 import {
   getStyle,
@@ -88,6 +90,66 @@ async function run(cmd: string, cmdArgs: string[]): Promise<void> {
 }
 
 const ffmpegBin = () => process.env.FFMPEG_BIN || "ffmpeg";
+
+/** Like run() but returns combined stdout+stderr — for probes (volumedetect). */
+async function runCapture(cmd: string, cmdArgs: string[]): Promise<string> {
+  return new Promise((resolve) => {
+    const p = spawn(cmd, cmdArgs, { stdio: ["ignore", "pipe", "pipe"] });
+    let out = "";
+    p.stdout.on("data", (d) => (out += String(d)));
+    p.stderr.on("data", (d) => (out += String(d)));
+    p.on("close", () => resolve(out));
+    p.on("error", () => resolve(out));
+  });
+}
+
+/**
+ * NARRATE + SCORE — a documentary speaks. The render is visual-only, so here we
+ * voice the plan's per-shot narration (the script is already written) and bed it
+ * under a ducked music track, capped to the video length. Best-effort music
+ * (VO-only if it's unavailable). Returns the new audio-video path.
+ */
+async function narrateAndScore(o: {
+  videoPath: string; plan: DocuPlan; runDir: string; durationSec: number; niche?: string; log: Logger;
+}): Promise<string> {
+  const script = o.plan.shots.map((s) => s.narration?.trim()).filter(Boolean).join(" ");
+  if (!script) { o.log("documotion narrate: plan carries no narration — leaving silent"); return o.videoPath; }
+  const narrPath = join(o.runDir, "narration.mp3");
+  const vo = await synthNarration({ text: script, niche: o.niche });
+  await writeFile(narrPath, Buffer.from(vo));
+  o.log(`documotion narrate: VO ~${Math.round(Buffer.from(vo).length / 16000)}s (${script.split(/\s+/).filter(Boolean).length} words)`);
+
+  let music = false;
+  const musPath = join(o.runDir, "music.mp3");
+  try {
+    const m = await generateMusic({
+      prompt: "cinematic documentary underscore — restrained strings and soft piano, slow build, tension and wonder, NO drums, fully instrumental",
+      title: o.plan.title,
+    });
+    if (m.url) { await downloadTo(m.url, musPath); music = true; }
+  } catch (e) { o.log(`documotion narrate: music unavailable (${e instanceof Error ? e.message : e}) — VO only`); }
+
+  const out = o.videoPath.replace(/\.mp4$/i, "_av.mp4");
+  const inputs = music
+    ? ["-i", o.videoPath, "-i", narrPath, "-stream_loop", "-1", "-i", musPath]
+    : ["-i", o.videoPath, "-i", narrPath];
+  const filt = music
+    ? "[2:a]volume=0.5[mus];[mus][1:a]sidechaincompress=threshold=0.04:ratio=6:attack=5:release=400[duck];[1:a][duck]amix=inputs=2:duration=longest:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=11[a]"
+    : "[1:a]loudnorm=I=-14:TP=-1.5:LRA=11[a]";
+  await run(ffmpegBin(), ["-y", ...inputs, "-filter_complex", filt, "-map", "0:v", "-map", "[a]", "-t", String(o.durationSec + 2), "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", out]);
+  o.log(`documotion narrate: muxed ${music ? "VO + ducked music" : "VO"} → ${out}`);
+  return out;
+}
+
+/** OUTPUT VALIDATION — the verifier is vision-only; this fails a SILENT video. */
+async function validateAudio(videoPath: string, log: Logger): Promise<{ audioOk: boolean; meanVolumeDb: number }> {
+  const probe = await runCapture(ffmpegBin(), ["-i", videoPath, "-af", "volumedetect", "-f", "null", "-"]);
+  const m = probe.match(/mean_volume:\s*(-?\d+(?:\.\d+)?) dB/);
+  const meanVolumeDb = m ? parseFloat(m[1]) : -91;
+  const audioOk = meanVolumeDb > -50; // -91 / no audio stream ≈ silent
+  log(`documotion VALIDATE: audio mean ${meanVolumeDb} dB → ${audioOk ? "OK" : "FAIL (silent / no narration)"}`);
+  return { audioOk, meanVolumeDb };
+}
 
 /* ------------------------------------------------------------------ plan -- */
 
@@ -678,6 +740,9 @@ export interface DocuVerdict {
   cohesion?: number;
   pass?: boolean;
   actions?: RefineAction[];
+  /** Output validation: does the finished video carry audible narration/music? */
+  audioOk?: boolean;
+  meanVolumeDb?: number;
   note?: string;
 }
 
@@ -849,6 +914,9 @@ export interface CraftDocuArgs {
   maxRefineRounds?: number;
   /** Final render parallelism (default cores-2 on the host). */
   concurrency?: number;
+  /** Voice the plan narration + bed ducked music into the final video, and
+   *  validate the result actually carries audio. Default ON (a documentary speaks). */
+  narrate?: boolean;
   log?: Logger;
 }
 
@@ -958,5 +1026,18 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     log,
   });
   log(`documotion: final rendered ${outPath}`);
-  return { outPath, plan, verdict, rounds };
+
+  // 5. NARRATION + MUSIC + OUTPUT VALIDATION — a documentary must speak. The render
+  //    is visual-only and the verifier is FRAME-ONLY, so without this a silent doc
+  //    would pass. Voice the plan narration, bed ducked music, then VALIDATE the
+  //    finished file actually carries audible audio (fail loudly if it doesn't).
+  let deliverPath = outPath;
+  if (args.narrate !== false) {
+    deliverPath = await narrateAndScore({ videoPath: outPath, plan, runDir, durationSec, niche: style.label, log });
+  }
+  const audio = await validateAudio(deliverPath, log);
+  if (args.narrate !== false && !audio.audioOk) {
+    throw new Error(`documotion: OUTPUT VALIDATION FAILED — finished documentary has no audible narration/music (mean ${audio.meanVolumeDb} dB). A documentary must speak.`);
+  }
+  return { outPath: deliverPath, plan, verdict: { ...verdict, audioOk: audio.audioOk, meanVolumeDb: audio.meanVolumeDb }, rounds };
 }
