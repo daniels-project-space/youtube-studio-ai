@@ -30,6 +30,7 @@ import { spawn } from "node:child_process";
 import { geminiJsonPro, geminiVisionLocal } from "@/lib/gemini";
 import { generateBananaImage } from "@/lib/banana";
 import { generateMusic } from "@/lib/music";
+import { ffprobeDuration } from "@/lib/ffmpeg";
 
 type Logger = (msg: string) => void;
 
@@ -150,9 +151,8 @@ function run(cmd: string, args: string[], log: Logger, capture = false): Promise
   });
 }
 
-async function probeDur(file: string, log: Logger): Promise<number> {
-  const s = await run("ffprobe", ["-v", "error", "-show_entries", "format=duration", "-of", "default=noprint_wrappers=1:nokey=1", file], log, true);
-  return Math.max(0.4, parseFloat(s) || 1);
+async function probeDur(file: string): Promise<number> {
+  return Math.max(0.4, (await ffprobeDuration(file)) || 1);
 }
 
 async function genImage(prompt: string, refs: string[]): Promise<Buffer> {
@@ -303,7 +303,7 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
         try { await writeFile(lf, await elevenDialogue([{ text: lines[k].text.trim(), voice_id: voiceOf(lines[k].speaker) }])); }
         catch (e) { log(`voice ${i}.${k} FAILED: ${e instanceof Error ? e.message : e}`); continue; }
       }
-      const d = await probeDur(lf, log);
+      const d = await probeDur(lf);
       if (lines[k].speaker !== "narrator") {
         const a = vision[i]?.anchors[lines[k].speaker];
         bubbles.push({ text: stripTags(lines[k].text), at: off, mouth: a?.mouth, anchor: a?.anchor });
