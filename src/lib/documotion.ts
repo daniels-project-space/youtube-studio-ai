@@ -119,6 +119,16 @@ const NARR = {
   speed: 0.95, // documentary gravitas (< 1 = slower delivery)
 };
 
+// BROADCAST MIX targets. Dialogue is the ANCHOR (loudest, most consistent); the
+// music BED sits well under it and ducks gently. The previous mix shipped music
+// LOUDER than the voice (−14 vs −20 LUFS) → narration buried. These lock the
+// relationship: voice ~−16 LUFS, bed ~−30 LUFS (≈14 dB under), gentle slow duck.
+const MIX = {
+  voLufs: -16, // dialogue anchor
+  bedLufs: -30, // music bed, ~14 dB under dialogue
+  minDialogueLeadDb: 8, // output gate: VO windows must beat music-only gaps by ≥ this
+};
+
 interface ShotVO {
   idx: number;
   path: string;
@@ -204,6 +214,7 @@ async function assembleNarration(o: {
     if (m.url) { musPath = join(o.runDir, "music.mp3"); await downloadTo(m.url, musPath); o.log(`documotion narrate: music bed via ${m.provider}`); }
   } catch (e) { o.log(`documotion narrate: music unavailable (${e instanceof Error ? e.message : e}) — VO only`); }
 
+  // ---- BROADCAST MIX: dialogue is the ANCHOR, music a quiet bed under it ----
   // input 0 = video; inputs 1..N = shot VOs; input N+1 = music (looped)
   const inputs: string[] = ["-i", o.videoPath];
   o.shotVOs.forEach((v) => inputs.push("-i", v.path));
@@ -212,28 +223,52 @@ async function assembleNarration(o: {
     const delayMs = Math.round((starts[v.idx] + NARR.lead) * 1000);
     parts.push(`[${k + 1}:a]adelay=${delayMs}:all=1[v${k}]`);
   });
-  parts.push(`${o.shotVOs.map((_, k) => `[v${k}]`).join("")}amix=inputs=${o.shotVOs.length}:normalize=0:duration=longest[vo]`);
+  // VO bus → normalize to the DIALOGUE target so narration is consistently the
+  // loudest, most intelligible element (it was −20 LUFS raw → buried).
+  parts.push(`${o.shotVOs.map((_, k) => `[v${k}]`).join("")}amix=inputs=${o.shotVOs.length}:normalize=0:duration=longest[vomix]`);
+  parts.push(`[vomix]loudnorm=I=${MIX.voLufs}:TP=-2:LRA=7[vo]`);
   let outChain = "[vo]";
   if (musPath) {
     inputs.push("-stream_loop", "-1", "-i", musPath);
     const mIdx = o.shotVOs.length + 1;
-    parts.push(`[${mIdx}:a]volume=0.42[mus]`);
-    parts.push(`[mus][vo]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=320[duck]`);
-    parts.push(`[vo][duck]amix=inputs=2:normalize=0:duration=first[mix]`);
+    // Music → bed level (≈14 dB under dialogue), then GENTLE sidechain duck keyed
+    // off the voice (slow release = no pumping). asplit so the VO feeds both the
+    // sidechain key and the final mix (a label can only be consumed once).
+    parts.push(`[vo]asplit=2[vomain][vokey]`);
+    parts.push(`[${mIdx}:a]loudnorm=I=${MIX.bedLufs}:TP=-9:LRA=6[mbed]`);
+    parts.push(`[mbed][vokey]sidechaincompress=threshold=0.05:ratio=4:attack=80:release=700:detection=rms[mduck]`);
+    parts.push(`[vomain][mduck]amix=inputs=2:normalize=0:duration=first[mix]`);
     outChain = "[mix]";
   }
+  // final broadcast loudness + true-peak ceiling (uniform gain → preserves the
+  // dialogue-to-bed RATIO established above).
   parts.push(`${outChain}loudnorm=I=-14:TP=-1.5:LRA=11[a]`);
 
   const out = o.videoPath.replace(/\.mp4$/i, "_av.mp4");
   await run(ffmpegBin(), ["-y", ...inputs, "-filter_complex", parts.join(";"), "-map", "0:v", "-map", "[a]", "-t", totalSec.toFixed(3), "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", out]);
-  o.log(`documotion narrate: muxed ${musPath ? "VO + ducked music" : "VO"} aligned over ${totalSec.toFixed(1)}s → ${out}`);
+  o.log(`documotion narrate: muxed ${musPath ? "VO + ducked music bed" : "VO"} aligned over ${totalSec.toFixed(1)}s → ${out}`);
   return out;
 }
 
-/** OUTPUT VALIDATION — the verifier is VISION-only. This fails a video whose
- *  audio is silent OR doesn't COVER the timeline (the "narration stops halfway"
- *  bug): measures mean level, total speech coverage, and any long trailing gap. */
-async function validateAudioCoverage(videoPath: string, expectSec: number, log: Logger): Promise<{ audioOk: boolean; meanVolumeDb: number; coverage: number }> {
+/** Mean dBFS of one time-window of a file's audio. */
+async function windowDb(videoPath: string, startSec: number, durSec: number): Promise<number> {
+  const probe = await runCapture(ffmpegBin(), ["-ss", startSec.toFixed(2), "-t", durSec.toFixed(2), "-i", videoPath, "-af", "volumedetect", "-f", "null", "-"]);
+  const m = probe.match(/mean_volume:\s*(-?\d+(?:\.\d+)?) dB/);
+  return m ? parseFloat(m[1]) : -91;
+}
+
+/** OUTPUT VALIDATION — the verifier is VISION-only, so the audio must police
+ *  itself. The old check only proved "sound exists across the timeline", which a
+ *  loud music bed satisfies even when the NARRATION is buried (the bug that
+ *  shipped). This now also measures DIALOGUE DOMINANCE: a voice window must beat
+ *  a music-only gap window by ≥ minDialogueLeadDb, i.e. the narration is actually
+ *  the foreground. Fails on: silence, poor coverage, trailing gap, OR a buried VO. */
+async function validateAudioCoverage(
+  videoPath: string,
+  expectSec: number,
+  log: Logger,
+  dominance?: { voStartSec: number; gapStartSec: number; hasMusic: boolean },
+): Promise<{ audioOk: boolean; meanVolumeDb: number; coverage: number; dialogueLeadDb: number | null }> {
   const probe = await runCapture(ffmpegBin(), ["-i", videoPath, "-af", "silencedetect=noise=-45dB:d=0.8,volumedetect", "-f", "null", "-"]);
   const mm = probe.match(/mean_volume:\s*(-?\d+(?:\.\d+)?) dB/);
   const meanVolumeDb = mm ? parseFloat(mm[1]) : -91;
@@ -248,9 +283,25 @@ async function validateAudioCoverage(videoPath: string, expectSec: number, log: 
   }
   if (lastStart !== null) { trailing = Math.max(0, expectSec - lastStart); silence += trailing; } // ran to EOF
   const coverage = expectSec > 0 ? Math.max(0, 1 - silence / expectSec) : 0;
-  const audioOk = meanVolumeDb > -50 && coverage >= 0.6 && trailing < expectSec * 0.15;
-  log(`documotion VALIDATE: mean ${meanVolumeDb} dB, coverage ${(coverage * 100).toFixed(0)}%, trailing-gap ${trailing.toFixed(1)}s → ${audioOk ? "OK" : "FAIL"}`);
-  return { audioOk, meanVolumeDb, coverage };
+
+  // DIALOGUE DOMINANCE — only meaningful when a music bed is present (else a quiet
+  // gap is genuine silence, not competing music).
+  let dialogueLeadDb: number | null = null;
+  if (dominance?.hasMusic) {
+    const [voDb, gapDb] = await Promise.all([
+      windowDb(videoPath, dominance.voStartSec, 1.2),
+      windowDb(videoPath, dominance.gapStartSec, 0.35),
+    ]);
+    dialogueLeadDb = voDb - gapDb;
+  }
+
+  const dominanceOk = dialogueLeadDb === null || dialogueLeadDb >= MIX.minDialogueLeadDb;
+  const audioOk = meanVolumeDb > -50 && coverage >= 0.6 && trailing < expectSec * 0.15 && dominanceOk;
+  log(
+    `documotion VALIDATE: mean ${meanVolumeDb} dB, coverage ${(coverage * 100).toFixed(0)}%, trailing-gap ${trailing.toFixed(1)}s` +
+      `${dialogueLeadDb !== null ? `, dialogue-lead ${dialogueLeadDb.toFixed(1)} dB (need ≥${MIX.minDialogueLeadDb})` : ""} → ${audioOk ? "OK" : "FAIL"}`,
+  );
+  return { audioOk, meanVolumeDb, coverage, dialogueLeadDb };
 }
 
 /* ------------------------------------------------------------------ plan -- */
@@ -920,7 +971,11 @@ export async function verifyDocu(args: {
     model: "gemini-3.1-pro-preview",
     maxTokens: 6000,
   }).catch(() => "");
-  const v: DocuVerdict = raw ? parseJsonLoose<DocuVerdict>(raw) : {};
+  let v: DocuVerdict = {};
+  if (raw) {
+    try { v = parseJsonLoose<DocuVerdict>(raw); }
+    catch { args.log?.("documotion verify: unparseable verdict JSON — treating as unsatisfied (honest verdict)"); }
+  }
   // HARD legibility gate — overlapping text must never ship silently. Recompute
   // pass from all six craft scores so a generous model-assigned pass can't mask
   // a text collision (the failure mode that let a stale render go out).
@@ -1150,18 +1205,24 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   });
   log(`documotion: final rendered ${outPath}`);
 
-  // 6. ALIGN VO + MUSIC + VALIDATE COVERAGE — bed the per-shot VOs back on the
-  //    render (picture matches the words), duck music across the whole length,
-  //    then FAIL if the audio doesn't COVER the timeline (not just "has sound").
+  // 6. ALIGN VO + MUSIC + VALIDATE — bed the per-shot VOs back on the render
+  //    (picture matches the words), duck a quiet music bed under them, then FAIL
+  //    unless the audio COVERS the timeline AND the narration DOMINATES the bed.
   let deliverPath = outPath;
-  let audio = { audioOk: true, meanVolumeDb: 0, coverage: 1 };
+  let audio: { audioOk: boolean; meanVolumeDb: number; coverage: number; dialogueLeadDb: number | null } = { audioOk: true, meanVolumeDb: 0, coverage: 1, dialogueLeadDb: null };
   if (args.narrate !== false && shotVOs.length && fixedDursSec) {
+    const hadMusic = Boolean(process.env.SUNO_API_KEY || process.env.MUREKA_API_KEY);
     deliverPath = await assembleNarration({ videoPath: outPath, runDir, shotVOs, shotDursSec: fixedDursSec, plan, log });
-    const totalSec = fixedDursSec.reduce((a, d) => a + Math.round(d * FPS) / FPS, 0);
-    audio = await validateAudioCoverage(deliverPath, totalSec, log);
+    const rendered = fixedDursSec.map((d) => Math.round(d * FPS) / FPS);
+    const totalSec = rendered.reduce((a, d) => a + d, 0);
+    // sample a VO window (inside shot 0's line) and a music-only GAP window (shot 0's tail breath)
+    const vo0 = shotVOs[0].durSec;
+    const dominance = { voStartSec: NARR.lead + 0.6, gapStartSec: NARR.lead + vo0 + 0.15, hasMusic: hadMusic };
+    audio = await validateAudioCoverage(deliverPath, totalSec, log, dominance);
     if (!audio.audioOk) {
+      const buried = audio.dialogueLeadDb !== null && audio.dialogueLeadDb < MIX.minDialogueLeadDb;
       throw new Error(
-        `documotion: OUTPUT VALIDATION FAILED — narration does not COVER the video (mean ${audio.meanVolumeDb} dB, coverage ${(audio.coverage * 100).toFixed(0)}%). A documentary must speak throughout.`,
+        `documotion: OUTPUT VALIDATION FAILED — ${buried ? `narration is BURIED under the music (dialogue lead only ${audio.dialogueLeadDb?.toFixed(1)} dB, need ≥${MIX.minDialogueLeadDb})` : `audio does not cover the video (mean ${audio.meanVolumeDb} dB, coverage ${(audio.coverage * 100).toFixed(0)}%)`}. The narration must be the clear foreground throughout.`,
       );
     }
   }
