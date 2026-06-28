@@ -11,6 +11,9 @@
  */
 import { selectModule, getModule, moduleTool, type FormatInput, type ModuleResult } from "./formatTools";
 import { keyStatus, missingForModules } from "./keyRegistry";
+import { resolveRubric, type ChannelQualitySpec } from "@/lib/quality/rubric";
+import { verifyAndHeal } from "@/lib/quality/verifyHeal";
+import type { QualityReport } from "@/lib/quality/assess";
 
 /** Which module file backs each format engine — so the preflight can report the
  *  exact keys that engine needs (the orchestrator knows what to get). */
@@ -51,12 +54,21 @@ export interface OrchestrateArgs {
   outPath: string;
   style?: string;
   durationSec?: number;
+  /** Per-channel rubric overrides (the channel's quality bar) — merged over the
+   *  format default, which is anchored to the golden example. */
+  qualityOverrides?: Partial<ChannelQualitySpec>;
+  /** Skip the verify-and-heal ship gate (e.g. for a quick draft). Default OFF. */
+  skipQualityGate?: boolean;
   log?: (m: string) => void;
 }
 
 export interface OrchestrateResult extends ModuleResult {
   plan: VideoPlan;
   topic: string;
+  /** The quality report from the ship gate (when run). */
+  quality?: QualityReport;
+  /** Did the output clear the channel's hard quality gates? */
+  shipReady?: boolean;
 }
 
 /**
@@ -110,5 +122,13 @@ export async function orchestrateVideo(args: OrchestrateArgs): Promise<Orchestra
   const res = await tool.execute(input);
   log(`orchestrator: done → ${res.videoPath}`);
 
-  return { plan, topic, ...res };
+  // 3) SHIP GATE — verify the produced video against the channel's quality bar
+  //    (anchored to the golden example for this format) and heal/flag. Nothing
+  //    ships below the bar silently.
+  if (args.skipQualityGate) return { plan, topic, ...res, shipReady: true };
+  const spec = resolveRubric(engine.id, args.qualityOverrides);
+  const script = typeof res.meta?.script === "string" ? (res.meta.script as string) : undefined;
+  const vh = await verifyAndHeal({ videoPath: res.videoPath, script, spec, framesDir: `${args.runDir}/qa-frames`, log });
+  if (!vh.shipped) log(`orchestrator: ⚠ OUTPUT FLAGGED — not ship-ready (blocked on ${vh.report.blocking.join(", ")}). See quality report.`);
+  return { plan, topic, ...res, videoPath: vh.videoPath, quality: vh.report, shipReady: vh.shipped };
 }
