@@ -339,6 +339,10 @@ export interface DocuShotPlan {
   threads?: DocuThread[];
   /** geo_map: the real place to render (e.g. "Antwerp, Belgium"). */
   geoQuery?: string;
+  /** geo_map: orienting CONTEXT labels — the surrounding bodies/regions that place
+   *  the feature ("MEDITERRANEAN SEA" top, "RED SEA" bottom, …) so the viewer sees
+   *  WHERE it is and what it connects, in relation to the narration. */
+  geoContext?: { label: string; side: "top" | "bottom" | "left" | "right" }[];
   /** depth_parallax: a cinematic focus pull between near + far planes. */
   rackFocus?: "near_to_far" | "far_to_near";
   assets: DocuAssetBrief[];
@@ -606,16 +610,21 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
     })
     .join("\n");
   try {
+    const geoShots = plan.shots.map((s, i) => ({ s, i })).filter((x) => x.s.kind === "geo_map");
     const res = await geminiJsonPro<{
-      shots?: { i: number; assets?: { id: string; brief?: string; source?: "generate" | "archival"; query?: string }[]; title?: string; kicker?: string; circleLabel?: string; labels?: { text: string; sub?: string }[]; annotations?: string[]; cues?: string[] }[];
+      shots?: { i: number; assets?: { id: string; brief?: string; source?: "generate" | "archival"; query?: string }[]; title?: string; kicker?: string; circleLabel?: string; labels?: { text: string; sub?: string }[]; annotations?: string[]; cues?: string[]; geoContext?: { label: string; side: "top" | "bottom" | "left" | "right" }[] }[];
     }>({
       prompt:
         `${CINEMATOGRAPHER_DOCTRINE}\n\n` +
         `VIDEO: a "${style.label}" documentary about: ${topic}.\nLOOK CONTRACT (every image inherits this): ${style.stillStyle}\nWORLD: ${style.creativeDirection}\n\n` +
         `THE NARRATION ARC (keep the SAME figures/places consistent across shots):\n${arc}\n\n` +
         `For EACH shot, REWRITE every listed asset brief into a rich, specific, COMPOSED image that shows ITS line's concrete elements (keep each asset's id), and write SPECIFIC on-screen text. Keep the shot kind. geo_map shots have no image assets — still give specific text + cues. quote_card keeps its quote.\n\n` +
-        `SOURCE — set "source" per asset. PREFER "generate" for almost everything: a composed, period-accurate GENERATED image is more faithful to the line and on-style. Use "archival" ONLY for a genuinely iconic, UNAMBIGUOUS public-domain photograph, with a precise "query" — and NEVER for a person/thing whose name also matches a DIFFERENT subject (e.g. "Ferdinand de Lesseps" also returns Panama Canal material → GENERATE him instead). When in doubt, generate.\n\n${shotReqs}\n\n` +
-        `Return STRICT JSON {"shots":[{"i":n,"assets":[{"id":"bg","brief":"rich, specific, composed PICTURE-ONLY brief — name the real subject, show the action + key objects, set framing/lighting/era","source":"generate|archival","query":"<only if archival: a precise unambiguous subject>"}],"title":"SPECIFIC headline — a name / number / place, not an abstraction (<=4 words)","kicker":"informative qualifier <=6 words","circleLabel":"ring/geo word if any","labels":[{"text":"specific callout <=4 words","sub":"opt note"}],"annotations":["opt margin note"],"cues":["concrete thing the frame MUST show","2-4 of these"]}]}.`,
+        `SOURCE — set "source" per asset. PREFER "generate" for almost everything: a composed, period-accurate GENERATED image is more faithful to the line and on-style. Use "archival" ONLY for a genuinely iconic, UNAMBIGUOUS public-domain photograph, with a precise "query" — and NEVER for a person/thing whose name also matches a DIFFERENT subject (e.g. "Ferdinand de Lesseps" also returns Panama Canal material → GENERATE him instead). When in doubt, generate.\n\n` +
+        (geoShots.length
+          ? `GEO ORIENTATION — for the geo_map shot(s) [${geoShots.map((x) => x.i).join(", ")}], also give "geoContext": 2-4 orienting labels that place the feature so the viewer sees WHERE it is and what it connects, in relation to the line. Use REAL surrounding geography with the correct side: e.g. a N–S canal → {"label":"MEDITERRANEAN SEA","side":"top"},{"label":"RED SEA","side":"bottom"},{"label":"EGYPT","side":"left"},{"label":"SINAI","side":"right"}.\n\n`
+          : "") +
+        `${shotReqs}\n\n` +
+        `Return STRICT JSON {"shots":[{"i":n,"assets":[{"id":"bg","brief":"rich, specific, composed PICTURE-ONLY brief — name the real subject, show the action + key objects, set framing/lighting/era","source":"generate|archival","query":"<only if archival: a precise unambiguous subject>"}],"title":"SPECIFIC headline — a name / number / place, not an abstraction (<=4 words)","kicker":"informative qualifier <=6 words","circleLabel":"ring/geo word if any","labels":[{"text":"specific callout <=4 words","sub":"opt note"}],"annotations":["opt margin note"],"cues":["concrete thing the frame MUST show","2-4 of these"],"geoContext":[{"label":"MEDITERRANEAN SEA","side":"top"}]}]}.`,
       maxTokens: 4000,
       temperature: 0.5,
     });
@@ -636,6 +645,7 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
       if (d.labels?.length) s.labels = d.labels.filter((l) => l.text?.trim());
       if (d.annotations?.length) s.annotations = d.annotations.filter((x) => x?.trim());
       if (d.cues?.length) s.visualCues = d.cues.filter((c) => c?.trim()).slice(0, 4);
+      if (d.geoContext?.length && s.kind === "geo_map") s.geoContext = d.geoContext.filter((g) => g.label?.trim() && ["top", "bottom", "left", "right"].includes(g.side)).slice(0, 4);
       touched++;
     }
     log?.(`documotion direct: cinematographer re-composed ${touched}/${plan.shots.length} shots (specific briefs + informative text + cues)`);
@@ -936,7 +946,7 @@ export async function buildShotSpecs(
       accent: s.accent,
       titleBoost: o.titleBoost,
       threads: s.threads,
-      geo: geoByShot[i],
+      geo: geoByShot[i] ? { ...geoByShot[i], context: s.geoContext } : undefined,
       typeImage: typeByShot[i] ? await uri(typeByShot[i]) : undefined,
       rackFocus: s.rackFocus,
     });

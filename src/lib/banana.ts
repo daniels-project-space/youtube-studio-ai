@@ -113,7 +113,7 @@ export async function bananaTypeCard(args: {
   let fix = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
-      const bytes = await generateBananaImage({ prompt: base + fix, aspectRatio: "16:9" });
+      const bytes = await generateBananaImage({ prompt: base + fix, aspectRatio: "16:9", allowText: true });
       await writeFile(args.outJpg, bytes);
       const raw = await geminiVisionLocal({
         prompt:
@@ -138,6 +138,15 @@ export async function bananaTypeCard(args: {
 }
 
 /** One generation. Returns jpg/png bytes. Throws loud — never silent-degrades. */
+/** Appended to every PICTURE-ONLY render so the model never bakes in titles/
+ *  captions/labels — those are the engine's overlays. The single universal guard
+ *  every pipeline inherits (the per-brief "no text" notes were weak + inconsistent). */
+export const NO_TEXT_CLAUSE =
+  " ABSOLUTE RULE — PICTURE ONLY, NO TEXT: do NOT render any words, letters, numbers, titles, captions, " +
+  "subtitles, labels, callouts, signage text, logos, watermarks or typography of ANY kind anywhere in the image. " +
+  "Every title and label is added afterwards by the engine as an overlay. If a scene would naturally contain " +
+  "writing (a sign, a page, a map), render it as ILLEGIBLE texture, not real words.";
+
 export async function generateBananaImage(args: {
   prompt: string;
   aspectRatio?: string;
@@ -145,11 +154,16 @@ export async function generateBananaImage(args: {
   imageSize?: string;
   /** Optional input images (base64) for img2img / style-reference conditioning. */
   images?: { data: string; mimeType?: string }[];
+  /** Set true ONLY for TEXT-DESIGN renders (thumbnails, type cards). Default false:
+   *  the render is picture-only and NO_TEXT_CLAUSE is appended, because every
+   *  pipeline's titles/labels are engine overlays — baked-in text is the bug. */
+  allowText?: boolean;
 }): Promise<Buffer> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
+  const prompt = args.allowText ? args.prompt : args.prompt + NO_TEXT_CLAUSE;
   // Text first, then any conditioning images (img2img / style reference).
-  const parts: Record<string, unknown>[] = [{ text: args.prompt }];
+  const parts: Record<string, unknown>[] = [{ text: prompt }];
   for (const im of args.images ?? []) parts.push({ inlineData: { mimeType: im.mimeType ?? "image/png", data: im.data } });
   let lastErr = "";
   for (const model of MODELS) {
@@ -225,7 +239,7 @@ export async function bananaThumbnail(args: {
   let fixNote = "";
   let lastVerdict: BananaVerdict = {};
   for (let attempt = 0; attempt < 2; attempt++) {
-    const bytes = await generateBananaImage({ prompt: args.brief + fixNote });
+    const bytes = await generateBananaImage({ prompt: args.brief + fixNote, allowText: true });
     await writeFile(args.outJpg, bytes);
     const wordList = (args.expectWords ?? []).map((w) => `"${w.toUpperCase()}"`).join(" and ");
     const raw = await geminiVisionLocal({

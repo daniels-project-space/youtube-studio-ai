@@ -77,6 +77,9 @@ export interface DocuGeo {
   route?: [number, number][][];
   /** The SUBJECT as area polygons (country / lake / city outline). */
   area?: [number, number][][];
+  /** Orienting context labels — the surrounding bodies/regions, placed at the
+   *  frame edges so the viewer sees what the feature connects + where it sits. */
+  context?: { label: string; side: "top" | "bottom" | "left" | "right" }[];
   synthetic?: boolean;
 }
 
@@ -981,6 +984,25 @@ const GeoMapShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed
             <div style={{ fontFamily: t.fontLabel, fontSize: Math.round(width * 0.01), letterSpacing: "0.16em", color: accent, marginTop: 5, textShadow: "0 1px 3px rgba(0,0,0,0.9)" }}>{scaleLabel}</div>
           </div>
         ) : null}
+        {/* ORIENTING CONTEXT — what the feature connects + where it sits (the seas,
+            the regions either side) so the viewer is placed in relation to the line */}
+        {(() => {
+          const sideIdx: Record<string, number> = {};
+          return (geo?.context ?? []).map((c, i) => {
+            const k = sideIdx[c.side] ?? 0;
+            sideIdx[c.side] = k + 1;
+            const op = interpolate(frame, [tPin + 4 + i * 3, tPin + 16 + i * 3], [0, 0.5], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
+            const fs = Math.round(width * 0.0165);
+            const stack = k * fs * 1.5;
+            const common: React.CSSProperties = { position: "absolute", fontFamily: t.fontDisplay, fontWeight: 700, fontSize: fs, letterSpacing: "0.3em", textTransform: "uppercase", color: t.paper, opacity: op, textShadow: "0 2px 12px rgba(0,0,0,0.85)", whiteSpace: "nowrap" };
+            const pos: React.CSSProperties =
+              c.side === "top" ? { top: height * 0.075 + stack, left: "50%", transform: "translateX(-50%)" }
+                : c.side === "bottom" ? { bottom: height * 0.17 + stack, left: "50%", transform: "translateX(-50%)" }
+                  : c.side === "left" ? { left: width * 0.045, top: `calc(46% + ${stack}px)`, transform: "translateY(-50%)" }
+                    : { right: width * 0.045, top: `calc(46% + ${stack}px)`, transform: "translateY(-50%)" };
+            return <div key={i} style={{ ...common, ...pos }}>{c.label}</div>;
+          });
+        })()}
       </AbsoluteFill>
 
       {/* location title */}
