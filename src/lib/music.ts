@@ -322,7 +322,12 @@ export async function generateSuno(args: {
   throw new MusicError(`suno timed out (task ${taskId})`);
 }
 
-/** Provider-routed entry point. */
+/** Provider-routed entry point with automatic FALLBACK to the other provider.
+ *
+ *  A documentary/short must not ship silent because one music host is down or
+ *  over quota (the Mureka-429 that left a doc music-less). So: try the preferred
+ *  provider, and on ANY failure fall back to the other one whose key is present.
+ *  Only providers with a configured key are attempted. */
 export async function generateMusic(args: {
   provider?: MusicProvider;
   prompt: string;
@@ -331,9 +336,11 @@ export async function generateMusic(args: {
   wantClips?: number;
   preferWav?: boolean;
   timeoutMs?: number;
+  /** Progress/diagnostics. */
+  log?: (msg: string) => void;
 }): Promise<MusicResult> {
-  if ((args.provider ?? "mureka") === "suno") {
-    return generateSuno({
+  const runSuno = () =>
+    generateSuno({
       prompt: args.prompt,
       model: args.model,
       title: args.title,
@@ -341,10 +348,27 @@ export async function generateMusic(args: {
       preferWav: args.preferWav,
       timeoutMs: args.timeoutMs,
     });
+  const runMureka = () => generateMureka({ prompt: args.prompt, model: args.model, timeoutMs: args.timeoutMs });
+
+  const preferred: MusicProvider = args.provider ?? "mureka";
+  // Order providers preferred-first, then drop any whose key is missing.
+  const order: { name: MusicProvider; key: boolean; run: () => Promise<MusicResult> }[] = [
+    { name: "mureka" as MusicProvider, key: Boolean(process.env.MUREKA_API_KEY), run: runMureka },
+    { name: "suno" as MusicProvider, key: Boolean(process.env.SUNO_API_KEY), run: runSuno },
+  ]
+    .sort((a, b) => (a.name === preferred ? -1 : b.name === preferred ? 1 : 0))
+    .filter((p) => p.key);
+
+  if (!order.length) throw new MusicError("no music provider key configured (MUREKA_API_KEY / SUNO_API_KEY)");
+
+  let lastErr = "";
+  for (const p of order) {
+    try {
+      return await p.run();
+    } catch (e) {
+      lastErr = e instanceof Error ? e.message : String(e);
+      args.log?.(`music: ${p.name} failed (${lastErr.slice(0, 120)})${p !== order[order.length - 1] ? " — falling back" : ""}`);
+    }
   }
-  return generateMureka({
-    prompt: args.prompt,
-    model: args.model,
-    timeoutMs: args.timeoutMs,
-  });
+  throw new MusicError(`all music providers failed: ${lastErr}`);
 }

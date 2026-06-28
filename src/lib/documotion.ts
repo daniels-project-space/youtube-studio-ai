@@ -103,52 +103,154 @@ async function runCapture(cmd: string, cmdArgs: string[]): Promise<string> {
   });
 }
 
-/**
- * NARRATE + SCORE — a documentary speaks. The render is visual-only, so here we
- * voice the plan's per-shot narration (the script is already written) and bed it
- * under a ducked music track, capped to the video length. Best-effort music
- * (VO-only if it's unavailable). Returns the new audio-video path.
- */
-async function narrateAndScore(o: {
-  videoPath: string; plan: DocuPlan; runDir: string; durationSec: number; niche?: string; log: Logger;
-}): Promise<string> {
-  const script = o.plan.shots.map((s) => s.narration?.trim()).filter(Boolean).join(" ");
-  if (!script) { o.log("documotion narrate: plan carries no narration — leaving silent"); return o.videoPath; }
-  const narrPath = join(o.runDir, "narration.mp3");
-  const vo = await synthNarration({ text: script, niche: o.niche });
-  await writeFile(narrPath, Buffer.from(vo));
-  o.log(`documotion narrate: VO ~${Math.round(Buffer.from(vo).length / 16000)}s (${script.split(/\s+/).filter(Boolean).length} words)`);
+/* ---- NARRATION-DRIVEN ASSEMBLY ------------------------------------------- *
+ * A documentary's SPINE is the spoken word. The old engine rendered a fixed-
+ * length visual timeline and laid one VO blob underneath, so a 35s VO sat under
+ * a 60s video → the second half went SILENT and the visuals drifted from the
+ * line being spoken. Now: voice each shot's line FIRST, derive each shot's
+ * duration FROM its spoken length, then align the VO to the shots so the picture
+ * always matches the words. Music beds across the WHOLE length (ducked).        */
 
-  let music = false;
-  const musPath = join(o.runDir, "music.mp3");
+const NARR = {
+  lead: 0.35, // breath before a shot's line starts
+  tail: 0.7, // breathing room after the line, before the cut
+  minShot: 3.2, // a near-silent beat still holds on screen
+  maxShot: 13, // cap one very long line's shot
+  speed: 0.95, // documentary gravitas (< 1 = slower delivery)
+};
+
+interface ShotVO {
+  idx: number;
+  path: string;
+  durSec: number;
+}
+
+/** ElevenLabs v3 (expressive, documentary-grade) when its key is present — the
+ *  right narration tool for this format; Fish Audio otherwise. */
+function pickNarrationTts(): { provider?: string; elevenVoiceId?: string } {
+  if (process.env.ELEVENLABS_API_KEY) {
+    return { provider: "elevenlabs", ...(process.env.DOCU_ELEVEN_VOICE_ID ? { elevenVoiceId: process.env.DOCU_ELEVEN_VOICE_ID } : {}) };
+  }
+  return {};
+}
+
+/** Decode an audio file's duration (seconds) from ffmpeg's banner. */
+async function audioDurationSec(path: string): Promise<number> {
+  const out = await runCapture(ffmpegBin(), ["-i", path, "-f", "null", "-"]);
+  const m = out.match(/Duration:\s*(\d+):(\d+):(\d+(?:\.\d+)?)/);
+  return m ? +m[1] * 3600 + +m[2] * 60 + parseFloat(m[3]) : 0;
+}
+
+/** Voice EACH shot's narration line separately (documentary pace) so timing and
+ *  visuals can lock to the spoken word. Returns per-shot VO files + durations. */
+async function synthShotVOs(plan: DocuPlan, runDir: string, niche: string | undefined, log: Logger): Promise<ShotVO[]> {
+  const tts = pickNarrationTts();
+  const voDir = join(runDir, "vo");
+  await mkdir(voDir, { recursive: true });
+  const lines = plan.shots.map((s) => (s.narration ?? "").trim());
+  const out: ShotVO[] = [];
+  for (let i = 0; i < plan.shots.length; i++) {
+    if (!lines[i]) continue;
+    const path = join(voDir, `vo_${i}.mp3`);
+    const bytes = await synthNarration({
+      text: lines[i],
+      niche,
+      speed: NARR.speed,
+      ...tts,
+      eleven: { stability: 0.45, seed: 4242 },
+      stitch: { previousText: lines[i - 1] || undefined, nextText: lines[i + 1] || undefined },
+    });
+    await writeFile(path, Buffer.from(bytes));
+    out.push({ idx: i, path, durSec: await audioDurationSec(path) });
+  }
+  const voTotal = out.reduce((a, v) => a + v.durSec, 0);
+  log(`documotion narrate: ${out.length}/${plan.shots.length} shots voiced via ${tts.provider ?? "fish"} @ speed ${NARR.speed} — ${voTotal.toFixed(1)}s VO`);
+  return out;
+}
+
+/** Narration-driven shot durations (sec): a shot lasts as long as its spoken
+ *  line + breathing room (clamped); a silent shot gets a short visual beat. */
+function narrationDurations(plan: DocuPlan, shotVOs: ShotVO[], fallbackSec: number): number[] {
+  const byIdx = new Map(shotVOs.map((v) => [v.idx, v.durSec]));
+  return plan.shots.map((s, i) => {
+    const vo = byIdx.get(i);
+    if (vo && vo > 0) return Math.max(NARR.minShot, Math.min(NARR.maxShot, vo + NARR.lead + NARR.tail));
+    return Math.max(NARR.minShot, Math.min(8, s.durationSec ?? fallbackSec));
+  });
+}
+
+/** Mux the per-shot VOs onto the render ALIGNED to each shot's start (picture
+ *  matches the line being spoken), bed a ducked music track across the FULL
+ *  length, normalize to broadcast loudness. Music best-effort (provider
+ *  fallback). Returns the new audio-video path. */
+async function assembleNarration(o: {
+  videoPath: string; runDir: string; shotVOs: ShotVO[]; shotDursSec: number[]; plan: DocuPlan; log: Logger;
+}): Promise<string> {
+  if (!o.shotVOs.length) { o.log("documotion narrate: plan carries no narration — leaving silent"); return o.videoPath; }
+  // exact rendered start (sec) of each shot = cumulative rendered duration (frame-quantized to match the render)
+  const renderedSec = o.shotDursSec.map((d) => Math.round(d * FPS) / FPS);
+  const starts: number[] = [];
+  let totalSec = 0;
+  for (const d of renderedSec) { starts.push(totalSec); totalSec += d; }
+
+  // music bed (best-effort, provider fallback, looped under the whole thing)
+  let musPath = "";
   try {
     const m = await generateMusic({
       prompt: "cinematic documentary underscore — restrained strings and soft piano, slow build, tension and wonder, NO drums, fully instrumental",
       title: o.plan.title,
+      log: o.log,
     });
-    if (m.url) { await downloadTo(m.url, musPath); music = true; }
+    if (m.url) { musPath = join(o.runDir, "music.mp3"); await downloadTo(m.url, musPath); o.log(`documotion narrate: music bed via ${m.provider}`); }
   } catch (e) { o.log(`documotion narrate: music unavailable (${e instanceof Error ? e.message : e}) — VO only`); }
 
+  // input 0 = video; inputs 1..N = shot VOs; input N+1 = music (looped)
+  const inputs: string[] = ["-i", o.videoPath];
+  o.shotVOs.forEach((v) => inputs.push("-i", v.path));
+  const parts: string[] = [];
+  o.shotVOs.forEach((v, k) => {
+    const delayMs = Math.round((starts[v.idx] + NARR.lead) * 1000);
+    parts.push(`[${k + 1}:a]adelay=${delayMs}:all=1[v${k}]`);
+  });
+  parts.push(`${o.shotVOs.map((_, k) => `[v${k}]`).join("")}amix=inputs=${o.shotVOs.length}:normalize=0:duration=longest[vo]`);
+  let outChain = "[vo]";
+  if (musPath) {
+    inputs.push("-stream_loop", "-1", "-i", musPath);
+    const mIdx = o.shotVOs.length + 1;
+    parts.push(`[${mIdx}:a]volume=0.42[mus]`);
+    parts.push(`[mus][vo]sidechaincompress=threshold=0.03:ratio=8:attack=20:release=320[duck]`);
+    parts.push(`[vo][duck]amix=inputs=2:normalize=0:duration=first[mix]`);
+    outChain = "[mix]";
+  }
+  parts.push(`${outChain}loudnorm=I=-14:TP=-1.5:LRA=11[a]`);
+
   const out = o.videoPath.replace(/\.mp4$/i, "_av.mp4");
-  const inputs = music
-    ? ["-i", o.videoPath, "-i", narrPath, "-stream_loop", "-1", "-i", musPath]
-    : ["-i", o.videoPath, "-i", narrPath];
-  const filt = music
-    ? "[2:a]volume=0.5[mus];[mus][1:a]sidechaincompress=threshold=0.04:ratio=6:attack=5:release=400[duck];[1:a][duck]amix=inputs=2:duration=longest:normalize=0[mix];[mix]loudnorm=I=-14:TP=-1.5:LRA=11[a]"
-    : "[1:a]loudnorm=I=-14:TP=-1.5:LRA=11[a]";
-  await run(ffmpegBin(), ["-y", ...inputs, "-filter_complex", filt, "-map", "0:v", "-map", "[a]", "-t", String(o.durationSec + 2), "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", out]);
-  o.log(`documotion narrate: muxed ${music ? "VO + ducked music" : "VO"} → ${out}`);
+  await run(ffmpegBin(), ["-y", ...inputs, "-filter_complex", parts.join(";"), "-map", "0:v", "-map", "[a]", "-t", totalSec.toFixed(3), "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", out]);
+  o.log(`documotion narrate: muxed ${musPath ? "VO + ducked music" : "VO"} aligned over ${totalSec.toFixed(1)}s → ${out}`);
   return out;
 }
 
-/** OUTPUT VALIDATION — the verifier is vision-only; this fails a SILENT video. */
-async function validateAudio(videoPath: string, log: Logger): Promise<{ audioOk: boolean; meanVolumeDb: number }> {
-  const probe = await runCapture(ffmpegBin(), ["-i", videoPath, "-af", "volumedetect", "-f", "null", "-"]);
-  const m = probe.match(/mean_volume:\s*(-?\d+(?:\.\d+)?) dB/);
-  const meanVolumeDb = m ? parseFloat(m[1]) : -91;
-  const audioOk = meanVolumeDb > -50; // -91 / no audio stream ≈ silent
-  log(`documotion VALIDATE: audio mean ${meanVolumeDb} dB → ${audioOk ? "OK" : "FAIL (silent / no narration)"}`);
-  return { audioOk, meanVolumeDb };
+/** OUTPUT VALIDATION — the verifier is VISION-only. This fails a video whose
+ *  audio is silent OR doesn't COVER the timeline (the "narration stops halfway"
+ *  bug): measures mean level, total speech coverage, and any long trailing gap. */
+async function validateAudioCoverage(videoPath: string, expectSec: number, log: Logger): Promise<{ audioOk: boolean; meanVolumeDb: number; coverage: number }> {
+  const probe = await runCapture(ffmpegBin(), ["-i", videoPath, "-af", "silencedetect=noise=-45dB:d=0.8,volumedetect", "-f", "null", "-"]);
+  const mm = probe.match(/mean_volume:\s*(-?\d+(?:\.\d+)?) dB/);
+  const meanVolumeDb = mm ? parseFloat(mm[1]) : -91;
+  let silence = 0;
+  let trailing = 0;
+  let lastStart: number | null = null;
+  for (const line of probe.split("\n")) {
+    const s = line.match(/silence_start:\s*(-?\d+(?:\.\d+)?)/);
+    const e = line.match(/silence_end:\s*(-?\d+(?:\.\d+)?)/);
+    if (s) lastStart = parseFloat(s[1]);
+    if (e && lastStart !== null) { silence += parseFloat(e[1]) - lastStart; lastStart = null; }
+  }
+  if (lastStart !== null) { trailing = Math.max(0, expectSec - lastStart); silence += trailing; } // ran to EOF
+  const coverage = expectSec > 0 ? Math.max(0, 1 - silence / expectSec) : 0;
+  const audioOk = meanVolumeDb > -50 && coverage >= 0.6 && trailing < expectSec * 0.15;
+  log(`documotion VALIDATE: mean ${meanVolumeDb} dB, coverage ${(coverage * 100).toFixed(0)}%, trailing-gap ${trailing.toFixed(1)}s → ${audioOk ? "OK" : "FAIL"}`);
+  return { audioOk, meanVolumeDb, coverage };
 }
 
 /* ------------------------------------------------------------------ plan -- */
@@ -266,9 +368,13 @@ function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef)
   }
   const total = (plan.shots ?? []).reduce((a, s) => a + (s.durationSec || 0), 0);
   if (Math.abs(total - durationSec) > durationSec * 0.15) problems.push(`durations sum ${total}s, target ${durationSec}s (±15%)`);
+  // Narration now DRIVES the video length (each shot lasts as long as its line),
+  // so the word count must fill the target duration at real documentary pace
+  // (~2.3 wps incl. per-shot breaths). Under-writing => a short, half-empty video,
+  // so the lower bound is tight; over-writing only lengthens it gently.
   const words = (plan.shots ?? []).map((s) => s.narration ?? "").join(" ").split(/\s+/).filter(Boolean).length;
-  const wTarget = Math.round(durationSec * 2.0);
-  if (words < wTarget * 0.6 || words > wTarget * 1.4) problems.push(`narration ${words} words, target ~${wTarget} (≈2 words/sec of ${durationSec}s)`);
+  const wTarget = Math.round(durationSec * 2.3);
+  if (words < wTarget * 0.8 || words > wTarget * 1.4) problems.push(`narration ${words} words, target ~${wTarget} (≈2.3 words/sec fills ${durationSec}s; under-writing leaves the video half-silent)`);
   // Documentary shot grammar: SET THE SCENE first, then have scale variety.
   const scales = (plan.shots ?? []).map((s) => s.scale);
   const opensWide = scales.slice(0, 2).some((sc) => sc === "establishing" || sc === "wide");
@@ -323,7 +429,9 @@ export async function planDocu(args: {
 }): Promise<DocuPlan> {
   const { topic, style, referenceNotes, durationSec, log } = args;
   const shotsWanted = Math.max(6, Math.min(8, Math.round(durationSec / 8)));
-  const wordsTarget = Math.round(durationSec * 2.0);
+  // ~2.3 words/sec at documentary pace — the narration LENGTH sets the video
+  // length now, so this must fill the target duration (not under-write it).
+  const wordsTarget = Math.round(durationSec * 2.3);
   const base =
     `You are the writer + director of ${style.worldDescription}\n` +
     `CREATIVE DIRECTION: ${style.creativeDirection}\n` +
@@ -679,14 +787,17 @@ export async function buildShotSpecs(
   overrides: DocuOverrides = {},
   geoByShot: Record<number, CityGeo> = {},
   typeByShot: Record<number, string> = {},
+  /** Narration-driven absolute per-shot seconds — when given, used VERBATIM (no
+   *  normalization to durationSec) so the picture tracks the spoken word. */
+  fixedDursSec?: number[],
 ): Promise<DocuShotSpec[]> {
   const cache = new Map<string, string>();
   const uri = async (p: string) => {
     if (!cache.has(p)) cache.set(p, dataUri(p, await readFile(p)));
     return cache.get(p)!;
   };
-  const durs = plan.shots.map((s, i) => Math.max(3, Math.min(10, overrides[i]?.durationSec ?? s.durationSec ?? 7)));
-  const norm = durationSec / durs.reduce((a, b) => a + b, 0);
+  const durs = fixedDursSec ?? plan.shots.map((s, i) => Math.max(3, Math.min(10, overrides[i]?.durationSec ?? s.durationSec ?? 7)));
+  const norm = fixedDursSec ? 1 : durationSec / durs.reduce((a, b) => a + b, 0);
   const specs: DocuShotSpec[] = [];
   for (const [i, s] of plan.shots.entries()) {
     const mine = assets.filter((a) => a.shotIdx === i);
@@ -993,13 +1104,23 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     if (made) typeByShot[i] = made;
   }
 
-  // 3. VERIFY & REFINE on fast stills
+  // 3. NARRATE FIRST — voice each shot's line so the TIMELINE follows the spoken
+  //    word (kills the silent-tail bug + locks each visual to its line). Shot
+  //    durations below are derived from these VOs; the VO is aligned back on at step 6.
+  let shotVOs: ShotVO[] = [];
+  let fixedDursSec: number[] | undefined;
+  if (args.narrate !== false) {
+    shotVOs = await synthShotVOs(plan, runDir, style.label, log);
+    if (shotVOs.length) fixedDursSec = narrationDurations(plan, shotVOs, durationSec / Math.max(1, plan.shots.length));
+  }
+
+  // 4. VERIFY & REFINE on fast stills
   const overridesPath = join(runDir, "overrides.json");
   let overrides: DocuOverrides = existsSync(overridesPath) ? (JSON.parse(await readFile(overridesPath, "utf8")) as DocuOverrides) : {};
   let verdict: DocuVerdict = {};
   let rounds = 0;
   for (let round = 1; round <= maxRounds + 1; round++) {
-    const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, typeByShot);
+    const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, typeByShot, fixedDursSec);
     const { framePaths, labels } = await renderVerifySet({ plan, specs, style, framesDir: join(runDir, `verify_r${round}`), log });
     verdict = await verifyDocu({ framePaths, labels, worldHint: style.label, log });
     rounds = round;
@@ -1011,8 +1132,8 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   }
   if (!verdict.pass) log(`documotion: verifier unsatisfied after ${rounds} rounds — shipping with honest verdict`);
 
-  // 4. FINAL 1080p master
-  const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, typeByShot);
+  // 5. FINAL 1080p master (narration-driven durations)
+  const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, typeByShot, fixedDursSec);
   const outPath = args.outPath ?? join(runDir, "final.mp4");
   await renderDocuMotion({
     shots: specs,
@@ -1029,17 +1150,20 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   });
   log(`documotion: final rendered ${outPath}`);
 
-  // 5. NARRATION + MUSIC + OUTPUT VALIDATION — a documentary must speak. The render
-  //    is visual-only and the verifier is FRAME-ONLY, so without this a silent doc
-  //    would pass. Voice the plan narration, bed ducked music, then VALIDATE the
-  //    finished file actually carries audible audio (fail loudly if it doesn't).
+  // 6. ALIGN VO + MUSIC + VALIDATE COVERAGE — bed the per-shot VOs back on the
+  //    render (picture matches the words), duck music across the whole length,
+  //    then FAIL if the audio doesn't COVER the timeline (not just "has sound").
   let deliverPath = outPath;
-  if (args.narrate !== false) {
-    deliverPath = await narrateAndScore({ videoPath: outPath, plan, runDir, durationSec, niche: style.label, log });
-  }
-  const audio = await validateAudio(deliverPath, log);
-  if (args.narrate !== false && !audio.audioOk) {
-    throw new Error(`documotion: OUTPUT VALIDATION FAILED — finished documentary has no audible narration/music (mean ${audio.meanVolumeDb} dB). A documentary must speak.`);
+  let audio = { audioOk: true, meanVolumeDb: 0, coverage: 1 };
+  if (args.narrate !== false && shotVOs.length && fixedDursSec) {
+    deliverPath = await assembleNarration({ videoPath: outPath, runDir, shotVOs, shotDursSec: fixedDursSec, plan, log });
+    const totalSec = fixedDursSec.reduce((a, d) => a + Math.round(d * FPS) / FPS, 0);
+    audio = await validateAudioCoverage(deliverPath, totalSec, log);
+    if (!audio.audioOk) {
+      throw new Error(
+        `documotion: OUTPUT VALIDATION FAILED — narration does not COVER the video (mean ${audio.meanVolumeDb} dB, coverage ${(audio.coverage * 100).toFixed(0)}%). A documentary must speak throughout.`,
+      );
+    }
   }
   return { outPath: deliverPath, plan, verdict: { ...verdict, audioOk: audio.audioOk, meanVolumeDb: audio.meanVolumeDb }, rounds };
 }
