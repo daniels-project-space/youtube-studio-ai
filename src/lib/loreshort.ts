@@ -49,6 +49,7 @@ export interface LoreShortCfg {
   nScenes?: number;
   subStyle?: string;
   voiceId?: string;
+  narrationSpeed?: number; // TTS speaking-rate multiplier (<1 = slower/graver); default 0.96
   model?: "ltx" | "wan" | "seedance";
   frames?: number;
   seedanceRes?: "480p" | "720p" | "1080p";
@@ -232,7 +233,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
   const lineDur: number[] = [];
   for (let i = 0; i < scenes.length; i++) {
     const f = rd(`line_${i}.mp3`);
-    if (!existsSync(f)) { const b = await synthNarration({ text: scenes[i].line, provider: "elevenlabs", elevenVoiceId: cfg.voiceId }); await writeFile(f, Buffer.from(b as any)); }
+    if (!existsSync(f)) { const b = await synthNarration({ text: scenes[i].line, provider: "elevenlabs", elevenVoiceId: cfg.voiceId, speed: cfg.narrationSpeed ?? 0.96 }); await writeFile(f, Buffer.from(b as any)); }
     lineDur[i] = await probe(f);
   }
   log(`lines: ${lineDur.map((d) => d.toFixed(1)).join(", ")}s  total≈${(lineDur.reduce((a, b) => a + b, 0) + scenes.length * cfg.pause).toFixed(0)}s`);
