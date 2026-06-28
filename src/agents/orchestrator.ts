@@ -10,6 +10,18 @@
  * (Block-only pipelines coordinate via composePipeline + runPipelineWorkflow.)
  */
 import { selectModule, getModule, moduleTool, type FormatInput, type ModuleResult } from "./formatTools";
+import { keyStatus, missingForModules } from "./keyRegistry";
+
+/** Which module file backs each format engine — so the preflight can report the
+ *  exact keys that engine needs (the orchestrator knows what to get). */
+const ENGINE_FILES: Record<string, string> = {
+  documotion: "lib/documotion.ts",
+  loreshort: "lib/loreshort.ts",
+  comic: "lib/motionComic.ts",
+  whiteboard: "lib/whiteboardSync.ts",
+  lofi: "lib/lofi.ts",
+  cinematic: "lib/cinecraft.ts",
+};
 
 export interface VideoPlan {
   concept: string;
@@ -57,6 +69,17 @@ export async function orchestrateVideo(args: OrchestrateArgs): Promise<Orchestra
   const engine = getModule(plan.formatEngine);
   if (!engine) throw new Error(`orchestrator: engine "${plan.formatEngine}" not found`);
   log(`orchestrator: selected "${engine.id}" for concept "${args.concept}"`);
+
+  // PREFLIGHT — consult the key registry so we know what this run needs (and the
+  // operator knows what to provide). Hard-stop only on the universal GEMINI key;
+  // a missing feature key (music, stock, …) degrades that capability, not the run.
+  const gemini = keyStatus().find((k) => k.name === "GEMINI_API_KEY");
+  if (gemini && !gemini.present) throw new Error(`orchestrator: GEMINI_API_KEY missing — ${gemini.obtain}. Every engine needs it.`);
+  const engineFile = ENGINE_FILES[engine.id];
+  if (engineFile) {
+    const miss = missingForModules([engineFile]);
+    if (miss.length) log(`orchestrator: NOTE — ${engine.id} keys not present: ${miss.map((k) => `${k.name} (${k.purpose})`).join("; ")} — that capability will be skipped`);
+  }
 
   // 1) CONTENT — the autonomous topic step
   let topic = args.topic;
