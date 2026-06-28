@@ -42,6 +42,7 @@ import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
 import { synthNarration } from "@/lib/tts";
 import { generateMusic } from "@/lib/music";
+import { CINEMATOGRAPHER_DOCTRINE } from "@/lib/visualDirection";
 import { renderDocuMotion, renderDocuStills } from "@/lib/remotionRender";
 import {
   getStyle,
@@ -341,6 +342,9 @@ export interface DocuShotPlan {
   /** depth_parallax: a cinematic focus pull between near + far planes. */
   rackFocus?: "near_to_far" | "far_to_near";
   assets: DocuAssetBrief[];
+  /** Cinematographer pass: the concrete elements the frame MUST show (from the
+   *  narration line) — drives the coherence cue-check in the verifier. */
+  visualCues?: string[];
 }
 
 export interface DocuPlan {
@@ -579,6 +583,60 @@ async function lintLabels(plan: DocuPlan, style: DocuStyleDef, log?: Logger): Pr
     if (n) log?.(`documotion label lint: rewrote ${n} on-screen text item(s)`);
   } catch (e) {
     log?.(`documotion label lint skipped (${e instanceof Error ? e.message : e})`);
+  }
+}
+
+/**
+ * CINEMATOGRAPHER PASS — the planner writes the narrative + structure; THIS pass
+ * REALISES each shot. It rewrites every asset brief so the picture literally shows
+ * the line's concrete elements (the subject, the action, the key objects), named
+ * + period-accurate + composed, and rewrites the on-screen text to carry real
+ * INFORMATION (a name / date / place / number) instead of a generic chapter
+ * label. It also records the per-shot visualCues the verifier checks. One
+ * Gemini-Pro call; mutates the plan. Best-effort — on failure the planner's
+ * briefs stand. (Doctrine in src/lib/visualDirection.ts is reusable by other
+ * narrated engines.)
+ */
+export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, topic: string, log?: Logger): Promise<void> {
+  const arc = plan.shots.map((s, i) => `${i}. ${s.narration}`).join("\n");
+  const shotReqs = plan.shots
+    .map((s, i) => {
+      const roles = s.kind === "geo_map" ? "(none — geo map renders from data)" : s.assets.map((a) => `${a.id}(${a.role}${a.source === "archival" ? `, archival of "${a.query}"` : ""})`).join(", ");
+      return `SHOT ${i} [${s.kind} / ${s.scale}] line: "${s.narration}"\n  asset roles to rewrite: ${roles}`;
+    })
+    .join("\n");
+  try {
+    const res = await geminiJsonPro<{
+      shots?: { i: number; assets?: { id: string; brief?: string }[]; title?: string; kicker?: string; circleLabel?: string; labels?: { text: string; sub?: string }[]; annotations?: string[]; cues?: string[] }[];
+    }>({
+      prompt:
+        `${CINEMATOGRAPHER_DOCTRINE}\n\n` +
+        `VIDEO: a "${style.label}" documentary about: ${topic}.\nLOOK CONTRACT (every image inherits this): ${style.stillStyle}\nWORLD: ${style.creativeDirection}\n\n` +
+        `THE NARRATION ARC (keep the SAME figures/places consistent across shots):\n${arc}\n\n` +
+        `For EACH shot, REWRITE every listed asset brief into a rich, specific, COMPOSED image that shows ITS line's concrete elements (keep each asset's id), and write SPECIFIC on-screen text. Keep the shot kind. geo_map shots have no image assets — still give specific text + cues. quote_card keeps its quote.\n\n${shotReqs}\n\n` +
+        `Return STRICT JSON {"shots":[{"i":n,"assets":[{"id":"bg","brief":"rich, specific, composed PICTURE-ONLY brief — name the real subject, show the action + key objects, set framing/lighting/era"}],"title":"SPECIFIC headline — a name / number / place, not an abstraction (<=4 words)","kicker":"informative qualifier <=6 words","circleLabel":"ring/geo word if any","labels":[{"text":"specific callout <=4 words","sub":"opt note"}],"annotations":["opt margin note"],"cues":["concrete thing the frame MUST show","2-4 of these"]}]}.`,
+      maxTokens: 4000,
+      temperature: 0.5,
+    });
+    let touched = 0;
+    for (const d of res?.shots ?? []) {
+      const s = plan.shots[d.i];
+      if (!s) continue;
+      for (const da of d.assets ?? []) {
+        const a = s.assets.find((x) => x.id === da.id);
+        if (a && da.brief?.trim()) a.brief = da.brief.trim();
+      }
+      if (d.title?.trim()) s.title = d.title.trim();
+      if (d.kicker?.trim()) s.kicker = d.kicker.trim();
+      if (d.circleLabel?.trim()) s.circleLabel = d.circleLabel.trim();
+      if (d.labels?.length) s.labels = d.labels.filter((l) => l.text?.trim());
+      if (d.annotations?.length) s.annotations = d.annotations.filter((x) => x?.trim());
+      if (d.cues?.length) s.visualCues = d.cues.filter((c) => c?.trim()).slice(0, 4);
+      touched++;
+    }
+    log?.(`documotion direct: cinematographer re-composed ${touched}/${plan.shots.length} shots (specific briefs + informative text + cues)`);
+  } catch (e) {
+    log?.(`documotion direct: cinematographer pass skipped (${e instanceof Error ? e.message : e}) — planner briefs stand`);
   }
 }
 
@@ -957,8 +1015,13 @@ export async function verifyDocu(args: {
     prompt:
       `You are the FILM VERIFIER for a ${args.worldHint} motion engine. One frame per shot, in order:\n` +
       `${args.labels.join("\n")}\n${VERIFIER_DOCTRINE}\n${VERIFIER_CHECKLIST}\n` +
+      `CUE FIDELITY (the most important check): the frame must SHOW what its LINE says. Read each shot's "MUST SHOW" ` +
+      `cues — if a key element the line names is ABSENT or generic (e.g. the line is "stares at a map" but there is no ` +
+      `map; "the laborers" but no people; a named person who is the wrong person/era), that shot's COHESION is <=4 and ` +
+      `you MUST emit a regen_asset that adds the missing element. The picture has to realise the specific moment.\n` +
       `Score 1-10: typeCraft, cutoutCraft, composition, legibility, styleMatch, cohesion. pass = every score >=7 ` +
-      `(legibility drops below 7 whenever any two text blocks overlap or touch).\n` +
+      `(legibility drops below 7 whenever any two text blocks overlap or touch; cohesion drops below 7 when the frame ` +
+      `does not show its line's MUST-SHOW cues).\n` +
       `Then emit ACTIONS — only real problems, max 6, the MOST actionable fix per problem (obey the doctrine above):\n` +
       `- {"type":"regen_asset","shot":n,"asset":"<existing id: bg/fg/img1/cutout1>","fix":"<=14 words, PHOTO content/style/framing only, never text"}\n` +
       `- {"type":"emphasize_text","shot":n}  (type too small / weak contrast)\n` +
@@ -1051,7 +1114,9 @@ async function renderVerifySet(args: {
     labels.push(
       `[shot ${i}] ${s.kind}, ${Math.round(spec.durationInFrames / FPS)}s, camera ${spec.camera?.move}/${spec.camera?.intensity}` +
         (s.title ? `, title "${s.title}"` : "") +
-        (s.labels?.length ? `, labels ${s.labels.map((l) => `"${l.text}"`).join("+")}` : ""),
+        (s.labels?.length ? `, labels ${s.labels.map((l) => `"${l.text}"`).join("+")}` : "") +
+        `\n   LINE: "${s.narration}"` +
+        (s.visualCues?.length ? `\n   MUST SHOW: ${s.visualCues.join("; ")}` : ""),
     );
   }
   await renderDocuStills({
@@ -1104,7 +1169,8 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   const style = getStyle(args.style);
   await mkdir(runDir, { recursive: true });
 
-  // 1. PLAN (cached)
+  // 1. PLAN (cached) — then the CINEMATOGRAPHER pass realises each line into a
+  //    specific, composed image + informative text (runs once, persisted).
   const planPath = join(runDir, "plan.json");
   let plan: DocuPlan;
   if (existsSync(planPath)) {
@@ -1113,6 +1179,10 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   } else {
     plan = await planDocu({ topic: args.topic, style, referenceNotes: args.referenceNotes, durationSec, log });
     await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
+  }
+  if (plan.shots.some((s) => !s.visualCues)) {
+    await directDocuVisuals(plan, style, args.topic, log);
+    await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8"); // persist so re-runs skip it
   }
 
   // 2. ASSETS (gated, pooled, cached) + GEO geometry for any geo_map shots
