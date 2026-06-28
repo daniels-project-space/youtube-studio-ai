@@ -75,7 +75,8 @@ export const MODULE_SPECS: ModuleSpec[] = [
         topic: i.topic, style: i.style ?? "archival_collage", referenceNotes: i.referenceNotes,
         durationSec: i.durationSec, runDir: i.runDir, outPath: i.outPath, log: i.log,
       });
-      return { videoPath: r.outPath, meta: { shots: r.plan?.shots?.length, rounds: r.rounds, verdict: r.verdict } };
+      const script = (r.plan?.shots ?? []).map((s) => s.narration?.trim()).filter(Boolean).join(" ");
+      return { videoPath: r.outPath, meta: { shots: r.plan?.shots?.length, rounds: r.rounds, verdict: r.verdict, script } };
     },
   },
   {

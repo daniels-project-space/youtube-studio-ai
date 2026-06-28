@@ -1025,33 +1025,40 @@ export async function verifyDocu(args: {
   worldHint: string;
   log?: Logger;
 }): Promise<DocuVerdict> {
-  const raw = await geminiVisionLocal({
-    prompt:
-      `You are the FILM VERIFIER for a ${args.worldHint} motion engine. One frame per shot, in order:\n` +
-      `${args.labels.join("\n")}\n${VERIFIER_DOCTRINE}\n${VERIFIER_CHECKLIST}\n` +
-      `CUE FIDELITY (the most important check): the frame must SHOW what its LINE says. Read each shot's "MUST SHOW" ` +
-      `cues — if a key element the line names is ABSENT or generic (e.g. the line is "stares at a map" but there is no ` +
-      `map; "the laborers" but no people; a named person who is the wrong person/era), that shot's COHESION is <=4 and ` +
-      `you MUST emit a regen_asset that adds the missing element. The picture has to realise the specific moment.\n` +
-      `Score 1-10: typeCraft, cutoutCraft, composition, legibility, styleMatch, cohesion. pass = every score >=7 ` +
-      `(legibility drops below 7 whenever any two text blocks overlap or touch; cohesion drops below 7 when the frame ` +
-      `does not show its line's MUST-SHOW cues).\n` +
-      `Then emit ACTIONS — only real problems, max 6, the MOST actionable fix per problem (obey the doctrine above):\n` +
-      `- {"type":"regen_asset","shot":n,"asset":"<existing id: bg/fg/img1/cutout1>","fix":"<=14 words, PHOTO content/style/framing only, never text"}\n` +
-      `- {"type":"emphasize_text","shot":n}  (type too small / weak contrast)\n` +
-      `- {"type":"reposition_labels","shot":n,"to":"top_right|bottom_left|bottom_center"}  (text overlap / colliding labels — move the rail to clear space)\n` +
-      `- {"type":"retime","shot":n,"durationSec":n}\n` +
-      `- {"type":"camera","shot":n,"move":"push_in|pull_back|pan_left|pan_right|drift","intensity":"subtle|medium|strong"}\n` +
-      `Return STRICT JSON {"typeCraft":n,"cutoutCraft":n,"composition":n,"legibility":n,"styleMatch":n,"cohesion":n,"pass":bool,"actions":[...],"note":"<=25 words"}.`,
-    imagePaths: args.framePaths,
-    json: true,
-    model: "gemini-3.1-pro-preview",
-    maxTokens: 6000,
-  }).catch(() => "");
+  const basePrompt =
+    `You are the FILM VERIFIER for a ${args.worldHint} motion engine. One frame per shot, in order:\n` +
+    `${args.labels.join("\n")}\n${VERIFIER_DOCTRINE}\n${VERIFIER_CHECKLIST}\n` +
+    `CUE FIDELITY (the most important check): the frame must SHOW what its LINE says. Read each shot's "MUST SHOW" ` +
+    `cues — if a key element the line names is ABSENT or generic (e.g. the line is "stares at a map" but there is no ` +
+    `map; "the laborers" but no people; a named person who is the wrong person/era), that shot's COHESION is <=4 and ` +
+    `you MUST emit a regen_asset that adds the missing element. The picture has to realise the specific moment.\n` +
+    `Score 1-10: typeCraft, cutoutCraft, composition, legibility, styleMatch, cohesion. pass = every score >=7 ` +
+    `(legibility drops below 7 whenever any two text blocks overlap or touch; cohesion drops below 7 when the frame ` +
+    `does not show its line's MUST-SHOW cues).\n` +
+    `Then emit ACTIONS — only real problems, max 6, the MOST actionable fix per problem (obey the doctrine above):\n` +
+    `- {"type":"regen_asset","shot":n,"asset":"<existing id: bg/fg/img1/cutout1>","fix":"<=14 words, PHOTO content/style/framing only, never text"}\n` +
+    `- {"type":"emphasize_text","shot":n}  (type too small / weak contrast)\n` +
+    `- {"type":"reposition_labels","shot":n,"to":"top_right|bottom_left|bottom_center"}  (text overlap / colliding labels — move the rail to clear space)\n` +
+    `- {"type":"retime","shot":n,"durationSec":n}\n` +
+    `- {"type":"camera","shot":n,"move":"push_in|pull_back|pan_left|pan_right|drift","intensity":"subtle|medium|strong"}\n` +
+    `Return STRICT JSON {"typeCraft":n,"cutoutCraft":n,"composition":n,"legibility":n,"styleMatch":n,"cohesion":n,"pass":bool,"actions":[...],"note":"<=25 words"}.`;
+  // The multi-image verify intermittently returns unparseable JSON, which silently
+  // killed the regen/heal loop (actions=0). Retry once with a strict format reminder
+  // before degrading — so the gate's repairs actually fire.
   let v: DocuVerdict = {};
-  if (raw) {
-    try { v = parseJsonLoose<DocuVerdict>(raw); }
-    catch { args.log?.("documotion verify: unparseable verdict JSON — treating as unsatisfied (honest verdict)"); }
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const raw = await geminiVisionLocal({
+      prompt: attempt === 0 ? basePrompt : `${basePrompt}\n\nCRITICAL: your previous reply was not valid JSON. Reply with ONLY the JSON object — no markdown fences, no prose before or after, all strings closed, properly comma-separated.`,
+      imagePaths: args.framePaths,
+      json: true,
+      model: "gemini-3.1-pro-preview",
+      maxTokens: 6000,
+    }).catch(() => "");
+    if (!raw) continue;
+    try { v = parseJsonLoose<DocuVerdict>(raw); break; }
+    catch {
+      if (attempt === 1) args.log?.("documotion verify: unparseable verdict JSON after retry — treating as unsatisfied (honest verdict)");
+    }
   }
   // HARD legibility gate — overlapping text must never ship silently. Recompute
   // pass from all six craft scores so a generous model-assigned pass can't mask
