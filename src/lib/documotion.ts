@@ -607,14 +607,15 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
     .join("\n");
   try {
     const res = await geminiJsonPro<{
-      shots?: { i: number; assets?: { id: string; brief?: string }[]; title?: string; kicker?: string; circleLabel?: string; labels?: { text: string; sub?: string }[]; annotations?: string[]; cues?: string[] }[];
+      shots?: { i: number; assets?: { id: string; brief?: string; source?: "generate" | "archival"; query?: string }[]; title?: string; kicker?: string; circleLabel?: string; labels?: { text: string; sub?: string }[]; annotations?: string[]; cues?: string[] }[];
     }>({
       prompt:
         `${CINEMATOGRAPHER_DOCTRINE}\n\n` +
         `VIDEO: a "${style.label}" documentary about: ${topic}.\nLOOK CONTRACT (every image inherits this): ${style.stillStyle}\nWORLD: ${style.creativeDirection}\n\n` +
         `THE NARRATION ARC (keep the SAME figures/places consistent across shots):\n${arc}\n\n` +
-        `For EACH shot, REWRITE every listed asset brief into a rich, specific, COMPOSED image that shows ITS line's concrete elements (keep each asset's id), and write SPECIFIC on-screen text. Keep the shot kind. geo_map shots have no image assets — still give specific text + cues. quote_card keeps its quote.\n\n${shotReqs}\n\n` +
-        `Return STRICT JSON {"shots":[{"i":n,"assets":[{"id":"bg","brief":"rich, specific, composed PICTURE-ONLY brief — name the real subject, show the action + key objects, set framing/lighting/era"}],"title":"SPECIFIC headline — a name / number / place, not an abstraction (<=4 words)","kicker":"informative qualifier <=6 words","circleLabel":"ring/geo word if any","labels":[{"text":"specific callout <=4 words","sub":"opt note"}],"annotations":["opt margin note"],"cues":["concrete thing the frame MUST show","2-4 of these"]}]}.`,
+        `For EACH shot, REWRITE every listed asset brief into a rich, specific, COMPOSED image that shows ITS line's concrete elements (keep each asset's id), and write SPECIFIC on-screen text. Keep the shot kind. geo_map shots have no image assets — still give specific text + cues. quote_card keeps its quote.\n\n` +
+        `SOURCE — set "source" per asset. PREFER "generate" for almost everything: a composed, period-accurate GENERATED image is more faithful to the line and on-style. Use "archival" ONLY for a genuinely iconic, UNAMBIGUOUS public-domain photograph, with a precise "query" — and NEVER for a person/thing whose name also matches a DIFFERENT subject (e.g. "Ferdinand de Lesseps" also returns Panama Canal material → GENERATE him instead). When in doubt, generate.\n\n${shotReqs}\n\n` +
+        `Return STRICT JSON {"shots":[{"i":n,"assets":[{"id":"bg","brief":"rich, specific, composed PICTURE-ONLY brief — name the real subject, show the action + key objects, set framing/lighting/era","source":"generate|archival","query":"<only if archival: a precise unambiguous subject>"}],"title":"SPECIFIC headline — a name / number / place, not an abstraction (<=4 words)","kicker":"informative qualifier <=6 words","circleLabel":"ring/geo word if any","labels":[{"text":"specific callout <=4 words","sub":"opt note"}],"annotations":["opt margin note"],"cues":["concrete thing the frame MUST show","2-4 of these"]}]}.`,
       maxTokens: 4000,
       temperature: 0.5,
     });
@@ -624,7 +625,10 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
       if (!s) continue;
       for (const da of d.assets ?? []) {
         const a = s.assets.find((x) => x.id === da.id);
-        if (a && da.brief?.trim()) a.brief = da.brief.trim();
+        if (!a) continue;
+        if (da.brief?.trim()) a.brief = da.brief.trim();
+        if (da.source === "generate") { a.source = "generate"; a.query = undefined; }
+        else if (da.source === "archival" && da.query?.trim()) { a.source = "archival"; a.query = da.query.trim(); }
       }
       if (d.title?.trim()) s.title = d.title.trim();
       if (d.kicker?.trim()) s.kicker = d.kicker.trim();
