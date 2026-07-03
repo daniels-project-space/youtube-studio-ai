@@ -49,6 +49,7 @@ export async function authorForgedModule(args: {
   for (let attempt = 0; attempt < 2; attempt++) {
     try {
       const out = await claudeJson<{ specJson?: string }>({
+        tier: "pro",
         maxTokens: 4000,
         temperature: 0.4,
         system: "You are the MODULE FORGE: you author new pipeline modules as declarative specs. Return ONLY JSON.",

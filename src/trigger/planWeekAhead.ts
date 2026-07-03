@@ -241,6 +241,9 @@ async function genThumb(o: {
   }
   const outJpg = join(o.dir, `t_${o.id}.jpg`);
   await bananaThumbnail({
+    // PLAN-stage previews for topics that may never become videos: flash tier
+    // (~$0.04) — the render-time thumbnail_gen keeps Pro typography.
+    tier: "flash",
     brief: buildThumbBrief({
       channelName: o.channelName,
       imageStyle: look,

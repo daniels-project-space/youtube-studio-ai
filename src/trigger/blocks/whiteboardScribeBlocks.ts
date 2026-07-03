@@ -25,6 +25,8 @@ import { getVisualBrief } from "@/engine/creative/brief";
 import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { castWhiteboardSync, hasWhiteboardSync } from "@/lib/whiteboardSync";
+import { bananaCounters } from "@/lib/banana";
+import { PRICE } from "@/engine/pricing";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -47,7 +49,7 @@ async function recordAsset(ctx: StageContext, kind: string, r2Key: string, meta?
   }
 }
 
-/** Rough per-video spend: layered 2K Banana art + Fish TTS (no render credits). */
+/** Fallback per-video spend when counters are unavailable (art + Fish TTS). */
 const SCRIBE_COST = Number(process.env.WB_SYNC_COST_USD ?? 2.0);
 
 export const whiteboardScribe: Block = {
@@ -74,16 +76,27 @@ export const whiteboardScribe: Block = {
     const width = Math.max(1280, Math.min(2560, Number(ctx.params["width"] ?? 1920)));
     const height = Math.round((width * 9) / 16);
 
-    const runDir = await makeRunTempDir(ctx.runId);
+    // DETERMINISTIC dir (scoped): whiteboardSync's per-layer art cache is
+    // path-keyed — a random mkdtemp meant every Trigger retry/self-heal
+    // regenerated all 18-30 paid art layers from scratch.
+    const runDir = await makeRunTempDir(ctx.runId, "whiteboard_scribe");
     const outPath = join(runDir, "final.mp4");
     ctx.log(`whiteboard_scribe: drawing synced explainer "${topic.slice(0, 60)}" @ ${width}x${height} (style ${styleId})…`);
 
+    const countersBefore = { ...bananaCounters };
     const res = await castWhiteboardSync({
       brief: { topic, facts, styleId, header: visualBrief?.header, voiceId, width, height },
       runDir,
       outPath,
       log: (m) => ctx.log(`wb: ${m}`),
     });
+    // Real image spend from the banana counters (the flat $2 guess undercounted
+    // Pro-heavy runs and overcounted cached re-runs alike).
+    const genPro = bananaCounters.pro - countersBefore.pro;
+    const genFlash = bananaCounters.flash - countersBefore.flash;
+    const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd;
+    const scribeCost = genPro + genFlash > 0 ? artCost + 0.05 /* Fish TTS */ : SCRIBE_COST;
+    ctx.log(`whiteboard_scribe: image spend ${genPro} pro + ${genFlash} flash ≈ $${scribeCost.toFixed(2)}`);
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObject(videoKey, await readBytes(res.outPath), { contentType: "video/mp4" });
@@ -96,7 +109,7 @@ export const whiteboardScribe: Block = {
       videoLocalPath: res.outPath,
       videoDurationSec,
       narrationText: res.narrationText,
-      [COST_PATCH_KEY]: SCRIBE_COST,
+      [COST_PATCH_KEY]: scribeCost,
     };
   },
 };

@@ -27,7 +27,8 @@ import { craftMetadata } from "@/lib/metacraft";
 import { generateKeyframe } from "@/lib/higgsfield";
 import { resolveThumbnailStyle, styleFromDNA, shortTitleFallback } from "@/lib/thumbnailFormula";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
-import { geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 import { agentJson } from "@/agents/mastra";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { loadPerformanceContext } from "@/lib/performance";
@@ -736,7 +737,7 @@ export const thumbnailGen: Block = {
             refPaths.push(await downloadTo(referenceThumbs[i], join(tmp, `ref_${i}.jpg`)));
           } catch { /* unreachable reference — skip it */ }
         }
-        const raw = await geminiVisionLocal({
+        const raw = await visionLocal({
           prompt:
             `Image 1 is a CANDIDATE YouTube thumbnail rendered at real mobile browse size (~168px wide). ` +
             (refPaths.length
@@ -792,6 +793,7 @@ export const thumbnailGen: Block = {
     // gates the result. Falls through to the legacy paths on any failure.
     const playbook = (channelDoc as { thumbnailPlaybook?: import("@/lib/thumbnailLab").ThumbnailPlaybook } | null)
       ?.thumbnailPlaybook;
+    let rejectedPlaybookJpg: string | null = null;
     if (playbook?.patterns?.length && hasBanana() && thumbnailer !== "title_card") {
       try {
         const { renderCandidate } = await import("@/lib/thumbnailLab");
@@ -816,6 +818,10 @@ export const thumbnailGen: Block = {
         });
         const refQA = await referenceMobileQA(tmp, outJpg);
         if (refQA && !refQA.pass) {
+          // Keep the PAID render as a last-resort fallback — the old path threw
+          // it away, spent 2 more Pro gens on the DNA path, and on a double
+          // gate-fail shipped NOTHING (then the heal loop re-bought it all).
+          rejectedPlaybookJpg = outJpg;
           ctx.log(`thumbnail_gen: playbook candidate rejected (${refQA.reason}) — falling through`);
         } else {
           const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
@@ -914,26 +920,40 @@ export const thumbnailGen: Block = {
     const bScene = dnaThumb?.subject || dna?.recurringSubject
       ? `${dnaThumb?.subject ?? dna?.recurringSubject} - staged to literally dramatize "${title}".`
       : `a dramatic scene that literally enacts "${title}"${niche ? ` for a ${niche} channel` : ""}.`;
-    const { verdict } = await bananaThumbnail({
-      brief: buildThumbBrief({
-        channelName: String(ctx.store["channelName"] ?? "channel"),
+    try {
+      const { verdict } = await bananaThumbnail({
+        brief: buildThumbBrief({
+          channelName: String(ctx.store["channelName"] ?? "channel"),
+          imageStyle: dna?.colorGrade ?? undefined,
+          palette: dnaThumb?.palette ?? dna?.palette,
+          scene: bScene,
+          lines: bananaLines,
+          badge: String(ctx.store["channelName"] ?? ""),
+        }),
+        outJpg: bOut,
+        expectWords: bananaLines.map((w) => w.text),
         imageStyle: dna?.colorGrade ?? undefined,
-        palette: dnaThumb?.palette ?? dna?.palette,
-        scene: bScene,
-        lines: bananaLines,
-        badge: String(ctx.store["channelName"] ?? ""),
-      }),
-      outJpg: bOut,
-      expectWords: bananaLines.map((w) => w.text),
-      imageStyle: dna?.colorGrade ?? undefined,
-      title,
-      log: ctx.log,
-    });
-    const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-    await putObject(thumbnailKey, await readBytes(bOut), { contentType: "image/jpeg" });
-    await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "banana_dna", punch: verdict.punch });
-    ctx.log(`thumbnail_gen: BANANA thumbnail OK (DNA-direct, punch ${verdict.punch ?? "?"}/10)`);
-    return { thumbnailKey };
+        title,
+        log: ctx.log,
+      });
+      const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
+      await putObject(thumbnailKey, await readBytes(bOut), { contentType: "image/jpeg" });
+      await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "banana_dna", punch: verdict.punch });
+      ctx.log(`thumbnail_gen: BANANA thumbnail OK (DNA-direct, punch ${verdict.punch ?? "?"}/10)`);
+      return { thumbnailKey };
+    } catch (e) {
+      // Ship the best PAID render instead of nothing: the rejected playbook
+      // candidate beats a missing thumbnail (which fails QA and triggers the
+      // heal loop to re-buy every generation ×3).
+      if (rejectedPlaybookJpg) {
+        ctx.log(`thumbnail_gen: DNA-direct failed (${e instanceof Error ? e.message : e}) — shipping the below-bar playbook candidate instead of nothing`);
+        const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
+        await putObject(thumbnailKey, await readBytes(rejectedPlaybookJpg), { contentType: "image/jpeg" });
+        await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook_belowbar" });
+        return { thumbnailKey };
+      }
+      throw e;
+    }
   },
 };
 

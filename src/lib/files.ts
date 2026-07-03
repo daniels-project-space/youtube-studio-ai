@@ -12,9 +12,23 @@ import { join } from "node:path";
 import { Readable } from "node:stream";
 import { pipeline } from "node:stream/promises";
 
-/** Create an isolated temp dir for a run, e.g. /tmp/ysa-<runId>-<rand>/. */
-export async function makeRunTempDir(runId: string): Promise<string> {
+/**
+ * Create a temp dir for a run, e.g. /tmp/ysa-<runId>-<rand>/.
+ *
+ * Pass `scope` (e.g. the block id) to get a DETERMINISTIC dir instead:
+ * /tmp/ysa-<runId>-<scope>/. Blocks with path-keyed asset caches (whiteboard
+ * art layers, comic panels…) MUST use a scoped dir — with mkdtemp's random
+ * suffix, every Trigger retry/self-heal landed in a fresh dir and regenerated
+ * every paid image from scratch (the single worst retry-cost multiplier).
+ */
+export async function makeRunTempDir(runId: string, scope?: string): Promise<string> {
   const safe = runId.replace(/[^a-zA-Z0-9_-]/g, "");
+  if (scope) {
+    const s = scope.replace(/[^a-zA-Z0-9_-]/g, "");
+    const dir = join(tmpdir(), `ysa-${safe}-${s}`);
+    await mkdir(dir, { recursive: true });
+    return dir;
+  }
   return mkdtemp(join(tmpdir(), `ysa-${safe}-`));
 }
 

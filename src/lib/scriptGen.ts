@@ -93,6 +93,8 @@ export interface Script {
   closingLine?: string;
   /** The promise the cold open made — qa_script verifies the script pays it off. */
   hookLoop?: string;
+  /** The gated CraftedHook used — pass back via req.precraftedHook on regen. */
+  crafted?: CraftedHook;
 }
 
 export interface ScriptRequest {
@@ -125,6 +127,11 @@ export interface ScriptRequest {
   voiceTags?: boolean;
   /** Critic issues from a rejected prior draft — the regen must fix these. */
   priorIssues?: string[];
+  /** A hook already crafted + judge-gated in a prior attempt. A critic-reject
+   * regen passes the first attempt's hook here so the regen does NOT re-bill
+   * hookcraft (Pro call + judge + grounded fact-checks) for a hook that
+   * already passed its gates — only the narration was rejected. */
+  precraftedHook?: CraftedHook;
   /**
    * The channel's Style-DNA narrative spec — the per-channel register the
    * script must be written in (beats the generic per-archetype tone).
@@ -400,8 +407,41 @@ async function synthFullScriptOneShot(
     const sections: ScriptSection[] = (o.sections ?? [])
       .map((s) => ({ heading: cleanHeading(typeof s.heading === "string" ? s.heading : ""), narration: spoken(req, typeof s.narration === "string" ? s.narration : "") }))
       .filter((s) => s.narration.length > 0);
-    const wordCount = sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
-    if (sections.length < 3 || wordCount < minWords) {
+    let wordCount = sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
+    // TOP-UP before surrendering to the chunked path: the chunked fallback costs
+    // 10-25 MORE Pro calls. If the one-shot under-delivered but got most of the
+    // way there, ONE continuation call closes the gap far cheaper; accept ≥80%.
+    if (sections.length >= 3 && wordCount < minWords && wordCount >= wordBudget * 0.5) {
+      const missing = wordBudget - wordCount;
+      log(`scriptGen one-shot (${model}): ${wordCount}/${wordBudget} words — topping up with one continuation call`);
+      try {
+        const more = await geminiJson<{ sections?: { heading?: string; narration?: string }[] }>({
+          model,
+          maxTokens: 9000,
+          temperature: 0.8,
+          prompt: [
+            `You are CONTINUING a long-form YouTube narration script about "${req.topic}".`,
+            styleGuidance(req) + dataDiscipline(req.dataRich),
+            voiceTagClause(req),
+            CRAFT_RULES,
+            `Sections already written (do NOT repeat any of them): ${sections.map((s) => s.heading).filter(Boolean).join("; ")}.`,
+            `Write ${Math.max(2, Math.ceil(missing / 320))} MORE substantive body sections (about ${missing} words total) that fit ` +
+              `BEFORE the conclusion, each developing a distinct new idea in depth.`,
+            `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
+              `Return STRICT JSON {"sections":[{"heading":string,"narration":string}]}.`,
+          ].filter(Boolean).join("\n\n"),
+        });
+        const extra = (more.sections ?? [])
+          .map((s) => ({ heading: cleanHeading(typeof s.heading === "string" ? s.heading : ""), narration: spoken(req, typeof s.narration === "string" ? s.narration : "") }))
+          .filter((s) => s.narration.length > 0);
+        // Splice the continuation in BEFORE the final (conclusion-shaped) section.
+        sections.splice(Math.max(1, sections.length - 1), 0, ...extra);
+        wordCount = sections.reduce((n, s) => n + s.narration.split(/\s+/).filter(Boolean).length, 0);
+      } catch (e) {
+        log(`scriptGen one-shot top-up failed (${e instanceof Error ? e.message : e})`);
+      }
+    }
+    if (sections.length < 3 || wordCount < Math.round(wordBudget * 0.8)) {
       log(`scriptGen one-shot (${model}): ${wordCount}/${wordBudget} words, ${sections.length} sections — under target, falling back to chunked`);
       return null;
     }
@@ -409,7 +449,7 @@ async function synthFullScriptOneShot(
     const closingLine = typeof o.closing_line === "string" ? sanitizeSpoken(o.closing_line).replace(/\s+/g, " ").trim().slice(0, 80) : "";
     const narrationText = assemble(hook, sections);
     log(`scriptGen one-shot (${model}): ${sections.length} sections, ${wordCount} words (~${estSeconds(narrationText)}s) ✓`);
-    return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop };
+    return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
   } catch (e) {
     log(`scriptGen one-shot (${model}) failed (${e instanceof Error ? e.message : e}) — falling back to chunked`);
     return null;
@@ -506,19 +546,24 @@ async function synthLongScript(
     // video for a 10-min slot). Each section gets its fair share of what's left.
     const remainingSections = Math.max(1, Math.min(queue.length - i + 1, 60 - sections.length));
     const perSection = Math.max(140, Math.min(400, Math.round((targetWords - total) / remainingSections)));
+    // PROMPT ORDER = COST: the static doctrine block (style/playbook/voice/
+    // CRAFT_RULES, ~1.5-2k tokens) leads and the per-section variables trail,
+    // so Gemini's implicit prefix cache (≥1024 identical leading tokens, ~75%
+    // input discount) hits on every section after the first — this prompt is
+    // sent 10-75x per chunked long-form run.
     const sectionPrompt = [
       `You are writing ONE section of a long narrated video about "${req.topic}".`,
-      `Section: "${s.heading}". Focus: ${s.brief ?? s.heading}.`,
-      sections.length === 0 ? hookMandate(crafted) : "",
       styleGuidance(req) + dataDiscipline(req.dataRich),
       playbookSlim(req),
       voiceTagClause(req),
       CRAFT_RULES,
+      "PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues.",
+      `Return STRICT JSON {"narration":string}.`,
+      `Section: "${s.heading}". Focus: ${s.brief ?? s.heading}.`,
+      sections.length === 0 ? hookMandate(crafted) : "",
       `Write ${perSection}-${Math.min(400, perSection + 80)} words of SPOKEN narration in 2-3 FULL paragraphs for ` +
         `THIS section only — substantive and specific, no heading label, do not repeat earlier sections.`,
       reachingEnd ? "This is the FINAL section: end on a single, definitive closing sentence." : "",
-      "PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues.",
-      `Return STRICT JSON {"narration":string}.`,
     ].filter(Boolean).join("\n\n");
     // RETRY transient failures — a dropped section used to permanently lose ~300
     // words, which is the main reason long videos came out short under model load.
@@ -581,7 +626,7 @@ async function synthLongScript(
   const closingLine = sanitizeSpoken(closingRaw).replace(/\s+/g, " ").trim().slice(0, 80);
   const narrationText = assemble(hook, sections);
   log("scriptGen: long script ready", { sections: sections.length, words: narrationText.split(/\s+/).length, estSec: estSeconds(narrationText) });
-  return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop };
+  return { hook, sections: assignRoles(sections), narrationText, estDurationSec: estSeconds(narrationText), closingLine, hookLoop: crafted.loop, crafted };
 }
 
 /** Translate one spoken passage; keep names/quotes intact. Degrades to original. */
@@ -618,17 +663,71 @@ export async function translateScript(
   if (!language || language === "en" || !hasGeminiKey()) return script;
   const name = LANG_NAMES[language] ?? language;
   log(`scriptGen: translating ${script.sections.length}-section script → ${name}`);
-  // Translations are independent → run concurrently; Promise.all + map preserve order.
-  const [hook, sections, closingLine] = await Promise.all([
+
+  // BATCHED: sections are translated in ~1800-word chunks, one flash call per
+  // chunk (headings + narration together). The old per-string path made 2N+2
+  // HTTP calls (a 25-section script × 3 siblings ≈ 156 calls); this makes ~4-8
+  // per sibling. Any chunk that fails or comes back misaligned degrades to the
+  // proven per-string path for that chunk only.
+  const chunks: { start: number; items: ScriptSection[] }[] = [];
+  let cur: ScriptSection[] = [];
+  let curWords = 0;
+  let curStart = 0;
+  for (let i = 0; i < script.sections.length; i++) {
+    const s = script.sections[i];
+    const w = s.narration.split(/\s+/).filter(Boolean).length;
+    if (cur.length && curWords + w > 1800) {
+      chunks.push({ start: curStart, items: cur });
+      cur = [];
+      curWords = 0;
+      curStart = i;
+    }
+    cur.push(s);
+    curWords += w;
+  }
+  if (cur.length) chunks.push({ start: curStart, items: cur });
+
+  const translateChunk = async (items: ScriptSection[]): Promise<ScriptSection[]> => {
+    const o = await geminiJson<{ sections?: { heading?: string; narration?: string }[] }>({
+      prompt:
+        `Translate these spoken-narration sections into ${name}. Keep proper names and direct quotes in their ` +
+        `ORIGINAL form (do NOT translate names). Natural, fluent ${name} suitable for voiceover. Translate BOTH ` +
+        `heading and narration of every section, keep the array order and length EXACTLY. ` +
+        `Return STRICT JSON {"sections":[{"heading":string,"narration":string}]}.\n\n` +
+        JSON.stringify({ sections: items.map((s) => ({ heading: s.heading, narration: s.narration })) }),
+      maxTokens: 8000,
+      temperature: 0.3,
+    });
+    const out = (o.sections ?? []).map((s) => ({
+      heading: sanitizeSpoken(typeof s.heading === "string" ? s.heading : ""),
+      narration: sanitizeSpoken(typeof s.narration === "string" ? s.narration : ""),
+    }));
+    if (out.length !== items.length || out.some((s) => !s.narration)) {
+      throw new Error(`batch translation misaligned (${out.length}/${items.length} sections)`);
+    }
+    return out;
+  };
+
+  const [hook, chunkResults, closingLine] = await Promise.all([
     translateText(script.hook, name, log),
     Promise.all(
-      script.sections.map(async (s): Promise<ScriptSection> => ({
-        heading: await translateText(s.heading, name, log),
-        narration: await translateText(s.narration, name, log),
-      })),
+      chunks.map(async (c) => {
+        try {
+          return await translateChunk(c.items);
+        } catch (e) {
+          log(`scriptGen: batch translate chunk failed (${e instanceof Error ? e.message : e}) — per-section fallback`);
+          return Promise.all(
+            c.items.map(async (s): Promise<ScriptSection> => ({
+              heading: await translateText(s.heading, name, log),
+              narration: await translateText(s.narration, name, log),
+            })),
+          );
+        }
+      }),
     ),
     script.closingLine ? translateText(script.closingLine, name, log) : Promise.resolve(undefined),
   ]);
+  const sections = chunkResults.flat();
   const narrationText = assemble(hook, sections);
   return { hook, sections, narrationText, estDurationSec: estSeconds(narrationText), closingLine };
 }
@@ -652,7 +751,9 @@ export async function synthScript(
   // THE COLD OPEN COMES FIRST — crafted and judge-gated by hookcraft (lint +
   // punch/specificity/curiosity/voiceMatch gates, one retry, loud fail). The
   // director's hook idea is honored INSIDE the craft as intent, never verbatim.
-  const crafted = await craftHook({
+  // A critic-reject regen reuses the already-gated hook (precraftedHook) so it
+  // never re-bills the hookcraft Pro call + grounded fact-checks.
+  const crafted = req.precraftedHook ?? await craftHook({
     topic: req.topic,
     channelName: req.channelName,
     niche: req.niche,
@@ -762,6 +863,7 @@ export async function synthScript(
     estDurationSec: estSeconds(narrationText, gapSec),
     closingLine,
     hookLoop: crafted.loop,
+    crafted,
   };
   log("scriptGen: script ready", {
     sections: sections.length,

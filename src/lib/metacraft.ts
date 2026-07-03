@@ -31,7 +31,7 @@
  * youtubeData.ts (API key OR the vault's OAuth refresh token) and degrades
  * loudly when the niche databank already supplies the feed.
  */
-import { geminiJson, geminiJsonPro, hasGeminiKey } from "@/lib/gemini";
+import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/youtubeData";
 import { resolveVoiceDoctrine } from "@/engine/golden";
 
@@ -289,10 +289,12 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
   let fixNote = "";
   let lastIssues: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
-    // TITLES ONLY — small output, fast even with Pro thinking.
+    // TITLES ONLY — mechanical structured output; flash (no thinking) is
+    // plenty and the flash judge below already gates quality. Pro here was
+    // paying thinking tokens for 7 short lines.
     let gen: { candidates?: { frame?: string; title?: string }[] };
     try {
-      gen = await geminiJsonPro<typeof gen>({
+      gen = await geminiJson<typeof gen>({
         prompt: [
           `Write SEVEN YouTube TITLE candidates for a video about "${a.topic}" on "${a.channelName ?? "this channel"}" — one per frame: ${FRAMES}.`,
           `NICHE: ${a.niche ?? "general"} | PERSONA: ${a.persona ?? "n/a"}`,
@@ -315,9 +317,8 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           fixNote,
           `Return STRICT JSON {"candidates":[{"frame":string,"title":string}]}.`,
         ].filter(Boolean).join("\n\n"),
-        maxTokens: 7000,
+        maxTokens: 2500,
         temperature: 0.85,
-        log: a.log,
       });
     } catch (e) {
       lastIssues = [`generator returned invalid JSON (${e instanceof Error ? e.message.slice(0, 80) : e})`];
@@ -373,7 +374,8 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
 
       const w = survivors[best];
       // ONE description+tags, written FOR the winner (parallel work already done).
-      const pkg = await geminiJsonPro<{ description?: string; tagsCsv?: string }>({
+      // Mechanical structured output — flash, no thinking.
+      const pkg = await geminiJson<{ description?: string; tagsCsv?: string }>({
         prompt: [
           `Write the YouTube description + tags for this video.`,
           `TITLE: "${w.title}" | Channel: "${a.channelName ?? ""}" | Niche: ${a.niche ?? "general"}`,
@@ -388,9 +390,8 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
           `TAGS: 25-30 comma-separated, the real search queries + entities THIS video mentions.${lang}`,
           `Return STRICT JSON {"description":string,"tagsCsv":string}.`,
         ].filter(Boolean).join("\n\n"),
-        maxTokens: 7000,
+        maxTokens: 2500,
         temperature: 0.8,
-        log: a.log,
       });
       const description = String(pkg.description ?? "").trim();
       const tags = String(pkg.tagsCsv ?? "").split(",").map((t) => t.trim()).filter(Boolean);

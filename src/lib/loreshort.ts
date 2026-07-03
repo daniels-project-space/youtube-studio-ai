@@ -16,7 +16,8 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { bootstrapSecrets } from "./bootstrap";
-import { geminiJsonPro, geminiVisionLocal, parseJsonLoose } from "./gemini";
+import { geminiJsonPro, parseJsonLoose } from "./gemini";
+import { visionLocal } from "./vision";
 import { synthNarration } from "./tts";
 import { generateBananaImage } from "./banana";
 import { ffprobeDuration } from "./ffmpeg";
@@ -245,7 +246,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
   async function analyzeMotion(i: number) {
     const out = rd(`motion_${i}.json`);
     if (existsSync(out)) { motion[i] = JSON.parse(await readFile(out, "utf8")); return; }
-    const raw = await geminiVisionLocal({
+    const raw = await visionLocal({
       imagePaths: [rd(`scene_${i}.png`)], json: true, maxTokens: 700, model: "gemini-2.5-flash",
       prompt:
         `You are the SHOT DIRECTOR for an image-to-video clip (~6s). Look CAREFULLY at this ${String(cfg.subStyle).replace(/_/g, " ")} illustration ` +

@@ -6,7 +6,8 @@
  * self-guarding (returns a skipped verdict if no key / on error) so QA never
  * crashes — the qa_visual block decides what is a hard failure.
  */
-import { geminiVisionLocal, geminiJson, hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
+import { geminiJson, hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
+import { hasVisionKey, visionLocal } from "@/lib/vision";
 
 export interface Verdict {
   score: number; // 0-10
@@ -28,14 +29,15 @@ function coerce(raw: unknown): Verdict {
 }
 
 /**
- * Shared vision-grade: guard → Gemini vision (the centralized geminiVisionLocal)
- * → coerced {score, issues} Verdict, returning SKIP on no-key / no-images / error.
+ * Shared vision-grade: guard → the provider-routed vision client (visionLocal:
+ * groq/fal/gemini, frames downscaled + verdicts cached) → coerced
+ * {score, issues} Verdict, returning SKIP on no-key / no-images / error.
  * The per-artifact evaluators below differ ONLY in their rubric prompt.
  */
 async function gradeImage(imagePaths: string[], prompt: string, maxTokens = 400): Promise<Verdict> {
-  if (!hasGeminiKey() || imagePaths.length === 0) return SKIP;
+  if (!hasVisionKey() || imagePaths.length === 0) return SKIP;
   try {
-    return coerce(parseJsonLoose(await geminiVisionLocal({ prompt, imagePaths, json: true, maxTokens })));
+    return coerce(parseJsonLoose(await visionLocal({ prompt, imagePaths, json: true, maxTokens })));
   } catch {
     return SKIP;
   }

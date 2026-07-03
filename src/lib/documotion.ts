@@ -35,7 +35,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";
-import { geminiJson, geminiJsonPro, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
+import { geminiJson, geminiJsonPro, parseJsonLoose } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 import { generateBananaImage, bananaTypeCard } from "@/lib/banana";
 import { getDepthMap } from "@/lib/depth";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
@@ -754,7 +755,7 @@ async function gateAsset(path: string, role: DocuAssetRole, brief: string, world
         : "framingOk: clear focal hierarchy, no awkward crops of faces/subjects at the frame edge?";
   // objects legitimately carry markings (banknotes, signage) — exempt cutouts from noText
   const textAsk = role === "cutout" ? "noText: no large caption/watermark added over the object?" : "noText: ZERO letters/numbers/captions/borders baked in?";
-  const raw = await geminiVisionLocal({
+  const raw = await visionLocal({
     prompt:
       `ASSET GATE for ${worldHint}. Brief: "${brief.slice(0, 280)}". ` +
       `Judge: 1. styleOk: matches that world's look (not generic/glossy)? 2. briefOk: depicts the brief? ` +
@@ -1047,12 +1048,14 @@ export async function verifyDocu(args: {
   // before degrading — so the gate's repairs actually fire.
   let v: DocuVerdict = {};
   for (let attempt = 0; attempt < 2; attempt++) {
-    const raw = await geminiVisionLocal({
+    const raw = await visionLocal({
       prompt: attempt === 0 ? basePrompt : `${basePrompt}\n\nCRITICAL: your previous reply was not valid JSON. Reply with ONLY the JSON object — no markdown fences, no prose before or after, all strings closed, properly comma-separated.`,
       imagePaths: args.framePaths,
       json: true,
-      model: "gemini-3.1-pro-preview",
-      maxTokens: 6000,
+      // Routed via visionLocal (cheap chain, downscaled + cached) — this was
+      // the repo's ONLY Pro-vision call (gemini-3.1-pro-preview @ 6000 budget
+      // x up to 6 calls per docu video).
+      maxTokens: 2000,
     }).catch(() => "");
     if (!raw) continue;
     try { v = parseJsonLoose<DocuVerdict>(raw); break; }

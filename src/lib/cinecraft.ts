@@ -38,7 +38,8 @@
 import { join } from "node:path";
 import { runCli, HiggsfieldError } from "@/lib/higgsfield";
 import { downloadTo } from "@/lib/files";
-import { geminiJsonPro, geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { geminiJson, geminiJsonPro, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 import { cinematicDoctrineFor, type CinematicDoctrine } from "@/engine/golden";
 
 export { cinematicDoctrineFor, type CinematicDoctrine } from "@/engine/golden";
@@ -259,7 +260,9 @@ function sheetViews(kind: SubjectKind, n: number): string[] {
 
 async function distillMarkers(look: string, kind: SubjectKind): Promise<string> {
   const what = kind === "location" ? "place" : kind === "object" ? "object" : "person/creature";
-  const out = await geminiJsonPro<{ markers?: string }>({
+  // Mechanical extraction — flash (no thinking); Pro was billing a 6000-token
+  // thinking floor for a 200-token comma phrase.
+  const out = await geminiJson<{ markers?: string }>({
     prompt: `From this ${what} description, list the 3-5 MOST distinctive, identity-defining visual features as a short comma phrase a prompt can repeat to lock consistency (people: "thin mustache, slicked dark hair, charcoal suit"; places: "vaulted ceiling, green marble columns, brass sconces"; objects: "engraved silver lid, cracked leather strap"). Description: "${look}". Return STRICT JSON {"markers":string}.`,
     maxTokens: 200,
     temperature: 0.2,
@@ -382,7 +385,7 @@ async function consistencyScore(keyframeUrl: string, heroUrl: string, kind: Subj
     const b = join(tmpDir, `kf_${tag}.png`);
     await Promise.all([downloadTo(heroUrl, a), downloadTo(keyframeUrl, b)]);
     const what = kind === "location" ? "the SAME place (same architecture/layout)" : kind === "object" ? "the SAME object" : "the SAME person (same face + distinctive features)";
-    const raw = await geminiVisionLocal({
+    const raw = await visionLocal({
       prompt: `Image 1 is the canonical reference. Image 2 is a keyframe that must show ${what}. Return STRICT JSON {"match":0-10}.`,
       imagePaths: [a, b], json: true, maxTokens: 80,
     });

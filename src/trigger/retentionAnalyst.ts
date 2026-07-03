@@ -112,6 +112,7 @@ export const retentionAnalystTask = task({
       diagnosis?: string;
       learnings?: { rule: string; evidence: string; confidence: "high" | "medium" | "low" }[];
     }>({
+      tier: "pro",
       maxTokens: 1600,
       temperature: 0.3,
       system: "You are a YouTube retention engineer turning REAL audience data into writing rules. Return ONLY JSON.",
@@ -132,17 +133,21 @@ export const retentionAnalystTask = task({
     // 6. Persist: append to the playbook's retentionLearnings (capped, newest
     // first) — scriptGen's digest reads the playbook, so high-confidence rules
     // reach every future script.
-    if (!payload.dryRun && playbook && learnings.length) {
+    // ALWAYS write at least a marker entry: pipeline-doctor's "not yet
+    // analyzed" check keys on runId presence here, so a zero-learning analysis
+    // that wrote nothing was RE-QUEUED (and re-billed) every day until the
+    // video aged out of the 60-day window — the top scheduled-burn bug.
+    if (!payload.dryRun && playbook) {
+      const entries = learnings.length
+        ? learnings.map((l) => ({ ...l, videoId, runId: payload.runId, deviceUsed, at: Date.now() }))
+        : [{ rule: "(no confident rule — data too thin)", evidence: "analysis ran; digest ignores low confidence", confidence: "low" as const, videoId, runId: payload.runId, deviceUsed, at: Date.now() }];
       const existing = (playbook["retentionLearnings"] as unknown[] | undefined) ?? [];
       const updated = {
         ...playbook,
-        retentionLearnings: [
-          ...learnings.map((l) => ({ ...l, videoId, runId: payload.runId, deviceUsed, at: Date.now() })),
-          ...existing,
-        ].slice(0, 20),
+        retentionLearnings: [...entries, ...existing].slice(0, 20),
       };
       await convex.mutation(api.channels.updateChannel, { channelId, scriptPlaybook: updated });
-      log(`playbook updated with ${learnings.length} retention learning(s)`);
+      log(`playbook updated with ${learnings.length} retention learning(s)${learnings.length ? "" : " (marker only)"}`);
     }
     return {
       ok: true,

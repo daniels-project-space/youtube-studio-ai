@@ -79,11 +79,13 @@ function clampBox(b: unknown): number[] {
 
 async function styledScene(prompt: string, refB64: string): Promise<Buffer> {
   // Line-art still conditioned on the channel's style-reference image (img2img).
+  // An empty refB64 renders unconditioned — small keyword sketches skip the ref
+  // (input images bill per call; the style prompt locks simple icons fine).
   return generateBananaImage({
     prompt,
     aspectRatio: "16:9",
     imageSize: "2K",
-    images: [{ data: refB64, mimeType: "image/png" }],
+    images: refB64 ? [{ data: refB64, mimeType: "image/png" }] : undefined,
   });
 }
 
@@ -267,14 +269,18 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
     const isScene = Number(l.box?.[2] ?? 0) >= 0.32;
     const prompt =
       `A whiteboard marker line-art ${isScene ? "SCENE" : "SKETCH"} on a PURE WHITE (#ffffff) background, nothing else, filling the frame with a small margin. ` +
-      (refB64 ? `CRITICAL: match the EXACT clean black marker line-art style and single stroke weight of the REFERENCE image (copy STYLE only). ` : "") +
+      (isScene && refB64
+        ? `CRITICAL: match the EXACT clean black marker line-art style and single stroke weight of the REFERENCE image (copy STYLE only). `
+        : `CRITICAL: clean black marker line-art, a single consistent stroke weight throughout. `) +
       (isScene
         ? `Draw a COMPOSED, designed scene: ${l.draw} — show the objects AND how they relate, clear and informative. `
         : `Draw a single bold iconic sketch of: ${l.draw}, instantly readable. `) +
       `(Context for tone, do NOT write any text: "${p.narration}".) Simple line-art, NOT photorealistic, no shading. ` +
       `Use red for at most one or two accent marks. ABSOLUTELY NO text, words, numbers or letters anywhere. No watermark, NO whiteboard, NO frame, NO border, NO grey edges — pure white #ffffff background ONLY.`;
     try {
-      await writeFile(out, refB64 ? await styledScene(prompt, refB64) : await styledScene(prompt, ""));
+      // Style ref only for the hero SCENES — the 2-4 small sketches per panel
+      // were re-sending the same ref PNG on every call (billed input images).
+      await writeFile(out, await styledScene(prompt, isScene ? refB64 : ""));
       l.art = fn;
       log(`art ${fn} ✓`);
     } catch (e) {

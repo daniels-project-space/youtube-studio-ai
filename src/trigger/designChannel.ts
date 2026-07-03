@@ -674,8 +674,9 @@ async function reviewProbeArtifacts(
     if (thumbKey) {
       const tPath = join(tmp, "probe_thumb.jpg");
       await writeBytes(tPath, await getObjectBytes(thumbKey));
-      const { geminiVisionLocal, parseJsonLoose } = await import("@/lib/gemini");
-      const raw = await geminiVisionLocal({
+      const { parseJsonLoose } = await import("@/lib/gemini");
+      const { visionLocal } = await import("@/lib/vision");
+      const raw = await visionLocal({
         prompt:
           `CRITICAL thumbnail review for "${channelName}". The channel's locked thumbnail identity: ` +
           `subject "${dna.thumbnail?.subject ?? dna.recurringSubject ?? "?"}", palette ${(dna.thumbnail?.palette ?? []).join(",") || "?"}.\n` +

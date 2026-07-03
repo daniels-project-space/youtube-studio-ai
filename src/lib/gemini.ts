@@ -128,23 +128,34 @@ interface GeminiResponse {
   error?: { message?: string };
 }
 
+/**
+ * Thinking control per model family. Thinking tokens BILL AS OUTPUT (~$10-12/M
+ * on Pro) and Pro models think UNBOUNDED by default — this was a top driver of
+ * the Google bill. FLASH: disabled outright (budget 0). 2.5-PRO: budget capped
+ * (min the API allows is 128; 0 is rejected). GEMINI-3 previews: thinkingLevel
+ * "low" (they take a level, not a budget). If a preview rejects the field, the
+ * caller strips it and retries once (see the 400 handler below).
+ */
+function thinkingConfigFor(model: string): Record<string, unknown> | null {
+  if (/flash/i.test(model)) return { thinkingBudget: 0 };
+  if (/gemini-3/i.test(model)) return { thinkingLevel: process.env.GEMINI_PRO_THINKING || "low" };
+  if (/2\.5-pro/i.test(model)) return { thinkingBudget: Number(process.env.GEMINI_PRO_THINKING_BUDGET || 1024) };
+  return null;
+}
+
 async function generate(
   model: string,
   parts: GeminiPart[],
   opts: { json?: boolean; maxTokens?: number; temperature?: number; tools?: unknown[] } = {},
 ): Promise<string> {
+  const thinking = thinkingConfigFor(model);
   const body: Record<string, unknown> = {
     contents: [{ role: "user", parts }],
     ...(opts.tools ? { tools: opts.tools } : {}),
     generationConfig: {
       maxOutputTokens: opts.maxTokens ?? 2048,
       temperature: opts.temperature ?? 0.7,
-      // Gemini 2.5 FLASH spends maxOutputTokens on internal "thinking" first,
-      // which truncated small structured/JSON replies (finishReason MAX_TOKENS)
-      // → disable thinking there. PRO REJECTS budget 0 ("only works in thinking
-      // mode") — the blanket 0 made every gemini-2.5-pro call fail with HTTP 400
-      // (the one-shot long-script path silently fell back to chunked forever).
-      ...(/flash/i.test(model) ? { thinkingConfig: { thinkingBudget: 0 } } : {}),
+      ...(thinking ? { thinkingConfig: thinking } : {}),
       ...(opts.json ? { responseMimeType: "application/json" } : {}),
     },
   };
@@ -180,6 +191,12 @@ async function generate(
     if (res.ok) break;
     const code = res.status;
     lastErr = `HTTP ${code}: ${json.error?.message ?? ""}`;
+    // A preview model may reject our thinking field shape (400) — strip it and
+    // retry rather than failing the whole call. Costs one round-trip, once.
+    if (code === 400 && /thinking/i.test(json.error?.message ?? "") && (body.generationConfig as Record<string, unknown>)?.thinkingConfig) {
+      delete (body.generationConfig as Record<string, unknown>).thinkingConfig;
+      continue;
+    }
     if ((code === 429 || code === 500 || code === 503) && attempt < 3) {
       await sleep(2000 * (attempt + 1) * (attempt + 1)); // 2s, 8s, 18s
       continue;

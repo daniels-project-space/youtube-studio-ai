@@ -100,6 +100,7 @@ export async function distillScriptPlaybook(args: {
     voiceRules?: string[];
     avoid?: string[];
   }>({
+    tier: "pro",
     maxTokens: 2600,
     temperature: 0.5,
     system: "You are an elite YouTube retention engineer and head writer. Return ONLY JSON.",

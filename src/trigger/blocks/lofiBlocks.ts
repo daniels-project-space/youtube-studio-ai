@@ -33,6 +33,7 @@
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
 import { PRICE } from "@/engine/pricing";
+import { bananaCounters } from "@/lib/banana";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -45,7 +46,8 @@ import { uploadPrivateDraft, setVideoThumbnail } from "@/lib/youtube";
 import { notifyDraftReady } from "@/lib/telegram";
 import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
-import { hasGeminiKey, geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
+import { hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
@@ -452,6 +454,7 @@ export const keyframes: Block = {
     // The critic only runs with a grounded DNA + a Gemini key (else single-shot).
     const canCritique = hasGeminiKey() && !!(dna && dna.recurringSubject?.trim());
     let stills = 0;
+    const countersBefore = { ...bananaCounters };
     const loop = await produceAndCritique<{ url: string; local: string }>({
       label: "keyframe",
       threshold: 0.8,
@@ -471,7 +474,7 @@ export const keyframes: Block = {
       critique: async (cand) => {
         if (!canCritique) return { score: 1, pass: true, issues: [] };
         try {
-          const raw = await geminiVisionLocal({
+          const raw = await visionLocal({
             prompt: [
               "You are the channel's art director QA'ing a generated still against its LOCKED visual identity.",
               `RECURRING SUBJECT: ${dna!.recurringSubject}`,
@@ -513,7 +516,7 @@ export const keyframes: Block = {
     let motionPrompt = scene.klingMotionPrompt;
     if (hasGeminiKey()) {
       try {
-        const raw = await geminiVisionLocal({
+        const raw = await visionLocal({
           prompt:
             "This is a still for a seamless lofi/ambient LOOP. Identify the elements that should " +
             "SUBTLY animate (e.g. drifting steam, swaying plants, flickering candle, rain on glass, " +
@@ -536,7 +539,13 @@ export const keyframes: Block = {
       f1Url,
       f1Key,
       motionPrompt,
-      [COST_PATCH_KEY]: PRICE.fluxStillUsd * stills, // one flux still per critique attempt
+      // Real spend: banana stills at their true rate (the flat fluxStillUsd
+      // billed a Pro banana still at $0.01 — a 13x undercount); non-banana
+      // (Flux) attempts keep the flux rate.
+      [COST_PATCH_KEY]:
+        (bananaCounters.pro - countersBefore.pro) * PRICE.bananaProUsd +
+        (bananaCounters.flash - countersBefore.flash) * PRICE.bananaFlashUsd +
+        Math.max(0, stills - (bananaCounters.pro - countersBefore.pro) - (bananaCounters.flash - countersBefore.flash)) * PRICE.fluxStillUsd,
     };
   },
 };

@@ -27,7 +27,8 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
-import { geminiJsonPro, geminiVisionLocal } from "@/lib/gemini";
+import { geminiJsonPro } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 import { generateBananaImage } from "@/lib/banana";
 import { generateMusic } from "@/lib/music";
 import { ffprobeDuration } from "@/lib/ffmpeg";
@@ -116,7 +117,7 @@ async function locatePanelText(imgPath: string, lines: PlanLine[], chars: PlanCh
     `"keepClear":[[x,y,w,h], ...]}\n` +
     `keepClear = a TIGHT box around EVERY face AND every important/hero object the text must not cover. No prose.`;
   try {
-    const raw = await geminiVisionLocal({ prompt, imagePaths: [imgPath], json: true, maxTokens: 900 });
+    const raw = await visionLocal({ prompt, imagePaths: [imgPath], json: true, maxTokens: 900 });
     const j = safeJson<{ bubbles?: { name?: string; mouth?: number[]; anchor?: number[] }[]; keepClear?: number[][] }>(raw, {});
     const anchors: Record<string, BubbleAnchor> = {};
     for (const bb of j.bubbles ?? []) {
@@ -155,14 +156,39 @@ async function probeDur(file: string): Promise<number> {
   return Math.max(0.4, (await ffprobeDuration(file)) || 1);
 }
 
-async function genImage(prompt: string, refs: string[]): Promise<Buffer> {
+async function genImage(prompt: string, refs: { data: string; mime: string }[]): Promise<Buffer> {
   // 4:3 comic panels, optionally conditioned on character-sheet refs (img2img).
   return generateBananaImage({
     prompt,
     aspectRatio: "4:3",
     imageSize: "2K",
-    images: refs.map((r) => ({ data: r, mimeType: "image/png" })),
+    images: refs.map((r) => ({ data: r.data, mimeType: r.mime })),
   });
+}
+
+/**
+ * Identity refs don't need 2K: each panel call re-sends every appearing
+ * character's sheet as an INPUT image (billed per call). A ≤1024px JPEG carries
+ * face/wardrobe identity just as well at ~1/10 the payload. Falls back to the
+ * original PNG if ffmpeg is unavailable.
+ */
+async function refImageB64(pngPath: string): Promise<{ data: string; mime: string }> {
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const run = promisify(execFile);
+    const out = pngPath.replace(/\.png$/i, "_ref.jpg");
+    if (!existsSync(out)) {
+      await run(process.env.FFMPEG_PATH || "ffmpeg", [
+        "-y", "-i", pngPath,
+        "-vf", "scale='min(1024,iw)':'min(1024,ih)':force_original_aspect_ratio=decrease",
+        "-q:v", "3", "-frames:v", "1", out,
+      ]);
+    }
+    return { data: (await readFile(out)).toString("base64"), mime: "image/jpeg" };
+  } catch {
+    return { data: (await readFile(pngPath)).toString("base64"), mime: "image/png" };
+  }
 }
 
 /** ElevenLabs v3 Text-to-Dialogue — one or more (text, voice) lines → one mp3. */
@@ -254,7 +280,7 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
   const voiceOf = (s: string) => s === "narrator" ? plan.narratorVoiceId : (plan.characters.find((c) => c.id === s)?.voiceId ?? plan.narratorVoiceId);
 
   // 2. CHARACTER SHEETS (cached)
-  const sheetB64: Record<string, string> = {};
+  const sheetB64: Record<string, { data: string; mime: string }> = {};
   await pool(plan.characters, 2, async (c) => {
     const file = rd(`char_${c.id}.png`);
     if (!existsSync(file)) {
@@ -262,7 +288,7 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
       try { await writeFile(file, await genImage(prompt, [])); log(`char ${c.id} ✓`); }
       catch (e) { log(`char ${c.id} FAILED: ${e instanceof Error ? e.message : e}`); return; }
     }
-    sheetB64[c.id] = (await readFile(file)).toString("base64");
+    sheetB64[c.id] = await refImageB64(file);
   });
 
   // 3. PANELS (cached) — image-to-image with appearing characters' sheets

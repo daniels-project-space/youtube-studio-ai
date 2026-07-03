@@ -37,7 +37,8 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { downloadTo } from "@/lib/files";
 import { grabFrame } from "@/lib/ffmpeg";
-import { geminiJson, geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 import { footageDoctrineFor, type FootageDoctrine } from "@/engine/golden";
 import {
   searchFootage,
@@ -337,7 +338,7 @@ export async function gateClip(
       `moody channel) even when the subject matches. Reject loosely-related, generic decorative filler, or ` +
       `anything on the never-show list. Return STRICT JSON {"relevant":boolean,"score":0-10}.`;
   try {
-    const raw = await geminiVisionLocal({ prompt, imagePaths: frames, json: true, maxTokens: 200 });
+    const raw = await visionLocal({ prompt, imagePaths: frames, json: true, maxTokens: 200 });
     const v = parseJsonLoose<{ relevant?: boolean; score?: number }>(raw);
     return { relevant: v.relevant !== false, score: typeof v.score === "number" ? v.score : 5 };
   } catch (e) {

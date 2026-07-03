@@ -81,7 +81,7 @@ export async function synthChannelConcept(
 
   let raw: Partial<ChannelConcept> & { palette?: unknown; topicPool?: unknown; bannedWords?: unknown };
   try {
-    raw = await claudeJson({ prompt, system, maxTokens: 1500, temperature: 0.7 });
+    raw = await claudeJson({ prompt, system, tier: "pro", maxTokens: 1500, temperature: 0.7 });
   } catch (e) {
     log(`conceptSynth: LLM failed (${e instanceof Error ? e.message : e}) — fallback`);
     return fallbackConcept(seed);

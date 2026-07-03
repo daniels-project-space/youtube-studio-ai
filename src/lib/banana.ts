@@ -10,10 +10,29 @@
  *   const { path } = await bananaThumbnail({ brief: buildThumbBrief({...}), outJpg, log });
  */
 import { writeFile } from "node:fs/promises";
-import { geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
+import { parseJsonLoose } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 
-/** Primary, then graceful degrade (classic Nano Banana) if Pro is unavailable. */
-const MODELS = ["gemini-3-pro-image-preview", "gemini-2.5-flash-image"];
+/**
+ * MODEL TIERS. Pro (gemini-3-pro-image, ~$0.13/img) exists for DESIGNED
+ * TYPOGRAPHY — thumbnails and type cards, where its text rendering is the
+ * proven 9/9 edge. Flash (classic Nano Banana, ~$0.04/img) is the DEFAULT for
+ * every picture-only render (documotion assets, whiteboard layers, comic
+ * panels, lore scenes, lofi stills — ~90% of image volume): Pro-first for
+ * those was a silent 3.4x on the whole image bill. Flash tier never silently
+ * upgrades to Pro (a transient flash blip must not 3.4x the price).
+ * BANANA_FORCE_MODEL overrides everything (emergency pin).
+ */
+const PRO_MODELS = ["gemini-3-pro-image-preview", "gemini-2.5-flash-image"];
+const FLASH_MODELS = ["gemini-2.5-flash-image"];
+
+function modelsFor(tier: "pro" | "flash"): string[] {
+  if (process.env.BANANA_FORCE_MODEL) return [process.env.BANANA_FORCE_MODEL];
+  return tier === "pro" ? PRO_MODELS : FLASH_MODELS;
+}
+
+/** Billed-generation counters (by tier) — pipeline blocks report real cost from these. */
+export const bananaCounters = { pro: 0, flash: 0 };
 
 export function hasBanana(): boolean {
   return !!process.env.GEMINI_API_KEY;
@@ -115,7 +134,7 @@ export async function bananaTypeCard(args: {
     try {
       const bytes = await generateBananaImage({ prompt: base + fix, aspectRatio: "16:9", allowText: true });
       await writeFile(args.outJpg, bytes);
-      const raw = await geminiVisionLocal({
+      const raw = await visionLocal({
         prompt:
           `TYPOGRAPHY GATE. Does this card show the EXACT line "${args.text}" — every word present, correctly ` +
           `spelled, fully legible, no gibberish or extra words? Return STRICT JSON {"exact":bool,"legible":bool,"fix":"<=12 words"}.`,
@@ -158,15 +177,19 @@ export async function generateBananaImage(args: {
    *  the render is picture-only and NO_TEXT_CLAUSE is appended, because every
    *  pipeline's titles/labels are engine overlays — baked-in text is the bug. */
   allowText?: boolean;
+  /** Cost tier. Default: "pro" only for text-design renders (allowText), else
+   *  "flash". Pass explicitly to override (e.g. flash preview thumbnails). */
+  tier?: "pro" | "flash";
 }): Promise<Buffer> {
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
   const prompt = args.allowText ? args.prompt : args.prompt + NO_TEXT_CLAUSE;
+  const tier = args.tier ?? (args.allowText ? "pro" : "flash");
   // Text first, then any conditioning images (img2img / style reference).
   const parts: Record<string, unknown>[] = [{ text: prompt }];
   for (const im of args.images ?? []) parts.push({ inlineData: { mimeType: im.mimeType ?? "image/png", data: im.data } });
   let lastErr = "";
-  for (const model of MODELS) {
+  for (const model of modelsFor(tier)) {
     // Nano Banana Pro (gemini-3-pro-image) honours imageConfig.imageSize for 2K/4K
     // output; the classic gemini-2.5-flash-image fallback rejects it (400) and caps
     // ~1024px anyway, so it silently degrades.
@@ -203,6 +226,7 @@ export async function generateBananaImage(args: {
         }
         const part = (json.candidates?.[0]?.content?.parts ?? []).find((p) => p.inlineData?.data);
         if (!part?.inlineData?.data) { lastErr = `${model}: no image part in response`; break; }
+        bananaCounters[model.includes("gemini-3-pro-image") ? "pro" : "flash"]++;
         return Buffer.from(part.inlineData.data, "base64");
       } catch (e) {
         lastErr = `${model}: ${e instanceof Error ? e.message : e}`;
@@ -234,15 +258,18 @@ export async function bananaThumbnail(args: {
   expectWords?: string[];
   imageStyle?: string;
   title?: string;
+  /** "flash" for plan-stage PREVIEW thumbnails (may never become videos);
+   *  default "pro" — publish thumbnails keep the proven typography model. */
+  tier?: "pro" | "flash";
   log?: (msg: string) => void;
 }): Promise<{ path: string; verdict: BananaVerdict }> {
   let fixNote = "";
   let lastVerdict: BananaVerdict = {};
   for (let attempt = 0; attempt < 2; attempt++) {
-    const bytes = await generateBananaImage({ prompt: args.brief + fixNote, allowText: true });
+    const bytes = await generateBananaImage({ prompt: args.brief + fixNote, allowText: true, tier: args.tier });
     await writeFile(args.outJpg, bytes);
     const wordList = (args.expectWords ?? []).map((w) => `"${w.toUpperCase()}"`).join(" and ");
-    const raw = await geminiVisionLocal({
+    const raw = await visionLocal({
       prompt:
         `THUMBNAIL GATE. 1. textOk: ${wordList ? `exact words ${wordList} fully visible, spelled exactly, ` : ""}` +
         `every visible word a correctly spelled real word? 2. faceClear: NO text covering any face or eyes? ` +

@@ -14,7 +14,8 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
-import { geminiJson, geminiVideo, geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { geminiJson, geminiVideo, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 import { agentJson } from "@/agents/mastra";
 import { z } from "zod";
 import { existsSync } from "node:fs";
@@ -68,7 +69,7 @@ function splitSentences(text: string): string[] {
 import {
   evaluateVisualFrames,
   evaluateThumbnail,
-  evaluateFootage,
+
   evaluateSeo,
   evaluateIdentity,
   type Verdict,
@@ -226,7 +227,9 @@ export const scriptGen: Block = {
         const issues = (Array.isArray(crit.issues) ? crit.issues : []).filter(Boolean).slice(0, 6);
         if (crit.pass === false && issues.length) {
           ctx.log(`script_gen: draft rejected by critic â€” regenerating once`, { issues });
-          script = await synthScript({ ...req, priorIssues: issues }, ctx.log);
+          // Reuse the judge-gated hook: only the narration was rejected, so the
+          // regen must not re-bill hookcraft (Pro + grounded fact-checks).
+          script = await synthScript({ ...req, priorIssues: issues, precraftedHook: script.crafted }, ctx.log);
         }
       } catch (e) {
         ctx.log(`script_gen: critic unavailable (kept draft): ${e instanceof Error ? e.message : e}`);
@@ -814,7 +817,7 @@ export const entityImagery: Block = {
         // wrong face. Verify failure (not mismatch) keeps the image.
         if (hasGeminiKey()) {
           try {
-            const raw = await geminiVisionLocal({
+            const raw = await visionLocal({
               prompt:
                 `Does this image clearly depict "${e}"? Be strict about identity for ` +
                 `people and specific places. Return STRICT JSON {"match":boolean,"reason":string}.`,
@@ -1721,13 +1724,15 @@ export const qaVisual: Block = {
             .join("; ")
         : undefined,
     };
-    // NATIVE FULL-WATCH first (sees motion, HEARS music/narration â€” two-pass
-    // blind-indexâ†’compare with a coverage guard); frame sampling is the
-    // fallback when the native pass can't complete honestly.
+    // NATIVE FULL-WATCH is now OPT-IN (params.nativeWatch === true): uploading
+    // the whole render for 2 Gemini video passes cost up to ~1.3M video tokens
+    // on long-form, and its exclusive outputs (mood/pacing/musicFit) are
+    // ADVISORY logs. The frame-sampled watch below + deterministic audio
+    // meters (validateAudioCoverage, ebur128) cover everything that gates.
     let watch: Awaited<ReturnType<typeof watchRender>> & {
       moodMatch?: number; pacing?: number; musicFit?: number;
     } | null = null;
-    if (ctx.params["nativeWatch"] !== false) {
+    if (ctx.params["nativeWatch"] === true) {
       watch = await nativeWatchRender(video, p.durationSec, watchIntent, { log: ctx.log });
       if (watch?.moodMatch !== undefined || watch?.musicFit !== undefined) {
         const low = [
@@ -1759,22 +1764,10 @@ export const qaVisual: Block = {
       ctx.log(`qa_visual: thumbnail check skipped (${e instanceof Error ? e.message : e})`);
     }
 
-    // 5) Stock-footage appropriateness (vision, separate) â€” narrated only.
-    let footage: Verdict = { score: 10, issues: [], skipped: true };
-    const footageClips = ctx.store["footageClips"] as string[] | undefined;
-    if (footageClips?.length) {
-      const fframes: string[] = [];
-      for (let i = 0; i < Math.min(3, footageClips.length); i++) {
-        const f = join(tmp, `qa_f${i}.jpg`);
-        try {
-          await grabFrame(footageClips[i], 1, f);
-          fframes.push(f);
-        } catch {
-          /* skip */
-        }
-      }
-      footage = await evaluateFootage(fframes, { topic, niche });
-    }
+    // 5) Stock-footage appropriateness: DROPPED as a QA re-check. Relevance is
+    // enforced at the SOURCE (stock_footage gateClip + evergreen fallback) and
+    // this verdict was advisory-only (logged, never gated) — pure vision spend.
+    const footage: Verdict = { score: 10, issues: [], skipped: true };
 
     // 6) SEO + channel-identity (text, separate).
     const seo = await evaluateSeo({
@@ -1910,7 +1903,7 @@ export const qaVisual: Block = {
       const visionAssertions = spec.assertions.filter((a) => a.check === "vision");
       if (hasGeminiKey() && judgeFrames.length && visionAssertions.length) {
         try {
-          const raw = await geminiVisionLocal({
+          const raw = await visionLocal({
             prompt:
               `You are the QA Critic. Judge EACH requirement against the sampled video frames:\n` +
               visionAssertions.map((a) => `- id "${a.id}": ${a.description}`).join("\n") +

@@ -38,6 +38,7 @@ export interface KeySpec {
 export const KEY_REGISTRY: readonly KeySpec[] = [
   // ---- core: the pipeline cannot produce a video without these ----
   { name: "GEMINI_API_KEY", purpose: "Gemini LLM (planning, scripts, vision QA) + Banana image generation", usedBy: ["lib/gemini.ts", "lib/banana.ts", "all planners"], tier: "core", obtain: "aistudio.google.com → API key", notes: "GOOGLE_GENERATIVE_AI_API_KEY / GOOGLE_API_KEY are accepted aliases by the Google SDK." },
+  { name: "GROQ_API_KEY", purpose: "Groq llama-4-scout VISION judging — the FREE replacement for Gemini vision (1k req/day free tier)", usedBy: ["lib/vision.ts", "all vision gates/verifiers"], tier: "feature", obtain: "console.groq.com → API keys (free, no card)", notes: "vision.ts provider chain: groq → fal → gemini (VISION_PROVIDERS overrides; VISION_DISABLE_GEMINI=1 hard-forbids Google vision). Add this key and Google vision spend drops to zero." },
   { name: "FAL_KEY", purpose: "fal.ai — image cutout, depth maps, image-to-video", usedBy: ["lib/falImage.ts", "lib/documotion.ts", "lib/depth.ts"], tier: "core", obtain: "fal.ai/dashboard/keys" },
   { name: "TRIGGER_SECRET_KEY", purpose: "Trigger.dev runtime auth (task orchestration)", usedBy: ["trigger.config.ts", "src/trigger/**"], tier: "infra", obtain: "Trigger.dev dashboard → project → API keys", notes: "Local .env.local holds the DEV key; prod uses the vault." },
 

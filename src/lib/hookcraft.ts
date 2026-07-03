@@ -320,21 +320,17 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
 
   let fixNote = "";
   let lastIssues: string[] = [];
+  // Grounded fact-checks bill per REQUEST (~$35/1k) on top of tokens — cap them
+  // per craft: the judge's ordered picks get at most 2 grounded verdicts; after
+  // that a candidate passes on the judge gates alone (logged, never silent).
+  let groundedCalls = 0;
   for (let attempt = 0; attempt < 2; attempt++) {
+    // PROMPT ORDER = COST: the static doctrine (device list, retention arc,
+    // hard rules — ~1.5k tokens) leads; topic/register/fixNote trail, so
+    // Gemini's implicit prefix cache hits on attempt 2 and across runs.
     const gen = await geminiJsonPro<{ candidates?: { device?: string; hook?: string; opening?: string; loop?: string }[] }>({
       prompt: [
         `You are the cold-open director. Write the spoken COLD OPEN for a YouTube video.`,
-        `VIDEO TOPIC — the open must be SPECIFICALLY about this; a line that could open any video is a failure:`,
-        `"${a.topic}"`,
-        a.title ? `VIDEO TITLE (the promise the viewer clicked): "${a.title}"` : "",
-        registerClause(a),
-        a.playbookDigest ?? "",
-        a.directorIdea ? `Director's hook intent (honor the idea, craft the execution): "${a.directorIdea}"` : "",
-        a.seriesNote
-          ? `EPISODIC: ${a.seriesNote}. The cold open speaks to a RETURNING viewer — pick up the program's ` +
-            `thread inside the channel's ritual shape (still a real hook for a first-time viewer, never an ` +
-            `inside joke).`
-          : "",
         `FIRST, silently analyze the topic: its core tension, its single most surprising VERIFIED fact, the ` +
           `viewer's pain or fascination, and the emotional stakes. Write every candidate FROM that analysis.`,
         `Write 4 candidates, EACH using a DIFFERENT device from this list (pick the 4 that best fit this topic ` +
@@ -357,6 +353,19 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           `first-person research the channel hasn't done ("we analyzed", "I reviewed the filings") — cite real ` +
           `public facts instead. No disclaimers, no apologies, no subscribe asks. NEVER use these openers: ` +
           `${BANNED_OPENERS.join("; ")}.`,
+        `Return STRICT JSON {"candidates":[{"device":string,"hook":string,"opening":string,` +
+          `"loop":string (ONE sentence: the exact promise this cold open makes — what the video must pay off)}]}.`,
+        `VIDEO TOPIC — the open must be SPECIFICALLY about this; a line that could open any video is a failure:`,
+        `"${a.topic}"`,
+        a.title ? `VIDEO TITLE (the promise the viewer clicked): "${a.title}"` : "",
+        registerClause(a),
+        a.playbookDigest ?? "",
+        a.directorIdea ? `Director's hook intent (honor the idea, craft the execution): "${a.directorIdea}"` : "",
+        a.seriesNote
+          ? `EPISODIC: ${a.seriesNote}. The cold open speaks to a RETURNING viewer — pick up the program's ` +
+            `thread inside the channel's ritual shape (still a real hook for a first-time viewer, never an ` +
+            `inside joke).`
+          : "",
         a.voiceTags
           ? `The narration voice (ElevenLabs v3) PERFORMS bracketed delivery tags. The cold open may carry ` +
             `AT MOST 1-2 tags from this palette, placed immediately before the words they color (the breath ` +
@@ -367,8 +376,6 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           : `Plain spoken text only — no markdown, brackets, or stage directions.`,
         `${lang}`,
         fixNote,
-        `Return STRICT JSON {"candidates":[{"device":string,"hook":string,"opening":string,` +
-          `"loop":string (ONE sentence: the exact promise this cold open makes — what the video must pay off)}]}.`,
       ].filter(Boolean).join("\n\n"),
       maxTokens: 9000,
       temperature: 0.95,
@@ -431,7 +438,8 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         if (!passes(v)) continue;
         const c = survivors[i];
         let factCheck: "verified" | "skipped" | "unchecked" = "skipped";
-        if (!fiction) {
+        if (!fiction && groundedCalls < 2) {
+          groundedCalls++;
           const fc = await factCheckColdOpen(c, a);
           if (!fc.ok) {
             factProblems.push(...fc.problems);
@@ -439,6 +447,9 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
             continue;
           }
           factCheck = fc.status;
+        } else if (!fiction) {
+          a.log?.(`hookcraft: grounded fact-check budget (2) spent — "${c.device}" passes on judge gates alone`);
+          factCheck = "unchecked";
         }
         a.log?.(
           `hookcraft: "${c.device}" wins (punch ${v.punch ?? "?"}, specificity ${v.specificity ?? "?"}, ` +

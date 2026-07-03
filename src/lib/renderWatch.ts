@@ -10,7 +10,8 @@
  * concrete defects. Fewer rules, real watching — and reusable by any post-render check.
  */
 import { grabFrame } from "@/lib/ffmpeg";
-import { geminiVisionLocal, parseJsonLoose, hasGeminiKey, uploadGeminiVideo, geminiVideoUri } from "@/lib/gemini";
+import { parseJsonLoose, hasGeminiKey, uploadGeminiVideo, geminiVideoUri } from "@/lib/gemini";
+import { hasVisionKey, visionLocal } from "@/lib/vision";
 import { makeRunTempDir } from "@/lib/files";
 import { join } from "node:path";
 
@@ -211,9 +212,12 @@ export async function watchRender(
 ): Promise<RenderWatchResult> {
   const log = opts.log ?? (() => {});
   const skipped: RenderWatchResult = { ran: false, verdict: "pass", defects: [], framePaths: [], summary: "vision unavailable — skipped (advisory)" };
-  if (!hasGeminiKey() || durationSec < 2) return skipped;
+  if (!hasVisionKey() || durationSec < 2) return skipped;
 
-  const times = sampleTimes(durationSec, opts.stepSec ?? 4, opts.maxFrames ?? 60);
+  // 12 frames max: the old default grabbed 60 full-res frames but the vision
+  // wrapper only ever sent 12 — 48 wasted grabs per run, and the prompt listed
+  // timestamps the model never saw (its judgments on those were confabulated).
+  const times = sampleTimes(durationSec, opts.stepSec ?? 4, Math.min(opts.maxFrames ?? 12, 12));
   const tmp = await makeRunTempDir(opts.runId);
   const framePaths: string[] = [];
   const stamps: number[] = [];
@@ -253,7 +257,7 @@ export async function watchRender(
     `Return STRICT JSON {"defects":[{"tSec":number,"severity":"critical|major|minor","category":string,"issue":string}],"summary":string}.`;
 
   try {
-    const raw = await geminiVisionLocal({ prompt, imagePaths: framePaths, json: true, maxTokens: 3000 });
+    const raw = await visionLocal({ prompt, imagePaths: framePaths, json: true, maxTokens: 3000 });
     const parsed = parseJsonLoose(raw) as { defects?: RenderDefect[]; summary?: string } | null;
     const defects = Array.isArray(parsed?.defects)
       ? parsed!.defects.filter((d): d is RenderDefect => Boolean(d && d.severity && d.issue))

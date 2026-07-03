@@ -22,6 +22,12 @@ function rate(envName: string, fallback: number): number {
 export const PRICE = {
   /** Per keyframe still (Higgsfield/Flux). keyframes renders 2. */
   fluxStillUsd: rate("PRICE_FLUX_STILL_USD", 0.01),
+  /** Per Nano Banana PRO image (gemini-3-pro-image-preview, 2K). The ledger
+   *  previously had NO Gemini image rate at all — the exact spend that blew
+   *  up the Google bill was invisible to budget enforcement. */
+  bananaProUsd: rate("PRICE_BANANA_PRO_USD", 0.13),
+  /** Per classic Nano Banana image (gemini-2.5-flash-image). */
+  bananaFlashUsd: rate("PRICE_BANANA_FLASH_USD", 0.04),
   /** Per image-to-video clip (~5s, Higgsfield/Kling). loop_clips renders 2. */
   videoClipUsd: rate("PRICE_VIDEO_CLIP_USD", 0.35),
   /** Per loop-unit Topaz upscale (block comment anchor: ~$0.25). */

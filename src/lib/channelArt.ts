@@ -14,7 +14,8 @@ import { generateFalFluxProImage, hasFalKey } from "@/lib/falImage";
 import { channelKey, putObject } from "@/lib/storage";
 import { makeRunTempDir, downloadTo } from "@/lib/files";
 import { imageToJpeg } from "@/lib/ffmpeg";
-import { geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { join } from "node:path";
 
@@ -135,7 +136,7 @@ async function directAvatar(id: ArtIdentity, log: Logger): Promise<string> {
         const shown = join(tmp, "tiny_shown.jpg");
         await imageToJpeg(cand.path, tiny, 48, 48);
         await imageToJpeg(tiny, shown, 256, 256);
-        const raw = await geminiVisionLocal({
+        const raw = await visionLocal({
           prompt:
             `This is a YouTube PROFILE PICTURE shown at icon size for "${id.name}"` +
             (id.iconicMotif ? ` (motif: ${id.iconicMotif})` : "") + ".\n" +

@@ -13,7 +13,8 @@
 import { spawn } from "node:child_process";
 import { mkdir } from "node:fs/promises";
 import { join } from "node:path";
-import { geminiVisionLocal, parseJsonLoose } from "@/lib/gemini";
+import { parseJsonLoose } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 import { type ChannelQualitySpec, type QualityDimension, goldenReference, NARRATIVE_CRAFT, hardGates } from "./rubric";
 
 type Logger = (m: string) => void;
@@ -143,7 +144,7 @@ async function judge(args: { frames: string[]; script?: string; meters: QualityM
     `Score EACH dimension 1-10 and list concrete DEFECTS (what's wrong + which shot/moment), worst first:\n` +
     dimList.map((d) => `- ${d}: ${dimDesc(d)}`).join("\n") +
     `\n\nReturn STRICT JSON {"scores":{${dimList.map((d) => `"${d}":n`).join(",")}},"defects":[{"dimension":"...","issue":"<=18 words"}],"summary":"<=25 words"}.`;
-  const raw = await geminiVisionLocal({ prompt, imagePaths: args.frames, json: true, maxTokens: 1500 }).catch(() => "");
+  const raw = await visionLocal({ prompt, imagePaths: args.frames, json: true, maxTokens: 1500 }).catch(() => "");
   if (!raw) return {};
   try {
     return parseJsonLoose<JudgeOut>(raw);

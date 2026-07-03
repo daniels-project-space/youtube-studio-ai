@@ -19,7 +19,8 @@
  *     The winner ships; scores + reasons persist.
  */
 import { join } from "node:path";
-import { geminiVisionLocal, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { visionLocal } from "@/lib/vision";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { hasBanana } from "@/lib/banana";
 
@@ -198,7 +199,7 @@ export async function verifyReferences(args: {
   }
   if (paths.length < 3) throw new Error(`thumbnailLab: only ${paths.length} reference thumbnails reachable`);
 
-  const raw = await geminiVisionLocal({
+  const raw = await visionLocal({
     prompt:
       `These are ${paths.length} thumbnails from the HIGHEST-VIEW videos scraped in this niche, in order.\n` +
       `Channel being built: "${args.channelName}" Ã¢â‚¬â€ positioning: ${args.positioning}\n\n` +
@@ -263,7 +264,7 @@ export async function distillPlaybook(args: {
   if (args.refs.length === 0) {
     log("thumbnailLab: ZERO references (search quota dead?) - distilling from DNA + craft principles only");
   }
-  const deconRaw = args.refs.length === 0 ? '{"decon":[]}' : await geminiVisionLocal({
+  const deconRaw = args.refs.length === 0 ? '{"decon":[]}' : await visionLocal({
     prompt:
       `Deconstruct WHY each of these ${args.refs.length} proven high-view thumbnails wins the click. ` +
       `For each (1-${args.refs.length}): composition (focal placement, negative space), hero device ` +
@@ -289,6 +290,7 @@ export async function distillPlaybook(args: {
     avoid?: string[];
     patterns?: { name?: string; when?: string; fluxRecipe?: string; textRecipeJson?: string }[];
   }>({
+    tier: "pro",
     // The visualLanguage-era schema is bigger â€” 3000 truncated mid-JSON
     // ("Expected ',' or '}'") on two of four channels.
     maxTokens: 6000,
@@ -535,7 +537,7 @@ export async function judgeTournament(args: {
   for (let i = 0; i < n; i++) {
     smalls.push(await imageToJpeg(args.candidates[i].path, join(args.tmpDir, `cand_${i}_small.jpg`), 480, 270));
   }
-  const raw = await geminiVisionLocal({
+  const raw = await visionLocal({
     prompt:
       `FEED SIMULATION. Images 1-${n} are CANDIDATE thumbnails for the video "${args.title}". ` +
       `Images ${n + 1}-${n + refPaths.length} are REAL thumbnails of the highest-view videos in this niche ` +

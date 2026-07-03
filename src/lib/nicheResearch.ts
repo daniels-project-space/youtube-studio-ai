@@ -30,9 +30,9 @@ import {
 import {
   hasGeminiKey,
   geminiJson,
-  geminiVision,
   parseJsonLoose,
 } from "@/lib/gemini";
+import { visionUrls } from "@/lib/vision";
 import { NICHES } from "@/lib/nicheCatalog";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -164,7 +164,7 @@ export async function refreshNicheResearchCore(
       .slice(0, 8);
     if (thumbUrls.length) {
       try {
-        const raw = await geminiVision({
+        const raw = await visionUrls({
           prompt:
             "You are a YouTube thumbnail analyst. Examine these top-performing " +
             `thumbnails for the niche "${args.niche}". AGGREGATE ALL of them into ` +

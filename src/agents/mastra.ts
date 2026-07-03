@@ -243,6 +243,9 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
         structuredOutput: { schema: o.schema },
         ...(o.temperature !== undefined ? { temperature: o.temperature } : {}),
         ...(o.maxTokens !== undefined ? { maxOutputTokens: o.maxTokens } : {}),
+        // Flash agents were silently billing THINKING tokens (the REST helper
+        // disables thinking; the AI-SDK path never did) — kill it here too.
+        providerOptions: { google: { thinkingConfig: { thinkingBudget: 0 } } },
       });
       if (res?.object !== undefined && res.object !== null) {
         return o.schema.parse(res.object);
