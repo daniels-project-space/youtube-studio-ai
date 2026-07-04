@@ -193,6 +193,13 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       // by the block). Keeps "lengthMinutes" meaningful for comic channels.
       engineParams.panels = Math.max(4, Math.min(12, Math.round(lenSec / 22)));
     }
+    if (fam.visualEngine === "whiteboard_scribe" && lenSec) {
+      // The scribe sized itself from its own defaults (6 panels / 150 words ≈
+      // one minute) no matter what length the operator chose — the wizard's
+      // lengthMinutes never reached the engine. The block converts this into
+      // panels + word budget.
+      engineParams.targetSeconds = lenSec;
+    }
     pipeline.splice(anchor + 1, 0, { block: fam.visualEngine, params: engineParams });
     // Whiteboard beds the produced music under its narration — the track must
     // exist BEFORE the engine runs, so move `music` ahead of it (it sat after,

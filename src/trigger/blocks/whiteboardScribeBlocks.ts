@@ -90,6 +90,17 @@ export const whiteboardScribe: Block = {
     const voiceId = String(ctx.params["voiceId"] ?? ctx.store["voiceId"] ?? "sleepless_historian");
     const width = Math.max(1280, Math.min(2560, Number(ctx.params["width"] ?? 1920)));
     const height = Math.round((width * 9) / 16);
+    // LENGTH: the wizard's lengthMinutes never reached this engine — it sized
+    // itself from its own defaults (6 panels / 150 words ≈ one minute) no
+    // matter what the operator chose. targetSeconds (designer-set) converts to
+    // the scribe's real levers: spoken-word budget (~2.1 w/s at whiteboard
+    // pacing incl. draw holds) + one panel per ~22s.
+    const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
+    const panels = targetSeconds > 0 ? Math.max(4, Math.min(16, Math.round(targetSeconds / 22))) : undefined;
+    const targetWords = targetSeconds > 0 ? Math.round(targetSeconds * 2.1) : undefined;
+    if (targetSeconds > 0) {
+      ctx.log(`whiteboard_scribe: sized to ~${targetSeconds}s → ${panels} panels / ~${targetWords} words`);
+    }
 
     // DETERMINISTIC dir (scoped): whiteboardSync's per-layer art cache is
     // path-keyed — a random mkdtemp meant every Trigger retry/self-heal
@@ -100,7 +111,11 @@ export const whiteboardScribe: Block = {
 
     const countersBefore = { ...bananaCounters };
     const res = await castWhiteboardSync({
-      brief: { topic, facts, styleId, header: visualBrief?.header, voiceId, width, height },
+      brief: {
+        topic, facts, styleId, header: visualBrief?.header, voiceId, width, height,
+        ...(panels ? { panels } : {}),
+        ...(targetWords ? { targetWords } : {}),
+      },
       runDir,
       outPath,
       log: (m) => ctx.log(`wb: ${m}`),
