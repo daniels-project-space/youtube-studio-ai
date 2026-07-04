@@ -278,8 +278,7 @@ export function parseJsonLoose<T = unknown>(text: string): T {
     if (m) s = m[0];
   }
   // TRAILING JUNK: models sometimes emit a complete balanced value and then
-  // keep talking ("...}
-Hope this helps!") — JSON.parse rejects the whole
+  // keep talking (a closing brace followed by prose) — JSON.parse rejects the whole
   // thing ("Unexpected non-whitespace character after JSON"). Since the text
   // starts with {/[, the prose-span fallback above never fires. Trim to the
   // end of the FIRST balanced top-level value. (Killed a comic storyboard and
@@ -430,9 +429,7 @@ export async function geminiJsonPro<T = unknown>(args: {
         // already carries upstream spend (a comic storyboard and a plan-week
         // slate both died on this within 24h).
         args.log?.(`geminiJsonPro: unparseable JSON from ${model} (${pe instanceof Error ? pe.message.slice(0, 80) : pe}) — one strict retry`);
-        const retryText = await generate(model, [{ text: args.prompt + "
-
-CRITICAL: output STRICTLY VALID minified JSON only. No prose, no trailing text, no markdown." }], {
+        const retryText = await generate(model, [{ text: `${args.prompt}\n\nCRITICAL: output STRICTLY VALID minified JSON only. No prose, no trailing text, no markdown.` }], {
           json: true,
           maxTokens,
           temperature: Math.max(0, (args.temperature ?? 0.7) - 0.3),
