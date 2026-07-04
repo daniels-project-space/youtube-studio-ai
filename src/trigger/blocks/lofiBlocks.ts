@@ -665,6 +665,19 @@ export const upscale: Block = {
     const targetFps = Number(ctx.params.targetFps ?? 30);
 
     const tmp = await makeRunTempDir(ctx.runId);
+    // Operator knob: targetResolution "native" = SKIP the paid Topaz pass and
+    // ship the native loop unit (a deliberate choice, not the failure degrade).
+    if (targetResolution === "native") {
+      const key0 = str(ctx, "loopRawKey");
+      ctx.log("upscale: targetResolution=native - Topaz skipped by config (native loop unit)");
+      return {
+        loopUnitKey: key0,
+        loopUnitUrl: String(ctx.store["loopRawUrl"] ?? ""),
+        loopUnitUpscaled: false,
+        loopUnitResolution: "native",
+        [COST_PATCH_KEY]: 0,
+      };
+    }
     // loop_clips stashed the local path in loopRawUrl; re-fetch from R2 on resume.
     const loopRawLocal = ctx.store["loopRawUrl"] as string | undefined;
     let loopUnit: string;
