@@ -277,6 +277,15 @@ export function parseJsonLoose<T = unknown>(text: string): T {
     const m = s.match(/[[{][\s\S]*[\]}]/);
     if (m) s = m[0];
   }
+  // TRAILING JUNK: models sometimes emit a complete balanced value and then
+  // keep talking ("...}
+Hope this helps!") — JSON.parse rejects the whole
+  // thing ("Unexpected non-whitespace character after JSON"). Since the text
+  // starts with {/[, the prose-span fallback above never fires. Trim to the
+  // end of the FIRST balanced top-level value. (Killed a comic storyboard and
+  // a plan-week slate within 24h — same signature, two pipelines.)
+  const bal = balancedSpanEnd(s);
+  if (bal > 0 && bal < s.length) s = s.slice(0, bal);
   try {
     return JSON.parse(s) as T;
   } catch {
@@ -289,6 +298,30 @@ export function parseJsonLoose<T = unknown>(text: string): T {
       return JSON.parse(closeTruncatedJson(escapeCtrlInStrings(s))) as T;
     }
   }
+}
+
+/** Index just past the first balanced top-level {...}/[...] (0 = not found). */
+function balancedSpanEnd(s: string): number {
+  if (!/^[[{]/.test(s)) return 0;
+  let inStr = false;
+  let esc = false;
+  let depth = 0;
+  for (let i = 0; i < s.length; i++) {
+    const ch = s[i];
+    if (inStr) {
+      if (esc) esc = false;
+      else if (ch === "\\") esc = true;
+      else if (ch === '"') inStr = false;
+      continue;
+    }
+    if (ch === '"') inStr = true;
+    else if (ch === "{" || ch === "[") depth++;
+    else if (ch === "}" || ch === "]") {
+      depth--;
+      if (depth === 0) return i + 1;
+    }
+  }
+  return 0;
 }
 
 /** Close an unterminated string + unclosed braces/brackets on truncated JSON. */
@@ -388,7 +421,24 @@ export async function geminiJsonPro<T = unknown>(args: {
         maxTokens,
         temperature: args.temperature,
       });
-      return parseJsonLoose<T>(text);
+      try {
+        return parseJsonLoose<T>(text);
+      } catch (pe) {
+        // MALFORMED-JSON RETRY (once): even in json mode the model
+        // occasionally emits junk parseJsonLoose can't recover. One paid
+        // retry with an explicit strictness nudge beats killing a run that
+        // already carries upstream spend (a comic storyboard and a plan-week
+        // slate both died on this within 24h).
+        args.log?.(`geminiJsonPro: unparseable JSON from ${model} (${pe instanceof Error ? pe.message.slice(0, 80) : pe}) — one strict retry`);
+        const retryText = await generate(model, [{ text: args.prompt + "
+
+CRITICAL: output STRICTLY VALID minified JSON only. No prose, no trailing text, no markdown." }], {
+          json: true,
+          maxTokens,
+          temperature: Math.max(0, (args.temperature ?? 0.7) - 0.3),
+        });
+        return parseJsonLoose<T>(retryText);
+      }
     } catch (e) {
       lastErr = e;
       const msg = e instanceof Error ? e.message : String(e);

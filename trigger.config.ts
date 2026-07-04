@@ -87,7 +87,19 @@ export default defineConfig({
         })),
       ),
       ffmpeg(),
-      additionalPackages({ packages: ["@higgsfield/cli@0.1.40"] }),
+      additionalPackages({
+        packages: [
+          "@higgsfield/cli@0.1.40",
+          // Runtime-webpack dep of src/remotion (additionalFiles ships the raw
+          // .tsx; nothing in the ESBUILD bundle imports these, so listing them
+          // in `external` did NOT put them in the image — every intro/outro
+          // TitleCard died on "@remotion/noise unresolved". additionalPackages
+          // force-installs them into /app/node_modules.
+          "@remotion/noise@4.0.471",
+          "@remotion/motion-blur@4.0.471",
+          "@remotion/google-fonts@4.0.471",
+        ],
+      }),
       additionalFiles({
         files: [
           "src/remotion/**",

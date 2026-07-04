@@ -138,7 +138,11 @@ export const FAMILY_CREW: Record<FamilyKey, string[]> = {
   narrated_stock: ["director", "cinematographer", "editor", "composer", "critic"],
   shorts: ["director", "editor", "critic"],
   whiteboard: ["director", "editor", "composer", "critic"],
-  comic: ["director", "editor", "composer", "critic"],
+  // NO composer: the comic engine scores itself (its own Suno bed) — a
+  // composer_brief here was re-inserted by the crew pass after the designer
+  // deliberately stripped it, wasting an LLM call every run for output the
+  // engine never reads.
+  comic: ["director", "editor", "critic"],
   cinematic: ["director", "cinematographer", "editor", "composer", "critic"],
 };
 

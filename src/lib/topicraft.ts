@@ -212,6 +212,7 @@ export function lintBet(
     keptTokens: Set<string>[];
     channelName?: string;
     allowHype?: boolean;
+    isMusicNiche?: boolean;
   },
 ): BetLint {
   const issues: string[] = [];
@@ -277,7 +278,10 @@ export function lintBet(
       o.evidence.trends.map((t) => t.title).join("\n"),
       o.evidence.competitors.map((c) => c.title).join("\n"),
     ].join("\n");
-    const lt = lintTitle(title, { grounding, channelName: o.channelName, allowHype: o.allowHype });
+    // isMusicNiche was never wired here — metacraft's LOFI_LEAK lint then
+    // rejected every on-brand title ON A LOFI CHANNEL, and with the pool topic
+    // in no-repeat memory the whole render died at topic_select forever.
+    const lt = lintTitle(title, { grounding, channelName: o.channelName, allowHype: o.allowHype, isMusicNiche: o.isMusicNiche });
     if (!lt.pass) issues.push(...lt.issues.map((i) => `title: ${i}`));
   }
 
@@ -336,6 +340,10 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
   const want = count + 4;
   const doctrine = resolveVoiceDoctrine(a.niche);
   const allowHype = doctrine?.voice === "chaos-commentator";
+  // Music/ambient channels legitimately title with "lofi/chill/study" — the
+  // LOFI_LEAK anti-drift lint is for NON-music channels only (same detection
+  // regex the metadata block uses).
+  const isMusicNiche = /lofi|lo-fi|study|chill|ambient|sleep|relax|music|beats/i.test(a.niche ?? "");
 
   const evidence = await gatherEvidence(a, log);
   const hasLive = evidence.outliers.length + evidence.trends.length + evidence.suggests.length + evidence.competitors.length > 0;
@@ -443,7 +451,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
     const linted = candidates.map((c) => {
       const lint = lintBet(c, {
         evidence, perfContext: a.perfContext, identityGiven, bannedWords,
-        avoidNorm, avoidTokens, keptTokens, channelName: a.channelName, allowHype,
+        avoidNorm, avoidTokens, keptTokens, channelName: a.channelName, allowHype, isMusicNiche,
       });
       if (lint.pass) keptTokens.push(tokenSet(c.topic));
       return { ...c, lint };
@@ -475,7 +483,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
         const ranked = (j.rankings ?? [])
           .filter((r): r is Required<typeof r> =>
             typeof r.idx === "number" && r.idx >= 0 && r.idx < survivors.length &&
-            (r.demand ?? 0) >= 7 && (r.freshness ?? 0) >= 7 && (r.fit ?? 0) >= 7 && (r.packageability ?? 0) >= 7,
+            (r.demand ?? 0) >= 7 && (r.freshness ?? 0) >= (isMusicNiche ? 5 : 7) && (r.fit ?? 0) >= 7 && (r.packageability ?? 0) >= 7,
           )
           .sort((x, y) => y.demand + y.freshness + y.fit + y.packageability - (x.demand + x.freshness + x.fit + x.packageability));
         gated = ranked.map((r) => ({
