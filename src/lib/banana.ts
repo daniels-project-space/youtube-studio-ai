@@ -247,6 +247,9 @@ export async function generateBananaImage(args: {
       imageSize: args.imageSize,
       images: (args.images ?? []).map((im) => ({ data: im.data, mimeType: im.mimeType ?? "image/png" })),
       allowText: args.allowText, // generateFalImage appends NO_TEXT_CLAUSE itself
+      // Mirror banana's tiering on the fal route: flash (picture-only bulk
+      // assets) rides the cheap model; text-design renders stay on quality.
+      tier: args.tier ?? (args.allowText ? "pro" : "flash"),
     });
     bananaCounters.fal++;
     return bytes;

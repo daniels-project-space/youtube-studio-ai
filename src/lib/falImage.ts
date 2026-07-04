@@ -119,6 +119,11 @@ export async function generateFalImage(req: {
   images?: { data: string; mimeType: string }[];
   allowText?: boolean;
   seed?: number;
+  /** Cost tier (mirrors banana): "flash" uses the cheap model (default
+   *  fal-ai/flux/schnell, env FAL_IMAGE_MODEL_FLASH) for simple picture-only
+   *  assets (whiteboard line-art = 40+ images/video); "pro"/unset uses the
+   *  quality model. i2i (references) always uses the kontext model. */
+  tier?: "pro" | "flash";
 }): Promise<Buffer> {
   if (!hasFalKey()) throw new Error("FAL_KEY missing (vault service 'fal')");
   const prompt = req.allowText ? req.prompt : req.prompt + NO_TEXT_CLAUSE;
@@ -141,7 +146,8 @@ export async function generateFalImage(req: {
       // no safety_tolerance: Kontext caps it lower for image inputs (422 risk).
     };
   } else {
-    endpoint = `https://fal.run/${falImageModel()}`;
+    const flashModel = process.env.FAL_IMAGE_MODEL_FLASH || "fal-ai/flux/schnell";
+    endpoint = `https://fal.run/${req.tier === "flash" ? flashModel : falImageModel()}`;
     body = {
       prompt,
       image_size: FAL_SIZE_OF[aspect] ?? "landscape_16_9",
