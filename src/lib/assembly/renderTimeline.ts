@@ -179,7 +179,16 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
   }
 
   // 3. PRE-OVERLAY CHECKPOINT — overlay-class heals re-finish from here, no full rebuild.
-  const preKey = `render/${hashTimeline(t, ver + ":preoverlay")}.mp4`;
+  // Keyed on the OVERLAY-FREE sub-plan: the composed body+outro does not depend on
+  // overlays or captionStyle, and an overlay-class heal CHANGES those — hashing the
+  // full timeline meant every overlay retune missed this checkpoint and paid a full
+  // rebuild (the exact case the checkpoint exists for).
+  const preTimeline: Timeline = {
+    ...t,
+    overlays: [],
+    ...(t.renderHints ? { renderHints: { ...t.renderHints, captionStyle: undefined } } : {}),
+  };
+  const preKey = `render/${hashTimeline(preTimeline, ver + ":preoverlay")}.mp4`;
   let composed = await backend.cacheGet(preKey);
   let healedFrom: "full" | "preOverlay";
   let cardsRendered = 0;
@@ -259,10 +268,12 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
     warnings.push(...ln.warnings);
   }
 
-  // 5. PUBLISH + cache the final.
-  const videoKey = await backend.publish(finalPath);
+  // 5. PROBE → CACHE → PUBLISH. Probe first (a corrupt final must fail BEFORE it
+  // is published/cached); cache before publish so a publish failure retried later
+  // hits the final-key cache instead of re-rendering everything.
   const durationSec = await backend.probe(finalPath);
   await backend.cachePut(finalKey, finalPath);
+  const videoKey = await backend.publish(finalPath);
 
   return ReceiptSchema.parse({
     videoKey,

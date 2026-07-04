@@ -137,6 +137,10 @@ export function composeKlingPrompt(input: KlingPromptInput): ComposedKlingPrompt
   const indoor = isIndoorScene(parts.join(" "));
   let prompt = parts.join(". ");
   if (indoor) prompt += NO_RAIN_INSIDE_CLAUSE;
+  // HARD CEILING: fal rejects ~2500+ char prompts with a 422 the retry loop
+  // then burns as "transient". No creative clause needs 2000 chars — clamp on
+  // a word boundary and keep the constitution suffixes intact by construction.
+  if (prompt.length > 2000) prompt = prompt.slice(0, 2000).replace(/\s+\S*$/, "");
 
   const knownPreset =
     input.visualStyle !== undefined && input.visualStyle in VISUAL_STYLE_PRESETS;

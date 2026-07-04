@@ -270,7 +270,10 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
     `Name: ${input.name}`,
     `Format (family): ${input.family}`,
     input.niche ? `Niche: ${input.niche}` : "",
-    input.persona ? `Persona seed: ${input.persona}` : "",
+    input.persona
+      ? `OPERATOR PERSONA — CANON, not a suggestion: "${input.persona}". The recurringSubject, setting and motifs MUST embody THIS persona's world exactly (a persona set in a neon penthouse must never distill into a café). Competitor/databank signals inform PACKAGING (titles, thumbnails, hooks) only — they never relocate the world.`
+      : "",
+    ENGINE_MOTION_LIMITS[input.family] ?? "",
     input.styleGrammar ? `Visual style seed: ${input.styleGrammar}` : "",
     input.palette?.length ? `Palette seed (hint only): ${clampHexes(input.palette, 6).join(", ")}` : "",
     input.exampleClipNotes
@@ -437,6 +440,19 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
 }
 
 /** Confidence at/above which a channel's grounding is "established" (Doctor-free). */
+/**
+ * Self-contained deterministic engines can only MOVE in specific ways: the
+ * distiller used to promise papercraft parallax/breathing cutouts the comic
+ * renderer cannot do (confidence 1.0, zero grounding gaps), and QA then judged
+ * real output against the fantasy. Constrain the motion vocabulary per family.
+ */
+const ENGINE_MOTION_LIMITS: Record<string, string> = {
+  comic:
+    "ENGINE MOTION LIMITS (hard): the renderer draws panels in with a hand, pops speech bubbles, zooms/pans a 3D camera across the page and turns pages. Do NOT promise parallax layers, particle effects, breathing/animated cutouts or any motion outside that vocabulary.",
+  whiteboard:
+    "ENGINE MOTION LIMITS (hard): a hand draws line-art and lettered labels onto a whiteboard, panel by panel, synced to narration. Do NOT promise camera moves, parallax, color-grade shifts or animated characters.",
+};
+
 export const ESTABLISHED_CONFIDENCE = 0.7;
 
 /* --------------------------- Quality Bar ------------------------------ */

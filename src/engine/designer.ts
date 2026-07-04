@@ -97,6 +97,9 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         params.seriesTitle = opts.seriesTitle;
         if (opts.seriesCount) params.seriesCount = opts.seriesCount;
       }
+      // Topic SCOPE guard: topicraft must know the video length — probes picked
+      // "the complete history of the Roman Empire" for an 8-panel 3-min comic.
+      if (e.block === "topic_select" && lenSec) params.targetSeconds = lenSec;
       if (e.block === "script_gen" && opts.locale) params.language = opts.locale;
       if (e.block === "narration_tts") {
         if (opts.voiceFx) params.voiceFx = opts.voiceFx;
@@ -175,8 +178,13 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // the produced track under the narration); comic REPLACES music too (the
   // engine scores itself with its own Suno bed).
   if (fam.visualEngine === "whiteboard_scribe" || fam.visualEngine === "motion_comic") {
+    // POLICY GATES ARE NOT REPLACED: the old set stripped compliance_check +
+    // originality_gate wholesale, so self-scripting engines shipped with ZERO
+    // policy gate while topic intel could pick advertiser-hostile war topics.
+    // compliance_check consumes `topic` (stays BEFORE the engine, in place);
+    // originality_gate consumes `narrationText` (re-inserted AFTER the engine).
     const replaced = new Set([
-      "script_gen", "hook_craft", "qa_script", "originality_gate", "compliance_check",
+      "script_gen", "hook_craft", "qa_script", "originality_gate",
       "narration_tts", "stock_footage", "gen_footage", "entity_imagery", "intro_card",
       "visual_inserts", "quote_overlays", "captions", "length_check", "timeline_assemble",
       ...(fam.visualEngine === "motion_comic" ? ["music", "composer_brief"] : []),
@@ -201,6 +209,18 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       engineParams.targetSeconds = lenSec;
     }
     pipeline.splice(anchor + 1, 0, { block: fam.visualEngine, params: engineParams });
+    // originality_gate re-enters AFTER the engine (it judges the narration the
+    // engine wrote); compliance_check must sit BEFORE it (gate the topic before
+    // the paid art/voice spend, not after).
+    {
+      const ei = pipeline.findIndex((e) => e.block === fam.visualEngine);
+      pipeline.splice(ei + 1, 0, { block: "originality_gate" });
+      const ci = pipeline.findIndex((e) => e.block === "compliance_check");
+      if (ci > ei && ei >= 0) {
+        const [cc] = pipeline.splice(ci, 1);
+        pipeline.splice(ei, 0, cc);
+      }
+    }
     // Whiteboard beds the produced music under its narration — the track must
     // exist BEFORE the engine runs, so move `music` ahead of it (it sat after,
     // where the archetype's footage stage used to be).
@@ -318,6 +338,44 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   }
 
   return { pipeline, available: fam.available, warnings };
+}
+
+/**
+ * OPERATOR LENGTH CONTRACT — the wizard's lengthMinutes is LAW, not a hint.
+ * Live probes showed the architect escalating a requested 3-minute channel to
+ * 540s, then its own probe-FIX pass to 720s (with a [432,1152] gate), while a
+ * lofi pass silently reset assemble to the archetype's 3600s. Applied after
+ * EVERY architect pass: the length-bearing knobs are pinned back to canon.
+ */
+export function enforceLengthContract(
+  pipeline: PipelineEntry[],
+  lenSec: number,
+  family: FamilyKey,
+): { pipeline: PipelineEntry[]; changed: string[] } {
+  const changed: string[] = [];
+  const out = pipeline.map((e) => {
+    const p: Record<string, unknown> = { ...(e.params ?? {}) };
+    const pin = (k: string, v: unknown) => {
+      if (p[k] !== v) {
+        changed.push(`${e.block}.${k}: ${String(p[k] ?? "unset")}→${String(v)}`);
+        p[k] = v;
+      }
+    };
+    if (e.block === "script_gen") pin("maxSeconds", lenSec);
+    if (e.block === "length_check") {
+      pin("minSeconds", Math.round(lenSec * 0.6));
+      pin("maxSeconds", Math.round(lenSec * 1.8));
+    }
+    if (e.block === "assemble" && family === "music_loop") pin("durationSec", lenSec);
+    if (e.block === "music" && family === "music_loop") {
+      const want = Math.max(2, Math.min(8, Math.ceil(lenSec / 420)));
+      if (Number(p["trackCount"] ?? 0) > want) pin("trackCount", want);
+    }
+    if (e.block === "whiteboard_scribe") pin("targetSeconds", lenSec);
+    if (e.block === "motion_comic") pin("panels", Math.max(4, Math.min(12, Math.round(lenSec / 22))));
+    return { block: e.block, params: Object.keys(p).length ? p : undefined };
+  });
+  return { pipeline: out, changed };
 }
 
 export { OPTIONAL_BLOCKS };

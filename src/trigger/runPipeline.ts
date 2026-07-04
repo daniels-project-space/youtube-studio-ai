@@ -183,6 +183,10 @@ export const runPipelineTask = task({
 
       // Seed channel identity into the store so blocks can read style/topics.
       const seedStore: Record<string, unknown> = {
+        // The channel's chosen thumbnail engine — thumbnail_gen previously fell
+        // back to "banana" whenever nothing seeded this (title_card channels
+        // burned banana spend AND failed its spelling gate).
+        ...(channel.thumbnailer ? { thumbnailer: channel.thumbnailer } : {}),
         topicPool: channel.identity?.topicPool ?? [],
         styleGrammar: channel.identity?.styleGrammar ?? "",
         channelName: channel.name,

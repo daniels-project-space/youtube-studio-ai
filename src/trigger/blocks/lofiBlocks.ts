@@ -328,6 +328,7 @@ export const topicSelect: Block = {
       styleGrammar: style,
       topicPool: pool,
       bannedWords,
+      targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined,
       count: 1,
       avoid: [...usedRows.map((r) => r.key), ...plannedTopics],
       perfContext: perfCtx || undefined,

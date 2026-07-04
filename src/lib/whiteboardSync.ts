@@ -233,7 +233,7 @@ async function buildStoryboard(brief: WhiteboardSyncBrief, log: Logger): Promise
 
 /* ------------------------------ timing --------------------------------- */
 
-function alignCues(panels: NPanel[], fullText: string, words: { text: string; start: number; end: number }[]): { audioEnd: number } {
+function alignCues(panels: NPanel[], fullText: string, words: { text: string; start: number; end: number }[], log: Logger = () => {}): { audioEnd: number } {
   const norm = (s: string) => s.toLowerCase().replace(/[^a-z0-9]/g, "");
   const eq = (a: string, b: string) => Boolean(a && b && (a === b || a.includes(b) || b.includes(a)));
   const mw = fullText.split(/\s+/).map(norm);
@@ -248,21 +248,54 @@ function alignCues(panels: NPanel[], fullText: string, words: { text: string; st
     mwTime[i] = prev && next ? prev.t + (next.t - prev.t) * ((i - prev.i) / (next.i - prev.i)) : (prev || next || { t: 0 }).t;
   }
   const audioEnd = words.length ? words[words.length - 1].end : 60000;
+  // WINDOW MATCHER — the old greedy FIRST-word match desynced on any repeated
+  // common word ("the", "a"): the pointer ran away, every later cue fell to the
+  // +700ms stack, later panel windows collapsed, and the render FROZE on the
+  // last drawn layer for the rest of the audio (seen live: 48% of a probe was
+  // a static hold). Require 2 of the cue's first 3 words to match in sequence.
   let mp = 0;
   const cueTime = (cue: string): number | null => {
-    const cw = cue.split(/\s+/).map(norm).filter(Boolean);
+    const cw = cue.split(/\s+/).map(norm).filter(Boolean).slice(0, 3);
     if (!cw.length) return null;
-    for (let i = mp; i < mw.length; i++) if (eq(mw[i], cw[0])) { mp = i + 1; return Math.round(mwTime[i] as number); }
+    for (let i = mp; i < mw.length; i++) {
+      let hits = 0;
+      for (let k = 0; k < cw.length && i + k < mw.length; k++) if (eq(mw[i + k], cw[k])) hits++;
+      if (hits >= Math.min(2, cw.length)) { mp = i + 1; return Math.round(mwTime[i] as number); }
+    }
     return null;
   };
   let last = 0;
+  let misses = 0;
+  let totalCues = 0;
   for (const p of panels)
     for (const l of p.layers as (NLayer & { cueStartMs?: number })[]) {
+      totalCues++;
       const t = cueTime(l.cue);
+      if (t == null) misses++;
       l.cueStartMs = t != null ? t : last + 700;
       if (l.cueStartMs < last) l.cueStartMs = last + 250;
       last = l.cueStartMs;
     }
+  // DETERMINISTIC BACKSTOP: if matching still degraded (many misses, or the
+  // final panel starts in the last 8% of the audio), redistribute panel
+  // windows proportionally to each panel's narration word count and space the
+  // layers evenly inside. Slightly less word-exact, but it CANNOT freeze.
+  const lastPanelFirst = Number((panels[panels.length - 1]?.layers[0] as (NLayer & { cueStartMs?: number }) | undefined)?.cueStartMs ?? 0);
+  if (totalCues > 0 && (misses / totalCues > 0.3 || (panels.length > 1 && lastPanelFirst > audioEnd * 0.92))) {
+    log(`alignCues: DEGRADED matching (${misses}/${totalCues} misses, last panel @${Math.round(lastPanelFirst / 1000)}s of ${Math.round(audioEnd / 1000)}s) — proportional redistribution`);
+    const wordsPer = panels.map((p) => p.narration.split(/\s+/).filter(Boolean).length || 1);
+    const totWords = wordsPer.reduce((a, b) => a + b, 0);
+    let cum = 0;
+    for (let i = 0; i < panels.length; i++) {
+      const start = (cum / totWords) * audioEnd;
+      cum += wordsPer[i];
+      const end = (cum / totWords) * audioEnd;
+      const ls = panels[i].layers as (NLayer & { cueStartMs?: number })[];
+      ls.forEach((l, k) => {
+        l.cueStartMs = Math.round(start + ((end - start) * k) / Math.max(1, ls.length + 1));
+      });
+    }
+  }
   return { audioEnd };
 }
 
@@ -365,7 +398,7 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
     await runPy([join("scripts", "whisper_align.py"), mp3Path, wpath], log);
   } else log("alignment cached");
   const words = JSON.parse(await readFile(wpath, "utf8")) as { text: string; start: number; end: number }[];
-  const { audioEnd } = alignCues(panels, fullText, words);
+  const { audioEnd } = alignCues(panels, fullText, words, log);
 
   // 4. timeline
   const panelStart: Record<number, number> = {};

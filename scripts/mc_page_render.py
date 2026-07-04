@@ -24,7 +24,7 @@ panels = TL["panels"]
 N = len(panels)
 
 PAPER = (238, 230, 212); DESK = (38, 30, 26); INK = (26, 24, 22)
-FONT_PATH = "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf"
+FONT_PATH = (lambda: __import__("os").environ.get("MC_FONT") or next((f for f in ["src/assets/fonts/ComicNeue-Bold.otf", "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"] if __import__("os").path.exists(f)), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))()
 MOVE = 0.55; HOLD = 0.55; TAIL = 2.2; DRAW_FRAC = 0.62
 
 

@@ -10,7 +10,7 @@
  *      duration; mux audio; output mp4 (yuv420p, +faststart).
  */
 import { spawn } from "node:child_process";
-import { stat, copyFile, writeFile } from "node:fs/promises";
+import { stat, copyFile, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
 
 export class FfmpegError extends Error {
@@ -271,6 +271,13 @@ export async function assembleBeatBody(args: {
   tmpDir: string;
   beats?: number[]; // accepted for compatibility; no longer used (no looping)
   maxSegSec?: number;
+  /**
+   * Optional PLANNED per-entry screen time, aligned with clipPaths. When given
+   * (the EDL renderer's per-segment durSec — pacing curve, cutEnergy), each
+   * entry plays min(planned, real length) instead of the flat maxSeg cap — the
+   * plan's edit decisions actually reach the render. Absent ⇒ legacy maxSeg.
+   */
+  segDurationsSec?: number[];
   width?: number;
   height?: number;
   fps?: number;
@@ -283,37 +290,75 @@ export async function assembleBeatBody(args: {
   const fps = args.fps ?? 30;
   const maxSeg = args.maxSegSec ?? 10;
 
-  // Walk each clip AT MOST ONCE, playing it for up to maxSeg but NEVER longer
-  // than its real duration — no stream_loop, no clip reuse. Coverage comes from
-  // the quantity of distinct clips (stock_footage provisions sum(min(dur,8)) ≥
+  // MEMOIZE probe + scene-detect per PATH: an EDL plan cycles its pool, so the
+  // same file can appear many times — re-probing and re-scene-scanning each
+  // occurrence was pure waste (a full decode pass per duplicate).
+  const durCache = new Map<string, number>();
+  const clipDurOf = async (p: string): Promise<number> => {
+    const hit = durCache.get(p);
+    if (hit !== undefined) return hit;
+    let d = maxSeg;
+    try {
+      d = (await probe(p)).durationSec || maxSeg;
+    } catch {
+      d = maxSeg;
+    }
+    durCache.set(p, d);
+    return d;
+  };
+  const sceneCache = new Map<string, number[]>();
+  const scenesOf = async (p: string): Promise<number[]> => {
+    const hit = sceneCache.get(p);
+    if (hit) return hit;
+    const cuts = await detectSceneChanges(p);
+    sceneCache.set(p, cuts);
+    return cuts;
+  };
+  // Occurrence bookkeeping: when a path repeats, SPREAD the cut windows across
+  // the clip instead of re-cutting the identical centered window (identical
+  // repeated segments are the exact "duplicate footage" defect QA flags).
+  const occTotal = new Map<string, number>();
+  for (const p of clipPaths) occTotal.set(p, (occTotal.get(p) ?? 0) + 1);
+  const occSeen = new Map<string, number>();
+
+  // Walk each entry AT MOST ONCE, playing it for up to its planned/maxSeg time
+  // but NEVER longer than its real duration — no stream_loop. Coverage comes
+  // from the quantity of clips (stock_footage provisions sum(min(dur,8)) ≥
   // target), so the body reaches targetSec without ever looping a clip.
   const segFiles: string[] = [];
   let total = 0;
   for (let i = 0; i < clipPaths.length; i++) {
     if (total >= targetSec) break;
-    let dur = maxSeg;
-    try {
-      dur = (await probe(clipPaths[i])).durationSec || maxSeg;
-    } catch {
-      dur = maxSeg;
-    }
+    const dur = await clipDurOf(clipPaths[i]);
     if (dur < 0.3) continue;
-    let segLen = Math.min(dur, maxSeg);
+    const planned = args.segDurationsSec?.[i];
+    let segLen = Math.min(dur, planned && planned > 0 ? planned : maxSeg);
     // trim the last clip so we don't overshoot the target by much
     if (total + segLen > targetSec) segLen = Math.max(0.5, targetSec - total + 0.5);
     segLen = Math.min(segLen, dur); // never exceed the clip's real length
-    if (segLen < 0.4) break;
+    if (segLen < 0.4) {
+      if (planned && planned > 0) continue; // a tiny PLANNED seg skips, not aborts
+      break;
+    }
+    const nOcc = occTotal.get(clipPaths[i]) ?? 1;
+    const kOcc = occSeen.get(clipPaths[i]) ?? 0;
+    occSeen.set(clipPaths[i], kOcc + 1);
     // CENTER-CUT: stock clips routinely open on a black fade-in (and end on a
     // fade-out) — cutting from t=0 turned one such clip into a full-black
     // segment that then repeated at every body loop. Cutting from the middle
-    // lands on the clip's actual content.
-    let ss = Math.max(0, (dur - segLen) / 2);
-    // SCENE-AWARE CUT (long holds only — short segments rarely cross a cut):
-    // stock clips often contain internal hard cuts; a 16s contemplative hold
-    // crossing one jumps mid-shot. Fit the window inside the longest internal
-    // scene; shrink into it if needed; center-cut stays the fallback.
-    if (segLen >= 6) {
-      const cuts = await detectSceneChanges(clipPaths[i]);
+    // lands on the clip's actual content. REPEATED paths spread their windows
+    // evenly across the clip so each occurrence shows different footage.
+    let ss =
+      nOcc > 1
+        ? Math.max(0, ((dur - segLen) / (nOcc + 1)) * (kOcc + 1))
+        : Math.max(0, (dur - segLen) / 2);
+    // SCENE-AWARE CUT (long holds, single-occurrence only — spread windows for
+    // repeats already vary the cut): stock clips often contain internal hard
+    // cuts; a 16s contemplative hold crossing one jumps mid-shot. Fit the
+    // window inside the longest internal scene; shrink into it if needed;
+    // center-cut stays the fallback.
+    if (segLen >= 6 && nOcc === 1) {
+      const cuts = await scenesOf(clipPaths[i]);
       if (cuts.length > 0) {
         const bounds = [0, ...cuts.filter((t) => t > 0.1 && t < dur - 0.1).sort((a, b) => a - b), dur];
         let best: { start: number; len: number } | null = null;
@@ -418,10 +463,15 @@ export async function assembleStructuredBody(args: {
   const segFiles: string[] = [];
   let sj = 0;
   let ci = 0;
-  const cut = async (input: string, dur: number) => {
+  // Per-clip reuse counter: when the pool wraps, each reuse takes a DIFFERENT
+  // window of the clip instead of re-cutting the identical opening (visible
+  // duplicate segments — the defect the beat body already guards against).
+  const useCount = new Map<number, number>();
+  const cut = async (input: string, dur: number, ssSec = 0) => {
     const sf = join(args.tmpDir, `sbody_${sj++}.mp4`);
     await run(FFMPEG, [
-      "-y", "-i", input, "-t", dur.toFixed(3), "-vf", scalePad, "-an",
+      "-y", ...(ssSec > 0.01 ? ["-ss", ssSec.toFixed(3)] : []), "-i", input,
+      "-t", dur.toFixed(3), "-vf", scalePad, "-an",
       "-c:v", "libx264", "-preset", args.preset ?? "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", sf,
     ]);
     segFiles.push(sf);
@@ -429,15 +479,25 @@ export async function assembleStructuredBody(args: {
   for (const w of args.windows) {
     if (w.durSec < 0.3) continue;
     if (w.kind === "card" && w.cardPath) {
-      await cut(w.cardPath, w.durSec);
+      await cut(w.cardPath, w.durSec); // cards play from t=0 (authored start)
     } else if (args.clipPaths.length > 0) {
       let need = w.durSec;
       while (need > 0.4) {
-        const clip = args.clipPaths[ci % args.clipPaths.length];
-        const cd = clipDur[ci % args.clipPaths.length] || maxSeg;
+        const idx = ci % args.clipPaths.length;
+        const clip = args.clipPaths[idx];
+        const cd = clipDur[idx] || maxSeg;
         const seg = Math.min(cd, maxSeg, need);
         if (seg < 0.4) break;
-        await cut(clip, seg);
+        // CENTER-CUT footage (same rationale as assembleBeatBody: stock clips
+        // routinely open on a black fade-in); on reuse, walk the window across
+        // the clip so wrapped fills don't repeat identical footage.
+        const k = useCount.get(idx) ?? 0;
+        useCount.set(idx, k + 1);
+        const head = Math.max(0, cd - seg);
+        // golden-ratio hop: k=0 ⇒ center; each reuse lands on a well-spread,
+        // deterministic, non-repeating offset within the clip.
+        const ss = head * ((0.5 + k * 0.381966) % 1);
+        await cut(clip, seg, Math.min(ss, head));
         need -= seg;
         ci++;
       }
@@ -1206,6 +1266,9 @@ export async function applyQuoteOverlays(
           "-crf", "19", "-pix_fmt", "yuv420p", "-c:a", "copy", "-movflags", "+faststart", stepOut],
         opts.timeoutMs ?? 1_800_000,
       );
+      // Drop the superseded intermediate (never the caller's input) — each step
+      // is a FULL-LENGTH video; leaving N of them risks ENOSPC on long-form.
+      if (cur !== videoPath) await unlink(cur).catch(() => {});
       cur = stepOut;
       continue;
     }
@@ -1258,6 +1321,7 @@ export async function applyQuoteOverlays(
       ],
       opts.timeoutMs ?? 1_800_000,
     );
+    if (cur !== videoPath) await unlink(cur).catch(() => {});
     cur = stepOut;
   }
   return outPath;

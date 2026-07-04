@@ -68,8 +68,29 @@ export async function ensurePyDeps(packages: string[], marker: string, log: Logg
  * them with) → pip deps installable. Any failure THROWS so paid generation
  * never starts on a worker that cannot render the result.
  */
-export async function preflightPythonRenderer(opts: { scripts: string[]; packages: string[]; marker: string; log: Logger }): Promise<void> {
+export async function preflightPythonRenderer(opts: {
+  scripts: string[];
+  packages: string[];
+  marker: string;
+  log: Logger;
+  /**
+   * Font requirements: each entry is a list of CANDIDATE paths of which at
+   * least ONE must exist. The comic probe burned its full art+voice budget
+   * TWICE and then died at the very last render step on a missing font — the
+   * exact class of defect this $0 preflight exists to catch.
+   */
+  fontsAnyOf?: string[][];
+}): Promise<void> {
   const { scripts, packages, marker, log } = opts;
+  for (const candidates of opts.fontsAnyOf ?? []) {
+    const found = candidates.find((c) => existsSync(c));
+    if (!found) {
+      throw new Error(
+        `python renderer preflight: NO font found among [${candidates.join(", ")}] — bake one (aptGet fonts package or src/assets/fonts) before any paid generation`,
+      );
+    }
+    log(`preflight: font ok (${found})`);
+  }
   if ((await sh("python3", ["--version"], 10_000)).code !== 0) {
     throw new Error(
       "python renderer preflight: python3 not found on PATH — bake python3 + python3-pip into the worker image (trigger.config.ts aptGet)",

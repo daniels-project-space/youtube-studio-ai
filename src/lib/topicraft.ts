@@ -98,6 +98,8 @@ export interface CraftTopicsArgs {
   avoid?: string[];
   /** Analytics-ledger context (loadPerformanceContext output). */
   perfContext?: string;
+  /** Target video length (seconds) — bets must be answerable at this scope. */
+  targetSeconds?: number;
   /** Pre-fetched competitor top titles (databank) — no live fetch happens here. */
   competitorTitles?: { title: string; views: number }[];
   /** Pre-fetched outlier scan (loadOutlierBank) — omit to live-fetch best-effort. */
@@ -387,6 +389,8 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
             `- niche: ${a.niche || "n/a"} | persona: ${a.persona || "n/a"}${a.styleGrammar ? ` | style: ${a.styleGrammar}` : ""}` +
             (doctrine ? `\n- voice archetype "${doctrine.voice}": every bet must sound like a video THIS channel would make` : "") +
             (a.topicPool?.length ? `\n- example on-brand topics: ${a.topicPool.slice(0, 12).join("; ")}` : "") +
+            (a.targetSeconds ? `
+- VIDEO LENGTH: ~${Math.round(a.targetSeconds / 60)} minute(s). Every bet MUST be fully answerable at that scope: one tight story/mechanism/question, NEVER a survey topic ("the complete history of X" is an automatic fail at this length).` : "") +
             (bannedWords.length ? `\n- NEVER use: ${bannedWords.join(", ")}` : ""),
           `PORTFOLIO DOCTRINE — the ${want} bets must MIX three types:\n` +
             `- "hero": rides a cited breakout signal (outlier/reddit) for browse reach\n` +

@@ -36,4 +36,10 @@ export const PRICE = {
   musicTrackUsd: rate("PRICE_MUSIC_TRACK_USD", 0.05),
   /** Narration TTS, per 1000 characters (Fish Audio ~$0.006/1k). */
   ttsPerKCharUsd: rate("PRICE_TTS_PER_KCHAR_USD", 0.006),
+  // ElevenLabs v3 is ~20-50x Fish per character — the flat Fish rate made the
+  // budget guard blind exactly when the premium voice was cast.
+  ttsElevenPerKCharUsd: rate("PRICE_TTS_ELEVEN_PER_KCHAR_USD", 0.12),
+  // fal FLUX image (the IMAGE_DISABLE_GEMINI route) — counters track it like
+  // the banana tiers so per-run cost stays real on the no-Google path.
+  bananaFalUsd: rate("PRICE_BANANA_FAL_USD", 0.04),
 } as const;

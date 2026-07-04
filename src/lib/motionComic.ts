@@ -283,6 +283,14 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
     packages: ["numpy", "pillow", "scikit-image", "scipy"],
     marker: ".ysa_mc_pydeps_ready",
     log,
+    // At least one comic font must exist BEFORE any paid art/voice spend —
+    // the renderer resolves the same candidates (env MC_FONT wins).
+    fontsAnyOf: [[
+      process.env.MC_FONT ?? "",
+      join(process.cwd(), "src", "assets", "fonts", "ComicNeue-Bold.otf"),
+      "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf",
+      "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
+    ].filter(Boolean)],
   });
   await mkdir(args.runDir, { recursive: true });
   const rd = (f: string) => join(args.runDir, f);

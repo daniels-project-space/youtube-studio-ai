@@ -117,12 +117,19 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
     async buildBody(middle: Segment[], { targetSec, fmt }): Promise<string> {
       const resolverInst = await getResolver();
       const outPath = await out("body.mp4");
-      const maxSegSec = maxSegFrom(middle, fmt.fps > 0 ? 10 : 10);
+      const maxSegSec = maxSegFrom(middle, 10);
 
       const hasChapterCard = middle.some(isCard);
-      // Distinct clip sources (in order), resolved to local files once.
-      const clipSrcs = middle.filter((s) => !isCard(s)).map((s) => (s as Extract<Segment, { kind: "footage" }>).src).filter(Boolean);
-      const localClips = await resolverInst.resolveAll(clipSrcs);
+      // Clip sources IN ORDER, paired with their PLANNED durations so the plan's
+      // per-segment edit decisions (pacing curve, cutEnergy) survive rendering —
+      // src and durSec must stay index-aligned. Repeated srcs resolve to the same
+      // local file exactly once (SourceResolver is content-addressed per src).
+      const clipSegs = middle
+        .filter((s) => !isCard(s))
+        .map((s) => s as Extract<Segment, { kind: "footage" }>)
+        .filter((s) => Boolean(s.src));
+      const localClips = await resolverInst.resolveAll(clipSegs.map((s) => s.src));
+      const segDurationsSec = clipSegs.map((s) => s.durSec);
 
       if (hasChapterCard) {
         // Structured (chapter) body: render each chapter card to a clip, then
@@ -151,13 +158,15 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
         });
       }
 
-      // Beat body: walk distinct clips, each ≤ its real length, to cover targetSec.
+      // Beat body: cut each entry at its PLANNED durSec (≤ its real length) to
+      // cover targetSec — the Timeline's cadence is rendered, not re-decided.
       return assembleBeatBody({
         clipPaths: localClips,
         outPath,
         targetSec,
         tmpDir: await getTmp(),
         maxSegSec,
+        segDurationsSec,
         width: fmt.w,
         height: fmt.h,
         fps: fmt.fps,
@@ -386,7 +395,15 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
           }
           return null;
         }
-        // genuine 404 / NoSuchKey ⇒ cache miss (not an error)
+        // genuine 404 / NoSuchKey ⇒ cache miss (not an error). Anything ELSE
+        // (auth, network, timeout) is still treated as a miss — a cache must
+        // never fail a render — but LOUDLY: silently eating a transient R2
+        // outage here disables idempotency with zero trace (and cachePut later
+        // rethrows the same error class, so the run fails late instead).
+        const msg = (e as Error)?.message ?? String(e);
+        if (!/NoSuchKey|not found|404/i.test(msg)) {
+          console.warn(`cacheGet(${fullKey}): non-404 storage error treated as cache miss: ${msg.slice(0, 200)}`);
+        }
         return null;
       }
     },
@@ -407,7 +424,11 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
     },
 
     async publish(localPath: string): Promise<string> {
-      const key = `${opts.keyPrefix}runs/${opts.runId}/assembled.mp4`;
+      // "final.mp4" — parity with the god-block's videoKey AND the cleanup
+      // block's keep-list (["final.mp4","thumbnail.jpg"]): the old
+      // "assembled.mp4" would have been DELETED by cleanup after upload,
+      // leaving the library's videoKey dangling.
+      const key = `${opts.keyPrefix}runs/${opts.runId}/final.mp4`;
       try {
         await putObject(key, await readBytes(localPath), { contentType: "video/mp4" });
       } catch (e) {

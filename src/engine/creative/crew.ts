@@ -114,11 +114,25 @@ export async function briefCinematographer(bible: ShowBible, ctx: CrewContext): 
     });
     const queries = (raw.footageQueries ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 16);
     if (queries.length === 0 && !raw.promptStyle) return undefined;
+    // OUTPUT SANITY: a degenerate LLM loop once emitted a 307,000-char
+    // promptStyle ("gigantic" x420) that was blended into every downstream
+    // i2v prompt and 422'd the provider. Clause fields are CLAUSES: hard-cap
+    // them and collapse runaway token repetition to the first clean sentence.
+    const clause = (s: string | undefined, cap: number): string => {
+      let v = (s ?? "").trim();
+      if (!v) return v;
+      const toks = v.split(/\s+/);
+      if (toks.length > 40) {
+        const uniq = new Set(toks.map((t) => t.toLowerCase()));
+        if (uniq.size / toks.length < 0.35) v = v.split(/(?<=[.!?])\s+/)[0] ?? v.slice(0, 200);
+      }
+      return v.length > cap ? v.slice(0, cap).replace(/\s+\S*$/, "") : v;
+    };
     return {
       footageQueries: queries,
-      promptStyle: (raw.promptStyle ?? "").trim(),
+      promptStyle: clause(raw.promptStyle, 500),
       palette: (raw.palette ?? []).filter((c) => /^#[0-9a-fA-F]{6}$/.test(c)).slice(0, 5),
-      motion: (raw.motion ?? "").trim(),
+      motion: clause(raw.motion, 300),
       avoid: (raw.avoid ?? []).map((s) => s.trim()).filter(Boolean).slice(0, 8),
     };
   } catch (e) {

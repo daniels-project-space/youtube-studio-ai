@@ -23,7 +23,7 @@
  * approved edit to narratedBlocks.ts.
  */
 import type { ChannelProfile } from "@/engine/channelProfile";
-import type { QuoteOverlaySpec } from "@/lib/ffmpeg";
+import { captionCuesFromTimings, type QuoteOverlaySpec } from "@/lib/ffmpeg";
 import { resolveEditorConfig, editorDirectives } from "@/lib/crew/editor";
 import { getCutSheet } from "@/engine/creative/brief";
 import { createFfmpegBackend } from "./ffmpegBackend";
@@ -104,14 +104,13 @@ export function quoteSpecsToOverlays(specs: QuoteOverlaySpec[] | undefined, kind
  * `editor` directives are NOT pulled from store here — they come from the
  * ChannelProfile in assembleViaEdl (a profile-derived wire, not a store key).
  */
-export function buildPlanInput(store: StoreBag, _params: ParamsBag = {}): PlanInput {
+export function buildPlanInput(store: StoreBag, params: ParamsBag = {}): PlanInput {
   const footageClips = strArr(store, "footageClips");
   const entityClips = strArr(store, "entityClips");
 
   const script = store["script"] as { closingLine?: string } | undefined;
-  const sentenceTimings = (store["sentenceTimings"] as { end: number }[] | undefined)?.map((s) => ({
-    end: s.end,
-  }));
+  const fullTimings = store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
+  const sentenceTimings = fullTimings?.map((s) => ({ end: s.end }));
   const cutSheet = getCutSheet(store);
   const chapterPlan = store["chapterPlan"] as
     | { kind: "footage" | "card"; durSec: number; heading?: string }[]
@@ -121,6 +120,37 @@ export function buildPlanInput(store: StoreBag, _params: ParamsBag = {}): PlanIn
     ...quoteSpecsToOverlays(store["quoteOverlays"] as QuoteOverlaySpec[] | undefined, "quote"),
     ...quoteSpecsToOverlays(store["insertOverlays"] as QuoteOverlaySpec[] | undefined, "insert"),
   ];
+
+  // CAPTIONS (god-block parity — finishFromComposed burned these; without this
+  // the EDL flip silently shipped caption-less videos while captions:true).
+  // Cues come from the ground-truth sentenceTimings, offset by the intro, and
+  // are HIDDEN during quote/insert windows and chapter-heading reads exactly
+  // like the god-block's blocked-window logic.
+  if (params["burnCaptions"] !== false && fullTimings?.length) {
+    const introCardSrc = optStr(store, "introCardPath");
+    const introSec = introCardSrc ? Number(store["introSec"] ?? 5) : 0;
+    const pad = 0.2;
+    const qWindows = overlays.map((o) => [o.startSec - pad, o.endSec + pad] as [number, number]);
+    const preGap = Number(params["chapterPreSec"] ?? 3);
+    const postGap = Number(params["chapterPostSec"] ?? 3);
+    const cWindows: [number, number][] = [];
+    if (chapterPlan?.length) {
+      let t = introSec;
+      for (const w of chapterPlan) {
+        if (w.kind === "card") {
+          const a = t + preGap - 0.3;
+          const b = Math.max(t + preGap, t + w.durSec - postGap) + 0.3;
+          if (b > a) cWindows.push([a, b]);
+        }
+        t += w.durSec;
+      }
+    }
+    const blocked = [...qWindows, ...cWindows];
+    const cues = captionCuesFromTimings(fullTimings, introSec).filter(
+      (c) => !blocked.some(([a, b]) => c.endSec > a && c.startSec < b),
+    );
+    overlays.push(...cues.map((c) => ({ kind: "caption" as const, startSec: c.startSec, endSec: c.endSec, text: c.text })));
+  }
 
   return {
     footageClips,
@@ -229,10 +259,18 @@ export async function assembleViaEdl(args: AssembleViaEdlArgs): Promise<Assemble
 
   const receipt = await renderTimeline(timeline, backend);
 
-  // Map the module's Receipt → the god-block's produces shape.
+  // NO SILENT SKIPS across the boundary: the Receipt's typed warnings must not
+  // evaporate here — surface every one (the god-block logs its degradations too).
+  for (const w of receipt.warnings) console.warn(`assembleViaEdl: ${w}`);
+
+  // Map the module's Receipt → the god-block's produces shape. Applied counts are
+  // HONEST: if the finishing pass composited nothing (receipt.overlaysApplied 0),
+  // report 0 so the feature-presence QA gate fires — planned counts previously
+  // masked a total overlay failure.
   const overlays = timeline.overlays;
-  const quotesApplied = overlays.filter((o) => o.kind === "quote").length;
-  const insertsApplied = overlays.filter((o) => o.kind === "insert").length;
+  const nothingApplied = overlays.length > 0 && receipt.overlaysApplied === 0;
+  const quotesApplied = nothingApplied ? 0 : overlays.filter((o) => o.kind === "quote").length;
+  const insertsApplied = nothingApplied ? 0 : overlays.filter((o) => o.kind === "insert").length;
 
   return {
     videoKey: receipt.videoKey,
@@ -242,8 +280,12 @@ export async function assembleViaEdl(args: AssembleViaEdlArgs): Promise<Assemble
     videoDurationSec: receipt.durationSec || projectedDurationSec(timeline),
     quotesApplied,
     insertsApplied,
-    // The pre-overlay checkpoint = composed body+outro (overlays re-apply on top).
-    preOverlayKey: receipt.healedFrom === "preOverlay" ? receipt.videoKey : `${args.keyPrefix ?? "assembly/"}runs/${args.runId ?? "cutover"}/pre_overlay.mp4`,
-    preOverlayLocalPath: receipt.videoLocalPath ?? "",
+    // BLANK pre-overlay pointers: the backend persists its checkpoint under a
+    // content-addressed cache key, NOT this path — advertising a key whose object
+    // doesn't exist makes rehydrate hard-fail the whole block on resume. Blank =
+    // "surgical heal does a full rebuild" (safe, same as the god-block's own
+    // degrade when its pre-overlay upload fails).
+    preOverlayKey: "",
+    preOverlayLocalPath: "",
   };
 }

@@ -9,7 +9,7 @@ import numpy as np
 from scipy.ndimage import gaussian_filter, sobel
 from PIL import Image, ImageDraw, ImageFont
 
-FONT = "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf"
+FONT = (lambda: __import__("os").environ.get("MC_FONT") or next((f for f in ["src/assets/fonts/ComicNeue-Bold.otf", "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"] if __import__("os").path.exists(f)), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))()
 
 
 def detail_map(img):

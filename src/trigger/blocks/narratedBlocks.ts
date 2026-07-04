@@ -443,6 +443,10 @@ export const narrationTts: Block = {
       const speakOf = (it: Item) =>
         it.kind === "heading" ? `Chapter ${it.chap}: ${it.text.replace(/[.:;,\s]+$/, "")}.` : it.text;
       const chPool = Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2));
+      // Probe-fallback counter: an ESTIMATED duration shifts every later
+      // sentenceTiming (captions/quotes/inserts) by the estimation error —
+      // one flaky probe is tolerable, several means the whole sync is fiction.
+      let probeEstimates = 0;
       const synthed = await mapPool(items, chPool, async (it, i) => {
         const speak = speakOf(it);
         // v3 continuity: condition each take on its neighbors so consecutive
@@ -457,7 +461,7 @@ export const narrationTts: Block = {
         const p = join(tmp, `utt_${i}.mp3`);
         await writeBytes(p, bytes);
         let dur = 0;
-        try { dur = (await probe(p)).durationSec; } catch { dur = Math.max(1, speak.split(/\s+/).length / 2.5); }
+        try { dur = (await probe(p)).durationSec; } catch { dur = Math.max(1, speak.split(/\s+/).length / 2.5); probeEstimates++; }
         // Runaway-take guard (deterministic): v3 once rendered 13 minutes for
         // 65 words on a tag-heavy slow script. Code catches what ears cannot.
         const wcnt = speak.split(/\s+/).filter(Boolean).length;
@@ -466,6 +470,10 @@ export const narrationTts: Block = {
         }
         return { p, dur };
       });
+      if (probeEstimates > 2) {
+        throw new Error(`narration_tts: ${probeEstimates} sentence durations are ESTIMATES (probe failures) — caption/overlay sync would be fiction; failing loud`);
+      }
+      if (probeEstimates > 0) ctx.log(`narration_tts: WARNING ${probeEstimates} sentence duration(s) estimated (probe failed) — timings may drift slightly`);
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
         const nextIsHeading = items[i + 1]?.kind === "heading";
@@ -511,7 +519,7 @@ export const narrationTts: Block = {
         narrationLocalPath: local,
         sentenceTimings,
         chapterPlan,
-        [COST_PATCH_KEY]: (PRICE.ttsPerKCharUsd * text.length) / 1000,
+        [COST_PATCH_KEY]: ((ttsProvider === "elevenlabs" ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd) * text.length) / 1000,
       };
     }
 
@@ -599,7 +607,7 @@ export const narrationTts: Block = {
       // means "no chapter cards". (chapterCards:false channels hit the engine's
       // undefined-produce guard here on their very first render.)
       chapterPlan: [],
-      [COST_PATCH_KEY]: (PRICE.ttsPerKCharUsd * text.length) / 1000,
+      [COST_PATCH_KEY]: ((ttsProvider === "elevenlabs" ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd) * text.length) / 1000,
     };
   },
 };
@@ -614,13 +622,13 @@ export const stockFootage: Block = {
     // render-split) — the render child rehydrates footageClips from footageKeys —
     // and it also makes this block resume-restorable instead of re-downloading.
     const uploadFootageKeys = async (paths: string[]): Promise<string[]> => {
-      const keys: string[] = [];
-      for (let i = 0; i < paths.length; i++) {
+      // Parallel (pool of 4): the sequential loop over 100-160 clips added
+      // minutes of pure upload wait per run. Order-preserving via mapPool.
+      return mapPool(paths, 4, async (p, i) => {
         const key = `${ctx.keyPrefix}footage/run/${ctx.runId}/clip_${i}.mp4`;
-        await putObject(key, await readBytes(paths[i]), { contentType: "video/mp4" });
-        keys.push(key);
-      }
-      return keys;
+        await putObject(key, await readBytes(p), { contentType: "video/mp4" });
+        return key;
+      });
     };
     // RENDER-GROUP REUSE: a language sibling reuses the base render's footage from
     // the durable group bundle (no Pexels query/download/AI-gate â€” the visuals are
@@ -1069,6 +1077,10 @@ export const quoteOverlaysBlock: Block = {
 
     // PHASE 1 â€” build timed candidates (gated for length + synced to speech).
     type Cand = { idx: number; display: string; words: number; startSec: number; dur: number; highlights: string[] };
+    // TAIL CLAMP: overlays composite AFTER the outro card is placed, so a card
+    // running past the narration would blur/cover the outro. End by narration
+    // end (+0.5s grace); a card that can't fit its minimum blur ease is skipped.
+    const narrEndAbs = introSec + (timings[timings.length - 1]?.end ?? 0);
     const cands: Cand[] = [];
     for (const p of picks) {
       const t = timings[p.index];
@@ -1090,8 +1102,13 @@ export const quoteOverlaysBlock: Block = {
       const spokenDur = (display.length / Math.max(1, t.text.length)) * sentDur;
       const cardStart = introSec + t.start + startFrac * sentDur - 0.3;
       // floor 4.5s so the slow blur has room to ease fully in, hold, then ease out
-      const dur = Math.min(12, Math.max(5, Math.max(words * 0.42 + 2, spokenDur + 2.2)));
+      let dur = Math.min(12, Math.max(5, Math.max(words * 0.42 + 2, spokenDur + 2.2)));
       const startSec = Math.max(introSec + t.start, cardStart);
+      dur = Math.min(dur, Math.max(0, narrEndAbs + 0.5 - startSec));
+      if (dur < 4.5) {
+        ctx.log(`quote_overlays: skipped (would run past the narration into the outro) "${display.slice(0, 36)}â€¦"`);
+        continue;
+      }
       if (clashesCard(startSec, startSec + dur)) {
         ctx.log(`quote_overlays: skipped (overlaps a chapter card) "${display.slice(0, 36)}â€¦"`);
         continue;
@@ -1154,8 +1171,10 @@ export const quoteOverlaysBlock: Block = {
         const startFrac = ci / Math.max(1, t.text.length);
         const spokenDur = (display.length / Math.max(1, t.text.length)) * sentDur;
         const cardStart = introSec + t.start + startFrac * sentDur - 0.3;
-        const dur = Math.min(12, Math.max(5, Math.max(words * 0.42 + 2, spokenDur + 2.2)));
+        let dur = Math.min(12, Math.max(5, Math.max(words * 0.42 + 2, spokenDur + 2.2)));
         const startSec = Math.max(introSec + t.start, cardStart);
+        dur = Math.min(dur, Math.max(0, narrEndAbs + 0.5 - startSec)); // tail clamp (see PHASE 1)
+        if (dur < 4.5) continue;
         if (clashesCard(startSec, startSec + dur)) continue; // never near a chapter card
         fillers.push({ idx: i, display, words, startSec, dur, highlights: [] });
       }

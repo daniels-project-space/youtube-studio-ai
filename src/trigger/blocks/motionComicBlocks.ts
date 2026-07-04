@@ -110,9 +110,10 @@ export const motionComicBlock: Block = {
     // ElevenLabs dialogue lines + the single Suno bed.
     const genPro = bananaCounters.pro - countersBefore.pro;
     const genFlash = bananaCounters.flash - countersBefore.flash;
-    const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd;
-    const comicCost = genPro + genFlash > 0 ? artCost + 0.1 /* ElevenLabs + music */ : COMIC_COST;
-    ctx.log(`motion_comic: image spend ${genPro} pro + ${genFlash} flash ≈ $${comicCost.toFixed(2)}`);
+    const genFal = (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0);
+    const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd + genFal * PRICE.bananaFalUsd;
+    const comicCost = genPro + genFlash + genFal > 0 ? artCost + 0.1 /* ElevenLabs + music */ : COMIC_COST;
+    ctx.log(`motion_comic: image spend ${genPro} pro + ${genFlash} flash + ${genFal} fal ≈ $${comicCost.toFixed(2)}`);
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObject(videoKey, await readBytes(res.outPath), { contentType: "video/mp4" });

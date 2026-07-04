@@ -198,11 +198,27 @@ export const visualInserts: Block = {
       valid.push(it);
     }
 
-    // ---- Timing + spacing (sentence-synced; never collide with quote cards) ----
+    // ---- Timing + spacing (sentence-synced; never collide with quote cards,
+    // chapter heading cards, or the outro card in the tail) ----
     const introSec = Number(ctx.store["introSec"] ?? 0);
     const quoteWindows = (
       (ctx.store["quoteOverlays"] as { startSec: number; durSec: number }[] | undefined) ?? []
     ).map((q) => [q.startSec - 2, q.startSec + q.durSec + 2] as [number, number]);
+    // Chapter-card windows (chapterPlan runs in body time; body starts after the
+    // intro) — an insert blurring over a chapter heading is the same defect the
+    // quote block already guards against.
+    const chapterWindows: [number, number][] = [];
+    {
+      const plan = ctx.store["chapterPlan"] as { kind: string; durSec: number }[] | undefined;
+      let tAbs = introSec;
+      for (const w of plan ?? []) {
+        if (w.kind === "card") chapterWindows.push([tAbs - 2, tAbs + w.durSec + 2]);
+        tAbs += w.durSec;
+      }
+    }
+    // Inserts must never spill past the narration into the tail — overlays
+    // composite AFTER the outro card is placed, so a long hold would blur/cover it.
+    const narrationEndAbs = introSec + (timings[timings.length - 1]?.end ?? 0);
     const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
     const W = portrait ? 1080 : 1920;
     const H = portrait ? 1920 : 1080;
@@ -227,11 +243,21 @@ export const visualInserts: Block = {
       const spanSec = Math.max(0, timings[endIdx].end - t.start) + 1.0;
       const floors = { lower_third: 4.5, big_stat: 6, line_chart: 8, annotated_line: 9, bar_compare: 8 } as const;
       const caps = { lower_third: 9, big_stat: 14, line_chart: 18, annotated_line: 18, bar_compare: 16 } as const;
-      const durSec = Math.min(caps[it.kind], Math.max(floors[it.kind], spanSec));
+      let durSec = Math.min(caps[it.kind], Math.max(floors[it.kind], spanSec));
       const startSec = Math.max(introSec + 1, introSec + t.start - 0.2);
+      // Tail clamp: end by narration end (+0.5s grace) — never over the outro.
+      durSec = Math.min(durSec, Math.max(0, narrationEndAbs + 0.5 - startSec));
+      if (durSec < 3.5) {
+        ctx.log(`visual_inserts: ${it.kind}@${startSec.toFixed(0)}s would spill into the tail — skipped`);
+        continue;
+      }
       if (startSec < lastEnd + minGapSec) continue;
       if (quoteWindows.some(([a, b]) => startSec < b && startSec + durSec > a)) {
         ctx.log(`visual_inserts: ${it.kind}@${startSec.toFixed(0)}s clashes with a quote card — skipped`);
+        continue;
+      }
+      if (chapterWindows.some(([a, b]) => startSec < b && startSec + durSec > a)) {
+        ctx.log(`visual_inserts: ${it.kind}@${startSec.toFixed(0)}s clashes with a chapter card — skipped`);
         continue;
       }
       try {

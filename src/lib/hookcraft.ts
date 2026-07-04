@@ -137,7 +137,7 @@ function sentences(t: string): string[] {
 export function lintHook(
   hook: string,
   opening: string,
-  opts: { skipConcreteness?: boolean } = {},
+  opts: { skipConcreteness?: boolean; gentle?: boolean } = {},
 ): HookLint {
   const issues: string[] = [];
   const hs = sentences(hook);
@@ -149,10 +149,14 @@ export function lintHook(
   if (hs.length > 2) issues.push(`hook is ${hs.length} sentences (max 2)`);
   if (firstSentenceWords > 22) issues.push(`first sentence is ${firstSentenceWords} words (max 22 — must land in ~7s)`);
   if (estHookSeconds > 10) issues.push(`hook speaks in ~${estHookSeconds}s (max ~10s)`);
-  if (openingWords < 40 || openingWords > 140) issues.push(`opening is ${openingWords} words (want 50-110)`);
+  // Gentle registers (guided meditation): openings are LEGITIMATELY short and
+  // often begin with a welcome — the mass-produced-filler heuristics misfire.
+  const minOpen = opts.gentle ? 15 : 40;
+  if (openingWords < minOpen || openingWords > 140) issues.push(`opening is ${openingWords} words (want ${opts.gentle ? "15" : "50"}-110)`);
 
   const lower = `${hook} ${opening}`.toLowerCase();
-  const bannedHits = BANNED_OPENERS.filter((b) => lower.includes(b));
+  const bannedHits = BANNED_OPENERS.filter((b) => lower.includes(b))
+    .filter((b) => !(opts.gentle && /^welcome/.test(b)));
   if (bannedHits.length) issues.push(`banned filler opener: ${bannedHits.join(", ")}`);
 
   // Concreteness floor: a digit or proper nouns beyond sentence starts in the
@@ -390,7 +394,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         loop: String(c.loop ?? "").trim(),
       }))
       .filter((c) => c.hook && c.opening)
-      .map((c) => ({ ...c, lint: lintHook(c.hook, c.opening, { skipConcreteness }) }));
+      .map((c) => ({ ...c, lint: lintHook(c.hook, c.opening, { skipConcreteness, gentle: a.style === "meditation" }) }));
     const survivors = candidates.filter((c) => c.lint.pass);
     lastIssues = candidates.flatMap((c) => c.lint.issues);
     a.log?.(`hookcraft: ${candidates.length} candidates, ${survivors.length} pass lint${survivors.length ? "" : ` (${lastIssues.slice(0, 3).join("; ")})`}`);

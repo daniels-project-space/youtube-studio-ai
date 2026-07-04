@@ -97,7 +97,9 @@ export const whiteboardScribe: Block = {
     // pacing incl. draw holds) + one panel per ~22s.
     const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
     const panels = targetSeconds > 0 ? Math.max(4, Math.min(16, Math.round(targetSeconds / 22))) : undefined;
-    const targetWords = targetSeconds > 0 ? Math.round(targetSeconds * 2.1) : undefined;
+    // Measured on the live probe: Fish narration ran ~3.1 spoken w/s — the 2.1
+    // guess shipped a 2-min video for a 3-min target. 2.6 leaves pause/draw air.
+    const targetWords = targetSeconds > 0 ? Math.round(targetSeconds * 2.6) : undefined;
     if (targetSeconds > 0) {
       ctx.log(`whiteboard_scribe: sized to ~${targetSeconds}s → ${panels} panels / ~${targetWords} words`);
     }
@@ -124,9 +126,12 @@ export const whiteboardScribe: Block = {
     // Pro-heavy runs and overcounted cached re-runs alike).
     const genPro = bananaCounters.pro - countersBefore.pro;
     const genFlash = bananaCounters.flash - countersBefore.flash;
-    const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd;
-    const scribeCost = genPro + genFlash > 0 ? artCost + 0.05 /* Fish TTS */ : SCRIBE_COST;
-    ctx.log(`whiteboard_scribe: image spend ${genPro} pro + ${genFlash} flash ≈ $${scribeCost.toFixed(2)}`);
+    const genFal = (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0);
+    const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd + genFal * PRICE.bananaFalUsd;
+    // Include the fal route — the all-fal path used to book the flat $2 guess,
+    // which alone ate a $2 channel budget and aborted the run after this block.
+    const scribeCost = genPro + genFlash + genFal > 0 ? artCost + 0.05 /* Fish TTS */ : SCRIBE_COST;
+    ctx.log(`whiteboard_scribe: image spend ${genPro} pro + ${genFlash} flash + ${genFal} fal ≈ $${scribeCost.toFixed(2)}`);
 
     // MUSIC BED (P1-8): whiteboard-family pipelines generate a PAID music track
     // upstream (musicKey/musicUrl) that this engine never consumed — the bed

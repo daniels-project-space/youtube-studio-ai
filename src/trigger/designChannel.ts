@@ -11,7 +11,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { synthChannelConcept } from "@/lib/conceptSynth";
 import { generateChannelArt } from "@/lib/channelArt";
-import { designPipeline, type DesignOptions } from "@/engine/designer";
+import { designPipeline, enforceLengthContract, type DesignOptions } from "@/engine/designer";
 import type { PipelineEntry } from "@/engine/types";
 import { nichePreset } from "@/engine/golden";
 import { FAMILIES, type FamilyKey } from "@/engine/families";
@@ -99,6 +99,15 @@ export const designChannelTask = task({
       paramOverrides: payload.paramOverrides,
     });
     log(`designed ${design.pipeline.length}-block pipeline (available=${design.available})`);
+    // OPERATOR LENGTH LAW: pin the length-bearing knobs back to the wizard's
+    // request after EVERY architect pass (they escalated 3-min → 12-min live).
+    const lenSecLaw = payload.lengthMinutes ? Math.round(payload.lengthMinutes * 60) : 0;
+    const withLengthLaw = (pipe: PipelineEntry[]): PipelineEntry[] => {
+      if (!lenSecLaw) return pipe;
+      const r = enforceLengthContract(pipe, lenSecLaw, payload.family);
+      if (r.changed.length) log(`length law re-pinned: ${r.changed.join(", ")}`);
+      return r.pipeline;
+    };
 
     // 2. Identity (persona/palette/topics/voice) — synthesized from niche+family.
     const seed = [niche?.label ?? payload.nicheKey, payload.subcategory, payload.name, `${fam.label} format`]
@@ -106,12 +115,26 @@ export const designChannelTask = task({
     const concept = await synthChannelConcept(seed, undefined, log);
     const name = (payload.name ?? "").trim() || concept.name;
 
+    // SELF-CONSISTENCY LINT: a concept once banned "Aesthetic"/"Chillhop" while
+    // its OWN topicPool and the niche tags used them — every topic_select then
+    // died in a lint deadlock. Identity may not ban vocabulary the channel's
+    // own pool/name/persona/niche depends on: collisions are dropped LOUDLY.
+    const selfText = [
+      payload.name ?? "", concept.name, payload.persona ?? concept.persona,
+      niche?.label ?? "", payload.subcategory ?? "", ...concept.topicPool,
+    ].join(" ").toLowerCase();
+    const bannedWords = (concept.bannedWords ?? []).filter((w) => {
+      const clash = w && selfText.includes(w.toLowerCase());
+      if (clash) log(`identity lint: DROPPED self-colliding bannedWord "${w}" (used by the channel's own pool/persona)`);
+      return !clash;
+    });
+
     const identity = {
       persona: payload.persona ?? concept.persona,
       styleGrammar: concept.styleGrammar,
       palette: payload.palette ?? concept.palette,
       topicPool: concept.topicPool,
-      bannedWords: concept.bannedWords,
+      bannedWords,
       requiredCallbacks: [] as string[],
       cadence: payload.cadence ?? concept.cadence,
       niche: niche?.label ?? concept.niche,
@@ -405,7 +428,7 @@ export const designChannelTask = task({
           if (arch) {
             await convex.mutation(api.channels.updateChannel, {
               channelId,
-              pipeline: arch.pipeline,
+              pipeline: withLengthLaw(arch.pipeline),
               architectReport: arch.report,
             });
             log(`architect: ${arch.report.applied.length} applied / ${arch.report.rejected.length} rejected — ${arch.report.summary.slice(0, 160)}`);
@@ -444,7 +467,7 @@ export const designChannelTask = task({
                   });
                   if (arch2) {
                     await convex.mutation(api.channels.updateChannel, {
-                      channelId, pipeline: arch2.pipeline,
+                      channelId, pipeline: withLengthLaw(arch2.pipeline),
                       architectReport: { ...arch2.report, forged: forgedTools.map((t) => t.block) },
                     });
                     log(`architect (post-forge): ${arch2.report.applied.length} applied — forged modules wired in`);
@@ -604,7 +627,7 @@ export const designChannelTask = task({
                 });
                 if (tune && (tune.report.applied.length || tune.report.groundingActions.length)) {
                   await convex.mutation(api.channels.updateChannel, {
-                    channelId, pipeline: tune.pipeline,
+                    channelId, pipeline: withLengthLaw(tune.pipeline),
                     architectReport: { ...tune.report, probeDialIn: { feel: review.feel, thumbnailCritique: review.thumbnailCritique?.slice(0, 300) } },
                   });
                   log(`probe DIAL-IN: ${tune.report.applied.length} tuning change(s) applied from the critical review`);
@@ -629,7 +652,7 @@ export const designChannelTask = task({
             });
             if (fix) {
               await convex.mutation(api.channels.updateChannel, {
-                channelId, pipeline: fix.pipeline,
+                channelId, pipeline: withLengthLaw(fix.pipeline),
                 architectReport: { ...fix.report, probeFix: { attempt, error: error.slice(0, 200), failedBlock } },
               });
               log(`probe FIX applied: ${fix.report.applied.length} change(s) — re-probing`);
@@ -754,6 +777,10 @@ function buildProbePipeline(pipe: PipelineEntry[]): PipelineEntry[] {
     .filter((e) => !DROP.has(e.block))
     .map((e) => {
       const p: Record<string, unknown> = { ...(e.params ?? {}) };
+      // Probe topics are THROWAWAY: dryRun stops them consuming topic memory
+      // (probes were burning "Part 1/Part 2" of real 7-part series) and the
+      // scope guard sizes candidates to the probe, not the channel.
+      if (e.block === "topic_select") { p.dryRun = true; p.targetSeconds = 60; }
       if (e.block === "script_gen") { p.maxSeconds = 60; p.endWithSummary = false; }
       if (e.block === "length_check") { p.minSeconds = 20; p.maxSeconds = 220; }
       if (e.block === "music") { p.trackCount = 1; }
@@ -762,6 +789,10 @@ function buildProbePipeline(pipe: PipelineEntry[]): PipelineEntry[] {
       if (e.block === "visual_inserts") { p.maxInserts = 1; }
       if (e.block === "quote_overlays") { p.maxQuotes = 1; }
       if (e.block === "assemble") { p.durationSec = 120; }
+      // Self-contained engines must shrink too — a "cheap 60s probe" was
+      // rendering the FULL 8-panel/180s video (twice, on the retry).
+      if (e.block === "whiteboard_scribe") { p.targetSeconds = 60; p.width = 1280; }
+      if (e.block === "motion_comic") { p.panels = 4; p.width = 1280; }
       return { block: e.block, params: Object.keys(p).length ? p : undefined };
     });
 }

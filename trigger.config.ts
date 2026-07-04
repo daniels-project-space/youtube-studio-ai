@@ -74,6 +74,10 @@ export default defineConfig({
       // pino-pretty transport spawns a worker that requires the module from disk.
       "pino",
       "pino-pretty",
+      // Remotion composition dep — bundling it host-side broke the runtime
+      // webpack of src/remotion on workers ("@remotion/noise" unresolved →
+      // EVERY intro/outro TitleCard silently degraded to no-card).
+      "@remotion/noise",
     ],
     extensions: [
       syncEnvVars(() =>
@@ -111,6 +115,9 @@ export default defineConfig({
           // package at first use per machine — see src/lib/audioQa.ts).
           "python3",
           "python3-pip",
+          // Comic-page renderer typography (mc_page_render/mc_textplace);
+          // the repo also bakes the OTF under src/assets/fonts as a fallback.
+          "fonts-comic-neue",
           "libnss3",
           "libnspr4",
           "libdbus-1-3",

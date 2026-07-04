@@ -100,7 +100,8 @@ export async function generateFalI2V(req: FalI2VRequest): Promise<FalI2VResult> 
   // Kling exposes duration as a string enum "5"|"10".
   const dur = (req.durationSec ?? 5) >= 8 ? "10" : "5";
   const body: Record<string, unknown> = {
-    prompt: req.prompt,
+    // Provider hard limit guard (422 on ~2500+ chars — deterministic, not transient).
+    prompt: req.prompt.length > 2200 ? req.prompt.slice(0, 2200).replace(/\s+\S*$/, "") : req.prompt,
     image_url: req.imageUrl,
     duration: dur,
     aspect_ratio: req.aspectRatio ?? "16:9",
