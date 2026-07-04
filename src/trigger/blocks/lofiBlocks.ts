@@ -41,13 +41,13 @@ import { generateFalFluxProImage } from "@/lib/falImage";
 import { generateFalI2V } from "@/lib/falVideo";
 import { upscaleLoopUnit } from "@/lib/replicate";
 // (Real-ESRGAN image upscaler intentionally not used for video — Topaz only.)
-import { generateMusic, generateSuno, type MusicProvider, type MusicTrack } from "@/lib/music";
+import { generateMusic, generateSuno, selfLoopAudio, type MusicProvider, type MusicTrack } from "@/lib/music";
 import { uploadPrivateDraft, setVideoThumbnail } from "@/lib/youtube";
 import { notifyDraftReady } from "@/lib/telegram";
 import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
 import { hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { hasVisionKey, visionLocal } from "@/lib/vision";
 import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
@@ -451,8 +451,10 @@ export const keyframes: Block = {
     // Per-block CREATIVE-DIRECTOR LOOP (Phase 2): generate the still → a vision
     // critic scores it against the channel's DNA identity → regenerate carrying the
     // critique forward. Keep the BEST attempt; NEVER fall back to a generic image.
-    // The critic only runs with a grounded DNA + a Gemini key (else single-shot).
-    const canCritique = hasGeminiKey() && !!(dna && dna.recurringSubject?.trim());
+    // The critic only runs with a grounded DNA + ANY routed vision provider
+    // (visionLocal routes groq→fal→gemini; gating on the Gemini key alone
+    // silently disabled the critic in zero-Google deployments).
+    const canCritique = hasVisionKey() && !!(dna && dna.recurringSubject?.trim());
     let stills = 0;
     const countersBefore = { ...bananaCounters };
     const loop = await produceAndCritique<{ url: string; local: string }>({
@@ -483,6 +485,10 @@ export const keyframes: Block = {
               dna!.composition ? `COMPOSITION: ${dna!.composition}` : "",
               dna!.motifs?.length ? `MUST FEATURE motifs: ${dna!.motifs.join(", ")}` : "",
               dna!.visualAvoid?.length ? `MUST NOT contain: ${dna!.visualAvoid.slice(0, 6).join(", ")}` : "",
+              // Legacy NO_RAIN_INSIDE physics gate, now enforced by the critic too:
+              // Flux happily paints rain over interiors and the loop repeats the
+              // defect forever, so a wet interior is an automatic fail.
+              "HARD PHYSICS CHECK: if the scene is indoor/covered, is any rain, snow, mist or wet surface rendered INSIDE the room (not seen through a window)? If yes → this is an automatic FAIL: score 0 and name it in issues (weather belongs OUTSIDE the glass only).",
               "Score 0..1 how faithfully the image matches this identity (subject, setting, palette/grade, motifs, composition) AND is free of the forbidden elements and of any text/letters baked into the artwork.",
               'Return STRICT JSON {"score":number,"issues":[concrete visual fixes]}.',
             ].filter(Boolean).join("\n"),
@@ -514,7 +520,7 @@ export const keyframes: Block = {
     // and names the animatable elements + subtle motion (static camera), so i2v
     // animates what's really in the frame, not a templated guess.
     let motionPrompt = scene.klingMotionPrompt;
-    if (hasGeminiKey()) {
+    if (hasVisionKey()) {
       try {
         const raw = await visionLocal({
           prompt:
@@ -540,12 +546,14 @@ export const keyframes: Block = {
       f1Key,
       motionPrompt,
       // Real spend: banana stills at their true rate (the flat fluxStillUsd
-      // billed a Pro banana still at $0.01 — a 13x undercount); non-banana
-      // (Flux) attempts keep the flux rate.
+      // billed a Pro banana still at $0.01 — a 13x undercount); router-delegated
+      // fal FLUX renders bill at ≈$0.04/image (the banana-flash rate — same
+      // price point); non-banana (direct Flux) attempts keep the flux rate.
       [COST_PATCH_KEY]:
         (bananaCounters.pro - countersBefore.pro) * PRICE.bananaProUsd +
         (bananaCounters.flash - countersBefore.flash) * PRICE.bananaFlashUsd +
-        Math.max(0, stills - (bananaCounters.pro - countersBefore.pro) - (bananaCounters.flash - countersBefore.flash)) * PRICE.fluxStillUsd,
+        (bananaCounters.fal - countersBefore.fal) * PRICE.bananaFlashUsd +
+        Math.max(0, stills - (bananaCounters.pro - countersBefore.pro) - (bananaCounters.flash - countersBefore.flash) - (bananaCounters.fal - countersBefore.fal)) * PRICE.fluxStillUsd,
     };
   },
 };
@@ -578,6 +586,12 @@ export const loopClips: Block = {
     // "crossfade" = plain self-blend loop.
     const loopMode = (ctx.params.loopMode as string | undefined) ?? "flf2v";
     const flf = loopMode === "flf2v";
+    // PARAM SPLIT: flf's safety-net fade used to read the SHARED `crossfadeSec`
+    // (pipeline: 2.5s — tuned for the plain-crossfade mode where the blend IS
+    // the loop mechanism), double-exposing 2.5s of every loop into a visible
+    // ghost over a seam that FLF2V had already closed. flf gets its OWN small
+    // param, hard-capped: anything longer than ~0.6s reads as a double exposure.
+    const flfCrossfadeSec = Math.min(0.6, Math.max(0, Number(ctx.params.flfCrossfadeSec ?? 0.4)));
 
     // Prefer the Gemini scene-director motion (golden v1) over the template, and
     // push hard for a LOCKED camera + NON-directional ambient motion so the loop
@@ -610,8 +624,8 @@ export const loopClips: Block = {
     ctx.log(`loop_clips: building ${loopMode} seamless loop unit…`);
     const loopRaw = flf
       // FLF2V already closes the loop; a short crossfade is the safety net and
-      // keeps motion FORWARD (no reversal). Smaller default fade than plain mode.
-      ? await seamlessLoopUnit(clipLocal, join(tmp, "loopraw.mp4"), { crossfadeSec: Number(ctx.params.crossfadeSec ?? 0.5) })
+      // keeps motion FORWARD (no reversal). Own capped param — see flfCrossfadeSec.
+      ? await seamlessLoopUnit(clipLocal, join(tmp, "loopraw.mp4"), { crossfadeSec: flfCrossfadeSec })
       : loopMode === "crossfade"
       ? await seamlessLoopUnit(clipLocal, join(tmp, "loopraw.mp4"), { crossfadeSec })
       : await boomerangLoopUnit(clipLocal, join(tmp, "loopraw.mp4"));
@@ -845,8 +859,18 @@ export const music: Block = {
     const mixPath =
       locals.length > 1 ? await crossfadeConcatAudio(locals, join(tmp, "mix.mp3"), 3) : locals[0];
     const targetLufs = Number(a?.loudnessLufs ?? -14);
-    const local = await masterAudio(mixPath, join(tmp, "music.mp3"), { lufs: targetLufs });
+    let local = await masterAudio(mixPath, join(tmp, "music.mp3"), { lufs: targetLufs });
     ctx.log(`music: mastered mix → loudnorm I=${targetLufs} LUFS, 320k`);
+    // SELF-LOOPING FOLD: assemble stream_loops this mix for the whole render, and
+    // a hard splice at every loop point was audible every N minutes for hours.
+    // One tail→head acrossfade makes end==start. Runs AFTER mastering so any
+    // loudnorm gain drift at the edges is smoothed by the fold itself.
+    // Degrade-safe: a failed polish pass must not kill a paid render.
+    try {
+      local = await selfLoopAudio(local, join(tmp, "music_loop.mp3"), { log: (m) => ctx.log(`music: ${m}`) });
+    } catch (e) {
+      ctx.log(`music: !!! self-loop fold FAILED (${e instanceof Error ? e.message : e}) — shipping the plain mix (loop splices will be hard)`);
+    }
 
     const musicKey = `${ctx.keyPrefix}runs/${ctx.runId}/music.mp3`;
     await putObject(musicKey, await readBytes(local), { contentType: "audio/mpeg" });
@@ -1033,6 +1057,7 @@ export const uploadDraft: Block = {
     try {
       const auth = await convex().query(api.youtubeAuth.getForChannel, {
         channelId: ctx.channelId as Id<"channels">,
+        secret: process.env.INTERNAL_QUERY_SECRET ?? "",
       });
       if (auth?.refreshToken) {
         refreshToken = auth.refreshToken;
@@ -1207,7 +1232,7 @@ export const shortsSpinoff: Block = {
     let shortVideoId = "";
     let refreshToken: string | undefined;
     try {
-      const auth = await convex().query(api.youtubeAuth.getForChannel, { channelId: ctx.channelId as Id<"channels"> });
+      const auth = await convex().query(api.youtubeAuth.getForChannel, { channelId: ctx.channelId as Id<"channels">, secret: process.env.INTERNAL_QUERY_SECRET ?? "" });
       if (auth?.refreshToken) refreshToken = auth.refreshToken;
     } catch { /* fall back to global token */ }
     try {
@@ -1276,7 +1301,9 @@ export const LOFI_PIPELINE = [
   { block: "topic_select" },
   { block: "scene_planner", params: { visualStyle: "lofi", clipDurationSec: 5 } },
   { block: "keyframes", params: { aspectRatio: "16:9", visualStyle: "lofi" } },
-  { block: "loop_clips", params: { clipDurationSec: 10, visualStyle: "lofi", crossfadeSec: 2.5 } },
+  // crossfadeSec 2.5 only applies to loopMode:"crossfade" (the blend IS the loop
+  // there); the default flf2v path uses the capped flfCrossfadeSec safety net.
+  { block: "loop_clips", params: { clipDurationSec: 10, visualStyle: "lofi", crossfadeSec: 2.5, flfCrossfadeSec: 0.4 } },
   { block: "upscale", params: { targetResolution: "4k", targetFps: 30 } },
   { block: "music", params: { provider: "suno" } },
   { block: "metadata" },

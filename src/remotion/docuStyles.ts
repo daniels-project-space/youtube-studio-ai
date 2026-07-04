@@ -22,7 +22,14 @@ export type DocuShotKind =
   | "collage_pan"
   | "evidence_board"
   | "object_drop"
-  | "quote_card";
+  | "quote_card"
+  | "vox_reveal"
+  | "vox_chart"
+  | "vox_counter"
+  | "vox_map"
+  | "vox_dialogue"
+  | "vox_typewriter"
+  | "vox_scene";
 
 export type DocuAssetRole = "bg" | "fg" | "image" | "cutout";
 
@@ -274,10 +281,76 @@ const ROBBERY: DocuStyleDef = {
   },
 };
 
+/* ------------------------------------------------------- VOX EXPLAINER -- */
+
+const VOX_EXPLAINER: DocuStyleDef = {
+  id: "vox_explainer",
+  label: "Vox-style Explainer",
+  worldDescription:
+    "a modern editorial explainer channel (Vox / news-explainer look): a constant off-white paper canvas with a " +
+    "faint engineering grid, halftone black-and-white cutout figures with an offset red/orange marker-stroke, flat " +
+    "illustrated anchor objects (buildings, tankers, maps), self-drawing data cards and line charts, big bold " +
+    "condensed callouts, ticking number counters, speech bubbles, and typewriter payoff lines — clean, bright, " +
+    "information-dense motion graphics.",
+  stillStyle:
+    " STYLE (obey strictly): clean modern editorial-explainer graphic — either (a) a single desaturated documentary " +
+    "photograph of ONE subject destined for a halftone cutout, or (b) a flat vector-style illustration of ONE " +
+    "object/building. Bright and legible, minimal shadow. ABSOLUTELY NO text, NO letters, NO numbers, NO captions, " +
+    "NO watermarks, NO borders, NO UI, NO logos.",
+  roleFraming: {
+    bg: { prefix: "Flat editorial illustration plate, full-bleed, simple shapes, calm empty space in the upper-centre, muted palette: ", ar: "16:9" },
+    fg: {
+      prefix:
+        "Portrait for a die-cut HALFTONE cutout: ONE subject alone, head, shoulders and both arms COMPLETELY inside " +
+        "the frame, centered, sharp clean edges, evenly lit PLAIN WHITE studio backdrop, nothing else in frame: ",
+      ar: "3:4",
+    },
+    image: { prefix: "Single clean documentary photograph, full-bleed, no border: ", ar: "16:9" },
+    cutout: {
+      prefix: "Single object or flat illustrated icon (building, tanker, map, banknote) centered and COMPLETELY inside the frame on PLAIN WHITE, no shadow, nothing else: ",
+      ar: "1:1",
+    },
+  },
+  cinematography:
+    "each scene is a layered board: a constant grid background, a rising/anchored midground object, and halftone " +
+    "cutout figures that slide in from the sides. Camera is a gentle push_in with subtle independent-layer parallax " +
+    "— never showy. Beats are TIGHT and voiceover-driven (2-5s each), hard cuts, with the occasional slide " +
+    "transition. Numbers count up; charts draw on; payoff lines type out.",
+  creativeDirection:
+    "Explain like a premium news explainer: open on the scene with cutout characters, escalate with a counter or a " +
+    "self-drawing chart, widen to a map with a big stat, land on a typewriter payoff line. Keep it bright, clean and " +
+    "consistent — ONE visual system across every beat.",
+  typeStyle:
+    "bold condensed editorial sans for callouts/stats + a typewriter mono for payoff lines; orange accent, red " +
+    "marker underline, black ink on paper.",
+  preferredKinds: ["vox_reveal", "vox_chart", "vox_counter", "vox_map", "vox_dialogue", "vox_typewriter"],
+  hookKind: "vox_reveal",
+  closerKind: "vox_typewriter",
+  fontCss:
+    "https://fonts.googleapis.com/css2?family=Oswald:wght@500;600;700&family=Special+Elite&family=Caveat:wght@600;700&display=block",
+  fontProbe: ["Special Elite", "Oswald", "Caveat"],
+  theme: {
+    base: "#e7e4dc",
+    paper: "#f5f2ea",
+    ink: "#1b1712",
+    accent: "#e8641a",
+    accent2: "#d6402a",
+    fontDisplay: "Special Elite, monospace",
+    displayCharW: 0.5,
+    fontLabel: "Oswald, sans-serif",
+    fontHand: "Caveat, cursive",
+    plateFilter: "saturate(0.92) contrast(1.02)",
+    grain: 0.05,
+    vignette: 0.12,
+    flickerTint: "#ffffff",
+  },
+};
+
 export const DOCU_STYLES: Record<string, DocuStyleDef> = {
   archival_collage: ARCHIVAL,
   detective_board: DETECTIVE,
   robbery_noir: ROBBERY,
+  vox_explainer: VOX_EXPLAINER,
 };
 
 export const DEFAULT_STYLE_ID = "archival_collage";

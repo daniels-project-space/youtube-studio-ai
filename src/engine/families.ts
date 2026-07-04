@@ -11,7 +11,8 @@ export type FamilyKey =
   | "music_loop"
   | "sleep"
   | "shorts"
-  | "whiteboard";
+  | "whiteboard"
+  | "comic";
 
 export interface Family {
   key: FamilyKey;
@@ -58,14 +59,31 @@ export const FAMILIES: Record<FamilyKey, Family> = {
   },
   sleep: {
     key: "sleep",
-    label: "Ambient / Sleep",
-    description: "Very calm long-form music + slow ambient visuals. No narration (or soft whisper).",
+    label: "Ambient / Sleep / Meditation",
+    description: "Calm long-form guided narration (or none) + slow ambient visuals + soft music.",
     visualEngine: "ambient_visual",
     archetypeKey: "meditation",
     available: true,
-    narrated: false,
-    requiresKeys: ["mureka", "pexels"],
+    // The meditation archetype IS narrated (script_gen style=meditation +
+    // narration_tts pace slow). narrated:false skipped the wizard voice
+    // questions AND voice casting — every meditation channel spoke in the
+    // fallback default voice while the architect saw a loop-only toolbox.
+    narrated: true,
+    requiresKeys: ["mureka", "pexels", "fish-audio"],
     defaultThumbnailStyle: "title_card",
+  },
+  comic: {
+    key: "comic",
+    label: "Motion comic (3D drawn page)",
+    description:
+      "A narrated comic page that DRAWS ITSELF OUT in 3D: character-consistent panels, multi-voice " +
+      "dialogue bubbles, hand-drawn reveal, page turns. History, stories, true events. ZERO render credits.",
+    visualEngine: "motion_comic",
+    archetypeKey: "narrated-essay",
+    available: true,
+    narrated: true,
+    requiresKeys: ["gemini", "elevenlabs"],
+    defaultThumbnailStyle: "banana",
   },
   shorts: {
     key: "shorts",
@@ -120,6 +138,7 @@ export const FAMILY_CREW: Record<FamilyKey, string[]> = {
   narrated_stock: ["director", "cinematographer", "editor", "composer", "critic"],
   shorts: ["director", "editor", "critic"],
   whiteboard: ["director", "editor", "composer", "critic"],
+  comic: ["director", "editor", "composer", "critic"],
   cinematic: ["director", "cinematographer", "editor", "composer", "critic"],
 };
 

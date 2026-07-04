@@ -167,15 +167,19 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     }
   }
 
-  // DRAWN-CINEMA self-contained engine (whiteboard_scribe): it writes its own
-  // layered storyboard + narration and draws the synced video itself, so it
-  // REPLACES the script -> narration -> footage -> assemble chain with one
-  // visual-engine block placed right after the topic/crew briefs.
-  if (fam.visualEngine === "whiteboard_scribe") {
+  // SELF-CONTAINED visual engines (whiteboard_scribe drawn-cinema, motion_comic
+  // 3D comic page): each writes its own storyboard + narration and renders the
+  // whole video itself, so it REPLACES the script -> narration -> footage ->
+  // assemble chain with one visual-engine block placed right after the
+  // topic/crew briefs. whiteboard KEEPS the music block (the scribe now beds
+  // the produced track under the narration); comic REPLACES music too (the
+  // engine scores itself with its own Suno bed).
+  if (fam.visualEngine === "whiteboard_scribe" || fam.visualEngine === "motion_comic") {
     const replaced = new Set([
       "script_gen", "hook_craft", "qa_script", "originality_gate", "compliance_check",
       "narration_tts", "stock_footage", "gen_footage", "entity_imagery", "intro_card",
       "visual_inserts", "quote_overlays", "captions", "length_check", "timeline_assemble",
+      ...(fam.visualEngine === "motion_comic" ? ["music", "composer_brief"] : []),
     ]);
     pipeline = pipeline.filter((e) => !replaced.has(e.block));
     const briefBlocks = ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec"];
@@ -183,7 +187,24 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       pipeline.findIndex((e) => e.block === "topic_select"),
       ...briefBlocks.map((b) => pipeline.findIndex((e) => e.block === b)),
     );
-    pipeline.splice(anchor + 1, 0, { block: "whiteboard_scribe", params: {} });
+    const engineParams: Record<string, unknown> = {};
+    if (fam.visualEngine === "motion_comic" && lenSec) {
+      // ~22s of story per panel — a 3-min video plans ~8 panels (clamped 4-12
+      // by the block). Keeps "lengthMinutes" meaningful for comic channels.
+      engineParams.panels = Math.max(4, Math.min(12, Math.round(lenSec / 22)));
+    }
+    pipeline.splice(anchor + 1, 0, { block: fam.visualEngine, params: engineParams });
+    // Whiteboard beds the produced music under its narration — the track must
+    // exist BEFORE the engine runs, so move `music` ahead of it (it sat after,
+    // where the archetype's footage stage used to be).
+    if (fam.visualEngine === "whiteboard_scribe") {
+      const ei = pipeline.findIndex((e) => e.block === "whiteboard_scribe");
+      const mi = pipeline.findIndex((e) => e.block === "music");
+      if (mi > ei && ei >= 0) {
+        const [m] = pipeline.splice(mi, 1);
+        pipeline.splice(ei, 0, m);
+      }
+    }
   }
 
   // Mirror the narration pacing into script_gen so the word budget accounts for

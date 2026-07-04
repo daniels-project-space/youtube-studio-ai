@@ -1,5 +1,7 @@
 import { query } from "./_generated/server";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
 
 /**
  * Finished-videos library (Tranche 4).
@@ -16,16 +18,34 @@ import { v } from "convex/values";
  *                                  /api/asset-url route; null when absent)
  *   - videoKey                    (r2Key of the run's `kind === "video"` asset
  *                                  — used by the lightbox <video> fallback)
- *   - title                       (best-effort from asset/run meta)
+ *   - title                       (REAL SEO title from the `metadata` runStage,
+ *                                  falling back to asset meta → channel name)
+ *   - description / tags          (metadata runStage outputs, trimmed for the
+ *                                  list payload — full text via getVideoDetail)
  *   - thumbnailTitle / visualRationale  (claude_flux thumbnail intelligence,
  *                                  surfaced in the lightbox detail)
- *   - estimatedViews / estimatedViewsSource  (when present on the run)
+ *   - estimatedViews / estimatedViewsSource  (metadata stage, run fallback)
  *   - durationSec                 (when present on an asset/run meta)
  *   - createdAt / status
  *
- * Newest first. Optional server-side filters keep the common case cheap; the
- * client layers richer filtering/sorting on top.
+ * Newest first. Streams the runs index in desc order and STOPS once `limit`
+ * finished rows are found — the old shape collected EVERY owner run (the 16MB
+ * query problem) before filtering.
  */
+
+/** The `metadata` block's persisted stage outputs for a run (or {}). */
+async function metadataOutputs(
+  ctx: QueryCtx,
+  runId: Id<"runs">,
+): Promise<Record<string, unknown>> {
+  const stage = await ctx.db
+    .query("runStages")
+    .withIndex("by_run_block", (q) => q.eq("runId", runId).eq("block", "metadata"))
+    .first();
+  const out = stage?.outputs;
+  return out && typeof out === "object" ? (out as Record<string, unknown>) : {};
+}
+
 export const listVideos = query({
   args: {
     ownerId: v.string(),
@@ -35,29 +55,44 @@ export const listVideos = query({
     limit: v.optional(v.number()),
   },
   handler: async (ctx, args) => {
-    const runs = await ctx.db
-      .query("runs")
-      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
-      .collect();
+    // Bound the scan even when the caller passes no limit (all current
+    // callers do); early termination below keeps the common case cheap.
+    const limit = args.limit ?? 200;
+    const needle = args.search?.trim().toLowerCase() ?? "";
+
+    // Narrowest index first: by_channel when filtered, else by_owner. desc =
+    // newest _creationTime first (≈ startedAt order; runs stamp startedAt at
+    // insert), so we can stop as soon as `limit` finished rows are collected.
+    const source = args.channelId
+      ? ctx.db
+          .query("runs")
+          .withIndex("by_channel", (q) => q.eq("channelId", args.channelId!))
+          .order("desc")
+      : ctx.db
+          .query("runs")
+          .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+          .order("desc");
 
     // Channel-name cache so we join each channel at most once.
     const channelCache = new Map<
       string,
       { name: string; slug: string } | null
     >();
-    const getChannel = async (channelId: string) => {
-      if (channelCache.has(channelId)) return channelCache.get(channelId)!;
-      const ch = await ctx.db.get(channelId as typeof runs[number]["channelId"]);
+    const getChannel = async (channelId: Id<"channels">) => {
+      const key = channelId as string;
+      if (channelCache.has(key)) return channelCache.get(key)!;
+      const ch = await ctx.db.get(channelId);
       const val = ch ? { name: ch.name, slug: ch.slug } : null;
-      channelCache.set(channelId, val);
+      channelCache.set(key, val);
       return val;
     };
 
     const rows: Array<Record<string, unknown>> = [];
 
-    for (const run of runs) {
-      // Server-side channel filter (cheap, before the asset fan-out).
-      if (args.channelId && run.channelId !== args.channelId) continue;
+    for await (const run of source) {
+      if (rows.length >= limit) break;
+      // Tenancy guard when reading the channel index.
+      if (run.ownerId !== args.ownerId) continue;
       // Server-side status filter.
       if (args.status && run.status !== args.status) continue;
 
@@ -76,14 +111,28 @@ export const listVideos = query({
 
       const channel = await getChannel(run.channelId);
 
-      // Best-effort title: video asset meta → thumbnail meta → channel name.
+      // The REAL title/SEO live in the `metadata` stage outputs (they were
+      // previously stranded there — asset meta rarely carries a title).
+      const mOut = await metadataOutputs(ctx, run._id);
       const vMeta = (videoAsset?.meta ?? {}) as Record<string, unknown>;
       const tMeta = (thumbAsset?.meta ?? {}) as Record<string, unknown>;
       const title =
+        (typeof mOut.title === "string" && mOut.title) ||
         (typeof vMeta.title === "string" && vMeta.title) ||
         (typeof tMeta.thumbnailTitle === "string" && tMeta.thumbnailTitle) ||
         (typeof tMeta.title === "string" && tMeta.title) ||
         (channel?.name ?? "Untitled video");
+
+      // Optional title search — must run BEFORE the row counts toward `limit`.
+      if (needle && !String(title).toLowerCase().includes(needle)) continue;
+
+      const description =
+        typeof mOut.description === "string"
+          ? mOut.description.slice(0, 400)
+          : undefined;
+      const tags = Array.isArray(mOut.tags)
+        ? (mOut.tags.filter((t) => typeof t === "string") as string[]).slice(0, 20)
+        : undefined;
 
       // Optional duration from either asset's meta.
       const durationSec =
@@ -93,17 +142,20 @@ export const listVideos = query({
             ? (vMeta.duration as number)
             : undefined;
 
-      // Estimated views live on the run (loose-typed; analytics owns the
-      // schema). Read defensively so absence is fine.
+      // Estimated views: metadata stage first, legacy run fields as fallback.
       const runAny = run as unknown as Record<string, unknown>;
       const estimatedViews =
-        typeof runAny.estimatedViews === "number"
-          ? (runAny.estimatedViews as number)
-          : undefined;
+        typeof mOut.estimatedViews === "number"
+          ? (mOut.estimatedViews as number)
+          : typeof runAny.estimatedViews === "number"
+            ? (runAny.estimatedViews as number)
+            : undefined;
       const estimatedViewsSource =
-        typeof runAny.estimatedViewsSource === "string"
-          ? (runAny.estimatedViewsSource as string)
-          : undefined;
+        typeof mOut.estimatedViewsSource === "string"
+          ? (mOut.estimatedViewsSource as string)
+          : typeof runAny.estimatedViewsSource === "string"
+            ? (runAny.estimatedViewsSource as string)
+            : undefined;
 
       rows.push({
         _id: run._id,
@@ -116,6 +168,8 @@ export const listVideos = query({
         channelName: channel?.name ?? "(unknown)",
         channelSlug: channel?.slug ?? "",
         title: title as string,
+        description,
+        tags,
         thumbnailKey: thumbAsset?.r2Key ?? null,
         videoKey: videoAsset?.r2Key ?? null,
         thumbnailTitle:
@@ -132,24 +186,86 @@ export const listVideos = query({
       });
     }
 
-    // Optional title search (case-insensitive substring).
-    let filtered = rows;
-    if (args.search && args.search.trim()) {
-      const needle = args.search.trim().toLowerCase();
-      filtered = rows.filter((r) =>
-        String(r.title ?? "")
-          .toLowerCase()
-          .includes(needle),
-      );
+    // Newest first (startedAt can drift a hair from _creationTime).
+    rows.sort((a, b) => (b.createdAt as number) - (a.createdAt as number));
+    return rows;
+  },
+});
+
+/**
+ * On-demand detail for one finished run's lightbox: FULL description, tags,
+ * and the narration script (stranded in runStages outputs until now). Small
+ * targeted reads — one stage row per block via by_run_block.
+ */
+export const getVideoDetail = query({
+  args: { runId: v.id("runs") },
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run) return null;
+
+    const stageOutputs = async (block: string) => {
+      const stage = await ctx.db
+        .query("runStages")
+        .withIndex("by_run_block", (q) =>
+          q.eq("runId", args.runId).eq("block", block),
+        )
+        .first();
+      const out = stage?.outputs;
+      return out && typeof out === "object"
+        ? (out as Record<string, unknown>)
+        : {};
+    };
+
+    const mOut = await stageOutputs("metadata");
+
+    // Script text: script_gen first, then the self-contained narration engines.
+    let script: string | null = null;
+    for (const block of ["script_gen", "whiteboard_scribe", "motion_comic"]) {
+      const out = await stageOutputs(block);
+      if (typeof out.narrationText === "string" && out.narrationText.trim()) {
+        script = out.narrationText;
+        break;
+      }
     }
 
-    // Newest first.
-    filtered.sort(
-      (a, b) => (b.createdAt as number) - (a.createdAt as number),
-    );
+    const assets = await ctx.db
+      .query("assets")
+      .withIndex("by_run", (q) => q.eq("runId", args.runId))
+      .collect();
+    const videoAsset = assets.find((a) => a.kind === "video");
+    const thumbAsset = assets.find((a) => a.kind === "thumbnail");
+    const vMeta = (videoAsset?.meta ?? {}) as Record<string, unknown>;
+    const tMeta = (thumbAsset?.meta ?? {}) as Record<string, unknown>;
 
-    return typeof args.limit === "number"
-      ? filtered.slice(0, args.limit)
-      : filtered;
+    const channel = await ctx.db.get(run.channelId);
+    const title =
+      (typeof mOut.title === "string" && mOut.title) ||
+      (typeof vMeta.title === "string" && vMeta.title) ||
+      (typeof tMeta.thumbnailTitle === "string" && tMeta.thumbnailTitle) ||
+      (channel?.name ?? "Untitled video");
+
+    return {
+      title: title as string,
+      description:
+        typeof mOut.description === "string" ? mOut.description : null,
+      tags: Array.isArray(mOut.tags)
+        ? (mOut.tags.filter((t) => typeof t === "string") as string[])
+        : [],
+      script,
+      thumbnailKey: thumbAsset?.r2Key ?? null,
+      videoKey: videoAsset?.r2Key ?? null,
+      estimatedViews:
+        typeof mOut.estimatedViews === "number"
+          ? (mOut.estimatedViews as number)
+          : null,
+      estimatedViewsSource:
+        typeof mOut.estimatedViewsSource === "string"
+          ? (mOut.estimatedViewsSource as string)
+          : null,
+      pinnedComment:
+        typeof mOut.pinnedComment === "string" ? mOut.pinnedComment : null,
+      titleAlternate:
+        typeof mOut.titleAlternate === "string" ? mOut.titleAlternate : null,
+    };
   },
 });

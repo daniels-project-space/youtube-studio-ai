@@ -7,7 +7,7 @@
  * and large blobs are truncated so the panel stays readable.
  */
 
-const MAX_JSON_CHARS = 4000;
+const MAX_JSON_CHARS = 8000;
 
 /** Stable pretty-print of an arbitrary persisted JSON value, truncated. */
 function prettyJson(value: unknown): string {

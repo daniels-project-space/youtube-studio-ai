@@ -12,6 +12,8 @@ export const STATUS_COLOR: Record<string, string> = {
   queued: "var(--color-queued)",
   failed: "var(--color-failed)",
   canceled: "var(--color-canceled)",
+  superseded: "var(--color-amber)",
+  skipped: "var(--color-queued)",
 };
 
 /** Status → human label. */
@@ -21,4 +23,6 @@ export const STATUS_LABEL: Record<string, string> = {
   queued: "Queued",
   failed: "Failed",
   canceled: "Canceled",
+  superseded: "Superseded (self-heal)",
+  skipped: "Skipped",
 };

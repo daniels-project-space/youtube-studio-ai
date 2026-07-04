@@ -68,6 +68,34 @@ const HEAL_RULES: HealRule[] = [
     label: "overlays not composited → re-compose timeline",
   },
   {
+    // New deterministic QA gates (2026-07): captions burned, intro/outro
+    // presence, and audible music are now hard-gated — each is owned by a
+    // cheap re-run, never a reason to discard the paid store.
+    match: /captions missing: \d+ cues prepared/i,
+    owner: "timeline_assemble",
+    label: "caption burn failed → re-finish timeline",
+  },
+  {
+    match: /intro card missing: intro_card render failed/i,
+    owner: "intro_card",
+    label: "intro card render failed → re-render card + re-compose",
+  },
+  {
+    match: /outro card missing: outro render\/compose failed/i,
+    owner: "timeline_assemble",
+    label: "outro card failed → re-compose timeline",
+  },
+  {
+    match: /music missing from mix/i,
+    owner: "timeline_assemble",
+    label: "music inaudible in final mix → re-compose with the produced track",
+  },
+  {
+    match: /audio loudness .* outside the sane band/i,
+    owner: "timeline_assemble",
+    label: "mix loudness out of band → re-finish (loudnorm pass)",
+  },
+  {
     // Watch-caught OFF-WORLD footage (subject fits, grade/world doesn't —
     // "hands untying a journal on a plain white surface… contradicts the
     // channel's visual world"). Re-source footage with the stricter gate; the
@@ -93,7 +121,10 @@ const HEAL_RULES: HealRule[] = [
  * honestly instead of thrashing. (Length problems live in the paid script/TTS.)
  */
 const UNHEALABLE =
-  /length_check|lengthRatio|duration_max|durationSec.*(<=|>=)|video\/target|narration.*(short|long)/i;
+  // NOTE: includes the REAL qa_visual length string ("(length): video 848s vs
+  // target 660s") and the precheck — the old regex expected "video/target"
+  // literally and let length failures through to a doomed paid heal cycle.
+  /length_check|length_precheck|lengthRatio|duration_max|durationSec.*(<=|>=)|video\/target|\(length\): video \d+|narration.*(too )?(short|long)/i;
 
 /** Transitive downstream closure over the declared produces/consumes graph. */
 function downstreamClosure(ownerIds: Set<string>, blocks: HealableBlock[]): string[] {

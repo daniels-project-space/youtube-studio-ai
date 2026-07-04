@@ -82,7 +82,6 @@ const NARRATED: PipelineEntry[] = [
   { block: "quote_overlays", params: { maxQuotes: 3, minQuoteWords: 6 } },
   // 15s held outro card; music fades over the full 15s, video stays on the card.
   { block: "timeline_assemble", params: { tailSec: 15, fadeOutSec: 2, audioFadeOutSec: 15, burnCaptions: true } },
-  { block: "qa_refine" }, // Gemini watches the full video → editor agent fixes quote cards
   { block: "length_check", params: { minSeconds: 900, maxSeconds: 2100 } }, // 15-35 min
   { block: "captions" },
   { block: "metadata" },

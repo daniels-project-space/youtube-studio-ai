@@ -116,7 +116,16 @@ export async function nativeWatchRender(
   opts: { log?: (m: string) => void },
 ): Promise<(RenderWatchResult & NativeWatchScores) | null> {
   const log = opts.log ?? (() => {});
-  if (!hasGeminiKey() || durationSec < 5) return null;
+  // The native (video-upload) reviewer is Gemini-only. When the operator has
+  // hard-forbidden Google vision (VISION_DISABLE_GEMINI=1) — or there is no key —
+  // skip straight to the provider-routed frame watcher (callers handle null).
+  if (process.env.VISION_DISABLE_GEMINI === "1" || !hasGeminiKey()) {
+    log(
+      `nativeWatch: skipped (${process.env.VISION_DISABLE_GEMINI === "1" ? "VISION_DISABLE_GEMINI=1" : "no GEMINI_API_KEY"}) — falling back to frame watcher`,
+    );
+    return null;
+  }
+  if (durationSec < 5) return null;
   try {
     const file = await uploadGeminiVideo(videoPath);
     log(`nativeWatch: uploaded (${Math.round(durationSec)}s) — pass 1 blind index…`);

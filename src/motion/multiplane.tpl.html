@@ -1,0 +1,55 @@
+<!doctype html><html><head><meta charset="utf8">
+<style>html,body{margin:0;background:#000;overflow:hidden}#c{display:block}</style>
+<script type="importmap">{ "imports": { "three":"https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
+</head><body><canvas id="c"></canvas>
+<script type="module">
+import * as THREE from "three";
+// TRUE MULTIPLANE — N SEPARATE complete layer images, each a full-frame quad, moved at its
+// OWN rate by an EXPLICIT per-layer transform (NO perspective camera, no sign ambiguity).
+// near=0 (far) stays put and fills the frame; near=1 (front) trucks + scales the most, so the
+// layers visibly SLIDE PAST EACH OTHER like a Disney/GoT multiplane camera. Clean: each layer
+// is a whole image, so occlusion and reveal are crisp.
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
+renderer.setClearColor(0x000000, 1); renderer.outputColorSpace = THREE.SRGBColorSpace;
+const scene = new THREE.Scene();
+const ASPECT = 16 / 9;
+const camera = new THREE.OrthographicCamera(-1, 1, 1 / ASPECT, -1 / ASPECT, 0.01, 10);
+camera.position.z = 5;
+function resize() { renderer.setSize(window.innerWidth || 1280, window.innerHeight || 720, false); renderer.setPixelRatio(1); }
+window.addEventListener("resize", resize); resize();
+let META = null, LAYERS = [], pending = 0;
+const need = () => pending++;
+const fin = () => { pending--; if (pending <= 0 && META) window.__ready = true; };
+const texL = new THREE.TextureLoader();
+function loadTex(url) { need(); const t = texL.load(url, fin, undefined, fin); t.colorSpace = THREE.SRGBColorSpace; t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; return t; }
+
+function build() {
+  // a single full-frame quad spans [-1,1] x [-1/ASPECT, 1/ASPECT]; oversize so trucked/zoomed
+  // far layers never expose an edge.
+  const OS = META.oversize || 1.15;
+  LAYERS = META.layers.map((L, i) => {
+    const geo = new THREE.PlaneGeometry(2 * OS, (2 / ASPECT) * OS);
+    const mat = new THREE.MeshBasicMaterial({ map: loadTex(L.img), transparent: true, depthTest: false, depthWrite: false });
+    const m = new THREE.Mesh(geo, mat); m.renderOrder = i; m.position.z = i * 0.01; scene.add(m);
+    return { mesh: m, near: L.near };
+  });
+}
+fetch("multiplane_meta.json").then((r) => r.json()).then((m) => { META = m; build(); window.__dur = m.total; if (pending <= 0) window.__ready = true; });
+
+const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+window.__frame = (tn) => {
+  if (!META) return;
+  const u = ease(Math.min(1, Math.max(0, tn)));
+  const gz = META.globalZoom || 0;   // BIG camera pull-back: ALL layers start zoomed in by gz and
+  const pz = META.zoom || 0;         // open to 1.0 (whole scene reveals). Nearer layers get gz+near*pz
+  for (const L of LAYERS) {          // → recede MORE = strong parallax. Each layer scales rigidly (no slide).
+    const n = L.near;
+    const s = 1 + (gz + n * pz) * (1 - u);
+    L.mesh.position.set(0, 0, L.mesh.position.z);
+    L.mesh.scale.set(s, s, 1);
+  }
+  renderer.render(scene, camera);
+};
+window.__settle = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+const kick = setInterval(() => { if (window.__ready) { clearInterval(kick); window.__frame(0); } }, 60);
+</script></body></html>

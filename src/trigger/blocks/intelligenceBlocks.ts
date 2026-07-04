@@ -648,14 +648,16 @@ async function titleCardFallback(ctx: StageContext): Promise<string> {
   await titleCard({ basePath: base, outJpg, title: channelName, subtitle: topic });
   const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
   await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
-  await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "title_card_fallback" });
+  await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "title_card_fallback", thumbnailTitle: channelName });
   return thumbnailKey;
 }
 
 export const thumbnailGen: Block = {
   id: "thumbnail_gen",
   consumes: ["title"],
-  produces: ["thumbnailKey"],
+  // `strategy` feeds the thumbnail learning loop (which path produced the
+  // shipped thumbnail); every return path below must include it.
+  produces: ["thumbnailKey", "strategy"],
   paid: true,
   run: async (ctx) => {
     const title = str(ctx, "title");
@@ -826,9 +828,9 @@ export const thumbnailGen: Block = {
         } else {
           const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
           await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
-          await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook", pattern: pattern.name });
+          await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook", pattern: pattern.name, thumbnailTitle: title });
           ctx.log(`thumbnail_gen: PLAYBOOK thumbnail ✓ (pattern "${pattern.name}")${refQA ? ` — ref QA: ${refQA.reason}` : ""}`);
-          return { thumbnailKey };
+          return { thumbnailKey, strategy: "playbook" };
         }
       } catch (e) {
         ctx.log(`thumbnail_gen: playbook path failed (${e instanceof Error ? e.message : e}) — falling through`);
@@ -878,7 +880,7 @@ export const thumbnailGen: Block = {
           await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
           await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "scene_still", thumbnailTitle: ttl });
           ctx.log(`thumbnail_gen: real-scene thumbnail ✓ ("${ttl}")${refQA ? ` — ref QA: ${refQA.reason}` : ""}`);
-          return { thumbnailKey };
+          return { thumbnailKey, strategy: "scene_still" };
         }
       } catch (e) {
         ctx.log(`thumbnail_gen: real-scene path failed (${e instanceof Error ? e.message : e}) — falling through`);
@@ -888,7 +890,7 @@ export const thumbnailGen: Block = {
     // Operator explicitly selected the deterministic title card.
     if (thumbnailer === "title_card") {
       const thumbnailKey = await titleCardFallback(ctx);
-      return { thumbnailKey };
+      return { thumbnailKey, strategy: "title_card_fallback" };
     }
 
     // THE ENGINE (no playbook yet): DNA-direct Nano Banana Pro brief - the
@@ -938,9 +940,13 @@ export const thumbnailGen: Block = {
       });
       const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
       await putObject(thumbnailKey, await readBytes(bOut), { contentType: "image/jpeg" });
-      await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "banana_dna", punch: verdict.punch });
+      await recordAsset(ctx, "thumbnail", thumbnailKey, {
+        strategy: "banana_dna",
+        punch: verdict.punch,
+        thumbnailTitle: bananaLines.map((l) => l.text).join(" "),
+      });
       ctx.log(`thumbnail_gen: BANANA thumbnail OK (DNA-direct, punch ${verdict.punch ?? "?"}/10)`);
-      return { thumbnailKey };
+      return { thumbnailKey, strategy: "banana_dna" };
     } catch (e) {
       // Ship the best PAID render instead of nothing: the rejected playbook
       // candidate beats a missing thumbnail (which fails QA and triggers the
@@ -949,8 +955,8 @@ export const thumbnailGen: Block = {
         ctx.log(`thumbnail_gen: DNA-direct failed (${e instanceof Error ? e.message : e}) — shipping the below-bar playbook candidate instead of nothing`);
         const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
         await putObject(thumbnailKey, await readBytes(rejectedPlaybookJpg), { contentType: "image/jpeg" });
-        await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook_belowbar" });
-        return { thumbnailKey };
+        await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook_belowbar", thumbnailTitle: title });
+        return { thumbnailKey, strategy: "playbook_belowbar" };
       }
       throw e;
     }

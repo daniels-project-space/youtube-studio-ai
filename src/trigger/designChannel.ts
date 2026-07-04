@@ -60,6 +60,10 @@ export const designChannelTask = task({
   // each at 60s scale) — the channel isn't "ready" until it has PROVEN it can
   // finish a video.
   maxDuration: 3600,
+  // NO task-level retry: a retry after createChannel would duplicate the
+  // channel and re-spend the whole inception (art, labs, probes). Failures
+  // surface honestly; the operator re-runs deliberately.
+  retry: { maxAttempts: 1 },
   run: async (payload: DesignChannelArgs) => {
     const log = (m: string, x?: Record<string, unknown>) => console.log(`[design-channel] ${m}`, x ?? "");
     // Channel inception without the model keys yields a skeleton identity/DNA
@@ -118,6 +122,16 @@ export const designChannelTask = task({
     const now = Date.now();
     const slug = slugify(name, now);
     const archetype = getArchetype(fam.archetypeKey);
+    // Operator hard rail — wizard toggles set to OFF may never be re-added by
+    // ANY architect pass (initial, forge re-run, probe fix, dial-in, or the
+    // Doctor's re-architect). Computed once, PERSISTED on the channel row.
+    const tRail = payload.toggles ?? {};
+    const disabledBlocks = [
+      tRail.shorts === false ? "shorts_spinoff" : "",
+      tRail.crosspost === false ? "crosspost" : "",
+      tRail.quotes === false ? "quote_overlays" : "",
+      tRail.notify === false ? "notify" : "",
+    ].filter(Boolean);
     const channelId = (await convex.mutation(api.channels.createChannel, {
       ownerId, slug, name, identity,
       // Niche preset thumbnail engine wins over the family default when set.
@@ -125,6 +139,9 @@ export const designChannelTask = task({
         ?? (fam.defaultThumbnailStyle === "title_card" ? "title_card" : "banana"),
       template: archetype.template,
       pipeline: design.pipeline,
+      // Single source of family truth (no more template-letter guessing).
+      family: payload.family,
+      disabledBlocks,
       budget: payload.budget ?? 5,
       // DEACTIVATED-FIRST: even a fully-buildable channel starts "paused" so the
       // autopilot scheduler never auto-spends until the operator flips it on. A
@@ -326,19 +343,17 @@ export const designChannelTask = task({
     // roughly halves inception wall-time AND every future channel is BORN with
     // its thumbnail + script playbooks (no separate lab runs needed).
     let artFields: Partial<Awaited<ReturnType<typeof generateChannelArt>>> = {};
+    // Hoisted OUT of the parallel closure: the final identity write (below)
+    // used to spread the stale closure-local identity and CLOBBER the cast —
+    // and the identityValidator rejected the full CastResult anyway. We keep a
+    // slim projection and carry it into every later identity write.
+    let voiceCastingSlim:
+      | { voiceId: string; name?: string; character?: string; score?: number; why?: string; at?: number }
+      | undefined;
     await Promise.all([
       (async () => {
         try {
           if (!styleDNA) return;
-          // Operator hard rail: wizard toggles set to OFF may never be re-added
-          // by the architect, however good its identity reasoning.
-          const t = payload.toggles ?? {};
-          const disabledBlocks = [
-            t.shorts === false ? "shorts_spinoff" : "",
-            t.crosspost === false ? "crosspost" : "",
-            t.quotes === false ? "quote_overlays" : "",
-            t.notify === false ? "notify" : "",
-          ].filter(Boolean);
           // VOICE CASTING — voicecraft: the profiled voice bank (operator's
           // real ElevenLabs voices, heard + carded) is prefiltered by the
           // archetype's casting law and auditioned by a model that LISTENS;
@@ -358,10 +373,18 @@ export const designChannelTask = task({
                 log,
               });
               if (voiceCasting) {
-                await convex.mutation(api.channels.updateChannel, {
-                  channelId,
-                  identity: { ...identity, voiceCasting } as typeof identity,
-                });
+                // Slim projection (the full CastResult carries audition arrays
+                // + physics the validator rightly rejects). The final identity
+                // write below persists it — no racy mid-flight write here.
+                voiceCastingSlim = {
+                  voiceId: voiceCasting.voiceId,
+                  name: voiceCasting.name,
+                  character: voiceCasting.character?.slice(0, 300),
+                  score: voiceCasting.score,
+                  why: voiceCasting.why?.slice(0, 300),
+                  at: Date.now(),
+                };
+                log(`voiceCasting: winner persisted to identity (${voiceCasting.name}, ${voiceCasting.score}/10)`);
               }
             } catch (e) { log(`voiceCasting skipped: ${e instanceof Error ? e.message : e}`); }
           }
@@ -472,14 +495,36 @@ export const designChannelTask = task({
       })(),
     ]);
 
-    // Single identity write carrying art, the SEO-expanded pool, and the Show Bible.
+    // Single identity write carrying art, the SEO-expanded pool, the Show
+    // Bible AND the voice-casting winner (previously clobbered here).
     try {
       await convex.mutation(api.channels.updateChannel, {
-        channelId, identity: { ...identity, ...artFields, topicPool, ...(creativeBrief ? { creativeBrief } : {}) },
+        channelId, identity: {
+          ...identity, ...artFields, topicPool,
+          ...(creativeBrief ? { creativeBrief } : {}),
+          ...(voiceCastingSlim ? { voiceCasting: voiceCastingSlim } : {}),
+        },
         ...(styleDNA ? { styleDNA } : {}),
         ...(qualityBar ? { qaRubric: qualityBar } : {}),
       });
     } catch (e) { log(`identity update failed (non-fatal): ${e instanceof Error ? e.message : e}`); }
+
+    // CAST → RUNTIME: when narration runs on ElevenLabs and the architect
+    // didn't pin a voice, wire the audition WINNER into narration_tts — the
+    // cast used to live only in-memory and every render spoke the default.
+    if (voiceCastingSlim) {
+      try {
+        const chNow = await convex.query(api.channels.getChannel, { channelId });
+        const pipe = (chNow?.pipeline ?? []) as PipelineEntry[];
+        const tts = pipe.find((e) => e.block === "narration_tts");
+        const p = (tts?.params ?? {}) as Record<string, unknown>;
+        if (tts && p["ttsProvider"] === "elevenlabs" && !p["elevenVoiceId"]) {
+          tts.params = { ...p, elevenVoiceId: voiceCastingSlim.voiceId };
+          await convex.mutation(api.channels.updateChannel, { channelId, pipeline: pipe });
+          log(`voiceCasting: narration_tts.elevenVoiceId wired to the cast winner (${voiceCastingSlim.name ?? voiceCastingSlim.voiceId})`);
+        }
+      } catch (e) { log(`voiceCasting runtime wire skipped: ${e instanceof Error ? e.message : e}`); }
+    }
 
     // 6b. Auto-PLAN the first batch of upcoming videos — topics + SEO titles +
     // custom thumbnails into the contentPlan queue, so a new channel launches with
@@ -554,6 +599,7 @@ export const designChannelTask = task({
                   persona: identity.persona,
                   pipeline: ((await convex.query(api.channels.getChannel, { channelId }))?.pipeline ?? design.pipeline) as PipelineEntry[],
                   dna: styleDNA, bible: creativeBrief, qualityBar, competitorCount,
+                  disabledBlocks, // operator hard rail survives the dial-in pass
                   probeReport: { ok: true, ...review }, log,
                 });
                 if (tune && (tune.report.applied.length || tune.report.groundingActions.length)) {
@@ -578,6 +624,7 @@ export const designChannelTask = task({
               family: payload.family, channelName: name, niche: identity.niche,
               persona: identity.persona, pipeline: (chNow?.pipeline ?? design.pipeline) as PipelineEntry[],
               dna: styleDNA, bible: creativeBrief, qualityBar, competitorCount,
+              disabledBlocks, // operator hard rail survives the probe-fix pass
               probeReport: { ok: false, error, failedBlock }, log,
             });
             if (fix) {

@@ -88,6 +88,29 @@ export async function rehydrateOutputs(
       }
     }
   }
+  // Nested overlay specs ({path, key, ...} inside arrays — quoteOverlays,
+  // insertOverlays, extraOverlays): restore each item's missing local `path`
+  // from its OWN sibling `key`. This is the render-split contract for overlay
+  // producers; before it existed, one stale nested path forced a full re-run
+  // of the producing block (and on the render child, dropped every overlay).
+  for (const val of Object.values(outputs)) {
+    if (!Array.isArray(val)) continue;
+    for (let i = 0; i < val.length; i++) {
+      const item = val[i] as { path?: unknown; key?: unknown } | null;
+      if (!item || typeof item !== "object") continue;
+      if (isLocalPath(item.path) && !existsSync(item.path) && looksLikeR2Key(item.key)) {
+        try {
+          if (!tmp) tmp = await makeRunTempDir(runId);
+          const ext = item.path.match(/\.[a-z0-9]+$/i)?.[0] ?? "";
+          const dest = join(tmp, `resume_ovl_${String(item.key).replace(/[^a-z0-9]/gi, "_").slice(-32)}${ext}`);
+          await writeBytes(dest, await getObjectBytes(item.key));
+          (item as { path: string }).path = dest;
+        } catch {
+          return { ok: false, outputs };
+        }
+      }
+    }
+  }
   // Then: if ANY value (including nested in arrays/objects, e.g. quoteOverlays
   // [{path}], footageClips[]) still points at a missing local file, we cannot
   // restore it → re-run the block (correctness over a skipped re-run).

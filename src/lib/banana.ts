@@ -5,13 +5,16 @@
  * covered, correct badges — proven 9/9 SHIP across wildly different channels.
  *
  * Fully standalone: brief in → judged jpg out. The only deps are the Gemini
- * key (vault service "gemini") and the local vision judge.
+ * key (vault service "gemini") and the local vision judge. Set
+ * IMAGE_DISABLE_GEMINI=1 (or IMAGE_PROVIDERS=fal,…) to render every image on
+ * fal FLUX instead — zero Google image spend, same call sites.
  *
  *   const { path } = await bananaThumbnail({ brief: buildThumbBrief({...}), outJpg, log });
  */
 import { writeFile } from "node:fs/promises";
 import { parseJsonLoose } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
+import { generateFalImage } from "@/lib/falImage";
 
 /**
  * MODEL TIERS. Pro (gemini-3-pro-image, ~$0.13/img) exists for DESIGNED
@@ -31,10 +34,27 @@ function modelsFor(tier: "pro" | "flash"): string[] {
   return tier === "pro" ? PRO_MODELS : FLASH_MODELS;
 }
 
-/** Billed-generation counters (by tier) — pipeline blocks report real cost from these. */
-export const bananaCounters = { pro: 0, flash: 0 };
+/** Billed-generation counters (by tier) — pipeline blocks report real cost from
+ *  these. `fal` counts router-delegated FLUX renders (≈ $0.04/image — the same
+ *  rate as banana flash, which is what cost consumers bill it at). */
+export const bananaCounters = { pro: 0, flash: 0, fal: 0 };
+
+/**
+ * PROVIDER ROUTER ("no Google image gen" switch). The fal route is active when
+ * the operator sets IMAGE_DISABLE_GEMINI=1 or puts "fal" FIRST in
+ * IMAGE_PROVIDERS. Default (both unset) keeps the Google path byte-for-byte.
+ */
+function falImageRouteActive(): boolean {
+  if (process.env.IMAGE_DISABLE_GEMINI === "1") return true;
+  const providers = (process.env.IMAGE_PROVIDERS || "")
+    .split(",")
+    .map((s) => s.trim().toLowerCase())
+    .filter(Boolean);
+  return providers[0] === "fal";
+}
 
 export function hasBanana(): boolean {
+  if (falImageRouteActive()) return !!process.env.FAL_KEY;
   return !!process.env.GEMINI_API_KEY;
 }
 
@@ -103,6 +123,29 @@ export function buildThumbBrief(a: ThumbBriefArgs): string {
 }
 
 /**
+ * Judge-gate vision call that DISTINGUISHES a provider error from a verdict.
+ * The old `.catch(() => "")` failed OPEN: a dead vision provider turned every
+ * gate check into a pass (`v.x !== false`), so unverified spelling shipped.
+ * Now a provider error is RETRIED once; a second error returns null, and the
+ * caller decides: allowText renders (thumbnails/type cards) must treat null as
+ * a FAILED textOk (spelling can't ship unverified); picture-only
+ * (allowText:false) renders keep the old pass-with-warning behavior.
+ */
+async function judgeVision(
+  args: Parameters<typeof visionLocal>[0],
+  log?: (m: string) => void,
+): Promise<string | null> {
+  for (let attempt = 0; attempt < 2; attempt++) {
+    try {
+      return await visionLocal(args);
+    } catch (e) {
+      log?.(`banana: vision judge error (attempt ${attempt + 1}/2): ${e instanceof Error ? e.message : e}`);
+    }
+  }
+  return null;
+}
+
+/**
  * BANANA TYPE CARD — generate a bespoke DESIGNED-TYPOGRAPHY card (a film
  * title/end card) for a hero line, instead of a generic web font. Spelling is
  * gated by the vision judge with one retry; returns the jpg path, or null so
@@ -134,15 +177,21 @@ export async function bananaTypeCard(args: {
     try {
       const bytes = await generateBananaImage({ prompt: base + fix, aspectRatio: "16:9", allowText: true });
       await writeFile(args.outJpg, bytes);
-      const raw = await visionLocal({
+      const raw = await judgeVision({
         prompt:
           `TYPOGRAPHY GATE. Does this card show the EXACT line "${args.text}" — every word present, correctly ` +
           `spelled, fully legible, no gibberish or extra words? Return STRICT JSON {"exact":bool,"legible":bool,"fix":"<=12 words"}.`,
         imagePaths: [args.outJpg],
         json: true,
         maxTokens: 150,
-      }).catch(() => "");
-      const v = raw ? parseJsonLoose<{ exact?: boolean; legible?: boolean; fix?: string }>(raw) : {};
+      }, args.log);
+      if (raw == null) {
+        // Judge unavailable after retry → spelling is UNVERIFIED. Re-rendering
+        // won't fix a dead judge, so fall straight back to crisp CSS type.
+        args.log?.("banana type card: VISION JUDGE UNAVAILABLE — spelling unverified, falling back to CSS type");
+        return null;
+      }
+      const v = parseJsonLoose<{ exact?: boolean; legible?: boolean; fix?: string }>(raw);
       if (v.exact !== false && v.legible !== false) {
         args.log?.(`banana type card OK: "${args.text.slice(0, 40)}"`);
         return args.outJpg;
@@ -181,6 +230,27 @@ export async function generateBananaImage(args: {
    *  "flash". Pass explicitly to override (e.g. flash preview thumbnails). */
   tier?: "pro" | "flash";
 }): Promise<Buffer> {
+  // PROVIDER ROUTER: when the operator disabled Google image gen, EVERY engine
+  // that calls generateBananaImage transparently renders on fal FLUX instead
+  // (same args, bytes out). A missing FAL_KEY throws — never silently fall back
+  // to the provider the operator explicitly turned off.
+  if (falImageRouteActive()) {
+    if (!process.env.FAL_KEY) {
+      throw new Error(
+        "banana: fal image route active (IMAGE_DISABLE_GEMINI/IMAGE_PROVIDERS) but FAL_KEY missing " +
+          "(vault service 'fal') — refusing to fall back to the disabled Google provider",
+      );
+    }
+    const bytes = await generateFalImage({
+      prompt: args.prompt,
+      aspectRatio: args.aspectRatio,
+      imageSize: args.imageSize,
+      images: (args.images ?? []).map((im) => ({ data: im.data, mimeType: im.mimeType ?? "image/png" })),
+      allowText: args.allowText, // generateFalImage appends NO_TEXT_CLAUSE itself
+    });
+    bananaCounters.fal++;
+    return bytes;
+  }
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
   const prompt = args.allowText ? args.prompt : args.prompt + NO_TEXT_CLAUSE;
@@ -269,7 +339,7 @@ export async function bananaThumbnail(args: {
     const bytes = await generateBananaImage({ prompt: args.brief + fixNote, allowText: true, tier: args.tier });
     await writeFile(args.outJpg, bytes);
     const wordList = (args.expectWords ?? []).map((w) => `"${w.toUpperCase()}"`).join(" and ");
-    const raw = await visionLocal({
+    const raw = await judgeVision({
       prompt:
         `THUMBNAIL GATE. 1. textOk: ${wordList ? `exact words ${wordList} fully visible, spelled exactly, ` : ""}` +
         `every visible word a correctly spelled real word? 2. faceClear: NO text covering any face or eyes? ` +
@@ -282,8 +352,19 @@ export async function bananaThumbnail(args: {
       imagePaths: [args.outJpg],
       json: true,
       maxTokens: 250,
-    }).catch(() => "");
-    const v: BananaVerdict = raw ? parseJsonLoose<BananaVerdict>(raw) : {};
+    }, args.log);
+    if (raw == null) {
+      // Judge unavailable after retry — a thumbnail is an allowText render, so
+      // its spelling CANNOT ship unverified: count this attempt as a FAILED
+      // textOk (loud), never the old silent pass.
+      lastVerdict = { textOk: false, fix: "vision judge unavailable — spelling unverified" };
+      args.log?.(
+        `banana: VISION JUDGE UNAVAILABLE on attempt ${attempt + 1} — treating textOk as FAILED (spelling cannot ship unverified)`,
+      );
+      fixNote = " CRITICAL FIX FROM THE LAST ATTEMPT: render every headline word spelled exactly as quoted.";
+      continue;
+    }
+    const v: BananaVerdict = parseJsonLoose<BananaVerdict>(raw);
     lastVerdict = v;
     const pass =
       v.textOk !== false && v.faceClear !== false && v.uiClean !== false &&

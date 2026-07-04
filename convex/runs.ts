@@ -68,10 +68,13 @@ export const listRunsByChannel = query({
 export const listActive = query({
   args: { ownerId: v.string() },
   handler: async (ctx, args) => {
+    // Bounded window instead of a full-table collect: active runs are always
+    // recent, so the newest 200 (index desc ≈ startedAt desc) covers them.
     const runs = await ctx.db
       .query("runs")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
-      .collect();
+      .order("desc")
+      .take(200);
     const active = runs.filter(
       (r) => r.status === "queued" || r.status === "running",
     );
@@ -125,12 +128,14 @@ export const repointChannel = mutation({
 export const listRecent = query({
   args: { ownerId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const runs = await ctx.db
+    // Index desc ≈ startedAt desc (startedAt is stamped at insert) — take the
+    // page directly instead of collecting every owner run then slicing.
+    const limited = await ctx.db
       .query("runs")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
-      .collect();
-    runs.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
-    const limited = runs.slice(0, args.limit ?? 10);
+      .order("desc")
+      .take(args.limit ?? 10);
+    limited.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
     return await Promise.all(
       limited.map(async (run) => {
         const channel = await ctx.db.get(run.channelId);

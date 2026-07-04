@@ -855,6 +855,54 @@ export async function synthScript(
   if (sections.length === 0) {
     throw new Error("scriptGen: model returned no usable narration sections");
   }
+
+  // WORD-BUDGET ENFORCEMENT (parity with the long path): the short path used to
+  // accept ANY non-empty sections, so a "3-minute" video could ship with 90
+  // seconds of narration. Mirror the one-shot rule: <80% of budget → ONE
+  // continuation call splices extra body sections before the outro; still
+  // short → fail LOUD (a thin script is a real failure, never a silent ship).
+  const countWords = (t: string) => t.split(/\s+/).filter(Boolean).length;
+  let wordCount = sections.reduce((n, s) => n + countWords(s.narration), 0);
+  const minWords = Math.round(wordBudget * 0.8);
+  if (wordCount < minWords) {
+    const missing = wordBudget - wordCount;
+    log(`scriptGen short: ${wordCount}/${wordBudget} words — under target, topping up with one continuation call`);
+    try {
+      const more = await geminiJson<{ sections?: { heading?: string; narration?: string }[] }>({
+        maxTokens: 9000,
+        temperature: 0.8,
+        prompt: [
+          `You are CONTINUING a YouTube narration script about "${req.topic}".`,
+          styleGuidance(req) + dataDiscipline(req.dataRich),
+          voiceTagClause(req),
+          CRAFT_RULES,
+          `Sections already written (do NOT repeat any of them): ${sections.map((s) => s.heading).filter(Boolean).join("; ")}.`,
+          `Write ${Math.max(1, Math.ceil(missing / 320))} MORE substantive body sections (about ${missing} words total) ` +
+            `that fit BEFORE the final summary/outro section, each developing a distinct new idea in depth.`,
+          `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
+            `Return STRICT JSON {"sections":[{"heading":string,"narration":string}]}.`,
+        ].filter(Boolean).join("\n\n"),
+      });
+      const extra = (more.sections ?? [])
+        .map((s) => ({
+          heading: cleanHeading(typeof s.heading === "string" ? s.heading : ""),
+          narration: spoken(req, typeof s.narration === "string" ? s.narration : ""),
+        }))
+        .filter((s) => s.narration.length > 0);
+      // Splice the continuation in BEFORE the final (summary/outro-shaped) section.
+      sections.splice(Math.max(1, sections.length - 1), 0, ...extra);
+      wordCount = sections.reduce((n, s) => n + countWords(s.narration), 0);
+    } catch (e) {
+      log(`scriptGen short: top-up failed (${e instanceof Error ? e.message : e})`);
+    }
+    if (wordCount < minWords) {
+      throw new Error(
+        `scriptGen: short-form script is ${wordCount}/${wordBudget} words after top-up (<80% of budget) — ` +
+          `refusing to ship a video that runs far under its target length`,
+      );
+    }
+  }
+
   const narrationText = assemble(hook, sections);
   const script: Script = {
     hook,

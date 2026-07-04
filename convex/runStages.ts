@@ -35,6 +35,9 @@ export const upsertRunStage = mutation({
       if (args.inputs !== undefined) patch.inputs = args.inputs;
       if (args.outputs !== undefined) patch.outputs = args.outputs;
       if (args.error !== undefined) patch.error = args.error;
+      // A stage transitioning to OK clears any stale failure/supersede text —
+      // rows used to show "superseded by self-heal…" alongside status ok.
+      if (args.status === "ok" && args.error === undefined && existing.error) patch.error = undefined;
       await ctx.db.patch(existing._id, patch);
       return existing._id;
     }
@@ -54,12 +57,50 @@ export const upsertRunStage = mutation({
   },
 });
 
+/** Max string length surfaced per output value in slim mode. */
+const SLIM_MAX_STRING = 2000;
+
+/**
+ * Recursively truncate long string values inside a persisted outputs blob.
+ * Convex values are acyclic JSON with bounded depth, so plain recursion is safe.
+ */
+function slimValue(value: unknown): unknown {
+  if (typeof value === "string") {
+    return value.length > SLIM_MAX_STRING
+      ? value.slice(0, SLIM_MAX_STRING) + "…[truncated]"
+      : value;
+  }
+  if (Array.isArray(value)) return value.map(slimValue);
+  if (value && typeof value === "object") {
+    const out: Record<string, unknown> = {};
+    for (const [k, v2] of Object.entries(value)) out[k] = slimValue(v2);
+    return out;
+  }
+  return value;
+}
+
 export const listRunStages = query({
-  args: { runId: v.id("runs") },
+  args: {
+    runId: v.id("runs"),
+    /**
+     * Browser diet: strip `inputs` entirely and truncate long output strings.
+     * The run-detail page subscribes with slim:true; server-side consumers
+     * (sink resume, learn, doctor) keep the full rows.
+     */
+    slim: v.optional(v.boolean()),
+  },
   handler: async (ctx, args) => {
-    return await ctx.db
+    const rows = await ctx.db
       .query("runStages")
       .withIndex("by_run", (q) => q.eq("runId", args.runId))
       .collect();
+    if (!args.slim) return rows;
+    return rows.map((r) => {
+      const { inputs: _inputs, outputs, ...rest } = r;
+      return {
+        ...rest,
+        ...(outputs !== undefined ? { outputs: slimValue(outputs) } : {}),
+      };
+    });
   },
 });

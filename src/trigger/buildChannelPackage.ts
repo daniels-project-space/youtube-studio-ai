@@ -122,8 +122,12 @@ export const buildChannelPackageTask = task({
       log(`channel art failed (non-fatal): ${e instanceof Error ? e.message : e}`);
     }
 
-    // 5. Promote to active iff the pipeline validated.
-    const status = valid ? "active" : "draft";
+    // 5. Promote iff the pipeline validated — to PAUSED, never straight to
+    // active: this legacy path skips DNA/architect/probe grounding entirely,
+    // and the fleet safety rule is that the autopilot scheduler never
+    // auto-spends on a channel the operator hasn't flipped on. (Prefer the
+    // design-channel wizard path; this seed path is kept for API back-compat.)
+    const status = valid ? "paused" : "draft";
     await convex.mutation(api.channels.updateChannel, { channelId, status });
 
     log("done", { channelId, slug, status, archetype: archetype.key });

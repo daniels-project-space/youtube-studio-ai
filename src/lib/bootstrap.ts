@@ -23,6 +23,7 @@ const SERVICES = [
   "videvo", // VIDEVO_API_KEY (federated stock — partner; VIDEVO_API_BASE overridable)
   "replicate", // REPLICATE_API_TOKEN
   "fal", // FAL_KEY (FLUX1.1 [pro] thumbnail base via fal.ai)
+  "groq", // GROQ_API_KEY (llama-4-scout vision — the FREE first hop of the vision router chain)
   "higgsfield", // HIGGSFIELD_CREDENTIALS_JSON / HIGGSFIELD_ACCESS_TOKEN+REFRESH_TOKEN (CLI auth → seamless loop engine)
   "telegram", // TELEGRAM_BOT_TOKEN (+ admin chat id)
   "browserbase", // BROWSERBASE_API_KEY/PROJECT_ID (+ optional CONTEXT_ID) — headless YouTube channel creation

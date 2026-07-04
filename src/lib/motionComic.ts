@@ -32,6 +32,7 @@ import { visionLocal } from "@/lib/vision";
 import { generateBananaImage } from "@/lib/banana";
 import { generateMusic } from "@/lib/music";
 import { ffprobeDuration } from "@/lib/ffmpeg";
+import { preflightPythonRenderer } from "@/lib/pydeps";
 
 type Logger = (msg: string) => void;
 
@@ -83,7 +84,16 @@ interface PlanLine { speaker: string; text: string }
 interface PlanPanel { scene: string; characters: string[]; shot: string; lines: PlanLine[] }
 interface Plan { title: string; logline: string; narratorVoiceId: string; characters: PlanChar[]; panels: PlanPanel[] }
 
-export interface MotionComicResult { outPath: string; title: string; panels: number; durationMs: number; runDir: string }
+export interface MotionComicResult {
+  outPath: string;
+  title: string;
+  panels: number;
+  durationMs: number;
+  runDir: string;
+  /** Full spoken text (all lines, tags stripped, panel order) — downstream
+   *  metadata/compliance blocks need a script-equivalent for the video. */
+  narrationText: string;
+}
 
 /* ------------------------------ helpers -------------------------------- */
 
@@ -265,6 +275,15 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
   const brief = args.brief;
   const W = brief.width ?? 1920, H = brief.height ?? Math.round((brief.width ?? 1920) * 9 / 16);
   const style = brief.style ?? DEFAULT_STYLE;
+  // $0-spend gate: the page renderer is the LAST step — verify python3 + the
+  // baked scripts + pip deps BEFORE the storyboard/art/voice/music spend so a
+  // broken worker fails immediately instead of after the whole art budget.
+  await preflightPythonRenderer({
+    scripts: [join("scripts", "mc_page_render.py"), join("scripts", "mc_textplace.py")],
+    packages: ["numpy", "pillow", "scikit-image", "scipy"],
+    marker: ".ysa_mc_pydeps_ready",
+    log,
+  });
   await mkdir(args.runDir, { recursive: true });
   const rd = (f: string) => join(args.runDir, f);
 
@@ -286,7 +305,15 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
     if (!existsSync(file)) {
       const prompt = `Character MODEL SHEET, ${style} Plain light-grey background. Several views of ONE character — full body, two face close-ups, a hand detail — all the SAME person, for reuse across comic panels.\nCHARACTER (${c.name}): ${c.look}`;
       try { await writeFile(file, await genImage(prompt, [])); log(`char ${c.id} ✓`); }
-      catch (e) { log(`char ${c.id} FAILED: ${e instanceof Error ? e.message : e}`); return; }
+      catch (e) {
+        // ONE retry with a simplified prompt — the multi-view sheet layout is
+        // the usual trip-wire (safety/complexity); a plain full-body still
+        // carries identity well enough for the img2img panels.
+        log(`char ${c.id} failed (${e instanceof Error ? e.message : e}) — retrying simplified`);
+        const simple = `A single full-body character illustration, ${style} Plain light-grey background, one person only.\nCHARACTER (${c.name}): ${c.look}`;
+        try { await writeFile(file, await genImage(simple, [])); log(`char ${c.id} ✓ (retry)`); }
+        catch (e2) { log(`char ${c.id} FAILED twice: ${e2 instanceof Error ? e2.message : e2} — panels will render WITHOUT an identity ref`); return; }
+      }
     }
     sheetB64[c.id] = await refImageB64(file);
   });
@@ -300,8 +327,23 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
     const keep = refs.length ? ` KEEP the character(s) (${who}) IDENTICAL to the reference model-sheet(s): same face, hair, wardrobe, marks.` : "";
     const prompt = `A single ${p.shot.toUpperCase()} COMIC PANEL, ${style} 4:3 cinematic composition.${keep} Compose with some clean, UNCLUTTERED negative space (open sky, a plain wall, or empty ground) beside or above the main figure to leave room for a speech caption, and keep all faces away from the panel's extreme corners.\nPANEL: ${p.scene}`;
     try { await writeFile(file, await genImage(prompt, refs)); log(`panel ${i} ✓ (${p.shot})`); }
-    catch (e) { log(`panel ${i} art FAILED: ${e instanceof Error ? e.message : e}`); }
+    catch (e) {
+      // ONE retry with a simplified prompt: a failed panel silently dropped
+      // its narration from the final cut — a story hole nobody caught.
+      log(`panel ${i} art failed (${e instanceof Error ? e.message : e}) — retrying simplified`);
+      const simple = `A single COMIC PANEL, ${style}${keep}\nPANEL: ${p.scene}`;
+      try { await writeFile(file, await genImage(simple, refs)); log(`panel ${i} ✓ (retry)`); }
+      catch (e2) { log(`panel ${i} art FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); }
+    }
   });
+
+  // COVERAGE FLOOR: a couple of lost panels degrade gracefully, but below 90%
+  // the story has holes. Throw NOW — before the voice/music/render spend —
+  // rather than publish a broken video (the cached art survives for a retry).
+  const artOk = plan.panels.filter((_, i) => existsSync(rd(`panel_${i}.png`))).length;
+  if (artOk < plan.panels.length * 0.9) {
+    throw new Error(`motionComic: only ${artOk}/${plan.panels.length} panels have art (<90% coverage) — aborting before voice/render spend`);
+  }
 
   // 3b. VISION letterer — clear-space anchor + mouth per bubble + keep-clear boxes (cached)
   const vision: PanelVision[] = [];
@@ -312,6 +354,20 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
     const vf = rd(`vision_${i}.json`);
     if (existsSync(vf)) { vision[i] = JSON.parse(await readFile(vf, "utf8")); return; }
     vision[i] = await locatePanelText(img, p.lines, plan.characters, log);
+    // Empty anchors on a bubbled panel = the letterer pass failed → bubbles
+    // would be placed BLIND (renderer default) over faces/props. Retry once;
+    // if still blind, fall back to a deterministic safe spot: the top-left
+    // quadrant centre — panels are composed with faces off the extreme corners
+    // and negative space up top (see the panel prompt), so it rarely collides.
+    if (!Object.keys(vision[i].anchors).length) {
+      vision[i] = await locatePanelText(img, p.lines, plan.characters, log);
+    }
+    if (!Object.keys(vision[i].anchors).length) {
+      const anchors: Record<string, BubbleAnchor> = {};
+      for (const l of p.lines) if (l.speaker !== "narrator") anchors[l.speaker] = { anchor: [0.28, 0.18], mouth: undefined };
+      vision[i] = { anchors, keepClear: [] };
+      log(`WARNING: vision letterer failed twice for panel ${i} — using fallback top-left anchor for ${Object.keys(anchors).length} bubble(s)`);
+    }
     await writeFile(vf, JSON.stringify(vision[i]));
     log(`vision ${i} ✓ (${Object.keys(vision[i].anchors).length} bubbles, ${vision[i].keepClear.length} keepClear)`);
   });
@@ -326,8 +382,16 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
     for (let k = 0; k < lines.length; k++) {
       const lf = rd(`line_${i}_${k}.mp3`);
       if (!existsSync(lf)) {
-        try { await writeFile(lf, await elevenDialogue([{ text: lines[k].text.trim(), voice_id: voiceOf(lines[k].speaker) }])); }
-        catch (e) { log(`voice ${i}.${k} FAILED: ${e instanceof Error ? e.message : e}`); continue; }
+        // elevenDialogue retries transport errors internally; this outer retry
+        // covers a whole exhausted attempt cycle (e.g. a burst of 429s) — a
+        // dropped line silently cut narration from the story.
+        const input = [{ text: lines[k].text.trim(), voice_id: voiceOf(lines[k].speaker) }];
+        try { await writeFile(lf, await elevenDialogue(input)); }
+        catch (e) {
+          log(`voice ${i}.${k} failed (${e instanceof Error ? e.message : e}) — retrying once`);
+          try { await writeFile(lf, await elevenDialogue(input)); }
+          catch (e2) { log(`voice ${i}.${k} FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); continue; }
+        }
       }
       const d = await probeDur(lf);
       if (lines[k].speaker !== "narrator") {
@@ -336,6 +400,12 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
       }
       lineFiles.push(`line_${i}_${k}.mp3`);
       off += d;
+    }
+    // A panel that lost EVERY line has no audio → the renderer drops it AND
+    // its story beat. That is a coverage hole, not graceful degradation —
+    // fail loud before the music/render spend (line mp3s are cached for retry).
+    if (lines.length && !lineFiles.length) {
+      throw new Error(`motionComic: panel ${i} lost ALL ${lines.length} voice line(s) — aborting before render spend`);
     }
     panelAvoid[i] = vision[i]?.keepClear ?? [];
     const dur = off + TAIL_GAP;
@@ -397,6 +467,9 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
   }
 
   const durationMs = Math.round((PREROLL_MS / 1000 + panelDur.reduce((a, b) => a + b, 0)) * 1000);
+  // Script-equivalent for downstream blocks (metadata/compliance): every line
+  // in panel order with the ElevenLabs emotion tags stripped.
+  const narrationText = plan.panels.flatMap((p) => p.lines.map((l) => stripTags(l.text))).join(" ");
   log(`DONE: ${args.outPath} (${tlPanels.length} panels, ${(durationMs / 1000).toFixed(1)}s)`);
-  return { outPath: args.outPath, title: plan.title, panels: tlPanels.length, durationMs, runDir: args.runDir };
+  return { outPath: args.outPath, title: plan.title, panels: tlPanels.length, durationMs, runDir: args.runDir, narrationText };
 }

@@ -150,16 +150,23 @@ export async function runPipeline(
   let spentUsd = 0;
 
   // Resume: load already-completed blocks' persisted outputs (skip + restore).
+  // Their recorded COSTS seed spentUsd so (a) the budget ceiling covers the
+  // WHOLE run, not just this invocation (heal cycles previously reset it and
+  // could silently blow the channel budget), and (b) runs.costTotal reports
+  // the cumulative truth.
   const completedMap: Record<string, Record<string, unknown>> = {};
   if (opts.resume !== false && opts.sink.getCompleted) {
     try {
       for (const row of await opts.sink.getCompleted(opts.runId)) {
         if (row.outputs && typeof row.outputs === "object") {
           completedMap[row.block] = row.outputs as Record<string, unknown>;
+          if (typeof row.cost === "number" && Number.isFinite(row.cost) && row.cost > 0) {
+            spentUsd += row.cost;
+          }
         }
       }
       const n = Object.keys(completedMap).length;
-      if (n > 0) log(`resume: ${n} block(s) previously completed — will restore + skip`);
+      if (n > 0) log(`resume: ${n} block(s) previously completed — will restore + skip (prior spend $${spentUsd.toFixed(2)} carried into the budget)`);
     } catch (e) {
       log(`resume: getCompleted failed (running fresh): ${e instanceof Error ? e.message : e}`);
     }
@@ -174,7 +181,17 @@ export async function runPipeline(
     block: Block,
   ): Promise<{ status: "ok" | "failed"; cost: number; error?: string }> => {
     const params = opts.paramsByBlock?.[block.id] ?? {};
-    const inputs = Object.fromEntries(block.consumes.map((k) => [k, store[k]]));
+    // Debug snapshot only — SUMMARIZED. Persisting the full consumed values
+    // (whole scripts, clip-path arrays, timing tables) shipped hundreds of KB
+    // per stage transition to every open dashboard for zero consumer value.
+    const summarize = (v: unknown): unknown => {
+      if (v == null || typeof v === "number" || typeof v === "boolean") return v;
+      if (typeof v === "string") return v.length <= 300 ? v : `${v.slice(0, 300)}…[${v.length} chars]`;
+      if (Array.isArray(v)) return `[array:${v.length}]`;
+      if (typeof v === "object") return `[object:${Object.keys(v as object).length} keys]`;
+      return String(v);
+    };
+    const inputs = Object.fromEntries(block.consumes.map((k) => [k, summarize(store[k])]));
 
     // RESUME: restore a previously-completed block instead of re-running it
     // (no double-spend on paid blocks). Re-run if its files can't be rehydrated.
@@ -186,13 +203,16 @@ export async function runPipeline(
           delete outputs[COST_PATCH_KEY];
           assertProduced(block, outputs);
           Object.assign(store, outputs);
+          // NOTE: cost intentionally OMITTED — the upsert mutation skips
+          // undefined fields, so the block's ORIGINAL recorded spend survives
+          // the restore (a `cost: 0` here used to wipe it, destroying cost
+          // accounting on every resume/heal).
           await opts.sink.upsert({
             ownerId: opts.ownerId,
             runId: opts.runId,
             block: block.id,
             status: "ok",
             finishedAt: Date.now(),
-            cost: 0,
             outputs,
           });
           stages.push({ block: block.id, status: "ok" });

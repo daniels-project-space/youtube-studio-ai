@@ -197,8 +197,11 @@ async function getBundle(): Promise<MastraBundle | null> {
               },
             },
           });
-        } catch {
-          /* tracing is best-effort; agents still run without it */
+        } catch (e) {
+          // Tracing is best-effort — but say WHY it's off (the silent catch hid
+          // a missing @mastra/observability dep for weeks: "traced to Langfuse
+          // when keys are present" was simply false).
+          console.warn(`[mastra] Langfuse tracing unavailable: ${e instanceof Error ? e.message : e}`);
         }
       }
 
@@ -208,8 +211,11 @@ async function getBundle(): Promise<MastraBundle | null> {
       } as ConstructorParameters<typeof Mastra>[0]);
 
       return mastra as unknown as MastraBundle;
-    } catch {
+    } catch (e) {
       // Mastra unavailable (bundle/runtime) — disable for the process; REST covers.
+      // LOUD once: the silent latch made a broken Mastra install indistinguishable
+      // from a healthy one (everything quietly fell back to REST forever).
+      console.warn(`[mastra] stack unavailable — REST fallback for this process: ${e instanceof Error ? e.message : e}`);
       mastraDisabled = true;
       return null;
     }

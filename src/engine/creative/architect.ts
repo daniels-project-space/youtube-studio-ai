@@ -437,7 +437,10 @@ export interface ArchitectResult {
 /* ------------------------------ Executor ------------------------------- */
 
 function familyKind(family: string): "narrated" | "loop" {
-  return family === "music_loop" || family === "sleep" ? "loop" : "narrated";
+  // "sleep" is NARRATED (the meditation archetype speaks) — classifying it as
+  // loop filtered narration/script tools OUT of the architect's toolbox, so it
+  // literally could not tune the blocks a meditation channel runs.
+  return family === "music_loop" ? "loop" : "narrated";
 }
 
 function validateParams(

@@ -26,7 +26,7 @@ export const listPlanByOwner = query({
     const rows = (
       await ctx.db
         .query("contentPlan")
-        .filter((q) => q.eq(q.field("ownerId"), args.ownerId))
+        .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
         .collect()
     ).sort((a, b) => a.order - b.order);
 

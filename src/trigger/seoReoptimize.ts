@@ -58,7 +58,7 @@ async function reoptimize(ownerId: string, log: Logger) {
 
     let refreshToken: string | undefined;
     try {
-      const auth = await convex.query(api.youtubeAuth.getForChannel, { channelId: ch._id });
+      const auth = await convex.query(api.youtubeAuth.getForChannel, { channelId: ch._id, secret: process.env.INTERNAL_QUERY_SECRET ?? "" });
       refreshToken = auth?.refreshToken;
     } catch { /* fall back to global token */ }
 

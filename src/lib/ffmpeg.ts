@@ -632,6 +632,16 @@ export async function composeWithIntro(args: {
   /** Seconds over which the music GRADUALLY ducks from intro→body level once the
    * narration starts (instead of an instant drop). Default 3s. */
   musicDuckRampSec?: number;
+  /**
+   * Outro card FOLDED into this same encode: the tail dissolves into this card
+   * via xfade so the video ends on a deliberate beat. Previously the outro was
+   * patched on afterwards (patchSegment) — an ENTIRE second full-video x264
+   * pass for a 3-second change. Requires tailSec ≥ ~2 (the card covers the
+   * tail window exactly, matching the old patch behavior).
+   */
+  outroCardPath?: string;
+  /** Outro dissolve duration (seconds). Default 1.2 (the old patch fade-in). */
+  outroFadeInSec?: number;
   preset?: string;
   timeoutMs?: number;
 }): Promise<string> {
@@ -672,6 +682,13 @@ export async function composeWithIntro(args: {
     inputs.push("-i", args.narrationPath);
     narrIdx = idx++;
   }
+  // Outro card only participates when the tail window can actually hold it.
+  const outroLen = args.outroCardPath && tail >= 2 ? tail : 0;
+  let outroIdx = -1;
+  if (outroLen > 0) {
+    inputs.push("-i", args.outroCardPath as string);
+    outroIdx = idx++;
+  }
 
   // ----- video -----
   // With a title card, CROSSFADE it into the body (xfade) so the intro dissolves
@@ -696,6 +713,19 @@ export async function composeWithIntro(args: {
       `[${bodyIdx}:v]${scalePad},trim=0:${bodyTail.toFixed(3)},setpts=PTS-STARTPTS[body]`,
     );
     vcat = "[body]";
+  }
+  // OUTRO FOLD: dissolve the footage into the outro card across the tail — in
+  // THIS graph, so no post-hoc full re-encode. xfade output length stays
+  // `total` (offset + card length == total).
+  if (outroIdx >= 0) {
+    const oFade = Math.max(0.4, Math.min(outroLen - 0.2, args.outroFadeInSec ?? 1.2));
+    const oOffset = Math.max(0, total - outroLen);
+    vparts.push(
+      `[${outroIdx}:v]${scalePad},trim=0:${outroLen.toFixed(3)},setpts=PTS-STARTPTS[ocard]`,
+    );
+    vparts.push(`${vcat}null[vpre]`);
+    vparts.push(`[vpre][ocard]xfade=transition=fade:duration=${oFade.toFixed(3)}:offset=${oOffset.toFixed(3)}[vwo]`);
+    vcat = "[vwo]";
   }
   const vout =
     fade > 0
@@ -1003,7 +1033,11 @@ export async function applyVoiceFx(
   // Brown-noise static, band-limited and kept very low; amix duration=first
   // trims the (infinite) noise to the voice length.
   const noise = "[1:a]highpass=f=1000,lowpass=f=4500,volume=0.05[n]";
-  const filter = `${voice};${noise};[v][n]amix=inputs=2:duration=first:dropout_transition=0,volume=1.0[out]`;
+  // normalize=0 is CRITICAL: amix's default normalization scales each input by
+  // 1/n, so voice+static were both halved — every radio-fx channel shipped its
+  // narration ~6 dB under the intended voice/music ratio (music then ducked
+  // relative to a full-scale voice that wasn't there).
+  const filter = `${voice};${noise};[v][n]amix=inputs=2:duration=first:dropout_transition=0:normalize=0,volume=1.0[out]`;
   await run(FFMPEG, [
     "-y",
     "-i", inPath,
@@ -1018,9 +1052,100 @@ export async function applyVoiceFx(
   return outPath;
 }
 
+/**
+ * DETERMINISTIC EARS — cheap audio meters for the QA gate (the ear vision QA
+ * never had). All ffmpeg, no LLM, seconds to run:
+ *  - integratedLufs: ebur128 integrated loudness of the FULL mix,
+ *  - windowMeanDb:   volumedetect mean over an arbitrary window (used to prove
+ *    the music bed is actually audible in a narration-free window, e.g. the
+ *    intro), null when the window is too short to measure.
+ * A null field means "could not measure" — callers must treat that as skip,
+ * never as pass/fail.
+ */
+export async function measureAudio(
+  videoPath: string,
+  opts: { windowStartSec?: number; windowDurSec?: number } = {},
+): Promise<{ integratedLufs: number | null; windowMeanDb: number | null }> {
+  let integratedLufs: number | null = null;
+  let windowMeanDb: number | null = null;
+  try {
+    const { stderr } = await run(FFMPEG, [
+      "-nostats", "-i", videoPath, "-map", "a:0", "-filter:a", "ebur128", "-f", "null", "-",
+    ], 600_000);
+    // Summary block: "I:  -14.2 LUFS"
+    const m = stderr.match(/I:\s*(-?\d+(?:\.\d+)?)\s*LUFS/g);
+    if (m && m.length) {
+      const last = m[m.length - 1].match(/(-?\d+(?:\.\d+)?)/);
+      if (last) integratedLufs = Number(last[1]);
+    }
+  } catch { /* unmeasurable → null */ }
+  const ws = opts.windowStartSec ?? 0;
+  const wd = opts.windowDurSec ?? 0;
+  if (wd >= 1.5) {
+    try {
+      const { stderr } = await run(FFMPEG, [
+        "-nostats", "-ss", ws.toFixed(2), "-t", wd.toFixed(2), "-i", videoPath,
+        "-map", "a:0", "-filter:a", "volumedetect", "-f", "null", "-",
+      ], 300_000);
+      const mv = stderr.match(/mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB/);
+      if (mv) windowMeanDb = Number(mv[1]);
+    } catch { /* unmeasurable → null */ }
+  }
+  return { integratedLufs, windowMeanDb };
+}
+
+/**
+ * Final loudness normalization — AUDIO-ONLY (video stream copied, no x264
+ * pass): measure with loudnorm print_format=json, then apply LINEAR gain with
+ * the measured values (one-pass dynamic loudnorm audibly pumps under music
+ * swells). Shipped mixes previously had whatever loudness the TTS happened to
+ * output — this pins every video to a consistent target.
+ */
+export async function normalizeAudioOnly(
+  inPath: string,
+  outPath: string,
+  targetLufs = -14,
+): Promise<string> {
+  // Pass 1: measure.
+  const { stderr } = await run(FFMPEG, [
+    "-nostats", "-i", inPath, "-map", "a:0",
+    "-filter:a", `loudnorm=I=${targetLufs}:TP=-1.5:LRA=11:print_format=json`,
+    "-f", "null", "-",
+  ], 600_000);
+  const jm = stderr.match(/\{[\s\S]*\}/);
+  if (!jm) throw new FfmpegError("normalizeAudioOnly: no loudnorm JSON in output");
+  const j = JSON.parse(jm[0]) as Record<string, string>;
+  const f = (k: string) => Number(j[k]);
+  if (![f("input_i"), f("input_tp"), f("input_lra"), f("input_thresh")].every(Number.isFinite)) {
+    throw new FfmpegError("normalizeAudioOnly: unparseable loudnorm measurement");
+  }
+  // Pass 2: apply linear with measured values; video stream copied.
+  await run(FFMPEG, [
+    "-y", "-i", inPath,
+    "-map", "0:v", "-map", "0:a:0",
+    "-c:v", "copy",
+    "-filter:a",
+    `loudnorm=I=${targetLufs}:TP=-1.5:LRA=11:linear=true:` +
+      `measured_I=${j["input_i"]}:measured_TP=${j["input_tp"]}:` +
+      `measured_LRA=${j["input_lra"]}:measured_thresh=${j["input_thresh"]}`,
+    "-c:a", "aac", "-b:a", "384k",
+    "-movflags", "+faststart",
+    outPath,
+  ], 900_000);
+  return outPath;
+}
+
 export interface QuoteOverlaySpec {
   /** Transparent (VP8/alpha) overlay clip. */
   path: string;
+  /**
+   * Run-scoped R2 key backing `path`. REQUIRED by the render-split contract:
+   * timeline_assemble runs on a SEPARATE worker (and heal re-runs on fresh
+   * machines), so a local-only path is unreachable there — the child
+   * re-downloads from this key. Producers that omit it get their overlay
+   * dropped (typed warning) instead of crashing the compose.
+   */
+  key?: string;
   /** Absolute start time in the final video (seconds). */
   startSec: number;
   durSec: number;

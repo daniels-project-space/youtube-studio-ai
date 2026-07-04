@@ -22,7 +22,15 @@
  * cap), and a best-effort lossless WAV download per clip (falls back to the
  * mp3 audioUrl). One generation returns up to TWO clips — callers wanting a
  * multi-track mix should use them both before paying for another generation.
+ *
+ * selfLoopAudio() is the final polish pass for any bed that later loops via
+ * `-stream_loop`: it folds the track's tail into its head with one crossfade
+ * so end==start and every loop splice is seamless.
  */
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
+
+const execFileP = promisify(execFile);
 
 export class MusicError extends Error {
   constructor(message: string) {
@@ -32,6 +40,72 @@ export class MusicError extends Error {
 }
 
 export type MusicProvider = "mureka" | "suno";
+
+/* --------------------- seamless self-loop (tail→head fold) --------------------- */
+
+const FFMPEG_BIN = () => process.env.FFMPEG_BIN ?? "ffmpeg";
+const FFPROBE_BIN = () => process.env.FFPROBE_BIN ?? "ffprobe";
+
+/**
+ * Make a music mix SELF-LOOPING: fold the tail into the head with ONE
+ * triangular acrossfade, then trim, so the file's end flows seamlessly into its
+ * start. Every consumer loops beds with `-stream_loop -1`, which is a HARD
+ * splice at each loop point — an audible pop/jump every N minutes for hours.
+ *
+ * Mechanics (loop-continuity proof): with fade F and tail T = F + 0.5,
+ *   main = A[0 .. D-T],  tail = A[D-T .. D],  out = acrossfade(tail, main).
+ * `out` ends exactly where `tail` begins (A[D-T]), so on loop the pure 0.5s
+ * tail lead-in continues the waveform sample-perfectly, then fades into the
+ * head. Output is ~D - F seconds.
+ *
+ * Throws MusicError on ffmpeg/ffprobe failure; tracks too short to fold
+ * (< ~4×fade) are returned unchanged (a tiny bed loops too often for the fold
+ * to matter and acrossfade would eat most of it).
+ */
+export async function selfLoopAudio(
+  inPath: string,
+  outPath: string,
+  opts?: { crossfadeSec?: number; log?: (msg: string) => void },
+): Promise<string> {
+  const fade = Math.min(4, Math.max(0.5, opts?.crossfadeSec ?? 2));
+  let durationSec = 0;
+  try {
+    const { stdout } = await execFileP(FFPROBE_BIN(), [
+      "-v", "error",
+      "-show_entries", "format=duration",
+      "-of", "csv=p=0",
+      inPath,
+    ]);
+    durationSec = Number(String(stdout).trim());
+  } catch (e) {
+    throw new MusicError(`selfLoopAudio: ffprobe failed (${e instanceof Error ? e.message : e})`);
+  }
+  if (!Number.isFinite(durationSec) || durationSec < fade * 4) {
+    opts?.log?.(`selfLoopAudio: track too short to fold (${durationSec.toFixed(1)}s) — keeping as-is`);
+    return inPath;
+  }
+  const tail = fade + 0.5; // 0.5s pure lead-in before the fade (see proof above)
+  const mainEnd = (durationSec - tail).toFixed(3);
+  try {
+    await execFileP(FFMPEG_BIN(), [
+      "-y",
+      "-i", inPath,
+      "-filter_complex",
+      `[0:a]atrim=0:${mainEnd},asetpts=PTS-STARTPTS[main];` +
+        `[0:a]atrim=${mainEnd},asetpts=PTS-STARTPTS[tail];` +
+        `[tail][main]acrossfade=d=${fade}:c1=tri:c2=tri[out]`,
+      "-map", "[out]",
+      "-c:a", "libmp3lame",
+      "-b:a", "320k",
+      "-ar", "44100",
+      outPath,
+    ], { maxBuffer: 16 * 1024 * 1024 });
+  } catch (e) {
+    throw new MusicError(`selfLoopAudio: ffmpeg fold failed (${e instanceof Error ? e.message : e})`);
+  }
+  opts?.log?.(`selfLoopAudio: folded tail→head (${fade}s crossfade) — mix now loops seamlessly`);
+  return outPath;
+}
 
 export interface MusicTrack {
   /** Best available URL for this clip (WAV when the upgrade succeeded, else mp3). */

@@ -370,6 +370,15 @@ const KIND_ASSETS: Record<DocuShotKind, Partial<Record<DocuAssetRole, [number, n
   evidence_board: { bg: [0, 1], image: [3, 6] },
   object_drop: { bg: [1, 1], fg: [0, 1], cutout: [1, 3] },
   quote_card: { bg: [0, 1] },
+  // VOX kinds (motion-graphics shots — composition-drawn, no photo assets;
+  // vox_scene/vox_reveal may take one optional bg plate).
+  vox_reveal: { bg: [0, 1] },
+  vox_chart: {},
+  vox_counter: {},
+  vox_map: {},
+  vox_dialogue: {},
+  vox_typewriter: {},
+  vox_scene: { bg: [0, 1] },
 };
 
 /** What each capability does + when to use it — the planner's palette. */

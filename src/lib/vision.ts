@@ -54,14 +54,25 @@ function geminiVisionAllowed(): boolean {
   return Boolean(process.env.GEMINI_API_KEY) && process.env.VISION_DISABLE_GEMINI !== "1";
 }
 
+/** Once-per-process loud warning: an empty chain silently skips EVERY QA gate. */
+let warnedNoVisionProviders = false;
+
 function providerChain(): string[] {
   const order = (process.env.VISION_PROVIDERS || "groq,fal,gemini").split(",").map((s) => s.trim());
-  return order.filter(
+  const chain = order.filter(
     (p) =>
       (p === "groq" && !!process.env.GROQ_API_KEY) ||
       (p === "fal" && !!process.env.FAL_KEY) ||
       (p === "gemini" && geminiVisionAllowed()),
   );
+  if (chain.length === 0 && !warnedNoVisionProviders) {
+    warnedNoVisionProviders = true;
+    console.warn(
+      "[vision] !!! vision QA DISABLED (no providers) — set GROQ_API_KEY / FAL_KEY / GEMINI_API_KEY " +
+        "(with VISION_DISABLE_GEMINI unset) or every visual gate silently skips",
+    );
+  }
+  return chain;
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
@@ -216,24 +227,36 @@ async function falVision(
   const key = process.env.FAL_KEY;
   if (!key) throw new VisionError("no FAL_KEY");
   const picked = sampleEvenly(images, 8);
-  const res = await fetch("https://fal.run/fal-ai/any-llm/vision", {
-    method: "POST",
-    headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
-    body: JSON.stringify({
-      prompt:
-        (opts.json ? `${prompt}\nReturn ONLY the JSON object, no prose.` : prompt) +
-        (picked.length < images.length
-          ? `\n(Note: ${picked.length} representative frames sampled of ${images.length}.)`
-          : ""),
-      image_urls: picked.map((b) => `data:image/jpeg;base64,${b.toString("base64")}`),
-    }),
-    signal: AbortSignal.timeout(90_000),
+  const body = JSON.stringify({
+    prompt:
+      (opts.json ? `${prompt}\nReturn ONLY the JSON object, no prose.` : prompt) +
+      (picked.length < images.length
+        ? `\n(Note: ${picked.length} representative frames sampled of ${images.length}.)`
+        : ""),
+    image_urls: picked.map((b) => `data:image/jpeg;base64,${b.toString("base64")}`),
   });
-  if (!res.ok) throw new VisionError(`fal vision HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-  const j = (await res.json()) as { output?: string };
-  const text = j.output?.trim();
-  if (!text) throw new VisionError("fal vision: empty response");
-  return text;
+  // One retry on 429/5xx (groq's loop, shortened): a transient fal blip must not
+  // knock the whole chain down to the Gemini last resort.
+  let lastErr = "";
+  for (let attempt = 0; attempt < 2; attempt++) {
+    const res = await fetch("https://fal.run/fal-ai/any-llm/vision", {
+      method: "POST",
+      headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
+      body,
+      signal: AbortSignal.timeout(90_000),
+    });
+    if (res.status === 429 || res.status >= 500) {
+      lastErr = `HTTP ${res.status}`;
+      await sleep(1500 * (attempt + 1) * (attempt + 1));
+      continue;
+    }
+    if (!res.ok) throw new VisionError(`fal vision HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    const j = (await res.json()) as { output?: string };
+    const text = j.output?.trim();
+    if (!text) throw new VisionError("fal vision: empty response");
+    return text;
+  }
+  throw new VisionError(`fal vision exhausted retries (${lastErr})`);
 }
 
 async function geminiVisionBuffers(

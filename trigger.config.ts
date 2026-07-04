@@ -4,7 +4,25 @@ import {
   additionalPackages,
   additionalFiles,
   aptGet,
+  syncEnvVars,
 } from "@trigger.dev/build/extensions/core";
+
+/**
+ * Operator switches forwarded from the DEPLOY machine's env into the Trigger
+ * project at deploy time (no dashboard clicking):
+ *  - INTERNAL_QUERY_SECRET  — gates the youtubeAuth.getForChannel Convex query
+ *    (must match the Convex deployment's env var of the same name),
+ *  - IMAGE_DISABLE_GEMINI   — 1 → all image gen routes to fal FLUX (zero
+ *    Google image spend; banana stays the default when unset),
+ *  - VISION_DISABLE_GEMINI  — 1 → vision router never falls back to Gemini,
+ *  - GROQ_API_KEY           — frees the vision chain's free tier when present.
+ */
+const FORWARDED_ENV = [
+  "INTERNAL_QUERY_SECRET",
+  "IMAGE_DISABLE_GEMINI",
+  "VISION_DISABLE_GEMINI",
+  "GROQ_API_KEY",
+];
 
 /**
  * Trigger.dev config for YouTube Studio AI.
@@ -58,9 +76,31 @@ export default defineConfig({
       "pino-pretty",
     ],
     extensions: [
+      syncEnvVars(() =>
+        FORWARDED_ENV.filter((n) => process.env[n]).map((name) => ({
+          name,
+          value: process.env[name] as string,
+        })),
+      ),
       ffmpeg(),
       additionalPackages({ packages: ["@higgsfield/cli@0.1.40"] }),
-      additionalFiles({ files: ["src/remotion/**", "src/assets/**", "public/fonts/**"] }),
+      additionalFiles({
+        files: [
+          "src/remotion/**",
+          "src/assets/**",
+          "public/fonts/**",
+          // Python renderers for the drawn engines (whiteboard_scribe +
+          // motion_comic). The engines spawn them via `python3 scripts/…`
+          // relative to process.cwd(); without baking them in, every cloud run
+          // burned the full art+TTS budget and THEN died at the render step.
+          // Their pip deps install lazily at first use (src/lib/pydeps.ts),
+          // gated by a $0-spend preflight at the top of each engine.
+          "scripts/wb_scribe_sync.py",
+          "scripts/whisper_align.py",
+          "scripts/mc_page_render.py",
+          "scripts/mc_textplace.py",
+        ],
+      }),
       // Headless-Chromium system libraries (Remotion renderTitleCard). The image
       // ships chrome-headless-shell but not its shared libs — without these the
       // browser fails to launch (libnspr4.so / libnss3 missing). Remotion's

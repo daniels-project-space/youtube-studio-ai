@@ -1,0 +1,91 @@
+<!doctype html><html><head><meta charset="utf8">
+<style>html,body{margin:0;background:#000;overflow:hidden}#c{display:block}</style>
+<script type="importmap">{ "imports": { "three":"https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
+</head><body><canvas id="c"></canvas>
+<script type="module">
+import * as THREE from "three";
+// LORECRAFT LAYERS — MANY stacked parallax planes (the GoT multiplane). Each scene's CLEAN
+// background plate is sliced by its depth map into N discrete depth BANDS placed at separate
+// Z (backmost = full plate so holes stay clean), and the figure CUTOUT sits on a near card in
+// front. An elegant camera truck/push makes every layer slide at its own rate — layers on top
+// of layers, all clean (the figure was inpainted out of the plate, so nothing ghosts).
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
+renderer.setClearColor(0x000000, 1); renderer.outputColorSpace = THREE.SRGBColorSpace;
+const scene = new THREE.Scene();
+let META = null, SCENES = [], pending = 0, CAM = null;
+const need = () => pending++;
+const fin = () => { pending--; if (pending <= 0 && META) window.__ready = true; };
+const texL = new THREE.TextureLoader();
+function loadTex(url, srgb) { need(); const t = texL.load(url, fin, undefined, fin); t.colorSpace = srgb ? THREE.SRGBColorSpace : THREE.NoColorSpace; t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; return t; }
+
+const VERT = `varying vec2 vUv; void main(){ vUv = uv; gl_Position = projectionMatrix * modelViewMatrix * vec4(position,1.0); }`;
+// band-alpha cut of the plate + atmospheric haze on the far bands
+const FRAG = `
+precision highp float;
+uniform sampler2D map, depth; uniform float uOpacity, uBandLo, uBandHi, uFeather, uBack, uTop, uHaze; uniform vec3 uFog;
+varying vec2 vUv;
+void main(){
+  vec3 c = texture2D(map, vUv).rgb;
+  float d = texture2D(depth, vUv).r;
+  float a;
+  if (uBack > 0.5) a = 1.0;
+  else { float lo = smoothstep(uBandLo, uBandLo+uFeather, d); float hi = (uTop>0.5)?1.0:(1.0-smoothstep(uBandHi-uFeather, uBandHi, d)); a = lo*hi; }
+  c = mix(c, uFog, clamp((1.0-d)*uHaze, 0.0, 1.0));
+  if (a < 0.004) discard;
+  gl_FragColor = vec4(c, a*uOpacity);
+}`;
+
+const D2R = Math.PI/180;
+function planeSize(z) { const halfH = Math.tan((META.fov*0.5)*D2R)*META.oversize; const fillDist = (META.fillCam!==undefined?META.fillCam:META.camEnd) - z; const h = 2*fillDist*halfH; return [h*(16/9), h]; }
+
+function buildScene(s, si) {
+  const map = loadTex(s.bg, true), depth = loadTex(s.bgDepth, false);
+  const N = META.layers, layers = [];
+  for (let k = 0; k < N; k++) {
+    const back = k===0, top = k===N-1;
+    const z = -(META.bgBack - k*META.bgStep);
+    const [w,h] = planeSize(z);
+    const n = N>2 ? (k-1)/(N-2) : 1;            // 0..1 across cut bands
+    const center = 0.26 + n*0.60, hw = 0.15;
+    const mat = new THREE.ShaderMaterial({ uniforms: {
+      map:{value:map}, depth:{value:depth}, uOpacity:{value:0},
+      uBandLo:{value:center-hw}, uBandHi:{value:center+hw}, uFeather:{value:0.07},
+      uBack:{value:back?1:0}, uTop:{value:top?1:0}, uHaze:{value:META.haze*(back?1:0.4)}, uFog:{value:new THREE.Color(META.fog)},
+    }, vertexShader:VERT, fragmentShader:FRAG, transparent:true, depthTest:false, depthWrite:false });
+    const m = new THREE.Mesh(new THREE.PlaneGeometry(w,h), mat); m.position.z=z; m.frustumCulled=false; m.visible=false; m.renderOrder=si*20+k;
+    scene.add(m); layers.push(m);
+  }
+  // figure/foreground cutout on the nearest card (fgScale enlarges it, fgYoff drops it so a
+  // bottom-anchored foreground like grass stays in the lower frame instead of zooming off)
+  let [fw,fh] = planeSize(-META.fgZ); const fsc = META.fgScale||1; fw*=fsc; fh*=fsc;
+  const fmat = new THREE.MeshBasicMaterial({ map: loadTex(s.fg, true), transparent:true, depthTest:false, depthWrite:false, opacity:0 });
+  const fm = new THREE.Mesh(new THREE.PlaneGeometry(fw,fh), fmat); fm.position.z=-META.fgZ; fm.position.y=(META.fgYoff||0)*fh; fm.frustumCulled=false; fm.visible=false; fm.renderOrder=si*20+N;
+  scene.add(fm); layers.push(fm);
+  return { dur:s.dur, idx:si, layers, setOpacity:(o)=>{ for(const m of layers){ if(m.material.uniforms) m.material.uniforms.uOpacity.value=o; else m.material.opacity=o; m.visible=o>0.002; } } };
+}
+
+function resize(){ const W=window.innerWidth||1920,H=window.innerHeight||1080; renderer.setSize(W,H,false); renderer.setPixelRatio(1); if(CAM){CAM.aspect=W/H;CAM.updateProjectionMatrix();} }
+window.addEventListener("resize", resize);
+fetch("lore_layers_meta.json").then(r=>r.json()).then(m=>{ META=m; CAM=new THREE.PerspectiveCamera(m.fov,(window.innerWidth||1920)/(window.innerHeight||1080),0.1,400); resize(); SCENES=m.scenes.map(buildScene); window.__dur=m.total; if(pending<=0) window.__ready=true; });
+
+const ease=(x)=>(x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2);
+const smooth=(a,b,x)=>{x=Math.min(1,Math.max(0,(x-a)/(b-a)));return x*x*(3-2*x);};
+window.__frame=(tn)=>{
+  if(!META||!CAM) return;
+  const T=tn*META.total, cf=META.cross;
+  let acc=0, idx=0, lt=0;
+  for(let i=0;i<META.scenes.length;i++){ const d=SCENES[i].dur; if(T<acc+d||i===META.scenes.length-1){ idx=i; lt=(T-acc)/d; break; } acc+=d; }
+  lt=Math.min(1,Math.max(0,lt));
+  for(let i=0;i<SCENES.length;i++){ let st=0; for(let k=0;k<i;k++) st+=SCENES[k].dur; const en=st+SCENES[i].dur;
+    const fadeIn=i===0?1:smooth(st-cf,st+cf,T); const fadeOut=i===SCENES.length-1?1:(1-smooth(en-cf,en+cf,T));
+    SCENES[i].setOpacity(Math.min(fadeIn,fadeOut)); }
+  const e=ease(lt), dir=idx%2===0?1:-1;
+  const C=META.camStart+(META.camEnd-META.camStart)*e;
+  const x=dir*META.camAmpX*(e-0.5)+Math.sin(T*0.10)*0.03;
+  const y=META.camStartY+(META.camEndY-META.camStartY)*e;
+  CAM.position.set(x,y,C); CAM.lookAt(x*(1-META.converge), y*(1-META.converge), -100);
+  renderer.render(scene,CAM);
+};
+window.__settle=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+const kick=setInterval(()=>{ if(window.__ready){ clearInterval(kick); window.__frame(0); } },60);
+</script></body></html>

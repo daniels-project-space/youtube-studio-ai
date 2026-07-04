@@ -15,6 +15,16 @@ import { loadFont as loadOswald } from "@remotion/google-fonts/Oswald";
 import { loadFont as loadCaveat } from "@remotion/google-fonts/Caveat";
 import { loadFont as loadSpecialElite } from "@remotion/google-fonts/SpecialElite";
 import { type DocuTheme, type DocuShotKind, getStyle } from "./docuStyles";
+import {
+  VoxRevealShot,
+  VoxChartShot,
+  VoxCounterShot,
+  VoxMapShot,
+  VoxDialogueShot,
+  VoxTypewriterShot,
+  VoxSceneShot,
+} from "./VoxShots";
+import type { VoxShotData } from "./VoxShots";
 
 // Load every face the styles use via Remotion's native loader — it ties font
 // readiness into delayRender deterministically (no CDN race), so text NEVER
@@ -109,6 +119,8 @@ export interface DocuShotSpec {
   typeImage?: string;
   /** depth_parallax: animate a focus pull between the near and far planes. */
   rackFocus?: "near_to_far" | "far_to_near";
+  /** vox_*: structured payload for the Vox-explainer shot kit. */
+  vox?: VoxShotData;
 }
 
 export type DocuMotionProps = {
@@ -124,7 +136,7 @@ export type DocuMotionProps = {
 
 const DEFAULT_THEME = getStyle("archival_collage").theme;
 const ThemeCtx = createContext<DocuTheme>(DEFAULT_THEME);
-const useTheme = () => useContext(ThemeCtx);
+export const useTheme = () => useContext(ThemeCtx);
 
 /* ----------------------------------------------------------------- utils -- */
 
@@ -1532,6 +1544,20 @@ const renderShot = (shot: DocuShotSpec, i: number) => {
       return <ObjectDropShot shot={shot} seed={i + 1} />;
     case "quote_card":
       return <QuoteCardShot shot={shot} seed={i + 1} />;
+    case "vox_reveal":
+      return <VoxRevealShot shot={shot} seed={i + 1} />;
+    case "vox_chart":
+      return <VoxChartShot shot={shot} seed={i + 1} />;
+    case "vox_counter":
+      return <VoxCounterShot shot={shot} seed={i + 1} />;
+    case "vox_map":
+      return <VoxMapShot shot={shot} seed={i + 1} />;
+    case "vox_dialogue":
+      return <VoxDialogueShot shot={shot} seed={i + 1} />;
+    case "vox_typewriter":
+      return <VoxTypewriterShot shot={shot} seed={i + 1} />;
+    case "vox_scene":
+      return <VoxSceneShot shot={shot} seed={i + 1} />;
     default:
       return <AbsoluteFill style={{ backgroundColor: "#171410" }} />;
   }

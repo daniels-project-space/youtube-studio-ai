@@ -10,7 +10,8 @@ import { join } from "node:path";
 import type { Block, StageContext } from "@/engine/types";
 import { COST_PATCH_KEY } from "@/engine/types";
 import { register as registerBlock, get as getRegistered } from "@/engine/registry";
-import { makeRunTempDir, downloadTo } from "@/lib/files";
+import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
+import { putObject } from "@/lib/storage";
 import { geminiJson, parseJsonLoose } from "@/lib/gemini";
 import { generateFalFluxProImage } from "@/lib/falImage";
 import { generateI2V } from "@/lib/i2v";
@@ -183,10 +184,25 @@ export function makeForgedBlock(spec: ForgedModuleSpec): Block {
       for (const step of spec.steps) {
         scope.steps.push(await runStep(step, scope, ctx, state));
       }
+      // RENDER-SPLIT CONTRACT: overlays must be restorable on the compose
+      // worker — R2-back each media file and carry its key (a local-only path
+      // was silently uncompositable there, wasting the forged module's spend).
+      const keyed = [] as (typeof state.overlays[number] & { key?: string })[];
+      for (let i = 0; i < state.overlays.length; i++) {
+        const ov = { ...state.overlays[i] } as typeof state.overlays[number] & { key?: string };
+        try {
+          const key = `${ctx.keyPrefix}runs/${ctx.runId}/forged_${spec.id}_${i}.webm`;
+          await putObject(key, await readBytes(ov.path), { contentType: "video/webm" });
+          ov.key = key;
+        } catch (e) {
+          ctx.log(`${spec.id}: overlay R2 backup failed (compose may drop it): ${e instanceof Error ? e.message : e}`);
+        }
+        keyed.push(ov);
+      }
       // APPEND to extraOverlays (forged modules compose; they never clobber).
       const prior = (ctx.store["extraOverlays"] as unknown[] | undefined) ?? [];
-      ctx.log(`${spec.id}: done â€” ${state.overlays.length} overlay(s), $${state.cost.toFixed(2)}`);
-      return { extraOverlays: [...prior, ...state.overlays], [COST_PATCH_KEY]: state.cost };
+      ctx.log(`${spec.id}: done â€” ${keyed.length} overlay(s), $${state.cost.toFixed(2)}`);
+      return { extraOverlays: [...prior, ...keyed], [COST_PATCH_KEY]: state.cost };
     },
   };
 }

@@ -1,0 +1,61 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<link href="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.css" rel="stylesheet" />
+<script src="https://unpkg.com/maplibre-gl@4.7.1/dist/maplibre-gl.js"></script>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1920px;height:1080px;overflow:hidden;background:#05080f;font-family:"Inter",system-ui,sans-serif}
+  #map{position:absolute;inset:0}
+  .maplibregl-control-container{display:none}
+  #tint{position:absolute;inset:0;pointer-events:none;background:linear-gradient(180deg,rgba(8,16,30,.35),rgba(2,5,12,.15) 40%,rgba(2,5,12,.55));mix-blend-mode:multiply;z-index:4}
+  #vig{position:absolute;inset:0;pointer-events:none;box-shadow:inset 0 0 420px 80px rgba(2,6,14,.92);z-index:5}
+  #reticle{position:absolute;width:120px;height:120px;transform:translate(-50%,-50%);z-index:8;pointer-events:none}
+  #reticle svg{position:absolute;inset:0;overflow:visible}
+  .lbl{position:absolute;transform:translate(-50%,0);z-index:9;pointer-events:none;text-align:left;background:rgba(7,12,22,.82);border:1.5px solid #e8b23a;border-radius:5px;padding:12px 20px 10px;box-shadow:0 8px 40px rgba(0,0,0,.7),0 0 22px rgba(232,178,58,.18);white-space:nowrap;opacity:0}
+  .lbl .t{font-size:30px;font-weight:800;letter-spacing:0.16em;color:#ffd98a;text-transform:uppercase}
+  .lbl .c{font-size:18px;letter-spacing:0.34em;color:#5fe0cf;margin-top:5px;font-family:"JetBrains Mono",monospace}
+  #kick{position:absolute;left:90px;top:80px;z-index:9;opacity:0;font-size:22px;letter-spacing:0.55em;color:#5fe0cf;text-transform:uppercase;font-weight:600}
+</style>
+</head>
+<body>
+  <div id="map"></div><div id="tint"></div><div id="vig"></div>
+  <div id="kick"></div>
+  <div id="reticle"><svg viewBox="-60 -60 120 120">
+    <g id="ring"><circle r="34" fill="none" stroke="#ffd24a" stroke-width="2.2" stroke-dasharray="6 7" opacity="0.95"/></g>
+    <g id="diam"><rect x="-13" y="-13" width="26" height="26" fill="none" stroke="#ffd98a" stroke-width="3" transform="rotate(45)"/></g>
+    <circle r="3.2" fill="#ffd24a"/>
+    <line x1="40" y1="0" x2="54" y2="0" stroke="#ffd24a" stroke-width="2"/><line x1="-40" y1="0" x2="-54" y2="0" stroke="#ffd24a" stroke-width="2"/>
+    <line x1="0" y1="40" x2="0" y2="54" stroke="#ffd24a" stroke-width="2"/><line x1="0" y1="-40" x2="0" y2="-54" stroke="#ffd24a" stroke-width="2"/>
+  </svg></div>
+  <div class="lbl" id="lbl"><div class="t" id="lblT"></div><div class="c" id="lblC"></div></div>
+<script>
+  const SPEC = __SPEC__;   // { center:[lon,lat], label, coords, kicker, zoomEnd? }
+  const DUR = 6.0;
+  document.getElementById("lblT").textContent = SPEC.label || "";
+  document.getElementById("lblC").textContent = SPEC.coords || "";
+  document.getElementById("kick").textContent = SPEC.kicker || "Target Located";
+  const C = SPEC.center;
+  const map = new maplibregl.Map({ container:"map", style:"https://basemaps.cartocdn.com/gl/dark-matter-gl-style/style.json",
+    center:C, zoom:11, pitch:0, bearing:-18, attributionControl:false, fadeDuration:0 });
+  window.map = map; window.__ready=false; window.__dur=DUR;
+  map.on("load", ()=>{ try{ map.addSource("hot",{type:"geojson",data:{type:"Feature",geometry:{type:"Point",coordinates:C}}});
+    map.addLayer({id:"hotglow",type:"circle",source:"hot",paint:{"circle-radius":7,"circle-color":"#ffd24a","circle-blur":1.0,"circle-opacity":0.9}}); }catch(e){} window.__ready=true; });
+  const reticle=document.getElementById("reticle"),lbl=document.getElementById("lbl"),kick=document.getElementById("kick"),ring=document.getElementById("ring"),diam=document.getElementById("diam");
+  const sm=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
+  const lerp=(a,b,t)=>a+(b-a)*t, ease=(x)=>x<0.5?4*x*x*x:1-Math.pow(-2*x+2,3)/2;
+  const A={zoom:10.8,pitch:0,bearing:-18}, B={zoom:(SPEC.zoomEnd||15.6),pitch:56,bearing:22};
+  window.__frame=(f)=>{
+    const t=ease(f);
+    map.jumpTo({ center:C, zoom:lerp(A.zoom,B.zoom,t), pitch:lerp(A.pitch,B.pitch,t), bearing:lerp(A.bearing,B.bearing,t) });
+    const p=map.project(C);
+    reticle.style.left=p.x+"px"; reticle.style.top=p.y+"px";
+    lbl.style.left=p.x+"px"; lbl.style.top=(p.y+58)+"px";
+    const pulse=1+0.16*Math.sin(f*Math.PI*6); ring.setAttribute("transform",`scale(${pulse}) rotate(${f*90})`); diam.setAttribute("transform",`rotate(${-f*60})`);
+    lbl.style.opacity=sm(0.32,0.5,f); kick.style.opacity=sm(0.06,0.18,f)*(1-sm(0.85,1,f));
+  };
+  window.__settle=()=>new Promise((res)=>{ let d=false; const to=setTimeout(()=>{if(!d){d=true;res();}},2200); map.once("idle",()=>{if(!d){d=true;clearTimeout(to);res();}}); });
+</script>
+</body>
+</html>

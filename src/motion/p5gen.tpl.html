@@ -1,0 +1,80 @@
+<!doctype html>
+<html>
+<head>
+<meta charset="utf-8" />
+<link href="https://fonts.googleapis.com/css2?family=Inter:wght@600;800;900&family=JetBrains+Mono:wght@500&display=swap" rel="stylesheet">
+<script src="https://cdn.jsdelivr.net/npm/p5@1.9.4/lib/p5.min.js"></script>
+<style>
+  *{margin:0;padding:0;box-sizing:border-box}
+  html,body{width:1920px;height:1080px;overflow:hidden;background:#04060c;font-family:"Inter",sans-serif}
+  canvas{display:block}
+  #ov{position:absolute;inset:0;z-index:5;pointer-events:none}
+  #hud{position:absolute;left:96px;top:84px}
+  #hud .op{font-size:24px;font-weight:600;letter-spacing:0.44em;color:#5fe0cf;font-family:"JetBrains Mono",monospace}
+  #center{position:absolute;left:96px;top:50%;transform:translateY(-50%)}
+  #center .k{font-size:30px;font-weight:600;letter-spacing:0.42em;color:#e8b23a;text-transform:uppercase}
+  #center .t{font-size:122px;font-weight:900;color:#eef4fa;letter-spacing:-0.01em;line-height:0.98;margin-top:8px}
+  #center .t .w{display:inline-block;will-change:transform,opacity}
+  #center .s{font-size:32px;font-weight:600;letter-spacing:0.3em;color:#9fb0c0;margin-top:22px}
+  #br{position:absolute;right:96px;bottom:84px;text-align:right;font-family:"JetBrains Mono",monospace;font-size:18px;letter-spacing:0.3em;color:#e8b23a;opacity:0.85;line-height:1.6}
+  #vig{position:absolute;inset:0;box-shadow:inset 0 0 460px 90px rgba(2,4,9,0.82)}
+</style>
+</head>
+<body>
+  <div id="ov">
+    <div id="hud"><div class="op" id="op"></div></div>
+    <div id="center"><div class="k" id="k"></div><div class="t" id="t"></div><div class="s" id="s"></div></div>
+    <div id="br" id="brEl"></div>
+    <div id="vig"></div>
+  </div>
+<script>
+const SPEC = __SPEC__;  // { kicker, titleLines:[..], sub, hudTop, hudBottom, accent:[r,g,b], teal:[r,g,b] }
+const W=1920,H=1080, DUR=6.5; let T=0;
+const AC = SPEC.accent || [232,178,58], TL = SPEC.teal || [95,224,207];
+document.getElementById("op").textContent = SPEC.hudTop || "// SIGNAL · ACTIVE";
+document.getElementById("k").textContent = SPEC.kicker || "";
+document.getElementById("t").innerHTML = (SPEC.titleLines||["TITLE"]).join("<br>");
+document.getElementById("s").textContent = SPEC.sub || "";
+document.getElementById("br").innerHTML = (SPEC.hudBottom || "NODES: 0118 · LINKS: LIVE\nSECTOR: —").replace(/\n/g,"<br>");
+
+const sketch=(p)=>{
+  let nodes=[];
+  p.setup=()=>{ const c=p.createCanvas(W,H); c.parent(document.body); p.noLoop(); p.randomSeed(11);
+    for(let i=0;i<118;i++) nodes.push({x:p.random(W),y:p.random(H),vx:p.random(-14,14),vy:p.random(-10,10),r:p.random(1.4,3.6),hue:p.random()<0.18?'a':'t'}); };
+  const pos=(n)=>({x:((n.x+n.vx*T)%W+W)%W,y:((n.y+n.vy*T)%H+H)%H});
+  p.draw=()=>{ p.background(4,6,12);
+    p.stroke(18,40,62,90); p.strokeWeight(1); const off=(T*8)%70;
+    for(let x=-off;x<W;x+=70) p.line(x,0,x,H); for(let y=-off;y<H;y+=70) p.line(0,y,W,y);
+    const P=nodes.map(pos);
+    for(let i=0;i<P.length;i++) for(let j=i+1;j<P.length;j++){ const d=Math.hypot(P[i].x-P[j].x,P[i].y-P[j].y);
+      if(d<150){ p.stroke(TL[0],TL[1],TL[2],p.map(d,0,150,70,0)); p.strokeWeight(1); p.line(P[i].x,P[i].y,P[j].x,P[j].y); } }
+    p.noStroke();
+    for(let i=0;i<P.length;i++){ const n=nodes[i],pp=P[i],pulse=1+0.4*Math.sin(T*2+i);
+      if(n.hue==='a'){ p.fill(AC[0],AC[1],AC[2],230); p.circle(pp.x,pp.y,n.r*2.4*pulse); p.fill(AC[0],AC[1],AC[2],40); p.circle(pp.x,pp.y,n.r*7); }
+      else { p.fill(TL[0],TL[1],TL[2],210); p.circle(pp.x,pp.y,n.r*2*pulse); } }
+    const sy=((T/DUR)*(H+300))-150;
+    for(let k=0;k<26;k++){ p.stroke(AC[0],AC[1],AC[2],60-k*2.2); p.strokeWeight(1); p.line(0,sy-k*2,W,sy-k*2); }
+    p.stroke(255,228,150,180); p.strokeWeight(2); p.line(0,sy,W,sy);
+  };
+  window.__frame=(f)=>{ T=f*DUR; p.redraw(); updateOverlay(f); };
+};
+new p5(sketch);
+const sm=(a,b,x)=>{const t=Math.max(0,Math.min(1,(x-a)/(b-a)));return t*t*(3-2*t);};
+const tEl=document.getElementById("t");
+tEl.innerHTML = tEl.innerHTML.split("<br>").map(line=>line.split(" ").map(w=>`<span class='w'>${w}</span>`).join(" ")).join("<br>");
+const words=[...document.querySelectorAll("#t .w")];
+function updateOverlay(f){
+  document.getElementById("k").style.opacity=sm(0.05,0.18,f);
+  words.forEach((w,i)=>{const e=sm(0.12+i*0.05,0.3+i*0.05,f); w.style.opacity=e; w.style.transform=`translateY(${(1-e)*70}px)`;});
+  document.getElementById("s").style.opacity=sm(0.42,0.56,f);
+  document.getElementById("hud").style.opacity=sm(0.02,0.12,f);
+  document.getElementById("br").style.opacity=sm(0.3,0.45,f)*0.85;
+}
+window.__dur=DUR; window.__settle=()=>new Promise(r=>requestAnimationFrame(()=>requestAnimationFrame(r)));
+words.forEach(w=>w.style.opacity=0); ["k","s","hud","br"].forEach(id=>document.getElementById(id).style.opacity=0);
+window.__ready=false;
+(document.fonts&&document.fonts.ready?document.fonts.ready:Promise.resolve()).then(()=>{ window.__frame&&window.__frame(0); window.__ready=true; });
+setTimeout(()=>{window.__ready=true;},4000);
+</script>
+</body>
+</html>

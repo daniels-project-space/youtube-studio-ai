@@ -1,0 +1,86 @@
+<!doctype html><html><head><meta charset="utf8"><style>
+  html,body{margin:0;background:#15110e;overflow:hidden}
+  #c{width:1920px;height:1080px;display:block}
+</style></head><body>
+<canvas id="c" width="1920" height="1080"></canvas>
+<script type="importmap">
+{ "imports": { "three":"https://unpkg.com/three@0.160.0/build/three.module.js" } }
+</script>
+<script type="module">
+import * as THREE from "three";
+// ---- REUSABLE 3D PAGE-TURN. Drop in page_front.png (current page) + page_next.png
+// (page revealed beneath). Exposes the capture contract __ready/__dur/__frame/__settle.
+const W = 1920, H = 1080;
+const PW = 1.0, PH = 1.42;                 // page size (portrait); match texture aspect
+const SEGX = 54, SEGY = 76;                // mesh density (the bend resolution)
+const DUR = 1.7;                           // seconds
+
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
+renderer.setSize(W, H, false); renderer.setPixelRatio(1);
+renderer.shadowMap.enabled = true; renderer.shadowMap.type = THREE.PCFSoftShadowMap;
+renderer.toneMapping = THREE.ACESFilmicToneMapping; renderer.toneMappingExposure = 1.05;
+renderer.outputColorSpace = THREE.SRGBColorSpace;
+
+const scene = new THREE.Scene(); scene.background = new THREE.Color(0x1a1512);
+const camera = new THREE.PerspectiveCamera(31, W / H, 0.1, 100);
+camera.up.set(0, 0, 1);
+camera.position.set(0.46, -1.42, 1.62);
+camera.lookAt(0.40, 0.66, 0.04);
+
+// lights — a warm key from front-above (casts the page's shadow) + soft fill
+const key = new THREE.DirectionalLight(0xfff1dc, 2.5);
+key.position.set(0.9, -1.1, 2.2); key.castShadow = true;
+key.shadow.mapSize.set(2048, 2048); key.shadow.bias = -0.0006;
+const sc = key.shadow.camera; sc.near = 0.3; sc.far = 7; sc.left = -2; sc.right = 2; sc.top = 2.4; sc.bottom = -1.2;
+scene.add(key);
+scene.add(new THREE.HemisphereLight(0xbfcad6, 0x241c16, 0.55));
+scene.add(new THREE.AmbientLight(0xffffff, 0.18));
+
+// desk
+const desk = new THREE.Mesh(new THREE.PlaneGeometry(8, 8),
+  new THREE.MeshStandardMaterial({ color: 0x2a211b, roughness: 0.95 }));
+desk.position.set(0, 0.5, -0.012); desk.receiveShadow = true; scene.add(desk);
+
+const tl = new THREE.TextureLoader();
+let pending = 3; const done = () => { if (--pending <= 0) window.__ready = true; };
+const tex = (p) => { const t = tl.load(p, done, undefined, done); t.colorSpace = THREE.SRGBColorSpace; return t; };
+const frontT = tex("page_front.png"), nextT = tex("page_next.png"), paperT = tex("page_back.png");
+
+// next page (revealed beneath the turning page), lying flat on the desk at x in [0,PW]
+const nextPage = new THREE.Mesh(new THREE.PlaneGeometry(PW, PH),
+  new THREE.MeshStandardMaterial({ map: nextT, roughness: 0.92 }));
+nextPage.geometry.translate(PW / 2, PH / 2, 0); nextPage.position.z = 0.0; nextPage.receiveShadow = true; scene.add(nextPage);
+
+// the turning page — one geometry, two meshes (front face + back face) so each
+// side shows its own texture; hinged at the spine (x=0).
+const geo = new THREE.PlaneGeometry(PW, PH, SEGX, SEGY); geo.translate(PW / 2, PH / 2, 0);
+const base = Float32Array.from(geo.attributes.position.array);
+const front = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: frontT, roughness: 0.9, side: THREE.FrontSide }));
+const back = new THREE.Mesh(geo, new THREE.MeshStandardMaterial({ map: paperT, roughness: 0.95, side: THREE.BackSide }));
+front.castShadow = true; back.castShadow = true; scene.add(front); scene.add(back);
+
+const smooth = (t) => t * t * (3 - 2 * t);
+function deform(beta) {
+  const pos = geo.attributes.position.array;
+  const bow = 0.17 * PW;                                   // how much the sheet flexes
+  const sb = Math.sin(beta), cb = Math.cos(beta), fl = Math.sin(beta);
+  for (let i = 0; i < pos.length; i += 3) {
+    const x = base[i], y = base[i + 1], u = x / PW;
+    const bz = bow * Math.sin(Math.PI * u) * fl;           // billow: max mid-page, peaks mid-turn
+    pos[i] = x * cb - bz * sb;                             // rotate (x,bz) about the spine (y-axis)
+    pos[i + 1] = y;
+    pos[i + 2] = x * sb + bz * cb;
+  }
+  geo.attributes.position.needsUpdate = true;
+  geo.computeVertexNormals();
+}
+
+window.__dur = DUR;
+window.__frame = (t) => {
+  deform(smooth(t) * Math.PI);
+  renderer.render(scene, camera);
+};
+window.__settle = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+// initial draw once textures are in
+const kick = setInterval(() => { if (window.__ready) { clearInterval(kick); window.__frame(0); } }, 50);
+</script></body></html>

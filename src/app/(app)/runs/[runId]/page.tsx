@@ -28,8 +28,11 @@ export default function RunDetailPage({
   const { runId } = use(params);
 
   const run = useQuery(api.runs.getRun, { runId: runId as Id<"runs"> });
+  // slim:true → no `inputs`, long output strings truncated server-side (the
+  // full blobs were shipping megabytes to the browser on every subscription).
   const stages = useQuery(api.runStages.listRunStages, {
     runId: runId as Id<"runs">,
+    slim: true,
   }) as PipelineStage[] | undefined;
 
   // Fetch the run's channel to derive the expected (planned) block list. We

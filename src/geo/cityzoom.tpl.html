@@ -1,0 +1,217 @@
+<!doctype html>
+<html lang="en">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=1920, height=1080" />
+    <script src="https://cdn.jsdelivr.net/npm/gsap@3.14.2/dist/gsap.min.js"></script>
+    <script src="three.min.js"></script>
+    <script src="pp/CopyShader.js"></script>
+    <script src="pp/LuminosityHighPassShader.js"></script>
+    <script src="pp/EffectComposer.js"></script>
+    <script src="pp/RenderPass.js"></script>
+    <script src="pp/ShaderPass.js"></script>
+    <script src="pp/MaskPass.js"></script>
+    <script src="pp/UnrealBloomPass.js"></script>
+    <style>
+      * { margin: 0; padding: 0; box-sizing: border-box; }
+      html, body { width: 1920px; height: 1080px; overflow: hidden; background: #03040a; font-family: "Inter", sans-serif; }
+      #gl { position: absolute; inset: 0; }
+      .ov { position: absolute; color: #eef4f2; pointer-events: none; }
+      .mono { font-family: "JetBrains Mono", monospace; }
+      .kick { font-size: 25px; letter-spacing: 0.5em; text-transform: uppercase; font-weight: 600; }
+      .big { font-size: 112px; font-weight: 800; letter-spacing: 0.02em; text-transform: uppercase; text-shadow: 0 6px 46px rgba(0,0,0,0.96); line-height: 0.98; }
+      .coord { font-size: 28px; letter-spacing: 0.34em; margin-top: 6px; }
+    </style>
+  </head>
+  <body>
+    <div id="root" data-composition-id="main" data-start="0" data-duration="__DUR__" data-width="1920" data-height="1080">
+      <img id="earthimg" src="earth.jpg" style="display:none" />
+      <canvas id="gl" class="clip" data-start="0" data-duration="__DUR__" data-track-index="0"></canvas>
+      __LABELS__
+    </div>
+
+    <script id="scenedata" type="application/json">__SCENE__</script>
+    <script>
+      const SCENE = JSON.parse(document.getElementById("scenedata").textContent);
+      // SPEC = the cinema art-direction (produced by the module's LLM step in
+      // geoCinema.ts). The renderer below is a PURE FUNCTION of SPEC + SCENE.
+      const SPEC = __SPEC__;
+      const T = SPEC.timing;
+      const W = 1920, H = 1080;
+      const canvas = document.getElementById("gl");
+      const renderer = new THREE.WebGLRenderer({ canvas, antialias: true });
+      renderer.setSize(W, H, false); renderer.setPixelRatio(1);
+      renderer.outputEncoding = THREE.sRGBEncoding;
+      const scene = new THREE.Scene();
+      scene.background = new THREE.Color(0x03040a);
+      const camera = new THREE.PerspectiveCamera(40, W / H, 0.1, 9000);
+
+      let seed = 1337; const rnd = () => { seed = (seed * 16807) % 2147483647; return seed / 2147483647; };
+
+      // ---- stars ----
+      const sp = [];
+      for (let i = 0; i < 1500; i++) { const r = 1800 + rnd() * 2000, t = rnd() * 6.28, p = Math.acos(2 * rnd() - 1); sp.push(r * Math.sin(p) * Math.cos(t), r * Math.cos(p), r * Math.sin(p) * Math.sin(t)); }
+      const stars = new THREE.Points(new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(sp, 3)), new THREE.PointsMaterial({ color: 0x9ab0c0, size: 2.0, sizeAttenuation: false }));
+      scene.add(stars);
+
+      // ---- GLOBE ----
+      const R = 100; const globeGroup = new THREE.Group(); scene.add(globeGroup);
+      const earthImg = document.getElementById("earthimg");
+      const earthTex = new THREE.Texture(earthImg); earthTex.needsUpdate = true;
+      if (!earthImg.complete) earthImg.onload = () => { earthTex.needsUpdate = true; };
+      globeGroup.add(new THREE.Mesh(new THREE.SphereGeometry(R, 64, 64), new THREE.MeshPhongMaterial({ map: earthTex, color: SPEC.earth.color, emissive: SPEC.earth.emissive, specular: SPEC.earth.specular, shininess: SPEC.earth.shininess })));
+      globeGroup.add(new THREE.Mesh(new THREE.SphereGeometry(R * 1.004, 36, 24), new THREE.MeshBasicMaterial({ color: 0x2b6b6b, wireframe: true, transparent: true, opacity: 0.14 })));
+      const atmo = new THREE.Mesh(new THREE.SphereGeometry(R * 1.2, 64, 64), new THREE.ShaderMaterial({ transparent: true, side: THREE.BackSide, blending: THREE.AdditiveBlending, uniforms: { c: { value: new THREE.Color(SPEC.atmosphere || 0x2aa6c0) } }, vertexShader: "varying vec3 vN; void main(){ vN=normalize(normalMatrix*normal); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }", fragmentShader: "varying vec3 vN; uniform vec3 c; void main(){ float i=pow(0.62-dot(vN,vec3(0,0,1.0)),2.4); gl_FragColor=vec4(c,clamp(i,0.0,1.0)); }" }));
+      scene.add(atmo);
+      function latLon(lat, lon, r) { const phi = (90 - lat) * Math.PI / 180, th = (lon + 180) * Math.PI / 180; return new THREE.Vector3(-r * Math.sin(phi) * Math.cos(th), r * Math.cos(phi), r * Math.sin(phi) * Math.sin(th)); }
+      const antVec = latLon(SCENE.lat0, SCENE.lon0, R);
+      const centerVec = latLon(SCENE.lat0 + (SPEC.calibLat || 0), SCENE.lon0 + (SPEC.calibLon || 0), R);
+      const beacon = new THREE.Group();
+      const dot = new THREE.Mesh(new THREE.SphereGeometry(1.4, 16, 16), new THREE.MeshBasicMaterial({ color: SPEC.heroColor }));
+      const gring = new THREE.Mesh(new THREE.RingGeometry(2.3, 2.9, 36), new THREE.MeshBasicMaterial({ color: SPEC.heroColor, transparent: true, side: THREE.DoubleSide }));
+      // beacon AND rotation target are the SAME calibrated vector → the pin
+      // sits dead-centre on the real city texture (not the bare lat/lon point)
+      beacon.add(dot); beacon.add(gring); beacon.position.copy(centerVec); beacon.lookAt(centerVec.clone().multiplyScalar(2)); globeGroup.add(beacon);
+      const qTarget = new THREE.Quaternion().setFromUnitVectors(centerVec.clone().normalize(), new THREE.Vector3(0, 0, 1));
+      const qStart = qTarget.clone().multiply(new THREE.Quaternion().setFromAxisAngle(new THREE.Vector3(0, 1, 0), -0.9));
+
+      // ---- CITY ----
+      const cityGroup = new THREE.Group(); cityGroup.visible = false; scene.add(cityGroup);
+      scene.fog = new THREE.FogExp2(SPEC.fogColor, SPEC.fogDensity);
+      // horizon city-glow dome → empty distance reads as atmospheric haze, not a black void
+      const sky = new THREE.Mesh(new THREE.SphereGeometry(4200, 32, 16), new THREE.ShaderMaterial({ side: THREE.BackSide, depthWrite: false, fog: false, uniforms: { top: { value: new THREE.Color(SPEC.skyTop || 0x06080e) }, horizon: { value: new THREE.Color(SPEC.skyHorizon || 0x173a4c) } }, vertexShader: "varying float vy; void main(){ vy=normalize(position).y; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }", fragmentShader: "varying float vy; uniform vec3 top; uniform vec3 horizon; void main(){ float t=clamp((vy+0.04)/0.55,0.0,1.0); vec3 c=mix(horizon, top, pow(t,0.55)); gl_FragColor=vec4(c,1.0); }" }));
+      cityGroup.add(sky);
+      const ground = new THREE.Mesh(new THREE.PlaneGeometry(6000, 6000), new THREE.MeshStandardMaterial({ color: 0x0a131d, roughness: 0.85, metalness: 0.15 }));
+      ground.rotation.x = -Math.PI / 2; ground.position.y = -0.5; cityGroup.add(ground);
+      let hero = SCENE.buildings.find((b) => b.hero) || SCENE.buildings[0];
+      const heroC = hero.p.reduce((a, [x, z]) => [a[0] + x, a[1] + z], [0, 0]).map((v) => v / hero.p.length);
+      const heroPos = new THREE.Vector3(heroC[0], 0, -heroC[1]);
+      for (const w of SCENE.water) { const s = new THREE.Shape(); w.forEach(([x, z], i) => (i ? s.lineTo(x, -z) : s.moveTo(x, -z))); const m = new THREE.Mesh(new THREE.ShapeGeometry(s), new THREE.MeshStandardMaterial({ color: SPEC.waterColor, roughness: 0.2, metalness: 0.7, transparent: true, opacity: 0.95 })); m.rotation.x = -Math.PI / 2; m.position.y = 0.1; cityGroup.add(m); }
+      const streetLines = [];
+      for (const st of SCENE.streets) {
+        const pos = []; st.p.forEach(([x, z]) => pos.push(x, 0.7, -z));
+        const g = new THREE.BufferGeometry().setAttribute("position", new THREE.Float32BufferAttribute(pos, 3));
+        const line = new THREE.Line(g, new THREE.LineBasicMaterial({ color: st.big ? SPEC.streetBig : SPEC.streetColor, transparent: true, opacity: 0 }));
+        line.userData.big = st.big; cityGroup.add(line); streetLines.push(line);
+      }
+      const buildingVert = "varying vec3 vPos; varying vec3 vWorld; varying vec3 vN; void main(){ vPos=position; vWorld=(modelMatrix*vec4(position,1.0)).xyz; vN=normalize(mat3(modelMatrix)*normal); gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }";
+      const buildingFrag = `
+        precision highp float; varying vec3 vPos; varying vec3 vWorld; varying vec3 vN;
+        uniform vec3 uBase; uniform vec3 uWarm; uniform float uSeed; uniform float uReveal; uniform float uDens; uniform float uHero; uniform vec3 uHeroCol;
+        uniform vec3 uFogC; uniform float uFogD;
+        float hash(vec2 p){ return fract(sin(dot(p,vec2(127.1,311.7))+uSeed*57.0)*43758.5453); }
+        void main(){
+          float horiz = abs(vN.x) > abs(vN.z) ? vWorld.z : vWorld.x;
+          float gx = floor(horiz/3.4); float gy = floor(vPos.y/3.7);
+          float onFace = step(0.4, abs(vN.x)+abs(vN.z));
+          vec2 cell = fract(vec2(horiz/3.4, vPos.y/3.7));
+          float frame = step(0.16,cell.x)*step(cell.x,0.84)*step(0.2,cell.y)*step(cell.y,0.84);
+          float lit = step(0.62 - uDens*0.34, hash(vec2(gx,gy)));
+          float flick = 0.72 + 0.28*hash(vec2(gx*1.7, gy*0.9));
+          float em = lit*frame*onFace*uReveal*flick;
+          vec3 col = uBase + vec3(0.07,0.11,0.14)*onFace;
+          col = mix(col, uWarm, em);
+          if(uHero>0.5){ col = mix(col, uHeroCol*1.7, frame*onFace*uReveal*0.92); col += uHeroCol*0.16*onFace*uReveal; }
+          float dist = length(vWorld - cameraPosition);
+          float fog = 1.0 - exp(-uFogD*uFogD*dist*dist*1.35);
+          col = mix(col, uFogC, clamp(fog,0.0,0.9));
+          gl_FragColor = vec4(col, 1.0);
+        }`;
+      const bMeshes = [];
+      let maxD = 1; for (const b of SCENE.buildings) { const d = Math.hypot(b.p[0][0] - heroC[0], b.p[0][1] - heroC[1]); if (d > maxD) maxD = d; }
+      for (const b of SCENE.buildings.slice(0, 240)) {
+        const shape = new THREE.Shape(); b.p.forEach(([x, z], i) => (i ? shape.lineTo(x, -z) : shape.moveTo(x, -z)));
+        // the hero stands as a prominent landmark the beam crowns (never a stub)
+        const bh = b.hero ? Math.max(92, Math.min(SPEC.maxBuildingH || 120, b.h)) : Math.min(SPEC.maxBuildingH || 120, Math.max(10, b.h));
+        const geo = new THREE.ExtrudeGeometry(shape, { depth: bh, bevelEnabled: false }); geo.rotateX(-Math.PI / 2);
+        const mat = new THREE.ShaderMaterial({ vertexShader: buildingVert, fragmentShader: buildingFrag,
+          uniforms: { uBase: { value: new THREE.Color(SPEC.baseBuilding) }, uWarm: { value: new THREE.Vector3().fromArray(SPEC.windowWarm) }, uSeed: { value: rnd() * 10 }, uReveal: { value: 0 }, uDens: { value: SPEC.windowDensity * (0.7 + rnd() * 0.6) }, uHero: { value: b.hero ? 1 : 0 }, uHeroCol: { value: new THREE.Color(SPEC.heroColor) }, uFogC: { value: new THREE.Color(SPEC.fogColor) }, uFogD: { value: SPEC.fogDensity } } });
+        const mesh = new THREE.Mesh(geo, mat);
+        mesh.userData = { d: Math.hypot(b.p[0][0] - heroC[0], b.p[0][1] - heroC[1]) / maxD, mat, hero: b.hero };
+        cityGroup.add(mesh); bMeshes.push(mesh);
+        if (b.hero) {
+          const beamH = SPEC.heroBeamH || 360;
+          const beam = new THREE.Mesh(new THREE.CylinderGeometry(2.2, 2.2, beamH, 24, 1, true), new THREE.MeshBasicMaterial({ color: SPEC.heroColor, transparent: true, opacity: 0, blending: THREE.AdditiveBlending, side: THREE.DoubleSide, fog: false }));
+          beam.position.set(heroC[0], beamH / 2, -heroC[1]); cityGroup.add(beam); mesh.userData.beam = beam;
+          const halo = new THREE.Mesh(new THREE.RingGeometry(13, 17, 48), new THREE.MeshBasicMaterial({ color: SPEC.heroColor, transparent: true, opacity: 0, side: THREE.DoubleSide, fog: false }));
+          halo.rotation.x = -Math.PI / 2; halo.position.set(heroC[0], 1, -heroC[1]); cityGroup.add(halo); mesh.userData.halo = halo;
+        }
+      }
+      scene.add(new THREE.AmbientLight(0x32506e, SPEC.ambient || 1.1));
+      const klight = new THREE.DirectionalLight(0xa8ccf0, 0.7); klight.position.set(-1, 2.4, 1); scene.add(klight);
+      const rim = new THREE.DirectionalLight(0xffcaa0, 0.4); rim.position.set(2, 0.6, -1.5); scene.add(rim);
+      const globeLight = new THREE.DirectionalLight(0xffffff, 0.55); globeLight.position.set(-0.3, 0.5, 1.0); scene.add(globeLight);
+
+      // ---- post: bloom + grade/vignette/grain ----
+      const composer = new THREE.EffectComposer(renderer);
+      composer.addPass(new THREE.RenderPass(scene, camera));
+      const bloom = new THREE.UnrealBloomPass(new THREE.Vector2(W, H), SPEC.bloomStrength, SPEC.bloomRadius, SPEC.bloomThreshold);
+      composer.addPass(bloom);
+      const gradePass = new THREE.ShaderPass({
+        uniforms: { tDiffuse: { value: null }, uT: { value: 0 }, uVig: { value: SPEC.vignette }, uGrain: { value: SPEC.grain }, uC: { value: SPEC.contrast || 1.15 }, uSh: { value: new THREE.Vector3().fromArray(SPEC.gradeShadow) }, uHi: { value: new THREE.Vector3().fromArray(SPEC.gradeHi) } },
+        vertexShader: "varying vec2 vUv; void main(){ vUv=uv; gl_Position=projectionMatrix*modelViewMatrix*vec4(position,1.0); }",
+        fragmentShader: `
+          uniform sampler2D tDiffuse; uniform float uT; uniform float uVig; uniform float uGrain; uniform float uC; uniform vec3 uSh; uniform vec3 uHi; varying vec2 vUv;
+          void main(){
+            vec3 c = texture2D(tDiffuse, vUv).rgb;
+            float l = dot(c, vec3(0.299,0.587,0.114));
+            c *= mix(uSh, vec3(1.0), smoothstep(0.0,0.45,l));
+            c = mix(c, c*uHi, smoothstep(0.5,1.0,l)*0.5);
+            c = (c-0.5)*uC+0.5;
+            float v = smoothstep(1.08,0.32,length(vUv-0.5)); c *= mix(1.0, v, uVig);
+            float g = fract(sin(dot(vUv*(uT+1.3), vec2(12.9898,78.233)))*43758.5453);
+            c += (g-0.5)*uGrain;
+            gl_FragColor = vec4(clamp(c,0.0,1.0),1.0);
+          }`
+      });
+      gradePass.renderToScreen = true; composer.addPass(gradePass);
+
+      // ---- animation ----
+      const S = { zoom: 0, spin: 0, flash: 0, phase: 0, rise: 0, beam: 0, cam: 0, t: 0 };
+      const tmpQ = new THREE.Quaternion();
+      const flashEl = document.createElement("div");
+      flashEl.style.cssText = "position:absolute;inset:0;background:radial-gradient(circle,#cfeefc,#2aa6c0);pointer-events:none;opacity:0;mix-blend-mode:screen;z-index:5";
+      document.getElementById("root").appendChild(flashEl);
+      const C = SPEC.cam;
+
+      function draw() {
+        flashEl.style.opacity = S.flash * 0.9;
+        gradePass.uniforms.uT.value = S.t;
+        if (S.phase < 0.5) {
+          globeGroup.visible = true; cityGroup.visible = false; atmo.visible = true; stars.visible = true;
+          tmpQ.copy(qStart).slerp(qTarget, S.spin); globeGroup.quaternion.copy(tmpQ); atmo.quaternion.copy(tmpQ);
+          camera.position.set(0, S.zoom * 6, 360 - S.zoom * 150); camera.lookAt(0, 0, 0);
+          gring.scale.setScalar(1 + (Math.sin(S.zoom * 12) * 0.5 + 0.5) * 1.5); gring.material.opacity = 0.9;
+        } else {
+          globeGroup.visible = false; cityGroup.visible = true; atmo.visible = false; stars.visible = true;
+          for (const m of bMeshes) {
+            const local = Math.max(0, Math.min(1, (S.rise - m.userData.d * 0.7) / 0.28));
+            m.scale.y = 0.001 + local; m.userData.mat.uniforms.uReveal.value = Math.min(1, local * 2.0);
+            if (m.userData.beam) { m.userData.beam.material.opacity = S.beam * 0.5; m.userData.halo.material.opacity = S.beam * 0.85; m.userData.halo.scale.setScalar(1 + S.beam * 0.6); }
+          }
+          for (const ln of streetLines) ln.material.opacity = Math.min(1, S.rise * 1.3) * (ln.userData.big ? 1.0 : 0.55);
+          const a = C.aStart + S.cam * (C.aEnd - C.aStart);
+          const rad = C.radStart + S.cam * (C.radEnd - C.radStart);
+          const ey = C.eyStart + S.cam * (C.eyEnd - C.eyStart);
+          camera.position.set(heroPos.x + Math.cos(a) * rad, ey, heroPos.z + Math.sin(a) * rad);
+          camera.lookAt(heroPos.x, C.lookY + S.cam * 10, heroPos.z);
+        }
+        composer.render();
+      }
+
+      window.__timelines = window.__timelines || {};
+      const tl = gsap.timeline({ paused: true, onUpdate: draw });
+      tl.to(S, { spin: 1, duration: T.spinEnd, ease: "power2.inOut" }, 0)
+        .to(S, { zoom: 1, duration: T.spinEnd - 0.3, ease: "power2.in" }, 0.3)
+        .to(S, { t: T.total * 10, duration: T.total, ease: "none" }, 0)
+        .to(S, { flash: 1, duration: 0.22, ease: "power2.in" }, T.flash - 0.22)
+        .set(S, { phase: 1 }, T.phase)
+        .to(S, { flash: 0, duration: 0.5, ease: "power2.out" }, T.phase)
+        .to(S, { rise: 1.05, duration: T.riseEnd - T.riseStart, ease: "power2.out" }, T.riseStart)
+        .to(S, { beam: 1, duration: 1.4, ease: "power2.out" }, T.beam)
+        .to(S, { cam: 1, duration: T.camEnd - T.camStart, ease: "power1.inOut" }, T.camStart);
+      window.__timelines["main"] = tl;
+      draw();
+    </script>
+  </body>
+</html>

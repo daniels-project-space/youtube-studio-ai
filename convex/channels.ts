@@ -5,6 +5,18 @@ import { validateKnobs, type KnobValues, type KnobValue } from "@/engine/customi
 
 const identityValidator = v.object({
   persona: v.string(),
+  // Voicecraft audition winner — persisted at inception (was silently rejected
+  // by this validator before, discarding the cast voice on every channel).
+  voiceCasting: v.optional(
+    v.object({
+      voiceId: v.string(),
+      name: v.optional(v.string()),
+      character: v.optional(v.string()),
+      score: v.optional(v.number()),
+      why: v.optional(v.string()),
+      at: v.optional(v.number()),
+    }),
+  ),
   voiceId: v.optional(v.string()),
   voiceRef: v.optional(v.string()),
   toneRefs: v.optional(v.array(v.string())),
@@ -131,6 +143,13 @@ export const createChannel = mutation({
     // step: { [blockId]: { preset?, ...knobValues } }. Validated per block
     // against its CustomizationSurface (illegal config dropped, never stored).
     moduleConfig: v.optional(v.record(v.string(), v.any())),
+    // SINGLE SOURCE OF FAMILY TRUTH: persisted at creation so the architect/
+    // doctor/re-architect never re-derive it from template letters (the old
+    // template→family guess collapsed whiteboard/shorts into narrated_stock).
+    family: v.optional(v.string()),
+    // Operator hard rail: wizard-disabled blocks the architect may NEVER
+    // re-add — persisted so every later architect pass can honor it.
+    disabledBlocks: v.optional(v.array(v.string())),
     budget: v.number(),
     status: v.optional(v.string()),
     groupId: v.optional(v.string()),
@@ -162,6 +181,8 @@ export const createChannel = mutation({
       styleDNA: args.styleDNA,
       // Validate the onboarding-supplied module config (illegal → throws).
       moduleConfig: validateModuleConfigMap(args.moduleConfig),
+      family: args.family,
+      disabledBlocks: args.disabledBlocks,
       budget: args.budget,
       status: args.status ?? "draft",
       groupId: args.groupId,
@@ -306,6 +327,8 @@ export const updateChannel = mutation({
     qaRubric: v.optional(v.any()),
     styleDNA: v.optional(v.any()),
     architectReport: v.optional(v.any()),
+    family: v.optional(v.string()),
+    disabledBlocks: v.optional(v.array(v.string())),
     thumbnailPlaybook: v.optional(v.any()),
     scriptPlaybook: v.optional(v.any()),
     // Folder filing ("" = unfile).

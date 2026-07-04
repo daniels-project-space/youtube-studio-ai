@@ -1,0 +1,54 @@
+<!doctype html><html><head><meta charset="utf8">
+<style>html,body{margin:0;background:#000;overflow:hidden}#c{display:block}</style>
+<script type="importmap">{ "imports": { "three":"https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
+</head><body><canvas id="c"></canvas>
+<script type="module">
+import * as THREE from "three";
+// GENUINE 3D MULTIPLANE — the layer images are placed as cards at REAL world-Z depths and viewed
+// through a PERSPECTIVE camera that DOLLIES a long distance. Unlike 2D scaling, this gives true
+// perspective: near layers rush past with foreshortening, the vanishing point shifts — a real
+// camera flying through 3D space (like the C4D reference), not flat planes growing.
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
+renderer.setClearColor(0x000000, 1); renderer.outputColorSpace = THREE.SRGBColorSpace;
+const scene = new THREE.Scene();
+let META = null, LAYERS = [], pending = 0, CAM = null;
+const need = () => pending++;
+const fin = () => { pending--; if (pending <= 0 && META) window.__ready = true; };
+const texL = new THREE.TextureLoader();
+function loadTex(url) { need(); const t = texL.load(url, fin, undefined, fin); t.colorSpace = THREE.SRGBColorSpace; t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; return t; }
+
+const D2R = Math.PI / 180;
+function build() {
+  const fov = META.fov, halfTan = Math.tan((fov * 0.5) * D2R) * (META.oversize || 1.08);
+  const refCam = META.refCam;                  // camera-Z at which every card exactly fills the frame
+  LAYERS = META.layers.map((L, i) => {
+    const z = -(META.zNear + (1 - L.near) * META.zSpread);   // near=1 → closest; near=0 → farthest
+    const dist = refCam - z;                                  // distance from the fill camera
+    const h = 2 * dist * halfTan, w = h * (16 / 9);
+    const geo = new THREE.PlaneGeometry(w, h);
+    const mat = new THREE.MeshBasicMaterial({ map: loadTex(L.img), transparent: true, depthTest: false, depthWrite: false });
+    const m = new THREE.Mesh(geo, mat); m.position.z = z; m.renderOrder = i; m.frustumCulled = false; scene.add(m);
+    return m;
+  });
+}
+function resize() { const W = window.innerWidth || 1920, H = window.innerHeight || 1080; renderer.setSize(W, H, false); renderer.setPixelRatio(1); if (CAM) { CAM.aspect = W / H; CAM.updateProjectionMatrix(); } }
+window.addEventListener("resize", resize);
+fetch("multiplane_meta.json").then((r) => r.json()).then((m) => {
+  META = m; CAM = new THREE.PerspectiveCamera(m.fov, (window.innerWidth || 1920) / (window.innerHeight || 1080), 0.1, 4000);
+  resize(); build(); window.__dur = m.total; if (pending <= 0) window.__ready = true;
+});
+
+const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+window.__frame = (tn) => {
+  if (!META || !CAM) return;
+  const u = ease(Math.min(1, Math.max(0, tn)));
+  const cz = META.camStart + (META.camEnd - META.camStart) * u;          // big dolly along Z
+  const cy = (META.camStartY || 0) + ((META.camEndY || 0) - (META.camStartY || 0)) * u;
+  const cx = (META.camStartX || 0) + ((META.camEndX || 0) - (META.camStartX || 0)) * u;
+  CAM.position.set(cx, cy, cz);
+  CAM.lookAt(cx * (1 - (META.converge || 0)), cy * (1 - (META.converge || 0)), -100);
+  renderer.render(scene, CAM);
+};
+window.__settle = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+const kick = setInterval(() => { if (window.__ready) { clearInterval(kick); window.__frame(0); } }, 60);
+</script></body></html>

@@ -14,9 +14,23 @@ export default defineSchema({
     ownerId: v.string(),
     slug: v.string(),
     name: v.string(),
+    // Single source of family truth (wizard family key), set at creation.
+    family: v.optional(v.string()),
+    // Operator hard rail: blocks the architect may never re-add.
+    disabledBlocks: v.optional(v.array(v.string())),
     identity: v.object({
       persona: v.string(),
       voiceId: v.optional(v.string()),
+  voiceCasting: v.optional(
+    v.object({
+      voiceId: v.string(),
+      name: v.optional(v.string()),
+      character: v.optional(v.string()),
+      score: v.optional(v.number()),
+      why: v.optional(v.string()),
+      at: v.optional(v.number()),
+    }),
+  ),
       // Persona reference material for tone-matched generation (competitor-
       // intelligence port). All optional → back-compat with existing channels.
       voiceRef: v.optional(v.string()),
@@ -405,5 +419,7 @@ export default defineSchema({
     ytChannelId: v.optional(v.string()),
     ytTitle: v.optional(v.string()),
     updatedAt: v.number(),
-  }).index("by_channel", ["channelId"]),
+  })
+    .index("by_channel", ["channelId"])
+    .index("by_owner", ["ownerId"]),
 });

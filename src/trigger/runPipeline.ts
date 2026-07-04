@@ -100,13 +100,9 @@ export const runPipelineTask = task({
       console.log(`[run-pipeline] using one-off pipelineOverride (${entries.length} blocks) — channel config untouched`);
     }
 
-    // Per-block idempotency keys (used when blocks become child tasks in P2).
-    const blockKeys: Record<string, string> = {};
-    for (const e of entries) {
-      blockKeys[e.block] = await idempotencyKeys.create(
-        `${payload.runId}:${e.block}`,
-      );
-    }
+    // (Idempotency for the render CHILD is created at dispatch time inside
+    // runRemoteBlock — it must vary per HEAL cycle, since a superseded render
+    // must genuinely re-run while a plain orchestrator retry must reattach.)
 
     await convex.mutation(api.runs.updateRun, {
       runId: payload.runId as Id<"runs">,
@@ -143,6 +139,46 @@ export const runPipelineTask = task({
       const paramsByBlock: Record<string, Record<string, unknown>> = {};
       for (const e of entries) {
         if (e.params) paramsByBlock[e.block] = e.params as Record<string, unknown>;
+      }
+      // OPERATOR moduleConfig → RUNTIME (closes the biggest silent-defaults
+      // gap): the onboarding "Pipeline style" + Settings knobs were validated,
+      // persisted, surfaced — and never reached a render. Merge order:
+      // archetype/designer/architect params < operator knobs (preset resolved
+      // through the module's CustomizationSurface; invalid config skipped loud).
+      try {
+        const moduleConfig = (channel as { moduleConfig?: Record<string, Record<string, unknown>> }).moduleConfig ?? {};
+        if (Object.keys(moduleConfig).length) {
+          const { moduleSurface } = await import("@/engine/moduleRegistry");
+          const { resolveKnobs } = await import("@/engine/customization");
+          for (const [blockId, cfg] of Object.entries(moduleConfig)) {
+            if (!cfg || typeof cfg !== "object") continue;
+            const { preset, ...overrides } = cfg as { preset?: string } & Record<string, unknown>;
+            const surface = moduleSurface(blockId);
+            let values: Record<string, unknown> = overrides;
+            if (surface) {
+              const r = resolveKnobs(surface, preset, overrides as Parameters<typeof resolveKnobs>[2]);
+              if (!r.ok) {
+                log(`moduleConfig[${blockId}] SKIPPED (invalid: ${r.errors.join("; ")})`);
+                continue;
+              }
+              // Merge ONLY the knobs the operator actually chose (preset keys +
+              // explicit overrides) — resolveKnobs also returns surface DEFAULTS,
+              // and merging those would clobber designer/architect-tuned params
+              // the operator never touched.
+              const chosen = new Set([
+                ...(preset ? Object.keys(surface.presets[preset] ?? {}) : []),
+                ...Object.keys(overrides),
+              ]);
+              values = Object.fromEntries(
+                Object.entries(r.values as Record<string, unknown>).filter(([k]) => chosen.has(k)),
+              );
+            }
+            paramsByBlock[blockId] = { ...(paramsByBlock[blockId] ?? {}), ...values };
+            log(`moduleConfig[${blockId}] applied to runtime params (${Object.keys(values).length} knob(s)${preset ? `, preset ${preset}` : ""})`);
+          }
+        }
+      } catch (e) {
+        log(`moduleConfig runtime merge failed (defaults kept): ${e instanceof Error ? e.message : e}`);
       }
 
       // Seed channel identity into the store so blocks can read style/topics.
@@ -186,6 +222,9 @@ export const runPipelineTask = task({
       }
 
       const sink = makeConvexSink(convex, ownerId);
+      // Declared BEFORE engineOpts so runRemoteBlock's closure can key the
+      // child-task idempotency on the CURRENT heal cycle.
+      let heals = 0;
       const engineOpts = {
         ownerId,
         runId: payload.runId,
@@ -208,16 +247,24 @@ export const runPipelineTask = task({
         // instead of paying the big-machine rate to wait on external APIs.
         remoteBlocks: new Set(["timeline_assemble"]),
         runRemoteBlock: async (blockId: string, params: Record<string, unknown>) => {
-          const res = await renderBlockTask.triggerAndWait({
-            runId: payload.runId,
-            ownerId,
-            channelId: payload.channelId,
-            keyPrefix: channelPrefix(ownerId, channel.slug),
-            blockId,
-            params,
-            budgetUsd: channel.budget ?? 0,
-            seedStore,
-          });
+          // Same run + block + heal cycle → same child run: a retried
+          // orchestrator REATTACHES to the finished render (no double large-2x
+          // spend), while a self-heal (heals++) mints a fresh key so the
+          // superseded render genuinely re-runs.
+          const idemKey = await idempotencyKeys.create(`${payload.runId}:${blockId}:h${heals}`);
+          const res = await renderBlockTask.triggerAndWait(
+            {
+              runId: payload.runId,
+              ownerId,
+              channelId: payload.channelId,
+              keyPrefix: channelPrefix(ownerId, channel.slug),
+              blockId,
+              params,
+              budgetUsd: channel.budget ?? 0,
+              seedStore,
+            },
+            { idempotencyKey: idemKey },
+          );
           if (!res.ok) {
             throw new Error(`render-block child failed: ${JSON.stringify(res.error)?.slice(0, 300)}`);
           }
@@ -238,7 +285,6 @@ export const runPipelineTask = task({
         consumes: b.consumes,
         paid: (b as { paid?: boolean }).paid,
       }));
-      let heals = 0;
       while (!result.ok && heals < MAX_HEALS) {
         const plan = planHeal(result.error ?? "", healable, (m) => log(m));
         if (!plan) break;

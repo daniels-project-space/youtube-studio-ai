@@ -1,6 +1,9 @@
 "use client";
 
 import { useCallback, useEffect, useState } from "react";
+import { useQuery } from "convex/react";
+import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 import type { VideoRow } from "@/lib/types";
 import { fmtDateTime } from "@/lib/format";
 import {
@@ -32,6 +35,14 @@ export function Lightbox({
 }) {
   const video = videos[index];
   const count = videos.length;
+
+  // On-demand detail (full SEO description, tags, narration script) — a small
+  // targeted query so the list payload stays lean.
+  const detail = useQuery(
+    api.videos.getVideoDetail,
+    video ? { runId: video._id as Id<"runs"> } : "skip",
+  );
+  const [scriptOpen, setScriptOpen] = useState(false);
 
   const prev = useCallback(
     () => onIndex((index - 1 + count) % count),
@@ -125,7 +136,7 @@ export function Lightbox({
                 margin: 0,
               }}
             >
-              {video.title}
+              {detail?.title ?? video.title}
             </h2>
           </div>
           <button
@@ -199,6 +210,125 @@ export function Lightbox({
             </span>
           )}
         </div>
+
+        {/* SEO description (full text, scrollable) */}
+        {detail?.description && (
+          <div style={{ marginTop: "1rem" }}>
+            <div
+              style={{
+                fontSize: "0.72rem",
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+                color: "var(--color-faint)",
+                marginBottom: "0.45rem",
+              }}
+            >
+              Description
+            </div>
+            <div
+              style={{
+                maxHeight: 200,
+                overflowY: "auto",
+                whiteSpace: "pre-wrap",
+                wordBreak: "break-word",
+                fontSize: "0.85rem",
+                lineHeight: 1.55,
+                color: "var(--color-muted)",
+                padding: "0.75rem 0.9rem",
+                borderRadius: 10,
+                border: "1px solid var(--color-border)",
+                background: "var(--color-surface)",
+              }}
+            >
+              {detail.description}
+            </div>
+          </div>
+        )}
+
+        {/* SEO tags */}
+        {(detail?.tags?.length ?? 0) > 0 && (
+          <div
+            style={{
+              display: "flex",
+              flexWrap: "wrap",
+              gap: "0.4rem",
+              marginTop: "0.75rem",
+            }}
+          >
+            {detail!.tags.map((tag) => (
+              <span
+                key={tag}
+                style={{
+                  fontSize: "0.72rem",
+                  fontWeight: 500,
+                  padding: "0.12rem 0.55rem",
+                  borderRadius: 999,
+                  color: "var(--color-muted)",
+                  background: "var(--color-surface)",
+                  border: "1px solid var(--color-border)",
+                  whiteSpace: "nowrap",
+                }}
+              >
+                {tag}
+              </span>
+            ))}
+          </div>
+        )}
+
+        {/* Narration script (collapsible) */}
+        {detail?.script && (
+          <div style={{ marginTop: "1rem" }}>
+            <button
+              type="button"
+              onClick={() => setScriptOpen((o) => !o)}
+              aria-expanded={scriptOpen}
+              style={{
+                display: "inline-flex",
+                alignItems: "center",
+                gap: "0.4rem",
+                background: "transparent",
+                border: "none",
+                padding: 0,
+                cursor: "pointer",
+                font: "inherit",
+                fontSize: "0.72rem",
+                letterSpacing: "0.05em",
+                textTransform: "uppercase",
+                color: "var(--color-faint)",
+              }}
+            >
+              <IconChevron
+                width={13}
+                height={13}
+                style={{
+                  transform: scriptOpen ? "none" : "rotate(-90deg)",
+                  transition: "transform 0.15s ease",
+                }}
+              />
+              Script
+            </button>
+            {scriptOpen && (
+              <div
+                style={{
+                  marginTop: "0.45rem",
+                  maxHeight: 280,
+                  overflowY: "auto",
+                  whiteSpace: "pre-wrap",
+                  wordBreak: "break-word",
+                  fontSize: "0.85rem",
+                  lineHeight: 1.6,
+                  color: "var(--color-muted)",
+                  padding: "0.75rem 0.9rem",
+                  borderRadius: 10,
+                  border: "1px solid var(--color-border)",
+                  background: "var(--color-surface)",
+                }}
+              >
+                {detail.script}
+              </div>
+            )}
+          </div>
+        )}
 
         {/* Thumbnail intelligence (claude_flux) */}
         {hasIntel && (

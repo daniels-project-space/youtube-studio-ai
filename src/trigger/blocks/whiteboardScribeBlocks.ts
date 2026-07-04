@@ -11,19 +11,22 @@
  * per-layer Nano-Banana art (Gemini, 2K) + Fish TTS. Resolution-configurable
  * (1080p default, 2K via `width`).
  *
- * RUNTIME NOTE: the renderer shells out to python3 with whisper + numpy/scipy/
- * scikit-image/Pillow (scripts/wb_scribe_sync.py + scripts/whisper_align.py).
- * Present on the VPS/local runner; to run on a Trigger worker these must be
- * baked into the task image (python build extension in trigger.config.ts).
+ * RUNTIME NOTE: the renderer shells out to python3 with faster-whisper +
+ * numpy/scipy/scikit-image/Pillow (scripts/wb_scribe_sync.py +
+ * scripts/whisper_align.py). The scripts are baked into the Trigger image via
+ * additionalFiles (trigger.config.ts) and the pip deps install lazily —
+ * castWhiteboardSync preflights ALL of it at $0 spend (src/lib/pydeps.ts).
  */
 import { join } from "node:path";
+import { spawn } from "node:child_process";
+import { writeFile } from "node:fs/promises";
 import { ConvexHttpClient } from "convex/browser";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
-import { makeRunTempDir, readBytes } from "@/lib/files";
-import { putObject } from "@/lib/storage";
+import { makeRunTempDir, readBytes, downloadTo } from "@/lib/files";
+import { putObject, getObjectBytes } from "@/lib/storage";
 import { castWhiteboardSync, hasWhiteboardSync } from "@/lib/whiteboardSync";
 import { bananaCounters } from "@/lib/banana";
 import { PRICE } from "@/engine/pricing";
@@ -51,6 +54,18 @@ async function recordAsset(ctx: StageContext, kind: string, r2Key: string, meta?
 
 /** Fallback per-video spend when counters are unavailable (art + Fish TTS). */
 const SCRIBE_COST = Number(process.env.WB_SYNC_COST_USD ?? 2.0);
+
+/** Minimal spawn helper (pattern: motionComic's run()) — logs stdout, collects stderr. */
+function run(cmd: string, args: string[], log: (msg: string) => void): Promise<void> {
+  return new Promise((resolve, reject) => {
+    const c = spawn(cmd, args, { stdio: ["ignore", "pipe", "pipe"] });
+    let err = "";
+    c.stdout.on("data", (d) => log(`${cmd}: ${d.toString().trim()}`));
+    c.stderr.on("data", (d) => (err += d.toString()));
+    c.on("error", reject);
+    c.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} ${args[0]} exited ${code}: ${err.slice(-400)}`))));
+  });
+}
 
 export const whiteboardScribe: Block = {
   id: "whiteboard_scribe",
@@ -98,15 +113,46 @@ export const whiteboardScribe: Block = {
     const scribeCost = genPro + genFlash > 0 ? artCost + 0.05 /* Fish TTS */ : SCRIBE_COST;
     ctx.log(`whiteboard_scribe: image spend ${genPro} pro + ${genFlash} flash ≈ $${scribeCost.toFixed(2)}`);
 
+    // MUSIC BED (P1-8): whiteboard-family pipelines generate a PAID music track
+    // upstream (musicKey/musicUrl) that this engine never consumed — the bed
+    // played in ZERO published videos. Read it straight from the store as an
+    // OPTIONAL input (deliberately NOT in `consumes`: pipelines without a music
+    // stage must still validate) and duck it under the narration. Failure is
+    // non-fatal — ship the narration-only video rather than lose the run.
+    let finalPath = res.outPath;
+    const musicKey = ctx.store["musicKey"] as string | undefined;
+    const musicUrl = ctx.store["musicUrl"] as string | undefined;
+    if (musicKey || musicUrl) {
+      try {
+        const bed = join(runDir, "bed.mp3");
+        // R2 copy wins (mastered mix, never expires); URL is the legacy fallback.
+        if (musicKey) await writeFile(bed, await getObjectBytes(musicKey));
+        else await downloadTo(musicUrl as string, bed);
+        const withMusic = join(runDir, "final_music.mp4");
+        // Loop the bed under the full narration, low (0.10) + normalize=0 so
+        // amix doesn't halve the narration; duration=first keeps the narration
+        // length authoritative; video stream copies untouched.
+        await run("ffmpeg", [
+          "-y", "-i", res.outPath, "-stream_loop", "-1", "-i", bed,
+          "-filter_complex", "[1:a]volume=0.10[m];[0:a][m]amix=inputs=2:duration=first:dropout_transition=2:normalize=0[a]",
+          "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-shortest", withMusic,
+        ], (m) => ctx.log(`wb: ${m}`));
+        finalPath = withMusic;
+        ctx.log(`whiteboard_scribe: music bed muxed under narration (${musicKey ? "musicKey" : "musicUrl"})`);
+      } catch (e) {
+        ctx.log(`whiteboard_scribe: music bed mux FAILED (keeping narration-only video): ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
-    await putObject(videoKey, await readBytes(res.outPath), { contentType: "video/mp4" });
+    await putObject(videoKey, await readBytes(finalPath), { contentType: "video/mp4" });
     const videoDurationSec = Math.round(res.durationMs / 1000);
     await recordAsset(ctx, "video", videoKey, { durationSec: videoDurationSec, engine: "whiteboard_scribe", panels: res.panels.length });
     ctx.log(`whiteboard_scribe ✓ → ${videoKey} (${videoDurationSec}s, ${res.panels.length} panels)`);
 
     return {
       videoKey,
-      videoLocalPath: res.outPath,
+      videoLocalPath: finalPath,
       videoDurationSec,
       narrationText: res.narrationText,
       [COST_PATCH_KEY]: scribeCost,

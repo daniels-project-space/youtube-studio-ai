@@ -22,7 +22,9 @@
  *      ffmpeg muxes the narration.
  *
  * Deps: GEMINI_API_KEY (storyboard + art), FISH_AUDIO_API_KEY (TTS), and python3
- * with whisper + numpy/scipy/scikit-image/Pillow on PATH (the renderer + aligner).
+ * with faster-whisper + numpy/scipy/scikit-image/Pillow (the renderer + aligner).
+ * A $0-spend preflight (src/lib/pydeps.ts) verifies python3 + the scripts +
+ * pip deps BEFORE any paid generation, so a broken worker fails immediately.
  * Pure of R2/Convex — the caller owns `runDir` and persistence.
  *
  *   import { castWhiteboardSync, hasWhiteboardSync } from "@/lib/whiteboardSync";
@@ -38,6 +40,7 @@ import { spawn } from "node:child_process";
 import { geminiJsonPro } from "@/lib/gemini";
 import { generateBananaImage } from "@/lib/banana";
 import { synthNarration } from "@/lib/tts";
+import { preflightPythonRenderer } from "@/lib/pydeps";
 
 type Logger = (msg: string) => void;
 
@@ -77,7 +80,7 @@ function clampBox(b: unknown): number[] {
   return Array.isArray(b) && b.length === 4 ? b.map(Number) : [0.1, 0.18, 0.8, 0.66];
 }
 
-async function styledScene(prompt: string, refB64: string): Promise<Buffer> {
+async function styledScene(prompt: string, refB64: string, refMime = "image/png"): Promise<Buffer> {
   // Line-art still conditioned on the channel's style-reference image (img2img).
   // An empty refB64 renders unconditioned — small keyword sketches skip the ref
   // (input images bill per call; the style prompt locks simple icons fine).
@@ -85,8 +88,34 @@ async function styledScene(prompt: string, refB64: string): Promise<Buffer> {
     prompt,
     aspectRatio: "16:9",
     imageSize: "2K",
-    images: refB64 ? [{ data: refB64, mimeType: "image/png" }] : undefined,
+    images: refB64 ? [{ data: refB64, mimeType: refMime }] : undefined,
   });
+}
+
+/**
+ * Self-anchor ref payload: a ≤1024px JPEG re-encode of an accepted scene PNG.
+ * The ref is re-sent as an INPUT image on every subsequent scene call (billed
+ * + uploaded per call) and only needs to carry STYLE, not 2K detail — a small
+ * JPEG does that at ~1/10 the payload. Falls back to the raw PNG when ffmpeg
+ * is unavailable (dev boxes without the baked binary).
+ */
+async function selfAnchorB64(pngPath: string): Promise<{ data: string; mime: string }> {
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const exec = promisify(execFile);
+    const out = pngPath.replace(/\.png$/i, "_ref.jpg");
+    if (!existsSync(out)) {
+      await exec(process.env.FFMPEG_PATH || "ffmpeg", [
+        "-y", "-i", pngPath,
+        "-vf", "scale='min(1024,iw)':'min(1024,ih)':force_original_aspect_ratio=decrease",
+        "-q:v", "3", "-frames:v", "1", out,
+      ]);
+    }
+    return { data: (await readFile(out)).toString("base64"), mime: "image/jpeg" };
+  } catch {
+    return { data: (await readFile(pngPath)).toString("base64"), mime: "image/png" };
+  }
 }
 
 async function pool<T>(items: T[], n: number, fn: (item: T) => Promise<void>): Promise<void> {
@@ -244,6 +273,15 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
   const brief = args.brief;
   if (!process.env.GEMINI_API_KEY) throw new Error("whiteboardSync: GEMINI_API_KEY missing");
   if (!process.env.FISH_AUDIO_API_KEY) throw new Error("whiteboardSync: FISH_AUDIO_API_KEY missing");
+  // $0-spend gate: verify python3 + the baked renderer/aligner scripts + pip
+  // deps BEFORE the storyboard/art/TTS spend. The render is the LAST step —
+  // without this, a worker missing the scripts burned the whole budget first.
+  await preflightPythonRenderer({
+    scripts: [join("scripts", "wb_scribe_sync.py"), join("scripts", "whisper_align.py")],
+    packages: ["numpy", "pillow", "scikit-image", "scipy", "faster-whisper"],
+    marker: ".ysa_wb_pydeps_ready",
+    log,
+  });
   await mkdir(args.runDir, { recursive: true });
 
   // 1. storyboard (cached → resumable reruns)
@@ -259,17 +297,25 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
 
   // 2. art layers (style-locked, no text, pure white)
   const refPath = join(ASSET_DIR, `${brief.styleId ?? "history"}_ref.png`);
-  const refB64 = existsSync(refPath) ? (await readFile(refPath)).toString("base64") : "";
+  const curatedB64 = existsSync(refPath) ? (await readFile(refPath)).toString("base64") : "";
+  // Mutable scene ref: starts as the curated style ref. Only "history" ships a
+  // curated reference — for any OTHER styleId every scene used to free-interpret
+  // the style prompt, drifting between simple-doodle and detailed-illustration
+  // across panels. Fix: SELF-ANCHOR (below) — the first accepted scene becomes
+  // the img2img style reference for all subsequent scenes.
+  let sceneRefB64 = curatedB64;
+  let sceneRefMime = "image/png";
   const artJobs: { p: NPanel; l: NLayer }[] = [];
   for (const p of panels) for (const l of p.layers) if (l.kind === "art") artJobs.push({ p, l });
-  await pool(artJobs, 3, async ({ p, l }) => {
+  const isSceneJob = (j: { l: NLayer }) => Number(j.l.box?.[2] ?? 0) >= 0.32;
+  const renderArt = async ({ p, l }: { p: NPanel; l: NLayer }) => {
     const fn = `art_${p.idx}_${p.layers.indexOf(l)}.png`;
     const out = join(args.runDir, fn);
     if (existsSync(out)) { l.art = fn; return; }            // cached (resumable)
-    const isScene = Number(l.box?.[2] ?? 0) >= 0.32;
+    const isScene = isSceneJob({ l });
     const prompt =
       `A whiteboard marker line-art ${isScene ? "SCENE" : "SKETCH"} on a PURE WHITE (#ffffff) background, nothing else, filling the frame with a small margin. ` +
-      (isScene && refB64
+      (isScene && sceneRefB64
         ? `CRITICAL: match the EXACT clean black marker line-art style and single stroke weight of the REFERENCE image (copy STYLE only). `
         : `CRITICAL: clean black marker line-art, a single consistent stroke weight throughout. `) +
       (isScene
@@ -280,13 +326,31 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
     try {
       // Style ref only for the hero SCENES — the 2-4 small sketches per panel
       // were re-sending the same ref PNG on every call (billed input images).
-      await writeFile(out, await styledScene(prompt, isScene ? refB64 : ""));
+      await writeFile(out, await styledScene(prompt, isScene ? sceneRefB64 : "", sceneRefMime));
       l.art = fn;
       log(`art ${fn} ✓`);
     } catch (e) {
       log(`art ${fn} skipped (${(e instanceof Error ? e.message : String(e)).slice(0, 70)})`); // 1 bad gen must not kill the run
     }
-  });
+  };
+  // SELF-ANCHOR: no curated ref → render the FIRST hero scene alone, then feed
+  // it back as the style reference for every remaining scene. Costs nothing
+  // extra (that scene rendered anyway) beyond serialising one image; the
+  // anchor's ≤1024px JPEG re-encode keeps the per-call ref payload small.
+  let anchorJob: { p: NPanel; l: NLayer } | undefined;
+  if (!curatedB64) {
+    anchorJob = artJobs.find(isSceneJob);
+    if (anchorJob) {
+      await renderArt(anchorJob);
+      if (anchorJob.l.art) {
+        const a = await selfAnchorB64(join(args.runDir, anchorJob.l.art));
+        sceneRefB64 = a.data;
+        sceneRefMime = a.mime;
+        log(`style: no curated ref for "${brief.styleId ?? "history"}" — self-anchoring scenes to ${anchorJob.l.art}`);
+      }
+    }
+  }
+  await pool(artJobs.filter((j) => j !== anchorJob), 3, renderArt);
 
   // 3. narration + alignment (cached → resumable)
   const mp3Path = join(args.runDir, "narration.mp3");

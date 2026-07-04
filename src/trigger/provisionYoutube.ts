@@ -91,7 +91,7 @@ export const provisionYoutubeTask = task({
       // Verify the callback actually stored a token for this channel.
       let linked = null as { ytTitle?: string; ytChannelId?: string } | null;
       for (let i = 0; i < 6; i++) {
-        const row = await convex.query(api.youtubeAuth.getForChannel, { channelId: appChannelId }).catch(() => null);
+        const row = await convex.query(api.youtubeAuth.getForChannel, { channelId: appChannelId, secret: process.env.INTERNAL_QUERY_SECRET ?? "" }).catch(() => null);
         if (row) { linked = { ytTitle: row.ytTitle ?? undefined, ytChannelId: row.ytChannelId ?? undefined }; break; }
         await new Promise((r) => setTimeout(r, 2500));
       }

@@ -12,7 +12,11 @@ import { architectPipeline } from "@/engine/creative/architect";
 import type { PipelineEntry } from "@/engine/types";
 import type { ShowBible, StyleDNA, QualityBar } from "@/engine/creative/types";
 
-/** Family KIND from the persisted template letter (channels don't store family). */
+/**
+ * LEGACY fallback only: template letter → family guess, for channels created
+ * before `family` was persisted (it collapses whiteboard/shorts/comic into
+ * narrated_stock — the reason family is now a stored field).
+ */
 function familyFromTemplate(template?: string): string {
   if (template === "C") return "music_loop";
   if (template === "E") return "sleep";
@@ -56,7 +60,12 @@ export const architectPipelineTask = task({
     } catch { /* evidence stays 0 — the architect will order repair */ }
 
     const arch = await architectPipeline({
-      family: familyFromTemplate((channel as { template?: string }).template),
+      // Persisted family is the source of truth; template letter is the
+      // legacy-row fallback. Operator hard rail (disabledBlocks) rides along
+      // so no later architect pass can re-add wizard-disabled modules.
+      family:
+        (channel as { family?: string }).family ??
+        familyFromTemplate((channel as { template?: string }).template),
       channelName: channel.name,
       niche: identity?.niche,
       persona: identity?.persona,
@@ -65,6 +74,7 @@ export const architectPipelineTask = task({
       bible: identity?.creativeBrief ?? null,
       qualityBar: bar,
       competitorCount,
+      disabledBlocks: (channel as { disabledBlocks?: string[] }).disabledBlocks ?? [],
       log,
     });
     if (!arch) return { ok: false, reason: "architect agent failed (floor kept)" };

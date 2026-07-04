@@ -16,7 +16,8 @@
  */
 import type { Block } from "@/engine/types";
 import { join } from "node:path";
-import { makeRunTempDir } from "@/lib/files";
+import { makeRunTempDir, readBytes } from "@/lib/files";
+import { putObject } from "@/lib/storage";
 import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { renderDataInsert } from "@/lib/remotionRender";
 
@@ -209,7 +210,7 @@ export const visualInserts: Block = {
     valid.sort((a, b) => a.sentenceIdx - b.sentenceIdx);
     const tmp = await makeRunTempDir(ctx.runId);
     const out: {
-      path: string; startSec: number; durSec: number; text: string;
+      path: string; key?: string; startSec: number; durSec: number; text: string;
       highlights: string[]; width: number; height: number; noBlur?: boolean;
     }[] = [];
     let lastEnd = -Infinity;
@@ -251,9 +252,15 @@ export const visualInserts: Block = {
           width: W,
           height: H,
         });
+        // RENDER-SPLIT CONTRACT: timeline_assemble runs on a SEPARATE worker —
+        // R2-back the webm and carry the key so the compose pass can restore it
+        // (a local-only path made every insert silently uncompositable there,
+        // which then tripped the "inserts missing" QA gate and a heal treadmill).
+        const key = `${ctx.keyPrefix}runs/${ctx.runId}/insert_${out.length}.webm`;
+        await putObject(key, await readBytes(path), { contentType: "video/webm" });
         // lower thirds composite WITHOUT the blur-under treatment (small badge,
         // footage stays fully visible behind it).
-        out.push({ path, startSec, durSec, text: it.title ?? it.kind, highlights: [], width: W, height: H, noBlur: it.kind === "lower_third" });
+        out.push({ path, key, startSec, durSec, text: it.title ?? it.kind, highlights: [], width: W, height: H, noBlur: it.kind === "lower_third" });
         lastEnd = startSec + durSec;
         ctx.log(`visual_inserts: ${it.kind} "${(it.title ?? "").slice(0, 40)}" @ ${startSec.toFixed(1)}s (${durSec}s)`);
       } catch (e) {

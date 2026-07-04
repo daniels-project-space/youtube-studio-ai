@@ -66,6 +66,27 @@ export const VISUAL_STYLE_PRESETS: Record<string, string> = {
   lofi: `${STATIC_CAMERA_POSITIVE}, ${LOFI_POSITIVE}`,
 };
 
+/* --------------------- indoor weather physics (legacy port) --------------------- */
+
+/**
+ * Port of the legacy NO_RAIN_INSIDE rule (src/lib/lofi.ts): image/i2v models
+ * love painting rain streaks OVER cozy interiors, and on a loop the defect
+ * repeats forever. When the scene text reads as indoor/covered, a HARD dryness
+ * clause is appended to BOTH the FLUX still prompt and the Kling motion prompt.
+ */
+export const NO_RAIN_INSIDE_CLAUSE =
+  " HARD RULE — the interior is COVERED and completely DRY: rain, snow, mist and wet surfaces may appear " +
+  "ONLY through the windows / outside the glass, over the distant street, city or garden. Absolutely NO " +
+  "raindrops, rain streaks, drips, puddles, fog or wet sheen on any interior surface — no rain rendered " +
+  "over or inside the room. It NEVER rains inside; every interior surface stays warm and bone dry.";
+
+/** Keyword heuristic: does the composed scene text describe an indoor space? */
+const INDOOR_SCENE_RE = /\b(room|apartment|interior|caf[eé]|indoors?|inside|bedroom|studio)\b/i;
+
+export function isIndoorScene(text: string): boolean {
+  return INDOOR_SCENE_RE.test(text);
+}
+
 /* ------------------------------ composers ------------------------------- */
 
 export interface KlingPromptInput {
@@ -111,7 +132,11 @@ export function composeKlingPrompt(input: KlingPromptInput): ComposedKlingPrompt
   const suffix = VISUAL_STYLE_PRESETS[input.visualStyle ?? ""] ?? "";
   if (suffix) parts.push(suffix);
 
-  const prompt = parts.join(". ");
+  // Indoor scene (detected across scene + style-grammar text, since the motion
+  // prompt alone often omits the setting) → hard NO-RAIN-INSIDE clause.
+  const indoor = isIndoorScene(parts.join(" "));
+  let prompt = parts.join(". ");
+  if (indoor) prompt += NO_RAIN_INSIDE_CLAUSE;
 
   const knownPreset =
     input.visualStyle !== undefined && input.visualStyle in VISUAL_STYLE_PRESETS;
@@ -119,6 +144,10 @@ export function composeKlingPrompt(input: KlingPromptInput): ComposedKlingPrompt
   const extra = (input.extraNegative ?? "").trim();
   if (extra) {
     negativePrompt = negativePrompt ? `${negativePrompt}, ${extra}` : extra;
+  }
+  if (indoor) {
+    const wet = "rain inside the room, indoor rain, rain overlay on the interior, wet interior surfaces, indoor puddles";
+    negativePrompt = negativePrompt ? `${negativePrompt}, ${wet}` : wet;
   }
 
   return { prompt, negativePrompt };
@@ -166,6 +195,9 @@ export function composeFluxPrompt(input: FluxPromptInput): string {
   if (cs) parts.push(cs);
   const clause = FLUX_STYLE_CLAUSE[input.visualStyle ?? ""];
   if (clause) parts.push(clause);
+  // Indoor scene → the still must be born dry (Flux paints rain over interiors
+  // regardless of tasteful prompting — the hard clause is the only fix).
+  if (isIndoorScene(parts.join(" "))) parts.push(NO_RAIN_INSIDE_CLAUSE.trim().replace(/\.$/, ""));
   parts.push(FLUX_QUALITY_SUFFIX);
   return parts.join(". ");
 }

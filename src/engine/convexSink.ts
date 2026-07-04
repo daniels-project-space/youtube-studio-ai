@@ -30,10 +30,10 @@ export function makeConvexSink(
     async getCompleted(runId) {
       const rows = (await client.query(api.runStages.listRunStages, {
         runId: runId as Id<"runs">,
-      })) as Array<{ block: string; status: string; outputs?: unknown }>;
+      })) as Array<{ block: string; status: string; outputs?: unknown; cost?: number }>;
       return (rows ?? [])
         .filter((r) => r.status === "ok" && r.outputs != null)
-        .map((r) => ({ block: r.block, outputs: r.outputs }));
+        .map((r) => ({ block: r.block, outputs: r.outputs, cost: r.cost }));
     },
   };
 }

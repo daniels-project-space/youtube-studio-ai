@@ -14,7 +14,8 @@
 import type { Block } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
 import { join } from "node:path";
-import { makeRunTempDir, downloadTo } from "@/lib/files";
+import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
+import { putObject } from "@/lib/storage";
 import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { generateFalFluxProImage, hasFalKey } from "@/lib/falImage";
 import { FAL_I2V_MODEL } from "@/lib/falVideo";
@@ -82,7 +83,11 @@ export async function generateSignatureClips(
 export const genFootage: Block = {
   id: "gen_footage",
   consumes: ["topic", "script"],
-  produces: ["footageClips"],
+  // footageKeys is part of the RENDER-SPLIT + RESUME contract (mirrors
+  // stock_footage): without R2 keys the render child could never restore the
+  // clips (guaranteed remote failure) and every resume/heal re-SPENT the whole
+  // generation (up to 24 paid i2v clips).
+  produces: ["footageClips", "footageKeys"],
   paid: true,
   run: async (ctx) => {
     if (!hasGeminiKey() || !hasFalKey()) {
@@ -171,8 +176,14 @@ export const genFootage: Block = {
     if (clips.length < 4) {
       throw new Error(`gen_footage: only ${clips.length}/${scenes.length} clips generated â€” failing loudly (no stock fallback)`);
     }
-    ctx.log(`gen_footage: ${clips.length} generated clip(s), ~$${cost.toFixed(2)}`);
-    return { footageClips: clips, [COST_PATCH_KEY]: cost };
+    const footageKeys: string[] = [];
+    for (let i = 0; i < clips.length; i++) {
+      const key = `${ctx.keyPrefix}footage/run/${ctx.runId}/gen_${i}.mp4`;
+      await putObject(key, await readBytes(clips[i]), { contentType: "video/mp4" });
+      footageKeys.push(key);
+    }
+    ctx.log(`gen_footage: ${clips.length} generated clip(s), ~$${cost.toFixed(2)} (R2-backed for the render child)`);
+    return { footageClips: clips, footageKeys, [COST_PATCH_KEY]: cost };
   },
 };
 
@@ -186,14 +197,21 @@ export const genFootage: Block = {
 export const signatureClipsBlock: Block = {
   id: "signature_clips",
   consumes: ["topic"], // also reads styleDNA from the store
-  produces: ["signatureClips"],
+  produces: ["signatureClips", "signatureKeys"],
   paid: true,
   run: async (ctx) => {
     const k = Math.max(0, Math.min(6, Number(ctx.params["count"] ?? ctx.params["signatureGenClips"] ?? 0)));
-    if (k <= 0) return { signatureClips: [], [COST_PATCH_KEY]: 0 };
+    if (k <= 0) return { signatureClips: [], signatureKeys: [], [COST_PATCH_KEY]: 0 };
     const sig = await generateSignatureClips(ctx, k);
+    // R2-back for resume: without keys, any retry/heal re-SPENT the generation.
+    const signatureKeys: string[] = [];
+    for (let i = 0; i < sig.clips.length; i++) {
+      const key = `${ctx.keyPrefix}footage/run/${ctx.runId}/sig_${i}.mp4`;
+      await putObject(key, await readBytes(sig.clips[i]), { contentType: "video/mp4" });
+      signatureKeys.push(key);
+    }
     ctx.log(`signature_clips: ${sig.clips.length} DNA-locked establishing shot(s) (~$${sig.cost.toFixed(2)})`);
-    return { signatureClips: sig.clips, [COST_PATCH_KEY]: sig.cost };
+    return { signatureClips: sig.clips, signatureKeys, [COST_PATCH_KEY]: sig.cost };
   },
 };
 

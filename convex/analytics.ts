@@ -139,16 +139,20 @@ export const ownerTrends = query({
       subscriberCount: number; subscriberDelta: number; totalViews: number;
       totalWatchHours: number; estimatedRevenueUsd: number;
     }> = [];
+    // Per-channel window: newest `days` rows straight off the (channelId, date)
+    // index instead of collecting each channel's full history. 365-day cap
+    // bounds the unwindowed call.
+    const window = args.days && args.days > 0 ? args.days : 365;
     for (const ch of channels) {
-      const rows = (
+      const sliced = (
         await ctx.db
           .query("channelAnalytics")
           .withIndex("by_channel_date", (q) => q.eq("channelId", ch._id))
-          .collect()
+          .order("desc")
+          .take(window)
       )
         .filter((r) => r.ownerId === args.ownerId)
-        .sort((a, b) => (a.date < b.date ? -1 : a.date > b.date ? 1 : 0));
-      const sliced = args.days && args.days > 0 ? rows.slice(-args.days) : rows;
+        .reverse(); // back to date asc
       for (const r of sliced) {
         out.push({
           date: r.date,
@@ -168,13 +172,13 @@ export const ownerTrends = query({
 
 /** Latest (most recent date) channelAnalytics row for a channel, or null. */
 async function latestChannelDay(ctx: QueryCtx, channelId: Id<"channels">) {
-  const rows = await ctx.db
+  // Index is (channelId, date) and date is YYYY-MM-DD, so desc-first IS the
+  // latest day — no need to collect the channel's entire history.
+  return await ctx.db
     .query("channelAnalytics")
     .withIndex("by_channel_date", (q) => q.eq("channelId", channelId))
-    .collect();
-  if (rows.length === 0) return null;
-  rows.sort((a, b) => (a.date < b.date ? 1 : a.date > b.date ? -1 : 0));
-  return rows[0];
+    .order("desc")
+    .first();
 }
 
 // ---------------------------- Mutations ----------------------------

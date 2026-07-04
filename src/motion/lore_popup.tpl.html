@@ -1,0 +1,75 @@
+<!doctype html><html><head><meta charset="utf8">
+<style>html,body{margin:0;background:#000;overflow:hidden}#c{display:block}</style>
+<script type="importmap">{ "imports": { "three":"https://unpkg.com/three@0.160.0/build/three.module.js" } }</script>
+</head><body><canvas id="c"></canvas>
+<script type="module">
+import * as THREE from "three";
+// LORECRAFT POP-UP — true GoT diorama: each painting is split into a CLEAN background
+// plate (figure removed + inpainted) placed FAR, and a solid figure CUTOUT placed NEAR,
+// with a big Z gap. An elegant camera (lateral truck + slow push + crane) makes the near
+// figure sweep against the far hall = large, CLEAN parallax (no streaks — the hall is whole).
+const renderer = new THREE.WebGLRenderer({ canvas: document.getElementById("c"), antialias: true });
+renderer.setClearColor(0x000000, 1);
+const scene = new THREE.Scene();
+let META = null, SCENES = [], pending = 0, CAM = null;
+const need = () => pending++;
+const fin = () => { pending--; if (pending <= 0 && META) window.__ready = true; };
+const texL = new THREE.TextureLoader();
+function loadTex(url) { need(); const t = texL.load(url, fin, undefined, fin); t.colorSpace = THREE.SRGBColorSpace; t.minFilter = THREE.LinearFilter; t.magFilter = THREE.LinearFilter; t.generateMipmaps = false; return t; }
+
+const D2R = Math.PI / 180;
+function card(texUrl, z, transparent) {
+  const fov = META.fov, halfH = Math.tan((fov * 0.5) * D2R) * META.oversize;
+  const fillDist = META.camEnd - z, h = 2 * fillDist * halfH, w = h * (16 / 9);
+  const geo = new THREE.PlaneGeometry(w, h);
+  const mat = new THREE.MeshBasicMaterial({ map: loadTex(texUrl), transparent: true, depthTest: false, depthWrite: false, opacity: 0 });
+  const m = new THREE.Mesh(geo, mat); m.position.z = z; m.frustumCulled = false; m.visible = false;
+  scene.add(m); return m;
+}
+function buildScene(s, si) {
+  const bg = card(s.bg, -META.bgZ, false);
+  const fg = card(s.fg, -META.fgZ, true);
+  bg.renderOrder = si * 4 + 0; fg.renderOrder = si * 4 + 1;
+  return { dur: s.dur, idx: si, layers: [bg, fg] };
+}
+
+function resize() {
+  const W = window.innerWidth || 1920, H = window.innerHeight || 1080;
+  renderer.setSize(W, H, false); renderer.setPixelRatio(1);
+  if (CAM) { CAM.aspect = W / H; CAM.updateProjectionMatrix(); }
+}
+window.addEventListener("resize", resize);
+fetch("lore_popup_meta.json").then((r) => r.json()).then((m) => {
+  META = m; CAM = new THREE.PerspectiveCamera(m.fov, (window.innerWidth || 1920) / (window.innerHeight || 1080), 0.1, 300);
+  resize(); SCENES = m.scenes.map(buildScene); window.__dur = m.total;
+  if (pending <= 0) window.__ready = true;
+});
+
+const ease = (x) => (x < 0.5 ? 4 * x * x * x : 1 - Math.pow(-2 * x + 2, 3) / 2);
+const smooth = (a, b, x) => { x = Math.min(1, Math.max(0, (x - a) / (b - a))); return x * x * (3 - 2 * x); };
+
+window.__frame = (tn) => {
+  if (!META || !CAM) return;
+  const T = tn * META.total, cf = META.cross;
+  let acc = 0, idx = 0, lt = 0;
+  for (let i = 0; i < META.scenes.length; i++) { const d = SCENES[i].dur; if (T < acc + d || i === META.scenes.length - 1) { idx = i; lt = (T - acc) / d; break; } acc += d; }
+  lt = Math.min(1, Math.max(0, lt));
+  for (let i = 0; i < SCENES.length; i++) {
+    let st = 0; for (let k = 0; k < i; k++) st += SCENES[k].dur; const en = st + SCENES[i].dur;
+    const fadeIn = i === 0 ? 1 : smooth(st - cf, st + cf, T);
+    const fadeOut = i === SCENES.length - 1 ? 1 : (1 - smooth(en - cf, en + cf, T));
+    const o = Math.min(fadeIn, fadeOut);
+    for (const m of SCENES[i].layers) { m.material.opacity = o; m.visible = o > 0.002; }
+  }
+  // elegant camera: lateral truck (main parallax driver) + slow push + gentle crane
+  const e = ease(lt), dir = idx % 2 === 0 ? 1 : -1;
+  const C = META.camStart + (META.camEnd - META.camStart) * e;
+  const x = dir * META.camAmpX * (e - 0.5) + Math.sin(T * 0.11) * 0.03;
+  const y = META.camStartY + (META.camEndY - META.camStartY) * e;
+  CAM.position.set(x, y, C);
+  CAM.lookAt(x * (1 - META.converge), y * (1 - META.converge), -100);
+  renderer.render(scene, CAM);
+};
+window.__settle = () => new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
+const kick = setInterval(() => { if (window.__ready) { clearInterval(kick); window.__frame(0); } }, 60);
+</script></body></html>

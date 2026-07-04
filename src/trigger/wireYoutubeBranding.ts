@@ -42,7 +42,7 @@ export const wireYoutubeBrandingTask = task({
     const channelId = payload.channelId as Id<"channels">;
     const [channel, auth] = await Promise.all([
       convex.query(api.channels.getChannel, { channelId }),
-      convex.query(api.youtubeAuth.getForChannel, { channelId }),
+      convex.query(api.youtubeAuth.getForChannel, { channelId, secret: process.env.INTERNAL_QUERY_SECRET ?? "" }),
     ]);
     if (!channel) return { ok: false, error: "channel not found" };
     if (!auth?.refreshToken || !auth.ytChannelId) {

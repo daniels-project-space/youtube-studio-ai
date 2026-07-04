@@ -16,8 +16,6 @@ import { PRICE } from "@/engine/pricing";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
 import { geminiJson, geminiVideo, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
-import { agentJson } from "@/agents/mastra";
-import { z } from "zod";
 import { existsSync } from "node:fs";
 import { copyFile } from "node:fs/promises";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
@@ -43,7 +41,8 @@ import {
   applyQuoteOverlays,
   applyOverlaysAndCaptions,
   assembleStructuredBody,
-  patchSegment,
+  measureAudio,
+  normalizeAudioOnly,
   grabFrame,
   kenBurns,
   burnCaptions,
@@ -528,6 +527,7 @@ export const narrationTts: Block = {
     // Fish Audio enforces a plan-level CONCURRENCY limit (pool of 6 â†’ instant
     // 429 "exceeded your current concurrency limit" â†’ failed render).
     const ttsPool = Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2));
+    let probeFailures = 0;
     const parts = await mapPool(sentences, ttsPool, async (s, i) => {
       // v3 continuity: neighbor conditioning kills the per-sentence "new take"
       // voice jump (the cause of jarring instant voice changes between lines).
@@ -541,7 +541,7 @@ export const narrationTts: Block = {
       const p = join(tmp, `sent_${i}.mp3`);
       await writeBytes(p, bytes);
       let dur = 0;
-      try { dur = (await probe(p)).durationSec; } catch { dur = Math.max(1, s.split(/\s+/).length / 2.5); }
+      try { dur = (await probe(p)).durationSec; } catch { probeFailures++; dur = Math.max(1, s.split(/\s+/).length / 2.5); }
       // Runaway-take guard (deterministic) — see chapter mode.
       const wcnt2 = s.split(/\s+/).filter(Boolean).length;
       if (dur > Math.max(12, wcnt2 * 1.3)) {
@@ -567,6 +567,19 @@ export const narrationTts: Block = {
       durationSec = (await probe(local)).durationSec;
     } catch {
       durationSec = cursor;
+    }
+    // TIMING SELF-CHECK: a failed per-sentence probe injected an ESTIMATED
+    // duration into the cumulative cursor, silently shifting every later
+    // caption/quote/insert sync point. When probes failed AND the real
+    // narration length disagrees with the cursor, rescale timings linearly to
+    // the measured truth instead of shipping drifted sync.
+    if (probeFailures > 0 && durationSec > 0 && Math.abs(durationSec - cursor) > 1.5) {
+      const k = durationSec / Math.max(0.1, cursor);
+      for (const t of sentenceTimings) {
+        t.start *= k;
+        t.end *= k;
+      }
+      ctx.log(`narration_tts: ${probeFailures} probe failure(s) — sentence timings rescaled ×${k.toFixed(4)} to the measured ${durationSec.toFixed(1)}s`);
     }
 
     const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
@@ -1163,7 +1176,14 @@ export const quoteOverlaysBlock: Block = {
       try {
         const path = join(tmp, `quote_${c.idx}.webm`);
         await renderQuoteOverlay({ quote: c.display, highlights: c.highlights, outPath: path, durationSec: c.dur, width: W, height: H });
-        out.push({ path, startSec: c.startSec, durSec: c.dur, text: c.display, highlights: c.highlights, width: W, height: H });
+        // RENDER-SPLIT CONTRACT: timeline_assemble runs on a SEPARATE worker, so
+        // a local-only path is unreachable there — that was the root cause of the
+        // "N quotes generated but 0 composited" heal treadmill (every heal re-ran
+        // on a machine that still lacked the files). R2-back each card and carry
+        // the key; the compose pass re-downloads what isn't local.
+        const key = `${ctx.keyPrefix}runs/${ctx.runId}/quote_${c.idx}.webm`;
+        await putObject(key, await readBytes(path), { contentType: "video/webm" });
+        out.push({ path, key, startSec: c.startSec, durSec: c.dur, text: c.display, highlights: c.highlights, width: W, height: H });
         ctx.log(`quote_overlays: "${c.display.slice(0, 50)}â€¦" @ ${c.startSec.toFixed(1)}s (${c.words}w, ${c.dur.toFixed(1)}s)`);
       } catch (e) {
         ctx.log(`quote_overlays: render failed for #${c.idx} (${e instanceof Error ? e.message : e})`);
@@ -1190,6 +1210,10 @@ export const timelineAssemble: Block = {
     "videoDurationSec",
     "quotesApplied",
     "insertsApplied",
+    "captionsApplied",
+    "captionCues",
+    "outroApplied",
+    "overlaysDropped",
     "preOverlayKey",
     "preOverlayLocalPath",
   ],
@@ -1254,8 +1278,23 @@ export const timelineAssemble: Block = {
     // instead of rebuilding the whole body: a ~40-min full re-compose becomes a
     // single ~4-min finishing encode. Footage/black/dead-air defects still get
     // the full rebuild (their fix lives in the body).
-    const healHintsRaw = (ctx.store["healHints"] as string[] | string | undefined) ?? [];
-    const healHints = (Array.isArray(healHintsRaw) ? healHintsRaw : [healHintsRaw]).join(" | ");
+    // healHints is a Record<blockId, string[]> (healer.ts) — the old read
+    // treated it as string[]/string, producing "[object Object]" and silently
+    // disabling the surgical heal FOREVER (every overlay heal paid the full
+    // ~40-min recompose). Read this block's own hints, tolerate legacy shapes.
+    const healHintsRaw = ctx.store["healHints"] as
+      | Record<string, string[]>
+      | string[]
+      | string
+      | undefined;
+    const healHintsArr: string[] = Array.isArray(healHintsRaw)
+      ? healHintsRaw.map(String)
+      : typeof healHintsRaw === "string"
+        ? [healHintsRaw]
+        : healHintsRaw && typeof healHintsRaw === "object"
+          ? (healHintsRaw["timeline_assemble"] ?? []).map(String)
+          : [];
+    const healHints = healHintsArr.join(" | ");
     const overlayClassHeal =
       healHints.length > 0 &&
       /overlay|caption|quote|insert|card text|outro text/i.test(healHints) &&
@@ -1268,7 +1307,9 @@ export const timelineAssemble: Block = {
         await writeBytes(prePath, preBytes);
         const preDur = (await probe(prePath)).durationSec || videoSec;
         ctx.log(`timeline_assemble: SURGICAL HEAL â€” re-finishing from pre-overlay (${preDur.toFixed(1)}s) instead of full rebuild. Hints: ${healHints.slice(0, 160)}`);
-        return await finishFromComposed(ctx, prePath, tmp, { W, H, introSec, videoSec: preDur });
+        // The pre-overlay video already contains the folded outro (it is the
+        // compose output), so outroApplied mirrors the original build.
+        return await finishFromComposed(ctx, prePath, tmp, { W, H, introSec, videoSec: preDur, outroApplied: tailSec >= 2 });
       } catch (e) {
         ctx.log(`timeline_assemble: surgical heal unavailable (${e instanceof Error ? e.message : e}) â€” full rebuild`);
       }
@@ -1372,6 +1413,38 @@ export const timelineAssemble: Block = {
       musicPath = await downloadTo(str(ctx, "musicUrl"), join(tmp, "music.mp3"));
     }
 
+    // DEFINED OUTRO â€” the script's closing line + channel sign-off, rendered
+    // BEFORE the compose and FOLDED into its single filter graph (xfade across
+    // the tail). The old post-hoc patchSegment path paid an ENTIRE second
+    // full-video x264 pass for a 3-second change, and its probe-based anchor
+    // was a standing drift risk. The xfade offset (total - tail) is exact in
+    // every mode because the compose graph itself defines the total.
+    let outroCardPath: string | undefined;
+    if (tailSec >= 2) {
+      try {
+        const sc = ctx.store["script"] as { closingLine?: string } | undefined;
+        // Neutral fallback â€” "Master your mind." was a stoic-channel default
+        // that leaked onto every channel without a closingLine.
+        const closing = (sc?.closingLine || "").trim() || "Until next time.";
+        const chName = (ctx.store["channelName"] as string | undefined) ?? "";
+        const oc = join(tmp, "outro.mp4");
+        await renderTitleCard({
+          title: closing,
+          subtitle: chName,
+          outPath: oc,
+          durationSec: tailSec,
+          width: W,
+          height: H,
+          bgImagePath: brandCardBg,
+          outro: true,
+        });
+        outroCardPath = oc;
+        ctx.log(`timeline_assemble: outro card ready — folded into the compose over the ${tailSec}s tail ("${closing}")`);
+      } catch (e) {
+        ctx.log(`timeline_assemble: outro card render failed (plain tail): ${e instanceof Error ? e.message : e}`);
+      }
+    }
+
     ctx.log(
       `timeline_assemble: compose intro ${introSec}s + narration ${narrationSec}s + ${tailSec}s tail â†’ ${videoSec}sâ€¦`,
     );
@@ -1394,52 +1467,14 @@ export const timelineAssemble: Block = {
       bodyMusicVol: Number(ctx.params["bodyMusicVol"] ?? 0.1026),
       // slower, gentler duck into/out of the narration bed
       musicDuckRampSec: Number(ctx.params["musicDuckRampSec"] ?? 4),
+      outroCardPath,
+      outroFadeInSec: 1.2,
     });
 
-    // DEFINED OUTRO â€” crossfade the footage into an outro card (the script's
-    // closing line + channel sign-off over the bust, fading to black) across the
-    // tail, so the video ends on a deliberate beat timed to the narration's end
-    // rather than footage drifting into a fade.
-    let composed = out;
-    if (tailSec >= 2) {
-      try {
-        const sc = ctx.store["script"] as { closingLine?: string } | undefined;
-        // Neutral fallback â€” "Master your mind." was a stoic-channel default
-        // that leaked onto every channel without a closingLine.
-        const closing = (sc?.closingLine || "").trim() || "Until next time.";
-        const chName = (ctx.store["channelName"] as string | undefined) ?? "";
-        const outroCard = join(tmp, "outro.mp4");
-        await renderTitleCard({
-          title: closing,
-          subtitle: chName,
-          outPath: outroCard,
-          durationSec: tailSec,
-          width: W,
-          height: H,
-          bgImagePath: brandCardBg,
-          outro: true,
-        });
-        const withOutro = join(tmp, "video_outro.mp4");
-        // Anchor the outro to the ACTUAL composed-body duration (probe it), NOT
-        // introSec+narrationSec. In chapter mode the chapter cards add time, so that
-        // computed offset drifts EARLY â€” it was dropping the outro mid-video (~52s)
-        // and overlaying the Chapter-2 card (the "missing chapter"). Probing the real
-        // body length makes the outro always land on the true tail, in every mode.
-        const bodyDur = (await probe(out)).durationSec || introSec + narrationSec + tailSec;
-        const outroStart = Math.max(0, bodyDur - tailSec);
-        await patchSegment(out, outroCard, outroStart, tailSec, withOutro, {
-          width: W,
-          height: H,
-          fadeInSec: 1.2,
-        });
-        composed = withOutro;
-        ctx.log(`timeline_assemble: outro card crossfaded over the ${tailSec}s tail at ${outroStart.toFixed(1)}s (body ${bodyDur.toFixed(1)}s, "${closing}")`);
-      } catch (e) {
-        ctx.log(`timeline_assemble: outro card failed (plain tail): ${e instanceof Error ? e.message : e}`);
-      }
-    }
-
-    return await finishFromComposed(ctx, composed, tmp, { W, H, introSec, videoSec });
+    return await finishFromComposed(ctx, out, tmp, {
+      W, H, introSec, videoSec,
+      outroApplied: Boolean(outroCardPath),
+    });
   },
 };
 
@@ -1455,22 +1490,79 @@ async function finishFromComposed(
   ctx: StageContext,
   composed: string,
   tmp: string,
-  o: { W: number; H: number; introSec: number; videoSec: number },
+  o: { W: number; H: number; introSec: number; videoSec: number; outroApplied?: boolean },
 ): Promise<Record<string, unknown>> {
   const { W, H, introSec, videoSec } = o;
   const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
   const footage = (ctx.store["footageClips"] as string[] | undefined) ?? [];
+  const tailSec = Number(ctx.params["tailSec"] ?? 3);
+  const bodyEnd = Math.max(0, videoSec - tailSec);
+
+  // MATERIALIZE every overlay on THIS worker + clamp to the body window.
+  // The render-split child (and any heal on a fresh machine) receives specs
+  // whose `path` points at another machine's tmp dir — the exact root cause of
+  // "N generated but 0 composited" → heal treadmill → failed run. Order:
+  // local file → re-download from the spec's R2 `key` → (quotes only)
+  // re-render from the spec text → DROP with a typed warning. Overlays are
+  // also clamped so none ever covers the outro-card tail window.
+  let overlaysDropped = 0;
+  const materialize = async (specs: QuoteOverlaySpec[], kind: string): Promise<QuoteOverlaySpec[]> => {
+    const ready: QuoteOverlaySpec[] = [];
+    for (let i = 0; i < specs.length; i++) {
+      const s = { ...specs[i] };
+      if (s.startSec >= bodyEnd - 1) {
+        overlaysDropped++;
+        ctx.log(`timeline_assemble: DROPPED ${kind} overlay @${s.startSec.toFixed(1)}s — inside the outro tail window`);
+        continue;
+      }
+      if (s.startSec + s.durSec > bodyEnd) s.durSec = Math.max(2, bodyEnd - s.startSec);
+      if (!existsSync(s.path) && s.key) {
+        try {
+          const p = join(tmp, `ovl_${kind}_${i}.webm`);
+          await writeBytes(p, await getObjectBytes(s.key));
+          s.path = p;
+        } catch (e) {
+          ctx.log(`timeline_assemble: ${kind} overlay R2 fetch failed (${e instanceof Error ? e.message : e})`);
+        }
+      }
+      if (!existsSync(s.path) && kind === "quote" && s.text) {
+        try {
+          const p = join(tmp, `ovl_rerender_${i}.webm`);
+          await renderQuoteOverlay({ quote: s.text, highlights: s.highlights ?? [], outPath: p, durationSec: s.durSec, width: s.width ?? W, height: s.height ?? H });
+          s.path = p;
+          ctx.log(`timeline_assemble: quote overlay re-rendered from spec on this worker`);
+        } catch (e) {
+          ctx.log(`timeline_assemble: quote re-render failed (${e instanceof Error ? e.message : e})`);
+        }
+      }
+      if (!existsSync(s.path)) {
+        overlaysDropped++;
+        ctx.log(`timeline_assemble: WARNING — ${kind} overlay unavailable on this worker (no local file, no restorable key) — DROPPED`);
+        continue;
+      }
+      ready.push(s);
+    }
+    return ready;
+  };
+  const quotes = await materialize((ctx.store["quoteOverlays"] as QuoteOverlaySpec[] | undefined) ?? [], "quote");
+  // Script-synced data-viz inserts (visual_inserts) ride the SAME alpha-
+  // compositing pass; FORGED modules (architect-authored) emit here too.
+  const inserts = await materialize((ctx.store["insertOverlays"] as QuoteOverlaySpec[] | undefined) ?? [], "insert");
+  const forgedOv = await materialize((ctx.store["extraOverlays"] as QuoteOverlaySpec[] | undefined) ?? [], "forged");
 
   let assPath: string | null = null;
   let cueCount = 0;
   let preparedCues: { startSec: number; endSec: number; text: string }[] = [];
-  const qoForWindows = (ctx.store["quoteOverlays"] as QuoteOverlaySpec[] | undefined) ?? [];
   if (ctx.params["burnCaptions"] !== false) {
     const capTimings = ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined;
     if (capTimings && capTimings.length > 0) {
       try {
         const pad = 0.2;
-        const qWindows = qoForWindows.map((q) => [q.startSec - pad, q.startSec + q.durSec + pad] as [number, number]);
+        const qWindows = quotes.map((q) => [q.startSec - pad, q.startSec + q.durSec + pad] as [number, number]);
+        // Captions must hide under EVERY overlay that draws in their region —
+        // quote cards AND data inserts AND forged overlays (inserts previously
+        // blurred/overdrew live captions: text on text).
+        const iWindows = [...inserts, ...forgedOv].map((q) => [q.startSec - pad, q.startSec + q.durSec + pad] as [number, number]);
         // Hide captions only while the chapter HEADING is actually read â€” NOT the
         // 3s silent pre/post gaps (no captions there anyway). Insetting by the
         // gaps stops the wide window from clipping adjacent narration captions.
@@ -1482,14 +1574,14 @@ async function finishFromComposed(
         )
           .map((w) => [w.start + preGap - 0.3, Math.max(w.start + preGap, w.end - postGap) + 0.3] as [number, number])
           .filter(([a, b]) => b > a);
-        const blocked = [...qWindows, ...cWindows];
+        const blocked = [...qWindows, ...iWindows, ...cWindows];
         const cues = captionCuesFromTimings(capTimings, introSec).filter(
           (c) => !blocked.some(([a, b]) => c.endSec > a && c.startSec < b),
         );
         cueCount = cues.length;
         preparedCues = cues;
         assPath = await writeCaptionsAss(cues, tmp, { width: W, height: H });
-        ctx.log(`timeline_assemble: ${cues.length} caption cue(s) prepared (hidden during ${qoForWindows.length} quote + ${cWindows.length} chapter card(s))`);
+        ctx.log(`timeline_assemble: ${cues.length} caption cue(s) prepared (hidden during ${quotes.length} quote + ${inserts.length + forgedOv.length} insert/forged + ${cWindows.length} chapter card(s))`);
       } catch (e) {
         ctx.log(`timeline_assemble: caption prep failed (non-fatal): ${e instanceof Error ? e.message : e}`);
       }
@@ -1499,21 +1591,18 @@ async function finishFromComposed(
   let finalVideo = composed;
   let quotesApplied = 0;
   let insertsApplied = 0;
-  const overlays = ctx.store["quoteOverlays"] as QuoteOverlaySpec[] | undefined;
-  // Script-synced data-viz inserts (visual_inserts) ride the SAME alpha-
-  // compositing pass â€” same spec shape, same blur-under treatment.
-  const inserts = (ctx.store["insertOverlays"] as QuoteOverlaySpec[] | undefined) ?? [];
-  // FORGED modules (architect-authored, interpreter-run) emit here — their
-  // media composites through this same proven pass.
-  const forgedOv = (ctx.store["extraOverlays"] as QuoteOverlaySpec[] | undefined) ?? [];
-  const allOverlays = [...(overlays ?? []), ...inserts, ...forgedOv].sort((a, b) => a.startSec - b.startSec);
+  let captionsApplied = false;
+  const allOverlays = [...quotes, ...inserts, ...forgedOv].sort((a, b) => a.startSec - b.startSec);
   if (allOverlays.length > 0 || assPath) {
     const finished = join(tmp, "video_finished.mp4");
     try {
       await applyOverlaysAndCaptions(composed, allOverlays, assPath, finished, { blurSigma: 20 });
       finalVideo = finished;
-      quotesApplied = overlays?.length ?? 0;
+      // HONEST counts: what actually entered the successful filter graph — not
+      // the planned totals (the QA feature-presence gate trusts these).
+      quotesApplied = quotes.length;
       insertsApplied = inserts.length;
+      captionsApplied = Boolean(assPath);
       ctx.log(`timeline_assemble: SINGLE-PASS finished â€” ${cueCount} caption cue(s) + ${quotesApplied} quote(s) + ${insertsApplied} insert(s) in one encode`);
     } catch (e) {
       ctx.log(`timeline_assemble: single-pass finish failed â€” sequential fallback: ${e instanceof Error ? e.message : e}`);
@@ -1523,12 +1612,13 @@ async function finishFromComposed(
           const capPath = join(tmp, "video_captioned.mp4");
           await burnCaptions(base, preparedCues, capPath, { tmpDir: tmp, width: W, height: H });
           base = capPath;
+          captionsApplied = true;
         }
         if (allOverlays.length > 0) {
           const withQuotes = join(tmp, "video_quotes.mp4");
           await applyQuoteOverlays(base, allOverlays, withQuotes, { blurSigma: 20 });
           base = withQuotes;
-          quotesApplied = overlays?.length ?? 0;
+          quotesApplied = quotes.length;
           insertsApplied = inserts.length;
         }
         finalVideo = base;
@@ -1538,6 +1628,19 @@ async function finishFromComposed(
         ctx.log(`timeline_assemble: ERROR overlay compositing FAILED (clean video): ${e2 instanceof Error ? e2.message : e2}`);
       }
     }
+  }
+
+  // FINAL LOUDNESS — audio-only measured linear loudnorm (video stream
+  // copied, no x264 pass). Shipped mixes previously carried whatever loudness
+  // the TTS/music happened to produce; this pins every video to one target.
+  try {
+    const norm = join(tmp, "video_norm.mp4");
+    const target = Number(ctx.params["targetLufs"] ?? -14);
+    await normalizeAudioOnly(finalVideo, norm, target);
+    finalVideo = norm;
+    ctx.log(`timeline_assemble: final mix loudness-normalized to ${target} LUFS (audio-only pass)`);
+  } catch (e) {
+    ctx.log(`timeline_assemble: loudnorm skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
   }
 
   const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
@@ -1561,17 +1664,21 @@ async function finishFromComposed(
     durationSec: videoSec,
     narrationSec,
     introSec,
-    quoteOverlays: overlays?.length ?? 0,
+    quoteOverlays: quotes.length,
     source: "stock_footage",
     clips: footage.length,
   });
-  ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${overlays?.length ?? 0})`);
+  ctx.log(`timeline_assemble ok: video ${videoSec}s (narration ${narrationSec}s, intro ${introSec}s, quotes ${quotesApplied}/${quotes.length}, captions ${captionsApplied ? cueCount : 0}, dropped overlays ${overlaysDropped})`);
   return {
     videoKey,
     videoLocalPath: finalVideo,
     videoDurationSec: videoSec,
     quotesApplied,
     insertsApplied,
+    captionsApplied,
+    captionCues: cueCount,
+    outroApplied: o.outroApplied ?? false,
+    overlaysDropped,
     preOverlayKey,
     // The composed body INCLUDING the outro â€” overlays re-apply on top of it.
     preOverlayLocalPath: preOverlayLocalPathOut,
@@ -1874,6 +1981,45 @@ export const qaVisual: Block = {
     if (insertsExpected > 0 && insertsApplied === 0) {
       critical.push(`data inserts missing: ${insertsExpected} rendered but 0 composited onto the video`);
     }
+    if (quotesExpected > 0 && quotesApplied > 0 && quotesApplied < quotesExpected) {
+      ctx.log(`qa_visual: PARTIAL overlays (advisory): ${quotesApplied}/${quotesExpected} quotes composited (rest dropped/unrestorable)`);
+    }
+    // CAPTIONS gate — a failed caption burn used to ship silently (the coverage
+    // metric is computed from timings arithmetic, not the rendered video, so it
+    // could never detect the miss). timeline_assemble now reports the truth.
+    const capCues = Number(ctx.store["captionCues"] ?? 0);
+    if (capCues > 0 && ctx.store["captionsApplied"] === false) {
+      critical.push(`captions missing: ${capCues} cues prepared but the burn failed`);
+    }
+    // INTRO/OUTRO presence — plan facts beat vision opinion: these are owned by
+    // deterministic pipeline flags, not the watcher's card claims (which stay
+    // advisory precisely because the watcher mis-called cards in live trials).
+    if (ctx.store["introApplied"] === false) {
+      critical.push("intro card missing: intro_card render failed upstream (introApplied=false)");
+    }
+    if (ctx.store["outroApplied"] === false && Number(ctx.params["tailSec"] ?? 3) >= 2) {
+      critical.push("outro card missing: outro render/compose failed (outroApplied=false)");
+    }
+    // DETERMINISTIC EARS — the gate QA never had. Integrated loudness of the
+    // final mix must land in a sane band, and when a music track was produced
+    // it must be AUDIBLE in the mix (an R2 key existing is not a mix): measure
+    // the narration-free intro window. null = unmeasurable = skip, never fail.
+    try {
+      const introW = Number(ctx.store["introSec"] ?? 0);
+      const ears = await measureAudio(video, {
+        windowStartSec: 0.5,
+        windowDurSec: introW >= 2.5 ? introW - 1 : 0,
+      });
+      if (ears.integratedLufs !== null && (ears.integratedLufs < -30 || ears.integratedLufs > -8)) {
+        critical.push(`audio loudness ${ears.integratedLufs.toFixed(1)} LUFS outside the sane band [-30,-8]`);
+      }
+      if (music.present && ears.windowMeanDb !== null && ears.windowMeanDb < -50) {
+        critical.push(`music missing from mix: intro-window mean ${ears.windowMeanDb.toFixed(1)} dB despite a produced music track`);
+      }
+      ctx.log(`qa_visual: ears — integrated ${ears.integratedLufs ?? "?"} LUFS, intro-window ${ears.windowMeanDb ?? "?"} dB`);
+    } catch (e) {
+      ctx.log(`qa_visual: audio meters skipped: ${e instanceof Error ? e.message : e}`);
+    }
     // 8) Critic (crew) VALIDATION SPEC â€” the per-video checklist this content must
     // pass. Deterministic assertions compare metrics we computed; vision ones are
     // judged on the sampled frames. A failed BLOCK-severity assertion fails QA;
@@ -1949,7 +2095,13 @@ export const qaVisual: Block = {
     }
 
     if (critical.length > 0) {
-      throw new Error(`qa_visual FAILED: ${critical.join(" | ")} | ${JSON.stringify(report)}`);
+      // Throw ONLY the critical list. The old throw appended the full JSON
+      // report, and the healer's regex rules then pattern-matched ADVISORY
+      // strings inside it (thumbnail critiques, watch notes) — superseding the
+      // wrong blocks and even tripping UNHEALABLE on non-gating text. The full
+      // report still reaches the run record via the log line below.
+      ctx.log(`qa_visual FAILED — full report (advisory context): ${JSON.stringify(report).slice(0, 4000)}`);
+      throw new Error(`qa_visual FAILED: ${critical.join(" | ")}`);
     }
     ctx.log("qa_visual PASS (per-artifact)", {
       video: video_.score,
