@@ -110,6 +110,14 @@ const HEAL_RULES: HealRule[] = [
     label: "thumbnail defect → regenerate thumbnail",
   },
   {
+    // The engine's own loud gate rejection (banana/fal judge) — the message
+    // never contains the word "thumbnail", so the rule above missed it and a
+    // fully rendered run died unhealed (observed live).
+    match: /both attempts failed the gate/i,
+    owner: "thumbnail_gen",
+    label: "thumbnail judge rejection → regenerate thumbnail",
+  },
+  {
     match: /seo score \d|title \d+ chars|description too (short|long)/i,
     owner: "metadata",
     label: "metadata defect → regenerate SEO",

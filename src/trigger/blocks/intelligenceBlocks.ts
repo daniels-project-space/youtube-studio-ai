@@ -958,6 +958,17 @@ export const thumbnailGen: Block = {
         await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook_belowbar", thumbnailTitle: title });
         return { thumbnailKey, strategy: "playbook_belowbar" };
       }
+      // NO-GOOGLE ROUTE DEGRADE: FLUX typography is measurably weaker than the
+      // banana engine at design-native text — when the fal route is active and
+      // the judge (rightly) rejects both attempts, a deterministic title card
+      // beats killing a run that already carries the full render spend
+      // (observed live: a $1.22 whiteboard run died here). Banana mode keeps
+      // the strict loud failure — its craft bar is the whole point.
+      if (process.env.IMAGE_DISABLE_GEMINI === "1" && /failed the gate/i.test(e instanceof Error ? e.message : String(e))) {
+        ctx.log(`thumbnail_gen: fal-route judge rejection (${e instanceof Error ? e.message.slice(0, 120) : e}) — degrading to the deterministic title card`);
+        const thumbnailKey = await titleCardFallback(ctx);
+        return { thumbnailKey, strategy: "title_card_fallback" };
+      }
       throw e;
     }
   },
