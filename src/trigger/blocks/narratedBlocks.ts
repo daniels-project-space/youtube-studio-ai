@@ -1261,7 +1261,28 @@ export const timelineAssemble: Block = {
     // Intro = title card over a music-only opener (no narration yet). Tail = a
     // few silent seconds past the narration, fading to black (clean ending, no
     // end text). So narration time < video time, by design.
-    const introCardPath = opt(ctx, "introCardPath"); // "" if the card render failed
+    let introCardPath = opt(ctx, "introCardPath"); // "" if the card render failed
+    // FLAG/VIDEO CONTRACT: when intro_card says applied=true, the card file
+    // MUST exist here — a greedy rehydrate once dropped the path on the render
+    // child, the video composed WITHOUT the card, and qa then trusted the flag
+    // (a card-less video shipped "introApplied=true"). Re-fetch from the R2
+    // key; still missing -> FAIL LOUD so the heal re-runs the lineage.
+    if (!introCardPath && ctx.store["introApplied"] === true) {
+      const icKey = ctx.store["introCardKey"] as string | undefined;
+      if (icKey) {
+        try {
+          const p2 = join(tmp, "introcard_refetch.mp4");
+          await writeBytes(p2, await getObjectBytes(icKey));
+          introCardPath = p2;
+          ctx.log("timeline_assemble: intro card re-fetched from R2 (local path was lost)");
+        } catch (e) {
+          ctx.log(`timeline_assemble: intro card re-fetch failed: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+      if (!introCardPath) {
+        throw new Error("timeline_assemble: introApplied=true but the intro card cannot be materialized (intro card missing: intro_card render failed upstream)");
+      }
+    }
     const introSec = introCardPath ? Number(ctx.store["introSec"] ?? 5) : 0;
     const tailSec = Number(ctx.params["tailSec"] ?? 3);
     const fadeOutSec = Number(ctx.params["fadeOutSec"] ?? 2);

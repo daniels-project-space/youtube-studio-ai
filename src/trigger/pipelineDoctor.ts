@@ -66,6 +66,25 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     const runs = await convex.query(api.runs.listRunsByChannel, { channelId: ch._id });
     const recent = runs.filter((r) => (r._creationTime ?? 0) > Date.now() - 3 * DAY);
 
+    // REAPER: a worker killed by SYSTEM_FAILURE/OOM leaves the Convex run
+    // "running" forever (the UI row spins, the scheduler thinks the channel is
+    // busy). Anything running >3h is dead — flip it failed, honestly labeled.
+    for (const r of recent) {
+      if (r.status === "running" && (r._creationTime ?? 0) < Date.now() - 3 * 3_600_000) {
+        try {
+          await convex.mutation(api.runs.updateRun, {
+            runId: r._id as Id<"runs">,
+            status: "failed",
+            finishedAt: Date.now(),
+            error: "reaped by pipeline-doctor: run stuck 'running' >3h (worker died: SYSTEM_FAILURE/OOM/timeout)",
+          });
+          failures.push({ channel: ch.name, runId: r._id, error: "reaped: stuck running >3h (worker died)", at: r._creationTime ?? 0 });
+          log(`reaper: flipped stuck run ${r._id} (${ch.name}) to failed`);
+        } catch (e) {
+          log(`reaper failed for ${r._id}: ${e instanceof Error ? e.message : e}`);
+        }
+      }
+    }
     for (const r of recent) {
       if (r.status === "failed") {
         failures.push({

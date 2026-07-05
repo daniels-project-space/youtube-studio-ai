@@ -223,6 +223,9 @@ function finishMetadata(
   tags = Array.from(new Set([...baseTags, ...tags, ...nicheTags].filter(notBanned))).slice(0, 30);
   if (tags.length === 0) tags = [title.toLowerCase()];
 
+  // ElevenLabs v3 [audio tags] are PERFORMED, never displayed — they leaked
+  // into a live public description ("[softly]" in the hook quote).
+  description = description.replace(/\[(?:softly|whispers?|pause|long pause|sighs?|exhales?|inhales? deeply|laughs?|chuckles?|seriously|slowly|thoughtful|curious|emphatic|excited|sarcastic|appalled|surprised)\]/gi, "").replace(/  +/g, " ");
   const chaptersText = ctx.store["chaptersText"] as string | undefined;
   if (chaptersText && chaptersText.trim()) description = `${description}\n\nChapters:\n${chaptersText}`;
   // TIMESTAMP HONESTY: the model sometimes writes template chapter stamps
