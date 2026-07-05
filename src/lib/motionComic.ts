@@ -40,6 +40,10 @@ export interface MotionComicBrief {
   topic: string;
   facts?: string;
   panels?: number;
+  /** Target spoken length (sec) — budgets per-panel words. The first live
+   *  render ran 75s against a 180s target because panels averaged ~9 spoken
+   *  seconds; the writer needs an explicit word budget, not vibes. */
+  targetSeconds?: number;
   style?: string;
   width?: number;
   height?: number;
@@ -166,6 +170,18 @@ async function probeDur(file: string): Promise<number> {
   return Math.max(0.4, (await ffprobeDuration(file)) || 1);
 }
 
+/** Mean luma (0-255) of an image — near-black art gate. */
+async function meanLuma(png: string): Promise<number> {
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const ex = promisify(execFile);
+    const { stderr } = await ex(process.env.FFMPEG_PATH || "ffmpeg", ["-i", png, "-vf", "signalstats,metadata=print", "-f", "null", "-"]);
+    const m = String(stderr).match(/YAVG:(\d+(?:\.\d+)?)/);
+    return m ? Number(m[1]) : 128;
+  } catch { return 128; }
+}
+
 async function genImage(prompt: string, refs: { data: string; mime: string }[]): Promise<Buffer> {
   // 4:3 comic panels, optionally conditioned on character-sheet refs (img2img).
   return generateBananaImage({
@@ -224,12 +240,23 @@ async function elevenDialogue(inputs: { text: string; voice_id: string }[]): Pro
 
 function storyPrompt(brief: MotionComicBrief, nPanels: number): string {
   const facts = brief.facts ? `\nSOURCE MATERIAL (stay accurate; this is a REAL story):\n${brief.facts}\n` : "";
+  // Spoken-word budget per panel (~2.6 w/s incl. bubble beats + tail gaps);
+  // without it the first live render spoke 75s against a 180s target.
+  const perPanelWords = brief.targetSeconds
+    ? Math.max(18, Math.round((brief.targetSeconds * 2.6) / Math.max(1, nPanels)))
+    : 0;
+  const lengthClause = perPanelWords
+    ? `LENGTH (hard requirement): each panel's lines must total ~${perPanelWords} spoken words: the narrator carries 2-4 vivid, flowing sentences per panel (never one clipped line); character bubbles stay short. Read aloud, the whole piece must run ~${brief.targetSeconds} seconds.
+
+`
+    : "";
   const cast = ROSTER.map((r) => `  ${r.id}  — ${r.name} (${r.g}): ${r.note}`).join("\n");
   return (
     `You are the writer + director of a COMIC-BOOK short. Topic: ${brief.topic}${facts}\n` +
     `Write a genuinely GOOD, COHERENT story across exactly ${nPanels} panels with a real dramatic arc: a strong hook, ` +
     `rising tension, a turn, and a resonant ending. It is narrated: a NARRATOR carries the through-line in vivid prose, and ` +
     `CHARACTERS speak short, in-scene lines that will appear as comic SPEECH BUBBLES. Make every panel advance the story.\n\n` +
+    lengthClause +
     `Cast the narrator + each character to ONE voice from this ElevenLabs roster (return the ID string):\n${cast}\n\n` +
     `Output STRICT JSON only:\n{\n` +
     `  "title":"...", "logline":"one line",\n` +
@@ -334,13 +361,27 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
     const who = p.characters.map((id) => plan.characters.find((c) => c.id === id)?.name).filter(Boolean).join(", ");
     const keep = refs.length ? ` KEEP the character(s) (${who}) IDENTICAL to the reference model-sheet(s): same face, hair, wardrobe, marks.` : "";
     const prompt = `A single ${p.shot.toUpperCase()} COMIC PANEL, ${style} 4:3 cinematic composition.${keep} Compose with some clean, UNCLUTTERED negative space (open sky, a plain wall, or empty ground) beside or above the main figure to leave room for a speech caption, and keep all faces away from the panel's extreme corners.\nPANEL: ${p.scene}`;
-    try { await writeFile(file, await genImage(prompt, refs)); log(`panel ${i} ✓ (${p.shot})`); }
+    // NEAR-BLACK GATE: a live "night" panel rendered as a solid black frame
+    // and the hand drew wedges of void. Retry well-lit; still black means
+    // failed art (the coverage floor decides the run's fate).
+    const litOrThrow = async (path: string) => {
+      if ((await meanLuma(path)) >= 14) return;
+      log(`panel ${i}: near-black art, one well-lit retry`);
+      await writeFile(path, await genImage(`${prompt}
+CRITICAL: the scene must be CLEARLY VISIBLE: moonlit/firelit if night, never a near-black frame.`, refs));
+      if ((await meanLuma(path)) < 14) {
+        const { unlink } = await import("node:fs/promises");
+        await unlink(path).catch(() => {});
+        throw new Error("panel art near-black after retry");
+      }
+    };
+    try { await writeFile(file, await genImage(prompt, refs)); await litOrThrow(file); log(`panel ${i} ✓ (${p.shot})`); }
     catch (e) {
       // ONE retry with a simplified prompt: a failed panel silently dropped
       // its narration from the final cut — a story hole nobody caught.
       log(`panel ${i} art failed (${e instanceof Error ? e.message : e}) — retrying simplified`);
       const simple = `A single COMIC PANEL, ${style}${keep}\nPANEL: ${p.scene}`;
-      try { await writeFile(file, await genImage(simple, refs)); log(`panel ${i} ✓ (retry)`); }
+      try { await writeFile(file, await genImage(simple, refs)); await litOrThrow(file); log(`panel ${i} ✓ (retry)`); }
       catch (e2) { log(`panel ${i} art FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); }
     }
   });
@@ -466,13 +507,23 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
   // 8. MUX narration (delayed by preroll) + ducked music → final
   const pre = `${PREROLL_MS}|${PREROLL_MS}`;
   if (musicPath) {
+    // normalize=0: amix's default 1/n scaling buried BOTH voice and bed (the
+    // first live render metered -25.3 LUFS integrated, music inaudible).
     await run("ffmpeg", ["-y", "-i", silent, "-i", narration, "-stream_loop", "-1", "-i", musicPath,
-      "-filter_complex", `[1:a]adelay=${pre}[n];[2:a]volume=0.15[m];[n][m]amix=inputs=2:duration=longest:dropout_transition=2[a]`,
+      "-filter_complex", `[1:a]adelay=${pre}[n];[2:a]volume=0.20[m];[n][m]amix=inputs=2:duration=longest:dropout_transition=2:normalize=0[a]`,
       "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-shortest", args.outPath], log);
   } else {
     await run("ffmpeg", ["-y", "-i", silent, "-i", narration, "-filter_complex", `[1:a]adelay=${pre}[a]`,
       "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-shortest", args.outPath], log);
   }
+  // Final measured loudnorm to -14 LUFS (audio-only, video copied).
+  try {
+    const { normalizeAudioOnly } = await import("@/lib/ffmpeg");
+    const norm = rd("final_norm.mp4");
+    await normalizeAudioOnly(args.outPath, norm, -14);
+    await run("ffmpeg", ["-y", "-i", norm, "-c", "copy", args.outPath], log);
+    log("mix loudness-normalized to -14 LUFS");
+  } catch (e) { log(`loudnorm skipped: ${e instanceof Error ? e.message : e}`); }
 
   const durationMs = Math.round((PREROLL_MS / 1000 + panelDur.reduce((a, b) => a + b, 0)) * 1000);
   // Script-equivalent for downstream blocks (metadata/compliance): every line

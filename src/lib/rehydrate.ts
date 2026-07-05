@@ -15,11 +15,17 @@ import { getObjectBytes } from "@/lib/storage";
 import { makeRunTempDir, writeBytes } from "@/lib/files";
 
 function isLocalPath(v: unknown): v is string {
+  // STRICT filesystem-path shape only. The old test (any non-URL string
+  // containing a slash) classified brief prose like "24/7" or "sun/rain" as
+  // local paths — whole cached stages were declared "not rehydratable" and
+  // re-RAN, re-billing paid TTS/music/footage on every resume (observed live
+  // on the meditation resume: $0.35 ElevenLabs re-spend for nothing).
   return (
     typeof v === "string" &&
-    v.length > 0 &&
-    !/^https?:\/\//i.test(v) &&
-    /[/\\]/.test(v)
+    v.length > 3 &&
+    v.length < 400 &&
+    !/\s/.test(v) &&
+    /^(?:[A-Za-z]:[\\/]|\/)/.test(v)
   );
 }
 

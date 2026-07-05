@@ -198,8 +198,11 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     const engineParams: Record<string, unknown> = {};
     if (fam.visualEngine === "motion_comic" && lenSec) {
       // ~22s of story per panel — a 3-min video plans ~8 panels (clamped 4-12
-      // by the block). Keeps "lengthMinutes" meaningful for comic channels.
+      // by the block). targetSeconds ALSO rides along: the engine budgets
+      // spoken words per panel from it (first live comic ran 75s for a 180s
+      // target because panels averaged ~9 spoken seconds).
       engineParams.panels = Math.max(4, Math.min(12, Math.round(lenSec / 22)));
+      engineParams.targetSeconds = lenSec;
     }
     if (fam.visualEngine === "whiteboard_scribe" && lenSec) {
       // The scribe sized itself from its own defaults (6 panels / 150 words ≈

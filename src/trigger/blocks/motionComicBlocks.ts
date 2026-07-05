@@ -99,7 +99,7 @@ export const motionComicBlock: Block = {
 
     const countersBefore = { ...bananaCounters };
     const res = await castMotionComic({
-      brief: { topic, facts, panels, style, width },
+      brief: { topic, facts, panels, style, width, targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined },
       runDir,
       outPath,
       log: (m) => ctx.log(`mc: ${m}`),

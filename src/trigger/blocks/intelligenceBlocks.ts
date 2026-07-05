@@ -225,6 +225,25 @@ function finishMetadata(
 
   const chaptersText = ctx.store["chaptersText"] as string | undefined;
   if (chaptersText && chaptersText.trim()) description = `${description}\n\nChapters:\n${chaptersText}`;
+  // TIMESTAMP HONESTY: the model sometimes writes template chapter stamps
+  // ("3:45", "7:00") straight into the description; a live 75s comic shipped
+  // chapters out to 7:00. Strip any line whose timestamp exceeds the runtime.
+  const realDur = Number(ctx.store["videoDurationSec"] ?? 0);
+  if (realDur > 0) {
+    const NL = String.fromCharCode(10);
+    description = description
+      .split(NL)
+      .filter((line) => {
+        const m = line.match(/(\d{1,2}):(\d{2})/);
+        if (!m) return true;
+        const ts = Number(m[1]) * 60 + Number(m[2]);
+        if (ts <= realDur + 5) return true;
+        ctx.log(`metadata: dropped phantom timestamp line "${line.slice(0, 60)}" (${ts}s > video ${realDur}s)`);
+        return false;
+      })
+      .join(NL)
+      .replace(/\n{3,}/g, NL + NL);
+  }
   const attributions = ctx.store["attributions"] as string[] | undefined;
   if (attributions && attributions.length) description = `${description}\n\nImage credits:\n${attributions.join("\n")}`;
   return { title, description, tags };

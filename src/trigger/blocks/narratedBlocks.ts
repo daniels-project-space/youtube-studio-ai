@@ -933,10 +933,13 @@ export const introCard: Block = {
         introMode: "prepend",
       };
     } catch (e) {
-      ctx.log(
-        `intro_card: !!! title-card render FAILED (${e instanceof Error ? e.message : e}) â€” continuing without a card`,
-      );
-      return { introCardPath: "", introCardKey: "", introApplied: false, introSec: 0, introMode: "none" };
+      // FAIL LOUD: qa_visual now hard-gates introApplied, so degrading to
+      // no-card guaranteed a downstream QA failure anyway - but WORSE, the
+      // "ok" stage got resume-CACHED, poisoning every retry with the degraded
+      // state (seen live: a worker missing @remotion/noise baked
+      // introApplied=false into the run forever). Fail loudly so retry/heal
+      // re-runs this cheap render on a healthy worker.
+      throw new Error(`intro_card: title-card render FAILED (${e instanceof Error ? e.message : e})`);
     }
   },
 };
