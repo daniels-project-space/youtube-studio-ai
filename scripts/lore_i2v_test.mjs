@@ -1,0 +1,17 @@
+import { writeFile, copyFile } from "node:fs/promises";
+import { join } from "node:path";
+import { bootstrapSecrets } from "../src/lib/bootstrap.ts";
+import { generateFalI2V } from "@/lib/falVideo";
+await bootstrapSecrets(()=>{}, { required: ["FAL_KEY"] });
+const RUN = join(process.cwd(),"output","lorecraft","moria2");
+const WEB = "/var/www/html/lorecraft";
+await copyFile(join(RUN,"scene_0c.png"), join(WEB,"i2v0.png"));
+const prompt = "Cinematic establishing shot, slow and epic. The CAMERA performs a large smooth dolly: it slowly pulls back and cranes upward through the vast dwarven hall, revealing the great carved stone columns receding into depth with strong 3D parallax, the foreground statue and figures gliding past. Atmospheric haze and drifting embers. The illustration is fixed pen-and-ink art; ONLY the camera moves through 3D space. Majestic, smooth, no cuts.";
+const neg = "static frame, no camera motion, characters walking, people moving, morphing, warping, melting, distortion, flicker, text, watermark";
+console.error("submitting kling i2v...");
+const r = await generateFalI2V({ imageUrl: "http://87.106.233.113/lorecraft/i2v0.png", prompt, negativePrompt: neg, durationSec: 10 });
+console.error("result:", r.model, r.url);
+const buf = Buffer.from(await (await fetch(r.url)).arrayBuffer());
+await writeFile(join(RUN,"i2v_s0.mp4"), buf);
+await copyFile(join(RUN,"i2v_s0.mp4"), join(WEB,"i2v_s0.mp4"));
+console.log("DONE i2v_s0.mp4", buf.length);

@@ -13,6 +13,7 @@ import { EDITOR_MODULE } from "@/lib/crew/editor";
 import { COMPOSER_MODULE } from "@/lib/crew/composer";
 import { DIRECTOR_MODULE } from "@/lib/crew/director";
 import { CRITIC_MODULE } from "@/lib/crew/critic";
+import { CINEMATOGRAPHER_MODULE } from "@/lib/crew/cinematographer";
 import { CORE_MODULE_SURFACES } from "./moduleSurfaces";
 
 export interface ModuleCard {
@@ -32,7 +33,8 @@ export const MODULE_REGISTRY: Record<string, ModuleCard> = {
   editor_brief: EDITOR_MODULE, // crew sub-module
   composer_brief: COMPOSER_MODULE, // crew sub-module
   director_brief: DIRECTOR_MODULE, // crew sub-module
-  critic_spec: CRITIC_MODULE, // crew sub-module (cinematographer → needs Visuals module)
+  critic_spec: CRITIC_MODULE, // crew sub-module
+  dp_brief: CINEMATOGRAPHER_MODULE, // crew sub-module (DP — shot coverage + planCoverage)
   // Core narrated-pipeline surfaces (Tier-2: script/narration/footage/intro/inserts/quotes).
   // ← add Guard, Thumbnail, music + topic_select (need a free-text Knob) as each gains a surface.
   ...Object.fromEntries(CORE_MODULE_SURFACES.map((m) => [m.key, m])),

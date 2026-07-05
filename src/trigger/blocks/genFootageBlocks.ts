@@ -20,6 +20,7 @@ import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { generateFalFluxProImage, hasFalKey } from "@/lib/falImage";
 import { FAL_I2V_MODEL } from "@/lib/falVideo";
 import { generateI2V } from "@/lib/i2v";
+import { planCoverage, defaultCinematographerConfig } from "@/lib/crew/cinematographer";
 import { COST_PATCH_KEY } from "@/engine/types";
 
 const STILL_COST = Number(process.env.FAL_FLUX_COST_USD ?? 0.04);
@@ -126,6 +127,18 @@ export const genFootage: Block = {
     const beats = (script?.sections ?? [])
       .map((s) => `${s.heading ?? ""}: ${(s.narration ?? "").slice(0, 160)}`)
       .slice(0, 24);
+    let scenes: { still?: string; motion?: string }[];
+    if (ctx.params["dpCoverage"]) {
+      // Cinematographer (DP) crew member: coverage-rich shot list (varied sizes,
+      // inserts, reactions, subject variety) instead of one-scene-per-beat push-ins.
+      const shots = await planCoverage({
+        script: script ?? { sections: [] },
+        cfg: defaultCinematographerConfig(),
+        styleLock, avoid, targetShots: maxClips, clipSec, log: ctx.log,
+      });
+      scenes = shots.map((sh) => ({ still: sh.keyframePrompt, motion: sh.i2vPrompt }));
+      ctx.log(`gen_footage: DP coverage → ${scenes.length} shots (${shots.filter((s) => !s.subjects.length).length} inserts/atmosphere)`);
+    } else {
     const planRaw = await geminiJson<{ scenes?: { still?: string; motion?: string }[] }>({
       prompt:
         `You are the SCENE DIRECTOR for a generated-visuals YouTube channel. Video: "${topic}".\n` +
@@ -142,7 +155,8 @@ export const genFootage: Block = {
       maxTokens: 3000,
       temperature: 0.6,
     });
-    const scenes = (planRaw.scenes ?? []).filter((s) => s.still && s.motion).slice(0, maxClips);
+    scenes = (planRaw.scenes ?? []).filter((s) => s.still && s.motion).slice(0, maxClips);
+    }
     if (scenes.length < 4) throw new Error(`gen_footage: scene director planned only ${scenes.length} scenes (need â‰¥4)`);
     ctx.log(`gen_footage: ${scenes.length} scenes planned (clip ${clipSec}s, i2v model ${FAL_I2V_MODEL})`);
 

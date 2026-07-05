@@ -1,0 +1,10 @@
+file /home/ubuntu/youtube-studio-ai/motion-graphics/out/craft/heist/seg_00.mp4
+file /home/ubuntu/youtube-studio-ai/motion-graphics/out/craft/heist/seg_01.mp4
+file /home/ubuntu/youtube-studio-ai/motion-graphics/out/craft/heist/seg_02.mp4
+file /home/ubuntu/youtube-studio-ai/motion-graphics/out/craft/heist/seg_03.mp4
+file /home/ubuntu/youtube-studio-ai/motion-graphics/out/craft/heist/seg_04.mp4
+file /home/ubuntu/youtube-studio-ai/motion-graphics/out/craft/heist/seg_05.mp4
+file /home/ubuntu/youtube-studio-ai/motion-graphics/out/craft/heist/seg_06.mp4
+file /home/ubuntu/youtube-studio-ai/motion-graphics/out/craft/heist/seg_07.mp4
+file /home/ubuntu/youtube-studio-ai/motion-graphics/out/craft/heist/seg_08.mp4
+file /home/ubuntu/youtube-studio-ai/motion-graphics/out/craft/heist/seg_09.mp4
