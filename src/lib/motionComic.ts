@@ -177,7 +177,12 @@ async function meanLuma(png: string): Promise<number> {
     const { promisify } = await import("node:util");
     const ex = promisify(execFile);
     const { stderr } = await ex(process.env.FFMPEG_PATH || "ffmpeg", ["-i", png, "-vf", "signalstats,metadata=print", "-f", "null", "-"]);
-    const m = String(stderr).match(/YAVG:(\d+(?:\.\d+)?)/);
+    // metadata=print emits "lavfi.signalstats.YAVG=12.3" (EQUALS, not colon) —
+    // the colon-only regex never matched, the gate silently never fired, and
+    // two pure-black panels shipped. Accept both separators; scan all frames
+    // and take the mean of the per-frame values.
+    const vals = [...String(stderr).matchAll(/YAVG[=:](\d+(?:\.\d+)?)/g)].map((x) => Number(x[1]));
+    const m = vals.length ? [null, String(vals.reduce((a, b) => a + b, 0) / vals.length)] : null;
     return m ? Number(m[1]) : 128;
   } catch { return 128; }
 }
