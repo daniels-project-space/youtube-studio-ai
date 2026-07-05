@@ -1271,7 +1271,7 @@ export const timelineAssemble: Block = {
       const icKey = ctx.store["introCardKey"] as string | undefined;
       if (icKey) {
         try {
-          const p2 = join(tmp, "introcard_refetch.mp4");
+          const p2 = join(await makeRunTempDir(ctx.runId), "introcard_refetch.mp4");
           await writeBytes(p2, await getObjectBytes(icKey));
           introCardPath = p2;
           ctx.log("timeline_assemble: intro card re-fetched from R2 (local path was lost)");
