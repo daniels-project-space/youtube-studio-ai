@@ -654,12 +654,37 @@ async function titleCardFallback(ctx: StageContext): Promise<string> {
     base = await downloadTo(baseUrl, join(tmp, "thumb_base.png"));
   } else {
     // No keyframe (narrated archetypes) — synthesise a base: Flux, else solid.
+    // BAKED-TEXT GUARD: FLUX ignores "no text" often enough that a live card
+    // shipped with a misspelled pseudo-headline ("conceptal") baked into the
+    // bg. Vision-check the base; one regen, then a solid color (a clean solid
+    // beats gibberish on the most-visible surface).
     try {
-      const fluxUrl = await generateFluxImage({
-        prompt: `cinematic background image for a video about "${topic}", no text, no words, no letters`,
-        aspectRatio: "16:9",
-      });
-      base = await downloadTo(fluxUrl, join(tmp, "thumb_base.png"));
+      const gen = async (extra = "") =>
+        downloadTo(
+          await generateFluxImage({
+            prompt: `cinematic background image for a video about "${topic}", empty negative space, ABSOLUTELY NO text, NO words, NO letters, NO typography, NO signage${extra}`,
+            aspectRatio: "16:9",
+          }),
+          join(tmp, "thumb_base.png"),
+        );
+      base = await gen();
+      try {
+        const { visionLocal } = await import("@/lib/vision");
+        const { parseJsonLoose } = await import("@/lib/gemini");
+        const check = async (p2: string) =>
+          parseJsonLoose<{ hasText?: boolean }>(
+            await visionLocal({
+              prompt: 'Does this image contain ANY visible text, letters, words, numbers or typography (even faint/stylized)? Return STRICT JSON {"hasText": boolean}.',
+              imagePaths: [p2],
+              json: true,
+              maxTokens: 60,
+            }),
+          ).hasText === true;
+        if (await check(base)) {
+          base = await gen(", plain textureless surfaces only");
+          if (await check(base)) base = await solidImage(join(tmp, "thumb_base.jpg"));
+        }
+      } catch { /* vision unavailable — keep the base */ }
     } catch {
       base = await solidImage(join(tmp, "thumb_base.jpg"));
     }
