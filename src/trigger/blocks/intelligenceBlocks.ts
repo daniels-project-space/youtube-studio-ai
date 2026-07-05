@@ -652,6 +652,21 @@ async function titleCardFallback(ctx: StageContext): Promise<string> {
   const baseUrl = (ctx.store["f1Url"] as string | undefined) ?? "";
   const tmp = await makeRunTempDir(ctx.runId);
   const outJpg = join(tmp, "thumbnail.jpg");
+  // ON-BRAND BG MEDIUM: an illustrative-only channel (comic) kept degrading to a
+  // PHOTOREAL fallback card that violated its own "illustrative only" playbook.
+  // Derive the card's art medium from the channel's style DNA / grammar so the
+  // fallback stays on-brand instead of always cinematic-photoreal.
+  const styleText = [
+    (ctx.store["styleGrammar"] as string | undefined) ?? "",
+    JSON.stringify((ctx.store["styleDNA"] as { visualStyle?: string; medium?: string } | null) ?? {}),
+    (ctx.store["family"] as string | undefined) ?? "",
+  ].join(" ").toLowerCase();
+  const medium =
+    /comic|graphic.?novel|illustrat|cartoon|anime|hand.?drawn|painterly|watercolou?r|ink/.test(styleText)
+      ? "illustrated graphic-novel"
+      : /whiteboard|chalk|sketch|doodle/.test(styleText)
+        ? "clean hand-drawn"
+        : "cinematic photographic";
   let base: string;
   if (baseUrl) {
     base = await downloadTo(baseUrl, join(tmp, "thumb_base.png"));
@@ -665,7 +680,7 @@ async function titleCardFallback(ctx: StageContext): Promise<string> {
       const gen = async (extra = "") =>
         downloadTo(
           await generateFluxImage({
-            prompt: `cinematic background image for a video about "${topic}", empty negative space, ABSOLUTELY NO text, NO words, NO letters, NO typography, NO signage${extra}`,
+            prompt: `${medium} background image for a video about "${topic}", empty negative space, ABSOLUTELY NO text, NO words, NO letters, NO typography, NO signage${extra}`,
             aspectRatio: "16:9",
           }),
           join(tmp, "thumb_base.png"),
@@ -987,6 +1002,10 @@ export const thumbnailGen: Block = {
         outJpg: bOut,
         expectWords: bananaLines.map((w) => w.text),
         imageStyle: dna?.colorGrade ?? undefined,
+        // The channel's own thumbnail text-rule → the judge grades the brand's
+        // bar (restrained/illustrative channels stop getting rejected for
+        // lacking clickbait punch).
+        styleRubric: dnaThumb?.textRule ?? undefined,
         title,
         log: ctx.log,
       });

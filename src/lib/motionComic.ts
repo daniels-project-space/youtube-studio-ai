@@ -70,7 +70,8 @@ const DEFAULT_NARRATOR = "JBFqnCBsd6RMkjVDRZzb";
 const DEFAULT_STYLE =
   "cinematic graphic-novel / comic-book art: bold confident ink line-art with strong black outlines, dramatic cel shading, " +
   "rich but moody colour, expressive faces, dynamic compositions, film-grain texture. ABSOLUTELY NO speech bubbles, NO " +
-  "captions, NO lettering, NO text of any kind anywhere in the image.";
+  "captions, NO lettering, NO text of ANY kind anywhere: no words, letters, numbers, signage, banners, book titles, " +
+  "posters, screen text, tattoos-as-words, or gibberish glyphs. Every sign, banner, book and label must be BLANK.";
 
 const ASSET_DIR = join(process.cwd(), "src", "assets", "whiteboard");
 const PREROLL_MS = 1700; // must match EST in mc_page_render.py
@@ -222,6 +223,48 @@ async function refImageB64(pngPath: string): Promise<{ data: string; mime: strin
   }
 }
 
+/**
+ * Combine several character sheets into ONE reference image (vertical stack).
+ * The fal FLUX Kontext route accepts a SINGLE reference, so multi-character
+ * panels dropped every character after the first (observed: a 2nd character's
+ * hair/wardrobe drifted). A single stacked sheet shows Kontext every appearing
+ * character in one ref. Gemini's multi-image route also accepts the combined
+ * sheet fine. Falls back to the first ref if ffmpeg is unavailable.
+ */
+async function combineRefs(
+  refs: { data: string; mime: string }[],
+  runDir: string,
+  tag: string,
+): Promise<{ data: string; mime: string }[]> {
+  if (refs.length < 2) return refs;
+  try {
+    const { execFile } = await import("node:child_process");
+    const { promisify } = await import("node:util");
+    const run = promisify(execFile);
+    const out = join(runDir, `refcombo_${tag}.jpg`);
+    if (!existsSync(out)) {
+      const paths: string[] = [];
+      for (let i = 0; i < refs.length; i++) {
+        const p = join(runDir, `refcombo_${tag}_${i}.${refs[i].mime.includes("png") ? "png" : "jpg"}`);
+        await writeFile(p, Buffer.from(refs[i].data, "base64"));
+        paths.push(p);
+      }
+      // Normalize widths, stack vertically (one column keeps each face large).
+      const inputs = paths.flatMap((p) => ["-i", p]);
+      const scale = paths.map((_, i) => `[${i}:v]scale=768:-1[s${i}]`).join(";");
+      const chain = paths.map((_, i) => `[s${i}]`).join("");
+      await run(process.env.FFMPEG_PATH || "ffmpeg", [
+        "-y", ...inputs,
+        "-filter_complex", `${scale};${chain}vstack=inputs=${paths.length}[o]`,
+        "-map", "[o]", "-q:v", "3", "-frames:v", "1", out,
+      ]);
+    }
+    return [{ data: (await readFile(out)).toString("base64"), mime: "image/jpeg" }];
+  } catch {
+    return refs; // ffmpeg missing → keep multi-ref (Gemini route still uses all)
+  }
+}
+
 /** ElevenLabs v3 Text-to-Dialogue — one or more (text, voice) lines → one mp3. */
 async function elevenDialogue(inputs: { text: string; voice_id: string }[]): Promise<Buffer> {
   const key = process.env.ELEVENLABS_API_KEY;
@@ -362,7 +405,13 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
   await pool(plan.panels, 3, async (p, i) => {
     const file = rd(`panel_${i}.png`);
     if (existsSync(file)) return;
-    const refs = p.characters.map((id) => sheetB64[id]).filter(Boolean);
+    // Multi-character panels: composite the appearing sheets into ONE ref so the
+    // single-ref fal Kontext route keeps EVERY character consistent (not just #1).
+    const refs = await combineRefs(
+      p.characters.map((id) => sheetB64[id]).filter(Boolean),
+      args.runDir,
+      `p${i}`,
+    );
     const who = p.characters.map((id) => plan.characters.find((c) => c.id === id)?.name).filter(Boolean).join(", ");
     const keep = refs.length ? ` KEEP the character(s) (${who}) IDENTICAL to the reference model-sheet(s): same face, hair, wardrobe, marks.` : "";
     const prompt = `A single ${p.shot.toUpperCase()} COMIC PANEL, ${style} 4:3 cinematic composition.${keep} Compose with some clean, UNCLUTTERED negative space (open sky, a plain wall, or empty ground) beside or above the main figure to leave room for a speech caption, and keep all faces away from the panel's extreme corners.\nPANEL: ${p.scene}`;

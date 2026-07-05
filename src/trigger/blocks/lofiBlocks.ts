@@ -67,7 +67,7 @@ import {
   readBytes,
   writeBytes,
 } from "@/lib/files";
-import { putObject, getObjectBytes, listObjects, deleteObjects, publicUrl } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes, listObjects, deleteObjects, publicUrl } from "@/lib/storage";
 import { join } from "node:path";
 import { access } from "node:fs/promises";
 import {
@@ -700,7 +700,7 @@ export const upscale: Block = {
     }
 
     const loopUnitKey = `${ctx.keyPrefix}runs/${ctx.runId}/loopunit_${resolution}.mp4`;
-    await putObject(loopUnitKey, await readBytes(finalLoopPath), {
+    await putObjectFromFile(loopUnitKey, finalLoopPath, {
       contentType: "video/mp4",
     });
     await recordAsset(ctx, "loop_unit", loopUnitKey, {
@@ -1001,7 +1001,7 @@ export const assemble: Block = {
     }
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
-    await putObject(videoKey, await readBytes(finalPath), { contentType: "video/mp4" });
+    await putObjectFromFile(videoKey, finalPath, { contentType: "video/mp4" });
     await recordAsset(ctx, "video", videoKey, {
       durationSec: videoDurationSec,
       introSec,
@@ -1231,7 +1231,7 @@ export const shortsSpinoff: Block = {
     await burnCaptions(raw, cues, final, { tmpDir: tmp, width: 1080, height: 1920 });
 
     const shortKey = `${ctx.keyPrefix}runs/${ctx.runId}/short.mp4`;
-    await putObject(shortKey, await readBytes(final), { contentType: "video/mp4" });
+    await putObjectFromFile(shortKey, final, { contentType: "video/mp4" });
     ctx.log(`shorts_spinoff: built 9:16 short (${durSec.toFixed(0)}s) → ${shortKey}`);
 
     // Upload as a YouTube Short (PRIVATE unless the param opts into public).

@@ -249,6 +249,14 @@ export async function watchRender(
       ? `- A title card WAS intended at the start. CONVENTION: the card deliberately shows a SHORT topic phrase, ` +
         `NOT the full SEO title — a short card title is CORRECT, only flag a BLANK/garbled card.\n`
       : "") +
+    // The "Title" above is the SEARCH-OPTIMIZED SEO title. Any on-screen text
+    // (title card, persistent header, drawn heading) intentionally shows the
+    // TOPIC/hook, which reads differently by design. A whiteboard render kept
+    // failing on a fabricated "drawn title ≠ SEO title" critical — the two are
+    // never meant to match.
+    `- IMPORTANT: NEVER report a defect because on-screen text (a header, title card, or drawn heading) differs ` +
+    `from the SEO "Title" above — that difference is INTENTIONAL and correct. Only flag on-screen text that is ` +
+    `blank, garbled, misspelled, or clearly about a DIFFERENT topic.\n` +
     `- ENDING CONVENTION: after the outro card the video fades to black over the final ~2s — near-black FINAL ` +
     `frames are correct; judge the outro by the frames a few seconds before the end.\n` +
     (intent.expectChapters ? `- Chapter cards are used — verify they are present, readable, and numbered in order.\n` : "") +

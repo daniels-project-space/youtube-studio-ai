@@ -16,7 +16,22 @@ DIR = TL["dir"]; FPS = int(TL.get("fps", 25))
 W = int(os.environ.get("WB_W", TL.get("width", 1920))); H = int(os.environ.get("WB_H", TL.get("height", 1080)))
 PRE = float(TL.get("prerollSec", 2.6))
 FRAME_PRE = min(1.2, PRE * 0.5)                          # frame draws first, then the header
-BOARD = (243, 241, 235); FRAME_COLOR = (62, 62, 68)
+
+def _hex(s, fallback):
+    try:
+        s = str(s).lstrip("#")
+        return (int(s[0:2], 16), int(s[2:4], 16), int(s[4:6], 16))
+    except Exception:
+        return fallback
+
+# BOARD SURFACE: default cream whiteboard; "chalk" mode paints the same line-art
+# as light chalk on a dark board (dark-academic channels). Colors come from the
+# timeline (channel palette); absent → the legacy cream/black look, unchanged.
+CHALK = TL.get("boardMode") == "chalk"
+BOARD = _hex(TL.get("board"), (26, 28, 35) if CHALK else (243, 241, 235))
+INK = _hex(TL.get("ink"), (240, 240, 240) if CHALK else (0, 0, 0))
+ACCENT = _hex(TL.get("accent"), (185, 32, 32))
+FRAME_COLOR = tuple(min(255, c + 60) for c in INK) if CHALK else (62, 62, 68)
 # pacing knobs (env-tunable)
 MIN_DRAW = float(os.environ.get("WB_MIN_DRAW", 0.9))      # s — no element pops
 MAX_DRAW = float(os.environ.get("WB_MAX_DRAW", 3.2))      # s
@@ -91,6 +106,14 @@ def raster_art(path, box):
     ox = min(max(0, BX + (BW - nw) // 2), W - nw); oy = min(max(0, BY + (BH - nh) // 2), H - nh)
     m = np.zeros((H, W), bool); m[oy:oy + nh, ox:ox + nw] = ink_r
     col = np.zeros((H, W, 3), np.uint8); col[oy:oy + nh, ox:ox + nw] = rgb_r
+    if CHALK:
+        # The art is black marker on white; on a dark board that reads as ink
+        # holes. Recolor every stroke to chalk INK, keeping red accents as ACCENT
+        # (source reddishness = the "red accent marks" the art prompt allows).
+        rr, gg, bb = rgb_r[..., 0].astype(np.int16), rgb_r[..., 1].astype(np.int16), rgb_r[..., 2].astype(np.int16)
+        reddish = (rr > 110) & (gg < 110) & (bb < 110)
+        recol = np.empty_like(rgb_r); recol[...] = INK; recol[reddish] = ACCENT
+        col[oy:oy + nh, ox:ox + nw] = np.where(ink_r[..., None], recol, 0)
     return m, col
 
 def raster_label(text, box, color):
@@ -106,7 +129,10 @@ def raster_label(text, box, color):
     tx = min(max(0, BX + (BW - tw) // 2 - l), W - tw - 1); ty = min(max(0, BY + (BH - th) // 2 - t), H - th - 1)
     d.text((tx, ty), text, fill=255, font=font)
     m = np.asarray(img) > 128
-    rgb = (185, 32, 32) if color == "red" else (40, 40, 46)
+    if CHALK:
+        rgb = ACCENT if color == "red" else INK
+    else:
+        rgb = (185, 32, 32) if color == "red" else (40, 40, 46)
     col = np.zeros((H, W, 3), np.uint8); col[m] = rgb
     return m, col
 

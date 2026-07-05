@@ -26,7 +26,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
 import { makeRunTempDir, readBytes, downloadTo } from "@/lib/files";
-import { putObject, getObjectBytes } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
 import { castWhiteboardSync, hasWhiteboardSync } from "@/lib/whiteboardSync";
 import { bananaCounters } from "@/lib/banana";
 import { PRICE } from "@/engine/pricing";
@@ -88,6 +88,17 @@ export const whiteboardScribe: Block = {
 
     const styleId = String(ctx.params["styleId"] ?? "history");
     const voiceId = String(ctx.params["voiceId"] ?? ctx.store["voiceId"] ?? "sleepless_historian");
+    // IDENTITY WIRING: the designer threads the channel's cast ElevenLabs voice
+    // + dark/chalk board mode + palette into these params (they used to be unset
+    // → every scribe rendered the light "history" marker style in a Fish default
+    // voice regardless of the channel's DNA and audition winner).
+    const ttsProvider = String(ctx.params["ttsProvider"] ?? ctx.store["ttsProvider"] ?? "fish");
+    const elevenVoiceId = ctx.params["elevenVoiceId"] as string | undefined;
+    const boardMode = (ctx.params["boardMode"] as "white" | "chalk" | undefined) ?? undefined;
+    const palette =
+      (ctx.params["palette"] as string[] | undefined) ??
+      (ctx.store["palette"] as string[] | undefined) ??
+      undefined;
     const width = Math.max(1280, Math.min(2560, Number(ctx.params["width"] ?? 1920)));
     const height = Math.round((width * 9) / 16);
     // LENGTH: the wizard's lengthMinutes never reached this engine — it sized
@@ -116,6 +127,9 @@ export const whiteboardScribe: Block = {
     const res = await castWhiteboardSync({
       brief: {
         topic, facts, styleId, header: visualBrief?.header, voiceId, width, height,
+        ...(ttsProvider === "elevenlabs" && elevenVoiceId ? { ttsProvider, elevenVoiceId } : {}),
+        ...(boardMode ? { boardMode } : {}),
+        ...(palette ? { palette } : {}),
         ...(panels ? { panels } : {}),
         ...(targetWords ? { targetWords } : {}),
       },
@@ -182,7 +196,7 @@ export const whiteboardScribe: Block = {
     }
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
-    await putObject(videoKey, await readBytes(finalPath), { contentType: "video/mp4" });
+    await putObjectFromFile(videoKey, finalPath, { contentType: "video/mp4" });
     const videoDurationSec = Math.round(res.durationMs / 1000);
     await recordAsset(ctx, "video", videoKey, { durationSec: videoDurationSec, engine: "whiteboard_scribe", panels: res.panels.length });
     ctx.log(`whiteboard_scribe ✓ → ${videoKey} (${videoDurationSec}s, ${res.panels.length} panels)`);

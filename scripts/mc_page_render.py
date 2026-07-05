@@ -111,9 +111,7 @@ def cover_into(img, w, h):
 
 
 # ---------------- bubbles ----------------
-def make_bubble(text, box_w, box_h):
-    fs = max(19, int(box_h * 0.068)); font = ImageFont.truetype(FONT_PATH, fs)
-    maxw = int(box_w * 0.78); dd = ImageDraw.Draw(Image.new("RGB", (4, 4)))
+def _wrap_lines(text, font, maxw, dd):
     words, lines, cur = text.split(), [], ""
     for wd in words:
         t = (cur + " " + wd).strip()
@@ -123,8 +121,26 @@ def make_bubble(text, box_w, box_h):
             lines.append(cur); cur = wd
     if cur:
         lines.append(cur)
-    lh = int(fs * 1.16); tw = max(int(dd.textlength(ln, font=font)) for ln in lines); th = lh * len(lines)
-    pad = int(fs * 0.55); bw, bh = tw + 2 * pad, th + 2 * pad
+    return lines
+
+
+def make_bubble(text, box_w, box_h):
+    dd = ImageDraw.Draw(Image.new("RGB", (4, 4)))
+    # FIT-TO-PANEL: the bubble MUST fit inside the panel with a margin, or the
+    # placement clamp pushes it off the edge (observed: text clipped mid-word at
+    # a panel border). Shrink the font until the rendered bubble fits both axes.
+    fit_w = int(box_w * 0.86); fit_h = int(box_h * 0.82)
+    fs = max(19, int(box_h * 0.068))
+    while True:
+        font = ImageFont.truetype(FONT_PATH, fs)
+        maxw = min(int(box_w * 0.74), fit_w - int(fs * 1.1))
+        lines = _wrap_lines(text, font, maxw, dd)
+        lh = int(fs * 1.16); pad = int(fs * 0.55)
+        tw = max(int(dd.textlength(ln, font=font)) for ln in lines); th = lh * len(lines)
+        bw, bh = tw + 2 * pad, th + 2 * pad
+        if (bw <= fit_w and bh <= fit_h) or fs <= 15:
+            break
+        fs -= 2                                              # too big → shrink and re-wrap
     img = Image.new("RGBA", (bw, bh), (0, 0, 0, 0)); dr = ImageDraw.Draw(img)
     dr.rounded_rectangle([0, 0, bw - 1, bh - 1], radius=int(fs * 0.7), fill=(255, 255, 255, 236), outline=INK, width=max(3, fs // 12))
     for k, ln in enumerate(lines):

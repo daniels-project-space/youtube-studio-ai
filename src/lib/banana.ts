@@ -334,10 +334,20 @@ export async function bananaThumbnail(args: {
   /** "flash" for plan-stage PREVIEW thumbnails (may never become videos);
    *  default "pro" — publish thumbnails keep the proven typography model. */
   tier?: "pro" | "flash";
+  /** Channel thumbnail text-rule (from Style DNA). When it signals a RESTRAINED
+   *  aesthetic (minimal/no baked hype text — comic "illustrative only",
+   *  whiteboard "anti-sensationalist"), the judge stops demanding clickbait
+   *  "punch" and grades the channel's own bar, so on-brand clean thumbnails no
+   *  longer get rejected 0-for-N into the fallback. */
+  styleRubric?: string;
   log?: (msg: string) => void;
 }): Promise<{ path: string; verdict: BananaVerdict }> {
   let fixNote = "";
   let lastVerdict: BananaVerdict = {};
+  // Restrained brands: relax the scroll-stopping "punch" floor and tell the
+  // judge NOT to penalize the absence of hype text.
+  const restrained = /minimal|no text|clean|understated|restrained|illustrat|no hype|anti.?sensational/i.test(args.styleRubric ?? "");
+  const punchFloor = restrained ? 5 : 7;
   for (let attempt = 0; attempt < 2; attempt++) {
     const bytes = await generateBananaImage({ prompt: args.brief + fixNote, allowText: true, tier: args.tier });
     await writeFile(args.outJpg, bytes);
@@ -346,7 +356,8 @@ export async function bananaThumbnail(args: {
       prompt:
         `THUMBNAIL GATE. 1. textOk: ${wordList ? `exact words ${wordList} fully visible, spelled exactly, ` : ""}` +
         `every visible word a correctly spelled real word? 2. faceClear: NO text covering any face or eyes? ` +
-        `3. punch 1-10 (scroll-stopping)? 4. styleMatch 1-10 vs "${args.imageStyle ?? "professional design"}"? ` +
+        `3. punch 1-10 (scroll-stopping)?${restrained ? " (this channel is deliberately RESTRAINED/illustrative — do NOT reward hype text or clickbait; a clean on-brand image scores well)" : ""} ` +
+        `4. styleMatch 1-10 vs "${args.styleRubric || args.imageStyle || "professional design"}"? ` +
         `5. storyMatch 1-10: image alone evokes the topic${args.title ? ` "${args.title}"` : ""}? ` +
         `(for analysis/essay/abstract topics, an ICONIC depiction of the subject matter IS the story - ` +
         `judge subject relevance, not literal plot illustration) ` +
@@ -371,7 +382,7 @@ export async function bananaThumbnail(args: {
     lastVerdict = v;
     const pass =
       v.textOk !== false && v.faceClear !== false && v.uiClean !== false &&
-      (v.punch ?? 10) >= 7 && (v.styleMatch ?? 10) >= 7 && (v.storyMatch ?? 10) >= 7;
+      (v.punch ?? 10) >= punchFloor && (v.styleMatch ?? 10) >= 7 && (v.storyMatch ?? 10) >= 7;
     if (pass) {
       args.log?.(`banana: render OK (punch ${v.punch ?? "?"}/10, style ${v.styleMatch ?? "?"}/10)`);
       return { path: args.outJpg, verdict: v };

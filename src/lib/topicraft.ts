@@ -195,6 +195,15 @@ export interface BetLint {
 
 const EVIDENCE_TAG = /^(outlier|search|reddit|competitor-gap|perf|identity):\s*(.{4,})$/i;
 
+/** Listicle / clickbait-format title shapes (number-led lists, "… Revealed", etc.). */
+export function looksListicle(title: string): boolean {
+  const t = (title ?? "").trim();
+  return (
+    /^\d+\s+(secrets?|things?|reasons?|ways?|facts?|rules?|signs?|lessons?|mistakes?|tips?|tricks?|hacks?|steps?|myths?)\b/i.test(t) ||
+    /\b(revealed|exposed|you won'?t believe|shocking|will shock you|gone wrong|top \d+|number \d+ will)\b/i.test(t)
+  );
+}
+
 /**
  * Deterministic bet lint — the measurable gates, enforced instead of asked
  * for. The citation check verifies the bet's evidence against the ACTUAL
@@ -213,6 +222,7 @@ export function lintBet(
     channelName?: string;
     allowHype?: boolean;
     isMusicNiche?: boolean;
+    topicPool?: string[];
   },
 ): BetLint {
   const issues: string[] = [];
@@ -228,6 +238,19 @@ export function lintBet(
   const visible = `${topic} ${bet.provisionalTitle} ${bet.angle}`.toLowerCase();
   for (const w of o.bannedWords) {
     if (w && visible.includes(w.toLowerCase())) issues.push(`contains banned term "${w}"`);
+  }
+
+  // OFF-VOICE FORMAT: a narrative/story channel (comic, documentary) kept
+  // getting listicle titles ("7 Secrets of … Revealed") lifted from competitor
+  // FORMATS. Derive the channel's own title voice from its pool: if NONE of the
+  // curated pool titles are listicle-shaped, a listicle bet is off-brand. Skips
+  // channels that legitimately list (allowHype / a listicle-flavored pool).
+  if (!o.allowHype) {
+    const pool = o.topicPool ?? [];
+    const poolListicle = pool.some(looksListicle);
+    if (pool.length >= 3 && !poolListicle && looksListicle(bet.provisionalTitle ?? "")) {
+      issues.push(`title uses a listicle/hype format the channel never uses ("${(bet.provisionalTitle ?? "").slice(0, 50)}")`);
+    }
   }
 
   // Stale CONTENT years ("best ETFs 2024") — subject-matter years (1597) pass.
@@ -396,7 +419,10 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
           `CHANNEL IDENTITY (hard guardrail — every bet MUST fit):\n` +
             `- niche: ${a.niche || "n/a"} | persona: ${a.persona || "n/a"}${a.styleGrammar ? ` | style: ${a.styleGrammar}` : ""}` +
             (doctrine ? `\n- voice archetype "${doctrine.voice}": every bet must sound like a video THIS channel would make` : "") +
-            (a.topicPool?.length ? `\n- example on-brand topics: ${a.topicPool.slice(0, 12).join("; ")}` : "") +
+            (a.topicPool?.length
+              ? `\n- the channel's PROVEN topic territory + TITLE VOICE (match this register — subject range AND phrasing): ${a.topicPool.slice(0, 12).join("; ")}` +
+                `\n- borrow only the ANGLE from outliers/competitors, NEVER their FORMAT: if the examples above are narrative/story titles, do NOT output listicle "N Secrets…", "…Revealed", "You won't believe" or number-led list titles`
+              : "") +
             (a.targetSeconds ? `
 - VIDEO LENGTH: ~${Math.round(a.targetSeconds / 60)} minute(s). Every bet MUST be fully answerable at that scope: one tight story/mechanism/question, NEVER a survey topic ("the complete history of X" is an automatic fail at this length).` : "") +
             (bannedWords.length ? `\n- NEVER use: ${bannedWords.join(", ")}` : ""),
@@ -452,6 +478,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
       const lint = lintBet(c, {
         evidence, perfContext: a.perfContext, identityGiven, bannedWords,
         avoidNorm, avoidTokens, keptTokens, channelName: a.channelName, allowHype, isMusicNiche,
+        topicPool: a.topicPool,
       });
       if (lint.pass) keptTokens.push(tokenSet(c.topic));
       return { ...c, lint };

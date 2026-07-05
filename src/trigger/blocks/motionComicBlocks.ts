@@ -24,7 +24,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
 import { makeRunTempDir, readBytes } from "@/lib/files";
-import { putObject } from "@/lib/storage";
+import { putObject, putObjectFromFile } from "@/lib/storage";
 import { castMotionComic, hasMotionComic } from "@/lib/motionComic";
 import { bananaCounters } from "@/lib/banana";
 import { PRICE } from "@/engine/pricing";
@@ -117,7 +117,7 @@ export const motionComicBlock: Block = {
     ctx.log(`motion_comic: image spend ${genPro} pro + ${genFlash} flash + ${genFal} fal ≈ $${comicCost.toFixed(2)}`);
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
-    await putObject(videoKey, await readBytes(res.outPath), { contentType: "video/mp4" });
+    await putObjectFromFile(videoKey, res.outPath, { contentType: "video/mp4" });
     const videoDurationSec = Math.round(res.durationMs / 1000);
     await recordAsset(ctx, "video", videoKey, { durationSec: videoDurationSec, engine: "motion_comic", panels: res.panels });
     ctx.log(`motion_comic ✓ → ${videoKey} (${videoDurationSec}s, ${res.panels} panels)`);

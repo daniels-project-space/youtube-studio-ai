@@ -54,12 +54,51 @@ function str(ctx: StageContext, key: string): string {
   return v;
 }
 
+/**
+ * SPOKEN-LINE compliance — the pre-engine compliance_check only sees the TOPIC;
+ * the actual narration/dialogue the self-scripting engines write (comic, sleep,
+ * whiteboard) was never policy-scanned. A benign topic ("Spartacus's revolt")
+ * can still yield lines that glorify violence, give real-world harm instructions,
+ * or otherwise risk advertiser-hostility/demonetization. This scans the words
+ * that will actually be SPOKEN and hard-fails clear violations. Degrades to a
+ * pass without a model key (the topic-level gate already ran).
+ */
+async function scanSpokenLines(text: string, log: (m: string) => void): Promise<void> {
+  if (!hasGeminiKey()) return;
+  try {
+    const out = await geminiJson<{ violation?: boolean; category?: string; reason?: string }>({
+      prompt:
+        `You are a YouTube advertiser-safety reviewer reading the SPOKEN NARRATION of a faceless video. ` +
+        `Flag ONLY clear policy violations in the words themselves: glorification/encouragement of violence or ` +
+        `self-harm, hateful/demeaning content toward a protected group, real actionable instructions for harm ` +
+        `(weapons, drugs, hacking), graphic sexual content, or dangerous misinformation stated as fact. ` +
+        `Historical/educational description of violence is NOT a violation unless it glorifies or instructs.\n\n` +
+        `NARRATION:\n"""${text.slice(0, 6000)}"""\n\n` +
+        `Return STRICT JSON {"violation":boolean,"category":string,"reason":string}.`,
+      maxTokens: 200,
+      temperature: 0.1,
+    });
+    if (out.violation === true) {
+      throw new Error(
+        `spoken-line compliance FAILED: ${out.category || "policy"} — ${out.reason || "the narration violates advertiser-safety policy"} (refusing to auto-publish)`,
+      );
+    }
+    log("originality_gate: spoken-line compliance PASS");
+  } catch (e) {
+    // A thrown compliance failure must propagate; a model/parse error must not.
+    if (e instanceof Error && e.message.startsWith("spoken-line compliance FAILED")) throw e;
+    log(`originality_gate: spoken-line scan skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
+  }
+}
+
 export const originalityGate: Block = {
   id: "originality_gate",
   consumes: ["narrationText"],
   produces: ["originalityOk", "maxSimilarity"],
   run: async (ctx) => {
     const text = str(ctx, "narrationText");
+    // Policy-scan the ACTUAL spoken lines (the pre-engine gate saw only the topic).
+    await scanSpokenLines(text, (m) => ctx.log(m));
     if (!hasEmbedKey()) {
       ctx.log("originality_gate: no GEMINI_API_KEY — skipping self-dedup");
       return { originalityOk: true, maxSimilarity: 0 };

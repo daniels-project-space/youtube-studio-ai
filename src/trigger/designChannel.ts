@@ -330,6 +330,17 @@ export const designChannelTask = task({
           : /meditat|sleep|hypnot|guided/.test(sStyle) ? "meditation"
           : /short|punchy|rapid/.test(sStyle) ? "shorts"
           : undefined;
+        // WHITEBOARD IDENTITY: a dark-academic/chalkboard channel should render
+        // chalk-on-dark in its own palette, not the light "history" marker
+        // default. Detect it from the styleGrammar + palette darkness and set the
+        // scribe's board mode; the cast voice is wired separately (post-audition).
+        const grammar = `${identity.styleGrammar ?? ""} ${styleDNA.recurringSubject ?? ""}`.toLowerCase();
+        const pal = (identity.palette ?? []) as string[];
+        const bgHex = (pal[0] ?? "").replace("#", "");
+        const bgDark = /^[0-9a-f]{6}$/i.test(bgHex)
+          ? (parseInt(bgHex.slice(0, 2), 16) + parseInt(bgHex.slice(2, 4), 16) + parseInt(bgHex.slice(4, 6), 16)) / 3 < 110
+          : false;
+        const wantsChalk = /chalk|blackboard|chalkboard|dark academic|dark-academic|noir/.test(grammar) || bgDark;
         const changed: string[] = [];
         const customizedBase = design.pipeline.map((e) => {
           const params: Record<string, unknown> = { ...(e.params ?? {}) };
@@ -342,6 +353,13 @@ export const designChannelTask = task({
             if (styleEnum && (params.style === undefined || params.style === "generic")) {
               params.style = styleEnum;
               changed.push(`script_gen.style=${styleEnum}`);
+            }
+          }
+          if (e.block === "whiteboard_scribe") {
+            if (params.palette === undefined && pal.length) params.palette = pal;
+            if (params.boardMode === undefined && wantsChalk) {
+              params.boardMode = "chalk";
+              changed.push("whiteboard_scribe.boardMode=chalk");
             }
           }
           return { block: e.block, params: Object.keys(params).length ? params : undefined };
@@ -539,12 +557,27 @@ export const designChannelTask = task({
       try {
         const chNow = await convex.query(api.channels.getChannel, { channelId });
         const pipe = (chNow?.pipeline ?? []) as PipelineEntry[];
+        const wired: string[] = [];
         const tts = pipe.find((e) => e.block === "narration_tts");
         const p = (tts?.params ?? {}) as Record<string, unknown>;
         if (tts && p["ttsProvider"] === "elevenlabs" && !p["elevenVoiceId"]) {
           tts.params = { ...p, elevenVoiceId: voiceCastingSlim.voiceId };
+          wired.push("narration_tts");
+        }
+        // The whiteboard scribe is a self-contained narrated engine — wire the
+        // SAME cast winner (it now supports an ElevenLabs path); without this the
+        // scribe always fell back to the Fish default even on a cast channel.
+        const scribe = pipe.find((e) => e.block === "whiteboard_scribe");
+        if (scribe) {
+          const sp = (scribe.params ?? {}) as Record<string, unknown>;
+          if (!sp["elevenVoiceId"]) {
+            scribe.params = { ...sp, ttsProvider: "elevenlabs", elevenVoiceId: voiceCastingSlim.voiceId };
+            wired.push("whiteboard_scribe");
+          }
+        }
+        if (wired.length) {
           await convex.mutation(api.channels.updateChannel, { channelId, pipeline: pipe });
-          log(`voiceCasting: narration_tts.elevenVoiceId wired to the cast winner (${voiceCastingSlim.name ?? voiceCastingSlim.voiceId})`);
+          log(`voiceCasting: cast winner (${voiceCastingSlim.name ?? voiceCastingSlim.voiceId}) wired into ${wired.join(" + ")}`);
         }
       } catch (e) { log(`voiceCasting runtime wire skipped: ${e instanceof Error ? e.message : e}`); }
     }

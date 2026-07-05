@@ -155,6 +155,33 @@ export async function putObject(
   return key;
 }
 
+/**
+ * Upload a file to R2 by STREAMING it from disk — the bytes never sit in app
+ * memory as one Buffer. `putObject(key, await readBytes(path))` buffered the
+ * whole render (300MB+ meditation finals) and OOM-killed the worker mid-upload
+ * (TASK_PROCESS_SIGTERM). Uses a plain read stream + ContentLength (from stat),
+ * so it needs no extra dependency and stays a single streamed PUT.
+ */
+export async function putObjectFromFile(
+  key: string,
+  filePath: string,
+  opts: PutOptions = {},
+): Promise<string> {
+  const { createReadStream } = await import("node:fs");
+  const { stat } = await import("node:fs/promises");
+  const size = (await stat(filePath)).size;
+  const command = new PutObjectCommand({
+    Bucket: getBucket(opts.bucket),
+    Key: key,
+    Body: createReadStream(filePath),
+    ContentLength: size,
+    ContentType: opts.contentType,
+    Metadata: opts.metadata,
+  });
+  await getR2Client().send(command);
+  return key;
+}
+
 /** List every object key under a prefix (handles pagination). */
 export async function listObjects(prefix: string, bucket?: string): Promise<string[]> {
   const client = getR2Client();

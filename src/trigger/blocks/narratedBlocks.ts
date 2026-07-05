@@ -25,7 +25,7 @@ import { sanitizeSpoken } from "@/lib/scriptGen";
 import { buildFootageQueries, castFootage, hasAnyFootageProvider, type FootageBrief } from "@/lib/footagecraft";
 import { searchWikimediaImage } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
-import { putObject, getObjectBytes, publicUrl } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes, publicUrl } from "@/lib/storage";
 import {
   hasAssemblyKey,
   transcribeWords,
@@ -757,11 +757,22 @@ export const stockFootage: Block = {
     if (clips.length === 0) throw new Error("stock_footage: no clips found for any query");
 
     // Persist the ids actually used (bounded) so they're never reused later.
+    // IDEMPOTENT per run: a resume/heal that re-queries footage used to APPEND a
+    // whole new clip-set to the cross-video ledger every time (one video bloated
+    // it to 125 ids). Remove THIS run's previous contribution before adding the
+    // new one, so re-runs replace rather than accumulate.
     try {
+      const contribKey = `${ctx.keyPrefix}footage/run/${ctx.runId}/picked.json`;
+      let priorContrib: string[] = [];
+      try {
+        priorContrib = JSON.parse(Buffer.from(await getObjectBytes(contribKey)).toString("utf8")) as string[];
+      } catch { /* first run of this id */ }
+      for (const id of priorContrib) usedIds.delete(id);
       for (const id of cast.pickedIds) usedIds.add(id);
       const ledger = Array.from(usedIds).slice(-3000);
       await putObject(ledgerKey, Buffer.from(JSON.stringify(ledger), "utf8"), { contentType: "application/json" });
-      ctx.log(`stock_footage: ledger updated -> ${ledger.length} used clip ids`);
+      await putObject(contribKey, Buffer.from(JSON.stringify(cast.pickedIds), "utf8"), { contentType: "application/json" });
+      ctx.log(`stock_footage: ledger updated -> ${ledger.length} used clip ids (this run: ${cast.pickedIds.length})`);
     } catch (e) {
       ctx.log(`stock_footage: ledger save failed (non-fatal): ${e instanceof Error ? e.message : e}`);
     }
@@ -1687,7 +1698,7 @@ async function finishFromComposed(
   }
 
   const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
-  await putObject(videoKey, await readBytes(finalVideo), { contentType: "video/mp4" });
+  await putObjectFromFile(videoKey, finalVideo, { contentType: "video/mp4" });
   // Persist the PRE-OVERLAY composed video (body + outro, NO captions/cards) so
   // the surgical heal can re-finish without re-rendering the whole timeline.
   // If the upload fails, BLANK the key+path: an advertised R2 key whose object
@@ -1892,6 +1903,18 @@ export const qaVisual: Block = {
         ].filter(Boolean);
         if (low.length) ctx.log(`qa_visual: LOW FEEL SCORES (ADVISORY): ${low.join(", ")} â€” ${watch.summary.slice(0, 120)}`);
       }
+    }
+    // THUMBNAIL-ONLY HEAL: when the self-heal that re-ran this block only touched
+    // the thumbnail, the VIDEO is byte-identical to the pass that already
+    // watched it — re-running the 12-frame vision watch is pure waste. Skip it
+    // (the thumbnail is still judged separately below).
+    const healOwners = Object.keys(
+      (ctx.store["healHints"] as Record<string, unknown> | undefined) ?? {},
+    );
+    const thumbnailOnlyHeal = healOwners.length > 0 && healOwners.every((k) => k === "thumbnail_gen");
+    if (!watch && thumbnailOnlyHeal) {
+      ctx.log("qa_visual: thumbnail-only heal — video unchanged, skipping the render watch (thumbnail still judged)");
+      watch = { ran: false, verdict: "pass", defects: [], framePaths: [], summary: "skipped (thumbnail-only heal — video unchanged)" };
     }
     if (!watch) {
       watch = await watchRender(video, p.durationSec, watchIntent, { runId: ctx.runId, log: ctx.log });

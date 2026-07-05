@@ -105,8 +105,14 @@ export const listVideos = query({
       const videoAsset = assets.find((a) => a.kind === "video");
       const thumbAsset = assets.find((a) => a.kind === "thumbnail");
 
-      // Finished = published (youtubeVideoId) OR has a rendered video asset.
-      const isFinished = Boolean(run.youtubeVideoId) || Boolean(videoAsset);
+      // A shippable video = published (youtubeVideoId) OR a rendered video from
+      // a run that did NOT fail. A FAILED run that only left an intermediate
+      // video asset (e.g. died at qa_visual after the engine uploaded a draft
+      // key) is a stranded orphan, not a video — it used to clutter the Library
+      // with duplicate rows (3 rows for 1 usable video). Published runs always
+      // show regardless of status.
+      const isFinished =
+        Boolean(run.youtubeVideoId) || (Boolean(videoAsset) && run.status !== "failed");
       if (!isFinished) continue;
 
       const channel = await getChannel(run.channelId);
@@ -164,6 +170,12 @@ export const listVideos = query({
         startedAt: run.startedAt,
         finishedAt: run.finishedAt,
         youtubeVideoId: run.youtubeVideoId,
+        // Fold the private-draft watch URL into the row so the Library can link
+        // straight to the uploaded draft (it used to be stranded in the
+        // upload_draft stage outputs, never surfaced to the UI).
+        watchUrl: run.youtubeVideoId
+          ? `https://www.youtube.com/watch?v=${run.youtubeVideoId}`
+          : undefined,
         channelId: run.channelId,
         channelName: channel?.name ?? "(unknown)",
         channelSlug: channel?.slug ?? "",

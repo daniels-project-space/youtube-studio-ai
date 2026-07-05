@@ -54,8 +54,21 @@ export interface WhiteboardSyncBrief {
   header?: string;
   /** Whiteboard style-lock ref id (src/assets/whiteboard/<id>_ref.png). Default "history". */
   styleId?: string;
-  /** Fish voice id (default "sleepless_historian"). */
+  /** Fish voice id (default "sleepless_historian") — used when provider is Fish. */
   voiceId?: string;
+  /** TTS engine: "fish" (default) | "elevenlabs". Lets a cast ElevenLabs voice narrate. */
+  ttsProvider?: string;
+  /** ElevenLabs voice id (when ttsProvider === "elevenlabs"). */
+  elevenVoiceId?: string;
+  /**
+   * Board surface: "white" (cream whiteboard, default) or "chalk" (dark
+   * chalkboard — dark-academic channels whose DNA demands chalk-on-dark). Chalk
+   * mode inverts the board to `palette[0]` and draws the same line-art in a
+   * light chalk ink instead of black marker.
+   */
+  boardMode?: "white" | "chalk";
+  /** Channel palette [bg, ink/light, accent, …] — drives chalk-mode colors. */
+  palette?: string[];
   /** Panel count (default 6) and total spoken words (default 150). */
   panels?: number;
   targetWords?: number;
@@ -355,7 +368,12 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
         ? `Draw a COMPOSED, designed scene: ${l.draw} — show the objects AND how they relate, clear and informative. `
         : `Draw a single bold iconic sketch of: ${l.draw}, instantly readable. `) +
       `(Context for tone, do NOT write any text: "${p.narration}".) Simple line-art, NOT photorealistic, no shading. ` +
-      `Use red for at most one or two accent marks. ABSOLUTELY NO text, words, numbers or letters anywhere. No watermark, NO whiteboard, NO frame, NO border, NO grey edges — pure white #ffffff background ONLY.`;
+      `Use red for at most one or two accent marks. ` +
+      // FLUX bakes faint pseudo-words into signage/labels/props even when asked
+      // for "no text" (observed: "PICHEE", "CLAN S3" on a drawn register). Name
+      // the failure modes explicitly and forbid the surfaces that invite them.
+      `STRICTLY NO text of any kind: no words, no letters, no numbers, no labels, no captions, no signage, no book titles, no logos, no watermarks, no handwriting, no gibberish glyphs. Leave every sign, book, screen, banner and label BLANK. ` +
+      `NO whiteboard, NO frame, NO border, NO grey edges — pure white #ffffff background ONLY.`;
     try {
       // Style ref only for the hero SCENES — the 2-4 small sketches per panel
       // were re-sending the same ref PNG on every call (billed input images).
@@ -389,8 +407,16 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
   const mp3Path = join(args.runDir, "narration.mp3");
   const wpath = join(args.runDir, "wwords.json");
   if (!existsSync(mp3Path)) {
-    log("TTS (Fish)…");
-    const mp3 = await synthNarration({ text: fullText, voiceId: brief.voiceId ?? "sleepless_historian", speed: 0.95 });
+    // Honor a cast ElevenLabs voice when the channel was cast one; else Fish.
+    // (The cast winner used to be dropped here — every scribe spoke the Fish
+    // default no matter the channel's audition result.)
+    const useEleven = brief.ttsProvider === "elevenlabs" && !!brief.elevenVoiceId;
+    log(useEleven ? `TTS (ElevenLabs ${brief.elevenVoiceId})…` : "TTS (Fish)…");
+    const mp3 = await synthNarration(
+      useEleven
+        ? { text: fullText, provider: "elevenlabs", elevenVoiceId: brief.elevenVoiceId }
+        : { text: fullText, voiceId: brief.voiceId ?? "sleepless_historian", speed: 0.95 },
+    );
     await writeFile(mp3Path, Buffer.from(mp3));
   } else log("TTS cached");
   if (!existsSync(wpath)) {
@@ -413,10 +439,20 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
     layers: p.layers.map((l) => ({ kind: l.kind, art: l.art, text: l.text, color: l.color, box: l.box, cueStartMs: (l as NLayer & { cueStartMs: number }).cueStartMs })),
   }));
   const header = brief.header ?? title.toUpperCase().slice(0, 40);
+  // CHALK MODE: dark-academic channels (styleGrammar chalkboard/dark) render the
+  // same line-art as light chalk on a dark board instead of black marker on
+  // cream. palette = [bg, ink/light, accent]. The python renderer reads these
+  // hex fields; absent/white mode keeps the legacy cream board untouched.
+  const chalk = brief.boardMode === "chalk";
+  const pal = brief.palette ?? [];
+  const board = chalk ? (pal[0] ?? "#1a1c23") : "#f3f1eb";
+  const ink = chalk ? (pal[1] ?? "#f0f0f0") : "#000000";
+  const accent = pal[2] ?? "#c0392b";
   const timeline = {
     title, header, headerBox: [0.14, 0.035, 0.72, 0.092], dir: args.runDir, audio: "narration.mp3",
     width: brief.width ?? 1920, height: brief.height ?? Math.round((brief.width ?? 1920) * 9 / 16),
     prerollSec: 2.6, fps: 25, audioEndMs: audioEnd, tailMs: 1800, panels: tlPanels,
+    boardMode: chalk ? "chalk" : "white", board, ink, accent,
   };
   const timelinePath = join(args.runDir, "timeline.json");
   await writeFile(timelinePath, JSON.stringify(timeline, null, 2), "utf8");

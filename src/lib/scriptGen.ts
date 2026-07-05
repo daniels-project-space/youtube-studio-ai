@@ -394,9 +394,9 @@ async function synthFullScriptOneShot(
         CRAFT_RULES,
         ARC_RULES,
         `TARGET LENGTH: about ${Math.round(maxSeconds / 60)} minutes of SPOKEN narration — roughly ${wordBudget} words ` +
-          `TOTAL. This is a HARD requirement: the script MUST total at least ${minWords} words across the sections. Do ` +
-          `NOT stop short — write the FULL length as 8-18 substantive sections, each developing a distinct idea in depth ` +
-          `(about 250-450 words each).`,
+          `TOTAL (between ${minWords} and ${Math.round(wordBudget * 1.1)} words — do NOT exceed the upper bound; an ` +
+          `over-length script overshoots its slot). Write the FULL length as 8-18 substantive sections, each developing ` +
+          `a distinct idea in depth (about 250-450 words each). Do NOT pad or stop short.`,
         `End with a CONCLUSION section that lands on a single, definitive closing sentence.`,
         `PLAIN SPOKEN text only — no markdown, asterisks, slashes, or bracketed cues. ` +
           `Return STRICT JSON {"sections":[{"heading":string,"narration":string}],"closing_line":string}.`,
@@ -444,6 +444,21 @@ async function synthFullScriptOneShot(
     if (sections.length < 3 || wordCount < Math.round(wordBudget * 0.8)) {
       log(`scriptGen one-shot (${model}): ${wordCount}/${wordBudget} words, ${sections.length} sections — under target, falling back to chunked`);
       return null;
+    }
+    // UPPER CAP: models over-write on expansive/calm styles (a 3-min meditation
+    // rendered ~4 min). length_check only guards the LOW end; trim trailing BODY
+    // sections (keep the opener + the conclusion) until within ~12% of budget so
+    // the ask is honored on the high end too. Generalizes to every family.
+    const overCap = Math.round(wordBudget * 1.12);
+    if (wordCount > overCap && sections.length > 3) {
+      const before = wordCount;
+      while (wordCount > overCap && sections.length > 3) {
+        // Drop the second-to-last body section (never the conclusion or opener).
+        const dropIdx = sections.length - 2;
+        const dropped = sections.splice(dropIdx, 1)[0];
+        wordCount -= dropped.narration.split(/\s+/).filter(Boolean).length;
+      }
+      log(`scriptGen one-shot (${model}): trimmed ${before}→${wordCount} words to honor the length ceiling (${overCap})`);
     }
     const hook = spoken(req, crafted.coldOpen);
     const closingLine = typeof o.closing_line === "string" ? sanitizeSpoken(o.closing_line).replace(/\s+/g, " ").trim().slice(0, 80) : "";
