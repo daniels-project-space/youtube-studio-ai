@@ -131,7 +131,10 @@ export const whiteboardScribe: Block = {
     const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd + genFal * PRICE.bananaFalUsd;
     // Include the fal route — the all-fal path used to book the flat $2 guess,
     // which alone ate a $2 channel budget and aborted the run after this block.
-    const scribeCost = genPro + genFlash + genFal > 0 ? artCost + 0.05 /* Fish TTS */ : SCRIBE_COST;
+    // ZERO deltas = the engine's disk caches served everything (heal/self-heal
+    // re-run on the same worker): booking the flat guess here charged $2.00 of
+    // PHANTOM spend and tripped the budget ceiling mid-heal (observed live).
+    const scribeCost = genPro + genFlash + genFal > 0 ? artCost + 0.05 /* Fish TTS */ : 0.05;
     ctx.log(`whiteboard_scribe: image spend ${genPro} pro + ${genFlash} flash + ${genFal} fal ≈ $${scribeCost.toFixed(2)}`);
 
     // MUSIC BED (P1-8): whiteboard-family pipelines generate a PAID music track

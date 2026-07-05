@@ -1940,11 +1940,24 @@ export const qaVisual: Block = {
     // fallback), so here it's ADVISORY â€” a single borderline clip must not nuke a
     // fully-rendered, paid video. SEO/identity are advisory too (logged).
     const critical: string[] = [];
+    // TITLE-CARD TRUCE: when the shipped thumbnail is the DELIBERATE
+    // deterministic title card (operator choice or the fal-route degrade), the
+    // vision judge's clickbait rubric must not gate it — it scored a clean,
+    // correctly-spelled card 2/10 and the heal loop then regenerated the SAME
+    // card to exhaustion (observed live: a finished $1.2 run died healing a
+    // cosmetic verdict about a card that was working as designed).
+    const thumbStrategy = String(ctx.store["strategy"] ?? "");
+    const thumbIsDeliberateCard =
+      thumbStrategy === "title_card_fallback" || String(ctx.store["thumbnailer"] ?? "") === "title_card";
     for (const [name, v] of [
       ["video", video_],
       ["thumbnail", thumbnail],
     ] as const) {
       if (!v.skipped && v.score < 4) {
+        if (name === "thumbnail" && thumbIsDeliberateCard) {
+          ctx.log(`qa_visual: thumbnail ${v.score}/10 on a deliberate title card (ADVISORY, not gating): ${v.issues.slice(0, 2).join("; ")}`);
+          continue;
+        }
         critical.push(`${name} score ${v.score}: ${v.issues.slice(0, 2).join("; ")}`);
       }
     }

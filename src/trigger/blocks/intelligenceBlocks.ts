@@ -664,7 +664,12 @@ async function titleCardFallback(ctx: StageContext): Promise<string> {
       base = await solidImage(join(tmp, "thumb_base.jpg"));
     }
   }
-  await titleCard({ basePath: base, outJpg, title: channelName, subtitle: topic });
+  // Card carries the VIDEO's short title (SEO title trimmed to a card-sized
+  // clause) with the channel as subtitle — the raw topic string clipped at
+  // both edges on a live comic card, and QA rightly called it unmatched.
+  const seoTitle = ((ctx.store["title"] as string | undefined) ?? topic ?? channelName).split(/[:|]/)[0].trim();
+  const cardTitle = seoTitle.length > 52 ? seoTitle.slice(0, 52).replace(/\s+\S*$/, "") : seoTitle;
+  await titleCard({ basePath: base, outJpg, title: cardTitle || channelName, subtitle: channelName });
   const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
   await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
   await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "title_card_fallback", thumbnailTitle: channelName });

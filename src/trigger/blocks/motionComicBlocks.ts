@@ -112,7 +112,8 @@ export const motionComicBlock: Block = {
     const genFlash = bananaCounters.flash - countersBefore.flash;
     const genFal = (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0);
     const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd + genFal * PRICE.bananaFalUsd;
-    const comicCost = genPro + genFlash + genFal > 0 ? artCost + 0.1 /* ElevenLabs + music */ : COMIC_COST;
+    // ZERO deltas = cached re-run (same phantom-cost class the whiteboard hit).
+    const comicCost = genPro + genFlash + genFal > 0 ? artCost + 0.1 /* ElevenLabs + music */ : 0.1;
     ctx.log(`motion_comic: image spend ${genPro} pro + ${genFlash} flash + ${genFal} fal ≈ $${comicCost.toFixed(2)}`);
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
