@@ -665,19 +665,6 @@ export const upscale: Block = {
     const targetFps = Number(ctx.params.targetFps ?? 30);
 
     const tmp = await makeRunTempDir(ctx.runId);
-    // Operator knob: targetResolution "native" = SKIP the paid Topaz pass and
-    // ship the native loop unit (a deliberate choice, not the failure degrade).
-    if (targetResolution === "native") {
-      const key0 = str(ctx, "loopRawKey");
-      ctx.log("upscale: targetResolution=native - Topaz skipped by config (native loop unit)");
-      return {
-        loopUnitKey: key0,
-        loopUnitUrl: String(ctx.store["loopRawUrl"] ?? ""),
-        loopUnitUpscaled: false,
-        loopUnitResolution: "native",
-        [COST_PATCH_KEY]: 0,
-      };
-    }
     // loop_clips stashed the local path in loopRawUrl; re-fetch from R2 on resume.
     const loopRawLocal = ctx.store["loopRawUrl"] as string | undefined;
     let loopUnit: string;
@@ -1038,6 +1025,11 @@ export const uploadDraft: Block = {
     const filePath = str(ctx, "videoLocalPath");
     const title = str(ctx, "title");
     let description = str(ctx, "description");
+    // LAST-HOP SANITIZE: performed [audio tags] must never reach a public
+    // surface — a resume once shipped a CACHED pre-sanitize description
+    // ("[softly]" in the hook quote) straight to a YouTube draft. The upload
+    // is the final gate, so it strips regardless of upstream cache state.
+    description = description.replace(/\[(?:softly|whispers?|pause|long pause|sighs?|exhales?|inhales? deeply|laughs?|chuckles?|seriously|slowly|thoughtful|curious|emphatic|excited|sarcastic|appalled|surprised)\]/gi, "").replace(/ {2,}/g, " ");
     const tags = (ctx.store["tags"] as string[]) ?? [];
 
     // AUTO-CHAPTERS (metacraft.buildChapters): the chapterPlan knows exactly

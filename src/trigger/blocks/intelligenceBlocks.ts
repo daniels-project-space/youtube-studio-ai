@@ -696,7 +696,7 @@ async function titleCardFallback(ctx: StageContext): Promise<string> {
   // clause) with the channel as subtitle — the raw topic string clipped at
   // both edges on a live comic card, and QA rightly called it unmatched.
   const seoTitle = ((ctx.store["title"] as string | undefined) ?? topic ?? channelName).split(/[:|]/)[0].trim();
-  const cardTitle = seoTitle.length > 40 ? seoTitle.slice(0, 40).replace(/\s+\S*$/, "") : seoTitle;
+  const cardTitle = seoTitle.length > 34 ? seoTitle.slice(0, 34).replace(/\s+\S*$/, "") : seoTitle;
   await titleCard({ basePath: base, outJpg, title: cardTitle || channelName, subtitle: channelName });
   const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
   await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
