@@ -97,9 +97,10 @@ export const whiteboardScribe: Block = {
     // pacing incl. draw holds) + one panel per ~22s.
     const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
     const panels = targetSeconds > 0 ? Math.max(4, Math.min(16, Math.round(targetSeconds / 22))) : undefined;
-    // Measured on the live probe: Fish narration ran ~3.1 spoken w/s — the 2.1
-    // guess shipped a 2-min video for a 3-min target. 2.6 leaves pause/draw air.
-    const targetWords = targetSeconds > 0 ? Math.round(targetSeconds * 2.6) : undefined;
+    // Calibrated on TWO live renders: Fish speaks the scribe scripts at
+    // ~3.7-3.9 w/s (468 words -> ~120s narration). 3.1 w/s budgets words so
+    // narration + draw-holds lands ~95% of target instead of -30%.
+    const targetWords = targetSeconds > 0 ? Math.round(targetSeconds * 3.1) : undefined;
     if (targetSeconds > 0) {
       ctx.log(`whiteboard_scribe: sized to ~${targetSeconds}s → ${panels} panels / ~${targetWords} words`);
     }
@@ -162,6 +163,19 @@ export const whiteboardScribe: Block = {
       } catch (e) {
         ctx.log(`whiteboard_scribe: music bed mux FAILED (keeping narration-only video): ${e instanceof Error ? e.message : e}`);
       }
+    }
+
+    // FINAL LOUDNESS: the scribe mux shipped at ~-22 LUFS (quiet vs YT's -14
+    // renorm). Audio-only measured loudnorm, video stream copied — same pass
+    // the narrated assembler runs. Non-fatal on failure.
+    try {
+      const { normalizeAudioOnly } = await import("@/lib/ffmpeg");
+      const norm = join(runDir, "final_norm.mp4");
+      await normalizeAudioOnly(finalPath, norm, -14);
+      finalPath = norm;
+      ctx.log("whiteboard_scribe: final mix loudness-normalized to -14 LUFS");
+    } catch (e) {
+      ctx.log(`whiteboard_scribe: loudnorm skipped (non-fatal): ${e instanceof Error ? e.message : e}`);
     }
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
