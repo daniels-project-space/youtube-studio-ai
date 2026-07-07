@@ -13,6 +13,7 @@ import { hydrateEnv } from "@/lib/vault";
 
 const SERVICES = [
   "cloudflare", // R2_*
+  "salad", // SALAD_API_KEY, SALAD_LTX_GATEWAY, SALAD_R2_*, SALAD_LTX_WORKFLOW_JSON (LTX-2.3 Salad render)
   "youtube", // YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN (+ YOUTUBE_DATA_API_KEY)
   "mureka", // MUREKA_API_KEY
   "suno", // SUNO_API_KEY
