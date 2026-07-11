@@ -12,6 +12,7 @@ import { growthBlocks } from "@/trigger/blocks/growthBlocks";
 import { CREW_BLOCKS } from "@/trigger/blocks/crewBlocks";
 import { insertBlocks } from "@/trigger/blocks/insertBlocks";
 import { genFootageBlocks } from "@/trigger/blocks/genFootageBlocks";
+import { novitaRenderBlocks } from "@/trigger/blocks/novitaRenderBlocks";
 import { whiteboardScribeBlocks } from "@/trigger/blocks/whiteboardScribeBlocks";
 import { motionComicBlocks } from "@/trigger/blocks/motionComicBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
@@ -42,6 +43,10 @@ export function registerAllBlocks(): void {
   // Generated b-roll (gen_footage): DNA-locked flux stills → i2v, producer-
   // compatible with stock_footage (whiteboard/painted/signature-scene worlds).
   for (const b of genFootageBlocks) register(b);
+  // Novita 8×4090 render farm (novita_render_images / novita_render_video):
+  // VPS-side spot-pod orchestrator, drop-in producer-compatible with
+  // gen_footage (same footageClips/footageKeys contract).
+  for (const b of novitaRenderBlocks) register(b);
   // DRAWN-CINEMA self-contained engine (whiteboard_scribe): narration-synced
   // whiteboard explainer (src/lib/whiteboardSync.ts) — produces the final video.
   for (const b of whiteboardScribeBlocks) register(b);

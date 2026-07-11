@@ -73,6 +73,10 @@ const LORESHORT_PROOFS: { file: string; device: string; meta: string }[] = [
   { file: "smith4k", device: "premium lane · 480p → Real-ESRGAN 4K", meta: "One beat at true 4K — the smith forges the ring" },
 ];
 
+const NOVITA_PROOFS: { file: string; device: string; meta: string }[] = [
+  { file: "still001", device: "8×4090 spot-pod farm · image→i2v · val proof", meta: "First rendered shot — still + camera-move clip off the Novita render farm" },
+];
+
 const LOFI_PROOFS: { file: string; kind: "video" | "image"; device: string; meta: string }[] = [
   { file: "meadow", kind: "video", device: "ghibli meadow · 2×15s seamless · 1080p", meta: "Hillside meadow — everything moves on a locked camera, the loop seam invisible" },
   { file: "beachcafe", kind: "image", device: "scene · beach cafe", meta: "Sunny terrace over a turquoise bay — host + cat, parasol, sailboats" },
@@ -234,6 +238,7 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
     case "script": return textStrip(SCRIPT_PROOFS);
     // video engines
     case "loreshort": return videoStrip("loreshort", LORESHORT_PROOFS);
+    case "novita-render-farm": return videoStrip("novita-render-farm", NOVITA_PROOFS);
     case "quiz": return videoStrip("quiz", QUIZ_PROOFS);
     case "cinematic": return <GoldenImages images={take2(CINEMATIC_PROOFS)} />;
     case "documotion": return videoStrip("documotion", DOCU_PROOFS);

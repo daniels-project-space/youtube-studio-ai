@@ -518,6 +518,33 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "golden",
   },
   {
+    key: "novita-render-farm",
+    stage: "visual",
+    title: "Novita Render Farm",
+    engine:
+      "Novita 8×4090 spot-pod render farm — static modulo sharding, per-shot camera/director/script control, individual pod autoclose + spot-reclaim requeue, R2-backed idempotent resume (image + image-to-video)",
+    how:
+      "An editable shot list (script line, camera move, shot scale, lens, seconds, motion cue) is submitted straight into the " +
+      "orchestrator's job schema — no translation layer. The image phase renders every shot's still on however many 4090 pods " +
+      "are sharded (nshard, capped at 3 by the Novita account); each pod pushes its stills plus a `.done` marker to R2 and " +
+      "self-deletes on completion. The video phase pipelines off the SAME R2 stills into image-to-video camera moves once they " +
+      "land, converting seconds to the nearest valid 8n+1 frame count. A monitor loop verifies every pod's autoclose, " +
+      "force-deletes stragglers, and RELAUNCHES any shard whose pod vanished to a spot reclaim — workers skip outputs already " +
+      "in R2, so a requeue never double-renders. Output is drop-in producer-compatible with gen_footage (same footageClips / " +
+      "footageKeys contract), so timeline_assemble works unmodified. Self-describing (NOVITA_RENDER_FARM_MODULE contract). " +
+      "src/lib/novitaRenderFarm.ts; the render itself runs VPS-side (/root/ltx-build/novita/orchestrator.py), reached over " +
+      "HTTP by the module, never spawned in Vercel/Trigger.",
+    gates: [
+      "video frames always 8n+1 — rounded, never truncated silently",
+      "every shot needs a motion cue — cameraMove !== 'static' or a non-empty motion field",
+      "width/height must be a multiple of 32 (VAE tiling requirement)",
+      "shard count capped at 3 (Novita account pod limit) — validate() fails loud above it",
+      "no cross-engine fallback — a failed shard retries the same pod pattern, then fails loud",
+      "R2-backed idempotent resume — a spot-reclaim requeue never double-renders",
+    ],
+    status: "active",
+  },
+  {
     key: "lofi",
     stage: "visual",
     title: "Lofi Loop — Seaside Engine",
