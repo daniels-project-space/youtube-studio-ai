@@ -145,7 +145,7 @@ const DEFAULTS = {
 };
 
 /** VPS render-API bridge — a small server wrapping orchestrator.py's launch()/status(). */
-const RENDER_API = process.env.NOVITA_RENDER_API || "http://87.106.233.113:8791/render";
+const RENDER_API = process.env.NOVITA_RENDER_API || "http://87.106.233.113/novita-bridge/render";
 
 /** Round seconds → the nearest valid 8n+1 frame count at the given fps (never below 9 frames / 1 shard). */
 export function secondsToFrames(seconds: number, fps: number): number {

@@ -98,8 +98,8 @@ const SHORTS_PROOFS: TextProof[] = [
 
 const CATEGORY: Record<string, string> = {
   "channel-planner": "Pre-production", "topic-intel": "Pre-production", "show-bible": "Pre-production", script: "Pre-production", guard: "Pre-production",
-  loreshort: "Video Engines", lofi: "Video Engines", quiz: "Video Engines", cinematic: "Video Engines", documotion: "Video Engines", "speech-tv": "Video Engines", whiteboard: "Video Engines", comic: "Video Engines", shorts: "Video Engines",
-  thumbnail: "Visual", visuals: "Visual", motioncraft: "Visual", inserts: "Visual",
+  loreshort: "Video Engines", lofi: "Video Engines", quiz: "Video Engines", cinematic: "Video Engines", documotion: "Video Engines", "speech-tv": "Video Engines", whiteboard: "Video Engines", comic: "Video Engines", shorts: "Video Engines", "videocraft-novita": "Video Engines",
+  thumbnail: "Visual", visuals: "Visual", motioncraft: "Visual", inserts: "Visual", "imagecraft-novita": "Visual",
   narration: "Audio",
   layer: "Post-production", assemble: "Post-production", metadata: "Post-production", verify: "Post-production", ship: "Post-production",
 };

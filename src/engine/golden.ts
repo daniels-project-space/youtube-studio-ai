@@ -545,6 +545,42 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "active",
   },
   {
+    key: "imagecraft-novita",
+    stage: "visual",
+    title: "Imagecraft (Novita Z-Image)",
+    engine:
+      "Imagecraft — Z-Image base bf16 stills at 2048×1152 / 40 steps on Novita RTX 4090 spot pods (NAS-staged weights, slot-aware 3-pod queue, verified autoclose, R2-idempotent resume) via the live VPS render bridge",
+    how:
+      "A director shot list (per-shot prompt/lens/shotScale/seed + global style/negative/director/steps/cfg/width/height) is POSTed to the live nginx bridge and polled to done; inline sharpness/exposure QA re-renders weak stills pod-side. Self-describing (IMAGECRAFT_NOVITA_MODULE contract). src/lib/imagecraft-novita.ts.",
+    gates: [
+      "inline sharpness + exposure QA on every still — weak frames re-render pod-side, never ship",
+      "width/height must be a multiple of 32 (VAE tiling requirement) — validate() fails loud",
+      "shard count capped at 3 (Novita account pod limit) — no silent clamp",
+      "no cross-engine fallback — a failed shard retries the same Z-Image pod pattern, then fails loud",
+      "R2-idempotent resume — a requeue never double-renders",
+      "per-pod verified autoclose — stragglers force-deleted, no ghost billing",
+    ],
+    status: "golden",
+  },
+  {
+    key: "videocraft-novita",
+    stage: "visual",
+    title: "Videocraft (Novita LTX-2.3)",
+    engine:
+      "Videocraft — LTX-2.3 22B int8 image-to-video via Wan2GP at 1920×1088 / 40 steps / guidance 4.0 on Novita RTX 4090 spot pods, driving the 10-move camera grammar over Imagecraft's R2 stills (slot-aware 3-pod queue, verified autoclose, R2-idempotent resume)",
+    how:
+      "Each shot's rendered still + camera move + motion cue + seconds (rounded to 8n+1 frames) is POSTed to the live nginx bridge and polled to done; a freeze-detection QA gate rejects still-frame clips (the frozen-frame fix). Emits gen_footage-compatible footageClips/footageKeys, so timeline_assemble works unmodified. Self-describing (VIDEOCRAFT_NOVITA_MODULE contract). src/lib/videocraft-novita.ts.",
+    gates: [
+      "freeze-detection QA (the still-frame fix) — a clip that doesn't move is rejected and re-rendered, never shipped",
+      "video frames always 8n+1 — rounded, never truncated silently",
+      "every shot needs a stillKey + motion cue (cameraMove !== 'static' or a non-empty motion field) — validate() fails loud",
+      "shard count capped at 3 (Novita account pod limit) — no silent clamp",
+      "no cross-engine fallback — a failed shard retries the same LTX pod pattern, then fails loud",
+      "R2-idempotent resume — a spot-reclaim requeue never double-renders",
+    ],
+    status: "golden",
+  },
+  {
     key: "lofi",
     stage: "visual",
     title: "Lofi Loop — Seaside Engine",
