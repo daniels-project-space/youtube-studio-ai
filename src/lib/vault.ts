@@ -30,10 +30,12 @@ async function vaultQuery<T>(
   path: string,
   args: Record<string, unknown>,
 ): Promise<T> {
+  const vaultToken = process.env.VAULT_ACCESS_TOKEN;
+  if (!vaultToken) throw new Error("VAULT_ACCESS_TOKEN is not configured");
   const res = await fetch(`${vaultUrl()}/api/query`, {
     method: "POST",
     headers: { "content-type": "application/json" },
-    body: JSON.stringify({ path, args, format: "json" }),
+    body: JSON.stringify({ path, args: { ...args, vaultToken }, format: "json" }),
   });
   if (!res.ok) {
     throw new Error(`vault query failed: ${path} -> HTTP ${res.status}`);
