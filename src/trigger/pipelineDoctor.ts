@@ -28,6 +28,17 @@ async function sweep(ownerId: string, log: (m: string) => void) {
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = new ConvexHttpClient(url);
 
+  // First close abandoned queued/running records across the owner. The old
+  // per-channel reaper only inspected the last 72 hours and only `running`
+  // rows, leaving old queued records on the Overview forever. Triage is
+  // terminal/auditable and never resumes provider work or spends money.
+  const triaged = await convex.mutation(api.runs.triageStale, { ownerId });
+  if (triaged.queuedCanceled || triaged.runningFailed) {
+    log(
+      `triage: canceled ${triaged.queuedCanceled} abandoned queued run(s); marked ${triaged.runningFailed} abandoned running run(s) failed`,
+    );
+  }
+
   const channels = await convex.query(api.channels.listChannels, { ownerId });
   const failures: { channel: string; runId: string; error: string; at: number }[] = [];
   const healed: { channel: string; runId: string; superseded: string[] }[] = [];
@@ -66,25 +77,9 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     const runs = await convex.query(api.runs.listRunsByChannel, { channelId: ch._id });
     const recent = runs.filter((r) => (r._creationTime ?? 0) > Date.now() - 3 * DAY);
 
-    // REAPER: a worker killed by SYSTEM_FAILURE/OOM leaves the Convex run
-    // "running" forever (the UI row spins, the scheduler thinks the channel is
-    // busy). Anything running >3h is dead — flip it failed, honestly labeled.
-    for (const r of recent) {
-      if (r.status === "running" && (r._creationTime ?? 0) < Date.now() - 3 * 3_600_000) {
-        try {
-          await convex.mutation(api.runs.updateRun, {
-            runId: r._id as Id<"runs">,
-            status: "failed",
-            finishedAt: Date.now(),
-            error: "reaped by pipeline-doctor: run stuck 'running' >3h (worker died: SYSTEM_FAILURE/OOM/timeout)",
-          });
-          failures.push({ channel: ch.name, runId: r._id, error: "reaped: stuck running >3h (worker died)", at: r._creationTime ?? 0 });
-          log(`reaper: flipped stuck run ${r._id} (${ch.name}) to failed`);
-        } catch (e) {
-          log(`reaper failed for ${r._id}: ${e instanceof Error ? e.message : e}`);
-        }
-      }
-    }
+    // Stale execution is triaged once at the start of this sweep, across all
+    // owner runs. Keep this per-channel pass read-only so a legitimate retry
+    // cannot be failed by the old, too-short 3-hour reaper window.
     for (const r of recent) {
       if (r.status === "failed") {
         failures.push({
@@ -260,6 +255,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
 
   const report = {
     at: Date.now(),
+    triaged,
     failures,
     healedRuns: healed,
     retentionQueued,

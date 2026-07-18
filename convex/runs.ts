@@ -1,6 +1,24 @@
 import { mutation, query } from "./_generated/server";
 import { v } from "convex/values";
 
+// A run may take up to 70 minutes per attempt and can retry. These windows are
+// deliberately wider than that execution envelope: do not hide or terminate a
+// legitimate retry just because it is slow. A queued run has not started work,
+// so it gets an even wider window before it is treated as abandoned.
+const STALE_RUNNING_AFTER_MS = 6 * 60 * 60 * 1000;
+const STALE_QUEUED_AFTER_MS = 24 * 60 * 60 * 1000;
+
+function isStaleActiveRun(
+  run: { status: string; startedAt?: number; _creationTime: number },
+  now: number,
+): boolean {
+  const age = now - (run.startedAt ?? run._creationTime);
+  return (
+    (run.status === "running" && age > STALE_RUNNING_AFTER_MS) ||
+    (run.status === "queued" && age > STALE_QUEUED_AFTER_MS)
+  );
+}
+
 export const createRun = mutation({
   args: {
     ownerId: v.string(),
@@ -62,12 +80,14 @@ export const listRunsByChannel = query({
 
 /**
  * Active runs (queued|running) for an owner, newest first, enriched with the
- * channel name/slug — mirrors listRecent's enrichment. Powers the Overview
- * "Active runs" board.
+ * channel name/slug — mirrors listRecent's enrichment. Abandoned records are
+ * intentionally excluded even before the Doctor's next daily sweep, so a
+ * dead worker cannot make the Overview claim a channel is active forever.
  */
 export const listActive = query({
   args: { ownerId: v.string() },
   handler: async (ctx, args) => {
+    const now = Date.now();
     // Bounded window instead of a full-table collect: active runs are always
     // recent, so the newest 200 (index desc ≈ startedAt desc) covers them.
     const runs = await ctx.db
@@ -76,7 +96,9 @@ export const listActive = query({
       .order("desc")
       .take(200);
     const active = runs.filter(
-      (r) => r.status === "queued" || r.status === "running",
+      (r) =>
+        (r.status === "queued" || r.status === "running") &&
+        !isStaleActiveRun(r, now),
     );
     active.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
     return await Promise.all(
@@ -95,6 +117,52 @@ export const listActive = query({
         };
       }),
     );
+  },
+});
+
+/**
+ * Terminally triage abandoned work without deleting its audit trail.
+ *
+ * This is intentionally conservative and idempotent. It only acts after the
+ * same age gates used by listActive, records why the run was closed, and marks
+ * it `canceled` rather than pretending an unstarted queued job failed. It
+ * never resumes work or triggers a provider call, so old rows cannot cause
+ * surprise rendering or spend during maintenance.
+ */
+export const triageStale = mutation({
+  args: { ownerId: v.string() },
+  returns: v.object({ queuedCanceled: v.number(), runningFailed: v.number() }),
+  handler: async (ctx, args) => {
+    const now = Date.now();
+    const runs = await ctx.db
+      .query("runs")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .collect();
+    let queuedCanceled = 0;
+    let runningFailed = 0;
+
+    for (const run of runs) {
+      if (!isStaleActiveRun(run, now)) continue;
+      const ageHours = Math.floor(
+        (now - (run.startedAt ?? run._creationTime)) / (60 * 60 * 1000),
+      );
+      if (run.status === "queued") {
+        await ctx.db.patch(run._id, {
+          status: "canceled",
+          finishedAt: now,
+          error: `triaged by pipeline-doctor: queued for ${ageHours}h without starting`,
+        });
+        queuedCanceled++;
+      } else {
+        await ctx.db.patch(run._id, {
+          status: "failed",
+          finishedAt: now,
+          error: `triaged by pipeline-doctor: running for ${ageHours}h beyond the safe execution window (worker likely died)`,
+        });
+        runningFailed++;
+      }
+    }
+    return { queuedCanceled, runningFailed };
   },
 });
 
