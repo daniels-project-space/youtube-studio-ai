@@ -19,6 +19,7 @@ import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claudeJson } from "@/lib/anthropic";
 import { putObject } from "@/lib/storage";
 import { sendMessage } from "@/lib/telegram";
+import { isStaleActiveRun, runCreatedAt, staleRunAction } from "@/lib/runFreshness";
 
 const DAY = 86_400_000;
 
@@ -34,6 +35,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
   const retentionQueued: string[] = [];
   const missingCaps = new Map<string, string>();
   const publishCandidates: { channel: string; videoId: string; title: string; topic: string }[] = [];
+  const stalePipelineRecords: { channel: string; runId: string; status: string; at: number; action: "reaped" | "triage-required" }[] = [];
   // NEW EYES (2026-07): the Doctor used to be blind to (a) advisory QA data on
   // PASSED runs (low feel/audio/thumbnail scores living in qaReport), and
   // (b) the styleDNA groundingGaps the distiller explicitly deferred to it.
@@ -66,11 +68,15 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     const runs = await convex.query(api.runs.listRunsByChannel, { channelId: ch._id });
     const recent = runs.filter((r) => (r._creationTime ?? 0) > Date.now() - 3 * DAY);
 
-    // REAPER: a worker killed by SYSTEM_FAILURE/OOM leaves the Convex run
-    // "running" forever (the UI row spins, the scheduler thinks the channel is
-    // busy). Anything running >3h is dead — flip it failed, honestly labeled.
-    for (const r of recent) {
-      if (r.status === "running" && (r._creationTime ?? 0) < Date.now() - 3 * 3_600_000) {
+    // REAPER: scan ALL active rows, not just the 72h reporting window. The old
+    // window made a run that survived its first Doctor pass invisible forever.
+    // A running task is beyond run-pipeline's 70-minute hard limit at 3h and
+    // can be failed safely. A queued row has no persisted Trigger handle, so
+    // changing it could race a delayed task; record it for operator triage only.
+    for (const r of runs) {
+      if (!isStaleActiveRun(r)) continue;
+      const action = staleRunAction(r);
+      if (action === "fail-running") {
         try {
           await convex.mutation(api.runs.updateRun, {
             runId: r._id as Id<"runs">,
@@ -78,11 +84,17 @@ async function sweep(ownerId: string, log: (m: string) => void) {
             finishedAt: Date.now(),
             error: "reaped by pipeline-doctor: run stuck 'running' >3h (worker died: SYSTEM_FAILURE/OOM/timeout)",
           });
-          failures.push({ channel: ch.name, runId: r._id, error: "reaped: stuck running >3h (worker died)", at: r._creationTime ?? 0 });
+          const at = runCreatedAt(r);
+          failures.push({ channel: ch.name, runId: r._id, error: "reaped: stuck running >3h (worker died)", at });
+          stalePipelineRecords.push({ channel: ch.name, runId: r._id, status: "running", at, action: "reaped" });
           log(`reaper: flipped stuck run ${r._id} (${ch.name}) to failed`);
         } catch (e) {
           log(`reaper failed for ${r._id}: ${e instanceof Error ? e.message : e}`);
         }
+      } else if (action === "triage-queued") {
+        const at = runCreatedAt(r);
+        stalePipelineRecords.push({ channel: ch.name, runId: r._id, status: "queued", at, action: "triage-required" });
+        log(`triage: queued run ${r._id} (${ch.name}) is stale; left unchanged because its Trigger dispatch cannot be proven`);
       }
     }
     for (const r of recent) {
@@ -187,7 +199,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     }
   }
 
-  log(`sweep: ${failures.length} failure(s), ${healed.length} healed run(s), ${retentionQueued.length} retention job(s), ${missingCaps.size} missing capability(ies)`);
+  log(`sweep: ${failures.length} failure(s), ${stalePipelineRecords.length} stale record(s), ${healed.length} healed run(s), ${retentionQueued.length} retention job(s), ${missingCaps.size} missing capability(ies)`);
 
   // ENGAGEMENT: post the owner HOOK-QUESTION comment on freshly PUBLIC videos
   // (an engagement signal the algorithm rewards). Dedupe = the channel already
@@ -234,7 +246,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     .slice(0, 12)
     .map(([k, n]) => `- ${k} ×${n}`);
   let diagnosis: { summary?: string; actions?: { priority?: string; kind?: string; detail?: string }[] } = {};
-  if (failures.length || healed.length || missingCaps.size || trendLines.length || groundingGapChannels.length) {
+  if (failures.length || stalePipelineRecords.length || healed.length || missingCaps.size || trendLines.length || groundingGapChannels.length) {
     try {
       diagnosis = await claudeJson({
         maxTokens: 1400,
@@ -243,6 +255,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
         prompt:
           `Nightly sweep of the render fleet.\n\n` +
           `FAILED RUNS (72h):\n${failures.map((f) => `- [${f.channel}] ${f.error}`).join("\n") || "none"}\n\n` +
+          `STALE PIPELINE RECORDS (queued records require operator approval; do not resume or clear them automatically):\n${stalePipelineRecords.map((r) => `- [${r.channel}] ${r.status} ${r.runId}: ${r.action}`).join("\n") || "none"}\n\n` +
           `SELF-HEALED RUNS (superseded blocks):\n${healed.map((h) => `- [${h.channel}] ${h.superseded.join(",")}`).join("\n") || "none"}\n\n` +
           `RECURRING ADVISORY DEFECTS on PASSED runs (quality rot that never gates):\n${trendLines.join("\n") || "none"}\n\n` +
           `CHANNELS WITH STYLE-DNA GROUNDING GAPS (research auto-queued):\n${groundingGapChannels.map((g) => `- ${g.channel}: ${g.gaps.join("; ")}`).join("\n") || "none"}\n\n` +
@@ -261,6 +274,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
   const report = {
     at: Date.now(),
     failures,
+    stalePipelineRecords,
     healedRuns: healed,
     retentionQueued,
     missingCapabilities: Object.fromEntries(missingCaps),
