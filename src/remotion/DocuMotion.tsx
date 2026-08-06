@@ -108,6 +108,8 @@ export interface DocuShotSpec {
   annotations?: string[];
   circleLabel?: string;
   quote?: string;
+  /** Exact quote words to accent. Chosen in the main plan, rendered here. */
+  quoteEmphasis?: string[];
   attribution?: string;
   accent?: string;
   titleBoost?: number;
@@ -115,8 +117,6 @@ export interface DocuShotSpec {
   threads?: DocuThread[];
   /** geo_map: projected street/building geometry. */
   geo?: DocuGeo;
-  /** quote_card: a Banana-designed type card (data URI) — overrides CSS type. */
-  typeImage?: string;
   /** depth_parallax: animate a focus pull between the near and far planes. */
   rackFocus?: "near_to_far" | "far_to_near";
   /** vox_*: structured payload for the Vox-explainer shot kit. */
@@ -152,6 +152,125 @@ const mulberry32 = (seed: number) => {
 };
 
 const clamp01 = (v: number) => Math.max(0, Math.min(1, v));
+
+export interface QuoteCardLayout {
+  panelWidth: number;
+  panelMaxHeight: number;
+  panelPaddingX: number;
+  panelPaddingY: number;
+  quoteWidth: number;
+  quoteMaxHeight: number;
+  fontSize: number;
+  lineHeight: number;
+  letterSpacing: number;
+  estimatedLines: number;
+  estimatedQuoteHeight: number;
+  attributionFontSize: number;
+}
+
+const normalizeQuoteToken = (value: string): string =>
+  value.normalize("NFKC").toLocaleLowerCase("en").replace(/[^\p{L}\p{N}]+/gu, "");
+
+const QUOTE_STOP_WORDS = new Set([
+  "a", "an", "and", "are", "as", "at", "be", "been", "but", "by", "for", "from", "in", "is", "it", "of", "on", "or", "that", "the", "this", "to", "was", "were", "with",
+]);
+
+/** Resolve accent words without a second model call. New plans supply their
+ *  choice in the original planning response; cached plans use a stable tail
+ *  emphasis that ignores connective words. */
+export function resolveQuoteCardEmphasis(quote: string, requested?: string[]): string[] {
+  const available = quote.split(/\s+/).map(normalizeQuoteToken).filter(Boolean);
+  const availableSet = new Set(available);
+  const selected = (requested ?? [])
+    .flatMap((part) => part.split(/\s+/))
+    .map(normalizeQuoteToken)
+    .filter((word, index, all) => availableSet.has(word) && all.indexOf(word) === index)
+    .slice(0, 3);
+  if (selected.length) return selected;
+
+  const significant = available.filter((word) => word.length > 1 && !QUOTE_STOP_WORDS.has(word));
+  const fallback = (significant.length ? significant : available).slice(-2);
+  return fallback.filter((word, index) => fallback.indexOf(word) === index);
+}
+
+const quoteGlyphUnits = (value: string): number =>
+  Array.from(value).reduce((units, glyph) => {
+    if (/[ilI1'’.,:;!|]/u.test(glyph)) return units + 0.52;
+    if (/[MW@#%&]/u.test(glyph)) return units + 1.24;
+    return units + 1;
+  }, 0);
+
+function estimateQuoteLines(words: string[], width: number, fontSize: number, charWidth: number): number {
+  if (!words.length) return 1;
+  const space = fontSize * charWidth * 0.62;
+  let lines = 1;
+  let occupied = 0;
+  for (const word of words) {
+    const wordWidth = quoteGlyphUnits(word) * fontSize * charWidth;
+    if (wordWidth > width) {
+      if (occupied > 0) lines += 1;
+      lines += Math.max(0, Math.ceil(wordWidth / width) - 1);
+      occupied = wordWidth % width;
+      continue;
+    }
+    if (occupied > 0 && occupied + space + wordWidth > width) {
+      lines += 1;
+      occupied = wordWidth;
+    } else {
+      occupied += (occupied > 0 ? space : 0) + wordWidth;
+    }
+  }
+  return lines;
+}
+
+/** Pure layout planner used by the actual Remotion card and by regression
+ *  tests. It sizes from the rendered frame and the channel font's measured
+ *  width ratio, so long quotes stay inside both horizontal and vertical safe
+ *  areas at preview, 1080p, and portrait resolutions. */
+export function planQuoteCardLayout(args: {
+  quote: string;
+  width: number;
+  height: number;
+  displayCharWidth: number;
+  hasAttribution?: boolean;
+}): QuoteCardLayout {
+  const width = Math.max(1, args.width);
+  const height = Math.max(1, args.height);
+  const portrait = height > width;
+  const words = args.quote.trim().split(/\s+/).filter(Boolean);
+  const charWidth = Math.max(0.4, Math.min(0.75, args.displayCharWidth || 0.54));
+  const panelWidth = Math.min(width * 0.8, height * 1.36);
+  const panelPaddingX = Math.max(16, Math.min(88, panelWidth * 0.055));
+  const panelPaddingY = Math.max(14, Math.min(52, height * 0.036));
+  const panelMaxHeight = height * (portrait ? 0.62 : 0.68);
+  const attributionBlock = args.hasAttribution ? Math.max(34, Math.min(96, height * 0.09)) : 0;
+  const quoteWidth = Math.max(120, panelWidth - panelPaddingX * 2);
+  const quoteMaxHeight = Math.max(64, panelMaxHeight - panelPaddingY * 2 - attributionBlock);
+  const lineHeight = words.length > 24 ? 1.06 : words.length > 12 ? 1.09 : 1.13;
+  const minFontSize = Math.max(18, Math.min(width, height) * 0.038);
+  const maxFontSize = Math.max(minFontSize, Math.min(width * 0.075, height * 0.15));
+  let fontSize = maxFontSize;
+  let estimatedLines = estimateQuoteLines(words, quoteWidth, fontSize, charWidth);
+  while (fontSize > minFontSize && estimatedLines * fontSize * lineHeight > quoteMaxHeight) {
+    fontSize = Math.max(minFontSize, fontSize - 1);
+    estimatedLines = estimateQuoteLines(words, quoteWidth, fontSize, charWidth);
+  }
+
+  return {
+    panelWidth,
+    panelMaxHeight,
+    panelPaddingX,
+    panelPaddingY,
+    quoteWidth,
+    quoteMaxHeight,
+    fontSize,
+    lineHeight,
+    letterSpacing: fontSize * (words.length <= 8 ? 0.014 : words.length <= 16 ? 0.006 : 0),
+    estimatedLines,
+    estimatedQuoteHeight: estimatedLines * fontSize * lineHeight,
+    attributionFontSize: Math.max(16, Math.min(36, width * 0.019)),
+  };
+}
 
 const grainUri = (seed: number) =>
   `data:image/svg+xml;utf8,${encodeURIComponent(
@@ -1441,68 +1560,89 @@ const EvidenceBoardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ sho
 
 const QuoteCardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
   const frame = useCurrentFrame();
-  const { width, height } = useVideoConfig();
+  const { width, height, fps } = useVideoConfig();
   const t = useTheme();
   const dur = shot.durationInFrames;
   const cam = useCam(shot.camera ?? { move: "drift", intensity: "subtle" }, dur, seed);
   const words = (shot.quote ?? "").split(/\s+/).filter(Boolean);
+  const emphasis = new Set(resolveQuoteCardEmphasis(shot.quote ?? "", shot.quoteEmphasis));
+  const layout = planQuoteCardLayout({
+    quote: shot.quote ?? "",
+    width,
+    height,
+    displayCharWidth: t.displayCharW,
+    hasAttribution: Boolean(shot.attribution),
+  });
+  const revealStep = Math.max(0.45, Math.min(2, (Math.max(36, dur) - 30) / Math.max(1, words.length)));
+  const panelIn = spring({ fps, frame, config: { damping: 18, stiffness: 95, mass: 0.9 } });
   const fadeOut = interpolate(frame, [dur - 18, dur - 2], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-
-  // BANANA-DESIGNED end card: a bespoke typographic image, slow push + fade.
-  if (shot.typeImage) {
-    const zoom = interpolate(frame, [0, dur], [1.04, 1.12], { easing: Easing.inOut(Easing.cubic), extrapolateRight: "clamp" });
-    const fin = interpolate(frame, [0, 14], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
-    return (
-      <AbsoluteFill style={{ backgroundColor: t.base }}>
-        <Img src={shot.typeImage} style={{ width: "100%", height: "100%", objectFit: "cover", transform: `scale(${zoom.toFixed(4)})`, opacity: fin }} />
-        <AbsoluteFill style={{ background: "radial-gradient(ellipse at center, rgba(0,0,0,0) 55%, rgba(6,6,4,0.5) 100%)" }} />
-        <AbsoluteFill style={{ backgroundColor: "#000", opacity: fadeOut }} />
-      </AbsoluteFill>
-    );
-  }
   return (
     <AbsoluteFill style={{ backgroundColor: t.base }}>
       {shot.bg ? (
-        <Img src={shot.bg} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.5, transform: camTransform(cam, 1.04), filter: `${t.plateFilter} brightness(0.92)` }} />
+        <Img src={shot.bg} style={{ width: "100%", height: "100%", objectFit: "cover", opacity: 0.42, transform: camTransform(cam, 1.04), filter: `${t.plateFilter} brightness(0.78)` }} />
       ) : (
-        <AbsoluteFill style={{ backgroundImage: `url("${paperUri(9)}")`, opacity: 0.35 }} />
+        <AbsoluteFill style={{ backgroundImage: `url("${paperUri(9)}")`, opacity: 0.42 }} />
       )}
+      <AbsoluteFill style={{ background: `radial-gradient(ellipse at center, transparent 12%, ${t.base} 92%)`, opacity: 0.82 }} />
       <AbsoluteFill style={{ alignItems: "center", justifyContent: "flex-start" }}>
-        <div style={{ fontFamily: "Georgia, serif", fontSize: Math.round(height * 0.62), lineHeight: 1, color: "rgba(247,241,226,0.09)", marginTop: -height * 0.06, opacity: interpolate(frame, [0, 16], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }}>
+        <div style={{ fontFamily: t.fontHand, fontSize: Math.round(height * 0.58), lineHeight: 1, color: t.paper, marginTop: -height * 0.08, opacity: interpolate(frame, [0, 16], [0, 0.08], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }}>
           &ldquo;
         </div>
       </AbsoluteFill>
-      <TextScrim cx={50} cy={50} w={74} h={56} opacity={0.55} />
-      <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", padding: `0 ${width * 0.11}px`, transform: camTransform(cam, 1.06) }}>
-        {/* dark panel so the quote reads on ANY plate */}
+      <TextScrim cx={50} cy={50} w={88} h={76} opacity={0.6} />
+      <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", padding: `${height * 0.08}px ${width * 0.08}px`, transform: camTransform(cam, 1.025) }}>
         <div
           style={{
-            fontFamily: t.fontHand,
-            fontWeight: 700,
-            fontSize: Math.round(width * 0.058),
-            lineHeight: 1.3,
-            color: t.paper,
-            textAlign: "center",
-            padding: `${height * 0.05}px ${width * 0.05}px`,
-            background: "rgba(8,7,5,0.5)",
-            borderRadius: width * 0.02,
-            boxShadow: "0 0 0 1px rgba(247,241,226,0.08), 0 20px 60px rgba(0,0,0,0.6)",
-            WebkitTextStroke: "0.6px rgba(8,6,4,0.55)",
-            textShadow: "0 4px 26px rgba(0,0,0,0.98), 0 2px 6px rgba(0,0,0,0.9)",
+            width: layout.panelWidth,
+            maxHeight: layout.panelMaxHeight,
+            boxSizing: "border-box",
+            padding: `${layout.panelPaddingY}px ${layout.panelPaddingX}px`,
+            background: `linear-gradient(135deg, ${t.base}f2, rgba(0,0,0,0.78))`,
+            borderLeft: `${Math.max(4, Math.round(width * 0.004))}px solid ${shot.accent ?? t.accent}`,
+            borderRadius: Math.max(8, width * 0.012),
+            boxShadow: `0 0 0 1px ${t.paper}18, 0 ${height * 0.025}px ${height * 0.075}px rgba(0,0,0,0.62)`,
+            opacity: panelIn,
+            transform: `translateY(${((1 - panelIn) * height * 0.025).toFixed(2)}px) scale(${(0.97 + panelIn * 0.03).toFixed(4)})`,
           }}
         >
-          {words.map((w, i) => (
-            <span key={i} style={{ color: i >= words.length - 2 ? (shot.accent ?? t.accent) : t.paper, opacity: interpolate(frame, [6 + i * 2, 12 + i * 2], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }}>
-              {w}{" "}
-            </span>
-          ))}
-        </div>
-        <div style={{ width: interpolate(frame, [10 + words.length * 2, 26 + words.length * 2], [0, width * 0.16], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }), height: 3, marginTop: height * 0.035, backgroundColor: shot.accent ?? t.accent, opacity: 0.85 }} />
-        {shot.attribution ? (
-          <div style={{ marginTop: height * 0.035, fontFamily: t.fontLabel, fontWeight: 600, fontSize: Math.round(width * 0.021), letterSpacing: "0.5em", textTransform: "uppercase", color: shot.accent ?? t.accent, textShadow: "0 2px 10px rgba(0,0,0,0.9)", opacity: interpolate(frame, [Math.min(40, dur - 30), Math.min(52, dur - 18)], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }}>
-            {shot.attribution}
+          <div
+            aria-label={shot.quote}
+            style={{
+              width: layout.quoteWidth,
+              maxHeight: layout.quoteMaxHeight,
+              overflowWrap: "anywhere",
+              fontFamily: t.fontDisplay,
+              fontWeight: 700,
+              fontSize: layout.fontSize,
+              lineHeight: layout.lineHeight,
+              letterSpacing: layout.letterSpacing,
+              color: t.paper,
+              textAlign: "left",
+              textShadow: "0 4px 24px rgba(0,0,0,0.96), 0 1px 3px rgba(0,0,0,0.9)",
+            }}
+          >
+            {words.map((word, index) => {
+              const normalized = normalizeQuoteToken(word);
+              return (
+                <span
+                  key={`${index}-${word}`}
+                  style={{
+                    color: emphasis.has(normalized) ? (shot.accent ?? t.accent) : t.paper,
+                    opacity: interpolate(frame, [6 + index * revealStep, 12 + index * revealStep], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }),
+                  }}
+                >
+                  {word}{" "}
+                </span>
+              );
+            })}
           </div>
-        ) : null}
+          <div style={{ width: interpolate(frame, [10 + words.length * revealStep, 24 + words.length * revealStep], [0, layout.quoteWidth * 0.24], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }), height: Math.max(2, height * 0.003), marginTop: height * 0.024, backgroundColor: shot.accent ?? t.accent, opacity: 0.9 }} />
+          {shot.attribution ? (
+            <div style={{ maxWidth: layout.quoteWidth, marginTop: height * 0.022, overflowWrap: "anywhere", fontFamily: t.fontLabel, fontWeight: 600, fontSize: layout.attributionFontSize, lineHeight: 1.15, letterSpacing: "0.22em", textTransform: "uppercase", color: shot.accent ?? t.accent, textShadow: "0 2px 10px rgba(0,0,0,0.9)", opacity: interpolate(frame, [Math.min(40, dur - 30), Math.min(52, dur - 18)], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" }) }}>
+              {shot.attribution}
+            </div>
+          ) : null}
+        </div>
       </AbsoluteFill>
       <AbsoluteFill style={{ backgroundColor: "#000", opacity: fadeOut }} />
     </AbsoluteFill>

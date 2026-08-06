@@ -37,7 +37,7 @@ import { spawn } from "node:child_process";
 import { join } from "node:path";
 import { geminiJson, geminiJsonPro, parseJsonLoose } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
-import { generateBananaImage, bananaTypeCard } from "@/lib/banana";
+import { generateBananaImage } from "@/lib/banana";
 import { getDepthMap } from "@/lib/depth";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
@@ -335,6 +335,10 @@ export interface DocuShotPlan {
   annotations?: string[];
   circleLabel?: string;
   quote?: string;
+  /** Optional 1-3 exact quote words selected by the existing planning pass.
+   *  Remotion applies the visual emphasis deterministically; this never starts
+   *  a separate model or image-generation request. */
+  quoteEmphasis?: string[];
   attribution?: string;
   accent?: string;
   threads?: DocuThread[];
@@ -473,6 +477,7 @@ function planContract(style: DocuStyleDef): string {
      "annotations": ["optional handwritten margin note <=6 words"],
      "circleLabel": "map_zoom ring word (one word)",
      "quote": "quote_card only — THE line <=14 words",
+     "quoteEmphasis": ["quote_card only — 1-3 exact words already present in quote that carry its stakes or turn; never a mundane filler noun"],
      "attribution": "quote_card byline",
      "accent": "optional hex accent for this shot",
      "threads": [{"from": photoIndex, "to": photoIndex}]  (evidence_board only — connections between its images),
@@ -919,7 +924,6 @@ export async function buildShotSpecs(
   durationSec: number,
   overrides: DocuOverrides = {},
   geoByShot: Record<number, CityGeo> = {},
-  typeByShot: Record<number, string> = {},
   /** Narration-driven absolute per-shot seconds — when given, used VERBATIM (no
    *  normalization to durationSec) so the picture tracks the spoken word. */
   fixedDursSec?: number[],
@@ -952,12 +956,12 @@ export async function buildShotSpecs(
       annotations: s.annotations,
       circleLabel: s.circleLabel,
       quote: s.quote,
+      quoteEmphasis: s.quoteEmphasis,
       attribution: s.attribution,
       accent: s.accent,
       titleBoost: o.titleBoost,
       threads: s.threads,
       geo: geoByShot[i] ? { ...geoByShot[i], context: s.geoContext } : undefined,
-      typeImage: typeByShot[i] ? await uri(typeByShot[i]) : undefined,
       rackFocus: s.rackFocus,
     });
   }
@@ -1224,43 +1228,10 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   for (const [i, s] of plan.shots.entries()) {
     if (s.kind === "geo_map" && s.geoQuery) geoByShot[i] = await fetchCityGeo(s.geoQuery, join(runDir, "geo"), log);
   }
-  // Bespoke Banana-designed typography for the hero end card(s) — unique
-  // lettering instead of a web font; gated for spelling, CSS fallback.
-  const typeByShot: Record<number, string> = {};
-  for (const [i, s] of plan.shots.entries()) {
-    if (s.kind !== "quote_card" || !s.quote) continue;
-    const out = join(runDir, "assets", `type_${i}.jpg`);
-    if (existsSync(out)) {
-      typeByShot[i] = out;
-      continue;
-    }
-    // REASONABILITY PASS — choose emphasis + framing so the card lands with the
-    // right TONE: a mundane/comical detail must not become the epic gold payoff;
-    // emphasise the words carrying the irony or stakes, frame the rest deadpan.
-    const reason = await geminiJson<{ emphasis?: string[]; framing?: string }>({
-      prompt:
-        `A documentary CLOSING TYPE CARD will render this exact line as bold designed typography (style: ${style.typeStyle}): ` +
-        `"${s.quote}". Decide how to frame it TASTEFULLY. Pick EMPHASIS = the 1-3 words that should be largest/accented — ` +
-        `the words carrying the IRONY, STAKES or turn — NOT a mundane or comical noun blown up comically. Write a FRAMING ` +
-        `note (<=22 words) so the tone is right: if part of the line is deliberately mundane/absurd, render it deadpan and ` +
-        `smaller so the CONTRAST lands instead of reading as slapstick. ` +
-        `Return STRICT JSON {"emphasis":["..."],"framing":"..."}.`,
-      maxTokens: 300,
-      temperature: 0.3,
-    }).catch(() => ({ emphasis: undefined, framing: undefined }) as { emphasis?: string[]; framing?: string });
-    const emphasis = reason.emphasis?.length ? reason.emphasis : s.quote.split(/\s+/).filter(Boolean).slice(0, 2);
-    log(`documotion type card: emphasis [${emphasis.join(", ")}]${reason.framing ? ` — ${reason.framing}` : ""}`);
-    const made = await bananaTypeCard({
-      text: s.quote,
-      emphasis,
-      framing: reason.framing,
-      styleDesc: style.typeStyle,
-      accent: s.accent ?? style.theme.accent,
-      outJpg: out,
-      log,
-    });
-    if (made) typeByShot[i] = made;
-  }
+  // Quote/type-card text is composed only by Remotion from the exact plan text.
+  // Background plates remain text-free assets, so readable lettering is never
+  // delegated to an image model (no spelling drift, vision retries, or card-only
+  // provider spend). Optional emphasis comes from the already-required plan.
 
   // 3. NARRATE FIRST — voice each shot's line so the TIMELINE follows the spoken
   //    word (kills the silent-tail bug + locks each visual to its line). Shot
@@ -1278,7 +1249,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   let verdict: DocuVerdict = {};
   let rounds = 0;
   for (let round = 1; round <= maxRounds + 1; round++) {
-    const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, typeByShot, fixedDursSec);
+    const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, fixedDursSec);
     const { framePaths, labels } = await renderVerifySet({ plan, specs, style, framesDir: join(runDir, `verify_r${round}`), log });
     verdict = await verifyDocu({ framePaths, labels, worldHint: style.label, log });
     rounds = round;
@@ -1291,7 +1262,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   if (!verdict.pass) log(`documotion: verifier unsatisfied after ${rounds} rounds — shipping with honest verdict`);
 
   // 5. FINAL 1080p master (narration-driven durations)
-  const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, typeByShot, fixedDursSec);
+  const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, fixedDursSec);
   const outPath = args.outPath ?? join(runDir, "final.mp4");
   await renderDocuMotion({
     shots: specs,
