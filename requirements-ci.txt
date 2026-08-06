@@ -1,0 +1,3 @@
+# The production motion-comic preflight installs Pillow before any paid work.
+# CI imports the same font loader directly, so declare and pin that dependency.
+pillow==12.1.1
