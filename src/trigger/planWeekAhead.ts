@@ -1,10 +1,9 @@
 /**
  * `plan-week-ahead` — pre-build the upcoming-videos queue for a channel: pick N
  * fresh topics, then for each generate an SEO title, a short description, and a
- * thumbnail (the SAME banana engine as a real render: one-pass Nano Banana Pro
- * from a design brief, judge-gated), and store them in the `contentPlan` table
- * for the channel page's "Week ahead" section. Cheap relative to a full render
- * (no video/TTS) — just stills + text.
+ * thumbnail (the SAME universal renderer as a real render: one text-free flash
+ * scene + deterministic local typography), and store them in the `contentPlan`
+ * table for the channel page's "Week ahead" section.
  */
 import { task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
@@ -16,7 +15,10 @@ import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { optimizeTopics } from "@/lib/topicOptimizer";
 import { loadLedger } from "@/lib/performance";
 import { detectFollowups, type FollowupCandidate } from "@/lib/followups";
-import { buildThumbBrief, bananaThumbnail, hasBanana } from "@/lib/banana";
+import { hasBanana } from "@/lib/banana";
+import { renderThumbnail } from "@/lib/thumbnailRenderer";
+import type { ThumbnailPlaybook } from "@/lib/thumbnailLab";
+import type { ThumbnailTextZone } from "@/lib/thumbnailLayout";
 import {
   resolveThumbnailStyle,
   styleFromDNA,
@@ -145,7 +147,11 @@ export const planWeekAheadTask = task({
 
       let thumbnailKey: string | undefined;
       try {
-        thumbnailKey = await genThumb({ id, topic, title, style, channelName, niche, ownerId, slug: channel.slug, dir, log, sceneSeed: bet?.thumbnailMoment });
+        thumbnailKey = await genThumb({
+          id, topic, title, style, channelName, niche, ownerId, slug: channel.slug,
+          dir, log, sceneSeed: bet?.thumbnailMoment,
+          playbook: (channel as { thumbnailPlaybook?: ThumbnailPlaybook }).thumbnailPlaybook,
+        });
       } catch (e) {
         log(`thumbnail failed for "${topic}": ${e instanceof Error ? e.message : e}`);
       }
@@ -206,15 +212,14 @@ async function genThumb(o: {
   log: (m: string) => void;
   /** Topicraft's judged thumbnail moment — the scene the bet was gated on. */
   sceneSeed?: string;
+  playbook?: ThumbnailPlaybook;
 }): Promise<string | undefined> {
   if (!hasBanana()) return undefined;
   let scene = o.sceneSeed?.trim() || `a dramatic scene that literally enacts "${o.title}"${o.niche ? ` for a ${o.niche} channel` : ""}.`;
-  let look = o.style.label === "Style DNA" ? undefined : o.style.label;
   let lines: { text: string; payoff?: boolean }[] = [{ text: shortTitleFallback(o.title), payoff: true }];
   try {
     const c = await geminiJson<{
       scene?: string;
-      look?: string;
       lines?: { text?: string; payoff?: boolean }[];
     }>({
       prompt:
@@ -223,15 +228,14 @@ async function genThumb(o: {
         (o.sceneSeed?.trim() ? `The PLANNED thumbnail moment (build the scene ON this, restyled into the locked look): ${o.sceneSeed.trim()}\n` : "") +
         `- scene: ONE sentence — hero subject + background + one story-carrying detail, literally enacting the ` +
         `topic INSIDE the locked look (never a generic scene).\n` +
-        `- look: the rendering style distilled to <=12 words (medium, material, grade).\n` +
         `- lines: 2-3 headline lines, 1-3 punchy words each, <=5 words total, NOT restating the title, ` +
         `exactly ONE marked as the payoff.\n` +
-        `Return STRICT JSON {"scene":string,"look":string,"lines":[{"text":string,"payoff":boolean}]}.`,
+        `The scene must contain no textual prop, writing surface, sign, label, newspaper, poster, screen, logo, or UI.\n` +
+        `Return STRICT JSON {"scene":string,"lines":[{"text":string,"payoff":boolean}]}.`,
       maxTokens: 600,
       temperature: 0.8,
     });
     if (c.scene?.trim()) scene = c.scene.trim();
-    if (c.look?.trim()) look = c.look.trim();
     const got = (c.lines ?? [])
       .filter((l) => l.text && l.text.trim())
       .map((l) => ({ text: String(l.text).trim(), payoff: l.payoff === true }));
@@ -240,24 +244,46 @@ async function genThumb(o: {
     /* deterministic fallback above */
   }
   const outJpg = join(o.dir, `t_${o.id}.jpg`);
-  await bananaThumbnail({
-    // PLAN-stage previews for topics that may never become videos: flash tier
-    // (~$0.04) — the render-time thumbnail_gen keeps Pro typography.
-    tier: "flash",
-    brief: buildThumbBrief({
-      channelName: o.channelName,
-      imageStyle: look,
-      palette: [o.style.palette],
-      accentColor: o.style.title.accent ?? undefined,
-      scene,
-      lines,
-      badge: o.channelName,
-    }),
+  const vl = o.playbook?.visualLanguage;
+  const patterns = o.playbook?.patterns ?? [];
+  const patternIndex = patterns.length
+    ? [...o.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) % patterns.length
+    : 0;
+  const requestedZone = String(patterns[patternIndex]?.textRecipe?.position ?? "left");
+  const zones = new Set<ThumbnailTextZone>([
+    "left", "right", "upperLeft", "upperRight", "center", "upperCenter",
+  ]);
+  const textZone = zones.has(requestedZone as ThumbnailTextZone)
+    ? requestedZone as ThumbnailTextZone
+    : "left";
+  await renderThumbnail({
+    spec: {
+      scene: {
+        description: scene,
+        imageStyle: vl?.imageStyle ?? o.style.art,
+        palette: [vl?.baseColor, vl?.accentColor, o.style.palette]
+          .filter((value): value is string => Boolean(value)),
+        accentColor: vl?.accentColor ?? o.style.title.accent ?? undefined,
+        composition: vl?.composition,
+        textZone,
+        visualAvoid: o.playbook?.avoid,
+      },
+      typography: {
+        lines: lines.map((line) => ({
+          text: line.text,
+          payoff: line.payoff,
+          accent: line.payoff,
+        })),
+        subtitle: o.channelName,
+        font: vl?.font ?? o.style.title.font,
+        uppercase: vl?.uppercase ?? o.style.title.uppercase,
+        treatment: vl?.treatment ?? "clean",
+        textObject: vl?.textObject,
+        accentColor: vl?.accentColor ?? o.style.title.accent ?? undefined,
+      },
+    },
     outJpg,
-    expectWords: lines.map((l) => l.text),
-    imageStyle: look,
-    title: o.title,
-    log: o.log,
+    tmpDir: o.dir,
   });
   const key = `${channelPrefix(o.ownerId, o.slug)}plan/${o.id}.jpg`;
   await putObject(key, readFileSync(outJpg), { contentType: "image/jpeg" });

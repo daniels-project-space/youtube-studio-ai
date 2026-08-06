@@ -14,19 +14,22 @@
  *     three named, executable patterns. Stored on the channel — the "devises
  *     rules out of that" loop, made durable.
  *  3. TOURNAMENT — per video, instantiate an executable pattern into a real
- *     candidate (provider-native type or text-free art + exact compositor type)
+ *     candidate (text-free base art + exact local compositor type)
  *     and judge it
  *     COMPARATIVELY against the verified references in a simulated feed.
  *     The winner ships; scores + reasons persist.
  */
 import { join } from "node:path";
-import { writeFile } from "node:fs/promises";
 import { parseJsonLoose } from "@/lib/gemini";
 import { hasVisionKey, visionLocal } from "@/lib/vision";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { hasBanana } from "@/lib/banana";
 
-import { imageToJpeg, thumbnailText } from "@/lib/ffmpeg";
+import { imageToJpeg } from "@/lib/ffmpeg";
+import {
+  renderThumbnail,
+  type ThumbnailBaseArtifact,
+} from "@/lib/thumbnailRenderer";
 import { downloadTo } from "@/lib/files";
 import type { StyleDNA } from "@/engine/creative/types";
 import type { FamilyKey } from "@/engine/families";
@@ -76,9 +79,9 @@ export interface VisualLanguage {
   /** Base-image rendering style, e.g. "vintage ink engraving on parchment". */
   imageStyle?: string;
   badgeStyle?: "center" | "pill";
-  /** TYPE-AS-OBJECT treatment: typography rendered as a physical designed
-   * object in the scene (torn strips / paint smear / censor bar / sticker),
-   * never plain floating text. The single biggest craft lever. */
+  /** TYPE-AS-OBJECT treatment: deterministic local typography rendered with
+   * a physical-design motif (plate / smear / stamp / sticker). It is never
+   * delegated to the scene model. */
   textObject?:
     | "torn_strip" | "paint_smear" | "censor_bar" | "grunge_sticker" | "spaced_elegant" | "block_plate"
     | "neon_sign" | "spray_paint" | "stamp_ink" | "movie_poster" | "ransom_note" | "carved";
@@ -87,11 +90,8 @@ export interface VisualLanguage {
    * full_scene = one continuous rendered scene. */
   composition?: "cutout_collage" | "full_scene";
   uppercase?: boolean;
-  /** recraft = the FULL frame (art + typography + layout) designed as ONE
-   * generation by the design-tuned Recraft V3 model — the strongest one-pass
-   * path, kills the text-pasted-on-top look; integrated = words generated AS
-   * PART of the artwork (Ideogram typography engine); layered = compositor
-   * type on top (deterministic control). */
+  /** Historical playbook preference retained for stored-data compatibility.
+   * Deployed rendering always uses the deterministic local compositor. */
   renderMode?: "recraft" | "integrated" | "layered" | "template";
   /** Locked layout subset from the template pack (docs/THUMB_TEMPLATES.md). */
   templates?: string[];
@@ -449,7 +449,7 @@ export async function distillPlaybook(args: {
       `stamp=hollow archival border, neon=glowing type for night/synth worlds, clean=pure premium type), ` +
       `"baseColor":"#hex","accentColor":"#hex" — colors MUST come from THIS channel's palette; NEVER default to ` +
       `gold/yellow unless it is genuinely this channel's color, ` +
-      `"textObject":"torn_strip"|"paint_smear"|"censor_bar"|"grunge_sticker"|"spaced_elegant"|"block_plate"|"neon_sign"|"spray_paint"|"stamp_ink"|"movie_poster"|"ransom_note"|"carved" (the channel SIGNATURE type-as-object treatment - ALSO available: neon_sign=real glowing tubes in the scene; spray_paint=stencil graffiti with drips; stamp_ink=huge CLASSIFIED-style rubber stamp slammed diagonally; movie_poster=cinematic beveled title card in the scene atmosphere; ransom_note=letters cut from different magazines; carved=letters chiseled into the scene material with real depth - torn_strip: each word HUGE on its own torn newspaper strip in mixed tabloid serifs layered in front of/behind the hero; paint_smear: elegant wide-tracked capitals sitting ON a rough hand-swiped accent paint smear crossing the hero; censor_bar: white stencil caps on a solid accent censor bar laid across the frame or the hero eyes; grunge_sticker: ONE lowercase word ending in a period, distressed punk type, white knockout on a rough black sticker; spaced_elegant: thin extremely wide-tracked caps integrated into the artwork material; block_plate: ultra-heavy condensed caps on hard solid plates, key word underlined with a rough brush stroke), "imageStyle":"<=12 words — the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
+      `"textObject":"torn_strip"|"paint_smear"|"censor_bar"|"grunge_sticker"|"spaced_elegant"|"block_plate"|"neon_sign"|"spray_paint"|"stamp_ink"|"movie_poster"|"ransom_note"|"carved" (the channel SIGNATURE motif for the deterministic LOCAL typography layer; it must never appear in fluxRecipe or become a textual scene prop), "imageStyle":"<=12 words — the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
       `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill","composition":"cutout_collage"|"full_scene" (cutout_collage = the hero is a clean die-cut PHOTO cutout with crisp edges pasted OVER a designed collage background of torn clippings/photos/graphic shapes - real photographic grain, magazine-composite feel; PICK THIS for commentary/persona/drama/expose channels because continuous AI scenes read fake there. full_scene = one continuous rendered scene for painterly/cinematic worlds),` +
       `"uppercase":boolean}. THE RULE: if another channel could wear this language, it is WRONG — diverge hard.\n` +
       `1. rules: 6-8 HARD rules for this channel's thumbnails — specific (sizes, positions, counts, colors), ` +
@@ -533,6 +533,9 @@ export async function renderCandidate(args: {
   outJpg: string;
   tmpDir: string;
   idx: number;
+  /** Optional scene-still reuse. Ignored unless its producer supplied the
+   * explicit text-free + matching-safe-zone provenance contract. */
+  baseArt?: ThumbnailBaseArtifact;
   log?: Logger;
 }): Promise<string> {
   if (!hasBanana()) {
@@ -580,9 +583,10 @@ export async function renderCandidate(args: {
       `OPPOSITE the textZone.\n` +
       `background: a SEPARATE supporting layer behind the hero - darker, simpler, with depth (torn tabloid strips, ` +
       `a blurred crowd in red, a burning skyline, a storm sky). It frames the hero, never competes.\n` +
-      `details: 1-3 SYMBOLIC story-carrying additions ON or AROUND the hero that make the click irresistible ` +
-      `(fire reflected in glasses lenses, a glowing crack across the chest, torn headline strips reading into ` +
-      `frame, a red zigzag crash line). Each detail must deepen the SAME story - nothing random.\n` +
+      `details: 1-3 NON-TEXTUAL SYMBOLIC story-carrying additions ON or AROUND the hero that make the click irresistible ` +
+      `(fire reflected in glasses lenses, a glowing crack across the chest, a red zigzag crash line). ` +
+      `Never request newspapers, signs, posters, labels, screens, letters, words, or any other textual prop. ` +
+      `Each detail must deepen the SAME story - nothing random.\n` +
       `STEP 3 — textPropsJson: the template as a JSON-ENCODED STRING with placeholders replaced (line texts: 1-3 ` +
       `punchy words each, ≤5 words total, NOT restating the title - every line must be a real English hook word, NEVER meta-words like "omit"/"none"; ` +
       `numberCallout: a REAL number from the topic, or LEAVE THE KEY OUT of the JSON entirely when none exists; set "position" to your chosen textZone).\n` +
@@ -630,49 +634,13 @@ export async function renderCandidate(args: {
     delete textProps["numberCallout"];
   }
 
-  // PROVIDER-CORRECT ENGINE: Gemini Pro can design exact typography natively.
-  // FLUX is an excellent scene renderer but an unreliable speller, so on the
-  // Fal route it renders TEXT-FREE base art and FFmpeg places the exact
-  // playbook headline in the already-reserved safe zone. This removes the
-  // misspelling -> judge rejection -> generic title-card loop seen in live runs.
-  const {
-    bananaThumbnail,
-    bananaUsesNativeTypography,
-    buildThumbBrief,
-    buildThumbSceneRequest,
-    generateBananaImage,
-  } = await import("@/lib/banana");
+  // UNIVERSAL ENGINE: every provider renders scene pixels only. Typography is
+  // always local and deterministic, so a provider/environment switch cannot
+  // reintroduce misspellings or a more expensive Pro typography request.
   const numberCallout = textProps["numberCallout"]
     ? String(textProps["numberCallout"])
     : undefined;
-  const words = cleanLines.map((l) => l.text);
-  if (numberCallout) words.unshift(numberCallout);
   const payoffIdx = Math.max(cleanLines.findIndex((l) => l.accent), 0);
-  const briefArgs = {
-    channelName: String(textProps["badge"] ?? "channel"),
-    imageStyle: vl.imageStyle,
-    palette: [vl.baseColor, vl.accentColor].filter((color): color is string => Boolean(color)),
-    accentColor: vl.accentColor,
-    textObject: (vl as { textObject?: string }).textObject,
-    composition: (vl as { composition?: string }).composition,
-    scene: inst.fluxPrompt,
-    lines: cleanLines.map((l, i) => ({ text: l.text, payoff: i === payoffIdx, accent: l.accent })),
-    badge: String(textProps["badge"] ?? ""),
-  };
-
-  if (bananaUsesNativeTypography()) {
-    const { verdict } = await bananaThumbnail({
-      brief: buildThumbBrief(briefArgs),
-      outJpg: args.outJpg,
-      expectWords: words,
-      imageStyle: vl.imageStyle,
-      title: args.title,
-      log: args.log,
-    });
-    args.log?.(`thumbnailLab: candidate ${args.idx + 1} "${args.pattern.name}" rendered (banana, punch ${verdict.punch ?? "?"}/10)`);
-    return args.outJpg;
-  }
-
   const zones = new Set<ThumbnailTextZone>([
     "left", "right", "upperLeft", "upperRight", "center", "upperCenter",
   ]);
@@ -686,78 +654,36 @@ export async function renderCandidate(args: {
       payoff: !numberCallout && index === payoffIdx,
     })),
   ];
-  const sceneRequest = buildThumbSceneRequest({ ...briefArgs, textZone: zone });
-  let lastVerdict: {
-    textOk?: boolean;
-    faceClear?: boolean;
-    punch?: number;
-    styleMatch?: number;
-    storyMatch?: number;
-    uiClean?: boolean;
-    fix?: string;
-  } = {};
-  let fix = "";
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const bytes = await generateBananaImage({
-      ...sceneRequest,
-      // Picture-only art does not need the expensive typography model. The
-      // exact headline is composited below, so the flash tier is the quality/
-      // cost-correct route and never receives allowText:true.
-      prompt: sceneRequest.prompt + fix,
-    });
-    const basePath = join(args.tmpDir, `thumbnail_scene_${args.idx}_${attempt}.jpg`);
-    await writeFile(basePath, bytes);
-    await thumbnailText({
-      basePath,
-      outJpg: args.outJpg,
-      title: words.join(" "),
-      lines: overlayLines,
-      position: zone,
-      subtitle: String(textProps["badge"] ?? "") || undefined,
-      accentColor: vl.accentColor,
-      font: vl.font ?? "sans",
-      uppercase: textProps["uppercase"] !== false,
-      treatment: vl.treatment,
-    });
-    const raw = await visionLocal({
-      prompt:
-        `THUMBNAIL GATE. The exact headline words ${words.map((word) => `"${word.toUpperCase()}"`).join(" and ")} ` +
-        `must be fully visible and spelled exactly. Judge textOk, faceClear (no headline over a face/eyes), ` +
-        `punch 1-10 at phone size, styleMatch 1-10 versus "${vl.imageStyle ?? "the channel Style DNA"}", ` +
-        `storyMatch 1-10 versus video "${args.title}", and uiClean (no fake player UI/watermark). ` +
-        `Return STRICT JSON {"textOk":bool,"faceClear":bool,"punch":n,"styleMatch":n,"storyMatch":n,"uiClean":bool,"fix":"<=15 words"}.`,
-      imagePaths: [args.outJpg],
-      json: true,
-      maxTokens: 260,
-    });
-    lastVerdict = parseJsonLoose<typeof lastVerdict>(raw);
-    const restrained = vl.treatment === "clean" || /sleep|calm|understated/i.test(vl.imageStyle ?? "");
-    const pass =
-      lastVerdict.textOk !== false &&
-      lastVerdict.faceClear !== false &&
-      lastVerdict.uiClean !== false &&
-      (lastVerdict.punch ?? 0) >= (restrained ? 5 : 7) &&
-      (lastVerdict.styleMatch ?? 0) >= 7 &&
-      (lastVerdict.storyMatch ?? 0) >= 7;
-    if (pass) {
-      args.log?.(
-        `thumbnailLab: candidate ${args.idx + 1} "${args.pattern.name}" rendered ` +
-        `(FLUX scene + deterministic type, punch ${lastVerdict.punch ?? "?"}/10)`,
-      );
-      return args.outJpg;
-    }
-    fix = ` CRITICAL SCENE FIX: ${lastVerdict.fix ?? "stronger topic-specific hero and cleaner reserved text zone"}. ` +
-      `Do not add any typography; the compositor owns it.`;
-    args.log?.(
-      `thumbnailLab: composited attempt ${attempt + 1} rejected ` +
-      `(punch=${lastVerdict.punch} style=${lastVerdict.styleMatch} story=${lastVerdict.storyMatch})`,
-    );
-  }
-  throw new Error(
-    `thumbnailLab: FLUX scene + deterministic typography failed after 2 attempts ` +
-    `(punch=${lastVerdict.punch} style=${lastVerdict.styleMatch} story=${lastVerdict.storyMatch}; ` +
-    `fix="${lastVerdict.fix ?? ""}")`,
+  const rendered = await renderThumbnail({
+    spec: {
+      scene: {
+        description: inst.fluxPrompt,
+        imageStyle: vl.imageStyle,
+        palette: [vl.baseColor, vl.accentColor].filter((color): color is string => Boolean(color)),
+        accentColor: vl.accentColor,
+        composition: (vl as { composition?: string }).composition,
+        textZone: zone,
+        visualAvoid: args.playbook.avoid,
+      },
+      typography: {
+        lines: overlayLines,
+        subtitle: String(textProps["badge"] ?? "") || undefined,
+        accentColor: vl.accentColor,
+        font: vl.font ?? "sans",
+        uppercase: textProps["uppercase"] !== false,
+        treatment: vl.treatment,
+        textObject: (vl as { textObject?: string }).textObject,
+      },
+    },
+    outJpg: args.outJpg,
+    tmpDir: args.tmpDir,
+    baseArt: args.baseArt,
+  });
+  args.log?.(
+    `thumbnailLab: candidate ${args.idx + 1} "${args.pattern.name}" rendered ` +
+    `(${rendered.baseSource} text-free scene + deterministic type)`,
   );
+  return args.outJpg;
 }
 /** Comparative feed judgment: candidates vs the verified real winners. */
 export async function judgeTournament(args: {

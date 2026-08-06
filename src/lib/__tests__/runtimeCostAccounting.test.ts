@@ -84,7 +84,7 @@ function costPatches(): void {
     0.01,
   );
   const images = PRICE.bananaProUsd + 2 * PRICE.bananaFlashUsd + PRICE.bananaFalUsd;
-  const judges = (4 * 2 + 2) * PRICE.visionGraderUsd;
+  const judges = 2 * PRICE.visionGraderUsd;
   assert.equal(thumbnail, images + judges + 0.01);
 
   assert.equal(qaVisual.paid, true);

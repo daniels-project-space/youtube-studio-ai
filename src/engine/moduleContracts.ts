@@ -222,17 +222,15 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   thumbnail_gen: contract(["package.thumbnail"], {
     optionalConsumes: [
-      "channelName", "topic", "f1Url", "f1Key", "styleGrammar", "styleDNA", "family", "persona",
+      "channelName", "topic", "f1Url", "f1Key", "f1ThumbnailBaseProvenance", "styleGrammar", "styleDNA", "family", "persona",
       "thumbnailIdentity", "nicheIntel", "thumbnailer", "niche", "seoDatabank", "competitors", "healHints",
       "narrationText",
     ],
     providerProfiles: [managed],
     maxCostUsd: 2,
-    // Worst configured path: two judged playbook attempts followed by two
-    // judged DNA-direct attempts. Every scene uses the picture/Flash tier and
-    // deterministic local typography; the allowance also covers both graders
-    // per candidate plus the mobile/reference decisions.
-    maxCostUsdFor: () => 4 * bananaUnitRate("flash") + 10 * PRICE.visionGraderUsd,
+    // One text-free Flash scene + one post-composite mobile/reference alarm.
+    // Spelling can never trigger another paid render because type is local.
+    maxCostUsdFor: () => bananaUnitRate("flash") + PRICE.visionGraderUsd,
     qualityRequired: true,
   }),
   script_gen: contract(["script.generated"], {

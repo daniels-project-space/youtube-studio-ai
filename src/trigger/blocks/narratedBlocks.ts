@@ -2153,7 +2153,9 @@ export const qaVisual: Block = {
     // cosmetic verdict about a card that was working as designed).
     const thumbStrategy = String(ctx.store["strategy"] ?? "");
     const thumbIsDeliberateCard =
-      thumbStrategy === "title_card_fallback" || String(ctx.store["thumbnailer"] ?? "") === "title_card";
+      thumbStrategy === "title_card_fallback" ||
+      thumbStrategy === "draft_preview_placeholder" ||
+      String(ctx.store["thumbnailer"] ?? "") === "title_card";
     for (const [name, v] of [
       ["video", video_],
       ["thumbnail", thumbnail],

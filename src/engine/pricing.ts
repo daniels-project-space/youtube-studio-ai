@@ -126,12 +126,13 @@ export function thumbnailGenerationCost(
   const pro = Math.max(0, after.pro - before.pro);
   const flash = Math.max(0, after.flash - before.flash);
   const fal = Math.max(0, after.fal - before.fal);
-  const bananaJudgeAllowance = (pro + flash + fal) * 2;
   return (
     pro * PRICE.bananaProUsd +
     flash * PRICE.bananaFlashUsd +
     fal * PRICE.bananaFalUsd +
-    (bananaJudgeAllowance + Math.max(0, referenceJudgeCalls)) * PRICE.visionGraderUsd +
+    // Image generation no longer launches hidden candidate judges. Only the
+    // explicit post-render publishing alarm is charged here.
+    Math.max(0, referenceJudgeCalls) * PRICE.visionGraderUsd +
     Math.max(0, extraCostUsd)
   );
 }

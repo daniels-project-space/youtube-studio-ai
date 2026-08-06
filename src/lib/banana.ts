@@ -1,15 +1,10 @@
 /**
- * BANANA — the thumbnail engine. Nano Banana Pro (Gemini 3 Pro Image) renders
- * the COMPLETE thumbnail in one pass from a rich design brief: dimensional
- * material typography, photo-cutout collage, hero dominance, faces never
- * covered, correct badges — proven 9/9 SHIP across wildly different channels.
+ * BANANA — shared still-image provider adapter.
  *
- * Fully standalone: brief in → judged jpg out. The only deps are the Gemini
- * key (vault service "gemini") and the local vision judge. Set
+ * Real thumbnail paths use `thumbnailRenderer.ts`: this module renders their
+ * text-free base art, while exact typography is composited locally. Set
  * IMAGE_DISABLE_GEMINI=1 (or IMAGE_PROVIDERS=fal,…) to render every image on
- * fal FLUX instead — zero Google image spend, same call sites.
- *
- *   const { path } = await bananaThumbnail({ brief: buildThumbBrief({...}), outJpg, log });
+ * fal FLUX instead — zero Google image spend, with identical type correctness.
  */
 import { writeFile } from "node:fs/promises";
 import { parseJsonLoose } from "@/lib/gemini";
@@ -17,9 +12,9 @@ import { visionLocal } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
 
 /**
- * MODEL TIERS. Pro (gemini-3-pro-image, ~$0.13/img) exists for DESIGNED
- * TYPOGRAPHY — thumbnails and type cards, where its text rendering is the
- * proven 9/9 edge. Flash (classic Nano Banana, ~$0.04/img) is the DEFAULT for
+ * MODEL TIERS. Pro (gemini-3-pro-image, ~$0.13/img) remains available for
+ * explicitly non-thumbnail design experiments/type cards. Flash (classic Nano
+ * Banana, ~$0.04/img) is the DEFAULT for
  * every picture-only render (documotion assets, whiteboard layers, comic
  * panels, lore scenes, lofi stills — ~90% of image volume): Pro-first for
  * those was a silent 3.4x on the whole image bill. Flash tier never silently
@@ -56,15 +51,6 @@ function falImageRouteActive(): boolean {
 export function hasBanana(): boolean {
   if (falImageRouteActive()) return !!process.env.FAL_KEY;
   return !!process.env.GEMINI_API_KEY;
-}
-
-/**
- * Gemini's image model is the only configured route that reliably renders
- * exact display type as part of the artwork. FLUX remains the picture engine,
- * but its headline is composited deterministically by thumbnailLab.
- */
-export function bananaUsesNativeTypography(): boolean {
-  return !falImageRouteActive();
 }
 
 /** The proven craft contract — prepended to EVERY brief. */
@@ -267,12 +253,12 @@ export async function generateBananaImage(args: {
   imageSize?: string;
   /** Optional input images (base64) for img2img / style-reference conditioning. */
   images?: { data: string; mimeType?: string }[];
-  /** Set true ONLY for TEXT-DESIGN renders (thumbnails, type cards). Default false:
-   *  the render is picture-only and NO_TEXT_CLAUSE is appended, because every
-   *  pipeline's titles/labels are engine overlays — baked-in text is the bug. */
+  /** Legacy/manual text-design escape hatch. Production thumbnails must use
+   *  thumbnailRenderer and never set this. Default false: picture-only with
+   *  NO_TEXT_CLAUSE appended. */
   allowText?: boolean;
-  /** Cost tier. Default: "pro" only for text-design renders (allowText), else
-   *  "flash". Pass explicitly to override (e.g. flash preview thumbnails). */
+  /** Cost tier. Default: "pro" only for legacy text-design renders
+   *  (`allowText`), otherwise "flash". */
   tier?: "pro" | "flash";
 }): Promise<Buffer> {
   // PROVIDER ROUTER: when the operator disabled Google image gen, EVERY engine
@@ -387,6 +373,9 @@ export async function bananaThumbnail(args: {
   styleRubric?: string;
   log?: (msg: string) => void;
 }): Promise<{ path: string; verdict: BananaVerdict }> {
+  // Legacy experiment compatibility only. Deployed thumbnail paths must use
+  // thumbnailRenderer, whose typed scene/type split makes this unsafe one-pass
+  // API unreachable from production.
   let fixNote = "";
   let lastVerdict: BananaVerdict = {};
   // Restrained brands: relax the scroll-stopping "punch" floor and tell the

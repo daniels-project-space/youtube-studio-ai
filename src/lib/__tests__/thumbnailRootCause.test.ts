@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { mkdtemp, rm } from "node:fs/promises";
+import { mkdtemp, readFile, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 
@@ -7,12 +7,17 @@ import { ARCHETYPES } from "@/engine/archetypes";
 import type { StyleDNA } from "@/engine/creative/types";
 import { FAMILIES, type FamilyKey } from "@/engine/families";
 import {
-  buildThumbSceneRequest,
   generateBananaImage,
 } from "@/lib/banana";
-import { probe, solidImage, thumbnailText } from "@/lib/ffmpeg";
+import { probe, solidImage } from "@/lib/ffmpeg";
 import { buildStyleDnaPlaybook } from "@/lib/thumbnailLab";
 import { planThumbnailText, type ThumbnailTextZone } from "@/lib/thumbnailLayout";
+import {
+  buildThumbnailImageRequest,
+  isThumbnailBaseProvenance,
+  renderThumbnail,
+  type ThumbnailRenderSpec,
+} from "@/lib/thumbnailRenderer";
 
 const DNA: StyleDNA = {
   source: "research+vision",
@@ -82,25 +87,77 @@ function assertFamilyPolicy(): void {
 }
 
 function assertSceneTypographySplit(): void {
-  const request = buildThumbSceneRequest({
-    channelName: "The Quiet Stoic",
-    imageStyle: "cinematic marble sculpture",
-    palette: ["#111111", "#ffd400"],
-    accentColor: "#ffd400",
-    scene: "A stoic statue stopping a spear with a cracked golden shield",
-    lines: [
-      { text: "DEFEND YOUR", payoff: false },
-      { text: "PEACE", payoff: true },
-    ],
-    badge: "THE QUIET STOIC",
-    textZone: "left",
-  });
+  const spec: ThumbnailRenderSpec = {
+    scene: {
+      description: "A stoic statue stopping a spear with a cracked golden shield",
+      imageStyle: "cinematic marble sculpture",
+      palette: ["#111111", "#ffd400"],
+      accentColor: "#ffd400",
+      textZone: "left",
+    },
+    typography: {
+      lines: [
+        { text: "DEFEND YOUR", payoff: false },
+        { text: "PEACE", payoff: true },
+      ],
+      subtitle: "THE QUIET STOIC",
+      font: "impact",
+      treatment: "plate",
+    },
+  };
+  const request = buildThumbnailImageRequest(spec);
   const prompt = request.prompt;
   assert.equal(request.allowText, false);
   assert.equal(request.tier, "flash");
-  assert.doesNotMatch(prompt, /DEFEND YOUR|PEACE/);
-  assert.match(prompt, /No text, no letters, no numbers/i);
+  assert.equal(request.aspectRatio, "16:9");
+  assert.doesNotMatch(prompt, /DEFEND YOUR|PEACE|QUIET STOIC/i);
+  assert.match(prompt, /no text, letters, words, numbers/i);
   assert.match(prompt, /left 42%/i);
+
+  assert.throws(
+    () => buildThumbnailImageRequest({
+      ...spec,
+      scene: { ...spec.scene, description: "A plaque reading DEFEND YOUR beside the statue" },
+    }),
+    /typography leaked into scene prompt/i,
+  );
+  assert.doesNotThrow(
+    () => buildThumbnailImageRequest({
+      ...spec,
+      scene: { ...spec.scene, description: "A peaceful marble guardian at sunrise" },
+    }),
+    "one semantic headline keyword must remain legal scene grounding",
+  );
+
+  assert.equal(isThumbnailBaseProvenance(undefined, "left"), false);
+  assert.equal(isThumbnailBaseProvenance({
+    contract: "thumbnail-base-v1", textFree: true, safeZone: "right", source: "verified-video-still",
+  }, "left"), false);
+  assert.equal(isThumbnailBaseProvenance({
+    contract: "thumbnail-base-v1", textFree: true, safeZone: "left", source: "verified-video-still",
+  }, "left"), true);
+}
+
+async function assertRealCallPaths(): Promise<void> {
+  const paths = [
+    "src/lib/thumbnailLab.ts",
+    "src/trigger/blocks/intelligenceBlocks.ts",
+    "src/trigger/planWeekAhead.ts",
+    "src/lib/speechThumbnail.ts",
+  ];
+  for (const path of paths) {
+    const source = await readFile(join(process.cwd(), path), "utf8");
+    assert.doesNotMatch(source, /bananaUsesNativeTypography|bananaThumbnail\s*\(|allowText\s*:\s*true/,
+      `${path} must never delegate thumbnail typography to an image provider`);
+  }
+  const production = await readFile(
+    join(process.cwd(), "src/trigger/blocks/intelligenceBlocks.ts"),
+    "utf8",
+  );
+  assert.match(production, /buildStyleDnaPlaybook/, "no-playbook path must use the Style-DNA foundation");
+  assert.doesNotMatch(production, /titleCardFallback|fal-route judge rejection/,
+    "generic cards must not be automatic recovery");
+  assert.match(production, /draft_preview_placeholder/);
 }
 
 function assertSafePlans(): void {
@@ -129,18 +186,40 @@ async function assertRenderedLayout(): Promise<void> {
   try {
     const basePath = await solidImage(join(directory, "base.jpg"), 1_280, 720, "#16243a");
     const outJpg = join(directory, "thumbnail.jpg");
-    await thumbnailText({
-      basePath,
+    let generated = 0;
+    await renderThumbnail({
+      spec: {
+        scene: {
+          description: "A luminous river stone beside two resting hands",
+          imageStyle: "ethereal twilight editorial scene",
+          textZone: "left",
+        },
+        typography: {
+          lines: [{ text: "Gratitude for the People Beside You", payoff: true }],
+          subtitle: "Gratitude Springs",
+          accentColor: "#b2c8ba",
+          font: "serif",
+          uppercase: false,
+          treatment: "clean",
+        },
+      },
       outJpg,
-      title: "Gratitude for the People Beside You",
-      lines: [{ text: "Gratitude for the People Beside You", payoff: true }],
-      position: "left",
-      subtitle: "Gratitude Springs",
-      accentColor: "#b2c8ba",
-      font: "serif",
-      uppercase: false,
-      treatment: "clean",
+      tmpDir: directory,
+      baseArt: {
+        path: basePath,
+        provenance: {
+          contract: "thumbnail-base-v1",
+          textFree: true,
+          safeZone: "left",
+          source: "verified-video-still",
+        },
+      },
+      generateScene: async () => {
+        generated += 1;
+        throw new Error("verified base must be reused");
+      },
     });
+    assert.equal(generated, 0);
     const media = await probe(outJpg);
     assert.equal(media.width, 1_280);
     assert.equal(media.height, 720);
@@ -190,6 +269,7 @@ async function main(): Promise<void> {
   assertFamilyPolicy();
   assertSceneTypographySplit();
   assertSafePlans();
+  await assertRealCallPaths();
   await assertRenderedLayout();
   await assertRetryBoundarySignal();
   console.log("THUMBNAIL ROOT-CAUSE PASS");

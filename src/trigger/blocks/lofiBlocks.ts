@@ -1042,11 +1042,17 @@ export const assemble: Block = {
 
 export const uploadDraft: Block = {
   id: "upload_draft",
-  consumes: ["videoKey", "videoLocalPath", "title", "description", "tags", "qaPassed", "thumbnailKey"],
+  consumes: [
+    "videoKey", "videoLocalPath", "title", "description", "tags", "qaPassed",
+    "thumbnailKey", "thumbnailPublishable",
+  ],
   produces: ["youtubeVideoId", "watchUrl", "youtubePrivacy"],
   run: async (ctx) => {
     if (ctx.store["qaPassed"] !== true) {
       throw new Error("upload_draft: qa did not pass — refusing to upload");
+    }
+    if (ctx.store["thumbnailPublishable"] !== true) {
+      throw new Error("upload_draft: thumbnail is a nonpublishable draft preview — refusing to upload");
     }
     const filePath = str(ctx, "videoLocalPath");
     const title = str(ctx, "title");

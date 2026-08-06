@@ -460,8 +460,8 @@ function configurationSpecificCostEnvelopes(): void {
 
   assert.equal(
     envelope("thumbnail_gen", {}),
-    4 * bananaUnitRate("flash") + 10 * PRICE.visionGraderUsd,
-    "thumbnail reservation must cover every generated scene and grader call",
+    bananaUnitRate("flash") + PRICE.visionGraderUsd,
+    "thumbnail reservation must cover the single text-free scene and one publishing alarm",
   );
 
   const narrationCharacters =

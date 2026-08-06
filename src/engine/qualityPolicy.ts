@@ -42,7 +42,11 @@ export function assertThumbnailGate(
 export function assertThumbnailStrategy(profile: QualityProfile, strategy: string): void {
   if (
     profile === "production" &&
-    (strategy === "playbook_belowbar" || strategy === "title_card_fallback")
+    (
+      strategy === "playbook_belowbar" ||
+      strategy === "title_card_fallback" ||
+      strategy === "draft_preview_placeholder"
+    )
   ) {
     throw new Error(`thumbnail_gen: strategy ${strategy} is draft-only`);
   }
