@@ -11,7 +11,7 @@
  * Output:           stdout + /tmp/topicraft-ab-report.md
  */
 import { writeFileSync } from "node:fs";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../convex/_generated/api";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { craftTopics, type TopicBet } from "@/lib/topicraft";

@@ -10,11 +10,13 @@
  * image we apply here.
  */
 import { task } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { updateChannelBranding, uploadChannelBanner } from "@/lib/youtube";
+import { requireYouTubeConnector } from "@/lib/youtubeConnector";
+import { YOUTUBE_WRITE_SCOPES } from "@/lib/publishingPolicy";
 import { getObjectBytes } from "@/lib/storage";
 import { makeRunTempDir, writeBytes, readBytes } from "@/lib/files";
 import { imageToJpeg } from "@/lib/ffmpeg";
@@ -40,12 +42,14 @@ export const wireYoutubeBrandingTask = task({
     const convex = new ConvexHttpClient(url);
 
     const channelId = payload.channelId as Id<"channels">;
-    const [channel, auth] = await Promise.all([
-      convex.query(api.channels.getChannel, { channelId }),
-      convex.query(api.youtubeAuth.getForChannel, { channelId, secret: process.env.INTERNAL_QUERY_SECRET ?? "" }),
-    ]);
+    const channel = await convex.query(api.channels.getChannel, { channelId });
     if (!channel) return { ok: false, error: "channel not found" };
-    if (!auth?.refreshToken || !auth.ytChannelId) {
+    const connector = await requireYouTubeConnector(convex, {
+      channelId,
+      ownerId: channel.ownerId,
+      requiredScopes: YOUTUBE_WRITE_SCOPES,
+    });
+    if (!connector.ytChannelId) {
       return { ok: false, error: "channel not linked yet (no token / yt id)" };
     }
 
@@ -64,23 +68,23 @@ export const wireYoutubeBrandingTask = task({
         const out = join(tmp, "banner_2560.jpg");
         await writeBytes(src, await getObjectBytes(id.bannerKey));
         await imageToJpeg(src, out, 2560, 1440); // scale-to-cover + crop to 16:9
-        bannerExternalUrl = await uploadChannelBanner(auth.refreshToken, await readBytes(out), "image/jpeg");
+        bannerExternalUrl = await uploadChannelBanner(connector.refreshToken, await readBytes(out), "image/jpeg");
         log("banner uploaded (2560x1440)", { bannerExternalUrl });
       } catch (e) { log(`banner upload failed (continuing): ${e instanceof Error ? e.message : e}`); }
     }
 
     try {
       await updateChannelBranding({
-        refreshToken: auth.refreshToken,
-        ytChannelId: auth.ytChannelId,
+        refreshToken: connector.refreshToken,
+        ytChannelId: connector.ytChannelId,
         description: description || undefined,
         country: LANG_COUNTRY[lang] ?? "US",
         defaultLanguage: lang,
         keywords: keywords || undefined,
         bannerExternalUrl,
       });
-      log("branding applied", { ytChannelId: auth.ytChannelId, lang, hasBanner: Boolean(bannerExternalUrl) });
-      return { ok: true, ytChannelId: auth.ytChannelId, bannerSet: Boolean(bannerExternalUrl) };
+      log("branding applied", { ytChannelId: connector.ytChannelId, lang, hasBanner: Boolean(bannerExternalUrl) });
+      return { ok: true, ytChannelId: connector.ytChannelId, bannerSet: Boolean(bannerExternalUrl) };
     } catch (e) {
       return { ok: false, error: e instanceof Error ? e.message : String(e) };
     }

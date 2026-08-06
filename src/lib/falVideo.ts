@@ -14,15 +14,21 @@
  * ffmpeg), so we never depend on rarer start+end-image models.
  */
 
+import { boundFalVideoPrompt } from "@/lib/providerText";
+import {
+  ExecutionError,
+  type ExecutionErrorOptions,
+} from "@/engine/executionErrors";
+
 const FAL_QUEUE_BASE = "https://queue.fal.run";
 
 /** Pinned i2v model (override via env). Kling 1.6 standard = good motion/cost. */
 export const FAL_I2V_MODEL =
   process.env.FAL_I2V_MODEL ?? "fal-ai/kling-video/v1.6/standard/image-to-video";
 
-export class FalVideoError extends Error {
-  constructor(message: string) {
-    super(message);
+export class FalVideoError extends ExecutionError {
+  constructor(message: string, options: ExecutionErrorOptions = {}) {
+    super(message, options);
     this.name = "FalVideoError";
   }
 }
@@ -31,6 +37,10 @@ function falKey(): string {
   const k = process.env.FAL_KEY;
   if (!k) throw new FalVideoError("FAL_KEY missing (vault service 'fal')");
   return k;
+}
+
+function retryableHttpStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 export interface FalI2VRequest {
@@ -101,7 +111,7 @@ export async function generateFalI2V(req: FalI2VRequest): Promise<FalI2VResult> 
   const dur = (req.durationSec ?? 5) >= 8 ? "10" : "5";
   const body: Record<string, unknown> = {
     // Provider hard limit guard (422 on ~2500+ chars — deterministic, not transient).
-    prompt: req.prompt.length > 2200 ? req.prompt.slice(0, 2200).replace(/\s+\S*$/, "") : req.prompt,
+    prompt: boundFalVideoPrompt(req.prompt),
     image_url: req.imageUrl,
     duration: dur,
     aspect_ratio: req.aspectRatio ?? "16:9",
@@ -121,6 +131,11 @@ export async function generateFalI2V(req: FalI2VRequest): Promise<FalI2VResult> 
   if (!submitRes.ok || !submit.request_id) {
     throw new FalVideoError(
       `fal i2v submit failed: HTTP ${submitRes.status} ${JSON.stringify(submit).slice(0, 240)}`,
+      {
+        phase: "submit",
+        status: submitRes.status,
+        retryable: retryableHttpStatus(submitRes.status),
+      },
     );
   }
   const id = submit.request_id;
@@ -132,19 +147,49 @@ export async function generateFalI2V(req: FalI2VRequest): Promise<FalI2VResult> 
     await new Promise((r) => setTimeout(r, req.pollIntervalMs ?? 6000));
     const sRes = await fetch(statusUrl, { headers: { Authorization: `Key ${falKey()}` } });
     const s = (await sRes.json().catch(() => ({}))) as QueueStatus;
+    if (!sRes.ok) {
+      // Keep polling the SAME accepted request on capacity/rate-limit errors.
+      // A non-transient 4xx cannot improve and should fail immediately.
+      if (retryableHttpStatus(sRes.status)) continue;
+      throw new FalVideoError(
+        `fal i2v status failed for request ${id}: HTTP ${sRes.status} ${JSON.stringify(s).slice(0, 240)}`,
+        { phase: "poll", status: sRes.status, retryable: false },
+      );
+    }
     if (s.status === "COMPLETED") {
       const rRes = await fetch(responseUrl, { headers: { Authorization: `Key ${falKey()}` } });
       const payload = await rRes.json().catch(() => ({}));
       if (!rRes.ok) {
-        throw new FalVideoError(`fal i2v result fetch failed: HTTP ${rRes.status} ${JSON.stringify(payload).slice(0, 240)}`);
+        // The generation is complete; retry fetching its result in this same
+        // polling loop instead of submitting and charging for another job.
+        if (retryableHttpStatus(rRes.status)) continue;
+        throw new FalVideoError(
+          `fal i2v result fetch failed for request ${id}: HTTP ${rRes.status} ${JSON.stringify(payload).slice(0, 240)}`,
+          // The paid job already completed. Re-running the block would submit a
+          // second generation; retain the request id and fail without re-spend.
+          { phase: "result", status: rRes.status, retryable: false },
+        );
       }
       const url = extractVideoUrl(payload);
-      if (!url) throw new FalVideoError(`fal i2v completed but no video url: ${JSON.stringify(payload).slice(0, 240)}`);
+      if (!url) {
+        throw new FalVideoError(
+          `fal i2v completed but no video url (request ${id}): ${JSON.stringify(payload).slice(0, 240)}`,
+          { phase: "result", retryable: false },
+        );
+      }
       return { url, jobId: id, model };
     }
     if (s.status && /fail|error|cancel/i.test(s.status)) {
-      throw new FalVideoError(`fal i2v failed: status=${s.status} ${JSON.stringify(s).slice(0, 200)}`);
+      throw new FalVideoError(
+        `fal i2v failed: status=${s.status} request=${id} ${JSON.stringify(s).slice(0, 200)}`,
+        { phase: "poll", retryable: false },
+      );
     }
   }
-  throw new FalVideoError(`fal i2v timed out (request ${id})`);
+  throw new FalVideoError(`fal i2v timed out (request ${id})`, {
+    phase: "poll",
+    // Submission succeeded and the job may still finish. A blind retry would
+    // create another paid job instead of recovering this request.
+    retryable: false,
+  });
 }

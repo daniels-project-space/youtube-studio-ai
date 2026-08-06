@@ -33,16 +33,32 @@ export function hasYouTubeDataAccess(): boolean {
   );
 }
 
-async function get<T>(path: string, params: Record<string, string>): Promise<T> {
-  // Prefer the API key (simple, public). Else use the OAuth token (readonly).
+export interface YouTubeDataAccess {
+  /** Exact channel-bound connector token; preferred whenever supplied. */
+  refreshToken?: string;
+  /** Refuse API-key/global fallbacks for tenant-owned data. */
+  requireConnector?: boolean;
+}
+
+async function get<T>(
+  path: string,
+  params: Record<string, string>,
+  access: YouTubeDataAccess = {},
+): Promise<T> {
   const apiKey = process.env.YOUTUBE_DATA_API_KEY;
   let url: string;
   const headers: Record<string, string> = {};
-  if (apiKey) {
+  if (access.refreshToken) {
+    const { getAccessToken } = await import("@/lib/youtube");
+    headers.Authorization = `Bearer ${await getAccessToken(access.refreshToken)}`;
+    url = `${BASE}/${path}?${new URLSearchParams(params).toString()}`;
+  } else if (access.requireConnector) {
+    throw new YouTubeDataError("channel-bound YouTube Data access is required");
+  } else if (apiKey) {
     url = `${BASE}/${path}?${new URLSearchParams({ ...params, key: apiKey }).toString()}`;
   } else if (process.env.YOUTUBE_REFRESH_TOKEN) {
     const { getAccessToken } = await import("@/lib/youtube");
-    headers.Authorization = `Bearer ${await getAccessToken()}`;
+    headers.Authorization = `Bearer ${await getAccessToken(process.env.YOUTUBE_REFRESH_TOKEN)}`;
     url = `${BASE}/${path}?${new URLSearchParams(params).toString()}`;
   } else {
     throw new YouTubeDataError("no YouTube Data access (set YOUTUBE_DATA_API_KEY or OAuth)");
@@ -173,15 +189,22 @@ export interface VideoStat {
 }
 
 /** videos.list?part=snippet,statistics for a batch of ids → live numbers. */
-export async function fetchVideoStats(ids: string[]): Promise<VideoStat[]> {
+export async function fetchVideoStats(
+  ids: string[],
+  access: YouTubeDataAccess = {},
+): Promise<VideoStat[]> {
   const out: VideoStat[] = [];
   for (let i = 0; i < ids.length; i += 50) {
     const batch = ids.slice(i, i + 50);
     if (batch.length === 0) continue;
-    const json = await get<VideosResponse>("videos", {
-      part: "snippet,statistics",
-      id: batch.join(","),
-    });
+    const json = await get<VideosResponse>(
+      "videos",
+      {
+        part: "snippet,statistics",
+        id: batch.join(","),
+      },
+      access,
+    );
     for (const it of json.items ?? []) {
       const sn = it.snippet ?? {};
       const st = it.statistics ?? {};
@@ -218,16 +241,21 @@ interface ChannelsResponse {
 /** channels.list?part=statistics for a batch of YouTube channelIds (≤50). */
 export async function fetchChannelStats(
   channelIds: string[],
+  access: YouTubeDataAccess = {},
 ): Promise<ChannelStat[]> {
   const out: ChannelStat[] = [];
   const unique = [...new Set(channelIds.filter(Boolean))];
   for (let i = 0; i < unique.length; i += 50) {
     const batch = unique.slice(i, i + 50);
     if (batch.length === 0) continue;
-    const json = await get<ChannelsResponse>("channels", {
-      part: "statistics",
-      id: batch.join(","),
-    });
+    const json = await get<ChannelsResponse>(
+      "channels",
+      {
+        part: "statistics",
+        id: batch.join(","),
+      },
+      access,
+    );
     for (const it of json.items ?? []) {
       const st = it.statistics ?? {};
       out.push({

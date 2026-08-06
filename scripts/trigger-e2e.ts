@@ -7,7 +7,7 @@
  * Requires: NEXT_PUBLIC_CONVEX_URL + TRIGGER_SECRET_KEY (dev) in env, and a
  * `trigger.dev dev` worker running for the same project.
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { tasks } from "@trigger.dev/sdk";
 import { api } from "../convex/_generated/api";
 

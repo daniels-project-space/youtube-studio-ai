@@ -1,4 +1,4 @@
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { auditionBank } from "@/lib/voicecraft";
 (async () => {

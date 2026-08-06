@@ -10,9 +10,16 @@
 import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+import { requireYouTubeConnector } from "@/lib/youtubeConnector";
+
+interface MetadataOutputs {
+  description?: string;
+  tags?: string[];
+  title?: string;
+}
 
 const VAULT = "https://fantastic-roadrunner-485.convex.cloud/api/query";
 
@@ -40,22 +47,34 @@ async function main() {
   }
   process.env.R2_BUCKET = process.env.R2_BUCKET ?? "youtube-studio-ai";
   const yt = await vaultService("youtube");
-  for (const k of ["YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_REFRESH_TOKEN"]) {
+  for (const k of ["YOUTUBE_CLIENT_ID", "YOUTUBE_CLIENT_SECRET", "YOUTUBE_TOKEN_ENCRYPTION_KEY"]) {
     if (yt[k]) process.env[k] = yt[k];
   }
 
   const convex = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
+  const run = await convex.query(api.runs.getRun, {
+    runId: runId as Id<"runs">,
+  });
+  if (!run?.channelId) throw new Error("run has no channel");
+  const channel = await convex.query(api.channels.getChannel, {
+    channelId: run.channelId,
+  });
+  if (!channel) throw new Error("run channel not found");
+  const connector = await requireYouTubeConnector(convex, {
+    channelId: run.channelId,
+    ownerId: channel.ownerId,
+  });
 
   // Pull persisted metadata (title/description/tags) from the metadata stage.
-  const stages = (await convex.query(api.runStages.listRunStages, {
+  const stages = await convex.query(api.runStages.listRunStages, {
     runId: runId as Id<"runs">,
-  })) as Array<{ block: string; status: string; outputs?: any }>;
-  const meta = stages.find((s) => s.block === "metadata")?.outputs;
+  });
+  const meta = stages.find((stage) => stage.block === "metadata")?.outputs as MetadataOutputs | undefined;
   if (!meta?.title) throw new Error("no persisted metadata.title for this run");
 
-  const assets = (await convex.query(api.assets.listForRun, {
+  const assets = await convex.query(api.assets.listForRun, {
     runId: runId as Id<"runs">,
-  })) as Array<{ kind: string; r2Key: string }>;
+  });
   const videoKey = assets.find((a) => a.kind === "video")?.r2Key;
   const thumbKey = assets.find((a) => a.kind === "thumbnail")?.r2Key;
   if (!videoKey) throw new Error("no video asset for this run");
@@ -73,14 +92,20 @@ async function main() {
     filePath: mp4,
     title: meta.title,
     description: meta.description ?? "",
-    tags: (meta.tags as string[]) ?? [],
+    tags: meta.tags ?? [],
     privacyStatus: "private",
+    refreshToken: connector.refreshToken,
   });
   console.log(`uploaded: ${res.watchUrl} (privacy=${res.privacyStatus})`);
 
   if (thumbKey) {
     try {
-      await setVideoThumbnail(res.videoId, await getObjectBytes(thumbKey), "image/jpeg");
+      await setVideoThumbnail(
+        res.videoId,
+        await getObjectBytes(thumbKey),
+        "image/jpeg",
+        connector.refreshToken,
+      );
       console.log("custom thumbnail set");
     } catch (e) {
       console.log(`thumbnail set FAILED (non-fatal): ${e instanceof Error ? e.message : e}`);

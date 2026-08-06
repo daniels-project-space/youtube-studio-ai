@@ -17,7 +17,7 @@
  *   - runs.repointChannel
  *   - channels.deleteChannel  (added below alongside this script)
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 

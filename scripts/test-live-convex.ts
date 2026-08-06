@@ -13,7 +13,7 @@
  * Run: NEXT_PUBLIC_CONVEX_URL=… npx tsx scripts/test-live-convex.ts
  */
 import assert from "node:assert/strict";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../convex/_generated/api";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline, preflight } from "@/engine/validate";

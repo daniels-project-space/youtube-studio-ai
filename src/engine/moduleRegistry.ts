@@ -13,7 +13,7 @@ import { EDITOR_MODULE } from "@/lib/crew/editor";
 import { COMPOSER_MODULE } from "@/lib/crew/composer";
 import { DIRECTOR_MODULE } from "@/lib/crew/director";
 import { CRITIC_MODULE } from "@/lib/crew/critic";
-import { CINEMATOGRAPHER_MODULE } from "@/lib/crew/cinematographer";
+import { CINEMATOGRAPHER_MODULE } from "@/lib/crew/cinematographerManifest";
 import { CORE_MODULE_SURFACES } from "./moduleSurfaces";
 
 export interface ModuleCard {

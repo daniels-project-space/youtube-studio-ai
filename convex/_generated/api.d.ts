@@ -9,14 +9,19 @@
  */
 
 import type * as analytics from "../analytics.js";
+import type * as analyticsIngestions from "../analyticsIngestions.js";
 import type * as assets from "../assets.js";
 import type * as channelArchives from "../channelArchives.js";
+import type * as channelPublishPolicies from "../channelPublishPolicies.js";
 import type * as channels from "../channels.js";
 import type * as competitors from "../competitors.js";
 import type * as contentPlan from "../contentPlan.js";
 import type * as folders from "../folders.js";
 import type * as forgedModules from "../forgedModules.js";
+import type * as learningGovernance from "../learningGovernance.js";
 import type * as outlierBank from "../outlierBank.js";
+import type * as publishIntents from "../publishIntents.js";
+import type * as runArtifacts from "../runArtifacts.js";
 import type * as runLogs from "../runLogs.js";
 import type * as runStages from "../runStages.js";
 import type * as runs from "../runs.js";
@@ -25,6 +30,7 @@ import type * as topicMemory from "../topicMemory.js";
 import type * as videos from "../videos.js";
 import type * as voiceBank from "../voiceBank.js";
 import type * as youtubeAuth from "../youtubeAuth.js";
+import type * as youtubeUploads from "../youtubeUploads.js";
 
 import type {
   ApiFromModules,
@@ -34,14 +40,19 @@ import type {
 
 declare const fullApi: ApiFromModules<{
   analytics: typeof analytics;
+  analyticsIngestions: typeof analyticsIngestions;
   assets: typeof assets;
   channelArchives: typeof channelArchives;
+  channelPublishPolicies: typeof channelPublishPolicies;
   channels: typeof channels;
   competitors: typeof competitors;
   contentPlan: typeof contentPlan;
   folders: typeof folders;
   forgedModules: typeof forgedModules;
+  learningGovernance: typeof learningGovernance;
   outlierBank: typeof outlierBank;
+  publishIntents: typeof publishIntents;
+  runArtifacts: typeof runArtifacts;
   runLogs: typeof runLogs;
   runStages: typeof runStages;
   runs: typeof runs;
@@ -50,6 +61,7 @@ declare const fullApi: ApiFromModules<{
   videos: typeof videos;
   voiceBank: typeof voiceBank;
   youtubeAuth: typeof youtubeAuth;
+  youtubeUploads: typeof youtubeUploads;
 }>;
 
 /**

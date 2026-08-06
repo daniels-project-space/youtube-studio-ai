@@ -20,8 +20,11 @@ import {
   validatePipeline,
   preflight,
   PipelineValidationError,
+  PreflightError,
 } from "@/engine/validate";
 import { runPipeline } from "@/engine/runner";
+import { allManifests } from "@/engine/registry";
+import { configuredMaxCostUsd } from "@/engine/moduleManifest";
 import { COST_PATCH_KEY, type Block, type RunStageSink } from "@/engine/types";
 
 interface Recorded {
@@ -132,6 +135,32 @@ async function negativeSilentFallback(): Promise<void> {
   console.log("NEGATIVE(no-silent-fallback) PASS:", result.error);
 }
 
+async function preflightCostReservation(): Promise<void> {
+  _resetBlocks();
+  registerAllBlocks();
+  const paid = allManifests().find(
+    (manifest) => manifest.costAndLatency.paid && Number.isFinite(manifest.costAndLatency.maxCostUsd),
+  );
+  assert.ok(paid, "the production registry must contain a paid module with a cost envelope");
+  const resolved = validatePipeline(
+    [{ block: paid.id }],
+    Object.keys(paid.consumes),
+  );
+  const maximum = configuredMaxCostUsd(paid, resolved.entries[0].params ?? {}, {
+    entries: resolved.entries,
+    index: 0,
+  });
+  assert.ok(maximum > 0, "the selected paid module must reserve a positive amount");
+
+  assert.throws(
+    () => preflight(resolved, { budgetUsd: Math.max(0.000001, maximum / 2) }),
+    (error: unknown) => error instanceof PreflightError && /reserves up to/.test(error.message),
+    "a run must fail before provider execution when its declared worst case exceeds budget",
+  );
+  preflight(resolved, { budgetUsd: maximum });
+  console.log(`PREFLIGHT RESERVATION PASS: ${paid.id} reserves $${maximum.toFixed(2)}`);
+}
+
 /**
  * Cost wiring: a paid block that reports __costUsd must (a) have that cost
  * recorded on its runStage, (b) roll up into RunResult.costTotal, and (c) when
@@ -192,6 +221,7 @@ async function main(): Promise<void> {
   await positive();
   await negativeValidation();
   await negativeSilentFallback();
+  await preflightCostReservation();
   await costAndBudget();
   console.log("\nALL ENGINE TESTS PASSED");
 }

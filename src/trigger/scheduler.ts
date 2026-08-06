@@ -12,25 +12,14 @@
  * (draft|scheduled|public) — this scheduler only kicks off GENERATION.
  */
 import { schedules, tasks } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
-
-const DAY = 86_400_000;
-function cadenceMs(c?: string): number {
-  switch (c) {
-    case "daily":
-      return DAY;
-    case "biweekly":
-      return 14 * DAY;
-    case "monthly":
-      return 30 * DAY;
-    case "weekly":
-    default:
-      return 7 * DAY;
-  }
-}
+import {
+  isGenerationDue,
+  type ChannelSchedulePolicy,
+} from "@/lib/publishingPolicy";
 
 interface ChannelRow {
   _id: Id<"channels">;
@@ -38,6 +27,7 @@ interface ChannelRow {
   slug: string;
   status?: string;
   identity?: { cadence?: string };
+  schedule?: ChannelSchedulePolicy;
 }
 interface RunRow {
   status?: string;
@@ -84,9 +74,16 @@ export const generationScheduler = schedules.task({
         continue;
       }
       const last = runs.reduce((m, r) => Math.max(m, r.startedAt ?? 0), 0);
-      const interval = cadenceMs(ch.identity?.cadence);
-      // Due if never run, or at least (interval - 1h slack for the 6h cron grain).
-      if (last && Date.now() - last < interval - 3_600_000) continue;
+      if (
+        !isGenerationDue({
+          now: Date.now(),
+          lastStartedAt: last,
+          schedule: ch.schedule,
+          cadence: ch.identity?.cadence,
+        })
+      ) {
+        continue;
+      }
 
       const runId = await convex.mutation(api.runs.createRun, {
         ownerId: owner,

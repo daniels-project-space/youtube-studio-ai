@@ -12,6 +12,8 @@ import {
  * project at deploy time (no dashboard clicking):
  *  - INTERNAL_QUERY_SECRET  — gates the youtubeAuth.getForChannel Convex query
  *    (must match the Convex deployment's env var of the same name),
+ *  - STUDIO_CONVEX_JWT_PRIVATE_KEY — signs short-lived, owner-scoped Convex
+ *    service identities for durable workers (ES256 PKCS#8 PEM),
  *  - IMAGE_DISABLE_GEMINI   — 1 → all image gen routes to fal FLUX (zero
  *    Google image spend; banana stays the default when unset),
  *  - VISION_DISABLE_GEMINI  — 1 → vision router never falls back to Gemini,
@@ -19,6 +21,16 @@ import {
  */
 const FORWARDED_ENV = [
   "INTERNAL_QUERY_SECRET",
+  "STUDIO_CONVEX_JWT_PRIVATE_KEY",
+  "STUDIO_INTERNAL_API_TOKEN",
+  "STUDIO_OWNER_ID",
+  "YOUTUBE_CLIENT_ID",
+  "YOUTUBE_CLIENT_SECRET",
+  "YOUTUBE_TOKEN_ENCRYPTION_KEY",
+  "YOUTUBE_OAUTH_STATE_SECRET",
+  "YOUTUBE_ALLOW_LEGACY_PLAINTEXT_TOKENS",
+  "NOVITA_RENDER_FARM_API",
+  "NOVITA_RENDER_FARM_TOKEN",
   "IMAGE_DISABLE_GEMINI",
   "VISION_DISABLE_GEMINI",
   "GROQ_API_KEY",
@@ -116,6 +128,7 @@ export default defineConfig({
           "scripts/whisper_align.py",
           "scripts/mc_page_render.py",
           "scripts/mc_textplace.py",
+          "scripts/mc_font.py",
         ],
       }),
       // Headless-Chromium system libraries (Remotion renderTitleCard). The image

@@ -3,10 +3,11 @@
  * `runStages` table via the Convex HTTP client. This is the production sink the
  * Trigger task hands to the runner; tests use an in-memory sink instead.
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import type { RunStageSink } from "./types";
+import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
 
 export function makeConvexSink(
   client: ConvexHttpClient,
@@ -34,6 +35,27 @@ export function makeConvexSink(
       return (rows ?? [])
         .filter((r) => r.status === "ok" && r.outputs != null)
         .map((r) => ({ block: r.block, outputs: r.outputs, cost: r.cost }));
+    },
+    async upsertArtifact(args) {
+      await client.mutation(api.runArtifacts.upsert, {
+        secret: requireInternalQuerySecret(),
+        ownerId: args.ownerId ?? ownerId,
+        channelId: args.channelId as Id<"channels">,
+        runId: args.runId as Id<"runs">,
+        artifactId: args.artifact.artifactId,
+        key: args.artifact.key,
+        type: args.artifact.type,
+        schemaVersion: args.artifact.schemaVersion,
+        producerModule: args.artifact.producerModule,
+        producerVersion: args.artifact.producerVersion,
+        payloadHash: args.artifact.payloadHash,
+        inputArtifactIds: args.inputArtifactIds,
+        optionalFallbacks: args.optionalFallbacks,
+        persistence: args.persistence,
+        payload: args.payload,
+        summary: args.summary,
+        createdAt: args.createdAt,
+      });
     },
   };
 }

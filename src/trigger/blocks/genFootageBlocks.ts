@@ -13,6 +13,7 @@
  */
 import type { Block } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
+import { PRICE } from "@/engine/pricing";
 import { join } from "node:path";
 import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
@@ -22,9 +23,6 @@ import { FAL_I2V_MODEL } from "@/lib/falVideo";
 import { generateI2V } from "@/lib/i2v";
 import { planCoverage, defaultCinematographerConfig } from "@/lib/crew/cinematographer";
 import { COST_PATCH_KEY } from "@/engine/types";
-
-const STILL_COST = Number(process.env.FAL_FLUX_COST_USD ?? 0.04);
-const CLIP_COST = Number(process.env.FAL_I2V_COST_USD ?? 0.13);
 
 /** Ordered pool (same as narratedBlocks.mapPool â€” local copy, no cross-import). */
 async function pool<T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
@@ -69,9 +67,9 @@ export async function generateSignatureClips(
   const out = await pool(scenes, 2, async (s, i) => {
     try {
       const url = await generateFalFluxProImage({ prompt: `${s.still}. Absolutely NO text, NO words, NO letters.` });
-      cost += STILL_COST;
+      cost += PRICE.falFluxUsd;
       const clip = await generateI2V({ prompt: s.motion!, imageUrl: url, durationSec: 5, aspectRatio: "16:9" });
-      cost += CLIP_COST;
+      cost += PRICE.falI2vUsd;
       return await downloadTo(clip.url, join(tmp, `sig_${i}.mp4`));
     } catch (e) {
       ctx.log(`signature clip ${i + 1} failed: ${e instanceof Error ? e.message : e}`);
@@ -136,7 +134,11 @@ export const genFootage: Block = {
         cfg: defaultCinematographerConfig(),
         styleLock, avoid, targetShots: maxClips, clipSec, log: ctx.log,
       });
-      scenes = shots.map((sh) => ({ still: sh.keyframePrompt, motion: sh.i2vPrompt }));
+      // The DP is model-backed and may over-return. Never let that expand the
+      // paid request fan-out beyond the configured reservation.
+      scenes = shots
+        .slice(0, maxClips)
+        .map((sh) => ({ still: sh.keyframePrompt, motion: sh.i2vPrompt }));
       ctx.log(`gen_footage: DP coverage → ${scenes.length} shots (${shots.filter((s) => !s.subjects.length).length} inserts/atmosphere)`);
     } else {
     const planRaw = await geminiJson<{ scenes?: { still?: string; motion?: string }[] }>({
@@ -167,7 +169,7 @@ export const genFootage: Block = {
         const stillUrl = await generateFalFluxProImage({
           prompt: `${s.still}. Absolutely NO text, NO words, NO letters, NO watermark.`,
         });
-        cost += STILL_COST;
+        cost += PRICE.falFluxUsd;
         const clip = await generateI2V({
           prompt: s.motion!,
           imageUrl: stillUrl,
@@ -177,7 +179,7 @@ export const genFootage: Block = {
           runId: ctx.runId,
           log: ctx.log,
         });
-        cost += CLIP_COST;
+        cost += PRICE.falI2vUsd;
         const path = await downloadTo(clip.url, join(tmp, `gen_${i}.mp4`));
         ctx.log(`gen_footage: scene ${i + 1}/${scenes.length} âœ“`);
         return path;

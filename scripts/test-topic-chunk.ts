@@ -6,7 +6,7 @@
  *   NEXT_PUBLIC_OWNER_ID=owner_daniel npx tsx scripts/test-topic-chunk.ts
  */
 import { hydrateEnv } from "@/lib/vault";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "@/../convex/_generated/api";
 import type { Id } from "@/../convex/_generated/dataModel";
 import { topicSelect } from "@/trigger/blocks/lofiBlocks";

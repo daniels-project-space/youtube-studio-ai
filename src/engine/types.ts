@@ -30,12 +30,24 @@ export interface StageContext {
   keyPrefix: string;
   /** Block params from the channel's pipeline entry. */
   params: Record<string, unknown>;
-  /** Accumulated outputs from upstream blocks (the produced key/value store). */
-  store: Record<string, unknown>;
+  /** Declared, read-only inputs from upstream artifacts. Ambient reads throw. */
+  store: Readonly<Record<string, unknown>>;
+  /** Exact immutable artifact ids behind the values visible to this module. */
+  artifactRefs?: Readonly<Record<string, ArtifactRef>>;
   /** Per-run budget ceiling in USD (preflight asserts this is set). */
   budgetUsd: number;
   /** Structured log sink; defaults to console in the local runner. */
   log: (msg: string, extra?: Record<string, unknown>) => void;
+}
+
+export interface ArtifactRef {
+  artifactId: string;
+  key: string;
+  type: string;
+  schemaVersion: string;
+  producerModule: string;
+  producerVersion: string;
+  payloadHash: string;
 }
 
 /** A registered, executable pipeline step. */
@@ -80,4 +92,17 @@ export interface RunStageSink {
    * for this run, so a resumed run can skip them (no double-spend on paid blocks).
    */
   getCompleted?(runId: string): Promise<Array<{ block: string; outputs: unknown; cost?: number }>>;
+  /** Persist a first-class, content-addressed artifact and its exact lineage. */
+  upsertArtifact?(args: {
+    ownerId: string;
+    channelId: string;
+    runId: string;
+    artifact: ArtifactRef;
+    inputArtifactIds: string[];
+    optionalFallbacks: string[];
+    persistence: "inline" | "reference" | "summary";
+    payload?: unknown;
+    summary?: string;
+    createdAt: number;
+  }): Promise<void>;
 }

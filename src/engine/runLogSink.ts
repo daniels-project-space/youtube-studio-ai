@@ -12,7 +12,7 @@
  * guarded; on error the batch is logged via console.warn and dropped, and the
  * run proceeds. Logs are best-effort telemetry, never a hard dependency.
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 

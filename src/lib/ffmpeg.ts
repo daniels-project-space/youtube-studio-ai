@@ -12,6 +12,11 @@
 import { spawn } from "node:child_process";
 import { stat, copyFile, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  planThumbnailText,
+  type ThumbnailHeadlineLine,
+  type ThumbnailTextZone,
+} from "@/lib/thumbnailLayout";
 
 export class FfmpegError extends Error {
   constructor(message: string) {
@@ -427,6 +432,105 @@ export async function assembleBeatBody(args: {
     segFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"),
   );
   await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  return args.outPath;
+}
+
+/**
+ * Assemble an authored story body without reordering, recycling, center-cuts,
+ * scene substitution, or silent segment drops. Each source starts at frame 0
+ * and occupies its declared duration; the final frame may be held only for the
+ * explicit post-narration tail.
+ */
+export async function assembleAuthoredBody(args: {
+  clipPaths: string[];
+  segDurationsSec: number[];
+  outPath: string;
+  tmpDir: string;
+  tailHoldSec?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  preset?: string;
+}): Promise<string> {
+  if (args.clipPaths.length === 0 || args.clipPaths.length !== args.segDurationsSec.length) {
+    throw new FfmpegError("assembleAuthoredBody: clip/duration mapping must be non-empty and one-to-one");
+  }
+  const W = args.width ?? 1920;
+  const H = args.height ?? 1080;
+  const fps = args.fps ?? 30;
+  const tailHold = Math.max(0, args.tailHoldSec ?? 0);
+  const segFiles: string[] = [];
+  let expectedTotal = 0;
+
+  for (let index = 0; index < args.clipPaths.length; index++) {
+    const authored = args.segDurationsSec[index];
+    if (!Number.isFinite(authored) || authored <= 0) {
+      throw new FfmpegError(`assembleAuthoredBody: invalid duration for segment ${index}`);
+    }
+    const media = await probe(args.clipPaths[index]);
+    if (!media.hasVideo || !Number.isFinite(media.durationSec) || media.durationSec <= 0) {
+      throw new FfmpegError(`assembleAuthoredBody: segment ${index} is not a valid video`);
+    }
+    // LTX clips are quantized to 8n+1 frames, so their container duration can
+    // differ from the authored window by a few frames. Larger deficits are a
+    // provider contract violation; tiny deficits are held to the exact cut.
+    if (media.durationSec < authored - Math.max(0.2, 3 / fps)) {
+      throw new FfmpegError(
+        `assembleAuthoredBody: segment ${index} is ${media.durationSec.toFixed(3)}s, shorter than authored ${authored.toFixed(3)}s`,
+      );
+    }
+    const outputDur = authored + (index === args.clipPaths.length - 1 ? tailHold : 0);
+    const pad = Math.max(0, outputDur - media.durationSec);
+    const vf =
+      `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+      `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps},` +
+      `tpad=stop_mode=clone:stop_duration=${pad.toFixed(3)},` +
+      `trim=duration=${outputDur.toFixed(3)},setpts=PTS-STARTPTS`;
+    const segmentPath = join(args.tmpDir, `authored_${String(index).padStart(4, "0")}.mp4`);
+    await run(FFMPEG, [
+      "-y",
+      "-i",
+      args.clipPaths[index],
+      "-vf",
+      vf,
+      "-an",
+      "-c:v",
+      "libx264",
+      "-preset",
+      args.preset ?? "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      segmentPath,
+    ]);
+
+    const q1 = `${segmentPath}.q1.jpg`;
+    const q3 = `${segmentPath}.q3.jpg`;
+    await grabFrame(segmentPath, Math.max(0.08, Math.min(outputDur * 0.25, outputDur - 0.08)), q1);
+    await grabFrame(segmentPath, Math.max(0.08, Math.min(outputDur * 0.75, outputDur - 0.08)), q3);
+    const [l1, l2] = await Promise.all([regionLuma(q1, 0, 1), regionLuma(q3, 0, 1)]);
+    if (l1 < 14 && l2 < 14) {
+      throw new FfmpegError(
+        `assembleAuthoredBody: segment ${index} is black (luma ${l1.toFixed(0)}/${l2.toFixed(0)})`,
+      );
+    }
+    segFiles.push(segmentPath);
+    expectedTotal += outputDur;
+  }
+
+  const listFile = join(args.tmpDir, "authored_segments.txt");
+  await writeFile(
+    listFile,
+    segFiles.map((file) => `file '${file.replace(/'/g, "'\\\\''")}'`).join("\n"),
+  );
+  await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  const assembled = await probe(args.outPath);
+  if (Math.abs(assembled.durationSec - expectedTotal) > Math.max(0.2, 3 / fps)) {
+    throw new FfmpegError(
+      `assembleAuthoredBody: assembled duration ${assembled.durationSec.toFixed(3)}s != ${expectedTotal.toFixed(3)}s`,
+    );
+  }
   return args.outPath;
 }
 
@@ -1775,9 +1879,22 @@ export async function grabFrame(
 }
 
 /**
- * Title-card thumbnail: draw the channel name + topic over a still using
- * drawtext. Pure ffmpeg, $0. Uses DejaVu Sans Bold (present on Ubuntu).
+ * Size title-card text to stay inside the thumbnail safe area. Drawtext does not
+ * wrap automatically, and a fixed 72px size previously shipped clipped titles
+ * on both edges. The conservative glyph ratio covers wide uppercase text too.
  */
+export function fitTitleCardFontSize(
+  text: string,
+  options: { min?: number; max?: number; safeWidth?: number; glyphWidthRatio?: number } = {},
+): number {
+  const min = options.min ?? 38;
+  const max = options.max ?? 72;
+  const safeWidth = options.safeWidth ?? 1_104;
+  const glyphWidthRatio = options.glyphWidthRatio ?? 0.72;
+  const glyphs = Math.max(1, Array.from(text.trim()).length);
+  return Math.max(min, Math.min(max, Math.floor(safeWidth / (glyphs * glyphWidthRatio))));
+}
+
 export async function titleCard(args: {
   basePath: string;
   outJpg: string;
@@ -1789,10 +1906,17 @@ export async function titleCard(args: {
     args.fontFile ?? "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
   const esc = (s: string) =>
     s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "’");
+  const titleSize = fitTitleCardFontSize(args.title);
+  const subtitleSize = fitTitleCardFontSize(args.subtitle, {
+    min: 26,
+    max: 40,
+    safeWidth: 1_040,
+    glyphWidthRatio: 0.68,
+  });
   const draw =
-    `drawtext=fontfile=${font}:text='${esc(args.title)}':fontcolor=white:fontsize=72:` +
+    `drawtext=fontfile=${font}:text='${esc(args.title)}':fontcolor=white:fontsize=${titleSize}:` +
     `box=1:boxcolor=black@0.5:boxborderw=24:x=(w-text_w)/2:y=(h-text_h)/2-40,` +
-    `drawtext=fontfile=${font}:text='${esc(args.subtitle)}':fontcolor=white@0.85:fontsize=40:` +
+    `drawtext=fontfile=${font}:text='${esc(args.subtitle)}':fontcolor=white@0.85:fontsize=${subtitleSize}:` +
     `box=1:boxcolor=black@0.4:boxborderw=16:x=(w-text_w)/2:y=(h-text_h)/2+70`;
   await run(FFMPEG, [
     "-y",
@@ -1818,23 +1942,37 @@ export async function titleCard(args: {
 const CLOUD_FONTS = {
   sans: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
   serif: "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+  impact: "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
+  bebas: "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
+  marker: "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-BoldOblique.ttf",
+  rounded: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 };
 
 export async function thumbnailText(args: {
   basePath: string;
   outJpg: string;
   title: string;
+  /** Structured headline from the channel playbook. Exact text is composited
+   * deterministically instead of asking a picture model to spell it. */
+  lines?: ThumbnailHeadlineLine[];
+  /** Text-safe region reserved by the scene prompt. */
+  position?: ThumbnailTextZone;
   /** Channel name shown small at the bottom. */
   subtitle?: string;
   /** Main title color (def white). */
   textColor?: string;
+  /** Payoff/accent-line color from the channel Style DNA. */
+  accentColor?: string;
   textShadow?: boolean;
   /** Explicit font path (wins over `font`). */
   fontFile?: string;
   /** Font family preset → concrete cloud font. Def "sans" (heavier/bolder). */
-  font?: "serif" | "sans";
+  font?: "serif" | "sans" | "impact" | "marker" | "bebas" | "rounded";
   /** Uppercase the title for max impact (def true). */
   uppercase?: boolean;
+  /** Channel playbook treatment. Plates are deterministic approximations of
+   * the richer material language used by native-typography providers. */
+  treatment?: "plate" | "sticker" | "stamp" | "neon" | "clean";
 }): Promise<string> {
   // BOLD, high-CTR overlay: large title in the reserved negative space, drawn
   // LINE BY LINE (an embedded newline renders as a tofu box on the cloud font),
@@ -1843,35 +1981,49 @@ export async function thumbnailText(args: {
   const font =
     args.fontFile ?? CLOUD_FONTS[args.font ?? "sans"] ?? CLOUD_FONTS.sans;
   const color = args.textColor ?? "white";
+  const safeColor = (value: string | undefined, fallback: string): string => {
+    if (!value) return fallback;
+    const hex = value.trim().replace(/^#/, "");
+    return /^[0-9a-f]{6}$/i.test(hex) ? `0x${hex}` : fallback;
+  };
+  const accent = safeColor(args.accentColor, "0xffd400");
   const esc = (s: string) =>
-    s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "’");
+    s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "’").replace(/%/g, "\\%");
 
-  // Word-wrap ~15 chars/line so a punchy 3-5 word title renders large.
-  const raw = args.uppercase === false ? args.title.trim() : args.title.toUpperCase().trim();
-  const words = raw.split(/\s+/);
-  const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    if ((cur + " " + w).trim().length > 15 && cur) {
-      lines.push(cur.trim());
-      cur = w;
-    } else {
-      cur = (cur + " " + w).trim();
-    }
-  }
-  if (cur) lines.push(cur);
+  const plan = planThumbnailText({
+    lines: args.lines?.length ? args.lines : [{ text: args.title }],
+    zone: args.position,
+    uppercase: args.uppercase,
+  });
+  const treatment = args.treatment ?? "plate";
+  const box = treatment === "plate"
+    ? "box=1:boxcolor=black@0.66:boxborderw=16:"
+    : treatment === "sticker"
+      ? "box=1:boxcolor=white@0.94:boxborderw=16:"
+      : "";
+  const borderWidth = treatment === "clean" ? 4 : treatment === "neon" ? 3 : 6;
+  const shadow = args.textShadow === false
+    ? ""
+    : treatment === "neon"
+      ? `shadowcolor=${accent}@0.95:shadowx=4:shadowy=4:`
+      : "shadowcolor=black@0.9:shadowx=5:shadowy=5:";
 
-  // Scale font to line count; bigger = punchier.
-  const size = lines.length >= 4 ? 64 : lines.length === 3 ? 80 : lines.length === 2 ? 96 : 110;
-  const lineH = Math.round(size * 1.12);
-  const block = lines.length * lineH;
-
-  // Stack lines centered vertically around y=0.66h (sits in the lower-mid third).
-  const draws: string[] = lines.map((ln, i) => {
-    const y = `h*0.66-${Math.round(block / 2)}+${i * lineH}`;
+  const draws: string[] = plan.lines.map((line) => {
+    const lineColor = treatment === "sticker"
+      ? (line.accent ? accent : "0x111111")
+      : (line.accent || line.payoff ? accent : safeColor(color, color));
+    // Use drawtext's measured text_w for final alignment. The pure planner's
+    // conservative boxes drive wrapping/tests, while this expression guarantees
+    // an unusually wide glyph can never cross the edge safe area.
+    const x = plan.align === "left"
+      ? `${plan.safeInset + 16}`
+      : plan.align === "right"
+        ? `w-${plan.safeInset + 16}-text_w`
+        : `(w-text_w)/2`;
     return (
-      `drawtext=fontfile=${font}:text='${esc(ln)}':fontcolor=${color}:fontsize=${size}:` +
-      `borderw=7:bordercolor=black:shadowcolor=black@0.9:shadowx=5:shadowy=5:x=(w-text_w)/2:y=${y}`
+      `drawtext=fontfile=${font}:text='${esc(line.text)}':fontcolor=${lineColor}:fontsize=${line.fontSize}:` +
+      `${box}borderw=${borderWidth}:bordercolor=black@0.94:${shadow}` +
+      `x=${x}:y=${line.y + 10}`
     );
   });
   if (args.subtitle) {

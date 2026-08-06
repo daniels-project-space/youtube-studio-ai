@@ -18,14 +18,14 @@
  * (src/lib/pydeps.ts) before any paid generation.
  */
 import { join } from "node:path";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
-import { makeRunTempDir, readBytes } from "@/lib/files";
-import { putObject, putObjectFromFile } from "@/lib/storage";
-import { castMotionComic, hasMotionComic } from "@/lib/motionComic";
+import { makeRunTempDir } from "@/lib/files";
+import { putObjectFromFile } from "@/lib/storage";
+import { castMotionComic, hasMotionComic, motionComicPanelCount } from "@/lib/motionComic";
 import { bananaCounters } from "@/lib/banana";
 import { PRICE } from "@/engine/pricing";
 
@@ -51,7 +51,6 @@ async function recordAsset(ctx: StageContext, kind: string, r2Key: string, meta?
 }
 
 /** Fallback per-video spend when counters are unavailable (art + voices + music). */
-const COMIC_COST = Number(process.env.MOTION_COMIC_COST_USD ?? 2.0);
 
 /**
  * The no-text guard baked into motionComic's DEFAULT_STYLE. A channel style
@@ -81,7 +80,7 @@ export const motionComicBlock: Block = {
       undefined;
     const visualBrief = getVisualBrief(ctx.store);
 
-    const panels = Math.max(4, Math.min(12, Number(ctx.params["panels"] ?? 8)));
+    const panels = motionComicPanelCount(ctx.params["panels"]);
     // Style: explicit param wins; else the DP's promptStyle; else the engine's
     // curated default (undefined → motionComic's DEFAULT_STYLE). Any custom
     // style gets the no-text guard re-appended.
@@ -106,15 +105,24 @@ export const motionComicBlock: Block = {
     });
     // Real image spend from the banana counters (same rationale as
     // whiteboard_scribe: a flat guess undercounts Pro-heavy runs and
-    // overcounts cached re-runs alike). ~$0.10 allowance on top covers the
-    // ElevenLabs dialogue lines + the single Suno bed.
-    const genPro = bananaCounters.pro - countersBefore.pro;
-    const genFlash = bananaCounters.flash - countersBefore.flash;
-    const genFal = (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0);
+    // overcounts cached re-runs alike). The result also reports invocation-
+    // local TTS, music, and grader usage below.
+    const genPro = Math.max(0, bananaCounters.pro - countersBefore.pro);
+    const genFlash = Math.max(0, bananaCounters.flash - countersBefore.flash);
+    const genFal = Math.max(0, (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0));
     const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd + genFal * PRICE.bananaFalUsd;
-    // ZERO deltas = cached re-run (same phantom-cost class the whiteboard hit).
-    const comicCost = genPro + genFlash + genFal > 0 ? artCost + 0.1 /* ElevenLabs + music */ : 0.1;
-    ctx.log(`motion_comic: image spend ${genPro} pro + ${genFlash} flash + ${genFal} fal ≈ $${comicCost.toFixed(2)}`);
+    const ttsCost =
+      (res.ttsCharactersGenerated / 1000) * PRICE.ttsElevenPerKCharUsd;
+    const musicCost = res.musicGenerations * PRICE.musicTrackUsd;
+    const graderCost = res.visionGraderCalls * PRICE.visionGraderUsd;
+    // Every component is invocation-local. A fully cached resume is exactly
+    // zero instead of the old phantom $0.10 fallback charge.
+    const comicCost = artCost + ttsCost + musicCost + graderCost;
+    ctx.log(
+      `motion_comic: spend ${genPro} pro + ${genFlash} flash + ${genFal} fal, ` +
+      `${res.ttsCharactersGenerated} TTS chars, ${res.musicGenerations} music, ` +
+      `${res.visionGraderCalls} graders ≈ $${comicCost.toFixed(2)}`,
+    );
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObjectFromFile(videoKey, res.outPath, { contentType: "video/mp4" });

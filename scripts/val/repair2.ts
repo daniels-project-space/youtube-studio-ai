@@ -1,5 +1,5 @@
 import { config } from "dotenv"; config({ path: ".env.local" });
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { designPipeline } from "../../src/engine/designer";
@@ -12,7 +12,8 @@ async function main() {
   // string repair + aggressive pool dedupe by rare-token overlap.
   {
     const id = "j97btry53hv0y363bwq6w69yx989wqr0" as Id<"channels">;
-    const ch = (await convex.query(api.channels.getChannel, { channelId: id })) as Record<string, any>;
+    const ch = await convex.query(api.channels.getChannel, { channelId: id });
+    if (!ch) throw new Error(`missing channel ${id}`);
     const d = designPipeline({ family: "comic", nicheKey: "history", lengthMinutes: 3, publishMode: "draft", toggles: { shorts: false, crosspost: false } });
     const dnaStr = JSON.stringify(ch.styleDNA ?? {})
       .replace(/papercraft|paper-craft|paper craft/gi, "inked comic-book art")
@@ -40,7 +41,8 @@ async function main() {
   // LOFI: qaRubric global re-anchor (anime-character + cafe phrasing out).
   {
     const id = "j9734c02jsjc5d04ta5ax9g43n89wxwv" as Id<"channels">;
-    const ch = (await convex.query(api.channels.getChannel, { channelId: id })) as Record<string, any>;
+    const ch = await convex.query(api.channels.getChannel, { channelId: id });
+    if (!ch) throw new Error(`missing channel ${id}`);
     if (ch.qaRubric) {
       const s = JSON.stringify(ch.qaRubric)
         .replace(/Anime-style character silhouetted against a rainy window/gi, "Rain-streaked floor-to-ceiling penthouse window wall, warm lamplight against the neon city below")

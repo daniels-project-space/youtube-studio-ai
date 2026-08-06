@@ -1,5 +1,5 @@
 import { v } from "convex/values";
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./studioFunctions";
 
 /** The upcoming-videos queue for a channel, soonest first. */
 export const listPlan = query({

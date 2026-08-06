@@ -1,13 +1,22 @@
-import { NextResponse } from "next/server";
-import { ConvexHttpClient } from "convex/browser";
+import { NextRequest, NextResponse } from "next/server";
+import { replaceChannelPublishPolicy } from "@/lib/channelPublishPolicy";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
-import { OWNER_ID } from "@/lib/config";
 import { hydrateEnv } from "@/lib/vault";
-import { exchangeCode, getChannelMine } from "@/lib/youtube";
+import { exchangeCode, getChannelMine, YT_SCOPES } from "@/lib/youtube";
+import { encryptSecret } from "@/lib/secretEnvelope";
+import {
+  verifyYouTubeOAuthState,
+  YOUTUBE_OAUTH_NONCE_COOKIE,
+} from "@/lib/youtubeOAuthState";
+import {
+  requireInternalQuerySecret,
+  youtubeConnectorAad,
+} from "@/lib/youtubeConnector";
 
 /**
- * GET /api/youtube-callback?code=&state=<channelId>
+ * GET /api/youtube-callback?code=&state=<signed browser-bound payload>
  * OAuth redirect target: exchanges the code for a refresh token, stores it for
  * the channel (youtubeAuth.set), records the linked YouTube channel id/title, and
  * activates the channel. Then bounces back to the channel page.
@@ -17,17 +26,35 @@ export const runtime = "nodejs";
 const BASE = process.env.OAUTH_REDIRECT_BASE ?? "https://youtube-studio-ai.vercel.app";
 const REDIRECT_URI = `${BASE}/api/youtube-callback`;
 
-export async function GET(request: Request) {
+function redirectAndClearNonce(url: string): NextResponse {
+  const response = NextResponse.redirect(url);
+  response.cookies.set(YOUTUBE_OAUTH_NONCE_COOKIE, "", {
+    httpOnly: true,
+    secure: new URL(BASE).protocol === "https:",
+    sameSite: "lax",
+    path: "/api/youtube-callback",
+    maxAge: 0,
+  });
+  return response;
+}
+
+export async function GET(request: NextRequest) {
   const sp = new URL(request.url).searchParams;
   const code = sp.get("code");
-  const channelId = sp.get("state");
+  const state = sp.get("state");
   const oauthErr = sp.get("error");
-  if (oauthErr || !code || !channelId) {
-    return NextResponse.redirect(`${BASE}/channels?yt=error`);
+  if (oauthErr || !code || !state) {
+    return redirectAndClearNonce(`${BASE}/channels?yt=error`);
   }
   try {
     await hydrateEnv("youtube");
-    const { refreshToken, accessToken } = await exchangeCode(code, REDIRECT_URI);
+    const oauthState = verifyYouTubeOAuthState({
+      state,
+      nonce: request.cookies.get(YOUTUBE_OAUTH_NONCE_COOKIE)?.value,
+    });
+    const channelId = oauthState.channelId;
+    const ownerId = oauthState.ownerId;
+    const { refreshToken, accessToken, grantedScopes } = await exchangeCode(code, REDIRECT_URI);
     const me = await getChannelMine(accessToken);
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -37,6 +64,9 @@ export async function GET(request: Request) {
     const ch = await convex.query(api.channels.getChannel, {
       channelId: channelId as Id<"channels">,
     });
+    if (!ch || ch.ownerId !== ownerId) {
+      throw new Error("OAuth channel owner mismatch");
+    }
     const slug = ch?.slug ?? "";
 
     // GUARD: if the agent recorded which YouTube channel was created for this app
@@ -45,23 +75,46 @@ export async function GET(request: Request) {
     // never silently link the wrong channel; tell them to switch + retry.
     const expected = ch?.youtubeCreated?.ytChannelId;
     if (expected && me?.id && me.id !== expected) {
-      return NextResponse.redirect(
+      return redirectAndClearNonce(
         `${BASE}/channels/${slug}?yt=wrongchannel&got=${encodeURIComponent(me.title ?? me.id)}`,
       );
     }
 
+    const refreshTokenCiphertext = encryptSecret(refreshToken, {
+      envName: "YOUTUBE_TOKEN_ENCRYPTION_KEY",
+      aad: youtubeConnectorAad(ownerId, channelId),
+    });
     await convex.mutation(api.youtubeAuth.set, {
-      ownerId: OWNER_ID,
+      secret: requireInternalQuerySecret(),
+      ownerId,
       channelId: channelId as Id<"channels">,
-      refreshToken,
+      refreshTokenCiphertext,
       ytChannelId: me?.id,
       ytTitle: me?.title,
+      grantedScopes,
+      scopeHealth:
+        grantedScopes.length === 0
+          ? "unknown"
+          : YT_SCOPES.split(" ").every((scope) => grantedScopes.includes(scope))
+            ? "healthy"
+            : "partial",
       updatedAt: Date.now(),
     });
-    // A connected channel is ready to publish → activate it.
+    // A new/rotated destination always invalidates prior channel-level publish
+    // authority. Keep the channel paused until the operator approves this exact
+    // connector/configuration combination from Settings.
+    await replaceChannelPublishPolicy({
+      ownerId,
+      channelId: channelId as Id<"channels">,
+      channel: ch,
+      allowedActions: [],
+      actor: `oauth-connector:${ownerId}`,
+      evidence: "YouTube connector created or rotated; explicit publish reapproval required",
+      convex,
+    });
     await convex.mutation(api.channels.updateChannel, {
       channelId: channelId as Id<"channels">,
-      status: "active",
+      status: "paused",
     });
 
     // Auto-apply the app channel's details to the YouTube channel (description,
@@ -73,9 +126,9 @@ export async function GET(request: Request) {
       } catch { /* branding is best-effort; the link itself succeeded */ }
     }
 
-    return NextResponse.redirect(`${BASE}/channels/${slug}?yt=connected`);
+    return redirectAndClearNonce(`${BASE}/channels/${slug}?yt=connected`);
   } catch (e) {
-    return NextResponse.redirect(
+    return redirectAndClearNonce(
       `${BASE}/channels?yt=error&msg=${encodeURIComponent(e instanceof Error ? e.message : "callback failed")}`,
     );
   }

@@ -470,12 +470,15 @@ export function cinematicDoctrineFor(niche?: string): CinematicDoctrine & { arch
 /**
  * GOLDEN_MODULES — the golden template, module by module, as shown on the
  * studio's "Golden Pipeline" tab. One entry per module of the spine with the
- * honest story of HOW it works and which gates protect it. `status: "golden"`
- * marks a module certified at the golden bar (operator-approved output quality,
- * judge-gated, no silent fallbacks) — the thumbnail engine is the first.
- * Order = display order: golden modules lead, then the spine in stage order.
+ * honest story of HOW it works and which gates are intended to protect it.
+ * `status: "reference"` is an editorial reference flag only: it means a proof
+ * sample exists in this catalog. It is deliberately not an executable or
+ * production certification. Production promotion is fail-closed in
+ * goldenExecution.ts and requires registered Golden-certified manifests plus a
+ * machine-readable proof receipt covering every gate.
+ * Order = display order: reference modules lead, then the spine in stage order.
  */
-export type GoldenModuleStatus = "golden" | "active";
+export type CatalogModuleStatus = "reference" | "active";
 
 export interface GoldenModule {
   key: string;
@@ -488,7 +491,7 @@ export interface GoldenModule {
   how: string;
   /** The QA gates that protect its output. */
   gates: string[];
-  status: GoldenModuleStatus;
+  status: CatalogModuleStatus;
 }
 
 export const GOLDEN_MODULES: GoldenModule[] = [
@@ -515,7 +518,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "no cross-engine fallback — retry same engine or fail loud",
       "genuine-3D camera move (not a 2D pan)",
     ],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "novita-render-farm",
@@ -560,7 +563,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "R2-idempotent resume — a requeue never double-renders",
       "per-pod verified autoclose — stragglers force-deleted, no ghost billing",
     ],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "videocraft-novita",
@@ -578,7 +581,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "no cross-engine fallback — a failed shard retries the same LTX pod pattern, then fails loud",
       "R2-idempotent resume — a spot-reclaim requeue never double-renders",
     ],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "lofi",
@@ -607,7 +610,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "temporal de-warble removes AI camera shimmer (seam preserved)",
       "no baked-in upscale — native res; Topaz 4K is a separate optional pass",
     ],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "quiz",
@@ -629,7 +632,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "per-capability timing + layout",
       "isolated Remotion bundle",
     ],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "thumbnail",
@@ -643,7 +646,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "never covering faces, exact spelling. A vision judge scores six dimensions; one feedback retry, then " +
       "loud failure into the heal loop. ~15s and ~$0.13 per render, standalone in src/lib/banana.ts.",
     gates: ["exact-spelling textOk", "faceClear", "punch ≥ 7", "styleMatch ≥ 7", "storyMatch ≥ 7", "uiClean"],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "topic-intel",
@@ -661,7 +664,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "metadata, thumbnail and hook engines downstream. Two LLM calls per slate; loud failure; " +
       "quota-immune outlier reads.",
     gates: ["evidence citation verified vs real signals", "semantic dedupe vs done + planned", "metacraft title lint on every bet", "demand / freshness / fit / packageability ≥ 7", "banned words / stale years"],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "show-bible",
@@ -708,7 +711,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "image → integration into the viewer's day → a landing with a quotable takeaway. Episodic programs " +
       "get formal series support (phase-aware curriculum, previous-episode thread, next-episode seed).",
     gates: ["hook lint (≤7s, no filler, concrete)", "punch / specificity / curiosity / voiceMatch / promise-by-15s ≥ 7", "grounded fact-check (search-verified claims, false = rejected)", "loop payoff verified by qa_script", "midpoint re-hook verified"],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "guard",
@@ -738,7 +741,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "spend a cold-open probe is rendered once and judged on register / pace / tag performance / cleanliness " +
       "≥7 with one seed-bumped retry — a wrong cast dies in ~250 characters, not after the whole paid render.",
     gates: ["casting spec prefilter (gender / age / register law)", "audition judge ≥ 7 on real audio", "cold-open gate: register / pace / performance / clean ≥ 7", "loud failure (no fallback voice)"],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "visuals",
@@ -774,7 +777,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "then Seedance/Kling animates the locked keyframe. Establishing + multi-subject shots supported; any style. Operator " +
       "approves the hero before any Soul. Standalone src/lib/cinecraft.ts, visual-only (a pipeline adds audio + assembly).",
     gates: ["hero-image identity anchor (not the soul)", "vision consistency gate \u2265 8 (re-roll on drift)", "per-kind lock: same person / place / object", "operator-approved hero before Soul"],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "documotion",
@@ -792,7 +795,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "frame per shot and a vision judge scores it, applying typed fixes until it passes. Standalone src/lib/documotion.ts, " +
       "visual-only (a pipeline wraps narration, music, thumbnail and title around the body).",
     gates: ["still-verifier type / cutout / composition / style / cohesion >= 7", "HARD legibility gate: no overlapping text (deterministic pass, self-corrects)", "text is an overlay, never baked into images", "narration-cue match + tonal label lint"],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "motioncraft",
@@ -811,7 +814,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "__frame / __settle) drives a single generic Playwright capture, so new tools plug in with zero rework. Clips are " +
       "timed to each narration cue and per-clip failures stay isolated. Standalone src/lib/motioncraft.ts, visual-only.",
     gates: ["the LLM earns each graphic (3-6 / video, never per line)", "best-tool routing per beat", "verbatim numbers only (stats)", "no text baked into the hero image — the title is a crisp overlay", "per-clip failure isolated"],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "speech-tv",
@@ -835,7 +838,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "deterministic from a typed plan (no per-frame LLM)",
       "cues clamped to their [start,end] window",
     ],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "inserts",
@@ -885,7 +888,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "no silent skips (dropped overlays → typed warnings)",
       "'essay' preset == legacy renderer (parity)",
     ],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "metadata",
@@ -901,7 +904,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "the title-promise contract; the runner-up is stored for CTR-swap learning. THE QUOTE opens the " +
       "description, auto-chapters land at upload, and a comment-seeding pinned comment is emitted.",
     gates: ["claims grounded in fact-checked script", "direct ≥ 7 (no setup prefixes, 40-70 chars)", "clickScore ≥ 7 vs the real feed", "payoff in first ~50 chars", "title-promise contract", "banned words / register"],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "verify",
@@ -929,7 +932,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "persistent topic header + frame are drawn once, words letter in reading order, then ffmpeg muxes the narration. No video " +
       "model = $0 render credits; spend is the 2K Banana art + Fish TTS. Resolution-configurable (1080p / 2K).",
     gates: ["storyboard retry until full beat coverage", "cue → ms via Whisper word-alignment (interpolated)", "per-layer pixels (no segmentation): nothing shown before its cue", "minimum draw time + guaranteed panel HOLD: nothing pops or cuts early", "number-integrity: labels grounded in the narration"],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "comic",
@@ -946,7 +949,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "headless and muxed with the voices + a Suno score. Bubbles are placed by HARD face-exclusion + adaptive sizing with an " +
       "elegant slim tail that stops at the face edge. No video model = $0 render credits.",
     gates: ["per-panel geometric check: bubble face_overlap = 0 (faces are a hard constraint)", "adaptive bubble sizing until it fits a face-free gap (clear_fit)", "elegant tail stops at the face edge — never crosses the face", "panels generated at the exact tile aspect — no cropped heads", "vision letterer scores clear / tail / proximity / legibility per bubble", "character consistency via model-sheet image-to-image"],
-    status: "golden",
+    status: "reference",
   },
   {
     key: "ship",
@@ -1016,11 +1019,11 @@ export interface NichePreset {
    */
   crew?: string[];
   /**
-   * Optional per-niche thumbnail engine override. "banana" (the engine —
-   * src/lib/banana.ts) is the default everywhere; "title_card" is the only
-   * explicit operator alternative (deterministic ffmpeg card).
+   * Optional per-niche thumbnail engine override. Production channel families
+   * always use "banana" (Style DNA + executable playbook). Deterministic title
+   * cards are a draft-only rendering tool, not a production preset.
    */
-  thumbnailer?: "banana" | "title_card";
+  thumbnailer?: "banana";
   /** Optional per-niche footage theme (e.g. "nature" hard-locks serene b-roll). */
   footageTheme?: string;
   /**

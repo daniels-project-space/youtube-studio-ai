@@ -154,6 +154,9 @@ export function buildPlanInput(store: StoreBag, params: ParamsBag = {}): PlanInp
 
   return {
     footageClips,
+    shotRenderManifest: store["shotRenderManifest"] as PlanInput["shotRenderManifest"],
+    shotQaReport: store["shotQaReport"],
+    visualCoverage: store["visualCoverage"],
     entityClips,
     narrationSrc: optStr(store, "narrationLocalPath"),
     narrationDurationSec: Number(store["narrationDurationSec"] ?? 0) || 60,

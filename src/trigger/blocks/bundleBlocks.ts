@@ -8,7 +8,7 @@
  * No-op (bundleEmitted:false) for ungrouped channels and for siblings.
  */
 import type { Block, StageContext } from "@/engine/types";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { putObject, getObjectBytes } from "@/lib/storage";

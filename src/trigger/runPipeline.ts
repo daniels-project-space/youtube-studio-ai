@@ -15,11 +15,16 @@
  * that key.
  */
 import { task, idempotencyKeys } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline, preflight } from "@/engine/validate";
+import {
+  compilePipeline,
+  completePipelineForPolicy,
+  materializeRuntimePipelineParams,
+} from "@/engine/pipelineCompiler";
 import { runPipeline as runEngine } from "@/engine/runner";
 import { renderBlockTask } from "@/trigger/render-block";
 import { planHeal } from "@/engine/healer";
@@ -30,6 +35,7 @@ import { alertFailure } from "@/lib/telegram";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { rehydrateOutputs } from "@/lib/rehydrate";
 import type { PipelineEntry } from "@/engine/types";
+import { throwForTaskRetryPolicy } from "@/trigger/taskRetryPolicy";
 
 export interface RunPipelineInput {
   channelId: string;
@@ -76,26 +82,39 @@ export const runPipelineTask = task({
   // limit of 3 throttled the whole fleet).
   queue: { concurrencyLimit: 1 },
   run: async (payload: RunPipelineInput) => {
-    registerAllBlocks();
+    try {
+      registerAllBlocks();
+    } catch (error) {
+      throwForTaskRetryPolicy(error);
+    }
     // CRITICAL-KEY GATE: without the core model keys every creative block falls
     // back to generic output (the "basic and stale" failure mode). Fail the run
     // at minute 0 instead of silently producing a degraded video.
-    await bootstrapSecrets(
-      (m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""),
-      { required: ["GEMINI_API_KEY"] },
-    );
+    try {
+      await bootstrapSecrets(
+        (m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""),
+        { required: ["GEMINI_API_KEY"] },
+      );
+    } catch (error) {
+      throwForTaskRetryPolicy(error);
+    }
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
-    if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
+    if (!url) throwForTaskRetryPolicy(new Error("NEXT_PUBLIC_CONVEX_URL is not configured"));
     const convex = new ConvexHttpClient(url);
 
-    const channel = await convex.query(api.channels.getChannel, {
-      channelId: payload.channelId as Id<"channels">,
-    });
-    if (!channel) throw new Error(`channel not found: ${payload.channelId}`);
+    let channel;
+    try {
+      channel = await convex.query(api.channels.getChannel, {
+        channelId: payload.channelId as Id<"channels">,
+      });
+    } catch (error) {
+      throwForTaskRetryPolicy(error);
+    }
+    if (!channel) throwForTaskRetryPolicy(new Error(`channel not found: ${payload.channelId}`));
 
     const ownerId = channel.ownerId;
-    const entries = (payload.pipelineOverride ?? channel.pipeline ?? []) as PipelineEntry[];
+    let entries = (payload.pipelineOverride ?? channel.pipeline ?? []) as PipelineEntry[];
     if (payload.pipelineOverride) {
       console.log(`[run-pipeline] using one-off pipelineOverride (${entries.length} blocks) — channel config untouched`);
     }
@@ -104,10 +123,14 @@ export const runPipelineTask = task({
     // runRemoteBlock — it must vary per HEAL cycle, since a superseded render
     // must genuinely re-run while a plain orchestrator retry must reattach.)
 
-    await convex.mutation(api.runs.updateRun, {
-      runId: payload.runId as Id<"runs">,
-      status: "running",
-    });
+    try {
+      await convex.mutation(api.runs.updateRun, {
+        runId: payload.runId as Id<"runs">,
+        status: "running",
+      });
+    } catch (error) {
+      throwForTaskRetryPolicy(error);
+    }
 
     // Live log sink — tees every ctx.log line into the runLogs table so the
     // run detail page can stream a console. Best-effort: never crashes the run.
@@ -133,9 +156,16 @@ export const runPipelineTask = task({
         }
       }
 
-      const resolved = validatePipeline(entries);
-      preflight(resolved, { budgetUsd: channel.budget ?? 0 });
-
+      // Persisted channels predate the production capability policy. Complete
+      // uniquely resolvable safety/crew gaps at execution time as well as at
+      // design time, so an old but otherwise valid channel does not fail before
+      // its first block. Creative engine choices remain explicit and ambiguous
+      // gaps still fail closed in the compiler.
+      const completed = completePipelineForPolicy(entries);
+      entries = completed.entries;
+      if (completed.inserted.length) {
+        log(`Production compiler completed legacy pipeline: ${completed.inserted.join(", ")}`);
+      }
       const paramsByBlock: Record<string, Record<string, unknown>> = {};
       for (const e of entries) {
         if (e.params) paramsByBlock[e.block] = e.params as Record<string, unknown>;
@@ -180,6 +210,33 @@ export const runPipelineTask = task({
       } catch (e) {
         log(`moduleConfig runtime merge failed (defaults kept): ${e instanceof Error ? e.message : e}`);
       }
+
+      // Compile and reserve against the EXACT params that will execute. The old
+      // order compiled the channel pipeline first and merged operator knobs
+      // afterwards, so a cost-increasing preset could bypass both the persisted
+      // fingerprint and the pre-spend budget reservation.
+      entries = materializeRuntimePipelineParams(entries, paramsByBlock);
+      const resolved = validatePipeline(entries);
+      const compilation = compilePipeline(resolved);
+      preflight(resolved, { budgetUsd: channel.budget ?? 0 });
+      await convex.mutation(api.runs.updateRun, {
+        runId: payload.runId as Id<"runs">,
+        pipelinePolicyId: compilation.policyId,
+        pipelinePolicyVersion: compilation.policyVersion,
+        pipelineFingerprint: compilation.fingerprint,
+        pipelineModules: compilation.modules,
+        pipelineCapabilities: compilation.capabilities,
+        reservedMaxCostUsd: compilation.reservedMaxCostUsd,
+        pipelineCompiledAt: Date.now(),
+      });
+      log(
+        `Production compile ${compilation.policyId}@${compilation.policyVersion} ${compilation.fingerprint}: ` +
+          `${compilation.modules.length} versioned modules, ${compilation.capabilities.length} capabilities`,
+      );
+      log(
+        `Spend reserved: up to $${compilation.reservedMaxCostUsd.toFixed(2)} ` +
+          `of $${Number(channel.budget ?? 0).toFixed(2)} per-video budget`,
+      );
 
       // Seed channel identity into the store so blocks can read style/topics.
       const seedStore: Record<string, unknown> = {
@@ -342,8 +399,9 @@ export const runPipelineTask = task({
         finishedAt: Date.now(),
         costTotal: result.costTotal,
       });
-      // Budget guard: warn (don't block) when a run overshoots the channel's
-      // per-video budget, so runaway spend surfaces immediately.
+      // This should be unreachable for declared provider envelopes because
+      // preflight reserves the worst case before execution. Keep the alert as
+      // a second rail for a provider returning a charge above its contract.
       if (channel.budget && result.costTotal > channel.budget) {
         await safeAlert(
           `budget exceeded (${channel.slug})`,
@@ -362,7 +420,7 @@ export const runPipelineTask = task({
         error: message,
       });
       await safeAlert(`run-pipeline aborted (${payload.runId})`, message);
-      throw err;
+      throwForTaskRetryPolicy(err);
     }
   },
 });

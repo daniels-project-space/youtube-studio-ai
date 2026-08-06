@@ -13,11 +13,16 @@
  * by the Doctor/operator. dryRun returns the analysis without writing.
  */
 import { task } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { fetchRetentionCurve, fetchVideoAnalytics, hasAnalyticsAccess } from "@/lib/youtubeAnalytics";
+import {
+  requireInternalQuerySecret,
+  requireYouTubeConnector,
+} from "@/lib/youtubeConnector";
+import { YOUTUBE_ANALYTICS_SCOPE } from "@/lib/publishingPolicy";
 import { claudeJson } from "@/lib/anthropic";
 
 interface Drop {
@@ -34,7 +39,6 @@ export const retentionAnalystTask = task({
   run: async (payload: { runId: string; dryRun?: boolean }) => {
     const log = (m: string) => console.log(`[retention] ${m}`);
     await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
-    if (!hasAnalyticsAccess()) return { ok: false, reason: "no yt-analytics OAuth access" };
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
@@ -49,6 +53,19 @@ export const retentionAnalystTask = task({
         | undefined)?.outputs ?? {};
     const videoId = String(out("upload_draft")["youtubeVideoId"] ?? "");
     if (!videoId) return { ok: false, reason: "run has no uploaded video" };
+    const run = await convex.query(api.runs.getRun, { runId });
+    const channelId = run?.channelId as Id<"channels"> | undefined;
+    if (!channelId) return { ok: false, reason: "run has no channel" };
+    const channel = await convex.query(api.channels.getChannel, { channelId });
+    if (!channel) return { ok: false, reason: "channel not found" };
+    const connector = await requireYouTubeConnector(convex, {
+      channelId,
+      ownerId: channel.ownerId,
+      requiredScopes: [YOUTUBE_ANALYTICS_SCOPE],
+    });
+    if (!hasAnalyticsAccess(connector.refreshToken)) {
+      return { ok: false, reason: "no channel-bound yt-analytics OAuth access" };
+    }
     const durationSec = Number(out("timeline_assemble")["videoDurationSec"] ?? 0);
     const introSec = Number(out("intro_card")["introSec"] ?? 0);
     const timings = (out("narration_tts")["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined) ?? [];
@@ -60,9 +77,19 @@ export const retentionAnalystTask = task({
     // 2. The retention curve (≥3-day metric finality; caller enforces ~7d lag).
     const end = new Date().toISOString().slice(0, 10);
     const start = new Date(Date.now() - 90 * 86_400_000).toISOString().slice(0, 10);
-    const curve = await fetchRetentionCurve({ videoId, startDate: start, endDate: end });
+    const curve = await fetchRetentionCurve({
+      videoId,
+      startDate: start,
+      endDate: end,
+      refreshToken: connector.refreshToken,
+    });
     if (!curve || curve.length < 10) return { ok: false, reason: "no retention curve yet (too few views or too early)" };
-    const summary = await fetchVideoAnalytics({ videoId, startDate: start, endDate: end });
+    const summary = await fetchVideoAnalytics({
+      videoId,
+      startDate: start,
+      endDate: end,
+      refreshToken: connector.refreshToken,
+    });
 
     // 3. Steep drops: ≥4% of REMAINING viewers lost within one curve step.
     const describeAt = (sec: number): string[] => {
@@ -98,10 +125,6 @@ export const retentionAnalystTask = task({
     log(`curve: ${curve.length} pts | hook hold ${(hookHold * 100).toFixed(0)}% | ${drops.length} steep drop(s) | avgView ${summary?.avgViewPct?.toFixed(1) ?? "?"}%`);
 
     // 4. Channel + playbook context for attribution.
-    const run = await convex.query(api.runs.getRun, { runId });
-    const channelId = run?.channelId as Id<"channels"> | undefined;
-    if (!channelId) return { ok: false, reason: "run has no channel" };
-    const channel = await convex.query(api.channels.getChannel, { channelId });
     const playbook = (channel as { scriptPlaybook?: Record<string, unknown> } | null)?.scriptPlaybook;
     const deviceIdx = [...payload.runId].reduce((s, c) => s + c.charCodeAt(0), 0);
     const devices = (playbook?.["openingDevices"] as { name: string }[] | undefined) ?? [];
@@ -130,13 +153,9 @@ export const retentionAnalystTask = task({
     const learnings = (analysis.learnings ?? []).filter((l) => l.rule);
     log(`diagnosis: ${analysis.diagnosis ?? "n/a"} | ${learnings.length} learning(s)`);
 
-    // 6. Persist: append to the playbook's retentionLearnings (capped, newest
-    // first) — scriptGen's digest reads the playbook, so high-confidence rules
-    // reach every future script.
-    // ALWAYS write at least a marker entry: pipeline-doctor's "not yet
-    // analyzed" check keys on runId presence here, so a zero-learning analysis
-    // that wrote nothing was RE-QUEUED (and re-billed) every day until the
-    // video aged out of the 60-day window — the top scheduled-burn bug.
+    // 6. Propose a versioned policy change. No audience-derived rule enters the
+    // active playbook until its offline evidence gate passes and an operator
+    // explicitly approves activation.
     if (!payload.dryRun && playbook) {
       const entries = learnings.length
         ? learnings.map((l) => ({ ...l, videoId, runId: payload.runId, deviceUsed, at: Date.now() }))
@@ -146,8 +165,37 @@ export const retentionAnalystTask = task({
         ...playbook,
         retentionLearnings: [...entries, ...existing].slice(0, 20),
       };
-      await convex.mutation(api.channels.updateChannel, { channelId, scriptPlaybook: updated });
-      log(`playbook updated with ${learnings.length} retention learning(s)${learnings.length ? "" : " (marker only)"}`);
+      const now = Date.now();
+      await convex.mutation(api.learningGovernance.propose, {
+        secret: requireInternalQuerySecret(),
+        ownerId: channel.ownerId,
+        channelId,
+        connectorId: connector.connectorId,
+        connectorVersion: connector.tokenVersion,
+        recommendationKey: `retention:${String(channelId)}:${videoId}`,
+        kind: "retention_rule",
+        target: "script_playbook",
+        sourceVideoIds: [videoId],
+        dataWindowStart: start,
+        dataWindowEnd: end,
+        proposal: {
+          nextValue: updated,
+          diagnosis: analysis.diagnosis,
+          runId: payload.runId,
+        },
+        offlineEvaluation: {
+          method: "settled_retention_curve_evidence_v1",
+          sampleSize: summary?.views ?? 0,
+          baselineScore: summary?.avgViewPct,
+          passed: curve.length >= 10 && (summary?.views ?? 0) >= 100,
+          notes:
+            curve.length >= 10 && (summary?.views ?? 0) >= 100
+              ? "Settled retention curve with at least 100 observed views."
+              : "Evidence sample is too small; activation is blocked.",
+        },
+        createdAt: now,
+      });
+      log(`retention recommendation proposed with ${learnings.length} learning(s); operator approval required`);
     }
     return {
       ok: true,

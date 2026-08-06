@@ -7,9 +7,8 @@
 # on important content. Fast (one numpy pass, O(candidates) search), no API.
 import numpy as np
 from scipy.ndimage import gaussian_filter, sobel
-from PIL import Image, ImageDraw, ImageFont
-
-FONT = (lambda: __import__("os").environ.get("MC_FONT") or next((f for f in ["src/assets/fonts/ComicNeue-Bold.otf", "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"] if __import__("os").path.exists(f)), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))()
+from PIL import Image, ImageDraw
+from mc_font import load_font
 
 
 def detail_map(img):
@@ -23,7 +22,7 @@ def detail_map(img):
 
 
 def bubble_size(text, box_w, box_h):
-    fs = max(19, int(box_h * 0.068)); font = ImageFont.truetype(FONT, fs)
+    fs = max(19, int(box_h * 0.068)); font = load_font(fs)
     maxw = int(box_w * 0.78); dd = ImageDraw.Draw(Image.new("RGB", (4, 4)))
     words, lines, cur = text.split(), [], ""
     for w in words:
@@ -74,7 +73,7 @@ def box_detail(det, x, y, bw, bh):
 
 
 def _measure(text, fs, max_w):
-    font = ImageFont.truetype(FONT, fs); dd = ImageDraw.Draw(Image.new("RGB", (4, 4)))
+    font = load_font(fs); dd = ImageDraw.Draw(Image.new("RGB", (4, 4)))
     words, lines, cur = text.split(), [], ""
     for w in words:
         t = (cur + " " + w).strip()

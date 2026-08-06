@@ -94,7 +94,7 @@ Return ONLY JSON: {"title":"...","clips":[{"start":<sec>,"end":<sec>}]}  (times 
 TRANSCRIPT:
 ${transcript}`;
   const res = await geminiJson<{ title?: string; clips?: Clip[] }>({ prompt, maxTokens: 800 });
-  let clips = (res.clips ?? [])
+  const clips = (res.clips ?? [])
     .map((c) => ({ start: Math.max(0, +c.start), end: Math.min(windowLen, +c.end) }))
     .filter((c) => c.end - c.start >= 2 && c.end > c.start)
     .sort((a, b) => a.start - b.start);

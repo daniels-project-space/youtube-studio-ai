@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { OWNER_ID } from "@/lib/config";
+import { authorizeStudioRoute } from "@/lib/operatorSession";
 
 /**
  * POST /api/build-channel  { seed: string }   → { id }  (Trigger run handle)
@@ -12,6 +13,8 @@ import { OWNER_ID } from "@/lib/config";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const authFailure = await authorizeStudioRoute(request);
+  if (authFailure) return authFailure;
   let body: { seed?: string; design?: Record<string, unknown> };
   try {
     body = await request.json();
@@ -38,6 +41,21 @@ export async function POST(request: Request) {
       const { sanitizeParamOverrides } = await import("@/engine/moduleCatalog");
       design = { ...design, paramOverrides: sanitizeParamOverrides(design.paramOverrides) };
     }
+    if (design) {
+      // This authenticated route is the only place the wizard's explicit
+      // confirmation becomes pipeline publish authority.
+      const approvedForPublish = design.approvedForPublish === true;
+      design = {
+        ...design,
+        approvedForPublish,
+        approvalActor: approvedForPublish
+          ? `authenticated-operator:${OWNER_ID}`
+          : undefined,
+        approvalEvidence: approvedForPublish
+          ? "explicit confirmation in channel creation wizard"
+          : undefined,
+      };
+    }
     const handle = design
       ? await tasks.trigger("design-channel", { ...design, ownerId: OWNER_ID })
       : await tasks.trigger("build-channel-package", { seed, ownerId: OWNER_ID });
@@ -51,6 +69,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const authFailure = await authorizeStudioRoute(request);
+  if (authFailure) return authFailure;
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
   if (!process.env.TRIGGER_SECRET_KEY) {

@@ -12,13 +12,18 @@
  * changes stay operator decisions; the only thing it auto-fires is analysis.
  */
 import { task, schedules, tasks } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { claudeJson } from "@/lib/anthropic";
 import { putObject } from "@/lib/storage";
 import { sendMessage } from "@/lib/telegram";
+import {
+  requireInternalQuerySecret,
+  requireYouTubeConnector,
+} from "@/lib/youtubeConnector";
+import { YOUTUBE_WRITE_SCOPES } from "@/lib/publishingPolicy";
 
 const DAY = 86_400_000;
 
@@ -33,7 +38,13 @@ async function sweep(ownerId: string, log: (m: string) => void) {
   const healed: { channel: string; runId: string; superseded: string[] }[] = [];
   const retentionQueued: string[] = [];
   const missingCaps = new Map<string, string>();
-  const publishCandidates: { channel: string; videoId: string; title: string; topic: string }[] = [];
+  const publishCandidates: {
+    channel: string;
+    channelId: Id<"channels">;
+    videoId: string;
+    title: string;
+    topic: string;
+  }[] = [];
   // NEW EYES (2026-07): the Doctor used to be blind to (a) advisory QA data on
   // PASSED runs (low feel/audio/thumbnail scores living in qaReport), and
   // (b) the styleDNA groundingGaps the distiller explicitly deferred to it.
@@ -109,6 +120,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
           if (vid) {
             publishCandidates.push({
               channel: ch.name,
+              channelId: ch._id,
               videoId: vid,
               title: String(sOut("metadata")["title"] ?? ""),
               topic: String(sOut("topic_select")["topic"] ?? ""),
@@ -146,23 +158,30 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       } catch { /* stage read is best-effort */ }
     }
 
-    // Retention sweep: published ok-runs past the 7-day lag, not yet analyzed.
-    const analyzed = new Set(
-      (((ch as { scriptPlaybook?: { retentionLearnings?: { runId?: string }[] } }).scriptPlaybook)?.retentionLearnings ?? [])
-        .map((l) => l.runId)
-        .filter(Boolean),
-    );
+    // Retention sweep: published ok-runs past the 7-day lag with no durable
+    // recommendation yet. Proposed/rejected recommendations both count as
+    // analyzed, preventing daily re-billing while keeping active policy clean.
     const due = runs.filter(
       (r) =>
         r.status === "ok" &&
+        Boolean(r.youtubeVideoId) &&
         (r._creationTime ?? 0) < Date.now() - 7 * DAY &&
-        (r._creationTime ?? 0) > Date.now() - 60 * DAY &&
-        !analyzed.has(r._id),
+        (r._creationTime ?? 0) > Date.now() - 60 * DAY,
     );
-    for (const r of due.slice(0, 2)) {
+    let channelRetentionQueued = 0;
+    for (const r of due) {
+      if (channelRetentionQueued >= 2) break;
       try {
+        const recommendationKey = `retention:${String(ch._id)}:${r.youtubeVideoId}`;
+        const existing = await convex.query(api.learningGovernance.getByKey, {
+          secret: requireInternalQuerySecret(),
+          ownerId,
+          recommendationKey,
+        });
+        if (existing) continue;
         await tasks.trigger("retention-analyst", { runId: r._id });
         retentionQueued.push(`${ch.name}:${r._id}`);
+        channelRetentionQueued++;
       } catch (e) {
         log(`retention queue failed for ${r._id}: ${e instanceof Error ? e.message : e}`);
       }
@@ -193,15 +212,23 @@ async function sweep(ownerId: string, log: (m: string) => void) {
   // (an engagement signal the algorithm rewards). Dedupe = the channel already
   // commented. NOTE: pinning has no public API — pin manually in Studio.
   let commentsPosted = 0;
-  try {
+  if (process.env.STUDIO_ENGAGEMENT_AUTOMATION !== "on") {
+    log("engagement: external comment automation disabled (set STUDIO_ENGAGEMENT_AUTOMATION=on to authorize)");
+  } else try {
     const { getMyChannelId, getVideoPrivacy, hasChannelComment, postComment } = await import("@/lib/youtube");
-    const myId = await getMyChannelId();
-    if (myId) {
-      for (const pc of publishCandidates.slice(0, 10)) {
-        if (commentsPosted >= 5) break;
-        try {
-          if ((await getVideoPrivacy(pc.videoId)) !== "public") continue;
-          if (await hasChannelComment(pc.videoId, myId)) continue;
+    for (const pc of publishCandidates.slice(0, 10)) {
+      if (commentsPosted >= 5) break;
+      try {
+        const connector = await requireYouTubeConnector(convex, {
+          channelId: pc.channelId,
+          ownerId,
+          requiredScopes: YOUTUBE_WRITE_SCOPES,
+        });
+        const refreshToken = connector.refreshToken;
+        const myId = await getMyChannelId(refreshToken);
+        if (!myId) continue;
+        if ((await getVideoPrivacy(pc.videoId, refreshToken)) !== "public") continue;
+        if (await hasChannelComment(pc.videoId, myId, refreshToken)) continue;
           const q = await claudeJson<{ comment?: string }>({
             maxTokens: 200,
             temperature: 0.8,
@@ -212,13 +239,12 @@ async function sweep(ownerId: string, log: (m: string) => void) {
               `max one emoji, no "smash subscribe"). Return STRICT JSON {"comment":string}.`,
           });
           if (q.comment) {
-            await postComment(pc.videoId, q.comment);
+            await postComment(pc.videoId, q.comment, refreshToken);
             commentsPosted++;
             log(`engagement: hook comment posted on ${pc.videoId} (${pc.channel}): "${q.comment.slice(0, 60)}"`);
           }
-        } catch (e) {
-          log(`engagement: ${pc.videoId} failed: ${e instanceof Error ? e.message : e}`);
-        }
+      } catch (e) {
+        log(`engagement: ${pc.videoId} failed: ${e instanceof Error ? e.message : e}`);
       }
     }
   } catch (e) {

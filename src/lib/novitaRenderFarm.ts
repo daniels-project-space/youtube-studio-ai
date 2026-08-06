@@ -1,6 +1,6 @@
 /**
  * NOVITA RENDER FARM — standalone image + video render module driven by the
- * proven 8×4090 Novita orchestrator (`/root/ltx-build/novita/orchestrator.py`
+ * three-slot Novita RTX 4090 orchestrator (`/root/ltx-build/novita/orchestrator.py`
  * on the VPS): static modulo sharding, spot-pod autoclose + reclaim-requeue,
  * R2-backed idempotent resume (workers skip outputs already in R2).
  *
@@ -8,12 +8,14 @@
  * launches/monitors Novita GPU pods; it does NOT run inside Vercel or a
  * Trigger.dev task (no spot-pod lifecycle, no multi-hour process there). This
  * module therefore never spawns python directly — it POSTs the render cfg to
- * a small HTTP bridge that lives on the VPS (a thin server wrapping
- * orchestrator.py's `launch()`/`status()`), then polls that bridge for
- * completion. Configure the bridge URL via `NOVITA_RENDER_API`; default
- * points at the VPS render-API bridge alongside the rest of the render infra.
+ * an authenticated HTTPS control-plane bridge, then polls that bridge for
+ * completion. Both `NOVITA_RENDER_FARM_API` and `NOVITA_RENDER_FARM_TOKEN` are required;
+ * there is deliberately no public or unauthenticated fallback.
  */
+import { createHash, createHmac } from "node:crypto";
+import type { GenerationProfile } from "@/engine/generationProfiles";
 import { bootstrapSecrets } from "./bootstrap";
+import { z } from "zod";
 
 /** One of the 10 canonical camera moves a shot can use (static = no camera motion). */
 export type CameraMove =
@@ -51,6 +53,67 @@ export interface Shot {
   stillKey?: string;
   section?: string;
   storyFunction?: string;
+  /** Authored story timecodes and lineage; preserved into render manifests. */
+  t0?: number;
+  t1?: number;
+  sourceSentenceIds?: string[];
+  continuityState?: string;
+  generationProfile?: "draft" | "production" | "hero";
+  candidateCount?: number;
+}
+
+export interface NovitaPhaseProfile {
+  contractVersion: "1.0.0";
+  id: "draft" | "production" | "hero";
+  phase: "image" | "video";
+  model: string;
+  revision: string;
+  checkpoint: string;
+  width: number;
+  height: number;
+  steps: number;
+  guidanceScale: number;
+  precision: "bf16" | "fp16";
+  candidates: number;
+  fps?: number;
+  twoStageRefine?: boolean;
+  allowFallback: false;
+}
+
+/** Convert one approved studio profile into the exact phase contract accepted by the bridge. */
+export function toNovitaPhaseProfile(
+  profile: GenerationProfile,
+  phase: "image" | "video",
+): NovitaPhaseProfile {
+  const settings = profile[phase];
+  return {
+    contractVersion: profile.contractVersion,
+    id: profile.id,
+    phase,
+    model: settings.model,
+    revision: settings.revision,
+    checkpoint: settings.checkpoint,
+    width: settings.width,
+    height: settings.height,
+    steps: settings.steps,
+    guidanceScale: settings.guidanceScale,
+    precision: settings.precision,
+    candidates: settings.candidates,
+    ...(phase === "video"
+      ? {
+          fps: profile.video.fps,
+          twoStageRefine: profile.video.twoStageRefine,
+        }
+      : {}),
+    allowFallback: false,
+  };
+}
+
+export interface RenderedCandidate {
+  shotId: string;
+  candidateIndex: number;
+  outputId: string;
+  key: string;
 }
 
 /** Full render job config — maps ~1:1 onto the orchestrator's job schema (no translation layer). */
@@ -58,6 +121,8 @@ export interface NovitaRenderCfg {
   /** R2 key prefix for this render's outputs, e.g. "adart2". */
   prefix: string;
   shots: Shot[];
+  /** Immutable, provider-pinned profile. There is no implicit production fallback. */
+  profile: NovitaPhaseProfile;
   /** Global style string appended to every shot prompt. */
   style?: string;
   /** Global negative prompt, prepended to every shot's negative. */
@@ -85,6 +150,8 @@ export interface NovitaRenderResult {
   footageClips?: string[];
   /** R2 keys of clips produced (video phase). */
   footageKeys?: string[];
+  /** Exact shot/candidate mapping; callers never infer identity from array order. */
+  candidates?: RenderedCandidate[];
   outputs: number;
   durationSec: number;
   raw?: unknown;
@@ -99,7 +166,7 @@ export const NOVITA_RENDER_FARM_MODULE = {
   key: "novita-render-farm",
   title: "Novita Render Farm",
   stage: "visual",
-  does: "Renders a full shot list (images then videos) on an 8×4090 Novita spot-pod farm: static modulo sharding, individual pod autoclose, spot-reclaim requeue, and R2-backed idempotent resume. Standalone and composable — feeds stillKeys/footageKeys into any downstream assembler.",
+  does: "Renders a full shot list on a three-slot Novita RTX 4090 spot fleet through a signed HTTPS bridge. Approved immutable profiles pin model revision, checkpoint, dimensions, steps, guidance, precision, FPS, and candidate count; the bridge rejects drift and cross-engine fallback.",
   produces: {
     kind: "shot_list_render",
     file: "R2-backed stills (png/jpg) + clips (mp4, H.264)",
@@ -109,24 +176,25 @@ export const NOVITA_RENDER_FARM_MODULE = {
   requires: { // the caller MUST supply these
     prefix: "string — R2 key prefix that names this render's outputs",
     shots: "Shot[] — at least one shot with a non-empty prompt",
+    profile: "approved immutable image- or video-phase generation profile",
   },
   optional: { // sensible defaults
     style: "string — global style suffix appended to every shot prompt",
     negative: "string — global negative prompt",
     director: "string — director notes, appended to every shot prompt",
-    steps: "sampler steps (default 40 image base tier)",
-    cfg: "classifier-free guidance scale",
-    fps: "video frames-per-second (default 24)",
-    width: "px, must be %32==0 (default 1024)",
-    height: "px, must be %32==0 (default 576)",
+    steps: "compatibility guard — if supplied, must exactly equal the pinned profile",
+    cfg: "compatibility guard — if supplied, must exactly equal the pinned profile",
+    fps: "compatibility guard — if supplied, must exactly equal the pinned video profile",
+    width: "compatibility guard — if supplied, must exactly equal the pinned profile",
+    height: "compatibility guard — if supplied, must exactly equal the pinned profile",
     nshard: "Novita pods to shard across, ≤3 (account cap)",
     jobs: "'val' | 'full' — val proves on 1 shard before a full run",
     maxConcurrent: "max pods in flight at once (default 3)",
   },
   needs: { // environment
-    secrets: ["NOVITA_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY"],
-    tools: ["VPS render-API bridge (NOVITA_RENDER_API)"],
-    note: "The orchestrator lives on the VPS (/root/ltx-build/novita/orchestrator.py), NOT in Vercel/Trigger — this module talks to it over HTTP only.",
+    secrets: ["NOVITA_RENDER_FARM_TOKEN"],
+    tools: ["authenticated HTTPS render bridge (NOVITA_RENDER_FARM_API)"],
+    note: "The GPU control plane owns the Novita and R2 credentials; Vercel/Trigger only receives a scoped bridge token.",
   },
   rules: [
     "Video frames are ALWAYS 8n+1 (LTX/Wan temporal requirement) — seconds are rounded to the nearest valid frame count, never truncated silently.",
@@ -144,8 +212,91 @@ const DEFAULTS = {
   nshard: 1, jobs: "val" as const, maxConcurrent: 3,
 };
 
-/** VPS render-API bridge — a small server wrapping orchestrator.py's launch()/status(). */
-const RENDER_API = process.env.NOVITA_RENDER_API || "http://87.106.233.113/novita-bridge/render";
+const BridgeLaunchSchema = z.object({
+  jobId: z.string().regex(/^(image|video)-[a-f0-9]{32}$/),
+});
+
+const BridgeStatusSchema = z.object({
+  ok: z.boolean(),
+  jobId: z.string(),
+  phase: z.enum(["image", "video"]),
+  status: z.enum(["queued", "launching", "running", "done", "failed"]),
+  outputs: z.array(z.string()),
+  n_outputs: z.number().int().nonnegative(),
+  n_jobs: z.number().int().positive(),
+  outputPrefix: z.string().min(1),
+  expectedKeys: z.array(z.string()),
+  missingKeys: z.array(z.string()),
+  failedIds: z.array(z.string()),
+  stillKeys: z.array(z.string()).optional(),
+  footageKeys: z.array(z.string()).optional(),
+  footageClips: z.array(z.string()).optional(),
+  profile: z.unknown(),
+  profileSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  manifestSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  requestSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  error: z.string().nullable().optional(),
+}).passthrough();
+
+export type NovitaBridgeStatus = z.infer<typeof BridgeStatusSchema>;
+
+/** Server-side verification receipt for an accepted bridge launch. */
+export interface NovitaRenderLaunch {
+  jobId: string;
+  phase: "image" | "video";
+  prefix: string;
+  expectedJobIds: string[];
+  profile: NovitaPhaseProfile;
+  profileSha256: string;
+  requestSha256: string;
+  nshard: number;
+}
+
+function canonicalJson(value: unknown): string {
+  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
+  if (value !== null && typeof value === "object") {
+    const record = value as Record<string, unknown>;
+    return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
+  }
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined) throw new Error("novitaRenderFarm: contract contains an undefined value");
+  return encoded;
+}
+
+function renderBridgeConfig(): { baseUrl: string; token: string } {
+  const rawUrl = process.env.NOVITA_RENDER_FARM_API?.trim();
+  const token = process.env.NOVITA_RENDER_FARM_TOKEN?.trim();
+  if (!rawUrl) throw new Error("novitaRenderFarm: NOVITA_RENDER_FARM_API is required");
+  if (!token || token.length < 32) {
+    throw new Error("novitaRenderFarm: NOVITA_RENDER_FARM_TOKEN must contain at least 32 characters");
+  }
+  const url = new URL(rawUrl);
+  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
+  if (url.protocol !== "https:" && !(loopback && url.protocol === "http:")) {
+    throw new Error("novitaRenderFarm: NOVITA_RENDER_FARM_API must use HTTPS (HTTP is allowed only for loopback)");
+  }
+  if (url.username || url.password || url.search || url.hash) {
+    throw new Error("novitaRenderFarm: NOVITA_RENDER_FARM_API must not contain credentials, query parameters, or a fragment");
+  }
+  return { baseUrl: url.toString().replace(/\/$/, ""), token };
+}
+
+/** True only when the scoped HTTPS bridge configuration passes all local checks. */
+export async function hasNovitaRenderBridge(): Promise<boolean> {
+  if (!process.env.NOVITA_RENDER_FARM_API || !process.env.NOVITA_RENDER_FARM_TOKEN) {
+    try {
+      await bootstrapSecrets();
+    } catch {
+      return false;
+    }
+  }
+  try {
+    renderBridgeConfig();
+    return true;
+  } catch {
+    return false;
+  }
+}
 
 /** Round seconds → the nearest valid 8n+1 frame count at the given fps (never below 9 frames / 1 shard). */
 export function secondsToFrames(seconds: number, fps: number): number {
@@ -162,21 +313,62 @@ export function secondsToFrames(seconds: number, fps: number): number {
 export function validate(cfg: NovitaRenderCfg, phase: "image" | "video"): void {
   const errs: string[] = [];
   if (!cfg.prefix || !cfg.prefix.trim()) errs.push("prefix is required");
+  if (!/^[A-Za-z0-9][A-Za-z0-9._/-]{0,191}$/.test(cfg.prefix) || cfg.prefix.split("/").some((part) => part === "." || part === "..")) {
+    errs.push("prefix must be a safe, relative R2 key prefix");
+  }
   const shots = cfg.shots ?? [];
+  const profile = cfg.profile;
+  if (!profile) {
+    errs.push("an explicit immutable generation profile is required");
+  } else {
+    if (profile.contractVersion !== "1.0.0") errs.push("unsupported generation profile contract version");
+    if (profile.phase !== phase) errs.push(`profile phase ${profile.phase} does not match ${phase}`);
+    if (profile.allowFallback !== false) errs.push("generation profile must prohibit fallback");
+    if (!/^[a-f0-9]{40}$/.test(profile.revision)) errs.push("profile revision must be a pinned 40-character commit");
+    if (!profile.model.trim() || !profile.checkpoint.trim()) errs.push("profile model and checkpoint are required");
+    if (!Number.isInteger(profile.steps) || profile.steps < 1) errs.push("profile steps must be a positive integer");
+    if (profile.width % 32 !== 0 || profile.height % 32 !== 0) {
+      errs.push(`profile dimensions ${profile.width}x${profile.height} must be divisible by 32`);
+    }
+    if (cfg.width !== undefined && cfg.width !== profile.width) errs.push("width override conflicts with pinned profile");
+    if (cfg.height !== undefined && cfg.height !== profile.height) errs.push("height override conflicts with pinned profile");
+    if (cfg.steps !== undefined && cfg.steps !== profile.steps) errs.push("steps override conflicts with pinned profile");
+    if (cfg.cfg !== undefined && cfg.cfg !== profile.guidanceScale) errs.push("CFG override conflicts with pinned profile");
+    if (phase === "video" && cfg.fps !== undefined && cfg.fps !== profile.fps) {
+      errs.push("fps override conflicts with pinned profile");
+    }
+  }
+  const expandedCount = phase === "image"
+    ? shots.reduce((sum, shot) => sum + (shot.candidateCount ?? profile?.candidates ?? 1), 0)
+    : shots.length;
+  if (expandedCount > 240) errs.push("expanded render count exceeds the bridge limit of 240");
   const withPrompt = shots.filter((s) => s.prompt && s.prompt.trim());
   if (withPrompt.length < 1) errs.push("at least one shot with a non-empty prompt is required");
+  const seenIds = new Set<string>();
+  for (const shot of shots) {
+    if (!/^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$/.test(shot.id)) {
+      errs.push(`shot id ${JSON.stringify(shot.id)} must be a safe output identifier`);
+    } else if (seenIds.has(shot.id)) {
+      errs.push(`duplicate shot id ${shot.id}`);
+    }
+    seenIds.add(shot.id);
+  }
 
-  const width = cfg.width ?? DEFAULTS.width;
-  const height = cfg.height ?? DEFAULTS.height;
+  const width = profile?.width ?? cfg.width ?? DEFAULTS.width;
+  const height = profile?.height ?? cfg.height ?? DEFAULTS.height;
   if (width % 32 !== 0) errs.push(`width ${width} must be a multiple of 32`);
   if (height % 32 !== 0) errs.push(`height ${height} must be a multiple of 32`);
 
   const nshard = cfg.nshard ?? DEFAULTS.nshard;
   if (nshard > 3) errs.push(`nshard ${nshard} exceeds the Novita account cap of 3`);
   if (nshard < 1) errs.push("nshard must be >= 1");
+  const maxConcurrent = cfg.maxConcurrent ?? DEFAULTS.maxConcurrent;
+  if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 3) {
+    errs.push("maxConcurrent must be an integer between 1 and 3");
+  }
 
   if (phase === "video") {
-    const fps = cfg.fps ?? DEFAULTS.fps;
+    const fps = profile?.fps ?? cfg.fps ?? DEFAULTS.fps;
     for (const s of shots) {
       if (!s.prompt || !s.prompt.trim()) continue; // already flagged above if it's the only shot
       const frames = secondsToFrames(s.seconds, fps);
@@ -184,6 +376,19 @@ export function validate(cfg: NovitaRenderCfg, phase: "image" | "video"): void {
       const hasMotionCue = (s.cameraMove && s.cameraMove !== "static") || (s.motion && s.motion.trim());
       if (!hasMotionCue) errs.push(`shot ${s.id}: no motion cue (cameraMove is 'static' and motion is empty)`);
       if (!s.stillKey || !s.stillKey.trim()) errs.push(`shot ${s.id}: missing stillKey (video phase needs a rendered still to animate)`);
+      if (s.generationProfile && profile && s.generationProfile !== profile.id) {
+        errs.push(`shot ${s.id}: profile ${s.generationProfile} does not match render profile ${profile.id}`);
+      }
+    }
+  } else {
+    for (const s of shots) {
+      const candidates = s.candidateCount ?? profile?.candidates ?? 1;
+      if (!Number.isInteger(candidates) || candidates < 1 || candidates > 4) {
+        errs.push(`shot ${s.id}: candidateCount must be an integer between 1 and 4`);
+      }
+      if (s.generationProfile && profile && s.generationProfile !== profile.id) {
+        errs.push(`shot ${s.id}: profile ${s.generationProfile} does not match render profile ${profile.id}`);
+      }
     }
   }
 
@@ -199,35 +404,270 @@ function shotNegative(cfg: NovitaRenderCfg, s: Shot): string {
   return [cfg.negative, s.negative].filter((p) => p && p.trim()).join(", ");
 }
 
-/** POST to the VPS render-API bridge and poll until the job reports done. */
-async function bridgeRenderAndPoll(
+function expectedBridgeOutputPrefix(phase: "image" | "video", prefix: string, jobId: string): string {
+  const root = phase === "image" ? "imagecraft" : "videocraft";
+  const leaf = phase === "image" ? "stills" : "shots";
+  return `${root}/${prefix}/${jobId}/${leaf}`;
+}
+
+export function validateBridgeCompletion(args: {
+  phase: "image" | "video";
+  prefix: string;
+  jobId: string;
+  expectedJobIds: string[];
+  status: NovitaBridgeStatus;
+}): string[] {
+  const { phase, prefix, jobId, expectedJobIds, status } = args;
+  if (status.status !== "done" || status.ok !== true) {
+    throw new Error(`novitaRenderFarm: ${phase} job ${jobId} did not report a successful terminal state`);
+  }
+  if (status.jobId !== jobId || status.phase !== phase) {
+    throw new Error(`novitaRenderFarm: ${phase} job ${jobId} returned mismatched job identity`);
+  }
+  if (status.failedIds.length || status.missingKeys.length) {
+    throw new Error(`novitaRenderFarm: ${phase} job ${jobId} reported failed or missing outputs`);
+  }
+  const outputPrefix = expectedBridgeOutputPrefix(phase, prefix, jobId);
+  if (status.outputPrefix !== outputPrefix) {
+    throw new Error(`novitaRenderFarm: ${phase} job ${jobId} returned an unexpected output namespace`);
+  }
+  const extension = phase === "image" ? "png" : "mp4";
+  const expectedKeys = expectedJobIds.map((id) => `${outputPrefix}/${id}.${extension}`);
+  const outputs = phase === "image" ? status.stillKeys : status.footageKeys;
+  if (!outputs || status.n_jobs !== expectedKeys.length || status.n_outputs !== expectedKeys.length) {
+    throw new Error(`novitaRenderFarm: ${phase} job ${jobId} returned an incomplete output count`);
+  }
+  const expectedSet = new Set(expectedKeys);
+  const outputSet = new Set(outputs);
+  const protocolSet = new Set(status.expectedKeys);
+  if (outputSet.size !== expectedSet.size || protocolSet.size !== expectedSet.size
+      || expectedKeys.some((key) => !outputSet.has(key) || !protocolSet.has(key))) {
+    throw new Error(`novitaRenderFarm: ${phase} job ${jobId} returned stale, duplicate, or unexpected output keys`);
+  }
+  return expectedKeys;
+}
+
+/** POST one immutable render contract to the authenticated bridge. */
+async function launchBridgeRender(
   phase: "image" | "video",
-  body: Record<string, unknown>,
-  opts: { pollMs?: number; timeoutMs?: number } = {},
-): Promise<any> {
-  const pollMs = opts.pollMs ?? 15_000;
-  const timeoutMs = opts.timeoutMs ?? 4 * 60 * 60 * 1000; // 4h ceiling, mirrors orchestrator's own monitor timeout
-  const launchRes = await fetch(`${RENDER_API}/${phase}`, {
+  body: Record<string, unknown> & { prefix: string },
+  expectedJobIds: string[],
+): Promise<NovitaRenderLaunch> {
+  const { baseUrl, token } = renderBridgeConfig();
+  const payload = JSON.stringify(body);
+  const expectedProfileHash = createHash("sha256").update(canonicalJson(body["profile"])).digest("hex");
+  const expectedRequestHash = createHash("sha256").update(`${phase}\0`).update(payload).digest("hex");
+  const timestamp = String(Math.floor(Date.now() / 1000));
+  const signature = createHmac("sha256", token)
+    .update(`${timestamp}.${phase}.${payload}`)
+    .digest("hex");
+  const headers = {
+    "content-type": "application/json",
+    authorization: `Bearer ${token}`,
+    "x-render-timestamp": timestamp,
+    "x-render-signature": signature,
+  };
+  const launchRes = await fetch(`${baseUrl}/${phase}`, {
     method: "POST",
-    headers: { "content-type": "application/json" },
-    body: JSON.stringify(body),
+    headers,
+    body: payload,
+    signal: AbortSignal.timeout(45_000),
   });
-  if (!launchRes.ok) throw new Error(`novitaRenderFarm: bridge launch ${phase} failed ${launchRes.status}: ${(await launchRes.text()).slice(0, 300)}`);
-  const launch = await launchRes.json();
-  const jobId = launch.jobId ?? launch.id;
-  if (!jobId) throw new Error(`novitaRenderFarm: bridge launch ${phase} returned no jobId`);
+  if (!launchRes.ok) {
+    throw new Error(`novitaRenderFarm: bridge launch ${phase} failed ${launchRes.status}: ${(await launchRes.text()).slice(0, 300)}`);
+  }
+  const launch = BridgeLaunchSchema.parse(await launchRes.json());
+  const jobId = launch.jobId;
+  if (!jobId.startsWith(`${phase}-`)) {
+    throw new Error(`novitaRenderFarm: bridge launch returned mismatched identity for ${phase}`);
+  }
+  return {
+    jobId,
+    phase,
+    prefix: body.prefix,
+    expectedJobIds: [...expectedJobIds],
+    profile: body["profile"] as NovitaPhaseProfile,
+    profileSha256: expectedProfileHash,
+    requestSha256: expectedRequestHash,
+    nshard: typeof body["nshard"] === "number" ? body["nshard"] : 1,
+  };
+}
+
+/** Read and schema-check one bridge job without launching or waiting. */
+export async function getNovitaRenderStatus(jobId: string): Promise<NovitaBridgeStatus> {
+  const identity = /^(image|video)-[a-f0-9]{32}$/.exec(jobId);
+  if (!identity) throw new Error("novitaRenderFarm: invalid bridge job id");
+  await bootstrapSecrets(() => {}, { required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
+  const { baseUrl, token } = renderBridgeConfig();
+  const statusRes = await fetch(`${baseUrl}/status?jobId=${encodeURIComponent(jobId)}`, {
+    headers: { authorization: `Bearer ${token}` },
+    cache: "no-store",
+    signal: AbortSignal.timeout(30_000),
+  });
+  if (!statusRes.ok) {
+    throw new Error(`novitaRenderFarm: bridge status failed ${statusRes.status}: ${(await statusRes.text()).slice(0, 300)}`);
+  }
+  const status = BridgeStatusSchema.parse(await statusRes.json());
+  if (status.jobId !== jobId || status.phase !== identity[1]) {
+    throw new Error(`novitaRenderFarm: bridge status returned mismatched identity for ${jobId}`);
+  }
+  const profileHash = createHash("sha256").update(canonicalJson(status.profile)).digest("hex");
+  if (profileHash !== status.profileSha256) {
+    throw new Error(`novitaRenderFarm: bridge status returned a corrupted profile contract for ${jobId}`);
+  }
+  return status;
+}
+
+function assertStatusMatchesLaunch(
+  launch: NovitaRenderLaunch,
+  status: NovitaBridgeStatus,
+): void {
+  if (status.jobId !== launch.jobId || status.phase !== launch.phase) {
+    throw new Error(`novitaRenderFarm: bridge status returned mismatched identity for ${launch.jobId}`);
+  }
+  if (canonicalJson(status.profile) !== canonicalJson(launch.profile)) {
+    throw new Error(`novitaRenderFarm: bridge status returned a mismatched generation profile for ${launch.jobId}`);
+  }
+  if (status.profileSha256 !== launch.profileSha256 || status.requestSha256 !== launch.requestSha256) {
+    throw new Error(`novitaRenderFarm: bridge status returned mismatched contract hashes for ${launch.jobId}`);
+  }
+}
+
+/** Poll a previously accepted launch and re-verify its identity and contract on every response. */
+async function waitForBridgeRender(
+  launch: NovitaRenderLaunch,
+  opts: { pollMs?: number; timeoutMs?: number } = {},
+): Promise<NovitaBridgeStatus> {
+  const pollMs = opts.pollMs ?? 15_000;
+  const waves = Math.ceil(launch.expectedJobIds.length / Math.max(1, Math.min(3, launch.nshard)));
+  const estimatedMs = waves * (launch.phase === "image" ? 3 : 20) * 60_000 + 60 * 60_000;
+  const timeoutMs = opts.timeoutMs ?? Math.min(24 * 60 * 60 * 1000, Math.max(4 * 60 * 60 * 1000, estimatedMs));
 
   const t0 = Date.now();
+  let consecutivePollFailures = 0;
   for (;;) {
-    const statusRes = await fetch(`${RENDER_API}/status?jobId=${encodeURIComponent(jobId)}`);
-    if (statusRes.ok) {
-      const st = await statusRes.json();
-      if (st.status === "done" || st.ok === true) return st;
-      if (st.status === "failed" || st.error) throw new Error(`novitaRenderFarm: ${phase} job ${jobId} failed: ${st.error ?? "unknown"}`);
+    let status: NovitaBridgeStatus | undefined;
+    try {
+      status = await getNovitaRenderStatus(launch.jobId);
+    } catch (error) {
+      consecutivePollFailures += 1;
+      if (consecutivePollFailures >= 5) throw error;
     }
-    if (Date.now() - t0 > timeoutMs) throw new Error(`novitaRenderFarm: ${phase} job ${jobId} timed out after ${timeoutMs}ms`);
-    await new Promise((r) => setTimeout(r, pollMs));
+    if (status) {
+      consecutivePollFailures = 0;
+      assertStatusMatchesLaunch(launch, status);
+      if (status.status === "failed") {
+        throw new Error(`novitaRenderFarm: ${launch.phase} job ${launch.jobId} failed: ${status.error ?? "unknown"}`);
+      }
+      if (status.status === "done") {
+        validateBridgeCompletion({
+          phase: launch.phase,
+          prefix: launch.prefix,
+          jobId: launch.jobId,
+          expectedJobIds: launch.expectedJobIds,
+          status,
+        });
+        return status;
+      }
+    }
+    if (Date.now() - t0 > timeoutMs) {
+      throw new Error(`novitaRenderFarm: ${launch.phase} job ${launch.jobId} timed out after ${timeoutMs}ms`);
+    }
+    await new Promise((resolve) => setTimeout(resolve, pollMs));
   }
+}
+
+function normalizedCfg(userCfg: NovitaRenderCfg): NovitaRenderCfg {
+  return {
+    ...userCfg,
+    style: userCfg.style ?? DEFAULTS.style,
+    negative: userCfg.negative ?? DEFAULTS.negative,
+    director: userCfg.director ?? DEFAULTS.director,
+    nshard: userCfg.nshard ?? DEFAULTS.nshard,
+    jobs: userCfg.jobs ?? DEFAULTS.jobs,
+    maxConcurrent: userCfg.maxConcurrent ?? DEFAULTS.maxConcurrent,
+  };
+}
+
+function imageJobs(cfg: NovitaRenderCfg) {
+  return cfg.shots
+    .filter((shot) => shot.prompt && shot.prompt.trim())
+    .flatMap((shot) => Array.from(
+      { length: shot.candidateCount ?? cfg.profile.candidates },
+      (_, candidateIndex) => ({
+        id: `${shot.id}-c${String(candidateIndex + 1).padStart(2, "0")}`,
+        sourceShotId: shot.id,
+        candidateIndex,
+        prompt: shotPrompt(cfg, shot),
+        negative: shotNegative(cfg, shot),
+        width: cfg.profile.width,
+        height: cfg.profile.height,
+        steps: cfg.profile.steps,
+        cfg: cfg.profile.guidanceScale,
+        seed: (shot.seed ?? 0) + candidateIndex * 10_000,
+      }),
+    ));
+}
+
+function videoJobs(cfg: NovitaRenderCfg) {
+  const fps = cfg.profile.fps;
+  if (!fps) throw new Error("novitaRenderFarm: video profile is missing fps");
+  return cfg.shots
+    .filter((shot) => shot.prompt && shot.prompt.trim() && shot.stillKey)
+    .map((shot) => ({
+      id: shot.id,
+      stillKey: shot.stillKey,
+      cameraMove: shot.cameraMove,
+      shotScale: shot.shotScale,
+      lens: shot.lens,
+      motion: shot.motion,
+      frames: secondsToFrames(shot.seconds, fps),
+      fps,
+      negative: shotNegative(cfg, shot),
+      seed: shot.seed,
+    }));
+}
+
+async function startImageRender(userCfg: NovitaRenderCfg) {
+  const cfg = normalizedCfg(userCfg);
+  validate(cfg, "image");
+  await bootstrapSecrets(() => {}, { required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
+  const jobs = imageJobs(cfg);
+  const launch = await launchBridgeRender("image", {
+    prefix: cfg.prefix,
+    jobs,
+    nshard: cfg.nshard ?? DEFAULTS.nshard,
+    jobsSel: cfg.jobs ?? DEFAULTS.jobs,
+    maxConcurrent: cfg.maxConcurrent ?? DEFAULTS.maxConcurrent,
+    profile: cfg.profile,
+  }, jobs.map((job) => job.id));
+  return { jobs, launch };
+}
+
+async function startVideoRender(userCfg: NovitaRenderCfg) {
+  const cfg = normalizedCfg(userCfg);
+  validate(cfg, "video");
+  await bootstrapSecrets(() => {}, { required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
+  const jobs = videoJobs(cfg);
+  const launch = await launchBridgeRender("video", {
+    prefix: cfg.prefix,
+    jobs,
+    nshard: cfg.nshard ?? DEFAULTS.nshard,
+    jobsSel: cfg.jobs ?? DEFAULTS.jobs,
+    maxConcurrent: cfg.maxConcurrent ?? DEFAULTS.maxConcurrent,
+    profile: cfg.profile,
+  }, jobs.map((job) => job.id));
+  return { jobs, launch };
+}
+
+/** Launch the image phase and return immediately with a bridge job receipt. */
+export async function launchImages(userCfg: NovitaRenderCfg): Promise<NovitaRenderLaunch> {
+  return (await startImageRender(userCfg)).launch;
+}
+
+/** Launch the video phase and return immediately with a bridge job receipt. */
+export async function launchVideo(userCfg: NovitaRenderCfg): Promise<NovitaRenderLaunch> {
+  return (await startVideoRender(userCfg)).launch;
 }
 
 /**
@@ -236,37 +676,23 @@ async function bridgeRenderAndPoll(
  * then polls until all shards report done. Returns R2 stillKeys.
  */
 export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
-  const cfg: NovitaRenderCfg = { ...DEFAULTS, ...userCfg };
-  validate(cfg, "image");
-  await bootstrapSecrets(() => {}, { required: ["NOVITA_API_KEY"] });
   const t0 = Date.now();
+  const { jobs, launch } = await startImageRender(userCfg);
+  const st = await waitForBridgeRender(launch);
 
-  const jobs = cfg.shots
-    .filter((s) => s.prompt && s.prompt.trim())
-    .map((s) => ({
-      id: s.id,
-      prompt: shotPrompt(cfg, s),
-      negative: shotNegative(cfg, s),
-      width: cfg.width ?? DEFAULTS.width,
-      height: cfg.height ?? DEFAULTS.height,
-      steps: cfg.steps ?? DEFAULTS.steps,
-      cfg: cfg.cfg ?? DEFAULTS.cfg,
-      seed: s.seed,
-    }));
-
-  const st = await bridgeRenderAndPoll("image", {
-    prefix: cfg.prefix,
-    jobs,
-    nshard: cfg.nshard ?? DEFAULTS.nshard,
-    jobsSel: cfg.jobs ?? DEFAULTS.jobs,
-    maxConcurrent: cfg.maxConcurrent ?? DEFAULTS.maxConcurrent,
-  });
+  const candidates = jobs.map((job) => ({
+    shotId: job.sourceShotId,
+    candidateIndex: job.candidateIndex,
+    outputId: job.id,
+    key: `${st.outputPrefix}/${job.id}.png`,
+  }));
 
   return {
     ok: true,
     phase: "image",
-    stillKeys: st.stillKeys ?? st.outputs ?? [],
-    outputs: (st.stillKeys ?? st.outputs ?? []).length,
+    stillKeys: candidates.map((candidate) => candidate.key),
+    candidates,
+    outputs: candidates.length,
     durationSec: Math.round((Date.now() - t0) / 1000),
     raw: st,
   };
@@ -279,40 +705,23 @@ export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRend
  * `timeline_assemble` (and any other downstream block) consumes it unmodified.
  */
 export async function renderVideo(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
-  const cfg: NovitaRenderCfg = { ...DEFAULTS, ...userCfg };
-  validate(cfg, "video");
-  await bootstrapSecrets(() => {}, { required: ["NOVITA_API_KEY"] });
   const t0 = Date.now();
-  const fps = cfg.fps ?? DEFAULTS.fps;
+  const { jobs, launch } = await startVideoRender(userCfg);
+  const st = await waitForBridgeRender(launch);
 
-  const jobs = cfg.shots
-    .filter((s) => s.prompt && s.prompt.trim() && s.stillKey)
-    .map((s) => ({
-      id: s.id,
-      stillKey: s.stillKey,
-      cameraMove: s.cameraMove,
-      shotScale: s.shotScale,
-      lens: s.lens,
-      motion: s.motion,
-      frames: secondsToFrames(s.seconds, fps),
-      fps,
-      negative: shotNegative(cfg, s),
-    }));
-
-  const st = await bridgeRenderAndPoll("video", {
-    prefix: cfg.prefix,
-    jobs,
-    nshard: cfg.nshard ?? DEFAULTS.nshard,
-    jobsSel: cfg.jobs ?? DEFAULTS.jobs,
-    maxConcurrent: cfg.maxConcurrent ?? DEFAULTS.maxConcurrent,
-  });
-
-  const footageKeys: string[] = st.footageKeys ?? st.clipKeys ?? st.outputs ?? [];
+  const candidates = jobs.map((job) => ({
+    shotId: job.id,
+    candidateIndex: 0,
+    outputId: job.id,
+    key: `${st.outputPrefix}/${job.id}.mp4`,
+  }));
+  const footageKeys = candidates.map((candidate) => candidate.key);
   return {
     ok: true,
     phase: "video",
     footageClips: st.footageClips ?? [],
     footageKeys,
+    candidates,
     outputs: footageKeys.length,
     durationSec: Math.round((Date.now() - t0) / 1000),
     raw: st,

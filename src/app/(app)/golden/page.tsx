@@ -1,5 +1,9 @@
 import type { CSSProperties } from "react";
 import { GOLDEN_MODULES, type GoldenModule } from "@/engine/golden";
+import {
+  catalogExecutionBinding,
+  GOLDEN_PROMOTION_PROOFS,
+} from "@/engine/goldenExecution";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
 import { GoldenImages } from "./GoldenImages";
 
@@ -18,39 +22,39 @@ const CINEMATIC_PROOFS: { src: string; alt: string }[] = [
 ];
 
 const DOCU_PROOFS: { file: string; device: string; meta: string }[] = [
-  { file: "fordlandia", device: "archival collage · narrated · 1080p", meta: "Fordlandia — Ford's failed Amazon rubber town" },
-  { file: "robbery", device: "robbery noir · depth-parallax · 1080p", meta: "The Vault — the Antwerp diamond heist" },
+  { file: "fordlandia", device: "reference proxy · archival collage · 720p", meta: "Fordlandia — Ford's failed Amazon rubber town" },
+  { file: "robbery", device: "reference proxy · robbery noir · 720p", meta: "The Vault — the Antwerp diamond heist" },
 ];
 
 const MOTION_PROOFS: { file: string; device: string; meta: string }[] = [
-  { file: "hero", device: "hero_title · Nano Banana + Remotion · 1080p", meta: "\"Never fully solved\" — camera flies through a depth-parallax hero render" },
-  { file: "stats", device: "data_stats · Remotion · 1080p", meta: "Ten layers · $100M · zero alarms — only the spoken numbers, verbatim" },
+  { file: "hero", device: "reference proxy · hero_title · 720p", meta: "\"Never fully solved\" — depth-parallax hero render" },
+  { file: "stats", device: "reference proxy · data_stats · 720p", meta: "Ten layers · $100M · zero alarms — catalog sample, not a promotion receipt" },
 ];
 
 const QUIZ_PROOFS: { file: string; device: string; meta: string }[] = [
-  { file: "trivia", device: "common-knowledge · +image reveal · 1080p", meta: "\"Capital of France?\" — depleting timer, then a vision-verified answer card" },
-  { file: "flag", device: "flag-guess · EASY→IMPOSSIBLE · 1080p", meta: "195 CC0 flags, deterministic reveal — a dataset can't hallucinate the answer" },
+  { file: "trivia", device: "reference proxy · common-knowledge · 720p", meta: "\"Capital of France?\" — timer and answer-card sample" },
+  { file: "flag", device: "reference proxy · flag-guess · 720p", meta: "Flag reveal sample; no executable promotion receipt" },
 ];
 
 const SPEECH_PROOFS: { file: string; device: string; meta: string }[] = [
-  { file: "steve-jobs", device: "motivation-speech · word-synced · 1080p", meta: "Steve Jobs · Stanford 2005 — vintage grade, karaoke captions" },
+  { file: "steve-jobs", device: "reference proxy · motivation-speech · 720p", meta: "Steve Jobs · Stanford 2005 — caption-sync sample" },
 ];
 
 interface TextProof { device: string; channel: string; line: string; note: string }
 
 const SCRIPT_PROOFS: TextProof[] = [
-  { device: "cold_open", channel: "The Drawn Past", line: "Frau Troffea steps into a Strasbourg street and begins to twitch. She will not stop for six days.", note: "7/7 claims verified" },
-  { device: "myth_snap", channel: "Empires at War", line: "The Roman Empire did not fall in a fiery battle. It bled out over two hundred years of self-inflicted wounds.", note: "facts search-verified" },
+  { device: "reference · cold_open", channel: "The Drawn Past", line: "Frau Troffea steps into a Strasbourg street and begins to twitch. She will not stop for six days.", note: "sample only · no proof receipt" },
+  { device: "reference · myth_snap", channel: "Empires at War", line: "The Roman Empire did not fall in a fiery battle. It bled out over two hundred years of self-inflicted wounds.", note: "sample only · no proof receipt" },
 ];
 
 const META_PROOFS: TextProof[] = [
-  { device: "direct", channel: "The Quiet Stoic", line: "Anger is the ultimate form of self-destruction.", note: "click 9 · direct 9" },
-  { device: "contrarian", channel: "Empires at War", line: "Barbarian Hordes Did Not Destroy the Roman Empire", note: "judged vs 10 real titles" },
+  { device: "reference · direct", channel: "The Quiet Stoic", line: "Anger is the ultimate form of self-destruction.", note: "sample only · no proof receipt" },
+  { device: "reference · contrarian", channel: "Empires at War", line: "Barbarian Hordes Did Not Destroy the Roman Empire", note: "sample only · no proof receipt" },
 ];
 
 const TOPIC_PROOFS: TextProof[] = [
-  { device: "hero · search", channel: "Antiquity Files", line: "Eric Cline's perfect storm that ended the Bronze Age", note: "demand 9 · verbatim query" },
-  { device: "hub · identity", channel: "The Quiet Stoa", line: "Detaching from the opinions of others", note: "fresh 9 · zero repeats" },
+  { device: "reference · hero", channel: "Antiquity Files", line: "Eric Cline's perfect storm that ended the Bronze Age", note: "sample only · no proof receipt" },
+  { device: "reference · hub", channel: "The Quiet Stoa", line: "Detaching from the opinions of others", note: "sample only · no proof receipt" },
 ];
 
 const ASSEMBLY_PROOFS: TextProof[] = [
@@ -69,8 +73,8 @@ const VOICE_PROOFS: { file: string; device: string; meta: string }[] = [
 ];
 
 const LORESHORT_PROOFS: { file: string; device: string; meta: string }[] = [
-  { file: "lotr", device: "watercolour+pencil · Seedance → 4K · narrated", meta: "The Rings of Power — first-person loremaster, depth-led 3D camera" },
-  { file: "smith4k", device: "premium lane · 480p → Real-ESRGAN 4K", meta: "One beat at true 4K — the smith forges the ring" },
+  { file: "lotr", device: "reference proxy · watercolour+pencil · 720p", meta: "The Rings of Power — first-person loremaster sample" },
+  { file: "smith4k", device: "reference proxy · premium-lane source · 720p", meta: "The smith forges the ring — proxy does not prove a 4K master" },
 ];
 
 const NOVITA_PROOFS: { file: string; device: string; meta: string }[] = [
@@ -78,7 +82,7 @@ const NOVITA_PROOFS: { file: string; device: string; meta: string }[] = [
 ];
 
 const LOFI_PROOFS: { file: string; kind: "video" | "image"; device: string; meta: string }[] = [
-  { file: "meadow", kind: "video", device: "ghibli meadow · 2×15s seamless · 1080p", meta: "Hillside meadow — everything moves on a locked camera, the loop seam invisible" },
+  { file: "meadow", kind: "video", device: "reference proxy · ghibli meadow · 720p/24s", meta: "Hillside meadow sample — proxy does not prove the declared 30s seamless-loop gate" },
   { file: "beachcafe", kind: "image", device: "scene · beach cafe", meta: "Sunny terrace over a turquoise bay — host + cat, parasol, sailboats" },
 ];
 
@@ -91,7 +95,7 @@ const PLANNER_PROOFS: TextProof[] = [
 
 const SHORTS_PROOFS: TextProof[] = [
   { device: "pipeline · EXISTS", channel: "template D · 9:16", line: "<50s script → hook → originality+compliance → 9:16 footage → ~4s cuts + karaoke captions", note: "end-to-end, runs today" },
-  { device: "needs · for golden", channel: "~70% there", line: "A validated proof render + verified subject-track reframe + the longform→Short repurposer turned ON", note: "then it certifies" },
+  { device: "promotion gaps", channel: "reference only", line: "Needs a validated render, verified subject-track reframe, and the longform→Short repurposer enabled", note: "then it can request a promotion receipt" },
 ];
 
 /* ============================ categories ============================= */
@@ -125,25 +129,29 @@ function take2<T>(xs: T[]): T[] { return xs.slice(0, 2); }
  * best examples. The engine and this page share one source of truth.
  */
 export default function GoldenPipelinePage() {
-  const goldenCount = GOLDEN_MODULES.filter((m) => m.status === "golden").length;
+  const referenceCount = GOLDEN_MODULES.filter((m) => m.status === "reference").length;
+  const executableCount = GOLDEN_MODULES.filter(
+    (m) => catalogExecutionBinding(m.key).kind === "pipeline-module",
+  ).length;
+  const receiptCount = Object.keys(GOLDEN_PROMOTION_PROOFS).length;
   return (
     <>
       <PageHeader
-        title="Golden Pipeline"
-        subtitle={`The template every channel inherits — ${goldenCount} of ${GOLDEN_MODULES.length} modules certified golden. Refine one, lift every channel.`}
+        title="Golden Module Catalog"
+        subtitle={`${referenceCount} reference entries · ${executableCount} executable bindings · ${receiptCount} production-promotion receipts. Reference media is not certification.`}
       />
       {CATEGORY_ORDER.map((cat) => {
         const mods = GOLDEN_MODULES
           .filter((m) => (CATEGORY[m.key] ?? "Post-production") === cat)
-          .sort((a, b) => (a.status === b.status ? 0 : a.status === "golden" ? -1 : 1));
+          .sort((a, b) => (a.status === b.status ? 0 : a.status === "reference" ? -1 : 1));
         if (!mods.length) return null;
-        const gold = mods.filter((m) => m.status === "golden").length;
+        const references = mods.filter((m) => m.status === "reference").length;
         return (
           <section key={cat} style={{ marginTop: "1.4rem" }}>
             <SectionTitle>
               {cat}{" "}
               <span style={{ color: "var(--color-faint)", fontWeight: 400 }}>
-                · {gold}/{mods.length} golden · {CATEGORY_BLURB[cat]}
+                · {references}/{mods.length} reference samples · {CATEGORY_BLURB[cat]}
               </span>
             </SectionTitle>
             <div style={GRID}>
@@ -166,21 +174,29 @@ const GRID: CSSProperties = {
 /* ----------------------------- module card ----------------------------- */
 
 function ModuleCard({ module: m }: { module: GoldenModule }) {
-  const isGolden = m.status === "golden";
+  const isReference = m.status === "reference";
+  const execution = catalogExecutionBinding(m.key);
   return (
-    <article className={`glass lift${isGolden ? " golden-glow" : ""}`} style={{ padding: "0.8rem 0.9rem", display: "flex", flexDirection: "column" }}>
+    <article className={`glass lift${isReference ? " golden-glow" : ""}`} style={{ padding: "0.8rem 0.9rem", display: "flex", flexDirection: "column" }}>
       <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.4rem", marginBottom: "0.35rem" }}>
         <span style={{ fontFamily: "var(--font-mono)", fontSize: "0.56rem", letterSpacing: "0.1em", textTransform: "uppercase", color: "var(--color-faint)" }}>{m.stage}</span>
-        {isGolden ? <span className="golden-chip">★ GOLDEN</span> : <span className="status-chip">ACTIVE</span>}
+        {isReference ? <span className="golden-chip">REFERENCE PROOF</span> : <span className="status-chip">ACTIVE</span>}
       </div>
 
       <h3 style={{ margin: 0, fontSize: "0.96rem", fontWeight: 600, letterSpacing: "-0.015em", lineHeight: 1.2 }}>{m.title}</h3>
+      <div style={{ marginTop: "0.25rem", fontFamily: "var(--font-mono)", fontSize: "0.56rem", color: execution.kind === "catalog-only" ? "var(--color-warning)" : "var(--color-secondary)" }}>
+        {execution.kind === "pipeline-module"
+          ? `EXECUTABLE BINDING · ${execution.executableIds.join(" · ")} · NOT PROMOTED`
+          : execution.kind === "external-task"
+            ? `EXTERNAL TASK · ${execution.executableIds.join(" · ")} · NOT PROMOTED`
+            : "CATALOG ONLY · NOT COMPILER-EXECUTABLE · NOT PROMOTED"}
+      </div>
       <p style={{ margin: "0.3rem 0 0.5rem", fontSize: "0.78rem", lineHeight: 1.4, color: "var(--color-secondary)" }}>{blurb(m.how)}</p>
 
       <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: "0.22rem" }}>
         {m.gates.slice(0, 3).map((g) => (
           <li key={g} style={{ display: "flex", gap: "0.4rem", alignItems: "baseline", fontSize: "0.7rem", lineHeight: 1.3, color: "var(--color-muted)" }}>
-            <span style={{ color: isGolden ? "var(--color-gold)" : "var(--color-secondary)", fontSize: "0.62rem", flex: "0 0 auto" }}>▪</span>
+            <span style={{ color: isReference ? "var(--color-gold)" : "var(--color-secondary)", fontSize: "0.62rem", flex: "0 0 auto" }}>▪</span>
             <span>{g}</span>
           </li>
         ))}
@@ -220,7 +236,7 @@ function videoStrip(base: string, items: { file: string; device: string; meta: s
       {take2(items).map((p) => (
         <div key={p.file} style={CARD}>
           <span style={DEVICE}>{p.device}</span>
-          {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+          { }
           <video controls preload="none" poster={`/golden/${base}/${p.file}.jpg`} src={`/golden/${base}/${p.file}.mp4`} style={MEDIA} />
           <span style={METAT}>{p.meta}</span>
         </div>
@@ -251,7 +267,7 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
             <div key={p.file} style={CARD}>
               <span style={DEVICE}>{p.device}</span>
               {p.kind === "video" ? (
-                // eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip
+
                 <video controls preload="none" poster={`/golden/lofi/${p.file}.jpg`} src={`/golden/lofi/${p.file}.mp4`} style={MEDIA} />
               ) : (
                 // eslint-disable-next-line @next/next/no-img-element -- static proof still
@@ -266,8 +282,8 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
       return (
         <div style={STRIP}>
           <div style={{ ...CARD, gridColumn: "1 / -1" }}>
-            <span style={DEVICE}>drawn cinema · narration-synced · 2K · $0 render</span>
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+            <span style={DEVICE}>reference proxy · drawn cinema · 720p</span>
+            { }
             <video controls preload="none" poster="/golden/whiteboard/chiquita.jpg" src="/golden/whiteboard/chiquita.mp4" style={MEDIA} />
             <span style={METAT}>Chiquita and the Banana Republic — every beat drawn in time with the voice</span>
           </div>
@@ -277,8 +293,8 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
       return (
         <div style={STRIP}>
           <div style={{ ...CARD, gridColumn: "1 / -1" }}>
-            <span style={DEVICE}>3D drawn comic · real camera · multi-voice · $0 render</span>
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+            <span style={DEVICE}>reference proxy · 3D drawn comic · 1080p</span>
+            { }
             <video controls preload="none" poster="/golden/comic/comic3d.jpg" src="/golden/comic/comic3d.mp4" style={MEDIA} />
             <span style={METAT}>The Silent Night — the comic draws itself out in 3D, the page turns, every line voiced</span>
           </div>
@@ -294,7 +310,7 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
           {take2(VOICE_PROOFS).map((p) => (
             <div key={p.file} style={CARD}>
               <span style={DEVICE}>{p.device}</span>
-              {/* eslint-disable-next-line jsx-a11y/media-has-caption -- proof clip */}
+              { }
               <audio controls preload="none" src={`/golden/voice/${p.file}`} style={{ width: "100%", height: 30 }} />
               <span style={METAT}>{p.meta}</span>
             </div>

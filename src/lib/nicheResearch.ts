@@ -12,7 +12,7 @@
  * Graceful degradation: any missing key is logged and that stage is skipped.
  * Freshness guard: skips if data is < 7 days old unless `force`.
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import {

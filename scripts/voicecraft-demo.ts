@@ -15,7 +15,7 @@
  */
 import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { probe } from "@/lib/ffmpeg";
 import { synthNarration, stripAudioTags } from "@/lib/tts";

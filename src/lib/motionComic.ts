@@ -23,7 +23,7 @@
  *   6. RENDER     — scripts/mc_page_render.py draws the page panel-by-panel, hand
  *                   following the ink, bubbles on cue; ffmpeg muxes voice + music.
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, readdir, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -98,6 +98,145 @@ export interface MotionComicResult {
   /** Full spoken text (all lines, tags stripped, panel order) — downstream
    *  metadata/compliance blocks need a script-equivalent for the video. */
   narrationText: string;
+  /** Characters sent to ElevenLabs during this invocation (zero on cache hit). */
+  ttsCharactersGenerated: number;
+  /** Successfully created music jobs during this invocation (zero on cache hit). */
+  musicGenerations: number;
+  /** Vision-letterer requests made during this invocation (zero on cache hit). */
+  visionGraderCalls: number;
+}
+
+export const MOTION_COMIC_MIN_PANELS = 4;
+export const MOTION_COMIC_MAX_PANELS = 12;
+export const MOTION_COMIC_MAX_CHARACTERS = 4;
+export const MOTION_COMIC_MAX_IMAGE_CALLS_PER_PANEL = 2;
+export const MOTION_COMIC_MAX_IMAGE_CALLS_PER_CHARACTER = 2;
+export const MOTION_COMIC_MAX_LINES_PER_PANEL = 3;
+export const MOTION_COMIC_MAX_LINE_CHARS = 320;
+export const MOTION_COMIC_MAX_WORD_CHARS = 48;
+export const MOTION_COMIC_MIN_DIALOGUE_CHARS_PER_PANEL = 160;
+/** 2.6 spoken words/sec × roughly 6 characters including spaces. */
+export const MOTION_COMIC_DIALOGUE_CHARS_PER_SECOND = 16;
+export const MOTION_COMIC_MAX_TTS_PROVIDER_RESPONSES_PER_LINE = 3;
+export const MOTION_COMIC_MAX_VISION_CALLS_PER_PANEL = 2;
+export const MOTION_COMIC_MAX_MUSIC_GENERATIONS = 1;
+
+export function motionComicPanelCount(value: unknown): number {
+  const parsed = Number(value ?? 8);
+  return Number.isFinite(parsed)
+    ? Math.max(MOTION_COMIC_MIN_PANELS, Math.min(MOTION_COMIC_MAX_PANELS, Math.floor(parsed)))
+    : 8;
+}
+
+export function motionComicImageCallCeiling(panelCount: unknown, characterCount: unknown = 4): number {
+  const parsedCharacters = Number(characterCount);
+  const characters = Number.isFinite(parsedCharacters)
+    ? Math.max(0, Math.min(MOTION_COMIC_MAX_CHARACTERS, Math.floor(parsedCharacters)))
+    : MOTION_COMIC_MAX_CHARACTERS;
+  return (
+    motionComicPanelCount(panelCount) * MOTION_COMIC_MAX_IMAGE_CALLS_PER_PANEL +
+    characters * MOTION_COMIC_MAX_IMAGE_CALLS_PER_CHARACTER
+  );
+}
+
+export function motionComicTtsBillableCharacterCeiling(
+  panelCount: unknown,
+  targetSeconds: unknown = undefined,
+): number {
+  return (
+    motionComicDialogueCharacterCeiling(panelCount, targetSeconds)
+  );
+}
+
+export function motionComicVisionCallCeiling(panelCount: unknown): number {
+  return motionComicPanelCount(panelCount) * MOTION_COMIC_MAX_VISION_CALLS_PER_PANEL;
+}
+
+export function motionComicTtsProviderCallCeiling(panelCount: unknown): number {
+  return (
+    motionComicPanelCount(panelCount) *
+    MOTION_COMIC_MAX_LINES_PER_PANEL *
+    MOTION_COMIC_MAX_TTS_PROVIDER_RESPONSES_PER_LINE
+  );
+}
+
+export function boundMotionComicLine(text: unknown): string {
+  const value = String(text ?? "").trim();
+  return clipMotionComicWords(value, MOTION_COMIC_MAX_LINE_CHARS);
+}
+
+function clipMotionComicWords(text: string, maxChars: number): string {
+  const words = text.trim().split(/\s+/).filter(Boolean);
+  const oversized = words.find((word) => word.length > MOTION_COMIC_MAX_WORD_CHARS);
+  if (oversized) {
+    throw new Error(
+      `motionComic: dialogue contains an invalid ${oversized.length}-character token (max ${MOTION_COMIC_MAX_WORD_CHARS})`,
+    );
+  }
+  const kept: string[] = [];
+  let length = 0;
+  for (const word of words) {
+    const next = length + (kept.length ? 1 : 0) + word.length;
+    if (next > maxChars) break;
+    kept.push(word);
+    length = next;
+  }
+  if (!kept.length && words.length) {
+    throw new Error(`motionComic: dialogue budget ${maxChars} cannot preserve a complete word`);
+  }
+  return kept.join(" ");
+}
+
+export function motionComicDialogueCharacterCeiling(
+  panelCount: unknown,
+  targetSeconds: unknown = undefined,
+): number {
+  const panels = motionComicPanelCount(panelCount);
+  const seconds = Number(targetSeconds);
+  const requested = Number.isFinite(seconds) && seconds > 0
+    ? Math.ceil(seconds * MOTION_COMIC_DIALOGUE_CHARS_PER_SECOND)
+    : panels * 22 * MOTION_COMIC_DIALOGUE_CHARS_PER_SECOND;
+  return Math.max(
+    panels * MOTION_COMIC_MIN_DIALOGUE_CHARS_PER_PANEL,
+    Math.min(panels * MOTION_COMIC_MAX_LINES_PER_PANEL * MOTION_COMIC_MAX_LINE_CHARS, requested),
+  );
+}
+
+export function boundMotionComicDialogueLines(
+  linesByPanel: readonly (readonly string[])[],
+  targetSeconds: unknown,
+): string[][] {
+  if (!linesByPanel.length) return [];
+  const totalBudget = motionComicDialogueCharacterCeiling(linesByPanel.length, targetSeconds);
+  const baseBudget = Math.floor(totalBudget / linesByPanel.length);
+  const remainder = totalBudget % linesByPanel.length;
+
+  return linesByPanel.map((panelLines, panelIndex) => {
+    const panelBudget = baseBudget + (panelIndex < remainder ? 1 : 0);
+    let remaining = panelBudget;
+    return panelLines.map((line, lineIndex) => {
+      const linesLeft = panelLines.length - lineIndex - 1;
+      const reserved = linesLeft * MOTION_COMIC_MAX_WORD_CHARS;
+      const allowance = Math.max(MOTION_COMIC_MAX_WORD_CHARS, remaining - reserved);
+      const text = clipMotionComicWords(line, allowance);
+      remaining -= text.length;
+      return text;
+    });
+  });
+}
+
+function boundMotionComicDialogue(panels: PlanPanel[], targetSeconds: unknown): PlanPanel[] {
+  const bounded = boundMotionComicDialogueLines(
+    panels.map((panel) => panel.lines.map((line) => line.text)),
+    targetSeconds,
+  );
+  return panels.map((panel, panelIndex) => ({
+    ...panel,
+    lines: panel.lines.map((line, lineIndex) => ({
+      ...line,
+      text: bounded[panelIndex][lineIndex],
+    })),
+  }));
 }
 
 /* ------------------------------ helpers -------------------------------- */
@@ -266,7 +405,12 @@ async function combineRefs(
 }
 
 /** ElevenLabs v3 Text-to-Dialogue — one or more (text, voice) lines → one mp3. */
-async function elevenDialogue(inputs: { text: string; voice_id: string }[]): Promise<Buffer> {
+class TerminalDialogueResponseError extends Error {}
+
+export async function elevenDialogue(
+  inputs: { text: string; voice_id: string }[],
+  onBillableCharacters?: (characters: number) => void,
+): Promise<Buffer> {
   const key = process.env.ELEVENLABS_API_KEY;
   let lastErr = "";
   for (let attempt = 0; attempt < 3; attempt++) {
@@ -276,9 +420,19 @@ async function elevenDialogue(inputs: { text: string; voice_id: string }[]): Pro
         body: JSON.stringify({ model_id: "eleven_v3", inputs }),
         signal: AbortSignal.timeout(120_000),
       });
-      if (res.ok) { const b = Buffer.from(await res.arrayBuffer()); if (b.length > 800) return b; lastErr = "tiny audio"; }
+      if (res.ok) {
+        onBillableCharacters?.(inputs.reduce((sum, input) => sum + input.text.length, 0));
+        const b = Buffer.from(await res.arrayBuffer());
+        if (b.length > 800) return b;
+        throw new TerminalDialogueResponseError(
+          "ElevenLabs dialogue returned tiny audio after a successful response",
+        );
+      }
       else { lastErr = `HTTP ${res.status}: ${(await res.text().catch(() => "")).slice(0, 160)}`; if (res.status < 500 && res.status !== 429) break; }
-    } catch (e) { lastErr = e instanceof Error ? e.message : String(e); }
+    } catch (e) {
+      if (e instanceof TerminalDialogueResponseError) throw e;
+      lastErr = e instanceof Error ? e.message : String(e);
+    }
     await new Promise((r) => setTimeout(r, 2000 * (attempt + 1)));
   }
   throw new Error(`elevenDialogue failed: ${lastErr}`);
@@ -326,21 +480,31 @@ function castVoice(id: string | undefined, fallbackGender: string): string {
   return ROSTER.find((r) => r.g === fallbackGender)?.id ?? DEFAULT_NARRATOR;
 }
 
-function normalizePlan(raw: Plan, log: Logger): Plan {
+function normalizePlan(raw: Plan, log: Logger, maxPanels: number, targetSeconds: unknown): Plan {
   const narratorVoiceId = castVoice(raw.narratorVoiceId, "male");
-  const characters = (raw.characters ?? []).slice(0, 4).map((c, i) => ({
+  const characters = (raw.characters ?? []).slice(0, MOTION_COMIC_MAX_CHARACTERS).map((c, i) => ({
     id: c.id || `char${i}`, name: c.name || `Character ${i + 1}`, look: c.look || "a person",
     voiceId: castVoice(c.voiceId, i % 2 ? "female" : "male"),
   }));
   const ids = new Set(characters.map((c) => c.id));
-  const panels = (raw.panels ?? []).map((p) => ({
+  const panels = (raw.panels ?? []).slice(0, maxPanels).map((p) => ({
     scene: p.scene || "a dramatic scene",
     characters: (p.characters ?? []).filter((id) => ids.has(id)),
     shot: ["wide", "medium", "close"].includes(p.shot) ? p.shot : "medium",
-    lines: (p.lines ?? []).filter((l) => l.text?.trim()).slice(0, 3),
+    lines: (p.lines ?? [])
+      .filter((l) => l.text?.trim())
+      .slice(0, MOTION_COMIC_MAX_LINES_PER_PANEL)
+      .map((line) => ({ ...line, text: boundMotionComicLine(line.text) })),
   })).filter((p) => p.lines.length);
-  log(`plan: "${raw.title}" — ${characters.length} chars, ${panels.length} panels`);
-  return { title: raw.title || "Untitled", logline: raw.logline || "", narratorVoiceId, characters, panels };
+  const boundedPanels = boundMotionComicDialogue(panels, targetSeconds);
+  log(`plan: "${raw.title}" — ${characters.length} chars, ${boundedPanels.length} panels`);
+  return {
+    title: raw.title || "Untitled",
+    logline: raw.logline || "",
+    narratorVoiceId,
+    characters,
+    panels: boundedPanels,
+  };
 }
 
 /* -------------------------------- main --------------------------------- */
@@ -350,11 +514,12 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
   const brief = args.brief;
   const W = brief.width ?? 1920, H = brief.height ?? Math.round((brief.width ?? 1920) * 9 / 16);
   const style = brief.style ?? DEFAULT_STYLE;
+  const nPanels = motionComicPanelCount(brief.panels);
   // $0-spend gate: the page renderer is the LAST step — verify python3 + the
   // baked scripts + pip deps BEFORE the storyboard/art/voice/music spend so a
   // broken worker fails immediately instead of after the whole art budget.
   await preflightPythonRenderer({
-    scripts: [join("scripts", "mc_page_render.py"), join("scripts", "mc_textplace.py")],
+    scripts: [join("scripts", "mc_page_render.py"), join("scripts", "mc_textplace.py"), join("scripts", "mc_font.py")],
     packages: ["numpy", "pillow", "scikit-image", "scipy"],
     marker: ".ysa_mc_pydeps_ready",
     log,
@@ -372,11 +537,26 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
 
   // 1. STORYBOARD (cached)
   let plan: Plan;
-  if (existsSync(rd("plan.json"))) { plan = JSON.parse(await readFile(rd("plan.json"), "utf8")); log("plan: cached"); }
+  if (existsSync(rd("plan.json"))) {
+    const cached = JSON.parse(await readFile(rd("plan.json"), "utf8")) as Plan;
+    plan = normalizePlan(cached, log, nPanels, brief.targetSeconds);
+    if (JSON.stringify(plan) !== JSON.stringify(cached)) {
+      await writeFile(rd("plan.json"), JSON.stringify(plan, null, 2));
+      // A bounded/normalized line must never reuse audio or letter-placement
+      // produced for the old text. Keep paid art/music caches; invalidate only
+      // text-dependent derived files.
+      const stale = (await readdir(args.runDir)).filter((name) =>
+        /^(?:line_\d+_\d+\.mp3|panel_\d+\.mp3|alist_\d+\.txt|vision_\d+\.json|narration\.mp3|narr_list\.txt)$/.test(name),
+      );
+      await Promise.all(stale.map((name) => unlink(rd(name)).catch(() => {})));
+      log(`plan: cached plan normalized/capped to ${nPanels}; invalidated ${stale.length} text-dependent cache file(s)`);
+    } else {
+      log("plan: cached");
+    }
+  }
   else {
-    const nPanels = Math.max(4, Math.min(12, brief.panels ?? 8));
     const raw = await geminiJsonPro<Plan>({ prompt: storyPrompt(brief, nPanels), maxTokens: 14000, temperature: 0.85, log });
-    plan = normalizePlan(raw, log);
+    plan = normalizePlan(raw, log, nPanels, brief.targetSeconds);
     await writeFile(rd("plan.json"), JSON.stringify(plan, null, 2));
   }
   const voiceOf = (s: string) => s === "narrator" ? plan.narratorVoiceId : (plan.characters.find((c) => c.id === s)?.voiceId ?? plan.narratorVoiceId);
@@ -415,27 +595,23 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
     const who = p.characters.map((id) => plan.characters.find((c) => c.id === id)?.name).filter(Boolean).join(", ");
     const keep = refs.length ? ` KEEP the character(s) (${who}) IDENTICAL to the reference model-sheet(s): same face, hair, wardrobe, marks.` : "";
     const prompt = `A single ${p.shot.toUpperCase()} COMIC PANEL, ${style} 4:3 cinematic composition.${keep} Compose with some clean, UNCLUTTERED negative space (open sky, a plain wall, or empty ground) beside or above the main figure to leave room for a speech caption, and keep all faces away from the panel's extreme corners.\nPANEL: ${p.scene}`;
-    // NEAR-BLACK GATE: a live "night" panel rendered as a solid black frame
-    // and the hand drew wedges of void. Retry well-lit; still black means
-    // failed art (the coverage floor decides the run's fate).
-    const litOrThrow = async (path: string) => {
-      if ((await meanLuma(path)) >= 14) return;
-      log(`panel ${i}: near-black art, one well-lit retry`);
-      await writeFile(path, await genImage(`${prompt}
-CRITICAL: the scene must be CLEARLY VISIBLE: moonlit/firelit if night, never a near-black frame.`, refs));
-      if ((await meanLuma(path)) < 14) {
-        const { unlink } = await import("node:fs/promises");
-        await unlink(path).catch(() => {});
-        throw new Error("panel art near-black after retry");
-      }
+    // Exactly two paid image calls maximum: one primary and one combined
+    // simplified/well-lit recovery. Nested luma + simplified retries used to
+    // multiply to four calls for a single panel.
+    const renderVisible = async (candidatePrompt: string) => {
+      await writeFile(file, await genImage(candidatePrompt, refs));
+      if ((await meanLuma(file)) >= 14) return;
+      const { unlink } = await import("node:fs/promises");
+      await unlink(file).catch(() => {});
+      throw new Error("panel art near-black");
     };
-    try { await writeFile(file, await genImage(prompt, refs)); await litOrThrow(file); log(`panel ${i} ✓ (${p.shot})`); }
+    try { await renderVisible(prompt); log(`panel ${i} ✓ (${p.shot})`); }
     catch (e) {
-      // ONE retry with a simplified prompt: a failed panel silently dropped
-      // its narration from the final cut — a story hole nobody caught.
-      log(`panel ${i} art failed (${e instanceof Error ? e.message : e}) — retrying simplified`);
-      const simple = `A single COMIC PANEL, ${style}${keep}\nPANEL: ${p.scene}`;
-      try { await writeFile(file, await genImage(simple, refs)); await litOrThrow(file); log(`panel ${i} ✓ (retry)`); }
+      log(`panel ${i} art failed (${e instanceof Error ? e.message : e}) — one simplified/well-lit retry`);
+      const simple =
+        `A single COMIC PANEL, ${style}${keep}\nPANEL: ${p.scene}\n` +
+        `CRITICAL: clearly visible moonlit/firelit scene if night; never near-black.`;
+      try { await renderVisible(simple); log(`panel ${i} ✓ (retry)`); }
       catch (e2) { log(`panel ${i} art FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); }
     }
   });
@@ -450,12 +626,14 @@ CRITICAL: the scene must be CLEARLY VISIBLE: moonlit/firelit if night, never a n
 
   // 3b. VISION letterer — clear-space anchor + mouth per bubble + keep-clear boxes (cached)
   const vision: PanelVision[] = [];
+  let visionGraderCalls = 0;
   await pool(plan.panels, 3, async (p, i) => {
     const hasBubble = p.lines.some((l) => l.speaker !== "narrator");
     const img = rd(`panel_${i}.png`);
     if (!hasBubble || !existsSync(img)) { vision[i] = { anchors: {}, keepClear: [] }; return; }
     const vf = rd(`vision_${i}.json`);
     if (existsSync(vf)) { vision[i] = JSON.parse(await readFile(vf, "utf8")); return; }
+    visionGraderCalls += 1;
     vision[i] = await locatePanelText(img, p.lines, plan.characters, log);
     // Empty anchors on a bubbled panel = the letterer pass failed → bubbles
     // would be placed BLIND (renderer default) over faces/props. Retry once;
@@ -463,6 +641,7 @@ CRITICAL: the scene must be CLEARLY VISIBLE: moonlit/firelit if night, never a n
     // quadrant centre — panels are composed with faces off the extreme corners
     // and negative space up top (see the panel prompt), so it rarely collides.
     if (!Object.keys(vision[i].anchors).length) {
+      visionGraderCalls += 1;
       vision[i] = await locatePanelText(img, p.lines, plan.characters, log);
     }
     if (!Object.keys(vision[i].anchors).length) {
@@ -477,6 +656,7 @@ CRITICAL: the scene must be CLEARLY VISIBLE: moonlit/firelit if night, never a n
 
   // 4. VOICES — per-line (exact timing) + per-panel padded audio + bubble cues
   const TAIL_GAP = 0.6;
+  let ttsCharactersGenerated = 0;
   type Bub = { text: string; at: number; mouth?: [number, number]; anchor?: [number, number] };
   const panelDur: number[] = [], panelBubbles: Bub[][] = [], panelAvoid: number[][][] = [], panelHasAudio: boolean[] = [];
   for (let i = 0; i < plan.panels.length; i++) {
@@ -485,15 +665,29 @@ CRITICAL: the scene must be CLEARLY VISIBLE: moonlit/firelit if night, never a n
     for (let k = 0; k < lines.length; k++) {
       const lf = rd(`line_${i}_${k}.mp3`);
       if (!existsSync(lf)) {
-        // elevenDialogue retries transport errors internally; this outer retry
-        // covers a whole exhausted attempt cycle (e.g. a burst of 429s) — a
-        // dropped line silently cut narration from the story.
+        // elevenDialogue owns the complete bounded provider retry cycle; cache
+        // writes are handled separately below so they never repurchase audio.
         const input = [{ text: lines[k].text.trim(), voice_id: voiceOf(lines[k].speaker) }];
-        try { await writeFile(lf, await elevenDialogue(input)); }
-        catch (e) {
-          log(`voice ${i}.${k} failed (${e instanceof Error ? e.message : e}) — retrying once`);
-          try { await writeFile(lf, await elevenDialogue(input)); }
-          catch (e2) { log(`voice ${i}.${k} FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); continue; }
+        let audio: Buffer;
+        try {
+          audio = await elevenDialogue(
+            input,
+            (characters) => { ttsCharactersGenerated += characters; },
+          );
+        } catch (e) {
+          // elevenDialogue already exhausted its three bounded transport
+          // attempts. Never start a second synthesis cycle here.
+          log(`voice ${i}.${k} FAILED after provider retries: ${e instanceof Error ? e.message : e}`);
+          continue;
+        }
+        try {
+          await writeFile(lf, audio);
+        } catch (e) {
+          // Retry only the local cache write with the exact same bytes. A disk
+          // hiccup must never repurchase speech.
+          log(`voice ${i}.${k} cache write failed (${e instanceof Error ? e.message : e}) — retrying local write`);
+          try { await writeFile(lf, audio); }
+          catch (e2) { log(`voice ${i}.${k} cache write FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); continue; }
         }
       }
       const d = await probeDur(lf);
@@ -523,12 +717,14 @@ CRITICAL: the scene must be CLEARLY VISIBLE: moonlit/firelit if night, never a n
 
   // 5. MUSIC (cached, optional)
   let musicPath = "";
+  let musicGenerations = 0;
   if (brief.music !== false) {
     const file = rd("music.mp3");
     if (existsSync(file)) musicPath = file;
     else {
       try {
         const m = await generateMusic({ provider: "suno", prompt: brief.musicPrompt ?? `Cinematic emotional underscore for "${brief.topic}": orchestral, restrained strings + piano, building, instrumental, no vocals`, title: plan.title, timeoutMs: 240_000 });
+        musicGenerations += 1;
         const url = m.url || "";
         if (url) { await run("ffmpeg", ["-y", "-i", url, "-c:a", "libmp3lame", file], log); musicPath = file; log("music ✓"); }
         else log("music: no url in result");
@@ -584,5 +780,15 @@ CRITICAL: the scene must be CLEARLY VISIBLE: moonlit/firelit if night, never a n
   // in panel order with the ElevenLabs emotion tags stripped.
   const narrationText = plan.panels.flatMap((p) => p.lines.map((l) => stripTags(l.text))).join(" ");
   log(`DONE: ${args.outPath} (${tlPanels.length} panels, ${(durationMs / 1000).toFixed(1)}s)`);
-  return { outPath: args.outPath, title: plan.title, panels: tlPanels.length, durationMs, runDir: args.runDir, narrationText };
+  return {
+    outPath: args.outPath,
+    title: plan.title,
+    panels: tlPanels.length,
+    durationMs,
+    runDir: args.runDir,
+    narrationText,
+    ttsCharactersGenerated,
+    musicGenerations,
+    visionGraderCalls,
+  };
 }

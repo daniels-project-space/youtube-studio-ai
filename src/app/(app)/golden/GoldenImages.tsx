@@ -18,8 +18,6 @@ export interface ProofImage { src: string; alt: string }
  */
 export function GoldenImages({ images }: { images: ProofImage[] }) {
   const [idx, setIdx] = useState<number | null>(null);
-  const [mounted, setMounted] = useState(false);
-  useEffect(() => setMounted(true), []);
 
   const close = useCallback(() => setIdx(null), []);
   const prev = useCallback(() => setIdx((i) => (i === null ? i : (i - 1 + images.length) % images.length)), [images.length]);
@@ -89,7 +87,7 @@ export function GoldenImages({ images }: { images: ProofImage[] }) {
           />
         ))}
       </div>
-      {mounted && overlay ? createPortal(overlay, document.body) : null}
+      {overlay ? createPortal(overlay, document.body) : null}
     </>
   );
 }

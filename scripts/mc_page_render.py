@@ -8,11 +8,12 @@
 # When a page fills, it TURNS to a fresh page and keeps drawing. Audio muxed later.
 import sys, os, json, math, subprocess
 import numpy as np
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
 from skimage.morphology import skeletonize
 from skimage.measure import label
 from scipy.spatial import cKDTree
 from mc_textplace import detail_map, best_box   # deterministic, pixel-grounded bubble placement
+from mc_font import load_font
 
 TL_PATH, RUN_DIR, OUT, HAND_PATH = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
 TL = json.load(open(TL_PATH))
@@ -24,7 +25,6 @@ panels = TL["panels"]
 N = len(panels)
 
 PAPER = (238, 230, 212); DESK = (38, 30, 26); INK = (26, 24, 22)
-FONT_PATH = (lambda: __import__("os").environ.get("MC_FONT") or next((f for f in ["src/assets/fonts/ComicNeue-Bold.otf", "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"] if __import__("os").path.exists(f)), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))()
 MOVE = 0.55; HOLD = 0.55; TAIL = 2.2; DRAW_FRAC = 0.62
 
 
@@ -132,7 +132,7 @@ def make_bubble(text, box_w, box_h):
     fit_w = int(box_w * 0.86); fit_h = int(box_h * 0.82)
     fs = max(19, int(box_h * 0.068))
     while True:
-        font = ImageFont.truetype(FONT_PATH, fs)
+        font = load_font(fs)
         maxw = min(int(box_w * 0.74), fit_w - int(fs * 1.1))
         lines = _wrap_lines(text, font, maxw, dd)
         lh = int(fs * 1.16); pad = int(fs * 0.55)

@@ -15,12 +15,13 @@
  * cuts the overlay/xfade OOMs (SYSTEM_FAILURE) the shared monolith was hitting.
  */
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { registerAllBlocks } from "@/engine/blocks";
 import { get } from "@/engine/registry";
 import { makeConvexSink } from "@/engine/convexSink";
 import { rehydrateOutputs } from "@/lib/rehydrate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
 import type { StageContext } from "@/engine/types";
 
 export interface RenderBlockInput {
@@ -89,7 +90,23 @@ export const renderBlockTask = task({
       log: (msg: string, extra?: Record<string, unknown>) => logger.info(`[render-block] ${msg}`, extra),
     };
 
-    const patch = await block.run(ctx);
-    return { patch };
+    try {
+      const patch = await block.run(ctx);
+      return { patch };
+    } catch (error) {
+      const taskError = taskErrorForRetryPolicy(error);
+      const { classification } = taskError;
+      logger.error(`[render-block] ${payload.blockId} failed`, {
+        error: classification.message,
+        errorKind: classification.kind,
+        retryReason: classification.reason,
+        ...(classification.status !== undefined ? { status: classification.status } : {}),
+        ...(classification.code ? { code: classification.code } : {}),
+      });
+      // Trigger task retries are reserved for crashes/OOM and failures with a
+      // concrete transient signal. Re-running malformed inputs, provider 4xx,
+      // or a deterministic FFmpeg command just burns another large-2x attempt.
+      throw taskError.error;
+    }
   },
 });

@@ -75,6 +75,7 @@ export default function NewChannelWizard() {
   const [days, setDays] = useState<number[]>([1]);
   const [budget, setBudget] = useState(5);
   const [publishMode, setPublishMode] = useState("draft");
+  const [approvedForPublish, setApprovedForPublish] = useState(false);
   const [autoYoutube, setAutoYoutube] = useState(true);
   const [toggles, setToggles] = useState<Toggles>(DEFAULT_TOGGLES);
   // Advanced per-module param editor: paramOverrides[blockId][key] = value.
@@ -188,7 +189,7 @@ export default function NewChannelWizard() {
           voiceFx: fam?.narrated && voiceFx !== "none" ? voiceFx : undefined,
           seriesTitle: seriesTitle.trim() || undefined,
           seriesCount: seriesTitle.trim() && seriesCount > 0 ? seriesCount : undefined,
-          cadence, days, budget, publishMode, toggles, autoYoutube,
+          cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube,
           paramOverrides: Object.keys(paramOverrides).length ? paramOverrides : undefined,
           moduleConfig: Object.keys(moduleConfig).length ? moduleConfig : undefined,
           exampleClipUrl: clipUrl.trim() || undefined,
@@ -346,7 +347,7 @@ export default function NewChannelWizard() {
                 </div>
               </Row>
             )}
-            <Row label="Auto-publish"><select value={publishMode} onChange={(e) => setPublishMode(e.target.value)} style={selStyle}><option value="draft">Private draft</option><option value="scheduled">Scheduled</option><option value="public">Public</option></select></Row>
+            <Row label="Auto-publish"><select value={publishMode} onChange={(e) => { setPublishMode(e.target.value); setApprovedForPublish(false); }} style={selStyle}><option value="draft">Private draft</option><option value="scheduled">Scheduled</option><option value="public">Public</option></select></Row>
             <Row label="Auto-create YouTube channel">
               <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
                 <input type="checkbox" checked={autoYoutube} onChange={(e) => setAutoYoutube(e.target.checked)} />
@@ -369,7 +370,7 @@ export default function NewChannelWizard() {
       {/* STEP 3 — review */}
       {step === 3 && fam && (
         <div style={{ display: "grid", gap: "1rem", maxWidth: 760 }}>
-          {!fam.available && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {fam.label}: visual engine "{fam.visualEngine}" not built yet — channel will be created as a DRAFT until it ships.</div>}
+          {!fam.available && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {fam.label}: visual engine “{fam.visualEngine}” not built yet — channel will be created as a DRAFT until it ships.</div>}
           <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.5rem", fontSize: "0.86rem" }}>
             <SummaryRow k="Niche" v={`${niche?.label}${subcategory ? " · " + subcategory : ""}`} />
             <SummaryRow k="Format" v={fam.label} />
@@ -379,6 +380,12 @@ export default function NewChannelWizard() {
             {seriesTitle.trim() && <SummaryRow k="Series" v={`${seriesTitle.trim()}${seriesCount > 0 ? ` · ${seriesCount} parts` : " · open-ended"}`} />}
             <SummaryRow k="Cadence" v={`${cadence}${(cadence === "weekly" || cadence === "biweekly") && days.length ? " · " + days.map((d) => DOW[d]).join(",") : ""} · ${publishMode}`} />
           </div>
+          {(publishMode !== "draft" || toggles.crosspost) && (
+            <label className="glass" style={{ padding: "0.9rem 1rem", display: "flex", alignItems: "flex-start", gap: "0.65rem", fontSize: "0.82rem", cursor: "pointer", border: "1px solid rgba(245,158,11,0.45)" }}>
+              <input type="checkbox" checked={approvedForPublish} onChange={(e) => setApprovedForPublish(e.target.checked)} />
+              <span>I explicitly approve automatic external publishing for this channel. This includes scheduled/public YouTube uploads and any enabled cross-posting.</span>
+            </label>
+          )}
           <div className="glass" style={{ padding: "1.1rem 1.2rem" }}>
             <div style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.6rem" }}>Designed pipeline ({preview.length} modules)</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
@@ -442,7 +449,7 @@ export default function NewChannelWizard() {
         <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} style={{ ...btnGhost, opacity: step === 0 ? 0.4 : 1 }}>Back</button>
         {step < 3
           ? <button onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext} style={{ ...btnPrimary, opacity: canNext ? 1 : 0.5 }}>Next</button>
-          : <button onClick={create} style={btnPrimary}>Create channel</button>}
+          : <button onClick={create} disabled={(publishMode !== "draft" || toggles.crosspost) && !approvedForPublish} style={{ ...btnPrimary, opacity: (publishMode !== "draft" || toggles.crosspost) && !approvedForPublish ? 0.5 : 1 }}>Create channel</button>}
       </div>
     </>
   );

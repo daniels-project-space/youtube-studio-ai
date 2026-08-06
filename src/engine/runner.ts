@@ -12,12 +12,21 @@
  */
 import {
   COST_PATCH_KEY,
+  type ArtifactRef,
   type Block,
   type RunStageSink,
   type StageContext,
   type StageStatus,
 } from "./types";
 import type { ResolvedPipeline } from "./validate";
+import { createHash } from "node:crypto";
+import { artifactContract, validateArtifact } from "./artifactSchemas";
+import {
+  classifyExecutionError,
+  executionRetryDelayMs,
+} from "./executionErrors";
+import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
+import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
 
 export interface RunPipelineOptions {
   ownerId: string;
@@ -82,11 +91,29 @@ function takeCost(patch: Record<string, unknown>): number {
   return typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : 0;
 }
 
-/** Transient (worth retrying) vs deterministic (gate/QA) failures. */
-function isTransient(msg: string): boolean {
-  return /(\b(429|408|425|500|502|503|504)\b|ECONNRESET|ETIMEDOUT|ENOTFOUND|EAI_AGAIN|socket hang up|timed?\s?out|fetch failed|network|rate.?limit|overloaded|temporarily|unavailable|too many requests)/i.test(
-    msg,
-  );
+/** Spend a provider adapter observed before throwing (for failed paid calls). */
+function observedCostFromError(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const raw = (error as { observedCostUsd?: unknown }).observedCostUsd;
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= 0
+    ? raw
+    : undefined;
+}
+
+function hasModelUsage(summary: ModelUsageSummary): boolean {
+  return summary.calls > 0 || summary.cacheHits > 0 || summary.unpricedCalls > 0;
+}
+
+/** Bound operator/module retry knobs so malformed values cannot loop forever. */
+function normalizeRetryCount(value: unknown, fallback: unknown): number {
+  const fallbackNumber = Number(fallback);
+  const safeFallback = Number.isFinite(fallbackNumber)
+    ? Math.max(0, Math.min(5, Math.floor(fallbackNumber)))
+    : 2;
+  const number = Number(value);
+  return Number.isFinite(number)
+    ? Math.max(0, Math.min(5, Math.floor(number)))
+    : safeFallback;
 }
 
 /** Run a block, retrying TRANSIENT errors with exponential backoff. */
@@ -101,24 +128,132 @@ async function runBlockWithRetry(
     try {
       return await block.run(ctx);
     } catch (err) {
-      const msg = err instanceof Error ? err.message : String(err);
+      const classification = classifyExecutionError(err);
       attempt++;
-      if (attempt > retries || !isTransient(msg)) throw err;
-      const backoff = Math.min(30_000, 1000 * 2 ** (attempt - 1));
+      if (attempt > retries || !classification.retryable) throw err;
+      const backoff = executionRetryDelayMs(classification, attempt);
       log(
-        `block ${block.id}: transient error (retry ${attempt}/${retries} in ${backoff}ms): ${msg.slice(0, 160)}`,
+        `block ${block.id}: transient error (retry ${attempt}/${retries} in ${backoff}ms): ${classification.message.slice(0, 160)}`,
+        {
+          errorKind: classification.kind,
+          retryReason: classification.reason,
+          ...(classification.status !== undefined ? { status: classification.status } : {}),
+          ...(classification.code ? { code: classification.code } : {}),
+        },
       );
       await new Promise((r) => setTimeout(r, backoff));
     }
   }
 }
 
-function assertProduced(block: Block, patch: Record<string, unknown>): void {
-  for (const key of block.produces) {
+function stableJson(value: unknown): string {
+  if (value === undefined) return "undefined";
+  if (value === null || typeof value !== "object") return JSON.stringify(value);
+  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
+  const object = value as Record<string, unknown>;
+  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`).join(",")}}`;
+}
+
+function hashPayload(value: unknown): string {
+  return createHash("sha256").update(stableJson(value)).digest("hex");
+}
+
+function artifactSummary(value: unknown): string {
+  if (typeof value === "string") return value.length <= 300 ? value : `${value.slice(0, 300)}…[${value.length} chars]`;
+  if (Array.isArray(value)) return `[array:${value.length}]`;
+  if (value && typeof value === "object") return `[object:${Object.keys(value as object).length} keys]`;
+  return String(value);
+}
+
+/** Build the only store view a module may observe. */
+export function declaredArtifactStore(
+  manifest: ModuleManifest,
+  store: Record<string, unknown>,
+  optionalFallbacks: Set<string>,
+  log: (message: string) => void = () => {},
+): Readonly<Record<string, unknown>> {
+  const required = new Set(Object.keys(manifest.consumes));
+  const optional = new Set(Object.keys(manifest.optionalConsumes));
+  const allowed = new Set([...required, ...optional]);
+  const assertAllowed = (property: PropertyKey): string | null => {
+    if (typeof property === "symbol") return null;
+    const key = String(property);
+    if (!allowed.has(key)) {
+      throw new Error(
+        `module "${manifest.id}" attempted undeclared artifact read "${key}"; add it to consumes/optionalConsumes`,
+      );
+    }
+    return key;
+  };
+  return new Proxy(store, {
+    get(target, property, receiver) {
+      const key = assertAllowed(property);
+      if (key === null) return Reflect.get(target, property, receiver);
+      if (optional.has(key) && !Reflect.has(target, key) && !optionalFallbacks.has(key)) {
+        optionalFallbacks.add(key);
+        log(`module ${manifest.id}: optional artifact "${key}" absent; deterministic fallback recorded`);
+      }
+      return Reflect.get(target, property, receiver);
+    },
+    has(target, property) {
+      const key = assertAllowed(property);
+      return key === null ? Reflect.has(target, property) : Reflect.has(target, key);
+    },
+    ownKeys(target) {
+      return [...allowed].filter((key) => Reflect.has(target, key));
+    },
+    getOwnPropertyDescriptor(target, property) {
+      const key = assertAllowed(property);
+      return key === null
+        ? Reflect.getOwnPropertyDescriptor(target, property)
+        : Reflect.getOwnPropertyDescriptor(target, key);
+    },
+    set() {
+      throw new Error(`module "${manifest.id}" attempted to mutate the read-only artifact store`);
+    },
+    deleteProperty() {
+      throw new Error(`module "${manifest.id}" attempted to delete from the read-only artifact store`);
+    },
+    defineProperty() {
+      throw new Error(`module "${manifest.id}" attempted to redefine the read-only artifact store`);
+    },
+  });
+}
+
+function assertProduced(manifest: ModuleManifest, patch: Record<string, unknown>): void {
+  const declared = new Set([
+    ...Object.keys(manifest.produces),
+    ...Object.keys(manifest.optionalProduces),
+  ]);
+  const extra = Object.keys(patch).filter((key) => key !== COST_PATCH_KEY && !declared.has(key));
+  if (extra.length) {
+    throw new Error(
+      `module "${manifest.id}" returned undeclared artifact(s): ${extra.join(", ")}`,
+    );
+  }
+  for (const [key, contract] of Object.entries(manifest.produces)) {
     const val = patch[key];
     if (val === undefined || val === null) {
       throw new Error(
-        `block "${block.id}" declared it produces "${key}" but returned ${val === undefined ? "undefined" : "null"} (no silent fallbacks)`,
+        `module "${manifest.id}" declared it produces "${key}" but returned ${val === undefined ? "undefined" : "null"} (no silent fallbacks)`,
+      );
+    }
+    try {
+      validateArtifact(contract, val);
+    } catch (error) {
+      throw new Error(
+        `module "${manifest.id}" returned invalid ${contract.type}@${contract.version} for "${key}": ${error instanceof Error ? error.message : error}`,
+      );
+    }
+  }
+  for (const [key, contract] of Object.entries(manifest.optionalProduces)) {
+    const value = patch[key];
+    if (value === undefined || value === null) continue;
+    try {
+      validateArtifact(contract, value);
+    } catch (error) {
+      throw new Error(
+        `module "${manifest.id}" returned invalid optional ${contract.type}@${contract.version} for "${key}": ${error instanceof Error ? error.message : error}`,
       );
     }
   }
@@ -146,6 +281,20 @@ export async function runPipeline(
 ): Promise<RunResult> {
   const log = opts.log ?? (() => {});
   const store: Record<string, unknown> = { ...(opts.seedStore ?? {}) };
+  const artifactRefs: Record<string, ArtifactRef> = {};
+  for (const [key, value] of Object.entries(store)) {
+    const contract = artifactContract(key);
+    const payloadHash = hashPayload(value);
+    artifactRefs[key] = {
+      artifactId: `${opts.runId}:seed:${key}:${payloadHash.slice(0, 16)}`,
+      key,
+      type: contract.type,
+      schemaVersion: contract.version,
+      producerModule: "$seed",
+      producerVersion: "1.0.0",
+      payloadHash,
+    };
+  }
   const stages: { block: string; status: StageStatus }[] = [];
   let spentUsd = 0;
 
@@ -168,9 +317,62 @@ export async function runPipeline(
       const n = Object.keys(completedMap).length;
       if (n > 0) log(`resume: ${n} block(s) previously completed — will restore + skip (prior spend $${spentUsd.toFixed(2)} carried into the budget)`);
     } catch (e) {
-      log(`resume: getCompleted failed (running fresh): ${e instanceof Error ? e.message : e}`);
+      // Fail closed. Treating a persistence outage as "no completed stages"
+      // silently re-runs every paid block and can double-charge a whole video.
+      log(`resume: getCompleted failed — refusing to run fresh: ${e instanceof Error ? e.message : e}`);
+      throw e;
     }
   }
+
+  const persistProducedArtifacts = async (
+    manifest: ModuleManifest,
+    patch: Record<string, unknown>,
+    inputRefs: Readonly<Record<string, ArtifactRef>>,
+    optionalFallbacks: Set<string>,
+  ): Promise<void> => {
+    const inputArtifactIds = [...new Set(Object.values(inputRefs).map((ref) => ref.artifactId))].sort();
+    for (const [key, contract] of [
+      ...Object.entries(manifest.produces),
+      ...Object.entries(manifest.optionalProduces),
+    ]) {
+      const value = patch[key];
+      if (value === undefined || value === null) continue;
+      const payloadHash = hashPayload(value);
+      const identityHash = hashPayload({
+        payloadHash,
+        inputArtifactIds,
+        moduleId: manifest.id,
+        moduleVersion: manifest.version,
+        artifactKey: key,
+      });
+      const artifact: ArtifactRef = {
+        artifactId: `${opts.runId}:${manifest.id}:${key}:${identityHash.slice(0, 16)}`,
+        key,
+        type: contract.type,
+        schemaVersion: contract.version,
+        producerModule: manifest.id,
+        producerVersion: manifest.version,
+        payloadHash,
+      };
+      if (opts.sink.upsertArtifact) {
+        const serialized = stableJson(value);
+        const canInline = contract.persist !== "summary" && serialized.length <= 100_000;
+        await opts.sink.upsertArtifact({
+          ownerId: opts.ownerId,
+          channelId: opts.channelId,
+          runId: opts.runId,
+          artifact,
+          inputArtifactIds,
+          optionalFallbacks: [...optionalFallbacks].sort(),
+          persistence: canInline ? contract.persist : "summary",
+          payload: canInline ? value : undefined,
+          summary: canInline ? undefined : artifactSummary(value),
+          createdAt: Date.now(),
+        });
+      }
+      artifactRefs[key] = artifact;
+    }
+  };
 
   /**
    * Execute one block end-to-end (resume-restore | run+retry), persist its
@@ -179,8 +381,45 @@ export async function runPipeline(
    */
   const executeBlock = async (
     block: Block,
+    blockIndex: number,
   ): Promise<{ status: "ok" | "failed"; cost: number; error?: string }> => {
-    const params = opts.paramsByBlock?.[block.id] ?? {};
+    const manifest = resolved.manifests[blockIndex];
+    if (!manifest) {
+      throw new Error(`resolved block "${block.id}" has no executable manifest`);
+    }
+    if (manifest.id !== block.id) {
+      throw new Error(
+        `resolved pipeline alignment mismatch at step ${blockIndex}: block=${block.id}, manifest=${manifest.id}`,
+      );
+    }
+    const params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
+    let configuredEnvelope: number | undefined;
+    if (manifest.costAndLatency.paid && manifest.costAndLatency.maxCostUsd !== undefined) {
+      configuredEnvelope = configuredMaxCostUsd(manifest, params, {
+        entries: resolved.entries,
+        index: blockIndex,
+      });
+      if (
+        opts.budgetUsd > 0 &&
+        spentUsd + configuredEnvelope > opts.budgetUsd + Number.EPSILON
+      ) {
+        const message =
+          `budget reservation rejected before paid block "${block.id}": ` +
+          `$${spentUsd.toFixed(2)} spent + $${configuredEnvelope.toFixed(2)} reserved > ` +
+          `$${opts.budgetUsd.toFixed(2)} budget`;
+        await opts.sink.upsert({
+          ownerId: opts.ownerId,
+          runId: opts.runId,
+          block: block.id,
+          status: "failed",
+          finishedAt: Date.now(),
+          error: message,
+        });
+        stages.push({ block: block.id, status: "failed" });
+        log(message);
+        return { status: "failed", cost: 0, error: message };
+      }
+    }
     // Debug snapshot only — SUMMARIZED. Persisting the full consumed values
     // (whole scripts, clip-path arrays, timing tables) shipped hundreds of KB
     // per stage transition to every open dashboard for zero consumer value.
@@ -201,7 +440,15 @@ export async function runPipeline(
         const { ok, outputs } = await opts.rehydrate(block.id, { ...cached });
         if (ok) {
           delete outputs[COST_PATCH_KEY];
-          assertProduced(block, outputs);
+          assertProduced(manifest, outputs);
+          const allowedInputs = new Set([
+            ...Object.keys(manifest.consumes),
+            ...Object.keys(manifest.optionalConsumes),
+          ]);
+          const inputRefs = Object.fromEntries(
+            Object.entries(artifactRefs).filter(([key]) => allowedInputs.has(key)),
+          );
+          await persistProducedArtifacts(manifest, outputs, inputRefs, new Set());
           Object.assign(store, outputs);
           // NOTE: cost intentionally OMITTED — the upsert mutation skips
           // undefined fields, so the block's ORIGINAL recorded spend survives
@@ -221,7 +468,11 @@ export async function runPipeline(
         }
         log(`block ${block.id}: cached outputs not rehydratable — re-running`);
       } catch (e) {
-        log(`block ${block.id}: rehydrate failed — re-running: ${e instanceof Error ? e.message : e}`);
+        // A thrown rehydrate error means storage/auth/transport itself failed,
+        // not that this artifact is known missing. Re-running a paid producer
+        // under an R2 outage converts an infrastructure incident into spend.
+        log(`block ${block.id}: rehydrate infrastructure failed — refusing paid re-run: ${e instanceof Error ? e.message : e}`);
+        throw e;
       }
     }
 
@@ -234,19 +485,45 @@ export async function runPipeline(
       inputs,
     });
 
+    const optionalFallbacks = new Set<string>();
+    const allowedInputs = new Set([
+      ...Object.keys(manifest.consumes),
+      ...Object.keys(manifest.optionalConsumes),
+    ]);
+    const inputRefs = Object.fromEntries(
+      Object.entries(artifactRefs).filter(([key]) => allowedInputs.has(key)),
+    );
     const ctx: StageContext = {
       ownerId: opts.ownerId,
       runId: opts.runId,
       channelId: opts.channelId,
       keyPrefix: opts.keyPrefix,
       params,
-      store,
+      store: declaredArtifactStore(manifest, store, optionalFallbacks, log),
+      artifactRefs: inputRefs,
       budgetUsd: opts.budgetUsd,
       log,
     };
 
+    let observedCost = 0;
+    let costAccounted = false;
+    let usageReported = false;
+    const usageScope = createModelUsageScope();
+    const reportUsage = (): ModelUsageSummary => {
+      const summary = usageScope.snapshot();
+      if (!usageReported && hasModelUsage(summary)) {
+        usageReported = true;
+        log(`block model usage: ${block.id}`, {
+          modelUsage: summary,
+          ...(summary.unpricedCalls > 0
+            ? { accountingWarning: `${summary.unpricedCalls} model call(s) have an unpriced component` }
+            : {}),
+        });
+      }
+      return summary;
+    };
     try {
-      const retries = Number(params["retries"] ?? opts.defaultRetries ?? 2);
+      const retries = normalizeRetryCount(params["retries"], opts.defaultRetries);
       let patch: Record<string, unknown>;
       if (opts.remoteBlocks?.has(block.id) && opts.runRemoteBlock) {
         // Dispatch to a child task (large-2x render). Orchestrator suspends here.
@@ -265,11 +542,33 @@ export async function runPipeline(
           if (!r.ok) log(`remote block ${block.id}: partial rehydrate (downstream-consumed outputs restored; a heal-only sibling may be absent)`);
         }
       } else {
-        patch = await runBlockWithRetry(block, ctx, retries, log);
+        // Keep one scope across the block's bounded retry loop. Provider
+        // wrappers can then reuse a valid response if a later operation fails,
+        // while every actual successful provider response is charged once.
+        patch = await usageScope.run(() => runBlockWithRetry(block, ctx, retries, log));
       }
-      const cost = takeCost(patch);
+      const hasExplicitCost = Object.prototype.hasOwnProperty.call(patch, COST_PATCH_KEY);
+      const explicitCost = takeCost(patch);
+      const modelUsage = reportUsage();
+      // Existing composite paid blocks already include their model/vision
+      // allowance in __costUsd. Treat that patch as authoritative to prevent
+      // double counting; text-only blocks without a patch receive exact
+      // provider-token cost from this scope.
+      const cost = hasExplicitCost ? explicitCost : explicitCost + modelUsage.costUsd;
+      observedCost = cost;
       spentUsd += cost;
-      assertProduced(block, patch);
+      costAccounted = true;
+      if (
+        configuredEnvelope !== undefined &&
+        cost > configuredEnvelope + Number.EPSILON
+      ) {
+        throw new Error(
+          `module "${block.id}" reported $${cost.toFixed(4)} spend above its ` +
+          `$${configuredEnvelope.toFixed(4)} configured envelope`,
+        );
+      }
+      assertProduced(manifest, patch);
+      await persistProducedArtifacts(manifest, patch, inputRefs, optionalFallbacks);
       Object.assign(store, patch);
 
       await opts.sink.upsert({
@@ -286,17 +585,28 @@ export async function runPipeline(
       return { status: "ok", cost };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
+      if (!costAccounted) {
+        const modelUsage = reportUsage();
+        const reportedFailureCost = observedCostFromError(err);
+        // observedCostUsd is an adapter's authoritative whole-attempt spend
+        // (for example TTS plus its audio judge). Otherwise preserve the exact
+        // known token cost of provider responses received before the failure.
+        observedCost = reportedFailureCost ?? modelUsage.costUsd;
+        spentUsd += observedCost;
+        costAccounted = true;
+      }
       await opts.sink.upsert({
         ownerId: opts.ownerId,
         runId: opts.runId,
         block: block.id,
         status: "failed",
         finishedAt: Date.now(),
+        ...(observedCost > 0 ? { cost: observedCost } : {}),
         error: message,
       });
       stages.push({ block: block.id, status: "failed" });
       log(`block failed: ${block.id}`, { error: message });
-      return { status: "failed", cost: 0, error: message };
+      return { status: "failed", cost: observedCost, error: message };
     }
   };
 
@@ -335,7 +645,7 @@ export async function runPipeline(
       }
       if (group.length > 1) {
         log(`parallel group: ${group.map((b) => b.id).join(" ∥ ")}`);
-        const results = await Promise.all(group.map((b) => executeBlock(b)));
+        const results = await Promise.all(group.map((b, offset) => executeBlock(b, i + offset)));
         for (let k = 0; k < group.length; k++) {
           if (results[k].status === "failed") {
             return fail(group[k].id, results[k].error ?? "block failed");
@@ -348,7 +658,7 @@ export async function runPipeline(
       }
     }
 
-    const res = await executeBlock(block);
+    const res = await executeBlock(block, i);
     if (res.status === "failed") return fail(block.id, res.error ?? "block failed");
     const ob = overBudget(block.id);
     if (ob) return ob;

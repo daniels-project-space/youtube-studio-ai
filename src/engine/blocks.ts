@@ -13,6 +13,7 @@ import { CREW_BLOCKS } from "@/trigger/blocks/crewBlocks";
 import { insertBlocks } from "@/trigger/blocks/insertBlocks";
 import { genFootageBlocks } from "@/trigger/blocks/genFootageBlocks";
 import { novitaRenderBlocks } from "@/trigger/blocks/novitaRenderBlocks";
+import { STORY_SPINE_BLOCKS } from "@/trigger/blocks/storySpineBlocks";
 import { whiteboardScribeBlocks } from "@/trigger/blocks/whiteboardScribeBlocks";
 import { motionComicBlocks } from "@/trigger/blocks/motionComicBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
@@ -37,6 +38,8 @@ export function registerAllBlocks(): void {
   // Film-crew brief blocks (creative-direction layer): director_brief, dp_brief,
   // editor_brief, composer_brief, critic_spec.
   for (const b of CREW_BLOCKS) register(b);
+  // Versioned TimedScript → beats → ShotPlan → DP spec → exact EDL spine.
+  for (const b of STORY_SPINE_BLOCKS) register(b);
   // Script-synced motion-graphics inserts (visual_inserts): Remotion data viz
   // planned from the numbers the narration actually speaks.
   for (const b of insertBlocks) register(b);

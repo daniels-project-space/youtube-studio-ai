@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
 
 export const createRun = mutation({
@@ -28,6 +28,13 @@ export const updateRun = mutation({
     error: v.optional(v.string()),
     videoAssetId: v.optional(v.id("assets")),
     youtubeVideoId: v.optional(v.string()),
+    pipelinePolicyId: v.optional(v.string()),
+    pipelinePolicyVersion: v.optional(v.string()),
+    pipelineFingerprint: v.optional(v.string()),
+    pipelineModules: v.optional(v.any()),
+    pipelineCapabilities: v.optional(v.array(v.string())),
+    reservedMaxCostUsd: v.optional(v.number()),
+    pipelineCompiledAt: v.optional(v.number()),
   },
   returns: v.null(),
   handler: async (ctx, args) => {

@@ -85,11 +85,13 @@ export default function SchedulePage() {
 
   // Month being viewed (offset from the current month).
   const [offset, setOffset] = useState(0);
-  const now = new Date();
+  const [todayMs] = useState(() => Date.now());
+  const now = new Date(todayMs);
   const view = new Date(now.getFullYear(), now.getMonth() + offset, 1);
 
   // Build the date → events map.
   const events = useMemo(() => {
+    const current = new Date(todayMs);
     const map = new Map<string, Ev[]>();
     const add = (d: Date, e: Ev) => {
       const k = dayKey(d);
@@ -102,7 +104,7 @@ export default function SchedulePage() {
       if (!byChannel.has(p.channelId)) byChannel.set(p.channelId, []);
       byChannel.get(p.channelId)!.push(p);
     }
-    const today = new Date(now.getFullYear(), now.getMonth(), now.getDate());
+    const today = new Date(current.getFullYear(), current.getMonth(), current.getDate());
     for (const items of byChannel.values()) {
       const sorted = [...items].sort((a, b) => a.order - b.order);
       const freq = sorted[0]?.frequency ?? sorted[0]?.cadence ?? "weekly";
@@ -119,7 +121,7 @@ export default function SchedulePage() {
       add(new Date(v.createdAt), { type: "published", title: v.title, channel: v.channelName, youtubeVideoId: v.youtubeVideoId });
     }
     return map;
-  }, [plan, videos, now]);
+  }, [plan, videos, todayMs]);
 
   // 6-week grid starting on the Sunday on/before the 1st.
   const gridStart = new Date(view);
@@ -128,16 +130,18 @@ export default function SchedulePage() {
 
   const loading = plan === undefined || videos === undefined;
   const upcoming = useMemo(() => {
+    const current = new Date(todayMs);
+    const today = new Date(current.getFullYear(), current.getMonth(), current.getDate());
     const list: { date: Date; ev: Ev }[] = [];
     for (const [k, evs] of events) {
       const [y, m, d] = k.split("-").map(Number);
       const date = new Date(y, m, d);
-      if (date >= new Date(now.getFullYear(), now.getMonth(), now.getDate())) {
+      if (date >= today) {
         for (const ev of evs) if (ev.type === "planned") list.push({ date, ev });
       }
     }
     return list.sort((a, b) => a.date.getTime() - b.date.getTime()).slice(0, 8);
-  }, [events, now]);
+  }, [events, todayMs]);
 
   return (
     <>
@@ -303,13 +307,25 @@ function ChipLink({ ev }: { ev: Ev }) {
 }
 
 function ChannelScheduleEditor({ channel }: { channel: ChannelRow }) {
-  const update = useMutation(api.channels.updateChannel);
   const freq = channel.schedule?.frequency ?? channel.identity?.cadence ?? "weekly";
   const days = channel.schedule?.days ?? [];
   const usesDays = freq === "weekly" || freq === "biweekly";
 
-  const save = (next: { frequency: string; days?: number[] }) =>
-    update({ channelId: channel._id as Id<"channels">, schedule: next });
+  const save = async (next: { frequency: string; days?: number[] }) => {
+    const response = await fetch("/api/channel-settings", {
+      method: "POST",
+      headers: { "content-type": "application/json" },
+      body: JSON.stringify({
+        action: "schedule",
+        channelId: channel._id,
+        schedule: next,
+      }),
+    });
+    if (!response.ok) {
+      const result = (await response.json().catch(() => ({}))) as { error?: string };
+      throw new Error(result.error ?? "schedule update failed");
+    }
+  };
 
   const setFreq = (f: string) => save({ frequency: f, days: f === "daily" || f === "monthly" ? undefined : days.length ? days : [1] });
   const toggleDay = (d: number) => {

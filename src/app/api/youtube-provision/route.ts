@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorizeStudioRoute } from "@/lib/operatorSession";
 
 /**
  * POST /api/youtube-provision  { channelId: string, name: string }
@@ -8,6 +9,8 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const authFailure = await authorizeStudioRoute(request);
+  if (authFailure) return authFailure;
   let body: { channelId?: string; name?: string };
   try {
     body = await request.json();

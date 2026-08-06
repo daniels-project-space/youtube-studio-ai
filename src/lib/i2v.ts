@@ -53,10 +53,29 @@ export interface I2VRequest extends FalI2VRequest {
   log?: (m: string) => void;
   /** Scratch id for temp files (defaults to a time-free generic). */
   runId?: string;
+  /** Opt-in: route to the gpuVideo module (LTX native audio) — "fal-ltx" | "salad-ltx". */
+  provider?: string;
 }
 
 export async function generateI2V(req: I2VRequest): Promise<FalI2VResult> {
   const log = req.log ?? (() => {});
+
+  // GPU-video route (LTX native audio) — opt-in via req.provider or I2V_PROVIDER=gpu.
+  // Default path (Higgsfield → fal Kling) is unchanged when not selected.
+  if (req.provider === "fal-ltx" || req.provider === "salad-ltx" || process.env.I2V_PROVIDER === "gpu") {
+    const { renderGpuVideo } = await import("@/lib/gpuVideo");
+    const r = await renderGpuVideo({
+      prompt: req.prompt,
+      imageUrl: req.imageUrl,
+      durationSec: req.durationSec,
+      aspectRatio: req.aspectRatio,
+      negativePrompt: req.negativePrompt,
+      provider: req.provider === "salad-ltx" ? "salad-ltx" : req.provider === "fal-ltx" ? "fal-ltx" : undefined,
+      log,
+    });
+    log(`i2v: gpuVideo[${r.provider}] ✓ (audio=${r.hasAudio})`);
+    return { url: r.url, jobId: r.jobId, model: r.model };
+  }
 
   // Capability gate: FLF2V (end-frame) loops stay on the proven fal path.
   const flf2v = Boolean(req.tailImageUrl);

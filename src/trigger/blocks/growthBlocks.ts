@@ -8,6 +8,8 @@
 import type { Block, StageContext } from "@/engine/types";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
 import { publicUrl } from "@/lib/storage";
+import { requireChannelPublishAction } from "@/lib/channelPublishPolicy";
+import type { Id } from "../../../convex/_generated/dataModel";
 
 function str(ctx: StageContext, key: string): string {
   const v = ctx.store[key];
@@ -26,6 +28,11 @@ export const crosspost: Block = {
       ctx.log("crosspost: no AYRSHARE_API_KEY — skipping (add vault 'ayrshare')");
       return { crosspostIds: [] };
     }
+    await requireChannelPublishAction({
+      ownerId: ctx.ownerId,
+      channelId: ctx.channelId as Id<"channels">,
+      action: "crosspost",
+    });
     const platforms =
       (ctx.params["platforms"] as string[] | undefined) ?? ["tiktok", "instagram"];
     const title = str(ctx, "title");

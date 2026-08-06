@@ -93,6 +93,8 @@ export default defineSchema({
       }),
     ),
     modelRouting: v.optional(v.any()),
+    // Only an approved recommendation may increment this version.
+    learningPolicyVersion: v.optional(v.number()),
     qaRubric: v.optional(v.any()),
     // Per-module operator config: { [blockId]: { preset?, ...knobValues } }. Set
     // from the onboarding "Pipeline style" step + the channel Settings "Pipeline
@@ -128,6 +130,17 @@ export default defineSchema({
       v.object({
         frequency: v.string(), // daily|weekly|biweekly|monthly
         days: v.optional(v.array(v.number())),
+        timezone: v.optional(v.string()), // IANA name, e.g. Europe/Berlin
+        localTime: v.optional(v.string()), // 24h HH:mm
+        enabled: v.optional(v.boolean()),
+        approvalMode: v.optional(
+          v.union(v.literal("manual"), v.literal("private_auto")),
+        ),
+        dailyQuota: v.optional(v.number()),
+        maxConcurrent: v.optional(v.number()),
+        retryMaxAttempts: v.optional(v.number()),
+        retryBaseMinutes: v.optional(v.number()),
+        madeForKids: v.optional(v.boolean()),
       }),
     ),
     // Multi-language group link. groupId = the base channel's _id; the base + its
@@ -298,6 +311,13 @@ export default defineSchema({
     error: v.optional(v.string()),
     videoAssetId: v.optional(v.id("assets")),
     youtubeVideoId: v.optional(v.string()),
+    pipelinePolicyId: v.optional(v.string()),
+    pipelinePolicyVersion: v.optional(v.string()),
+    pipelineFingerprint: v.optional(v.string()),
+    pipelineModules: v.optional(v.any()),
+    pipelineCapabilities: v.optional(v.array(v.string())),
+    reservedMaxCostUsd: v.optional(v.number()),
+    pipelineCompiledAt: v.optional(v.number()),
   })
     .index("by_owner", ["ownerId"])
     .index("by_channel", ["channelId"]),
@@ -317,6 +337,32 @@ export default defineSchema({
   })
     .index("by_run", ["runId"])
     .index("by_run_block", ["runId", "block"])
+    .index("by_owner", ["ownerId"]),
+
+  // Immutable, content-addressed module handoffs. Unlike the legacy ambient
+  // run-stage blob, every artifact records its schema/module version and exact
+  // upstream artifact ids so a resumed consumer can prove lineage.
+  runArtifacts: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    artifactId: v.string(),
+    key: v.string(),
+    type: v.string(),
+    schemaVersion: v.string(),
+    producerModule: v.string(),
+    producerVersion: v.string(),
+    payloadHash: v.string(),
+    inputArtifactIds: v.array(v.string()),
+    optionalFallbacks: v.array(v.string()),
+    persistence: v.union(v.literal("inline"), v.literal("reference"), v.literal("summary")),
+    payload: v.optional(v.any()),
+    summary: v.optional(v.string()),
+    createdAt: v.number(),
+  })
+    .index("by_artifact_id", ["artifactId"])
+    .index("by_run", ["runId"])
+    .index("by_run_key", ["runId", "key"])
     .index("by_owner", ["ownerId"]),
 
   // Per-run streamed console lines (ctx.log) — drives the live LogConsole.
@@ -363,6 +409,18 @@ export default defineSchema({
   videoAnalytics: defineTable({
     ownerId: v.string(),
     channelId: v.id("channels"),
+    connectorId: v.optional(v.id("youtubeAuth")),
+    connectorVersion: v.optional(v.number()),
+    ingestionId: v.optional(v.id("analyticsIngestions")),
+    source: v.optional(
+      v.union(v.literal("youtube_data_api"), v.literal("youtube_analytics_api")),
+    ),
+    metricDefinitionVersion: v.optional(v.string()),
+    windowStart: v.optional(v.string()),
+    windowEnd: v.optional(v.string()),
+    confidence: v.optional(
+      v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+    ),
     youtubeVideoId: v.string(),
     views: v.number(),
     likes: v.number(),
@@ -383,6 +441,14 @@ export default defineSchema({
   channelAnalytics: defineTable({
     ownerId: v.string(),
     channelId: v.id("channels"),
+    connectorId: v.optional(v.id("youtubeAuth")),
+    connectorVersion: v.optional(v.number()),
+    ingestionId: v.optional(v.id("analyticsIngestions")),
+    source: v.optional(v.literal("youtube_data_api")),
+    metricDefinitionVersion: v.optional(v.string()),
+    confidence: v.optional(
+      v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
+    ),
     date: v.string(), // YYYY-MM-DD (UTC)
     totalViews: v.number(),
     totalWatchHours: v.optional(v.number()),
@@ -415,11 +481,253 @@ export default defineSchema({
   youtubeAuth: defineTable({
     ownerId: v.string(),
     channelId: v.id("channels"),
-    refreshToken: v.string(),
+    // New grants are encrypted before they reach Convex. `refreshToken`
+    // remains optional only while existing rows are migrated.
+    refreshTokenCiphertext: v.optional(v.string()),
+    refreshToken: v.optional(v.string()),
     ytChannelId: v.optional(v.string()),
     ytTitle: v.optional(v.string()),
+    grantedScopes: v.optional(v.array(v.string())),
+    tokenVersion: v.optional(v.number()),
+    status: v.optional(
+      v.union(v.literal("active"), v.literal("revoked"), v.literal("error")),
+    ),
+    scopeHealth: v.optional(
+      v.union(v.literal("healthy"), v.literal("partial"), v.literal("unknown")),
+    ),
+    connectedAt: v.optional(v.number()),
+    validatedAt: v.optional(v.number()),
+    lastRefreshAt: v.optional(v.number()),
+    revokedAt: v.optional(v.number()),
+    lastError: v.optional(v.string()),
+    dataRetentionPolicy: v.optional(v.string()),
     updatedAt: v.number(),
   })
     .index("by_channel", ["channelId"])
     .index("by_owner", ["ownerId"]),
+
+  // Encrypted YouTube resumable-upload capabilities. A row is bound to one
+  // owner/channel/upload key so retries can query the remote byte range and
+  // continue after a Trigger worker restart without crossing account lines.
+  youtubeUploadSessions: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    uploadKey: v.string(),
+    sessionUrlCiphertext: v.string(),
+    fileSize: v.number(),
+    fileSha256: v.string(),
+    metadataSha256: v.string(),
+    uploadedBytes: v.number(),
+    chunkSize: v.number(),
+    status: v.union(
+      v.literal("initiated"),
+      v.literal("uploading"),
+      v.literal("completed"),
+      v.literal("expired"),
+      v.literal("failed"),
+    ),
+    videoId: v.optional(v.string()),
+    privacyStatus: v.optional(v.string()),
+    publishAt: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    expiresAt: v.number(),
+  })
+    .index("by_owner_upload_key", ["ownerId", "uploadKey"])
+    .index("by_channel", ["channelId"]),
+
+  // Internal-only, revocable channel publishing authority. Pipeline booleans
+  // are configuration hints; this action list + exact external-config digest is
+  // the runtime authorization source of truth.
+  channelPublishPolicies: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    allowedActions: v.array(
+      v.union(
+        v.literal("youtube_public"),
+        v.literal("youtube_scheduled"),
+        v.literal("youtube_short_public"),
+        v.literal("crosspost"),
+      ),
+    ),
+    pipelineFingerprint: v.string(),
+    status: v.union(v.literal("active"), v.literal("revoked")),
+    version: v.number(),
+    approvedBy: v.optional(v.string()),
+    approvalEvidence: v.optional(v.string()),
+    approvedAt: v.optional(v.number()),
+    revokedBy: v.optional(v.string()),
+    revocationEvidence: v.optional(v.string()),
+    revokedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_channel", ["channelId"])
+    .index("by_owner", ["ownerId"]),
+
+  // Durable, connector-bound publishing ledger. The idempotency key is exactly
+  // (connectorId, immutable video artifact id, intentVersion); claims are leased
+  // atomically so duplicate scheduler ticks cannot create duplicate uploads.
+  publishIntents: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    runId: v.optional(v.id("runs")),
+    videoArtifactId: v.string(),
+    videoArtifactKey: v.string(),
+    videoSha256: v.string(),
+    thumbnailArtifactKey: v.optional(v.string()),
+    thumbnailSha256: v.optional(v.string()),
+    intentVersion: v.number(),
+    idempotencyKey: v.string(),
+    metadataSha256: v.string(),
+    title: v.string(),
+    description: v.string(),
+    tags: v.array(v.string()),
+    categoryId: v.string(),
+    privacyStatus: v.union(
+      v.literal("private"),
+      v.literal("unlisted"),
+      v.literal("public"),
+    ),
+    publishAt: v.optional(v.number()),
+    containsSyntheticMedia: v.boolean(),
+    madeForKids: v.boolean(),
+    status: v.union(
+      v.literal("awaiting_approval"),
+      v.literal("approved"),
+      v.literal("scheduled"),
+      v.literal("dispatching"),
+      v.literal("retry_wait"),
+      v.literal("uploaded"),
+      v.literal("dead_letter"),
+      v.literal("cancelled"),
+      v.literal("blocked_connector"),
+    ),
+    approvedBy: v.optional(v.string()),
+    approvedAt: v.optional(v.number()),
+    approvalEvidence: v.optional(v.string()),
+    approvalKind: v.optional(
+      v.union(
+        v.literal("private_first"),
+        v.literal("channel_policy"),
+        v.literal("manual_intent"),
+      ),
+    ),
+    approvalPolicyVersion: v.optional(v.number()),
+    approvalPolicyFingerprint: v.optional(v.string()),
+    attempts: v.number(),
+    maxAttempts: v.number(),
+    nextAttemptAt: v.number(),
+    leaseOwner: v.optional(v.string()),
+    leaseExpiresAt: v.optional(v.number()),
+    quotaDay: v.optional(v.string()),
+    youtubeVideoId: v.optional(v.string()),
+    watchUrl: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    experimentId: v.optional(v.id("contentExperiments")),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    completedAt: v.optional(v.number()),
+  })
+    .index("by_idempotency", ["ownerId", "idempotencyKey"])
+    .index("by_due", ["status", "nextAttemptAt"])
+    .index("by_status_lease", ["status", "leaseExpiresAt"])
+    .index("by_channel_status", ["channelId", "status"])
+    .index("by_channel_quota_day", ["channelId", "quotaDay"])
+    .index("by_owner_created", ["ownerId", "createdAt"]),
+
+  analyticsIngestions: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    source: v.union(
+      v.literal("youtube_data_api"),
+      v.literal("youtube_analytics_api"),
+    ),
+    metricDefinitionVersion: v.string(),
+    windowStart: v.string(),
+    windowEnd: v.string(),
+    status: v.union(
+      v.literal("running"),
+      v.literal("completed"),
+      v.literal("partial"),
+      v.literal("failed"),
+    ),
+    recordsWritten: v.number(),
+    lastError: v.optional(v.string()),
+    startedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+  })
+    .index("by_channel_started", ["channelId", "startedAt"])
+    .index("by_connector_started", ["connectorId", "startedAt"]),
+
+  // Versioned creative assignment and its observed outcome. This keeps title,
+  // thumbnail, hook, and visual decisions joined to the exact published video.
+  contentExperiments: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    runId: v.optional(v.id("runs")),
+    publishIntentId: v.optional(v.id("publishIntents")),
+    youtubeVideoId: v.optional(v.string()),
+    experimentKey: v.string(),
+    version: v.number(),
+    hypothesis: v.optional(v.string()),
+    titleVariant: v.string(),
+    thumbnailVariant: v.optional(v.string()),
+    hookVariant: v.optional(v.string()),
+    visualVariant: v.optional(v.string()),
+    status: v.union(v.literal("assigned"), v.literal("observed"), v.literal("closed")),
+    outcome: v.optional(v.any()),
+    outcomeIngestionId: v.optional(v.id("analyticsIngestions")),
+    createdAt: v.number(),
+    observedAt: v.optional(v.number()),
+  })
+    .index("by_key", ["ownerId", "experimentKey"])
+    .index("by_video", ["youtubeVideoId"])
+    .index("by_channel_created", ["channelId", "createdAt"]),
+
+  // Recommendations are proposals, never active policy. Activation requires a
+  // passing offline evidence evaluation and an authenticated operator approval.
+  learningRecommendations: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    recommendationKey: v.string(),
+    kind: v.union(v.literal("show_bible"), v.literal("retention_rule")),
+    target: v.union(v.literal("creative_brief"), v.literal("script_playbook")),
+    basePolicyVersion: v.number(),
+    proposedPolicyVersion: v.number(),
+    sourceVideoIds: v.array(v.string()),
+    dataWindowStart: v.string(),
+    dataWindowEnd: v.string(),
+    proposal: v.any(),
+    offlineEvaluation: v.object({
+      method: v.string(),
+      sampleSize: v.number(),
+      baselineScore: v.optional(v.number()),
+      candidateScore: v.optional(v.number()),
+      passed: v.boolean(),
+      notes: v.string(),
+    }),
+    status: v.union(
+      v.literal("proposed"),
+      v.literal("approved"),
+      v.literal("activated"),
+      v.literal("rejected"),
+    ),
+    approvedBy: v.optional(v.string()),
+    approvedAt: v.optional(v.number()),
+    activatedAt: v.optional(v.number()),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_key", ["ownerId", "recommendationKey"])
+    .index("by_owner_status", ["ownerId", "status"])
+    .index("by_channel_created", ["channelId", "createdAt"]),
 });

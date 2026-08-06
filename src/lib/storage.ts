@@ -235,3 +235,27 @@ export async function getObjectBytes(
     res.Body as { transformToByteArray: () => Promise<Uint8Array> }
   ).transformToByteArray();
 }
+
+/** Stream a large R2 object directly to disk without buffering the render. */
+export async function getObjectToFile(
+  key: string,
+  filePath: string,
+  bucket?: string,
+): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: getBucket(bucket),
+    Key: key,
+  });
+  const res = await getR2Client().send(command);
+  if (!res.Body) throw new Error(`R2 object has no body: ${key}`);
+  const body = res.Body as NodeJS.ReadableStream;
+  if (typeof body.pipe !== "function") {
+    throw new Error(`R2 object body is not a Node stream: ${key}`);
+  }
+  const [{ createWriteStream }, { pipeline }] = await Promise.all([
+    import("node:fs"),
+    import("node:stream/promises"),
+  ]);
+  await pipeline(body, createWriteStream(filePath));
+  return filePath;
+}

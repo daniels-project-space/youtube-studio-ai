@@ -11,7 +11,7 @@
  * pass, so un-ported archetypes land as drafts until Stage 3.
  */
 import { task } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -91,8 +91,9 @@ export const buildChannelPackageTask = task({
       slug,
       name: concept.name,
       identity,
-      thumbnailer:
-        archetype.thumbnailTemplate === "title_card" ? "title_card" : "banana",
+      // This compatibility path is paused-first, but it must still use the real
+      // thumbnail engine rather than creating another legacy title-card row.
+      thumbnailer: "banana",
       template: archetype.template,
       pipeline,
       budget: payload.budget ?? 5,

@@ -13,10 +13,19 @@
  * only a channel with NEITHER fails loudly (it's mis-provisioned).
  */
 import type { Block, StageContext } from "@/engine/types";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { ShowBible, StyleDNA } from "@/engine/creative/types";
+import type { ChannelProfile } from "@/engine/channelProfile";
+import { resolveDirectorConfig } from "@/lib/crew/director";
+import {
+  cinematographerDirectives,
+  resolveCinematographerConfig,
+} from "@/lib/crew/cinematographer";
+import { editorDirectives, resolveEditorConfig } from "@/lib/crew/editor";
+import { composerDirectives, resolveComposerConfig } from "@/lib/crew/composer";
+import { applyCriticPolicy, resolveCriticConfig } from "@/lib/crew/critic";
 import {
   briefDirector,
   briefCinematographer,
@@ -126,7 +135,18 @@ function dnaAudioDigest(dna: StyleDNA | null): string {
   );
 }
 
-function crewCtx(ctx: StageContext, g: ChannelGrounding): CrewContext {
+function roleProfile(ctx: StageContext, block: string): ChannelProfile {
+  return {
+    pipeline: [{ block, params: ctx.params }],
+    moduleOverrides: {},
+  } as unknown as ChannelProfile;
+}
+
+function crewCtx(
+  ctx: StageContext,
+  g: ChannelGrounding,
+  roleDirectives?: unknown,
+): CrewContext {
   return {
     topic: topicOf(ctx),
     family: (ctx.params["family"] as string | undefined) ?? "narrated_stock",
@@ -135,6 +155,7 @@ function crewCtx(ctx: StageContext, g: ChannelGrounding): CrewContext {
     targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined,
     dnaDigest: dnaDigest(g.dna),
     dnaAudio: dnaAudioDigest(g.dna),
+    roleDirectives: roleDirectives ? JSON.stringify(roleDirectives) : undefined,
     log: ctx.log,
   };
 }
@@ -156,10 +177,11 @@ export const directorBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "director_brief", ctx.log);
-    const out = await briefDirector(bible, crewCtx(ctx, g));
+    const config = resolveDirectorConfig(roleProfile(ctx, "director_brief"));
+    const out = await briefDirector(bible, crewCtx(ctx, g, config));
     if (!out) failLoud("director_brief");
     ctx.log(`director_brief: ${out.beats.length} beats`);
-    return { structure: out };
+    return { structure: { ...out, config, configVersion: "director@1.0.0" } };
   },
 };
 
@@ -172,10 +194,19 @@ export const dpBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "dp_brief", ctx.log);
-    const out = await briefCinematographer(bible, crewCtx(ctx, g));
+    const config = resolveCinematographerConfig(roleProfile(ctx, "dp_brief"));
+    const directives = cinematographerDirectives(config);
+    const out = await briefCinematographer(bible, crewCtx(ctx, g, directives));
     if (!out) failLoud("dp_brief");
     ctx.log(`dp_brief: ${out.footageQueries.length} queries`);
-    return { visualBrief: out };
+    return {
+      visualBrief: {
+        ...out,
+        config,
+        directives,
+        configVersion: "cinematographer@1.0.0",
+      },
+    };
   },
 };
 
@@ -188,10 +219,12 @@ export const editorBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "editor_brief", ctx.log);
-    const out = await briefEditor(bible, crewCtx(ctx, g));
+    const config = resolveEditorConfig(roleProfile(ctx, "editor_brief"));
+    const directives = editorDirectives(config);
+    const out = await briefEditor(bible, crewCtx(ctx, g, directives));
     if (!out) failLoud("editor_brief");
     ctx.log(`editor_brief: ${out.sections.length} sections`);
-    return { cutSheet: out };
+    return { cutSheet: { ...out, config, directives, configVersion: "editor@1.0.0" } };
   },
 };
 
@@ -204,10 +237,12 @@ export const composerBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "composer_brief", ctx.log);
-    const out = await briefComposer(bible, crewCtx(ctx, g));
+    const config = resolveComposerConfig(roleProfile(ctx, "composer_brief"));
+    const directives = composerDirectives(config);
+    const out = await briefComposer(bible, crewCtx(ctx, g, { config, directives }));
     if (!out) failLoud("composer_brief");
     ctx.log(`composer_brief: music prompt set`);
-    return { musicBrief: out };
+    return { musicBrief: { ...out, config, directives, configVersion: "composer@1.0.0" } };
   },
 };
 
@@ -220,10 +255,18 @@ export const criticSpecBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "critic_spec", ctx.log);
-    const out = await briefCritic(bible, crewCtx(ctx, g));
+    const config = resolveCriticConfig(roleProfile(ctx, "critic_spec"));
+    const out = await briefCritic(bible, crewCtx(ctx, g, config));
     if (!out) failLoud("critic_spec");
-    ctx.log(`critic_spec: ${out.assertions.length} assertions`);
-    return { validationSpec: out };
+    const validationSpec = applyCriticPolicy(out, config);
+    ctx.log(`critic_spec: ${validationSpec.assertions.length} assertions`);
+    return {
+      validationSpec: {
+        ...validationSpec,
+        config,
+        configVersion: "critic@1.0.0",
+      },
+    };
   },
 };
 

@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { OWNER_ID } from "@/lib/config";
+import { authorizeStudioRoute } from "@/lib/operatorSession";
 
 /**
  * POST /api/make-multilingual  { channelId: string, languages: string[] }
@@ -11,6 +12,8 @@ import { OWNER_ID } from "@/lib/config";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const authFailure = await authorizeStudioRoute(request);
+  if (authFailure) return authFailure;
   let body: { channelId?: string; languages?: string[] };
   try {
     body = await request.json();

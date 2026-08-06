@@ -1,7 +1,6 @@
 import type { Metadata } from "next";
 import { Fraunces, Instrument_Sans, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
-import { ConvexClientProvider } from "./ConvexClientProvider";
 
 const fraunces = Fraunces({
   variable: "--font-fraunces",
@@ -38,9 +37,7 @@ export default function RootLayout({
       lang="en"
       className={`${fraunces.variable} ${instrumentSans.variable} ${jetbrainsMono.variable}`}
     >
-      <body>
-        <ConvexClientProvider>{children}</ConvexClientProvider>
-      </body>
+      <body>{children}</body>
     </html>
   );
 }

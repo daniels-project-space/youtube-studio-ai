@@ -1,13 +1,15 @@
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { tasks, configure } from "@trigger.dev/sdk";
 import { api } from "../convex/_generated/api";
+import type { PipelineEntry } from "@/engine/types";
 async function main(){
   const c=new ConvexHttpClient("https://astute-camel-689.convex.cloud");
   configure({ secretKey: process.env.TRIGGER_SECRET_KEY! });
-  const chans=(await c.query(api.channels.listChannels,{ownerId:"owner_daniel"})) as any[];
+  const chans=await c.query(api.channels.listChannels,{ownerId:"owner_daniel"});
   const ch=chans.find(x=>/quiet stoic/i.test(x.name));
+  if (!ch) throw new Error("Quiet Stoic channel not found");
   // override: 10-min script target + widen length gate for this run
-  const pipeline=(ch.pipeline as any[]).map(e=>{
+  const pipeline=(ch.pipeline as PipelineEntry[]).map(e=>{
     if(e.block==="script_gen") return {...e, params:{...(e.params||{}), maxSeconds:600}};
     if(e.block==="length_check") return {...e, params:{...(e.params||{}), minSeconds:420, maxSeconds:1200}};
     return e;

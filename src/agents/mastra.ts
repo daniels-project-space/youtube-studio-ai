@@ -20,6 +20,12 @@
 import type { z } from "zod";
 import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import {
+  cacheModelResponse,
+  getCachedModelResponse,
+  modelRequestCacheKey,
+  recordModelUsage,
+} from "@/lib/modelUsage";
 
 /**
  * Agent roles. `producer` + `director` are the original generate/critique pair;
@@ -142,14 +148,67 @@ function ensureProviderEnv(): void {
   }
 }
 
+interface MastraUsage {
+  inputTokens?: number;
+  outputTokens?: number;
+  totalTokens?: number;
+  reasoningTokens?: number;
+  cachedInputTokens?: number;
+  inputTokenDetails?: { cacheReadTokens?: number };
+  outputTokenDetails?: { textTokens?: number; reasoningTokens?: number };
+}
+
+interface MastraGenerationResponse {
+  object?: unknown;
+  usage?: MastraUsage;
+  totalUsage?: MastraUsage;
+  modelId?: string;
+  response?: { id?: string; modelId?: string };
+}
+
 interface MastraBundle {
   // Minimal shape we use — kept loose to avoid coupling to Mastra's types here.
   getAgent: (id: AgentRole) => {
     generate: (
       prompt: string,
       opts: Record<string, unknown>,
-    ) => Promise<{ object?: unknown }>;
+    ) => Promise<MastraGenerationResponse>;
   };
+}
+
+function finiteToken(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0
+    ? value
+    : undefined;
+}
+
+function recordMastraUsage(
+  configuredModel: string,
+  response: MastraGenerationResponse,
+): void {
+  const usage = response.totalUsage ?? response.usage;
+  const reasoning =
+    finiteToken(usage?.outputTokenDetails?.reasoningTokens) ??
+    finiteToken(usage?.reasoningTokens) ??
+    0;
+  const totalOutput = finiteToken(usage?.outputTokens);
+  const textOutput =
+    finiteToken(usage?.outputTokenDetails?.textTokens) ??
+    (totalOutput !== undefined ? Math.max(0, totalOutput - reasoning) : undefined);
+  recordModelUsage({
+    provider: configuredModel.startsWith("google/") ? "gemini" : "mastra",
+    model: response.response?.modelId ?? response.modelId ?? configuredModel,
+    kind: "text",
+    requestId: response.response?.id,
+    inputTokens: finiteToken(usage?.inputTokens),
+    outputTokens: textOutput,
+    reasoningTokens: reasoning,
+    cachedInputTokens:
+      finiteToken(usage?.inputTokenDetails?.cacheReadTokens) ??
+      finiteToken(usage?.cachedInputTokens),
+    totalTokens: finiteToken(usage?.totalTokens),
+    ...(!usage ? { unpricedReason: "Mastra/AI SDK response omitted usage" } : {}),
+  });
 }
 
 let bundlePromise: Promise<MastraBundle | null> | null = null;
@@ -240,6 +299,19 @@ export interface AgentJsonOptions<T> {
  */
 export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
   const log = o.log ?? (() => {});
+  const cfg = ROLE_CONFIG[o.role];
+  const requestKey = modelRequestCacheKey("mastra", cfg.model, {
+    role: o.role,
+    prompt: o.prompt,
+    temperature: o.temperature,
+    maxTokens: o.maxTokens,
+  });
+  const cached = getCachedModelResponse<T>(requestKey, {
+    provider: cfg.model.startsWith("google/") ? "gemini" : "mastra",
+    model: cfg.model,
+    kind: "text",
+  });
+  if (cached !== undefined) return cached;
 
   const bundle = await getBundle();
   if (bundle) {
@@ -253,8 +325,11 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
         // disables thinking; the AI-SDK path never did) — kill it here too.
         providerOptions: { google: { thinkingConfig: { thinkingBudget: 0 } } },
       });
+      recordMastraUsage(cfg.model, res);
       if (res?.object !== undefined && res.object !== null) {
-        return o.schema.parse(res.object);
+        const parsed = o.schema.parse(res.object);
+        cacheModelResponse(requestKey, parsed);
+        return parsed;
       }
       log(`agentJson(${o.role}): Mastra returned no object — falling back to REST`);
     } catch (e) {
@@ -265,7 +340,6 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
   // REST fallback (existing, proven, vault-wired helpers), routed by the role's
   // declared provider. If the preferred provider's key is missing, fall back to
   // the other so a crew brief never hard-fails when only one key is configured.
-  const cfg = ROLE_CONFIG[o.role];
   const preferGemini = cfg?.provider === "gemini";
   const system = o.system ?? cfg?.instructions;
   const useGemini = preferGemini ? hasGeminiKey() : !hasAnthropicKey() && hasGeminiKey();
@@ -276,7 +350,9 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
       maxTokens: o.maxTokens,
       temperature: o.temperature,
     });
-    return o.schema.parse(out);
+    const parsed = o.schema.parse(out);
+    cacheModelResponse(requestKey, parsed);
+    return parsed;
   }
   if (!hasAnthropicKey()) throw new Error(`agentJson(${o.role}): no Mastra and no ANTHROPIC_API_KEY`);
   const out = await claudeJson<T>({
@@ -285,5 +361,7 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
     maxTokens: o.maxTokens,
     temperature: o.temperature,
   });
-  return o.schema.parse(out);
+  const parsed = o.schema.parse(out);
+  cacheModelResponse(requestKey, parsed);
+  return parsed;
 }

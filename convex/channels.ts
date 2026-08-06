@@ -1,4 +1,4 @@
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
 import { moduleSurface, configurableModules } from "@/engine/moduleRegistry";
 import { validateKnobs, type KnobValues, type KnobValue } from "@/engine/customization";
@@ -137,6 +137,7 @@ export const createChannel = mutation({
     template: v.string(),
     pipeline: pipelineValidator,
     modelRouting: v.optional(v.any()),
+    learningPolicyVersion: v.optional(v.number()),
     qaRubric: v.optional(v.any()),
     styleDNA: v.optional(v.any()),
     // Initial per-module operator config from the onboarding "Pipeline style"
@@ -336,7 +337,21 @@ export const updateChannel = mutation({
     budget: v.optional(v.number()),
     status: v.optional(v.string()),
     schedule: v.optional(
-      v.object({ frequency: v.string(), days: v.optional(v.array(v.number())) }),
+      v.object({
+        frequency: v.string(),
+        days: v.optional(v.array(v.number())),
+        timezone: v.optional(v.string()),
+        localTime: v.optional(v.string()),
+        enabled: v.optional(v.boolean()),
+        approvalMode: v.optional(
+          v.union(v.literal("manual"), v.literal("private_auto")),
+        ),
+        dailyQuota: v.optional(v.number()),
+        maxConcurrent: v.optional(v.number()),
+        retryMaxAttempts: v.optional(v.number()),
+        retryBaseMinutes: v.optional(v.number()),
+        madeForKids: v.optional(v.boolean()),
+      }),
     ),
     groupId: v.optional(v.string()),
     language: v.optional(v.string()),

@@ -4,7 +4,7 @@
  * sentence gaps). Uses run-pipeline's pipelineOverride so the channel's real
  * 15-35 min config is NEVER touched. Produces a private YouTube draft (deletable).
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { tasks, configure } from "@trigger.dev/sdk";
 import { api } from "../convex/_generated/api";
 import type { PipelineEntry } from "@/engine/types";
@@ -12,7 +12,7 @@ import type { PipelineEntry } from "@/engine/types";
 async function main() {
   const c = new ConvexHttpClient("https://astute-camel-689.convex.cloud");
   configure({ secretKey: process.env.TRIGGER_SECRET_KEY! });
-  const chans = (await c.query(api.channels.listChannels, { ownerId: "owner_daniel" })) as any[];
+  const chans = await c.query(api.channels.listChannels, { ownerId: "owner_daniel" });
   const ch = chans.find((x) => /quiet stoic/i.test(x.name));
   if (!ch) throw new Error("Quiet Stoic channel not found");
 

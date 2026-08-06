@@ -33,7 +33,7 @@
  *     runDir, log,
  *   });
  */
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -79,7 +79,57 @@ export interface WhiteboardSyncBrief {
 
 export interface SyncLayer { kind: "art" | "label"; art?: string; text?: string; color?: string; box: number[]; cueStartMs: number }
 export interface SyncPanel { idx: number; startMs: number; endMs: number; layers: SyncLayer[] }
-export interface WhiteboardSyncResult { outPath: string; timelinePath: string; title: string; narrationText: string; panels: SyncPanel[]; durationMs: number }
+export interface WhiteboardSyncResult {
+  outPath: string;
+  timelinePath: string;
+  title: string;
+  narrationText: string;
+  panels: SyncPanel[];
+  durationMs: number;
+  /** Characters sent to TTS during this invocation (zero when the cache hit). */
+  ttsCharactersGenerated: number;
+}
+
+export const WHITEBOARD_MAX_PANELS = 16;
+export const WHITEBOARD_MAX_ART_IMAGES_PER_PANEL = 5;
+export const WHITEBOARD_MAX_WORDS_PER_PANEL = 120;
+export const WHITEBOARD_MAX_CHARS_PER_WORD = 12;
+export const WHITEBOARD_MAX_TTS_PROVIDER_RESPONSES = 3;
+
+export function whiteboardPanelCount(value: unknown): number {
+  const parsed = Number(value ?? 6);
+  return Number.isFinite(parsed)
+    ? Math.max(1, Math.min(WHITEBOARD_MAX_PANELS, Math.floor(parsed)))
+    : 6;
+}
+
+export function whiteboardImageCallCeiling(panelCount: unknown): number {
+  return whiteboardPanelCount(panelCount) * WHITEBOARD_MAX_ART_IMAGES_PER_PANEL;
+}
+
+export function whiteboardNarrationCharacterCeiling(panelCount: unknown, targetWords: unknown): number {
+  const panels = whiteboardPanelCount(panelCount);
+  const parsedWords = Number(targetWords ?? 150);
+  const requestedWords = Number.isFinite(parsedWords) && parsedWords > 0 ? Math.ceil(parsedWords) : 150;
+  const boundedWords = Math.max(
+    panels * 8,
+    Math.min(panels * WHITEBOARD_MAX_WORDS_PER_PANEL, requestedWords),
+  );
+  return boundedWords * WHITEBOARD_MAX_CHARS_PER_WORD;
+}
+
+export function whiteboardTtsBillableCharacterCeiling(
+  panelCount: unknown,
+  targetWords: unknown,
+): number {
+  return (
+    whiteboardNarrationCharacterCeiling(panelCount, targetWords)
+  );
+}
+
+export function whiteboardTtsProviderCallCeiling(): number {
+  return WHITEBOARD_MAX_TTS_PROVIDER_RESPONSES;
+}
 
 const ASSET_DIR = join(process.cwd(), "src", "assets", "whiteboard");
 
@@ -180,10 +230,9 @@ function planContract(brief: WhiteboardSyncBrief, nPanels: number, words: number
 }
 
 function normalize(raw: RawPlan): NPanel[] {
-  return (raw.panels ?? []).map((p, i) => ({
-    idx: i,
-    narration: String(p.narration ?? "").trim(),
-    layers: (p.layers ?? [])
+  return (raw.panels ?? []).map((p, i) => {
+    let artCount = 0;
+    const layers = (p.layers ?? [])
       .map((l) => ({
         kind: l.kind === "label" ? ("label" as const) : ("art" as const),
         draw: l.draw ? String(l.draw).trim() : undefined,
@@ -192,8 +241,40 @@ function normalize(raw: RawPlan): NPanel[] {
         cue: String(l.cue ?? "").trim(),
         box: clampBox(l.box),
       }))
-      .filter((l) => (l.kind === "art" && l.draw) || (l.kind === "label" && l.text)),
-  }));
+      .filter((l) => (l.kind === "art" && l.draw) || (l.kind === "label" && l.text))
+      // The prompt asks for one hero + 2–4 keyword sketches. A model that
+      // over-returns must not create an unbounded paid image fan-out.
+      .filter((l) => {
+        if (l.kind !== "art") return true;
+        if (artCount >= WHITEBOARD_MAX_ART_IMAGES_PER_PANEL) return false;
+        artCount += 1;
+        return true;
+      });
+    return { idx: i, narration: String(p.narration ?? "").trim(), layers };
+  });
+}
+
+function boundNarration(panels: NPanel[], targetWords: unknown): NPanel[] {
+  if (!panels.length) return panels;
+  const charCeiling = whiteboardNarrationCharacterCeiling(panels.length, targetWords);
+  const totalWordBudget = Math.floor(charCeiling / WHITEBOARD_MAX_CHARS_PER_WORD);
+  const baseWords = Math.floor(totalWordBudget / panels.length);
+  const remainder = totalWordBudget % panels.length;
+
+  return panels.map((panel, index) => {
+    const wordBudget = baseWords + (index < remainder ? 1 : 0);
+    const words = panel.narration.split(/\s+/).filter(Boolean).slice(0, wordBudget);
+    const rawNarration = words.join(" ");
+    const charBudget = wordBudget * WHITEBOARD_MAX_CHARS_PER_WORD;
+    const narration = rawNarration.length <= charBudget
+      ? rawNarration
+      : rawNarration.slice(0, charBudget).replace(/\s+\S*$/, "").trim();
+    const lowerNarration = narration.toLowerCase();
+    const layers = panel.layers.filter((layer) =>
+      !layer.cue || lowerNarration.includes(layer.cue.toLowerCase()),
+    );
+    return { ...panel, narration, layers };
+  });
 }
 
 /** Generate ONE chunk of panels (retry on short/invalid output). */
@@ -205,7 +286,7 @@ async function genChunk(brief: WhiteboardSyncBrief, beats: string[], nP: number,
       (attempt ? `\n\nFIX: output EXACTLY ${nP} panels as STRICTLY VALID minified JSON.` : "");
     try {
       const raw = await geminiJsonPro<RawPlan>({ prompt: planContract(sub, nP, words) + extra, maxTokens: 14000, temperature: 0.5 });
-      const panels = normalize(raw);
+      const panels = normalize(raw).slice(0, nP);
       if (panels.length >= nP) return { title: String(raw.title ?? brief.topic), panels };
       log(`  chunk got ${panels.length}/${nP} panels — retry`);
       if (attempt === 2 && panels.length) return { title: String(raw.title ?? brief.topic), panels };
@@ -217,9 +298,9 @@ async function genChunk(brief: WhiteboardSyncBrief, beats: string[], nP: number,
 }
 
 async function buildStoryboard(brief: WhiteboardSyncBrief, log: Logger): Promise<{ title: string; panels: NPanel[]; fullText: string }> {
-  const nPanels = brief.panels ?? 6;
+  const nPanels = whiteboardPanelCount(brief.panels);
   const words = brief.targetWords ?? 150;
-  const beats = brief.beats ?? [];
+  const beats = (brief.beats ?? []).slice(0, nPanels);
   const CHUNK = 4;
   let title = brief.topic;
   const all: NPanel[] = [];
@@ -239,9 +320,10 @@ async function buildStoryboard(brief: WhiteboardSyncBrief, log: Logger): Promise
     all.push(...panels);
     log(`storyboard: ${all.length} panels, ${all.reduce((n, p) => n + p.layers.length, 0)} layers`);
   }
-  all.forEach((p, i) => (p.idx = i));
-  if (!all.length) throw new Error("whiteboardSync: storyboard produced no panels");
-  return { title, panels: all, fullText: all.map((p) => p.narration).join(" ") };
+  const bounded = boundNarration(all.slice(0, nPanels), brief.targetWords);
+  bounded.forEach((p, i) => (p.idx = i));
+  if (!bounded.length) throw new Error("whiteboardSync: storyboard produced no panels");
+  return { title, panels: bounded, fullText: bounded.map((p) => p.narration).join(" ") };
 }
 
 /* ------------------------------ timing --------------------------------- */
@@ -317,6 +399,7 @@ function alignCues(panels: NPanel[], fullText: string, words: { text: string; st
 export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; runDir: string; outPath?: string; log?: Logger }): Promise<WhiteboardSyncResult> {
   const log = args.log ?? (() => {});
   const brief = args.brief;
+  const requestedPanels = whiteboardPanelCount(brief.panels);
   if (!process.env.GEMINI_API_KEY) throw new Error("whiteboardSync: GEMINI_API_KEY missing");
   if (!process.env.FISH_AUDIO_API_KEY) throw new Error("whiteboardSync: FISH_AUDIO_API_KEY missing");
   // $0-spend gate: verify python3 + the baked renderer/aligner scripts + pip
@@ -338,6 +421,19 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
     log(`storyboard: loaded cached plan (${panels.length} panels)`);
   } else {
     ({ title, panels, fullText } = await buildStoryboard(brief, log));
+    await writeFile(planPath, JSON.stringify({ title, panels, fullText }, null, 2), "utf8");
+  }
+  // Old cached plans and model output both pass through the same spend bound.
+  // Rebuild the narration from the accepted panels so discarded over-returned
+  // panels cannot still incur TTS or appear in downstream metadata.
+  const boundedPanels = boundNarration(panels.slice(0, requestedPanels), brief.targetWords);
+  const boundedFullText = boundedPanels.map((panel) => panel.narration).join(" ");
+  const cachedNarrationChanged =
+    boundedPanels.length !== panels.length || boundedFullText !== fullText;
+  panels = boundedPanels;
+  panels.forEach((panel, index) => { panel.idx = index; });
+  fullText = boundedFullText;
+  if (cachedNarrationChanged) {
     await writeFile(planPath, JSON.stringify({ title, panels, fullText }, null, 2), "utf8");
   }
 
@@ -406,6 +502,11 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
   // 3. narration + alignment (cached → resumable)
   const mp3Path = join(args.runDir, "narration.mp3");
   const wpath = join(args.runDir, "wwords.json");
+  if (cachedNarrationChanged) {
+    await Promise.all([unlink(mp3Path).catch(() => {}), unlink(wpath).catch(() => {})]);
+    log("storyboard: bounded cached plan changed narration — invalidated stale TTS/alignment cache");
+  }
+  let ttsCharactersGenerated = 0;
   if (!existsSync(mp3Path)) {
     // Honor a cast ElevenLabs voice when the channel was cast one; else Fish.
     // (The cast winner used to be dropped here — every scribe spoke the Fish
@@ -414,8 +515,18 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
     log(useEleven ? `TTS (ElevenLabs ${brief.elevenVoiceId})…` : "TTS (Fish)…");
     const mp3 = await synthNarration(
       useEleven
-        ? { text: fullText, provider: "elevenlabs", elevenVoiceId: brief.elevenVoiceId }
-        : { text: fullText, voiceId: brief.voiceId ?? "sleepless_historian", speed: 0.95 },
+        ? {
+            text: fullText,
+            provider: "elevenlabs",
+            elevenVoiceId: brief.elevenVoiceId,
+            onBillableCharacters: (characters: number) => { ttsCharactersGenerated += characters; },
+          }
+        : {
+            text: fullText,
+            voiceId: brief.voiceId ?? "sleepless_historian",
+            speed: 0.95,
+            onBillableCharacters: (characters: number) => { ttsCharactersGenerated += characters; },
+          },
     );
     await writeFile(mp3Path, Buffer.from(mp3));
   } else log("TTS cached");
@@ -463,5 +574,13 @@ export async function castWhiteboardSync(args: { brief: WhiteboardSyncBrief; run
   log("rendering synced scribe…");
   await runPy([join("scripts", "wb_scribe_sync.py"), timelinePath, outPath, hand], log);
   log(`whiteboardSync done → ${outPath}`);
-  return { outPath, timelinePath, title, narrationText: fullText, panels: tlPanels, durationMs: 2600 + audioEnd + 1800 };
+  return {
+    outPath,
+    timelinePath,
+    title,
+    narrationText: fullText,
+    panels: tlPanels,
+    durationMs: 2600 + audioEnd + 1800,
+    ttsCharactersGenerated,
+  };
 }

@@ -24,36 +24,27 @@ const cache = new Map<string, string>();
  * lifetime of the page. Pass `null` to skip (e.g. YouTube-thumb path).
  */
 export function useAssetUrl(key: string | null | undefined): string | null {
-  const [url, setUrl] = useState<string | null>(
-    key && cache.has(key) ? cache.get(key)! : null,
-  );
+  const [resolved, setResolved] = useState<{ key: string; url: string | null } | null>(null);
 
   useEffect(() => {
-    if (!key) {
-      setUrl(null);
-      return;
-    }
-    if (cache.has(key)) {
-      setUrl(cache.get(key)!);
-      return;
-    }
+    if (!key || cache.has(key)) return;
     let cancelled = false;
     fetch(`/api/asset-url?key=${encodeURIComponent(key)}`)
       .then((r) => (r.ok ? r.json() : Promise.reject(r)))
       .then((data: { url?: string }) => {
         if (cancelled || !data.url) return;
         cache.set(key, data.url);
-        setUrl(data.url);
+        setResolved({ key, url: data.url });
       })
       .catch(() => {
-        if (!cancelled) setUrl(null);
+        if (!cancelled) setResolved({ key, url: null });
       });
     return () => {
       cancelled = true;
     };
   }, [key]);
 
-  return url;
+  return key ? (cache.get(key) ?? (resolved?.key === key ? resolved.url : null)) : null;
 }
 
 /** Compact view-count formatter: 1234 → "1.2K", 1500000 → "1.5M". */

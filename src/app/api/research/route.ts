@@ -1,5 +1,6 @@
 import { NextResponse } from "next/server";
 import { OWNER_ID } from "@/lib/config";
+import { authorizeStudioRoute } from "@/lib/operatorSession";
 
 /**
  * POST /api/research  { niche: string, channelId?: string }
@@ -17,6 +18,8 @@ import { OWNER_ID } from "@/lib/config";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const authFailure = await authorizeStudioRoute(request);
+  if (authFailure) return authFailure;
   let body: { niche?: string; channelId?: string };
   try {
     body = await request.json();

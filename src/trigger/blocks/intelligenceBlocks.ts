@@ -14,15 +14,23 @@
  *                         only as explicit operator choice. Produces
  *                         `thumbnailKey`; failure is LOUD (heal loop retries).
  */
-import type { Block, StageContext } from "@/engine/types";
-import { ConvexHttpClient } from "convex/browser";
+import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { PRICE, thumbnailGenerationCost } from "@/engine/pricing";
+import {
+  assertThumbnailGate,
+  assertThumbnailStrategy,
+  qualityProfile,
+  thumbnailGatePassed,
+  type ThumbnailGateVerdict,
+} from "@/engine/qualityPolicy";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { makeRunTempDir, downloadTo, readBytes, writeBytes } from "@/lib/files";
 import { putObject, getObjectBytes } from "@/lib/storage";
 import { titleCard, thumbnailText, imageToJpeg, solidImage } from "@/lib/ffmpeg";
 import { generateFluxImage } from "@/lib/replicate";
-import { hasBanana } from "@/lib/banana";
+import { bananaCounters, hasBanana } from "@/lib/banana";
 import { craftMetadata } from "@/lib/metacraft";
 import { generateKeyframe } from "@/lib/higgsfield";
 import { resolveThumbnailStyle, styleFromDNA, shortTitleFallback } from "@/lib/thumbnailFormula";
@@ -118,14 +126,22 @@ function resolveNiche(
 export const competitorResearch: Block = {
   id: "competitor_research",
   consumes: [],
-  produces: ["nicheReady"],
+  produces: [
+    "nicheReady",
+    "niche",
+    "nicheIntel",
+    "seoDatabank",
+    "competitors",
+    "thumbnailIdentity",
+    "persona",
+    "thumbnailer",
+  ],
   run: async (ctx) => {
     const channel = await loadChannel(ctx);
     const niche = resolveNiche(ctx, channel);
 
     if (!niche) {
-      ctx.log("competitor_research: no niche configured — skipping research");
-      return { nicheReady: false, niche: "" };
+      throw new Error("competitor_research: no niche configured — Golden research cannot be skipped");
     }
 
     // Ensure the databank is fresh (no-op if <7d old or no YouTube key).
@@ -646,12 +662,13 @@ async function fallbackBase(ctx: StageContext, basePrompt: string): Promise<stri
 }
 
 /** Legacy title_card fallback — guaranteed to yield a thumbnailKey. */
-async function titleCardFallback(ctx: StageContext): Promise<string> {
+async function titleCardFallback(ctx: StageContext): Promise<{ thumbnailKey: string; costUsd: number }> {
   const channelName = (ctx.store["channelName"] as string | undefined) ?? "Lofi";
   const topic = (ctx.store["topic"] as string | undefined) ?? "";
   const baseUrl = (ctx.store["f1Url"] as string | undefined) ?? "";
   const tmp = await makeRunTempDir(ctx.runId);
   const outJpg = join(tmp, "thumbnail.jpg");
+  let costUsd = 0;
   // ON-BRAND BG MEDIUM: an illustrative-only channel (comic) kept degrading to a
   // PHOTOREAL fallback card that violated its own "illustrative only" playbook.
   // Derive the card's art medium from the channel's style DNA / grammar so the
@@ -677,20 +694,21 @@ async function titleCardFallback(ctx: StageContext): Promise<string> {
     // bg. Vision-check the base; one regen, then a solid color (a clean solid
     // beats gibberish on the most-visible surface).
     try {
-      const gen = async (extra = "") =>
-        downloadTo(
-          await generateFluxImage({
+      const gen = async (extra = "") => {
+        const url = await generateFluxImage({
             prompt: `${medium} background image for a video about "${topic}", empty negative space, ABSOLUTELY NO text, NO words, NO letters, NO typography, NO signage${extra}`,
             aspectRatio: "16:9",
-          }),
-          join(tmp, "thumb_base.png"),
-        );
+          });
+        costUsd += PRICE.fluxStillUsd;
+        return downloadTo(url, join(tmp, "thumb_base.png"));
+      };
       base = await gen();
       try {
         const { visionLocal } = await import("@/lib/vision");
         const { parseJsonLoose } = await import("@/lib/gemini");
-        const check = async (p2: string) =>
-          parseJsonLoose<{ hasText?: boolean }>(
+        const check = async (p2: string) => {
+          costUsd += PRICE.visionGraderUsd;
+          return parseJsonLoose<{ hasText?: boolean }>(
             await visionLocal({
               prompt: 'Does this image contain ANY visible text, letters, words, numbers or typography (even faint/stylized)? Return STRICT JSON {"hasText": boolean}.',
               imagePaths: [p2],
@@ -698,6 +716,7 @@ async function titleCardFallback(ctx: StageContext): Promise<string> {
               maxTokens: 60,
             }),
           ).hasText === true;
+        };
         if (await check(base)) {
           base = await gen(", plain textureless surfaces only");
           if (await check(base)) base = await solidImage(join(tmp, "thumb_base.jpg"));
@@ -716,7 +735,7 @@ async function titleCardFallback(ctx: StageContext): Promise<string> {
   const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
   await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
   await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "title_card_fallback", thumbnailTitle: channelName });
-  return thumbnailKey;
+  return { thumbnailKey, costUsd };
 }
 
 export const thumbnailGen: Block = {
@@ -727,6 +746,7 @@ export const thumbnailGen: Block = {
   produces: ["thumbnailKey", "strategy"],
   paid: true,
   run: async (ctx) => {
+    const quality = qualityProfile(ctx.params["qualityProfile"]);
     const title = str(ctx, "title");
     const persona = (ctx.store["persona"] as string | undefined) ?? "";
     const thumbId = (ctx.store["thumbnailIdentity"] as ThumbIdentity | null) ?? null;
@@ -737,6 +757,10 @@ export const thumbnailGen: Block = {
       (ctx.params["thumbnailer"] as string | undefined) ??
       "banana";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
+    const countersBefore = { ...bananaCounters };
+    let referenceJudgeCalls = 0;
+    const thumbnailCost = (extraCostUsd = 0): number =>
+      thumbnailGenerationCost(countersBefore, bananaCounters, referenceJudgeCalls, extraCostUsd);
 
     // CHANNEL GROUNDING that previously never reached generation:
     //  - styleDNA.thumbnail — the research-distilled per-channel thumbnail spec
@@ -790,12 +814,12 @@ export const thumbnailGen: Block = {
      * REFERENCE + MOBILE QA — the missing half of validation: (1) downscale the
      * candidate to real browse-strip size (~168px) and check legibility there,
      * (2) judge it SIDE-BY-SIDE against the scraped top competitor thumbnails.
-     * Returns null when it can't run (no key/refs) — never blocks on infra.
+     * A null verdict is tolerated only by an explicitly draft-quality run.
      */
     const referenceMobileQA = async (
       tmp: string,
       outJpg: string,
-    ): Promise<{ pass: boolean; reason: string } | null> => {
+    ): Promise<ThumbnailGateVerdict | null> => {
       if (!hasGeminiKey()) return null;
       try {
         const mobileJpg = join(tmp, "thumb_mobile.jpg");
@@ -806,26 +830,37 @@ export const thumbnailGen: Block = {
             refPaths.push(await downloadTo(referenceThumbs[i], join(tmp, `ref_${i}.jpg`)));
           } catch { /* unreachable reference — skip it */ }
         }
+        referenceJudgeCalls += 1;
         const raw = await visionLocal({
           prompt:
             `Image 1 is a CANDIDATE YouTube thumbnail rendered at real mobile browse size (~168px wide). ` +
             (refPaths.length
               ? `Images 2-${refPaths.length + 1} are thumbnails of the TOP-PERFORMING videos in the same niche (the bar to beat). `
               : "") +
-            `Video title: "${title}"${niche ? `, niche: ${niche}` : ""}. Judge the candidate:\n` +
-            `(1) Is every word of overlay text still easily readable at THIS size?\n` +
-            `(2) Does it have a single clear focal subject that reads instantly at this size?\n` +
+            `Video title: "${title}"${niche ? `, niche: ${niche}` : ""}. ${dnaSpecClause}${rulesClause}` +
+            `Judge the candidate against the production gate:\n` +
+            `(1) textOk: every visible word is correctly spelled and readable at THIS size.\n` +
+            `(2) faceClear: any intended face is clear and undistorted (true when no face is intended).\n` +
             (refPaths.length
-              ? `(3) Placed next to the reference thumbnails in a browse feed, would it hold its own or look amateur? Rate competitiveness 1-10.\n`
-              : `(3) Rate overall click-appeal 1-10.\n`) +
-            `Return ONLY JSON {"legible":true|false,"focal":true|false,"score":1-10,"reason":"..."}.`,
+              ? `(3) Placed next to the references, rate punch, styleMatch, and storyMatch 1-10.\n`
+              : `(3) Rate punch, styleMatch, and storyMatch 1-10.\n`) +
+            `(4) uiClean: no broken glyphs, watermarks, accidental UI, clipping, or unreadable clutter.\n` +
+            `Return ONLY JSON {"textOk":boolean,"faceClear":boolean,"punch":1-10,"styleMatch":1-10,` +
+            `"storyMatch":1-10,"uiClean":boolean,"reason":"..."}.`,
           imagePaths: [mobileJpg, ...refPaths],
           json: true,
           maxTokens: 250,
         });
-        const v = parseJsonLoose<{ legible?: boolean; focal?: boolean; score?: number; reason?: string }>(raw);
-        const pass = v.legible !== false && v.focal !== false && (typeof v.score !== "number" || v.score >= 6);
-        return { pass, reason: `${v.reason ?? ""} (score ${v.score ?? "?"})` };
+        const v = parseJsonLoose<Partial<ThumbnailGateVerdict>>(raw);
+        return {
+          textOk: v.textOk === true,
+          faceClear: v.faceClear === true,
+          punch: Number(v.punch ?? 0),
+          styleMatch: Number(v.styleMatch ?? 0),
+          storyMatch: Number(v.storyMatch ?? 0),
+          uiClean: v.uiClean === true,
+          reason: String(v.reason ?? "judge omitted its reason"),
+        };
       } catch (e) {
         ctx.log(`thumbnail_gen: reference/mobile QA errored (skipping): ${e instanceof Error ? e.message : e}`);
         return null;
@@ -886,18 +921,19 @@ export const thumbnailGen: Block = {
           ...(dnaSubject ? { sceneMandate: dnaSubject } : {}),
         });
         const refQA = await referenceMobileQA(tmp, outJpg);
-        if (refQA && !refQA.pass) {
+        if (refQA && !thumbnailGatePassed(refQA)) {
           // Keep the PAID render as a last-resort fallback — the old path threw
           // it away, spent 2 more Pro gens on the DNA path, and on a double
           // gate-fail shipped NOTHING (then the heal loop re-bought it all).
           rejectedPlaybookJpg = outJpg;
           ctx.log(`thumbnail_gen: playbook candidate rejected (${refQA.reason}) — falling through`);
         } else {
+          assertThumbnailGate(quality, refQA, "playbook candidate");
           const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
           await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
           await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook", pattern: pattern.name, thumbnailTitle: title });
           ctx.log(`thumbnail_gen: PLAYBOOK thumbnail ✓ (pattern "${pattern.name}")${refQA ? ` — ref QA: ${refQA.reason}` : ""}`);
-          return { thumbnailKey, strategy: "playbook" };
+          return { thumbnailKey, strategy: "playbook", [COST_PATCH_KEY]: thumbnailCost() };
         }
       } catch (e) {
         ctx.log(`thumbnail_gen: playbook path failed (${e instanceof Error ? e.message : e}) — falling through`);
@@ -940,14 +976,15 @@ export const thumbnailGen: Block = {
           textShadow: true,
         });
         const refQA = await referenceMobileQA(tmp, outJpg);
-        if (refQA && !refQA.pass) {
+        if (refQA && !thumbnailGatePassed(refQA)) {
           ctx.log(`thumbnail_gen: real-scene composite rejected (${refQA.reason}) — generating a fresh base`);
         } else {
+          assertThumbnailGate(quality, refQA, "real-scene candidate");
           const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
           await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
           await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "scene_still", thumbnailTitle: ttl });
           ctx.log(`thumbnail_gen: real-scene thumbnail ✓ ("${ttl}")${refQA ? ` — ref QA: ${refQA.reason}` : ""}`);
-          return { thumbnailKey, strategy: "scene_still" };
+          return { thumbnailKey, strategy: "scene_still", [COST_PATCH_KEY]: thumbnailCost() };
         }
       } catch (e) {
         ctx.log(`thumbnail_gen: real-scene path failed (${e instanceof Error ? e.message : e}) — falling through`);
@@ -956,8 +993,13 @@ export const thumbnailGen: Block = {
 
     // Operator explicitly selected the deterministic title card.
     if (thumbnailer === "title_card") {
-      const thumbnailKey = await titleCardFallback(ctx);
-      return { thumbnailKey, strategy: "title_card_fallback" };
+      assertThumbnailStrategy(quality, "title_card_fallback");
+      const fallback = await titleCardFallback(ctx);
+      return {
+        thumbnailKey: fallback.thumbnailKey,
+        strategy: "title_card_fallback",
+        [COST_PATCH_KEY]: thumbnailCost(fallback.costUsd),
+      };
     }
 
     // THE ENGINE (no playbook yet): DNA-direct Nano Banana Pro brief - the
@@ -1017,28 +1059,33 @@ export const thumbnailGen: Block = {
         thumbnailTitle: bananaLines.map((l) => l.text).join(" "),
       });
       ctx.log(`thumbnail_gen: BANANA thumbnail OK (DNA-direct, punch ${verdict.punch ?? "?"}/10)`);
-      return { thumbnailKey, strategy: "banana_dna" };
+      return { thumbnailKey, strategy: "banana_dna", [COST_PATCH_KEY]: thumbnailCost() };
     } catch (e) {
-      // Ship the best PAID render instead of nothing: the rejected playbook
-      // candidate beats a missing thumbnail (which fails QA and triggers the
-      // heal loop to re-buy every generation ×3).
+      // Draft-only escape hatch. Production asserts before either below-bar
+      // strategy can write an asset or return success.
       if (rejectedPlaybookJpg) {
+        assertThumbnailStrategy(quality, "playbook_belowbar");
         ctx.log(`thumbnail_gen: DNA-direct failed (${e instanceof Error ? e.message : e}) — shipping the below-bar playbook candidate instead of nothing`);
         const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
         await putObject(thumbnailKey, await readBytes(rejectedPlaybookJpg), { contentType: "image/jpeg" });
         await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook_belowbar", thumbnailTitle: title });
-        return { thumbnailKey, strategy: "playbook_belowbar" };
+        return { thumbnailKey, strategy: "playbook_belowbar", [COST_PATCH_KEY]: thumbnailCost() };
       }
-      // NO-GOOGLE ROUTE DEGRADE: FLUX typography is measurably weaker than the
+      // DRAFT-ONLY NO-GOOGLE DEGRADE: FLUX typography is weaker than the
       // banana engine at design-native text — when the fal route is active and
       // the judge (rightly) rejects both attempts, a deterministic title card
       // beats killing a run that already carries the full render spend
       // (observed live: a $1.22 whiteboard run died here). Banana mode keeps
       // the strict loud failure — its craft bar is the whole point.
       if (process.env.IMAGE_DISABLE_GEMINI === "1" && /failed the gate/i.test(e instanceof Error ? e.message : String(e))) {
+        assertThumbnailStrategy(quality, "title_card_fallback");
         ctx.log(`thumbnail_gen: fal-route judge rejection (${e instanceof Error ? e.message.slice(0, 120) : e}) — degrading to the deterministic title card`);
-        const thumbnailKey = await titleCardFallback(ctx);
-        return { thumbnailKey, strategy: "title_card_fallback" };
+        const fallback = await titleCardFallback(ctx);
+        return {
+          thumbnailKey: fallback.thumbnailKey,
+          strategy: "title_card_fallback",
+          [COST_PATCH_KEY]: thumbnailCost(fallback.costUsd),
+        };
       }
       throw e;
     }

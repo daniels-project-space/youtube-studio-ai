@@ -3,7 +3,7 @@
  * named row; channels reference it by name (channels.folder). Deleting a
  * folder unfiles its channels (never deletes them).
  */
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
 
 export const list = query({

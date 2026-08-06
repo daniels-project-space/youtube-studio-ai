@@ -21,6 +21,11 @@
  * (verified: urllib → 403, browser UA → 200).
  */
 import type { FalI2VResult } from "@/lib/falVideo";
+import { boundFalVideoPrompt } from "@/lib/providerText";
+import {
+  ExecutionError,
+  type ExecutionErrorOptions,
+} from "@/engine/executionErrors";
 
 /** Browser UA — Cloudflare bot-gate bypass for the Salad container gateway. */
 const BROWSER_UA =
@@ -63,9 +68,9 @@ export interface GpuVideoResult extends FalI2VResult {
   r2Key?: string;
 }
 
-export class GpuVideoError extends Error {
-  constructor(message: string) {
-    super(message);
+export class GpuVideoError extends ExecutionError {
+  constructor(message: string, options: ExecutionErrorOptions = {}) {
+    super(message, options);
     this.name = "GpuVideoError";
   }
 }
@@ -87,10 +92,9 @@ export function ltxDuration(sec: number | undefined): number {
 /** Build the fal LTX-2 image-to-video request body (native audio on by default). Pure. */
 export function buildFalLtxBody(req: GpuVideoRequest): Record<string, unknown> {
   if (!req.imageUrl) throw new GpuVideoError("fal-ltx: imageUrl required (image-to-video)");
-  const prompt = req.prompt.length > 2200 ? req.prompt.slice(0, 2200).replace(/\s+\S*$/, "") : req.prompt;
   return {
     image_url: req.imageUrl,
-    prompt,
+    prompt: boundFalVideoPrompt(req.prompt),
     duration: ltxDuration(req.durationSec),
     resolution: req.resolution ?? "1080p",
     fps: 25,
@@ -107,6 +111,10 @@ function falKey(): string {
   const k = process.env.FAL_KEY;
   if (!k) throw new GpuVideoError("FAL_KEY missing (vault service 'fal')");
   return k;
+}
+
+function retryableFalHttpStatus(status: number): boolean {
+  return status === 408 || status === 425 || status === 429 || status >= 500;
 }
 
 function extractVideoUrl(payload: unknown): string | undefined {
@@ -134,7 +142,14 @@ async function renderFalLtx(req: GpuVideoRequest): Promise<GpuVideoResult> {
     request_id?: string; status_url?: string; response_url?: string;
   };
   if (!submitRes.ok || !submit.request_id) {
-    throw new GpuVideoError(`fal-ltx submit failed: HTTP ${submitRes.status} ${JSON.stringify(submit).slice(0, 240)}`);
+    throw new GpuVideoError(
+      `fal-ltx submit failed: HTTP ${submitRes.status} ${JSON.stringify(submit).slice(0, 240)}`,
+      {
+        phase: "submit",
+        status: submitRes.status,
+        retryable: retryableFalHttpStatus(submitRes.status),
+      },
+    );
   }
   const id = submit.request_id;
   const statusUrl = submit.status_url ?? `${FAL_QUEUE_BASE}/${model}/requests/${id}/status`;
@@ -146,19 +161,43 @@ async function renderFalLtx(req: GpuVideoRequest): Promise<GpuVideoResult> {
     await new Promise((r) => setTimeout(r, req.pollIntervalMs ?? 6000));
     const sRes = await fetch(statusUrl, { headers: { Authorization: `Key ${falKey()}` } });
     const s = (await sRes.json().catch(() => ({}))) as { status?: string };
+    if (!sRes.ok) {
+      if (retryableFalHttpStatus(sRes.status)) continue;
+      throw new GpuVideoError(
+        `fal-ltx status failed for request ${id}: HTTP ${sRes.status} ${JSON.stringify(s).slice(0, 240)}`,
+        { phase: "poll", status: sRes.status, retryable: false },
+      );
+    }
     if (s.status === "COMPLETED") {
       const rRes = await fetch(responseUrl, { headers: { Authorization: `Key ${falKey()}` } });
       const payload = await rRes.json().catch(() => ({}));
-      if (!rRes.ok) throw new GpuVideoError(`fal-ltx result HTTP ${rRes.status} ${JSON.stringify(payload).slice(0, 240)}`);
+      if (!rRes.ok) {
+        if (retryableFalHttpStatus(rRes.status)) continue;
+        throw new GpuVideoError(
+          `fal-ltx result failed for request ${id}: HTTP ${rRes.status} ${JSON.stringify(payload).slice(0, 240)}`,
+          { phase: "result", status: rRes.status, retryable: false },
+        );
+      }
       const url = extractVideoUrl(payload);
-      if (!url) throw new GpuVideoError(`fal-ltx completed but no video url: ${JSON.stringify(payload).slice(0, 240)}`);
+      if (!url) {
+        throw new GpuVideoError(
+          `fal-ltx completed but no video url (request ${id}): ${JSON.stringify(payload).slice(0, 240)}`,
+          { phase: "result", retryable: false },
+        );
+      }
       return { url, jobId: id, model, provider: "fal-ltx", hasAudio: req.audio !== false };
     }
     if (s.status && /fail|error|cancel/i.test(s.status)) {
-      throw new GpuVideoError(`fal-ltx failed: status=${s.status}`);
+      throw new GpuVideoError(`fal-ltx failed: status=${s.status} request=${id}`, {
+        phase: "poll",
+        retryable: false,
+      });
     }
   }
-  throw new GpuVideoError(`fal-ltx timed out (request ${id})`);
+  throw new GpuVideoError(`fal-ltx timed out (request ${id})`, {
+    phase: "poll",
+    retryable: false,
+  });
 }
 
 /* ------------------------------- salad-ltx --------------------------------- */
@@ -229,24 +268,30 @@ async function fetchDataUri(url: string): Promise<string> {
 /** Inject this call's image (base64) + prompts into a pinned LTX-2.3 ComfyUI template.
  *  Positive/negative CLIPTextEncode are resolved via the LTXVConditioning node's links. */
 function injectTemplate(
-  wf: Record<string, any>,
+  wf: Record<string, unknown>,
   o: { image?: string; prompt: string; negative?: string },
 ): Record<string, unknown> {
   let posId: string | undefined, negId: string | undefined;
-  for (const n of Object.values(wf)) {
-    if (n?.class_type === "LTXVConditioning") {
-      posId = n.inputs?.positive?.[0];
-      negId = n.inputs?.negative?.[0];
+  type WorkflowNode = { class_type?: string; inputs?: Record<string, unknown> };
+  const linkedId = (value: unknown): string | undefined =>
+    Array.isArray(value) && typeof value[0] === "string" ? value[0] : undefined;
+  for (const value of Object.values(wf)) {
+    const node = value as WorkflowNode;
+    if (node.class_type === "LTXVConditioning") {
+      posId = linkedId(node.inputs?.positive);
+      negId = linkedId(node.inputs?.negative);
     }
   }
-  for (const [id, n] of Object.entries(wf)) {
-    if (n?.class_type === "LoadImage" && o.image) n.inputs.image = o.image;
-    if (n?.class_type === "CLIPTextEncode") {
-      if (id === posId) n.inputs.text = o.prompt;
-      else if (id === negId && o.negative != null) n.inputs.text = o.negative;
+  for (const [id, value] of Object.entries(wf)) {
+    const node = value as WorkflowNode;
+    if (!node.inputs) continue;
+    if (node.class_type === "LoadImage" && o.image) node.inputs.image = o.image;
+    if (node.class_type === "CLIPTextEncode") {
+      if (id === posId) node.inputs.text = o.prompt;
+      else if (id === negId && o.negative != null) node.inputs.text = o.negative;
     }
   }
-  return wf as Record<string, unknown>;
+  return wf;
 }
 
 async function renderSaladLtx(req: GpuVideoRequest): Promise<GpuVideoResult> {

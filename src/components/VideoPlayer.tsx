@@ -38,7 +38,7 @@ export function VideoPlayer({ video }: { video: VideoRow }) {
           }}
         />
       ) : r2Video ? (
-        // eslint-disable-next-line jsx-a11y/media-has-caption
+
         <video
           src={r2Video}
           controls

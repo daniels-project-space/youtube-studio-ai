@@ -4,7 +4,7 @@
  * makes the hot path (topic_select / plan-week-ahead) read cached scans and
  * refresh at most weekly, the same doctrine as the SEO databank.
  */
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
 
 const outlierValidator = v.object({

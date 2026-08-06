@@ -202,15 +202,16 @@ const Scene: React.FC = () => {
    (Creating a new <perspectiveCamera makeDefault> proved unreliable headless;
    mutating the live default camera every frame is deterministic and works.) */
 const PerspectiveCameraRig: React.FC<{ z: number; y: number }> = ({ z, y }) => {
-  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
+  const getThreeState = useThree((state) => state.get);
   React.useLayoutEffect(() => {
+    const camera = getThreeState().camera as THREE.PerspectiveCamera;
     camera.position.set(0, y, z);
     camera.lookAt(0, 0, 0);
     camera.fov = 32;
     camera.near = 0.1;
     camera.far = 100;
     camera.updateProjectionMatrix();
-  });
+  }, [getThreeState, y, z]);
   return null;
 };
 

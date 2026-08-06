@@ -58,6 +58,15 @@ export function hasBanana(): boolean {
   return !!process.env.GEMINI_API_KEY;
 }
 
+/**
+ * Gemini's image model is the only configured route that reliably renders
+ * exact display type as part of the artwork. FLUX remains the picture engine,
+ * but its headline is composited deterministically by thumbnailLab.
+ */
+export function bananaUsesNativeTypography(): boolean {
+  return !falImageRouteActive();
+}
+
 /** The proven craft contract — prepended to EVERY brief. */
 export const BANANA_RULES =
   "Rules: 1280x720 YouTube thumbnail. The hero fills 55-75% of the frame, aggressively cropped. " +
@@ -120,6 +129,42 @@ export function buildThumbBrief(a: ThumbBriefArgs): string {
     ` Headline: ${headline} - placed clear of all faces.${typeClause}` +
     ` Small badge pill "${a.badge.toUpperCase()}" in a corner away from the text.`
   );
+}
+
+/**
+ * Picture-only half of the thumbnail brief. Used on providers that are strong
+ * scene renderers but unreliable spellers; the channel typography is added by
+ * the deterministic safe-zone compositor afterward.
+ */
+export function buildThumbSceneBrief(a: ThumbBriefArgs & { textZone?: string }): string {
+  const collage = a.composition === "cutout_collage"
+    ? " The hero is a crisp die-cut photographic cutout over a deliberate editorial collage of torn clippings, graphic shapes, paper texture, and hard cut shadows."
+    : " Render one coherent, premium cinematic scene with clear depth.";
+  const zone = a.textZone ?? "left";
+  return (
+    `1280x720 YouTube thumbnail BASE ART for channel "${a.channelName}". ` +
+    `Signature look: ${a.imageStyle ?? "premium cinematic editorial art"}. ` +
+    `${a.palette?.length ? `Palette: ${a.palette.join(" / ")}. ` : ""}` +
+    `${a.accentColor ? `Accent: ${a.accentColor}. ` : ""}` +
+    `Scene: ${a.scene}.${collage} ` +
+    `The hero must fill 55-70% of the frame on the side OPPOSITE the ${zone} text zone. ` +
+    `Keep the ${zone} 42% of the frame darker, simple, and genuinely empty for a later headline overlay. ` +
+    `The scene alone must communicate the video's subject at phone size. Maximum three visual elements. ` +
+    `No text, no letters, no numbers, no signs, no logos, no badges, no UI, no watermark.`
+  );
+}
+
+/** Locked request contract for deterministic-composite thumbnails. */
+export function buildThumbSceneRequest(a: ThumbBriefArgs & { textZone?: string }): {
+  prompt: string;
+  allowText: false;
+  tier: "flash";
+} {
+  return {
+    prompt: buildThumbSceneBrief(a),
+    allowText: false,
+    tier: "flash",
+  };
 }
 
 /**
@@ -306,7 +351,7 @@ export async function generateBananaImage(args: {
       }
     }
   }
-  throw new Error(`banana: generation failed (${lastErr})`);
+  throw new Error(`banana: provider retry budget exhausted (${lastErr})`);
 }
 
 export interface BananaVerdict {

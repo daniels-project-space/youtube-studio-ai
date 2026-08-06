@@ -12,7 +12,7 @@
  *   PRIOR_PREFIX="owner/owner_daniel/channel/<slug>/runs/<runId>/" \
  *   REUSE_CHANNEL_ID=<id> npm_config_userconfig=/tmp/empty-npmrc npx tsx scripts/resume-lofi-m1.ts
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";

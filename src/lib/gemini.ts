@@ -10,6 +10,14 @@
  * without a key, so the build/import never crashes.
  */
 
+import {
+  cacheModelResponse,
+  getCachedModelResponse,
+  modelRequestCacheKey,
+  recordModelUsage,
+  type ModelCallKind,
+} from "@/lib/modelUsage";
+
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
 export class GeminiError extends Error {
@@ -124,8 +132,89 @@ export async function uploadGeminiVideo(
 }
 
 interface GeminiResponse {
-  candidates?: { content?: { parts?: { text?: string }[] } }[];
+  candidates?: {
+    content?: { parts?: { text?: string }[] };
+    groundingMetadata?: { webSearchQueries?: string[] };
+  }[];
   error?: { message?: string };
+  modelVersion?: string;
+  responseId?: string;
+  usageMetadata?: {
+    promptTokenCount?: number;
+    cachedContentTokenCount?: number;
+    candidatesTokenCount?: number;
+    toolUsePromptTokenCount?: number;
+    thoughtsTokenCount?: number;
+    totalTokenCount?: number;
+    promptTokensDetails?: { modality?: string; tokenCount?: number }[];
+    cacheTokensDetails?: { modality?: string; tokenCount?: number }[];
+  };
+}
+
+function tokenCountForModality(
+  details: { modality?: string; tokenCount?: number }[] | undefined,
+  modality: string,
+): number {
+  return (details ?? []).reduce(
+    (sum, detail) =>
+      detail.modality?.toUpperCase() === modality &&
+      typeof detail.tokenCount === "number" &&
+      Number.isFinite(detail.tokenCount)
+        ? sum + Math.max(0, detail.tokenCount)
+        : sum,
+    0,
+  );
+}
+
+function callKind(parts: GeminiPart[]): ModelCallKind {
+  const mimeTypes = parts
+    .map((part) => part.inlineData?.mimeType ?? part.fileData?.mimeType)
+    .filter((value): value is string => Boolean(value));
+  if (mimeTypes.some((mime) => mime.startsWith("video/"))) return "video";
+  if (mimeTypes.some((mime) => mime.startsWith("audio/"))) return "audio";
+  if (mimeTypes.some((mime) => mime.startsWith("image/"))) return "vision";
+  return "text";
+}
+
+function recordGeminiResponseUsage(
+  requestedModel: string,
+  kind: ModelCallKind,
+  response: GeminiResponse,
+  usedGrounding: boolean,
+): void {
+  const usage = response.usageMetadata;
+  const hasAudioBreakdown = usage?.promptTokensDetails?.some(
+    (detail) => detail.modality?.toUpperCase() === "AUDIO",
+  );
+  const actualGroundedQueries = response.candidates?.reduce(
+    (sum, candidate) => sum + (candidate.groundingMetadata?.webSearchQueries?.length ?? 0),
+    0,
+  ) ?? 0;
+  recordModelUsage({
+    provider: "gemini",
+    model: response.modelVersion ?? requestedModel,
+    kind,
+    requestId: response.responseId,
+    inputTokens: usage?.promptTokenCount,
+    outputTokens: usage?.candidatesTokenCount,
+    reasoningTokens: usage?.thoughtsTokenCount,
+    cachedInputTokens: usage?.cachedContentTokenCount,
+    audioInputTokens: tokenCountForModality(usage?.promptTokensDetails, "AUDIO"),
+    cachedAudioInputTokens: tokenCountForModality(usage?.cacheTokensDetails, "AUDIO"),
+    totalTokens: usage?.totalTokenCount,
+    ...(!usage
+      ? { unpricedReason: "Gemini response omitted usageMetadata" }
+      : kind === "audio" && !hasAudioBreakdown
+        ? { unpricedReason: "Gemini audio response omitted modality token breakdown" }
+        : {}),
+    ...(usedGrounding
+      ? {
+          additionalUnpricedReason:
+            `Google Search grounding fee is quota-dependent` +
+            (actualGroundedQueries > 0 ? ` (${actualGroundedQueries} reported queries)` : ""),
+        }
+      : {}),
+  });
 }
 
 /**
@@ -159,6 +248,15 @@ async function generate(
       ...(opts.json ? { responseMimeType: "application/json" } : {}),
     },
   };
+  const kind = callKind(parts);
+  const requestKey = modelRequestCacheKey("gemini", model, body);
+  const cached = getCachedModelResponse<string>(requestKey, {
+    provider: "gemini",
+    model,
+    kind,
+  });
+  if (cached !== undefined) return cached;
+  const retryBaseMs = Math.max(0, Number(process.env.GEMINI_RETRY_BASE_MS ?? 2_000) || 0);
   // Retry transient overload / rate-limit / server errors with backoff — Gemini
   // 2.5 Flash frequently returns 503 "high demand", which previously threw and
   // silently degraded vision/JSON callers to placeholder output. Honest grounding
@@ -182,13 +280,32 @@ async function generate(
     } catch (e) {
       lastErr = `network/timeout: ${e instanceof Error ? e.message : e}`;
       if (attempt < 3) {
-        await sleep(2000 * (attempt + 1) * (attempt + 1));
+        await sleep(retryBaseMs * (attempt + 1) * (attempt + 1));
+        continue;
+      }
+      throw new GeminiError(`gemini ${model} provider retry budget exhausted (${lastErr})`);
+    }
+    try {
+      json = (await res.json()) as GeminiResponse;
+    } catch (e) {
+      lastErr = `HTTP ${res.status}: unreadable response (${e instanceof Error ? e.message : e})`;
+      if (res.ok) {
+        // The provider may already have billed this successful response. An
+        // outer block retry would blindly buy it again with no usage evidence.
+        throw new GeminiError(
+          `gemini ${model} provider retry budget exhausted (unreadable successful response)`,
+        );
+      }
+      if ((res.status === 429 || res.status >= 500) && attempt < 3) {
+        await sleep(retryBaseMs * (attempt + 1) * (attempt + 1));
         continue;
       }
       throw new GeminiError(`gemini ${model} -> ${lastErr}`);
     }
-    json = (await res.json()) as GeminiResponse;
-    if (res.ok) break;
+    if (res.ok) {
+      recordGeminiResponseUsage(model, kind, json, Boolean(opts.tools));
+      break;
+    }
     const code = res.status;
     lastErr = `HTTP ${code}: ${json.error?.message ?? ""}`;
     // A preview model may reject our thinking field shape (400) — strip it and
@@ -198,8 +315,11 @@ async function generate(
       continue;
     }
     if ((code === 429 || code === 500 || code === 503) && attempt < 3) {
-      await sleep(2000 * (attempt + 1) * (attempt + 1)); // 2s, 8s, 18s
+      await sleep(retryBaseMs * (attempt + 1) * (attempt + 1)); // 2s, 8s, 18s by default
       continue;
+    }
+    if (code === 429 || code === 500 || code === 503) {
+      throw new GeminiError(`gemini ${model} provider retry budget exhausted (${lastErr})`);
     }
     throw new GeminiError(`gemini ${model} -> ${lastErr}`);
   }
@@ -207,7 +327,12 @@ async function generate(
     ?.map((p) => p.text ?? "")
     .join("")
     .trim();
-  if (!text) throw new GeminiError(`gemini returned no text${lastErr ? ` (last: ${lastErr})` : ""}`);
+  if (!text) {
+    throw new GeminiError(
+      `gemini ${model} provider retry budget exhausted (successful response returned no usable text)`,
+    );
+  }
+  cacheModelResponse(requestKey, text);
   return text;
 }
 

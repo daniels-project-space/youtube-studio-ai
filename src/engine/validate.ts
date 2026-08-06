@@ -8,7 +8,8 @@
  *   (and per-paid-block readiness), before any paid block can spend.
  */
 import type { Block, PipelineEntry } from "./types";
-import { get } from "./registry";
+import { getManifest } from "./registry";
+import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
 
 export class PipelineValidationError extends Error {
   constructor(message: string) {
@@ -26,9 +27,21 @@ export class PreflightError extends Error {
 
 export interface ResolvedPipeline {
   blocks: Block[];
+  manifests: ModuleManifest[];
   entries: PipelineEntry[];
   /** All keys produced across the pipeline, in order of first production. */
   producedKeys: string[];
+}
+
+function isExplicitArtifactReplacement(
+  key: string,
+  previousProducer: string,
+  nextProducer: string,
+): boolean {
+  // intro_card reports whether its standalone asset rendered; the legacy lofi
+  // assembler then reports whether that asset was actually prepended (or its
+  // deblur intro was applied). The latter is intentionally authoritative.
+  return key === "introApplied" && previousProducer === "intro_card" && nextProducer === "assemble";
 }
 
 /**
@@ -49,21 +62,23 @@ export function validatePipeline(
   }
 
   const blocks: Block[] = [];
+  const manifests: ModuleManifest[] = [];
   const available = new Set<string>(seeds);
   const producedKeys: string[] = [];
   const producerOf = new Map<string, string>();
 
   for (let i = 0; i < entries.length; i++) {
     const entry = entries[i];
-    const block = get(entry.block);
-    if (!block) {
+    const manifest = getManifest(entry.block);
+    if (!manifest) {
       throw new PipelineValidationError(
         `step ${i} references unknown block "${entry.block}" (not in registry)`,
       );
     }
+    const block = manifest.block;
 
     // Every consumed key must be produced upstream (or be a seed).
-    for (const need of block.consumes) {
+    for (const need of Object.keys(manifest.consumes)) {
       if (!available.has(need)) {
         throw new PipelineValidationError(
           `block "${block.id}" (step ${i}) consumes "${need}" which is not produced by any upstream block` +
@@ -73,11 +88,19 @@ export function validatePipeline(
     }
 
     // Register this block's produced keys; reject duplicate producers (loud).
-    for (const out of block.produces) {
+    for (const out of [
+      ...Object.keys(manifest.produces),
+      ...Object.keys(manifest.optionalProduces),
+    ]) {
       if (producerOf.has(out)) {
-        throw new PipelineValidationError(
-          `key "${out}" produced by both "${producerOf.get(out)}" and "${block.id}" (duplicate producer)`,
-        );
+        const previousProducer = producerOf.get(out)!;
+        if (!isExplicitArtifactReplacement(out, previousProducer, block.id)) {
+          throw new PipelineValidationError(
+            `key "${out}" produced by both "${previousProducer}" and "${block.id}" (duplicate producer)`,
+          );
+        }
+        producerOf.set(out, block.id);
+        continue;
       }
       producerOf.set(out, block.id);
       available.add(out);
@@ -85,9 +108,10 @@ export function validatePipeline(
     }
 
     blocks.push(block);
+    manifests.push(manifest);
   }
 
-  return { blocks, entries, producedKeys };
+  return { blocks, manifests, entries, producedKeys };
 }
 
 export interface PreflightInput {
@@ -107,10 +131,34 @@ export function preflight(
   resolved: ResolvedPipeline,
   input: PreflightInput,
 ): void {
-  const hasPaid = resolved.blocks.some((b) => b.paid);
+  const paidIndexes = resolved.manifests
+    .map((manifest, index) => (manifest.costAndLatency.paid ? index : -1))
+    .filter((index) => index >= 0);
+  const hasPaid = paidIndexes.length > 0;
   if (hasPaid && (!Number.isFinite(input.budgetUsd) || input.budgetUsd <= 0)) {
     throw new PreflightError(
       "pipeline contains paid blocks but no positive budget ceiling is set",
+    );
+  }
+
+  // Reserve the compiler-declared worst case before the first paid provider
+  // call. Runtime cost accounting still stops unexpected overages, but doing
+  // that only after a provider has charged us is too late to be a spend rail.
+  // A paid module without a finite envelope is therefore not executable.
+  const reservedMaxCostUsd = paidIndexes.reduce((total, index) => {
+    const manifest = resolved.manifests[index];
+    try {
+      return total + configuredMaxCostUsd(manifest, resolved.entries[index].params ?? {}, {
+        entries: resolved.entries,
+        index,
+      });
+    } catch (error) {
+      throw new PreflightError(error instanceof Error ? error.message : String(error));
+    }
+  }, 0);
+  if (hasPaid && reservedMaxCostUsd > input.budgetUsd + Number.EPSILON) {
+    throw new PreflightError(
+      `pipeline reserves up to $${reservedMaxCostUsd.toFixed(2)} but the per-video budget is $${input.budgetUsd.toFixed(2)}`,
     );
   }
 

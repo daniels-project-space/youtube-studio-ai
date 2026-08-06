@@ -61,6 +61,7 @@ import {
   V3_TAG_PALETTES,
   type NarrationPhysics,
 } from "@/engine/golden";
+import { boundNarrationColdOpen } from "@/lib/narrationBounds";
 
 export { narrationPhysicsFor as narrationPhysics, NARRATION_PHYSICS, V3_TAG_PALETTES, type NarrationPhysics } from "@/engine/golden";
 export { stripAudioTags } from "@/lib/tts";
@@ -517,7 +518,7 @@ export async function castVoice(o: {
   const spec = physics.cast;
 
   // Bank (profile on first use).
-  let cards = await profileVoiceBank({ convex: o.convex, ownerId: o.ownerId, log });
+  const cards = await profileVoiceBank({ convex: o.convex, ownerId: o.ownerId, log });
   if (cards.length === 0) throw new Error("voicecraft: voice bank is empty — no ElevenLabs voices reachable");
 
   // Deterministic prefilter (profile first, vendor labels as tiebreak data).
@@ -619,6 +620,7 @@ export async function renderNarration(o: {
   seed?: number;
   stitch?: TtsStitch;
   onRequestId?: (id: string) => void;
+  onBillableCharacters?: (characters: number) => void;
 }): Promise<Uint8Array> {
   const eleven: ElevenSettings = {
     stability: o.physics.stability,
@@ -633,6 +635,7 @@ export async function renderNarration(o: {
     eleven,
     stitch: o.stitch,
     onRequestId: o.onRequestId,
+    onBillableCharacters: o.onBillableCharacters,
   });
 }
 
@@ -658,6 +661,9 @@ export async function judgeNarrationTake(o: {
   text: string;
   durationSec?: number;
   log?: (m: string) => void;
+  /** Counts logical Gemini audio-grader invocations. The adapter only retries
+   * non-billable transport/provider failures internally. */
+  onAudioJudgeCall?: () => void;
 }): Promise<TakeVerdict> {
   // Duration gate runs ALWAYS: when no measured duration is given, estimate
   // from the byte length (our renders are CBR mp3_44100_128 ≈ 16 KB/s).
@@ -674,6 +680,7 @@ export async function judgeNarrationTake(o: {
     }
   }
   const paceWord = o.physics.speed <= 0.85 ? "slow and spacious" : o.physics.speed <= 0.95 ? "measured, unhurried" : o.physics.speed <= 1.02 ? "natural" : "brisk and energetic";
+  o.onAudioJudgeCall?.();
   const v = await geminiAudioJson<Partial<TakeVerdict> & { scores?: Partial<TakeVerdict> }>({
     audios: [Buffer.from(o.mp3).toString("base64")],
     maxTokens: 700,
@@ -713,12 +720,27 @@ export async function gateColdOpen(o: {
   physics: NarrationPhysics & { archetype?: string };
   seed?: number;
   log?: (m: string) => void;
+  onBillableCharacters?: (characters: number) => void;
+  onAudioJudgeCall?: () => void;
 }): Promise<{ verdict: TakeVerdict; seed: number }> {
   const log = o.log ?? (() => {});
+  const text = boundNarrationColdOpen(o.text);
   let seed = o.seed ?? 4242;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const bytes = await renderNarration({ text: o.text, elevenVoiceId: o.elevenVoiceId, physics: o.physics, seed });
-    const verdict = await judgeNarrationTake({ mp3: bytes, physics: o.physics, text: o.text, log });
+    const bytes = await renderNarration({
+      text,
+      elevenVoiceId: o.elevenVoiceId,
+      physics: o.physics,
+      seed,
+      onBillableCharacters: o.onBillableCharacters,
+    });
+    const verdict = await judgeNarrationTake({
+      mp3: bytes,
+      physics: o.physics,
+      text,
+      log,
+      onAudioJudgeCall: o.onAudioJudgeCall,
+    });
     if (verdict.pass) return { verdict, seed };
     log(`voicecraft: cold-open gate attempt ${attempt + 1} FAILED (${verdict.why}) -> ${attempt === 0 ? "seed-bumped retry" : "FAILING LOUD"}`);
     seed += 1;

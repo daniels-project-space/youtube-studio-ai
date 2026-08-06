@@ -16,15 +16,18 @@
  * the table v1 left empty (so all the growth charts were blank).
  */
 import { task, schedules } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
-  hasYouTubeDataAccess,
   fetchVideoStats,
   fetchChannelStats,
 } from "@/lib/youtubeData";
+import {
+  requireInternalQuerySecret,
+  requireYouTubeConnector,
+} from "@/lib/youtubeConnector";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
@@ -34,7 +37,7 @@ export interface StatsRefreshArgs {
 
 export interface StatsRefreshResult {
   ok: boolean;
-  skipped?: "no_youtube_key";
+  skipped?: "no_connector";
   channelsProcessed: number;
   videoSnapshots: number;
 }
@@ -62,25 +65,37 @@ export async function statsRefreshCore(
   const ownerId =
     args.ownerId ?? process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel";
 
-  if (!hasYouTubeDataAccess()) {
-    log("no YouTube Data access (API key or OAuth) — skipping stats refresh gracefully");
-    return {
-      ok: true,
-      skipped: "no_youtube_key",
-      channelsProcessed: 0,
-      videoSnapshots: 0,
-    };
-  }
-
   const convex = convexClient();
+  const internalSecret = requireInternalQuerySecret();
   const channels = await convex.query(api.channels.listChannels, { ownerId });
   const date = utcDate();
   let channelsProcessed = 0;
   let videoSnapshots = 0;
+  let connectorsMissing = 0;
 
   for (const ch of channels) {
     if (ch.status === "archived") continue;
     const channelId = ch._id as Id<"channels">;
+    let connector: Awaited<ReturnType<typeof requireYouTubeConnector>>;
+    try {
+      connector = await requireYouTubeConnector(convex, {
+        channelId,
+        ownerId,
+        requiredScopes: [
+          "https://www.googleapis.com/auth/youtube",
+          "https://www.googleapis.com/auth/youtube.readonly",
+        ],
+      });
+      if (!connector.ytChannelId) {
+        throw new Error("linked connector has no YouTube channel id");
+      }
+    } catch (error) {
+      connectorsMissing++;
+      log(
+        `channel "${ch.name}" skipped — ${error instanceof Error ? error.message : String(error)}`,
+      );
+      continue;
+    }
 
     // 1. Uploaded video ids for this channel (from its completed runs).
     let videoIds: string[] = [];
@@ -102,32 +117,76 @@ export async function statsRefreshCore(
       continue;
     }
 
+    const ingestionId = await convex.mutation(api.analyticsIngestions.start, {
+      secret: internalSecret,
+      ownerId,
+      channelId,
+      connectorId: connector.connectorId,
+      connectorVersion: connector.tokenVersion,
+      source: "youtube_data_api",
+      metricDefinitionVersion: "youtube-data-statistics-v1",
+      windowStart: date,
+      windowEnd: date,
+      startedAt: Date.now(),
+    });
+    let ingestionWrites = 0;
+    const ingestionErrors: string[] = [];
+
     // 2. Per-video live stats → one snapshot row each.
     let videoStats: Awaited<ReturnType<typeof fetchVideoStats>> = [];
     try {
-      videoStats = await fetchVideoStats(videoIds);
+      videoStats = await fetchVideoStats(videoIds, {
+        refreshToken: connector.refreshToken,
+        requireConnector: true,
+      });
+      const crossedAccount = videoStats.find(
+        (row) => row.channelId !== connector.ytChannelId,
+      );
+      if (crossedAccount) {
+        throw new Error(
+          `video ${crossedAccount.youtubeVideoId} belongs to ${crossedAccount.channelId}, expected ${connector.ytChannelId}`,
+        );
+      }
     } catch (e) {
       log(`videos.list failed for "${ch.name}": ${e instanceof Error ? e.message : e}`);
+      await convex.mutation(api.analyticsIngestions.finish, {
+        secret: internalSecret,
+        ingestionId,
+        status: "failed",
+        recordsWritten: 0,
+        lastError: e instanceof Error ? e.message : String(e),
+        finishedAt: Date.now(),
+      });
       continue;
     }
 
     let totalViews = 0;
-    const ytChannelIds: string[] = [];
     for (const vs of videoStats) {
       totalViews += vs.views;
-      if (vs.channelId) ytChannelIds.push(vs.channelId);
       try {
         await convex.mutation(api.analytics.recordVideoSnapshot, {
+          secret: internalSecret,
           ownerId,
           channelId,
+          connectorId: connector.connectorId,
+          connectorVersion: connector.tokenVersion,
+          ingestionId,
+          source: "youtube_data_api",
+          metricDefinitionVersion: "youtube-data-statistics-v1",
+          windowStart: date,
+          windowEnd: date,
+          confidence: "high",
           youtubeVideoId: vs.youtubeVideoId,
           views: vs.views,
           likes: vs.likes,
           comments: vs.comments,
         });
         videoSnapshots++;
+        ingestionWrites++;
       } catch (e) {
-        log(`recordVideoSnapshot failed (${vs.youtubeVideoId}): ${e instanceof Error ? e.message : e}`);
+        const message = `recordVideoSnapshot failed (${vs.youtubeVideoId}): ${e instanceof Error ? e.message : e}`;
+        ingestionErrors.push(message);
+        log(message);
       }
     }
 
@@ -136,10 +195,14 @@ export async function statsRefreshCore(
     let subscriberCount = 0;
     let channelViewCount = totalViews; // fall back to summed video views
     let videoCount = videoStats.length;
-    const dominant = mode(ytChannelIds);
+    let rollupConfidence: "high" | "medium" = "high";
+    const dominant = connector.ytChannelId;
     if (dominant) {
       try {
-        const chStats = await fetchChannelStats([dominant]);
+        const chStats = await fetchChannelStats([dominant], {
+          refreshToken: connector.refreshToken,
+          requireConnector: true,
+        });
         const s = chStats[0];
         if (s) {
           subscriberCount = s.subscriberCount;
@@ -147,46 +210,66 @@ export async function statsRefreshCore(
           videoCount = s.videoCount || videoStats.length;
         }
       } catch (e) {
-        log(`channels.list failed for "${ch.name}": ${e instanceof Error ? e.message : e}`);
+        const message = `channels.list failed for "${ch.name}": ${e instanceof Error ? e.message : e}`;
+        ingestionErrors.push(message);
+        rollupConfidence = "medium";
+        log(message);
       }
     }
 
     try {
       await convex.mutation(api.analytics.upsertChannelDay, {
+        secret: internalSecret,
         ownerId,
         channelId,
+        connectorId: connector.connectorId,
+        connectorVersion: connector.tokenVersion,
+        ingestionId,
+        source: "youtube_data_api",
+        metricDefinitionVersion: "youtube-data-statistics-v1",
+        confidence: rollupConfidence,
         date,
         totalViews: channelViewCount,
         subscriberCount,
         videoCount,
       });
+      ingestionWrites++;
     } catch (e) {
-      log(`upsertChannelDay failed for "${ch.name}": ${e instanceof Error ? e.message : e}`);
+      const message = `upsertChannelDay failed for "${ch.name}": ${e instanceof Error ? e.message : e}`;
+      ingestionErrors.push(message);
+      log(message);
     }
+    const ingestionStatus =
+      ingestionErrors.length === 0
+        ? "completed"
+        : ingestionWrites > 0
+          ? "partial"
+          : "failed";
+    await convex.mutation(api.analyticsIngestions.finish, {
+      secret: internalSecret,
+      ingestionId,
+      status: ingestionStatus,
+      recordsWritten: ingestionWrites,
+      lastError: ingestionErrors.length ? ingestionErrors.join(" | ") : undefined,
+      finishedAt: Date.now(),
+    });
     channelsProcessed++;
   }
 
   log(
     `stats refresh complete: ${channelsProcessed} channels, ${videoSnapshots} snapshots`,
   );
-  return { ok: true, channelsProcessed, videoSnapshots };
+  return {
+    ok: true,
+    ...(channelsProcessed === 0 && connectorsMissing > 0
+      ? { skipped: "no_connector" as const }
+      : {}),
+    channelsProcessed,
+    videoSnapshots,
+  };
 }
 
 /** Most-frequent value in a list (the channel's own YouTube channelId). */
-function mode(values: string[]): string | null {
-  if (values.length === 0) return null;
-  const counts = new Map<string, number>();
-  for (const v of values) counts.set(v, (counts.get(v) ?? 0) + 1);
-  let best: string | null = null;
-  let bestN = 0;
-  for (const [val, n] of counts) {
-    if (n > bestN) {
-      best = val;
-      bestN = n;
-    }
-  }
-  return best;
-}
 
 /** Callable task — invoke manually or from another task. */
 export const statsRefreshTask = task({

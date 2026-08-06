@@ -6,9 +6,9 @@
  * and repair the lofi/comic Style-DNA drift the assessors documented.
  */
 import { config } from "dotenv"; config({ path: ".env.local" });
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
+import type { Doc, Id } from "../../convex/_generated/dataModel";
 import { designPipeline } from "../../src/engine/designer";
 import type { PipelineEntry } from "../../src/engine/types";
 
@@ -20,12 +20,12 @@ function mergeParams(pipe: PipelineEntry[], block: string, params: Record<string
   if (e) e.params = { ...(e.params ?? {}), ...params };
 }
 
-async function repair(channelId: string, fix: (ch: Record<string, any>) => { pipeline?: PipelineEntry[]; styleDNA?: unknown; identity?: unknown; qaRubric?: unknown }) {
+async function repair(channelId: string, fix: (ch: Doc<"channels">) => { pipeline?: PipelineEntry[]; styleDNA?: unknown; identity?: unknown; qaRubric?: unknown }) {
   const ch = await convex.query(api.channels.getChannel, { channelId: channelId as Id<"channels"> });
   if (!ch) throw new Error("missing " + channelId);
-  const patch = fix(ch as Record<string, any>);
+  const patch = fix(ch);
   await convex.mutation(api.channels.updateChannel, { channelId: channelId as Id<"channels">, ...(patch as object) });
-  log(`${(ch as any).slug}: repaired (${Object.keys(patch).join(", ")})`);
+  log(`${ch.slug}: repaired (${Object.keys(patch).join(", ")})`);
 }
 
 async function main() {

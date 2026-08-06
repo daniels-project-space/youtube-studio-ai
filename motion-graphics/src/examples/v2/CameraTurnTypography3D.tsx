@@ -289,7 +289,7 @@ const FlyingCamera: React.FC<{ rail: THREE.CatmullRomCurve3; frame: number }> = 
   // Drive the EXISTING default camera (mutating it every frame is deterministic
   // and headless-reliable; a freshly-created makeDefault camera was not picked
   // up under `remotion render`).
-  const camera = useThree((s) => s.camera) as THREE.PerspectiveCamera;
+  const getThreeState = useThree((state) => state.get);
 
   const easedP = interpolate(frame, PROGRESS.keyFrames, PROGRESS.keyP, {
     extrapolateLeft: "clamp",
@@ -298,6 +298,7 @@ const FlyingCamera: React.FC<{ rail: THREE.CatmullRomCurve3; frame: number }> = 
   const p = Math.min(Math.max(easedP, 0.0001), 0.9999);
 
   React.useLayoutEffect(() => {
+    const camera = getThreeState().camera as THREE.PerspectiveCamera;
     const pos = rail.getPointAt(p).clone();
     const tan = rail.getTangentAt(p).clone().normalize();
     // pull the camera back off the rail toward the viewer (+Z) and slightly up
@@ -311,7 +312,7 @@ const FlyingCamera: React.FC<{ rail: THREE.CatmullRomCurve3; frame: number }> = 
     camera.near = 0.1;
     camera.far = 120;
     camera.updateProjectionMatrix();
-  });
+  }, [getThreeState, p, rail]);
 
   return null;
 };

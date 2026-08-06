@@ -9,13 +9,19 @@
  * degrades to a no-op without it.
  */
 import { schedules, task } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id, Doc } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix } from "@/lib/storage";
 import { fetchVideoAnalytics, hasAnalyticsAccess } from "@/lib/youtubeAnalytics";
+import {
+  requireInternalQuerySecret,
+  requireYouTubeConnector,
+  type YouTubeConnectorCredential,
+} from "@/lib/youtubeConnector";
 import { loadLedger, saveLedger, loadPerformanceContext, type PerfEntry } from "@/lib/performance";
+import { YOUTUBE_ANALYTICS_SCOPE } from "@/lib/publishingPolicy";
 import { agentJson } from "@/agents/mastra";
 import { z } from "zod";
 
@@ -40,14 +46,25 @@ type Brief = NonNullable<Identity["creativeBrief"]>;
  */
 async function adaptShowBible(
   convex: ConvexHttpClient,
-  ch: { _id: Id<"channels">; name: string; identity?: Identity },
+  ch: {
+    _id: Id<"channels">;
+    name: string;
+    identity?: Identity;
+    learningPolicyVersion?: number;
+  },
+  ownerId: string,
   prefix: string,
+  connector: YouTubeConnectorCredential,
   log: Logger,
 ): Promise<boolean> {
   const identity = ch.identity;
   const brief: Brief | undefined = identity?.creativeBrief;
   if (!identity || !brief) return false;
-  const perf = await loadPerformanceContext(prefix, { minViews: 50 });
+  const perf = await loadPerformanceContext(prefix, {
+    minViews: 50,
+    connectorId: String(connector.connectorId),
+    connectorVersion: connector.tokenVersion,
+  });
   if (!perf) return false;
   try {
     const insights = await agentJson({
@@ -72,11 +89,46 @@ async function adaptShowBible(
       avoidInSpace: insights.avoidInSpace?.length ? insights.avoidInSpace : brief.avoidInSpace,
       refreshedAt: Date.now(),
     };
-    await convex.mutation(api.channels.updateChannel, {
+    const measured = (await loadLedger(prefix)).filter(
+      (entry) =>
+        entry.views >= 50 &&
+        entry.connectorId === String(connector.connectorId) &&
+        entry.connectorVersion === connector.tokenVersion,
+    );
+    const baseline = measured.length
+      ? measured.reduce((sum, entry) => sum + entry.avgViewPct, 0) / measured.length
+      : undefined;
+    await convex.mutation(api.learningGovernance.propose, {
+      secret: requireInternalQuerySecret(),
+      ownerId,
       channelId: ch._id,
-      identity: { ...identity, creativeBrief: nextBrief },
+      connectorId: connector.connectorId,
+      connectorVersion: connector.tokenVersion,
+      recommendationKey: `show-bible:${String(ch._id)}:v${(ch.learningPolicyVersion ?? 0) + 1}`,
+      kind: "show_bible",
+      target: "creative_brief",
+      sourceVideoIds: measured.map((entry) => entry.videoId),
+      dataWindowStart: measured.length
+        ? ymd(Math.min(...measured.map((entry) => entry.publishedAt)))
+        : ymd(Date.now()),
+      dataWindowEnd: ymd(Date.now()),
+      proposal: {
+        nextValue: nextBrief,
+        rationale: "showrunner synthesis of connector-bound historical outcomes",
+      },
+      offlineEvaluation: {
+        method: "historical_evidence_sufficiency_v1",
+        sampleSize: measured.length,
+        baselineScore: baseline,
+        passed: measured.length >= 4,
+        notes:
+          measured.length >= 4
+            ? "At least four settled videos with defined retention metrics."
+            : "Insufficient settled historical sample; activation is blocked.",
+      },
+      createdAt: Date.now(),
     });
-    log(`learning-refresh: adapted Show Bible for ${ch.name} (works=${nextBrief.worksInSpace.length}, avoid=${nextBrief.avoidInSpace.length})`);
+    log(`learning-refresh: proposed Show Bible v${(ch.learningPolicyVersion ?? 0) + 1} for ${ch.name}; operator approval required`);
     return true;
   } catch (e) {
     log(`adaptShowBible failed (${e instanceof Error ? e.message : e})`);
@@ -86,23 +138,40 @@ async function adaptShowBible(
 
 async function refresh(ownerId: string, log: Logger) {
   await bootstrapSecrets((m) => log(m));
-  if (!hasAnalyticsAccess()) {
-    log("learning-refresh: no Analytics access (re-consent yt-analytics.readonly) — skip");
-    return { ok: true, skipped: "no_analytics", channels: 0, videos: 0 };
-  }
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL not configured");
   const convex = new ConvexHttpClient(url);
+  const internalSecret = requireInternalQuerySecret();
 
   const channels = (await convex.query(api.channels.listChannels, { ownerId })) as Array<{
     _id: Id<"channels">;
     slug: string;
     name: string;
     identity?: Identity;
+    learningPolicyVersion?: number;
   }>;
   let videos = 0;
   let adapted = 0;
   for (const ch of channels) {
+    let refreshToken: string;
+    let connector: YouTubeConnectorCredential;
+    try {
+      connector = await requireYouTubeConnector(convex, {
+        channelId: ch._id,
+        ownerId,
+        requiredScopes: [YOUTUBE_ANALYTICS_SCOPE],
+      });
+      refreshToken = connector.refreshToken;
+    } catch (error) {
+      log(
+        `learning-refresh: ${ch.name} skipped — ${error instanceof Error ? error.message : String(error)}`,
+      );
+      continue;
+    }
+    if (!hasAnalyticsAccess(refreshToken)) {
+      log(`learning-refresh: ${ch.name} skipped — analytics scope unavailable`);
+      continue;
+    }
     const prefix = channelPrefix(ownerId, ch.slug);
     const runs = (await convex.query(api.runs.listRunsByChannel, {
       channelId: ch._id,
@@ -112,6 +181,25 @@ async function refresh(ownerId: string, log: Logger) {
     );
     if (published.length === 0) continue;
 
+    const windowStart = ymd(
+      Math.min(...published.map((row) => row.finishedAt ?? Date.now())),
+    );
+    const windowEnd = ymd(Date.now());
+    const ingestionId = await convex.mutation(api.analyticsIngestions.start, {
+      secret: internalSecret,
+      ownerId,
+      channelId: ch._id,
+      connectorId: connector.connectorId,
+      connectorVersion: connector.tokenVersion,
+      source: "youtube_analytics_api",
+      metricDefinitionVersion: "youtube-analytics-outcomes-v1",
+      windowStart,
+      windowEnd,
+      startedAt: Date.now(),
+    });
+    let recordsWritten = 0;
+    const ingestionErrors: string[] = [];
+
     const ledger = await loadLedger(prefix);
     const byId = new Map<string, PerfEntry>(ledger.map((e) => [e.videoId, e]));
     for (const run of published) {
@@ -120,8 +208,17 @@ async function refresh(ownerId: string, log: Logger) {
         videoId: vid,
         startDate: ymd(run.finishedAt!),
         endDate: ymd(Date.now()),
+        refreshToken,
+      }).catch((error) => {
+        ingestionErrors.push(
+          `analytics request failed for ${vid}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+        return null;
       });
-      if (!a) continue;
+      if (!a) {
+        ingestionErrors.push(`analytics unavailable for ${vid}`);
+        continue;
+      }
       // Link to content attributes from the run's stages.
       let title = "";
       let topic = "";
@@ -146,13 +243,75 @@ async function refresh(ownerId: string, log: Logger) {
         avgViewPct: a.avgViewPct,
         ctr: a.ctr,
         updatedAt: Date.now(),
+        connectorId: String(connector.connectorId),
+        connectorVersion: connector.tokenVersion,
+        ingestionId: String(ingestionId),
+        metricDefinitionVersion: "youtube-analytics-outcomes-v1",
       });
+      recordsWritten++;
+      try {
+        const experiment = await convex.query(
+          api.learningGovernance.getExperimentByVideo,
+          {
+            secret: internalSecret,
+            ownerId,
+            youtubeVideoId: vid,
+          },
+        );
+        if (experiment) {
+          await convex.mutation(api.learningGovernance.recordExperimentOutcome, {
+            secret: internalSecret,
+            ownerId,
+            experimentId: experiment._id,
+            ingestionId,
+            youtubeVideoId: vid,
+            outcome: {
+              views: a.views,
+              avgViewPct: a.avgViewPct,
+              ctr: a.ctr,
+              windowStart: ymd(run.finishedAt!),
+              windowEnd,
+              metricDefinitionVersion: "youtube-analytics-outcomes-v1",
+            },
+            observedAt: Date.now(),
+          });
+        }
+      } catch (error) {
+        ingestionErrors.push(
+          `experiment outcome failed for ${vid}: ${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
       videos++;
     }
-    await saveLedger(prefix, [...byId.values()]);
+    let ledgerSaved = false;
+    try {
+      await saveLedger(prefix, [...byId.values()]);
+      ledgerSaved = true;
+    } catch (error) {
+      ingestionErrors.push(
+        `performance ledger write failed: ${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+    const ingestionStatus =
+      ingestionErrors.length === 0
+        ? "completed"
+        : recordsWritten > 0
+          ? "partial"
+          : "failed";
+    await convex.mutation(api.analyticsIngestions.finish, {
+      secret: internalSecret,
+      ingestionId,
+      status: ingestionStatus,
+      recordsWritten,
+      lastError: ingestionErrors.length ? ingestionErrors.join(" | ") : undefined,
+      finishedAt: Date.now(),
+    });
     log(`learning-refresh: ${ch.name} → ${byId.size} videos in ledger`);
     // Close the creative loop — adapt the Show Bible from the refreshed ledger.
-    if (await adaptShowBible(convex, ch, prefix, log)) adapted++;
+    if (
+      ledgerSaved &&
+      await adaptShowBible(convex, ch, ownerId, prefix, connector, log)
+    ) adapted++;
   }
   log(`learning-refresh: done — ${videos} video(s) updated, ${adapted} Show Bible(s) adapted across ${channels.length} channel(s)`);
   return { ok: true, channels: channels.length, videos, adapted };

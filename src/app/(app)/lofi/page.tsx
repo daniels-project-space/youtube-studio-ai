@@ -62,7 +62,7 @@ export default function LofiPage() {
             </div>
             <span style={DEVICE}>{v.device}</span>
             {v.kind === "video" ? (
-              // eslint-disable-next-line jsx-a11y/media-has-caption -- example render
+
               <video controls preload="none" poster={`/golden/lofi/${v.file}.jpg`} src={`/golden/lofi/${v.file}.mp4`} style={{ width: "100%", borderRadius: 8, background: "#000" }} />
             ) : (
               // eslint-disable-next-line @next/next/no-img-element -- static scene still

@@ -1,0 +1,147 @@
+import { z } from "zod";
+
+const ProfileSchema = z.object({
+  contractVersion: z.literal("1.0.0"),
+  id: z.enum(["draft", "production", "hero"]),
+  image: z.object({
+    provider: z.literal("novita"),
+    model: z.string().min(1),
+    revision: z.string().regex(/^[a-f0-9]{40}$/),
+    checkpoint: z.string().min(1),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    steps: z.number().int().positive(),
+    guidanceScale: z.number().min(0),
+    precision: z.enum(["bf16", "fp16"]),
+    candidates: z.number().int().min(1).max(4),
+  }),
+  video: z.object({
+    provider: z.literal("novita"),
+    model: z.string().min(1),
+    revision: z.string().regex(/^[a-f0-9]{40}$/),
+    checkpoint: z.string().min(1),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    fps: z.number().int().positive(),
+    steps: z.number().int().positive(),
+    guidanceScale: z.number().positive(),
+    precision: z.enum(["bf16", "fp16"]),
+    twoStageRefine: z.boolean(),
+    candidates: z.number().int().min(1).max(3),
+  }),
+  qa: z.object({
+    imageMinScore: z.number().min(0).max(1),
+    shotMinScore: z.number().min(0).max(1),
+    maxFreezeFraction: z.number().min(0).max(0.2),
+    required: z.literal(true),
+  }),
+  allowFallback: z.literal(false),
+});
+
+export type GenerationProfile = z.infer<typeof ProfileSchema>;
+
+export const GENERATION_PROFILES: Readonly<Record<GenerationProfile["id"], GenerationProfile>> = {
+  draft: ProfileSchema.parse({
+    contractVersion: "1.0.0",
+    id: "draft",
+    image: {
+      provider: "novita",
+      model: "Tongyi-MAI/Z-Image-Turbo",
+      revision: "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      checkpoint: "Z-Image-Turbo",
+      width: 1280,
+      height: 736,
+      steps: 9,
+      guidanceScale: 0,
+      precision: "bf16",
+      candidates: 1,
+    },
+    video: {
+      provider: "novita",
+      model: "Lightricks/LTX-2.3",
+      revision: "4229404625088d21c4f112eb640fb04a0900ee25",
+      checkpoint: "ltx-2.3-22b-dev",
+      width: 1280,
+      height: 736,
+      fps: 25,
+      steps: 24,
+      guidanceScale: 4,
+      precision: "bf16",
+      twoStageRefine: false,
+      candidates: 1,
+    },
+    qa: { imageMinScore: 0.72, shotMinScore: 0.72, maxFreezeFraction: 0.08, required: true },
+    allowFallback: false,
+  }),
+  production: ProfileSchema.parse({
+    contractVersion: "1.0.0",
+    id: "production",
+    image: {
+      provider: "novita",
+      model: "Tongyi-MAI/Z-Image-Turbo",
+      revision: "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      checkpoint: "Z-Image-Turbo",
+      width: 1920,
+      height: 1088,
+      steps: 9,
+      guidanceScale: 0,
+      precision: "bf16",
+      candidates: 1,
+    },
+    video: {
+      provider: "novita",
+      model: "Lightricks/LTX-2.3",
+      revision: "4229404625088d21c4f112eb640fb04a0900ee25",
+      checkpoint: "ltx-2.3-22b-dev",
+      width: 1920,
+      height: 1088,
+      fps: 25,
+      steps: 40,
+      guidanceScale: 4,
+      precision: "bf16",
+      twoStageRefine: false,
+      candidates: 1,
+    },
+    qa: { imageMinScore: 0.8, shotMinScore: 0.8, maxFreezeFraction: 0.04, required: true },
+    allowFallback: false,
+  }),
+  hero: ProfileSchema.parse({
+    contractVersion: "1.0.0",
+    id: "hero",
+    image: {
+      provider: "novita",
+      model: "Tongyi-MAI/Z-Image-Turbo",
+      revision: "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      checkpoint: "Z-Image-Turbo",
+      width: 2048,
+      height: 1152,
+      steps: 9,
+      guidanceScale: 0,
+      precision: "bf16",
+      candidates: 2,
+    },
+    video: {
+      provider: "novita",
+      model: "Lightricks/LTX-2.3",
+      revision: "4229404625088d21c4f112eb640fb04a0900ee25",
+      checkpoint: "ltx-2.3-22b-dev",
+      width: 1920,
+      height: 1088,
+      fps: 25,
+      steps: 48,
+      guidanceScale: 4,
+      precision: "bf16",
+      twoStageRefine: false,
+      candidates: 1,
+    },
+    qa: { imageMinScore: 0.86, shotMinScore: 0.84, maxFreezeFraction: 0.025, required: true },
+    allowFallback: false,
+  }),
+};
+
+export function generationProfile(id: unknown): GenerationProfile {
+  const key = typeof id === "string" ? id : "production";
+  const profile = GENERATION_PROFILES[key as GenerationProfile["id"]];
+  if (!profile) throw new Error(`unknown generation profile "${key}"`);
+  return ProfileSchema.parse(profile);
+}

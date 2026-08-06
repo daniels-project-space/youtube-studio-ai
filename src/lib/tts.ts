@@ -35,7 +35,11 @@ export function resolveVoiceId(voiceId?: string, niche?: string): string {
   return VOICE_MAP[key] ?? VOICE_MAP["sleepless_historian"];
 }
 
-export class TtsError extends Error {}
+/** Provider-local retries are already exhausted (or the response was billable),
+ * so the engine must never multiply a TTS purchase with a block-level retry. */
+export class TtsError extends Error {
+  readonly retryable = false;
+}
 
 /** Strip ElevenLabs-style [audio tags] — Fish/captions would expose them. */
 export function stripAudioTags(text: string): string {
@@ -85,6 +89,9 @@ async function synthElevenLabs(args: {
   stitch?: TtsStitch;
   /** Receives the response request-id so sequential callers can chain takes. */
   onRequestId?: (id: string) => void;
+  /** Called once for a successful provider response. A tiny 2xx response is
+   * counted, then fails terminal so the same speech is never repurchased. */
+  onBillableCharacters?: (characters: number) => void;
 }): Promise<Uint8Array> {
   const key = process.env.ELEVENLABS_API_KEY;
   if (!key) throw new TtsError("ELEVENLABS_API_KEY is not configured");
@@ -125,13 +132,16 @@ async function synthElevenLabs(args: {
         },
       );
       if (res.ok) {
+        args.onBillableCharacters?.(args.text.length);
         const bytes = new Uint8Array(await res.arrayBuffer());
         if (bytes.length >= 1000) {
           const rid = res.headers.get("request-id");
           if (rid) args.onRequestId?.(rid);
           return bytes;
         }
-        lastErr = "ElevenLabs returned empty/tiny audio";
+        // A 2xx may already consume character quota. Retrying it would buy the
+        // same speech twice, so count it above and fail terminal.
+        throw new TtsError("ElevenLabs returned empty/tiny audio after a successful response");
       } else {
         const body = await res.text().catch(() => "");
         lastErr = `ElevenLabs TTS HTTP ${res.status}: ${body.slice(0, 200)}`;
@@ -160,6 +170,7 @@ export async function synthNarration(args: {
   /** ElevenLabs continuity across chunked requests (ignored by Fish). */
   stitch?: TtsStitch;
   onRequestId?: (id: string) => void;
+  onBillableCharacters?: (characters: number) => void;
 }): Promise<Uint8Array> {
   if (args.provider === "elevenlabs") return synthElevenLabs(args);
   const key = process.env.FISH_AUDIO_API_KEY;
@@ -194,8 +205,12 @@ export async function synthNarration(args: {
         if (res.status === 429 || res.status >= 500) { await sleep(2000 * (attempt + 1)); continue; }
         throw new TtsError(lastErr);
       }
+      args.onBillableCharacters?.(args.text.length);
       const bytes = new Uint8Array(await res.arrayBuffer());
-      if (bytes.length < 1000) { lastErr = "Fish Audio returned empty/tiny audio"; await sleep(2000 * (attempt + 1)); continue; }
+      if (bytes.length < 1000) {
+        // A 2xx may already consume character quota. Never repurchase it.
+        throw new TtsError("Fish Audio returned empty/tiny audio after a successful response");
+      }
       return bytes;
     } catch (e) {
       if (e instanceof TtsError) throw e;
