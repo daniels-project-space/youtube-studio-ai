@@ -89,6 +89,34 @@ interface PlanLine { speaker: string; text: string }
 interface PlanPanel { scene: string; characters: string[]; shot: string; lines: PlanLine[] }
 interface Plan { title: string; logline: string; narratorVoiceId: string; characters: PlanChar[]; panels: PlanPanel[] }
 
+export interface MotionComicArtReference {
+  data: string;
+  mime: string;
+}
+
+export interface MotionComicPanelArtSource {
+  scene: string;
+  shot: string;
+  characters: readonly string[];
+}
+
+/** The only request shape motion-comic art is allowed to send to an image provider. */
+export interface MotionComicArtRequest {
+  prompt: string;
+  aspectRatio: "4:3";
+  imageSize: "2K";
+  images: { data: string; mimeType: string }[];
+  allowText: false;
+  tier: "flash";
+}
+
+export interface MotionComicTimelineBubble {
+  text: string;
+  at: number;
+  mouth?: [number, number];
+  anchor?: [number, number];
+}
+
 export interface MotionComicResult {
   outPath: string;
   title: string;
@@ -327,14 +355,85 @@ async function meanLuma(png: string): Promise<number> {
   } catch { return 128; }
 }
 
-async function genImage(prompt: string, refs: { data: string; mime: string }[]): Promise<Buffer> {
-  // 4:3 comic panels, optionally conditioned on character-sheet refs (img2img).
-  return generateBananaImage({
-    prompt,
+const MOTION_COMIC_PICTURE_ONLY_DIRECTION =
+  "PICTURE-ONLY ART CONTRACT: render illustration pixels only. Do not render dialogue or any readable text, " +
+  "letters, words, numbers, captions, subtitles, labels, signs, logos, watermarks, or pseudo-lettering. " +
+  "Do not draw speech bubbles, thought bubbles, caption boxes, placards, banners, or blank text containers. " +
+  "All lettering is added later by the deterministic renderer.";
+
+function motionComicArtRequest(
+  prompt: string,
+  refs: readonly MotionComicArtReference[],
+): MotionComicArtRequest {
+  return {
+    prompt: `${prompt}\n${MOTION_COMIC_PICTURE_ONLY_DIRECTION}`,
     aspectRatio: "4:3",
     imageSize: "2K",
-    images: refs.map((r) => ({ data: r.data, mimeType: r.mime })),
-  });
+    images: refs.map((ref) => ({ data: ref.data, mimeType: ref.mime })),
+    allowText: false,
+    tier: "flash",
+  };
+}
+
+/**
+ * Pure boundary between storyboard data and the paid panel-art provider.
+ * `PlanPanel.lines` is deliberately absent: dialogue can reach the visual output
+ * only through the deterministic timeline/letterer, never through image gen.
+ */
+export function buildMotionComicPanelArtRequest(args: {
+  style: string;
+  panel: MotionComicPanelArtSource;
+  characterNames?: readonly string[];
+  refs?: readonly MotionComicArtReference[];
+  recovery?: boolean;
+}): MotionComicArtRequest {
+  const names = (args.characterNames ?? []).filter(Boolean).join(", ");
+  const identity = names && (args.refs?.length ?? 0) > 0
+    ? `Keep the depicted character identities (${names}) identical to the supplied model-sheet reference: same face, hair, wardrobe, and marks.`
+    : "";
+  const lighting = args.recovery
+    ? "Use clearly visible moonlight or firelight for a night scene; never produce a near-black image."
+    : "";
+  const prompt = [
+    `A single ${args.panel.shot.toUpperCase()} comic panel in this visual style: ${args.style}`,
+    identity,
+    "LETTERING-SAFE COMPOSITION: reserve a broad, clean, uncluttered area beside or above the main figure using environmental negative space such as open sky, a plain wall, fog, or empty ground. Keep faces away from the extreme corners. The reserved area must remain natural scenery, never a drawn bubble, box, sign, banner, or placeholder glyph.",
+    `VISUAL SCENE ONLY (never dialogue or quoted words): ${args.panel.scene}`,
+    lighting,
+  ].filter(Boolean).join("\n");
+  return motionComicArtRequest(prompt, args.refs ?? []);
+}
+
+export function buildMotionComicCharacterArtRequest(args: {
+  style: string;
+  character: Pick<PlanChar, "name" | "look">;
+  simplified?: boolean;
+}): MotionComicArtRequest {
+  const composition = args.simplified
+    ? "A single full-body character illustration on a plain light-grey background, one person only."
+    : "A character model sheet on a plain light-grey background: several views of one character — full body, two face close-ups, and a hand detail — all depicting the same person for reuse across comic panels.";
+  return motionComicArtRequest(
+    `${composition}\nVISUAL STYLE: ${args.style}\nCHARACTER IDENTITY (description only, never a printed label): ${args.character.name}: ${args.character.look}`,
+    [],
+  );
+}
+
+export function buildMotionComicTimelineBubble(
+  line: Pick<PlanLine, "speaker" | "text">,
+  at: number,
+  placement?: BubbleAnchor,
+): MotionComicTimelineBubble | null {
+  if (line.speaker === "narrator") return null;
+  return {
+    text: stripTags(line.text),
+    at,
+    mouth: placement?.mouth,
+    anchor: placement?.anchor,
+  };
+}
+
+async function genImage(request: MotionComicArtRequest): Promise<Buffer> {
+  return generateBananaImage(request);
 }
 
 /**
@@ -566,15 +665,15 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
   await pool(plan.characters, 2, async (c) => {
     const file = rd(`char_${c.id}.png`);
     if (!existsSync(file)) {
-      const prompt = `Character MODEL SHEET, ${style} Plain light-grey background. Several views of ONE character — full body, two face close-ups, a hand detail — all the SAME person, for reuse across comic panels.\nCHARACTER (${c.name}): ${c.look}`;
-      try { await writeFile(file, await genImage(prompt, [])); log(`char ${c.id} ✓`); }
+      const request = buildMotionComicCharacterArtRequest({ style, character: c });
+      try { await writeFile(file, await genImage(request)); log(`char ${c.id} ✓`); }
       catch (e) {
         // ONE retry with a simplified prompt — the multi-view sheet layout is
         // the usual trip-wire (safety/complexity); a plain full-body still
         // carries identity well enough for the img2img panels.
         log(`char ${c.id} failed (${e instanceof Error ? e.message : e}) — retrying simplified`);
-        const simple = `A single full-body character illustration, ${style} Plain light-grey background, one person only.\nCHARACTER (${c.name}): ${c.look}`;
-        try { await writeFile(file, await genImage(simple, [])); log(`char ${c.id} ✓ (retry)`); }
+        const simple = buildMotionComicCharacterArtRequest({ style, character: c, simplified: true });
+        try { await writeFile(file, await genImage(simple)); log(`char ${c.id} ✓ (retry)`); }
         catch (e2) { log(`char ${c.id} FAILED twice: ${e2 instanceof Error ? e2.message : e2} — panels will render WITHOUT an identity ref`); return; }
       }
     }
@@ -592,25 +691,35 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
       args.runDir,
       `p${i}`,
     );
-    const who = p.characters.map((id) => plan.characters.find((c) => c.id === id)?.name).filter(Boolean).join(", ");
-    const keep = refs.length ? ` KEEP the character(s) (${who}) IDENTICAL to the reference model-sheet(s): same face, hair, wardrobe, marks.` : "";
-    const prompt = `A single ${p.shot.toUpperCase()} COMIC PANEL, ${style} 4:3 cinematic composition.${keep} Compose with some clean, UNCLUTTERED negative space (open sky, a plain wall, or empty ground) beside or above the main figure to leave room for a speech caption, and keep all faces away from the panel's extreme corners.\nPANEL: ${p.scene}`;
+    const characterNames = p.characters
+      .map((id) => plan.characters.find((c) => c.id === id)?.name)
+      .filter((name): name is string => Boolean(name));
+    const request = buildMotionComicPanelArtRequest({
+      style,
+      panel: p,
+      characterNames,
+      refs,
+    });
     // Exactly two paid image calls maximum: one primary and one combined
     // simplified/well-lit recovery. Nested luma + simplified retries used to
     // multiply to four calls for a single panel.
-    const renderVisible = async (candidatePrompt: string) => {
-      await writeFile(file, await genImage(candidatePrompt, refs));
+    const renderVisible = async (candidate: MotionComicArtRequest) => {
+      await writeFile(file, await genImage(candidate));
       if ((await meanLuma(file)) >= 14) return;
       const { unlink } = await import("node:fs/promises");
       await unlink(file).catch(() => {});
       throw new Error("panel art near-black");
     };
-    try { await renderVisible(prompt); log(`panel ${i} ✓ (${p.shot})`); }
+    try { await renderVisible(request); log(`panel ${i} ✓ (${p.shot})`); }
     catch (e) {
       log(`panel ${i} art failed (${e instanceof Error ? e.message : e}) — one simplified/well-lit retry`);
-      const simple =
-        `A single COMIC PANEL, ${style}${keep}\nPANEL: ${p.scene}\n` +
-        `CRITICAL: clearly visible moonlit/firelit scene if night; never near-black.`;
+      const simple = buildMotionComicPanelArtRequest({
+        style,
+        panel: p,
+        characterNames,
+        refs,
+        recovery: true,
+      });
       try { await renderVisible(simple); log(`panel ${i} ✓ (retry)`); }
       catch (e2) { log(`panel ${i} art FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); }
     }
@@ -657,11 +766,10 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
   // 4. VOICES — per-line (exact timing) + per-panel padded audio + bubble cues
   const TAIL_GAP = 0.6;
   let ttsCharactersGenerated = 0;
-  type Bub = { text: string; at: number; mouth?: [number, number]; anchor?: [number, number] };
-  const panelDur: number[] = [], panelBubbles: Bub[][] = [], panelAvoid: number[][][] = [], panelHasAudio: boolean[] = [];
+  const panelDur: number[] = [], panelBubbles: MotionComicTimelineBubble[][] = [], panelAvoid: number[][][] = [], panelHasAudio: boolean[] = [];
   for (let i = 0; i < plan.panels.length; i++) {
     const lines = plan.panels[i].lines;
-    let off = 0; const bubbles: Bub[] = []; const lineFiles: string[] = [];
+    let off = 0; const bubbles: MotionComicTimelineBubble[] = []; const lineFiles: string[] = [];
     for (let k = 0; k < lines.length; k++) {
       const lf = rd(`line_${i}_${k}.mp3`);
       if (!existsSync(lf)) {
@@ -691,10 +799,12 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
         }
       }
       const d = await probeDur(lf);
-      if (lines[k].speaker !== "narrator") {
-        const a = vision[i]?.anchors[lines[k].speaker];
-        bubbles.push({ text: stripTags(lines[k].text), at: off, mouth: a?.mouth, anchor: a?.anchor });
-      }
+      const bubble = buildMotionComicTimelineBubble(
+        lines[k],
+        off,
+        vision[i]?.anchors[lines[k].speaker],
+      );
+      if (bubble) bubbles.push(bubble);
       lineFiles.push(`line_${i}_${k}.mp3`);
       off += d;
     }
