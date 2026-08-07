@@ -16,10 +16,12 @@ import type * as channelPublishPolicies from "../channelPublishPolicies.js";
 import type * as channels from "../channels.js";
 import type * as competitors from "../competitors.js";
 import type * as contentPlan from "../contentPlan.js";
+import type * as crons from "../crons.js";
 import type * as folders from "../folders.js";
 import type * as forgedModules from "../forgedModules.js";
 import type * as learningGovernance from "../learningGovernance.js";
 import type * as outlierBank from "../outlierBank.js";
+import type * as planWeekRenderReceipts from "../planWeekRenderReceipts.js";
 import type * as publishContinuationState from "../publishContinuationState.js";
 import type * as publishIntents from "../publishIntents.js";
 import type * as runArtifacts from "../runArtifacts.js";
@@ -32,6 +34,7 @@ import type * as topicMemory from "../topicMemory.js";
 import type * as videos from "../videos.js";
 import type * as voiceBank from "../voiceBank.js";
 import type * as youtubeAuth from "../youtubeAuth.js";
+import type * as youtubeCreationClaims from "../youtubeCreationClaims.js";
 import type * as youtubeUploads from "../youtubeUploads.js";
 
 import type {
@@ -49,10 +52,12 @@ declare const fullApi: ApiFromModules<{
   channels: typeof channels;
   competitors: typeof competitors;
   contentPlan: typeof contentPlan;
+  crons: typeof crons;
   folders: typeof folders;
   forgedModules: typeof forgedModules;
   learningGovernance: typeof learningGovernance;
   outlierBank: typeof outlierBank;
+  planWeekRenderReceipts: typeof planWeekRenderReceipts;
   publishContinuationState: typeof publishContinuationState;
   publishIntents: typeof publishIntents;
   runArtifacts: typeof runArtifacts;
@@ -65,6 +70,7 @@ declare const fullApi: ApiFromModules<{
   videos: typeof videos;
   voiceBank: typeof voiceBank;
   youtubeAuth: typeof youtubeAuth;
+  youtubeCreationClaims: typeof youtubeCreationClaims;
   youtubeUploads: typeof youtubeUploads;
 }>;
 

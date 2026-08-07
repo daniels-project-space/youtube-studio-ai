@@ -1,5 +1,12 @@
 import { v } from "convex/values";
 import { mutation, query } from "./studioFunctions";
+import type { Doc } from "./_generated/dataModel";
+import type { QueryCtx } from "./_generated/server";
+import { canonicalJson } from "../src/lib/canonicalJson";
+import {
+  type PlanWeekProviderRenderReceipt,
+  verifyFinalizedPlanWeekRenderReceipt,
+} from "../src/lib/planWeekRenderReceipt";
 import {
   PLAN_WEEK_CONTRACT_VERSION,
   planWeekContractReservation,
@@ -20,8 +27,27 @@ import {
   orphanReadyRowsForMaintenance,
 } from "../src/lib/calendarMaintenance";
 import { completedPublishContinuationPatch } from "./publishContinuationState";
+import { RUN_QUEUE_LEASE_MS } from "../src/lib/runLease";
+import { paginationOptsValidator } from "convex/server";
+import {
+  CHANNEL_PLAN_LIMIT,
+  OWNER_PLAN_LIMIT,
+  PLAN_HISTORY_PAGE_LIMIT,
+  validatedReadLimit,
+} from "../src/lib/boundedConvexReads";
 
 const PLAN_BATCH_LEASE_MS = 2 * 60 * 60 * 1_000;
+const PROVEN_READY_PLAN_LIMIT = {
+  defaultLimit: 24,
+  maxLimit: 96,
+  label: "proven ready plan limit",
+} as const;
+const PROVEN_READY_BATCH_SCAN_LIMIT = 96;
+const PROVEN_READY_BATCH_PAGE_LIMIT = {
+  defaultLimit: 8,
+  maxLimit: 12,
+  label: "proven ready batch page limit",
+} as const;
 
 function cleanError(value: string): string {
   return value.trim().slice(0, 1_000) || "unknown planner failure";
@@ -52,10 +78,42 @@ function usageEvidence(modelUsage: unknown, imageUsage: unknown) {
   return { modelCost, imageCost, accountingComplete };
 }
 
+function imageUsageMatchesProviderReceipt(
+  imageUsage: unknown,
+  receipt: PlanWeekProviderRenderReceipt,
+): boolean {
+  if (typeof imageUsage !== "object" || imageUsage === null) return false;
+  const summary = imageUsage as { records?: unknown; costUsd?: unknown; images?: unknown };
+  if (!Array.isArray(summary.records) || summary.records.length !== 1 ||
+      summary.images !== 1 || typeof summary.costUsd !== "number" ||
+      Math.abs(summary.costUsd - receipt.costUsd) > 0.000001) return false;
+  return summary.records.every((record) => {
+    if (typeof record !== "object" || record === null) return false;
+    const values = record as {
+      images?: unknown;
+      costUsd?: unknown;
+      provider?: unknown;
+      route?: unknown;
+      model?: unknown;
+      width?: unknown;
+      height?: unknown;
+    };
+    return values.images === 1 && values.costUsd === receipt.costUsd &&
+      values.provider === "novita" && values.route === "local-z-image-turbo" &&
+      values.model === `${receipt.model}@${receipt.modelRevision}`.toLowerCase() &&
+      values.width === receipt.width && values.height === receipt.height;
+  });
+}
+
 function validUsageFingerprint(value: string): string {
   const fingerprint = value.trim().toLowerCase();
   if (!/^[a-f0-9]{64}$/.test(fingerprint)) throw new Error("invalid plan usage fingerprint");
   return fingerprint;
+}
+
+async function sha256Hex(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return Array.from(new Uint8Array(digest), (byte) => byte.toString(16).padStart(2, "0")).join("");
 }
 
 async function requirePlannerService(ctx: {
@@ -97,10 +155,103 @@ function scheduledRunPayload(run: {
   });
 }
 
-/** The upcoming-videos queue for a channel, soonest first. */
+async function proveReadyPlanBatches(
+  ctx: Pick<QueryCtx, "db">,
+  args: { ownerId: string; channelId: Doc<"channels">["_id"] },
+  batches: Doc<"planBatches">[],
+) {
+  const provenBatches = await Promise.all(batches.map(async (batch) => {
+    if (batch.ownerId !== args.ownerId || batch.channelId !== args.channelId ||
+        batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION ||
+        batch.status !== "ready" || batch.topicState !== "complete" ||
+        !batch.accountingComplete || batch.budgetExceeded) {
+      return [];
+    }
+    const expectedIds = batch.itemIds ?? [];
+    if (!expectedIds.length || expectedIds.length > 12 ||
+        new Set(expectedIds.map(String)).size !== expectedIds.length) return [];
+    const [loadedItems, usageRows, renderRows] = await Promise.all([
+      Promise.all(expectedIds.map((itemId) => ctx.db.get(itemId))),
+      ctx.db.query("planBatchUsage").withIndex("by_batch", (q) => q.eq("batchId", batch._id)).take(65),
+      ctx.db.query("planWeekRenderReceipts").withIndex("by_batch", (q) => q.eq("batchId", batch._id)).take(13),
+    ]);
+    if (loadedItems.some((item) => !item) || usageRows.length > 64 ||
+        renderRows.length !== expectedIds.length) return [];
+    const items = loadedItems.filter((item): item is NonNullable<typeof item> => Boolean(item));
+    const allUsageBound = usageRows.every((usage) =>
+      usage.ownerId === args.ownerId && usage.channelId === args.channelId &&
+      usage.batchId === batch._id && usage.accountingComplete &&
+      Number.isFinite(usage.costUsd) && usage.costUsd >= 0,
+    );
+    const usageTotal = Number(usageRows.reduce((sum, usage) => sum + usage.costUsd, 0).toFixed(6));
+    const topicUsage = usageRows.find((usage) =>
+      !usage.itemId && usage.checkpointKey === batch.topicUsageCheckpointKey,
+    );
+    if (!allUsageBound || !topicUsage || Math.abs(usageTotal - batch.actualCostUsd) > 0.000001 ||
+        batch.actualCostUsd > batch.reservedCostUsd + 0.000001) {
+      return [];
+    }
+    const artifacts = new Map<string, NonNullable<(typeof renderRows)[number]["artifactReceipt"]>>();
+    const providers = new Map<string, (typeof renderRows)[number]["providerReceipt"]>();
+    for (const item of items) {
+      const itemUsage = usageRows.filter((usage) => usage.itemId === item._id);
+      const checkpoint = itemUsage.find((usage) => usage.checkpointKey === item.usageCheckpointKey);
+      const matchingReceipts = renderRows.filter((row) =>
+        row.itemId === item._id && row.checkpointKey === item.usageCheckpointKey,
+      );
+      const renderReceipt = matchingReceipts[0];
+      const expectedThumbnailKey =
+        `owner/${args.ownerId.replace(/^\/+|\/+$/g, "")}/channel/${batch.channelSlug.replace(/^\/+|\/+$/g, "")}/plan/${item._id}.jpg`;
+      const itemCost = Number(itemUsage.reduce((sum, usage) => sum + usage.costUsd, 0).toFixed(6));
+      const receiptVerified = renderReceipt
+        ? await verifyFinalizedPlanWeekRenderReceipt(renderReceipt, {
+            ownerId: args.ownerId,
+            channelId: String(args.channelId),
+            batchId: String(batch._id),
+            itemId: String(item._id),
+            attempt: item.generationAttempt,
+            requestKey: batch.requestKey,
+            checkpointKey: item.usageCheckpointKey,
+            destinationKey: expectedThumbnailKey,
+          })
+        : false;
+      if (item.ownerId !== args.ownerId || item.channelId !== args.channelId ||
+          item.batchId !== batch._id ||
+          item.status !== "ready" || item.generationState !== "complete" ||
+          item.thumbnailKey !== expectedThumbnailKey || !checkpoint ||
+          matchingReceipts.length !== 1 || !renderReceipt || !receiptVerified ||
+          renderReceipt.ownerId !== args.ownerId || renderReceipt.channelId !== args.channelId ||
+          renderReceipt.batchId !== batch._id || renderReceipt.attempt !== item.generationAttempt ||
+          renderReceipt.requestKey !== batch.requestKey ||
+          renderReceipt.destinationKey !== expectedThumbnailKey ||
+          !imageUsageMatchesProviderReceipt(checkpoint.imageUsage, renderReceipt.providerReceipt) ||
+          typeof item.generationCostUsd !== "number" ||
+          Math.abs(item.generationCostUsd - itemCost) > 0.000001) {
+        return [];
+      }
+      artifacts.set(String(item._id), renderReceipt.artifactReceipt!);
+      providers.set(String(item._id), renderReceipt.providerReceipt);
+    }
+    return items.map((item) => ({
+      ...item,
+      planWeekArtifactReceipt: artifacts.get(String(item._id))!,
+      planWeekProviderReceipt: providers.get(String(item._id))!,
+    }));
+  }));
+  return provenBatches
+    .flat()
+    .sort((left, right) => right.order - left.order);
+}
+
+/** Bounded upcoming-videos queue for a channel, soonest first. */
 export const listPlan = query({
-  args: { ownerId: v.string(), channelId: v.id("channels") },
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    limit: v.optional(v.number()),
+  },
   handler: async (ctx, args) => {
+    const limit = validatedReadLimit(args.limit, CHANNEL_PLAN_LIMIT);
     const rows = (
       await Promise.all(
         ["generating", "ready", "failed"].map((status) =>
@@ -109,7 +260,8 @@ export const listPlan = query({
             .withIndex("by_channel_status_order", (q) =>
               q.eq("channelId", args.channelId).eq("status", status),
             )
-            .collect(),
+            .order(status === "failed" ? "desc" : "asc")
+            .take(status === "failed" ? Math.min(limit, 100) : limit),
         ),
       )
     ).flat();
@@ -120,9 +272,66 @@ export const listPlan = query({
 });
 
 /**
+ * Service-only readiness projection for paid channel-inception consumers.
+ * A visible `status: ready` string is deliberately insufficient: every row
+ * must still belong to a finalized batch with immutable, fully priced image
+ * evidence and the exact admitted R2 artifact path.
+ */
+export const listProvenReadyPlan = query({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    await requirePlannerService(ctx);
+    const limit = validatedReadLimit(args.limit, PROVEN_READY_PLAN_LIMIT);
+    // Start from finalized batches, not arbitrary ready rows. Invalid or
+    // legacy contentPlan rows therefore cannot crowd valid evidence out of a
+    // bounded pre-filter window.
+    const batches = await ctx.db
+      .query("planBatches")
+      .withIndex("by_channel_status", (q) =>
+        q.eq("channelId", args.channelId).eq("status", "ready"),
+      )
+      .order("desc")
+      .take(PROVEN_READY_BATCH_SCAN_LIMIT);
+    return (await proveReadyPlanBatches(ctx, args, batches)).slice(0, limit);
+  },
+});
+
+/**
+ * Cursor page used by durable readiness scans. Pagination happens before
+ * provenance filtering so any number of newer invalid legacy batches cannot
+ * permanently hide an older valid batch.
+ */
+export const listProvenReadyPlanPage = query({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    await requirePlannerService(ctx);
+    validatedReadLimit(args.paginationOpts.numItems, PROVEN_READY_BATCH_PAGE_LIMIT);
+    const batchPage = await ctx.db
+      .query("planBatches")
+      .withIndex("by_channel_status", (q) =>
+        q.eq("channelId", args.channelId).eq("status", "ready"),
+      )
+      .order("desc")
+      .paginate(args.paginationOpts);
+    return {
+      ...batchPage,
+      page: await proveReadyPlanBatches(ctx, args, batchPage.page),
+    };
+  },
+});
+
+/**
  * Small, stable projection for the persistent channel header. The detailed
- * week-ahead view owns the unbounded queue read; every other tab only needs a
- * bounded set to calculate the next production slot and artwork fallback.
+ * week-ahead view owns the larger bounded queue read; every other tab only
+ * needs a small set to calculate the next production slot and artwork fallback.
  */
 export const listReadyPlanPreview = query({
   args: { ownerId: v.string(), channelId: v.id("channels") },
@@ -139,13 +348,14 @@ export const listReadyPlanPreview = query({
 });
 
 /**
- * ALL planned items across the owner's channels, joined with channel name +
+ * Bounded active planned items across the owner's channels, joined with channel name +
  * cadence (drives the Schedule calendar — dates are projected client-side from
  * each channel's cadence + the item order). Soonest-first per channel.
  */
 export const listPlanByOwner = query({
-  args: { ownerId: v.string() },
+  args: { ownerId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    const limit = validatedReadLimit(args.limit, OWNER_PLAN_LIMIT);
     // Active calendar reads must not subscribe to the owner's unbounded used
     // history. Read only the three non-terminal states through a compound
     // index, then preserve the existing per-channel order projection.
@@ -157,7 +367,8 @@ export const listPlanByOwner = query({
             .withIndex("by_owner_status", (q) =>
               q.eq("ownerId", args.ownerId).eq("status", status),
             )
-            .collect(),
+            .order("desc")
+            .take(status === "failed" ? Math.min(limit, 100) : limit),
         ),
       )
     ).flat().sort((a, b) => a.order - b.order);
@@ -205,6 +416,29 @@ export const listPlanByOwner = query({
   },
 });
 
+/** Bounded cursor history for diagnostics without subscribing UI to all rows. */
+export const listPlanHistoryPage = query({
+  args: {
+    ownerId: v.string(),
+    status: v.union(
+      v.literal("failed"),
+      v.literal("used"),
+      v.literal("cancelled"),
+    ),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    validatedReadLimit(args.paginationOpts.numItems, PLAN_HISTORY_PAGE_LIMIT);
+    return await ctx.db
+      .query("contentPlan")
+      .withIndex("by_owner_status", (q) =>
+        q.eq("ownerId", args.ownerId).eq("status", args.status),
+      )
+      .order("desc")
+      .paginate(args.paginationOpts);
+  },
+});
+
 /** Pin (or clear) a planned item's calendar date — drag-to-reschedule / date field. */
 export const setScheduledAt = mutation({
   args: { id: v.id("contentPlan"), scheduledAt: v.union(v.number(), v.null()) },
@@ -219,36 +453,6 @@ export const setScheduledAt = mutation({
     }
     await ctx.db.patch(args.id, { scheduledAt: args.scheduledAt ?? undefined });
     return null;
-  },
-});
-
-/** Append planned topics (status "generating"); the task fills them in. */
-export const addItems = mutation({
-  args: {
-    ownerId: v.string(),
-    channelId: v.id("channels"),
-    topics: v.array(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const existing = await ctx.db
-      .query("contentPlan")
-      .withIndex("by_channel_order", (q) => q.eq("channelId", args.channelId))
-      .collect();
-    let order = existing.length ? Math.max(...existing.map((r) => r.order)) + 1 : 0;
-    const ids = [];
-    for (const topic of args.topics) {
-      ids.push(
-        await ctx.db.insert("contentPlan", {
-          ownerId: args.ownerId,
-          channelId: args.channelId,
-          order: order++,
-          topic,
-          status: "generating",
-          createdAt: Date.now(),
-        }),
-      );
-    }
-    return ids;
   },
 });
 
@@ -420,6 +624,9 @@ export const claimPlanTopics = mutation({
     if (!batch || batch.ownerId !== args.ownerId || batch.channelId !== args.channelId) {
       throw new Error("plan batch ownership mismatch");
     }
+    if (batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION) {
+      throw new Error("plan topics do not belong to the active attested Novita contract");
+    }
     if (batch.topicState === "complete") return { state: "complete" as const, itemIds: batch.itemIds ?? [] };
     if (batch.budgetExceeded) {
       return {
@@ -542,6 +749,9 @@ export const recordPlanBatchUsage = mutation({
     if (!batch || batch.ownerId !== args.ownerId || batch.channelId !== args.channelId) {
       throw new Error("plan batch ownership mismatch");
     }
+    if (batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION) {
+      throw new Error("plan usage does not belong to the active contract");
+    }
     const checkpointKey = args.checkpointKey.trim();
     if (!checkpointKey || checkpointKey.length > 220) throw new Error("invalid plan usage checkpoint key");
     const { modelCost, imageCost, accountingComplete } = usageEvidence(args.modelUsage, args.imageUsage);
@@ -556,6 +766,16 @@ export const recordPlanBatchUsage = mutation({
       throw new Error("plan usage accountingComplete does not match scoped usage evidence");
     }
     const fingerprint = validUsageFingerprint(args.fingerprint);
+    const expectedFingerprint = await sha256Hex(canonicalJson({
+      contractVersion: PLAN_WEEK_CONTRACT_VERSION,
+      costUsd,
+      accountingComplete,
+      modelUsage: args.modelUsage,
+      imageUsage: args.imageUsage,
+    }));
+    if (fingerprint !== expectedFingerprint) {
+      throw new Error("plan usage fingerprint does not match its canonical evidence");
+    }
     const prior = await ctx.db
       .query("planBatchUsage")
       .withIndex("by_checkpoint", (q) => q.eq("batchId", args.batchId).eq("checkpointKey", checkpointKey))
@@ -955,10 +1175,14 @@ export const completePlanItem = mutation({
     if (!item || item.ownerId !== args.ownerId || item.channelId !== args.channelId || item.batchId !== args.batchId) {
       throw new Error("plan item ownership mismatch");
     }
-    if (item.status === "ready" && item.thumbnailKey) return item.thumbnailKey;
+    const alreadyReady = item.status === "ready" && Boolean(item.thumbnailKey);
+    if (alreadyReady &&
+        (item.generationAttempt !== args.attempt || item.usageCheckpointKey !== args.usageCheckpointKey)) {
+      throw new Error("ready plan item replay does not match its fenced receipt");
+    }
     const restoringFailedArtifact = item.generationState === "failed" &&
       item.generationAttempt === args.attempt && item.usageCheckpointKey === args.usageCheckpointKey;
-    if (!restoringFailedArtifact &&
+    if (!alreadyReady && !restoringFailedArtifact &&
         (item.generationState !== "claimed" || item.generationAttempt !== args.attempt)) {
       throw new Error("stale plan item completion attempt");
     }
@@ -968,29 +1192,54 @@ export const completePlanItem = mutation({
     if (!batch || batch.ownerId !== args.ownerId || batch.channelId !== args.channelId) {
       throw new Error("plan batch ownership mismatch");
     }
+    if (batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION) {
+      throw new Error("plan item does not belong to the active attested Novita contract");
+    }
     const cleanKeyPart = (value: string) => value.replace(/^\/+|\/+$/g, "");
     const expectedThumbnailKey =
       `owner/${cleanKeyPart(args.ownerId)}/channel/${cleanKeyPart(batch.channelSlug)}/plan/${args.itemId}.jpg`;
     if (thumbnailKey !== expectedThumbnailKey) {
       throw new Error("plan item thumbnail key does not match its admitted artifact path");
     }
-    const usage = await ctx.db
-      .query("planBatchUsage")
-      .withIndex("by_checkpoint", (q) =>
-        q.eq("batchId", args.batchId).eq("checkpointKey", args.usageCheckpointKey),
-      )
-      .unique();
+    const [usage, renderReceipt] = await Promise.all([
+      ctx.db.query("planBatchUsage")
+        .withIndex("by_checkpoint", (q) =>
+          q.eq("batchId", args.batchId).eq("checkpointKey", args.usageCheckpointKey),
+        )
+        .unique(),
+      ctx.db.query("planWeekRenderReceipts")
+        .withIndex("by_checkpoint", (q) => q
+          .eq("ownerId", args.ownerId)
+          .eq("channelId", args.channelId)
+          .eq("checkpointKey", args.usageCheckpointKey),
+        )
+        .unique(),
+    ]);
     if (!usage || usage.itemId !== args.itemId || !usage.accountingComplete) {
       throw new Error("plan item usage checkpoint is missing or unpriced");
     }
-    const imageRecords = (usage.imageUsage as { records?: unknown })?.records;
-    const hasImageEvidence = Array.isArray(imageRecords) && imageRecords.some((record) => {
-      if (typeof record !== "object" || record === null) return false;
-      const values = record as { images?: unknown; costUsd?: unknown };
-      return typeof values.images === "number" && values.images >= 1 &&
-        typeof values.costUsd === "number" && Number.isFinite(values.costUsd) && values.costUsd >= 0;
-    });
-    if (!hasImageEvidence) throw new Error("plan item usage checkpoint has no generated image evidence");
+    if (!renderReceipt) throw new Error("plan item finalized Novita receipt is missing");
+    if (!(await verifyFinalizedPlanWeekRenderReceipt(renderReceipt, {
+      ownerId: args.ownerId,
+      channelId: String(args.channelId),
+      batchId: String(args.batchId),
+      itemId: String(args.itemId),
+      attempt: args.attempt,
+      requestKey: batch.requestKey,
+      checkpointKey: args.usageCheckpointKey,
+      destinationKey: thumbnailKey,
+    }))) {
+      throw new Error("plan item Novita receipt is not artifact-finalized");
+    }
+    if (renderReceipt.batchId !== args.batchId || renderReceipt.itemId !== args.itemId ||
+        renderReceipt.attempt !== args.attempt || renderReceipt.requestKey !== batch.requestKey ||
+        renderReceipt.destinationKey !== thumbnailKey) {
+      throw new Error("plan item finalized Novita receipt is not bound to the item attempt");
+    }
+    if (!imageUsageMatchesProviderReceipt(usage.imageUsage, renderReceipt.providerReceipt)) {
+      throw new Error("plan item usage does not match its finalized Novita provider receipt");
+    }
+    if (alreadyReady) return item.thumbnailKey!;
     await ctx.db.patch(args.itemId, {
       thumbnailKey,
       status: "ready",
@@ -1121,33 +1370,6 @@ export const finalizePlanBatch = mutation({
   },
 });
 
-/** Fill in a planned item's generated title/description/thumbnail. */
-export const setGenerated = mutation({
-  args: {
-    id: v.id("contentPlan"),
-    title: v.optional(v.string()),
-    description: v.optional(v.string()),
-    thumbnailKey: v.optional(v.string()),
-    status: v.optional(v.string()),
-  },
-  handler: async (ctx, args) => {
-    const item = await ctx.db.get(args.id);
-    if (!item) throw new Error("content plan item not found");
-    if (item.batchId) throw new Error("batch-managed plan items require the fenced completion flow");
-    const status = args.status ?? "ready";
-    const thumbnailKey = args.thumbnailKey?.trim() || item.thumbnailKey?.trim();
-    if (status === "ready" && !thumbnailKey) {
-      throw new Error("legacy plan item cannot be ready without a thumbnail");
-    }
-    const { id, ...patch } = args;
-    await ctx.db.patch(id, {
-      ...patch,
-      ...(args.thumbnailKey !== undefined ? { thumbnailKey: args.thumbnailKey.trim() || undefined } : {}),
-      status,
-    });
-  },
-});
-
 export const deleteItem = mutation({
   args: { id: v.id("contentPlan") },
   handler: async (ctx, args) => {
@@ -1246,6 +1468,42 @@ export const claimNextPlanRun = mutation({
         };
       }
       return { state: "cadence" as const, reused: true, runId: queued._id };
+    }
+
+    // The lease reaper only sets this marker when the run has a complete,
+    // immutable invocation snapshot. Re-dispatching the same id lets the
+    // runner reuse durable completed stages without purchasing them twice.
+    if (lastRun?.status === "failed" && lastRun.leaseRecoveryPending === true) {
+      if (lastRun.ownerId !== args.ownerId) {
+        throw new Error("recoverable run ownership mismatch");
+      }
+      if (lastRun.planItemId) {
+        const item = await ctx.db.get(lastRun.planItemId);
+        if (
+          !item ||
+          item.ownerId !== args.ownerId ||
+          item.channelId !== args.channelId ||
+          item.status !== "ready" ||
+          item.scheduledRunId !== lastRun._id
+        ) {
+          throw new Error("recoverable scheduled run fence mismatch");
+        }
+        const payload = scheduledItemPayload(item);
+        assertScheduledPlanPayloadMatches(payload, scheduledRunPayload(lastRun));
+        return {
+          state: "claimed" as const,
+          reused: true,
+          recoveryDispatch: true,
+          runId: lastRun._id,
+          ...payload,
+        };
+      }
+      return {
+        state: "cadence" as const,
+        reused: true,
+        recoveryDispatch: true,
+        runId: lastRun._id,
+      };
     }
 
     const pinnedRows = await ctx.db
@@ -1385,6 +1643,8 @@ export const claimNextPlanRun = mutation({
         status: "queued",
         startedAt: now,
         costTotal: 0,
+        heartbeatAt: now,
+        leaseExpiresAt: now + RUN_QUEUE_LEASE_MS,
       });
       return { state: "cadence" as const, reused: false, runId };
     }
@@ -1440,6 +1700,8 @@ export const claimNextPlanRun = mutation({
       status: "queued",
       startedAt: now,
       costTotal: 0,
+      heartbeatAt: now,
+      leaseExpiresAt: now + RUN_QUEUE_LEASE_MS,
       planItemId: item._id,
       plannedTopic: payload.topic,
       plannedTitle: payload.title,
@@ -1521,6 +1783,10 @@ export const completeClaimedPlanRun = mutation({
         status: "ok",
         finishedAt: run.finishedAt ?? args.finishedAt,
         error: undefined,
+        heartbeatAt: run.finishedAt ?? args.finishedAt,
+        leaseExpiresAt: undefined,
+        leaseOwner: undefined,
+        leaseRecoveryPending: undefined,
         ...continuationPatch,
       });
       return { state: "used" as const, reused: true };
@@ -1544,6 +1810,10 @@ export const completeClaimedPlanRun = mutation({
       finishedAt: args.finishedAt,
       costTotal: args.costTotal,
       error: undefined,
+      heartbeatAt: args.finishedAt,
+      leaseExpiresAt: undefined,
+      leaseOwner: undefined,
+      leaseRecoveryPending: undefined,
       ...continuationPatch,
     });
     await ctx.db.patch(args.itemId, {
@@ -1581,6 +1851,10 @@ export const failClaimedPlanRun = mutation({
       finishedAt: args.failedAt,
       ...(args.costTotal !== undefined ? { costTotal: validUsd(args.costTotal, "run cost") } : {}),
       error,
+      heartbeatAt: args.failedAt,
+      leaseExpiresAt: undefined,
+      leaseOwner: undefined,
+      leaseRecoveryPending: undefined,
     });
     await ctx.db.patch(args.itemId, { scheduledFailure: error });
     return { state: "failed" as const };

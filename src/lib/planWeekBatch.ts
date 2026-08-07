@@ -1,6 +1,6 @@
 import { createHash } from "node:crypto";
 import { PRICE } from "@/engine/pricing";
-import { selectedFalImageCostUsd } from "@/lib/falImagePricing";
+import { canonicalJson } from "@/lib/canonicalJson";
 import type { ImageUsageSummary } from "@/lib/imageUsage";
 import type { ModelUsageSummary } from "@/lib/modelUsage";
 import {
@@ -9,7 +9,10 @@ import {
   planWeekContractReservation,
 } from "@/lib/planWeekContract";
 
-export { PLAN_WEEK_CONTRACT_VERSION } from "@/lib/planWeekContract";
+export {
+  PLAN_WEEK_CONTRACT_VERSION,
+  PLAN_WEEK_IMAGE_UNIT_USD,
+} from "@/lib/planWeekContract";
 
 const STOP_WORDS = new Set([
   "a", "an", "and", "are", "as", "at", "be", "by", "for", "from", "how", "in", "into",
@@ -55,16 +58,12 @@ function roundUsd(value: number): number {
 
 /**
  * Conservative pre-provider envelope for the only paid paths left in the
- * planner: Topicraft's bounded two-slate generator/judge and one Flash image
- * per accepted item. Per-item metadata/concept calls are intentionally absent.
+ * planner: Topicraft's bounded two-slate generator/judge and one attested
+ * Novita image per accepted item. Actual spend comes from signed receipts; the
+ * reservation uses the hard per-image admission ceiling.
  */
 export function planWeekReservation(count: number): PlanWeekReservation {
-  const falFlashUsd = selectedFalImageCostUsd({
-    tier: "flash",
-    aspectRatio: "16:9",
-    hasReferences: false,
-  });
-  const liveImageUnitUsd = roundUsd(Math.max(PRICE.bananaFlashUsd, falFlashUsd));
+  const liveImageUnitUsd = roundUsd(PRICE.novitaImageUsd);
   if (liveImageUnitUsd > PLAN_WEEK_IMAGE_UNIT_USD + 0.000001) {
     throw new Error(
       `plan-week pricing $${liveImageUnitUsd.toFixed(4)} exceeds ${PLAN_WEEK_CONTRACT_VERSION}; bump the contract`,
@@ -124,13 +123,6 @@ export function dedupePlanCandidates<T extends { topic: string }>(
   return accepted;
 }
 
-function stableJson(value: unknown): string {
-  if (value === null || typeof value !== "object") return JSON.stringify(value);
-  if (Array.isArray(value)) return `[${value.map(stableJson).join(",")}]`;
-  const object = value as Record<string, unknown>;
-  return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${stableJson(object[key])}`).join(",")}}`;
-}
-
 export function buildPlanWeekUsageCheckpoint(
   modelUsage: ModelUsageSummary,
   imageUsage: ImageUsageSummary,
@@ -147,7 +139,7 @@ export function buildPlanWeekUsageCheckpoint(
   };
   return {
     ...payload,
-    fingerprint: createHash("sha256").update(stableJson(payload)).digest("hex"),
+    fingerprint: createHash("sha256").update(canonicalJson(payload)).digest("hex"),
   };
 }
 
@@ -168,7 +160,7 @@ export function buildPlanWeekTopicCheckpoint(args: {
   };
   return {
     ...payload,
-    artifactFingerprint: createHash("sha256").update(stableJson(payload)).digest("hex"),
+    artifactFingerprint: createHash("sha256").update(canonicalJson(payload)).digest("hex"),
   };
 }
 

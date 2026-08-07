@@ -1,4 +1,4 @@
-import { mutation, query } from "./studioFunctions";
+import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { v } from "convex/values";
 
 /**
@@ -33,6 +33,7 @@ export const upsertNiche = mutation({
   },
   returns: v.id("nicheIntelligence"),
   handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "research evidence write");
     const existing = await ctx.db
       .query("nicheIntelligence")
       .withIndex("by_owner_niche", (q) =>
@@ -85,6 +86,7 @@ export const upsertDatabank = mutation({
   },
   returns: v.id("seoDatabank"),
   handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "SEO evidence write");
     const existing = await ctx.db
       .query("seoDatabank")
       .withIndex("by_owner_niche", (q) =>

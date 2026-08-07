@@ -27,6 +27,7 @@ import {
 import { loadLedger, saveLedger, loadPerformanceContext, type PerfEntry } from "@/lib/performance";
 import { YOUTUBE_ANALYTICS_SCOPE } from "@/lib/publishingPolicy";
 import { agentJson } from "@/agents/mastra";
+import { listRunHistorySince } from "@/lib/runHistory";
 import { z } from "zod";
 
 const SETTLE_MS = 72 * 3_600_000;
@@ -177,9 +178,7 @@ async function refresh(ownerId: string, log: Logger) {
       continue;
     }
     const prefix = channelPrefix(ownerId, ch.slug);
-    const runs = (await convex.query(api.runs.listRunsByChannel, {
-      channelId: ch._id,
-    })) as Array<{ _id: Id<"runs">; youtubeVideoId?: string; finishedAt?: number }>;
+    const runs = await listRunHistorySince(convex, ch._id, 0);
     const published = runs.filter(
       (r) => r.youtubeVideoId && r.finishedAt && Date.now() - r.finishedAt > SETTLE_MS,
     );

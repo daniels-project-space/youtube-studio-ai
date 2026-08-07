@@ -13,6 +13,8 @@ type StudioArgs = Record<string, unknown>;
 type TableName = TableNames;
 type StudioOperation = "query" | "mutation";
 
+type StudioAuthCtx = Pick<StudioCtx, "auth">;
+
 const RESOURCE_KEYS = {
   channelId: "channels",
   targetChannelId: "channels",
@@ -43,6 +45,22 @@ function identityScope(identity: UserIdentity | null) {
     throw new Error("Invalid studio viewer identity");
   }
   return { role, ownerId } as const;
+}
+
+/**
+ * Require the short-lived server JWT, additionally bound to the requested
+ * owner. Public owner sessions must never be able to manufacture provider or
+ * accounting evidence that downstream readiness checks treat as trusted.
+ */
+export async function requireStudioServiceIdentity(
+  ctx: StudioAuthCtx,
+  ownerId: string,
+  purpose = "Studio service operation",
+): Promise<void> {
+  const identity = identityScope(await ctx.auth.getUserIdentity());
+  if (identity.role !== "service" || identity.ownerId !== ownerId) {
+    throw new Error(`${purpose} requires the bound studio service identity`);
+  }
 }
 
 async function assertOwnedRecord(
@@ -156,4 +174,5 @@ export const mutation = authenticatedBuilder(baseMutation, "mutation");
 export const studioAuthorizationForTests = {
   identityScope,
   authorizeStudioCall,
+  requireStudioServiceIdentity,
 };

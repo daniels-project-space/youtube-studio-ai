@@ -1,4 +1,5 @@
-export const PLAN_WEEK_CONTRACT_VERSION = "plan-week-v2" as const;
+export const PLAN_WEEK_CONTRACT_VERSION = "plan-week-v3-attested-novita" as const;
+/** Budget reservation only; actual billing always uses the signed GPU receipt. */
 export const PLAN_WEEK_IMAGE_UNIT_USD = 0.04;
 
 function roundUsd(value: number): number {

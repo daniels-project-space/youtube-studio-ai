@@ -18,6 +18,7 @@ import {
   formatZonedScheduleTimestamp,
   nextProjectedPlanItem,
 } from "@/lib/scheduleCalendar";
+import { channelsVisibleForFolder } from "./channelCardVisibility";
 
 type ChannelCardRow = ChannelRow & {
   folder?: string;
@@ -80,10 +81,8 @@ export default function ChannelsPage() {
   const linkedIds = new Set((links ?? []).map((l) => l.channelId));
   const ytIdByChannel = new Map((links ?? []).map((l) => [l.channelId, l.ytChannelId ?? null]));
 
-  const folderNames = new Set((folders ?? []).map((f) => f.name));
   const inFolder = (name: string) => (channels ?? []).filter((c) => c.folder === name);
-  const unfiled = (channels ?? []).filter((c) => !c.folder || !folderNames.has(c.folder));
-  const visible = openFolder ? inFolder(openFolder) : unfiled;
+  const visible = channelsVisibleForFolder(channels ?? [], openFolder);
   const readyPlanBySlug = new Map<string, PlanCardRow[]>();
   for (const item of plan ?? []) {
     if (item.status !== "ready") continue;
@@ -108,37 +107,19 @@ export default function ChannelsPage() {
         title="Channels"
         subtitle="Every channel and its pipeline status"
         actions={
-          <div style={{ display: "flex", gap: "0.5rem" }}>
+          <div className="channel-page-actions">
             <button
               onClick={async () => {
                 const name = window.prompt("Folder name:");
                 if (name?.trim()) await createFolder({ ownerId, name: name.trim() });
               }}
-              className="lift"
-              style={{
-                padding: "0.55rem 1rem",
-                borderRadius: 9,
-                background: "transparent",
-                border: "1px solid var(--color-border)",
-                color: "var(--color-muted)",
-                fontWeight: 600,
-                fontSize: "0.85rem",
-                cursor: "pointer",
-              }}
+              className="studio-action studio-action-secondary"
             >
               + Folder
             </button>
             <Link
               href="/channels/new"
-              className="lift"
-              style={{
-                padding: "0.55rem 1rem",
-                borderRadius: 9,
-                background: "var(--color-accent)",
-                color: "#0a0a0b",
-                fontWeight: 600,
-                fontSize: "0.85rem",
-              }}
+              className="studio-action"
             >
               + New channel
             </Link>
@@ -148,20 +129,16 @@ export default function ChannelsPage() {
 
       {/* Folder row: drop targets with mini avatar previews. */}
       {(folders?.length ?? 0) > 0 && (
-        <div style={{ display: "flex", flexWrap: "wrap", gap: "0.75rem", marginBottom: "1.1rem" }}>
+        <div className="channel-folder-strip" aria-label="Channel folders">
           {openFolder && (
             <button
               onClick={() => setOpenFolder(null)}
               onDragOver={(e) => { e.preventDefault(); setDragOver("__all"); }}
               onDragLeave={() => setDragOver(null)}
               onDrop={(e) => onDropToFolder(e, null)}
-              className="glass lift"
+              className="channel-folder-back"
               title="Back to all channels (drop a channel here to unfile it)"
-              style={{
-                padding: "0.6rem 0.9rem", borderRadius: 10, cursor: "pointer", fontSize: "0.85rem",
-                fontWeight: 600, color: "var(--color-muted)",
-                border: dragOver === "__all" ? "1px dashed var(--color-accent)" : "1px solid var(--color-border)",
-              }}
+              data-drag-over={dragOver === "__all" ? "true" : undefined}
             >
               ← All channels
             </button>
@@ -172,42 +149,42 @@ export default function ChannelsPage() {
             return (
               <div
                 key={f._id}
-                onClick={() => setOpenFolder(isOpen ? null : f.name)}
                 onDragOver={(e) => { e.preventDefault(); setDragOver(f.name); }}
                 onDragLeave={() => setDragOver(null)}
                 onDrop={(e) => onDropToFolder(e, f.name)}
-                className="glass glass-shine lift"
-                title={`${members.length} channel(s) — click to ${isOpen ? "close" : "open"}; drag a channel card here to file it`}
-                style={{
-                  padding: "0.6rem 0.9rem", borderRadius: 10, cursor: "pointer",
-                  display: "flex", alignItems: "center", gap: "0.6rem",
-                  border: dragOver === f.name
-                    ? "1px dashed var(--color-accent)"
-                    : isOpen ? "1px solid var(--color-accent)" : "1px solid var(--color-border)",
-                }}
+                className="channel-folder-chip"
+                data-open={isOpen ? "true" : undefined}
+                data-drag-over={dragOver === f.name ? "true" : undefined}
               >
-                <span style={{ fontSize: "1rem" }}>📁</span>
-                <span style={{ fontWeight: 600, fontSize: "0.85rem" }}>{f.name}</span>
-                <span style={{ display: "flex", marginLeft: "0.15rem" }}>
-                  {members.slice(0, 4).map((m, i) => (
-                    <span key={m._id} style={{ marginLeft: i === 0 ? 0 : -8, borderRadius: 7, overflow: "hidden", border: "1px solid var(--color-border)", lineHeight: 0 }}>
-                      <ChannelAvatar imageKey={m.identity?.imageKey} name={m.name} palette={m.identity?.palette} size={22} radius={6} />
-                    </span>
-                  ))}
-                </span>
-                <span style={{ fontSize: "0.72rem", color: "var(--color-faint)", fontFamily: "var(--font-mono)" }}>
-                  {members.length}
-                </span>
                 <button
-                  onClick={async (e) => {
-                    e.stopPropagation();
+                  type="button"
+                  className="channel-folder-chip-main"
+                  onClick={() => setOpenFolder(isOpen ? null : f.name)}
+                  aria-pressed={isOpen}
+                  title={`${members.length} channel(s) — click to ${isOpen ? "close" : "open"}; drag a channel card here to file it`}
+                >
+                  <span aria-hidden="true">📁</span>
+                  <strong>{f.name}</strong>
+                  <span className="channel-folder-avatars" aria-hidden="true">
+                    {members.slice(0, 4).map((m, i) => (
+                      <span key={m._id} style={{ marginLeft: i === 0 ? 0 : -7 }}>
+                        <ChannelAvatar imageKey={m.identity?.imageKey} name={m.name} palette={m.identity?.palette} size={20} radius={5} />
+                      </span>
+                    ))}
+                  </span>
+                  <small>{members.length}</small>
+                </button>
+                <button
+                  type="button"
+                  className="channel-folder-delete"
+                  onClick={async () => {
                     if (window.confirm(`Delete folder "${f.name}"? Channels inside are kept (unfiled).`)) {
                       if (openFolder === f.name) setOpenFolder(null);
                       await removeFolder({ ownerId, folderId: f._id as Id<"channelFolders"> });
                     }
                   }}
+                  aria-label={`Delete ${f.name} folder; channels are kept`}
                   title="Delete folder (channels are kept)"
-                  style={{ background: "none", border: "none", color: "var(--color-faint)", cursor: "pointer", fontSize: "0.85rem", padding: "0 0.1rem" }}
                 >
                   ×
                 </button>
@@ -272,10 +249,10 @@ export default function ChannelsPage() {
                   fallbackKeys={[planArtwork, c.identity?.bannerKey]}
                   name={c.name}
                   palette={c.identity?.palette}
-                  aspectRatio="16 / 9"
+                  aspectRatio="16 / 7"
                 >
                   <span className="channel-card-preview-label">
-                    {latestArtwork ? "Latest accepted thumbnail" : planArtwork ? "Planned thumbnail" : "Channel artwork"}
+                    {latestArtwork ? "Latest render" : planArtwork ? "Planned thumbnail" : "Channel artwork"}
                   </span>
                 </ChannelBanner>
                 <div className="channel-card-identity">
@@ -283,8 +260,8 @@ export default function ChannelsPage() {
                     imageKey={c.identity?.imageKey}
                     name={c.name}
                     palette={c.identity?.palette}
-                    size={66}
-                    radius={16}
+                    size={52}
+                    radius={12}
                   />
                   <div className="channel-card-title">
                     <Link href={`/channels/${c.slug}`}>
@@ -317,20 +294,33 @@ export default function ChannelsPage() {
                   </div>
                 </div>
 
-                <div className="channel-module-path" title={modulePath.join(" → ")}>
-                  <small>Module path</small>
-                  <span>
-                    {modulePath.length
-                      ? `${modulePath.slice(0, 3).join(" → ")}${modulePath.length > 3 ? ` → +${modulePath.length - 3}` : ""}`
-                      : "No pipeline configured"}
-                  </span>
-                </div>
+                <details className="channel-card-details">
+                  <summary>
+                    <span>Pipeline &amp; recent activity</span>
+                    <small>{modulePath.length} modules · {count} runs</small>
+                  </summary>
+                  <div className="channel-card-details-body">
+                    <div className="channel-module-path" title={modulePath.join(" → ")}>
+                      <small>Module path</small>
+                      <span>
+                        {modulePath.length
+                          ? `${modulePath.slice(0, 3).join(" → ")}${modulePath.length > 3 ? ` → +${modulePath.length - 3}` : ""}`
+                          : "No pipeline configured"}
+                      </span>
+                    </div>
 
-                <div className="channel-card-stats" title="Latest 20 runs for this channel">
-                  <CardStat label="Recent runs" value={String(count)} />
-                  <CardStat label="Published" value={String(videos)} />
-                  <CardStat label="Recent spend" value={fmtUsd(cost)} />
-                </div>
+                    <div className="channel-card-stats" title="Latest 20 runs for this channel">
+                      <CardStat label="Recent runs" value={String(count)} />
+                      <CardStat label="Published" value={String(videos)} />
+                      <CardStat label="Recent spend" value={fmtUsd(cost)} />
+                    </div>
+                    <nav className="channel-card-secondary-actions" aria-label={`${c.name} setup actions`}>
+                      <Link href={`/channels/${c.slug}?tab=settings`}>Settings</Link>
+                      <Link href={`/channels/${c.slug}?tab=week-ahead`}>Schedule</Link>
+                      <Link href={`/channels/${c.slug}?tab=pipeline`}>Pipeline</Link>
+                    </nav>
+                  </div>
+                </details>
 
                 {creating && (
                   <div className="channel-card-notice channel-card-notice-warning">
@@ -343,9 +333,6 @@ export default function ChannelsPage() {
                 )}
 
                 <nav className="channel-card-actions" aria-label={`${c.name} actions`}>
-                  <Link href={`/channels/${c.slug}?tab=settings`}>Settings</Link>
-                  <Link href={`/channels/${c.slug}?tab=week-ahead`}>Schedule</Link>
-                  <Link href={`/channels/${c.slug}?tab=pipeline`}>Pipeline</Link>
                   <Link href={`/channels/${c.slug}`} className="channel-card-open">Open →</Link>
                 </nav>
               </article>
@@ -541,20 +528,9 @@ function SetAvatarButton({ imageKey, ytChannelId, slug }: { imageKey: string; yt
 
 function CardStat({ label, value }: { label: string; value: string }) {
   return (
-    <div>
-      <div
-        style={{
-          fontSize: "0.62rem",
-          letterSpacing: "0.05em",
-          textTransform: "uppercase",
-          color: "var(--color-faint)",
-        }}
-      >
-        {label}
-      </div>
-      <div style={{ fontSize: "0.92rem", fontWeight: 600, marginTop: "0.15rem" }}>
-        {value}
-      </div>
+    <div className="channel-card-stat">
+      <small>{label}</small>
+      <strong>{value}</strong>
     </div>
   );
 }

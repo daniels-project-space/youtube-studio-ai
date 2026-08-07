@@ -13,6 +13,7 @@ import {
   ChannelScheduleEditor,
   channelScheduleEditorKey,
 } from "./ChannelScheduleEditor";
+import { DayByDaySchedule } from "./DayByDaySchedule";
 import { ScheduleQueue } from "./ScheduleQueue";
 import {
   CHANNEL_COLORS,
@@ -28,11 +29,13 @@ import styles from "./schedule.module.css";
 
 type Notice = { tone: "ok" | "error"; text: string };
 type PublishedHistoryPage = { items: PublishedVideo[]; truncated: boolean };
+type ScheduleView = "week" | "month" | "cadence";
 
 export default function SchedulePage() {
   const ownerId = useOwnerId();
   const [offset, setOffset] = useState(0);
   const [scope, setScope] = useState("all");
+  const [scheduleView, setScheduleView] = useState<ScheduleView>("week");
   const [notice, setNotice] = useState<Notice | null>(null);
   const [todayMs] = useState(() => Date.now());
   const reschedule = useMutation(api.contentPlan.setScheduledAt);
@@ -45,7 +48,18 @@ export default function SchedulePage() {
     { length: 42 },
     (_, index) => new Date(gridStart.getFullYear(), gridStart.getMonth(), gridStart.getDate() + index),
   );
-  const publishedRange = publishedTimestampRange(cells);
+  const weekCells = Array.from(
+    { length: 7 },
+    (_, index) => new Date(today.getFullYear(), today.getMonth(), today.getDate() + index),
+  );
+  // A six-row month grid can end one day before the seven-day board when the
+  // month starts late in the week. Include the explicit week dates so the last
+  // day never silently loses a real scheduled/published upload.
+  const publishedRange = publishedTimestampRange(
+    scheduleView === "week"
+      ? [...cells, ...weekCells].sort((left, right) => left.getTime() - right.getTime())
+      : cells,
+  );
 
   const plan = useQuery(api.contentPlan.listPlanByOwner, { ownerId }) as PlanItem[] | undefined;
   const channels = useQuery(api.channels.listChannels, { ownerId }) as ChannelRow[] | undefined;
@@ -83,14 +97,15 @@ export default function SchedulePage() {
     [channelById, channelColors, effectiveScope, plan, publishedHistory, todayMs],
   );
 
-  const upcoming = calendar.flat
-    .filter((event) => event.type === "planned" && event.date.getTime() >= today.getTime())
-    .sort((a, b) => a.date.getTime() - b.date.getTime())
-    .slice(0, 12);
   const viewedEvents = calendar.flat.filter(
     (event) => event.date.getFullYear() === view.getFullYear() && event.date.getMonth() === view.getMonth(),
   );
   const plannedEvents = calendar.flat.filter((event) => event.type === "planned");
+  const upcoming = plannedEvents
+    .filter((event) => event.date.getTime() >= today.getTime())
+    .sort((a, b) => (a.timestamp ?? a.date.getTime()) - (b.timestamp ?? b.date.getTime()))
+    .slice(0, 12);
+  const weekEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7).getTime();
   const summary = {
     planned: viewedEvents.filter((event) => event.type === "planned").length,
     published: viewedEvents.filter(
@@ -98,6 +113,11 @@ export default function SchedulePage() {
     ).length,
     ready: plannedEvents.filter((event) => event.readiness === "ready").length,
     attention: plannedEvents.filter((event) => event.readiness === "attention").length,
+    nextSevenDays: calendar.flat.filter((event) => {
+      const timestamp = event.date.getTime();
+      return timestamp >= today.getTime() && timestamp < weekEnd;
+    }).length,
+    activeCadences: visibleChannels.filter((channel) => channel.schedule?.enabled).length,
   };
   const loading = plan === undefined || publishedHistory === undefined || channels === undefined;
 
@@ -167,16 +187,40 @@ export default function SchedulePage() {
           </select>
         </div>
         <div className={styles.metrics}>
-          <Metric value={loading ? "—" : summary.planned} label="Planned this month" />
-          <Metric value={loading ? "—" : summary.published} label="Published this month" />
+          <Metric value={loading ? "—" : summary.planned} label={offset === 0 ? "Planned this month" : "Planned in view"} />
+          <Metric value={loading ? "—" : summary.published} label={offset === 0 ? "Published this month" : "Published in view"} />
           <Metric value={loading ? "—" : summary.ready} label="Ready in queue" tone={loading ? undefined : "ok"} />
           <Metric
             value={loading ? "—" : summary.attention}
             label="Need attention"
             tone={!loading && summary.attention ? "warn" : undefined}
           />
+          <Metric value={loading ? "—" : summary.nextSevenDays} label="Next 7 days" />
+          <Metric value={loading ? "—" : summary.activeCadences} label="Active cadences" />
         </div>
       </section>
+
+      <nav className={styles.viewTabs} aria-label="Schedule view" role="tablist">
+        {([
+          ["week", "Day by day"],
+          ["month", "Month"],
+          ["cadence", "Channel cadence"],
+        ] as const).map(([value, label]) => (
+          <button
+            type="button"
+            key={value}
+            role="tab"
+            data-active={scheduleView === value}
+            aria-selected={scheduleView === value}
+            onClick={() => {
+              setScheduleView(value);
+              if (value !== "month") setOffset(0);
+            }}
+          >
+            {label}
+          </button>
+        ))}
+      </nav>
 
       {notice && (
         <div className={notice.tone === "error" ? styles.noticeError : styles.noticeOk} role="status">
@@ -207,45 +251,61 @@ export default function SchedulePage() {
         </div>
       ) : (
         <>
-          <CalendarPanel
-            view={view}
-            today={today}
-            cells={cells}
-            calendar={calendar}
-            channels={visibleChannels}
-            channelColors={channelColors}
-            scope={effectiveScope}
-            onScope={setScope}
-            onPrevious={() => setOffset((value) => value - 1)}
-            onToday={() => setOffset(0)}
-            onNext={() => setOffset((value) => value + 1)}
-            onPin={pinEvent}
-          />
-          <ScheduleQueue events={upcoming} onPin={pinEvent} onUnpin={unpinEvent} />
-
-          <section className={styles.section} aria-labelledby="channel-schedules-title">
-            <div className={styles.sectionHeader}>
-              <div>
-                <span className={styles.eyebrow}>Channel settings</span>
-                <h2 id="channel-schedules-title">Upload cadence</h2>
+          {scheduleView === "week" && (
+            <>
+              <DayByDaySchedule events={calendar.flat} today={today} />
+              <details className={`${styles.queueDisclosure} glass`}>
+                <summary>
+                  <span>Manage exact dates</span>
+                  <small>{upcoming.length} upcoming</small>
+                </summary>
+                <div className={styles.queueDisclosureBody}>
+                  <ScheduleQueue events={upcoming} onPin={pinEvent} onUnpin={unpinEvent} />
+                </div>
+              </details>
+            </>
+          )}
+          {scheduleView === "month" && (
+            <CalendarPanel
+              view={view}
+              today={today}
+              cells={cells}
+              calendar={calendar}
+              channels={visibleChannels}
+              channelColors={channelColors}
+              scope={effectiveScope}
+              onScope={setScope}
+              onPrevious={() => setOffset((value) => value - 1)}
+              onToday={() => setOffset(0)}
+              onNext={() => setOffset((value) => value + 1)}
+              onPin={pinEvent}
+            />
+          )}
+          {scheduleView === "cadence" && (
+            <section className={styles.section} aria-labelledby="channel-schedules-title">
+              <div className={styles.sectionHeader}>
+                <div>
+                  <span className={styles.eyebrow}>Channel settings</span>
+                  <h2 id="channel-schedules-title">Upload cadence</h2>
+                </div>
+                <span>Changes save once per channel</span>
               </div>
-              <span>Changes save once per channel</span>
-            </div>
-            {visibleChannels.length === 0 ? (
-              <div className={`${styles.emptyState} glass`}>No channels are available in this scope.</div>
-            ) : (
-              <div className={styles.scheduleGrid}>
-                {visibleChannels.map((channel) => (
-                  <ChannelScheduleEditor
-                    key={channelScheduleEditorKey(channel)}
-                    channel={channel}
-                    color={channelColors.get(channel._id) ?? CHANNEL_COLORS[0]}
-                  />
-                ))}
-              </div>
-            )}
-          </section>
-          <TimeZoneSuggestions />
+              {visibleChannels.length === 0 ? (
+                <div className={`${styles.emptyState} glass`}>No channels are available in this scope.</div>
+              ) : (
+                <div className={styles.scheduleGrid}>
+                  {visibleChannels.map((channel) => (
+                    <ChannelScheduleEditor
+                      key={channelScheduleEditorKey(channel)}
+                      channel={channel}
+                      color={channelColors.get(channel._id) ?? CHANNEL_COLORS[0]}
+                    />
+                  ))}
+                </div>
+              )}
+              <TimeZoneSuggestions />
+            </section>
+          )}
         </>
       )}
     </>

@@ -225,6 +225,29 @@ export function completePipelineForPolicy(
     }
   }
   const inserted: string[] = [];
+
+  // The current designer gives every externally narrated family a versioned,
+  // timed story artifact. Persisted pre-overhaul channels must receive the same
+  // spine without forcing self-contained whiteboard/comic or music-loop
+  // families to adopt narration modules they do not use.
+  const narrationIndex = entries.findIndex((entry) => entry.block === "narration_tts");
+  if (narrationIndex >= 0 && !entries.some((entry) => entry.block === "story_spine")) {
+    const isShorts = entries.some(
+      (entry) =>
+        entry.params?.["style"] === "shorts" ||
+        entry.params?.["aspect"] === "9:16" ||
+        entry.params?.["aspectRatio"] === "9:16",
+    );
+    entries.splice(narrationIndex + 1, 0, {
+      block: "story_spine",
+      params: {
+        generationProfile: "production",
+        targetShotSec: isShorts ? 4 : 6,
+      },
+    });
+    inserted.push("story_spine");
+  }
+
   for (const capability of ["topic.researched", "final.compliance_passed"]) {
     const moduleId = insertCapabilityProvider(entries, capability);
     if (moduleId) inserted.push(moduleId);

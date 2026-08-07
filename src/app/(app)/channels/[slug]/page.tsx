@@ -59,6 +59,18 @@ type ChannelDoc = {
   language?: string;
   groupRole?: string;
   youtubeCreated?: { ytChannelId?: string; handle?: string; url?: string; createdAt: number; status?: string };
+  inception?: {
+    status: "planned" | "running" | "complete" | "blocked";
+    updatedAt: number;
+    stages: Record<
+      string,
+      {
+        moduleKey: string;
+        status: "pending" | "running" | "accepted" | "complete" | "failed" | "blocked";
+        error?: string;
+      }
+    >;
+  };
 };
 
 type RawRun = {
@@ -90,17 +102,34 @@ type ChannelCardDetail = {
 
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
-const TABS = [
-  "Overview",
-  "Week ahead",
-  "Analytics",
-  "Library",
-  "SEO",
-  "Pipeline",
-  "Identity",
-  "Settings",
+const INCEPTION_STAGE_LABELS = [
+  ["channel-inception-research", "Research"],
+  ["channel-inception-positioning", "Identity"],
+  ["channel-inception-seo", "SEO"],
+  ["channel-inception-voice", "Voice"],
+  ["channel-inception-avatar", "Avatar"],
+  ["channel-inception-banner", "Banner"],
+  ["channel-inception-thumbnails", "Topics + covers"],
+  ["channel-inception-pipeline", "Pipeline"],
+  ["channel-inception-probe", "Probe"],
+  ["channel-inception-readiness", "Ready"],
 ] as const;
-type Tab = (typeof TABS)[number];
+
+type Tab =
+  | "Overview"
+  | "Week ahead"
+  | "Analytics"
+  | "Library"
+  | "SEO"
+  | "Pipeline"
+  | "Identity"
+  | "Settings";
+const TAB_GROUPS = [
+  { label: "Overview", tabs: ["Overview"] },
+  { label: "Content", tabs: ["Week ahead", "Library"] },
+  { label: "Performance", tabs: ["Analytics", "SEO"] },
+  { label: "Setup", tabs: ["Identity", "Pipeline", "Settings"] },
+] as const satisfies ReadonlyArray<{ label: string; tabs: ReadonlyArray<Tab> }>;
 
 const TAB_BY_QUERY: Record<string, Tab> = {
   overview: "Overview",
@@ -132,6 +161,7 @@ export default function ChannelHubPage({
   const searchParams = useSearchParams();
   const [viewStartedAt] = useState(() => Date.now());
   const tab = validatedTab(searchParams.get("tab"));
+  const activeTabGroup = TAB_GROUPS.find((group) => group.tabs.some((item) => item === tab)) ?? TAB_GROUPS[0];
   const ytStatus = searchParams.get("yt");
   const ytGot = searchParams.get("got");
 
@@ -322,28 +352,40 @@ export default function ChannelHubPage({
             {modulePath.length ? `${modulePath.slice(0, 3).join(" → ")}${modulePath.length > 3 ? ` → +${modulePath.length - 3}` : ""}` : "Not configured"}
           </span>
         </div>
-        <nav className="channel-profile-actions" aria-label="Channel shortcuts">
-          <Link href={`/channels/${slug}?tab=settings`}>Settings</Link>
-          <Link href={`/channels/${slug}?tab=week-ahead`}>Schedule</Link>
-          <Link href={`/channels/${slug}?tab=pipeline`}>Pipeline</Link>
-        </nav>
       </section>
 
-      {/* Tabs */}
+      {channel.inception && <ChannelInceptionProgress inception={channel.inception} />}
+
+      {/* Four stable work areas keep specialist views available without a wall of peer tabs. */}
       <div className="channel-tabs" role="tablist" aria-label="Channel sections">
-        {TABS.map((t) => (
+        {TAB_GROUPS.map((group) => (
           <button
-            key={t}
+            key={group.label}
             type="button"
-            onClick={() => selectTab(t)}
+            onClick={() => selectTab(group.tabs[0])}
             role="tab"
-            aria-selected={tab === t}
+            aria-selected={activeTabGroup.label === group.label}
             className="channel-tab"
           >
-            {t}
+            {group.label}
           </button>
         ))}
       </div>
+      {activeTabGroup.tabs.length > 1 && (
+        <nav className="channel-subtabs" aria-label={`${activeTabGroup.label} views`}>
+          {activeTabGroup.tabs.map((item) => (
+            <button
+              key={item}
+              type="button"
+              data-active={tab === item}
+              aria-current={tab === item ? "page" : undefined}
+              onClick={() => selectTab(item)}
+            >
+              {item}
+            </button>
+          ))}
+        </nav>
+      )}
 
       {tab === "Overview" && (
         <OverviewTab
@@ -379,6 +421,58 @@ export default function ChannelHubPage({
       {tab === "Identity" && <IdentityTab id={id} budget={channel.budget} />}
       {tab === "Settings" && <SettingsTab channel={channel} />}
     </>
+  );
+}
+
+function ChannelInceptionProgress({
+  inception,
+}: {
+  inception: NonNullable<ChannelDoc["inception"]>;
+}) {
+  const stages = INCEPTION_STAGE_LABELS.flatMap(([key, label]) => {
+    const stage = inception.stages[key];
+    return stage ? [{ key, label, ...stage }] : [];
+  });
+  const complete = stages.filter(
+    (stage) => stage.status === "complete" || stage.status === "accepted",
+  ).length;
+
+  return (
+    <section className="channel-inception glass" aria-label="Channel setup progress">
+      <div className="channel-inception-heading">
+        <div>
+          <small>Channel setup engine</small>
+          <strong>
+            {inception.status === "complete"
+              ? "Ready"
+              : inception.status === "blocked"
+                ? "Needs attention"
+                : inception.status === "planned"
+                  ? "Plan ready — approval required"
+                : "Building the channel"}
+          </strong>
+        </div>
+        <span>{complete}/{stages.length} stages</span>
+      </div>
+      <div className="channel-inception-stages">
+        {stages.map((stage) => (
+          <div
+            className="channel-inception-stage"
+            data-status={stage.status}
+            key={stage.key}
+            title={stage.error ?? `${stage.label}: ${stage.status}`}
+          >
+            <i aria-hidden="true" />
+            <span>{stage.label}</span>
+            {stage.error && (
+              <small className="channel-inception-stage-error" role="alert">
+                {stage.error}
+              </small>
+            )}
+          </div>
+        ))}
+      </div>
+    </section>
   );
 }
 
@@ -870,13 +964,22 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
     );
   };
   const autoCreate = async () => {
+    if (!window.confirm(
+      `Create a new external YouTube channel named "${channel.name}"? This is an irreversible provider action.`,
+    )) return;
+    const intentKey = window.crypto.randomUUID();
     setBusy(true);
     setMsg(null);
     try {
       const r = await fetch("/api/youtube-create", {
         method: "POST",
         headers: { "content-type": "application/json" },
-        body: JSON.stringify({ name: channel.name, channelId: channel._id }),
+        body: JSON.stringify({
+          name: channel.name,
+          channelId: channel._id,
+          intentKey,
+          confirmedCreateNewChannel: true,
+        }),
       });
       const d = await r.json();
       setMsg(

@@ -99,6 +99,13 @@ export const generationScheduler = schedules.task({
         { channelId: ch._id, runId, ...(scheduledPlan ? { scheduledPlan } : {}) },
         { concurrencyKey: String(ch._id), idempotencyKey },
       );
+      if ("recoveryDispatch" in admitted && admitted.recoveryDispatch === true) {
+        await convex.mutation(api.runs.markLeaseRecoveryDispatched, {
+          ownerId: owner,
+          channelId: ch._id,
+          runId,
+        });
+      }
       triggered++;
       console.log(
         `[scheduler] ${admitted.reused ? "reattached" : "triggered"} ${scheduledPlan ? `plan ${scheduledPlan.planItemId}` : "cadence run"} ` +

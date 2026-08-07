@@ -23,12 +23,11 @@ import { join } from "node:path";
 import { parseJsonLoose } from "@/lib/gemini";
 import { hasVisionKey, visionLocal } from "@/lib/vision";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
-import { hasBanana } from "@/lib/banana";
-
 import { imageToJpeg } from "@/lib/ffmpeg";
 import {
   renderThumbnail,
   type ThumbnailBaseArtifact,
+  type GenerateScene,
 } from "@/lib/thumbnailRenderer";
 import { downloadTo } from "@/lib/files";
 import type { StyleDNA } from "@/engine/creative/types";
@@ -536,11 +535,10 @@ export async function renderCandidate(args: {
   /** Optional scene-still reuse. Ignored unless its producer supplied the
    * explicit text-free + matching-safe-zone provenance contract. */
   baseArt?: ThumbnailBaseArtifact;
+  /** Explicit production still route. There is deliberately no provider fallback. */
+  generateScene: GenerateScene;
   log?: Logger;
 }): Promise<string> {
-  if (!hasBanana()) {
-    throw new Error("thumbnailLab: no configured image provider (Gemini or Fal)");
-  }
   // TWO-PASS DESIGN: the LAYOUT is decided FIRST (which zone the text owns),
   // the image is generated WITH that zone deliberately reserved as negative
   // space, then the text lands in its planned home — never fighting the image.
@@ -680,6 +678,7 @@ export async function renderCandidate(args: {
     outJpg: args.outJpg,
     tmpDir: args.tmpDir,
     baseArt: args.baseArt,
+    generateScene: args.generateScene,
   });
   args.log?.(
     `thumbnailLab: candidate ${args.idx + 1} "${args.pattern.name}" rendered ` +

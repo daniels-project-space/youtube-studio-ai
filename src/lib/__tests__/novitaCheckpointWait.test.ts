@@ -76,6 +76,7 @@ async function main() {
     expectedJobIds: ["shot-01-c01"],
     profileSha256,
     requestSha256,
+    requestCanonicalJson: canonicalJson({}),
     nshard: 1,
     maxCostUsd: 2,
   };

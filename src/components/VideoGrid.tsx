@@ -3,7 +3,7 @@
 import type { VideoRow } from "@/lib/types";
 import { VideoCard } from "./VideoCard";
 
-/** Responsive grid of VideoCards. Auto-fills 240px+ columns. */
+/** Responsive compact grid of finished-video cards. */
 export function VideoGrid({
   videos,
   onOpen,
@@ -12,13 +12,7 @@ export function VideoGrid({
   onOpen?: (video: VideoRow) => void;
 }) {
   return (
-    <div
-      style={{
-        display: "grid",
-        gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))",
-        gap: "1rem",
-      }}
-    >
+    <div className="video-grid">
       {videos.map((v) => (
         <VideoCard key={v._id} video={v} onOpen={onOpen} />
       ))}

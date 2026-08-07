@@ -14,65 +14,29 @@ export function RunCard({ run }: { run: RunRow }) {
   return (
     <Link
       href={`/runs/${run._id}`}
-      className="glass glass-shine lift run-card"
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "1rem",
-        padding: "0.9rem 1.1rem",
-      }}
+      className="glass run-card"
     >
       <div className="run-card-main">
         <StageBadge status={run.status} />
-        <div style={{ minWidth: 0 }}>
-          <div
-            style={{
-              fontWeight: 500,
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
+        <div className="run-card-copy">
+          <div>
             {run.channelName}
           </div>
-          <div style={{ fontSize: "0.78rem", color: "var(--color-faint)" }}>
+          <small>
             {fmtDateTime(run.startedAt)}
-          </div>
+          </small>
         </div>
       </div>
 
-      <div
-        className="run-card-meta"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "1.1rem",
-          fontSize: "0.8rem",
-          color: "var(--color-muted)",
-          whiteSpace: "nowrap",
-        }}
-      >
-        <span
-          style={{
-            fontFamily: "var(--font-mono)",
-            fontVariantNumeric: "tabular-nums",
-          }}
-        >
+      <div className="run-card-meta">
+        <span className="run-card-cost">
           {fmtUsd(run.costTotal)}
         </span>
-        <span style={{ color: live ? "var(--color-secondary)" : "var(--color-faint)" }}>
+        <span className={live ? "run-card-live" : undefined}>
           <Elapsed from={run.startedAt} to={live ? undefined : run.finishedAt} />
         </span>
         {run.youtubeVideoId && (
-          <span
-            style={{
-              display: "inline-flex",
-              alignItems: "center",
-              gap: "0.3rem",
-              color: "var(--color-accent)",
-            }}
-          >
+          <span className="run-card-video">
             video <IconExternal width={13} height={13} />
           </span>
         )}

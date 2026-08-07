@@ -30,11 +30,10 @@ import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { geminiJsonPro } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
-import { generateBananaImage, hasBanana } from "@/lib/banana";
 import { generateMusic } from "@/lib/music";
 import { ffprobeDuration } from "@/lib/ffmpeg";
 import { preflightPythonRenderer } from "@/lib/pydeps";
-import { FalImageTransportError } from "@/lib/falImage";
+import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 
 type Logger = (msg: string) => void;
 
@@ -81,7 +80,11 @@ const PER_PAGE = 6;      // panels per comic page (must match per_page in the re
 const TURN_SEC = 1.3;    // page-turn duration (must match turn in the renderer)
 
 export function hasMotionComic(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY && process.env.ELEVENLABS_API_KEY && hasBanana());
+  return Boolean(
+    process.env.GEMINI_API_KEY
+    && process.env.ELEVENLABS_API_KEY
+    && hasNovitaRenderFarmConfig(),
+  );
 }
 
 /* ------------------------------- types --------------------------------- */
@@ -414,7 +417,15 @@ export interface MotionComicArtRequest {
   tier: "flash";
 }
 
-export const MOTION_COMIC_ART_CONTRACT_VERSION = "motion-comic-art-v4-closed-visual-schema";
+export interface MotionComicImageRequest extends MotionComicArtRequest {
+  id: string;
+  negativePrompt: string;
+  seed: number;
+}
+
+export type MotionComicImageGenerator = (request: MotionComicImageRequest) => Promise<Buffer>;
+
+export const MOTION_COMIC_ART_CONTRACT_VERSION = "motion-comic-art-v5-text-native-identity";
 
 interface MotionComicArtManifest {
   contractVersion: typeof MOTION_COMIC_ART_CONTRACT_VERSION;
@@ -547,14 +558,11 @@ export function motionComicPanelCount(value: unknown): number {
 }
 
 export function motionComicImageCallCeiling(panelCount: unknown, characterCount: unknown = 4): number {
-  const parsedCharacters = Number(characterCount);
-  const characters = Number.isFinite(parsedCharacters)
-    ? Math.max(0, Math.min(MOTION_COMIC_MAX_CHARACTERS, Math.floor(parsedCharacters)))
-    : MOTION_COMIC_MAX_CHARACTERS;
-  return (
-    motionComicPanelCount(panelCount) * MOTION_COMIC_MAX_IMAGE_CALLS_PER_PANEL +
-    characters * MOTION_COMIC_MAX_IMAGE_CALLS_PER_CHARACTER
-  );
+  void characterCount;
+  // Character model sheets were a provider-specific img2img workaround. The
+  // live Novita route carries the closed character identity schema in every
+  // panel prompt, so only primary + bounded recovery panels consume images.
+  return motionComicPanelCount(panelCount) * MOTION_COMIC_MAX_IMAGE_CALLS_PER_PANEL;
 }
 
 export function motionComicTtsBillableCharacterCeiling(
@@ -996,14 +1004,23 @@ export function buildMotionComicPanelArtRequest(args: {
   style: MotionComicVisualStyle;
   panel: MotionComicPanelArtSource;
   refs?: readonly MotionComicArtReference[];
+  /** Closed, repeatable identities used by the text-native Novita route. */
+  characterIdentities?: readonly { id: string; visual: MotionComicVisualCharacter }[];
   recovery?: boolean;
 }): MotionComicArtRequest {
   const visualScene = renderMotionComicScene(args.panel.visual);
   const style = renderMotionComicStyle(args.style);
   const shot = closedValue(args.panel.shot, ["wide", "medium", "close"] as const, "medium");
-  const identity = (args.refs?.length ?? 0) > 0
-    ? "Keep every depicted reference subject identical to the supplied model-sheet imagery: same face, hair, wardrobe silhouette and non-textual marks."
-    : "";
+  const describedIdentities = (args.characterIdentities ?? [])
+    .map((character) =>
+      `Recurring subject ${character.id}: ${renderMotionComicCharacter(character.visual)}`,
+    )
+    .join(". ");
+  const identity = describedIdentities
+    ? `IDENTITY LOCK — repeat these exact visual traits in every panel: ${describedIdentities}. No substitutions or drift.`
+    : (args.refs?.length ?? 0) > 0
+      ? "Keep every depicted reference subject identical to the supplied model-sheet imagery: same face, hair, wardrobe silhouette and non-textual marks."
+      : "";
   const lighting = args.recovery
     ? "Use clearly visible moonlight or firelight for a night scene; never produce a near-black image."
     : "";
@@ -1045,84 +1062,8 @@ export function buildMotionComicTimelineBubble(
   };
 }
 
-async function genImage(request: MotionComicArtRequest): Promise<Buffer> {
-  // This module owns its one-primary + one-recovery budget. Disable nested
-  // provider retries so that budget is also the real HTTP submission ceiling.
-  return generateBananaImage({ ...request, maxProviderAttempts: 1 });
-}
-
 export function motionComicImageRecoveryAllowed(error: unknown): boolean {
-  return !(error instanceof FalImageTransportError)
-    && !(error && typeof error === "object" && (error as { retryable?: unknown }).retryable === false);
-}
-
-/**
- * Identity refs don't need 2K: each panel call re-sends every appearing
- * character's sheet as an INPUT image (billed per call). A ≤1024px JPEG carries
- * face/wardrobe identity just as well at ~1/10 the payload. Falls back to the
- * original PNG if ffmpeg is unavailable.
- */
-async function refImageB64(pngPath: string): Promise<{ data: string; mime: string }> {
-  try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const run = promisify(execFile);
-    const source = await readFile(pngPath);
-    const out = pngPath.replace(/\.png$/i, `_ref_${sha256(source).slice(0, 16)}.jpg`);
-    if (!existsSync(out)) {
-      await run(process.env.FFMPEG_PATH || "ffmpeg", [
-        "-y", "-i", pngPath,
-        "-vf", "scale='min(1024,iw)':'min(1024,ih)':force_original_aspect_ratio=decrease",
-        "-q:v", "3", "-frames:v", "1", out,
-      ]);
-    }
-    return { data: (await readFile(out)).toString("base64"), mime: "image/jpeg" };
-  } catch {
-    return { data: (await readFile(pngPath)).toString("base64"), mime: "image/png" };
-  }
-}
-
-/**
- * Combine several character sheets into ONE reference image (vertical stack).
- * The fal FLUX Kontext route accepts a SINGLE reference, so multi-character
- * panels dropped every character after the first (observed: a 2nd character's
- * hair/wardrobe drifted). A single stacked sheet shows Kontext every appearing
- * character in one ref. Gemini's multi-image route also accepts the combined
- * sheet fine. Falls back to the first ref if ffmpeg is unavailable.
- */
-async function combineRefs(
-  refs: { data: string; mime: string }[],
-  runDir: string,
-  tag: string,
-): Promise<{ data: string; mime: string }[]> {
-  if (refs.length < 2) return refs;
-  try {
-    const { execFile } = await import("node:child_process");
-    const { promisify } = await import("node:util");
-    const run = promisify(execFile);
-    const digest = sha256(JSON.stringify(refs.map((ref) => ({ mime: ref.mime, sha256: sha256(ref.data) })))).slice(0, 16);
-    const out = join(runDir, `refcombo_${tag}_${digest}.jpg`);
-    if (!existsSync(out)) {
-      const paths: string[] = [];
-      for (let i = 0; i < refs.length; i++) {
-        const p = join(runDir, `refcombo_${tag}_${digest}_${i}.${refs[i].mime.includes("png") ? "png" : "jpg"}`);
-        await writeFile(p, Buffer.from(refs[i].data, "base64"));
-        paths.push(p);
-      }
-      // Normalize widths, stack vertically (one column keeps each face large).
-      const inputs = paths.flatMap((p) => ["-i", p]);
-      const scale = paths.map((_, i) => `[${i}:v]scale=768:-1[s${i}]`).join(";");
-      const chain = paths.map((_, i) => `[s${i}]`).join("");
-      await run(process.env.FFMPEG_PATH || "ffmpeg", [
-        "-y", ...inputs,
-        "-filter_complex", `${scale};${chain}vstack=inputs=${paths.length}[o]`,
-        "-map", "[o]", "-q:v", "3", "-frames:v", "1", out,
-      ]);
-    }
-    return [{ data: (await readFile(out)).toString("base64"), mime: "image/jpeg" }];
-  } catch {
-    return refs; // ffmpeg missing → keep multi-ref (Gemini route still uses all)
-  }
+  return !(error && typeof error === "object" && (error as { retryable?: unknown }).retryable === false);
 }
 
 /** ElevenLabs v3 Text-to-Dialogue — one or more (text, voice) lines → one mp3. */
@@ -1262,11 +1203,17 @@ function normalizePlan(raw: RawPlan | Plan, log: Logger, maxPanels: number, targ
 
 /* -------------------------------- main --------------------------------- */
 
-export async function castMotionComic(args: { brief: MotionComicBrief; runDir: string; outPath: string; log?: Logger }): Promise<MotionComicResult> {
+export async function castMotionComic(args: {
+  brief: MotionComicBrief;
+  runDir: string;
+  outPath: string;
+  generateImage: MotionComicImageGenerator;
+  log?: Logger;
+}): Promise<MotionComicResult> {
   const log = args.log ?? (() => {});
   const brief = args.brief;
-  if (!hasMotionComic()) {
-    throw new Error("motionComic: storyboard, voice, and selected image provider must all be ready before any generation");
+  if (!hasMotionComic() || typeof args.generateImage !== "function") {
+    throw new Error("motionComic: storyboard, voice, and an explicit attested image generator must all be ready before any generation");
   }
   const W = brief.width ?? 1920, H = brief.height ?? Math.round((brief.width ?? 1920) * 9 / 16);
   const style = projectMotionComicVisualStyle(brief.style ?? DEFAULT_STYLE);
@@ -1317,71 +1264,46 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
   }
   const voiceOf = (s: string) => s === "narrator" ? plan.narratorVoiceId : (plan.characters.find((c) => c.id === s)?.voiceId ?? plan.narratorVoiceId);
 
-  // 2. CHARACTER SHEETS (cached)
-  const sheetB64: Record<string, { data: string; mime: string }> = {};
-  await pool(plan.characters, 2, async (c) => {
-    const file = rd(`char_${c.id}.png`);
-    const request = buildMotionComicCharacterArtRequest({ style, character: c.visual });
-    const simple = buildMotionComicCharacterArtRequest({ style, character: c.visual, simplified: true });
-    const requestHash = motionComicArtRequestHash(request);
-    const simpleHash = motionComicArtRequestHash(simple);
-    if (!await validateMotionComicArtCache(file, [requestHash, simpleHash])) {
-      let primary: Buffer | null = null;
-      let primaryError: unknown;
-      try { primary = await genImage(request); }
-      catch (e) {
-        if (!motionComicImageRecoveryAllowed(e)) throw e;
-        primaryError = e;
-      }
-      if (primary) {
-        // Cache writes are outside the provider catch: local I/O must never
-        // purchase the simplified image after a successful primary response.
-        await writeMotionComicArtCache(file, primary, requestHash);
-        log(`char ${c.id} ✓`);
-      } else {
-        // ONE retry with a simplified prompt — the multi-view sheet layout is
-        // the usual trip-wire (safety/complexity); a plain full-body still
-        // carries identity well enough for the img2img panels.
-        log(`char ${c.id} failed (${primaryError instanceof Error ? primaryError.message : primaryError}) — retrying simplified`);
-        try {
-          const image = await genImage(simple);
-          await writeMotionComicArtCache(file, image, simpleHash);
-          log(`char ${c.id} ✓ (retry)`);
-        }
-        catch (e2) { log(`char ${c.id} FAILED twice: ${e2 instanceof Error ? e2.message : e2} — panels will render WITHOUT an identity ref`); return; }
-      }
-    }
-    sheetB64[c.id] = await refImageB64(file);
-  });
-
-  // 3. PANELS (cached) — image-to-image with appearing characters' sheets
+  // 2. PANELS (cached) — the closed identity schema is repeated in every
+  // prompt. This replaces provider-specific img2img model sheets, removes an
+  // entire paid generation phase, and keeps the live route Z-Image-native.
   await pool(plan.panels, 3, async (p, i) => {
     const file = rd(`panel_${i}.png`);
-    // Multi-character panels: composite the appearing sheets into ONE ref so the
-    // single-ref fal Kontext route keeps EVERY character consistent (not just #1).
-    const refs = await combineRefs(
-      p.characters.map((id) => sheetB64[id]).filter(Boolean),
-      args.runDir,
-      `p${i}`,
-    );
+    const characterIdentities = p.characters
+      .map((id) => plan.characters.find((character) => character.id === id))
+      .filter((character): character is PlanChar => Boolean(character))
+      .map((character) => ({ id: character.id, visual: character.visual }));
     const request = buildMotionComicPanelArtRequest({
       style,
       panel: p,
-      refs,
+      characterIdentities,
     });
     const simple = buildMotionComicPanelArtRequest({
       style,
       panel: p,
-      refs,
+      characterIdentities,
       recovery: true,
     });
     const requestHash = motionComicArtRequestHash(request);
     const simpleHash = motionComicArtRequestHash(simple);
     if (await validateMotionComicArtCache(file, [requestHash, simpleHash])) return;
     await unlink(rd(`vision_${i}.json`)).catch(() => {});
-    // Exactly two paid provider submissions maximum: one primary and one
-    // simplified/well-lit recovery. genImage disables adapter-level retries,
-    // so this source-level budget is also the operational HTTP ceiling.
+    // Exactly two provider submissions maximum: one primary and one bounded
+    // simplified/well-lit recovery. The adapter itself has no fallback route.
+    const identitySeed = Number.parseInt(
+      sha256(JSON.stringify({ style, characterIdentities })).slice(0, 8),
+      16,
+    ) & 0x7fffffff;
+    const providerRequest = (
+      art: MotionComicArtRequest,
+      variant: "primary" | "recovery",
+    ): MotionComicImageRequest => ({
+      ...art,
+      id: `panel-${i}-${variant}`,
+      seed: identitySeed,
+      negativePrompt:
+        "text, letters, numbers, captions, speech bubbles, logos, watermark, UI, near-black exposure, distorted face, duplicate person",
+    });
     const cacheVisible = async (image: Buffer, hash: string) => {
       await writeMotionComicArtCache(file, image, hash);
       if ((await meanLuma(file)) >= 14) return true;
@@ -1389,11 +1311,11 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
       throw new Error("panel art near-black");
     };
     let primary: Buffer | null = null;
-    try { primary = await genImage(request); }
+    try { primary = await args.generateImage(providerRequest(request, "primary")); }
     catch (e) {
       if (!motionComicImageRecoveryAllowed(e)) throw e;
       log(`panel ${i} art failed (${e instanceof Error ? e.message : e}) — one simplified/well-lit retry`);
-      try { await cacheVisible(await genImage(simple), simpleHash); log(`panel ${i} ✓ (retry)`); }
+      try { await cacheVisible(await args.generateImage(providerRequest(simple, "recovery")), simpleHash); log(`panel ${i} ✓ (retry)`); }
       catch (e2) { log(`panel ${i} art FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); }
     }
     if (primary) {
@@ -1401,7 +1323,7 @@ export async function castMotionComic(args: { brief: MotionComicBrief; runDir: s
       catch (e) {
         if (!(e instanceof Error && e.message === "panel art near-black")) throw e;
         log(`panel ${i} art failed (near-black) — one simplified/well-lit retry`);
-        try { await cacheVisible(await genImage(simple), simpleHash); log(`panel ${i} ✓ (retry)`); }
+        try { await cacheVisible(await args.generateImage(providerRequest(simple, "recovery")), simpleHash); log(`panel ${i} ✓ (retry)`); }
         catch (e2) { log(`panel ${i} art FAILED twice: ${e2 instanceof Error ? e2.message : e2}`); }
       }
     }

@@ -166,6 +166,7 @@ export async function headObjectMetadata(
 ): Promise<{
   contentLength?: number;
   contentType?: string;
+  etag?: string;
   metadata: Record<string, string>;
 } | null> {
   try {
@@ -176,6 +177,7 @@ export async function headObjectMetadata(
     return {
       ...(typeof response.ContentLength === "number" ? { contentLength: response.ContentLength } : {}),
       ...(response.ContentType ? { contentType: response.ContentType } : {}),
+      ...(response.ETag ? { etag: response.ETag } : {}),
       metadata: response.Metadata ?? {},
     };
   } catch (error) {

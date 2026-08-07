@@ -9,6 +9,8 @@
  * â†’ analytics learning loop.
  */
 
+import { CHANNEL_INCEPTION_CATALOG_MODULES } from "./channelInceptionContracts";
+
 /**
  * CRAFT_RULES â€” research-backed retention craft injected into every script prompt
  * (short, long, per-section, hook). Channel-agnostic; the Show Bible adds the
@@ -499,6 +501,10 @@ export interface GoldenModule {
 }
 
 export const GOLDEN_MODULES: GoldenModule[] = [
+  // Channel setup is now modeled as family-aware mini-module contracts. They
+  // remain reference-only until resumable executors and immutable proof
+  // receipts exist; catalog presence must not be confused with qualification.
+  ...CHANNEL_INCEPTION_CATALOG_MODULES,
   {
     key: "loreshort",
     stage: "visual",

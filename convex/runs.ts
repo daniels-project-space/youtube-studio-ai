@@ -1,5 +1,6 @@
 import { mutation, query } from "./studioFunctions";
-import { query as publicQuery } from "./_generated/server";
+import { internalMutation, query as publicQuery } from "./_generated/server";
+import { paginationOptsValidator } from "convex/server";
 import { v } from "convex/values";
 import { evaluateConvexAuthProbeIdentity } from "../src/lib/convexAuthProbe";
 import {
@@ -8,9 +9,26 @@ import {
   type PipelineInvocationSnapshot,
 } from "../src/lib/pipelineInvocationSnapshot";
 import {
+  assertChannelInceptionProbeEnvelopeStructure,
+  type ChannelInceptionProbeAttemptCheckpoint,
+} from "../src/lib/channelInceptionProbeContract";
+import {
   completedPublishContinuationPatch,
   requireExactBoundPublishIntent,
 } from "./publishContinuationState";
+import {
+  RUN_EXECUTION_LEASE_MS,
+  RUN_QUEUE_LEASE_MS,
+  assertRunLeaseClaimable,
+  expiredRunRecoveryDisposition,
+  isRunLeaseExpired,
+} from "../src/lib/runLease";
+import {
+  RECENT_RUNS_LIMIT,
+  RUN_HISTORY_PAGE_LIMIT,
+  RUNS_BY_CHANNEL_LIMIT,
+  validatedReadLimit,
+} from "../src/lib/boundedConvexReads";
 
 /**
  * Data-free rollout contract for the Trigger -> Convex authentication boundary.
@@ -30,17 +48,213 @@ export const createRun = mutation({
   args: {
     ownerId: v.string(),
     channelId: v.id("channels"),
-    status: v.optional(v.string()),
+    status: v.optional(v.union(v.literal("queued"), v.literal("running"))),
   },
   returns: v.id("runs"),
   handler: async (ctx, args) => {
+    const now = Date.now();
+    const status = args.status ?? "queued";
     return await ctx.db.insert("runs", {
       ownerId: args.ownerId,
       channelId: args.channelId,
-      status: args.status ?? "queued",
-      startedAt: Date.now(),
+      status,
+      startedAt: now,
       costTotal: 0,
+      heartbeatAt: now,
+      leaseExpiresAt:
+        now + (status === "queued" ? RUN_QUEUE_LEASE_MS : RUN_EXECUTION_LEASE_MS),
     });
+  },
+});
+
+/**
+ * Idempotent no-spend shell for a Channel Inception probe child. The stable
+ * dispatch key closes the crash gap between creating the run row and saving
+ * the parent stage checkpoint.
+ */
+export const createProbeRun = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    dispatchKey: v.string(),
+  },
+  returns: v.id("runs"),
+  handler: async (ctx, args) => {
+    if (!args.dispatchKey.trim() || args.dispatchKey.length > 300) {
+      throw new Error("probe dispatch key must contain 1-300 characters");
+    }
+    const existing = await ctx.db
+      .query("runs")
+      .withIndex("by_channel_probe_dispatch", (q) =>
+        q.eq("channelId", args.channelId).eq("probeDispatchKey", args.dispatchKey))
+      .unique();
+    if (existing) {
+      if (existing.ownerId !== args.ownerId) {
+        throw new Error("probe dispatch key owner mismatch");
+      }
+      return existing._id;
+    }
+    const now = Date.now();
+    return await ctx.db.insert("runs", {
+      ownerId: args.ownerId,
+      channelId: args.channelId,
+      status: "queued",
+      startedAt: now,
+      costTotal: 0,
+      heartbeatAt: now,
+      leaseExpiresAt: now + RUN_QUEUE_LEASE_MS,
+      probeDispatchKey: args.dispatchKey,
+    });
+  },
+});
+
+export const claimExecutionLease = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    leaseOwner: v.string(),
+    now: v.number(),
+  },
+  returns: v.object({ leaseExpiresAt: v.number(), executionAttempts: v.number() }),
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run) throw new Error(`run not found: ${args.runId}`);
+    if (run.ownerId !== args.ownerId || run.channelId !== args.channelId) {
+      throw new Error("run lease ownership/channel mismatch");
+    }
+    if (!args.leaseOwner.trim() || !Number.isFinite(args.now)) {
+      throw new Error("run lease claim is invalid");
+    }
+    assertRunLeaseClaimable(run, args.leaseOwner, args.now);
+    const leaseExpiresAt = args.now + RUN_EXECUTION_LEASE_MS;
+    const executionAttempts = (run.executionAttempts ?? 0) + 1;
+    await ctx.db.patch(args.runId, {
+      status: "running",
+      heartbeatAt: args.now,
+      leaseExpiresAt,
+      leaseOwner: args.leaseOwner,
+      executionAttempts,
+      leaseRecoveryPending: undefined,
+    });
+    return { leaseExpiresAt, executionAttempts };
+  },
+});
+
+export const heartbeatExecutionLease = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    leaseOwner: v.string(),
+    now: v.number(),
+  },
+  returns: v.number(),
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run) throw new Error(`run not found: ${args.runId}`);
+    if (
+      run.ownerId !== args.ownerId ||
+      run.channelId !== args.channelId ||
+      run.status !== "running" ||
+      run.leaseOwner !== args.leaseOwner
+    ) {
+      throw new Error("run heartbeat lease mismatch");
+    }
+    const leaseExpiresAt = args.now + RUN_EXECUTION_LEASE_MS;
+    await ctx.db.patch(args.runId, {
+      heartbeatAt: args.now,
+      leaseExpiresAt,
+    });
+    return leaseExpiresAt;
+  },
+});
+
+/** Clear the one-shot recovery marker only after Trigger accepted dispatch. */
+export const markLeaseRecoveryDispatched = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+  },
+  returns: v.boolean(),
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run) throw new Error(`run not found: ${args.runId}`);
+    if (run.ownerId !== args.ownerId || run.channelId !== args.channelId) {
+      throw new Error("run recovery dispatch ownership/channel mismatch");
+    }
+    // The worker may claim immediately after Trigger accepts the request. Its
+    // execution-lease claim already clears the marker, making this replay safe.
+    if (run.status === "running" || run.leaseRecoveryPending !== true) return false;
+    if (run.status !== "failed") {
+      throw new Error(`run recovery dispatch cannot acknowledge ${run.status}`);
+    }
+    await ctx.db.patch(args.runId, { leaseRecoveryPending: undefined });
+    return true;
+  },
+});
+
+/** Indexed, provider-free safety net invoked by Convex cron. */
+export const reapExpiredRunLeases = internalMutation({
+  args: {},
+  returns: v.object({ checked: v.number(), reaped: v.number() }),
+  handler: async (ctx) => {
+    const now = Date.now();
+    let checked = 0;
+    let reaped = 0;
+    for (const status of ["queued", "running"] as const) {
+      const ageLimit =
+        now - (status === "queued" ? RUN_QUEUE_LEASE_MS : RUN_EXECUTION_LEASE_MS);
+      const candidates = await ctx.db
+        .query("runs")
+        .withIndex("by_status_started", (q) =>
+          q.eq("status", status).lte("startedAt", ageLimit),
+        )
+        .take(100);
+      checked += candidates.length;
+      for (const run of candidates) {
+        if (!isRunLeaseExpired(run, now)) continue;
+        const recovery = expiredRunRecoveryDisposition(run);
+        const error =
+          recovery === "resume"
+            ? "run execution lease expired without a heartbeat; resuming the exact durable invocation"
+            : status === "queued"
+              ? "run lease expired before a worker claimed it; a fresh run will be admitted"
+              : "run execution lease expired before its invocation was frozen; a fresh run will be admitted";
+        await ctx.db.patch(run._id, {
+          status: "failed",
+          finishedAt: now,
+          heartbeatAt: now,
+          leaseExpiresAt: undefined,
+          leaseOwner: undefined,
+          error,
+          leaseRecoveryPending: recovery === "resume" ? true : undefined,
+        });
+        if (run.planItemId) {
+          const item = await ctx.db.get(run.planItemId);
+          if (
+            item &&
+            item.status !== "used" &&
+            item.ownerId === run.ownerId &&
+            item.channelId === run.channelId &&
+            item.scheduledRunId === run._id
+          ) {
+            await ctx.db.patch(run.planItemId, {
+              scheduledFailure: error,
+              ...(recovery === "replace"
+                ? {
+                    scheduledRunId: undefined,
+                    scheduledClaimedAt: undefined,
+                  }
+                : {}),
+            });
+          }
+        }
+        reaped++;
+      }
+    }
+    return { checked, reaped };
   },
 });
 
@@ -49,6 +263,79 @@ export const createRun = mutation({
  * only present the byte-equivalent normalized snapshot. Legacy runs with any
  * execution evidence fail closed because their original inputs are unknowable.
  */
+export const claimProbeDispatchEnvelope = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    envelope: v.any(),
+    fingerprint: v.string(),
+  },
+  returns: v.any(),
+  handler: async (ctx, args) => {
+    const run = await ctx.db.get(args.runId);
+    if (!run) throw new Error(`run not found: ${args.runId}`);
+    if (
+      run.ownerId !== args.ownerId ||
+      run.channelId !== args.channelId ||
+      ["ok", "failed", "canceled"].includes(run.status)
+    ) {
+      throw new Error("probe dispatch run identity/status mismatch");
+    }
+    if (!/^[a-f0-9]{64}$/.test(args.fingerprint)) {
+      throw new Error("probe dispatch envelope fingerprint is invalid");
+    }
+    const envelope = args.envelope as ChannelInceptionProbeAttemptCheckpoint;
+    assertChannelInceptionProbeEnvelopeStructure(envelope);
+    if (
+      envelope.ownerId !== args.ownerId ||
+      envelope.channelId !== String(args.channelId) ||
+      envelope.runId !== String(args.runId) ||
+      envelope.dispatchEnvelopeFingerprint !== args.fingerprint
+    ) {
+      throw new Error("probe dispatch envelope is not bound to its durable run");
+    }
+    const encoded = JSON.stringify(envelope);
+    if (encoded.length > 250_000) {
+      throw new Error("probe dispatch envelope exceeds 250000 characters");
+    }
+    const existingEnvelope = run.probeDispatchEnvelope as
+      | ChannelInceptionProbeAttemptCheckpoint
+      | undefined;
+    const existingFingerprint = run.probeDispatchEnvelopeFingerprint;
+    if ((existingEnvelope === undefined) !== (existingFingerprint === undefined)) {
+      throw new Error("probe dispatch envelope/fingerprint pair is incomplete");
+    }
+    if (existingEnvelope) {
+      assertChannelInceptionProbeEnvelopeStructure(existingEnvelope);
+      if (
+        existingFingerprint !== args.fingerprint ||
+        existingEnvelope.dispatchEnvelopeFingerprint !== args.fingerprint
+      ) {
+        throw new Error("probe dispatch envelope is immutable");
+      }
+      return {
+        envelope: existingEnvelope,
+        fingerprint: existingFingerprint,
+        claimedAt: run.probeDispatchClaimedAt,
+        reused: true,
+      };
+    }
+    const claimedAt = Date.now();
+    await ctx.db.patch(args.runId, {
+      probeDispatchEnvelope: envelope,
+      probeDispatchEnvelopeFingerprint: args.fingerprint,
+      probeDispatchClaimedAt: claimedAt,
+    });
+    return {
+      envelope,
+      fingerprint: args.fingerprint,
+      claimedAt,
+      reused: false,
+    };
+  },
+});
+
 export const claimInvocationSnapshot = mutation({
   args: {
     ownerId: v.string(),
@@ -358,6 +645,10 @@ export const completeRun = mutation({
       finishedAt: args.finishedAt,
       costTotal: args.costTotal,
       error: undefined,
+      heartbeatAt: args.finishedAt,
+      leaseExpiresAt: undefined,
+      leaseOwner: undefined,
+      leaseRecoveryPending: undefined,
       ...continuationPatch,
     });
     return null;
@@ -390,6 +681,12 @@ export const updateRun = mutation({
     for (const [k, val] of Object.entries(rest)) {
       if (val !== undefined) patch[k] = val;
     }
+    if (rest.status && ["ok", "failed", "canceled"].includes(rest.status)) {
+      patch.heartbeatAt = rest.finishedAt ?? Date.now();
+      patch.leaseExpiresAt = undefined;
+      patch.leaseOwner = undefined;
+      patch.leaseRecoveryPending = undefined;
+    }
     await ctx.db.patch(runId, patch);
     return null;
   },
@@ -405,11 +702,34 @@ export const getRun = query({
 export const listRunsByChannel = query({
   args: { channelId: v.id("channels"), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
-    const source = ctx.db
+    const limit = validatedReadLimit(args.limit, RUNS_BY_CHANNEL_LIMIT);
+    return await ctx.db
       .query("runs")
       .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
-      .order("desc");
-    return args.limit ? await source.take(Math.min(500, Math.max(1, args.limit))) : await source.collect();
+      .order("desc")
+      .take(limit);
+  },
+});
+
+/** Cursor-paginated, startedAt-indexed history for workers that truly need it. */
+export const listRunsByChannelSincePage = query({
+  args: {
+    channelId: v.id("channels"),
+    startedAfter: v.number(),
+    paginationOpts: paginationOptsValidator,
+  },
+  handler: async (ctx, args) => {
+    if (!Number.isFinite(args.startedAfter) || args.startedAfter < 0) {
+      throw new Error("run history start must be a non-negative timestamp");
+    }
+    validatedReadLimit(args.paginationOpts.numItems, RUN_HISTORY_PAGE_LIMIT);
+    return await ctx.db
+      .query("runs")
+      .withIndex("by_channel_started", (q) =>
+        q.eq("channelId", args.channelId).gte("startedAt", args.startedAfter),
+      )
+      .order("desc")
+      .paginate(args.paginationOpts);
   },
 });
 
@@ -428,8 +748,11 @@ export const listActive = query({
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
       .order("desc")
       .take(200);
+    const now = Date.now();
     const active = runs.filter(
-      (r) => r.status === "queued" || r.status === "running",
+      (r) =>
+        (r.status === "queued" || r.status === "running") &&
+        !isRunLeaseExpired(r, now),
     );
     active.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
     return await Promise.all(
@@ -443,6 +766,8 @@ export const listActive = query({
           costTotal: run.costTotal,
           youtubeVideoId: run.youtubeVideoId,
           error: run.error,
+          heartbeatAt: run.heartbeatAt,
+          leaseExpiresAt: run.leaseExpiresAt,
           channelName: channel?.name ?? "(unknown)",
           channelSlug: channel?.slug ?? "",
         };
@@ -481,13 +806,14 @@ export const repointChannel = mutation({
 export const listRecent = query({
   args: { ownerId: v.string(), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
+    const limit = validatedReadLimit(args.limit, RECENT_RUNS_LIMIT);
     // Index desc ≈ startedAt desc (startedAt is stamped at insert) — take the
     // page directly instead of collecting every owner run then slicing.
     const limited = await ctx.db
       .query("runs")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
       .order("desc")
-      .take(args.limit ?? 10);
+      .take(limit);
     limited.sort((a, b) => (b.startedAt ?? 0) - (a.startedAt ?? 0));
     return await Promise.all(
       limited.map(async (run) => {

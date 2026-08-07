@@ -16,8 +16,12 @@ import { hasGeminiKey } from "@/lib/gemini";
 import { optimizeTopics } from "@/lib/topicOptimizer";
 import { loadLedger } from "@/lib/performance";
 import { detectFollowups } from "@/lib/followups";
-import { generateBananaImage, hasBanana } from "@/lib/banana";
 import { renderThumbnail } from "@/lib/thumbnailRenderer";
+import {
+  createAttestedNovitaImageGenerator,
+  type NovitaImageProviderReceipt,
+} from "@/lib/novitaMedia";
+import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import type { ThumbnailPlaybook } from "@/lib/thumbnailLab";
 import type { ThumbnailTextZone } from "@/lib/thumbnailLayout";
 import {
@@ -26,12 +30,23 @@ import {
   shortTitleFallback,
 } from "@/lib/thumbnailFormula";
 import { readFileSync, mkdirSync } from "node:fs";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { createModelUsageScope } from "@/lib/modelUsage";
-import { createImageUsageScope } from "@/lib/imageUsage";
+import { createImageUsageScope, recordImageUsage } from "@/lib/imageUsage";
+import {
+  PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA,
+  makePlanWeekArtifactReceipt,
+  makePlanWeekProviderRenderReceipt,
+  planWeekProviderReceiptImageUsage,
+  validatePlanWeekProviderRenderReceipt,
+  type PlanWeekArtifactReceipt,
+  type PlanWeekProviderRenderReceipt,
+} from "@/lib/planWeekRenderReceipt";
 import {
   PLAN_WEEK_CONTRACT_VERSION,
+  PLAN_WEEK_IMAGE_UNIT_USD,
   buildPlanWeekTopicCheckpoint,
   buildPlanWeekUsageCheckpoint,
   dedupePlanCandidates,
@@ -48,6 +63,8 @@ export interface PlanWeekArgs {
   ownerId: string;
   channelId: string;
   count?: number;
+  /** Optional caller-owned ceiling for this child batch. */
+  budgetCapUsd?: number;
   /** Stable caller key; Trigger run identity is the fallback for automatic retries. */
   requestKey?: string;
 }
@@ -79,6 +96,16 @@ export const planWeekAheadTask = task({
     const requestKey = payload.requestKey?.trim() || ctx.run.id;
     const claimant = `${ctx.run.id}:${ctx.attempt.number}`;
     const reservation = planWeekReservation(count);
+    if (
+      payload.budgetCapUsd !== undefined &&
+      (!Number.isFinite(payload.budgetCapUsd) ||
+        payload.budgetCapUsd <= 0 ||
+        reservation.totalUsd > payload.budgetCapUsd + Number.EPSILON)
+    ) {
+      abortTask(
+        `plan-week-ahead reservation $${reservation.totalUsd.toFixed(4)} exceeds caller cap $${String(payload.budgetCapUsd)}`,
+      );
+    }
     const admitted = await (async () => {
       try {
         return await convex.mutation(api.contentPlan.reservePlanBatch, {
@@ -120,7 +147,7 @@ export const planWeekAheadTask = task({
 
     let itemIds = admitted.itemIds as Id<"contentPlan">[] | undefined;
     if (admitted.topicState !== "complete") {
-      if (!hasGeminiKey() || !hasBanana()) {
+      if (!hasGeminiKey() || !hasNovitaRenderFarmConfig()) {
         const modelScope = createModelUsageScope();
         const imageScope = createImageUsageScope();
         const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
@@ -133,7 +160,7 @@ export const planWeekAheadTask = task({
         });
         const error = !hasGeminiKey()
           ? "plan-week-ahead: Gemini topic provider is not configured"
-          : "plan-week-ahead: thumbnail image provider is not configured";
+          : "plan-week-ahead: attested Novita render farm is not configured";
         await convex.mutation(api.contentPlan.failPlanTopics, {
           ownerId, channelId, batchId, attempt: admitted.topicAttempt,
           usageCheckpointKey, error, retryable: true,
@@ -300,14 +327,31 @@ export const planWeekAheadTask = task({
       });
       if (claim.state === "complete") continue;
       const usageCheckpointKey = `thumbnail:${item._id}:${claim.attempt}`;
+      let providerReceipt: PlanWeekProviderRenderReceipt | null = null;
 
       try {
-        const recovered = await recoverThumbnailCheckpoint(thumbnailKey);
+        providerReceipt = await loadPlanWeekProviderReceipt({
+          convex,
+          ownerId,
+          channelId,
+          batchId,
+          itemId: item._id,
+          attempt: claim.attempt,
+          requestKey,
+          usageCheckpointKey,
+          destinationKey: thumbnailKey,
+        });
+        const recovered = await recoverThumbnailCheckpoint(thumbnailKey, providerReceipt ?? undefined);
         if (recovered) {
           await persistThumbnailCheckpoint({
             convex, ownerId, channelId, batchId, itemId: item._id,
             usageCheckpointKey: recovered.usageCheckpointKey,
             checkpoint: recovered.checkpoint,
+          });
+          await finalizePlanThumbnailReceipt({
+            convex, ownerId, channelId, batchId, itemId: item._id, requestKey,
+            usageCheckpointKey: recovered.usageCheckpointKey,
+            artifactReceipt: recovered.artifactReceipt,
           });
           await convex.mutation(api.contentPlan.completePlanItem, {
             ownerId, channelId, batchId, itemId: item._id, attempt: claim.attempt,
@@ -332,8 +376,17 @@ export const planWeekAheadTask = task({
       }
 
       if (claim.state === "recovery_only") {
-        failures.push(`${item.topic}: ${claim.error ?? "thumbnail provider spend already started; checkpoint recovery is required"}`);
-        break;
+        if (!providerReceipt) {
+          const error = claim.error ??
+            "thumbnail provider spend started without a durable receipt; replay is prohibited";
+          await convex.mutation(api.contentPlan.failPlanItem, {
+            ownerId, channelId, batchId, itemId: item._id, attempt: claim.attempt,
+            usageCheckpointKey, error, retryable: false,
+          });
+          failures.push(`${item.topic}: ${error}`);
+          break;
+        }
+        log(`reattached paid provider receipt for ${index + 1}/${batchItems.length}; no provider replay`);
       }
 
       if (claim.state === "busy") {
@@ -344,7 +397,7 @@ export const planWeekAheadTask = task({
       const modelScope = createModelUsageScope();
       const imageScope = createImageUsageScope();
       try {
-        await modelScope.run(() => imageScope.run(() => genThumb({
+        const generated = await modelScope.run(() => imageScope.run(() => genThumb({
           id: item._id,
           topic: item.topic,
           title: item.title?.trim() || item.topic,
@@ -358,6 +411,10 @@ export const planWeekAheadTask = task({
           sceneSeed: item.sceneSeed,
           playbook: (channel as { thumbnailPlaybook?: ThumbnailPlaybook }).thumbnailPlaybook,
           usageCheckpointKey,
+          renderPrefix:
+            `${keyPrefix.replace(/\/$/, "")}/runs/${ctx.run.id}/plan-week/${batchId}` +
+            `/items/${item._id}/attempt-${claim.attempt}`,
+          providerReceipt: providerReceipt ?? undefined,
           usageMetadata: () => planWeekUsageMetadata(
             buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot()),
           ),
@@ -366,11 +423,47 @@ export const planWeekAheadTask = task({
               ownerId, channelId, batchId, itemId: item._id, attempt: claim.attempt, claimant,
             });
           },
+          onProviderReceipt: async (rendered) => {
+            const receipt = makePlanWeekProviderRenderReceipt({
+              ownerId,
+              channelId: String(channelId),
+              batchId: String(batchId),
+              itemId: String(item._id),
+              attempt: claim.attempt,
+              requestKey,
+              checkpointKey: usageCheckpointKey,
+              destinationKey: thumbnailKey,
+            }, rendered);
+            await convex.mutation(api.planWeekRenderReceipts.recordProviderReceipt, {
+              ownerId,
+              channelId,
+              batchId,
+              itemId: item._id,
+              requestKey,
+              checkpointKey: usageCheckpointKey,
+              providerReceipt: receipt,
+            });
+            providerReceipt = receipt;
+            // renderNovitaImage records the exact provider cost before invoking
+            // this callback. Persist that snapshot before presign/download.
+            await persistThumbnailCheckpoint({
+              convex, ownerId, channelId, batchId, itemId: item._id,
+              usageCheckpointKey,
+              checkpoint: buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot()),
+            });
+            return receipt;
+          },
         })));
+        providerReceipt = generated.providerReceipt;
         const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
         await persistThumbnailCheckpoint({
           convex, ownerId, channelId, batchId, itemId: item._id,
           usageCheckpointKey, checkpoint,
+        });
+        await finalizePlanThumbnailReceipt({
+          convex, ownerId, channelId, batchId, itemId: item._id, requestKey,
+          usageCheckpointKey,
+          artifactReceipt: generated.artifactReceipt,
         });
         await convex.mutation(api.contentPlan.completePlanItem, {
           ownerId, channelId, batchId, itemId: item._id, attempt: claim.attempt,
@@ -379,14 +472,43 @@ export const planWeekAheadTask = task({
         log(`planned ${index + 1}/${batchItems.length}: "${(item.title || item.topic).slice(0, 50)}"`);
       } catch (error) {
         const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
+        let receiptLookupFailure: unknown;
+        try {
+          providerReceipt = providerReceipt ?? await loadPlanWeekProviderReceipt({
+            convex,
+            ownerId,
+            channelId,
+            batchId,
+            itemId: item._id,
+            attempt: claim.attempt,
+            requestKey,
+            usageCheckpointKey,
+            destinationKey: thumbnailKey,
+          });
+        } catch (lookupError) {
+          // Corrupt receipts fail closed. A transient lookup failure retries
+          // only into recovery_only because provider-start is already fenced.
+          if (!(lookupError instanceof InvalidPlanCheckpointError)) {
+            receiptLookupFailure = lookupError;
+          }
+          providerReceipt = null;
+        }
         if (error instanceof AmbiguousThumbnailCheckpointError) {
           try {
-            const recovered = await recoverThumbnailCheckpoint(thumbnailKey);
+            const recovered = await recoverThumbnailCheckpoint(
+              thumbnailKey,
+              providerReceipt ?? undefined,
+            );
             if (recovered) {
               await persistThumbnailCheckpoint({
                 convex, ownerId, channelId, batchId, itemId: item._id,
                 usageCheckpointKey: recovered.usageCheckpointKey,
                 checkpoint: recovered.checkpoint,
+              });
+              await finalizePlanThumbnailReceipt({
+                convex, ownerId, channelId, batchId, itemId: item._id, requestKey,
+                usageCheckpointKey: recovered.usageCheckpointKey,
+                artifactReceipt: recovered.artifactReceipt,
               });
               await convex.mutation(api.contentPlan.completePlanItem, {
                 ownerId, channelId, batchId, itemId: item._id, attempt: claim.attempt,
@@ -413,10 +535,17 @@ export const planWeekAheadTask = task({
           });
         } catch (checkpointError) {
           failures.push(`${item.topic}: accounting checkpoint failed (${errorMessage(checkpointError)})`);
+          if (providerReceipt || receiptLookupFailure) throw checkpointError;
           break;
         }
         failures.push(`${item.topic}: ${errorMessage(error)}`);
-        if (error instanceof AmbiguousThumbnailCheckpointError) throw error;
+        if (receiptLookupFailure) throw receiptLookupFailure;
+        if (providerReceipt || error instanceof AmbiguousThumbnailCheckpointError) {
+          // A paid receipt is durable. Trigger may retry only to reattach the
+          // provider R2 source and finish local composition/upload; it cannot
+          // enter the provider again for this attempt.
+          throw error;
+        }
         // One terminal item means this batch cannot become ready. Do not buy
         // more thumbnails just to discover that again at finalization.
         if (!retryable) break;
@@ -541,21 +670,146 @@ async function persistTopicCheckpoint(args: {
   return saved.itemIds as Id<"contentPlan">[];
 }
 
-async function recoverThumbnailCheckpoint(key: string): Promise<{
+async function recoverThumbnailCheckpoint(
+  key: string,
+  providerReceipt?: PlanWeekProviderRenderReceipt,
+): Promise<{
   checkpoint: PlanWeekUsageCheckpoint;
   usageCheckpointKey: string;
+  artifactReceipt: PlanWeekArtifactReceipt;
 } | null> {
   const head = await headObjectMetadata(key);
   if (!head) return null;
-  if ((head.contentLength ?? 0) <= 0) {
-    throw new InvalidPlanCheckpointError("existing plan thumbnail checkpoint is empty");
+  if (!providerReceipt) {
+    throw new InvalidPlanCheckpointError("existing plan thumbnail has no durable provider receipt");
+  }
+  if (
+    !Number.isInteger(head.contentLength) ||
+    (head.contentLength ?? 0) <= 0 ||
+    (head.contentLength ?? 0) > 30 * 1024 * 1024 ||
+    head.contentType !== "image/jpeg" ||
+    !head.etag?.trim()
+  ) {
+    throw new InvalidPlanCheckpointError("existing plan thumbnail HEAD contract is incomplete");
   }
   const checkpoint = parsePlanWeekUsageMetadata(head.metadata);
-  const usageCheckpointKey = head.metadata["plan-week-checkpoint-key"]?.trim();
-  if (!checkpoint || !usageCheckpointKey) {
-    throw new InvalidPlanCheckpointError("existing plan thumbnail is missing its exact usage checkpoint");
+  const usageCheckpointKey = head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.checkpointKey]?.trim();
+  const providerRequestSha256 = head.metadata[
+    PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerRequestSha256
+  ]?.trim();
+  const billingReceiptSha256 = head.metadata[
+    PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256
+  ]?.trim();
+  const artifactSha256 = head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactSha256]?.trim();
+  const artifactCreatedAt = Number(
+    head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactCreatedAt],
+  );
+  if (
+    !checkpoint ||
+    !thumbnailUsageMatchesProviderReceipt(checkpoint, providerReceipt) ||
+    usageCheckpointKey !== providerReceipt.checkpointKey ||
+    providerRequestSha256 !== providerReceipt.requestSha256 ||
+    billingReceiptSha256 !== providerReceipt.billingReceiptSha256 ||
+    !artifactSha256 ||
+    !/^[a-f0-9]{64}$/.test(artifactSha256) ||
+    !Number.isFinite(artifactCreatedAt)
+  ) {
+    throw new InvalidPlanCheckpointError(
+      "existing plan thumbnail is missing or mismatches its exact receipt metadata",
+    );
   }
-  return { checkpoint, usageCheckpointKey };
+  let artifactReceipt: PlanWeekArtifactReceipt;
+  try {
+    artifactReceipt = makePlanWeekArtifactReceipt({
+      provider: providerReceipt,
+      destinationKey: key,
+      byteLength: head.contentLength!,
+      sha256: artifactSha256,
+      etag: head.etag,
+      createdAt: artifactCreatedAt,
+    });
+  } catch (error) {
+    throw new InvalidPlanCheckpointError(`invalid plan thumbnail artifact receipt: ${errorMessage(error)}`);
+  }
+  return { checkpoint, usageCheckpointKey, artifactReceipt };
+}
+
+function thumbnailUsageMatchesProviderReceipt(
+  checkpoint: PlanWeekUsageCheckpoint,
+  receipt: PlanWeekProviderRenderReceipt,
+): boolean {
+  const expected = planWeekProviderReceiptImageUsage(receipt);
+  const record = checkpoint.imageUsage.records[0];
+  return checkpoint.accountingComplete === true &&
+    checkpoint.modelUsage.calls === 0 &&
+    checkpoint.modelUsage.unpricedCalls === 0 &&
+    checkpoint.modelUsage.costUsd === 0 &&
+    checkpoint.imageUsage.calls === 1 &&
+    checkpoint.imageUsage.images === 1 &&
+    checkpoint.imageUsage.records.length === 1 &&
+    Math.abs(checkpoint.imageUsage.costUsd - receipt.costUsd) <= 0.000001 &&
+    Math.abs(checkpoint.costUsd - receipt.costUsd) <= 0.000001 &&
+    record?.provider === expected.provider &&
+    record.model === expected.model &&
+    record.route === expected.route &&
+    record.images === expected.images &&
+    record.width === expected.width &&
+    record.height === expected.height &&
+    Math.abs(record.costUsd - expected.costUsd) <= 0.000001;
+}
+
+async function finalizePlanThumbnailReceipt(args: {
+  convex: ConvexHttpClient;
+  ownerId: string;
+  channelId: Id<"channels">;
+  batchId: Id<"planBatches">;
+  itemId: Id<"contentPlan">;
+  requestKey: string;
+  usageCheckpointKey: string;
+  artifactReceipt: PlanWeekArtifactReceipt;
+}): Promise<void> {
+  await args.convex.mutation(api.planWeekRenderReceipts.finalizeArtifactReceipt, {
+    ownerId: args.ownerId,
+    channelId: args.channelId,
+    batchId: args.batchId,
+    itemId: args.itemId,
+    requestKey: args.requestKey,
+    checkpointKey: args.usageCheckpointKey,
+    artifactReceipt: args.artifactReceipt,
+  });
+}
+
+async function loadPlanWeekProviderReceipt(args: {
+  convex: ConvexHttpClient;
+  ownerId: string;
+  channelId: Id<"channels">;
+  batchId: Id<"planBatches">;
+  itemId: Id<"contentPlan">;
+  attempt: number;
+  requestKey: string;
+  usageCheckpointKey: string;
+  destinationKey: string;
+}): Promise<PlanWeekProviderRenderReceipt | null> {
+  const row = await args.convex.query(api.planWeekRenderReceipts.getByCheckpoint, {
+    ownerId: args.ownerId,
+    channelId: args.channelId,
+    checkpointKey: args.usageCheckpointKey,
+  });
+  if (!row) return null;
+  const receipt = row.providerReceipt as PlanWeekProviderRenderReceipt;
+  if (!validatePlanWeekProviderRenderReceipt(receipt, {
+    ownerId: args.ownerId,
+    channelId: String(args.channelId),
+    batchId: String(args.batchId),
+    itemId: String(args.itemId),
+    attempt: args.attempt,
+    requestKey: args.requestKey,
+    checkpointKey: args.usageCheckpointKey,
+    destinationKey: args.destinationKey,
+  })) {
+    throw new InvalidPlanCheckpointError("durable plan-week provider receipt is corrupt or misbound");
+  }
+  return receipt;
 }
 
 async function persistThumbnailCheckpoint(args: {
@@ -607,10 +861,23 @@ async function genThumb(o: {
   sceneSeed?: string;
   playbook?: ThumbnailPlaybook;
   usageCheckpointKey: string;
+  /** Run/attempt-scoped namespace used by the bridge idempotency contract. */
+  renderPrefix: string;
+  /** Durable terminal provider result used by recovery; skips provider launch. */
+  providerReceipt?: PlanWeekProviderRenderReceipt;
   usageMetadata: () => Record<string, string>;
   beforeProviderSpend: () => Promise<void>;
-}): Promise<string> {
-  if (!hasBanana()) throw new Error("plan thumbnail image provider is not configured");
+  onProviderReceipt?: (
+    receipt: NovitaImageProviderReceipt,
+  ) => Promise<PlanWeekProviderRenderReceipt>;
+}): Promise<{
+  key: string;
+  providerReceipt: PlanWeekProviderRenderReceipt;
+  artifactReceipt: PlanWeekArtifactReceipt;
+}> {
+  if (!o.providerReceipt && !hasNovitaRenderFarmConfig()) {
+    throw new Error("plan thumbnail attested Novita render farm is not configured");
+  }
   const scene = o.sceneSeed?.trim() ||
     `A dramatic physical scene that communicates this subject through people, objects, and action: ${o.topic}.` +
     (o.niche ? ` Visual context: ${o.niche}.` : "");
@@ -628,7 +895,31 @@ async function genThumb(o: {
   const textZone = zones.has(requestedZone as ThumbnailTextZone)
     ? requestedZone as ThumbnailTextZone
     : "left";
-  let providerSpendStarted = false;
+  let providerReceipt = o.providerReceipt;
+  const generateScene = providerReceipt
+    ? async () => {
+        recordImageUsage(planWeekProviderReceiptImageUsage(providerReceipt!));
+        const bytes = Buffer.from(await getObjectBytes(providerReceipt!.sourceKey));
+        if (!bytes.length || bytes.length > 30 * 1024 * 1024) {
+          throw new Error("plan thumbnail provider source is outside the 1B..30MiB contract");
+        }
+        return bytes;
+      }
+    : createAttestedNovitaImageGenerator<
+        import("@/lib/thumbnailRenderer").ThumbnailImageRequest
+      >({
+        prefix: o.renderPrefix,
+        id: () => `thumbnail-${o.id}`,
+        profileId: "production",
+        maxCostUsd: PLAN_WEEK_IMAGE_UNIT_USD,
+        beforeProviderSpend: o.beforeProviderSpend,
+        onProviderReceipt: async (receipt) => {
+          if (!o.onProviderReceipt) {
+            throw new Error("plan thumbnail provider receipt persistence is not configured");
+          }
+          providerReceipt = await o.onProviderReceipt(receipt);
+        },
+      });
   await renderThumbnail({
     spec: {
       scene: {
@@ -659,21 +950,30 @@ async function genThumb(o: {
     },
     outJpg,
     tmpDir: o.dir,
-    generateScene: async (request) => {
-      if (!providerSpendStarted) {
-        await o.beforeProviderSpend();
-        providerSpendStarted = true;
-      }
-      return generateBananaImage({ ...request, maxProviderAttempts: 1 });
-    },
+    generateScene,
   });
+  if (!providerReceipt) {
+    throw new Error("plan thumbnail render completed without its durable provider receipt");
+  }
   const key = planThumbnailKey(o.ownerId, o.slug, o.id);
+  const artifactBytes = readFileSync(outJpg);
+  if (!artifactBytes.length || artifactBytes.length > 30 * 1024 * 1024) {
+    throw new Error("plan thumbnail artifact is outside the 1B..30MiB contract");
+  }
+  const artifactSha256 = createHash("sha256").update(artifactBytes).digest("hex");
+  const artifactCreatedAt = Math.max(Date.now(), providerReceipt.createdAt);
   try {
-    await putObject(key, readFileSync(outJpg), {
+    await putObject(key, artifactBytes, {
       contentType: "image/jpeg",
       metadata: {
         ...o.usageMetadata(),
-        "plan-week-checkpoint-key": o.usageCheckpointKey,
+        [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.checkpointKey]: o.usageCheckpointKey,
+        [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerRequestSha256]:
+          providerReceipt.requestSha256,
+        [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256]:
+          providerReceipt.billingReceiptSha256,
+        [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactSha256]: artifactSha256,
+        [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactCreatedAt]: String(artifactCreatedAt),
       },
       ifNoneMatch: "*",
     });
@@ -682,5 +982,32 @@ async function genThumb(o: {
       `plan thumbnail upload outcome is ambiguous: ${errorMessage(error)}`,
     );
   }
-  return key;
+  const head = await headObjectMetadata(key);
+  if (
+    !head ||
+    head.contentLength !== artifactBytes.length ||
+    head.contentType !== "image/jpeg" ||
+    !head.etag?.trim() ||
+    head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactSha256] !== artifactSha256 ||
+    head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerRequestSha256] !==
+      providerReceipt.requestSha256 ||
+    head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256] !==
+      providerReceipt.billingReceiptSha256
+  ) {
+    throw new AmbiguousThumbnailCheckpointError(
+      "plan thumbnail upload did not produce an exact HEAD receipt",
+    );
+  }
+  return {
+    key,
+    providerReceipt,
+    artifactReceipt: makePlanWeekArtifactReceipt({
+      provider: providerReceipt,
+      destinationKey: key,
+      byteLength: artifactBytes.length,
+      sha256: artifactSha256,
+      etag: head.etag,
+      createdAt: artifactCreatedAt,
+    }),
+  };
 }

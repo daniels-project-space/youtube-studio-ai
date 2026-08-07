@@ -1,6 +1,7 @@
 "use client";
 
-import { useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, type ReactNode } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { NICHES, getNiche } from "@/lib/nicheCatalog";
@@ -9,13 +10,67 @@ import { FAMILIES, FAMILY_KEYS, FAMILY_CREW, CREW_ROLE_BLOCK, getFamily, type Fa
 import { ARCHETYPES } from "@/engine/archetypes";
 import { MODULE_CATALOG, type ParamField } from "@/engine/moduleCatalog";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { CHANNEL_INCEPTION_SETUP_COST_CEILING_USD } from "@/engine/channelInceptionContracts";
+import {
+  parsePendingChannelBuildRequest,
+  reusableChannelBuildRequestKey,
+  shouldRetainPendingChannelBuild,
+  ChannelBuildSubmissionGate,
+  type PendingChannelBuildRequest,
+} from "@/lib/channelBuildRecovery";
+import { channelBuildCostAuthority } from "@/lib/channelBuildCostAuthority";
+import {
+  normalizeYoutubeChannelName,
+  suggestYoutubeHandle,
+} from "@/lib/youtubeChannelCreationClaim";
 
 type Phase = "form" | "building" | "error";
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
-const BUILD_STEPS = ["Designing the pipeline…", "Synthesizing identity…", "Generating channel art…", "Finalizing…"];
+const ACTIVE_BUILD_STORAGE_KEY = "youtube-studio:active-channel-build:v1";
+const PENDING_BUILD_STORAGE_KEY = "youtube-studio:pending-channel-build:v1";
+const STAGE_LABELS: Record<string, string> = {
+  "channel-inception-research": "Research evidence",
+  "channel-inception-positioning": "Channel positioning",
+  "channel-inception-seo": "SEO system",
+  "channel-inception-voice": "Voice audition",
+  "channel-inception-avatar": "Profile image",
+  "channel-inception-banner": "Channel banner",
+  "channel-inception-thumbnails": "Starter thumbnails",
+  "channel-inception-pipeline": "Golden pipeline",
+  "channel-inception-probe": "Private validation render",
+  "channel-inception-readiness": "Production readiness",
+};
+
+interface ActiveBuildSession {
+  runId: string;
+  requestKey: string;
+  slug: string;
+  displayName: string;
+  startedAt: number;
+}
+
+interface BuildProgress {
+  inceptionStatus: "planned" | "running" | "complete" | "blocked";
+  updatedAt: number;
+  executionAuthorized: boolean;
+  probeAuthorized: boolean;
+  stages: Array<{
+    moduleKey: string;
+    status: string;
+    attempts: number;
+    executionPhase?: string;
+    error?: string;
+  }>;
+}
 
 interface Toggles { quotes: boolean; captions: boolean; chapters: boolean; notify: boolean; crosspost: boolean; shorts: boolean }
 const DEFAULT_TOGGLES: Toggles = { quotes: true, captions: true, chapters: true, notify: true, crosspost: false, shorts: false };
+
+async function browserSha256(value: string): Promise<string> {
+  const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
+  return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
 
 // Client preview of the designed block list (mirrors src/engine/designer filter).
 function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string): string[] {
@@ -53,8 +108,15 @@ export default function NewChannelWizard() {
   const [phase, setPhase] = useState<Phase>("form");
   const [step, setStep] = useState(0); // 0 niche, 1 format, 2 details, 3 review
   const [error, setError] = useState<string | null>(null);
-  const [buildStep, setBuildStep] = useState(0);
-  const pollRef = useRef<ReturnType<typeof setInterval> | null>(null);
+  const [activeBuild, setActiveBuild] = useState<ActiveBuildSession | null>(null);
+  const [pendingBuild, setPendingBuild] = useState<PendingChannelBuildRequest | null>(null);
+  const [buildProgress, setBuildProgress] = useState<BuildProgress | null>(null);
+  const pollRef = useRef<ReturnType<typeof setTimeout> | null>(null);
+  const pollGenerationRef = useRef(0);
+  const pollAbortRef = useRef<AbortController | null>(null);
+  const pollSessionRef = useRef<ActiveBuildSession | null>(null);
+  const submissionGateRef = useRef(new ChannelBuildSubmissionGate());
+  const pollCallbackRef = useRef<((session: ActiveBuildSession) => void) | null>(null);
 
   // selections
   const [nicheKey, setNicheKey] = useState<string>("");
@@ -75,7 +137,12 @@ export default function NewChannelWizard() {
   const [budget, setBudget] = useState(5);
   const [publishMode, setPublishMode] = useState("draft");
   const [approvedForPublish, setApprovedForPublish] = useState(false);
-  const [autoYoutube, setAutoYoutube] = useState(true);
+  const [approveSetupSpend, setApproveSetupSpend] = useState(false);
+  // Creating a real external channel is consequential. Keep it opt-in even
+  // though the rest of Channel Inception can run autonomously and stay draft.
+  const [autoYoutube, setAutoYoutube] = useState(false);
+  const [runProbe, setRunProbe] = useState(false);
+  const createRequestKeyRef = useRef<{ intent: string; key: string } | null>(null);
   const [toggles, setToggles] = useState<Toggles>(DEFAULT_TOGGLES);
   // Advanced per-module param editor: paramOverrides[blockId][key] = value.
   const [paramOverrides, setParamOverrides] = useState<Record<string, Record<string, unknown>>>({});
@@ -92,13 +159,11 @@ export default function NewChannelWizard() {
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;
-
-  useEffect(() => {
-    if (phase !== "building") return;
-    const t = setInterval(() => setBuildStep((s) => (s + 1) % BUILD_STEPS.length), 2500);
-    return () => clearInterval(t);
-  }, [phase]);
-  useEffect(() => () => { if (pollRef.current) clearInterval(pollRef.current); if (analyzeRef.current) clearInterval(analyzeRef.current); }, []);
+  const costAuthority = channelBuildCostAuthority({
+    approveSetupSpend,
+    runProbe,
+    perVideoBudgetUsd: budget,
+  });
 
   // pick niche → default its family + subcategory + research-tuned target length
   const pickNiche = (k: string) => {
@@ -176,61 +241,329 @@ export default function NewChannelWizard() {
     })();
   }
 
-  async function create() {
-    setPhase("building"); setError(null); setBuildStep(0);
+  async function create(startedAt: number) {
+    setPhase("building"); setError(null); setBuildProgress(null);
+    try {
+      const requestedYoutubeName = normalizeYoutubeChannelName(name);
+      if (autoYoutube && !requestedYoutubeName) {
+        setError("Enter the exact channel name before authorizing real YouTube creation.");
+        setPhase("error");
+        return;
+      }
+      const requestedYoutubeHandle = autoYoutube
+        ? suggestYoutubeHandle(requestedYoutubeName)
+        : undefined;
+      const design: Record<string, unknown> = {
+        nicheKey, subcategory, family, name: requestedYoutubeName || undefined,
+        lengthMinutes: fam?.narrated ? lengthMinutes : undefined,
+        locale, footageTheme: family === "narrated_stock" ? footageTheme : undefined,
+        voiceFx: fam?.narrated && voiceFx !== "none" ? voiceFx : undefined,
+        seriesTitle: seriesTitle.trim() || undefined,
+        seriesCount: seriesTitle.trim() && seriesCount > 0 ? seriesCount : undefined,
+        cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube, runProbe,
+        ...(autoYoutube ? { requestedYoutubeName, requestedYoutubeHandle } : {}),
+        approveSetupSpend,
+        setupBudgetUsd: costAuthority.setupCapUsd,
+        paramOverrides: Object.keys(paramOverrides).length ? paramOverrides : undefined,
+        moduleConfig: Object.keys(moduleConfig).length ? moduleConfig : undefined,
+        exampleClipUrl: clipUrl.trim() || undefined,
+      };
+      const intent = canonicalJson(design);
+      const prior = createRequestKeyRef.current;
+      const persisted = parsePendingChannelBuildRequest(
+        sessionStorage.getItem(PENDING_BUILD_STORAGE_KEY),
+      );
+      const requestKey = prior?.intent === intent
+        ? prior.key
+        : reusableChannelBuildRequestKey(intent, persisted) ??
+          `${crypto.randomUUID()}_${await browserSha256(intent)}`;
+      createRequestKeyRef.current = { intent, key: requestKey };
+      const pending: PendingChannelBuildRequest = {
+        version: "channel-build-pending/v1",
+        intent,
+        requestKey,
+        design,
+        displayName: name.trim() || niche?.label || "New channel",
+        startedAt: persisted?.intent === intent ? persisted.startedAt : startedAt,
+      };
+      // Persist before dispatch. If the server accepts but its response is lost,
+      // reload replays this exact globally-idempotent request instead of minting another.
+      sessionStorage.setItem(PENDING_BUILD_STORAGE_KEY, JSON.stringify(pending));
+      setPendingBuild(pending);
+      await submitPending(pending);
+    } catch {
+      setError("Could not prepare the recoverable channel request."); setPhase("error");
+    }
+  }
+
+  const submitPending = useCallback(async (pending: PendingChannelBuildRequest) => {
+    setPhase("building"); setError(null);
+    const attempt = submissionGateRef.current.begin(pending.requestKey);
+    if (!attempt) return;
     try {
       const res = await fetch("/api/build-channel", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ design: {
-          nicheKey, subcategory, family, name: name.trim() || undefined,
-          lengthMinutes: fam?.narrated ? lengthMinutes : undefined,
-          locale, footageTheme: family === "narrated_stock" ? footageTheme : undefined,
-          voiceFx: fam?.narrated && voiceFx !== "none" ? voiceFx : undefined,
-          seriesTitle: seriesTitle.trim() || undefined,
-          seriesCount: seriesTitle.trim() && seriesCount > 0 ? seriesCount : undefined,
-          cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube,
-          paramOverrides: Object.keys(paramOverrides).length ? paramOverrides : undefined,
-          moduleConfig: Object.keys(moduleConfig).length ? moduleConfig : undefined,
-          exampleClipUrl: clipUrl.trim() || undefined,
-        } }),
+        body: JSON.stringify({ requestKey: pending.requestKey, design: pending.design }),
+        signal: attempt.controller.signal,
       });
       const data = await res.json();
-      if (!res.ok) { setError(data.error ?? "Failed to start the builder."); setPhase("error"); return; }
-      poll(data.id);
-    } catch { setError("Network error starting the builder."); setPhase("error"); }
-  }
-  function poll(id: string) {
-    if (pollRef.current) clearInterval(pollRef.current);
-    pollRef.current = setInterval(async () => {
-      try {
-        const r = await fetch(`/api/build-channel?id=${encodeURIComponent(id)}`);
-        const d = await r.json();
-        if (d.status === "COMPLETED" && d.output?.slug) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          router.push(`/channels/${d.output.slug}`);
-        } else if (["FAILED", "CRASHED", "CANCELED", "TIMED_OUT"].includes(d.status)) {
-          if (pollRef.current) clearInterval(pollRef.current);
-          setError((typeof d.error === "object" && d.error?.message) || `Build ${String(d.status).toLowerCase()}.`);
-          setPhase("error");
+      if (!res.ok) {
+        if (!shouldRetainPendingChannelBuild(res.status)) {
+          sessionStorage.removeItem(PENDING_BUILD_STORAGE_KEY);
+          setPendingBuild(null);
         }
-      } catch { /* keep polling */ }
-    }, 2500);
-  }
+        setError(data.error ?? "Failed to start the builder."); setPhase("error"); return;
+      }
+      if (typeof data.id !== "string" || typeof data.slug !== "string") {
+        setError("Builder started without a recoverable run identity."); setPhase("error"); return;
+      }
+      const session: ActiveBuildSession = {
+        runId: data.id,
+        requestKey: pending.requestKey,
+        slug: data.slug,
+        displayName: pending.displayName,
+        startedAt: pending.startedAt,
+      };
+      sessionStorage.setItem(ACTIVE_BUILD_STORAGE_KEY, JSON.stringify(session));
+      setActiveBuild(session);
+      pollCallbackRef.current?.(session);
+    } catch {
+      if (attempt.controller.signal.aborted) return;
+      setError("The request may have started, but its response was lost. Retry uses the same request key."); setPhase("error");
+    } finally {
+      submissionGateRef.current.finish(attempt);
+    }
+  }, []);
+
+  const poll = useCallback((session: ActiveBuildSession) => {
+    pollSessionRef.current = session;
+    const generation = ++pollGenerationRef.current;
+    if (pollRef.current) clearTimeout(pollRef.current);
+    pollAbortRef.current?.abort();
+    let lastTaskReadAt = 0;
+
+    const finish = (slug: string) => {
+      if (generation !== pollGenerationRef.current) return;
+      sessionStorage.removeItem(ACTIVE_BUILD_STORAGE_KEY);
+      sessionStorage.removeItem(PENDING_BUILD_STORAGE_KEY);
+      setActiveBuild(null);
+      setPendingBuild(null);
+      pollSessionRef.current = null;
+      router.push(`/channels/${slug}`);
+    };
+    const terminalError = (message: string) => {
+      if (generation !== pollGenerationRef.current) return;
+      // Keep both journals byte-for-byte. Reloading an accepted build resumes
+      // read-only monitoring by run/slug; it must never mint a new request key
+      // or automatically redispatch a paid stage after a blocker.
+      pollSessionRef.current = null;
+      setError(message);
+      setPhase("error");
+    };
+
+    const tick = async (consecutiveErrors: number): Promise<void> => {
+      if (generation !== pollGenerationRef.current) return;
+      const elapsed = Date.now() - session.startedAt;
+      if (elapsed > 60 * 60 * 1_000) {
+        setError("The build is still running after an hour. Monitoring is paused; resume it when ready.");
+        setPhase("error");
+        return;
+      }
+      if (document.hidden) {
+        pollRef.current = setTimeout(() => void tick(consecutiveErrors), 15_000);
+        return;
+      }
+
+      let hadSuccessfulRead = false;
+      let progressAvailable = false;
+      const controller = new AbortController();
+      pollAbortRef.current?.abort();
+      pollAbortRef.current = controller;
+      try {
+        const progressResponse = await fetch(
+          `/api/build-channel/progress?slug=${encodeURIComponent(session.slug)}&requestKey=${encodeURIComponent(session.requestKey)}`,
+          { signal: controller.signal },
+        );
+        if (progressResponse.ok) {
+          const progress = await progressResponse.json() as BuildProgress;
+          progressAvailable = true;
+          hadSuccessfulRead = true;
+          if (generation !== pollGenerationRef.current) return;
+          setBuildProgress(progress);
+          if (progress.inceptionStatus === "complete" || progress.inceptionStatus === "planned") {
+            finish(session.slug);
+            return;
+          }
+          if (progress.inceptionStatus === "blocked") {
+            const blocker = progress.stages.find((stage) => stage.status === "blocked" || stage.status === "failed");
+            terminalError(blocker?.error ?? "Channel setup stopped at a blocked readiness gate.");
+            return;
+          }
+        } else if (progressResponse.status !== 404) {
+          const body = await progressResponse.json().catch(() => ({})) as { error?: string };
+          if (progressResponse.status === 409) {
+            terminalError(body.error ?? "Channel build identity mismatch.");
+            return;
+          }
+        }
+
+        const shouldReadTask = !progressAvailable || Date.now() - lastTaskReadAt >= 15_000;
+        if (shouldReadTask) {
+          lastTaskReadAt = Date.now();
+          const taskResponse = await fetch(
+            `/api/build-channel?id=${encodeURIComponent(session.runId)}`,
+            { signal: controller.signal },
+          );
+          if (taskResponse.ok) {
+            const taskState = await taskResponse.json() as {
+            status?: string;
+            output?: { slug?: string };
+            error?: { message?: string } | string;
+            };
+            hadSuccessfulRead = true;
+            if (taskState.status === "COMPLETED") {
+              finish(taskState.output?.slug ?? session.slug);
+              return;
+            }
+            if (["FAILED", "CRASHED", "CANCELED", "TIMED_OUT"].includes(taskState.status ?? "")) {
+              const detail = typeof taskState.error === "string" ? taskState.error : taskState.error?.message;
+              terminalError(detail ?? `Build ${String(taskState.status).toLowerCase()}.`);
+              return;
+            }
+          }
+        }
+      } catch {
+        if (controller.signal.aborted) return;
+        // A bounded retry below handles transient browser/network failures.
+      } finally {
+        if (pollAbortRef.current === controller) pollAbortRef.current = null;
+      }
+
+      const nextErrors = hadSuccessfulRead ? 0 : consecutiveErrors + 1;
+      if (nextErrors >= 5) {
+        setError("Live progress is temporarily unreachable. The build was not canceled; resume monitoring to reconnect.");
+        setPhase("error");
+        return;
+      }
+      const delay = elapsed < 30_000 ? 2_000 : elapsed < 5 * 60_000 ? 5_000 : 10_000;
+      pollRef.current = setTimeout(() => void tick(nextErrors), delay);
+    };
+
+    void tick(0);
+  }, [router]);
+
+  useEffect(() => {
+    let cancelled = false;
+    const submissionGate = submissionGateRef.current;
+    pollCallbackRef.current = poll;
+    const resumeVisiblePolling = () => {
+      if (!document.hidden && pollSessionRef.current) poll(pollSessionRef.current);
+    };
+    document.addEventListener("visibilitychange", resumeVisiblePolling);
+    queueMicrotask(() => {
+      if (cancelled) return;
+      try {
+        const pending = parsePendingChannelBuildRequest(
+          sessionStorage.getItem(PENDING_BUILD_STORAGE_KEY),
+        );
+        if (pending) {
+          setPendingBuild(pending);
+          createRequestKeyRef.current = { intent: pending.intent, key: pending.requestKey };
+        }
+        const raw = sessionStorage.getItem(ACTIVE_BUILD_STORAGE_KEY);
+        let restoredActive = false;
+        if (raw) {
+          let session: Partial<ActiveBuildSession> | null = null;
+          try { session = JSON.parse(raw) as Partial<ActiveBuildSession>; }
+          catch { sessionStorage.removeItem(ACTIVE_BUILD_STORAGE_KEY); }
+          if (
+            session &&
+            typeof session.runId === "string" &&
+            typeof session.requestKey === "string" &&
+            typeof session.slug === "string" &&
+            typeof session.displayName === "string" &&
+            typeof session.startedAt === "number"
+          ) {
+            const restored = session as ActiveBuildSession;
+            restoredActive = true;
+            setActiveBuild(restored);
+            setPhase("building");
+            poll(restored);
+          } else if (session) {
+            sessionStorage.removeItem(ACTIVE_BUILD_STORAGE_KEY);
+          }
+        }
+        if (!restoredActive && pending) {
+          setPhase("building");
+          void submitPending(pending);
+        }
+      } catch {
+        if (!cancelled) {
+          sessionStorage.removeItem(ACTIVE_BUILD_STORAGE_KEY);
+        }
+      }
+    });
+    return () => {
+      cancelled = true;
+      pollGenerationRef.current += 1;
+      if (pollRef.current) clearTimeout(pollRef.current);
+      pollAbortRef.current?.abort();
+      submissionGate.abort();
+      if (pollCallbackRef.current === poll) pollCallbackRef.current = null;
+      document.removeEventListener("visibilitychange", resumeVisiblePolling);
+      if (analyzeRef.current) clearInterval(analyzeRef.current);
+    };
+  }, [poll, submitPending]);
 
   if (phase === "building") {
     return (
       <>
-        <PageHeader title="Building channel" />
-        <div className="glass glass-shine" style={{ padding: "2.5rem", display: "grid", placeItems: "center", gap: "1rem" }}>
-          <div className="studio-pulse" style={{ fontSize: "2rem" }}>✦</div>
-          <div style={{ fontFamily: "var(--font-display)", fontSize: "1.2rem" }}>{name || niche?.label}</div>
-          <div style={{ color: "var(--color-muted)", fontSize: "0.9rem" }}>{BUILD_STEPS[buildStep]}</div>
+        <PageHeader title="Building channel" subtitle="Live durable progress — safe to leave and return." />
+        <div className="glass" style={{ padding: "1.25rem", display: "grid", gap: "1rem", maxWidth: 760 }}>
+          <div style={{ display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "center" }}>
+            <div>
+              <div style={{ fontFamily: "var(--font-display)", fontSize: "1.15rem" }}>{(activeBuild?.displayName ?? pendingBuild?.displayName ?? name) || niche?.label}</div>
+              <div style={{ color: "var(--color-muted)", fontSize: "0.78rem", marginTop: 3 }}>
+                {buildProgress
+                  ? buildProgress.inceptionStatus === "planned"
+                    ? "Plan saved — no provider spend authorized"
+                    : `${buildProgress.stages.filter((stage) => stage.status === "complete" || stage.status === "accepted").length}/${buildProgress.stages.length} stages finished`
+                  : "Creating the durable build ledger…"}
+              </div>
+            </div>
+            <div className="studio-pulse" aria-label="Build active" style={{ fontSize: "1.5rem" }}>✦</div>
+          </div>
+          {buildProgress?.stages?.length ? (
+            <div style={{ display: "grid", gap: "0.45rem" }}>
+              {buildProgress.stages.map((stage) => {
+                const done = stage.status === "complete" || stage.status === "accepted";
+                const active = stage.status === "running";
+                const failed = stage.status === "blocked" || stage.status === "failed";
+                return (
+                  <div key={stage.moduleKey} style={{ display: "grid", gridTemplateColumns: "18px minmax(0,1fr) auto", alignItems: "center", gap: "0.55rem", padding: "0.5rem 0.6rem", borderRadius: 8, background: active ? "rgba(124,124,255,0.08)" : "var(--color-surface)" }}>
+                    <span style={{ color: done ? "var(--color-ok)" : failed ? "var(--color-failed)" : active ? "var(--color-accent)" : "var(--color-faint)" }}>{done ? "✓" : failed ? "!" : active ? "●" : "○"}</span>
+                    <span style={{ fontSize: "0.82rem", fontWeight: active ? 600 : 500 }}>{STAGE_LABELS[stage.moduleKey] ?? stage.moduleKey}</span>
+                    <span style={{ color: "var(--color-muted)", fontSize: "0.7rem" }}>{stage.status}{stage.attempts > 1 ? ` · try ${stage.attempts}` : ""}</span>
+                    {stage.error && <span style={{ gridColumn: "2 / -1", color: "var(--color-failed)", fontSize: "0.72rem" }}>{stage.error}</span>}
+                  </div>
+                );
+              })}
+            </div>
+          ) : (
+            <div style={{ height: 4, borderRadius: 999, overflow: "hidden", background: "var(--color-surface)" }}>
+              <div className="studio-pulse" style={{ width: "35%", height: "100%", background: "var(--color-accent)" }} />
+            </div>
+          )}
         </div>
       </>
     );
   }
 
-  const canNext = step === 0 ? !!nicheKey : step === 1 ? !!family : true;
+  const canNext = step === 0
+    ? !!nicheKey
+    : step === 1
+      ? Boolean(family && fam?.available)
+      : true;
   const stepNames = ["Niche", "Format", "Details", "Review"];
 
   return (
@@ -249,7 +582,24 @@ export default function NewChannelWizard() {
         ))}
       </div>
 
-      {error && <div className="glass" style={{ padding: "0.8rem 1rem", marginBottom: "1rem", border: "1px solid rgba(248,113,113,0.4)", color: "#fca5a5", fontSize: "0.85rem" }}>{error}</div>}
+      {error && <div className="glass" role="alert" style={{ padding: "0.8rem 1rem", marginBottom: "1rem", border: "1px solid rgba(248,113,113,0.4)", color: "#fca5a5", fontSize: "0.85rem", display: "flex", justifyContent: "space-between", gap: "1rem", alignItems: "center", flexWrap: "wrap" }}>
+        <span style={{ display: "grid", gap: "0.25rem", minWidth: 0, flex: "1 1 320px" }}>
+          <strong>Channel setup needs attention</strong>
+          <span>{error}</span>
+          {activeBuild && <small style={{ color: "var(--color-muted)" }}>The exact build identity is preserved. Provider work will not restart automatically.</small>}
+        </span>
+        <span style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+          {activeBuild && (
+            <>
+              <Link href={`/channels/${encodeURIComponent(activeBuild.slug)}`} style={btnPrimary}>Open channel</Link>
+              <button onClick={() => { setError(null); setPhase("building"); poll(activeBuild); }} style={btnGhost}>Check progress</button>
+            </>
+          )}
+          {!activeBuild && pendingBuild
+            ? <button onClick={() => void submitPending(pendingBuild)} style={btnGhost}>Retry same request</button>
+            : null}
+        </span>
+      </div>}
 
       {/* STEP 0 — niche */}
       {step === 0 && (
@@ -287,16 +637,19 @@ export default function NewChannelWizard() {
             {FAMILY_KEYS.map((k) => {
               const f = FAMILIES[k]; const on = k === family;
               return (
-                <button key={k} onClick={() => setFamily(k)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: "pointer",
+                <button key={k} disabled={!f.available} onClick={() => f.available && setFamily(k)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: f.available ? "pointer" : "not-allowed", opacity: f.available ? 1 : 0.55,
                   border: on ? "1px solid var(--color-accent)" : "1px solid var(--color-border)", background: on ? "rgba(124,124,255,0.08)" : undefined }}>
-                  <div style={{ fontWeight: 600 }}>{f.label}{!f.available && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· in progress</span>}</div>
+                  <div style={{ fontWeight: 600 }}>{f.label}{!f.available && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· unavailable — no spend</span>}</div>
                   <div style={{ fontSize: "0.78rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{f.description}</div>
                 </button>
               );
             })}
           </div>
           <label style={lblStyle}><span style={capStyle}>Channel name (optional — auto-generated if blank)</span>
-            <input value={name} onChange={(e) => setName(e.target.value)} placeholder="e.g. Stoic Truths" style={inpStyle} /></label>
+            <input value={name} onChange={(e) => {
+              setName(e.target.value);
+              if (!normalizeYoutubeChannelName(e.target.value)) setAutoYoutube(false);
+            }} placeholder="e.g. Stoic Truths" style={inpStyle} /></label>
           <label style={lblStyle}><span style={capStyle}>Example clip URL (optional — Gemini analyzes it to match the style)</span>
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <input value={clipUrl} onChange={(e) => setClipUrl(e.target.value)} placeholder="paste a YouTube link you like" style={{ ...inpStyle, flex: 1 }} />
@@ -347,13 +700,41 @@ export default function NewChannelWizard() {
               </Row>
             )}
             <Row label="Auto-publish"><select value={publishMode} onChange={(e) => { setPublishMode(e.target.value); setApprovedForPublish(false); }} style={selStyle}><option value="draft">Private draft</option><option value="scheduled">Scheduled</option><option value="public">Public</option></select></Row>
-            <Row label="Auto-create YouTube channel">
+            <Row label="One-time setup">
               <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                <input type="checkbox" checked={autoYoutube} onChange={(e) => setAutoYoutube(e.target.checked)} />
-                <span style={muted}>create + link a YouTube channel via the cloud agent</span>
+                <input
+                  type="checkbox"
+                  checked={approveSetupSpend}
+                  onChange={(e) => {
+                    setApproveSetupSpend(e.target.checked);
+                    if (!e.target.checked) { setRunProbe(false); setAutoYoutube(false); }
+                  }}
+                />
+                <span style={muted}>authorize up to ${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)} for research, identity, art and starter thumbnails</span>
               </label>
             </Row>
-            <Row label="Budget / run"><input type="number" min={0} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD</span></Row>
+            <Row label="Auto-create YouTube channel">
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  disabled={!approveSetupSpend || !normalizeYoutubeChannelName(name)}
+                  checked={autoYoutube}
+                  onChange={(e) => setAutoYoutube(e.target.checked)}
+                />
+                <span style={muted}>
+                  {normalizeYoutubeChannelName(name)
+                    ? `create exactly “${normalizeYoutubeChannelName(name)}” as @${suggestYoutubeHandle(name)} (explicit opt-in)`
+                    : "enter a channel name first so the exact external identity can be approved"}
+                </span>
+              </label>
+            </Row>
+            <Row label="Paid validation render">
+              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                <input type="checkbox" disabled={!approveSetupSpend} checked={runProbe} onChange={(e) => setRunProbe(e.target.checked)} />
+                <span style={muted}>run one bounded private proof · up to ${costAuthority.validationCapUsd.toFixed(2)} extra</span>
+              </label>
+            </Row>
+            <Row label="Production budget / video"><input type="number" min={0.5} max={100} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD</span></Row>
           </div>
           <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.6rem" }}>
             <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Advanced — optional modules</div>
@@ -378,6 +759,10 @@ export default function NewChannelWizard() {
             {fam.narrated && voiceFx !== "none" && <SummaryRow k="Voice effect" v={voiceFx === "radio" ? "Old radio" : voiceFx} />}
             {seriesTitle.trim() && <SummaryRow k="Series" v={`${seriesTitle.trim()}${seriesCount > 0 ? ` · ${seriesCount} parts` : " · open-ended"}`} />}
             <SummaryRow k="Cadence" v={`${cadence}${(cadence === "weekly" || cadence === "biweekly") && days.length ? " · " + days.map((d) => DOW[d]).join(",") : ""} · ${publishMode}`} />
+            <SummaryRow k="Setup" v={approveSetupSpend ? `Approved · capped at $${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)}` : "Plan only · $0 provider spend"} />
+            {runProbe && <SummaryRow k="Private validation" v={`Approved separately · capped at $${costAuthority.validationCapUsd.toFixed(2)}`} />}
+            <SummaryRow k="Maximum setup + validation" v={`$${costAuthority.combinedSetupAndValidationCapUsd.toFixed(2)}`} />
+            <SummaryRow k="Future production videos" v={`$${costAuthority.perVideoProductionBudgetUsd.toFixed(2)} maximum each`} />
           </div>
           {(publishMode !== "draft" || toggles.crosspost) && (
             <label className="glass" style={{ padding: "0.9rem 1rem", display: "flex", alignItems: "flex-start", gap: "0.65rem", fontSize: "0.82rem", cursor: "pointer", border: "1px solid rgba(245,158,11,0.45)" }}>
@@ -448,7 +833,7 @@ export default function NewChannelWizard() {
         <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} style={{ ...btnGhost, opacity: step === 0 ? 0.4 : 1 }}>Back</button>
         {step < 3
           ? <button onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext} style={{ ...btnPrimary, opacity: canNext ? 1 : 0.5 }}>Next</button>
-          : <button onClick={create} disabled={(publishMode !== "draft" || toggles.crosspost) && !approvedForPublish} style={{ ...btnPrimary, opacity: (publishMode !== "draft" || toggles.crosspost) && !approvedForPublish ? 0.5 : 1 }}>Create channel</button>}
+          : <button onClick={() => void create(Date.now())} disabled={(publishMode !== "draft" || toggles.crosspost) && !approvedForPublish} style={{ ...btnPrimary, opacity: (publishMode !== "draft" || toggles.crosspost) && !approvedForPublish ? 0.5 : 1 }}>{approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
       </div>
     </>
   );

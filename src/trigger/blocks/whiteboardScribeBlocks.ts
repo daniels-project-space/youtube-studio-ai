@@ -27,8 +27,13 @@ import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
 import { makeRunTempDir, downloadTo } from "@/lib/files";
 import { putObjectFromFile, getObjectBytes } from "@/lib/storage";
-import { castWhiteboardSync, hasWhiteboardSync } from "@/lib/whiteboardSync";
-import { bananaCounters } from "@/lib/banana";
+import {
+  castWhiteboardSync,
+  hasWhiteboardSync,
+  type WhiteboardArtRequest,
+} from "@/lib/whiteboardSync";
+import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
+import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { PRICE } from "@/engine/pricing";
 
 function convex(): ConvexHttpClient {
@@ -72,8 +77,8 @@ export const whiteboardScribe: Block = {
   produces: ["videoKey", "videoLocalPath", "videoDurationSec", "narrationText"],
   paid: true,
   run: async (ctx) => {
-    if (!hasWhiteboardSync()) {
-      throw new Error("whiteboard_scribe: GEMINI_API_KEY + FISH_AUDIO_API_KEY required (no fallback — this is the channel's visual engine)");
+    if (!hasWhiteboardSync() || !hasNovitaRenderFarmConfig()) {
+      throw new Error("whiteboard_scribe: storyboard/TTS plus the attested Novita render farm are required (no fallback)");
     }
     const topic = String(ctx.store["topic"] ?? "");
     if (!topic) throw new Error("whiteboard_scribe: no topic in store");
@@ -122,10 +127,17 @@ export const whiteboardScribe: Block = {
     const outPath = join(runDir, "final.mp4");
     ctx.log(`whiteboard_scribe: drawing synced explainer "${topic.slice(0, 60)}" @ ${width}x${height} (style ${styleId})…`);
 
-    const countersBefore = { ...bananaCounters };
+    let novitaImageCostUsd = 0;
+    const generateImage = createAttestedNovitaImageGenerator<WhiteboardArtRequest>({
+      prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/whiteboard-art`,
+      id: (request) => request.id,
+      profileId: "production",
+      onReceipt: (receipt) => { novitaImageCostUsd += receipt.costUsd; },
+    });
     const res = await castWhiteboardSync({
       brief: {
-        topic, facts, styleId, header: visualBrief?.header, voiceId, width, height,
+        topic, facts, styleId, artStyle: visualBrief?.promptStyle,
+        header: visualBrief?.header, voiceId, width, height,
         ...(ttsProvider === "elevenlabs" && elevenVoiceId ? { ttsProvider, elevenVoiceId } : {}),
         ...(boardMode ? { boardMode } : {}),
         ...(palette ? { palette } : {}),
@@ -134,18 +146,10 @@ export const whiteboardScribe: Block = {
       },
       runDir,
       outPath,
+      generateImage,
       log: (m) => ctx.log(`wb: ${m}`),
     });
-    // Real image spend from the banana counters (the flat $2 guess undercounted
-    // Pro-heavy runs and overcounted cached re-runs alike).
-    const genPro = Math.max(0, bananaCounters.pro - countersBefore.pro);
-    const genFlash = Math.max(0, bananaCounters.flash - countersBefore.flash);
-    const genFal = Math.max(0, (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0));
-    const legacyArtCost =
-      genPro * PRICE.bananaProUsd +
-      genFlash * PRICE.bananaFlashUsd +
-      Math.max(0, bananaCounters.falCostUsd - countersBefore.falCostUsd);
-    const artCost = ctx.imageUsageAccounting?.().costUsd ?? legacyArtCost;
+    const artCost = ctx.imageUsageAccounting?.().costUsd ?? novitaImageCostUsd;
     const usedEleven = ttsProvider === "elevenlabs" && Boolean(elevenVoiceId);
     const ttsCost =
       (res.ttsCharactersGenerated / 1000) *
@@ -154,8 +158,8 @@ export const whiteboardScribe: Block = {
     // fallback charge merely because this is a paid-capable block.
     const scribeCost = artCost + ttsCost;
     ctx.log(
-      `whiteboard_scribe: spend ${genPro} pro + ${genFlash} flash + ${genFal} fal + ` +
-      `${res.ttsCharactersGenerated} TTS chars ≈ $${scribeCost.toFixed(2)}`,
+      `whiteboard_scribe: attested Novita art $${artCost.toFixed(4)} + ` +
+      `${res.ttsCharactersGenerated} TTS chars = $${scribeCost.toFixed(4)}`,
     );
 
     // MUSIC BED (P1-8): whiteboard-family pipelines generate a PAID music track
@@ -205,7 +209,12 @@ export const whiteboardScribe: Block = {
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObjectFromFile(videoKey, finalPath, { contentType: "video/mp4" });
     const videoDurationSec = Math.round(res.durationMs / 1000);
-    await recordAsset(ctx, "video", videoKey, { durationSec: videoDurationSec, engine: "whiteboard_scribe", panels: res.panels.length });
+    await recordAsset(ctx, "video", videoKey, {
+      durationSec: videoDurationSec,
+      engine: "whiteboard_scribe",
+      panels: res.panels.length,
+      imageProvider: "novita-z-image-turbo-local",
+    });
     ctx.log(`whiteboard_scribe ✓ → ${videoKey} (${videoDurationSec}s, ${res.panels.length} panels)`);
 
     return {

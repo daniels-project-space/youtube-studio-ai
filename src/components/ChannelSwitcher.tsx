@@ -56,55 +56,23 @@ export function ChannelSwitcher() {
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="channel-switcher-button lift"
+        className="channel-switcher-button"
         aria-expanded={open}
         aria-haspopup="listbox"
-        style={{
-          display: "flex",
-          alignItems: "center",
-          gap: "0.6rem",
-          padding: "0.5rem 0.85rem",
-          borderRadius: 12,
-          background: "var(--color-surface)",
-          backdropFilter: "blur(20px)",
-          WebkitBackdropFilter: "blur(20px)",
-          border: "1px solid var(--color-border)",
-          color: "var(--color-fg)",
-          font: "inherit",
-          fontSize: "0.88rem",
-          cursor: "pointer",
-          width: "100%",
-        }}
+        aria-controls="channel-switcher-options"
       >
-        <span
-          style={{
-            width: 7,
-            height: 7,
-            borderRadius: "50%",
-            background: current ? "var(--color-secondary)" : "var(--color-faint)",
-          }}
-        />
-        <span style={{ flex: 1, textAlign: "left", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
+        <span className={`channel-switcher-dot${current ? " is-selected" : ""}`} aria-hidden="true" />
+        <span className="channel-switcher-label">
           {label}
         </span>
-        <IconChevron width={15} height={15} style={{ color: "var(--color-muted)", transform: open ? "rotate(180deg)" : "none", transition: "transform 0.15s ease" }} />
+        <IconChevron className="channel-switcher-chevron" data-open={open ? "true" : undefined} width={15} height={15} />
       </button>
 
       {open && (
         <div
-          className="glass channel-switcher-menu"
+          id="channel-switcher-options"
+          className="channel-switcher-menu"
           role="listbox"
-          style={{
-            position: "absolute",
-            top: "calc(100% + 6px)",
-            left: 0,
-            right: 0,
-            minWidth: 200,
-            padding: "0.35rem",
-            zIndex: 40,
-            maxHeight: 320,
-            overflowY: "auto",
-          }}
         >
           <DropdownItem
             label="All channels"
@@ -127,7 +95,7 @@ export function ChannelSwitcher() {
             />
           ))}
           {channels && channels.length === 0 && (
-            <div style={{ padding: "0.6rem 0.7rem", fontSize: "0.82rem", color: "var(--color-faint)" }}>
+            <div className="channel-switcher-empty">
               No channels yet
             </div>
           )}
@@ -152,25 +120,13 @@ function DropdownItem({
     <button
       type="button"
       onClick={onClick}
-      style={{
-        display: "flex",
-        alignItems: "center",
-        justifyContent: "space-between",
-        gap: "0.5rem",
-        width: "100%",
-        padding: "0.5rem 0.6rem",
-        borderRadius: 8,
-        background: active ? "var(--color-accent-soft)" : "transparent",
-        border: "none",
-        color: active ? "var(--color-fg)" : "var(--color-muted)",
-        font: "inherit",
-        fontSize: "0.85rem",
-        textAlign: "left",
-        cursor: "pointer",
-      }}
+      role="option"
+      aria-selected={active}
+      className="channel-switcher-option"
+      data-active={active ? "true" : undefined}
     >
       <span>{label}</span>
-      {sub && <span style={{ fontSize: "0.72rem", color: "var(--color-faint)" }}>{sub}</span>}
+      {sub && <small>{sub}</small>}
     </button>
   );
 }

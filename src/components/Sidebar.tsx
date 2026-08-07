@@ -14,34 +14,37 @@ import {
   IconSpark,
   IconCalendar,
   IconGolden,
-  IconLore,
-  IconLofi,
+  IconTerminal,
 } from "./icons";
 
 const NAV_GROUPS = [
   {
-    label: "Operate",
+    label: "Command",
     items: [
       { href: "/", label: "Overview", icon: <IconOverview /> },
       { href: "/channels", label: "Channels", icon: <IconChannels /> },
       { href: "/schedule", label: "Schedule", icon: <IconCalendar /> },
       { href: "/runs", label: "Runs", icon: <IconRuns /> },
-      { href: "/library", label: "Library", icon: <IconLibrary /> },
     ],
   },
   {
-    label: "Improve",
+    label: "Content",
     items: [
+      { href: "/library", label: "Library", icon: <IconLibrary /> },
       { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
       { href: "/seo", label: "SEO", icon: <IconSeo /> },
     ],
   },
   {
+    label: "Production",
+    items: [
+      { href: "/golden", label: "Golden modules", icon: <IconGolden /> },
+      { href: "/novita-render", label: "Novita render", icon: <IconTerminal /> },
+    ],
+  },
+  {
     label: "System",
     items: [
-      { href: "/golden", label: "Golden Pipeline", icon: <IconGolden /> },
-      { href: "/loreshort", label: "Lore Short", icon: <IconLore /> },
-      { href: "/lofi", label: "Lofi Loop", icon: <IconLofi /> },
       { href: "/settings", label: "Settings", icon: <IconSettings /> },
     ],
   },
@@ -55,7 +58,9 @@ export function Sidebar() {
   const [moreOpenForPath, setMoreOpenForPath] = useState<string | null>(null);
   const moreRef = useRef<HTMLDivElement>(null);
   const moreOpen = moreOpenForPath === pathname;
-  const moreActive = MOBILE_MORE_ITEMS.some((item) => pathname.startsWith(item.href));
+  const moreActive = MOBILE_MORE_ITEMS.some((item) =>
+    item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
+  );
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -137,8 +142,7 @@ export function Sidebar() {
       </nav>
 
       <div className="studio-sidebar-footer">
-        <span className="health-dot health-dot-ready" aria-hidden="true" />
-        Live production workspace
+        Studio workspace
       </div>
     </aside>
   );

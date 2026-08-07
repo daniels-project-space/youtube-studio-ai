@@ -1,4 +1,5 @@
 import { z } from "zod";
+import { CHANNEL_INCEPTION_MODULE_CONTRACTS } from "./channelInceptionContracts";
 import { GOLDEN_MODULES, type GoldenModule } from "./golden";
 import type { ModuleManifest } from "./moduleManifest";
 
@@ -115,6 +116,16 @@ export class GoldenPromotionError extends Error {
  * flag can no longer imply that the compiler can execute or promote it.
  */
 export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutionBinding>> = {
+  ...Object.fromEntries(
+    CHANNEL_INCEPTION_MODULE_CONTRACTS.map((contract) => [
+      contract.key,
+      {
+        kind: "catalog-only" as const,
+        executableIds: [],
+        note: `Channel Inception ${contract.version} contract only; resumable executor and proof receipt are not bound.`,
+      },
+    ]),
+  ),
   loreshort: { kind: "catalog-only", executableIds: [], note: "Standalone library; pipeline adapter pending." },
   "novita-render-farm": { kind: "pipeline-module", executableIds: ["novita_render_images", "novita_render_video"] },
   "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "Reference engine is executed through the Novita render-farm module." },

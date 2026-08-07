@@ -50,6 +50,19 @@ import {
 } from "@/lib/pipelineInvocationSnapshot";
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
+import {
+  pipelineOverrideFingerprint,
+  pipelineProbeApprovalSubject,
+  studioActionApprovalFingerprint,
+  verifyStudioActionApproval,
+  type StudioActionApprovalReceipt,
+} from "@/lib/studioActionApproval";
+import {
+  assertChannelInceptionProbeAttempt,
+  channelInceptionProbeEffectiveBudgetUsd,
+  type ChannelInceptionProbeAttemptCheckpoint,
+  type ChannelInceptionProbeInvocationContext,
+} from "@/lib/channelInceptionProbe";
 
 export interface RunPipelineInput {
   channelId: string;
@@ -71,6 +84,16 @@ export interface RunPipelineInput {
    * still come from the channel.
    */
   pipelineOverride?: PipelineEntry[];
+  /** Exact module settings paired with an admitted one-off probe override. */
+  moduleConfigOverride?: Record<string, Record<string, unknown>>;
+  /** Every mutable channel-derived input frozen by the inception parent. */
+  probeInvocationContext?: ChannelInceptionProbeInvocationContext;
+  /** Signed, request-bound ceiling for an admitted Channel Inception probe. */
+  probeAdmission?: {
+    maximumCostUsd: number;
+    approval: StudioActionApprovalReceipt;
+    dispatchEnvelopeFingerprint: string;
+  };
   /**
    * Render-group reuse: when a language sibling is fanned out by the base run's
    * emit_bundle, the base assets are passed here and seeded into the store so the
@@ -105,7 +128,7 @@ export const runPipelineTask = task({
   // render fully in parallel (each run gets its own machine; the old global
   // limit of 3 throttled the whole fleet).
   queue: { concurrencyLimit: 1 },
-  run: async (payload: RunPipelineInput) => {
+  run: async (payload: RunPipelineInput, { ctx }) => {
     try {
       registerAllBlocks();
     } catch (error) {
@@ -199,6 +222,110 @@ export const runPipelineTask = task({
     } catch (error) {
       throwForTaskRetryPolicy(error);
     }
+    if (
+      (payload.moduleConfigOverride || payload.probeInvocationContext) &&
+      !payload.probeAdmission
+    ) {
+      throwForTaskRetryPolicy(
+        new Error("run-pipeline frozen probe overrides require signed inception admission"),
+      );
+    }
+    let durableProbeEnvelope: ChannelInceptionProbeAttemptCheckpoint | undefined;
+    if (durableRun.probeDispatchEnvelope !== undefined) {
+      try {
+        durableProbeEnvelope = durableRun.probeDispatchEnvelope as
+          ChannelInceptionProbeAttemptCheckpoint;
+        assertChannelInceptionProbeAttempt(durableProbeEnvelope);
+        if (
+          durableProbeEnvelope.ownerId !== ownerId ||
+          durableProbeEnvelope.channelId !== payload.channelId ||
+          durableProbeEnvelope.runId !== payload.runId ||
+          durableRun.probeDispatchEnvelopeFingerprint !==
+            durableProbeEnvelope.dispatchEnvelopeFingerprint
+        ) {
+          throw new Error("durable probe dispatch envelope identity mismatch");
+        }
+      } catch (error) {
+        throwForTaskRetryPolicy(error);
+      }
+    }
+    const rawOverrideFingerprint =
+      payload.pipelineOverride &&
+      payload.moduleConfigOverride &&
+      payload.probeInvocationContext &&
+      durableProbeEnvelope
+        ? pipelineOverrideFingerprint({
+            pipelineOverride: payload.pipelineOverride,
+            moduleConfigOverride: payload.moduleConfigOverride,
+            invocationContext: payload.probeInvocationContext,
+            productionFingerprint: durableProbeEnvelope.input.productionFingerprint,
+          })
+        : undefined;
+    let probeBudgetAdmission: PipelineInvocationSnapshot["budgetAdmission"];
+    if (payload.probeAdmission) {
+      const maximumCostUsd = payload.probeAdmission.maximumCostUsd;
+      if (
+        !rawOverrideFingerprint ||
+        !durableProbeEnvelope ||
+        payload.probeAdmission.dispatchEnvelopeFingerprint !==
+          durableProbeEnvelope.dispatchEnvelopeFingerprint ||
+        rawOverrideFingerprint !== durableProbeEnvelope.input.overrideFingerprint ||
+        !Number.isFinite(maximumCostUsd) ||
+        maximumCostUsd <= 0 ||
+        maximumCostUsd > 3
+      ) {
+        throwForTaskRetryPolicy(
+          new Error("run-pipeline probe admission requires an override and a $0-$3 ceiling"),
+        );
+      }
+      const subject = pipelineProbeApprovalSubject({
+        ownerId,
+        channelId: payload.channelId,
+        runId: payload.runId,
+        pipelineOverrideFingerprint: rawOverrideFingerprint,
+        maximumCostUsd,
+      });
+      const persistedAdmission = durableInvocation?.budgetAdmission;
+      const valid = verifyStudioActionApproval(payload.probeAdmission.approval, {
+        action: "channel-inception-probe",
+        ownerId,
+        subject,
+        maximumCostUsd,
+        persistedReceiptFingerprint:
+          persistedAdmission?.receiptFingerprint ?? durableProbeEnvelope.approvalFingerprint,
+      });
+      const receiptFingerprint = studioActionApprovalFingerprint(
+        payload.probeAdmission.approval,
+      );
+      if (
+        !valid ||
+        payload.probeAdmission.approval.maxCostUsd !== maximumCostUsd ||
+        maximumCostUsd !== durableProbeEnvelope.maximumCostUsd ||
+        receiptFingerprint !== durableProbeEnvelope.approvalFingerprint ||
+        (persistedAdmission !== undefined &&
+          (persistedAdmission.kind !== "channel-inception-probe" ||
+            persistedAdmission.maximumCostUsd !== maximumCostUsd ||
+            persistedAdmission.receiptFingerprint !== receiptFingerprint ||
+            persistedAdmission.subject !== subject ||
+            persistedAdmission.pipelineOverrideFingerprint !== rawOverrideFingerprint ||
+            persistedAdmission.dispatchEnvelopeFingerprint !==
+              durableProbeEnvelope.dispatchEnvelopeFingerprint))
+      ) {
+        throwForTaskRetryPolicy(new Error("run-pipeline probe admission is invalid or changed"));
+      }
+      probeBudgetAdmission = {
+        kind: "channel-inception-probe",
+        maximumCostUsd,
+        receiptFingerprint,
+        subject,
+        pipelineOverrideFingerprint: rawOverrideFingerprint,
+        dispatchEnvelopeFingerprint: durableProbeEnvelope.dispatchEnvelopeFingerprint,
+      };
+    } else if (durableInvocation?.budgetAdmission || durableProbeEnvelope) {
+      throwForTaskRetryPolicy(
+        new Error("run-pipeline durable probe invocation requires its exact signed admission"),
+      );
+    }
     if (payload.publishResume) {
       const resume = payload.publishResume;
       if (
@@ -252,11 +379,18 @@ export const runPipelineTask = task({
     // runRemoteBlock — it must vary per HEAL cycle, since a superseded render
     // must genuinely re-run while a plain orchestrator retry must reattach.)
 
+    const leaseOwner = ctx.run.id;
     try {
-      await convex.mutation(api.runs.updateRun, {
+      const lease = await convex.mutation(api.runs.claimExecutionLease, {
+        ownerId,
+        channelId: payload.channelId as Id<"channels">,
         runId: payload.runId as Id<"runs">,
-        status: "running",
+        leaseOwner,
+        now: Date.now(),
       });
+      console.log(
+        `[run-pipeline] execution lease claimed (attempt ${lease.executionAttempts}, expires ${new Date(lease.leaseExpiresAt).toISOString()})`,
+      );
     } catch (error) {
       throwForTaskRetryPolicy(error);
     }
@@ -268,6 +402,7 @@ export const runPipelineTask = task({
       console.log(`[run-pipeline] ${msg}`, extra ?? ""),
     );
     let scheduledPlan: ScheduledPlanRunPayload | undefined;
+    let observedCostTotal = Number(durableRun.costTotal ?? 0);
 
     try {
       if (payload.scheduledPlan) {
@@ -315,7 +450,8 @@ export const runPipelineTask = task({
         // OPERATOR moduleConfig is folded into the write-once invocation. A
         // retry never reads these mutable settings again.
         try {
-          const moduleConfig = (channel as { moduleConfig?: Record<string, Record<string, unknown>> }).moduleConfig ?? {};
+          const moduleConfig = payload.moduleConfigOverride ??
+            (channel as { moduleConfig?: Record<string, Record<string, unknown>> }).moduleConfig ?? {};
           if (Object.keys(moduleConfig).length) {
             const { moduleSurface } = await import("@/engine/moduleRegistry");
             const { resolveKnobs } = await import("@/engine/customization");
@@ -352,7 +488,10 @@ export const runPipelineTask = task({
                 ...entry,
                 params: {
                   ...(entry.params ?? {}),
-                  madeForKids: channel.schedule?.madeForKids ?? false,
+                  madeForKids:
+                    payload.probeInvocationContext?.madeForKids ??
+                    channel.schedule?.madeForKids ??
+                    false,
                 },
               }
             : entry,
@@ -375,6 +514,8 @@ export const runPipelineTask = task({
       let seedStore: Record<string, unknown>;
       if (durableInvocation) {
         seedStore = { ...durableInvocation.seedStore };
+      } else if (payload.probeInvocationContext) {
+        seedStore = structuredClone(payload.probeInvocationContext.seedStore);
       } else {
         // Freeze every channel-identity input that blocks can observe. These are
         // plain Convex values/R2 keys; credentials and live publish policy are
@@ -419,8 +560,13 @@ export const runPipelineTask = task({
             : "channel",
         entries,
         seedStore,
-        budgetUsd: channel.budget ?? 0,
-        keyPrefix: channelPrefix(ownerId, channel.slug),
+        budgetUsd: probeBudgetAdmission
+          ? channelInceptionProbeEffectiveBudgetUsd(
+              payload.probeInvocationContext!,
+              probeBudgetAdmission.maximumCostUsd,
+            )
+          : channel.budget ?? 0,
+        keyPrefix: payload.probeInvocationContext?.keyPrefix ?? channelPrefix(ownerId, channel.slug),
         remoteBlocks: ["timeline_assemble"],
         defaultRetries: 2,
         compilationFingerprint: compilation.fingerprint,
@@ -429,6 +575,7 @@ export const runPipelineTask = task({
         compilationModules: compilation.modules,
         compilationCapabilities: compilation.capabilities,
         reservedMaxCostUsd: compilation.reservedMaxCostUsd,
+        ...(probeBudgetAdmission ? { budgetAdmission: probeBudgetAdmission } : {}),
       });
       preflight(resolved, { budgetUsd: invocationCandidate.budgetUsd });
       const invocationSha256 = pipelineInvocationSha256(invocationCandidate);
@@ -447,6 +594,17 @@ export const runPipelineTask = task({
         pipelineInvocationSha256(invocation) !== invocationSha256
       ) {
         throw new Error("claimed pipeline invocation hash mismatch");
+      }
+      if (
+        probeBudgetAdmission &&
+        (!invocation.budgetAdmission ||
+          invocation.budgetAdmission.receiptFingerprint !==
+            probeBudgetAdmission.receiptFingerprint ||
+          invocation.budgetAdmission.dispatchEnvelopeFingerprint !==
+            probeBudgetAdmission.dispatchEnvelopeFingerprint ||
+          invocation.budgetUsd > probeBudgetAdmission.maximumCostUsd)
+      ) {
+        throw new Error("claimed pipeline invocation escaped its signed probe ceiling");
       }
       assertPipelineInvocationCompilation(invocation, compilation);
       entries = invocation.entries;
@@ -516,7 +674,15 @@ export const runPipelineTask = task({
           return (res.output as { patch: Record<string, unknown> }).patch;
         },
       };
+      await convex.mutation(api.runs.heartbeatExecutionLease, {
+        ownerId,
+        channelId: payload.channelId as Id<"channels">,
+        runId: payload.runId as Id<"runs">,
+        leaseOwner,
+        now: Date.now(),
+      });
       let result = await runEngine(resolved, { ...engineOpts, seedStore });
+      observedCostTotal = result.costTotal;
 
       // SELF-HEALER (Pipeline Doctor, run-level): a QA failure over a defect a
       // cheap block owns must not discard the run's paid artifacts. Diagnose →
@@ -550,13 +716,27 @@ export const runPipelineTask = task({
             error: `superseded by self-heal #${heals}: ${plan.reason}`,
           });
         }
+        await convex.mutation(api.runs.heartbeatExecutionLease, {
+          ownerId,
+          channelId: payload.channelId as Id<"channels">,
+          runId: payload.runId as Id<"runs">,
+          leaseOwner,
+          now: Date.now(),
+        });
         result = await runEngine(resolved, {
           ...engineOpts,
           seedStore: { ...seedStore, healHints: plan.hints, healAttempt: heals },
         });
+        observedCostTotal = result.costTotal;
       }
       if (heals > 0 && result.ok) {
         log(`SELF-HEAL succeeded after ${heals} cycle(s) — run recovered without re-spending paid blocks`);
+      }
+
+      if (result.costTotal > invocation.budgetUsd + Number.EPSILON) {
+        throw new Error(
+          `pipeline actual cost exceeded frozen invocation ceiling (${result.costTotal} > ${invocation.budgetUsd})`,
+        );
       }
 
       // Drain any buffered log lines before resolving the run state.
@@ -612,13 +792,19 @@ export const runPipelineTask = task({
       // This should be unreachable for declared provider envelopes because
       // preflight reserves the worst case before execution. Keep the alert as
       // a second rail for a provider returning a charge above its contract.
-      if (channel.budget && result.costTotal > channel.budget) {
+      if (result.costTotal > invocation.budgetUsd) {
         await safeAlert(
           `budget exceeded (${channel.slug})`,
-          `run cost $${result.costTotal.toFixed(2)} > budget $${channel.budget.toFixed(2)}`,
+          `run cost $${result.costTotal.toFixed(2)} > budget $${invocation.budgetUsd.toFixed(2)}`,
         );
       }
-      return { ok: true, stages: result.stages, costTotal: result.costTotal };
+      return {
+        ok: true,
+        stages: result.stages,
+        costTotal: result.costTotal,
+        invocationSha256,
+        budgetUsd: invocation.budgetUsd,
+      };
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       log(`run aborted: ${message}`);
@@ -631,6 +817,7 @@ export const runPipelineTask = task({
           itemId: scheduledPlan.planItemId as Id<"contentPlan">,
           runId: payload.runId as Id<"runs">,
           failedAt,
+          costTotal: observedCostTotal,
           error: message,
         });
       } else {
@@ -638,6 +825,7 @@ export const runPipelineTask = task({
           runId: payload.runId as Id<"runs">,
           status: "failed",
           finishedAt: failedAt,
+          costTotal: observedCostTotal,
           error: message,
         });
       }

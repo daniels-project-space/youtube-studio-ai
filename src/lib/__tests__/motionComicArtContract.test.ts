@@ -259,6 +259,8 @@ async function runAsyncRegressions(): Promise<void> {
       IMAGE_DISABLE_GEMINI: "1",
       IMAGE_PROVIDERS: "fal",
       FAL_KEY: "",
+      NOVITA_RENDER_FARM_API: "",
+      NOVITA_RENDER_FARM_TOKEN: "",
     },
   },
 );
@@ -266,7 +268,7 @@ async function runAsyncRegressions(): Promise<void> {
   assert.equal(
     unavailableArtProbe.stdout,
     "false|true",
-    "MotionComic readiness must fail before storyboard spend when its selected art route has no credential",
+    "MotionComic readiness must fail before storyboard spend when the attested Novita route has no credential",
   );
 }
 

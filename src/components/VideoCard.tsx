@@ -44,29 +44,10 @@ export function VideoCard({
     <button
       type="button"
       onClick={() => onOpen?.(video)}
-      className="glass glass-shine lift"
-      style={{
-        display: "block",
-        textAlign: "left",
-        padding: 0,
-        overflow: "hidden",
-        cursor: "pointer",
-        font: "inherit",
-        color: "inherit",
-        width: "100%",
-      }}
+      className="glass video-card"
     >
       {/* 16:9 thumbnail */}
-      <div
-        style={{
-          position: "relative",
-          width: "100%",
-          aspectRatio: "16 / 9",
-          background:
-            "linear-gradient(135deg, var(--color-surface-solid), #101013)",
-          overflow: "hidden",
-        }}
-      >
+      <div className="video-card-media">
         {thumbSrc ? (
           // eslint-disable-next-line @next/next/no-img-element
           <img
@@ -74,81 +55,35 @@ export function VideoCard({
             alt={video.title}
             loading="lazy"
             onError={() => setErrored(true)}
-            style={{
-              position: "absolute",
-              inset: 0,
-              width: "100%",
-              height: "100%",
-              objectFit: "cover",
-            }}
+            className="video-card-image"
           />
         ) : (
-          <span
-            style={{
-              position: "absolute",
-              inset: 0,
-              display: "grid",
-              placeItems: "center",
-              color: "var(--color-faint)",
-            }}
-          >
+          <span className="video-card-placeholder">
             <IconLibrary width={28} height={28} />
           </span>
         )}
 
         {/* Status badge, top-left */}
-        <span style={{ position: "absolute", top: 8, left: 8 }}>
+        <span className="video-card-badge">
           <StageBadge status={video.status} size="sm" />
         </span>
       </div>
 
       {/* Body */}
-      <div style={{ padding: "0.8rem 0.9rem 0.95rem", display: "grid", gap: "0.4rem" }}>
-        <h3
-          style={{
-            fontSize: "0.92rem",
-            fontWeight: 600,
-            lineHeight: 1.35,
-            margin: 0,
-            display: "-webkit-box",
-            WebkitLineClamp: 2,
-            WebkitBoxOrient: "vertical",
-            overflow: "hidden",
-          }}
-        >
+      <div className="video-card-body">
+        <h3>
           {video.title}
         </h3>
-        <div
-          style={{
-            display: "flex",
-            alignItems: "center",
-            justifyContent: "space-between",
-            gap: "0.6rem",
-            fontSize: "0.76rem",
-            color: "var(--color-faint)",
-          }}
-        >
-          <span
-            style={{
-              whiteSpace: "nowrap",
-              overflow: "hidden",
-              textOverflow: "ellipsis",
-            }}
-          >
+        <div className="video-card-meta">
+          <span>
             {video.channelName}
           </span>
-          <span style={{ whiteSpace: "nowrap" }}>
+          <time>
             {fmtDateTime(video.createdAt)}
-          </span>
+          </time>
         </div>
         {views && (
-          <div
-            style={{
-              fontSize: "0.74rem",
-              color: "var(--color-secondary)",
-              fontFamily: "var(--font-mono)",
-            }}
-          >
+          <div className="video-card-views">
             ~{views} est. views
           </div>
         )}

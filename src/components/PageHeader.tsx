@@ -25,15 +25,5 @@ export function PageHeader({
 
 /** Sub-section heading within a page. */
 export function SectionTitle({ children }: { children: ReactNode }) {
-  return (
-    <h2
-      style={{
-        fontSize: "1.05rem",
-        fontWeight: 600,
-        margin: "0 0 0.85rem",
-      }}
-    >
-      {children}
-    </h2>
-  );
+  return <h2 className="section-title">{children}</h2>;
 }
