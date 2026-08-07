@@ -4,7 +4,7 @@ import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { hydrateEnv } from "@/lib/vault";
 import { getConsentUrl } from "@/lib/youtube";
-import { requireStudioActor } from "@/lib/operatorSession";
+import { requireStudioActor, StudioAuthError } from "@/lib/operatorSession";
 import {
   createYouTubeOAuthState,
   YOUTUBE_OAUTH_NONCE_COOKIE,
@@ -31,10 +31,10 @@ export async function GET(request: NextRequest) {
   let actor;
   try {
     actor = await requireStudioActor(request);
-  } catch {
-    const next = `/api/youtube-connect?channelId=${encodeURIComponent(channelId)}`;
-    return NextResponse.redirect(
-      new URL(`/operator-login?next=${encodeURIComponent(next)}`, request.url),
+  } catch (error) {
+    return NextResponse.json(
+      { error: "privileged studio authorization required" },
+      { status: error instanceof StudioAuthError ? error.status : 401 },
     );
   }
   try {

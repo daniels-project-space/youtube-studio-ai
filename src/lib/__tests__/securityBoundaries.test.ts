@@ -14,7 +14,7 @@ import {
   getStudioActor,
   requireStudioActor,
   STUDIO_SESSION_COOKIE,
-  verifyOperatorLoginToken,
+  verifyOperationsElevationSecret,
 } from "@/lib/operatorSession";
 import {
   validateBridgeCompletion,
@@ -26,7 +26,7 @@ process.env.YOUTUBE_OAUTH_STATE_SECRET = Buffer.alloc(32, 9).toString(
   "base64url",
 );
 process.env.STUDIO_SESSION_SECRET = Buffer.alloc(32, 11).toString("base64url");
-process.env.STUDIO_OPERATOR_TOKEN = "operator-test-token";
+process.env.STUDIO_OPERATOR_TOKEN = "operations-test-key";
 process.env.STUDIO_INTERNAL_API_TOKEN = "service-test-token";
 process.env.STUDIO_OWNER_ID = "owner-test";
 
@@ -95,8 +95,9 @@ async function main() {
     /expired/,
   );
 
-  assert.equal(verifyOperatorLoginToken("operator-test-token"), true);
-  assert.equal(verifyOperatorLoginToken("wrong"), false);
+  assert.equal(verifyOperationsElevationSecret("operations-test-key"), true);
+  assert.equal(verifyOperationsElevationSecret("wrong-key"), false);
+
   const session = await createOperatorSessionToken();
   const sessionRequest = new Request("https://studio.test/api/secure", {
     headers: { cookie: `${STUDIO_SESSION_COOKIE}=${session}` },

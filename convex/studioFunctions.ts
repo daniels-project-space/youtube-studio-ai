@@ -11,6 +11,7 @@ import type { TableNames } from "./_generated/dataModel";
 type StudioCtx = QueryCtx | MutationCtx;
 type StudioArgs = Record<string, unknown>;
 type TableName = TableNames;
+type StudioOperation = "query" | "mutation";
 
 const RESOURCE_KEYS = {
   channelId: "channels",
@@ -29,11 +30,17 @@ function identityScope(identity: UserIdentity | null) {
   if (!identity) throw new Error("Studio authentication required");
   const role = identity.role;
   const ownerId = identity.owner_id;
-  if ((role !== "owner" && role !== "service") || typeof ownerId !== "string") {
+  if (
+    (role !== "viewer" && role !== "owner" && role !== "service") ||
+    typeof ownerId !== "string"
+  ) {
     throw new Error("Invalid studio identity");
   }
   if (role === "owner" && identity.subject !== ownerId) {
     throw new Error("Invalid studio owner identity");
+  }
+  if (role === "viewer" && identity.subject !== `viewer:${ownerId}`) {
+    throw new Error("Invalid studio viewer identity");
   }
   return { role, ownerId } as const;
 }
@@ -54,8 +61,18 @@ async function assertOwnedRecord(
   return true;
 }
 
-async function authorizeStudioCall(ctx: StudioCtx, args: StudioArgs) {
+async function authorizeStudioCall(
+  ctx: StudioCtx,
+  args: StudioArgs,
+  operation: StudioOperation = "query",
+) {
   const identity = identityScope(await ctx.auth.getUserIdentity());
+  if (identity.role === "viewer" && operation === "mutation") {
+    throw new Error("Studio viewer mutations are not permitted");
+  }
+  if (identity.role === "viewer" && Object.hasOwn(args, "secret")) {
+    throw new Error("Studio viewer privileged query denied");
+  }
   let scoped = false;
 
   if (typeof args.ownerId === "string") {
@@ -100,7 +117,7 @@ async function authorizeStudioCall(ctx: StudioCtx, args: StudioArgs) {
   }
 
   // Service-only fleet scans (for example publish-intent due work) may not have
-  // an owner or document argument. Owner sessions must always be data-scoped.
+  // an owner or document argument. Owner and viewer calls must always be scoped.
   if (!scoped && identity.role !== "service") {
     throw new Error("Studio call is not owner scoped");
   }
@@ -111,23 +128,30 @@ type PublicDefinition = {
   [key: string]: unknown;
 };
 
-function authenticatedBuilder(builder: typeof baseQuery): typeof baseQuery;
-function authenticatedBuilder(builder: typeof baseMutation): typeof baseMutation;
+function authenticatedBuilder(
+  builder: typeof baseQuery,
+  operation: StudioOperation,
+): typeof baseQuery;
+function authenticatedBuilder(
+  builder: typeof baseMutation,
+  operation: StudioOperation,
+): typeof baseMutation;
 function authenticatedBuilder(
   builder: typeof baseQuery | typeof baseMutation,
+  operation: StudioOperation,
 ): typeof baseQuery | typeof baseMutation {
   return ((definition: PublicDefinition) =>
     builder({
       ...definition,
       handler: async (ctx: StudioCtx, args: StudioArgs) => {
-        await authorizeStudioCall(ctx, args);
+        await authorizeStudioCall(ctx, args, operation);
         return definition.handler(ctx, args);
       },
     } as never)) as typeof baseQuery | typeof baseMutation;
 }
 
-export const query = authenticatedBuilder(baseQuery);
-export const mutation = authenticatedBuilder(baseMutation);
+export const query = authenticatedBuilder(baseQuery, "query");
+export const mutation = authenticatedBuilder(baseMutation, "mutation");
 
 export const studioAuthorizationForTests = {
   identityScope,
