@@ -1486,6 +1486,16 @@
   border-radius: 8px;
 }
 
+.latest-video-card {
+  display: grid;
+  grid-template-columns: minmax(0, 240px) minmax(0, 1fr);
+  align-items: center;
+  gap: 1.1rem;
+  padding: 0.9rem;
+}
+
+.latest-video-thumb { width: 100%; }
+
 /* ── SEO: next-action summary, deeper evidence on demand ──────────────── */
 
 .seo-workspace {
@@ -1586,6 +1596,11 @@
     gap: 0.65rem;
   }
   .channel-week-thumb { align-self: start; }
+  .latest-video-card {
+    grid-template-columns: 1fr;
+    align-items: stretch;
+    gap: 0.8rem;
+  }
   .seo-focus .panel-heading { align-items: flex-start; flex-direction: column; }
   .seo-focus-source { max-width: 100%; }
 }

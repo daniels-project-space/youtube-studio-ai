@@ -51,16 +51,9 @@ export function LatestVideoWidget({
     <section style={{ marginBottom: "1.6rem" }}>
       <SectionTitle>Latest video</SectionTitle>
       <div
-        className="glass"
-        style={{
-          display: "grid",
-          gridTemplateColumns: "minmax(0, 240px) 1fr",
-          gap: "1.1rem",
-          padding: "0.9rem",
-          alignItems: "center",
-        }}
+        className="glass latest-video-card"
       >
-        <div style={{ position: "relative", aspectRatio: "16 / 9", borderRadius: 10, overflow: "hidden" }}>
+        <div className="latest-video-thumb" style={{ position: "relative", aspectRatio: "16 / 9", borderRadius: 10, overflow: "hidden" }}>
           <AssetImg
             k={v?.thumbnailKey ?? undefined}
             alt={v?.title ?? "latest video"}

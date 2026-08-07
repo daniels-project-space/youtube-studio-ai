@@ -1,7 +1,11 @@
 "use client";
 
 import { ReactNode, useCallback, useEffect, useMemo, useRef, useState } from "react";
-import { ConvexProviderWithAuth, ConvexReactClient } from "convex/react";
+import {
+  ConvexProviderWithAuth,
+  ConvexReactClient,
+  useConvexAuth,
+} from "convex/react";
 
 type TokenState = "loading" | "authenticated" | "unauthenticated";
 
@@ -51,12 +55,61 @@ function useStudioConvexAuth() {
     void fetchToken(false);
   }, [fetchToken]);
 
+  const fetchAccessToken = useCallback(
+    ({ forceRefreshToken }: { forceRefreshToken: boolean }) =>
+      fetchToken(forceRefreshToken),
+    [fetchToken],
+  );
+
   return {
     isLoading: state === "loading",
     isAuthenticated: state === "authenticated",
-    fetchAccessToken: ({ forceRefreshToken }: { forceRefreshToken: boolean }) =>
-      fetchToken(forceRefreshToken),
+    fetchAccessToken,
   };
+}
+
+function StudioConvexAuthGate({ children }: { children: ReactNode }) {
+  const { isLoading, isAuthenticated } = useConvexAuth();
+
+  if (isLoading) {
+    return (
+      <main
+        aria-busy="true"
+        aria-label="Authenticating studio session"
+        style={{
+          minHeight: "100vh",
+          display: "grid",
+          placeItems: "center",
+          padding: "2rem",
+          color: "#a1a1aa",
+          fontFamily: "system-ui",
+        }}
+      >
+        Securing studio session…
+      </main>
+    );
+  }
+
+  if (!isAuthenticated) {
+    return (
+      <main
+        style={{
+          minHeight: "100vh",
+          display: "grid",
+          placeItems: "center",
+          padding: "2rem",
+          color: "#f87171",
+          fontFamily: "system-ui",
+        }}
+      >
+        <p>
+          Studio session expired. <a href="/operator-login">Sign in again</a>.
+        </p>
+      </main>
+    );
+  }
+
+  return children;
 }
 
 /**
@@ -80,7 +133,7 @@ export function ConvexClientProvider({ children }: { children: ReactNode }) {
 
   return (
     <ConvexProviderWithAuth client={client} useAuth={useStudioConvexAuth}>
-      {children}
+      <StudioConvexAuthGate>{children}</StudioConvexAuthGate>
     </ConvexProviderWithAuth>
   );
 }
