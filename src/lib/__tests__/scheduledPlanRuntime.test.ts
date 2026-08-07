@@ -18,6 +18,8 @@ import {
   selectUnpinnedPlanItem,
   type ScheduledPlanRunPayload,
 } from "@/lib/scheduledPlanRuntime";
+import { markLeaseRecoveryDispatched, reapExpiredRunLeases } from "../../../convex/runs";
+import { RUN_EXECUTION_LEASE_MS, RUN_QUEUE_LEASE_MS } from "@/lib/runLease";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 type Filter = { field: string; op: "eq" | "gt" | "lte"; value: unknown };
@@ -564,6 +566,122 @@ async function main() {
   assert.equal(blocked.state, "blocked");
   assert.equal(blocked.runId, failureClaim.runId);
   assert.equal(failureDb.rows("runs").length, 1);
+
+  // A queued run that never froze an invocation is replaced and its exact
+  // scheduled fence is atomically released by the provider-free lease reaper.
+  const queuedRecoveryDb = new MemoryDb();
+  const queuedRecoveryChannel = seedChannel(queuedRecoveryDb, {
+    enabled: true,
+    frequency: "daily",
+    timezone: "UTC",
+    localTime: "00:00",
+  });
+  const queuedRecoveryItem = "contentPlan:queued-recovery";
+  const queuedRecoveryRun = "runs:queued-recovery";
+  const queuedPublishAt = Date.now() + 4 * 60 * 60_000;
+  seedReadyPlan(queuedRecoveryDb, queuedRecoveryChannel, {
+    id: queuedRecoveryItem,
+    order: 0,
+    scheduledAt: queuedPublishAt,
+  });
+  await queuedRecoveryDb.patch(queuedRecoveryItem, {
+    scheduledRunId: queuedRecoveryRun,
+    scheduledClaimedAt: Date.now() - RUN_QUEUE_LEASE_MS,
+  });
+  queuedRecoveryDb.seed("runs", {
+    ownerId: "owner-test",
+    channelId: queuedRecoveryChannel,
+    status: "queued",
+    startedAt: Date.now() - RUN_QUEUE_LEASE_MS - 5_000,
+    heartbeatAt: Date.now() - RUN_QUEUE_LEASE_MS - 5_000,
+    leaseExpiresAt: Date.now() - 5_000,
+    costTotal: 0,
+    planItemId: queuedRecoveryItem,
+    plannedTopic: "Topic 0",
+    plannedTitle: "Title 0",
+    plannedThumbnailKey: `owner/owner-test/channel/test/plan/${queuedRecoveryItem}.jpg`,
+    plannedPublishAt: queuedPublishAt,
+  }, queuedRecoveryRun);
+  await invoke(reapExpiredRunLeases, testContext(queuedRecoveryDb), {});
+  assert.equal((await queuedRecoveryDb.get(queuedRecoveryRun))?.status, "failed");
+  assert.equal((await queuedRecoveryDb.get(queuedRecoveryItem))?.scheduledRunId, undefined);
+  const queuedReplacement = await invoke<{ state: string; reused: boolean; runId: string }>(
+    claimNextPlanRun,
+    testContext(queuedRecoveryDb),
+    {
+      ownerId: "owner-test",
+      channelId: queuedRecoveryChannel,
+      dueBefore: Date.now() + DEFAULT_PLAN_GENERATION_LEAD_MS,
+    },
+  );
+  assert.equal(queuedReplacement.state, "claimed");
+  assert.equal(queuedReplacement.reused, false);
+  assert.notEqual(queuedReplacement.runId, queuedRecoveryRun);
+
+  // A dead worker that did freeze a hash-bound invocation keeps the scheduled
+  // fence and is re-dispatched with the same run id so completed paid stages
+  // remain resumable.
+  const resumeDb = new MemoryDb();
+  const resumeChannel = seedChannel(resumeDb, {
+    enabled: true,
+    frequency: "daily",
+    timezone: "UTC",
+    localTime: "00:00",
+  });
+  const resumeItem = "contentPlan:resume";
+  const resumeRun = "runs:resume";
+  const resumePublishAt = Date.now() + 4 * 60 * 60_000;
+  seedReadyPlan(resumeDb, resumeChannel, {
+    id: resumeItem,
+    order: 0,
+    scheduledAt: resumePublishAt,
+  });
+  await resumeDb.patch(resumeItem, {
+    scheduledRunId: resumeRun,
+    scheduledClaimedAt: Date.now() - RUN_EXECUTION_LEASE_MS,
+  });
+  resumeDb.seed("runs", {
+    ownerId: "owner-test",
+    channelId: resumeChannel,
+    status: "running",
+    startedAt: Date.now() - RUN_EXECUTION_LEASE_MS - 5_000,
+    heartbeatAt: Date.now() - RUN_EXECUTION_LEASE_MS - 5_000,
+    leaseExpiresAt: Date.now() - 5_000,
+    leaseOwner: "dead-trigger",
+    costTotal: 0.7,
+    pipelineInvocationSnapshot: { runId: resumeRun },
+    pipelineInvocationSha256: "a".repeat(64),
+    planItemId: resumeItem,
+    plannedTopic: "Topic 0",
+    plannedTitle: "Title 0",
+    plannedThumbnailKey: `owner/owner-test/channel/test/plan/${resumeItem}.jpg`,
+    plannedPublishAt: resumePublishAt,
+  }, resumeRun);
+  await invoke(reapExpiredRunLeases, testContext(resumeDb), {});
+  assert.equal((await resumeDb.get(resumeRun))?.leaseRecoveryPending, true);
+  assert.equal((await resumeDb.get(resumeItem))?.scheduledRunId, resumeRun);
+  const resumed = await invoke<{ state: string; reused: boolean; recoveryDispatch: boolean; runId: string }>(
+    claimNextPlanRun,
+    testContext(resumeDb),
+    {
+      ownerId: "owner-test",
+      channelId: resumeChannel,
+      dueBefore: Date.now() + DEFAULT_PLAN_GENERATION_LEAD_MS,
+    },
+  );
+  assert.equal(resumed.state, "claimed");
+  assert.equal(resumed.reused, true);
+  assert.equal(resumed.recoveryDispatch, true);
+  assert.equal(resumed.runId, resumeRun);
+  assert.equal(
+    await invoke<boolean>(markLeaseRecoveryDispatched, testContext(resumeDb), {
+      ownerId: "owner-test",
+      channelId: resumeChannel,
+      runId: resumeRun,
+    }),
+    true,
+  );
+  assert.equal((await resumeDb.get(resumeRun))?.leaseRecoveryPending, undefined);
 
   console.log("scheduled plan runtime tests passed");
 }

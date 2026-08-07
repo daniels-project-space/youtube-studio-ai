@@ -6,9 +6,12 @@ import {
   toNovitaPhaseProfile,
   type NovitaRenderResult,
   type NovitaBillingReceipt,
+  type NovitaRuntimeAttestation,
   type Shot,
 } from "@/lib/novitaRenderFarm";
-import { presignDownload, putObject } from "@/lib/storage";
+import { recordImageUsage } from "@/lib/imageUsage";
+import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
+import { canonicalJson } from "@/lib/canonicalJson";
 
 export type NovitaProfileId = GenerationProfile["id"];
 
@@ -29,6 +32,70 @@ export interface NovitaRenderedScene extends NovitaGeneratedScene {
   stillUrl: string;
   clipKey: string;
   clipUrl: string;
+}
+
+export interface NovitaImageProviderReceipt {
+  key: string;
+  jobId: string;
+  model: string;
+  profileId: NovitaProfileId;
+  width: number;
+  height: number;
+  costUsd: number;
+  billingReceipt: NovitaBillingReceipt;
+  runtimeAttestation: NovitaRuntimeAttestation;
+  profileSha256: string;
+  manifestSha256: string;
+  requestSha256: string;
+  requestCanonicalJson: string;
+  billingReceiptSha256: string;
+}
+
+export interface NovitaRenderedImage extends NovitaImageProviderReceipt {
+  url: string;
+}
+
+export interface NovitaImageByteRequest {
+  prefix: string;
+  id: string;
+  prompt: string;
+  negativePrompt?: string;
+  seed?: number;
+  profileId?: NovitaProfileId;
+  maxCostUsd?: number;
+  /** Runs after all local work but immediately before the paid bridge launch. */
+  beforeProviderSpend?: () => void | Promise<void>;
+  /** Runs after a validated paid provider result and before presign/download. */
+  onProviderReceipt?: (receipt: NovitaImageProviderReceipt) => void | Promise<void>;
+}
+
+export interface AttestedNovitaImageBytes extends NovitaRenderedImage {
+  bytes: Buffer;
+}
+
+export type NovitaImageReceiptObserver = (receipt: NovitaRenderedImage) => void;
+export type NovitaImageProviderReceiptObserver = (
+  receipt: NovitaImageProviderReceipt,
+) => void | Promise<void>;
+
+type RenderNovitaImageFn = (args: {
+  prefix: string;
+  id: string;
+  prompt: string;
+  negativePrompt?: string;
+  seed?: number;
+  profileId?: NovitaProfileId;
+  maxCostUsd?: number;
+  beforeProviderSpend?: () => void | Promise<void>;
+  onProviderReceipt?: NovitaImageProviderReceiptObserver;
+}) => Promise<NovitaRenderedImage>;
+
+type DownloadNovitaImageFn = (key: string) => Promise<Uint8Array>;
+
+export interface NovitaPromptImageRequest {
+  prompt: string;
+  negativePrompt?: string;
+  seed?: number;
 }
 
 function safeId(value: string): string {
@@ -143,8 +210,12 @@ export async function renderNovitaImage(args: {
   id: string;
   prompt: string;
   negativePrompt?: string;
+  seed?: number;
   profileId?: NovitaProfileId;
-}): Promise<{ url: string; key: string; jobId: string; model: string; costUsd: number; billingReceipt: NovitaBillingReceipt }> {
+  maxCostUsd?: number;
+  beforeProviderSpend?: () => void | Promise<void>;
+  onProviderReceipt?: NovitaImageProviderReceiptObserver;
+}): Promise<NovitaRenderedImage> {
   const profile = generationProfile(args.profileId ?? "production");
   const id = safeId(args.id);
   const shot = asShot({
@@ -153,6 +224,7 @@ export async function renderNovitaImage(args: {
     motionPrompt: "subtle natural motion",
     durationSec: 5,
     negativePrompt: args.negativePrompt,
+    seed: args.seed,
   }, profile.id);
   const result = await renderImages({
     prefix: `${cleanPrefix(args.prefix)}/images`,
@@ -161,15 +233,221 @@ export async function renderNovitaImage(args: {
     nshard: 1,
     maxConcurrent: 1,
     jobs: "full",
+    maxCostUsd: args.maxCostUsd,
+    beforeProviderSpend: args.beforeProviderSpend,
   });
   const key = exactCandidateByShot(result, [id]).get(id)!;
-  return {
-    url: await presignDownload(key),
+  const providerReceipt: NovitaImageProviderReceipt = {
     key,
     jobId: result.raw.jobId,
     model: `${profile.image.model}@${profile.image.revision}`,
+    profileId: profile.id,
+    width: profile.image.width,
+    height: profile.image.height,
     costUsd: result.costUsd,
     billingReceipt: result.billingReceipt,
+    runtimeAttestation: result.raw.runtimeAttestation,
+    profileSha256: result.raw.profileSha256,
+    manifestSha256: result.raw.manifestSha256,
+    requestSha256: result.raw.requestSha256,
+    requestCanonicalJson: result.requestCanonicalJson,
+    billingReceiptSha256: result.raw.billingReceiptSha256,
+  };
+  await settleNovitaImageProviderReceipt(providerReceipt, profile.id, args.onProviderReceipt);
+  let url: string;
+  try {
+    url = await presignDownload(key);
+  } catch (error) {
+    if (error && typeof error === "object") {
+      Object.assign(error, {
+        observedCostUsd: result.costUsd,
+        retryable: false,
+        providerReceipt: { key, jobId: result.raw.jobId },
+      });
+    }
+    throw error;
+  }
+  return { ...providerReceipt, url };
+}
+
+/** Re-check the externally visible proof before a production caller accepts bytes. */
+export function assertAttestedNovitaImage(
+  rendered: NovitaImageProviderReceipt,
+  profileId: NovitaProfileId = "production",
+): void {
+  const profile = generationProfile(profileId);
+  const expectedModel = `${profile.image.model}@${profile.image.revision}`;
+  const expectedProfileHash = createHash("sha256")
+    .update(canonicalJson(toNovitaPhaseProfile(profile, "image")))
+    .digest("hex");
+  const expectedBillingHash = createHash("sha256")
+    .update(canonicalJson(rendered.billingReceipt))
+    .digest("hex");
+  let canonicalRequest = false;
+  try {
+    canonicalRequest = canonicalJson(JSON.parse(rendered.requestCanonicalJson)) === rendered.requestCanonicalJson;
+  } catch {
+    canonicalRequest = false;
+  }
+  const expectedRequestHash = createHash("sha256")
+    .update("image\0")
+    .update(rendered.requestCanonicalJson)
+    .digest("hex");
+  const attestation = rendered.runtimeAttestation;
+  const infra = profile.infrastructure;
+  const hashes = [
+    rendered.profileSha256,
+    rendered.manifestSha256,
+    rendered.requestSha256,
+    rendered.billingReceiptSha256,
+  ];
+  if (
+    rendered.profileId !== profile.id
+    || rendered.model !== expectedModel
+    || rendered.width !== profile.image.width
+    || rendered.height !== profile.image.height
+    || rendered.profileSha256 !== expectedProfileHash
+    || rendered.billingReceiptSha256 !== expectedBillingHash
+    || rendered.requestSha256 !== expectedRequestHash
+    || !canonicalRequest
+    || attestation.provider !== "novita"
+    || attestation.capacityMode !== infra.capacityMode
+    || attestation.weightStorage !== infra.weightStorage
+    || attestation.cacheMount !== infra.cacheMount
+    || attestation.checkpointing !== infra.checkpointing
+    || attestation.idleShutdownSeconds !== infra.idleShutdownSeconds
+    || attestation.gpuCount < 1
+    || attestation.gpuCount > infra.elasticGpuCeiling
+    || attestation.model !== profile.image.model
+    || attestation.revision !== profile.image.revision
+    || attestation.checkpoint !== profile.image.checkpoint
+    || rendered.billingReceipt.provider !== "novita"
+    || rendered.billingReceipt.gpuCount !== attestation.gpuCount
+    || Math.abs(rendered.billingReceipt.costUsd - rendered.costUsd) > 0.000001
+    || hashes.some((hash) => !/^[a-f0-9]{64}$/.test(hash))
+  ) {
+    throw new Error("novita image: missing or mismatched local Z-Image Turbo runtime attestation");
+  }
+}
+
+/**
+ * Seal known spend before any URL signing or byte delivery. Keeping this as a
+ * small exported boundary makes the provider-response crash ordering directly
+ * testable without making a paid bridge call.
+ */
+export async function settleNovitaImageProviderReceipt(
+  receipt: NovitaImageProviderReceipt,
+  profileId: NovitaProfileId,
+  onProviderReceipt?: NovitaImageProviderReceiptObserver,
+): Promise<void> {
+  const recordReceipt = () => recordImageUsage({
+    provider: "novita",
+    model: receipt.model,
+    route: "local-z-image-turbo",
+    images: 1,
+    width: receipt.width,
+    height: receipt.height,
+    costUsd: receipt.costUsd,
+  });
+  try {
+    assertAttestedNovitaImage(receipt, profileId);
+  } catch (error) {
+    // A terminal provider response can be billable even when its attestation
+    // is rejected. Preserve that known spend and fail closed.
+    if (Number.isFinite(receipt.costUsd) && receipt.costUsd >= 0) recordReceipt();
+    if (error && typeof error === "object") {
+      Object.assign(error, {
+        observedCostUsd: receipt.costUsd,
+        retryable: false,
+        providerReceipt: { key: receipt.key, jobId: receipt.jobId },
+      });
+    }
+    throw error;
+  }
+  recordReceipt();
+  await onProviderReceipt?.(receipt);
+}
+
+/**
+ * Shared production still adapter. It records the signed GPU receipt before
+ * downloading bytes, so a post-render R2 failure cannot disappear from cost
+ * accounting or trigger a second paid provider submission.
+ */
+export async function renderAttestedNovitaImageBytes(
+  args: NovitaImageByteRequest,
+  dependencies: {
+    renderImage?: RenderNovitaImageFn;
+    downloadImage?: DownloadNovitaImageFn;
+  } = {},
+): Promise<AttestedNovitaImageBytes> {
+  const profileId = args.profileId ?? "production";
+  const rendered = await (dependencies.renderImage ?? renderNovitaImage)({
+    prefix: args.prefix,
+    id: args.id,
+    prompt: args.prompt,
+    negativePrompt: args.negativePrompt,
+    seed: args.seed,
+    profileId,
+    maxCostUsd: args.maxCostUsd,
+    beforeProviderSpend: args.beforeProviderSpend,
+    onProviderReceipt: args.onProviderReceipt,
+  });
+  try {
+    assertAttestedNovitaImage(rendered, profileId);
+  } catch (error) {
+    // The bridge submission is already paid when a render receipt reaches this
+    // boundary. Refuse its bytes, but never erase that spend from the ledger.
+    if (error && typeof error === "object") {
+      Object.assign(error, {
+        observedCostUsd: rendered.costUsd,
+        retryable: false,
+        providerReceipt: { key: rendered.key, jobId: rendered.jobId },
+      });
+    }
+    throw error;
+  }
+  try {
+    const bytes = Buffer.from(await (dependencies.downloadImage ?? getObjectBytes)(rendered.key));
+    if (!bytes.length || bytes.length > 30 * 1024 * 1024) {
+      throw new Error("novita image: downloaded bytes are outside the 1B..30MiB contract");
+    }
+    return { ...rendered, bytes };
+  } catch (error) {
+    if (error && typeof error === "object") {
+      Object.assign(error, {
+        observedCostUsd: rendered.costUsd,
+        retryable: false,
+        providerReceipt: { key: rendered.key, jobId: rendered.jobId },
+      });
+    }
+    throw error;
+  }
+}
+
+/** Build a typed, deterministic prompt→bytes dependency for a live module. */
+export function createAttestedNovitaImageGenerator<T extends NovitaPromptImageRequest>(args: {
+  prefix: string;
+  id: (request: T) => string;
+  profileId?: NovitaProfileId;
+  maxCostUsd?: number;
+  beforeProviderSpend?: () => void | Promise<void>;
+  onProviderReceipt?: NovitaImageProviderReceiptObserver;
+  onReceipt?: NovitaImageReceiptObserver;
+}): (request: T) => Promise<Buffer> {
+  return async (request) => {
+    const rendered = await renderAttestedNovitaImageBytes({
+      prefix: args.prefix,
+      id: args.id(request),
+      prompt: request.prompt,
+      negativePrompt: request.negativePrompt,
+      seed: request.seed,
+      profileId: args.profileId ?? "production",
+      maxCostUsd: args.maxCostUsd,
+      beforeProviderSpend: args.beforeProviderSpend,
+      onProviderReceipt: args.onProviderReceipt,
+    });
+    args.onReceipt?.(rendered);
+    return rendered.bytes;
   };
 }
 

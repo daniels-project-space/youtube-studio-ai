@@ -14,7 +14,7 @@
  *                         draft previews only; failures never swap renderers.
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
-import { PRICE, thumbnailGenerationCost } from "@/engine/pricing";
+import { PRICE } from "@/engine/pricing";
 import { accountedModelUsageCost } from "@/engine/modelUsageCost";
 import {
   assertThumbnailGate,
@@ -36,7 +36,8 @@ import {
   thumbnailRequestHash,
 } from "@/lib/thumbnailCheckpoint";
 import { titleCard, imageToJpeg, solidImage } from "@/lib/ffmpeg";
-import { bananaCounters, hasBanana } from "@/lib/banana";
+import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
+import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { craftMetadata } from "@/lib/metacraft";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
@@ -688,14 +689,13 @@ export const thumbnailGen: Block = {
       (ctx.params["thumbnailer"] as string | undefined) ??
       "banana";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
-    const countersBefore = { ...bananaCounters };
+    let novitaImageCostUsd = 0;
     let checkpointGenerationCostUsd = 0;
     let checkpointQaCostUsd = 0;
     const observedConceptCost = (): number =>
       accountedModelUsageCost(ctx, ["text"], PRICE.thumbnailConceptUsd);
     const observedImageCost = (): number =>
-      ctx.imageUsageAccounting?.().costUsd ??
-      thumbnailGenerationCost(countersBefore, bananaCounters, 0);
+      ctx.imageUsageAccounting?.().costUsd ?? novitaImageCostUsd;
     const observedQaCost = (): number =>
       accountedModelUsageCost(ctx, ["vision"], PRICE.visionGraderUsd);
     const thumbnailCost = (extraCostUsd = 0): number =>
@@ -880,7 +880,7 @@ export const thumbnailGen: Block = {
 
     const scriptHint = String(ctx.store["narrationText"] ?? "").slice(0, 500);
     const requestHash = thumbnailRequestHash({
-      contract: "thumbnail-gen-checkpoint-v1",
+      contract: "thumbnail-gen-checkpoint-v2-attested-novita",
       title,
       scriptHint,
       sceneMandate: dnaThumb?.subject,
@@ -889,10 +889,10 @@ export const thumbnailGen: Block = {
       patternIndex: idx,
       verifiedSceneBase: verifiedSceneBase ? { sceneStillKey, provenance } : null,
       providerRoute: {
-        imageDisableGemini: process.env.IMAGE_DISABLE_GEMINI ?? "",
-        imageProviders: process.env.IMAGE_PROVIDERS ?? "",
-        bananaForceModel: process.env.BANANA_FORCE_MODEL ?? "",
-        falFlashModel: process.env.FAL_IMAGE_MODEL_FLASH ?? "",
+        provider: "novita",
+        profile: "production",
+        model: "Tongyi-MAI/Z-Image-Turbo@f332072aa78be7aecdf3ee76d5c247082da564a6",
+        fallback: false,
       },
     });
     const tmp = await makeRunTempDir(ctx.runId, `thumbnail-${requestHash.slice(0, 20)}`);
@@ -905,8 +905,8 @@ export const thumbnailGen: Block = {
         if (!hasGeminiKey()) {
           throw new Error("thumbnail_gen: no configured concept provider");
         }
-        if (!hasBanana()) {
-          throw new Error("thumbnail_gen: no configured text-free image provider");
+        if (!hasNovitaRenderFarmConfig()) {
+          throw new Error("thumbnail_gen: attested Novita render farm is not configured");
         }
         if (quality === "production" && !hasVisionKey()) {
           throw new Error("thumbnail_gen: no configured production QA provider");
@@ -931,6 +931,14 @@ export const thumbnailGen: Block = {
         };
       }
       checkpoint = await beginThumbnailPaidWork(checkpoint);
+      const generateScene = createAttestedNovitaImageGenerator<
+        import("@/lib/thumbnailRenderer").ThumbnailImageRequest
+      >({
+        prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/thumbnail/${requestHash}`,
+        id: () => `candidate-${idx}`,
+        profileId: "production",
+        onReceipt: (receipt) => { novitaImageCostUsd += receipt.costUsd; },
+      });
       await renderCandidate({
         pattern,
         title,
@@ -939,6 +947,7 @@ export const thumbnailGen: Block = {
         outJpg,
         tmpDir: tmp,
         idx,
+        generateScene,
         log: ctx.log,
         ...(dnaThumb?.subject ? { sceneMandate: dnaThumb.subject } : {}),
         ...(baseArt ? { baseArt } : {}),

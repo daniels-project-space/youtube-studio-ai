@@ -22,6 +22,14 @@ export interface PipelineInvocationSnapshot {
   compilationModules: unknown;
   compilationCapabilities: string[];
   reservedMaxCostUsd: number;
+  budgetAdmission?: {
+    kind: "channel-inception-probe";
+    maximumCostUsd: number;
+    receiptFingerprint: string;
+    subject: string;
+    pipelineOverrideFingerprint: string;
+    dispatchEnvelopeFingerprint: string;
+  };
 }
 
 function requiredText(value: unknown, label: string): string {
@@ -135,6 +143,47 @@ export function normalizePipelineInvocationSnapshot(
   const compilationCapabilities = snapshot.compilationCapabilities.map((value) =>
     requiredText(value, "capability")
   );
+  let budgetAdmission: PipelineInvocationSnapshot["budgetAdmission"];
+  if (snapshot.budgetAdmission !== undefined) {
+    const admission = snapshot.budgetAdmission;
+    if (admission.kind !== "channel-inception-probe") {
+      throw new Error("pipeline invocation budget admission kind is invalid");
+    }
+    if (
+      !Number.isFinite(admission.maximumCostUsd) ||
+      admission.maximumCostUsd <= 0 ||
+      admission.maximumCostUsd > 100
+    ) {
+      throw new Error("pipeline invocation admitted cost ceiling is invalid");
+    }
+    const receiptFingerprint = requiredText(
+      admission.receiptFingerprint,
+      "budget admission receipt fingerprint",
+    );
+    const pipelineOverrideFingerprint = requiredText(
+      admission.pipelineOverrideFingerprint,
+      "budget admission pipeline fingerprint",
+    );
+    const dispatchEnvelopeFingerprint = requiredText(
+      admission.dispatchEnvelopeFingerprint,
+      "budget admission dispatch envelope fingerprint",
+    );
+    if (
+      !/^[a-f0-9]{64}$/.test(receiptFingerprint) ||
+      !/^[a-f0-9]{64}$/.test(pipelineOverrideFingerprint) ||
+      !/^[a-f0-9]{64}$/.test(dispatchEnvelopeFingerprint)
+    ) {
+      throw new Error("pipeline invocation budget admission fingerprint is invalid");
+    }
+    budgetAdmission = {
+      kind: admission.kind,
+      maximumCostUsd: admission.maximumCostUsd,
+      receiptFingerprint,
+      subject: requiredText(admission.subject, "budget admission subject"),
+      pipelineOverrideFingerprint,
+      dispatchEnvelopeFingerprint,
+    };
+  }
 
   return {
     version: PIPELINE_INVOCATION_SNAPSHOT_VERSION,
@@ -154,6 +203,7 @@ export function normalizePipelineInvocationSnapshot(
     compilationModules: jsonClone(snapshot.compilationModules),
     compilationCapabilities,
     reservedMaxCostUsd: snapshot.reservedMaxCostUsd,
+    ...(budgetAdmission ? { budgetAdmission } : {}),
   };
 }
 

@@ -114,6 +114,7 @@ async function auditChannel(convex: ConvexHttpClient, channel: AuditChannel): Pr
 
   const runs = (await convex.query(api.runs.listRunsByChannel, {
     channelId: channel._id,
+    limit: 500,
   })) as Array<{
     _id: Id<"runs">;
     channelId: Id<"channels">;

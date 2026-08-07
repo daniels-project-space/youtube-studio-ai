@@ -25,8 +25,14 @@ import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
 import { makeRunTempDir } from "@/lib/files";
 import { putObjectFromFile } from "@/lib/storage";
-import { castMotionComic, hasMotionComic, motionComicPanelCount } from "@/lib/motionComic";
-import { bananaCounters } from "@/lib/banana";
+import {
+  castMotionComic,
+  hasMotionComic,
+  motionComicPanelCount,
+  type MotionComicImageRequest,
+} from "@/lib/motionComic";
+import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
+import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { PRICE } from "@/engine/pricing";
 
 function convex(): ConvexHttpClient {
@@ -67,8 +73,8 @@ export const motionComicBlock: Block = {
   produces: ["videoKey", "videoLocalPath", "videoDurationSec", "narrationText"],
   paid: true,
   run: async (ctx) => {
-    if (!hasMotionComic()) {
-      throw new Error("motion_comic: storyboard, ElevenLabs voice, and the selected Banana image route must all be configured (no fallback — this is the channel's visual engine)");
+    if (!hasMotionComic() || !hasNovitaRenderFarmConfig()) {
+      throw new Error("motion_comic: storyboard, ElevenLabs voice, and the attested Novita render farm must all be configured (no fallback)");
     }
     const topic = String(ctx.store["topic"] ?? "");
     if (!topic) throw new Error("motion_comic: no topic in store");
@@ -96,25 +102,21 @@ export const motionComicBlock: Block = {
     const outPath = join(runDir, "final.mp4");
     ctx.log(`motion_comic: drawing "${topic.slice(0, 60)}" — ${panels} panels @ ${width}w…`);
 
-    const countersBefore = { ...bananaCounters };
+    let novitaImageCostUsd = 0;
+    const generateImage = createAttestedNovitaImageGenerator<MotionComicImageRequest>({
+      prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/motion-comic-art`,
+      id: (request) => request.id,
+      profileId: "production",
+      onReceipt: (receipt) => { novitaImageCostUsd += receipt.costUsd; },
+    });
     const res = await castMotionComic({
       brief: { topic, facts, panels, style, width, targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined },
       runDir,
       outPath,
+      generateImage,
       log: (m) => ctx.log(`mc: ${m}`),
     });
-    // Real image spend from the banana counters (same rationale as
-    // whiteboard_scribe: a flat guess undercounts Pro-heavy runs and
-    // overcounts cached re-runs alike). The result also reports invocation-
-    // local TTS, music, and grader usage below.
-    const genPro = Math.max(0, bananaCounters.pro - countersBefore.pro);
-    const genFlash = Math.max(0, bananaCounters.flash - countersBefore.flash);
-    const genFal = Math.max(0, (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0));
-    const legacyArtCost =
-      genPro * PRICE.bananaProUsd +
-      genFlash * PRICE.bananaFlashUsd +
-      Math.max(0, bananaCounters.falCostUsd - countersBefore.falCostUsd);
-    const artCost = ctx.imageUsageAccounting?.().costUsd ?? legacyArtCost;
+    const artCost = ctx.imageUsageAccounting?.().costUsd ?? novitaImageCostUsd;
     const ttsCost =
       (res.ttsCharactersGenerated / 1000) * PRICE.ttsElevenPerKCharUsd;
     const musicCost = res.musicGenerations * PRICE.musicTrackUsd;
@@ -123,15 +125,20 @@ export const motionComicBlock: Block = {
     // zero instead of the old phantom $0.10 fallback charge.
     const comicCost = artCost + ttsCost + musicCost + graderCost;
     ctx.log(
-      `motion_comic: spend ${genPro} pro + ${genFlash} flash + ${genFal} fal, ` +
+      `motion_comic: attested Novita art $${artCost.toFixed(4)}, ` +
       `${res.ttsCharactersGenerated} TTS chars, ${res.musicGenerations} music, ` +
-      `${res.visionGraderCalls} graders ≈ $${comicCost.toFixed(2)}`,
+      `${res.visionGraderCalls} graders = $${comicCost.toFixed(4)}`,
     );
 
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;
     await putObjectFromFile(videoKey, res.outPath, { contentType: "video/mp4" });
     const videoDurationSec = Math.round(res.durationMs / 1000);
-    await recordAsset(ctx, "video", videoKey, { durationSec: videoDurationSec, engine: "motion_comic", panels: res.panels });
+    await recordAsset(ctx, "video", videoKey, {
+      durationSec: videoDurationSec,
+      engine: "motion_comic",
+      panels: res.panels,
+      imageProvider: "novita-z-image-turbo-local",
+    });
     ctx.log(`motion_comic ✓ → ${videoKey} (${videoDurationSec}s, ${res.panels} panels)`);
 
     return {

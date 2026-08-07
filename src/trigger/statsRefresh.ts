@@ -32,6 +32,7 @@ import {
   requireInternalQuerySecret,
   requireYouTubeConnector,
 } from "@/lib/youtubeConnector";
+import { listRunHistorySince } from "@/lib/runHistory";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
@@ -104,7 +105,7 @@ export async function statsRefreshCore(
     // 1. Uploaded video ids for this channel (from its completed runs).
     let videoIds: string[] = [];
     try {
-      const runs = await convex.query(api.runs.listRunsByChannel, { channelId });
+      const runs = await listRunHistorySince(convex, channelId, 0);
       videoIds = [
         ...new Set(
           runs

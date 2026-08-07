@@ -25,6 +25,8 @@ import {
 } from "@/lib/youtubeConnector";
 import { YOUTUBE_WRITE_SCOPES } from "@/lib/publishingPolicy";
 import { enqueueFailedPipelineResume } from "@/trigger/publishRetry";
+import { syncChannelPipelines } from "@/lib/goldenChannelSync";
+import { listRunHistorySince } from "@/lib/runHistory";
 
 const DAY = 86_400_000;
 
@@ -125,6 +127,41 @@ async function sweep(ownerId: string, log: (m: string) => void) {
   const convex = new ConvexHttpClient(url);
 
   const channels = await convex.query(api.channels.listChannels, { ownerId });
+  // Persist the exact catalog/compiler completion the runtime would otherwise
+  // repeat on every invocation. This is deterministic and provider-free: it
+  // preserves specialist choices, removes only proven retired rows, and never
+  // spends model/render tokens.
+  let channelPipelineSync = {
+    checked: channels.length,
+    changed: 0,
+    applied: 0,
+    conflicts: 0,
+    verified: false,
+    verification: "skipped" as "dry-run" | "skipped" | "verified",
+  };
+  try {
+    const sync = await syncChannelPipelines({
+      convex,
+      ownerId,
+      channels,
+      verify: false,
+      log: (message) => log(`pipeline sync: ${message}`),
+    });
+    channelPipelineSync = {
+      checked: sync.checked,
+      changed: sync.changed,
+      applied: sync.applied,
+      conflicts: sync.conflicts,
+      verified: sync.verified,
+      verification: sync.verification,
+    };
+  } catch (error) {
+    log(
+      `pipeline sync failed closed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
   const failures: { channel: string; runId: string; error: string; at: number }[] = [];
   const healed: { channel: string; runId: string; superseded: string[] }[] = [];
   const retentionQueued: string[] = [];
@@ -165,28 +202,11 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       log(`grounding-gap check failed for ${ch.name}: ${e instanceof Error ? e.message : e}`);
     }
 
-    const runs = await convex.query(api.runs.listRunsByChannel, { channelId: ch._id });
+    // One indexed 60-day cursor feeds both the 72h diagnosis and 7–60d
+    // retention pass. Typical channels fit one 100-row page; high-volume
+    // channels paginate without ever asking Convex for an unbounded collect.
+    const runs = await listRunHistorySince(convex, ch._id, Date.now() - 60 * DAY);
     const recent = runs.filter((r) => (r._creationTime ?? 0) > Date.now() - 3 * DAY);
-
-    // REAPER: a worker killed by SYSTEM_FAILURE/OOM leaves the Convex run
-    // "running" forever (the UI row spins, the scheduler thinks the channel is
-    // busy). Anything running >3h is dead — flip it failed, honestly labeled.
-    for (const r of recent) {
-      if (r.status === "running" && (r._creationTime ?? 0) < Date.now() - 3 * 3_600_000) {
-        try {
-          await convex.mutation(api.runs.updateRun, {
-            runId: r._id as Id<"runs">,
-            status: "failed",
-            finishedAt: Date.now(),
-            error: "reaped by pipeline-doctor: run stuck 'running' >3h (worker died: SYSTEM_FAILURE/OOM/timeout)",
-          });
-          failures.push({ channel: ch.name, runId: r._id, error: "reaped: stuck running >3h (worker died)", at: r._creationTime ?? 0 });
-          log(`reaper: flipped stuck run ${r._id} (${ch.name}) to failed`);
-        } catch (e) {
-          log(`reaper failed for ${r._id}: ${e instanceof Error ? e.message : e}`);
-        }
-      }
-    }
     for (const r of recent) {
       if (r.status === "failed") {
         failures.push({
@@ -403,6 +423,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     groundingGapChannels,
     researchTriggered,
     publishContinuationsQueued,
+    channelPipelineSync,
     diagnosis,
   };
   const key = `doctor/${new Date().toISOString().slice(0, 10)}.json`;
@@ -428,7 +449,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       log(`telegram digest failed: ${e instanceof Error ? e.message : e}`);
     }
   }
-  return { ok: true, reportKey: key, failures: failures.length, healedRuns: healed.length, retentionQueued: retentionQueued.length, publishContinuationsQueued, commentsPosted, actions };
+  return { ok: true, reportKey: key, failures: failures.length, healedRuns: healed.length, retentionQueued: retentionQueued.length, publishContinuationsQueued, channelPipelineSync, commentsPosted, actions };
 }
 
 export const pipelineDoctorSchedule = schedules.task({

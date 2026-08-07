@@ -5,6 +5,8 @@ import path from "node:path";
 import { importJWK, jwtVerify } from "jose";
 import ts from "typescript";
 import { api } from "../../../convex/_generated/api";
+import { upsertCompetitors } from "../../../convex/competitors";
+import { upsertDatabank, upsertNiche } from "../../../convex/seo";
 import { studioAuthorizationForTests } from "../../../convex/studioFunctions";
 import {
   createOperatorSessionToken,
@@ -60,6 +62,12 @@ function fakeCtx(options: {
 
 async function expectRejected(work: Promise<unknown>, pattern: RegExp) {
   await assert.rejects(work, pattern);
+}
+
+async function invokeConvexDefinition(definition: unknown, ctx: unknown, args: unknown) {
+  return await (definition as {
+    _handler: (handlerContext: unknown, handlerArgs: unknown) => Promise<unknown>;
+  })._handler(ctx, args);
 }
 
 async function filesBelow(directory: string): Promise<string[]> {
@@ -173,6 +181,65 @@ async function main() {
     assert.equal(verifiedViewer.payload.sub, "viewer:owner_a");
     assert.equal(verifiedViewer.payload.owner_id, "owner_a");
     assert.equal(verifiedViewer.payload.role, "viewer");
+
+    await assert.doesNotReject(() =>
+      studioAuthorizationForTests.requireStudioServiceIdentity(
+        fakeCtx({ role: "service", identityOwner: "owner_a" }) as never,
+        "owner_a",
+        "evidence write",
+      ),
+    );
+    await expectRejected(
+      studioAuthorizationForTests.requireStudioServiceIdentity(
+        fakeCtx({ role: "owner", identityOwner: "owner_a" }) as never,
+        "owner_a",
+        "evidence write",
+      ),
+      /requires the bound studio service identity/,
+    );
+    await expectRejected(
+      studioAuthorizationForTests.requireStudioServiceIdentity(
+        fakeCtx({ role: "service", identityOwner: "owner_b" }) as never,
+        "owner_a",
+        "evidence write",
+      ),
+      /requires the bound studio service identity/,
+    );
+    const ownerOnlyContext = fakeCtx({ role: "owner", identityOwner: "owner_a" });
+    await expectRejected(
+      invokeConvexDefinition(upsertNiche, ownerOnlyContext, {
+        ownerId: "owner_a",
+        niche: "stoicism",
+        topTitlePatterns: [],
+        powerWords: [],
+        optimalTitleLen: 55,
+        topTags: [],
+        avgViewsTop50: 1,
+        medianViewsTop50: 1,
+        thumbnailStyleGuide: { dominantColors: [], hasTextOverlayPct: 0, notes: "" },
+      }),
+      /research evidence write requires the bound studio service identity/,
+    );
+    await expectRejected(
+      invokeConvexDefinition(upsertDatabank, ownerOnlyContext, {
+        ownerId: "owner_a",
+        niche: "stoicism",
+        titleTemplates: [],
+        tagClusters: [],
+        thumbnailRules: [],
+        hookPatterns: [],
+        competitorGaps: [],
+      }),
+      /SEO evidence write requires the bound studio service identity/,
+    );
+    await expectRejected(
+      invokeConvexDefinition(upsertCompetitors, ownerOnlyContext, {
+        ownerId: "owner_a",
+        niche: "stoicism",
+        competitors: [],
+      }),
+      /competitor evidence write requires the bound studio service identity/,
+    );
 
     await studioAuthorizationForTests.authorizeStudioCall(
       fakeCtx({}) as never,

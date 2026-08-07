@@ -18,49 +18,15 @@ export function StatCard({
   icon?: ReactNode;
 }) {
   return (
-    <div className="glass glass-shine lift" style={{ padding: "1.1rem 1.2rem" }}>
-      <div
-        style={{
-          display: "flex",
-          alignItems: "center",
-          justifyContent: "space-between",
-          marginBottom: "0.6rem",
-        }}
-      >
-        <span
-          style={{
-            fontSize: "0.72rem",
-            letterSpacing: "0.06em",
-            textTransform: "uppercase",
-            color: "var(--color-muted)",
-          }}
-        >
-          {label}
-        </span>
-        {icon && <span style={{ color: accent, opacity: 0.85 }}>{icon}</span>}
+    <div className="glass stat-card">
+      <div className="stat-card-heading">
+        <span>{label}</span>
+        {icon && <span className="stat-card-icon" style={{ color: accent }}>{icon}</span>}
       </div>
-      <div
-        style={{
-          fontFamily: "var(--font-display)",
-          fontSize: "1.9rem",
-          fontWeight: 600,
-          lineHeight: 1,
-          color: accent,
-        }}
-      >
+      <div className="stat-card-value" style={{ color: accent }}>
         {value}
       </div>
-      {hint && (
-        <div
-          style={{
-            marginTop: "0.5rem",
-            fontSize: "0.8rem",
-            color: "var(--color-faint)",
-          }}
-        >
-          {hint}
-        </div>
-      )}
+      {hint && <div className="stat-card-hint">{hint}</div>}
     </div>
   );
 }

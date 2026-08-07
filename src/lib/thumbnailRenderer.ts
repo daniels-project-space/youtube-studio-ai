@@ -3,12 +3,11 @@
  *
  * The image provider owns pixels only. It never receives headline, badge, or
  * channel-name strings and is always called with `allowText:false`. Exact type
- * is applied locally, so switching Gemini/Fal cannot change spelling, layout,
- * or the channel's typography contract.
+ * is applied locally, so provider routing cannot change spelling, layout, or
+ * the channel's typography contract.
  */
 import { basename, extname, join } from "node:path";
 import { writeFile } from "node:fs/promises";
-import { generateBananaImage } from "@/lib/banana";
 import { thumbnailText, type ThumbnailTextObject } from "@/lib/ffmpeg";
 import type { ThumbnailHeadlineLine, ThumbnailTextZone } from "@/lib/thumbnailLayout";
 
@@ -70,7 +69,7 @@ export interface ThumbnailImageRequest {
   aspectRatio: "16:9";
 }
 
-type GenerateScene = (request: ThumbnailImageRequest) => Promise<Buffer>;
+export type GenerateScene = (request: ThumbnailImageRequest) => Promise<Buffer>;
 type CompositeTypography = typeof thumbnailText;
 
 export function isThumbnailBaseProvenance(
@@ -120,7 +119,6 @@ export async function renderThumbnail(args: {
   baseSource: "generated" | "reused";
   request?: ThumbnailImageRequest;
 }> {
-  const generateScene = args.generateScene ?? generateBananaImage;
   const compositeTypography = args.compositeTypography ?? thumbnailText;
   const reusable = args.baseArt &&
     isThumbnailBaseProvenance(args.baseArt.provenance, args.spec.scene.textZone);
@@ -130,11 +128,14 @@ export async function renderThumbnail(args: {
   if (reusable) {
     basePath = args.baseArt!.path;
   } else {
+    if (!args.generateScene) {
+      throw new Error("thumbnailRenderer: an explicit production image generator is required");
+    }
     request = buildThumbnailImageRequest(args.spec.scene);
     const extension = extname(args.outJpg);
     const stem = basename(args.outJpg, extension || undefined);
     basePath = join(args.tmpDir, `${stem}.text-free-base.jpg`);
-    await writeFile(basePath, await generateScene(request));
+    await writeFile(basePath, await args.generateScene(request));
   }
 
   const type = args.spec.typography;

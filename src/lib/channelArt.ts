@@ -1,23 +1,22 @@
 /**
- * Channel art generator — a square avatar + a 16:9 banner from the channel's
- * visual identity (palette + style + persona + the Show Bible's iconic motif).
+ * Production channel-art generation.
  *
- * The avatar is the channel's face, so it gets the premium treatment: a
- * DP-art-directed prompt built around the iconic motif, generated on FLUX1.1
- * [pro] (fal), then put through a CRITIC LOOP — the image is downscaled to a 48px
- * icon and an agent judges whether the subject is still instantly recognizable,
- * high-contrast, and on-vibe; if not it regenerates with the critique. Text-free
- * (the name renders in the UI). Falls back to replicate FLUX when fal is absent.
+ * Avatar and banner are independent, versioned Imagecraft jobs. Every generated
+ * candidate is durable in R2 before it is judged; only an accepted candidate is
+ * returned. The selected avatar is additionally center-cropped to a square and
+ * written with an immutable key after it passes both the full-size and tiny-icon
+ * checks. There is deliberately no provider fallback in this module.
  */
-import { generateFluxImage } from "@/lib/replicate";
-import { generateFalFluxProImage, hasFalKey } from "@/lib/falImage";
-import { channelKey, putObject } from "@/lib/storage";
-import { makeRunTempDir, downloadTo } from "@/lib/files";
-import { imageToJpeg } from "@/lib/ffmpeg";
-import { parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
-import { produceAndCritique } from "@/engine/critiqueLoop";
+import { randomUUID } from "node:crypto";
 import { join } from "node:path";
+
+import { produceAndCritique } from "@/engine/critiqueLoop";
+import { downloadTo, makeRunTempDir } from "@/lib/files";
+import { imageToJpeg } from "@/lib/ffmpeg";
+import { hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
+import { renderNovitaImage } from "@/lib/novitaMedia";
+import { channelKey, putObject } from "@/lib/storage";
+import { visionLocal } from "@/lib/vision";
 
 export interface ArtIdentity {
   name: string;
@@ -36,7 +35,105 @@ export interface ChannelArtResult {
   bannerKey: string;
 }
 
+export interface ChannelArtRenderRequest {
+  prefix: string;
+  id: string;
+  prompt: string;
+  negativePrompt: string;
+  profileId: "production";
+}
+
+export interface ChannelArtRuntime {
+  hasJudge(): boolean;
+  renderImage(request: ChannelArtRenderRequest): Promise<{ url: string; key: string }>;
+  download(url: string, path: string): Promise<unknown>;
+  makeTempDir(prefix: string): Promise<string>;
+  toJpeg(input: string, output: string, width: number, height: number): Promise<unknown>;
+  judge(request: { kind: ArtKind; prompt: string; imagePaths: string[] }): Promise<unknown>;
+  readBytes(path: string): Promise<Uint8Array>;
+  putImmutable(key: string, bytes: Uint8Array, contentType: string): Promise<string>;
+  createVersion(kind: ArtKind): string;
+}
+
+export interface ChannelArtOptions {
+  /** Generate or resolve the avatar. Defaults to true. */
+  avatar?: boolean;
+  /** Generate or resolve the banner. Defaults to true. */
+  banner?: boolean;
+  /**
+   * Keep supplied existing keys instead of generating replacements. This can be
+   * set globally or per asset, e.g. `{ avatar: true, banner: false }`.
+   */
+  preserveExisting?: boolean | { avatar?: boolean; banner?: boolean };
+  existing?: Partial<ChannelArtResult>;
+  /** Stable checkpoint namespace, or independent namespaces per asset. */
+  version?: string | { avatar?: string; banner?: string };
+  maxAttempts?: number;
+  /** Explicit dependency seam for deterministic tests; production omits it. */
+  runtime?: ChannelArtRuntime;
+}
+
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
+export type ArtKind = "avatar" | "banner";
+
+interface ArtCandidate {
+  key: string;
+  url: string;
+  sourcePath: string;
+  judgedPaths: string[];
+  attempt: number;
+}
+
+interface AcceptedArt {
+  key: string;
+  sourceKey: string;
+  score: number;
+  attempts: number;
+}
+
+const SCORE_THRESHOLD: Record<ArtKind, number> = {
+  avatar: 0.86,
+  banner: 0.84,
+};
+
+const NEGATIVE_PROMPT: Record<ArtKind, string> = {
+  avatar:
+    "text, words, letters, logo typography, watermark, multiple subjects, off-center subject, " +
+    "wide shot, full body, tiny face, cropped face, clutter, murky lighting, low contrast",
+  banner:
+    "text, words, letters, captions, logo typography, watermark, busy center, important subject " +
+    "outside the central safe area, clutter, low contrast, collage, split screen",
+};
+
+const DEFAULT_RUNTIME: ChannelArtRuntime = {
+  hasJudge: hasGeminiKey,
+  renderImage: async (request) => {
+    const rendered = await renderNovitaImage(request);
+    return { url: rendered.url, key: rendered.key };
+  },
+  download: downloadTo,
+  makeTempDir: makeRunTempDir,
+  toJpeg: imageToJpeg,
+  judge: async ({ prompt, imagePaths }) => {
+    const raw = await visionLocal({
+      prompt,
+      imagePaths,
+      json: true,
+      maxTokens: 400,
+    });
+    return parseJsonLoose(raw);
+  },
+  readBytes: async (path) => {
+    const { readFile } = await import("node:fs/promises");
+    return new Uint8Array(await readFile(path));
+  },
+  putImmutable: (key, bytes, contentType) =>
+    putObject(key, bytes, { contentType, ifNoneMatch: "*" }),
+  createVersion: (kind) => {
+    const timestamp = new Date().toISOString().replace(/[-:.TZ]/g, "").slice(0, 14);
+    return `${timestamp}-${kind}-${randomUUID().slice(0, 12)}`;
+  },
+};
 
 function paletteClause(palette?: string[]): string {
   return palette && palette.length
@@ -44,171 +141,423 @@ function paletteClause(palette?: string[]): string {
     : "cohesive cinematic color palette";
 }
 
-/** DP-art-directed avatar prompt. Critique notes are folded in on regeneration. */
-function avatarPrompt(id: ArtIdentity, notes: string[]): string {
+export function avatarPrompt(id: ArtIdentity, notes: string[] = []): string {
   return [
     `Premium YouTube channel PROFILE-PICTURE icon for "${id.name}"`,
     id.niche ? `a ${id.niche} channel` : "",
-    id.iconicMotif ? `ICONIC MOTIF (make this the subject): ${id.iconicMotif}` : (id.persona ?? ""),
+    id.iconicMotif
+      ? `ICONIC MOTIF (make this the single subject): ${id.iconicMotif}`
+      : (id.persona ?? ""),
     id.vibe ? `mood: ${id.vibe}` : "",
     id.styleGrammar ?? "",
     paletteClause(id.palette),
-    // CIRCULAR-CROP SAFE: YouTube renders avatars as a small CIRCLE, so the
-    // subject (its face/front) must be DEAD-CENTER and fill the frame.
-    "CRITICAL COMPOSITION: tight head-on/centered portrait — the subject's FACE/FRONT is perfectly CENTERED " +
-      "and FILLS the frame (head-and-shoulders crop only, NOT a wide body or off-center pose). Symmetrical, " +
-      "centered, designed to read inside a CIRCULAR crop at tiny (48px) size — keep all key detail in the central " +
-      "circle, nothing important near the edges or corners. ONE bold subject, luminous and clearly lit (bright, " +
-      "not murky), strong contrast, intense focal presence, ultra-detailed, crisp and instantly recognizable at " +
-      "icon size, no text, no letters, no words, app-icon style.",
-    notes.length ? `FIX from the last attempt: ${notes.join("; ")}` : "",
+    "CRITICAL COMPOSITION: one bold subject, face/front perfectly centered, symmetrical, tight " +
+      "head-and-shoulders framing, all essential detail inside the central circular crop, strong " +
+      "silhouette and contrast at 48px, bright legible focal lighting, no text, no letters, no words",
+    notes.length ? `FIX every issue from the prior attempt: ${notes.join("; ")}` : "",
   ]
     .filter(Boolean)
     .join(", ");
 }
 
-function bannerPrompt(id: ArtIdentity): string {
+export function bannerPrompt(
+  id: ArtIdentity,
+  notes: string[] = [],
+  extra: string[] = [],
+): string {
   return [
     `Wide cinematic YouTube channel banner artwork for "${id.name}"`,
     id.niche ? `a ${id.niche} channel` : "",
-    id.iconicMotif ? `featuring the channel's motif: ${id.iconicMotif}` : "",
+    id.iconicMotif ? `featuring the channel motif: ${id.iconicMotif}` : "",
     id.styleGrammar ?? id.persona ?? "",
     paletteClause(id.palette),
-    "epic atmospheric wide establishing composition, luminous cinematic lighting, depth and soft bokeh, " +
-      "high production value, ultra-detailed, no text, no letters, no words",
+    ...extra,
+    "YOUTUBE SAFE AREA: keep the focal subject and every essential detail inside the centered " +
+      "1546x423 safe area of a 2560x1440 canvas; outer edges are atmospheric extension only",
+    "wide 16:9 establishing composition, cinematic depth, clear focal hierarchy, high production " +
+      "value, absolutely no text, no letters, no words, no typography, no watermark",
+    notes.length ? `FIX every issue from the prior attempt: ${notes.join("; ")}` : "",
   ]
     .filter(Boolean)
     .join(", ");
 }
 
-/** Generate one still (1:1 by default) via fal FLUX1.1 [pro], replicate fallback. */
-async function generateStill(prompt: string, square: boolean): Promise<string> {
-  if (hasFalKey()) {
-    try {
-      return await generateFalFluxProImage({
-        prompt,
-        width: square ? 1024 : 1344,
-        height: square ? 1024 : 768,
-      });
-    } catch {
-      /* fall through to replicate */
-    }
+function judgePrompt(kind: ArtKind, id: ArtIdentity): string {
+  if (kind === "avatar") {
+    return [
+      `Judge this YouTube avatar for "${id.name}". Image 1 is the centered square crop; image 2 is`,
+      "the same art downsampled to 48px and enlarged for inspection. YouTube displays it as a circle.",
+      "Pass only when the subject remains instantly recognizable at tiny size, its face/front is",
+      "centered with all essential detail inside the circular crop, contrast is strong, and there is",
+      "no visible text or lettering. Return strict JSON:",
+      '{"score":0..1,"circleSafe":boolean,"tinyLegible":boolean,"noText":boolean,"issues":string[]}',
+    ].join(" ");
   }
-  return generateFluxImage({ prompt, aspectRatio: square ? "1:1" : "16:9" });
+  return [
+    `Judge this YouTube banner for "${id.name}". Image 1 is the full 16:9 banner; image 2 is the`,
+    "centered 1546x423-equivalent safe-area crop seen across devices. Pass only when the focal",
+    "subject and all essential information survive inside that crop, the composition is clean and",
+    "channel-specific, and neither image contains text, letters, watermarking, or fake typography.",
+    "Return strict JSON:",
+    '{"score":0..1,"safeArea":boolean,"noText":boolean,"issues":string[]}',
+  ].join(" ");
 }
 
-/** Fetch a remote image URL into R2 at `key`; returns the key. */
-async function pipeToR2(url: string, key: string): Promise<string> {
-  const res = await fetch(url);
-  if (!res.ok) throw new Error(`channelArt: fetch ${key} -> HTTP ${res.status}`);
-  const bytes = new Uint8Array(await res.arrayBuffer());
-  await putObject(key, bytes, { contentType: "image/png" });
-  return key;
+function parseCritique(kind: ArtKind, raw: unknown): {
+  score: number;
+  pass: boolean;
+  issues: string[];
+} {
+  const parsed = typeof raw === "string" ? parseJsonLoose(raw) : raw;
+  if (!parsed || typeof parsed !== "object") {
+    throw new Error(`channelArt: ${kind} judge returned no structured verdict`);
+  }
+  const verdict = parsed as Record<string, unknown>;
+  if (typeof verdict.score !== "number" || !Number.isFinite(verdict.score)) {
+    throw new Error(`channelArt: ${kind} judge returned an invalid score`);
+  }
+  const score = Math.max(0, Math.min(1, verdict.score));
+  const checks = kind === "avatar"
+    ? (["circleSafe", "tinyLegible", "noText"] as const)
+    : (["safeArea", "noText"] as const);
+  const failedChecks = checks.filter((check) => verdict[check] !== true);
+  const issues = Array.isArray(verdict.issues)
+    ? verdict.issues.filter((issue): issue is string => typeof issue === "string").slice(0, 6)
+    : [];
+  for (const check of failedChecks) issues.push(`${check} check failed or was omitted`);
+  const pass = failedChecks.length === 0 && score >= SCORE_THRESHOLD[kind];
+  return { score, pass, issues };
 }
 
-/**
- * Critic loop for the avatar: render → downscale to a 48px icon (then back up so
- * the judge sees the degraded version) → score recognizability / contrast / vibe;
- * regenerate with notes until it clears the bar (max 3). Returns the winning url.
- */
-async function directAvatar(id: ArtIdentity, log: Logger): Promise<string> {
-  const tmp = await makeRunTempDir(`art-${id.name}`);
-  const canJudge = hasGeminiKey();
-  let n = 0;
+function cleanVersion(value: string): string {
+  const cleaned = value.trim().replace(/[^a-zA-Z0-9._-]+/g, "-").replace(/^-+|-+$/g, "");
+  if (!cleaned) throw new Error("channelArt: version must contain a letter or number");
+  return cleaned.slice(0, 96);
+}
 
-  const loop = await produceAndCritique<{ url: string; path: string }>({
-    label: "avatar",
-    threshold: 0.8,
-    maxIters: canJudge ? 3 : 1,
-    log: (m) => log(m),
-    produce: async (priorIssues) => {
-      const url = await generateStill(avatarPrompt(id, priorIssues), true);
-      const path = join(tmp, `avatar_${n++}.png`);
-      await downloadTo(url, path);
-      return { url, path };
-    },
-    critique: async (cand) => {
-      if (!canJudge) return { score: 1, pass: true, issues: [] };
-      try {
-        // Simulate a tiny channel icon: shrink to 48px, then up to 256 so the
-        // judge actually sees how it reads at avatar size.
-        const tiny = join(tmp, "tiny48.jpg");
-        const shown = join(tmp, "tiny_shown.jpg");
-        await imageToJpeg(cand.path, tiny, 48, 48);
-        await imageToJpeg(tiny, shown, 256, 256);
-        const raw = await visionLocal({
-          prompt:
-            `This is a YouTube PROFILE PICTURE shown at icon size for "${id.name}"` +
-            (id.iconicMotif ? ` (motif: ${id.iconicMotif})` : "") + ".\n" +
-            `YouTube crops avatars to a CIRCLE. Judge it for that: is the subject's FACE/FRONT CENTERED and ` +
-            `FILLING the frame so it survives a tight circular crop? HEAVILY penalize an OFF-CENTER subject, a ` +
-            `subject too small/far, or key detail near the edges/corners (those get cropped away). Also require ` +
-            `it be INSTANTLY recognizable, HIGH-CONTRAST, distinctive, on-vibe; penalize mush, low contrast, ` +
-            `clutter, or any text. Return STRICT JSON {"score":0..1,"issues":string[]}.`,
-          imagePaths: [shown],
-          json: true,
-          maxTokens: 300,
+function versionFor(kind: ArtKind, options: ChannelArtOptions, runtime: ChannelArtRuntime): string {
+  const configured = typeof options.version === "string"
+    ? options.version
+    : options.version?.[kind];
+  return cleanVersion(configured ?? runtime.createVersion(kind));
+}
+
+function preserves(kind: ArtKind, option: ChannelArtOptions["preserveExisting"]): boolean {
+  return typeof option === "boolean" ? option : option?.[kind] === true;
+}
+
+function manifestBytes(value: unknown): Uint8Array {
+  return new TextEncoder().encode(`${JSON.stringify(value, null, 2)}\n`);
+}
+
+async function prepareCandidate(
+  kind: ArtKind,
+  candidate: ArtCandidate,
+  runtime: ChannelArtRuntime,
+): Promise<ArtCandidate> {
+  if (kind === "avatar") {
+    const square = candidate.sourcePath.replace(/\.png$/, "-square.jpg");
+    const tiny = candidate.sourcePath.replace(/\.png$/, "-tiny48.jpg");
+    const shown = candidate.sourcePath.replace(/\.png$/, "-tiny-shown.jpg");
+    await runtime.toJpeg(candidate.sourcePath, square, 1024, 1024);
+    await runtime.toJpeg(square, tiny, 48, 48);
+    await runtime.toJpeg(tiny, shown, 256, 256);
+    return { ...candidate, judgedPaths: [square, shown] };
+  }
+
+  const full = candidate.sourcePath.replace(/\.png$/, "-full.jpg");
+  const safe = candidate.sourcePath.replace(/\.png$/, "-safe-area.jpg");
+  await runtime.toJpeg(candidate.sourcePath, full, 1280, 720);
+  // 1546/2560 x 423/1440, scaled onto a 1280x720 working canvas.
+  await runtime.toJpeg(candidate.sourcePath, safe, 773, 212);
+  return { ...candidate, judgedPaths: [full, safe] };
+}
+
+async function directArt(args: {
+  ownerId: string;
+  slug: string;
+  kind: ArtKind;
+  identity: ArtIdentity;
+  version: string;
+  maxAttempts: number;
+  prompt: (issues: string[]) => string;
+  runtime: ChannelArtRuntime;
+  log: Logger;
+}): Promise<AcceptedArt> {
+  const { ownerId, slug, kind, identity, version, runtime, log } = args;
+  if (!runtime.hasJudge()) {
+    throw new Error(`channelArt: ${kind} quality judge is unavailable; refusing to generate`);
+  }
+
+  const prefix = channelKey(ownerId, slug, `art/${kind}/${version}`);
+  const expectedKeyPrefix = `imagecraft/${prefix.replace(/^\/+|\/+$/g, "")}/`;
+  const temp = await runtime.makeTempDir(`channel-art-${slug}-${kind}`);
+  const candidates: ArtCandidate[] = [];
+
+  let loop: Awaited<ReturnType<typeof produceAndCritique<ArtCandidate>>>;
+  try {
+    loop = await produceAndCritique<ArtCandidate>({
+      label: `channel-art-${kind}`,
+      threshold: SCORE_THRESHOLD[kind],
+      maxIters: args.maxAttempts,
+      log,
+      produce: async (priorIssues, attempt) => {
+        const id = `${kind}-candidate-${String(attempt).padStart(2, "0")}`;
+        const rendered = await runtime.renderImage({
+          prefix,
+          id,
+          prompt: args.prompt(priorIssues),
+          negativePrompt: NEGATIVE_PROMPT[kind],
+          profileId: "production",
         });
-        const v = (parseJsonLoose(raw) as { score?: number; issues?: string[] } | null) ?? {};
-        const score = typeof v.score === "number" ? Math.max(0, Math.min(1, v.score)) : 0.7;
-        return { score, pass: score >= 0.8, issues: Array.isArray(v.issues) ? v.issues.slice(0, 4) : [] };
-      } catch (e) {
-        log(`avatar critique skipped (${e instanceof Error ? e.message : e})`);
-        return { score: 0.8, pass: true, issues: [] };
-      }
-    },
+        if (!rendered.key.startsWith(expectedKeyPrefix)) {
+          throw new Error(`channelArt: ${kind} renderer escaped its versioned Imagecraft namespace`);
+        }
+        const sourcePath = join(temp, `${id}.png`);
+        await runtime.download(rendered.url, sourcePath);
+        const candidate = await prepareCandidate(kind, {
+          key: rendered.key,
+          url: rendered.url,
+          sourcePath,
+          judgedPaths: [],
+          attempt,
+        }, runtime);
+        candidates.push(candidate);
+        return candidate;
+      },
+      critique: async (candidate) => parseCritique(kind, await runtime.judge({
+        kind,
+        prompt: judgePrompt(kind, identity),
+        imagePaths: candidate.judgedPaths,
+      })),
+    });
+  } catch (error) {
+    if (candidates.length > 0) {
+      await runtime.putImmutable(
+        channelKey(ownerId, slug, `art/${kind}/${version}/rejection.json`),
+        manifestBytes({
+          schemaVersion: 1,
+          status: "rejected",
+          kind,
+          version,
+          error: error instanceof Error ? error.message : String(error),
+          candidates: candidates.map(({ key, attempt }) => ({ key, attempt })),
+        }),
+        "application/json",
+      );
+    }
+    throw error;
+  }
+
+  if (!loop.accepted) {
+    await runtime.putImmutable(
+      channelKey(ownerId, slug, `art/${kind}/${version}/rejection.json`),
+      manifestBytes({
+        schemaVersion: 1,
+        status: "rejected",
+        kind,
+        version,
+        threshold: SCORE_THRESHOLD[kind],
+        candidates: candidates.map((candidate, index) => ({
+          key: candidate.key,
+          attempt: candidate.attempt,
+          critique: loop.history[index],
+        })),
+      }),
+      "application/json",
+    );
+    throw new Error(
+      `channelArt: ${kind} rejected after ${loop.iterations} attempts (best score ${loop.critique.score.toFixed(2)})`,
+    );
+  }
+
+  let selectedKey = loop.value.key;
+  if (kind === "avatar") {
+    const squarePath = loop.value.judgedPaths[0];
+    selectedKey = channelKey(ownerId, slug, `art/avatar/${version}/approved.jpg`);
+    await runtime.putImmutable(
+      selectedKey,
+      await runtime.readBytes(squarePath),
+      "image/jpeg",
+    );
+  }
+
+  await runtime.putImmutable(
+    channelKey(ownerId, slug, `art/${kind}/${version}/approval.json`),
+    manifestBytes({
+      schemaVersion: 1,
+      status: "approved",
+      kind,
+      version,
+      threshold: SCORE_THRESHOLD[kind],
+      score: loop.critique.score,
+      attempts: loop.iterations,
+      sourceKey: loop.value.key,
+      outputKey: selectedKey,
+      candidates: candidates.map((candidate, index) => ({
+        key: candidate.key,
+        attempt: candidate.attempt,
+        critique: loop.history[index],
+      })),
+    }),
+    "application/json",
+  );
+
+  log(`channelArt: ${kind} approved`, {
+    version,
+    score: loop.critique.score,
+    attempts: loop.iterations,
+    sourceKey: loop.value.key,
+    outputKey: selectedKey,
   });
-  log(`avatar: accepted=${loop.accepted} score=${loop.critique.score.toFixed(2)} after ${loop.iterations} iter(s)`);
-  return loop.value.url;
+  return {
+    key: selectedKey,
+    sourceKey: loop.value.key,
+    score: loop.critique.score,
+    attempts: loop.iterations,
+  };
+}
+
+function validateSelection(options: ChannelArtOptions): void {
+  if (options.avatar === false && !options.existing?.imageKey) {
+    throw new Error("channelArt: avatar=false requires existing.imageKey");
+  }
+  if (options.banner === false && !options.existing?.bannerKey) {
+    throw new Error("channelArt: banner=false requires existing.bannerKey");
+  }
 }
 
 /**
- * Generate avatar (critic-looped) + banner for a channel and store them in R2.
- * Returns the two R2 keys (caller persists them onto the channel record).
+ * Generate one independently leased art asset. Channel Inception uses this so
+ * avatar and banner provider spend is checkpointed under the correct stage.
  */
+export async function generateChannelArtAsset(
+  ownerId: string,
+  slug: string,
+  kind: ArtKind,
+  identity: ArtIdentity,
+  log: Logger = () => {},
+  options: ChannelArtOptions = {},
+): Promise<string> {
+  const existingKey = kind === "avatar" ? options.existing?.imageKey : options.existing?.bannerKey;
+  if (preserves(kind, options.preserveExisting) && existingKey) return existingKey;
+  const runtime = options.runtime ?? DEFAULT_RUNTIME;
+  if (!runtime.hasJudge()) {
+    throw new Error("channelArt: quality judge is unavailable; refusing paid generation");
+  }
+  const version = versionFor(kind, options, runtime);
+  const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
+  log(`channelArt: generating versioned ${kind} through Novita Imagecraft`, { version });
+  return (await directArt({
+    ownerId,
+    slug,
+    kind,
+    identity,
+    version,
+    maxAttempts,
+    prompt: (issues) => kind === "avatar"
+      ? avatarPrompt(identity, issues)
+      : bannerPrompt(identity, issues),
+    runtime,
+    log,
+  })).key;
+}
+
 export async function generateChannelArt(
   ownerId: string,
   slug: string,
   identity: ArtIdentity,
   log: Logger = () => {},
+  options: ChannelArtOptions = {},
 ): Promise<ChannelArtResult> {
-  log("channelArt: art-directing avatar (1:1, critic loop)…");
-  const avatarUrl = await directAvatar(identity, log);
-  log("channelArt: generating banner (16:9)…");
-  const bannerUrl = await generateStill(bannerPrompt(identity), false);
+  validateSelection(options);
+  const runtime = options.runtime ?? DEFAULT_RUNTIME;
+  const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
+  const existing = options.existing ?? {};
 
-  const imageKey = await pipeToR2(avatarUrl, channelKey(ownerId, slug, "art/avatar.png"));
-  const bannerKey = await pipeToR2(bannerUrl, channelKey(ownerId, slug, "art/banner.png"));
-  log("channelArt: uploaded to R2", { imageKey, bannerKey });
+  const generateAvatar = options.avatar !== false && !(
+    preserves("avatar", options.preserveExisting) && existing.imageKey
+  );
+  const generateBanner = options.banner !== false && !(
+    preserves("banner", options.preserveExisting) && existing.bannerKey
+  );
+
+  // Validate the judge before making either paid request. Preserved-only calls do
+  // not need a judge and are safe even during provider outages.
+  if ((generateAvatar || generateBanner) && !runtime.hasJudge()) {
+    throw new Error("channelArt: quality judge is unavailable; refusing paid generation");
+  }
+
+  let imageKey = existing.imageKey;
+  let bannerKey = existing.bannerKey;
+
+  // Sequential by design: if the avatar fails closed, do not spend on a banner.
+  if (generateAvatar) {
+    const version = versionFor("avatar", options, runtime);
+    log("channelArt: generating versioned avatar through Novita Imagecraft", { version });
+    imageKey = (await directArt({
+      ownerId,
+      slug,
+      kind: "avatar",
+      identity,
+      version,
+      maxAttempts,
+      prompt: (issues) => avatarPrompt(identity, issues),
+      runtime,
+      log,
+    })).key;
+  }
+
+  if (generateBanner) {
+    const version = versionFor("banner", options, runtime);
+    log("channelArt: generating versioned banner through Novita Imagecraft", { version });
+    bannerKey = (await directArt({
+      ownerId,
+      slug,
+      kind: "banner",
+      identity,
+      version,
+      maxAttempts,
+      prompt: (issues) => bannerPrompt(identity, issues),
+      runtime,
+      log,
+    })).key;
+  }
+
+  if (!imageKey || !bannerKey) {
+    throw new Error("channelArt: generation completed without both avatar and banner keys");
+  }
   return { imageKey, bannerKey };
 }
 
-/**
- * Banner for a language sibling: the channel's look with the country's flag softly
- * filling the background, so the group reads as "the German / Spanish edition" while
- * sharing the base avatar. Returns the R2 banner key. (Avatar isn't API-settable,
- * so siblings reuse the base avatar; the flag lives on the banner.)
- */
+/** Generate a localized banner without touching the channel avatar. */
 export async function generateFlagBanner(
   ownerId: string,
   slug: string,
   identity: ArtIdentity,
   country: string,
   log: Logger = () => {},
+  options: Pick<ChannelArtOptions, "version" | "maxAttempts" | "runtime"> = {},
 ): Promise<string> {
-  const prompt = [
-    `Wide cinematic YouTube channel banner for "${identity.name}"`,
-    identity.niche ? `a ${identity.niche} channel` : "",
-    identity.iconicMotif ? `motif: ${identity.iconicMotif}` : (identity.styleGrammar ?? ""),
-    paletteClause(identity.palette),
-    `a large, softly out-of-focus waving flag of ${country} filling the background — ` +
-      `subtle and atmospheric (not garish), low contrast so foreground stays readable`,
-    "epic atmospheric composition, luminous cinematic lighting, depth and soft bokeh, " +
-      "high production value, ultra-detailed, no text, no letters, no words",
-  ].filter(Boolean).join(", ");
-  log(`channelArt: generating ${country} flag banner…`);
-  const url = await generateStill(prompt, false);
-  const bannerKey = await pipeToR2(url, channelKey(ownerId, slug, "art/banner.png"));
-  log("channelArt: flag banner uploaded", { bannerKey, country });
-  return bannerKey;
+  const runtime = options.runtime ?? DEFAULT_RUNTIME;
+  if (!runtime.hasJudge()) {
+    throw new Error("channelArt: banner quality judge is unavailable; refusing paid generation");
+  }
+  const version = versionFor("banner", options, runtime);
+  const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
+  const result = await directArt({
+    ownerId,
+    slug,
+    kind: "banner",
+    identity,
+    version,
+    maxAttempts,
+    prompt: (issues) => bannerPrompt(identity, issues, [
+      `a softly defocused waving flag of ${country} extending through the atmospheric background`,
+      "keep flag detail subtle so the centered channel motif remains dominant and safe-area legible",
+    ]),
+    runtime,
+    log,
+  });
+  return result.key;
 }

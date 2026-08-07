@@ -129,7 +129,8 @@ function requestBounds(): void {
   assert.equal(whiteboardTtsProviderCallCeiling(), 3);
 
   assert.equal(motionComicPanelCount(999), 12);
-  assert.equal(motionComicImageCallCeiling(999, 999), 32);
+  // Text-native identity removes four character sheets + their recoveries.
+  assert.equal(motionComicImageCallCeiling(999, 999), 24);
   assert.equal(motionComicDialogueCharacterCeiling(999), 4_224);
   assert.equal(motionComicTtsBillableCharacterCeiling(999), 4_224);
   assert.equal(

@@ -1,8 +1,16 @@
 "use client";
 
-import { useState, type CSSProperties } from "react";
+import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { GENERATION_PROFILES, type GenerationProfile } from "@/engine/generationProfiles";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
+import {
+  NOVITA_RENDER_STATUS_TIMEOUT_MS,
+  clearPersistedNovitaRenderJob,
+  loadPersistedNovitaRenderJob,
+  novitaRenderPollDelayMs,
+  persistNovitaRenderJob,
+  type PersistedNovitaRenderJob,
+} from "@/lib/novitaRenderPolling";
 
 const CAMERA_MOVES = [
   "static", "dolly_push", "dolly_pull", "crane_up", "crane_down",
@@ -47,6 +55,53 @@ interface RenderStatus {
   error?: string | null;
 }
 
+interface NovitaFleetHealth {
+  ok: boolean;
+  ready: boolean;
+  checkedAt: string | null;
+  architecturalGpuCeiling: number;
+  verifiedGpuQuota: number | null;
+  effectiveGpuLimit: number | null;
+  activeGpuCount: number | null;
+  blockers: string[];
+  contract: {
+    version: string;
+    dispatchReady: boolean;
+    workerImageReady: boolean;
+  } | null;
+  models: {
+    gemma: { name: string; localCacheVerified: boolean };
+    zImage: { name: string; localCacheVerified: boolean };
+    ltx: { name: string; localCacheVerified: boolean; twoStageHqVerified: boolean };
+  } | null;
+  storage: {
+    persistentModelVolumeVerified: boolean;
+    volumeSizeGb: number;
+  } | null;
+  controls: {
+    capacityAwareWaves: boolean;
+    r2CheckpointRecovery: boolean;
+    idleShutdownSeconds: number;
+    verifiedReaper: boolean;
+    statusBatchSeconds: number;
+  } | null;
+}
+
+const UNAVAILABLE_FLEET_HEALTH: NovitaFleetHealth = {
+  ok: false,
+  ready: false,
+  checkedAt: null,
+  architecturalGpuCeiling: 8,
+  verifiedGpuQuota: null,
+  effectiveGpuLimit: null,
+  activeGpuCount: null,
+  blockers: ["fleet_readiness_unavailable"],
+  contract: null,
+  models: null,
+  storage: null,
+  controls: null,
+};
+
 type Phase = "idle" | "rendering-images" | "rendering-video" | "done" | "error";
 
 function newShot(i: number): ShotRow {
@@ -61,8 +116,62 @@ function newShot(i: number): ShotRow {
   };
 }
 
-function sleep(ms: number): Promise<void> {
-  return new Promise((resolve) => setTimeout(resolve, ms));
+function abortableSleep(ms: number, signal: AbortSignal): Promise<void> {
+  return new Promise((resolve, reject) => {
+    if (signal.aborted) {
+      reject(new DOMException("Aborted", "AbortError"));
+      return;
+    }
+    const timeout = window.setTimeout(done, ms);
+    function done() {
+      signal.removeEventListener("abort", abort);
+      resolve();
+    }
+    function abort() {
+      window.clearTimeout(timeout);
+      reject(new DOMException("Aborted", "AbortError"));
+    }
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function waitUntilVisible(signal: AbortSignal): Promise<void> {
+  if (signal.aborted) {
+    return Promise.reject(new DOMException("Aborted", "AbortError"));
+  }
+  if (document.visibilityState !== "hidden") return Promise.resolve();
+  return new Promise((resolve, reject) => {
+    function cleanup() {
+      document.removeEventListener("visibilitychange", visible);
+      signal.removeEventListener("abort", abort);
+    }
+    function visible() {
+      if (document.visibilityState === "hidden") return;
+      cleanup();
+      resolve();
+    }
+    function abort() {
+      cleanup();
+      reject(new DOMException("Aborted", "AbortError"));
+    }
+    document.addEventListener("visibilitychange", visible);
+    signal.addEventListener("abort", abort, { once: true });
+  });
+}
+
+function isFleetHealth(value: unknown): value is NovitaFleetHealth {
+  if (!value || typeof value !== "object") return false;
+  const health = value as Partial<NovitaFleetHealth>;
+  return (
+    typeof health.ok === "boolean" &&
+    typeof health.ready === "boolean" &&
+    Number.isInteger(health.architecturalGpuCeiling) &&
+    (health.verifiedGpuQuota === null || Number.isInteger(health.verifiedGpuQuota)) &&
+    (health.effectiveGpuLimit === null || Number.isInteger(health.effectiveGpuLimit)) &&
+    (health.activeGpuCount === null || Number.isInteger(health.activeGpuCount)) &&
+    Array.isArray(health.blockers) &&
+    health.blockers.every((blocker) => typeof blocker === "string")
+  );
 }
 
 export default function NovitaRenderPage() {
@@ -74,7 +183,45 @@ export default function NovitaRenderPage() {
   const [nshard, setNshard] = useState(1);
   const [phase, setPhase] = useState<Phase>("idle");
   const [message, setMessage] = useState("");
+  const [fleetHealth, setFleetHealth] = useState<NovitaFleetHealth | null>(null);
+  const [recoverableJob, setRecoverableJob] = useState<PersistedNovitaRenderJob | null>(null);
+  const activePoll = useRef<AbortController | null>(null);
   const profile = GENERATION_PROFILES[profileId];
+
+  useEffect(() => {
+    const restoreTimer = window.setTimeout(() => {
+      try {
+        setRecoverableJob(loadPersistedNovitaRenderJob(window.localStorage));
+      } catch {
+        setRecoverableJob(null);
+      }
+    }, 0);
+    return () => {
+      window.clearTimeout(restoreTimer);
+      activePoll.current?.abort();
+    };
+  }, []);
+
+  useEffect(() => {
+    const controller = new AbortController();
+    void (async () => {
+      try {
+        const response = await fetch("/api/novita-render?health=1", {
+          cache: "no-store",
+          signal: controller.signal,
+        });
+        const payload = await response.json().catch(() => null);
+        if (!controller.signal.aborted) {
+          setFleetHealth(isFleetHealth(payload) ? payload : UNAVAILABLE_FLEET_HEALTH);
+        }
+      } catch (error) {
+        if (!controller.signal.aborted && !(error instanceof DOMException && error.name === "AbortError")) {
+          setFleetHealth(UNAVAILABLE_FLEET_HEALTH);
+        }
+      }
+    })();
+    return () => controller.abort();
+  }, []);
 
   function clearAllStills() {
     setShots((rows) => rows.map((row) => ({ ...row, stillKey: undefined })));
@@ -137,29 +284,119 @@ export default function NovitaRenderPage() {
     return payload;
   }
 
-  async function pollRender(launch: RenderLaunch): Promise<RenderStatus> {
-    const startedAt = Date.now();
-    for (;;) {
-      const response = await fetch(
-        `/api/novita-render?jobId=${encodeURIComponent(launch.jobId)}&profileId=${encodeURIComponent(launch.profileId)}`,
-        { cache: "no-store" },
+  async function pollRender(
+    launch: RenderLaunch,
+    startedAt: number,
+  ): Promise<RenderStatus> {
+    activePoll.current?.abort();
+    const controller = new AbortController();
+    activePoll.current = controller;
+    let priorProgress = "";
+    let unchangedPolls = 0;
+    try {
+      for (;;) {
+        if (document.visibilityState === "hidden") {
+          setMessage(`Tracking ${launch.phase} job ${launch.jobId} is paused while this tab is hidden…`);
+          await waitUntilVisible(controller.signal);
+        }
+        const response = await fetch(
+          `/api/novita-render?jobId=${encodeURIComponent(launch.jobId)}&profileId=${encodeURIComponent(launch.profileId)}`,
+          { cache: "no-store", signal: controller.signal },
+        );
+        const status = await response.json().catch(() => null) as (RenderStatus & { error?: string }) | null;
+        if (response.status === 401 || response.status === 403) {
+          throw new Error("Operator access expired. Unlock Ops, then resume this saved render status check.");
+        }
+        if (!response.ok || !status) {
+          throw new Error(status?.error ?? `render status failed with HTTP ${response.status}`);
+        }
+        if (status.jobId !== launch.jobId || status.phase !== launch.phase) {
+          throw new Error("render bridge returned a mismatched job identity");
+        }
+        if (status.status === "failed") {
+          finishTracking();
+          throw new Error(status.error ?? `${status.phase} render failed`);
+        }
+        if (status.status === "done") return status;
+        const elapsedMs = Date.now() - startedAt;
+        if (elapsedMs > NOVITA_RENDER_STATUS_TIMEOUT_MS) {
+          throw new Error(`${status.phase} render is still active after 24 hours; status tracking remains saved for a later retry`);
+        }
+        const progress = `${status.status}:${status.n_outputs}:${status.n_jobs}`;
+        unchangedPolls = progress === priorProgress ? unchangedPolls + 1 : 0;
+        priorProgress = progress;
+        const delayMs = novitaRenderPollDelayMs({
+          statusBatchSeconds: fleetHealth?.controls?.statusBatchSeconds,
+          elapsedMs,
+          unchangedPolls,
+        });
+        setMessage(
+          `${status.phase} job ${status.jobId} is ${status.status} (${status.n_outputs}/${status.n_jobs}); checking again in ${Math.round(delayMs / 1_000)}s…`,
+        );
+        await abortableSleep(delayMs, controller.signal);
+      }
+    } finally {
+      if (activePoll.current === controller) activePoll.current = null;
+    }
+  }
+
+  function rememberLaunch(launch: RenderLaunch, startedAt: number): boolean {
+    const handle: PersistedNovitaRenderJob = {
+      version: 1,
+      jobId: launch.jobId,
+      phase: launch.phase,
+      profileId: launch.profileId,
+      startedAt,
+    };
+    setRecoverableJob(handle);
+    try {
+      persistNovitaRenderJob(window.localStorage, handle);
+      return true;
+    } catch {
+      return false;
+    }
+  }
+
+  function finishTracking() {
+    try {
+      clearPersistedNovitaRenderJob(window.localStorage);
+    } catch {
+      // The remote job is already terminal; storage denial must not trap UI.
+    }
+    setRecoverableJob(null);
+  }
+
+  function applyCompletedStatus(status: RenderStatus) {
+    if (status.phase === "image") {
+      const stillKeys = status.stillKeys ?? [];
+      setShots((rows) => rows.map((shot) => {
+        const stillKey = stillKeys.find((key) => key.endsWith(`/${shot.id}-c01.png`));
+        return stillKey ? { ...shot, stillKey } : shot;
+      }));
+      setMessage(`${status.n_outputs} verified still(s) rendered and stored. Matching visible shots are ready for video.`);
+    } else {
+      const footageKeys = status.footageKeys ?? [];
+      setMessage(`${footageKeys.length} verified clip(s) rendered and stored.`);
+    }
+    finishTracking();
+    setPhase("done");
+  }
+
+  async function onResumeTracking() {
+    if (!recoverableJob) return;
+    setProfileId(recoverableJob.profileId);
+    setPhase(recoverableJob.phase === "image" ? "rendering-images" : "rendering-video");
+    setMessage(`Resuming authenticated status tracking for ${recoverableJob.jobId}…`);
+    try {
+      const status = await pollRender(
+        { ok: true, status: "queued", ...recoverableJob },
+        recoverableJob.startedAt,
       );
-      const status = await response.json().catch(() => null) as (RenderStatus & { error?: string }) | null;
-      if (!response.ok || !status) {
-        throw new Error(status?.error ?? `render status failed with HTTP ${response.status}`);
-      }
-      if (status.jobId !== launch.jobId || status.phase !== launch.phase) {
-        throw new Error("render bridge returned a mismatched job identity");
-      }
-      if (status.status === "failed") {
-        throw new Error(status.error ?? `${status.phase} render failed`);
-      }
-      if (status.status === "done") return status;
-      if (Date.now() - startedAt > 24 * 60 * 60 * 1_000) {
-        throw new Error(`${status.phase} render timed out after 24 hours`);
-      }
-      setMessage(`${status.phase} job ${status.jobId} is ${status.status} (${status.n_outputs}/${status.n_jobs})…`);
-      await sleep(10_000);
+      applyCompletedStatus(status);
+    } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
+      setMessage(error instanceof Error ? error.message : String(error));
+      setPhase("error");
     }
   }
 
@@ -175,8 +412,14 @@ export default function NovitaRenderPage() {
     setMessage("Signing and submitting the immutable image contract…");
     try {
       const launch = await callRenderApi("image");
-      setMessage(`Image job ${launch.jobId} accepted; waiting for verified outputs…`);
-      const status = await pollRender(launch);
+      const startedAt = Date.now();
+      const recoverySaved = rememberLaunch(launch, startedAt);
+      setMessage(
+        recoverySaved
+          ? `Image job ${launch.jobId} accepted; waiting for verified outputs…`
+          : `Image job ${launch.jobId} accepted, but browser recovery storage is unavailable; keep this tab open…`,
+      );
+      const status = await pollRender(launch, startedAt);
       const stillKeys = status.stillKeys ?? [];
       const withStills = shots.map((shot) => {
         const stillKey = stillKeys.find((key) => key.endsWith(`/${shot.id}-c01.png`));
@@ -185,8 +428,10 @@ export default function NovitaRenderPage() {
       });
       setShots(withStills);
       setMessage(`${status.n_outputs} verified still(s) rendered. Primary stills are ready for video.`);
+      finishTracking();
       setPhase("done");
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
       setMessage(error instanceof Error ? error.message : String(error));
       setPhase("error");
     }
@@ -198,28 +443,125 @@ export default function NovitaRenderPage() {
     setMessage("Signing and submitting the immutable image-to-video contract…");
     try {
       const launch = await callRenderApi("video");
-      setMessage(`Video job ${launch.jobId} accepted; waiting for verified outputs…`);
-      const status = await pollRender(launch);
+      const startedAt = Date.now();
+      const recoverySaved = rememberLaunch(launch, startedAt);
+      setMessage(
+        recoverySaved
+          ? `Video job ${launch.jobId} accepted; waiting for verified outputs…`
+          : `Video job ${launch.jobId} accepted, but browser recovery storage is unavailable; keep this tab open…`,
+      );
+      const status = await pollRender(launch, startedAt);
       const footageKeys = status.footageKeys ?? [];
       if (footageKeys.length !== shots.length) {
         throw new Error(`video render returned ${footageKeys.length}/${shots.length} clips`);
       }
       setMessage(`${footageKeys.length} verified clip(s) rendered and stored.`);
+      finishTracking();
       setPhase("done");
     } catch (error) {
+      if (error instanceof DOMException && error.name === "AbortError") return;
       setMessage(error instanceof Error ? error.message : String(error));
       setPhase("error");
     }
   }
 
   const busy = phase === "rendering-images" || phase === "rendering-video";
+  const launchBlocked = busy || recoverableJob !== null;
 
   return (
     <>
       <PageHeader
         title="Novita Render Farm"
-        subtitle="Operator console for signed, pinned-profile image and image-to-video jobs on the three-slot Novita spot fleet."
+        subtitle="Operator console for signed, pinned-profile image and image-to-video jobs on the capacity-aware Novita spot fleet."
       />
+
+      <section aria-label="Live Novita fleet readiness" style={{ ...CARD, marginBottom: "1rem" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
+          <span style={LABEL}>Live fleet readiness</span>
+          <span
+            aria-live="polite"
+            style={{
+              fontSize: "0.74rem",
+              fontWeight: 700,
+              color: fleetHealth === null ? "var(--color-muted)" : fleetHealth.ready ? "#30a46c" : "#e5484d",
+            }}
+          >
+            {fleetHealth === null ? "Checking live fleet…" : fleetHealth.ready ? "Ready" : "Unavailable"}
+          </span>
+        </div>
+        <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: "0.5rem" }}>
+          <div style={FLEET_STAT}>
+            <span style={FIELD_LABEL}>Architecture ceiling</span>
+            <strong>{fleetHealth?.architecturalGpuCeiling ?? 8} GPUs</strong>
+            <span style={FAINT}>Orchestration design limit</span>
+          </div>
+          <div style={FLEET_STAT}>
+            <span style={FIELD_LABEL}>Verified provider quota</span>
+            <strong>{fleetHealth?.verifiedGpuQuota == null ? "—" : `${fleetHealth.verifiedGpuQuota} GPUs`}</strong>
+            <span style={FAINT}>Live bridge attestation</span>
+          </div>
+          <div style={FLEET_STAT}>
+            <span style={FIELD_LABEL}>Available now</span>
+            <strong>{fleetHealth?.effectiveGpuLimit == null ? "—" : `${fleetHealth.effectiveGpuLimit} GPUs`}</strong>
+            <span style={FAINT}>
+              {fleetHealth?.activeGpuCount == null ? "Current quota unavailable" : `${fleetHealth.activeGpuCount} active`}
+            </span>
+          </div>
+        </div>
+        {fleetHealth?.ready ? (
+          <div style={{ display: "grid", gap: "0.25rem", fontSize: "0.72rem", color: "var(--color-muted)" }}>
+            <span>
+              Contract {fleetHealth.contract?.version ?? "unverified"} · dispatch {fleetHealth.contract?.dispatchReady ? "ready" : "blocked"} · worker image {fleetHealth.contract?.workerImageReady ? "prewarmed" : "unverified"}
+            </span>
+            <span>
+              Models · Gemma {fleetHealth.models?.gemma.localCacheVerified ? "cached" : "unverified"} · Z-Image {fleetHealth.models?.zImage.localCacheVerified ? "cached" : "unverified"} · LTX {fleetHealth.models?.ltx.twoStageHqVerified ? "HQ verified" : "unverified"}
+            </span>
+            <span>
+              Storage · {fleetHealth.storage?.persistentModelVolumeVerified ? `${fleetHealth.storage.volumeSizeGb} GB persistent model disk verified` : "unverified"}
+            </span>
+            <span>
+              Controls · {fleetHealth.controls?.capacityAwareWaves ? "capacity-aware waves" : "waves unverified"} · {fleetHealth.controls?.r2CheckpointRecovery ? "R2 recovery" : "recovery unverified"} · {fleetHealth.controls?.verifiedReaper ? "verified reaper" : "reaper unverified"} · {fleetHealth.controls?.idleShutdownSeconds ?? "—"}s idle shutdown
+            </span>
+          </div>
+        ) : (
+          <span style={fleetHealth === null ? FAINT : WARN}>
+            {fleetHealth === null
+              ? "Reading the authenticated bridge attestation once…"
+              : "Live capacity could not be verified. Render admission remains server-gated."}
+          </span>
+        )}
+        {fleetHealth && fleetHealth.blockers.length > 0 && (
+          <span style={FAINT}>Blockers · {fleetHealth.blockers.map((blocker) => blocker.replaceAll("_", " ")).join(" · ")}</span>
+        )}
+      </section>
+
+      {recoverableJob && (
+        <section aria-label="Saved Novita render status" style={{ ...CARD, marginBottom: "1rem" }}>
+          <span style={LABEL}>Saved render status</span>
+          <strong style={{ fontSize: "0.84rem" }}>{recoverableJob.jobId}</strong>
+          <span style={FAINT}>
+            {recoverableJob.phase} · {recoverableJob.profileId} · started {new Date(recoverableJob.startedAt).toLocaleString()}
+          </span>
+          <span style={FAINT}>Only the sanitized job identity is stored. Every status request reauthorizes through Ops.</span>
+          <div style={{ display: "flex", gap: "0.5rem", flexWrap: "wrap" }}>
+            <button type="button" style={PRIMARY_BTN} onClick={() => void onResumeTracking()} disabled={busy}>
+              {busy ? "Checking…" : "Resume status"}
+            </button>
+            <button
+              type="button"
+              style={SECONDARY_BTN}
+              disabled={busy}
+              onClick={() => {
+                finishTracking();
+                setPhase("idle");
+                setMessage("Saved status tracking dismissed. This does not cancel the remote job.");
+              }}
+            >
+              Dismiss tracking
+            </button>
+          </div>
+        </section>
+      )}
 
       <SectionTitle>Shot list</SectionTitle>
       <div style={{ display: "grid", gap: "0.6rem" }}>
@@ -300,7 +642,7 @@ export default function NovitaRenderPage() {
           </select>
         </label>
         <label style={FIELD}>
-          <span style={FIELD_LABEL}>Shard count (fleet cap 3)</span>
+          <span style={FIELD_LABEL}>Shard count (manual console cap 3)</span>
           <input type="number" min={1} max={3} value={nshard} onChange={(event) => setNshard(Number(event.target.value))} style={INPUT} disabled={busy} />
         </label>
       </div>
@@ -321,10 +663,10 @@ export default function NovitaRenderPage() {
 
       <div style={{ height: "1.4rem" }} />
       <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
-        <button type="button" onClick={onRenderImages} disabled={busy || !nshardValid || !promptsValid} style={PRIMARY_BTN}>
+        <button type="button" onClick={onRenderImages} disabled={launchBlocked || !nshardValid || !promptsValid} style={PRIMARY_BTN}>
           {phase === "rendering-images" ? "Rendering images…" : "Launch Image Render"}
         </button>
-        <button type="button" onClick={onRenderVideo} disabled={busy || !nshardValid || !promptsValid || !motionValid || !stillsReady} style={PRIMARY_BTN}>
+        <button type="button" onClick={onRenderVideo} disabled={launchBlocked || !nshardValid || !promptsValid || !motionValid || !stillsReady} style={PRIMARY_BTN}>
           {phase === "rendering-video" ? "Rendering video…" : "Launch Video Render"}
         </button>
         {message && <span style={{ fontSize: "0.82rem", color: phase === "error" ? "#e5484d" : "var(--color-muted)" }}>{message}</span>}
@@ -347,6 +689,7 @@ const WARN: CSSProperties = { fontSize: "0.72rem", color: "#e5484d", display: "b
 const READY: CSSProperties = { fontSize: "0.72rem", color: "#30a46c", display: "block", marginTop: "0.2rem" };
 const SPEC: CSSProperties = { fontSize: "0.82rem", color: "var(--color-fg)" };
 const FAINT: CSSProperties = { fontSize: "0.7rem", color: "var(--color-faint)", display: "block", marginTop: "0.2rem" };
+const FLEET_STAT: CSSProperties = { display: "grid", gap: "0.18rem", padding: "0.55rem 0.65rem", borderRadius: 8, border: "1px solid var(--color-border)", background: "var(--color-bg)" };
 const PRIMARY_BTN: CSSProperties = { padding: "0.55rem 1.1rem", borderRadius: 8, border: "1px solid color-mix(in srgb, var(--color-accent) 40%, transparent)", background: "var(--color-accent-soft)", color: "var(--color-fg)", font: "inherit", fontSize: "0.85rem", fontWeight: 600, cursor: "pointer" };
 const SECONDARY_BTN: CSSProperties = { padding: "0.45rem 0.9rem", borderRadius: 8, border: "1px solid var(--color-border)", background: "transparent", color: "var(--color-muted)", font: "inherit", fontSize: "0.8rem", cursor: "pointer", justifySelf: "start" };
 const SMALL_BTN: CSSProperties = { padding: "0.2rem 0.5rem", borderRadius: 6, border: "1px solid var(--color-border)", background: "transparent", color: "var(--color-faint)", font: "inherit", fontSize: "0.7rem", cursor: "pointer" };

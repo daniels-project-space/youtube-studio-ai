@@ -37,8 +37,6 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { renderNovitaI2V, renderNovitaImage } from "@/lib/novitaMedia";
-import { upscaleLoopUnit } from "@/lib/replicate";
-// (Real-ESRGAN image upscaler intentionally not used for video — Topaz only.)
 import {
   generateMureka,
   generateSuno,
@@ -76,6 +74,8 @@ import {
 import { putObject, putObjectFromFile, getObjectBytes, listObjects, deleteObjects, publicUrl } from "@/lib/storage";
 import { join } from "node:path";
 import { access } from "node:fs/promises";
+import { execFile } from "node:child_process";
+import { promisify } from "node:util";
 import {
   composeKlingPrompt,
   composeFluxPrompt,
@@ -686,15 +686,24 @@ export const upscale: Block = {
     "loopUnitUpscaled",
     "loopUnitResolution",
   ],
-  paid: true,
+  paid: false,
   run: async (ctx) => {
-    // THE REAL UPSCALE (legacy topaz.py): run Topaz `topazlabs/video-upscale` on
-    // JUST the short seamless loop UNIT (built by loop_clips). assemble then
-    // stream_loops the 4K unit under audio — so we never upscale the full render.
-    // Bounds cost/time to ~$0.25 / ~1 min. Degrade-safe: a Topaz failure keeps
-    // the native loop (the render still completes).
+    // The generative pixels already came from the attested Novita LTX-2.3
+    // two-stage HQ pipeline and its pinned spatial upscaler. This finishing
+    // stage performs only deterministic local Lanczos scaling on the short loop
+    // unit; no Replicate/Topaz provider or hidden fallback can re-render it.
     const targetResolution = (ctx.params.targetResolution as string) ?? "4k";
     const targetFps = Number(ctx.params.targetFps ?? 30);
+    const dimensions: Record<string, [number, number]> = {
+      "2k": [2560, 1440],
+      "4k": [3840, 2160],
+      "1080p": [1920, 1080],
+    };
+    const target = dimensions[targetResolution];
+    if (!target) throw new Error(`upscale: unsupported target resolution ${targetResolution}`);
+    if (!Number.isFinite(targetFps) || targetFps < 24 || targetFps > 60) {
+      throw new Error(`upscale: target fps ${targetFps} is outside 24..60`);
+    }
 
     const tmp = await makeRunTempDir(ctx.runId);
     // loop_clips stashed the local path in loopRawUrl; re-fetch from R2 on resume.
@@ -708,28 +717,20 @@ export const upscale: Block = {
       loopUnit = await writeBytes(join(tmp, "loopraw.mp4"), await getObjectBytes(key));
     }
 
-    let finalLoopPath = loopUnit;
-    let upscaled = true;
-    let resolution = targetResolution;
-    try {
-      ctx.log(
-        `upscale: Topaz video-upscale on loop unit → ${targetResolution}@${targetFps}fps…`,
-      );
-      const upUrl = await upscaleLoopUnit({
-        inputPath: loopUnit,
-        targetResolution,
-        targetFps,
-      });
-      finalLoopPath = await downloadTo(upUrl, join(tmp, "loopunit_4k.mp4"));
-      ctx.log(`upscale: Topaz complete — ${targetResolution}`);
-    } catch (e) {
-      // HONEST degrade: keep the native loop unit, log LOUDLY (legacy parity).
-      resolution = "native";
-      upscaled = false;
-      ctx.log(
-        `upscale: !!! TOPAZ UPSCALE FAILED (${e instanceof Error ? e.message : e}) — DEGRADING to native loop unit (NOT 4K)`,
-      );
-    }
+    const finalLoopPath = join(tmp, `loopunit_${targetResolution}.mp4`);
+    const [width, height] = target;
+    ctx.log(`upscale: deterministic local Lanczos finish → ${width}x${height}@${targetFps}fps…`);
+    await promisify(execFile)(process.env.FFMPEG_PATH || "ffmpeg", [
+      "-y", "-i", loopUnit,
+      "-vf",
+      `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos,` +
+        `pad=${width}:${height}:(ow-iw)/2:(oh-ih)/2:black,fps=${Math.round(targetFps)}`,
+      "-an", "-c:v", "libx264", "-preset", "veryfast", "-crf", "17",
+      "-pix_fmt", "yuv420p", "-movflags", "+faststart", finalLoopPath,
+    ], { maxBuffer: 4 * 1024 * 1024 });
+    const resolution = targetResolution;
+    const upscaled = true;
+    ctx.log(`upscale: local finish complete — ${resolution}`);
 
     const loopUnitKey = `${ctx.keyPrefix}runs/${ctx.runId}/loopunit_${resolution}.mp4`;
     await putObjectFromFile(loopUnitKey, finalLoopPath, {
@@ -739,6 +740,8 @@ export const upscale: Block = {
       upscaled,
       resolution,
       targetFps,
+      sourceRender: "novita-ltx-2.3-two-stage-hq",
+      finish: "local-lanczos",
     });
 
     // Stash the local path so assemble can stream_loop without re-downloading.
@@ -747,8 +750,7 @@ export const upscale: Block = {
       loopUnitUrl: finalLoopPath, // local path; assemble reads it directly
       loopUnitUpscaled: upscaled,
       loopUnitResolution: resolution,
-      // Topaz only billed when the upscale actually ran (degrade path is free).
-      [COST_PATCH_KEY]: upscaled ? PRICE.topazUpscaleUsd : 0,
+      [COST_PATCH_KEY]: 0,
     };
   },
 };

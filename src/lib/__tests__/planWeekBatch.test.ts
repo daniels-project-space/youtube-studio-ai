@@ -7,14 +7,19 @@ import {
   failPlanItem,
   failPlanTopics,
   finalizePlanBatch,
+  listProvenReadyPlan,
+  listProvenReadyPlanPage,
   markPlanItemProviderStarted,
   markPlanTopicsProviderStarted,
   recordPlanBatchUsage,
   reservePlanBatch,
   savePlanTopics,
-  setGenerated,
 } from "../../../convex/contentPlan";
 import { overview } from "../../../convex/analytics";
+import {
+  finalizeArtifactReceipt,
+  recordProviderReceipt,
+} from "../../../convex/planWeekRenderReceipts";
 import {
   PLAN_WEEK_CONTRACT_VERSION,
   buildPlanWeekTopicCheckpoint,
@@ -26,6 +31,11 @@ import {
 } from "@/lib/planWeekBatch";
 import { createModelUsageScope } from "@/lib/modelUsage";
 import { createImageUsageScope, recordImageUsage } from "@/lib/imageUsage";
+import {
+  finalizedPlanWeekRenderReceiptFixture,
+  planWeekProviderResultFixture,
+} from "@/lib/__tests__/planWeekRenderReceiptFixture";
+import { isFinalizedPlanWeekRenderReceipt } from "@/lib/planWeekRenderReceipt";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 
@@ -60,6 +70,25 @@ class MemoryQuery {
         ? left._creationTime - right._creationTime
         : right._creationTime - left._creationTime,
     );
+  }
+
+  async take(limit: number): Promise<Row[]> {
+    return (await this.collect()).slice(0, limit);
+  }
+
+  async paginate(options: { numItems: number; cursor: string | null }): Promise<{
+    page: Row[];
+    continueCursor: string;
+    isDone: boolean;
+  }> {
+    const rows = await this.collect();
+    const start = options.cursor ? Number.parseInt(options.cursor, 10) : 0;
+    const end = Math.min(rows.length, start + options.numItems);
+    return {
+      page: rows.slice(start, end),
+      continueCursor: String(end),
+      isDone: end >= rows.length,
+    };
   }
 
   async unique(): Promise<Row | null> {
@@ -148,9 +177,9 @@ interface InvokeResult {
   totalCost: number;
 }
 
-async function invoke(definition: unknown, ctx: unknown, args: unknown): Promise<InvokeResult> {
+async function invoke<Result = InvokeResult>(definition: unknown, ctx: unknown, args: unknown): Promise<Result> {
   const runtime = definition as {
-    _handler: (handlerContext: unknown, handlerArgs: unknown) => Promise<InvokeResult>;
+    _handler: (handlerContext: unknown, handlerArgs: unknown) => Promise<Result>;
   };
   return runtime._handler(ctx, args);
 }
@@ -168,26 +197,8 @@ async function main() {
     identity: { niche: "finance" },
   }, channelId);
   const ctx = testContext(db, ownerId);
-  const legacyDb = new MemoryDb();
-  legacyDb.seed("channels", {
-    ownerId, name: "Legacy", slug: "legacy", budget: 2, status: "active",
-  }, channelId);
-  const legacyCtx = testContext(legacyDb, ownerId);
-  const legacyWithoutThumbnail = legacyDb.seed("contentPlan", {
-    ownerId, channelId, order: 0, topic: "Legacy incomplete", status: "generating", createdAt: Date.now(),
-  }, "contentPlan:legacy-incomplete");
-  await assert.rejects(
-    invoke(setGenerated, legacyCtx, { id: legacyWithoutThumbnail, status: "ready" }),
-    /legacy plan item cannot be ready without a thumbnail/,
-  );
-  assert.equal((await legacyDb.get(legacyWithoutThumbnail))?.status, "generating");
-  const legacyWithThumbnail = legacyDb.seed("contentPlan", {
-    ownerId, channelId, order: 1, topic: "Legacy complete", status: "generating",
-    thumbnailKey: "legacy/complete.jpg", createdAt: Date.now(),
-  }, "contentPlan:legacy-complete");
-  await invoke(setGenerated, legacyCtx, { id: legacyWithThumbnail, title: "Preserved legacy output" });
-  assert.equal((await legacyDb.get(legacyWithThumbnail))?.status, "ready");
   const reservation = planWeekReservation(5);
+  assert.equal(reservation.imageUnitUsd, 0.04);
   assert.ok(reservation.totalUsd > 0 && reservation.totalUsd <= 2);
 
   const common = {
@@ -212,7 +223,7 @@ async function main() {
     invoke(reservePlanBatch, testContext(bypassDb, ownerId), {
       ...common, requestKey: "under-reserved", reservedCostUsd: 0.01,
     }),
-    /below plan-week-v2 floor/,
+    /below plan-week-v3-attested-novita floor/,
   );
   await assert.rejects(
     invoke(reservePlanBatch, testContext(bypassDb, ownerId), {
@@ -464,28 +475,58 @@ async function main() {
   });
   assert.equal(retryClaim.state, "claimed");
   assert.equal(retryClaim.attempt, 3);
+  const paidCheckpointKey = `thumbnail:${itemId}:${retryClaim.attempt}`;
   await invoke(markPlanItemProviderStarted, ctx, {
     ownerId, channelId, batchId: admitted.batchId, itemId,
     attempt: retryClaim.attempt, claimant: "run-1:2",
   });
 
+  const nonNovitaImageScope = createImageUsageScope();
+  await nonNovitaImageScope.run(async () => {
+    recordImageUsage({
+      provider: "other", model: "unattested-image-model", route: "generic-image-route",
+      images: 1, width: 1280, height: 720, costUsd: 0,
+    });
+  });
+  const nonNovitaUsage = buildPlanWeekUsageCheckpoint(emptyModel, nonNovitaImageScope.snapshot());
+  await invoke(recordPlanBatchUsage, ctx, {
+    ownerId, channelId, batchId: admitted.batchId, itemId,
+    checkpointKey: "thumbnail:item:unattested", fingerprint: nonNovitaUsage.fingerprint,
+    modelUsage: nonNovitaUsage.modelUsage, imageUsage: nonNovitaUsage.imageUsage,
+    costUsd: nonNovitaUsage.costUsd, accountingComplete: nonNovitaUsage.accountingComplete,
+  });
+  await assert.rejects(
+    invoke(completePlanItem, ctx, {
+      ownerId, channelId, batchId: admitted.batchId, itemId, attempt: retryClaim.attempt,
+      thumbnailKey: `owner/${ownerId}/channel/test-channel/plan/${itemId}.jpg`,
+      usageCheckpointKey: "thumbnail:item:unattested",
+    }),
+    /finalized Novita receipt is missing/,
+  );
+
   const imageScope = createImageUsageScope();
+  const attestedProviderResult = planWeekProviderResultFixture();
   await imageScope.run(async () => {
     recordImageUsage({
-      provider: "gemini", model: "gemini-2.5-flash-image", route: "banana-flash",
-      images: 1, width: 1280, height: 720, costUsd: 0.04,
+      provider: "novita",
+      model: attestedProviderResult.model,
+      route: "local-z-image-turbo",
+      images: 1,
+      width: attestedProviderResult.width,
+      height: attestedProviderResult.height,
+      costUsd: attestedProviderResult.costUsd,
     });
   });
   const paidUsage = buildPlanWeekUsageCheckpoint(emptyModel, imageScope.snapshot());
   const firstLedger = await invoke(recordPlanBatchUsage, ctx, {
     ownerId, channelId, batchId: admitted.batchId, itemId,
-    checkpointKey: "thumbnail:item:2", fingerprint: paidUsage.fingerprint,
+    checkpointKey: paidCheckpointKey, fingerprint: paidUsage.fingerprint,
     modelUsage: paidUsage.modelUsage, imageUsage: paidUsage.imageUsage,
     costUsd: paidUsage.costUsd, accountingComplete: paidUsage.accountingComplete,
   });
   const replayLedger = await invoke(recordPlanBatchUsage, ctx, {
     ownerId, channelId, batchId: admitted.batchId, itemId,
-    checkpointKey: "thumbnail:item:2", fingerprint: paidUsage.fingerprint,
+    checkpointKey: paidCheckpointKey, fingerprint: paidUsage.fingerprint,
     modelUsage: paidUsage.modelUsage, imageUsage: paidUsage.imageUsage,
     costUsd: paidUsage.costUsd, accountingComplete: paidUsage.accountingComplete,
   });
@@ -508,14 +549,14 @@ async function main() {
     "post-start lease expiry must not increment the paid thumbnail attempt");
   const recoveredLedger = await invoke(recordPlanBatchUsage, ctx, {
     ownerId, channelId, batchId: admitted.batchId, itemId,
-    checkpointKey: "thumbnail:item:2", fingerprint: paidUsage.fingerprint,
+    checkpointKey: paidCheckpointKey, fingerprint: paidUsage.fingerprint,
     modelUsage: paidUsage.modelUsage, imageUsage: paidUsage.imageUsage,
     costUsd: paidUsage.costUsd, accountingComplete: paidUsage.accountingComplete,
   });
   assert.equal(recoveredLedger.actualCostUsd, firstLedger.actualCostUsd);
   await invoke(failPlanItem, ctx, {
     ownerId, channelId, batchId: admitted.batchId, itemId,
-    attempt: responseLossClaim.attempt, usageCheckpointKey: "thumbnail:item:2",
+    attempt: responseLossClaim.attempt, usageCheckpointKey: paidCheckpointKey,
     error: "ambiguous R2 upload response", retryable: false,
   });
   const recoveryOnly = await invoke(claimPlanItem, ctx, {
@@ -526,28 +567,151 @@ async function main() {
   await assert.rejects(
     invoke(completePlanItem, ctx, {
       ownerId, channelId, batchId: admitted.batchId, itemId, attempt: recoveryOnly.attempt,
-      thumbnailKey: "", usageCheckpointKey: "thumbnail:item:2",
+      thumbnailKey: "", usageCheckpointKey: paidCheckpointKey,
     }),
     /cannot be ready without a thumbnail/,
   );
   await assert.rejects(
     invoke(completePlanItem, ctx, {
       ownerId, channelId, batchId: admitted.batchId, itemId, attempt: recoveryOnly.attempt,
-      thumbnailKey: "owner/wrong/channel/wrong/plan/item.jpg", usageCheckpointKey: "thumbnail:item:2",
+      thumbnailKey: "owner/wrong/channel/wrong/plan/item.jpg", usageCheckpointKey: paidCheckpointKey,
     }),
-    /does not match its admitted artifact path/,
+    /does not match its admitted artifact path|no matching finalized Novita provider and artifact receipt/,
   );
+  const thumbnailKey = `owner/${ownerId}/channel/test-channel/plan/${itemId}.jpg`;
+  const receiptCreatedAt = Date.now();
+  const finalizedRender = finalizedPlanWeekRenderReceiptFixture({
+    ownerId,
+    channelId,
+    batchId: admitted.batchId,
+    itemId,
+    attempt: recoveryOnly.attempt,
+    requestKey: common.requestKey,
+    checkpointKey: paidCheckpointKey,
+    destinationKey: thumbnailKey,
+  }, receiptCreatedAt);
+  const wrongDestinationRender = finalizedPlanWeekRenderReceiptFixture({
+    ownerId,
+    channelId,
+    batchId: admitted.batchId,
+    itemId,
+    attempt: recoveryOnly.attempt,
+    requestKey: common.requestKey,
+    checkpointKey: paidCheckpointKey,
+    destinationKey: `owner/${ownerId}/channel/wrong/plan/${itemId}.jpg`,
+  }, receiptCreatedAt);
+  await assert.rejects(invoke(recordProviderReceipt, ctx, {
+    ownerId,
+    channelId,
+    batchId: admitted.batchId,
+    itemId,
+    requestKey: common.requestKey,
+    checkpointKey: paidCheckpointKey,
+    providerReceipt: wrongDestinationRender.providerReceipt,
+  }), /invalid or unbound plan-week provider receipt/);
+  assert.equal(db.rows("planWeekRenderReceipts").length, 0,
+    "a wrong destination must not permanently poison the immutable checkpoint");
+  const recordedRender = await invoke<{ receiptId: string; reused: boolean }>(
+    recordProviderReceipt,
+    ctx,
+    {
+      ownerId,
+      channelId,
+      batchId: admitted.batchId,
+      itemId,
+      requestKey: common.requestKey,
+      checkpointKey: paidCheckpointKey,
+      providerReceipt: finalizedRender.providerReceipt,
+    },
+  );
+  await invoke(finalizeArtifactReceipt, ctx, {
+    ownerId,
+    channelId,
+    batchId: admitted.batchId,
+    itemId,
+    requestKey: common.requestKey,
+    checkpointKey: paidCheckpointKey,
+    artifactReceipt: finalizedRender.artifactReceipt,
+  });
+  const storedRender = await db.get(recordedRender.receiptId);
+  assert.equal(isFinalizedPlanWeekRenderReceipt(storedRender), true);
+  assert.equal(finalizedRender.providerReceipt.model, attestedProviderResult.runtimeAttestation.model);
+  assert.equal(
+    `${finalizedRender.providerReceipt.model}@${finalizedRender.providerReceipt.modelRevision}`,
+    attestedProviderResult.model,
+  );
+  assert.deepEqual(paidUsage.imageUsage.records, [{
+    provider: "novita",
+    model: `${finalizedRender.providerReceipt.model}@${finalizedRender.providerReceipt.modelRevision}`.toLowerCase(),
+    route: "local-z-image-turbo",
+    images: 1,
+    width: finalizedRender.providerReceipt.width,
+    height: finalizedRender.providerReceipt.height,
+    costUsd: finalizedRender.providerReceipt.costUsd,
+  }]);
   await invoke(completePlanItem, ctx, {
     ownerId, channelId, batchId: admitted.batchId, itemId, attempt: recoveryOnly.attempt,
-    thumbnailKey: `owner/${ownerId}/channel/test-channel/plan/${itemId}.jpg`,
-    usageCheckpointKey: "thumbnail:item:2",
+    thumbnailKey,
+    usageCheckpointKey: paidCheckpointKey,
   });
   const final = await invoke(finalizePlanBatch, ctx, { ownerId, channelId, batchId: admitted.batchId });
   assert.equal(final.status, "ready");
   assert.equal(final.actualCostUsd, 0.04);
+  for (let index = 0; index < 30; index++) {
+    db.seed("contentPlan", {
+      ownerId,
+      channelId,
+      order: 99 + index,
+      topic: `Legacy row ${index} without an admitted batch`,
+      status: "ready",
+      thumbnailKey: `legacy/forged-${index}.jpg`,
+      createdAt: Date.now(),
+    }, `contentPlan:legacy-forged-${index}`);
+  }
+  for (let index = 0; index < 30; index++) {
+    db.seed("planBatches", {
+      ownerId,
+      channelId,
+      channelSlug: "test-channel",
+      requestKey: `invalid-ready-${index}`,
+      contractVersion: "legacy-unattested-contract",
+      status: "ready",
+      topicState: "complete",
+      itemIds: [`contentPlan:legacy-forged-${index}`],
+      accountingComplete: true,
+      budgetExceeded: false,
+      actualCostUsd: 0,
+      reservedCostUsd: 0,
+      createdAt: Date.now() + index,
+    }, `planBatches:invalid-ready-${index}`);
+  }
+  const proven = await invoke<Row[]>(listProvenReadyPlan, ctx, { ownerId, channelId });
+  assert.deepEqual(proven.map((row) => row._id), [itemId],
+    "more than 24 newer invalid batches cannot crowd out an older proven row");
+  let provenCursor: string | null = null;
+  let provenDone = false;
+  let provenPages = 0;
+  const pagedProven: Row[] = [];
+  while (!provenDone) {
+    const pageResult: {
+      page: Row[];
+      continueCursor: string;
+      isDone: boolean;
+    } = await invoke(listProvenReadyPlanPage, ctx, {
+      ownerId,
+      channelId,
+      paginationOpts: { numItems: 8, cursor: provenCursor },
+    });
+    pagedProven.push(...pageResult.page);
+    provenCursor = pageResult.continueCursor;
+    provenDone = pageResult.isDone;
+    provenPages += 1;
+  }
+  assert.ok(provenPages > 3, "the readiness projection must advance beyond the old 24-row window");
+  assert.deepEqual(pagedProven.map((row) => row._id), [itemId]);
   await assert.rejects(
-    invoke(setGenerated, ctx, { id: itemId, status: "ready", thumbnailKey: "forged.jpg" }),
-    /batch-managed plan items require the fenced completion flow/,
+    invoke<Row[]>(listProvenReadyPlan, testContext(db, ownerId, "owner"), { ownerId, channelId }),
+    /requires a studio service identity/,
   );
 
   await assert.rejects(
@@ -567,6 +731,15 @@ async function main() {
       costUsd: 0, accountingComplete: true,
     }),
     /accountingComplete does not match/,
+  );
+  await assert.rejects(
+    invoke(recordPlanBatchUsage, ctx, {
+      ownerId, channelId, batchId: admitted.batchId,
+      checkpointKey: "forged-canonical-fingerprint", fingerprint: "0".repeat(64),
+      modelUsage: emptyModel, imageUsage: emptyImage,
+      costUsd: 0, accountingComplete: true,
+    }),
+    /fingerprint does not match its canonical evidence/,
   );
 
   db.seed("runs", { ownerId, channelId, status: "ok", costTotal: 0.5 }, "runs:test");

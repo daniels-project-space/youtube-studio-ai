@@ -8,6 +8,117 @@ import {
   isAcceptedChannelArtworkRun,
   summarizeChannelCardRuns,
 } from "@/lib/channelCardProjection";
+import {
+  beginChannelInceptionLedger,
+  checkpointChannelInceptionLedgerStage,
+  claimChannelInceptionLedgerStage,
+  completeChannelInceptionLedgerStage,
+  failChannelInceptionLedgerStage,
+  heartbeatChannelInceptionLedgerStage,
+  invalidateChannelInceptionStageAndDescendants,
+  type ChannelInceptionLedgerState,
+  type ChannelInceptionStageDescriptor,
+} from "@/engine/channelInceptionLedger";
+import {
+  CHANNEL_INCEPTION_MODULE_KEYS,
+  CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD,
+} from "@/engine/channelInceptionContracts";
+import { comparablePipeline } from "@/engine/channelPipelineComparable";
+import { channelInceptionInvalidationRoots } from "@/engine/channelInceptionInvalidation";
+
+const MAX_INCEPTION_OUTPUT_CHARS = 16_000;
+const MAX_INCEPTION_STAGES = 10;
+const INCEPTION_MODULE_KEYS = new Set<string>(CHANNEL_INCEPTION_MODULE_KEYS);
+
+function invalidatePersistedInceptionProofs(
+  inception: unknown,
+  roots: readonly (typeof CHANNEL_INCEPTION_MODULE_KEYS)[number][],
+  callerRole: unknown,
+): ChannelInceptionLedgerState | undefined {
+  if (!inception || typeof inception !== "object" || roots.length === 0) return undefined;
+  const ledger = structuredClone(inception) as ChannelInceptionLedgerState;
+  const running = roots.filter((root) => ledger.stages?.[root]?.status === "running");
+  if (running.length > 0 && callerRole !== "service") {
+    throw new Error(
+      `channel fields are locked while inception stage is running: ${running.join(", ")}`,
+    );
+  }
+  let invalidated = false;
+  for (const root of roots) {
+    const stage = ledger.stages?.[root];
+    // The service orchestrator persists a stage's own output before committing
+    // its receipt. Human edits are rejected above during that short lease.
+    if (!stage || stage.status === "pending" || stage.status === "running") continue;
+    invalidateChannelInceptionStageAndDescendants(ledger, root);
+    invalidated = true;
+  }
+  if (!invalidated) return undefined;
+  ledger.updatedAt = Date.now();
+  return ledger;
+}
+
+async function channelMutationRole(ctx: {
+  auth: { getUserIdentity: () => Promise<unknown> };
+}): Promise<unknown> {
+  return (await ctx.auth.getUserIdentity() as { role?: unknown } | null)?.role;
+}
+
+async function requireInceptionService(ctx: {
+  auth: { getUserIdentity: () => Promise<unknown> };
+}): Promise<void> {
+  const identity = await ctx.auth.getUserIdentity() as { role?: unknown } | null;
+  if (identity?.role !== "service") {
+    throw new Error("channel inception ledger writes require a studio service identity");
+  }
+}
+
+function assertInceptionOutputSize(value: unknown): void {
+  if (value === undefined) return;
+  const encoded = JSON.stringify(value);
+  if (encoded === undefined || encoded.length > MAX_INCEPTION_OUTPUT_CHARS) {
+    throw new Error(`channel inception output exceeds ${MAX_INCEPTION_OUTPUT_CHARS} characters`);
+  }
+}
+
+function assertInceptionStageDescriptor(stage: ChannelInceptionStageDescriptor): void {
+  if (!INCEPTION_MODULE_KEYS.has(stage.moduleKey)) {
+    throw new Error("invalid channel inception module key");
+  }
+  if (
+    stage.dependsOn.length > MAX_INCEPTION_STAGES - 1 ||
+    new Set(stage.dependsOn).size !== stage.dependsOn.length ||
+    stage.dependsOn.some(
+      (dependency) => !INCEPTION_MODULE_KEYS.has(dependency) || dependency === stage.moduleKey,
+    )
+  ) {
+    throw new Error("invalid channel inception dependencies");
+  }
+  if (!/^[a-f0-9]{64}$/.test(stage.inputFingerprint)) {
+    throw new Error("invalid channel inception input fingerprint");
+  }
+  if (!stage.contractVersion.trim() || stage.contractVersion.length > 64) {
+    throw new Error("invalid channel inception contract version");
+  }
+  if (stage.maximumCostUsd !== CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD[stage.moduleKey]) {
+    throw new Error("invalid channel inception stage cost ceiling");
+  }
+  if (stage.stageKey !== `channel-inception/stages/${stage.moduleKey}/${stage.inputFingerprint}`) {
+    throw new Error("invalid channel inception stage key");
+  }
+  if (
+    stage.idempotencyKey !==
+    `channel-inception:${stage.moduleKey}@${stage.contractVersion}:${stage.inputFingerprint}`
+  ) {
+    throw new Error("invalid channel inception idempotency key");
+  }
+}
+
+export const channelInceptionLedgerGuardsForTests = {
+  requireInceptionService,
+  assertInceptionOutputSize,
+  assertInceptionStageDescriptor,
+  invalidatePersistedInceptionProofs,
+};
 
 async function projectChannelCard(ctx: QueryCtx, channel: Doc<"channels">) {
   const recentRuns = await ctx.db
@@ -15,19 +126,19 @@ async function projectChannelCard(ctx: QueryCtx, channel: Doc<"channels">) {
     .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
     .order("desc")
     .take(20);
-  let latestThumbnailKey: string | null = null;
-  for (const run of recentRuns.filter(isAcceptedChannelArtworkRun).slice(0, 5)) {
-    const runAssets = await ctx.db
+  const acceptedRunIds = new Set(
+    recentRuns.filter(isAcceptedChannelArtworkRun).map((run) => String(run._id)),
+  );
+  const recentThumbnails = acceptedRunIds.size > 0
+    ? await ctx.db
       .query("assets")
-      .withIndex("by_run", (q) => q.eq("runId", run._id))
+      .withIndex("by_channel_kind", (q) => q.eq("channelId", channel._id).eq("kind", "thumbnail"))
       .order("desc")
-      .collect();
-    const thumbnail = runAssets.find((asset) => asset.kind === "thumbnail");
-    if (thumbnail) {
-      latestThumbnailKey = thumbnail.r2Key;
-      break;
-    }
-  }
+      .take(60)
+    : [];
+  const latestThumbnailKey = recentThumbnails.find(
+    (asset) => asset.runId && acceptedRunIds.has(String(asset.runId)),
+  )?.r2Key ?? null;
   return {
     channelId: channel._id,
     channelSlug: channel.slug,
@@ -48,6 +159,34 @@ const identityValidator = v.object({
       score: v.optional(v.number()),
       why: v.optional(v.string()),
       at: v.optional(v.number()),
+      auditionReceipt: v.optional(v.object({
+        version: v.literal("voice-casting-audition/v1"),
+        ownerId: v.string(),
+        channelId: v.string(),
+        voiceId: v.string(),
+        score: v.number(),
+        judgedAt: v.number(),
+        auditionedCount: v.number(),
+        shortlistFingerprint: v.string(),
+        verdictFingerprint: v.string(),
+      })),
+      coldOpenReceipt: v.optional(v.object({
+        version: v.literal("voice-cold-open/v1"),
+        ownerId: v.string(),
+        channelId: v.string(),
+        voiceId: v.string(),
+        judgedAt: v.number(),
+        seed: v.number(),
+        textFingerprint: v.string(),
+        physicsFingerprint: v.string(),
+        verdictFingerprint: v.string(),
+        scores: v.object({
+          register: v.number(),
+          pace: v.number(),
+          performance: v.number(),
+          clean: v.number(),
+        }),
+      })),
     }),
   ),
   voiceId: v.optional(v.string()),
@@ -438,8 +577,303 @@ export const updateChannel = mutation({
     }
     // "" means UNFILE (optional args can't carry null).
     if (rest.folder === "") patch.folder = undefined;
+    const roots = channelInceptionInvalidationRoots(existing, { ...existing, ...patch });
+    if (roots.length > 0) {
+      const invalidated = invalidatePersistedInceptionProofs(
+        existing.inception,
+        roots,
+        await channelMutationRole(ctx),
+      );
+      if (invalidated) {
+        patch.inception = invalidated;
+        patch.status = "draft";
+      }
+    }
     await ctx.db.patch(channelId, patch);
     return null;
+  },
+});
+
+/**
+ * Atomically install a compiler upgrade only if the channel still contains
+ * the source pipeline the caller inspected. This prevents a background sync
+ * from overwriting a newer architect/operator edit between read and write.
+ */
+export const updatePipelineIfCurrent = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    expectedPipeline: pipelineValidator,
+    pipeline: pipelineValidator,
+  },
+  returns: v.object({
+    state: v.union(
+      v.literal("updated"),
+      v.literal("current"),
+      v.literal("conflict"),
+    ),
+  }),
+  handler: async (ctx, args) => {
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) {
+      throw new Error("channel pipeline CAS ownership mismatch");
+    }
+    const current = channel.pipeline ?? [];
+    if (comparablePipeline(current) !== comparablePipeline(args.expectedPipeline)) {
+      return { state: "conflict" as const };
+    }
+    if (comparablePipeline(current) === comparablePipeline(args.pipeline)) {
+      return { state: "current" as const };
+    }
+    const patch: Record<string, unknown> = { pipeline: args.pipeline };
+    const invalidated = invalidatePersistedInceptionProofs(
+      channel.inception,
+      channelInceptionInvalidationRoots(channel, { ...channel, ...patch }),
+      await channelMutationRole(ctx),
+    );
+    if (invalidated) {
+      patch.inception = invalidated;
+      patch.status = "draft";
+    }
+    await ctx.db.patch(args.channelId, patch);
+    return { state: "updated" as const };
+  },
+});
+
+const inceptionStageDescriptorValidator = v.object({
+  moduleKey: v.string(),
+  dependsOn: v.array(v.string()),
+  stageKey: v.string(),
+  idempotencyKey: v.string(),
+  inputFingerprint: v.string(),
+  contractVersion: v.string(),
+  maximumCostUsd: v.number(),
+});
+
+const inceptionAdmissionValidator = v.object({
+  executionAuthorized: v.boolean(),
+  executionCapUsd: v.number(),
+  executionReceiptFingerprint: v.optional(v.string()),
+  probeAuthorized: v.boolean(),
+  probeCapUsd: v.number(),
+  probeReceiptFingerprint: v.optional(v.string()),
+  boundRequestFingerprint: v.string(),
+});
+
+/** Install/refresh the latest plan while retaining receipts for unchanged stage keys. */
+export const beginChannelInception = mutation({
+  args: {
+    channelId: v.id("channels"),
+    schemaVersion: v.string(),
+    planKey: v.string(),
+    requestFingerprint: v.string(),
+    requestSnapshot: v.any(),
+    admission: inceptionAdmissionValidator,
+    stages: v.array(inceptionStageDescriptorValidator),
+  },
+  handler: async (ctx, args) => {
+    await requireInceptionService(ctx);
+    if (!args.schemaVersion.trim() || args.schemaVersion.length > 64) {
+      throw new Error("invalid channel inception schema version");
+    }
+    if (!args.planKey.trim() || args.planKey.length > 240) throw new Error("invalid channel inception plan key");
+    if (!/^[a-f0-9]{64}$/.test(args.requestFingerprint)) {
+      throw new Error("invalid channel inception request fingerprint");
+    }
+    assertInceptionOutputSize(args.requestSnapshot);
+    if (
+      !Number.isFinite(args.admission.executionCapUsd) ||
+      args.admission.executionCapUsd < 0 ||
+      args.admission.executionCapUsd > 100 ||
+      !Number.isFinite(args.admission.probeCapUsd) ||
+      args.admission.probeCapUsd < 0 ||
+      args.admission.probeCapUsd > 100
+    ) {
+      throw new Error("invalid channel inception admission cost cap");
+    }
+    if (args.admission.boundRequestFingerprint !== args.requestFingerprint) {
+      throw new Error("channel inception admission is not bound to this request");
+    }
+    if (!args.stages.length || args.stages.length > MAX_INCEPTION_STAGES) {
+      throw new Error(`channel inception requires 1-${MAX_INCEPTION_STAGES} planned stages`);
+    }
+    if (new Set(args.stages.map((stage) => stage.moduleKey)).size !== args.stages.length) {
+      throw new Error("channel inception plan contains duplicate modules");
+    }
+    for (const stage of args.stages) assertInceptionStageDescriptor(stage as ChannelInceptionStageDescriptor);
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel) throw new Error(`channel not found: ${args.channelId}`);
+    const inception = beginChannelInceptionLedger(
+      channel.inception as ChannelInceptionLedgerState | undefined,
+      {
+        schemaVersion: args.schemaVersion,
+        inceptionKey: args.planKey,
+        requestFingerprint: args.requestFingerprint,
+        requestSnapshot: args.requestSnapshot,
+        admission: args.admission,
+        stages: args.stages as ChannelInceptionStageDescriptor[],
+      },
+      Date.now(),
+    );
+    await ctx.db.patch(args.channelId, { inception });
+    return inception;
+  },
+});
+
+/** Atomically claim one content-addressed inception stage. */
+export const claimChannelInceptionStage = mutation({
+  args: {
+    channelId: v.id("channels"),
+    stage: inceptionStageDescriptorValidator,
+    claimant: v.string(),
+    leaseMs: v.number(),
+    maximumAttempts: v.number(),
+    observedOutputFingerprint: v.optional(v.string()),
+  },
+  handler: async (ctx, args) => {
+    await requireInceptionService(ctx);
+    assertInceptionStageDescriptor(args.stage as ChannelInceptionStageDescriptor);
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel?.inception) throw new Error("channel inception plan is not initialized");
+    const claim = claimChannelInceptionLedgerStage({
+      ledger: channel.inception as ChannelInceptionLedgerState,
+      stage: args.stage as ChannelInceptionStageDescriptor,
+      claimant: args.claimant,
+      now: Date.now(),
+      leaseMs: args.leaseMs,
+      maximumAttempts: args.maximumAttempts,
+      observedOutputFingerprint: args.observedOutputFingerprint,
+    });
+    await ctx.db.patch(args.channelId, { inception: claim.ledger });
+    return {
+      disposition: claim.disposition,
+      outputs: claim.stage.outputs,
+      status: claim.stage.status,
+      attempts: claim.stage.attempts,
+      leaseVersion: claim.stage.leaseVersion,
+      leaseExpiresAt: claim.stage.leaseExpiresAt,
+      executionPhase: claim.stage.executionPhase,
+    };
+  },
+});
+
+/** Complete only the exact stage lease held by this task attempt. */
+export const completeChannelInceptionStage = mutation({
+  args: {
+    channelId: v.id("channels"),
+    stage: inceptionStageDescriptorValidator,
+    claimant: v.string(),
+    leaseVersion: v.number(),
+    status: v.union(v.literal("accepted"), v.literal("complete"), v.literal("blocked")),
+    outputFingerprint: v.string(),
+    outputs: v.optional(v.any()),
+  },
+  handler: async (ctx, args) => {
+    await requireInceptionService(ctx);
+    assertInceptionStageDescriptor(args.stage as ChannelInceptionStageDescriptor);
+    assertInceptionOutputSize(args.outputs);
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel?.inception) throw new Error("channel inception plan is not initialized");
+    const inception = completeChannelInceptionLedgerStage({
+      ledger: channel.inception as ChannelInceptionLedgerState,
+      stage: args.stage as ChannelInceptionStageDescriptor,
+      claimant: args.claimant,
+      leaseVersion: args.leaseVersion,
+      status: args.status,
+      outputs: args.outputs,
+      outputFingerprint: args.outputFingerprint,
+      now: Date.now(),
+    });
+    await ctx.db.patch(args.channelId, { inception });
+    return inception.stages[args.stage.moduleKey];
+  },
+});
+
+/** Persist a resumable provider/checkpoint receipt while retaining the lease. */
+export const checkpointChannelInceptionStage = mutation({
+  args: {
+    channelId: v.id("channels"),
+    stage: inceptionStageDescriptorValidator,
+    claimant: v.string(),
+    leaseVersion: v.number(),
+    outputs: v.any(),
+    executionPhase: v.optional(
+      v.union(v.literal("claimed"), v.literal("provider-started")),
+    ),
+  },
+  handler: async (ctx, args) => {
+    await requireInceptionService(ctx);
+    assertInceptionStageDescriptor(args.stage as ChannelInceptionStageDescriptor);
+    assertInceptionOutputSize(args.outputs);
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel?.inception) throw new Error("channel inception plan is not initialized");
+    const inception = checkpointChannelInceptionLedgerStage({
+      ledger: channel.inception as ChannelInceptionLedgerState,
+      stage: args.stage as ChannelInceptionStageDescriptor,
+      claimant: args.claimant,
+      leaseVersion: args.leaseVersion,
+      outputs: args.outputs,
+      executionPhase: args.executionPhase,
+      now: Date.now(),
+    });
+    await ctx.db.patch(args.channelId, { inception });
+    return inception.stages[args.stage.moduleKey];
+  },
+});
+
+/** Renew a long-running provider stage without changing its checkpoint. */
+export const heartbeatChannelInceptionStage = mutation({
+  args: {
+    channelId: v.id("channels"),
+    stage: inceptionStageDescriptorValidator,
+    claimant: v.string(),
+    leaseVersion: v.number(),
+    leaseMs: v.number(),
+  },
+  handler: async (ctx, args) => {
+    await requireInceptionService(ctx);
+    assertInceptionStageDescriptor(args.stage as ChannelInceptionStageDescriptor);
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel?.inception) throw new Error("channel inception plan is not initialized");
+    const inception = heartbeatChannelInceptionLedgerStage({
+      ledger: channel.inception as ChannelInceptionLedgerState,
+      stage: args.stage as ChannelInceptionStageDescriptor,
+      claimant: args.claimant,
+      leaseVersion: args.leaseVersion,
+      leaseMs: args.leaseMs,
+      now: Date.now(),
+    });
+    await ctx.db.patch(args.channelId, { inception });
+    return inception.stages[args.stage.moduleKey];
+  },
+});
+
+/** Release a failed lease so an admitted Trigger retry can resume this stage. */
+export const failChannelInceptionStage = mutation({
+  args: {
+    channelId: v.id("channels"),
+    stage: inceptionStageDescriptorValidator,
+    claimant: v.string(),
+    leaseVersion: v.number(),
+    error: v.string(),
+    retryable: v.boolean(),
+  },
+  handler: async (ctx, args) => {
+    await requireInceptionService(ctx);
+    assertInceptionStageDescriptor(args.stage as ChannelInceptionStageDescriptor);
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel?.inception) throw new Error("channel inception plan is not initialized");
+    const inception = failChannelInceptionLedgerStage({
+      ledger: channel.inception as ChannelInceptionLedgerState,
+      stage: args.stage as ChannelInceptionStageDescriptor,
+      claimant: args.claimant,
+      leaseVersion: args.leaseVersion,
+      error: args.error,
+      retryable: args.retryable,
+      now: Date.now(),
+    });
+    await ctx.db.patch(args.channelId, { inception });
+    return inception.stages[args.stage.moduleKey];
   },
 });
 
@@ -471,9 +905,21 @@ export const setModuleConfig = mutation({
     } else {
       next[args.blockId] = cleaned;
     }
-    await ctx.db.patch(args.channelId, {
+    const patch: Record<string, unknown> = {
       moduleConfig: Object.keys(next).length ? next : undefined,
-    });
+    };
+    if (JSON.stringify(existing.moduleConfig ?? {}) !== JSON.stringify(next)) {
+      const invalidated = invalidatePersistedInceptionProofs(
+        existing.inception,
+        channelInceptionInvalidationRoots(existing, { ...existing, ...patch }),
+        await channelMutationRole(ctx),
+      );
+      if (invalidated) {
+        patch.inception = invalidated;
+        patch.status = "draft";
+      }
+    }
+    await ctx.db.patch(args.channelId, patch);
     return null;
   },
 });

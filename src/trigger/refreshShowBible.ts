@@ -12,7 +12,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { synthShowBible } from "@/engine/creative/showBible";
-import { generateChannelArt } from "@/lib/channelArt";
+import { generateChannelArt, type ChannelArtOptions } from "@/lib/channelArt";
 import { FAMILY_CREW, CREW_ROLE_BLOCK, type FamilyKey } from "@/engine/families";
 import type { PipelineEntry } from "@/engine/types";
 
@@ -27,8 +27,19 @@ export interface RefreshShowBibleArgs {
   motifHint?: string;
   /** Target spoken length used to size crew briefs (seconds). */
   targetSeconds?: number;
-  /** Regenerate the avatar from the new motif (default true). */
+  /** Refresh channel art from the new motif (default true). */
   regenerateArt?: boolean;
+  /**
+   * Per-asset control. Existing avatars are preserved by default so an approved
+   * channel identity is not replaced merely because its Show Bible was refreshed.
+   * Passing `avatar: true` explicitly opts into a new judged avatar.
+   */
+  art?: {
+    avatar?: boolean;
+    banner?: boolean;
+    preserveExisting?: ChannelArtOptions["preserveExisting"];
+    version?: ChannelArtOptions["version"];
+  };
 }
 
 /** Insert the family's crew brief blocks after topic_select if missing. */
@@ -93,7 +104,9 @@ export const refreshShowBibleTask = task({
     });
     log("bible ready", { motif: creativeBrief.iconicMotif, crew: creativeBrief.activeCrew });
 
-    // Regenerate the avatar from the new motif.
+    // Refresh art from the new motif. A known-good avatar is an identity asset,
+    // not disposable Show Bible output, so preserve it unless explicitly asked
+    // to regenerate it. The banner remains independently refreshable.
     let artFields: Partial<Awaited<ReturnType<typeof generateChannelArt>>> = {};
     if (payload.regenerateArt !== false) {
       try {
@@ -101,7 +114,19 @@ export const refreshShowBibleTask = task({
           name: ch.name, persona: identity.persona, styleGrammar: identity.styleGrammar,
           palette: identity.palette, niche: identity.niche,
           iconicMotif: creativeBrief.iconicMotif, vibe: creativeBrief.vibe,
-        }, log);
+        }, log, {
+          avatar: payload.art?.avatar ?? true,
+          banner: payload.art?.banner ?? true,
+          preserveExisting: payload.art?.preserveExisting ?? {
+            avatar: payload.art?.avatar === true ? false : true,
+            banner: false,
+          },
+          existing: {
+            imageKey: identity.imageKey,
+            bannerKey: identity.bannerKey,
+          },
+          version: payload.art?.version,
+        });
       } catch (e) { log(`art failed (non-fatal): ${e instanceof Error ? e.message : e}`); }
     }
 

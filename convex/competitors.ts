@@ -1,4 +1,4 @@
-import { mutation, query } from "./studioFunctions";
+import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { v } from "convex/values";
 
 /**
@@ -40,6 +40,7 @@ export const upsertCompetitors = mutation({
   },
   returns: v.number(),
   handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "competitor evidence write");
     const existing = await ctx.db
       .query("competitors")
       .withIndex("by_owner_niche", (q) =>

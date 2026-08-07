@@ -168,7 +168,7 @@ export default function OverviewPage() {
         <Metric
           label="In progress"
           value={active === undefined ? "—" : String(activeFiltered?.length ?? 0)}
-          hint="Queued or running now"
+          hint="Active or queued work"
           icon={<IconRuns width={17} height={17} />}
           tone="secondary"
         />

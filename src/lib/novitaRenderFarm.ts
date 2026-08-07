@@ -172,6 +172,10 @@ export interface NovitaRenderCfg {
   nshard?: number;
   jobs?: "val" | "full";
   maxConcurrent?: number;
+  /** Optional stricter caller cap, always intersected with fleet admission. */
+  maxCostUsd?: number;
+  /** Called after fleet/budget attestation and immediately before paid POST. */
+  beforeProviderSpend?: () => void | Promise<void>;
 }
 
 /** Result of an image or video render call. */
@@ -190,6 +194,8 @@ export interface NovitaRenderResult {
   durationSec: number;
   costUsd: number;
   billingReceipt: NovitaBillingReceipt;
+  /** Exact canonical body whose phase-prefixed SHA-256 admitted the paid job. */
+  requestCanonicalJson: string;
   raw: NovitaBridgeStatus;
 }
 
@@ -322,6 +328,7 @@ export interface NovitaRenderLaunch {
   profile: NovitaPhaseProfile;
   profileSha256: string;
   requestSha256: string;
+  requestCanonicalJson: string;
   nshard: number;
   maxCostUsd: number;
 }
@@ -353,6 +360,20 @@ function renderBridgeConfig(): { baseUrl: string; token: string } {
     throw new Error("novitaRenderFarm: NOVITA_RENDER_FARM_API must not contain credentials, query parameters, or a fragment");
   }
   return { baseUrl: url.toString().replace(/\/$/, ""), token };
+}
+
+/**
+ * Synchronous, zero-network preflight for production callers. Secrets are
+ * bootstrapped by the owning Trigger task before this check; the authenticated
+ * fleet-readiness request still runs immediately before every paid launch.
+ */
+export function hasNovitaRenderFarmConfig(): boolean {
+  try {
+    renderBridgeConfig();
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** True only when the scoped HTTPS bridge configuration passes all local checks. */
@@ -555,6 +576,8 @@ async function launchBridgeRender(
   phase: "image" | "video",
   body: Record<string, unknown> & { prefix: string },
   expectedJobIds: string[],
+  beforeProviderSpend?: () => void | Promise<void>,
+  callerMaxCostUsd?: number,
 ): Promise<NovitaRenderLaunch> {
   const { baseUrl, token } = renderBridgeConfig();
   // This authenticated GET is intentionally the only pre-spend call. The
@@ -563,13 +586,15 @@ async function launchBridgeRender(
   const readiness = await requireNovitaFleetReadiness({ baseUrl, token });
   const budget = readiness.attestation?.budget;
   if (!budget) throw new Error("novitaRenderFarm: fleet readiness omitted its spend admission contract");
-  const maxCostUsd = Math.min(budget.maxFleetUsd, budget.maxJobUsd * expectedJobIds.length);
+  const requestedCap = callerMaxCostUsd === undefined ? Number.POSITIVE_INFINITY : callerMaxCostUsd;
+  const maxCostUsd = Math.min(budget.maxFleetUsd, budget.maxJobUsd * expectedJobIds.length, requestedCap);
   if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0) {
     throw new Error("novitaRenderFarm: fleet readiness returned an invalid hard spend cap");
   }
   const cappedBody: Record<string, unknown> & { prefix: string; maxCostUsd: number } = { ...body, maxCostUsd };
+  const requestCanonicalJson = canonicalJson(cappedBody);
   const expectedProfileHash = createHash("sha256").update(canonicalJson(cappedBody["profile"])).digest("hex");
-  const expectedRequestHash = createHash("sha256").update(`${phase}\0`).update(canonicalJson(cappedBody)).digest("hex");
+  const expectedRequestHash = createHash("sha256").update(`${phase}\0`).update(requestCanonicalJson).digest("hex");
   const payload = JSON.stringify({
     ...cappedBody,
     requestSha256: expectedRequestHash,
@@ -587,6 +612,7 @@ async function launchBridgeRender(
     "x-render-idempotency-key": expectedRequestHash,
     "x-render-profile-sha256": expectedProfileHash,
   };
+  await beforeProviderSpend?.();
   const launchRes = await fetch(`${baseUrl}/${phase}`, {
     method: "POST",
     headers,
@@ -612,6 +638,7 @@ async function launchBridgeRender(
     profile: cappedBody["profile"] as NovitaPhaseProfile,
     profileSha256: expectedProfileHash,
     requestSha256: expectedRequestHash,
+    requestCanonicalJson,
     nshard: typeof cappedBody["nshard"] === "number" ? cappedBody["nshard"] : 1,
     maxCostUsd,
   };
@@ -820,7 +847,7 @@ async function startImageRender(userCfg: NovitaRenderCfg) {
     jobsSel: cfg.jobs ?? DEFAULTS.jobs,
     maxConcurrent: cfg.maxConcurrent ?? DEFAULTS.maxConcurrent,
     profile: cfg.profile,
-  }, jobs.map((job) => job.id));
+  }, jobs.map((job) => job.id), cfg.beforeProviderSpend, cfg.maxCostUsd);
   return { jobs, launch };
 }
 
@@ -836,7 +863,7 @@ async function startVideoRender(userCfg: NovitaRenderCfg) {
     jobsSel: cfg.jobs ?? DEFAULTS.jobs,
     maxConcurrent: cfg.maxConcurrent ?? DEFAULTS.maxConcurrent,
     profile: cfg.profile,
-  }, jobs.map((job) => job.id));
+  }, jobs.map((job) => job.id), cfg.beforeProviderSpend, cfg.maxCostUsd);
   return { jobs, launch };
 }
 
@@ -876,6 +903,7 @@ export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRend
     durationSec: Math.round((Date.now() - t0) / 1000),
     costUsd: st.billingReceipt.costUsd,
     billingReceipt: st.billingReceipt,
+    requestCanonicalJson: launch.requestCanonicalJson,
     raw: st,
   };
 }
@@ -908,6 +936,7 @@ export async function renderVideo(userCfg: NovitaRenderCfg): Promise<NovitaRende
     durationSec: Math.round((Date.now() - t0) / 1000),
     costUsd: st.billingReceipt.costUsd,
     billingReceipt: st.billingReceipt,
+    requestCanonicalJson: launch.requestCanonicalJson,
     raw: st,
   };
 }

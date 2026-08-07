@@ -18,6 +18,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <span aria-hidden="true">✦</span>
                 <strong>AutoStudio</strong>
               </div>
+              <div className="studio-topbar-context" aria-label="Current workspace">
+                <span>Workspace</span>
+                <strong>Production command</strong>
+              </div>
               <div className="studio-topbar-actions">
                 <ChannelSwitcher />
                 <OperationsAccess />

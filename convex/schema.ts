@@ -29,6 +29,34 @@ export default defineSchema({
       score: v.optional(v.number()),
       why: v.optional(v.string()),
       at: v.optional(v.number()),
+          auditionReceipt: v.optional(v.object({
+            version: v.literal("voice-casting-audition/v1"),
+        ownerId: v.string(),
+        channelId: v.string(),
+        voiceId: v.string(),
+        score: v.number(),
+        judgedAt: v.number(),
+        auditionedCount: v.number(),
+        shortlistFingerprint: v.string(),
+            verdictFingerprint: v.string(),
+          })),
+          coldOpenReceipt: v.optional(v.object({
+            version: v.literal("voice-cold-open/v1"),
+            ownerId: v.string(),
+            channelId: v.string(),
+            voiceId: v.string(),
+            judgedAt: v.number(),
+            seed: v.number(),
+            textFingerprint: v.string(),
+            physicsFingerprint: v.string(),
+            verdictFingerprint: v.string(),
+            scores: v.object({
+              register: v.number(),
+              pace: v.number(),
+              performance: v.number(),
+              clean: v.number(),
+            }),
+          })),
     }),
   ),
       // Persona reference material for tone-matched generation (competitor-
@@ -119,6 +147,11 @@ export default defineSchema({
     // Script Lab output: hook rules + rotated opening devices distilled from
     // WATCHING the niche's top-view videos. script_gen executes it per video.
     scriptPlaybook: v.optional(v.any()),
+    // Resumable Channel Inception ledger. The TypeScript transition contract in
+    // engine/channelInceptionLedger owns its strict shape; keeping the persisted
+    // envelope flexible allows contract-version migrations without a live-table
+    // rewrite while every mutation still validates stage identities atomically.
+    inception: v.optional(v.any()),
     budget: v.number(), // per-run USD ceiling
     status: v.string(), // draft|active|paused|archived
     // Operator organization: name of the channelFolders folder this channel is
@@ -165,7 +198,70 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerId"])
     .index("by_owner_slug", ["ownerId", "slug"])
-    .index("by_group", ["groupId"]),
+    .index("by_group", ["groupId"])
+    .index("by_youtube_channel_id", ["youtubeCreated.ytChannelId"]),
+
+  // Durable exactly-once boundary for the irreversible Browserbase YouTube
+  // channel-create click. A request can enter provider_started only once; all
+  // later executions are reconciliation-only until an exact channel receipt is
+  // atomically attached to the app channel.
+  youtubeCreationClaims: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    requestKey: v.string(),
+    name: v.string(),
+    requestedHandle: v.string(),
+    receiptFingerprint: v.string(),
+    approvalSubject: v.string(),
+    approvalActor: v.string(),
+    approvalEvidence: v.string(),
+    approvalIssuedAt: v.number(),
+    approvalExpiresAt: v.number(),
+    approvalReceipt: v.any(),
+    status: v.union(
+      v.literal("claimed"),
+      v.literal("provider_started"),
+      v.literal("ambiguous"),
+      v.literal("recovery"),
+      v.literal("pre_provider_failed"),
+      v.literal("created"),
+    ),
+    workerId: v.string(),
+    claimExpiresAt: v.number(),
+    providerAttemptId: v.optional(v.string()),
+    providerStartedAt: v.optional(v.number()),
+    providerSessionId: v.optional(v.string()),
+    preProviderInventory: v.optional(v.object({
+      version: v.literal("youtube-pre-provider-inventory/v1"),
+      ownerId: v.string(),
+      channelId: v.string(),
+      requestKey: v.string(),
+      name: v.string(),
+      requestedHandle: v.string(),
+      receiptFingerprint: v.string(),
+      inventoryFingerprint: v.string(),
+      candidateCount: v.number(),
+      observedYtChannelIds: v.array(v.string()),
+      exactIdentityState: v.union(
+        v.literal("absent"),
+        v.literal("present"),
+        v.literal("ambiguous"),
+      ),
+      observedAt: v.number(),
+    })),
+    recoveryAttempts: v.number(),
+    lastRecoveryAt: v.optional(v.number()),
+    ytChannelId: v.optional(v.string()),
+    handle: v.optional(v.string()),
+    url: v.optional(v.string()),
+    lastError: v.optional(v.string()),
+    createdAt: v.number(),
+    completedAt: v.optional(v.number()),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_request", ["ownerId", "requestKey"])
+    .index("by_channel_request", ["channelId", "requestKey"])
+    .index("by_yt_channel_id", ["ytChannelId"]),
 
   // Operator-created folders on the Channels page (channels reference them by
   // name via channels.folder; a folder can exist empty).
@@ -324,6 +420,13 @@ export default defineSchema({
     pipelineInvocationSnapshot: v.optional(v.any()),
     pipelineInvocationSha256: v.optional(v.string()),
     pipelineInvocationClaimedAt: v.optional(v.number()),
+    // Write-once parent checkpoint for an admitted Channel Inception probe.
+    // This is claimed before Trigger dispatch, so a lost response reuses the
+    // exact child receipt, frozen overrides, context, run id, and cost cap.
+    probeDispatchEnvelope: v.optional(v.any()),
+    probeDispatchEnvelopeFingerprint: v.optional(v.string()),
+    probeDispatchClaimedAt: v.optional(v.number()),
+    probeDispatchKey: v.optional(v.string()),
     // Exact upload intent currently fencing post-upload continuation for this
     // run. The intent id and immutable artifact id are installed before the
     // dispatcher can call YouTube, and are cleared only by an exact successful
@@ -354,10 +457,24 @@ export default defineSchema({
     plannedTitle: v.optional(v.string()),
     plannedThumbnailKey: v.optional(v.string()),
     plannedPublishAt: v.optional(v.number()),
+    // Durable worker lifecycle. Queued work gets a short claim lease; Trigger
+    // replaces it with a bounded execution lease and heartbeat. Convex cron
+    // reaps expired work without depending on a paid/AI maintenance task.
+    heartbeatAt: v.optional(v.number()),
+    leaseExpiresAt: v.optional(v.number()),
+    leaseOwner: v.optional(v.string()),
+    executionAttempts: v.optional(v.number()),
+    // Set only by the lease reaper when a dead execution has a complete,
+    // immutable invocation snapshot. The scheduler may re-dispatch that exact
+    // run once; claiming the execution lease clears this marker.
+    leaseRecoveryPending: v.optional(v.boolean()),
   })
     .index("by_owner", ["ownerId"])
     .index("by_channel", ["channelId"])
+    .index("by_channel_started", ["channelId", "startedAt"])
     .index("by_channel_status", ["channelId", "status"])
+    .index("by_channel_probe_dispatch", ["channelId", "probeDispatchKey"])
+    .index("by_status_started", ["status", "startedAt"])
     .index("by_owner_publish_continuation", [
       "ownerId",
       "publishContinuationState",
@@ -570,7 +687,8 @@ export default defineSchema({
   })
     .index("by_request", ["ownerId", "channelId", "requestKey"])
     .index("by_owner", ["ownerId", "createdAt"])
-    .index("by_channel", ["channelId", "createdAt"]),
+    .index("by_channel", ["channelId", "createdAt"])
+    .index("by_channel_status", ["channelId", "status", "createdAt"]),
 
   /** Immutable per-phase usage ledger; batch totals are recomputed from rows. */
   planBatchUsage: defineTable({
@@ -588,6 +706,87 @@ export default defineSchema({
   })
     .index("by_batch", ["batchId", "createdAt"])
     .index("by_checkpoint", ["batchId", "checkpointKey"]),
+
+  /** Immutable paid Novita receipt plus the independently finalized thumbnail artifact. */
+  planWeekRenderReceipts: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    batchId: v.id("planBatches"),
+    itemId: v.id("contentPlan"),
+    attempt: v.number(),
+    requestKey: v.string(),
+    checkpointKey: v.string(),
+    destinationKey: v.string(),
+    providerRequestSha256: v.string(),
+    providerReceipt: v.object({
+      version: v.literal("plan-week-provider-render/v1"),
+      ownerId: v.string(),
+      channelId: v.string(),
+      batchId: v.string(),
+      itemId: v.string(),
+      attempt: v.number(),
+      requestKey: v.string(),
+      checkpointKey: v.string(),
+      destinationKey: v.string(),
+      provider: v.literal("novita"),
+      providerJobId: v.string(),
+      sourceKey: v.string(),
+      model: v.string(),
+      modelRevision: v.string(),
+      profileId: v.string(),
+      width: v.number(),
+      height: v.number(),
+      costUsd: v.number(),
+      runtimeAttestation: v.object({
+        provider: v.literal("novita"),
+        capacityMode: v.literal("spot"),
+        weightStorage: v.literal("local-persistent-disk"),
+        cacheMount: v.literal("/workspace/model-cache"),
+        checkpointing: v.literal(true),
+        idleShutdownSeconds: v.number(),
+        gpuCount: v.number(),
+        model: v.string(),
+        revision: v.string(),
+        checkpoint: v.string(),
+        pipeline: v.optional(v.union(v.literal("distilled"), v.literal("two-stage-hq"))),
+        distilledLoraCheckpoint: v.optional(v.string()),
+        spatialUpscalerCheckpoint: v.optional(v.string()),
+      }),
+      profileSha256: v.string(),
+      manifestSha256: v.string(),
+      requestSha256: v.string(),
+      requestCanonicalJson: v.string(),
+      billingReceiptSha256: v.string(),
+      billingReceipt: v.object({
+        provider: v.literal("novita"),
+        currency: v.literal("USD"),
+        receiptId: v.string(),
+        gpuSku: v.string(),
+        gpuCount: v.number(),
+        gpuSeconds: v.number(),
+        gpuRateUsdPerSecond: v.number(),
+        startupUsd: v.number(),
+        storageUsd: v.number(),
+        costUsd: v.number(),
+      }),
+      createdAt: v.number(),
+    }),
+    artifactReceipt: v.optional(v.object({
+      version: v.literal("plan-week-thumbnail-artifact/v1"),
+      providerRequestSha256: v.string(),
+      destinationKey: v.string(),
+      byteLength: v.number(),
+      sha256: v.string(),
+      etag: v.string(),
+      createdAt: v.number(),
+    })),
+    createdAt: v.number(),
+    finalizedAt: v.optional(v.number()),
+  })
+    .index("by_checkpoint", ["ownerId", "channelId", "checkpointKey"])
+    .index("by_request_hash", ["ownerId", "requestKey", "providerRequestSha256"])
+    .index("by_item", ["itemId", "attempt"])
+    .index("by_batch", ["batchId", "createdAt"]),
 
   // Per-channel YouTube OAuth tokens — so each channel uploads to its OWN
   // YouTube channel. Onboarding a channel = one consent → one row here. Read
