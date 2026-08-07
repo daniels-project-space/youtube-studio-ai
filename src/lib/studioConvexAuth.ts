@@ -10,7 +10,7 @@ import {
 export const STUDIO_CONVEX_ISSUER = "https://youtube-studio-ai.vercel.app";
 export const STUDIO_CONVEX_AUDIENCE = "youtube-studio-ai-convex";
 
-export type StudioConvexRole = "owner" | "service";
+export type StudioConvexRole = "viewer" | "owner" | "service";
 
 function base64UrlJson(value: object): string {
   return Buffer.from(JSON.stringify(value), "utf8").toString("base64url");
@@ -117,9 +117,11 @@ export function studioOwnerId(): string {
 }
 
 /**
- * Issue a JWT accepted only by this app's Convex deployment. Browser tokens are
- * deliberately short lived; worker tokens are bounded above the two-hour task
- * ceiling so a durable run cannot lose database access halfway through.
+ * Issue a JWT accepted only by this app's Convex deployment. Public browser
+ * viewers receive a longer-lived read-only token to avoid needless refreshes;
+ * owner tokens remain deliberately short lived, while worker tokens are
+ * bounded above the two-hour task ceiling so a durable run cannot lose database
+ * access halfway through.
  */
 export function issueStudioConvexToken(options: {
   role: StudioConvexRole;
@@ -129,14 +131,29 @@ export function issueStudioConvexToken(options: {
   const key = privateKey();
   const publicJwk = publicJwkFor(key);
   const now = Math.floor(Date.now() / 1000);
-  const defaultTtl = options.role === "owner" ? 5 * 60 : 3 * 60 * 60;
-  const maxTtl = options.role === "owner" ? 10 * 60 : 4 * 60 * 60;
+  const defaultTtl =
+    options.role === "owner"
+      ? 5 * 60
+      : options.role === "viewer"
+        ? 30 * 60
+        : 3 * 60 * 60;
+  const maxTtl =
+    options.role === "owner"
+      ? 10 * 60
+      : options.role === "viewer"
+        ? 60 * 60
+        : 4 * 60 * 60;
   const ttlSeconds = Math.max(
     60,
     Math.min(Math.floor(options.ttlSeconds ?? defaultTtl), maxTtl),
   );
   const ownerId = options.ownerId ?? studioOwnerId();
-  const subject = options.role === "owner" ? ownerId : "service:youtube-studio-ai";
+  const subject =
+    options.role === "owner"
+      ? ownerId
+      : options.role === "viewer"
+        ? `viewer:${ownerId}`
+        : "service:youtube-studio-ai";
 
   const header = base64UrlJson({ alg: "ES256", typ: "JWT", kid: publicJwk.kid });
   const payload = base64UrlJson({

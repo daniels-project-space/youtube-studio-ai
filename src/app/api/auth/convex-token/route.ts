@@ -1,4 +1,4 @@
-import { requireStudioActor } from "@/lib/operatorSession";
+import { getStudioActor } from "@/lib/operatorSession";
 import { issueStudioConvexToken } from "@/lib/studioConvexAuth";
 
 export const dynamic = "force-dynamic";
@@ -17,32 +17,19 @@ export async function GET(request: Request) {
     );
   }
 
-  let ownerId: string;
   try {
-    const actor = await requireStudioActor(request);
-    if (actor.authKind !== "session" || actor.role !== "owner") {
-      return Response.json({ error: "operator session required" }, { status: 403 });
-    }
-    ownerId = actor.ownerId;
-  } catch {
-    return Response.json(
-      { error: "authentication required" },
-      {
-        status: 401,
-        headers: { "Cache-Control": "private, no-store, max-age=0" },
-      },
-    );
-  }
-
-  try {
+    const actor = await getStudioActor(request);
+    const ownerSession = actor?.authKind === "session" && actor.role === "owner";
+    const role = ownerSession ? "owner" : "viewer";
     const result = issueStudioConvexToken({
-      role: "owner",
-      ownerId,
+      role,
+      ownerId: ownerSession ? actor.ownerId : undefined,
     });
-    return Response.json(result, {
+    return Response.json({ ...result, role }, {
       headers: {
         "Cache-Control": "private, no-store, max-age=0",
         Pragma: "no-cache",
+        Vary: "Cookie",
       },
     });
   } catch (error) {

@@ -21,5 +21,15 @@ assert.match(
   /<StudioConvexAuthGate>\{children\}<\/StudioConvexAuthGate>/,
   "authenticated queries must remain unmounted until Convex confirms the token",
 );
+assert.doesNotMatch(
+  source,
+  /operator-login|Sign in again|Operator access/,
+  "public viewer recovery must never send the browser back to an operator gate",
+);
+assert.match(
+  source,
+  /onClick=\{\(\) => window\.location\.reload\(\)\}/,
+  "Retry must perform a real token/subscription reload",
+);
 
 console.log("Convex client auth gate regression tests passed");

@@ -33,12 +33,18 @@ function safeEqualText(actual: string, expected: string): boolean {
   return a.byteLength === b.byteLength && timingSafeEqual(a, b);
 }
 
-export function verifyOperatorLoginToken(token: string): boolean {
+/**
+ * Verify the high-entropy secret used only to elevate the already-readable
+ * studio into its short-lived operations mode. This is deliberately not an
+ * application login: an invalid or missing secret never prevents viewer access.
+ */
+export function verifyOperationsElevationSecret(secret: string): boolean {
   const expected = process.env.STUDIO_OPERATOR_TOKEN;
   if (!expected) {
-    throw new StudioAuthError("STUDIO_OPERATOR_TOKEN is not configured", 503);
+    throw new StudioAuthError("operations elevation is not configured", 503);
   }
-  return safeEqualText(token, expected);
+  if (!secret || secret.length > 4_096) return false;
+  return safeEqualText(secret, expected);
 }
 
 export async function createOperatorSessionToken(): Promise<string> {
@@ -82,7 +88,12 @@ function readCookie(request: Request, name: string): string | undefined {
   const header = request.headers.get("cookie") ?? "";
   for (const part of header.split(";")) {
     const [rawName, ...rawValue] = part.trim().split("=");
-    if (rawName === name) return decodeURIComponent(rawValue.join("="));
+    if (rawName !== name) continue;
+    try {
+      return decodeURIComponent(rawValue.join("="));
+    } catch {
+      return undefined;
+    }
   }
   return undefined;
 }

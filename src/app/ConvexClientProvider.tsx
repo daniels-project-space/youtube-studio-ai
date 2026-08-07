@@ -102,9 +102,23 @@ function StudioConvexAuthGate({ children }: { children: ReactNode }) {
           fontFamily: "system-ui",
         }}
       >
-        <p>
-          Studio session expired. <a href="/operator-login">Sign in again</a>.
-        </p>
+        <div style={{ display: "grid", justifyItems: "center", gap: "0.75rem" }}>
+          <p style={{ margin: 0 }}>Studio data is temporarily unavailable.</p>
+          <button
+            type="button"
+            onClick={() => window.location.reload()}
+            style={{
+              border: "1px solid rgba(248, 113, 113, 0.32)",
+              borderRadius: "0.65rem",
+              padding: "0.55rem 0.8rem",
+              color: "inherit",
+              background: "rgba(248, 113, 113, 0.08)",
+              cursor: "pointer",
+            }}
+          >
+            Retry live data
+          </button>
+        </div>
       </main>
     );
   }

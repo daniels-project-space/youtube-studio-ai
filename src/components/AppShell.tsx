@@ -3,6 +3,7 @@ import { Sidebar } from "./Sidebar";
 import { ChannelSwitcher } from "./ChannelSwitcher";
 import { OwnerProvider } from "@/lib/owner-context";
 import { ChannelProvider } from "@/lib/channel-context";
+import { OperationsAccess } from "./OperationsAccess";
 
 /** Responsive app chrome shared by every operating surface. */
 export function AppShell({ children }: { children: ReactNode }) {
@@ -17,7 +18,10 @@ export function AppShell({ children }: { children: ReactNode }) {
                 <span aria-hidden="true">✦</span>
                 <strong>AutoStudio</strong>
               </div>
-              <ChannelSwitcher />
+              <div className="studio-topbar-actions">
+                <ChannelSwitcher />
+                <OperationsAccess />
+              </div>
             </header>
             <main className="studio-main">{children}</main>
           </div>

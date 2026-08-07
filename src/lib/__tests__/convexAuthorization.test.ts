@@ -20,9 +20,14 @@ import {
 } from "../studioConvexAuth";
 import { StudioConvexHttpClient } from "../studioConvexHttpClient";
 
-function identity(role: "owner" | "service", ownerId: string) {
+function identity(role: "viewer" | "owner" | "service", ownerId: string) {
   return {
-    subject: role === "owner" ? ownerId : "service:youtube-studio-ai",
+    subject:
+      role === "owner"
+        ? ownerId
+        : role === "viewer"
+          ? `viewer:${ownerId}`
+          : "service:youtube-studio-ai",
     issuer: STUDIO_CONVEX_ISSUER,
     tokenIdentifier: `${STUDIO_CONVEX_ISSUER}|${role}`,
     role,
@@ -31,7 +36,7 @@ function identity(role: "owner" | "service", ownerId: string) {
 }
 
 function fakeCtx(options: {
-  role?: "owner" | "service";
+  role?: "viewer" | "owner" | "service";
   identityOwner?: string;
   documentOwner?: string;
 }) {
@@ -156,9 +161,51 @@ async function main() {
     assert.equal(verifiedOwner.payload.owner_id, "owner_a");
     assert.equal(verifiedOwner.payload.role, "owner");
 
+    const viewerToken = issueStudioConvexToken({
+      role: "viewer",
+      ownerId: "owner_a",
+    });
+    const verifiedViewer = await jwtVerify(viewerToken.token, verificationKey, {
+      algorithms: ["ES256"],
+      issuer: STUDIO_CONVEX_ISSUER,
+      audience: STUDIO_CONVEX_AUDIENCE,
+    });
+    assert.equal(verifiedViewer.payload.sub, "viewer:owner_a");
+    assert.equal(verifiedViewer.payload.owner_id, "owner_a");
+    assert.equal(verifiedViewer.payload.role, "viewer");
+
     await studioAuthorizationForTests.authorizeStudioCall(
       fakeCtx({}) as never,
       { ownerId: "owner_a" },
+    );
+    await studioAuthorizationForTests.authorizeStudioCall(
+      fakeCtx({ role: "viewer" }) as never,
+      { ownerId: "owner_a" },
+      "query",
+    );
+    await expectRejected(
+      studioAuthorizationForTests.authorizeStudioCall(
+        fakeCtx({ role: "viewer" }) as never,
+        { ownerId: "owner_a" },
+        "mutation",
+      ),
+      /viewer mutations are not permitted/,
+    );
+    await expectRejected(
+      studioAuthorizationForTests.authorizeStudioCall(
+        fakeCtx({ role: "viewer" }) as never,
+        { ownerId: "owner_a", secret: "must-remain-server-only" },
+        "query",
+      ),
+      /viewer privileged query denied/,
+    );
+    await expectRejected(
+      studioAuthorizationForTests.authorizeStudioCall(
+        fakeCtx({ role: "viewer" }) as never,
+        { limit: 100 },
+        "query",
+      ),
+      /not owner scoped/,
     );
     await expectRejected(
       studioAuthorizationForTests.authorizeStudioCall(
@@ -297,7 +344,23 @@ async function main() {
     const noSessionResponse = await getConvexToken(
       new Request("https://youtube-studio-ai.vercel.app/api/auth/convex-token"),
     );
-    assert.equal(noSessionResponse.status, 401);
+    assert.equal(noSessionResponse.status, 200);
+    const noSessionBody = (await noSessionResponse.json()) as { token?: unknown };
+    assert.equal(typeof noSessionBody.token, "string");
+    const verifiedPublicViewer = await jwtVerify(
+      noSessionBody.token as string,
+      verificationKey,
+      {
+        algorithms: ["ES256"],
+        issuer: STUDIO_CONVEX_ISSUER,
+        audience: STUDIO_CONVEX_AUDIENCE,
+      },
+    );
+    assert.equal(verifiedPublicViewer.payload.role, "viewer");
+    assert.equal(
+      verifiedPublicViewer.payload.sub,
+      `viewer:${String(verifiedPublicViewer.payload.owner_id)}`,
+    );
     const crossOriginResponse = await getConvexToken(
       new Request("https://youtube-studio-ai.vercel.app/api/auth/convex-token", {
         headers: {
@@ -316,10 +379,25 @@ async function main() {
     assert.equal(tokenResponse.status, 200);
     const tokenBody = (await tokenResponse.json()) as { token?: unknown };
     assert.equal(typeof tokenBody.token, "string");
+    const verifiedSessionRequest = await jwtVerify(
+      tokenBody.token as string,
+      verificationKey,
+      {
+        algorithms: ["ES256"],
+        issuer: STUDIO_CONVEX_ISSUER,
+        audience: STUDIO_CONVEX_AUDIENCE,
+      },
+    );
+    assert.equal(
+      verifiedSessionRequest.payload.role,
+      "owner",
+      "a valid owner session must elevate Convex mutations without gating public reads",
+    );
 
     console.log("CONVEX AUTHORIZATION PASS: owner spoofing denied");
+    console.log("CONVEX AUTHORIZATION PASS: public viewer is query-only and scoped");
     console.log("CONVEX AUTHORIZATION PASS: server client sends verified service JWT");
-    console.log("CONVEX AUTHORIZATION PASS: app session gate rejects missing/forged sessions");
+    console.log("CONVEX AUTHORIZATION PASS: public viewer upgrades only with a valid owner session");
     console.log("CONVEX AUTHORIZATION PASS: missing key and JWKS readiness fail closed");
   } finally {
     if (priorPrivateKey === undefined) delete process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY;
