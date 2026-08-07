@@ -36,6 +36,18 @@ export function makeConvexSink(
         .filter((r) => r.status === "ok" && r.outputs != null)
         .map((r) => ({ block: r.block, outputs: r.outputs, cost: r.cost }));
     },
+    async getResumeState(runId) {
+      return (await client.query(api.runStages.listRunStages, {
+        runId: runId as Id<"runs">,
+      })) as Array<{
+        block: string;
+        status: string;
+        outputs?: unknown;
+        cost?: number;
+        startedAt?: number;
+        error?: string;
+      }>;
+    },
     async upsertArtifact(args) {
       await client.mutation(api.runArtifacts.upsert, {
         secret: requireInternalQuerySecret(),

@@ -141,7 +141,11 @@ export const whiteboardScribe: Block = {
     const genPro = Math.max(0, bananaCounters.pro - countersBefore.pro);
     const genFlash = Math.max(0, bananaCounters.flash - countersBefore.flash);
     const genFal = Math.max(0, (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0));
-    const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd + genFal * PRICE.bananaFalUsd;
+    const legacyArtCost =
+      genPro * PRICE.bananaProUsd +
+      genFlash * PRICE.bananaFlashUsd +
+      Math.max(0, bananaCounters.falCostUsd - countersBefore.falCostUsd);
+    const artCost = ctx.imageUsageAccounting?.().costUsd ?? legacyArtCost;
     const usedEleven = ttsProvider === "elevenlabs" && Boolean(elevenVoiceId);
     const ttsCost =
       (res.ttsCharactersGenerated / 1000) *

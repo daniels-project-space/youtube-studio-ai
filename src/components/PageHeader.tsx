@@ -11,24 +11,14 @@ export function PageHeader({
   actions?: ReactNode;
 }) {
   return (
-    <div
-      style={{
-        display: "flex",
-        alignItems: "flex-end",
-        justifyContent: "space-between",
-        gap: "1rem",
-        marginBottom: "1.75rem",
-      }}
-    >
+    <div className="page-header">
       <div>
-        <h1 style={{ fontSize: "1.9rem", fontWeight: 600 }}>{title}</h1>
+        <h1>{title}</h1>
         {subtitle && (
-          <p style={{ margin: "0.4rem 0 0", color: "var(--color-muted)", fontSize: "0.92rem" }}>
-            {subtitle}
-          </p>
+          <p>{subtitle}</p>
         )}
       </div>
-      {actions}
+      {actions ? <div className="page-header-actions">{actions}</div> : null}
     </div>
   );
 }

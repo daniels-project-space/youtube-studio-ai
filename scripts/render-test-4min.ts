@@ -17,7 +17,7 @@ async function main() {
   if (!ch) throw new Error("Quiet Stoic channel not found");
 
   // One-off short override: ~4-min script + widened length gate. Everything else
-  // (chapter cards, quote overlays, 15s outro, qa_refine) stays as configured.
+  // (chapter cards, quote overlays, 15s outro, final QA) stays as configured.
   const targetSec = Number(process.argv[2] ?? 240); // e.g. `npx tsx scripts/render-test-4min.ts 180`
   const pipelineOverride = (ch.pipeline as PipelineEntry[]).map((e) => {
     if (e.block === "script_gen") return { ...e, params: { ...(e.params || {}), maxSeconds: targetSec } };

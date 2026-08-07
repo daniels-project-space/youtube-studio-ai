@@ -9,7 +9,6 @@ import { _clear, register } from "@/engine/registry";
 import { runPipeline } from "@/engine/runner";
 import type { Block, RunStageSink } from "@/engine/types";
 import { validatePipeline } from "@/engine/validate";
-import { generateFalI2V } from "@/lib/falVideo";
 import { rehydrateOutputs } from "@/lib/rehydrate";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
 
@@ -245,6 +244,68 @@ async function classificationAndRetryPolicy(): Promise<void> {
     r2FailedClosed && paidCallsDuringR2Outage === 0,
     "R2 outage preserves the completed paid stage instead of regenerating it",
   );
+
+  let paidCallsForMissingArtifact = 0;
+  const missingArtifactWrites: Array<{ status: string; error?: string }> = [];
+  const missingArtifactBlock: Block = {
+    id: "recovery_paid_missing_artifact",
+    consumes: [],
+    produces: ["recoveryResult"],
+    paid: true,
+    run: async () => {
+      paidCallsForMissingArtifact++;
+      return { recoveryResult: "charged-again" };
+    },
+  };
+  _clear();
+  register(missingArtifactBlock);
+  const missingArtifactResult = await runPipeline(
+    validatePipeline([{ block: missingArtifactBlock.id }]),
+    {
+      ...base,
+      sink: {
+        async upsert(args) {
+          missingArtifactWrites.push({ status: args.status, error: args.error });
+        },
+        async getCompleted() {
+          return [{
+            block: missingArtifactBlock.id,
+            outputs: { recoveryResult: "paid-but-artifact-missing" },
+            cost: 0.42,
+          }];
+        },
+      },
+      rehydrate: async (_block, outputs) => ({ ok: false, outputs }),
+    },
+  );
+  assert(
+    !missingArtifactResult.ok && paidCallsForMissingArtifact === 0,
+    "confirmed-missing outputs never regenerate a completed paid stage",
+  );
+  assert(
+    missingArtifactWrites.some(
+      (write) =>
+        write.status === "failed" &&
+        write.error?.includes("PAID_STAGE_RECONCILIATION_REQUIRED"),
+    ),
+    "missing paid artifacts persist an actionable reconciliation fence",
+  );
+
+  const noRehydratorResult = await runPipeline(
+    validatePipeline([{ block: missingArtifactBlock.id }]),
+    {
+      ...base,
+      sink: sinkWithCompleted([{
+        block: missingArtifactBlock.id,
+        outputs: { recoveryResult: "paid-cached-output" },
+        cost: 0.42,
+      }]),
+    },
+  );
+  assert(
+    !noRehydratorResult.ok && paidCallsForMissingArtifact === 0,
+    "completed paid stages also fail closed when no rehydrator is configured",
+  );
 }
 
 async function narrationResumeDoesNotRespend(): Promise<void> {
@@ -318,95 +379,142 @@ async function narrationResumeDoesNotRespend(): Promise<void> {
   }
 }
 
-async function falQueueRecoveryKeepsAcceptedJob(): Promise<void> {
-  const originalFetch = globalThis.fetch;
-  const originalKey = process.env.FAL_KEY;
-  process.env.FAL_KEY = "test-only-fal-key";
-  try {
-    let submitCalls = 0;
-    let statusCalls = 0;
-    let resultCalls = 0;
-    globalThis.fetch = (async (input, init) => {
-      const url = String(input);
-      if (init?.method === "POST") {
-        submitCalls++;
-        return new Response(
-          JSON.stringify({
-            request_id: "accepted-job",
-            status_url: "https://fal.test/status",
-            response_url: "https://fal.test/result",
-          }),
-          { status: 200, headers: { "content-type": "application/json" } },
-        );
-      }
-      if (url.endsWith("/status")) {
-        statusCalls++;
-        return new Response(JSON.stringify({ status: "COMPLETED" }), {
-          status: 200,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      resultCalls++;
-      if (resultCalls === 1) {
-        return new Response(JSON.stringify({ detail: "temporary overload" }), {
-          status: 503,
-          headers: { "content-type": "application/json" },
-        });
-      }
-      return new Response(
-        JSON.stringify({ video: { url: "https://cdn.test/video.mp4" } }),
-        { status: 200, headers: { "content-type": "application/json" } },
-      );
-    }) as typeof fetch;
+async function interruptedPaidStageRequiresReconciliation(): Promise<void> {
+  let paidCalls = 0;
+  const writes: Array<{ status: string; error?: string }> = [];
+  const paidBlock: Block = {
+    id: "recovery_interrupted_paid_stage",
+    consumes: [],
+    produces: ["recoveryResult"],
+    paid: true,
+    run: async () => {
+      paidCalls += 1;
+      return { recoveryResult: "would-charge-again" };
+    },
+  };
+  _clear();
+  register(paidBlock);
+  const result = await runPipeline(
+    validatePipeline([{ block: paidBlock.id }]),
+    {
+      ...base,
+      sink: {
+        async upsert(args) {
+          writes.push({ status: args.status, error: args.error });
+        },
+        async getResumeState() {
+          return [{
+            block: paidBlock.id,
+            status: "running",
+            startedAt: 1_700_000_000_000,
+          }];
+        },
+      },
+      resume: true,
+    },
+  );
 
-    const recovered = await generateFalI2V({
-      prompt: "A bounded camera move",
-      imageUrl: "https://cdn.test/source.jpg",
-      pollIntervalMs: 0,
-      timeoutMs: 1_000,
-    });
-    assert(
-      recovered.jobId === "accepted-job" &&
-        submitCalls === 1 &&
-        statusCalls === 2 &&
-        resultCalls === 2,
-      "transient result fetch recovers the accepted Fal job without a second paid submission",
-    );
+  assert(!result.ok, "an interrupted paid stage fails closed on worker resume");
+  assert(paidCalls === 0, "an interrupted paid stage is never purchased twice");
+  assert(
+    writes.some(
+      (write) =>
+        write.status === "failed" &&
+        write.error?.includes("PAID_STAGE_RECONCILIATION_REQUIRED"),
+    ),
+    "the stage records an actionable reconciliation marker",
+  );
 
-    let rejectedCalls = 0;
-    globalThis.fetch = (async () => {
-      rejectedCalls++;
-      return new Response(
-        JSON.stringify({
-          detail: "network temporarily unavailable is not a valid prompt value",
-        }),
-        { status: 422, headers: { "content-type": "application/json" } },
-      );
-    }) as typeof fetch;
-    let rejectionKind = "";
-    try {
-      await generateFalI2V({
-        prompt: "Invalid fixture",
-        imageUrl: "https://cdn.test/source.jpg",
-      });
-    } catch (error) {
-      rejectionKind = classifyExecutionError(error).kind;
-    }
-    assert(
-      rejectionKind === "deterministic" && rejectedCalls === 1,
-      "Fal 422 is emitted with structured terminal metadata after one request",
-    );
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalKey === undefined) delete process.env.FAL_KEY;
-    else process.env.FAL_KEY = originalKey;
-  }
+  const marker = writes.find((write) =>
+    write.error?.includes("PAID_STAGE_RECONCILIATION_REQUIRED"),
+  )?.error;
+  const repeatedResume = await runPipeline(
+    validatePipeline([{ block: paidBlock.id }]),
+    {
+      ...base,
+      sink: {
+        async upsert() {},
+        async getResumeState() {
+          return [{
+            block: paidBlock.id,
+            status: "failed",
+            error: marker,
+          }];
+        },
+      },
+      resume: true,
+    },
+  );
+  assert(
+    !repeatedResume.ok && paidCalls === 0,
+    "the reconciliation fence survives further orchestration retries",
+  );
+}
+
+async function legacyThumbnailResumeFailsClosedWithoutRespend(): Promise<void> {
+  let paidThumbnailCalls = 0;
+  let persistedOutputs: Record<string, unknown> | undefined;
+  const thumbnail: Block = {
+    id: "thumbnail_gen",
+    consumes: ["title"],
+    produces: ["thumbnailKey", "strategy", "thumbnailPublishable"],
+    paid: true,
+    run: async () => {
+      paidThumbnailCalls += 1;
+      throw new Error("legacy cached thumbnail must resume without another provider call");
+    },
+  };
+  _clear();
+  register(thumbnail);
+  const resumed = await runPipeline(
+    validatePipeline([{ block: thumbnail.id }], ["title"]),
+    {
+      ...base,
+      seedStore: { title: "A real legacy rental-economy thumbnail" },
+      sink: {
+        async upsert(args) {
+          if (args.status === "ok") {
+            persistedOutputs = args.outputs as Record<string, unknown>;
+          }
+        },
+        async getCompleted() {
+          return [{
+            block: thumbnail.id,
+            cost: 0.05321,
+            // This is the exact pre-contract shape persisted by older runs.
+            outputs: {
+              thumbnailKey: "owners/recovery/channels/test/runs/recovery_run/thumbnail.jpg",
+              strategy: "playbook",
+            },
+          }];
+        },
+      },
+      resume: true,
+      rehydrate: async (_block, outputs) => ({ ok: true, outputs }),
+    },
+  );
+
+  assert(resumed.ok, "legacy thumbnail outputs migrate during resume");
+  assert(paidThumbnailCalls === 0, "legacy thumbnail resume never re-spends");
+  assert(
+    resumed.store["thumbnailPublishable"] === false,
+    "missing legacy publishability evidence is derived fail-closed",
+  );
+  assert(
+    persistedOutputs?.["thumbnailPublishable"] === false,
+    "the migrated publishability flag is persisted for future resumes",
+  );
+  assert(
+    Math.abs(resumed.costTotal - 0.05321) < 0.000001,
+    "legacy thumbnail resume preserves its original recorded spend",
+  );
 }
 
 async function main(): Promise<void> {
   await classificationAndRetryPolicy();
   await narrationResumeDoesNotRespend();
-  await falQueueRecoveryKeepsAcceptedJob();
+  await interruptedPaidStageRequiresReconciliation();
+  await legacyThumbnailResumeFailsClosedWithoutRespend();
   _clear();
   console.log("\nRECOVERY POLICY TEST PASSED");
 }

@@ -12,6 +12,10 @@ import { schedules, task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id, Doc } from "../../convex/_generated/dataModel";
+import {
+  STUDIO_AUTOMATION_GATES,
+  studioAutomationGate,
+} from "@/lib/automationGate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix } from "@/lib/storage";
 import { fetchVideoAnalytics, hasAnalyticsAccess } from "@/lib/youtubeAnalytics";
@@ -319,8 +323,13 @@ async function refresh(ownerId: string, log: Logger) {
 
 export const learningRefreshSchedule = schedules.task({
   id: "learning-refresh",
-  // cron: "0 7 * * *", // daily, after metrics settle // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
-  run: async () => refresh(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[learn] ${m}`)),
+  cron: "0 7 * * *", // daily, after metrics settle
+  run: async () => {
+    const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
+    if (!gate.enabled) return gate;
+
+    return refresh(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[learn] ${m}`));
+  },
 });
 
 export const learningRefreshTask = task({

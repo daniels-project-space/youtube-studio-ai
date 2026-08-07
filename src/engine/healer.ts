@@ -105,17 +105,15 @@ const HEAL_RULES: HealRule[] = [
     label: "off-world footage → re-source clips with a stricter grade gate",
   },
   {
-    match: /thumbnail (missing|score \d)|thumbnail[^|]*?(illegible|cluttered|overlaps|amateur)/i,
+    // A missing persisted artifact is recoverable: thumbnail_gen reuses its
+    // immutable paid-generation checkpoint and retries only the storage/write
+    // work. Quality rejection is deliberately excluded. The generation and QA
+    // request identities do not change during self-heal, so replaying an
+    // illegible/below-bar candidate would only re-read the identical rejected
+    // checkpoint and waste Trigger/Convex cycles.
+    match: /thumbnail missing/i,
     owner: "thumbnail_gen",
-    label: "thumbnail defect → regenerate thumbnail",
-  },
-  {
-    // The engine's own loud gate rejection (banana/fal judge) — the message
-    // never contains the word "thumbnail", so the rule above missed it and a
-    // fully rendered run died unhealed (observed live).
-    match: /both attempts failed the gate/i,
-    owner: "thumbnail_gen",
-    label: "thumbnail judge rejection → regenerate thumbnail",
+    label: "thumbnail artifact missing → restore checkpoint + persist",
   },
   {
     match: /seo score \d|title \d+ chars|description too (short|long)/i,

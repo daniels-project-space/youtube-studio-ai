@@ -73,13 +73,21 @@ export const overview = query({
       .query("runs")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
       .collect();
-    const totalCost = runs.reduce((sum, r) => sum + (r.costTotal ?? 0), 0);
+    const planBatches = await ctx.db
+      .query("planBatches")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .collect();
+    // Plan batches never create run rows, so adding their idempotent batch total
+    // exposes real planner spend without double-counting pipeline cost.
+    const planningCost = planBatches.reduce((sum, batch) => sum + batch.actualCostUsd, 0);
+    const totalCost = runs.reduce((sum, r) => sum + (r.costTotal ?? 0), 0) + planningCost;
     const videoCount = runs.filter((r) => Boolean(r.youtubeVideoId)).length;
 
     return {
       totalSubscribers,
       totalViews,
       totalCost,
+      planningCost,
       videoCount,
       channelCount: channels.length,
     };
@@ -106,7 +114,14 @@ export const channelSummary = query({
           .query("runs")
           .withIndex("by_channel", (q) => q.eq("channelId", ch._id))
           .collect();
-        const costTotal = runs.reduce((s, r) => s + (r.costTotal ?? 0), 0);
+        const planBatches = await ctx.db
+          .query("planBatches")
+          .withIndex("by_channel", (q) => q.eq("channelId", ch._id))
+          .collect();
+        const planningCost = planBatches
+          .filter((batch) => batch.ownerId === args.ownerId)
+          .reduce((sum, batch) => sum + batch.actualCostUsd, 0);
+        const costTotal = runs.reduce((s, r) => s + (r.costTotal ?? 0), 0) + planningCost;
         const videoCount = runs.filter((r) => Boolean(r.youtubeVideoId)).length;
         return {
           channelId: ch._id,
@@ -117,6 +132,7 @@ export const channelSummary = query({
           totalViews: latest?.totalViews ?? 0,
           videoCount,
           costTotal,
+          planningCost,
         };
       }),
     );

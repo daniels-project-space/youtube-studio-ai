@@ -201,6 +201,30 @@ async function main() {
       const rawBuilders = importedValues(source, "./_generated/server").filter(
         (name) => name === "query" || name === "mutation",
       );
+      if (file.endsWith("/runs.ts") && rawBuilders.length > 0) {
+        // The rollout probe is deliberately public and data-free: the same
+        // endpoint must return a challenge-bound denial to an unsigned client
+        // and a grant to the signed service client. Keep this exception exact
+        // so it cannot become a back door to application data.
+        assert.deepEqual(rawBuilders, ["query"]);
+        assert.equal(
+          [...source.matchAll(/=\s*publicQuery\s*\(/g)].length,
+          1,
+          "runs.ts may expose only the single data-free auth probe",
+        );
+        const probeSource = source.slice(
+          source.indexOf("export const verifyAuthBoundary"),
+          source.indexOf("export const createRun"),
+        );
+        assert.match(probeSource, /verifyAuthBoundary\s*=\s*publicQuery\s*\(/);
+        assert.match(probeSource, /ctx\.auth\.getUserIdentity\(\)/);
+        assert.doesNotMatch(
+          probeSource,
+          /ctx\.(?:db|storage|scheduler)|\.query\(|\.mutation\(|fetch\s*\(/,
+          "the public auth probe must remain data-free and side-effect-free",
+        );
+        continue;
+      }
       assert.deepEqual(
         rawBuilders,
         [],
@@ -218,6 +242,24 @@ async function main() {
       const rawClients = importedValues(source, "convex/browser").filter(
         (name) => name === "ConvexHttpClient",
       );
+      if (file.endsWith("/src/trigger/convexAuthProbe.ts") && rawClients.length > 0) {
+        // The data-free rollout probe needs one intentionally unsigned client
+        // to prove that the public boundary reports denial. Its companion
+        // client is signed, and both are restricted to the probe endpoint.
+        assert.deepEqual(rawClients, ["ConvexHttpClient"]);
+        assert.equal(
+          [...source.matchAll(/new\s+ConvexHttpClient\s*\(/g)].length,
+          1,
+          "the auth probe may construct exactly one unsigned client",
+        );
+        assert.equal(
+          [...source.matchAll(/\.query\(api\.runs\.verifyAuthBoundary/g)].length,
+          2,
+          "signed and unsigned clients must call only the auth-boundary probe",
+        );
+        assert.doesNotMatch(source, /\.mutation\(|api\.(?!runs\.verifyAuthBoundary)/);
+        continue;
+      }
       assert.deepEqual(
         rawClients,
         [],

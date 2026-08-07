@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 
 import { classifyExecutionError } from "@/engine/executionErrors";
+import { accountedModelUsageCost } from "@/engine/modelUsageCost";
+import { PRICE } from "@/engine/pricing";
 import { _clear, register } from "@/engine/registry";
 import { runPipeline } from "@/engine/runner";
 import { COST_PATCH_KEY, type Block, type RunStageSink } from "@/engine/types";
 import { validatePipeline } from "@/engine/validate";
-import { geminiJson } from "@/lib/gemini";
+import { GeminiSubmissionError, geminiJson } from "@/lib/gemini";
 import {
   createModelUsageScope,
   priceModelUsage,
@@ -114,25 +116,75 @@ async function exhaustedProviderRetryIsTerminal(): Promise<void> {
   const originalDelay = process.env.GEMINI_RETRY_BASE_MS;
   process.env.GEMINI_API_KEY = "hermetic-test-key";
   process.env.GEMINI_RETRY_BASE_MS = "0";
-  let fetches = 0;
-  globalThis.fetch = async () => {
-    fetches++;
-    return Response.json({ error: { message: "capacity" } }, { status: 503 });
-  };
   try {
+    let fetches = 0;
+    globalThis.fetch = async () => {
+      fetches++;
+      return Response.json({ error: { message: "capacity" } }, { status: 503 });
+    };
     let failure: unknown;
     try {
-      await geminiJson({ prompt: "terminal provider retries" });
+      await geminiJson({ prompt: "ambiguous server submission" });
     } catch (error) {
       failure = error;
     }
-    assert.ok(failure instanceof Error);
-    assert.match(failure.message, /provider retry budget exhausted/);
-    assert.equal(fetches, 4, "Gemini owns one bounded retry budget");
+    assert.ok(failure instanceof GeminiSubmissionError);
+    assert.equal(fetches, 1, "an ambiguous 5xx must never resubmit a potentially-billed call");
     assert.equal(
       classifyExecutionError(failure).retryable,
       false,
-      "engine must not multiply an exhausted provider retry loop",
+      "engine must not multiply an ambiguous provider submission",
+    );
+
+    fetches = 0;
+    globalThis.fetch = async () => {
+      fetches++;
+      throw new TypeError("fixture connection reset after dispatch");
+    };
+    await assert.rejects(
+      geminiJson({ prompt: "ambiguous transport submission" }),
+      (error: unknown) =>
+        error instanceof GeminiSubmissionError &&
+        classifyExecutionError(error).retryable === false,
+    );
+    assert.equal(fetches, 1, "an ambiguous transport failure must never resubmit");
+
+    // Explicit 429 is a definite pre-admission rejection, so the adapter may
+    // retain its one bounded retry budget without duplicating token spend.
+    fetches = 0;
+    globalThis.fetch = async () => {
+      fetches++;
+      return Response.json({ error: { message: "rate limited" } }, { status: 429 });
+    };
+    await assert.rejects(
+      geminiJson({ prompt: "definite rate-limit rejection" }),
+      /provider retry budget exhausted.*HTTP 429/i,
+    );
+    assert.equal(fetches, 4, "explicit pre-admission 429 responses retain bounded retries");
+
+    // The one deterministic request-shape recovery remains safe: the first
+    // request is rejected during validation and the accepted retry omits the
+    // unsupported thinking field.
+    fetches = 0;
+    let acceptedBody: Record<string, unknown> | undefined;
+    globalThis.fetch = async (_input, init) => {
+      fetches++;
+      const body = JSON.parse(String(init?.body)) as Record<string, unknown>;
+      if (fetches === 1) {
+        return Response.json({ error: { message: "thinkingConfig is unsupported" } }, { status: 400 });
+      }
+      acceptedBody = body;
+      return Response.json({
+        candidates: [{ content: { parts: [{ text: '{"ok":true}' }] } }],
+        usageMetadata: { promptTokenCount: 3, candidatesTokenCount: 2, totalTokenCount: 5 },
+      });
+    };
+    assert.deepEqual(await geminiJson({ prompt: "thinking validation rejection", model: "gemini-2.5-flash" }), { ok: true });
+    assert.equal(fetches, 2);
+    assert.equal(
+      "thinkingConfig" in ((acceptedBody?.["generationConfig"] as Record<string, unknown>) ?? {}),
+      false,
+      "the accepted retry must remove the deterministically rejected field",
     );
   } finally {
     globalThis.fetch = originalFetch;
@@ -287,15 +339,106 @@ async function explicitAndFailedCostsAreAuthoritative(): Promise<void> {
   });
   assert.equal(success.costTotal, 0.5, "explicit composite patch must not double-count model cost");
 
+  const conceptUsage = {
+    provider: "gemini",
+    model: "gemini-2.5-flash",
+    kind: "text" as const,
+    inputTokens: 2_400,
+    outputTokens: 640,
+  };
+  const exactConceptCost = priceModelUsage(conceptUsage).costUsd;
+  assert.notEqual(exactConceptCost, undefined);
+  const pricedVisionUsage = {
+    provider: "groq",
+    model: "qwen/qwen3.6-27b",
+    kind: "vision" as const,
+    inputTokens: 1_000,
+    outputTokens: 100,
+  };
+  const exactVisionCost = priceModelUsage(pricedVisionUsage).costUsd;
+  assert.notEqual(exactVisionCost, undefined);
+  const unpricedVisionUsage = {
+    provider: "fal",
+    model: "fal-ai/any-llm/vision",
+    kind: "vision" as const,
+    unpricedReason: "Fal response omitted billable usage and routed model",
+  };
+  const recordThumbnailModelUsage = (): void => {
+    recordModelUsage(conceptUsage);
+    recordModelUsage(pricedVisionUsage);
+    recordModelUsage(unpricedVisionUsage);
+  };
+  const expectedThumbnailCost =
+    0.04 +
+    (exactConceptCost ?? 0) +
+    (exactVisionCost ?? 0) +
+    PRICE.visionGraderUsd;
+
+  _clear();
+  const thumbnailComposite: Block = {
+    id: "thumbnail_composite_cost_test",
+    consumes: [],
+    produces: ["x"],
+    run: async (ctx) => {
+      recordThumbnailModelUsage();
+      const conceptCost = accountedModelUsageCost(
+        ctx,
+        ["text"],
+        PRICE.thumbnailConceptUsd,
+      );
+      const visionAccounting = ctx.modelUsageAccounting?.(["vision"]);
+      assert.equal(conceptCost, exactConceptCost, "composite block sees exact scoped concept spend");
+      assert.equal(visionAccounting?.costUsd, exactVisionCost);
+      assert.equal(visionAccounting?.unpricedCalls, 1);
+      const visionCost = accountedModelUsageCost(
+        ctx,
+        ["vision"],
+        PRICE.visionGraderUsd,
+      );
+      return {
+        x: "ok",
+        [COST_PATCH_KEY]: 0.04 + conceptCost + visionCost,
+      };
+    },
+  };
+  register(thumbnailComposite);
+  const thumbnailSuccess = await runPipeline(
+    validatePipeline([{ block: thumbnailComposite.id }]),
+    {
+      ownerId: "owner",
+      runId: "run-thumbnail-composite-cost",
+      channelId: "channel",
+      keyPrefix: "test/",
+      budgetUsd: 1,
+      sink: sinkRows().sink,
+    },
+  );
+  assert.ok(
+    Math.abs(thumbnailSuccess.costTotal - expectedThumbnailCost) < 1e-12,
+    "priced vision is exact and only one genuinely unpriced vision call receives the fallback",
+  );
+
   _clear();
   const failed: Block = {
     id: "failed_cost_test",
     consumes: [],
     produces: ["x"],
-    run: async () => {
+    run: async (ctx) => {
+      recordThumbnailModelUsage();
+      const exactObservedConcept = accountedModelUsageCost(
+        ctx,
+        ["text"],
+        PRICE.thumbnailConceptUsd,
+      );
+      const exactObservedVision = accountedModelUsageCost(
+        ctx,
+        ["vision"],
+        PRICE.visionGraderUsd,
+      );
       throw Object.assign(new Error("paid response was unusable"), {
         retryable: false,
-        observedCostUsd: 0.42,
+        // Simulates a candidate rendered and judged before a gate/storage error.
+        observedCostUsd: 0.04 + exactObservedConcept + exactObservedVision,
       });
     },
   };
@@ -310,11 +453,14 @@ async function explicitAndFailedCostsAreAuthoritative(): Promise<void> {
     sink: failedSink.sink,
   });
   assert.equal(result.ok, false);
-  assert.equal(result.costTotal, 0.42, "failed paid attempt stays in the run total");
-  assert.equal(
-    failedSink.rows.find((row) => row.status === "failed")?.cost,
-    0.42,
-    "failed stage persists observed spend",
+  const failedWholeCost = expectedThumbnailCost;
+  assert.ok(
+    Math.abs(result.costTotal - failedWholeCost) < 1e-12,
+    "failed paid attempt stays in the run total",
+  );
+  assert.ok(
+    Math.abs((failedSink.rows.find((row) => row.status === "failed")?.cost ?? 0) - failedWholeCost) < 1e-12,
+    "failed stage persists concept, image, and vision spend",
   );
 }
 

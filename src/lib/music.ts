@@ -33,10 +33,47 @@ import { promisify } from "node:util";
 const execFileP = promisify(execFile);
 
 export class MusicError extends Error {
-  constructor(message: string) {
-    super(message);
+  readonly retryable = false;
+  readonly status?: number;
+  /** True only when the provider explicitly rejected the create before work. */
+  readonly safeToFallback: boolean;
+  /** Confirmed accepted generation jobs represented by this failure. */
+  readonly acceptedUnits: number;
+  readonly acceptedJobId?: string;
+
+  constructor(
+    message: string,
+    options: {
+      status?: number;
+      safeToFallback?: boolean;
+      acceptedUnits?: number;
+      acceptedJobId?: string;
+      cause?: unknown;
+    } = {},
+  ) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
     this.name = "MusicError";
+    this.status = options.status;
+    this.safeToFallback = options.safeToFallback === true;
+    this.acceptedUnits = Math.max(0, Math.floor(options.acceptedUnits ?? 0));
+    this.acceptedJobId = options.acceptedJobId;
   }
+}
+
+/** Preserve confirmed generation spend when later work fails. */
+export function withMusicGenerationCost(
+  error: unknown,
+  completedUnits: number,
+  unitCostUsd: number,
+): Error {
+  const failure = error instanceof Error ? error : new Error(String(error));
+  const acceptedOnFailure = error instanceof MusicError ? error.acceptedUnits : 0;
+  const totalUnits = Math.max(0, Math.floor(completedUnits)) + acceptedOnFailure;
+  Object.assign(failure, {
+    retryable: false,
+    additionalObservedCostUsd: totalUnits * Math.max(0, unitCostUsd),
+  });
+  return failure;
 }
 
 export type MusicProvider = "mureka" | "suno";
@@ -160,32 +197,78 @@ export async function generateMureka(args: {
   pollIntervalMs?: number;
   timeoutMs?: number;
 }): Promise<MusicResult> {
-  const created = await fetch(`${MUREKA_BASE}/instrumental/generate`, {
-    method: "POST",
-    headers: {
-      Authorization: `Bearer ${murekaKey()}`,
-      "Content-Type": "application/json",
-    },
-    body: JSON.stringify({ model: args.model ?? "auto", prompt: args.prompt }),
-  });
-  const cjson = (await created.json()) as { id?: string; status?: string };
-  if (!created.ok || !cjson.id) {
+  let created: Response;
+  try {
+    created = await fetch(`${MUREKA_BASE}/instrumental/generate`, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${murekaKey()}`,
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify({ model: args.model ?? "auto", prompt: args.prompt }),
+    });
+  } catch (error) {
     throw new MusicError(
-      `mureka generate failed: HTTP ${created.status} ${JSON.stringify(cjson).slice(0, 200)}`,
+      `mureka create outcome is unknown after transport failure; not resubmitting: ${error instanceof Error ? error.message : String(error)}`,
+      { cause: error },
+    );
+  }
+  let cjson: { id?: string; status?: string; message?: string };
+  try {
+    cjson = (await created.json()) as typeof cjson;
+  } catch (error) {
+    throw new MusicError(
+      `mureka create returned unreadable HTTP ${created.status}; not resubmitting`,
+      {
+        status: created.status,
+        acceptedUnits: created.ok ? 1 : 0,
+        cause: error,
+      },
+    );
+  }
+  if (!created.ok) {
+    const detail = JSON.stringify(cjson).slice(0, 200);
+    const quotaRejected = created.status === 429 || /quota|billing|insufficient|credit/i.test(detail);
+    throw new MusicError(
+      `mureka generate failed: HTTP ${created.status} ${detail}`,
+      { status: created.status, safeToFallback: quotaRejected },
+    );
+  }
+  if (!cjson.id) {
+    throw new MusicError(
+      `mureka accepted create without a recoverable job id: ${JSON.stringify(cjson).slice(0, 200)}`,
+      { status: created.status, acceptedUnits: 1 },
     );
   }
   const id = cjson.id;
   const deadline = Date.now() + (args.timeoutMs ?? 600_000);
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, args.pollIntervalMs ?? 8000));
-    const res = await fetch(`${MUREKA_BASE}/instrumental/query/${id}`, {
-      headers: { Authorization: `Bearer ${murekaKey()}` },
-    });
-    const json = (await res.json()) as {
+    let res: Response;
+    let json: {
       status?: string;
       choices?: Array<Record<string, unknown>>;
       failed_reason?: string;
     };
+    try {
+      res = await fetch(`${MUREKA_BASE}/instrumental/query/${id}`, {
+        headers: { Authorization: `Bearer ${murekaKey()}` },
+      });
+      if (!res.ok) {
+        if (res.status === 429 || res.status >= 500) continue;
+        throw new MusicError(`mureka query ${id} failed: HTTP ${res.status}`, {
+          status: res.status,
+          acceptedUnits: 1,
+          acceptedJobId: id,
+        });
+      }
+      json = (await res.json()) as typeof json;
+    } catch (error) {
+      if (error instanceof MusicError) throw error;
+      // Polling the same accepted id is safe. A transient GET failure does not
+      // create another generation, so keep recovering until the deadline.
+      continue;
+    }
     if (json.status === "succeeded") {
       const choices = json.choices ?? [];
       const tracks: MusicTrack[] = [];
@@ -196,13 +279,20 @@ export async function generateMureka(args: {
       if (tracks.length) return { provider: "mureka", url: tracks[0].url, jobId: id, tracks };
       throw new MusicError(
         `mureka succeeded but no audio url: ${JSON.stringify(json).slice(0, 200)}`,
+        { acceptedUnits: 1, acceptedJobId: id },
       );
     }
     if (json.status === "failed") {
-      throw new MusicError(`mureka failed: ${json.failed_reason ?? "unknown"}`);
+      throw new MusicError(`mureka failed: ${json.failed_reason ?? "unknown"}`, {
+        acceptedUnits: 1,
+        acceptedJobId: id,
+      });
     }
   }
-  throw new MusicError(`mureka timed out (job ${id})`);
+  throw new MusicError(`mureka timed out (job ${id})`, {
+    acceptedUnits: 1,
+    acceptedJobId: id,
+  });
 }
 
 /** Trim a prompt to a hard char cap on a word boundary. */
@@ -329,39 +419,94 @@ export async function generateSuno(args: {
   };
 
   let taskId: string | undefined;
-  let lastErr = "";
-  for (const body of [customBody, legacyBody]) {
-    const created = await fetch(`${SUNO_BASE}/generate`, {
-      method: "POST",
-      headers,
-      body: JSON.stringify(body),
-    });
-    const cjson = (await created.json()) as {
+  for (const [bodyIndex, body] of [customBody, legacyBody].entries()) {
+    let created: Response;
+    try {
+      created = await fetch(`${SUNO_BASE}/generate`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify(body),
+      });
+    } catch (error) {
+      throw new MusicError(
+        `suno create outcome is unknown after transport failure; not resubmitting: ${error instanceof Error ? error.message : String(error)}`,
+        { cause: error },
+      );
+    }
+    let cjson: {
       data?: { taskId?: string };
       code?: number;
       msg?: string;
     };
+    try {
+      cjson = (await created.json()) as typeof cjson;
+    } catch (error) {
+      throw new MusicError(
+        `suno create returned unreadable HTTP ${created.status}; not resubmitting`,
+        {
+          status: created.status,
+          acceptedUnits: created.ok ? 1 : 0,
+          cause: error,
+        },
+      );
+    }
     taskId = cjson.data?.taskId;
     if (created.ok && taskId) break;
-    lastErr = `HTTP ${created.status} ${cjson.msg ?? JSON.stringify(cjson).slice(0, 200)}`;
-    taskId = undefined;
+
+    const detail = cjson.msg ?? JSON.stringify(cjson).slice(0, 200);
+    if (created.ok) {
+      throw new MusicError(`suno accepted create without a recoverable task id: ${detail}`, {
+        status: created.status,
+        acceptedUnits: 1,
+      });
+    }
+    // The legacy request is a schema-compatibility fallback, not a provider
+    // retry. It is safe only when custom mode was explicitly rejected as an
+    // invalid request before generation admission.
+    const explicitSchemaRejection = bodyIndex === 0 && (created.status === 400 || created.status === 422);
+    if (explicitSchemaRejection) {
+      taskId = undefined;
+      continue;
+    }
+    const quotaRejected = created.status === 429 || /quota|billing|insufficient|credit/i.test(detail);
+    throw new MusicError(`suno generate failed: HTTP ${created.status} ${detail}`, {
+      status: created.status,
+      safeToFallback: quotaRejected,
+    });
   }
-  if (!taskId) throw new MusicError(`suno generate failed: ${lastErr}`);
+  if (!taskId) {
+    throw new MusicError("suno legacy request was explicitly rejected", { safeToFallback: false });
+  }
 
   type SunoItem = { id?: string; audioUrl?: string; streamAudioUrl?: string; duration?: number };
   const deadline = Date.now() + (args.timeoutMs ?? 600_000);
   while (Date.now() < deadline) {
     await new Promise((r) => setTimeout(r, args.pollIntervalMs ?? 8000));
-    const res = await fetch(
-      `${SUNO_BASE}/generate/record-info?taskId=${encodeURIComponent(taskId)}`,
-      { headers: { Authorization: `Bearer ${sunoKey()}` } },
-    );
-    const json = (await res.json()) as {
+    let res: Response;
+    let json: {
       data?: {
         status?: string;
         response?: { sunoData?: SunoItem[] };
       };
     };
+    try {
+      res = await fetch(
+        `${SUNO_BASE}/generate/record-info?taskId=${encodeURIComponent(taskId)}`,
+        { headers: { Authorization: `Bearer ${sunoKey()}` } },
+      );
+      if (!res.ok) {
+        if (res.status === 429 || res.status >= 500) continue;
+        throw new MusicError(`suno query ${taskId} failed: HTTP ${res.status}`, {
+          status: res.status,
+          acceptedUnits: 1,
+          acceptedJobId: taskId,
+        });
+      }
+      json = (await res.json()) as typeof json;
+    } catch (error) {
+      if (error instanceof MusicError) throw error;
+      continue;
+    }
     const status = json.data?.status;
     const items = json.data?.response?.sunoData ?? [];
     // `||`-style emptiness check: an empty-string audioUrl ("" while still
@@ -390,18 +535,24 @@ export async function generateSuno(args: {
       }
     }
     if (status && /fail|error|sensitive/i.test(status)) {
-      throw new MusicError(`suno failed: ${status}`);
+      throw new MusicError(`suno failed: ${status}`, {
+        acceptedUnits: 1,
+        acceptedJobId: taskId,
+      });
     }
   }
-  throw new MusicError(`suno timed out (task ${taskId})`);
+  throw new MusicError(`suno timed out (task ${taskId})`, {
+    acceptedUnits: 1,
+    acceptedJobId: taskId,
+  });
 }
 
-/** Provider-routed entry point with automatic FALLBACK to the other provider.
+/** Provider-routed entry point with admission-safe quota fallback.
  *
- *  A documentary/short must not ship silent because one music host is down or
- *  over quota (the Mureka-429 that left a doc music-less). So: try the preferred
- *  provider, and on ANY failure fall back to the other one whose key is present.
- *  Only providers with a configured key are attempted. */
+ * The alternate provider is used only after an explicit quota/billing rejection
+ * that proves the preferred provider did not accept a generation. Transport,
+ * 5xx, missing-receipt, and accepted-job failures stop in place; falling back
+ * after those outcomes could purchase the same music twice. */
 export async function generateMusic(args: {
   provider?: MusicProvider;
   prompt: string;
@@ -435,14 +586,22 @@ export async function generateMusic(args: {
 
   if (!order.length) throw new MusicError("no music provider key configured (MUREKA_API_KEY / SUNO_API_KEY)");
 
-  let lastErr = "";
-  for (const p of order) {
+  for (let index = 0; index < order.length; index++) {
+    const p = order[index];
     try {
       return await p.run();
     } catch (e) {
-      lastErr = e instanceof Error ? e.message : String(e);
-      args.log?.(`music: ${p.name} failed (${lastErr.slice(0, 120)})${p !== order[order.length - 1] ? " — falling back" : ""}`);
+      const message = e instanceof Error ? e.message : String(e);
+      const canFallback =
+        e instanceof MusicError &&
+        e.safeToFallback &&
+        e.acceptedUnits === 0 &&
+        index < order.length - 1;
+      args.log?.(
+        `music: ${p.name} failed (${message.slice(0, 120)})${canFallback ? " — admission rejected, falling back" : " — stopping"}`,
+      );
+      if (!canFallback) throw e;
     }
   }
-  throw new MusicError(`all music providers failed: ${lastErr}`);
+  throw new MusicError("all configured music providers explicitly rejected generation");
 }

@@ -1,139 +1,68 @@
 /**
- * UNIFIED image-to-video with SUBSCRIPTION-FIRST routing:
+ * Single AI-video runtime seam.
  *
- *   1. Higgsfield (operator's subscription — monthly credits renew; burn these
- *      FIRST, they're already paid for).
- *   2. fal.ai (pay-per-clip) — only when Higgsfield credits are exhausted for
- *      the month (R2 marker, auto-resets on month rollover) or the request
- *      needs a capability Higgsfield's CLI doesn't expose (FLF2V end-frame
- *      loops keep the proven fal/Kling tail_image_url path).
- *
- * A credits/quota error from Higgsfield marks the month exhausted and falls
- * through to fal in the SAME call — callers never see the switch.
+ * Provider routing is intentionally not configurable: every generated clip is
+ * submitted to the authenticated Novita spot render farm and the farm attests
+ * the pinned local-disk LTX contract before output is accepted. Legacy
+ * Fal/Salad/Higgsfield fallbacks are rejected before paid work starts.
  */
-import { join } from "node:path";
-import { downloadTo, makeRunTempDir } from "@/lib/files";
-import { generateFalI2V, type FalI2VRequest, type FalI2VResult } from "@/lib/falVideo";
-import { putObject, getObjectBytes } from "@/lib/storage";
+import { createHash } from "node:crypto";
+import { renderNovitaI2V } from "@/lib/novitaMedia";
 
-const QUOTA_KEY = "state/higgsfield_quota.json";
-let quotaCache: { month: string; exhausted: boolean } | null = null;
-
-function thisMonth(): string {
-  return new Date().toISOString().slice(0, 7);
-}
-
-async function higgsfieldExhausted(): Promise<boolean> {
-  const month = thisMonth();
-  if (quotaCache?.month === month) return quotaCache.exhausted;
-  try {
-    const raw = JSON.parse(Buffer.from(await getObjectBytes(QUOTA_KEY)).toString()) as { month?: string };
-    quotaCache = { month, exhausted: raw.month === month };
-  } catch {
-    quotaCache = { month, exhausted: false };
-  }
-  return quotaCache.exhausted;
-}
-
-async function markExhausted(log: (m: string) => void): Promise<void> {
-  quotaCache = { month: thisMonth(), exhausted: true };
-  try {
-    await putObject(QUOTA_KEY, Buffer.from(JSON.stringify({ month: thisMonth(), at: Date.now() })), {
-      contentType: "application/json",
-    });
-  } catch { /* marker is best-effort; the in-process cache still holds */ }
-  log(`i2v: Higgsfield monthly credits EXHAUSTED — fal.ai takes over until ${thisMonth()} rolls over`);
-}
-
-function isQuotaError(msg: string): boolean {
-  return /credit|insufficient|quota|not enough|balance|payment required|subscription/i.test(msg);
-}
-
-export interface I2VRequest extends FalI2VRequest {
-  log?: (m: string) => void;
-  /** Scratch id for temp files (defaults to a time-free generic). */
-  runId?: string;
-  /** Opt-in: route to the gpuVideo module (LTX native audio) — "fal-ltx" | "salad-ltx". */
+export interface I2VRequest {
+  prompt: string;
+  imageUrl?: string;
+  imageKey?: string;
+  tailImageUrl?: string;
+  durationSec?: number;
+  aspectRatio?: string;
+  negativePrompt?: string;
+  model?: string;
   provider?: string;
+  runId?: string;
+  keyPrefix?: string;
+  log?: (message: string) => void;
 }
 
-export async function generateI2V(req: I2VRequest): Promise<FalI2VResult> {
-  const log = req.log ?? (() => {});
-
-  // GPU-video route (LTX native audio) — opt-in via req.provider or I2V_PROVIDER=gpu.
-  // Default path (Higgsfield → fal Kling) is unchanged when not selected.
-  if (req.provider === "fal-ltx" || req.provider === "salad-ltx" || process.env.I2V_PROVIDER === "gpu") {
-    const { renderGpuVideo } = await import("@/lib/gpuVideo");
-    const r = await renderGpuVideo({
-      prompt: req.prompt,
-      imageUrl: req.imageUrl,
-      durationSec: req.durationSec,
-      aspectRatio: req.aspectRatio,
-      negativePrompt: req.negativePrompt,
-      provider: req.provider === "salad-ltx" ? "salad-ltx" : req.provider === "fal-ltx" ? "fal-ltx" : undefined,
-      log,
-    });
-    log(`i2v: gpuVideo[${r.provider}] ✓ (audio=${r.hasAudio})`);
-    return { url: r.url, jobId: r.jobId, model: r.model };
-  }
-
-  // Capability gate: FLF2V (end-frame) loops stay on the proven fal path.
-  const flf2v = Boolean(req.tailImageUrl);
-  const higgsReady = process.env.HIGGSFIELD_LIVE === "1";
-
-  if (!flf2v && higgsReady && !(await higgsfieldExhausted())) {
-    try {
-      const { generateClip, runCli } = await import("@/lib/higgsfield");
-      // CLI takes a local path/upload id — fetch the still locally.
-      const tmp = await makeRunTempDir(req.runId ?? "i2v");
-      const still = await downloadTo(req.imageUrl, join(tmp, `i2v_start_${Math.abs(hash(req.imageUrl))}.png`));
-      // Plain forward i2v: start-image only (no end frame).
-      const out = (await runCli([
-        "generate", "create", req.model && !req.model.includes("/") ? req.model : "kling3_0",
-        "--prompt", req.prompt,
-        "--start-image", still,
-        "--duration", String((req.durationSec ?? 5) >= 8 ? 10 : 5),
-        "--aspect_ratio", req.aspectRatio ?? "16:9",
-        "--mode", "std",
-        "--sound", "off",
-        "--wait", "--wait-timeout", "20m", "--wait-interval", "5s",
-      ])) as Record<string, unknown>;
-      const url = extractUrl(out);
-      if (!url) throw new Error("higgsfield returned no result url");
-      log(`i2v: Higgsfield (subscription) ✓`);
-      void generateClip; // (end-frame variant available for future loop use)
-      return { url, jobId: String(out["id"] ?? out["job_id"] ?? "higgsfield"), model: "higgsfield/kling" };
-    } catch (e) {
-      const msg = e instanceof Error ? e.message : String(e);
-      if (isQuotaError(msg)) {
-        await markExhausted(log);
-      } else {
-        log(`i2v: Higgsfield failed (${msg.slice(0, 140)}) — fal fallback for this clip`);
-      }
-    }
-  }
-
-  return generateFalI2V(req);
+export interface I2VResult {
+  url: string;
+  jobId: string;
+  model: string;
+  key: string;
+  costUsd: number;
 }
 
-function extractUrl(job: Record<string, unknown>): string | undefined {
-  for (const k of ["url", "result_url", "video_url", "output_url"]) {
-    if (typeof job[k] === "string") return job[k] as string;
+export async function generateI2V(req: I2VRequest): Promise<I2VResult> {
+  if (req.provider && req.provider !== "novita" && req.provider !== "novita-ltx") {
+    throw new Error(`i2v: provider ${JSON.stringify(req.provider)} is retired; Novita LTX is mandatory`);
   }
-  const results = job["results"] as Record<string, unknown> | undefined;
-  if (results) {
-    for (const v of Object.values(results)) {
-      if (typeof v === "string" && v.startsWith("http")) return v;
-      if (v && typeof v === "object" && typeof (v as Record<string, unknown>)["url"] === "string") {
-        return (v as Record<string, unknown>)["url"] as string;
-      }
-    }
+  if (req.tailImageUrl) {
+    throw new Error("i2v: first/last-frame provider fallback is retired; use the Novita clip plus deterministic loop assembly");
   }
-  return undefined;
-}
-
-function hash(s: string): number {
-  let h = 0;
-  for (let i = 0; i < s.length; i++) h = (h * 31 + s.charCodeAt(i)) | 0;
-  return h;
+  if (req.aspectRatio && req.aspectRatio !== "16:9") {
+    throw new Error(`i2v: aspect ratio ${JSON.stringify(req.aspectRatio)} is not covered by the pinned Novita production profile`);
+  }
+  if (!req.prompt.trim()) throw new Error("i2v: prompt is required");
+  const imageIdentity = req.imageKey ?? req.imageUrl ?? "";
+  if (!imageIdentity) throw new Error("i2v: imageKey or imageUrl is required");
+  const identity = createHash("sha256")
+    .update(req.runId ?? "shared")
+    .update("\0")
+    .update(req.prompt)
+    .update("\0")
+    .update(imageIdentity)
+    .digest("hex")
+    .slice(0, 20);
+  const result = await renderNovitaI2V({
+    prefix: `${(req.keyPrefix ?? "youtube-studio").replace(/\/$/, "")}/runs/${req.runId ?? "shared"}/novita-i2v`,
+    id: `clip-${identity}`,
+    prompt: req.prompt,
+    imageKey: req.imageKey,
+    imageUrl: req.imageKey ? undefined : req.imageUrl,
+    durationSec: req.durationSec,
+    negativePrompt: req.negativePrompt,
+    profileId: "production",
+  });
+  req.log?.(`i2v: Novita LTX-2.3 ${result.jobId} accepted`);
+  return result;
 }

@@ -14,7 +14,8 @@
  *                         draft previews only; failures never swap renderers.
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
-import { thumbnailGenerationCost } from "@/engine/pricing";
+import { PRICE, thumbnailGenerationCost } from "@/engine/pricing";
+import { accountedModelUsageCost } from "@/engine/modelUsageCost";
 import {
   assertThumbnailGate,
   assertThumbnailStrategy,
@@ -27,6 +28,13 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { makeRunTempDir, downloadTo, readBytes, writeBytes } from "@/lib/files";
 import { putObject, getObjectBytes } from "@/lib/storage";
+import {
+  beginThumbnailPaidWork,
+  openThumbnailCheckpoint,
+  saveThumbnailGenerationCheckpoint,
+  saveThumbnailQaCheckpoint,
+  thumbnailRequestHash,
+} from "@/lib/thumbnailCheckpoint";
 import { titleCard, imageToJpeg, solidImage } from "@/lib/ffmpeg";
 import { bananaCounters, hasBanana } from "@/lib/banana";
 import { craftMetadata } from "@/lib/metacraft";
@@ -277,6 +285,12 @@ export const metadataOptimized: Block = {
   ],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
+    const plannedTitle = typeof ctx.store["plannedTitle"] === "string"
+      ? (ctx.store["plannedTitle"] as string).trim()
+      : "";
+    if (plannedTitle.length > 100) {
+      throw new Error("metadata: claimed plan title exceeds YouTube's 100-character limit");
+    }
     const channelName = (ctx.store["channelName"] as string | undefined) ?? "this channel";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
     const persona = (ctx.store["persona"] as string | undefined) ?? "";
@@ -357,7 +371,7 @@ export const metadataOptimized: Block = {
       const tags = [topic.toLowerCase(), niche].filter(Boolean) as string[];
       const ve = await viewEstimate(tags);
       ctx.log(`metadata (degraded, no Gemini): "${title}"`);
-      return { title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
+      return { title: plannedTitle || title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
     }
 
     // Phase 7: bias titles toward past high-CTR/retention winners ("" until data).
@@ -400,7 +414,14 @@ export const metadataOptimized: Block = {
       ({ title, description, tags } = finishMetadata(ctx, { title, description, tags, channelName, nicheIntel }));
       const ve = await viewEstimate(tags);
       ctx.log(`metadata: METACRAFT [${m.frame}] click ${m.clickScore}/10 — "${title.slice(0, 60)}" est=${ve.estimatedViews} (${ve.estimatedViewsSource})`);
-      return { title, description, tags, pinnedComment: m.pinnedComment, titleAlternate: m.titleAlternate, ...ve };
+      return {
+        title: plannedTitle || title,
+        description,
+        tags,
+        pinnedComment: m.pinnedComment,
+        titleAlternate: m.titleAlternate,
+        ...ve,
+      };
     } catch (e) {
       ctx.log(`metadata: metacraft failed (${e instanceof Error ? e.message : e}) — legacy tournament fallback`);
     }
@@ -618,7 +639,7 @@ export const metadataOptimized: Block = {
     ctx.log(
       `metadata: title="${title.slice(0, 60)}…" (${tournament ? `tournament ${(tournament.score * 10).toFixed(0)}/10` : `score=${loop!.critique.score.toFixed(2)}, accepted=${loop!.accepted}`}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
     );
-    return { title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
+    return { title: plannedTitle || title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
   },
 };
 
@@ -668,9 +689,22 @@ export const thumbnailGen: Block = {
       "banana";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
     const countersBefore = { ...bananaCounters };
-    let referenceJudgeCalls = 0;
+    let checkpointGenerationCostUsd = 0;
+    let checkpointQaCostUsd = 0;
+    const observedConceptCost = (): number =>
+      accountedModelUsageCost(ctx, ["text"], PRICE.thumbnailConceptUsd);
+    const observedImageCost = (): number =>
+      ctx.imageUsageAccounting?.().costUsd ??
+      thumbnailGenerationCost(countersBefore, bananaCounters, 0);
+    const observedQaCost = (): number =>
+      accountedModelUsageCost(ctx, ["vision"], PRICE.visionGraderUsd);
     const thumbnailCost = (extraCostUsd = 0): number =>
-      thumbnailGenerationCost(countersBefore, bananaCounters, referenceJudgeCalls, extraCostUsd);
+      Math.max(
+        checkpointGenerationCostUsd,
+        observedImageCost() + observedConceptCost(),
+      ) + Math.max(checkpointQaCostUsd, observedQaCost()) + Math.max(0, extraCostUsd);
+
+    try {
 
     // CHANNEL GROUNDING that previously never reached generation:
     //  - styleDNA.thumbnail — the research-distilled per-channel thumbnail spec
@@ -733,7 +767,6 @@ export const thumbnailGen: Block = {
             refPaths.push(await downloadTo(referenceThumbs[i], join(tmp, `ref_${i}.jpg`)));
           } catch { /* unreachable reference — skip it */ }
         }
-        referenceJudgeCalls += 1;
         const raw = await visionLocal({
           prompt:
             `Image 1 is a CANDIDATE YouTube thumbnail rendered at real mobile browse size (~168px wide). ` +
@@ -784,10 +817,6 @@ export const thumbnailGen: Block = {
       };
     }
 
-    if (!hasBanana()) {
-      throw new Error("thumbnail_gen: no configured text-free image provider");
-    }
-
     const { buildStyleDnaPlaybook, renderCandidate } = await import("@/lib/thumbnailLab");
     let playbook = (channelDoc as {
       thumbnailPlaybook?: import("@/lib/thumbnailLab").ThumbnailPlaybook;
@@ -827,7 +856,6 @@ export const thumbnailGen: Block = {
       ctx.log("thumbnail_gen: built the missing playbook from the channel's Style DNA");
     }
 
-    const tmp = await makeRunTempDir(ctx.runId);
     const bias = (ctx.params["patternBias"] as string[] | undefined)?.filter((name) =>
       playbook.patterns.some((pattern) => pattern.name === name),
     );
@@ -836,42 +864,139 @@ export const thumbnailGen: Block = {
       : playbook.patterns;
     const idx = [...ctx.runId].reduce((sum, char) => sum + char.charCodeAt(0), 0) % pool.length;
     const pattern = pool[idx];
-    const outJpg = join(tmp, "thumbnail.jpg");
     const energyOverride = ctx.params["thumbEnergy"] as "spectacle" | "bold" | "cozy_pop" | undefined;
     const effectivePlaybook = energyOverride ? { ...playbook, energy: energyOverride } : playbook;
 
     // A raw video keyframe is NOT automatically safe thumbnail art. Only a
     // future producer carrying the explicit text-free + safe-zone contract may
     // reuse it; current f1 frames therefore generate a dedicated cheap base.
-    let baseArt: import("@/lib/thumbnailRenderer").ThumbnailBaseArtifact | undefined;
     const sceneStillKey = ctx.store["f1Key"] as string | undefined;
     const provenance = ctx.store["f1ThumbnailBaseProvenance"];
     const { isThumbnailBaseProvenance } = await import("@/lib/thumbnailRenderer");
-    if (sceneStillKey && isThumbnailBaseProvenance(provenance)) {
-      baseArt = {
-        path: await writeBytes(join(tmp, "verified-scene-base.jpg"), await getObjectBytes(sceneStillKey)),
-        provenance,
-      };
-    } else if (sceneStillKey) {
+    const verifiedSceneBase = Boolean(sceneStillKey && isThumbnailBaseProvenance(provenance));
+    if (sceneStillKey && !verifiedSceneBase) {
       ctx.log("thumbnail_gen: f1 reuse disabled (missing text-free + safe-zone provenance)");
     }
 
-    await renderCandidate({
-      pattern,
+    const scriptHint = String(ctx.store["narrationText"] ?? "").slice(0, 500);
+    const requestHash = thumbnailRequestHash({
+      contract: "thumbnail-gen-checkpoint-v1",
       title,
-      scriptHint: String(ctx.store["narrationText"] ?? "").slice(0, 500),
+      scriptHint,
+      sceneMandate: dnaThumb?.subject,
+      pattern,
       playbook: effectivePlaybook,
-      outJpg,
-      tmpDir: tmp,
-      idx,
-      log: ctx.log,
-      ...(dnaThumb?.subject ? { sceneMandate: dnaThumb.subject } : {}),
-      ...(baseArt ? { baseArt } : {}),
+      patternIndex: idx,
+      verifiedSceneBase: verifiedSceneBase ? { sceneStillKey, provenance } : null,
+      providerRoute: {
+        imageDisableGemini: process.env.IMAGE_DISABLE_GEMINI ?? "",
+        imageProviders: process.env.IMAGE_PROVIDERS ?? "",
+        bananaForceModel: process.env.BANANA_FORCE_MODEL ?? "",
+        falFlashModel: process.env.FAL_IMAGE_MODEL_FLASH ?? "",
+      },
     });
+    const tmp = await makeRunTempDir(ctx.runId, `thumbnail-${requestHash.slice(0, 20)}`);
+    const outJpg = join(tmp, "thumbnail.jpg");
+    let checkpoint = await openThumbnailCheckpoint({
+      checkpointRoot: `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,
+      requestHash,
+      localImagePath: outJpg,
+      beforeClaim: () => {
+        if (!hasGeminiKey()) {
+          throw new Error("thumbnail_gen: no configured concept provider");
+        }
+        if (!hasBanana()) {
+          throw new Error("thumbnail_gen: no configured text-free image provider");
+        }
+        if (quality === "production" && !hasVisionKey()) {
+          throw new Error("thumbnail_gen: no configured production QA provider");
+        }
+      },
+    });
+
+    if (checkpoint.manifest) {
+      checkpointGenerationCostUsd = checkpoint.manifest.generationCostUsd;
+      ctx.log(
+        `thumbnail_gen: reused ${checkpoint.source} paid candidate checkpoint ${requestHash.slice(0, 12)}`,
+      );
+    } else {
+      let baseArt: import("@/lib/thumbnailRenderer").ThumbnailBaseArtifact | undefined;
+      if (sceneStillKey && isThumbnailBaseProvenance(provenance)) {
+        baseArt = {
+          path: await writeBytes(
+            join(tmp, "verified-scene-base.jpg"),
+            await getObjectBytes(sceneStillKey),
+          ),
+          provenance,
+        };
+      }
+      checkpoint = await beginThumbnailPaidWork(checkpoint);
+      await renderCandidate({
+        pattern,
+        title,
+        scriptHint,
+        playbook: effectivePlaybook,
+        outJpg,
+        tmpDir: tmp,
+        idx,
+        log: ctx.log,
+        ...(dnaThumb?.subject ? { sceneMandate: dnaThumb.subject } : {}),
+        ...(baseArt ? { baseArt } : {}),
+      });
+      // Persist the whole authoritative generation spend: the exact concept
+      // token usage plus the actual image counter delta. This local manifest is
+      // written before R2, so a storage retry on this worker cannot re-purchase.
+      checkpointGenerationCostUsd = observedImageCost() + observedConceptCost();
+      checkpoint = await saveThumbnailGenerationCheckpoint(
+        checkpoint,
+        checkpointGenerationCostUsd,
+      );
+    }
 
     // One post-render alarm. It can block publishing; it never starts another
     // paid renderer or swaps in a generic card.
-    const refQA = await referenceMobileQA(tmp, outJpg);
+    const qaRequestHash = thumbnailRequestHash({
+      contract: "thumbnail-mobile-reference-qa-v2-exact-accounting",
+      candidateRequestHash: requestHash,
+      quality,
+      title,
+      niche,
+      dnaSpecClause,
+      rulesClause,
+      referenceThumbs,
+    });
+    let refQA: ThumbnailGateVerdict | null;
+    const cachedQa = checkpoint.manifest?.qa;
+    if (cachedQa?.completed && cachedQa.requestHash === qaRequestHash) {
+      checkpointQaCostUsd = cachedQa.costUsd;
+      if (cachedQa.verdict === null) {
+        refQA = null;
+      } else {
+        const verdict = cachedQa.verdict as Partial<ThumbnailGateVerdict> | undefined;
+        if (
+          !verdict ||
+          typeof verdict.textOk !== "boolean" ||
+          typeof verdict.faceClear !== "boolean" ||
+          !Number.isFinite(verdict.punch) ||
+          !Number.isFinite(verdict.styleMatch) ||
+          !Number.isFinite(verdict.storyMatch) ||
+          typeof verdict.uiClean !== "boolean" ||
+          typeof verdict.reason !== "string"
+        ) {
+          throw new Error("thumbnail_gen: cached QA verdict is invalid");
+        }
+        refQA = verdict as ThumbnailGateVerdict;
+      }
+      ctx.log("thumbnail_gen: reused checkpointed mobile/reference QA verdict");
+    } else {
+      refQA = await referenceMobileQA(tmp, outJpg);
+      checkpointQaCostUsd = observedQaCost();
+      checkpoint = await saveThumbnailQaCheckpoint(checkpoint, {
+        requestHash: qaRequestHash,
+        verdict: refQA,
+        costUsd: checkpointQaCostUsd,
+      });
+    }
     assertThumbnailGate(quality, refQA, `${strategy} candidate`);
     const passed = refQA !== null && thumbnailGatePassed(refQA);
     const publishable = quality === "production" ? true : passed;
@@ -893,6 +1018,11 @@ export const thumbnailGen: Block = {
       thumbnailPublishable: publishable,
       [COST_PATCH_KEY]: thumbnailCost(),
     };
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      Object.assign(failure, { observedCostUsd: thumbnailCost() });
+      throw failure;
+    }
   },
 };
 

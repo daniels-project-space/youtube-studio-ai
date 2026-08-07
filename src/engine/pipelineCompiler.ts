@@ -1,7 +1,15 @@
+import { createHash } from "node:crypto";
 import type { PipelineEntry } from "./types";
 import type { ResolvedPipeline } from "./validate";
 import { allManifests, getManifest } from "./registry";
 import { configuredMaxCostUsd } from "./moduleManifest";
+import {
+  assessNovitaVideoRenderBinding,
+  assertNovitaVideoRenderBinding,
+  compileCatalogExecutionFlow,
+  type CatalogExecutionStep,
+  type NovitaVideoRenderAssessment,
+} from "./goldenExecution";
 
 export interface PipelinePolicy {
   id: string;
@@ -27,6 +35,10 @@ export interface PipelineCompilation {
   fingerprint: string;
   capabilities: string[];
   modules: CompiledModuleRecord[];
+  /** Exact selected modules mapped to catalog owners; qualification is explicit. */
+  catalogFlow: readonly CatalogExecutionStep[];
+  /** Read-only admission assessment for the single approved provider AI-video route. */
+  videoRenderBinding: NovitaVideoRenderAssessment;
   bindings: Record<string, Record<string, string>>;
   warnings: string[];
   reservedMaxCostUsd: number;
@@ -58,10 +70,11 @@ export function materializeRuntimePipelineParams(
 }
 
 /**
- * Runnable production floor. This is intentionally not named or represented as
- * Golden: contract-certified modules and migration artifacts are still allowed.
- * Golden selection goes through selectGoldenProductionModules(), which requires
- * Golden-certified manifests and an immutable proof receipt.
+ * Runnable production floor. Every selected ABI is mapped to an editorial
+ * module-catalog owner for routing/export, but that mapping does not change its
+ * certification: contract-certified modules remain contract-certified. Formal
+ * Golden promotion still requires selectGoldenProductionModules(), a Golden-
+ * certified manifest, and an immutable proof receipt.
  */
 export const PRODUCTION_CONTRACT_POLICY: PipelinePolicy = {
   id: "production-contract",
@@ -179,11 +192,22 @@ function insertCapabilityProvider(
  */
 export function completePipelineForPolicy(
   source: readonly PipelineEntry[],
-): { entries: PipelineEntry[]; inserted: string[] } {
+): { entries: PipelineEntry[]; inserted: string[]; retired: string[] } {
   const entries = source.map((entry) => ({
     block: entry.block,
     ...(entry.params ? { params: { ...entry.params } } : {}),
   }));
+  const retired: string[] = [];
+
+  // qa_refine is a proven no-op whose implementation was fully replaced by
+  // qa_visual's fail-closed deterministic gate and the runner's bounded
+  // ownership-aware self-heal. Strip persisted legacy rows before resolution so
+  // the retired block no longer needs to remain registered forever.
+  for (let index = entries.length - 1; index >= 0; index--) {
+    if (entries[index].block !== "qa_refine") continue;
+    entries.splice(index, 1);
+    retired.push("qa_refine");
+  }
 
   // Legacy music-loop channels sometimes persisted both intro_card and the
   // newer deblur-intro assemble mode. The former is dead work in that mode and
@@ -196,6 +220,7 @@ export function completePipelineForPolicy(
     for (let index = assembleIndex - 1; index >= 0; index--) {
       if (entries[index].block !== "intro_card") continue;
       entries.splice(index, 1);
+      retired.push("intro_card");
       assembleIndex--;
     }
   }
@@ -220,7 +245,7 @@ export function completePipelineForPolicy(
     }
     inserted.push(moduleId);
   }
-  return { entries, inserted };
+  return { entries, inserted, retired: [...new Set(retired)] };
 }
 
 function stable(value: unknown): string {
@@ -230,15 +255,9 @@ function stable(value: unknown): string {
   return `{${Object.keys(object).sort().map((key) => `${JSON.stringify(key)}:${stable(object[key])}`).join(",")}}`;
 }
 
-/** Deterministic non-security fingerprint; persisted payloads use SHA-256. */
+/** Deterministic SHA-256 identity for persisted compilation evidence. */
 function fingerprint(value: unknown): string {
-  const text = stable(value);
-  let hash = 0x811c9dc5;
-  for (let i = 0; i < text.length; i++) {
-    hash ^= text.charCodeAt(i);
-    hash = Math.imul(hash, 0x01000193) >>> 0;
-  }
-  return hash.toString(16).padStart(8, "0");
+  return createHash("sha256").update(stable(value)).digest("hex");
 }
 
 function requireCapability(capabilities: Set<string>, capability: string, reason?: string): void {
@@ -389,11 +408,22 @@ export function compilePipeline(
     certification: manifest.certification.status,
     capabilities: manifest.capabilities,
   }));
+  const catalogFlow = compileCatalogExecutionFlow(resolved.manifests);
+  const videoRenderBinding = assessNovitaVideoRenderBinding(resolved.manifests);
+  try {
+    assertNovitaVideoRenderBinding(resolved.manifests);
+  } catch (error) {
+    throw new PipelinePolicyError(
+      error instanceof Error ? error.message : "AI-video render binding rejected",
+    );
+  }
   const record = {
     policyId: policy.id,
     policyVersion: policy.version,
     capabilities: [...capabilities].sort(),
     modules,
+    catalogFlow,
+    videoRenderBinding,
   };
   return {
     ...record,

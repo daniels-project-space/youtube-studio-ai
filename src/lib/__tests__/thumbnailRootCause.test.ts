@@ -5,11 +5,21 @@ import { join } from "node:path";
 
 import { ARCHETYPES } from "@/engine/archetypes";
 import type { StyleDNA } from "@/engine/creative/types";
+import { classifyExecutionError } from "@/engine/executionErrors";
 import { FAMILIES, type FamilyKey } from "@/engine/families";
 import {
+  BananaImageSubmissionError,
   generateBananaImage,
 } from "@/lib/banana";
-import { probe, solidImage } from "@/lib/ffmpeg";
+import {
+  buildThumbnailTextFilterGraph,
+  probe,
+  regionLuma,
+  resolveThumbnailTextStyle,
+  solidImage,
+  thumbnailText,
+  THUMBNAIL_TEXT_OBJECTS,
+} from "@/lib/ffmpeg";
 import { buildStyleDnaPlaybook } from "@/lib/thumbnailLab";
 import { planThumbnailText, type ThumbnailTextZone } from "@/lib/thumbnailLayout";
 import {
@@ -105,7 +115,7 @@ function assertSceneTypographySplit(): void {
       treatment: "plate",
     },
   };
-  const request = buildThumbnailImageRequest(spec);
+  const request = buildThumbnailImageRequest(spec.scene);
   const prompt = request.prompt;
   assert.equal(request.allowText, false);
   assert.equal(request.tier, "flash");
@@ -114,20 +124,15 @@ function assertSceneTypographySplit(): void {
   assert.match(prompt, /no text, letters, words, numbers/i);
   assert.match(prompt, /left 42%/i);
 
-  assert.throws(
-    () => buildThumbnailImageRequest({
-      ...spec,
-      scene: { ...spec.scene, description: "A plaque reading DEFEND YOUR beside the statue" },
-    }),
-    /typography leaked into scene prompt/i,
-  );
   assert.doesNotThrow(
     () => buildThumbnailImageRequest({
-      ...spec,
-      scene: { ...spec.scene, description: "A peaceful marble guardian at sunrise" },
+        ...spec.scene,
+        description: "A market crash survival scene with a shielded investor at sunrise",
     }),
-    "one semantic headline keyword must remain legal scene grounding",
+    "week-ahead fallback scenes may legitimately describe the title subject",
   );
+  const sameSceneRequest = buildThumbnailImageRequest({ ...spec.scene });
+  assert.equal(sameSceneRequest.prompt, prompt, "scene-only provider request must be deterministic");
 
   assert.equal(isThumbnailBaseProvenance(undefined, "left"), false);
   assert.equal(isThumbnailBaseProvenance({
@@ -136,6 +141,76 @@ function assertSceneTypographySplit(): void {
   assert.equal(isThumbnailBaseProvenance({
     contract: "thumbnail-base-v1", textFree: true, safeZone: "left", source: "verified-video-still",
   }, "left"), true);
+}
+
+function assertMotifImplementations(): void {
+  const signatures = new Set<string>();
+  const expected: Record<(typeof THUMBNAIL_TEXT_OBJECTS)[number], RegExp> = {
+    torn_strip: /0xfff4d6.*t=fill/,
+    paint_smear: /0x42d6c5@0\.82:t=fill/,
+    censor_bar: /0x42d6c5@0\.96:t=fill/,
+    grunge_sticker: /color=black@0\.96:t=fill/,
+    spaced_elegant: /M  A  R  K  E  T/,
+    block_plate: /:h=8:color=0x42d6c5@0\.95:t=fill/,
+    neon_sign: /borderw=15:bordercolor=0x42d6c5@0\.20/,
+    spray_paint: /:w=5:h=18:color=0x42d6c5@0\.76:t=fill/,
+    stamp_ink: /fontcolor=0x42d6c5@0\.34/,
+    movie_poster: /fontcolor=black@0\.72/,
+    ransom_note: /0xff8f80@0\.96:t=fill/,
+    carved: /fontcolor=white@0\.34/,
+  };
+  for (const textObject of THUMBNAIL_TEXT_OBJECTS) {
+    const style = resolveThumbnailTextStyle({ textObject });
+    assert.equal(style.motif, textObject);
+    const graph = buildThumbnailTextFilterGraph({
+      title: "MARKET CRASH",
+      lines: [{ text: "MARKET", accent: false }, { text: "CRASH", payoff: true }],
+      position: "left",
+      subtitle: "INVESTORY",
+      accentColor: "#42d6c5",
+      textObject,
+    });
+    assert.match(graph, expected[textObject], `${textObject} must reach its executable FFmpeg treatment`);
+    signatures.add(graph);
+  }
+  assert.equal(signatures.size, THUMBNAIL_TEXT_OBJECTS.length, "every Style-DNA motif must render distinctly");
+  assert.equal(
+    resolveThumbnailTextStyle({ textObject: "future_unvalidated_motif", treatment: "plate" }).motif,
+    "legacy",
+    "unknown persisted motif data must degrade before rendering rather than crash after paid scene generation",
+  );
+
+  const speechGraph = buildThumbnailTextFilterGraph({
+    title: "STAY HARD",
+    lines: [{ text: "STAY HARD", payoff: true }],
+    subtitle: "MINDSET",
+    footerLabel: "David Goggins",
+    accentColor: "#ffd27a",
+  });
+  assert.match(speechGraph, /text='MINDSET'.*x=w-text_w-44:y=38/);
+  assert.match(speechGraph, /text='D A V I D.*G O G G I N S'.*y=h-58/);
+  assert.doesNotMatch(speechGraph, /text='MINDSET'.*y=h\*0\.92/,
+    "speech badge and speaker footer must never share the bottom baseline");
+
+  const grungePunctuation = buildThumbnailTextFilterGraph({
+    title: "MARKET:",
+    lines: [{ text: "MARKET:", payoff: true }],
+    position: "left",
+    textObject: "grunge_sticker",
+  });
+  assert.match(grungePunctuation, /text='market\\:'/);
+  assert.doesNotMatch(grungePunctuation, /text='market\\:\.'/,
+    "grunge casing must preserve existing terminal punctuation");
+
+  const smearContrast = buildThumbnailTextFilterGraph({
+    title: "CRASH",
+    lines: [{ text: "CRASH", payoff: true }],
+    position: "left",
+    accentColor: "#42d6c5",
+    textObject: "paint_smear",
+  });
+  assert.match(smearContrast, /drawtext=.*fontcolor=black:/,
+    "paint-smear text must use the measured high-contrast foreground, not the smear color");
 }
 
 async function assertRealCallPaths(): Promise<void> {
@@ -158,6 +233,10 @@ async function assertRealCallPaths(): Promise<void> {
   assert.doesNotMatch(production, /titleCardFallback|fal-route judge rejection/,
     "generic cards must not be automatic recovery");
   assert.match(production, /draft_preview_placeholder/);
+  const weekAhead = await readFile(join(process.cwd(), "src/trigger/planWeekAhead.ts"), "utf8");
+  assert.doesNotMatch(weekAhead, /enacts\s+\\?"\$\{o\.title\}/,
+    "the deterministic scene fallback must not inject headline/title copy into provider art");
+  assert.match(weekAhead, /subject through people, objects, and action:\s*\$\{o\.topic\}/);
 }
 
 function assertSafePlans(): void {
@@ -201,6 +280,7 @@ async function assertRenderedLayout(): Promise<void> {
           font: "serif",
           uppercase: false,
           treatment: "clean",
+          textObject: "spaced_elegant",
         },
       },
       outJpg,
@@ -224,6 +304,61 @@ async function assertRenderedLayout(): Promise<void> {
     assert.equal(media.width, 1_280);
     assert.equal(media.height, 720);
     assert.equal(media.hasVideo, true);
+
+    const percentPath = join(directory, "percent-thumbnail.jpg");
+    await thumbnailText({
+      basePath,
+      outJpg: percentPath,
+      title: "%",
+      lines: [{ text: "%", payoff: true }],
+      position: "left",
+      textObject: "spaced_elegant",
+      textColor: "white",
+      accentColor: "#ffffff",
+      textShadow: false,
+    });
+    const [baseLuma, renderedLuma] = await Promise.all([
+      regionLuma(basePath, 0, 0.2),
+      regionLuma(percentPath, 0, 0.2),
+    ]);
+    assert.ok(
+      renderedLuma > baseLuma + 1,
+      `literal-percent headline must render visible pixels (base=${baseLuma}, rendered=${renderedLuma})`,
+    );
+
+    const longBase = await solidImage(join(directory, "long-base.png"), 1_280, 720, "#000000");
+    const longPath = join(directory, "long-thumbnail.png");
+    const longText = "DONAUDAMPFSCHIFFFAHRTSGESELLSCHAFT";
+    const spaced = resolveThumbnailTextStyle({ textObject: "spaced_elegant" });
+    const longPlan = planThumbnailText({
+      lines: [{ text: longText, payoff: true }],
+      zone: "left",
+      tracking: spaced.tracking,
+      fontScale: spaced.fontScale,
+    });
+    assert.ok(longPlan.lines.length >= 3, "overlong unbroken words must hard-wrap before rendering");
+    assert.ok(longPlan.lines.every((line) => line.x + line.width <= 622));
+    await thumbnailText({
+      basePath: longBase,
+      outJpg: longPath,
+      title: longText,
+      lines: [{ text: longText, payoff: true }],
+      position: "left",
+      textObject: "spaced_elegant",
+      textColor: "white",
+      accentColor: "#ffffff",
+      textShadow: false,
+    });
+    const [longLeft, longRight, longBaseRight] = await Promise.all([
+      regionLuma(longPath, 0, 0.5),
+      regionLuma(longPath, 0.55, 0.45),
+      regionLuma(longBase, 0.55, 0.45),
+    ]);
+    assert.ok(longLeft > longBaseRight + 1, "hard-wrapped tracked headline must remain visible");
+    assert.ok(
+      longRight <= longBaseRight + 1,
+      `tracked headline must stay out of the hero zone (base=${longBaseRight}, right=${longRight})`,
+    );
   } finally {
     await rm(directory, { recursive: true, force: true });
   }
@@ -249,9 +384,36 @@ async function assertRetryBoundarySignal(): Promise<void> {
     }) as typeof fetch;
     await assert.rejects(
       generateBananaImage({ prompt: "fixture", allowText: false, tier: "flash" }),
-      /provider retry budget exhausted.*fixture transport failure/i,
+      (error: unknown) =>
+        error instanceof BananaImageSubmissionError &&
+        error.retryable === false &&
+        classifyExecutionError(error).retryable === false,
     );
-    assert.equal(calls, 2, "the provider owns one bounded two-attempt loop");
+    assert.equal(calls, 1, "ambiguous transport must never repeat a potentially-paid submission");
+
+    // A server error is equally ambiguous and must not fall through from the
+    // requested Pro model to a second (lower-quality) model.
+    calls = 0;
+    delete process.env.BANANA_FORCE_MODEL;
+    globalThis.fetch = (async () => {
+      calls += 1;
+      return new Response(JSON.stringify({ error: { message: "fixture upstream failure" } }), {
+        status: 503,
+        headers: { "content-type": "application/json" },
+      });
+    }) as typeof fetch;
+    await assert.rejects(
+      generateBananaImage({
+        prompt: "outer-recovery-fixture",
+        allowText: true,
+        tier: "pro",
+      }),
+      (error: unknown) =>
+        error instanceof BananaImageSubmissionError &&
+        error.status === 503 &&
+        classifyExecutionError(error).retryable === false,
+    );
+    assert.equal(calls, 1, "an ambiguous response must not retry or switch image models");
   } finally {
     globalThis.fetch = previous.fetch;
     if (previous.geminiKey === undefined) delete process.env.GEMINI_API_KEY;
@@ -268,6 +430,7 @@ async function assertRetryBoundarySignal(): Promise<void> {
 async function main(): Promise<void> {
   assertFamilyPolicy();
   assertSceneTypographySplit();
+  assertMotifImplementations();
   assertSafePlans();
   await assertRealCallPaths();
   await assertRenderedLayout();

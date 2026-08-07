@@ -17,6 +17,10 @@ import {
 } from "@/lib/youtubeConnector";
 import { evaluateChannelPublishAction } from "@/lib/channelPublishPolicy";
 import { uploadDurableVideo } from "@/lib/youtubeDurableUpload";
+import {
+  enqueueFailedPipelineResume,
+  enqueuePublishIntentRetry,
+} from "@/trigger/publishRetry";
 
 export interface PublishMetadataIdentity {
   title: string;
@@ -50,6 +54,95 @@ function convexClient(): ConvexHttpClientType {
   return new ConvexHttpClient(url);
 }
 
+async function handoffUploadedIntentToFailedPipeline(
+  convex: ConvexHttpClientType,
+  intent: {
+    _id: Id<"publishIntents">;
+    ownerId: string;
+    channelId: Id<"channels">;
+    runId?: Id<"runs">;
+    status: string;
+    videoArtifactId: string;
+    youtubeVideoId?: string;
+  },
+  log: (message: string) => void,
+): Promise<void> {
+  if (!intent.runId) return;
+  if (!intent.youtubeVideoId) {
+    throw new Error(`uploaded publish intent ${intent._id} is missing its YouTube video id`);
+  }
+  const prepared = await convex.mutation(api.runs.preparePublishContinuation, {
+    ownerId: intent.ownerId,
+    channelId: intent.channelId,
+    runId: intent.runId,
+    intentId: intent._id,
+    artifactId: intent.videoArtifactId,
+    youtubeVideoId: intent.youtubeVideoId,
+    preparedAt: Date.now(),
+  });
+  let resumed;
+  try {
+    resumed = await enqueueFailedPipelineResume(
+      {
+        ...intent,
+        _id: String(intent._id),
+        channelId: String(intent.channelId),
+        runId: String(intent.runId),
+      },
+      prepared
+        ? {
+            ...prepared,
+            _id: String(prepared._id),
+            channelId: String(prepared.channelId),
+            blockedPublishIntentId: prepared.blockedPublishIntentId
+              ? String(prepared.blockedPublishIntentId)
+              : undefined,
+            publishContinuationIntentId: prepared.publishContinuationIntentId
+              ? String(prepared.publishContinuationIntentId)
+              : undefined,
+            planItemId: prepared.planItemId ? String(prepared.planItemId) : undefined,
+          }
+        : prepared,
+    );
+  } catch (error) {
+    const message = error instanceof Error ? error.message : String(error);
+    try {
+      await convex.mutation(api.runs.recordPublishContinuationEnqueueFailure, {
+        ownerId: intent.ownerId,
+        channelId: intent.channelId,
+        runId: intent.runId,
+        intentId: intent._id,
+        artifactId: intent.videoArtifactId,
+        youtubeVideoId: intent.youtubeVideoId,
+        error: message,
+        failedAt: Date.now(),
+      });
+    } catch (stateError) {
+      log(
+        `publish ${intent._id}: continuation enqueue failure-state persistence failed: ${
+          stateError instanceof Error ? stateError.message : String(stateError)
+        }`,
+      );
+    }
+    throw error;
+  }
+  if (resumed) {
+    await convex.mutation(api.runs.markPublishContinuationQueued, {
+      ownerId: intent.ownerId,
+      channelId: intent.channelId,
+      runId: intent.runId,
+      intentId: intent._id,
+      artifactId: intent.videoArtifactId,
+      youtubeVideoId: intent.youtubeVideoId,
+      triggerRunId: resumed.runId,
+      queuedAt: Date.now(),
+    });
+    log(
+      `publish ${intent._id}: failed pipeline continuation queued (${resumed.runId})`,
+    );
+  }
+}
+
 export type PublishDispatchResult =
   | ({ kind: "uploaded" } & UploadVideoResult)
   | { kind: "deferred"; reason: string; status: string };
@@ -76,18 +169,25 @@ export async function dispatchPublishIntent(args: {
       claimed.intent.youtubeVideoId &&
       claimed.intent.watchUrl
     ) {
-      if (claimed.intent.runId) {
-        await convex.mutation(api.runs.updateRun, {
-          runId: claimed.intent.runId,
-          youtubeVideoId: claimed.intent.youtubeVideoId,
-        });
-      }
+      await handoffUploadedIntentToFailedPipeline(convex, claimed.intent, log);
       return {
         kind: "uploaded",
         videoId: claimed.intent.youtubeVideoId,
         watchUrl: claimed.intent.watchUrl,
         privacyStatus: claimed.intent.privacyStatus,
       };
+    }
+    if (claimed.reason === "not_due" && claimed.intent.status === "retry_wait") {
+      const retry = await enqueuePublishIntentRetry({
+        ...claimed.intent,
+        _id: String(claimed.intent._id),
+        channelId: String(claimed.intent.channelId),
+      });
+      if (retry) {
+        log(
+          `publish ${claimed.intent._id}: retry already queued for ${new Date(retry.scheduledFor).toISOString()} (${retry.runId})`,
+        );
+      }
     }
     return {
       kind: "deferred",
@@ -203,16 +303,12 @@ export async function dispatchPublishIntent(args: {
       completedAt: Date.now(),
     });
     if (!completed) throw new Error("publish intent completion was not persisted");
-    if (intent.runId) {
-      await convex.mutation(api.runs.updateRun, {
-        runId: intent.runId,
-        youtubeVideoId: result.videoId,
-      });
-    }
+    await handoffUploadedIntentToFailedPipeline(convex, completed, log);
     return { kind: "uploaded", ...result };
   } catch (error) {
+    let failedIntent: Awaited<ReturnType<typeof convex.mutation<typeof api.publishIntents.fail>>> | undefined;
     try {
-      await convex.mutation(api.publishIntents.fail, {
+      failedIntent = await convex.mutation(api.publishIntents.fail, {
         secret,
         intentId: intent._id,
         workerId: args.workerId,
@@ -225,6 +321,30 @@ export async function dispatchPublishIntent(args: {
           stateError instanceof Error ? stateError.message : String(stateError)
         }`,
       );
+    }
+    if (failedIntent?.status === "retry_wait") {
+      try {
+        const retry = await enqueuePublishIntentRetry({
+          ...failedIntent,
+          _id: String(failedIntent._id),
+          channelId: String(failedIntent.channelId),
+        });
+        if (retry) {
+          log(
+            `publish ${failedIntent._id}: transient failure retry queued for ${new Date(retry.scheduledFor).toISOString()} (${retry.runId})`,
+          );
+        }
+        return {
+          kind: "deferred",
+          reason: failedIntent.lastError ?? "transient_failure_retry_scheduled",
+          status: failedIntent.status,
+        };
+      } catch (scheduleError) {
+        throw new AggregateError(
+          [error, scheduleError],
+          `publish ${intent._id}: failed and its durable retry could not be queued`,
+        );
+      }
     }
     throw error;
   } finally {

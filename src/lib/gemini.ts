@@ -27,6 +27,26 @@ export class GeminiError extends Error {
   }
 }
 
+/**
+ * A generateContent submission that ended without a durable provider response.
+ * Gemini's synchronous endpoint exposes no request idempotency/status handle,
+ * so repeating an ambiguous transport or server failure can duplicate billed
+ * tokens. Explicit 429 rejection and the known thinking-config 400 are handled
+ * before this error because those responses prove the request was not run.
+ */
+export class GeminiSubmissionError extends GeminiError {
+  readonly retryable = false;
+  readonly status?: number;
+  readonly code = "GEMINI_SUBMISSION_AMBIGUOUS";
+
+  constructor(message: string, options: { status?: number; cause?: unknown } = {}) {
+    super(message);
+    this.name = "GeminiSubmissionError";
+    this.status = options.status;
+    if (options.cause !== undefined) this.cause = options.cause;
+  }
+}
+
 export function hasGeminiKey(): boolean {
   return Boolean(process.env.GEMINI_API_KEY);
 }
@@ -44,24 +64,6 @@ interface GeminiPart {
 }
 
 const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-
-/**
- * Upload a video to the Gemini File API, wait until it's ACTIVE, then ask the
- * model to WATCH it and answer `prompt`. Used by qa_refine to critique the whole
- * rendered video (not just sampled frames). Returns the model's text/JSON.
- */
-export async function geminiVideo(args: {
-  path: string;
-  prompt: string;
-  model?: string;
-  json?: boolean;
-  maxTokens?: number;
-  temperature?: number;
-  mimeType?: string;
-}): Promise<string> {
-  const file = await uploadGeminiVideo(args.path, args.mimeType);
-  return geminiVideoUri({ ...args, fileUri: file.fileUri, mimeType: file.mimeType });
-}
 
 /** Ask a model to watch an ALREADY-UPLOADED video (reuse one upload across passes). */
 export async function geminiVideoUri(args: {
@@ -257,15 +259,15 @@ async function generate(
   });
   if (cached !== undefined) return cached;
   const retryBaseMs = Math.max(0, Number(process.env.GEMINI_RETRY_BASE_MS ?? 2_000) || 0);
-  // Retry transient overload / rate-limit / server errors with backoff — Gemini
-  // 2.5 Flash frequently returns 503 "high demand", which previously threw and
-  // silently degraded vision/JSON callers to placeholder output. Honest grounding
-  // means surviving a transient blip, not falling back.
+  // Retry only explicit pre-admission rejections. A 429 proves no generation
+  // ran; the known thinking-config 400 likewise rejects validation before
+  // inference. Network failures and 5xx responses are ambiguous without a
+  // provider idempotency/status handle and must never be auto-resubmitted.
   let json: GeminiResponse | undefined;
   let lastErr = "";
   for (let attempt = 0; attempt < 4; attempt++) {
-    // Hard per-attempt deadline: a dead socket with no timeout once hung a
-    // render for 2+ hours. Timeouts/network drops are transient -> retry.
+    // Hard deadline prevents a hung render. A timeout after dispatch is still
+    // ambiguous, so it stops rather than silently buying a duplicate call.
     let res: Response;
     try {
       res = await fetch(
@@ -277,13 +279,11 @@ async function generate(
           signal: AbortSignal.timeout(120_000),
         },
       );
-    } catch (e) {
-      lastErr = `network/timeout: ${e instanceof Error ? e.message : e}`;
-      if (attempt < 3) {
-        await sleep(retryBaseMs * (attempt + 1) * (attempt + 1));
-        continue;
-      }
-      throw new GeminiError(`gemini ${model} provider retry budget exhausted (${lastErr})`);
+    } catch (error) {
+      throw new GeminiSubmissionError(
+        `gemini ${model} submission transport failed without a durable response; refusing automatic resubmission`,
+        { cause: error },
+      );
     }
     try {
       json = (await res.json()) as GeminiResponse;
@@ -296,11 +296,17 @@ async function generate(
           `gemini ${model} provider retry budget exhausted (unreadable successful response)`,
         );
       }
-      if ((res.status === 429 || res.status >= 500) && attempt < 3) {
+      if (res.status === 429 && attempt < 3) {
         await sleep(retryBaseMs * (attempt + 1) * (attempt + 1));
         continue;
       }
-      throw new GeminiError(`gemini ${model} -> ${lastErr}`);
+      if (res.status === 429) {
+        throw new GeminiError(`gemini ${model} provider retry budget exhausted (${lastErr})`);
+      }
+      throw new GeminiSubmissionError(
+        `gemini ${model} returned ${lastErr} without a durable response; refusing automatic resubmission`,
+        { status: res.status, cause: e },
+      );
     }
     if (res.ok) {
       recordGeminiResponseUsage(model, kind, json, Boolean(opts.tools));
@@ -314,14 +320,17 @@ async function generate(
       delete (body.generationConfig as Record<string, unknown>).thinkingConfig;
       continue;
     }
-    if ((code === 429 || code === 500 || code === 503) && attempt < 3) {
+    if (code === 429 && attempt < 3) {
       await sleep(retryBaseMs * (attempt + 1) * (attempt + 1)); // 2s, 8s, 18s by default
       continue;
     }
-    if (code === 429 || code === 500 || code === 503) {
+    if (code === 429) {
       throw new GeminiError(`gemini ${model} provider retry budget exhausted (${lastErr})`);
     }
-    throw new GeminiError(`gemini ${model} -> ${lastErr}`);
+    throw new GeminiSubmissionError(
+      `gemini ${model} returned ${lastErr} without a durable response; refusing automatic resubmission`,
+      { status: code },
+    );
   }
   const text = json?.candidates?.[0]?.content?.parts
     ?.map((p) => p.text ?? "")

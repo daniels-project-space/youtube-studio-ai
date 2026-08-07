@@ -106,6 +106,10 @@ export interface CraftTopicsArgs {
   outliers?: OutlierVideo[];
   /** High-CTR niche power words (databank) — flavor for provisional titles. */
   powerWords?: string[];
+  /** Disable paid embedding fan-out when the caller supplies its own deterministic near-duplicate gate. */
+  providerSemanticDedupe?: boolean;
+  /** Durable fence invoked once, immediately before Topicraft enters a paid provider. */
+  beforeProviderSpend?: () => Promise<void>;
   log?: (m: string, x?: Record<string, unknown>) => void;
 }
 
@@ -371,6 +375,12 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
   const evidence = await gatherEvidence(a, log);
   const hasLive = evidence.outliers.length + evidence.trends.length + evidence.suggests.length + evidence.competitors.length > 0;
   if (!hasLive) log("topicraft: NO live evidence reachable — running identity-grounded (demand will judge low)");
+  let providerSpendStarted = false;
+  const markProviderSpendStarted = async () => {
+    if (providerSpendStarted) return;
+    await a.beforeProviderSpend?.();
+    providerSpendStarted = true;
+  };
 
   const avoidRaw = [...new Set((a.avoid ?? []).map((s) => s.trim()).filter(Boolean))];
   const bannedWords = (a.bannedWords ?? []).filter(Boolean);
@@ -411,6 +421,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
     const avoidNorm = new Set(avoidAll.map(normTopic));
     const avoidTokens = avoidAll.map(tokenSet);
     let gen: { bets?: Partial<TopicBet>[] };
+    await markProviderSpendStarted();
     try {
       gen = await geminiJsonPro<typeof gen>({
         prompt: [
@@ -483,11 +494,13 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
       if (lint.pass) keptTokens.push(tokenSet(c.topic));
       return { ...c, lint };
     });
-    let survivors = linted.filter((c) => c.lint.pass).map(({ lint: _lint, ...bet }) => bet as TopicBet);
+    let survivors = linted.flatMap(({ lint, ...bet }) => lint.pass ? [bet as TopicBet] : []);
     lastIssues = linted.flatMap((c) => c.lint.issues);
     log(`topicraft: ${candidates.length} bets, ${survivors.length} pass lint (${((Date.now() - t0) / 1000).toFixed(1)}s)`);
 
-    survivors = await semanticDedupe(survivors, avoidAll, (m) => log(m));
+    if (a.providerSemanticDedupe !== false) {
+      survivors = await semanticDedupe(survivors, avoidAll, (m) => log(m));
+    }
 
     if (survivors.length > 0) {
       let gated: TopicBet[] = [];

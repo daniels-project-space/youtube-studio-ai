@@ -37,7 +37,6 @@ export interface DesignOptions {
     quotes?: boolean;
     captions?: boolean;
     chapters?: boolean;
-    refine?: boolean;
     notify?: boolean;
     crosspost?: boolean;
     /** Auto-spin a 9:16 Short from each long-form (private-first). Default OFF. */
@@ -57,7 +56,6 @@ export interface DesignResult {
 const OPTIONAL_BLOCKS = new Set([
   "quote_overlays",
   "captions",
-  "qa_refine",
   "notify",
   "crosspost",
 ]);
@@ -80,11 +78,10 @@ export function designPipeline(opts: DesignOptions): DesignResult {
 
   let pipeline: PipelineEntry[] = base.pipeline
     .filter((e) => {
-      // honor optional-module toggles (default ON for quotes/captions/refine/notify
+      // honor optional-module toggles (default ON for quotes/captions/notify
       // when the base archetype includes them; crosspost default OFF).
       if (e.block === "quote_overlays" && t.quotes === false) return false;
       if (e.block === "captions" && t.captions === false) return false;
-      if (e.block === "qa_refine" && t.refine === false) return false;
       if (e.block === "notify" && t.notify === false) return false;
       return true;
     })

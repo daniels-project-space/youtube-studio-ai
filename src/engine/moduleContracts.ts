@@ -1,5 +1,9 @@
 import { generationProfile } from "./generationProfiles";
-import { PRICE, bananaUnitRate, qaVisualCost } from "./pricing";
+import {
+  PRICE,
+  bananaUnitRate,
+  qaVisualCost,
+} from "./pricing";
 import {
   NARRATION_COLD_OPEN_MAX_CHARS,
   narrationChapterHeadingCharacterCeiling,
@@ -55,12 +59,10 @@ function targetSeconds(
   return boundedNumber(direct ?? upstream, fallback, 30, 36_000);
 }
 
-function imageGenerationCeiling(): number {
+function bananaImageUnitCeiling(tier: "flash" | "pro"): number {
   return Math.max(
-    PRICE.bananaProUsd,
-    PRICE.bananaFlashUsd,
-    PRICE.bananaFalUsd,
-    PRICE.fluxStillUsd,
+    bananaUnitRate(tier),
+    bananaUnitRate(tier, process.env, { hasReferences: true }),
   );
 }
 
@@ -105,7 +107,7 @@ function whiteboardCostCeiling(
     params["elevenVoiceId"].trim().length > 0;
   const ttsRate = usesEleven ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd;
   return (
-    panels * 5 * bananaUnitRate("flash") +
+    panels * 5 * bananaImageUnitCeiling("flash") +
     (characters / 1_000) * ttsRate
   );
 }
@@ -122,7 +124,7 @@ function motionComicCostCeiling(params: Readonly<Record<string, unknown>>): numb
     Math.min(panels * 3 * 320, requestedCharacters),
   );
   return (
-    (2 * panels + 8) * bananaUnitRate("flash") +
+    (2 * panels + 8) * bananaImageUnitCeiling("flash") +
     (characters / 1_000) * PRICE.ttsElevenPerKCharUsd +
     PRICE.musicTrackUsd +
     2 * panels * PRICE.visionGraderUsd
@@ -160,25 +162,25 @@ const contract = (
  */
 export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> = {
   topic_select: contract(["topic.selected"], {
-    optionalConsumes: ["reuseTopic", "channelName", "persona", "niche", "styleGrammar", "topicPool"],
+    optionalConsumes: ["plannedTopic", "reuseTopic", "channelName", "persona", "niche", "styleGrammar", "topicPool"],
     optionalProduces: ["topicBet"],
   }),
   competitor_research: contract(["topic.researched"], { optionalConsumes: ["niche"] }),
   scene_planner: contract(["visuals.planned"], {
     optionalConsumes: ["styleGrammar", "visualStyle", "visualBrief", "niche", "styleDNA", "sceneLibrary"],
   }),
-  keyframes: contract(["visuals.keyframe_generated"], {
+  keyframes: contract(["visuals.keyframe_generated", "render.profile_pinned", "render.spot_only"], {
     optionalConsumes: ["styleGrammar", "visualStyle", "styleDNA"],
-    providerProfiles: [managed],
+    providerProfiles: [{ id: "novita-zimage-local-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 1,
     // The art-director loop performs at most two still generations.
-    maxCostUsdFor: () => 2 * imageGenerationCeiling(),
+    maxCostUsdFor: () => 2 * PRICE.novitaImageMaxUsd,
   }),
-  loop_clips: contract(["visuals.motion_generated"], {
+  loop_clips: contract(["visuals.motion_generated", "render.profile_pinned", "render.spot_only"], {
     optionalConsumes: ["scenes", "motionPrompt", "styleGrammar", "visualStyle"],
-    providerProfiles: [managed],
+    providerProfiles: [{ id: "novita-ltx23-hq-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 5,
-    maxCostUsdFor: () => PRICE.videoClipUsd,
+    maxCostUsdFor: () => PRICE.novitaVideoMaxUsd,
   }),
   upscale: contract(["visuals.upscaled"], {
     optionalConsumes: ["loopRawKey"],
@@ -205,7 +207,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   upload_draft: contract(
     ["publish.connector_bound", "publish.resumable", "publish.synthetic_disclosed", "publish.private_first"],
-    { optionalConsumes: ["chapterPlan"], sideEffects: ["publish_media"], qualityRequired: true },
+    { optionalConsumes: ["chapterPlan", "scheduledPublishAt"], sideEffects: ["publish_media"], qualityRequired: true },
   ),
   notify: contract(["notify.operator"], { sideEffects: ["external_message"] }),
   cleanup: contract(["storage.scoped_cleanup"], { sideEffects: ["delete_scoped_artifacts"] }),
@@ -217,20 +219,22 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   metadata: contract(["package.metadata"], {
     optionalConsumes: [
       "bannedWords", "chaptersText", "videoDurationSec", "attributions", "channelName", "niche", "persona",
-      "nicheIntel", "seoDatabank", "competitors", "narrationText", "script", "styleDNA", "topicBet",
+      "nicheIntel", "seoDatabank", "competitors", "narrationText", "script", "styleDNA", "topicBet", "plannedTitle",
     ],
   }),
   thumbnail_gen: contract(["package.thumbnail"], {
     optionalConsumes: [
       "channelName", "topic", "f1Url", "f1Key", "f1ThumbnailBaseProvenance", "styleGrammar", "styleDNA", "family", "persona",
-      "thumbnailIdentity", "nicheIntel", "thumbnailer", "niche", "seoDatabank", "competitors", "healHints",
+      "thumbnailIdentity", "nicheIntel", "thumbnailer", "niche", "seoDatabank", "competitors", "healHints", "plannedThumbnailKey",
       "narrationText",
     ],
     providerProfiles: [managed],
     maxCostUsd: 2,
-    // One text-free Flash scene + one post-composite mobile/reference alarm.
-    // Spelling can never trigger another paid render because type is local.
-    maxCostUsdFor: () => bananaUnitRate("flash") + PRICE.visionGraderUsd,
+    // One bounded concept pass + one text-free Flash scene + one
+    // post-composite mobile/reference alarm. Spelling can never trigger another
+    // paid render because type is local.
+    maxCostUsdFor: () =>
+      PRICE.thumbnailConceptUsd + bananaUnitRate("flash") + PRICE.visionGraderUsd,
     qualityRequired: true,
   }),
   script_gen: contract(["script.generated"], {
@@ -306,7 +310,6 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     maxCostUsdFor: (params) => qaVisualCost(params),
     qualityRequired: true,
   }),
-  qa_refine: contract(["master.refinement_reviewed"], { qualityRequired: true }),
   originality_gate: contract(["final.originality_passed"], { optionalConsumes: ["topic"], qualityRequired: true }),
   compliance_check: contract(["final.compliance_passed"], { optionalConsumes: ["niche"], qualityRequired: true }),
 
@@ -321,27 +324,27 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
 
-  gen_footage: contract(["visuals.generated"], {
+  gen_footage: contract(["visuals.generated", "render.profile_pinned", "render.spot_only"], {
     optionalConsumes: ["styleDNA", "visualBrief", "narrationDurationSec"],
-    providerProfiles: [managed],
-    maxCostUsd: 30,
+    providerProfiles: [{ id: "novita-zimage-ltx23-production", provider: "novita", quality: "production", allowFallback: false }],
+    maxCostUsd: 132,
     maxCostUsdFor: (params, context) => {
       const seconds = targetSeconds(params, context, 300);
       const clips = Math.ceil(
         boundedNumber(params["maxClips"], Math.ceil(seconds / 22), 6, 24),
       );
-      return clips * (PRICE.falFluxUsd + PRICE.falI2vUsd);
+      return clips * (PRICE.novitaImageMaxUsd + PRICE.novitaVideoMaxUsd);
     },
   }),
-  signature_clips: contract(["visuals.signature_generated"], {
+  signature_clips: contract(["visuals.signature_generated", "render.profile_pinned", "render.spot_only"], {
     optionalConsumes: ["styleDNA", "visualBrief"],
-    providerProfiles: [managed],
-    maxCostUsd: 15,
+    providerProfiles: [{ id: "novita-zimage-ltx23-production", provider: "novita", quality: "production", allowFallback: false }],
+    maxCostUsd: 33,
     maxCostUsdFor: (params) => {
       const count = Math.ceil(
         boundedNumber(params["count"] ?? params["signatureGenClips"], 0, 0, 6),
       );
-      return count * (PRICE.falFluxUsd + PRICE.falI2vUsd);
+      return count * (PRICE.novitaImageMaxUsd + PRICE.novitaVideoMaxUsd);
     },
   }),
   novita_render_images: contract(["visuals.keyframes_generated", "render.profile_pinned", "render.spot_only"], {
@@ -352,7 +355,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     maxCostUsdFor: (params, context) =>
       shotCount(params, context) *
       Math.max(2, generationProfile(generationProfileId(params, context)).image.candidates) *
-      PRICE.novitaImageUsd,
+      PRICE.novitaImageMaxUsd,
   }),
   qa_assets: contract(["qa.assets_required", "visuals.keyframes_selected"], {
     providerProfiles: [managed],
@@ -366,7 +369,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     maxCostUsdFor: (params, context) =>
       shotCount(params, context) *
       generationProfile(generationProfileId(params, context)).video.candidates *
-      PRICE.novitaVideoUsd,
+      PRICE.novitaVideoMaxUsd,
   }),
   qa_shots: contract(["visuals.generated", "visuals.story_aligned", "qa.shots_required"], {
     providerProfiles: [managed, local],

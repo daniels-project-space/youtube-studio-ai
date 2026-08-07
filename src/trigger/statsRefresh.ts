@@ -19,6 +19,10 @@ import { task, schedules } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import {
+  STUDIO_AUTOMATION_GATES,
+  studioAutomationGate,
+} from "@/lib/automationGate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   fetchVideoStats,
@@ -288,9 +292,12 @@ export const statsRefreshTask = task({
 /** Scheduled refresh every 6 hours for the operator's channels. */
 export const statsRefreshSchedule = schedules.task({
   id: "stats-refresh-6h",
-  // cron: "0 */6 * * *", // every 6 hours // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
+  cron: "0 */6 * * *", // every 6 hours
   maxDuration: 1800,
   run: async () => {
+    const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
+    if (!gate.enabled) return gate;
+
     const log: Logger = (m, x) => console.log(`[stats-refresh-6h] ${m}`, x ?? "");
     await bootstrapSecrets(log);
     return statsRefreshCore({}, log);

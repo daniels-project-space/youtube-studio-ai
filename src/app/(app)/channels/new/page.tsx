@@ -14,8 +14,8 @@ type Phase = "form" | "building" | "error";
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 const BUILD_STEPS = ["Designing the pipeline…", "Synthesizing identity…", "Generating channel art…", "Finalizing…"];
 
-interface Toggles { quotes: boolean; captions: boolean; chapters: boolean; refine: boolean; notify: boolean; crosspost: boolean; shorts: boolean }
-const DEFAULT_TOGGLES: Toggles = { quotes: true, captions: true, chapters: true, refine: true, notify: true, crosspost: false, shorts: false };
+interface Toggles { quotes: boolean; captions: boolean; chapters: boolean; notify: boolean; crosspost: boolean; shorts: boolean }
+const DEFAULT_TOGGLES: Toggles = { quotes: true, captions: true, chapters: true, notify: true, crosspost: false, shorts: false };
 
 // Client preview of the designed block list (mirrors src/engine/designer filter).
 function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string): string[] {
@@ -25,7 +25,6 @@ function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string): str
     .filter((e) => {
       if (e.block === "quote_overlays" && !t.quotes) return false;
       if (e.block === "captions" && !t.captions) return false;
-      if (e.block === "qa_refine" && !t.refine) return false;
       if (e.block === "notify" && !t.notify) return false;
       return true;
     })
@@ -358,7 +357,7 @@ export default function NewChannelWizard() {
           </div>
           <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.6rem" }}>
             <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Advanced — optional modules</div>
-            {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["refine", "AI refine pass"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
+            {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
               <label key={k} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
                 <input type="checkbox" checked={toggles[k]} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}
               </label>

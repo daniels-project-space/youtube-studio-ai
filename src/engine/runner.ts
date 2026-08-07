@@ -14,6 +14,8 @@ import {
   COST_PATCH_KEY,
   type ArtifactRef,
   type Block,
+  type CostModelUsageKind,
+  type ModelUsageCostSnapshot,
   type RunStageSink,
   type StageContext,
   type StageStatus,
@@ -27,6 +29,7 @@ import {
 } from "./executionErrors";
 import { configuredMaxCostUsd, type ModuleManifest } from "./moduleManifest";
 import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
+import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 
 export interface RunPipelineOptions {
   ownerId: string;
@@ -45,14 +48,16 @@ export interface RunPipelineOptions {
   /**
    * Resume: skip blocks that already completed "ok" for this runId (restoring
    * their persisted outputs) so a retried run never re-spends on paid blocks.
-   * Default true. Requires sink.getCompleted + rehydrate.
+   * Default true. Production supplies sink.getCompleted + rehydrate. If a
+   * completed paid stage cannot be rehydrated, execution fails closed instead
+   * of purchasing the provider output again.
    */
   resume?: boolean;
   /**
    * Make a completed block's persisted outputs usable again on a fresh worker —
-   * re-download local files from their R2 keys. Returns ok:false if it can't
-   * (then the block is re-run). Supplied by the Trigger task (keeps the engine
-   * free of storage deps).
+   * re-download local files from their R2 keys. Returns ok:false if it can't;
+   * only unpaid blocks may then regenerate automatically. Supplied by the
+   * Trigger task (keeps the engine free of storage deps).
    */
   rehydrate?: (
     block: string,
@@ -73,6 +78,8 @@ export interface RunPipelineOptions {
     params: Record<string, unknown>,
   ) => Promise<Record<string, unknown>>;
 }
+
+const PAID_STAGE_RECONCILIATION_MARKER = "PAID_STAGE_RECONCILIATION_REQUIRED";
 
 export interface RunResult {
   ok: boolean;
@@ -98,6 +105,59 @@ function observedCostFromError(error: unknown): number | undefined {
   return typeof raw === "number" && Number.isFinite(raw) && raw >= 0
     ? raw
     : undefined;
+}
+
+/**
+ * Paid work outside the model/image async scopes. Unlike observedCostUsd this
+ * is supplemental, so it is added after scope reconciliation rather than used
+ * as a competing whole-attempt total.
+ */
+function additionalObservedCostFromError(error: unknown): number | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const raw = (error as { additionalObservedCostUsd?: unknown }).additionalObservedCostUsd;
+  return typeof raw === "number" && Number.isFinite(raw) && raw >= 0
+    ? raw
+    : undefined;
+}
+
+function trackedUsageForKinds(
+  summary: ModelUsageSummary,
+  kinds?: ReadonlySet<CostModelUsageKind>,
+): ModelUsageCostSnapshot {
+  return summary.groups.reduce<ModelUsageCostSnapshot>(
+    (total, group) => {
+      if (kinds && !kinds.has(group.kind)) return total;
+      return {
+        calls: total.calls + group.calls,
+        cacheHits: total.cacheHits + group.cacheHits,
+        costUsd: total.costUsd + group.costUsd,
+        unpricedCalls: total.unpricedCalls + group.unpricedCalls,
+      };
+    },
+    { calls: 0, cacheHits: 0, costUsd: 0, unpricedCalls: 0 },
+  );
+}
+
+function trackedCostForKinds(
+  summary: ModelUsageSummary,
+  kinds: ReadonlySet<CostModelUsageKind>,
+): number {
+  return trackedUsageForKinds(summary, kinds).costUsd;
+}
+
+/**
+ * Upgrade persisted outputs from module-contract versions that predate a
+ * required field. A legacy thumbnail has no evidence that it passed the new
+ * publishability contract, so migration is deliberately fail-closed.
+ */
+export function migrateCachedOutputsForResume(
+  blockId: string,
+  outputs: Record<string, unknown>,
+): Record<string, unknown> {
+  if (blockId !== "thumbnail_gen" || outputs["thumbnailPublishable"] !== undefined) {
+    return outputs;
+  }
+  return { ...outputs, thumbnailPublishable: false };
 }
 
 function hasModelUsage(summary: ModelUsageSummary): boolean {
@@ -128,6 +188,10 @@ async function runBlockWithRetry(
     try {
       return await block.run(ctx);
     } catch (err) {
+      // Once a block reports accepted paid work, retrying the whole block can
+      // purchase it again. Provider adapters must recover an accepted job in
+      // place; otherwise leave the pipeline failed for persisted resume/heal.
+      if ((additionalObservedCostFromError(err) ?? 0) > 0) throw err;
       const classification = classifyExecutionError(err);
       attempt++;
       if (attempt > retries || !classification.retryable) throw err;
@@ -304,9 +368,39 @@ export async function runPipeline(
   // could silently blow the channel budget), and (b) runs.costTotal reports
   // the cumulative truth.
   const completedMap: Record<string, Record<string, unknown>> = {};
-  if (opts.resume !== false && opts.sink.getCompleted) {
+  const priorStageMap = new Map<
+    string,
+    { status: string; cost?: number; startedAt?: number; error?: string }
+  >();
+  if (
+    opts.resume !== false &&
+    (opts.sink.getResumeState || opts.sink.getCompleted)
+  ) {
     try {
-      for (const row of await opts.sink.getCompleted(opts.runId)) {
+      // Production uses one full-state read for both completed-output resume and
+      // the interrupted-paid-stage fence. Keep getCompleted as a compatibility
+      // fallback for small in-memory/test sinks.
+      const rows: Array<{
+        block: string;
+        status: string;
+        outputs?: unknown;
+        cost?: number;
+        startedAt?: number;
+        error?: string;
+      }> = opts.sink.getResumeState
+        ? await opts.sink.getResumeState(opts.runId)
+        : (await opts.sink.getCompleted!(opts.runId)).map((row) => ({
+            ...row,
+            status: "ok",
+          }));
+      for (const row of rows) {
+        priorStageMap.set(row.block, {
+          status: row.status,
+          cost: row.cost,
+          startedAt: row.startedAt,
+          error: row.error,
+        });
+        if (row.status !== "ok") continue;
         if (row.outputs && typeof row.outputs === "object") {
           completedMap[row.block] = row.outputs as Record<string, unknown>;
           if (typeof row.cost === "number" && Number.isFinite(row.cost) && row.cost > 0) {
@@ -393,32 +487,36 @@ export async function runPipeline(
       );
     }
     const params = opts.paramsByBlock?.[block.id] ?? resolved.entries[blockIndex]?.params ?? {};
-    let configuredEnvelope: number | undefined;
-    if (manifest.costAndLatency.paid && manifest.costAndLatency.maxCostUsd !== undefined) {
-      configuredEnvelope = configuredMaxCostUsd(manifest, params, {
-        entries: resolved.entries,
-        index: blockIndex,
+    const priorStage = priorStageMap.get(block.id);
+    // Remote child work is already keyed by Trigger's durable idempotency key;
+    // a parent retry must reattach to that child instead of deadlocking itself.
+    // Inline provider calls have no equivalent process-crash receipt, so they
+    // require explicit reconciliation when their persisted state is ambiguous.
+    const paidStageNeedsReconciliation =
+      manifest.costAndLatency.paid &&
+      !opts.remoteBlocks?.has(block.id) &&
+      (priorStage?.status === "running" ||
+        (priorStage?.status === "failed" &&
+          priorStage.error?.includes(PAID_STAGE_RECONCILIATION_MARKER)));
+    if (paidStageNeedsReconciliation) {
+      const started = priorStage?.startedAt
+        ? ` (started ${new Date(priorStage.startedAt).toISOString()})`
+        : "";
+      const message =
+        `${PAID_STAGE_RECONCILIATION_MARKER}: paid block "${block.id}" was left ` +
+        `${priorStage?.status ?? "unknown"}${started}; refusing automatic replay because the ` +
+        "provider may already have accepted or completed the charge. Reconcile the provider receipt, then supersede the stage or start a new run.";
+      await opts.sink.upsert({
+        ownerId: opts.ownerId,
+        runId: opts.runId,
+        block: block.id,
+        status: "failed",
+        finishedAt: Date.now(),
+        error: message,
       });
-      if (
-        opts.budgetUsd > 0 &&
-        spentUsd + configuredEnvelope > opts.budgetUsd + Number.EPSILON
-      ) {
-        const message =
-          `budget reservation rejected before paid block "${block.id}": ` +
-          `$${spentUsd.toFixed(2)} spent + $${configuredEnvelope.toFixed(2)} reserved > ` +
-          `$${opts.budgetUsd.toFixed(2)} budget`;
-        await opts.sink.upsert({
-          ownerId: opts.ownerId,
-          runId: opts.runId,
-          block: block.id,
-          status: "failed",
-          finishedAt: Date.now(),
-          error: message,
-        });
-        stages.push({ block: block.id, status: "failed" });
-        log(message);
-        return { status: "failed", cost: 0, error: message };
-      }
+      stages.push({ block: block.id, status: "failed" });
+      log(message);
+      return { status: "failed", cost: 0, error: message };
     }
     // Debug snapshot only — SUMMARIZED. Persisting the full consumed values
     // (whole scripts, clip-path arrays, timing tables) shipped hundreds of KB
@@ -432,12 +530,38 @@ export async function runPipeline(
     };
     const inputs = Object.fromEntries(block.consumes.map((k) => [k, summarize(store[k])]));
 
-    // RESUME: restore a previously-completed block instead of re-running it
-    // (no double-spend on paid blocks). Re-run if its files can't be rehydrated.
+    const refusePaidCachedReplay = async (reason: string) => {
+      const message =
+        `${PAID_STAGE_RECONCILIATION_MARKER}: completed paid block "${block.id}" ` +
+        `${reason}; refusing automatic regeneration because it would create a second charge. ` +
+        "Restore the durable artifacts or explicitly supersede the stage after reconciliation.";
+      await opts.sink.upsert({
+        ownerId: opts.ownerId,
+        runId: opts.runId,
+        block: block.id,
+        status: "failed",
+        finishedAt: Date.now(),
+        error: message,
+      });
+      stages.push({ block: block.id, status: "failed" });
+      log(message);
+      return { status: "failed" as const, cost: 0, error: message };
+    };
+
+    // RESUME: restore a previously-completed block instead of re-running it.
+    // A confirmed-missing artifact may be regenerated only for an unpaid block;
+    // completed paid work always requires explicit reconciliation/supersession.
     const cached = completedMap[block.id];
-    if (cached && opts.rehydrate) {
+    if (cached && !opts.rehydrate) {
+      if (manifest.costAndLatency.paid) {
+        return await refusePaidCachedReplay("has no configured artifact rehydrator");
+      }
+      log(`block ${block.id}: cached outputs cannot be rehydrated — re-running unpaid block`);
+    } else if (cached && opts.rehydrate) {
       try {
-        const { ok, outputs } = await opts.rehydrate(block.id, { ...cached });
+        const restored = await opts.rehydrate(block.id, { ...cached });
+        const outputs = migrateCachedOutputsForResume(block.id, restored.outputs);
+        const { ok } = restored;
         if (ok) {
           delete outputs[COST_PATCH_KEY];
           assertProduced(manifest, outputs);
@@ -466,13 +590,46 @@ export async function runPipeline(
           log(`block resumed (cached, no re-spend): ${block.id}`);
           return { status: "ok", cost: 0 };
         }
-        log(`block ${block.id}: cached outputs not rehydratable — re-running`);
+        if (manifest.costAndLatency.paid) {
+          return await refusePaidCachedReplay("has missing or non-rehydratable durable outputs");
+        }
+        log(`block ${block.id}: cached outputs not rehydratable — re-running unpaid block`);
       } catch (e) {
         // A thrown rehydrate error means storage/auth/transport itself failed,
         // not that this artifact is known missing. Re-running a paid producer
         // under an R2 outage converts an infrastructure incident into spend.
         log(`block ${block.id}: rehydrate infrastructure failed — refusing paid re-run: ${e instanceof Error ? e.message : e}`);
         throw e;
+      }
+    }
+
+    // Reserve only for work that will actually execute. Restored stages already
+    // contributed their persisted cost above and need no second envelope.
+    let configuredEnvelope: number | undefined;
+    if (manifest.costAndLatency.paid && manifest.costAndLatency.maxCostUsd !== undefined) {
+      configuredEnvelope = configuredMaxCostUsd(manifest, params, {
+        entries: resolved.entries,
+        index: blockIndex,
+      });
+      if (
+        opts.budgetUsd > 0 &&
+        spentUsd + configuredEnvelope > opts.budgetUsd + Number.EPSILON
+      ) {
+        const message =
+          `budget reservation rejected before paid block "${block.id}": ` +
+          `$${spentUsd.toFixed(2)} spent + $${configuredEnvelope.toFixed(2)} reserved > ` +
+          `$${opts.budgetUsd.toFixed(2)} budget`;
+        await opts.sink.upsert({
+          ownerId: opts.ownerId,
+          runId: opts.runId,
+          block: block.id,
+          status: "failed",
+          finishedAt: Date.now(),
+          error: message,
+        });
+        stages.push({ block: block.id, status: "failed" });
+        log(message);
+        return { status: "failed", cost: 0, error: message };
       }
     }
 
@@ -493,6 +650,8 @@ export async function runPipeline(
     const inputRefs = Object.fromEntries(
       Object.entries(artifactRefs).filter(([key]) => allowedInputs.has(key)),
     );
+    const usageScope = createModelUsageScope();
+    const imageUsageScope = createImageUsageScope();
     const ctx: StageContext = {
       ownerId: opts.ownerId,
       runId: opts.runId,
@@ -502,13 +661,25 @@ export async function runPipeline(
       store: declaredArtifactStore(manifest, store, optionalFallbacks, log),
       artifactRefs: inputRefs,
       budgetUsd: opts.budgetUsd,
+      modelUsageCostUsd: (kinds) => {
+        const summary = usageScope.snapshot();
+        return kinds === undefined
+          ? summary.costUsd
+          : trackedCostForKinds(summary, new Set<CostModelUsageKind>(kinds));
+      },
+      modelUsageAccounting: (kinds) =>
+        trackedUsageForKinds(
+          usageScope.snapshot(),
+          kinds === undefined ? undefined : new Set<CostModelUsageKind>(kinds),
+        ),
+      imageUsageAccounting: () => imageUsageScope.snapshot(),
       log,
     };
 
     let observedCost = 0;
     let costAccounted = false;
     let usageReported = false;
-    const usageScope = createModelUsageScope();
+    let imageUsageReported = false;
     const reportUsage = (): ModelUsageSummary => {
       const summary = usageScope.snapshot();
       if (!usageReported && hasModelUsage(summary)) {
@@ -519,6 +690,14 @@ export async function runPipeline(
             ? { accountingWarning: `${summary.unpricedCalls} model call(s) have an unpriced component` }
             : {}),
         });
+      }
+      return summary;
+    };
+    const reportImageUsage = (): ImageUsageSummary => {
+      const summary = imageUsageScope.snapshot();
+      if (!imageUsageReported && (summary.calls > 0 || summary.cacheHits > 0)) {
+        imageUsageReported = true;
+        log(`block image usage: ${block.id}`, { imageUsage: summary });
       }
       return summary;
     };
@@ -545,16 +724,21 @@ export async function runPipeline(
         // Keep one scope across the block's bounded retry loop. Provider
         // wrappers can then reuse a valid response if a later operation fails,
         // while every actual successful provider response is charged once.
-        patch = await usageScope.run(() => runBlockWithRetry(block, ctx, retries, log));
+        patch = await usageScope.run(() =>
+          imageUsageScope.run(() => runBlockWithRetry(block, ctx, retries, log)),
+        );
       }
       const hasExplicitCost = Object.prototype.hasOwnProperty.call(patch, COST_PATCH_KEY);
       const explicitCost = takeCost(patch);
       const modelUsage = reportUsage();
+      const imageUsage = reportImageUsage();
       // Existing composite paid blocks already include their model/vision
       // allowance in __costUsd. Treat that patch as authoritative to prevent
       // double counting; text-only blocks without a patch receive exact
       // provider-token cost from this scope.
-      const cost = hasExplicitCost ? explicitCost : explicitCost + modelUsage.costUsd;
+      const cost = hasExplicitCost
+        ? explicitCost
+        : explicitCost + modelUsage.costUsd + imageUsage.costUsd;
       observedCost = cost;
       spentUsd += cost;
       costAccounted = true;
@@ -587,11 +771,17 @@ export async function runPipeline(
       const message = err instanceof Error ? err.message : String(err);
       if (!costAccounted) {
         const modelUsage = reportUsage();
+        const imageUsage = reportImageUsage();
         const reportedFailureCost = observedCostFromError(err);
+        const additionalFailureCost = additionalObservedCostFromError(err) ?? 0;
         // observedCostUsd is an adapter's authoritative whole-attempt spend
         // (for example TTS plus its audio judge). Otherwise preserve the exact
         // known token cost of provider responses received before the failure.
-        observedCost = reportedFailureCost ?? modelUsage.costUsd;
+        observedCost =
+          Math.max(
+            reportedFailureCost ?? 0,
+            modelUsage.costUsd + imageUsage.costUsd,
+          ) + additionalFailureCost;
         spentUsd += observedCost;
         costAccounted = true;
       }

@@ -13,6 +13,10 @@ import { schedules, task } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import {
+  STUDIO_AUTOMATION_GATES,
+  studioAutomationGate,
+} from "@/lib/automationGate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix } from "@/lib/storage";
 import { loadLedger, saveLedger, type PerfEntry } from "@/lib/performance";
@@ -111,8 +115,17 @@ async function reoptimize(ownerId: string, log: Logger, approvedForMetadataChang
 
 export const seoReoptimizeSchedule = schedules.task({
   id: "seo-reoptimize",
-  // cron: "0 9 * * 1", // weekly, Monday 09:00 — after the weekend's metrics settle // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
-  run: async () => reoptimize(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[seo-reopt] ${m}`), false),
+  cron: "0 9 * * 1", // weekly, Monday 09:00 — after the weekend's metrics settle
+  run: async () => {
+    const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
+    if (!gate.enabled) return gate;
+
+    return reoptimize(
+      process.env.STUDIO_OWNER_ID ?? "owner_daniel",
+      (m) => console.log(`[seo-reopt] ${m}`),
+      false,
+    );
+  },
 });
 
 export const seoReoptimizeTask = task({

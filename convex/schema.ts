@@ -318,9 +318,51 @@ export default defineSchema({
     pipelineCapabilities: v.optional(v.array(v.string())),
     reservedMaxCostUsd: v.optional(v.number()),
     pipelineCompiledAt: v.optional(v.number()),
+    // Write-once, pre-provider execution contract. Retries and post-upload
+    // recovery use this exact pipeline/seed/budget/key namespace instead of
+    // silently recompiling mutable channel settings.
+    pipelineInvocationSnapshot: v.optional(v.any()),
+    pipelineInvocationSha256: v.optional(v.string()),
+    pipelineInvocationClaimedAt: v.optional(v.number()),
+    // Exact upload intent currently fencing post-upload continuation for this
+    // run. The intent id and immutable artifact id are installed before the
+    // dispatcher can call YouTube, and are cleared only by an exact successful
+    // pipeline completion.
+    blockedPublishIntentId: v.optional(v.id("publishIntents")),
+    blockedPublishArtifactId: v.optional(v.string()),
+    // Durable continuation outbox. A Trigger enqueue can fail after YouTube has
+    // accepted the upload; `pending` survives that gap for the nightly Doctor,
+    // `queued` records a durable enqueue receipt, and `completed` is retained as
+    // audit evidence after the blocking fence is cleared.
+    publishContinuationState: v.optional(
+      v.union(v.literal("pending"), v.literal("queued"), v.literal("completed")),
+    ),
+    publishContinuationIntentId: v.optional(v.id("publishIntents")),
+    publishContinuationArtifactId: v.optional(v.string()),
+    publishContinuationVideoId: v.optional(v.string()),
+    publishContinuationAttempts: v.optional(v.number()),
+    publishContinuationUpdatedAt: v.optional(v.number()),
+    publishContinuationQueuedAt: v.optional(v.number()),
+    publishContinuationCompletedAt: v.optional(v.number()),
+    publishContinuationTriggerRunId: v.optional(v.string()),
+    publishContinuationLastError: v.optional(v.string()),
+    // Immutable snapshot of a pinned plan item admitted by the scheduler.
+    // Keeping it on the run makes retries observable and prevents a later UI
+    // edit from silently changing the topic or native YouTube publish time.
+    planItemId: v.optional(v.id("contentPlan")),
+    plannedTopic: v.optional(v.string()),
+    plannedTitle: v.optional(v.string()),
+    plannedThumbnailKey: v.optional(v.string()),
+    plannedPublishAt: v.optional(v.number()),
   })
     .index("by_owner", ["ownerId"])
-    .index("by_channel", ["channelId"]),
+    .index("by_channel", ["channelId"])
+    .index("by_channel_status", ["channelId", "status"])
+    .index("by_owner_publish_continuation", [
+      "ownerId",
+      "publishContinuationState",
+      "publishContinuationUpdatedAt",
+    ]),
 
   // Per-block progress for a run — drives the live UI.
   runStages: defineTable({
@@ -389,6 +431,7 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerId"])
     .index("by_channel", ["channelId"])
+    .index("by_channel_kind", ["channelId", "kind"])
     .index("by_run", ["runId"]),
 
   // Topic dedup memory.
@@ -463,17 +506,88 @@ export default defineSchema({
   contentPlan: defineTable({
     ownerId: v.string(),
     channelId: v.id("channels"),
+    batchId: v.optional(v.id("planBatches")),
+    itemKey: v.optional(v.string()),
     order: v.number(),
     topic: v.string(),
     title: v.optional(v.string()),
     description: v.optional(v.string()),
+    sceneSeed: v.optional(v.string()),
     thumbnailKey: v.optional(v.string()),
-    status: v.string(), // "generating" | "ready" | "used"
+    status: v.string(), // "generating" | "ready" | "failed" | "used"
+    generationState: v.optional(v.string()), // pending|claimed|complete|failed
+    generationAttempt: v.optional(v.number()),
+    generationClaimedBy: v.optional(v.string()),
+    generationClaimedAt: v.optional(v.number()),
+    generationProviderStartedAt: v.optional(v.number()),
+    generationProviderStartedBy: v.optional(v.string()),
+    generationError: v.optional(v.string()),
+    generationRetryable: v.optional(v.boolean()),
+    generationCostUsd: v.optional(v.number()),
+    usageCheckpointKey: v.optional(v.string()),
     createdAt: v.number(),
     scheduledAt: v.optional(v.number()), // pinned publish date (ms epoch)
+    scheduledRunId: v.optional(v.id("runs")),
+    scheduledClaimedAt: v.optional(v.number()),
+    scheduledUsedAt: v.optional(v.number()),
+    scheduledFailure: v.optional(v.string()),
   })
     .index("by_channel_order", ["channelId", "order"])
-    .index("by_owner", ["ownerId"]),
+    .index("by_channel_status_order", ["channelId", "status", "order"])
+    .index("by_channel_status_schedule", ["channelId", "status", "scheduledAt"])
+    .index("by_owner", ["ownerId"])
+    .index("by_owner_status", ["ownerId", "status"])
+    .index("by_batch", ["batchId", "order"]),
+
+  /** Durable, idempotent admission/checkpoint record for plan-week-ahead. */
+  planBatches: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    channelSlug: v.string(),
+    requestKey: v.string(),
+    triggerRunId: v.string(),
+    contractVersion: v.string(),
+    requestedCount: v.number(),
+    reservedCostUsd: v.number(),
+    actualCostUsd: v.number(),
+    status: v.string(), // reserved|running|ready|failed
+    topicState: v.string(), // pending|claimed|complete|failed
+    topicAttempt: v.number(),
+    topicClaimedBy: v.optional(v.string()),
+    topicClaimedAt: v.optional(v.number()),
+    topicProviderStartedAt: v.optional(v.number()),
+    topicProviderStartedBy: v.optional(v.string()),
+    topicUsageCheckpointKey: v.optional(v.string()),
+    itemIds: v.optional(v.array(v.id("contentPlan"))),
+    accountingComplete: v.boolean(),
+    budgetExceeded: v.boolean(),
+    error: v.optional(v.string()),
+    retryable: v.boolean(),
+    leaseExpiresAt: v.number(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+    finishedAt: v.optional(v.number()),
+  })
+    .index("by_request", ["ownerId", "channelId", "requestKey"])
+    .index("by_owner", ["ownerId", "createdAt"])
+    .index("by_channel", ["channelId", "createdAt"]),
+
+  /** Immutable per-phase usage ledger; batch totals are recomputed from rows. */
+  planBatchUsage: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    batchId: v.id("planBatches"),
+    itemId: v.optional(v.id("contentPlan")),
+    checkpointKey: v.string(),
+    fingerprint: v.string(),
+    modelUsage: v.any(),
+    imageUsage: v.any(),
+    costUsd: v.number(),
+    accountingComplete: v.boolean(),
+    createdAt: v.number(),
+  })
+    .index("by_batch", ["batchId", "createdAt"])
+    .index("by_checkpoint", ["batchId", "checkpointKey"]),
 
   // Per-channel YouTube OAuth tokens — so each channel uploads to its OWN
   // YouTube channel. Onboarding a channel = one consent → one row here. Read
@@ -619,6 +733,9 @@ export default defineSchema({
     approvalPolicyFingerprint: v.optional(v.string()),
     attempts: v.number(),
     maxAttempts: v.number(),
+    // First authorized provider-dispatch time. This is deliberately separate
+    // from publishAt (public visibility) and nextAttemptAt (mutable retry due).
+    dispatchAt: v.optional(v.number()),
     nextAttemptAt: v.number(),
     leaseOwner: v.optional(v.string()),
     leaseExpiresAt: v.optional(v.number()),
@@ -636,7 +753,23 @@ export default defineSchema({
     .index("by_status_lease", ["status", "leaseExpiresAt"])
     .index("by_channel_status", ["channelId", "status"])
     .index("by_channel_quota_day", ["channelId", "quotaDay"])
-    .index("by_owner_created", ["ownerId", "createdAt"]),
+    .index("by_owner_created", ["ownerId", "createdAt"])
+    .index("by_owner_status_publish_at", ["ownerId", "status", "publishAt"])
+    .index("by_channel_status_publish_at", ["channelId", "status", "publishAt"])
+    .index("by_owner_status_privacy_publish_completed_at", [
+      "ownerId",
+      "status",
+      "privacyStatus",
+      "publishAt",
+      "completedAt",
+    ])
+    .index("by_channel_status_privacy_publish_completed_at", [
+      "channelId",
+      "status",
+      "privacyStatus",
+      "publishAt",
+      "completedAt",
+    ]),
 
   analyticsIngestions: defineTable({
     ownerId: v.string(),

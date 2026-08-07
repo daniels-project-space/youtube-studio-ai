@@ -117,6 +117,48 @@ function timezoneScheduling(): void {
     false,
   );
   assert.equal(
+    isGenerationDue({
+      now: Date.parse("2026-07-19T13:30:00.000Z"),
+      lastStartedAt: 0,
+      schedule: { timezone: "America/New_York", localTime: "09:00", frequency: "weekly" },
+    }),
+    false,
+    "an unset weekly weekday follows the calendar's Monday default",
+  );
+  assert.equal(
+    isGenerationDue({
+      now: Date.parse("2026-07-20T13:30:00.000Z"),
+      lastStartedAt: 0,
+      schedule: { timezone: "America/New_York", localTime: "09:00", frequency: "weekly" },
+    }),
+    true,
+  );
+  assert.equal(
+    isGenerationDue({
+      now: Date.parse("2026-07-22T13:30:00.000Z"),
+      lastStartedAt: Date.parse("2026-07-20T13:30:00.000Z"),
+      schedule: { timezone: "America/New_York", localTime: "09:00", frequency: "weekly", days: [1, 3] },
+    }),
+    true,
+    "each configured weekly day is independently due",
+  );
+  assert.equal(
+    isGenerationDue({
+      now: Date.parse("2026-08-10T13:30:00.000Z"),
+      lastStartedAt: 0,
+      schedule: { timezone: "America/New_York", localTime: "09:00", frequency: "biweekly", days: [1] },
+    }),
+    true,
+  );
+  assert.equal(
+    isGenerationDue({
+      now: Date.parse("2026-08-17T13:30:00.000Z"),
+      lastStartedAt: 0,
+      schedule: { timezone: "America/New_York", localTime: "09:00", frequency: "biweekly", days: [1] },
+    }),
+    false,
+  );
+  assert.equal(
     localDateKey(Date.parse("2026-07-19T00:30:00.000Z"), "America/Los_Angeles"),
     "2026-07-18",
   );

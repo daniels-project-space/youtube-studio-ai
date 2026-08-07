@@ -68,7 +68,7 @@ export const motionComicBlock: Block = {
   paid: true,
   run: async (ctx) => {
     if (!hasMotionComic()) {
-      throw new Error("motion_comic: GEMINI_API_KEY + ELEVENLABS_API_KEY required (no fallback — this is the channel's visual engine)");
+      throw new Error("motion_comic: storyboard, ElevenLabs voice, and the selected Banana image route must all be configured (no fallback — this is the channel's visual engine)");
     }
     const topic = String(ctx.store["topic"] ?? "");
     if (!topic) throw new Error("motion_comic: no topic in store");
@@ -110,7 +110,11 @@ export const motionComicBlock: Block = {
     const genPro = Math.max(0, bananaCounters.pro - countersBefore.pro);
     const genFlash = Math.max(0, bananaCounters.flash - countersBefore.flash);
     const genFal = Math.max(0, (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0));
-    const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd + genFal * PRICE.bananaFalUsd;
+    const legacyArtCost =
+      genPro * PRICE.bananaProUsd +
+      genFlash * PRICE.bananaFlashUsd +
+      Math.max(0, bananaCounters.falCostUsd - countersBefore.falCostUsd);
+    const artCost = ctx.imageUsageAccounting?.().costUsd ?? legacyArtCost;
     const ttsCost =
       (res.ttsCharactersGenerated / 1000) * PRICE.ttsElevenPerKCharUsd;
     const musicCost = res.musicGenerations * PRICE.musicTrackUsd;

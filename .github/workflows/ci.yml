@@ -47,7 +47,13 @@ jobs:
           else
             npx --yes tsc --noEmit
           fi
+      - name: Lint
+        run: ${{ steps.pm.outputs.pm }} run lint
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
       - name: Install declared Python renderer test dependency
         run: python -m pip install --disable-pip-version-check --no-cache-dir -r requirements-ci.txt
+      - name: Novita worker contract tests
+        run: PYTHONDONTWRITEBYTECODE=1 python -m unittest -v infra/novita/test_worker.py
       - name: Production-readiness tests
         run: ${{ steps.pm.outputs.pm }} run test:production-readiness

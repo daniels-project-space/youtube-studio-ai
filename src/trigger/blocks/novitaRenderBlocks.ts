@@ -218,7 +218,7 @@ export const novitaRenderImages: Block = {
     return {
       stillKeys: stillRenderManifest.items.map((item) => item.stillKey),
       stillRenderManifest,
-      [COST_PATCH_KEY]: stillRenderManifest.items.length * PRICE.novitaImageUsd,
+      [COST_PATCH_KEY]: result.costUsd,
     };
   },
 };
@@ -390,7 +390,7 @@ export const novitaRenderVideo: Block = {
     ctx.log(`novita_render_video: ${result.outputs} pinned story clip(s) in ${result.durationSec}s`);
     return {
       shotRenderManifest,
-      [COST_PATCH_KEY]: shotRenderManifest.items.length * PRICE.novitaVideoUsd,
+      [COST_PATCH_KEY]: result.costUsd,
     };
   },
 };

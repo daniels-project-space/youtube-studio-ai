@@ -1,0 +1,10 @@
+# Root-context default deny. In particular, .env*, .git, graphify-out,
+# node_modules, __pycache__, *.pyc, source media, and test fixtures never enter
+# the documented `docker build -f infra/novita/Dockerfile ... .` context.
+**
+!infra/
+infra/*
+!infra/novita/
+infra/novita/*
+!infra/novita/Dockerfile
+!infra/novita/worker.py

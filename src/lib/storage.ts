@@ -20,6 +20,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
@@ -132,6 +133,8 @@ export interface PutOptions {
   bucket?: string;
   contentType?: string;
   metadata?: Record<string, string>;
+  /** Atomic create-only write, used for paid-provider idempotency claims. */
+  ifNoneMatch?: "*";
 }
 
 /**
@@ -150,9 +153,37 @@ export async function putObject(
     Body: body,
     ContentType: opts.contentType,
     Metadata: opts.metadata,
+    IfNoneMatch: opts.ifNoneMatch,
   });
   await getR2Client().send(command);
   return key;
+}
+
+/** Read object metadata without downloading the media body (recovery/checkpoint path). */
+export async function headObjectMetadata(
+  key: string,
+  bucket?: string,
+): Promise<{
+  contentLength?: number;
+  contentType?: string;
+  metadata: Record<string, string>;
+} | null> {
+  try {
+    const response = await getR2Client().send(new HeadObjectCommand({
+      Bucket: getBucket(bucket),
+      Key: key,
+    }));
+    return {
+      ...(typeof response.ContentLength === "number" ? { contentLength: response.ContentLength } : {}),
+      ...(response.ContentType ? { contentType: response.ContentType } : {}),
+      metadata: response.Metadata ?? {},
+    };
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    const name = (error as { name?: string }).name;
+    if (status === 404 || name === "NotFound" || name === "NoSuchKey") return null;
+    throw error;
+  }
 }
 
 /**

@@ -15,7 +15,10 @@ function convexClient(): ConvexHttpClient {
 export const dispatchPublishIntentTask = task({
   id: "dispatch-publish-intent",
   maxDuration: 28_800,
-  retry: { maxAttempts: 1 },
+  // Provider failures persist retry_wait and enqueue a delayed successor. These
+  // short retries only recover a failed Trigger enqueue; claim/not_due then
+  // deduplicates the same delayed successor without another provider call.
+  retry: { maxAttempts: 3, minTimeoutInMs: 5_000, maxTimeoutInMs: 30_000, factor: 2 },
   queue: { concurrencyLimit: 3 },
   run: async (payload: { intentId: string }) => {
     const workerId = `trigger:${payload.intentId}:${Date.now()}`;

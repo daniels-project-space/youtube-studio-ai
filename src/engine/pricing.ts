@@ -12,11 +12,19 @@
  * The one non-guessed anchor: Topaz video-upscale is documented at ~$0.25 per
  * loop unit in the upscale block (legacy topaz.py parity).
  */
+import {
+  falFluxProV11CostUsd,
+  falImageRates,
+  selectedFalImageCostUsd,
+} from "@/lib/falImagePricing";
+
 function rate(envName: string, fallback: number): number {
   const raw = process.env[envName];
   const n = raw === undefined ? NaN : Number(raw);
   return Number.isFinite(n) && n >= 0 ? n : fallback;
 }
+
+const falRates = falImageRates();
 
 export const PRICE = {
   /** Per keyframe still (Higgsfield/Flux). keyframes renders 2. */
@@ -29,8 +37,6 @@ export const PRICE = {
   bananaProUsd: rate("PRICE_BANANA_PRO_USD", 0.135),
   /** Per classic Nano Banana image (gemini-2.5-flash-image). */
   bananaFlashUsd: rate("PRICE_BANANA_FLASH_USD", 0.04),
-  /** Per image-to-video clip (~5s, Higgsfield/Kling). loop_clips renders 2. */
-  videoClipUsd: rate("PRICE_VIDEO_CLIP_USD", 0.35),
   /** Per loop-unit Topaz upscale (block comment anchor: ~$0.25). */
   topazUpscaleUsd: rate("PRICE_TOPAZ_UPSCALE_USD", 0.25),
   /** Per generated music track (Mureka/Suno). */
@@ -40,19 +46,23 @@ export const PRICE = {
   // ElevenLabs v3 is ~20-50x Fish per character — the flat Fish rate made the
   // budget guard blind exactly when the premium voice was cast.
   ttsElevenPerKCharUsd: rate("PRICE_TTS_ELEVEN_PER_KCHAR_USD", 0.12),
-  // fal FLUX image (the IMAGE_DISABLE_GEMINI route) — counters track it like
-  // the banana tiers so per-run cost stays real on the no-Google path.
-  bananaFalUsd: rate("PRICE_BANANA_FAL_USD", 0.04),
-  /** fal FLUX Pro still used by generated-footage modules. */
-  falFluxUsd: rate("FAL_FLUX_COST_USD", 0.04),
-  /** fal image-to-video clip used by generated-footage modules. */
-  falI2vUsd: rate("FAL_I2V_COST_USD", 0.13),
-  /** Per pinned Novita still candidate. */
+  /** Fal public rates. Per-output cost is derived from the selected model and
+   * actual dimensions; none of these is a universal per-image fallback. */
+  falSchnellUsdPerMegapixel: falRates.schnellUsdPerMegapixel,
+  falKontextUsdPerImage: falRates.kontextUsdPerImage,
+  falFluxProV11UsdPerMegapixel: falRates.fluxProV11UsdPerMegapixel,
+  /** Legacy planning estimate only; runtime accounting uses the signed bridge receipt. */
   novitaImageUsd: rate("NOVITA_IMAGE_COST_USD", 0.02),
-  /** Per pinned Novita video clip. */
+  /** Legacy planning estimate only; runtime accounting uses the signed bridge receipt. */
   novitaVideoUsd: rate("NOVITA_VIDEO_COST_USD", 0.08),
+  /** Hard admission ceilings. These reserve budget but never claim actual spend. */
+  novitaImageMaxUsd: rate("NOVITA_IMAGE_MAX_COST_USD", 0.5),
+  novitaVideoMaxUsd: rate("NOVITA_VIDEO_MAX_COST_USD", 5),
   /** One managed vision-grader request. */
   visionGraderUsd: rate("VISION_GRADER_COST_USD", 0.003),
+  /** Conservative ceiling for the bounded 1,000-token Flash thumbnail concept
+   * pass (actual token spend is recorded by the runner scope). */
+  thumbnailConceptUsd: rate("PRICE_THUMBNAIL_CONCEPT_USD", 0.01),
   /** Conservative allowance for the normal frame-sampled production QA pass. */
   qaBaseUsd: rate("PRICE_QA_BASE_USD", 0.04),
   /** Optional two-pass native full-video review. */
@@ -71,13 +81,14 @@ export type BananaPriceTier = "flash" | "pro";
 export function bananaUnitRate(
   tier: BananaPriceTier,
   env: Readonly<Record<string, string | undefined>> = process.env,
+  request: Readonly<{ aspectRatio?: string; hasReferences?: boolean }> = {},
 ): number {
   const providers = (env.IMAGE_PROVIDERS ?? "")
     .split(",")
     .map((provider) => provider.trim().toLowerCase())
     .filter(Boolean);
   if (env.IMAGE_DISABLE_GEMINI === "1" || providers[0] === "fal") {
-    return PRICE.bananaFalUsd;
+    return selectedFalImageCostUsd({ tier, ...request }, env);
   }
   const forcedModel = (env.BANANA_FORCE_MODEL ?? "").toLowerCase();
   if (forcedModel.includes("gemini-3-pro")) return PRICE.bananaProUsd;
@@ -115,6 +126,8 @@ export interface BananaGenerationCounters {
   pro: number;
   flash: number;
   fal: number;
+  /** Exact successful Fal response cost; never derive it from `fal` count. */
+  falCostUsd: number;
 }
 
 export function thumbnailGenerationCost(
@@ -125,14 +138,23 @@ export function thumbnailGenerationCost(
 ): number {
   const pro = Math.max(0, after.pro - before.pro);
   const flash = Math.max(0, after.flash - before.flash);
-  const fal = Math.max(0, after.fal - before.fal);
+  const falCostUsd = Math.max(0, after.falCostUsd - before.falCostUsd);
   return (
     pro * PRICE.bananaProUsd +
     flash * PRICE.bananaFlashUsd +
-    fal * PRICE.bananaFalUsd +
+    falCostUsd +
     // Image generation no longer launches hidden candidate judges. Only the
     // explicit post-render publishing alarm is charged here.
     Math.max(0, referenceJudgeCalls) * PRICE.visionGraderUsd +
     Math.max(0, extraCostUsd)
   );
+}
+
+/** Exact configured cost for the direct FLUX Pro v1.1 helper's output size. */
+export function falFluxProImageCost(
+  width = 1344,
+  height = 768,
+  env: Readonly<Record<string, string | undefined>> = process.env,
+): number {
+  return falFluxProV11CostUsd(width, height, env);
 }

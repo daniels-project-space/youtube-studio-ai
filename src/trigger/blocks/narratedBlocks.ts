@@ -21,10 +21,9 @@ import {
 } from "@/engine/renderArtifacts";
 import { narrationTtsCost, qaVisualCost } from "@/engine/pricing";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
-import { geminiJson, geminiVideo, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
 import { existsSync } from "node:fs";
-import { copyFile } from "node:fs/promises";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
 import { narrationPhysics, gateColdOpen, judgeNarrationTake } from "@/lib/voicecraft";
@@ -134,15 +133,28 @@ function bodySegSeconds(
 async function mapPool<T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
+  let failed = false;
+  let firstError: unknown;
   await Promise.all(
     Array.from({ length: Math.min(limit, Math.max(1, items.length)) }, async () => {
       for (;;) {
+        // Stop admitting new paid work after the first failure, but wait for
+        // already in-flight workers to settle so their billable callbacks are
+        // included in the failed-stage ledger before this pool rejects.
+        if (failed) return;
         const idx = next++;
         if (idx >= items.length) return;
-        out[idx] = await fn(items[idx], idx);
+        try {
+          out[idx] = await fn(items[idx], idx);
+        } catch (error) {
+          if (!failed) firstError = error;
+          failed = true;
+          return;
+        }
       }
     }),
   );
+  if (failed) throw firstError;
   return out;
 }
 
@@ -2378,55 +2390,6 @@ export const qaVisual: Block = {
   },
 };
 
-/* ----------------------------- qa_refine -------------------------------- *
- * Closed-loop quality control: GEMINI WATCHES THE WHOLE RENDERED VIDEO against
- * a do/don't rubric â†’ structured findings â†’ a Mastra EDITOR agent maps the
- * fixable ones to bounded ops (drop/shorten/retime quote cards) â†’ an executor
- * re-applies the corrected overlays onto the persisted PRE-OVERLAY video and
- * overwrites the canonical output (no full re-render). Non-fixable findings are
- * recorded (refineNotes) so source-level gates can absorb them next run. Runs
- * after timeline_assemble, before qa_visual/upload. Fully guarded â€” any failure
- * leaves the original video untouched. */
-const REFINE_RUBRIC =
-  `You are the QUALITY DIRECTOR for a faceless Stoic-philosophy YouTube channel. WATCH the entire video and ` +
-  `report every violation of these DO/DON'T rules, each with a timestamp (atSec) and a concrete fix:\n` +
-  `1. QUOTE CARDS: must be fully on-screen, legible, SHORT enough to read in their time, and at least ~5s apart ` +
-  `(consecutive cards must NEVER overlap or run back-to-back). Flag any card with too much text or any pair too ` +
-  `close together.\n` +
-  `2. NO channel name / handle on the intro title card or burned into any frame.\n` +
-  `3. FOOTAGE must be on-theme and must NOT contradict the Stoic message (no luxury cars, money, brands, ` +
-  `shopping/markets, busy offices, parties).\n` +
-  `4. NO repeated/looped/duplicate footage; clips should feel distinct.\n` +
-  `5. TEXT must never overlap a face/subject and must have strong contrast.\n` +
-  `6. The intro should dissolve into the body; the video must END on a deliberate OUTRO CARD (a closing line over ` +
-  `the bust) that fades cleanly to black with the music â€” flag if the ending feels abrupt or is just footage ` +
-  `cutting off.\n` +
-  `7. MUSIC after the intro must duck DOWN GRADUALLY (a smooth ~3s ease, never an instant drop) when the voice ` +
-  `starts.\n` +
-  `8. Quote-card blur and text must fade in/out SLOWLY and calmly (not snappy/jarring).\n` +
-  `9. INTRO TITLE CARD must look sophisticated (elegant type, the bust faint behind at ~50% opacity, text fading ` +
-  `in and out) and must NOT show the channel name.\n` +
-  `10. Overall pacing, polish, and on-brand premium feel.\n` +
-  `Return STRICT JSON {"findings":[{"issue":string,"severity":"low|medium|high","atSec":number,"fix":string}],"overall":string}.`;
-
-export const qaRefine: Block = {
-  id: "qa_refine",
-  consumes: ["videoKey"],
-  produces: ["refineNotes"],
-  paid: false,
-  run: async (ctx) => {
-    // SUPERSEDED by qa_visual (deterministic renderValidate gate + advisory
-    // watchRender). qa_refine's old full-video geminiVideo upload + auto-patch/re-
-    // encode was slow and 503-prone and could HANG a render for 20+ min, for no gate
-    // value. It is now a no-op; QA happens reliably in qa_visual. Kept as a block so
-    // existing channel pipelines that reference it still validate.
-    ctx.log("qa_refine: skipped (superseded by qa_visual deterministic gate)");
-    return { refineNotes: { skipped: "superseded_by_qa_visual" } };
-    // (legacy auto-refine implementation deleted — it was unreachable dead code
-    // that still type-checked and broke the Vercel build. git history has it.)
-  },
-};
-
 export const narratedBlocks: Block[] = [
   scriptGen,
   hookCraft,
@@ -2437,7 +2400,6 @@ export const narratedBlocks: Block[] = [
   introCard,
   quoteOverlaysBlock,
   timelineAssemble,
-  qaRefine,
   lengthCheck,
   captions,
   qaVisual,

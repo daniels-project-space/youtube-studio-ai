@@ -58,7 +58,7 @@ function numberInRange(
   return parsed;
 }
 
-function validatedSchedule(
+export function validatedSchedule(
   current: Record<string, unknown>,
   input: Record<string, unknown>,
 ) {
@@ -83,6 +83,11 @@ function validatedSchedule(
   if (days.some((day) => !Number.isInteger(day) || day < 0 || day > 6)) {
     throw new SettingsValidationError(
       "schedule days must be integers from 0 to 6",
+    );
+  }
+  if ((frequency === "weekly" || frequency === "biweekly") && days.length === 0) {
+    throw new SettingsValidationError(
+      "weekly and biweekly schedules require at least one weekday",
     );
   }
   const approvalMode = String(merged.approvalMode ?? "manual");

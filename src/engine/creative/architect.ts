@@ -125,14 +125,6 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
     ],
   },
   {
-    block: "qa_refine",
-    purpose: "LEGACY no-op block (superseded by qa_visual). Safe to remove from any pipeline.",
-    whenToUse: "Never — remove it when present.",
-    addable: false,
-    removable: true,
-    params: [],
-  },
-  {
     block: "topic_select",
     purpose: "Chooses each video's topic with a no-repeat memory.",
     whenToUse: "Core. Tune the repeat policy to the channel's content shape.",
@@ -218,12 +210,12 @@ export const ARCHITECT_TOOLBOX: Tool[] = [
   {
     block: "thumbnail_gen",
     purpose:
-      "Renders thumbnails with the BANANA ENGINE (Nano Banana Pro / Gemini 3 Pro Image): ONE design-native " +
-      "generation from a rich brief - the channel's visual language (imageStyle, palette, textObject type " +
-      "treatment, cutout_collage composition), a scene that literally enacts the topic, payoff-word headline " +
-      "hierarchy, badge - then a vision gate (text exact, faces never covered, punch/style/story >=7) with one " +
-      "feedback retry. Typography comes out as physical material (carved slabs, torn strips, paint smears). " +
-      "Playbook patterns rotate per run for anti-repetition; without a playbook it renders DNA-direct.",
+      "Builds a thumbnail from one bounded concept pass, one text-free Flash scene render, and a deterministic " +
+      "local typography compositor. The provider sees only visual scene fields and a reserved safe zone; exact " +
+      "headline/badge copy is rendered locally through the channel's executable Style-DNA motif (carved, torn " +
+      "strip, paint smear, neon, ransom tiles, and the remaining supported treatments). One independent mobile/" +
+      "reference gate can block publishing but never launches a paid feedback retry or generic fallback. Playbook " +
+      "patterns rotate per run; when references are unavailable, a persisted Style-DNA foundation is required.",
     whenToUse: "Core. patternBias steers the rotation toward tournament-proven patterns; thumbEnergy sets the clickbait tier.",
     addable: false,
     removable: false,

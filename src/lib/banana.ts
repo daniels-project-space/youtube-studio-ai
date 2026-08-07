@@ -10,6 +10,8 @@ import { writeFile } from "node:fs/promises";
 import { parseJsonLoose } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
+import { PRICE } from "@/engine/pricing";
+import { recordImageUsage } from "@/lib/imageUsage";
 
 /**
  * MODEL TIERS. Pro (gemini-3-pro-image, ~$0.13/img) remains available for
@@ -32,7 +34,28 @@ function modelsFor(tier: "pro" | "flash"): string[] {
 /** Billed-generation counters (by tier) — pipeline blocks report real cost from
  *  these. `fal` counts router-delegated FLUX renders (≈ $0.04/image — the same
  *  rate as banana flash, which is what cost consumers bill it at). */
-export const bananaCounters = { pro: 0, flash: 0, fal: 0 };
+/** Legacy diagnostics/fallback only. Authoritative per-block accounting lives
+ * in the AsyncLocalStorage image-usage scope installed by the runner. */
+export const bananaCounters = { pro: 0, flash: 0, fal: 0, falCostUsd: 0 };
+
+/**
+ * A Gemini image submission that ended without a durable image response.
+ * The generateContent endpoint exposes neither an idempotency key nor an
+ * accepted-job recovery handle, so repeating an ambiguous request can buy the
+ * same image twice. Explicit 429 responses are handled separately because
+ * they prove the request was rejected before generation.
+ */
+export class BananaImageSubmissionError extends Error {
+  readonly retryable = false;
+  readonly status?: number;
+  readonly code = "BANANA_IMAGE_SUBMISSION_AMBIGUOUS";
+
+  constructor(message: string, options: { status?: number; cause?: unknown } = {}) {
+    super(message, options.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "BananaImageSubmissionError";
+    this.status = options.status;
+  }
+}
 
 /**
  * PROVIDER ROUTER ("no Google image gen" switch). The fal route is active when
@@ -260,6 +283,11 @@ export async function generateBananaImage(args: {
   /** Cost tier. Default: "pro" only for legacy text-design renders
    *  (`allowText`), otherwise "flash". */
   tier?: "pro" | "flash";
+  /** Maximum HTTP submissions after explicit 429 rejections. Every ambiguous
+   * transport/response failure stops after one potentially-paid submission;
+   * callers may still own a separate, intentional quality attempt after they
+   * received and graded a real image. */
+  maxProviderAttempts?: 1 | 2 | 3;
 }): Promise<Buffer> {
   // PROVIDER ROUTER: when the operator disabled Google image gen, EVERY engine
   // that calls generateBananaImage transparently renders on fal FLUX instead
@@ -281,14 +309,19 @@ export async function generateBananaImage(args: {
       // Mirror banana's tiering on the fal route: flash (picture-only bulk
       // assets) rides the cheap model; text-design renders stay on quality.
       tier: args.tier ?? (args.allowText ? "pro" : "flash"),
+      maxProviderAttempts: args.maxProviderAttempts,
+      onUsage: (usage) => {
+        bananaCounters.fal += usage.images;
+        bananaCounters.falCostUsd += usage.costUsd;
+      },
     });
-    bananaCounters.fal++;
     return bytes;
   }
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
   const prompt = args.allowText ? args.prompt : args.prompt + NO_TEXT_CLAUSE;
   const tier = args.tier ?? (args.allowText ? "pro" : "flash");
+  const maxProviderAttempts = Math.max(1, Math.min(2, args.maxProviderAttempts ?? 2));
   // Text first, then any conditioning images (img2img / style reference).
   const parts: Record<string, unknown>[] = [{ text: prompt }];
   for (const im of args.images ?? []) parts.push({ inlineData: { mimeType: im.mimeType ?? "image/png", data: im.data } });
@@ -299,9 +332,10 @@ export async function generateBananaImage(args: {
     // ~1024px anyway, so it silently degrades.
     const imageConfig: Record<string, string> = { aspectRatio: args.aspectRatio ?? "16:9" };
     if (model.includes("gemini-3-pro-image")) imageConfig.imageSize = args.imageSize ?? "2K";
-    for (let attempt = 0; attempt < 2; attempt++) {
+    for (let attempt = 0; attempt < maxProviderAttempts; attempt++) {
+      let res: Response;
       try {
-        const res = await fetch(
+        res = await fetch(
           `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
           {
             method: "POST",
@@ -316,25 +350,59 @@ export async function generateBananaImage(args: {
             signal: AbortSignal.timeout(180_000),
           },
         );
-        const json = (await res.json()) as {
-          candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
-          error?: { message?: string };
-        };
-        if (!res.ok) {
-          lastErr = `${model} HTTP ${res.status}: ${json.error?.message ?? ""}`;
-          if ([429, 500, 503].includes(res.status) && attempt === 0) {
-            await new Promise((r) => setTimeout(r, 4000));
-            continue;
-          }
-          break; // non-transient → next model
-        }
-        const part = (json.candidates?.[0]?.content?.parts ?? []).find((p) => p.inlineData?.data);
-        if (!part?.inlineData?.data) { lastErr = `${model}: no image part in response`; break; }
-        bananaCounters[model.includes("gemini-3-pro-image") ? "pro" : "flash"]++;
-        return Buffer.from(part.inlineData.data, "base64");
-      } catch (e) {
-        lastErr = `${model}: ${e instanceof Error ? e.message : e}`;
+      } catch (error) {
+        throw new BananaImageSubmissionError(
+          `${model}: image submission transport failed without a durable response; refusing automatic resubmission`,
+          { cause: error },
+        );
       }
+
+      const raw = await res.text();
+      let json: {
+        candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
+        error?: { message?: string };
+      } = {};
+      try {
+        json = raw ? JSON.parse(raw) as typeof json : {};
+      } catch (error) {
+        throw new BananaImageSubmissionError(
+          `${model}: provider returned an unreadable HTTP ${res.status} response without a durable image; ` +
+            "refusing automatic resubmission",
+          { status: res.status, cause: error },
+        );
+      }
+
+      if (res.status === 429) {
+        lastErr = `${model} HTTP 429: ${json.error?.message ?? "rate limited"}`;
+        if (attempt + 1 < maxProviderAttempts) {
+          await new Promise((r) => setTimeout(r, 4000));
+        }
+        continue;
+      }
+      if (!res.ok) {
+        throw new BananaImageSubmissionError(
+          `${model}: provider returned HTTP ${res.status} without a durable image; ` +
+            `refusing automatic resubmission: ${json.error?.message ?? raw.slice(0, 240)}`,
+          { status: res.status },
+        );
+      }
+      const part = (json.candidates?.[0]?.content?.parts ?? []).find((candidate) => candidate.inlineData?.data);
+      if (!part?.inlineData?.data) {
+        throw new BananaImageSubmissionError(
+          `${model}: provider accepted the request but returned no durable image; refusing model fallback/resubmission`,
+          { status: res.status },
+        );
+      }
+      const isPro = model.includes("gemini-3-pro-image");
+      bananaCounters[isPro ? "pro" : "flash"]++;
+      recordImageUsage({
+        provider: "gemini",
+        model,
+        route: isPro ? "banana-pro" : "banana-flash",
+        images: 1,
+        costUsd: isPro ? PRICE.bananaProUsd : PRICE.bananaFlashUsd,
+      });
+      return Buffer.from(part.inlineData.data, "base64");
     }
   }
   throw new Error(`banana: provider retry budget exhausted (${lastErr})`);

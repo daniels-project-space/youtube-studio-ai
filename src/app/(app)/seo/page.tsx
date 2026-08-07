@@ -41,7 +41,16 @@ export default function SeoPage() {
   // Niche resolution: selected channel's niche wins; else a manual selector.
   const selectedChannel = channelNiches.find((c) => c.slug === selectedSlug);
   const channelNiche = selectedChannel?.niche ?? null;
-  const [manualNiche, setManualNiche] = useState<string | null>(null);
+  const [manualSelection, setManualSelection] = useState<{
+    selectedSlug: string | null;
+    niche: string;
+  } | null>(null);
+  const manualNiche = manualSelection?.selectedSlug === selectedSlug
+    ? manualSelection.niche
+    : null;
+  const setManualNiche = (niche: string) => {
+    setManualSelection({ selectedSlug, niche });
+  };
   const niche = channelNiche ?? manualNiche;
 
   // Distinct niches across channels, for the fallback selector.
@@ -65,8 +74,8 @@ export default function SeoPage() {
   return (
     <>
       <PageHeader
-        title="SEO"
-        subtitle="Title, tag, and keyword intelligence per niche"
+        title="SEO studio"
+        subtitle="Turn live niche intelligence into the next stronger upload"
         actions={
           niche ? (
             <ResearchButton niche={niche} channelId={selectedChannel?._id} />
@@ -83,7 +92,7 @@ export default function SeoPage() {
           hasChannel={Boolean(selectedSlug)}
         />
       ) : (
-        <div style={{ display: "grid", gap: "1.75rem" }}>
+        <div className="seo-workspace">
           {!channelNiche && (
             <NicheSelector
               niches={availableNiches}
@@ -104,15 +113,143 @@ export default function SeoPage() {
             />
           ) : (
             <>
-              {intel && <NicheIntelligence intel={intel} />}
-              {databank && <SeoDatabank databank={databank} />}
+              <SeoFocus
+                niche={niche}
+                channelName={selectedChannel?.name}
+                intel={intel}
+                databank={databank}
+                competitors={competitors}
+              />
               <ViewEstimateWidget ownerId={ownerId} niche={niche} />
-              <CompetitorTopVideos competitors={competitors} />
+
+              {intel && (
+                <InsightDetails
+                  title="Detailed niche intelligence"
+                  description="Title patterns, tags, power words, and the measured thumbnail style guide"
+                >
+                  <NicheIntelligence intel={intel} />
+                </InsightDetails>
+              )}
+
+              {(databank || competitors) && (
+                <InsightDetails
+                  title="Strategy databank and competitors"
+                  description="Reusable hooks, opportunity gaps, and the source videos behind the guidance"
+                >
+                  {databank && <SeoDatabank databank={databank} />}
+                  <CompetitorTopVideos competitors={competitors} />
+                </InsightDetails>
+              )}
             </>
           )}
         </div>
       )}
     </>
+  );
+}
+
+type SeoIntel = {
+  optimalTitleLen: number;
+  topTags: unknown[];
+  topTitlePatterns: unknown[];
+  powerWords: unknown[];
+  avgViewsTop50: number;
+  medianViewsTop50: number;
+  thumbnailStyleGuide: {
+    dominantColors: string[];
+    hasTextOverlayPct: number;
+    notes: string;
+  };
+};
+
+type SeoDatabankRow = {
+  titleTemplates: string[];
+  hookPatterns: string[];
+  competitorGaps: string[];
+};
+
+function SeoFocus({
+  niche,
+  channelName,
+  intel,
+  databank,
+  competitors,
+}: {
+  niche: string;
+  channelName?: string;
+  intel: SeoIntel | null | undefined;
+  databank: SeoDatabankRow | null | undefined;
+  competitors: CompetitorRow[] | undefined;
+}) {
+  const titlePattern = intel
+    ? labeled(intel.topTitlePatterns, "pattern")[0]
+    : undefined;
+  const opportunity = databank?.competitorGaps[0];
+  const sourceVideos =
+    competitors?.reduce((total, competitor) => total + competitor.topVideos.length, 0) ?? 0;
+
+  return (
+    <section className="glass overview-panel seo-focus">
+      <div className="panel-heading">
+        <span>
+          <small>Use next</small>
+          <h2>Focus for the next upload</h2>
+        </span>
+        <span className="seo-focus-source">
+          {channelName ?? "All channels"} · {niche}
+        </span>
+      </div>
+      <div className="seo-focus-grid">
+        <div>
+          <small>Title target</small>
+          <strong>
+            {intel ? `${intel.optimalTitleLen} characters` : "Research needed"}
+          </strong>
+          <span>{titlePattern ?? "Run research to learn the winning title structure."}</span>
+        </div>
+        <div>
+          <small>Content opportunity</small>
+          <strong>{opportunity ? "Gap identified" : "No gap recorded"}</strong>
+          <span>{opportunity ?? "The strategy databank has no open competitor gap yet."}</span>
+        </div>
+        <div>
+          <small>Thumbnail signal</small>
+          <strong>
+            {intel
+              ? `${intel.thumbnailStyleGuide.hasTextOverlayPct}% use text`
+              : "Research needed"}
+          </strong>
+          <span>
+            {sourceVideos > 0
+              ? `Grounded in ${sourceVideos} stored competitor videos.`
+              : "No competitor video sample is stored for this niche yet."}
+          </span>
+        </div>
+      </div>
+    </section>
+  );
+}
+
+function InsightDetails({
+  title,
+  description,
+  children,
+}: {
+  title: string;
+  description: string;
+  children: React.ReactNode;
+}) {
+  return (
+    <details className="channel-advanced glass">
+      <summary>
+        <span>
+          <strong>{title}</strong>
+          <small>{description}</small>
+        </span>
+        <span aria-hidden="true">+</span>
+      </summary>
+      <div className="channel-advanced-content">{children}</div>
+    </details>
   );
 }
 
@@ -273,19 +410,7 @@ function NicheSelector({
 function NicheIntelligence({
   intel,
 }: {
-  intel: {
-    optimalTitleLen: number;
-    topTags: unknown[];
-    topTitlePatterns: unknown[];
-    powerWords: unknown[];
-    avgViewsTop50: number;
-    medianViewsTop50: number;
-    thumbnailStyleGuide: {
-      dominantColors: string[];
-      hasTextOverlayPct: number;
-      notes: string;
-    };
-  };
+  intel: SeoIntel;
 }) {
   const tags = labeled(intel.topTags, "tag");
   const patterns = labeled(intel.topTitlePatterns, "pattern");
@@ -370,11 +495,7 @@ function NicheIntelligence({
 function SeoDatabank({
   databank,
 }: {
-  databank: {
-    titleTemplates: string[];
-    hookPatterns: string[];
-    competitorGaps: string[];
-  };
+  databank: SeoDatabankRow;
 }) {
   return (
     <section>

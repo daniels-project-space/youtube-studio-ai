@@ -1,8 +1,9 @@
 /**
  * NOVITA RENDER FARM — standalone image + video render module driven by the
- * three-slot Novita RTX 4090 orchestrator (`/root/ltx-build/novita/orchestrator.py`
+ * elastic Novita GPU control plane
  * on the VPS): static modulo sharding, spot-pod autoclose + reclaim-requeue,
- * R2-backed idempotent resume (workers skip outputs already in R2).
+ * R2-backed checkpoint resume (workers skip jobs recorded as uploaded in the
+ * manifest-bound checkpoint; the bridge reconciles artifacts after a hard kill).
  *
  * EXECUTION MODEL — the orchestrator is a long-running Python driver that
  * launches/monitors Novita GPU pods; it does NOT run inside Vercel or a
@@ -13,7 +14,12 @@
  * there is deliberately no public or unauthenticated fallback.
  */
 import { createHash, createHmac } from "node:crypto";
-import type { GenerationProfile } from "@/engine/generationProfiles";
+import { NOVITA_ELASTIC_GPU_CEILING, type GenerationProfile } from "@/engine/generationProfiles";
+import { requireNovitaFleetReadiness } from "@/lib/novitaFleet";
+import {
+  waitForNovitaRenderPoll,
+  type NovitaRenderPollWait,
+} from "@/lib/novitaPollWait";
 import { bootstrapSecrets } from "./bootstrap";
 import { z } from "zod";
 
@@ -75,9 +81,29 @@ export interface NovitaPhaseProfile {
   guidanceScale: number;
   precision: "bf16" | "fp16";
   candidates: number;
+  infrastructure: GenerationProfile["infrastructure"];
   fps?: number;
+  pipeline?: GenerationProfile["video"]["pipeline"];
   twoStageRefine?: boolean;
+  distilledLoraCheckpoint?: string;
+  spatialUpscalerCheckpoint?: string;
   allowFallback: false;
+}
+
+export interface NovitaRuntimeAttestation {
+  provider: "novita";
+  capacityMode: "spot";
+  weightStorage: "local-persistent-disk";
+  cacheMount: "/workspace/model-cache";
+  checkpointing: true;
+  idleShutdownSeconds: number;
+  gpuCount: number;
+  model: string;
+  revision: string;
+  checkpoint: string;
+  pipeline?: GenerationProfile["video"]["pipeline"];
+  distilledLoraCheckpoint?: string;
+  spatialUpscalerCheckpoint?: string;
 }
 
 /** Convert one approved studio profile into the exact phase contract accepted by the bridge. */
@@ -99,10 +125,18 @@ export function toNovitaPhaseProfile(
     guidanceScale: settings.guidanceScale,
     precision: settings.precision,
     candidates: settings.candidates,
+    infrastructure: profile.infrastructure,
     ...(phase === "video"
       ? {
           fps: profile.video.fps,
+          pipeline: profile.video.pipeline,
           twoStageRefine: profile.video.twoStageRefine,
+          ...(profile.video.distilledLoraCheckpoint
+            ? { distilledLoraCheckpoint: profile.video.distilledLoraCheckpoint }
+            : {}),
+          ...(profile.video.spatialUpscalerCheckpoint
+            ? { spatialUpscalerCheckpoint: profile.video.spatialUpscalerCheckpoint }
+            : {}),
         }
       : {}),
     allowFallback: false,
@@ -134,7 +168,7 @@ export interface NovitaRenderCfg {
   fps?: number;
   width?: number;
   height?: number;
-  /** Number of Novita pods to shard across (account cap = 3). */
+  /** Elastic Novita spot GPU shard count, hard-capped at eight. */
   nshard?: number;
   jobs?: "val" | "full";
   maxConcurrent?: number;
@@ -154,7 +188,9 @@ export interface NovitaRenderResult {
   candidates?: RenderedCandidate[];
   outputs: number;
   durationSec: number;
-  raw?: unknown;
+  costUsd: number;
+  billingReceipt: NovitaBillingReceipt;
+  raw: NovitaBridgeStatus;
 }
 
 /**
@@ -166,7 +202,7 @@ export const NOVITA_RENDER_FARM_MODULE = {
   key: "novita-render-farm",
   title: "Novita Render Farm",
   stage: "visual",
-  does: "Renders a full shot list on a three-slot Novita RTX 4090 spot fleet through a signed HTTPS bridge. Approved immutable profiles pin model revision, checkpoint, dimensions, steps, guidance, precision, FPS, and candidate count; the bridge rejects drift and cross-engine fallback.",
+  does: "Renders a full shot list on an elastic Novita spot fleet (up to eight GPUs) through a signed HTTPS bridge. Approved immutable profiles pin model revision, local persistent-disk cache, checkpoint, dimensions, steps, guidance, precision, FPS, and candidate count; the bridge rejects drift and cross-engine fallback.",
   produces: {
     kind: "shot_list_render",
     file: "R2-backed stills (png/jpg) + clips (mp4, H.264)",
@@ -187,9 +223,9 @@ export const NOVITA_RENDER_FARM_MODULE = {
     fps: "compatibility guard — if supplied, must exactly equal the pinned video profile",
     width: "compatibility guard — if supplied, must exactly equal the pinned profile",
     height: "compatibility guard — if supplied, must exactly equal the pinned profile",
-    nshard: "Novita pods to shard across, ≤3 (account cap)",
+    nshard: "Novita pods to shard across, ≤8 (subject to the bridge-attested account quota)",
     jobs: "'val' | 'full' — val proves on 1 shard before a full run",
-    maxConcurrent: "max pods in flight at once (default 3)",
+    maxConcurrent: "max pods in flight at once (default 1, hard ceiling 8)",
   },
   needs: { // environment
     secrets: ["NOVITA_RENDER_FARM_TOKEN"],
@@ -200,21 +236,55 @@ export const NOVITA_RENDER_FARM_MODULE = {
     "Video frames are ALWAYS 8n+1 (LTX/Wan temporal requirement) — seconds are rounded to the nearest valid frame count, never truncated silently.",
     "Every shot needs a motion cue (cameraMove !== 'static' OR a non-empty motion field) — a shot with neither is a still, not a video shot.",
     "width/height MUST be a multiple of 32 (VAE tiling requirement) — never submitted unrounded.",
-    "nshard is capped at 3 (Novita account pod limit) — a request above that fails validate(), it does not silently clamp.",
+    "nshard is capped at 8 and the bridge may admit fewer from its live provider-attested quota — a request above the hard ceiling fails validate(), it does not silently clamp.",
     "NO cross-engine fallback: a failed shard retries the SAME engine/pod pattern, then fails loud.",
-    "R2-backed idempotent resume — workers skip outputs already present in R2, so a requeue never double-renders.",
+    "R2-backed checkpoint resume — workers skip uploaded jobs recorded in the manifest-bound checkpoint; bridge-side artifact reconciliation closes the hard-kill gap before requeue.",
   ],
 } as const;
 
 const DEFAULTS = {
   style: "", negative: "", director: "",
   steps: 40, cfg: 4.5, fps: 24, width: 1024, height: 576,
-  nshard: 1, jobs: "val" as const, maxConcurrent: 3,
+  nshard: 1, jobs: "val" as const, maxConcurrent: 1,
 };
 
 const BridgeLaunchSchema = z.object({
   jobId: z.string().regex(/^(image|video)-[a-f0-9]{32}$/),
+  requestSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  profileSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  reused: z.boolean(),
 });
+
+const RuntimeAttestationSchema = z.object({
+  provider: z.literal("novita"),
+  capacityMode: z.literal("spot"),
+  weightStorage: z.literal("local-persistent-disk"),
+  cacheMount: z.literal("/workspace/model-cache"),
+  checkpointing: z.literal(true),
+  idleShutdownSeconds: z.number().int().min(60).max(900),
+  gpuCount: z.number().int().min(1).max(NOVITA_ELASTIC_GPU_CEILING),
+  model: z.string().min(1),
+  revision: z.string().regex(/^[a-f0-9]{40}$/),
+  checkpoint: z.string().min(1),
+  pipeline: z.enum(["distilled", "two-stage-hq"]).optional(),
+  distilledLoraCheckpoint: z.string().min(1).optional(),
+  spatialUpscalerCheckpoint: z.string().min(1).optional(),
+});
+
+const BillingReceiptSchema = z.object({
+  provider: z.literal("novita"),
+  currency: z.literal("USD"),
+  receiptId: z.string().min(8).max(200),
+  gpuSku: z.string().min(1).max(100),
+  gpuCount: z.number().int().min(1).max(NOVITA_ELASTIC_GPU_CEILING),
+  gpuSeconds: z.number().finite().nonnegative(),
+  gpuRateUsdPerSecond: z.number().finite().nonnegative(),
+  startupUsd: z.number().finite().nonnegative(),
+  storageUsd: z.number().finite().nonnegative(),
+  costUsd: z.number().finite().nonnegative(),
+});
+
+export type NovitaBillingReceipt = z.infer<typeof BillingReceiptSchema>;
 
 const BridgeStatusSchema = z.object({
   ok: z.boolean(),
@@ -235,6 +305,9 @@ const BridgeStatusSchema = z.object({
   profileSha256: z.string().regex(/^[a-f0-9]{64}$/),
   manifestSha256: z.string().regex(/^[a-f0-9]{64}$/),
   requestSha256: z.string().regex(/^[a-f0-9]{64}$/),
+  runtimeAttestation: RuntimeAttestationSchema,
+  billingReceipt: BillingReceiptSchema,
+  billingReceiptSha256: z.string().regex(/^[a-f0-9]{64}$/),
   error: z.string().nullable().optional(),
 }).passthrough();
 
@@ -250,6 +323,7 @@ export interface NovitaRenderLaunch {
   profileSha256: string;
   requestSha256: string;
   nshard: number;
+  maxCostUsd: number;
 }
 
 function canonicalJson(value: unknown): string {
@@ -324,6 +398,16 @@ export function validate(cfg: NovitaRenderCfg, phase: "image" | "video"): void {
     if (profile.contractVersion !== "1.0.0") errs.push("unsupported generation profile contract version");
     if (profile.phase !== phase) errs.push(`profile phase ${profile.phase} does not match ${phase}`);
     if (profile.allowFallback !== false) errs.push("generation profile must prohibit fallback");
+    const infra = profile.infrastructure;
+    if (infra.provider !== "novita" || infra.capacityMode !== "spot") {
+      errs.push("generation profile must use Novita spot capacity");
+    }
+    if (infra.weightStorage !== "local-persistent-disk" || infra.cacheMount !== "/workspace/model-cache") {
+      errs.push("generation profile must load weights from the pinned local persistent-disk cache");
+    }
+    if (infra.checkpointing !== true || infra.elasticGpuCeiling !== NOVITA_ELASTIC_GPU_CEILING) {
+      errs.push("generation profile must require checkpointing and the eight-GPU elastic ceiling");
+    }
     if (!/^[a-f0-9]{40}$/.test(profile.revision)) errs.push("profile revision must be a pinned 40-character commit");
     if (!profile.model.trim() || !profile.checkpoint.trim()) errs.push("profile model and checkpoint are required");
     if (!Number.isInteger(profile.steps) || profile.steps < 1) errs.push("profile steps must be a positive integer");
@@ -336,6 +420,20 @@ export function validate(cfg: NovitaRenderCfg, phase: "image" | "video"): void {
     if (cfg.cfg !== undefined && cfg.cfg !== profile.guidanceScale) errs.push("CFG override conflicts with pinned profile");
     if (phase === "video" && cfg.fps !== undefined && cfg.fps !== profile.fps) {
       errs.push("fps override conflicts with pinned profile");
+    }
+    if (phase === "video") {
+      if (profile.id === "draft") {
+        if (profile.pipeline !== "distilled" || profile.twoStageRefine !== false || !profile.spatialUpscalerCheckpoint) {
+          errs.push("draft video must use the pinned efficient distilled pipeline and spatial upscaler");
+        }
+      } else if (
+        profile.pipeline !== "two-stage-hq"
+        || profile.twoStageRefine !== true
+        || !profile.distilledLoraCheckpoint
+        || !profile.spatialUpscalerCheckpoint
+      ) {
+        errs.push("production and hero video must use the pinned two-stage HQ pipeline with distilled LoRA and spatial upscaler");
+      }
     }
   }
   const expandedCount = phase === "image"
@@ -358,13 +456,18 @@ export function validate(cfg: NovitaRenderCfg, phase: "image" | "video"): void {
   const height = profile?.height ?? cfg.height ?? DEFAULTS.height;
   if (width % 32 !== 0) errs.push(`width ${width} must be a multiple of 32`);
   if (height % 32 !== 0) errs.push(`height ${height} must be a multiple of 32`);
+  if (phase === "video" && (width % 64 !== 0 || height % 64 !== 0)) {
+    errs.push(`two-stage LTX dimensions ${width}x${height} must be divisible by 64`);
+  }
 
   const nshard = cfg.nshard ?? DEFAULTS.nshard;
-  if (nshard > 3) errs.push(`nshard ${nshard} exceeds the Novita account cap of 3`);
+  if (nshard > NOVITA_ELASTIC_GPU_CEILING) {
+    errs.push(`nshard ${nshard} exceeds the elastic ceiling of ${NOVITA_ELASTIC_GPU_CEILING}`);
+  }
   if (nshard < 1) errs.push("nshard must be >= 1");
   const maxConcurrent = cfg.maxConcurrent ?? DEFAULTS.maxConcurrent;
-  if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > 3) {
-    errs.push("maxConcurrent must be an integer between 1 and 3");
+  if (!Number.isInteger(maxConcurrent) || maxConcurrent < 1 || maxConcurrent > NOVITA_ELASTIC_GPU_CEILING) {
+    errs.push(`maxConcurrent must be an integer between 1 and ${NOVITA_ELASTIC_GPU_CEILING}`);
   }
 
   if (phase === "video") {
@@ -454,9 +557,24 @@ async function launchBridgeRender(
   expectedJobIds: string[],
 ): Promise<NovitaRenderLaunch> {
   const { baseUrl, token } = renderBridgeConfig();
-  const payload = JSON.stringify(body);
-  const expectedProfileHash = createHash("sha256").update(canonicalJson(body["profile"])).digest("hex");
-  const expectedRequestHash = createHash("sha256").update(`${phase}\0`).update(payload).digest("hex");
+  // This authenticated GET is intentionally the only pre-spend call. The
+  // bridge must attest the immutable worker, verified local cache, budget,
+  // interruption recovery, and scale-to-zero controls before a paid launch.
+  const readiness = await requireNovitaFleetReadiness({ baseUrl, token });
+  const budget = readiness.attestation?.budget;
+  if (!budget) throw new Error("novitaRenderFarm: fleet readiness omitted its spend admission contract");
+  const maxCostUsd = Math.min(budget.maxFleetUsd, budget.maxJobUsd * expectedJobIds.length);
+  if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0) {
+    throw new Error("novitaRenderFarm: fleet readiness returned an invalid hard spend cap");
+  }
+  const cappedBody: Record<string, unknown> & { prefix: string; maxCostUsd: number } = { ...body, maxCostUsd };
+  const expectedProfileHash = createHash("sha256").update(canonicalJson(cappedBody["profile"])).digest("hex");
+  const expectedRequestHash = createHash("sha256").update(`${phase}\0`).update(canonicalJson(cappedBody)).digest("hex");
+  const payload = JSON.stringify({
+    ...cappedBody,
+    requestSha256: expectedRequestHash,
+    profileSha256: expectedProfileHash,
+  });
   const timestamp = String(Math.floor(Date.now() / 1000));
   const signature = createHmac("sha256", token)
     .update(`${timestamp}.${phase}.${payload}`)
@@ -466,6 +584,8 @@ async function launchBridgeRender(
     authorization: `Bearer ${token}`,
     "x-render-timestamp": timestamp,
     "x-render-signature": signature,
+    "x-render-idempotency-key": expectedRequestHash,
+    "x-render-profile-sha256": expectedProfileHash,
   };
   const launchRes = await fetch(`${baseUrl}/${phase}`, {
     method: "POST",
@@ -477,6 +597,9 @@ async function launchBridgeRender(
     throw new Error(`novitaRenderFarm: bridge launch ${phase} failed ${launchRes.status}: ${(await launchRes.text()).slice(0, 300)}`);
   }
   const launch = BridgeLaunchSchema.parse(await launchRes.json());
+  if (launch.requestSha256 !== expectedRequestHash || launch.profileSha256 !== expectedProfileHash) {
+    throw new Error(`novitaRenderFarm: bridge launch returned mismatched contract hashes for ${phase}`);
+  }
   const jobId = launch.jobId;
   if (!jobId.startsWith(`${phase}-`)) {
     throw new Error(`novitaRenderFarm: bridge launch returned mismatched identity for ${phase}`);
@@ -484,12 +607,13 @@ async function launchBridgeRender(
   return {
     jobId,
     phase,
-    prefix: body.prefix,
+    prefix: cappedBody.prefix,
     expectedJobIds: [...expectedJobIds],
-    profile: body["profile"] as NovitaPhaseProfile,
+    profile: cappedBody["profile"] as NovitaPhaseProfile,
     profileSha256: expectedProfileHash,
     requestSha256: expectedRequestHash,
-    nshard: typeof body["nshard"] === "number" ? body["nshard"] : 1,
+    nshard: typeof cappedBody["nshard"] === "number" ? cappedBody["nshard"] : 1,
+    maxCostUsd,
   };
 }
 
@@ -515,6 +639,17 @@ export async function getNovitaRenderStatus(jobId: string): Promise<NovitaBridge
   if (profileHash !== status.profileSha256) {
     throw new Error(`novitaRenderFarm: bridge status returned a corrupted profile contract for ${jobId}`);
   }
+  const receiptHash = createHash("sha256").update(canonicalJson(status.billingReceipt)).digest("hex");
+  if (receiptHash !== status.billingReceiptSha256) {
+    throw new Error(`novitaRenderFarm: bridge status returned a corrupted billing receipt for ${jobId}`);
+  }
+  const receipt = status.billingReceipt;
+  const calculatedCost = receipt.gpuSeconds * receipt.gpuRateUsdPerSecond
+    + receipt.startupUsd
+    + receipt.storageUsd;
+  if (Math.abs(calculatedCost - receipt.costUsd) > 0.000001 || receipt.gpuCount !== status.runtimeAttestation.gpuCount) {
+    throw new Error(`novitaRenderFarm: bridge status returned an internally inconsistent billing receipt for ${jobId}`);
+  }
   return status;
 }
 
@@ -531,24 +666,61 @@ function assertStatusMatchesLaunch(
   if (status.profileSha256 !== launch.profileSha256 || status.requestSha256 !== launch.requestSha256) {
     throw new Error(`novitaRenderFarm: bridge status returned mismatched contract hashes for ${launch.jobId}`);
   }
+  if (status.billingReceipt.costUsd > launch.maxCostUsd + 0.000001) {
+    throw new Error(`novitaRenderFarm: bridge exceeded the sealed $${launch.maxCostUsd.toFixed(4)} spend cap for ${launch.jobId}`);
+  }
+  const attestation = status.runtimeAttestation;
+  const infra = launch.profile.infrastructure;
+  if (
+    attestation.provider !== infra.provider
+    || attestation.capacityMode !== infra.capacityMode
+    || attestation.weightStorage !== infra.weightStorage
+    || attestation.cacheMount !== infra.cacheMount
+    || attestation.checkpointing !== infra.checkpointing
+    || attestation.idleShutdownSeconds !== infra.idleShutdownSeconds
+    || attestation.gpuCount > launch.nshard
+    || attestation.gpuCount > infra.elasticGpuCeiling
+    || attestation.model !== launch.profile.model
+    || attestation.revision !== launch.profile.revision
+    || attestation.checkpoint !== launch.profile.checkpoint
+    || attestation.pipeline !== launch.profile.pipeline
+    || attestation.distilledLoraCheckpoint !== launch.profile.distilledLoraCheckpoint
+    || attestation.spatialUpscalerCheckpoint !== launch.profile.spatialUpscalerCheckpoint
+  ) {
+    throw new Error(`novitaRenderFarm: bridge worker did not attest the pinned Novita spot/local-disk model contract for ${launch.jobId}`);
+  }
+}
+
+export interface NovitaRenderPollOptions {
+  pollMs?: number;
+  timeoutMs?: number;
+  pollWait?: NovitaRenderPollWait;
+  statusReader?: (jobId: string) => Promise<NovitaBridgeStatus>;
+  now?: () => number;
 }
 
 /** Poll a previously accepted launch and re-verify its identity and contract on every response. */
-async function waitForBridgeRender(
+export async function waitForBridgeRender(
   launch: NovitaRenderLaunch,
-  opts: { pollMs?: number; timeoutMs?: number } = {},
+  opts: NovitaRenderPollOptions = {},
 ): Promise<NovitaBridgeStatus> {
-  const pollMs = opts.pollMs ?? 15_000;
-  const waves = Math.ceil(launch.expectedJobIds.length / Math.max(1, Math.min(3, launch.nshard)));
+  const basePollMs = Math.max(30_000, opts.pollMs ?? 30_000);
+  const waves = Math.ceil(
+    launch.expectedJobIds.length / Math.max(1, Math.min(NOVITA_ELASTIC_GPU_CEILING, launch.nshard)),
+  );
   const estimatedMs = waves * (launch.phase === "image" ? 3 : 20) * 60_000 + 60 * 60_000;
   const timeoutMs = opts.timeoutMs ?? Math.min(24 * 60 * 60 * 1000, Math.max(4 * 60 * 60 * 1000, estimatedMs));
 
-  const t0 = Date.now();
+  const now = opts.now ?? Date.now;
+  const readStatus = opts.statusReader ?? getNovitaRenderStatus;
+  const pollWait = opts.pollWait ?? waitForNovitaRenderPoll;
+  const t0 = now();
   let consecutivePollFailures = 0;
+  let pollAttempt = 0;
   for (;;) {
     let status: NovitaBridgeStatus | undefined;
     try {
-      status = await getNovitaRenderStatus(launch.jobId);
+      status = await readStatus(launch.jobId);
     } catch (error) {
       consecutivePollFailures += 1;
       if (consecutivePollFailures >= 5) throw error;
@@ -570,10 +742,18 @@ async function waitForBridgeRender(
         return status;
       }
     }
-    if (Date.now() - t0 > timeoutMs) {
+    if (now() - t0 > timeoutMs) {
       throw new Error(`novitaRenderFarm: ${launch.phase} job ${launch.jobId} timed out after ${timeoutMs}ms`);
     }
-    await new Promise((resolve) => setTimeout(resolve, pollMs));
+    // Status checks are deliberately sparse and back off to two minutes. The
+    // bridge batches fleet state, so hot polling would only waste Trigger
+    // runtime and control-plane requests without making a render finish sooner.
+    const pollMs = Math.min(120_000, Math.ceil(basePollMs * 1.5 ** pollAttempt));
+    pollAttempt += 1;
+    await pollWait({
+      milliseconds: pollMs,
+      idempotencyKey: `novita-render:${launch.jobId}:poll:${pollAttempt}`,
+    });
   }
 }
 
@@ -694,6 +874,8 @@ export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRend
     candidates,
     outputs: candidates.length,
     durationSec: Math.round((Date.now() - t0) / 1000),
+    costUsd: st.billingReceipt.costUsd,
+    billingReceipt: st.billingReceipt,
     raw: st,
   };
 }
@@ -724,6 +906,8 @@ export async function renderVideo(userCfg: NovitaRenderCfg): Promise<NovitaRende
     candidates,
     outputs: footageKeys.length,
     durationSec: Math.round((Date.now() - t0) / 1000),
+    costUsd: st.billingReceipt.costUsd,
+    billingReceipt: st.billingReceipt,
     raw: st,
   };
 }

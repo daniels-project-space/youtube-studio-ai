@@ -39,6 +39,15 @@ export function resolveVoiceId(voiceId?: string, niche?: string): string {
  * so the engine must never multiply a TTS purchase with a block-level retry. */
 export class TtsError extends Error {
   readonly retryable = false;
+
+  constructor(
+    message: string,
+    readonly status?: number,
+    options?: { cause?: unknown },
+  ) {
+    super(message, options?.cause === undefined ? undefined : { cause: options.cause });
+    this.name = "TtsError";
+  }
 }
 
 /** Strip ElevenLabs-style [audio tags] — Fish/captions would expose them. */
@@ -99,10 +108,10 @@ async function synthElevenLabs(args: {
   const voice = args.elevenVoiceId || "JBFqnCBsd6RMkjVDRZzb";
   const speed = Math.max(0.7, Math.min(1.2, args.speed ?? 1));
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  let lastErr = "";
   for (let attempt = 0; attempt < 3; attempt++) {
+    let res: Response;
     try {
-      const res = await fetch(
+      res = await fetch(
         `https://api.elevenlabs.io/v1/text-to-speech/${voice}?output_format=mp3_44100_128`,
         {
           method: "POST",
@@ -131,29 +140,49 @@ async function synthElevenLabs(args: {
           }),
         },
       );
-      if (res.ok) {
-        args.onBillableCharacters?.(args.text.length);
-        const bytes = new Uint8Array(await res.arrayBuffer());
-        if (bytes.length >= 1000) {
-          const rid = res.headers.get("request-id");
-          if (rid) args.onRequestId?.(rid);
-          return bytes;
-        }
-        // A 2xx may already consume character quota. Retrying it would buy the
-        // same speech twice, so count it above and fail terminal.
-        throw new TtsError("ElevenLabs returned empty/tiny audio after a successful response");
-      } else {
-        const body = await res.text().catch(() => "");
-        lastErr = `ElevenLabs TTS HTTP ${res.status}: ${body.slice(0, 200)}`;
-        if (res.status !== 429 && res.status < 500) throw new TtsError(lastErr);
-      }
     } catch (e) {
-      if (e instanceof TtsError) throw e;
-      lastErr = e instanceof Error ? e.message : String(e);
+      // A transport failure after POST is ambiguous: the provider may have
+      // accepted and billed the synthesis even though its response was lost.
+      // Never turn that ambiguity into a second paid submission.
+      throw new TtsError(
+        `ElevenLabs TTS outcome is unknown after transport failure; not retrying: ${e instanceof Error ? e.message : String(e)}`,
+        undefined,
+        { cause: e },
+      );
     }
-    await sleep(1500 * (attempt + 1));
+    if (!res.ok) {
+      const body = await res.text().catch(() => "");
+      const message = `ElevenLabs TTS HTTP ${res.status}: ${body.slice(0, 200)}`;
+      // 429 is an explicit admission rejection. Any other response may follow
+      // accepted work, so it is terminal even when the provider reports 5xx.
+      if (res.status === 429 && attempt < 2) {
+        await sleep(1500 * (attempt + 1));
+        continue;
+      }
+      throw new TtsError(message, res.status);
+    }
+
+    args.onBillableCharacters?.(args.text.length);
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await res.arrayBuffer());
+    } catch (e) {
+      throw new TtsError(
+        `ElevenLabs returned a successful response but its audio could not be read; not retrying: ${e instanceof Error ? e.message : String(e)}`,
+        res.status,
+        { cause: e },
+      );
+    }
+    if (bytes.length >= 1000) {
+      const rid = res.headers.get("request-id");
+      if (rid) args.onRequestId?.(rid);
+      return bytes;
+    }
+    // A 2xx may already consume character quota. Retrying it would buy the
+    // same speech twice, so count it above and fail terminal.
+    throw new TtsError("ElevenLabs returned empty/tiny audio after a successful response", res.status);
   }
-  throw new TtsError(`ElevenLabs TTS failed after 3 attempts: ${lastErr}`);
+  throw new TtsError("ElevenLabs TTS retry budget exhausted", 429);
 }
 
 export async function synthNarration(args: {
@@ -180,13 +209,14 @@ export async function synthNarration(args: {
   // Defensive: a tagged script routed to Fish must never SPEAK the brackets.
   args = { ...args, text: stripAudioTags(args.text) };
 
-  // Retry transient failures (429 / 5xx / network) so one blip doesn't fail a paid
-  // run. 4xx (other than 429) is a real error → fail fast.
+  // Retry only an explicit 429 admission rejection. A transport failure or
+  // any other response can be ambiguous after POST and must not buy the same
+  // speech again.
   const sleep = (ms: number) => new Promise((r) => setTimeout(r, ms));
-  let lastErr = "";
   for (let attempt = 0; attempt < 3; attempt++) {
+    let res: Response;
     try {
-      const res = await fetch("https://api.fish.audio/v1/tts", {
+      res = await fetch("https://api.fish.audio/v1/tts", {
         method: "POST",
         headers: { Authorization: `Bearer ${key}`, "content-type": "application/json" },
         body: JSON.stringify({
@@ -199,24 +229,38 @@ export async function synthNarration(args: {
           ...(speed !== 1 ? { prosody: { speed } } : {}),
         }),
       });
-      if (!res.ok) {
-        const detail = await res.text().catch(() => "");
-        lastErr = `Fish Audio TTS HTTP ${res.status}: ${detail.slice(0, 200)}`;
-        if (res.status === 429 || res.status >= 500) { await sleep(2000 * (attempt + 1)); continue; }
-        throw new TtsError(lastErr);
-      }
-      args.onBillableCharacters?.(args.text.length);
-      const bytes = new Uint8Array(await res.arrayBuffer());
-      if (bytes.length < 1000) {
-        // A 2xx may already consume character quota. Never repurchase it.
-        throw new TtsError("Fish Audio returned empty/tiny audio after a successful response");
-      }
-      return bytes;
     } catch (e) {
-      if (e instanceof TtsError) throw e;
-      lastErr = e instanceof Error ? e.message : String(e); // network error → retry
-      await sleep(2000 * (attempt + 1));
+      throw new TtsError(
+        `Fish Audio TTS outcome is unknown after transport failure; not retrying: ${e instanceof Error ? e.message : String(e)}`,
+        undefined,
+        { cause: e },
+      );
     }
+    if (!res.ok) {
+      const detail = await res.text().catch(() => "");
+      const message = `Fish Audio TTS HTTP ${res.status}: ${detail.slice(0, 200)}`;
+      if (res.status === 429 && attempt < 2) {
+        await sleep(2000 * (attempt + 1));
+        continue;
+      }
+      throw new TtsError(message, res.status);
+    }
+    args.onBillableCharacters?.(args.text.length);
+    let bytes: Uint8Array;
+    try {
+      bytes = new Uint8Array(await res.arrayBuffer());
+    } catch (e) {
+      throw new TtsError(
+        `Fish Audio returned a successful response but its audio could not be read; not retrying: ${e instanceof Error ? e.message : String(e)}`,
+        res.status,
+        { cause: e },
+      );
+    }
+    if (bytes.length < 1000) {
+      // A 2xx may already consume character quota. Never repurchase it.
+      throw new TtsError("Fish Audio returned empty/tiny audio after a successful response", res.status);
+    }
+    return bytes;
   }
-  throw new TtsError(`Fish Audio TTS failed after 3 attempts: ${lastErr}`);
+  throw new TtsError("Fish Audio TTS retry budget exhausted", 429);
 }

@@ -34,6 +34,7 @@
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
+import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { geminiJson, geminiJsonPro, parseJsonLoose } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
@@ -362,6 +363,65 @@ export interface DocuPlan {
   shots: DocuShotPlan[];
 }
 
+const QUOTE_CARD_MAX_WORDS = 14;
+const QUOTE_CARD_MAX_CHARACTERS = 120;
+const QUOTE_ATTRIBUTION_MAX_CHARACTERS = 48;
+
+function optionalText(value: unknown): string | undefined {
+  if (typeof value !== "string") return undefined;
+  const normalized = value.trim().replace(/\s+/g, " ");
+  return normalized || undefined;
+}
+
+/**
+ * Provider JSON and historical cached plans are untrusted runtime input. Some
+ * providers return `quoteEmphasis` as a string (or, more rarely, an object)
+ * despite the requested schema. Normalize it before any downstream provider
+ * work so typography can never crash after image/TTS spend.
+ */
+export function normalizeQuoteEmphasis(value: unknown): string[] | undefined {
+  const parts = Array.isArray(value) ? value : typeof value === "string" ? [value] : [];
+  const words = parts
+    .filter((part): part is string => typeof part === "string")
+    .flatMap((part) => part.trim().split(/\s+/))
+    .map((part) => part.trim())
+    .filter(Boolean)
+    .filter((part, index, all) => all.indexOf(part) === index)
+    .slice(0, 3);
+  return words.length ? words : undefined;
+}
+
+export function normalizeDocuPlan(value: unknown): DocuPlan {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("documotion: plan must be an object");
+  }
+  const raw = value as Record<string, unknown>;
+  if (!Array.isArray(raw.shots)) throw new Error("documotion: plan.shots must be an array");
+
+  const shots = raw.shots.map((valueAtIndex, index) => {
+    if (!valueAtIndex || typeof valueAtIndex !== "object" || Array.isArray(valueAtIndex)) {
+      throw new Error(`documotion: shot ${index} must be an object`);
+    }
+    const shot = valueAtIndex as Record<string, unknown>;
+    return {
+      ...shot,
+      narration: optionalText(shot.narration) ?? "",
+      beat: optionalText(shot.beat) ?? "",
+      quote: optionalText(shot.quote),
+      quoteEmphasis: normalizeQuoteEmphasis(shot.quoteEmphasis),
+      attribution: optionalText(shot.attribution),
+      assets: Array.isArray(shot.assets) ? shot.assets : [],
+    } as unknown as DocuShotPlan;
+  });
+
+  return {
+    ...raw,
+    title: optionalText(raw.title) ?? "",
+    styleId: optionalText(raw.styleId) ?? "",
+    shots,
+  } as DocuPlan;
+}
+
 /** Per-kind asset contract: role → [min, max] count. */
 const KIND_ASSETS: Record<DocuShotKind, Partial<Record<DocuAssetRole, [number, number]>>> = {
   parallax_portrait: { bg: [1, 1], fg: [1, 1] },
@@ -414,7 +474,7 @@ const CAPABILITY_CATALOG =
 const CAMERA_MOVES = ["push_in", "pull_back", "pan_left", "pan_right", "drift"];
 const CAMERA_INTENSITIES = ["subtle", "medium", "strong"];
 
-function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef): string[] {
+export function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef): string[] {
   const problems: string[] = [];
   if (!plan.shots?.length || plan.shots.length < 5) problems.push("need 6-8 shots");
   // Any KNOWN capability is allowed — a style biases selection, it does not
@@ -436,7 +496,21 @@ function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef)
       const n = byRole[role] ?? 0;
       if (n < min || n > max) problems.push(`shot ${i} (${s.kind}): needs ${min}-${max} ${role}, got ${n}`);
     }
-    if (s.kind === "quote_card" && !s.quote?.trim()) problems.push(`shot ${i}: quote_card without quote`);
+    if (s.kind === "quote_card") {
+      const quote = optionalText(s.quote);
+      if (!quote) problems.push(`shot ${i}: quote_card without quote`);
+      else {
+        const quoteWords = quote.split(/\s+/).length;
+        if (quoteWords > QUOTE_CARD_MAX_WORDS || Array.from(quote).length > QUOTE_CARD_MAX_CHARACTERS) {
+          problems.push(
+            `shot ${i}: quote_card quote must be <=${QUOTE_CARD_MAX_WORDS} words and <=${QUOTE_CARD_MAX_CHARACTERS} characters`,
+          );
+        }
+      }
+      if (s.attribution && Array.from(s.attribution).length > QUOTE_ATTRIBUTION_MAX_CHARACTERS) {
+        problems.push(`shot ${i}: quote_card attribution must be <=${QUOTE_ATTRIBUTION_MAX_CHARACTERS} characters`);
+      }
+    }
     if (s.kind === "geo_map" && !s.geoQuery?.trim()) problems.push(`shot ${i}: geo_map without geoQuery (a real place name)`);
   }
   const total = (plan.shots ?? []).reduce((a, s) => a + (s.durationSec || 0), 0);
@@ -476,7 +550,7 @@ function planContract(style: DocuStyleDef): string {
      "labels": [{"text": "<=3 word callout / evidence tag", "sub": "optional handwritten note <=6 words"}],
      "annotations": ["optional handwritten margin note <=6 words"],
      "circleLabel": "map_zoom ring word (one word)",
-     "quote": "quote_card only — THE line <=14 words",
+     "quote": "quote_card only — THE line <=14 words AND <=120 characters; typography is added later by Remotion",
      "quoteEmphasis": ["quote_card only — 1-3 exact words already present in quote that carry its stakes or turn; never a mundane filler noun"],
      "attribution": "quote_card byline",
      "accent": "optional hex accent for this shot",
@@ -487,7 +561,7 @@ function planContract(style: DocuStyleDef): string {
    }
  ]
 }
-ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). depth_parallax: exactly 1 image (a cinematic scene with a CLEAR foreground subject and a separated background — the engine derives the 2.5D depth layers). geo_map: ZERO assets — supply "geoQuery" (a real place); the map is rendered from live street data. map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 bg.
+ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). depth_parallax: exactly 1 image (a cinematic scene with a CLEAR foreground subject and a separated background — the engine derives the 2.5D depth layers). geo_map: ZERO assets — supply "geoQuery" (a real place); the map is rendered from live street data. map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 PICTURE-ONLY background plate with negative space; NEVER put the quote, attribution, or any lettering in its brief/image.
 SOURCE: use "archival" with a precise "query" ONLY for a real, famous, named person/place that Wikimedia certainly has (e.g. fg of "Henry Ford"); otherwise "generate".
 CUE-DRIVEN ASSETS: every asset brief must depict EXACTLY what its shot's narration line says — render the concrete image the words evoke. If the line names the crew → a scene of the crew (e.g. dark-clad figures in a dim vault corridor at night); a place from above → an aerial/overhead scene of that place; a person at a location → that person in front of that location; an object → that object. Do NOT use generic filler.
 ON-SCREEN TEXT TONE: titles/kickers/labels/circleLabels must be SHORT, dramatic and tonally on-point for a premium documentary — evocative, never awkward, literal, redundant or accidentally COMICAL. (Bad: an evidence shot titled "THE TRASH". Good: "THE SLIP", "ONE MISTAKE", "THE INSIDER".) When unsure, omit the title and let the imagery speak.`;
@@ -542,7 +616,16 @@ export async function planDocu(args: {
   let feedback = "";
   let lastProblems: string[] = [];
   for (let attempt = 0; attempt < 2; attempt++) {
-    const plan = await geminiJsonPro<DocuPlan>({ prompt: base + feedback, maxTokens: 9000, temperature: 0.6, log });
+    const rawPlan = await geminiJsonPro<unknown>({ prompt: base + feedback, maxTokens: 9000, temperature: 0.6, log });
+    let plan: DocuPlan;
+    try {
+      plan = normalizeDocuPlan(rawPlan);
+    } catch (error) {
+      lastProblems = [error instanceof Error ? error.message : "plan is malformed"];
+      log?.(`documotion plan attempt ${attempt + 1} rejected: ${lastProblems.join("; ")}`);
+      feedback = `\nYOUR PREVIOUS ATTEMPT FAILED VALIDATION — fix exactly these: ${lastProblems.join("; ")}`;
+      continue;
+    }
     plan.styleId = style.id;
     lastProblems = validatePlan(plan, durationSec, style);
     if (!lastProblems.length) {
@@ -633,7 +716,7 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
         `${CINEMATOGRAPHER_DOCTRINE}\n\n` +
         `VIDEO: a "${style.label}" documentary about: ${topic}.\nLOOK CONTRACT (every image inherits this): ${style.stillStyle}\nWORLD: ${style.creativeDirection}\n\n` +
         `THE NARRATION ARC (keep the SAME figures/places consistent across shots):\n${arc}\n\n` +
-        `For EACH shot, REWRITE every listed asset brief into a rich, specific, COMPOSED image that shows ITS line's concrete elements (keep each asset's id), and write SPECIFIC on-screen text. Keep the shot kind. geo_map shots have no image assets — still give specific text + cues. quote_card keeps its quote.\n\n` +
+        `For EACH shot, REWRITE every listed asset brief into a rich, specific, COMPOSED image that shows ITS line's concrete elements (keep each asset's id), and write SPECIFIC on-screen text. Keep the shot kind. geo_map shots have no image assets — still give specific text + cues. quote_card keeps its quote, but its optional bg brief MUST describe only a text-free atmospheric picture plate with negative space; NEVER copy the quote/attribution into an asset brief.\n\n` +
         `SOURCE — set "source" per asset. PREFER "generate" for almost everything: a composed, period-accurate GENERATED image is more faithful to the line and on-style. Use "archival" ONLY for a genuinely iconic, UNAMBIGUOUS public-domain photograph, with a precise "query" — and NEVER for a person/thing whose name also matches a DIFFERENT subject (e.g. "Ferdinand de Lesseps" also returns Panama Canal material → GENERATE him instead). When in doubt, generate.\n\n` +
         (geoShots.length
           ? `GEO ORIENTATION — for the geo_map shot(s) [${geoShots.map((x) => x.i).join(", ")}], also give "geoContext": 2-4 orienting labels that place the feature so the viewer sees WHERE it is and what it connects, in relation to the line. Use REAL surrounding geography with the correct side: e.g. a N–S canal → {"label":"MEDITERRANEAN SEA","side":"top"},{"label":"RED SEA","side":"bottom"},{"label":"EGYPT","side":"left"},{"label":"SINAI","side":"right"}.\n\n`
@@ -751,12 +834,83 @@ async function deriveDepthLayers(baseImg: string, outDir: string, shotIdx: numbe
   }
 }
 
-interface AssetGate {
-  styleOk?: boolean;
-  briefOk?: boolean;
-  noText?: boolean;
-  framingOk?: boolean;
+export interface AssetGate {
+  verdictValid: boolean;
+  styleOk: boolean;
+  briefOk: boolean;
+  noText: boolean;
+  framingOk: boolean;
   fix?: string;
+}
+
+const TEXT_FREE_ASSET_CONTRACT =
+  " PICTURE-ONLY CONTRACT: render scenery, people, and objects only. ZERO readable text, letters, numbers, words, " +
+  "captions, quote lettering, labels, signs, logos, UI, borders, or watermarks. If the subject normally carries " +
+  "writing, keep those markings abstract and illegible. All readable typography is added later by Remotion.";
+const ASSET_APPROVAL_CONTRACT = "documotion-picture-only-v1";
+
+function removeForbiddenCopy(value: string, forbiddenCopy: Array<string | undefined>): string {
+  let clean = value;
+  for (const forbidden of forbiddenCopy) {
+    const exact = optionalText(forbidden);
+    if (!exact || exact.length < 4) continue;
+    clean = clean.replaceAll(exact, "the visual meaning of the closing line");
+  }
+  return clean;
+}
+
+export function buildDocuAssetPrompt(args: {
+  framingPrefix: string;
+  pictureBrief: string;
+  stillStyle: string;
+  quality: string;
+  focus?: string;
+  fix?: string;
+  forbiddenCopy?: Array<string | undefined>;
+}): string {
+  const pictureBrief = removeForbiddenCopy(args.pictureBrief, args.forbiddenCopy ?? []);
+  return (
+    `${args.framingPrefix}${pictureBrief}.${args.stillStyle}${args.quality}${args.focus ?? ""}` +
+    TEXT_FREE_ASSET_CONTRACT +
+    (args.fix ? ` CRITICAL FIX FROM THE LAST ATTEMPT: ${args.fix}.` : "")
+  );
+}
+
+export function isAssetGateApproved(gate: unknown): boolean {
+  if (!gate || typeof gate !== "object" || Array.isArray(gate)) return false;
+  const value = gate as Record<string, unknown>;
+  return (
+    value.verdictValid === true &&
+    value.styleOk === true &&
+    value.briefOk === true &&
+    value.noText === true &&
+    value.framingOk === true
+  );
+}
+
+function rejectedAssetGate(fix: string): AssetGate {
+  return { verdictValid: false, styleOk: false, briefOk: false, noText: false, framingOk: false, fix };
+}
+
+async function assetDigest(path: string): Promise<string> {
+  return createHash("sha256").update(await readFile(path)).digest("hex");
+}
+
+async function hasCurrentAssetApproval(path: string): Promise<boolean> {
+  try {
+    const approval = JSON.parse(await readFile(`${path}.approval.json`, "utf8")) as Record<string, unknown>;
+    return approval.contract === ASSET_APPROVAL_CONTRACT && approval.sha256 === (await assetDigest(path));
+  } catch {
+    return false;
+  }
+}
+
+async function persistAssetApproval(path: string): Promise<void> {
+  await writeFile(
+    `${path}.approval.json`,
+    JSON.stringify({ contract: ASSET_APPROVAL_CONTRACT, sha256: await assetDigest(path) }),
+    "utf8",
+  );
 }
 
 /** Per-still vision gate — catches weird crops/text/style drift before assembly. */
@@ -767,19 +921,38 @@ async function gateAsset(path: string, role: DocuAssetRole, brief: string, world
       : role === "cutout"
         ? "framingOk: single object fully inside frame on a plain background?"
         : "framingOk: clear focal hierarchy, no awkward crops of faces/subjects at the frame edge?";
-  // objects legitimately carry markings (banknotes, signage) — exempt cutouts from noText
-  const textAsk = role === "cutout" ? "noText: no large caption/watermark added over the object?" : "noText: ZERO letters/numbers/captions/borders baked in?";
   const raw = await visionLocal({
     prompt:
       `ASSET GATE for ${worldHint}. Brief: "${brief.slice(0, 280)}". ` +
       `Judge: 1. styleOk: matches that world's look (not generic/glossy)? 2. briefOk: depicts the brief? ` +
-      `3. ${textAsk} 4. ${framingAsk} ` +
+      `3. noText: ZERO readable text/letters/numbers/captions/signs/logos/UI/borders/watermarks baked in, ` +
+      `including on cutout objects? 4. ${framingAsk} ` +
       `Return STRICT JSON {"styleOk":bool,"briefOk":bool,"noText":bool,"framingOk":bool,"fix":"<=14 words"}.`,
     imagePaths: [path],
     json: true,
     maxTokens: 250,
   }).catch(() => "");
-  return raw ? parseJsonLoose<AssetGate>(raw) : {};
+  if (!raw) return rejectedAssetGate("asset gate unavailable; retry only after a verifiable text-free render");
+  try {
+    const parsed = parseJsonLoose<unknown>(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return rejectedAssetGate("asset gate returned a malformed verdict");
+    }
+    const value = parsed as Record<string, unknown>;
+    if (![value.styleOk, value.briefOk, value.noText, value.framingOk].every((item) => typeof item === "boolean")) {
+      return rejectedAssetGate("asset gate omitted a required boolean verdict");
+    }
+    return {
+      verdictValid: true,
+      styleOk: value.styleOk as boolean,
+      briefOk: value.briefOk as boolean,
+      noText: value.noText as boolean,
+      framingOk: value.framingOk as boolean,
+      fix: optionalText(value.fix),
+    };
+  } catch {
+    return rejectedAssetGate("asset gate returned unparseable JSON");
+  }
 }
 
 export interface DocuAssetFile {
@@ -814,9 +987,32 @@ export async function generateDocuAssets(
     const needsAlpha = a.role === "fg" || a.role === "cutout";
     const finalPath = join(assetsDir, `s${i}_${a.id}${needsAlpha ? ".png" : ".jpg"}`);
     const externalFix = fixNotes?.[keyId];
-    if (existsSync(finalPath) && !externalFix) return { shotIdx: i, id: a.id, role: a.role, path: finalPath };
-
+    const shot = plan.shots[i];
+    const pictureBrief =
+      shot.kind === "quote_card"
+        ? `Atmospheric closing background plate with calm negative space, visually expressing: ${(shot.visualCues ?? []).join("; ") || shot.beat || "a restrained documentary conclusion"}`
+        : a.brief;
     const framing = style.roleFraming[a.role];
+    if (existsSync(finalPath) && !externalFix) {
+      if (await hasCurrentAssetApproval(finalPath)) {
+        return { shotIdx: i, id: a.id, role: a.role, path: finalPath };
+      }
+      // Legacy caches predate the proof sidecar. Verify once, persist the
+      // content hash, then future resumes remain zero-provider and tamper-safe.
+      const cachedGate = await gateAsset(finalPath, a.role, pictureBrief, style.label);
+      if (!cachedGate.verdictValid) {
+        throw new Error(`documotion asset s${i}/${a.id}: ${cachedGate.fix}; refusing image spend without a working gate`);
+      }
+      if (isAssetGateApproved(cachedGate)) {
+        await persistAssetApproval(finalPath);
+        return { shotIdx: i, id: a.id, role: a.role, path: finalPath };
+      }
+      log?.(
+        `documotion asset s${i}/${a.id}: unapproved cache rejected ` +
+          `(style=${cachedGate.styleOk} brief=${cachedGate.briefOk} noText=${cachedGate.noText} framing=${cachedGate.framingOk}) — regenerating`,
+      );
+    }
+
     const rawPath = join(assetsDir, `s${i}_${a.id}_raw.jpg`);
     let got = false;
 
@@ -826,10 +1022,22 @@ export async function generateDocuAssets(
         const url = await searchWikimediaImageUrl(a.query);
         if (url) {
           await downloadTo(url, rawPath);
-          got = true;
-          log?.(`documotion asset s${i}/${a.id}: archival "${a.query}" via Wikimedia`);
+          const archivalGate = await gateAsset(rawPath, a.role, a.brief, style.label);
+          if (!archivalGate.verdictValid) {
+            throw new Error(`documotion asset s${i}/${a.id}: ${archivalGate.fix}; refusing fallback image spend`);
+          }
+          if (isAssetGateApproved(archivalGate)) {
+            got = true;
+            log?.(`documotion asset s${i}/${a.id}: archival "${a.query}" via Wikimedia (gate approved)`);
+          } else {
+            log?.(
+              `documotion asset s${i}/${a.id}: archival gate rejected ` +
+                `(style=${archivalGate.styleOk} brief=${archivalGate.briefOk} noText=${archivalGate.noText} framing=${archivalGate.framingOk}) — generating a clean replacement`,
+            );
+          }
         }
-      } catch {
+      } catch (error) {
+        if (error instanceof Error && error.message.includes("refusing fallback image spend")) throw error;
         /* fall through to generate */
       }
     }
@@ -847,19 +1055,42 @@ export async function generateDocuAssets(
       let fix = externalFix ?? "";
       let accepted = false;
       for (let attempt = 0; attempt < 2; attempt++) {
-        const prompt = `${framing.prefix}${a.brief}.${style.stillStyle}${QUALITY}${focus}` + (fix ? ` CRITICAL FIX FROM THE LAST ATTEMPT: ${fix}.` : "");
+        const prompt = buildDocuAssetPrompt({
+          framingPrefix: framing.prefix,
+          pictureBrief,
+          stillStyle: style.stillStyle,
+          quality: QUALITY,
+          focus,
+          fix,
+          forbiddenCopy: [shot.quote, shot.attribution],
+        });
         log?.(`documotion asset s${i}/${a.id} (${a.role})${fix ? ` [retry]` : ""}…`);
-        const bytes = await generateBananaImage({ prompt, aspectRatio: framing.ar });
+        const bytes = await generateBananaImage({
+          prompt,
+          aspectRatio: framing.ar,
+          allowText: false,
+          tier: "flash",
+          // This loop owns quality recovery. One HTTP submission per outer
+          // attempt prevents nested retries from multiplying image spend.
+          maxProviderAttempts: 1,
+        });
         await writeFile(rawPath, bytes);
-        const gate = await gateAsset(rawPath, a.role, a.brief, style.label);
-        if (gate.styleOk !== false && gate.briefOk !== false && gate.noText !== false && gate.framingOk !== false) {
+        const gate = await gateAsset(rawPath, a.role, pictureBrief, style.label);
+        if (!gate.verdictValid) {
+          throw new Error(`documotion asset s${i}/${a.id}: ${gate.fix}; refusing a second image submission`);
+        }
+        if (isAssetGateApproved(gate)) {
           accepted = true;
           break;
         }
         fix = gate.fix || "cleaner framing, authentic style, absolutely no text";
         log?.(`documotion asset s${i}/${a.id} gate REJECTED (style=${gate.styleOk} brief=${gate.briefOk} noText=${gate.noText} framing=${gate.framingOk})`);
       }
-      if (!accepted) log?.(`documotion asset s${i}/${a.id}: shipping last attempt (logged, not silent)`);
+      if (!accepted) {
+        throw new Error(
+          `documotion asset s${i}/${a.id}: no approved picture-only asset after 2 bounded attempts; refusing to ship a rejected provider image`,
+        );
+      }
     }
 
     if (needsAlpha) {
@@ -877,6 +1108,7 @@ export async function generateDocuAssets(
     } else {
       await normalizeAsset(rawPath, finalPath, 1280);
     }
+    await persistAssetApproval(finalPath);
     return { shotIdx: i, id: a.id, role: a.role, path: finalPath };
   });
 
@@ -1013,9 +1245,9 @@ const VERIFIER_DOCTRINE =
   `• Do NOT nitpick photographic taste. regen_asset ONLY for a CLEAR defect: wrong subject, a ragged/half-cut ` +
   `cutout edge, baked-in text on a PHOTO/PLATE, or a plate that is essentially black/empty. A merely "stylised" or ` +
   `"staged" photo is fine.\n` +
-  `• EXCEPTION — a quote_card / closing card MAY be a fully DESIGNED TYPOGRAPHIC image (the closing line rendered as ` +
-  `bespoke lettering). Baked lettering is INTENTIONAL there — judge it as typography (legible? on-style?), NEVER flag ` +
-  `it as a baked-text violation and never try to regen it.`;
+  `• quote_card has one explicitly labelled DETERMINISTIC OVERLAY (the exact quote + attribution drawn by Remotion). ` +
+  `That named overlay is intentional. ANY additional, duplicated, misspelled, or background lettering belongs to the ` +
+  `underlying provider plate, violates the picture-only contract, and MUST trigger regen_asset for that background.`;
 
 const VERIFIER_CHECKLIST =
   `THE CRAFT CHECKLIST:\n` +
@@ -1152,6 +1384,9 @@ async function renderVerifySet(args: {
       `[shot ${i}] ${s.kind}, ${Math.round(spec.durationInFrames / FPS)}s, camera ${spec.camera?.move}/${spec.camera?.intensity}` +
         (s.title ? `, title "${s.title}"` : "") +
         (s.labels?.length ? `, labels ${s.labels.map((l) => `"${l.text}"`).join("+")}` : "") +
+        (s.kind === "quote_card" && s.quote
+          ? `\n   DETERMINISTIC OVERLAY (allowed exact copy only): "${s.quote}"${s.attribution ? ` — ${s.attribution}` : ""}`
+          : "") +
         `\n   LINE: "${s.narration}"` +
         (s.visualCues?.length ? `\n   MUST SHOW: ${s.visualCues.join("; ")}` : ""),
     );
@@ -1211,7 +1446,16 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   const planPath = join(runDir, "plan.json");
   let plan: DocuPlan;
   if (existsSync(planPath)) {
-    plan = JSON.parse(await readFile(planPath, "utf8")) as DocuPlan;
+    plan = normalizeDocuPlan(JSON.parse(await readFile(planPath, "utf8")));
+    const cachedProblems = validatePlan(plan, durationSec, style);
+    if (cachedProblems.length) {
+      throw new Error(
+        `documotion: cached plan failed validation before provider work (${cachedProblems.join("; ")})`,
+      );
+    }
+    // Persist the normalized form once, so future resumes inherit the stable
+    // runtime schema instead of repeatedly handling old provider quirks.
+    await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
     log(`documotion: plan loaded from cache (${plan.shots.length} shots, style ${plan.styleId})`);
   } else {
     plan = await planDocu({ topic: args.topic, style, referenceNotes: args.referenceNotes, durationSec, log });

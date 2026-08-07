@@ -5,6 +5,7 @@
  * status active|draft based on whether the family's visual engine is built.
  */
 import { task } from "@trigger.dev/sdk";
+import { admitProviderTaskOwner } from "@/lib/providerTaskOwnerAdmission";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
@@ -77,7 +78,12 @@ export const designChannelTask = task({
     // that poisons every future render — fail loudly instead.
     await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
 
-    const ownerId = payload.ownerId ?? process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel";
+    const ownerId = admitProviderTaskOwner({
+      requestedOwnerId: payload.ownerId,
+      configuredOwnerId: process.env.STUDIO_OWNER_ID,
+      runtime: process.env.NODE_ENV,
+      developmentFallbackOwnerId: process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel",
+    });
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
     const convex = new ConvexHttpClient(url);

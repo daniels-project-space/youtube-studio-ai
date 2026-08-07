@@ -33,6 +33,10 @@ export interface OptimizeTopicsOpts {
   channelName?: string;
   /** Extra topics to treat as already-taken (e.g. the current content plan). */
   alsoAvoid?: string[];
+  /** Disable provider embeddings only when the caller applies a deterministic near-duplicate gate. */
+  providerSemanticDedupe?: boolean;
+  /** Durable fence invoked by Topicraft immediately before its first paid provider call. */
+  beforeProviderSpend?: () => Promise<void>;
   log?: (m: string, x?: Record<string, unknown>) => void;
 }
 
@@ -97,6 +101,8 @@ export async function optimizeTopics(opts: OptimizeTopicsOpts): Promise<Optimize
     competitorTitles,
     outliers,
     powerWords,
+    providerSemanticDedupe: opts.providerSemanticDedupe,
+    beforeProviderSpend: opts.beforeProviderSpend,
     log,
   });
 

@@ -12,6 +12,10 @@
 import { task, schedules } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
+import {
+  STUDIO_AUTOMATION_GATES,
+  studioAutomationGate,
+} from "@/lib/automationGate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
   refreshNicheResearchCore,
@@ -48,9 +52,12 @@ export const refreshNicheResearchTask = task({
  */
 export const refreshNicheResearchSchedule = schedules.task({
   id: "refresh-niche-research-weekly",
-  // cron: "0 6 * * 1", // Mondays 06:00 UTC // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
+  cron: "0 6 * * 1", // Mondays 06:00 UTC
   maxDuration: 1800,
   run: async () => {
+    const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
+    if (!gate.enabled) return gate;
+
     const log: Logger = (m, x) =>
       console.log(`[refresh-niche-research-weekly] ${m}`, x ?? "");
     await bootstrapSecrets(log);

@@ -25,9 +25,12 @@ export const CRAFT_RULES = [
 ].join("\n");
 
 /**
- * GOLDEN_SPINE â€” the canonical ordered stages every narrated channel inherits.
- * Documentation + reference for designer.ts alignment (the visual stage swaps per
- * family). Not executed directly; the block engine remains the orchestrator.
+ * GOLDEN_SPINE â€” the catalog of executable stages available to a channel.
+ * A channel does not inherit every block in this list: the production compiler
+ * maps only its selected executable entries to their editorial catalog owners.
+ * This is the all-family overview used by the UI; `compileCatalogExecutionFlow`
+ * is the authoritative per-channel path. Golden qualification is a separate,
+ * proof-gated decision.
  */
 export interface GoldenStage {
   /** Stage group label. */
@@ -39,17 +42,18 @@ export interface GoldenStage {
 }
 
 export const GOLDEN_SPINE: GoldenStage[] = [
-  { stage: "intel", blocks: ["competitor_research", "outlier_research", "topic_select"], note: "Pick topics from real outliers + competitor signal, learning-weighted." },
-  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec"], note: "Show Bible crew â€” addable per channel." },
+  { stage: "intel", blocks: ["competitor_research", "topic_select"], note: "Pick topics from real outliers + competitor signal, learning-weighted." },
+  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine"], note: "Show Bible crew and timed story spine â€” selected per channel." },
   { stage: "write", blocks: ["script_gen", "hook_craft"], note: "Hook-first, CRAFT_RULES applied." },
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check"], note: "Quality + originality + compliance floor." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
-  { stage: "visual", blocks: ["stock_footage", "entity_imagery", "keyframes", "loop_clips"], note: "Family delta swaps the engine here." },
-  { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card"], note: "Word-level captions + overlays." },
-  { stage: "build", blocks: ["timeline_assemble", "length_check"], note: "Remotion assembly + length gate." },
-  { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + BANANA thumbnail (one-pass Nano Banana Pro, judge-gated)." },
-  { stage: "verify", blocks: ["qa_visual", "qa_refine"], note: "Critic ValidationSpec â†’ refine loop." },
-  { stage: "ship", blocks: ["upload_draft", "emit_bundle", "crosspost", "notify"], note: "PRIVATE-first upload + multilang reuse + multi-platform + shorts." },
+  { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic"], note: "The family selects only the visual engine and QA chain it needs." },
+  { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz." },
+  { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both." },
+  { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + text-free Flash scene, deterministic Style-DNA typography, and one publishing gate." },
+  { stage: "verify", blocks: ["qa_assets", "qa_shots", "length_check", "qa_visual"], note: "Required asset/shot checks plus deterministic final quality gate and bounded self-heal." },
+  { stage: "ship", blocks: ["upload_draft", "emit_bundle", "shorts_spinoff", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + multilang reuse + optional distribution + scoped cleanup." },
 ];
 
 /**
@@ -638,14 +642,15 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "thumbnail",
     stage: "package",
     title: "Thumbnail — Banana Engine",
-    engine: "Nano Banana Pro (gemini-3-pro-image-preview), one-pass design-native render",
+    engine: "Text-free Flash scene + deterministic Style-DNA typography",
     how:
-      "A rich design brief — channel identity, signature type treatment, a scene that literally enacts the " +
-      "topic, a 2-3 line headline with one HUGE payoff word, badge — renders the COMPLETE thumbnail in a " +
-      "single pass: dimensional material typography, photo-cutout collage, hero at 55-75% of frame, text " +
-      "never covering faces, exact spelling. A vision judge scores six dimensions; one feedback retry, then " +
-      "loud failure into the heal loop. ~15s and ~$0.13 per render, standalone in src/lib/banana.ts.",
-    gates: ["exact-spelling textOk", "faceClear", "punch ≥ 7", "styleMatch ≥ 7", "storyMatch ≥ 7", "uiClean"],
+      "A bounded concept pass separates a literal story scene from a 2-3 line payoff headline. A Flash image " +
+      "provider receives only the typed, text-free scene and reserved safe zone; local FFmpeg then renders the " +
+      "exact copy using the channel's executable motif (carved, torn strip, paint smear, neon, ransom tiles, " +
+      "and the other Style-DNA treatments), palette, badge and layout. One post-render mobile/reference judge " +
+      "may block publishing but never regenerates or substitutes a generic card. Observed provider/model usage " +
+      "is charged from counters rather than a stale flat estimate.",
+    gates: ["structural text-free provider request", "deterministic spelling + bounded layout", "faceClear", "punch ≥ 7", "styleMatch ≥ 7", "storyMatch ≥ 7", "uiClean"],
     status: "reference",
   },
   {
@@ -742,6 +747,19 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "≥7 with one seed-bumped retry — a wrong cast dies in ~250 characters, not after the whole paid render.",
     gates: ["casting spec prefilter (gender / age / register law)", "audition judge ≥ 7 on real audio", "cold-open gate: register / pace / performance / clean ≥ 7", "loud failure (no fallback voice)"],
     status: "reference",
+  },
+  {
+    key: "music",
+    stage: "sound",
+    title: "Music — Scorecraft",
+    engine: "Channel-scoped multi-track score with bounded provider routing and exact usage accounting",
+    how:
+      "The selected family decides whether music is a supporting bed or the product itself. The executable " +
+      "module generates only the configured number of distinct tracks, crossfades them into one mastered " +
+      "mix, persists the mix before downstream assembly, and accounts for accepted provider work exactly. " +
+      "It is selected only for channels whose concrete pipeline contains the music block.",
+    gates: ["bounded track count", "provider receipt accounting", "persisted mix before assembly", "no implicit per-channel selection"],
+    status: "active",
   },
   {
     key: "visuals",
@@ -937,18 +955,18 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "comic",
     stage: "visual",
-    title: "Comic — Motion-Comic 3D Engine",
-    engine: "motionComic — a narrated comic that DRAWS ITSELF OUT IN 3D: Gemini story → Nano-Banana character-consistent panels at each tile's aspect → ElevenLabs multi-voice → vision letterer → Three.js comic-page render. ZERO render credits.",
+    title: "Comic — Motion-Comic Page Engine",
+    engine: "motionComic — Gemini structured story → text-free Flash character/panel art → ElevenLabs multi-voice → vision anchors/keep-clear regions → deterministic Python comic-page render. ZERO video-model credits.",
     how:
-      "A standalone engine (src/lib/motionComic.ts + the mc3d render path). Gemini-Pro writes a tight story; each panel renders " +
-      "image-to-image from per-character MODEL SHEETS at the EXACT aspect ratio of the page tile it will occupy — so heads are " +
-      "never cropped — composed with reserved caption space. ElevenLabs voices every line; a vision letterer derives each " +
-      "speaker's mouth from a TIGHT face box (never a guessed point on a held gun or hand). A Three.js scene then tours an open " +
-      "comic page with a real 3D camera — top-down establish, zoom into each empty panel, the HAND draws it in (the scribe " +
-      "pixel-reveal ported to a GPU order-map shader), speech bubbles pop on cue, the page TURNS to a fresh sheet — rendered " +
-      "headless and muxed with the voices + a Suno score. Bubbles are placed by HARD face-exclusion + adaptive sizing with an " +
-      "elegant slim tail that stops at the face edge. No video model = $0 render credits.",
-    gates: ["per-panel geometric check: bubble face_overlap = 0 (faces are a hard constraint)", "adaptive bubble sizing until it fits a face-free gap (clear_fit)", "elegant tail stops at the face edge — never crosses the face", "panels generated at the exact tile aspect — no cropped heads", "vision letterer scores clear / tail / proximity / legibility per bubble", "character consistency via model-sheet image-to-image"],
+      "A standalone reference engine (src/lib/motionComic.ts + scripts/mc_page_render.py). Gemini-Pro emits closed, typed " +
+      "visual fields for subject, object, environment, era, physical action and relations; dialogue and printable prop copy have " +
+      "no provider-boundary field. Character sheets and panels render as text-free 4:3 Flash images with model-sheet references. " +
+      "The page renderer center-crops those images into varied comic tiles, so composition reserves broad negative space and keeps " +
+      "faces away from edges. ElevenLabs voices each line. A vision letterer supplies mouth targets, preferred anchors and keep-clear " +
+      "regions; deterministic pixel placement adapts bubble size, hard-excludes those regions and fails instead of accepting an " +
+      "overlap. Tails point to the reported mouth. Python/Pillow animates the page, hand reveal, camera tour and page turns, then " +
+      "FFmpeg muxes voices and the optional Suno score. No paid video model is used.",
+    gates: ["closed visual schema: no dialogue/printed-copy route to art provider", "4:3 text-free art with edge-safe composition for tile crops", "keep-clear overlap = 0 or render fails", "adaptive readable bubble fit near the vision anchor", "tail targets the vision-reported mouth", "character consistency via model-sheet image-to-image"],
     status: "reference",
   },
   {

@@ -8,6 +8,7 @@ import {
 } from "@/lib/operatorSession";
 import { hydrateEnv } from "@/lib/vault";
 import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
+import { isPublishIntentDispatchDue } from "@/lib/publishTiming";
 
 export const runtime = "nodejs";
 
@@ -61,6 +62,7 @@ export async function POST(request: Request) {
     const convex = convexClient();
     const secret = requireInternalQuerySecret();
     const intentId = body.intentId as Id<"publishIntents">;
+    const actionAt = Date.now();
     const intent =
       body.action === "approve"
         ? await convex.mutation(api.publishIntents.approve, {
@@ -69,15 +71,29 @@ export async function POST(request: Request) {
             intentId,
             approvedBy: `${actor.authKind}:${actor.ownerId}`,
             evidence: body.evidence?.trim() || "operator approval",
-            approvedAt: Date.now(),
+            approvedAt: actionAt,
           })
         : await convex.mutation(api.publishIntents.cancel, {
             secret,
             ownerId: actor.ownerId,
             intentId,
-            cancelledAt: Date.now(),
+            cancelledAt: actionAt,
           });
-    return NextResponse.json({ ok: true, intent });
+    let dispatchTaskId: string | undefined;
+    if (
+      body.action === "approve" &&
+      intent &&
+      isPublishIntentDispatchDue(intent, actionAt)
+    ) {
+      const { tasks } = await import("@trigger.dev/sdk");
+      const handle = await tasks.trigger(
+        "dispatch-publish-intent",
+        { intentId: String(intent._id) },
+        { concurrencyKey: `publish:${String(intent.channelId)}` },
+      );
+      dispatchTaskId = handle.id;
+    }
+    return NextResponse.json({ ok: true, intent, dispatchTaskId });
   } catch (error) {
     return errorResponse(error);
   }

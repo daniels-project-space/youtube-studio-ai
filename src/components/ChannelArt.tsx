@@ -1,6 +1,7 @@
 "use client";
 
-import { useAssetUrl } from "@/lib/asset-url";
+import { useCallback, useState } from "react";
+import { invalidateAssetUrl, useAssetUrlState } from "@/lib/asset-url";
 
 /**
  * Channel avatar / banner. Presigns the R2 art key via /api/asset-url; while it
@@ -15,20 +16,52 @@ function paletteGradient(palette?: string[]): string {
   return `linear-gradient(135deg, ${cols.join(", ")})`;
 }
 
+export function orderedAssetKeys(
+  keys: Array<string | null | undefined>,
+): string[] {
+  return [...new Set(keys.filter((key): key is string => Boolean(key?.trim())))];
+}
+
+function useFallbackAssetUrl(keys: Array<string | null | undefined>) {
+  const candidates = orderedAssetKeys(keys);
+  const signature = candidates.join("\u0000");
+  const [selection, setSelection] = useState({ signature, index: 0 });
+  const candidateIndex = selection.signature === signature ? selection.index : 0;
+  const candidate = candidates[candidateIndex];
+  const advance = useCallback(() => {
+    invalidateAssetUrl(candidate);
+    setSelection((current) => {
+      const currentIndex = current.signature === signature ? current.index : 0;
+      return {
+        signature,
+        index: Math.min(currentIndex + 1, candidates.length),
+      };
+    });
+  }, [candidate, candidates.length, signature]);
+  const asset = useAssetUrlState(candidate, advance);
+
+  return {
+    url: asset.url,
+    onError: advance,
+  };
+}
+
 export function ChannelAvatar({
   imageKey,
+  fallbackKeys = [],
   name,
   palette,
   size = 56,
   radius = 14,
 }: {
   imageKey?: string | null;
+  fallbackKeys?: Array<string | null | undefined>;
   name: string;
   palette?: string[];
   size?: number;
   radius?: number;
 }) {
-  const url = useAssetUrl(imageKey ?? null);
+  const { url, onError } = useFallbackAssetUrl([imageKey, ...fallbackKeys]);
   return (
     <div
       style={{
@@ -51,6 +84,7 @@ export function ChannelAvatar({
           src={url}
           alt={name}
           loading="lazy"
+          onError={onError}
           style={{ width: "100%", height: "100%", objectFit: "cover" }}
         />
       ) : (
@@ -71,23 +105,29 @@ export function ChannelAvatar({
 
 export function ChannelBanner({
   bannerKey,
+  fallbackKeys = [],
   name,
   palette,
   height = 160,
+  aspectRatio,
   children,
 }: {
   bannerKey?: string | null;
+  fallbackKeys?: Array<string | null | undefined>;
   name: string;
   palette?: string[];
   height?: number;
+  aspectRatio?: string;
   children?: React.ReactNode;
 }) {
-  const url = useAssetUrl(bannerKey ?? null);
+  const { url, onError } = useFallbackAssetUrl([bannerKey, ...fallbackKeys]);
   return (
     <div
+      aria-label={`${name} artwork`}
       style={{
         position: "relative",
-        height,
+        height: aspectRatio ? undefined : height,
+        aspectRatio,
         borderRadius: 16,
         overflow: "hidden",
         background: paletteGradient(palette),
@@ -99,6 +139,7 @@ export function ChannelBanner({
         <img
           src={url}
           alt={`${name} banner`}
+          onError={onError}
           style={{
             position: "absolute",
             inset: 0,

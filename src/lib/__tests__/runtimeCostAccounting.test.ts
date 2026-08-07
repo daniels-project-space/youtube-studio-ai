@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   PRICE,
   bananaUnitRate,
+  falFluxProImageCost,
   narrationTtsCost,
   qaVisualCost,
   thumbnailGenerationCost,
@@ -56,11 +57,27 @@ function providerAwarePricing(): void {
   assert.equal(bananaUnitRate("pro", {}), PRICE.bananaProUsd);
   assert.equal(
     bananaUnitRate("flash", { IMAGE_DISABLE_GEMINI: "1" }),
-    PRICE.bananaFalUsd,
+    (1024 * 576 * 0.003) / 1_000_000,
   );
   assert.equal(
     bananaUnitRate("pro", { IMAGE_PROVIDERS: " fal,gemini " }),
-    PRICE.bananaFalUsd,
+    (1024 * 576 * 0.04) / 1_000_000,
+  );
+  assert.equal(
+    bananaUnitRate(
+      "pro",
+      { IMAGE_DISABLE_GEMINI: "1" },
+      { hasReferences: true },
+    ),
+    0.04,
+  );
+  assert.equal(falFluxProImageCost(1344, 768, {}), (1344 * 768 * 0.04) / 1_000_000);
+  assert.throws(
+    () => bananaUnitRate("flash", {
+      IMAGE_DISABLE_GEMINI: "1",
+      FAL_IMAGE_MODEL_FLASH: "fal-ai/custom-unpriced-model",
+    }),
+    /authoritative request schema and price/,
   );
   assert.equal(
     bananaUnitRate("flash", { BANANA_FORCE_MODEL: "gemini-3-pro-image-preview" }),
@@ -78,12 +95,12 @@ function providerAwarePricing(): void {
 
 function costPatches(): void {
   const thumbnail = thumbnailGenerationCost(
-    { pro: 2, flash: 3, fal: 4 },
-    { pro: 3, flash: 5, fal: 5 },
+    { pro: 2, flash: 3, fal: 4, falCostUsd: 0 },
+    { pro: 3, flash: 5, fal: 5, falCostUsd: 0.013 },
     2,
     0.01,
   );
-  const images = PRICE.bananaProUsd + 2 * PRICE.bananaFlashUsd + PRICE.bananaFalUsd;
+  const images = PRICE.bananaProUsd + 2 * PRICE.bananaFlashUsd + 0.013;
   const judges = 2 * PRICE.visionGraderUsd;
   assert.equal(thumbnail, images + judges + 0.01);
 
@@ -186,6 +203,30 @@ async function successfulTinyTtsIsTerminal(): Promise<void> {
       );
       assert.equal(calls, 1, `${provider} must not retry a potentially billable 2xx response`);
       assert.equal(billableCharacters, text.length);
+
+      calls = 0;
+      globalThis.fetch = async () => {
+        calls += 1;
+        return new Response("provider failed after submission", { status: 503 });
+      };
+      await assert.rejects(
+        synthNarration({ text, provider, elevenVoiceId: "voice-test" }),
+        (error: unknown) =>
+          error instanceof TtsError && error.retryable === false && error.status === 503,
+      );
+      assert.equal(calls, 1, `${provider} must not resubmit after an ambiguous 503`);
+
+      calls = 0;
+      globalThis.fetch = async () => {
+        calls += 1;
+        throw new TypeError("socket reset after upload");
+      };
+      await assert.rejects(
+        synthNarration({ text, provider, elevenVoiceId: "voice-test" }),
+        (error: unknown) =>
+          error instanceof TtsError && error.retryable === false && /not retrying/i.test(error.message),
+      );
+      assert.equal(calls, 1, `${provider} must not resubmit after transport ambiguity`);
     }
 
     let dialogueCalls = 0;
@@ -203,6 +244,34 @@ async function successfulTinyTtsIsTerminal(): Promise<void> {
     );
     assert.equal(dialogueCalls, 1);
     assert.equal(dialogueCharacters, "one dialogue charge".length);
+
+    dialogueCalls = 0;
+    globalThis.fetch = async () => {
+      dialogueCalls += 1;
+      return new Response("provider failed after submission", { status: 503 });
+    };
+    await assert.rejects(
+      elevenDialogue([{ text: "one dialogue charge", voice_id: "voice-test" }]),
+      (error: unknown) =>
+        error instanceof Error &&
+        (error as Error & { retryable?: boolean; status?: number }).retryable === false &&
+        (error as Error & { status?: number }).status === 503,
+    );
+    assert.equal(dialogueCalls, 1, "dialogue must not resubmit after an ambiguous 503");
+
+    dialogueCalls = 0;
+    globalThis.fetch = async () => {
+      dialogueCalls += 1;
+      throw new TypeError("socket reset after upload");
+    };
+    await assert.rejects(
+      elevenDialogue([{ text: "one dialogue charge", voice_id: "voice-test" }]),
+      (error: unknown) =>
+        error instanceof Error &&
+        (error as Error & { retryable?: boolean }).retryable === false &&
+        /not retrying/i.test(error.message),
+    );
+    assert.equal(dialogueCalls, 1, "dialogue must not resubmit after transport ambiguity");
   } finally {
     globalThis.fetch = originalFetch;
     if (originalFishKey === undefined) delete process.env.FISH_AUDIO_API_KEY;

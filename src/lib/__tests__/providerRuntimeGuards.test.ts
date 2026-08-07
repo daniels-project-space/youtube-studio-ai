@@ -1,8 +1,9 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
+import { LTX_23_MODEL_REVISION, generationProfile } from "@/engine/generationProfiles";
 import { parseJsonLoose } from "@/lib/gemini";
-import { buildFalLtxBody } from "@/lib/gpuVideo";
+import { toNovitaPhaseProfile } from "@/lib/novitaRenderFarm";
 import { boundFalVideoPrompt, FAL_VIDEO_PROMPT_MAX_CHARS } from "@/lib/providerText";
 
 function providerPromptGuard(): void {
@@ -10,9 +11,17 @@ function providerPromptGuard(): void {
   const bounded = boundFalVideoPrompt(source);
   assert.ok(bounded.length <= FAL_VIDEO_PROMPT_MAX_CHARS);
   assert.ok(!bounded.endsWith("cinem"), "long prompts end on a word boundary");
-  const body = buildFalLtxBody({ prompt: source, imageUrl: "https://example.com/still.png" });
-  assert.equal(body.prompt, bounded, "fal-LTX uses the shared provider bound");
   assert.equal(boundFalVideoPrompt("short prompt"), "short prompt");
+}
+
+function novitaProfileGuard(): void {
+  const profile = toNovitaPhaseProfile(generationProfile("production"), "video");
+  assert.equal(profile.model, "Lightricks/LTX-2.3");
+  assert.equal(profile.revision, LTX_23_MODEL_REVISION);
+  assert.equal(profile.pipeline, "two-stage-hq");
+  assert.equal(profile.infrastructure.weightStorage, "local-persistent-disk");
+  assert.equal(profile.infrastructure.elasticGpuCeiling, 8);
+  assert.equal(profile.allowFallback, false);
 }
 
 function trailingModelOutputGuard(): void {
@@ -37,6 +46,7 @@ function comicFontGuard(): void {
 }
 
 providerPromptGuard();
+novitaProfileGuard();
 trailingModelOutputGuard();
 comicFontGuard();
-console.log("PROVIDER RUNTIME GUARDS PASS: prompt bound, JSON tail repair, packaged font fallback");
+console.log("PROVIDER RUNTIME GUARDS PASS: prompt bound, Novita model pin, JSON tail repair, packaged font fallback");

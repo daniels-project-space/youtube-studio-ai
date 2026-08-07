@@ -1,8 +1,9 @@
 "use client";
 
-import { use, useState, useEffect, useRef, type CSSProperties, type ReactNode } from "react";
+import { use, useState, useRef, type CSSProperties, type ReactNode } from "react";
 import Link from "next/link";
-import { useSearchParams } from "next/navigation";
+import Image from "next/image";
+import { useRouter, useSearchParams } from "next/navigation";
 import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
@@ -23,8 +24,12 @@ import { LatestVideoWidget } from "@/components/LatestVideoWidget";
 import { StatsCharts } from "@/components/StatsCharts";
 import { fmtUsd } from "@/lib/format";
 import { VOICES } from "@/lib/voices";
-import { useAssetUrl } from "@/lib/asset-url";
+import { useAssetUrl, useAssetUrlState } from "@/lib/asset-url";
 import { NICHES, subcategoryTags } from "@/lib/nicheCatalog";
+import {
+  formatZonedScheduleTimestamp,
+  nextProjectedPlanItem,
+} from "@/lib/scheduleCalendar";
 
 type ChannelDoc = {
   _id: string;
@@ -73,6 +78,16 @@ type TrendRow = {
   videoCount: number;
 };
 
+type ChannelCardDetail = {
+  channelId: string;
+  channelSlug: string;
+  latestThumbnailKey: string | null;
+  recentRunCount: number;
+  recentPublishedCount: number;
+  recentSpend: number;
+  lastRunStatus: string | null;
+};
+
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
 
 const TABS = [
@@ -87,6 +102,25 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number];
 
+const TAB_BY_QUERY: Record<string, Tab> = {
+  overview: "Overview",
+  "week-ahead": "Week ahead",
+  analytics: "Analytics",
+  library: "Library",
+  seo: "SEO",
+  pipeline: "Pipeline",
+  identity: "Identity",
+  settings: "Settings",
+};
+
+const QUERY_BY_TAB = Object.fromEntries(
+  Object.entries(TAB_BY_QUERY).map(([query, tab]) => [tab, query]),
+) as Record<Tab, string>;
+
+function validatedTab(value: string | null): Tab {
+  return value ? (TAB_BY_QUERY[value.toLowerCase()] ?? "Overview") : "Overview";
+}
+
 export default function ChannelHubPage({
   params,
 }: {
@@ -94,10 +128,18 @@ export default function ChannelHubPage({
 }) {
   const { slug } = use(params);
   const ownerId = useOwnerId();
+  const router = useRouter();
   const searchParams = useSearchParams();
-  const [tab, setTab] = useState<Tab>("Overview");
+  const [viewStartedAt] = useState(() => Date.now());
+  const tab = validatedTab(searchParams.get("tab"));
   const ytStatus = searchParams.get("yt");
   const ytGot = searchParams.get("got");
+
+  const selectTab = (next: Tab) => {
+    const query = new URLSearchParams(searchParams.toString());
+    query.set("tab", QUERY_BY_TAB[next]);
+    router.replace(`/channels/${encodeURIComponent(slug)}?${query.toString()}`, { scroll: false });
+  };
 
   const channel = useQuery(api.channels.getChannelBySlug, {
     ownerId,
@@ -105,10 +147,19 @@ export default function ChannelHubPage({
   }) as ChannelDoc | null | undefined;
 
   const channelId = channel?._id as Id<"channels"> | undefined;
+  const needsRuns = tab === "Overview" || tab === "Analytics";
   const runs = useQuery(
     api.runs.listRunsByChannel,
-    channelId ? { channelId } : "skip",
+    channelId && needsRuns ? { channelId, limit: 500 } : "skip",
   ) as RawRun[] | undefined;
+  const headerPlan = useQuery(
+    api.contentPlan.listReadyPlanPreview,
+    channelId ? { ownerId, channelId } : "skip",
+  ) as PlanRow[] | undefined;
+  const channelCard = useQuery(
+    api.channels.getChannelCard,
+    channelId ? { ownerId, channelId } : "skip",
+  ) as ChannelCardDetail | null | undefined;
 
   if (channel === undefined) {
     return (
@@ -136,6 +187,26 @@ export default function ChannelHubPage({
       </>
     );
   }
+  if (
+    channelCard === undefined ||
+    headerPlan === undefined ||
+    (needsRuns && runs === undefined)
+  ) {
+    return (
+      <>
+        <PageHeader title={channel.name} />
+        <SkeletonList rows={4} />
+      </>
+    );
+  }
+  if (channelCard === null) {
+    return (
+      <EmptyState
+        title="Channel data unavailable"
+        description="The channel summary could not be read for this owner."
+      />
+    );
+  }
 
   const id = channel.identity ?? {};
   const allRuns = runs ?? [];
@@ -144,6 +215,26 @@ export default function ChannelHubPage({
   const failedRuns = allRuns.filter((r) => r.status === "failed");
   const totalCost = allRuns.reduce((s, r) => s + (r.costTotal ?? 0), 0);
   const costPerVideo = videoRuns.length > 0 ? totalCost / videoRuns.length : null;
+  const readyPlan = headerPlan;
+  const nextPlan = nextProjectedPlanItem({
+    items: readyPlan,
+    schedule: channel.schedule,
+    cadence: id.cadence,
+    fromTimestamp: viewStartedAt,
+  });
+  const readinessChecks = [
+    Boolean(id.imageKey && id.niche),
+    Boolean(id.voiceId),
+    Boolean(id.thumbnailTemplate),
+    Boolean(channel.pipeline?.length),
+    Boolean(channel.schedule?.frequency && channel.schedule?.localTime && channel.schedule?.timezone),
+  ];
+  const readinessDone = readinessChecks.filter(Boolean).length;
+  const modulePath = (channel.pipeline ?? []).map((entry) => entry.block.replaceAll("_", " "));
+  const latestArtwork = channelCard.latestThumbnailKey;
+  const plannedArtwork = nextPlan?.item.thumbnailKey ?? readyPlan.find(
+    (item) => item.thumbnailKey,
+  )?.thumbnailKey;
 
   return (
     <>
@@ -169,21 +260,12 @@ export default function ChannelHubPage({
       {/* Banner + identity header */}
       <ChannelBanner
         bannerKey={id.bannerKey}
+        fallbackKeys={[latestArtwork, plannedArtwork]}
         name={channel.name}
         palette={id.palette}
         height={170}
       >
-        <div
-          style={{
-            position: "absolute",
-            left: "1.4rem",
-            right: "1.4rem",
-            bottom: "1.1rem",
-            display: "flex",
-            alignItems: "flex-end",
-            gap: "1rem",
-          }}
-        >
+        <div className="channel-detail-hero-content">
           <ChannelAvatar
             imageKey={id.imageKey}
             name={channel.name}
@@ -191,68 +273,72 @@ export default function ChannelHubPage({
             size={76}
             radius={18}
           />
-          <div style={{ flex: 1, minWidth: 0 }}>
-            <h1
-              style={{
-                fontFamily: "var(--font-display)",
-                fontSize: "1.9rem",
-                fontWeight: 600,
-                lineHeight: 1.1,
-                margin: 0,
-              }}
-            >
-              {channel.name}
-            </h1>
-            <div
-              style={{
-                marginTop: "0.3rem",
-                fontSize: "0.82rem",
-                color: "var(--color-muted)",
-                display: "flex",
-                gap: "0.7rem",
-                flexWrap: "wrap",
-                alignItems: "center",
-              }}
-            >
-              <span>{videoRuns.length} video{videoRuns.length === 1 ? "" : "s"} published</span>
+          <div className="channel-detail-title">
+            <h1>{channel.name}</h1>
+            <div className="channel-detail-meta">
+              <span>{id.niche ?? channel.template}</span>
               <span style={{ opacity: 0.5 }}>·</span>
-              <span>{channel.status === "active" ? "Active" : "Paused"}</span>
+              <span>{channelCard.recentPublishedCount} recently published</span>
+              <span style={{ opacity: 0.5 }}>·</span>
+              <span>{channel.schedule?.frequency ?? id.cadence ?? "Cadence not set"}</span>
             </div>
           </div>
           <StageBadge status={channel.status === "active" ? "ok" : "queued"} />
         </div>
       </ChannelBanner>
 
+      <section className="channel-operating-profile glass" aria-label="Channel operating profile">
+        <div>
+          <small>Status</small>
+          <strong>{channel.status === "active" ? "Active" : channel.status}</strong>
+          <span>{channelCard.lastRunStatus ? `Last run ${channelCard.lastRunStatus}` : "No run history"}</span>
+        </div>
+        <div>
+          <small>Next production</small>
+          <strong>
+            {nextPlan?.timestamp
+              ? formatZonedScheduleTimestamp(nextPlan.timestamp, nextPlan.timeZone, { weekday: true })
+              : nextPlan
+                ? "Time unavailable"
+                : "No ready item"}
+          </strong>
+          <span>
+            {nextPlan
+              ? `${nextPlan.pinned ? "Pinned" : "Projected"} · ${nextPlan.item.title || nextPlan.item.topic}`
+              : "Ready queue is clear"}
+          </span>
+        </div>
+        <div>
+          <small>Config readiness</small>
+          <strong className={readinessDone === readinessChecks.length ? "channel-ready" : "channel-incomplete"}>
+            {readinessDone}/{readinessChecks.length} complete
+          </strong>
+          <span>Identity · voice · thumbnail · pipeline · schedule</span>
+        </div>
+        <div>
+          <small>Module path</small>
+          <strong>{modulePath.length} module{modulePath.length === 1 ? "" : "s"}</strong>
+          <span title={modulePath.join(" → ")}>
+            {modulePath.length ? `${modulePath.slice(0, 3).join(" → ")}${modulePath.length > 3 ? ` → +${modulePath.length - 3}` : ""}` : "Not configured"}
+          </span>
+        </div>
+        <nav className="channel-profile-actions" aria-label="Channel shortcuts">
+          <Link href={`/channels/${slug}?tab=settings`}>Settings</Link>
+          <Link href={`/channels/${slug}?tab=week-ahead`}>Schedule</Link>
+          <Link href={`/channels/${slug}?tab=pipeline`}>Pipeline</Link>
+        </nav>
+      </section>
+
       {/* Tabs */}
-      <div
-        style={{
-          display: "flex",
-          gap: "0.3rem",
-          margin: "1.2rem 0 1.5rem",
-          borderBottom: "1px solid var(--color-border)",
-          flexWrap: "wrap",
-        }}
-      >
+      <div className="channel-tabs" role="tablist" aria-label="Channel sections">
         {TABS.map((t) => (
           <button
             key={t}
             type="button"
-            onClick={() => setTab(t)}
-            style={{
-              background: "transparent",
-              border: "none",
-              cursor: "pointer",
-              font: "inherit",
-              fontSize: "0.88rem",
-              fontWeight: tab === t ? 600 : 500,
-              color: tab === t ? "var(--color-fg)" : "var(--color-muted)",
-              padding: "0.55rem 0.85rem",
-              borderBottom:
-                tab === t
-                  ? "2px solid var(--color-accent)"
-                  : "2px solid transparent",
-              marginBottom: -1,
-            }}
+            onClick={() => selectTab(t)}
+            role="tab"
+            aria-selected={tab === t}
+            className="channel-tab"
           >
             {t}
           </button>
@@ -349,11 +435,11 @@ function OverviewTab({
           marginBottom: "1.8rem",
         }}
       >
-        <StatCard label="Runs" value={kpis.runs} />
-        <StatCard label="Videos" value={kpis.videos} accent="var(--color-secondary)" />
-        <StatCard label="Completed" value={kpis.completed} accent="var(--color-ok)" />
+        <StatCard label="Recent runs" value={kpis.runs} hint="latest 500 maximum" />
+        <StatCard label="Recent published" value={kpis.videos} accent="var(--color-secondary)" />
+        <StatCard label="Recent completed" value={kpis.completed} accent="var(--color-ok)" />
         <StatCard
-          label="Total spend"
+          label="Recent spend"
           value={fmtUsd(kpis.totalCost)}
           accent="var(--color-accent)"
         />
@@ -437,12 +523,12 @@ function OverviewTab({
 
 function Row({ label, hint, children }: { label: string; hint: string; children: ReactNode }) {
   return (
-    <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "1rem", flexWrap: "wrap" }}>
+    <div className="channel-setting-row">
       <div style={{ minWidth: 0 }}>
         <div style={{ fontSize: "0.86rem", fontWeight: 600, color: "var(--color-fg)" }}>{label}</div>
         <div style={{ fontSize: "0.74rem", color: "var(--color-muted)", marginTop: 2 }}>{hint}</div>
       </div>
-      <div style={{ flexShrink: 0, display: "flex", gap: "0.4rem", alignItems: "center", flexWrap: "wrap", justifyContent: "flex-end" }}>
+      <div className="channel-setting-control">
         {children}
       </div>
     </div>
@@ -456,7 +542,7 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
   const [budget, setBudget] = useState(String(channel.budget ?? 0));
   const schedule = channel.schedule ?? { frequency: "weekly" };
   const [frequency, setFrequency] = useState(schedule.frequency ?? "weekly");
-  const [days, setDays] = useState<number[]>(schedule.days ?? [1]);
+  const [days, setDays] = useState<number[]>(schedule.days?.length ? schedule.days : [1]);
   const [timezone, setTimezone] = useState(schedule.timezone ?? "UTC");
   const [localTime, setLocalTime] = useState(schedule.localTime ?? "09:00");
   const [scheduleEnabled, setScheduleEnabled] = useState(schedule.enabled !== false);
@@ -582,7 +668,9 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
   const toggleDay = (day: number) => {
     setDays((current) =>
       current.includes(day)
-        ? current.filter((value) => value !== day)
+        ? current.length === 1
+          ? current
+          : current.filter((value) => value !== day)
         : [...current, day].sort((a, b) => a - b),
     );
   };
@@ -718,12 +806,20 @@ function ChannelSettingsCard({ channel }: { channel: ChannelDoc }) {
 
 function SettingsTab({ channel }: { channel: ChannelDoc }) {
   return (
-    <div style={{ display: "grid", gap: "1.6rem" }}>
+    <div className="channel-settings-stack">
       <ChannelSettingsCard channel={channel} />
-      <PipelineModulesCard channel={channel} />
       <YouTubeConnectCard channel={channel} />
-      <AdvancedControls channel={channel} />
-      <MultiLanguageCard channel={channel} />
+      <details className="channel-advanced glass">
+        <summary>
+          <span><strong>Advanced channel configuration</strong><small>Identity, module parameters and language variants</small></span>
+          <span aria-hidden="true">+</span>
+        </summary>
+        <div className="channel-advanced-content">
+          <PipelineModulesCard channel={channel} />
+          <AdvancedControls channel={channel} />
+          <MultiLanguageCard channel={channel} />
+        </div>
+      </details>
     </div>
   );
 }
@@ -769,7 +865,9 @@ function YouTubeConnectCard({ channel }: { channel: ChannelDoc }) {
   const [msg, setMsg] = useState<string | null>(null);
 
   const connect = () => {
-    window.location.href = `/api/youtube-connect?channelId=${channel._id}`;
+    window.location.assign(
+      new URL(`/api/youtube-connect?channelId=${channel._id}`, window.location.origin),
+    );
   };
   const autoCreate = async () => {
     setBusy(true);
@@ -965,7 +1063,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
 
   const [voice, setVoice] = useState(id.voiceId ?? "sleepless_historian");
   const [cadence, setCadence] = useState(channel.schedule?.frequency ?? id.cadence ?? "weekly");
-  const [days, setDays] = useState<number[]>(channel.schedule?.days ?? [1]);
+  const [days, setDays] = useState<number[]>(channel.schedule?.days?.length ? channel.schedule.days : [1]);
   const [niche, setNiche] = useState(id.niche ?? "");
   const [nicheKey, setNicheKey] = useState("");
   const [subcat, setSubcat] = useState("");
@@ -976,7 +1074,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
   const dirty =
     voice !== (id.voiceId ?? "sleepless_historian") ||
     cadence !== (channel.schedule?.frequency ?? id.cadence ?? "weekly") ||
-    JSON.stringify(days) !== JSON.stringify(channel.schedule?.days ?? [1]) ||
+    JSON.stringify(days) !== JSON.stringify(channel.schedule?.days?.length ? channel.schedule.days : [1]) ||
     niche.trim() !== (id.niche ?? "") ||
     Boolean(nicheKey && subcat);
 
@@ -1006,7 +1104,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
       await update({
         channelId: cid,
         identity: nextId,
-        schedule: { frequency: cadence, days },
+        schedule: { ...channel.schedule, frequency: cadence, days },
         ...(pipelinePatch ? { pipeline: pipelinePatch } : {}),
       } as Parameters<typeof update>[0]);
       setMsg(seed.length ? `Saved · seeded ${seed.length} SEO tags.` : "Saved.");
@@ -1084,7 +1182,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
                 const on = days.includes(i);
                 return (
                   <button key={i} disabled={busy}
-                    onClick={() => setDays((p) => on ? p.filter((x) => x !== i) : [...p, i].sort())}
+                    onClick={() => setDays((p) => on ? (p.length === 1 ? p : p.filter((x) => x !== i)) : [...p, i].sort((a, b) => a - b))}
                     style={{
                       width: 34, height: 30, borderRadius: 7, cursor: "pointer", fontSize: "0.72rem", fontWeight: 600,
                       border: `1px solid ${on ? "var(--color-accent)" : "var(--color-border)"}`,
@@ -1216,7 +1314,7 @@ function AnalyticsTab({
           marginBottom: "1.6rem",
         }}
       >
-        <StatCard label="Total spend" value={fmtUsd(totalCost)} accent="var(--color-accent)" />
+        <StatCard label="Recent spend" value={fmtUsd(totalCost)} accent="var(--color-accent)" hint="latest 500 runs maximum" />
         <StatCard
           label="Cost / video"
           value={costPerVideo === null ? "—" : fmtUsd(costPerVideo)}
@@ -1657,17 +1755,20 @@ function List({ items }: { items: string[] }) {
 /* ------------------------------ Week ahead ------------------------------ */
 
 /** Presigned R2 image (key → /api/asset-url → <img>). */
-function AssetImg({ k, alt, style }: { k?: string; alt: string; style?: CSSProperties }) {
-  const [url, setUrl] = useState<string | null>(null);
-  useEffect(() => {
-    if (!k) return;
-    let live = true;
-    fetch(`/api/asset-url?key=${encodeURIComponent(k)}`)
-      .then((r) => r.json())
-      .then((d) => { if (live && d.url) setUrl(d.url); })
-      .catch(() => {});
-    return () => { live = false; };
-  }, [k]);
+function AssetImg({
+  k,
+  alt,
+  className,
+  style,
+}: {
+  k?: string;
+  alt: string;
+  className?: string;
+  style?: CSSProperties;
+}) {
+  const asset = useAssetUrlState(k);
+  const [failedUrl, setFailedUrl] = useState<string | null>(null);
+  const imageFailed = Boolean(asset.url && failedUrl === asset.url);
   const base: CSSProperties = {
     background: "var(--color-surface)",
     display: "flex",
@@ -1677,18 +1778,34 @@ function AssetImg({ k, alt, style }: { k?: string; alt: string; style?: CSSPrope
     fontSize: "0.72rem",
     ...style,
   };
-  if (!url) return <div style={base}>{k ? "rendering…" : "no thumbnail"}</div>;
-  // eslint-disable-next-line @next/next/no-img-element
-  return <img src={url} alt={alt} style={{ objectFit: "cover", ...style }} />;
+  if (!k) return <div className={className} style={base}>no thumbnail</div>;
+  if (asset.status === "error" || imageFailed) {
+    return <div className={className} style={base}>thumbnail unavailable</div>;
+  }
+  if (!asset.url) return <div className={className} style={base}>loading thumbnail…</div>;
+  return (
+    <Image
+      src={asset.url}
+      alt={alt}
+      className={className}
+      width={200}
+      height={112}
+      unoptimized
+      onError={() => setFailedUrl(asset.url)}
+      style={{ objectFit: "cover", ...style }}
+    />
+  );
 }
 
 type PlanRow = {
   _id: Id<"contentPlan">;
+  order: number;
   topic: string;
   title?: string;
   description?: string;
   thumbnailKey?: string;
   status: string;
+  scheduledAt?: number;
 };
 
 function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"channels"> }) {
@@ -1757,10 +1874,9 @@ function WeekAheadTab({ ownerId, channelId }: { ownerId: string; channelId: Id<"
               onDragStart={() => { dragId.current = p._id; }}
               onDragOver={(e) => e.preventDefault()}
               onDrop={() => onDrop(p._id)}
-              className="glass"
-              style={{ display: "grid", gridTemplateColumns: "200px 1fr auto", gap: "1rem", padding: "0.7rem", alignItems: "center", cursor: "grab" }}
+              className="glass channel-week-row"
             >
-              <AssetImg k={p.thumbnailKey} alt={p.title ?? p.topic} style={{ width: "200px", height: "112px", borderRadius: "8px" }} />
+              <AssetImg k={p.thumbnailKey} alt={p.title ?? p.topic} className="channel-week-thumb" />
               <div style={{ display: "flex", flexDirection: "column", gap: "0.3rem", minWidth: 0 }}>
                 <span style={{ fontSize: "0.95rem", fontWeight: 600, color: "var(--color-fg)" }}>{p.title || p.topic}</span>
                 {p.title && p.title !== p.topic && (

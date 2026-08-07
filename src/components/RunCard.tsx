@@ -14,7 +14,7 @@ export function RunCard({ run }: { run: RunRow }) {
   return (
     <Link
       href={`/runs/${run._id}`}
-      className="glass glass-shine lift"
+      className="glass glass-shine lift run-card"
       style={{
         display: "flex",
         alignItems: "center",
@@ -23,7 +23,7 @@ export function RunCard({ run }: { run: RunRow }) {
         padding: "0.9rem 1.1rem",
       }}
     >
-      <div style={{ display: "flex", alignItems: "center", gap: "0.85rem", minWidth: 0 }}>
+      <div className="run-card-main">
         <StageBadge status={run.status} />
         <div style={{ minWidth: 0 }}>
           <div
@@ -43,6 +43,7 @@ export function RunCard({ run }: { run: RunRow }) {
       </div>
 
       <div
+        className="run-card-meta"
         style={{
           display: "flex",
           alignItems: "center",

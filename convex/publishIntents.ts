@@ -1,5 +1,6 @@
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
 import {
   boundedInt,
   buildPublishIdempotencyKey,
@@ -7,6 +8,12 @@ import {
   localDateKey,
   retryAt,
 } from "../src/lib/publishingPolicy";
+import {
+  reconcileLegacyDispatchTiming,
+  resolvePublishDispatchAt,
+} from "../src/lib/publishTiming";
+import { publishedCalendarItem } from "../src/lib/publishedCalendar";
+import { bindExactPublishIntent } from "./publishContinuationState";
 
 const LEASE_MS = 8 * 60 * 60 * 1000;
 
@@ -52,6 +59,7 @@ export const createOrGet = mutation({
     approvalEvidence: v.optional(v.string()),
     approvalPolicyVersion: v.optional(v.number()),
     approvalPolicyFingerprint: v.optional(v.string()),
+    dispatchRequestedAt: v.optional(v.number()),
     hypothesis: v.optional(v.string()),
     hookVariant: v.optional(v.string()),
     visualVariant: v.optional(v.string()),
@@ -89,6 +97,16 @@ export const createOrGet = mutation({
     if (Boolean(args.thumbnailArtifactKey) !== Boolean(args.thumbnailSha256)) {
       throw new Error("publishIntents.createOrGet: thumbnail key/digest must be paired");
     }
+    const bindRun = async (intentId: Id<"publishIntents">) => {
+      if (!args.runId) return;
+      await bindExactPublishIntent(ctx, {
+        ownerId: args.ownerId,
+        channelId: args.channelId,
+        runId: args.runId,
+        intentId,
+        artifactId: args.videoArtifactId,
+      });
+    };
     const needsApproval = args.privacyStatus !== "private" || args.publishAt !== undefined;
     if (
       needsApproval &&
@@ -127,6 +145,12 @@ export const createOrGet = mutation({
         needsApproval &&
         args.approvedForPublish
       ) {
+        const requestedDispatchAt = resolvePublishDispatchAt({
+          createdAt: args.createdAt,
+          dispatchRequestedAt: args.dispatchRequestedAt,
+          publishAt: args.publishAt,
+          privacyStatus: args.privacyStatus,
+        });
         await ctx.db.patch(existing._id, {
           status:
             args.publishAt !== undefined && args.publishAt > args.createdAt
@@ -138,12 +162,46 @@ export const createOrGet = mutation({
           approvalKind: "channel_policy",
           approvalPolicyVersion: args.approvalPolicyVersion,
           approvalPolicyFingerprint: args.approvalPolicyFingerprint,
-          nextAttemptAt: args.publishAt ?? args.createdAt,
+          dispatchAt: requestedDispatchAt,
+          nextAttemptAt: requestedDispatchAt,
           lastError: undefined,
-          updatedAt: args.createdAt,
+          updatedAt: requestedDispatchAt,
         });
+        await bindRun(existing._id);
         return await ctx.db.get(existing._id);
       }
+      // Repair pre-separation rows only before their first provider attempt.
+      // Never pull a retry_wait row forward and bypass its exponential backoff.
+      if (
+        existing.dispatchAt === undefined &&
+        existing.attempts === 0 &&
+        (existing.status === "approved" || existing.status === "scheduled")
+      ) {
+        const requestedDispatchAt = resolvePublishDispatchAt({
+          createdAt: args.createdAt,
+          dispatchRequestedAt: args.dispatchRequestedAt,
+          publishAt: args.publishAt,
+          privacyStatus: args.privacyStatus,
+        });
+        const repairedTiming = reconcileLegacyDispatchTiming({
+          status: existing.status,
+          attempts: existing.attempts,
+          dispatchAt: existing.dispatchAt,
+          nextAttemptAt: existing.nextAttemptAt,
+          requestedDispatchAt,
+        });
+        if (!repairedTiming) {
+          await bindRun(existing._id);
+          return existing;
+        }
+        await ctx.db.patch(existing._id, {
+          ...repairedTiming,
+          updatedAt: Math.max(existing.updatedAt, requestedDispatchAt),
+        });
+        await bindRun(existing._id);
+        return await ctx.db.get(existing._id);
+      }
+      await bindRun(existing._id);
       return existing;
     }
 
@@ -162,6 +220,12 @@ export const createOrGet = mutation({
         ? ("scheduled" as const)
         : ("approved" as const);
     const maxAttempts = boundedInt(channel.schedule?.retryMaxAttempts, 5, 1, 12);
+    const requestedDispatchAt = resolvePublishDispatchAt({
+      createdAt: args.createdAt,
+      dispatchRequestedAt: args.dispatchRequestedAt,
+      publishAt: args.publishAt,
+      privacyStatus: args.privacyStatus,
+    });
     const {
       secret: _secret,
       approvedForPublish: _approved,
@@ -170,10 +234,12 @@ export const createOrGet = mutation({
       visualVariant,
       approvalPolicyVersion,
       approvalPolicyFingerprint,
+      dispatchRequestedAt: _dispatchRequestedAt,
       ...doc
     } = args;
     void _secret;
     void _approved;
+    void _dispatchRequestedAt;
     const intentId = await ctx.db.insert("publishIntents", {
       ...doc,
       status,
@@ -191,10 +257,12 @@ export const createOrGet = mutation({
         approved && needsApproval ? approvalPolicyFingerprint : undefined,
       attempts: 0,
       maxAttempts,
-      nextAttemptAt: args.publishAt ?? args.createdAt,
+      dispatchAt: approved ? requestedDispatchAt : undefined,
+      nextAttemptAt: requestedDispatchAt,
       createdAt: args.createdAt,
       updatedAt: args.createdAt,
     });
+    await bindRun(intentId);
     const experimentKey = `${args.idempotencyKey}:creative`;
     const experimentId = await ctx.db.insert("contentExperiments", {
       ownerId: args.ownerId,
@@ -241,6 +309,102 @@ export const listForOwner = query({
       .order("desc")
       .take(limit);
     return rows;
+  },
+});
+
+/**
+ * Published/scheduled YouTube history for one visible calendar page.
+ * Native schedules are keyed by exact `publishAt`; immediate public/unlisted
+ * uploads are keyed by durable `completedAt`. Private drafts are excluded at
+ * the index boundary and cannot consume the bounded result window.
+ */
+export const listPublishedCalendarRange = query({
+  args: {
+    ownerId: v.string(),
+    channelId: v.optional(v.id("channels")),
+    startAt: v.number(),
+    endAt: v.number(),
+    limit: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    if (
+      !Number.isFinite(args.startAt) ||
+      !Number.isFinite(args.endAt) ||
+      args.endAt <= args.startAt ||
+      args.endAt - args.startAt > 62 * 86_400_000
+    ) {
+      throw new Error("published calendar range must be a valid window of at most 62 days");
+    }
+    const limit = boundedInt(args.limit, 800, 1, 1_000);
+    const take = limit + 1;
+
+    const scheduled = args.channelId
+      ? await ctx.db
+          .query("publishIntents")
+          .withIndex("by_channel_status_publish_at", (q) =>
+            q
+              .eq("channelId", args.channelId!)
+              .eq("status", "uploaded")
+              .gte("publishAt", args.startAt)
+              .lt("publishAt", args.endAt),
+          )
+          .take(take)
+      : await ctx.db
+          .query("publishIntents")
+          .withIndex("by_owner_status_publish_at", (q) =>
+            q
+              .eq("ownerId", args.ownerId)
+              .eq("status", "uploaded")
+              .gte("publishAt", args.startAt)
+              .lt("publishAt", args.endAt),
+          )
+          .take(take);
+
+    const immediate = async (privacy: "public" | "unlisted") =>
+      args.channelId
+        ? await ctx.db
+            .query("publishIntents")
+            .withIndex("by_channel_status_privacy_publish_completed_at", (q) =>
+              q
+                .eq("channelId", args.channelId!)
+                .eq("status", "uploaded")
+                .eq("privacyStatus", privacy)
+                .eq("publishAt", undefined)
+                .gte("completedAt", args.startAt)
+                .lt("completedAt", args.endAt),
+            )
+            .take(take)
+        : await ctx.db
+            .query("publishIntents")
+            .withIndex("by_owner_status_privacy_publish_completed_at", (q) =>
+              q
+                .eq("ownerId", args.ownerId)
+                .eq("status", "uploaded")
+                .eq("privacyStatus", privacy)
+                .eq("publishAt", undefined)
+                .gte("completedAt", args.startAt)
+                .lt("completedAt", args.endAt),
+            )
+            .take(take);
+
+    const [publicRows, unlistedRows] = await Promise.all([
+      immediate("public"),
+      immediate("unlisted"),
+    ]);
+    const items = [...scheduled, ...publicRows, ...unlistedRows]
+      .map(publishedCalendarItem)
+      .filter((item) => item !== null)
+      .filter((item) => item.publishedAt >= args.startAt && item.publishedAt < args.endAt)
+      .sort((a, b) => a.publishedAt - b.publishedAt);
+
+    return {
+      items: items.slice(0, limit),
+      truncated:
+        items.length > limit ||
+        scheduled.length > limit ||
+        publicRows.length > limit ||
+        unlistedRows.length > limit,
+    };
   },
 });
 
@@ -330,6 +494,13 @@ export const claim = mutation({
         )
         .collect()
     ).filter((row) => row.status === "uploaded").length;
+    const repairedTiming = reconcileLegacyDispatchTiming({
+      status: intent.status,
+      attempts: intent.attempts,
+      dispatchAt: intent.dispatchAt,
+      nextAttemptAt: intent.nextAttemptAt,
+      requestedDispatchAt: args.now,
+    });
     const decision = evaluatePublishClaim({
       now: args.now,
       intent: {
@@ -338,7 +509,8 @@ export const claim = mutation({
         connectorId: String(intent.connectorId),
         connectorVersion: intent.connectorVersion,
         status: intent.status,
-        nextAttemptAt: intent.nextAttemptAt,
+        nextAttemptAt: repairedTiming?.nextAttemptAt ?? intent.nextAttemptAt,
+        publishAt: intent.publishAt,
         leaseExpiresAt: intent.leaseExpiresAt,
       },
       connector: {
@@ -356,7 +528,10 @@ export const claim = mutation({
     if (!decision.ok) {
       if (decision.terminal) {
         await ctx.db.patch(intent._id, {
-          status: "blocked_connector",
+          status:
+            decision.reason === "publish_window_elapsed"
+              ? "dead_letter"
+              : "blocked_connector",
           leaseOwner: undefined,
           leaseExpiresAt: undefined,
           lastError: decision.reason,
@@ -366,6 +541,7 @@ export const claim = mutation({
       return { claimed: false as const, reason: decision.reason, intent };
     }
     await ctx.db.patch(intent._id, {
+      ...(repairedTiming ?? {}),
       status: "dispatching",
       attempts: intent.attempts + 1,
       leaseOwner: args.workerId,
@@ -484,6 +660,7 @@ export const requireReapproval = mutation({
       approvalKind: undefined,
       approvalPolicyVersion: undefined,
       approvalPolicyFingerprint: undefined,
+      dispatchAt: undefined,
       lastError: args.reason.slice(0, 1_000),
       updatedAt: args.changedAt,
     });
@@ -510,6 +687,12 @@ export const approve = mutation({
       throw new Error("publishIntents.approve: actor and evidence are required");
     }
     if (intent.status !== "awaiting_approval") return intent;
+    const dispatchAt = resolvePublishDispatchAt({
+      createdAt: intent.createdAt,
+      dispatchRequestedAt: args.approvedAt,
+      publishAt: intent.publishAt,
+      privacyStatus: intent.privacyStatus,
+    });
     await ctx.db.patch(intent._id, {
       status:
         intent.publishAt !== undefined && intent.publishAt > args.approvedAt
@@ -521,7 +704,8 @@ export const approve = mutation({
       approvalKind: "manual_intent",
       approvalPolicyVersion: undefined,
       approvalPolicyFingerprint: undefined,
-      nextAttemptAt: intent.publishAt ?? args.approvedAt,
+      dispatchAt,
+      nextAttemptAt: dispatchAt,
       updatedAt: args.approvedAt,
     });
     return await ctx.db.get(intent._id);

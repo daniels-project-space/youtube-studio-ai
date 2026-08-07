@@ -1,7 +1,40 @@
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
+import type { QueryCtx } from "./_generated/server";
+import type { Doc } from "./_generated/dataModel";
 import { moduleSurface, configurableModules } from "@/engine/moduleRegistry";
 import { validateKnobs, type KnobValues, type KnobValue } from "@/engine/customization";
+import {
+  isAcceptedChannelArtworkRun,
+  summarizeChannelCardRuns,
+} from "@/lib/channelCardProjection";
+
+async function projectChannelCard(ctx: QueryCtx, channel: Doc<"channels">) {
+  const recentRuns = await ctx.db
+    .query("runs")
+    .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+    .order("desc")
+    .take(20);
+  let latestThumbnailKey: string | null = null;
+  for (const run of recentRuns.filter(isAcceptedChannelArtworkRun).slice(0, 5)) {
+    const runAssets = await ctx.db
+      .query("assets")
+      .withIndex("by_run", (q) => q.eq("runId", run._id))
+      .order("desc")
+      .collect();
+    const thumbnail = runAssets.find((asset) => asset.kind === "thumbnail");
+    if (thumbnail) {
+      latestThumbnailKey = thumbnail.r2Key;
+      break;
+    }
+  }
+  return {
+    channelId: channel._id,
+    channelSlug: channel.slug,
+    latestThumbnailKey,
+    ...summarizeChannelCardRuns(recentRuns),
+  };
+}
 
 const identityValidator = v.object({
   persona: v.string(),
@@ -223,6 +256,33 @@ export const listChannels = query({
       .query("channels")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
       .collect();
+  },
+});
+
+/**
+ * Bounded card projection. It summarizes the latest 20 runs independently per
+ * channel and only accepts thumbnail provenance from a successful or uploaded
+ * run, avoiding the Library's heavier metadata joins and failed-run artwork.
+ */
+export const listChannelCards = query({
+  args: { ownerId: v.string() },
+  handler: async (ctx, args) => {
+    const channels = await ctx.db
+      .query("channels")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .collect();
+
+    return await Promise.all(channels.map((channel) => projectChannelCard(ctx, channel)));
+  },
+});
+
+/** One-channel projection for detail routes; avoids subscribing to the whole fleet. */
+export const getChannelCard = query({
+  args: { ownerId: v.string(), channelId: v.id("channels") },
+  handler: async (ctx, args) => {
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) return null;
+    return await projectChannelCard(ctx, channel);
   },
 });
 

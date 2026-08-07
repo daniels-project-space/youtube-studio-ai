@@ -108,9 +108,9 @@ export default defineConfig({
           // in `external` did NOT put them in the image — every intro/outro
           // TitleCard died on "@remotion/noise unresolved". additionalPackages
           // force-installs them into /app/node_modules.
-          "@remotion/noise@4.0.471",
-          "@remotion/motion-blur@4.0.471",
-          "@remotion/google-fonts@4.0.471",
+          "@remotion/noise@4.0.506",
+          "@remotion/motion-blur@4.0.506",
+          "@remotion/google-fonts@4.0.506",
         ],
       }),
       additionalFiles({

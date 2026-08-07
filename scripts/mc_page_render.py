@@ -12,7 +12,9 @@ from PIL import Image, ImageDraw
 from skimage.morphology import skeletonize
 from skimage.measure import label
 from scipy.spatial import cKDTree
-from mc_textplace import detail_map, best_box   # deterministic, pixel-grounded bubble placement
+from mc_textplace import (                        # deterministic, keep-clear-aware bubble placement
+    cover_geometry, detail_map, place_safe, remap_cover_box, remap_cover_point,
+)
 from mc_font import load_font
 
 TL_PATH, RUN_DIR, OUT, HAND_PATH = sys.argv[1], sys.argv[2], sys.argv[3], sys.argv[4]
@@ -104,9 +106,8 @@ def hand_for(box_h):
 
 
 def cover_into(img, w, h):
-    iw, ih = img.size; s = max(w / iw, h / ih)
-    img = img.resize((max(w, int(iw * s + 0.5)), max(h, int(ih * s + 0.5))), Image.LANCZOS)
-    ox, oy = (img.width - w) // 2, (img.height - h) // 2
+    rw, rh, ox, oy = cover_geometry(img.width, img.height, w, h)
+    img = img.resize((rw, rh), Image.LANCZOS)
     return img.crop((ox, oy, ox + w, oy + h))
 
 
@@ -124,21 +125,21 @@ def _wrap_lines(text, font, maxw, dd):
     return lines
 
 
-def make_bubble(text, box_w, box_h):
+def make_bubble(text, box_w, box_h, font_size=None, max_text_width=None):
     dd = ImageDraw.Draw(Image.new("RGB", (4, 4)))
     # FIT-TO-PANEL: the bubble MUST fit inside the panel with a margin, or the
     # placement clamp pushes it off the edge (observed: text clipped mid-word at
     # a panel border). Shrink the font until the rendered bubble fits both axes.
     fit_w = int(box_w * 0.86); fit_h = int(box_h * 0.82)
-    fs = max(19, int(box_h * 0.068))
+    fs = int(font_size) if font_size is not None else max(19, int(box_h * 0.068))
     while True:
         font = load_font(fs)
-        maxw = min(int(box_w * 0.74), fit_w - int(fs * 1.1))
+        maxw = int(max_text_width) if max_text_width is not None else min(int(box_w * 0.74), fit_w - int(fs * 1.1))
         lines = _wrap_lines(text, font, maxw, dd)
         lh = int(fs * 1.16); pad = int(fs * 0.55)
         tw = max(int(dd.textlength(ln, font=font)) for ln in lines); th = lh * len(lines)
         bw, bh = tw + 2 * pad, th + 2 * pad
-        if (bw <= fit_w and bh <= fit_h) or fs <= 15:
+        if font_size is not None or (bw <= fit_w and bh <= fit_h) or fs <= 15:
             break
         fs -= 2                                              # too big → shrink and re-wrap
     img = Image.new("RGBA", (bw, bh), (0, 0, 0, 0)); dr = ImageDraw.Draw(img)
@@ -197,7 +198,9 @@ def build_page(subset):
         x, y, w, h = BOXES[li]; art_path = os.path.join(RUN_DIR, p["img"])
         if not os.path.exists(art_path):
             panes.append(None); continue
-        art = np.asarray(cover_into(Image.open(art_path).convert("RGB"), w, h)).astype(np.uint8)
+        art_source = Image.open(art_path).convert("RGB")
+        crop_geometry = cover_geometry(art_source.width, art_source.height, w, h)
+        art = np.asarray(cover_into(art_source, w, h)).astype(np.uint8)
         g = 0.299 * art[..., 0] + 0.587 * art[..., 1] + 0.114 * art[..., 2]; traj = skeleton_traj(g < 145)
         if traj is None:
             order2d = np.repeat(np.linspace(0, 1, h)[:, None], w, axis=1).astype(np.float32)
@@ -208,14 +211,30 @@ def build_page(subset):
         hand_rgba, tipx, tipy = hand_for(h)
         panes.append({"box": (x, y, w, h), "art": art, "order2d": order2d, "traj": traj, "hand": hand_rgba, "tipx": tipx, "tipy": tipy})
         det = detail_map(art) if p.get("bubbles") else None   # one edge-energy map per panel
+        avoid = []
+        for raw in p.get("avoid", []):
+            mapped = remap_cover_box(raw, crop_geometry, w, h)
+            if mapped:
+                avoid.append(mapped)
         for b in p.get("bubbles", []):
-            body = make_bubble(b["text"], w, h)
             has = bool(b.get("mouth"))
-            ml = (b["mouth"][0] * w, b["mouth"][1] * h) if has else None
-            (lx, ly), _ = best_box(det, body.width, body.height, ml)   # emptiest box near the mouth
+            ml = remap_cover_point(b["mouth"], crop_geometry, w, h) if has else None
+            al = remap_cover_point(b["anchor"], crop_geometry, w, h) if b.get("anchor") else None
+            lx, ly, fs, bw, bh, clear_fit = place_safe(
+                det, avoid, b["text"], mouth=ml, anchor=al, max_w_frac=0.42,
+            )
+            if not clear_fit:
+                raise RuntimeError(
+                    f"motionComic bubble has no readable keep-clear placement in panel {li}; refusing overlap"
+                )
+            body = make_bubble(b["text"], w, h, font_size=fs, max_text_width=int(w * 0.42))
+            if body.width != bw or body.height != bh:
+                raise RuntimeError("motionComic bubble measurement/render metrics diverged")
             det[max(0, ly):ly + body.height, max(0, lx):lx + body.width] = 1.0   # mark taken so co-panel bubbles avoid it
+            avoid.append((lx, ly, body.width, body.height))
             bx, by = PX + x + lx, PY + y + ly
-            mouth = (PX + x + (b["mouth"][0] * w if has else 0.5 * w), PY + y + (b["mouth"][1] * h if has else 0.18 * h))
+            local_mouth = ml if has else (0.5 * w, 0.18 * h)
+            mouth = (PX + x + local_mouth[0], PY + y + local_mouth[1])
             bubraw.append((li, body, bx, by, mouth, has, float(b.get("at", 0.0))))
     return {"panels": subset, "PW": PW, "PH": PH, "BOXES": BOXES, "WDW": WDW, "WDH": WDH,
             "PX": PX, "PY": PY, "world": world, "panes": panes, "bubraw": bubraw, "bubbles": []}

@@ -9,7 +9,7 @@
 import { basename, extname, join } from "node:path";
 import { writeFile } from "node:fs/promises";
 import { generateBananaImage } from "@/lib/banana";
-import { thumbnailText } from "@/lib/ffmpeg";
+import { thumbnailText, type ThumbnailTextObject } from "@/lib/ffmpeg";
 import type { ThumbnailHeadlineLine, ThumbnailTextZone } from "@/lib/thumbnailLayout";
 
 export type ThumbnailFont = "serif" | "sans" | "impact" | "marker" | "bebas" | "rounded";
@@ -29,13 +29,17 @@ export interface ThumbnailSceneSpec {
 export interface ThumbnailTypographySpec {
   lines: ThumbnailHeadlineLine[];
   subtitle?: string;
+  footerLabel?: string;
+  badgePlacement?: "bottomCenter" | "topRight";
   font?: ThumbnailFont;
   uppercase?: boolean;
   treatment?: ThumbnailTreatment;
-  /** Rich Style-DNA name retained as provenance; rendering stays local. */
-  textObject?: string;
+  /** Style-DNA physical-design motif rendered by the local compositor. */
+  textObject?: ThumbnailTextObject;
   textColor?: string;
+  baseColor?: string;
   accentColor?: string;
+  badgeStyle?: "center" | "pill";
 }
 
 export interface ThumbnailRenderSpec {
@@ -82,13 +86,9 @@ export function isThumbnailBaseProvenance(
     (requestedZone === undefined || p.safeZone === requestedZone);
 }
 
-function normalized(value: string): string {
-  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
-}
-
-/** Build the provider request from scene-only fields. */
-export function buildThumbnailImageRequest(spec: ThumbnailRenderSpec): ThumbnailImageRequest {
-  const scene = spec.scene;
+/** Build the provider request from a scene-only type. Typography has no route
+ * into this function, so copy isolation is structural rather than heuristic. */
+export function buildThumbnailImageRequest(scene: ThumbnailSceneSpec): ThumbnailImageRequest {
   const zone = scene.textZone;
   const prompt = [
     "1280x720 YouTube thumbnail base art",
@@ -103,24 +103,6 @@ export function buildThumbnailImageRequest(spec: ThumbnailRenderSpec): Thumbnail
     scene.visualAvoid?.length ? `Avoid: ${scene.visualAvoid.join("; ")}` : "",
     "No textual props or writing surfaces: no text, letters, words, numbers, signs, labels, newspapers, posters, logos, badges, UI, or watermark",
   ].filter(Boolean).join(". ");
-
-  // Regression alarm, not recovery: typed separation is the root fix. If a
-  // future edit leaks copy across the boundary, stop before a paid request.
-  const normalizedPrompt = normalized(prompt);
-  // A scene can legitimately share one semantic keyword with a one-word
-  // headline (for example, a scene about "taxation"). Block copied phrases
-  // and every badge/subtitle instead of rejecting normal subject grounding.
-  const forbiddenCopy = [
-    ...spec.typography.lines
-      .map((line) => normalized(line.text))
-      .filter((copy) => copy.split(" ").length >= 2),
-    normalized(spec.typography.subtitle ?? ""),
-  ].filter((copy) => copy.length >= 3);
-  for (const copy of forbiddenCopy) {
-    if (normalizedPrompt.includes(copy)) {
-      throw new Error(`thumbnail renderer: typography leaked into scene prompt (${copy})`);
-    }
-  }
 
   return { prompt, allowText: false, tier: "flash", aspectRatio: "16:9" };
 }
@@ -148,7 +130,7 @@ export async function renderThumbnail(args: {
   if (reusable) {
     basePath = args.baseArt!.path;
   } else {
-    request = buildThumbnailImageRequest(args.spec);
+    request = buildThumbnailImageRequest(args.spec.scene);
     const extension = extname(args.outJpg);
     const stem = basename(args.outJpg, extension || undefined);
     basePath = join(args.tmpDir, `${stem}.text-free-base.jpg`);
@@ -163,11 +145,16 @@ export async function renderThumbnail(args: {
     lines: type.lines,
     position: args.spec.scene.textZone,
     subtitle: type.subtitle,
+    footerLabel: type.footerLabel,
+    badgePlacement: type.badgePlacement,
     textColor: type.textColor,
+    baseColor: type.baseColor,
     accentColor: type.accentColor,
+    badgeStyle: type.badgeStyle,
     font: type.font,
     uppercase: type.uppercase,
     treatment: type.treatment,
+    textObject: type.textObject,
   });
 
   return {

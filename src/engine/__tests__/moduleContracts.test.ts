@@ -24,7 +24,11 @@ import {
 } from "@/engine/goldenExecution";
 import type { ModuleManifest } from "@/engine/moduleManifest";
 import { MODULE_CONTRACTS } from "@/engine/moduleContracts";
-import { PRICE, bananaUnitRate, qaVisualCost } from "@/engine/pricing";
+import {
+  PRICE,
+  bananaUnitRate,
+  qaVisualCost,
+} from "@/engine/pricing";
 import {
   assertThumbnailGate,
   assertThumbnailStrategy,
@@ -180,6 +184,11 @@ function runtimeConfigurationIsCompiledBeforeSpendReservation(): void {
     publishMode: "draft",
   });
   const base = compilePipeline(validatePipeline(design.pipeline));
+  assert.match(
+    base.fingerprint,
+    /^[a-f0-9]{64}$/,
+    "production compilation fingerprints must be durable SHA-256 identities",
+  );
   const music = design.pipeline.find((entry) => entry.block === "music");
   assert.ok(music, "music-loop representative must contain the paid music module");
   const materialized = materializeRuntimePipelineParams(design.pipeline, {
@@ -460,8 +469,8 @@ function configurationSpecificCostEnvelopes(): void {
 
   assert.equal(
     envelope("thumbnail_gen", {}),
-    bananaUnitRate("flash") + PRICE.visionGraderUsd,
-    "thumbnail reservation must cover the single text-free scene and one publishing alarm",
+    PRICE.thumbnailConceptUsd + bananaUnitRate("flash") + PRICE.visionGraderUsd,
+    "thumbnail reservation must cover concept, one text-free scene, and one publishing alarm",
   );
 
   const narrationCharacters =
@@ -512,13 +521,18 @@ function configurationSpecificCostEnvelopes(): void {
 
   assert.equal(
     envelope("novita_render_images", { shotCount: 10, generationProfile: "production" }),
-    20 * PRICE.novitaImageUsd,
+    20 * PRICE.novitaImageMaxUsd,
     "every Novita still shot must reserve the high-risk two-candidate path",
   );
   assert.equal(
     envelope("novita_render_video", { shotCount: 10, generationProfile: "production" }),
-    10 * PRICE.novitaVideoUsd,
+    10 * PRICE.novitaVideoMaxUsd,
     "Novita video reservation must follow the pinned profile fanout",
+  );
+  assert.equal(
+    envelope("gen_footage", { maxClips: 6 }),
+    6 * (PRICE.novitaImageMaxUsd + PRICE.novitaVideoMaxUsd),
+    "generated footage must reserve the pinned Novita image and video ceilings",
   );
   assert.equal(
     envelope("qa_visual", { nativeWatch: true, audioQa: true }),
@@ -530,7 +544,7 @@ function configurationSpecificCostEnvelopes(): void {
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
-  assert.equal(manifests.length, 46, "all 46 executable blocks must have manifests");
+  assert.equal(manifests.length, 45, "all 45 executable blocks must have manifests");
   assert.deepEqual(
     manifests.filter((manifest) => manifest.certification.status === "legacy").map((manifest) => manifest.id),
     [],

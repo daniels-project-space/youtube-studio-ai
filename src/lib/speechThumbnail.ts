@@ -6,14 +6,12 @@
  * we (1) describe the person's iconic look WITHOUT the name (auto via Gemini),
  * (2) render only the figure/scene, (3) composite headline and name locally.
  */
-import { spawnSync } from "node:child_process";
 import { dirname } from "node:path";
 import { renderThumbnail } from "./thumbnailRenderer";
 import { geminiJson, hasGeminiKey } from "./gemini";
 
 const DEFAULT_STYLE =
   "cinematic high-contrast portrait, dramatic single-source rim light, moody charcoal background, premium editorial movie-poster look, crisp photographic detail";
-const FONT = "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
 
 /** Iconic, instantly-recognizable appearance of `person` WITHOUT naming them —
  * sidesteps the image model's named-celebrity refusal. */
@@ -65,8 +63,6 @@ export async function generateSpeechThumbnail(a: SpeechThumbArgs): Promise<{ pat
     `${look}, jaw set, an intense, defiant, determined gaze locked straight to camera. ` +
     `A single hard rim-light carves the face out of a deep charcoal void; faint atmospheric haze.` +
     `${a.sceneExtra ? " " + a.sceneExtra : ""} Powerful, cinematic.`;
-  const base = a.outJpg.replace(/\.jpg$/i, "");
-  const rawJpg = a.addName === false ? a.outJpg : `${base}-base.jpg`;
   const rendered = await renderThumbnail({
     spec: {
       scene: {
@@ -79,24 +75,16 @@ export async function generateSpeechThumbnail(a: SpeechThumbArgs): Promise<{ pat
       typography: {
         lines: a.lines,
         subtitle: a.badge ?? (a.channelName ?? "MINDSET"),
+        footerLabel: a.addName === false ? undefined : a.person,
+        badgePlacement: a.addName === false ? "bottomCenter" : "topRight",
         font: "impact",
         uppercase: true,
         treatment: "plate",
         accentColor: accent,
       },
     },
-    outJpg: rawJpg,
+    outJpg: a.outJpg,
     tmpDir: dirname(a.outJpg),
   });
-  if (a.addName === false) return { path: rendered.path };
-  // Composite the person's name strap locally (the image request never sees it).
-  const spaced = a.person.toUpperCase().split("").join(" ");
-  const r = spawnSync(
-    "ffmpeg",
-    ["-y", "-i", rawJpg, "-vf",
-      `drawtext=fontfile=${FONT}:text=${spaced}:fontcolor=${accent}:fontsize=30:x=(w-text_w)/2:y=h-58:shadowcolor=black@0.8:shadowx=2:shadowy=2`,
-      a.outJpg],
-    { stdio: "ignore" },
-  );
-  return r.status === 0 ? { path: a.outJpg } : { path: rendered.path };
+  return { path: rendered.path };
 }

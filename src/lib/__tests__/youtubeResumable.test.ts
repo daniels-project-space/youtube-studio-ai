@@ -19,6 +19,7 @@ async function main() {
   await writeFile(filePath, Buffer.alloc(fileSize, 7));
   const sessionUrl =
     "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&upload_id=test";
+  const publishAt = "2026-08-07T12:00:00.000Z";
   let checkpoint: YouTubeUploadCheckpoint | undefined;
   const firstRanges: string[] = [];
   let firstCall = 0;
@@ -26,9 +27,15 @@ async function main() {
     firstCall += 1;
     if (firstCall === 1) {
       const metadata = JSON.parse(String(init?.body)) as {
-        status?: { containsSyntheticMedia?: boolean };
+        status?: {
+          containsSyntheticMedia?: boolean;
+          privacyStatus?: string;
+          publishAt?: string;
+        };
       };
       assert.equal(metadata.status?.containsSyntheticMedia, true);
+      assert.equal(metadata.status?.privacyStatus, "private");
+      assert.equal(metadata.status?.publishAt, publishAt);
       return new Response(null, { status: 200, headers: { location: sessionUrl } });
     }
     if (firstCall === 2) {
@@ -51,6 +58,8 @@ async function main() {
           title: "Resumable test",
           description: "test",
           tags: [],
+          privacyStatus: "public",
+          publishAt,
           refreshToken: "not-used",
           chunkSizeBytes: 256 * 1024,
           accessTokenProvider: async () => "access-token",
@@ -88,6 +97,8 @@ async function main() {
       title: "Resumable test",
       description: "test",
       tags: [],
+      privacyStatus: "public",
+      publishAt,
       refreshToken: "not-used",
       chunkSizeBytes: 256 * 1024,
       accessTokenProvider: async () => "access-token",

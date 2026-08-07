@@ -1,3 +1,10 @@
+import {
+  civilDateFromIsoDay,
+  isScheduledCivilDate,
+  validTimeZone,
+} from "./scheduleCalendar";
+import { scheduledPublishWindowElapsed } from "./publishTiming";
+
 export const YOUTUBE_UPLOAD_SCOPES = [
   "https://www.googleapis.com/auth/youtube",
   "https://www.googleapis.com/auth/youtube.upload",
@@ -44,6 +51,7 @@ export interface PublishClaimInput {
     connectorVersion: number;
     status: PublishIntentStatus;
     nextAttemptAt: number;
+    publishAt?: number;
     leaseExpiresAt?: number;
   };
   connector: {
@@ -71,6 +79,7 @@ export type PublishClaimDecision =
         | "upload_scope_missing"
         | "not_dispatchable"
         | "not_due"
+        | "publish_window_elapsed"
         | "lease_active"
         | "channel_concurrency"
         | "daily_quota";
@@ -120,6 +129,9 @@ export function evaluatePublishClaim(input: PublishClaimInput): PublishClaimDeci
     (intent.status === "dispatching" && (intent.leaseExpiresAt ?? 0) <= now);
   if (!dispatchable) {
     return { ok: false, reason: "not_dispatchable", terminal: false };
+  }
+  if (scheduledPublishWindowElapsed({ now, publishAt: intent.publishAt })) {
+    return { ok: false, reason: "publish_window_elapsed", terminal: true };
   }
   if (intent.nextAttemptAt > now) {
     return { ok: false, reason: "not_due", terminal: false };
@@ -171,21 +183,16 @@ export function localDateKey(now: number, timezone = "UTC"): string {
   return key;
 }
 
-function localClock(now: number, timezone: string): { weekday: number; minutes: number } {
+function localClock(now: number, timezone: string): { minutes: number } {
   const parts = new Intl.DateTimeFormat("en-US", {
     timeZone: timezone,
-    weekday: "short",
     hour: "2-digit",
     minute: "2-digit",
     hourCycle: "h23",
   }).formatToParts(new Date(now));
   const value = (type: Intl.DateTimeFormatPartTypes) =>
     parts.find((part) => part.type === type)?.value ?? "";
-  const weekday = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"].indexOf(
-    value("weekday"),
-  );
   return {
-    weekday,
     minutes: Number(value("hour")) * 60 + Number(value("minute")),
   };
 }
@@ -198,7 +205,7 @@ export function isGenerationDue(args: {
 }): boolean {
   const schedule = args.schedule;
   if (schedule?.enabled === false) return false;
-  const timezone = schedule?.timezone ?? "UTC";
+  const timezone = validTimeZone(schedule?.timezone);
   const localTime = schedule?.localTime ?? "09:00";
   const match = /^(\d{2}):(\d{2})$/.exec(localTime);
   if (!match || Number(match[1]) > 23 || Number(match[2]) > 59) {
@@ -207,15 +214,14 @@ export function isGenerationDue(args: {
   const clock = localClock(args.now, timezone);
   const scheduledMinutes = Number(match[1]) * 60 + Number(match[2]);
   if (clock.minutes < scheduledMinutes) return false;
-  if (schedule?.days?.length && !schedule.days.includes(clock.weekday)) return false;
+  const frequency = schedule?.frequency ?? args.cadence ?? "weekly";
+  const civilDate = civilDateFromIsoDay(localDateKey(args.now, timezone));
+  if (!civilDate || !isScheduledCivilDate(frequency, schedule?.days, civilDate)) return false;
   if (!args.lastStartedAt) return true;
   if (localDateKey(args.lastStartedAt, timezone) === localDateKey(args.now, timezone)) {
     return false;
   }
-  const frequency = schedule?.frequency ?? args.cadence ?? "weekly";
-  const intervalDays =
-    frequency === "daily" ? 1 : frequency === "biweekly" ? 14 : frequency === "monthly" ? 28 : 7;
-  return args.now - args.lastStartedAt >= (intervalDays - 0.25) * 86_400_000;
+  return true;
 }
 
 export function buildPublishIdempotencyKey(args: {

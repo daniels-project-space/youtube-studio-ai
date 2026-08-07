@@ -24,11 +24,102 @@ import {
   requireYouTubeConnector,
 } from "@/lib/youtubeConnector";
 import { YOUTUBE_WRITE_SCOPES } from "@/lib/publishingPolicy";
+import { enqueueFailedPipelineResume } from "@/trigger/publishRetry";
 
 const DAY = 86_400_000;
 
+async function recoverPendingPublishContinuations(
+  convex: ConvexHttpClient,
+  ownerId: string,
+  log: (m: string) => void,
+): Promise<number> {
+  const pending = await convex.query(api.runs.listPendingPublishContinuations, {
+    ownerId,
+    limit: 50,
+  });
+  const secret = requireInternalQuerySecret();
+  let queued = 0;
+  for (const run of pending) {
+    const intentId = run.publishContinuationIntentId ?? run.blockedPublishIntentId;
+    if (!intentId) {
+      log(`publish continuation recovery skipped corrupt run ${run._id}: missing intent id`);
+      continue;
+    }
+    try {
+      const intent = await convex.query(api.publishIntents.get, {
+        secret,
+        intentId,
+      });
+      if (!intent) throw new Error(`publish intent not found: ${intentId}`);
+      const resumed = await enqueueFailedPipelineResume(
+        {
+          ...intent,
+          _id: String(intent._id),
+          channelId: String(intent.channelId),
+          runId: intent.runId ? String(intent.runId) : undefined,
+        },
+        {
+          ...run,
+          _id: String(run._id),
+          channelId: String(run.channelId),
+          blockedPublishIntentId: run.blockedPublishIntentId
+            ? String(run.blockedPublishIntentId)
+            : undefined,
+          publishContinuationIntentId: run.publishContinuationIntentId
+            ? String(run.publishContinuationIntentId)
+            : undefined,
+          planItemId: run.planItemId ? String(run.planItemId) : undefined,
+        },
+      );
+      if (!resumed || !intent.runId || !intent.youtubeVideoId) {
+        throw new Error("pending failed-run continuation did not produce an enqueue request");
+      }
+      await convex.mutation(api.runs.markPublishContinuationQueued, {
+        ownerId,
+        channelId: run.channelId,
+        runId: run._id,
+        intentId: intent._id,
+        artifactId: intent.videoArtifactId,
+        youtubeVideoId: intent.youtubeVideoId,
+        triggerRunId: resumed.runId,
+        queuedAt: Date.now(),
+      });
+      queued++;
+      log(`publish continuation recovery queued ${run._id} (${resumed.runId})`);
+    } catch (error) {
+      const message = error instanceof Error ? error.message : String(error);
+      try {
+        if (
+          run.blockedPublishIntentId &&
+          run.blockedPublishArtifactId &&
+          run.publishContinuationVideoId
+        ) {
+          await convex.mutation(api.runs.recordPublishContinuationEnqueueFailure, {
+            ownerId,
+            channelId: run.channelId,
+            runId: run._id,
+            intentId: run.blockedPublishIntentId,
+            artifactId: run.blockedPublishArtifactId,
+            youtubeVideoId: run.publishContinuationVideoId,
+            error: message,
+            failedAt: Date.now(),
+          });
+        }
+      } catch (stateError) {
+        log(
+          `publish continuation recovery state write failed for ${run._id}: ${
+            stateError instanceof Error ? stateError.message : String(stateError)
+          }`,
+        );
+      }
+      log(`publish continuation recovery failed for ${run._id}: ${message}`);
+    }
+  }
+  return queued;
+}
+
 async function sweep(ownerId: string, log: (m: string) => void) {
-  await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
+  await bootstrapSecrets(log);
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = new ConvexHttpClient(url);
@@ -206,7 +297,25 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     }
   }
 
-  log(`sweep: ${failures.length} failure(s), ${healed.length} healed run(s), ${retentionQueued.length} retention job(s), ${missingCaps.size} missing capability(ies)`);
+  // Low-frequency durable outbox recovery. This only re-enqueues the exact
+  // failed run; it never calls YouTube and reuses the same global idempotency
+  // key as the immediate handoff.
+  let publishContinuationsQueued = 0;
+  try {
+    publishContinuationsQueued = await recoverPendingPublishContinuations(
+      convex,
+      ownerId,
+      log,
+    );
+  } catch (error) {
+    log(
+      `publish continuation recovery sweep failed: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+
+  log(`sweep: ${failures.length} failure(s), ${healed.length} healed run(s), ${retentionQueued.length} retention job(s), ${publishContinuationsQueued} publish continuation(s), ${missingCaps.size} missing capability(ies)`);
 
   // ENGAGEMENT: post the owner HOOK-QUESTION comment on freshly PUBLIC videos
   // (an engagement signal the algorithm rewards). Dedupe = the channel already
@@ -293,6 +402,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
     defectTrends: Object.fromEntries(defectTrends),
     groundingGapChannels,
     researchTriggered,
+    publishContinuationsQueued,
     diagnosis,
   };
   const key = `doctor/${new Date().toISOString().slice(0, 10)}.json`;
@@ -318,7 +428,7 @@ async function sweep(ownerId: string, log: (m: string) => void) {
       log(`telegram digest failed: ${e instanceof Error ? e.message : e}`);
     }
   }
-  return { ok: true, reportKey: key, failures: failures.length, healedRuns: healed.length, retentionQueued: retentionQueued.length, commentsPosted, actions };
+  return { ok: true, reportKey: key, failures: failures.length, healedRuns: healed.length, retentionQueued: retentionQueued.length, publishContinuationsQueued, commentsPosted, actions };
 }
 
 export const pipelineDoctorSchedule = schedules.task({

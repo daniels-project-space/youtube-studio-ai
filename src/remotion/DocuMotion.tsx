@@ -1,4 +1,4 @@
-import React, { createContext, useContext } from "react";
+import React, { createContext, useContext, useLayoutEffect, useRef, useState } from "react";
 import {
   AbsoluteFill,
   Easing,
@@ -178,10 +178,12 @@ const QUOTE_STOP_WORDS = new Set([
 /** Resolve accent words without a second model call. New plans supply their
  *  choice in the original planning response; cached plans use a stable tail
  *  emphasis that ignores connective words. */
-export function resolveQuoteCardEmphasis(quote: string, requested?: string[]): string[] {
+export function resolveQuoteCardEmphasis(quote: string, requested?: unknown): string[] {
   const available = quote.split(/\s+/).map(normalizeQuoteToken).filter(Boolean);
   const availableSet = new Set(available);
-  const selected = (requested ?? [])
+  const requestedParts = Array.isArray(requested) ? requested : typeof requested === "string" ? [requested] : [];
+  const selected = requestedParts
+    .filter((part): part is string => typeof part === "string")
     .flatMap((part) => part.split(/\s+/))
     .map(normalizeQuoteToken)
     .filter((word, index, all) => availableSet.has(word) && all.indexOf(word) === index)
@@ -270,6 +272,67 @@ export function planQuoteCardLayout(args: {
     estimatedQuoteHeight: estimatedLines * fontSize * lineHeight,
     attributionFontSize: Math.max(16, Math.min(36, width * 0.019)),
   };
+}
+
+/**
+ * The pure planner is the fast first pass. This browser-side pass measures the
+ * real loaded font and deterministically tightens only when its actual DOM box
+ * exceeds the reserved area. A hard failure at the minimum prevents clipped or
+ * overlapping quote cards from being rendered silently.
+ */
+function useActualQuoteFit(args: {
+  quote: string;
+  initialFontSize: number;
+  minimumFontSize: number;
+  panelMaxHeight: number;
+  quoteMaxHeight: number;
+}) {
+  const [fontSize, setFontSize] = useState(args.initialFontSize);
+  const quoteRef = useRef<HTMLDivElement>(null);
+  const panelRef = useRef<HTMLDivElement>(null);
+
+  useLayoutEffect(() => {
+    const quoteNode = quoteRef.current;
+    const panelNode = panelRef.current;
+    if (!quoteNode || !panelNode) return;
+
+    // `scrollHeight` includes a few pixels of glyph ink outside the CSS line
+    // box even when content is naturally shorter than max-height. It is a real
+    // overflow only when max-height has actually clamped the element.
+    const quoteHeightClamped = quoteNode.clientHeight >= args.quoteMaxHeight - 1;
+    const panelHeightClamped = panelNode.clientHeight >= args.panelMaxHeight - 1;
+    const quoteFits =
+      (!quoteHeightClamped || quoteNode.scrollHeight <= quoteNode.clientHeight + 2) &&
+      quoteNode.scrollWidth <= quoteNode.clientWidth + 2;
+    const panelFits =
+      (!panelHeightClamped || panelNode.scrollHeight <= panelNode.clientHeight + 2) &&
+      panelNode.scrollWidth <= panelNode.clientWidth + 2;
+    if (quoteFits && panelFits) return;
+
+    const ratios = [
+      quoteNode.clientHeight / Math.max(1, quoteNode.scrollHeight),
+      quoteNode.clientWidth / Math.max(1, quoteNode.scrollWidth),
+      panelNode.clientHeight / Math.max(1, panelNode.scrollHeight),
+      panelNode.clientWidth / Math.max(1, panelNode.scrollWidth),
+    ];
+    const scale = Math.min(0.98, ...ratios.filter((ratio) => Number.isFinite(ratio) && ratio > 0));
+    const next = Math.max(
+      args.minimumFontSize,
+      Math.min(fontSize - 1, Math.floor(fontSize * Math.max(0.5, scale) * 0.97)),
+    );
+    if (next < fontSize) {
+      setFontSize(next);
+      return;
+    }
+
+    throw new Error(
+      `DocuMotion quote layout overflow after actual font measurement (quote=${quoteNode.scrollWidth}x${quoteNode.scrollHeight}, ` +
+        `box=${quoteNode.clientWidth}x${quoteNode.clientHeight}, panel=${panelNode.scrollWidth}x${panelNode.scrollHeight}, ` +
+        `panelBox=${panelNode.clientWidth}x${panelNode.clientHeight})`,
+    );
+  }, [args.minimumFontSize, args.panelMaxHeight, args.quote, args.quoteMaxHeight, fontSize]);
+
+  return { fontSize, panelRef, quoteRef };
 }
 
 const grainUri = (seed: number) =>
@@ -1573,6 +1636,13 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, s
     displayCharWidth: t.displayCharW,
     hasAttribution: Boolean(shot.attribution),
   });
+  const { fontSize: actualFontSize, panelRef, quoteRef } = useActualQuoteFit({
+    quote: shot.quote ?? "",
+    initialFontSize: layout.fontSize,
+    minimumFontSize: Math.max(12, Math.min(width, height) * 0.026),
+    panelMaxHeight: layout.panelMaxHeight,
+    quoteMaxHeight: layout.quoteMaxHeight,
+  });
   const revealStep = Math.max(0.45, Math.min(2, (Math.max(36, dur) - 30) / Math.max(1, words.length)));
   const panelIn = spring({ fps, frame, config: { damping: 18, stiffness: 95, mass: 0.9 } });
   const fadeOut = interpolate(frame, [dur - 18, dur - 2], [0, 1], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
@@ -1592,6 +1662,8 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, s
       <TextScrim cx={50} cy={50} w={88} h={76} opacity={0.6} />
       <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", padding: `${height * 0.08}px ${width * 0.08}px`, transform: camTransform(cam, 1.025) }}>
         <div
+          ref={panelRef}
+          data-docu-quote-panel="true"
           style={{
             width: layout.panelWidth,
             maxHeight: layout.panelMaxHeight,
@@ -1606,6 +1678,8 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, s
           }}
         >
           <div
+            ref={quoteRef}
+            data-docu-quote-text="true"
             aria-label={shot.quote}
             style={{
               width: layout.quoteWidth,
@@ -1613,9 +1687,9 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, s
               overflowWrap: "anywhere",
               fontFamily: t.fontDisplay,
               fontWeight: 700,
-              fontSize: layout.fontSize,
+              fontSize: actualFontSize,
               lineHeight: layout.lineHeight,
-              letterSpacing: layout.letterSpacing,
+              letterSpacing: layout.letterSpacing * (actualFontSize / layout.fontSize),
               color: t.paper,
               textAlign: "left",
               textShadow: "0 4px 24px rgba(0,0,0,0.96), 0 1px 3px rgba(0,0,0,0.9)",
