@@ -3,6 +3,11 @@
 #  of render output that the app does not need.)
 output/
 motion-graphics/
+graphify-out/
+.serena/
+.agents/
+.codex/
+scripts/__pycache__/
 .next/
 *.log
 # stray Windows temp-path artifacts

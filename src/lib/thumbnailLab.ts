@@ -1,49 +1,56 @@
 /**
- * THUMBNAIL LAB Ã¢â‚¬â€ evidence Ã¢â€ â€™ rules Ã¢â€ â€™ tournament Ã¢â€ â€™ comparative validation.
+ * THUMBNAIL LAB — evidence → rules → tournament → comparative validation.
  *
  * The one-shot "generate and pass/fail" approach produced competent-but-stale
  * thumbnails. The lab works the way winning channels work:
  *
- *  1. VERIFY EVIDENCE Ã¢â‚¬â€ pull the highest-VIEW competitor thumbnails the
+ *  1. VERIFY EVIDENCE — pull the highest-VIEW competitor thumbnails the
  *     research already scraped, then vision-screen them: only genuinely
  *     on-positioning, high-craft references survive (the architect flagged
- *     reference pollution as a BLOCKING gap Ã¢â‚¬â€ this is its repair).
- *  2. DISTILL RULES Ã¢â‚¬â€ vision-deconstruct WHY each verified winner clicks
+ *     reference pollution as a BLOCKING gap — this is its repair).
+ *  2. DISTILL RULES — vision-deconstruct WHY each verified winner clicks
  *     (composition, focal device, text treatment, color story), then have the
  *     showrunner synthesize a persistent per-channel PLAYBOOK: hard rules +
- *     three named, executable patterns. Stored on the channel Ã¢â‚¬â€ the "devises
+ *     three named, executable patterns. Stored on the channel — the "devises
  *     rules out of that" loop, made durable.
- *  3. TOURNAMENT Ã¢â‚¬â€ per video, instantiate ALL patterns into real candidates
- *     (FLUX base + Remotion typography layer, not drawtext) and judge them
+ *  3. TOURNAMENT — per video, instantiate an executable pattern into a real
+ *     candidate (text-free base art + exact local compositor type)
+ *     and judge it
  *     COMPARATIVELY against the verified references in a simulated feed.
  *     The winner ships; scores + reasons persist.
  */
 import { join } from "node:path";
-import { parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { parseJsonLoose } from "@/lib/gemini";
+import { hasVisionKey, visionLocal } from "@/lib/vision";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { hasBanana } from "@/lib/banana";
 
 import { imageToJpeg } from "@/lib/ffmpeg";
+import {
+  renderThumbnail,
+  type ThumbnailBaseArtifact,
+} from "@/lib/thumbnailRenderer";
 import { downloadTo } from "@/lib/files";
 import type { StyleDNA } from "@/engine/creative/types";
+import type { FamilyKey } from "@/engine/families";
+import type { ThumbnailTextZone } from "@/lib/thumbnailLayout";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 
-/** Distilled 2026 CTR research Ã¢â‚¬â€ the judge's and synthesizer's ground truth. */
+/** Distilled 2026 CTR research — the judge's and synthesizer's ground truth. */
 export const RESEARCH_PRINCIPLES = [
-  "Ã¢â€°Â¤3 visual elements; the tone+topic must read in under 1 second (clutter costs ~23% CTR).",
+  "≤3 visual elements; the tone+topic must read in under 1 second (clutter costs ~23% CTR).",
   "2-3 bold complementary colors; the subject 30%+ brighter or darker than the background.",
-  "Faceless niches win with ONE dramatic hero object against a clean ground + a Ã¢â€°Â¤4-word callout.",
-  "Finance: NUMBER-FORWARD Ã¢â‚¬â€ one specific number as the credibility trigger, occupying 15-20% of the canvas, upper third, white/gold on dark (data-literate audiences click specifics, not adjectives).",
+  "Faceless niches win with ONE dramatic hero object against a clean ground + a ≤4-word callout.",
+  "Finance: NUMBER-FORWARD — one specific number as the credibility trigger, occupying 15-20% of the canvas, upper third, white/gold on dark (data-literate audiences click specifics, not adjectives).",
   "Navy/charcoal base + gold/white accents = institutional authority palette for finance.",
-  "Text: bold sans-serif ONLY, 1-3 words (5 absolute max), NEVER restating the title Ã¢â‚¬â€ it adds the curiosity the title doesn't.",
+  "Text: bold sans-serif ONLY, 1-3 words (5 absolute max), NEVER restating the title — it adds the curiosity the title doesn't.",
   "Documentary annotation language (Vox/Johnny Harris school): muted cinematic base + ONE editorial annotation device (accent underline, circled element, arrow) in the accent color.",
   "Consistent per-channel styling lifts subscriber CTR 15-20%: lock palette + text position family; vary the hero object and the number.",
-  "Honest framing only Ã¢â‚¬â€ false-promise thumbnails decay channel-wide recommendations.",
-  "THE 120px SQUINT TEST: most first views are ~120px wide on mobile Ã¢â‚¬â€ mood, subject, and text must all survive there; if it's a muddy blur, the design is wrong.",
+  "Honest framing only — false-promise thumbnails decay channel-wide recommendations.",
+  "THE 120px SQUINT TEST: most first views are ~120px wide on mobile — mood, subject, and text must all survive there; if it's a muddy blur, the design is wrong.",
   "SAFE ZONES: never place text/key elements in the bottom-right (duration timestamp) or bottom-left (chapter markers) corners; keep critical content off extreme edges.",
-  "Max 6 words on the image, and saturate beyond real life Ã¢â‚¬â€ thumbnails compete with bright UI.",
+  "Max 6 words on the image, and saturate beyond real life — thumbnails compete with bright UI.",
 ] as const;
 
 export interface VerifiedRef {
@@ -57,7 +64,7 @@ export interface VerifiedRef {
 export interface ThumbPattern {
   name: string;
   when: string;
-  /** Scene recipe for the FLUX base Ã¢â‚¬â€ text-free, with <PLACEHOLDERS>. */
+  /** Scene recipe for the provider base — text-free, with <PLACEHOLDERS>. */
   fluxRecipe: string;
   /** ThumbText prop template (placeholders in line texts / numberCallout). */
   textRecipe: Record<string, unknown>;
@@ -72,9 +79,9 @@ export interface VisualLanguage {
   /** Base-image rendering style, e.g. "vintage ink engraving on parchment". */
   imageStyle?: string;
   badgeStyle?: "center" | "pill";
-  /** TYPE-AS-OBJECT treatment: typography rendered as a physical designed
-   * object in the scene (torn strips / paint smear / censor bar / sticker),
-   * never plain floating text. The single biggest craft lever. */
+  /** TYPE-AS-OBJECT treatment: deterministic local typography rendered with
+   * a physical-design motif (plate / smear / stamp / sticker). It is never
+   * delegated to the scene model. */
   textObject?:
     | "torn_strip" | "paint_smear" | "censor_bar" | "grunge_sticker" | "spaced_elegant" | "block_plate"
     | "neon_sign" | "spray_paint" | "stamp_ink" | "movie_poster" | "ransom_note" | "carved";
@@ -83,20 +90,20 @@ export interface VisualLanguage {
    * full_scene = one continuous rendered scene. */
   composition?: "cutout_collage" | "full_scene";
   uppercase?: boolean;
-  /** recraft = the FULL frame (art + typography + layout) designed as ONE
-   * generation by the design-tuned Recraft V3 model — the strongest one-pass
-   * path, kills the text-pasted-on-top look; integrated = words generated AS
-   * PART of the artwork (Ideogram typography engine); layered = compositor
-   * type on top (deterministic control). */
+  /** Historical playbook preference retained for stored-data compatibility.
+   * Deployed rendering always uses the deterministic local compositor. */
   renderMode?: "recraft" | "integrated" | "layered" | "template";
   /** Locked layout subset from the template pack (docs/THUMB_TEMPLATES.md). */
   templates?: string[];
 }
 
 export interface ThumbnailPlaybook {
+  /** Honest provenance: a reference-backed distillation or a deterministic
+   * Style-DNA foundation used when reference acquisition is unavailable. */
+  source?: "verified_references" | "style_dna_foundation";
   /** Clickbait ENERGY tier (identity-chosen): spectacle = over-the-top
    * impossible-scale drama; bold = strong grounded punch; cozy_pop = charming
-   * saturated warmth. ALL are catchy Ã¢â‚¬â€ none are sleepy. */
+   * saturated warmth. ALL are catchy — none are sleepy. */
   energy?: "spectacle" | "bold" | "cozy_pop";
   /** Channel-constant visual language (font/treatment/colors/image style). */
   visualLanguage?: VisualLanguage;
@@ -107,10 +114,136 @@ export interface ThumbnailPlaybook {
   distilledAt: number;
 }
 
+const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
+  energy: NonNullable<ThumbnailPlaybook["energy"]>;
+  font: NonNullable<VisualLanguage["font"]>;
+  treatment: NonNullable<VisualLanguage["treatment"]>;
+  textObject: NonNullable<VisualLanguage["textObject"]>;
+  imageStyle: string;
+}> = {
+  narrated_stock: {
+    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    imageStyle: "premium cinematic editorial photograph with dramatic subject isolation",
+  },
+  cinematic: {
+    energy: "spectacle", font: "bebas", treatment: "clean", textObject: "movie_poster",
+    imageStyle: "blockbuster cinematic still with deep atmosphere and dimensional light",
+  },
+  music_loop: {
+    energy: "cozy_pop", font: "rounded", treatment: "neon", textObject: "neon_sign",
+    imageStyle: "saturated atmospheric illustration with luminous environmental storytelling",
+  },
+  sleep: {
+    energy: "cozy_pop", font: "serif", treatment: "clean", textObject: "spaced_elegant",
+    imageStyle: "ethereal cinematic nature tableau with soft luminous depth",
+  },
+  shorts: {
+    energy: "spectacle", font: "impact", treatment: "sticker", textObject: "grunge_sticker",
+    imageStyle: "high-energy editorial poster with sharp subject separation",
+  },
+  whiteboard: {
+    energy: "bold", font: "marker", treatment: "stamp", textObject: "stamp_ink",
+    imageStyle: "hand-drawn editorial chalk illustration with tactile board grain",
+  },
+  comic: {
+    energy: "bold", font: "bebas", treatment: "stamp", textObject: "carved",
+    imageStyle: "cinematic inked graphic-novel panel with cross-hatched dimensional light",
+  },
+};
+
+/**
+ * A real, executable playbook derived entirely from the channel's Style DNA.
+ * It is not called Golden or reference-backed: its job is to make a channel
+ * operational when YouTube search/vision evidence is temporarily unavailable,
+ * while the inception probe still validates an actual rendered thumbnail.
+ */
+export function buildStyleDnaPlaybook(args: {
+  dna: StyleDNA;
+  family: FamilyKey;
+  channelName: string;
+  now?: number;
+}): ThumbnailPlaybook {
+  const family = FAMILY_VISUAL_LANGUAGE[args.family];
+  const palette = args.dna.thumbnail.palette.length
+    ? args.dna.thumbnail.palette
+    : args.dna.palette;
+  const baseColor = palette[0] ?? "#111827";
+  const accentColor = palette[Math.min(1, Math.max(0, palette.length - 1))] ?? "#ffd400";
+  const subject = args.dna.thumbnail.subject || args.dna.recurringSubject;
+  const setting = args.dna.setting;
+  const shared =
+    `DNA-LOCKED subject: ${subject}. Channel world: ${setting}. ` +
+    `Palette ${palette.join(" / ") || `${baseColor} / ${accentColor}`}.`;
+  const badge = args.channelName.toUpperCase();
+
+  return {
+    source: "style_dna_foundation",
+    energy: family.energy,
+    visualLanguage: {
+      font: family.font,
+      treatment: family.treatment,
+      baseColor,
+      accentColor,
+      textObject: family.textObject,
+      composition: "full_scene",
+      imageStyle: family.imageStyle,
+      badgeStyle: "pill",
+      uppercase: args.family !== "sleep",
+    },
+    rules: [
+      `The recurring click subject is always ${subject}.`,
+      `Composition contract: ${args.dna.thumbnail.composition}.`,
+      `Text contract: ${args.dna.thumbnail.textRule}.`,
+      `Use only the locked thumbnail palette: ${palette.join(", ")}.`,
+      "Reserve one clean 42% text zone opposite the hero before rendering.",
+      "Headline is five words maximum, deterministically typeset, and readable at 120px.",
+      "Keep critical content outside the 52px edge safe area and both bottom corners.",
+    ],
+    avoid: [
+      ...args.dna.visualAvoid.slice(0, 4),
+      "generic centered title cards",
+      "baked-in AI typography or misspelled lettering",
+      "text over faces, eyes, or the dominant subject",
+      "decorative scenes that do not communicate the video topic",
+    ],
+    patterns: [
+      {
+        name: "signature-hero",
+        when: "identity-led or benefit-led topic",
+        fluxRecipe: `${shared} One dominant <TOPIC_HERO> on the right third, emotionally legible, with a dark simple left text zone.`,
+        textRecipe: {
+          lines: [{ text: "<HOOK_WORD>", accent: false }, { text: "<PAYOFF_WORD>", accent: true }],
+          position: "left", baseColor, accentColor, uppercase: true, badge,
+        },
+      },
+      {
+        name: "story-tension",
+        when: "conflict, transformation, mystery, or before/after topic",
+        fluxRecipe: `${shared} Show <TOPIC_CONFLICT> as one coherent story moment on the left third, reserving clean dark negative space on the right.`,
+        textRecipe: {
+          lines: [{ text: "<TENSION_WORD>", accent: false }, { text: "<REVEAL_WORD>", accent: true }],
+          position: "right", baseColor, accentColor, uppercase: true, badge,
+        },
+      },
+      {
+        name: "iconic-detail",
+        when: "object, number, lesson, discovery, or calm mood topic",
+        fluxRecipe: `${shared} Extreme close-up of one topic-specific <ICONIC_DETAIL>, high contrast and tactile, with uncluttered upper-left negative space.`,
+        textRecipe: {
+          lines: [{ text: "<CURIOSITY_HOOK>", accent: false }, { text: "<KEY_DETAIL>", accent: true }],
+          position: "upperLeft", baseColor, accentColor, uppercase: true, badge,
+        },
+      },
+    ],
+    refsUsed: [],
+    distilledAt: args.now ?? Date.now(),
+  };
+}
+
 /* --------------------- 0. acquire fresh references --------------------- */
 
 /**
- * Direct, positioning-true reference acquisition Ã¢â‚¬â€ the repair for polluted
+ * Direct, positioning-true reference acquisition — the repair for polluted
  * niche scrapes (the catalog-keyword scrape returned 0 verifiable references
  * for Investory). The lab derives search queries from the channel's OWN
  * positioning, pulls top-VIEW videos straight from YouTube, and lets the
@@ -137,7 +270,7 @@ export async function acquireReferences(args: {
     system: "You are a YouTube competitive-research strategist. Return ONLY JSON.",
     prompt:
       `Channel: "${args.channelName}"${args.niche ? ` (${args.niche})` : ""}.\nPositioning: ${args.positioning}\n\n` +
-      `Write 4 YouTube SEARCH QUERIES that surface the videos of TRUE comparable channels Ã¢â‚¬â€ same tier, same ` +
+      `Write 4 YouTube SEARCH QUERIES that surface the videos of TRUE comparable channels — same tier, same ` +
       `format, same audience promise (NOT adjacent hustle/clickbait verticals). Concrete video-search phrasing ` +
       `(what a viewer of those channels actually searches), 2-5 words each. ` +
       `Return STRICT JSON {"queries":string[]}.`,
@@ -182,7 +315,9 @@ export async function verifyReferences(args: {
   log?: Logger;
 }): Promise<VerifiedRef[]> {
   const log = args.log ?? (() => {});
-  if (!hasGeminiKey()) throw new Error("thumbnailLab: GEMINI_API_KEY required");
+  if (!hasVisionKey()) {
+    throw new Error("thumbnailLab: a configured vision provider is required");
+  }
   const top = args.candidates
     .filter((c) => c.url)
     .sort((a, b) => b.views - a.views)
@@ -195,18 +330,18 @@ export async function verifyReferences(args: {
         url: top[i].url,
         views: top[i].views,
       });
-    } catch { /* unreachable url Ã¢â‚¬â€ skip */ }
+    } catch { /* unreachable url — skip */ }
   }
   if (paths.length < 3) throw new Error(`thumbnailLab: only ${paths.length} reference thumbnails reachable`);
 
   const raw = await visionLocal({
     prompt:
       `These are ${paths.length} thumbnails from the HIGHEST-VIEW videos scraped in this niche, in order.\n` +
-      `Channel being built: "${args.channelName}" Ã¢â‚¬â€ positioning: ${args.positioning}\n\n` +
+      `Channel being built: "${args.channelName}" — positioning: ${args.positioning}\n\n` +
       `For EACH image (1-${paths.length}): does it belong to the same PREMIUM/CINEMATIC tier and positioning ` +
       `(vs hustle-bro, crypto-pump, shocked-face tabloid, or low-craft clickbait)? Score craft 1-10 ` +
       `(composition, typography, color discipline). Return STRICT JSON ` +
-      `{"refs":[{"idx":1-based,"onBrand":boolean,"craft":1-10,"why":"<=15 words"}]} Ã¢â‚¬â€ judge every image.`,
+      `{"refs":[{"idx":1-based,"onBrand":boolean,"craft":1-10,"why":"<=15 words"}]} — judge every image.`,
     imagePaths: paths.map((p) => p.path),
     json: true,
     // 12 per-ref verdicts truncate at small budgets ("Expected ','" parse flake)
@@ -244,7 +379,7 @@ export async function verifyReferences(args: {
   }
   if (verified.length < 2) {
     throw new Error(
-      `thumbnailLab: only ${verified.length} verified references Ã¢â‚¬â€ the scraped niche set is too polluted to ground a playbook (re-run niche research with corrected queries)`,
+      `thumbnailLab: only ${verified.length} verified references — the scraped niche set is too polluted to ground a playbook (re-run niche research with corrected queries)`,
     );
   }
   return verified.slice(0, 6);
@@ -260,7 +395,7 @@ export async function distillPlaybook(args: {
   log?: Logger;
 }): Promise<ThumbnailPlaybook> {
   const log = args.log ?? (() => {});
-  // Vision deconstruction Ã¢â‚¬â€ WHY each verified winner clicks.
+  // Vision deconstruction — WHY each verified winner clicks.
   if (args.refs.length === 0) {
     log("thumbnailLab: ZERO references (search quota dead?) - distilling from DNA + craft principles only");
   }
@@ -291,36 +426,36 @@ export async function distillPlaybook(args: {
     patterns?: { name?: string; when?: string; fluxRecipe?: string; textRecipeJson?: string }[];
   }>({
     tier: "pro",
-    // The visualLanguage-era schema is bigger â€” 3000 truncated mid-JSON
+    // The visualLanguage-era schema is bigger — 3000 truncated mid-JSON
     // ("Expected ',' or '}'") on two of four channels.
     maxTokens: 6000,
     temperature: 0.5,
     system: "You are an elite YouTube thumbnail strategist. Return ONLY JSON.",
     prompt:
       `Build the THUMBNAIL PLAYBOOK for "${args.channelName}" (${args.positioning}).\n\n` +
-      `EVIDENCE Ã¢â‚¬â€ deconstruction of ${decon.length} verified high-view, on-positioning thumbnails:\n` +
+      `EVIDENCE — deconstruction of ${decon.length} verified high-view, on-positioning thumbnails:\n` +
       `${JSON.stringify(decon).slice(0, 6000)}\n\n` +
       `CHANNEL DNA: palette ${palette.join(", ")} (accent ${accent}); thumbnail subject: ` +
       `${args.dna?.thumbnail?.subject ?? args.dna?.recurringSubject ?? "n/a"}; world: ${args.dna?.setting ?? "n/a"}.\n\n` +
       `${(args.dna as { thumbnailAnchors?: string[] } | null)?.thumbnailAnchors?.length ? `OPERATOR-ANCHORED REFERENCE THUMBNAILS (the operator personally chose these as THE BAR for this channel - weight them ABOVE the scraped evidence when they conflict):\n- ${(args.dna as { thumbnailAnchors?: string[] }).thumbnailAnchors!.join("\n- ")}\n\n` : ""}` +
       `RESEARCH PRINCIPLES (hard constraints):\n- ${RESEARCH_PRINCIPLES.join("\n- ")}\n\n` +
       `Synthesize:\n` +
-      `0. energy: the channel's clickbait tier Ã¢â‚¬â€ "spectacle" (over-the-top impossible-scale drama: finance/tech/` +
+      `0. energy: the channel's clickbait tier — "spectacle" (over-the-top impossible-scale drama: finance/tech/` +
       `drama channels), "bold" (grounded heroic punch: education/history/documentary), or "cozy_pop" (charming ` +
-      `saturated warmth: lofi/ambient/kids). ALL tiers are CATCHY Ã¢â‚¬â€ pick what this identity can carry.\n` +
-      `0b. visualLanguage: the channel's UNMISTAKABLE identity Ã¢â‚¬â€ {"font":"impact"|"marker"|"bebas"|"serif"|"rounded" ` +
+      `saturated warmth: lofi/ambient/kids). ALL tiers are CATCHY — pick what this identity can carry.\n` +
+      `0b. visualLanguage: the channel's UNMISTAKABLE identity — {"font":"impact"|"marker"|"bebas"|"serif"|"rounded" ` +
       `(impact=bold modern, marker=hand-drawn, bebas=tall minimal, serif=editorial premium, rounded=soft playful), ` +
       `"treatment":"plate"|"sticker"|"stamp"|"neon"|"clean" (plate=filled box, sticker=white box+hard shadow pop, ` +
       `stamp=hollow archival border, neon=glowing type for night/synth worlds, clean=pure premium type), ` +
-      `"baseColor":"#hex","accentColor":"#hex" Ã¢â‚¬â€ colors MUST come from THIS channel's palette; NEVER default to ` +
+      `"baseColor":"#hex","accentColor":"#hex" — colors MUST come from THIS channel's palette; NEVER default to ` +
       `gold/yellow unless it is genuinely this channel's color, ` +
-      `"textObject":"torn_strip"|"paint_smear"|"censor_bar"|"grunge_sticker"|"spaced_elegant"|"block_plate"|"neon_sign"|"spray_paint"|"stamp_ink"|"movie_poster"|"ransom_note"|"carved" (the channel SIGNATURE type-as-object treatment - ALSO available: neon_sign=real glowing tubes in the scene; spray_paint=stencil graffiti with drips; stamp_ink=huge CLASSIFIED-style rubber stamp slammed diagonally; movie_poster=cinematic beveled title card in the scene atmosphere; ransom_note=letters cut from different magazines; carved=letters chiseled into the scene material with real depth - torn_strip: each word HUGE on its own torn newspaper strip in mixed tabloid serifs layered in front of/behind the hero; paint_smear: elegant wide-tracked capitals sitting ON a rough hand-swiped accent paint smear crossing the hero; censor_bar: white stencil caps on a solid accent censor bar laid across the frame or the hero eyes; grunge_sticker: ONE lowercase word ending in a period, distressed punk type, white knockout on a rough black sticker; spaced_elegant: thin extremely wide-tracked caps integrated into the artwork material; block_plate: ultra-heavy condensed caps on hard solid plates, key word underlined with a rough brush stroke), "imageStyle":"<=12 words Ã¢â‚¬â€ the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
+      `"textObject":"torn_strip"|"paint_smear"|"censor_bar"|"grunge_sticker"|"spaced_elegant"|"block_plate"|"neon_sign"|"spray_paint"|"stamp_ink"|"movie_poster"|"ransom_note"|"carved" (the channel SIGNATURE motif for the deterministic LOCAL typography layer; it must never appear in fluxRecipe or become a textual scene prop), "imageStyle":"<=12 words — the base-image rendering style (e.g. 'painterly anime watercolor', 'vintage ink ` +
       `engraving', 'hyperreal cinematic 3D', 'retro screenprint poster')","badgeStyle":"center"|"pill","composition":"cutout_collage"|"full_scene" (cutout_collage = the hero is a clean die-cut PHOTO cutout with crisp edges pasted OVER a designed collage background of torn clippings/photos/graphic shapes - real photographic grain, magazine-composite feel; PICK THIS for commentary/persona/drama/expose channels because continuous AI scenes read fake there. full_scene = one continuous rendered scene for painterly/cinematic worlds),` +
-      `"uppercase":boolean}. THE RULE: if another channel could wear this language, it is WRONG Ã¢â‚¬â€ diverge hard.\n` +
-      `1. rules: 6-8 HARD rules for this channel's thumbnails Ã¢â‚¬â€ specific (sizes, positions, counts, colors), ` +
+      `"uppercase":boolean}. THE RULE: if another channel could wear this language, it is WRONG — diverge hard.\n` +
+      `1. rules: 6-8 HARD rules for this channel's thumbnails — specific (sizes, positions, counts, colors), ` +
       `derived from the evidence + principles, honoring the DNA palette.\n` +
       `2. avoid: 4-6 anti-patterns seen in the rejected/owned space.\n` +
-      `3. patterns: EXACTLY 3 named, executable patterns (distinct compositions Ã¢â‚¬â€ e.g. number-forward / ` +
+      `3. patterns: EXACTLY 3 named, executable patterns (distinct compositions — e.g. number-forward / ` +
       `hero-object / annotated-chart). Each: name; when (which video topics); fluxRecipe = a TEXT-FREE ` +
       `image-generation scene recipe with <PLACEHOLDERS> for the topic-specific hero (palette + grade baked in, ` +
       `composition explicit incl. where negative space lives); textRecipeJson = a JSON-ENCODED STRING of the ` +
@@ -328,10 +463,10 @@ export async function distillPlaybook(args: {
       `"numberCallout":"<NUMBER>" (include this key ONLY in number-led patterns; otherwise LEAVE THE KEY OUT of the ` +
       `JSON entirely - NEVER write placeholder words like OMIT),"position":"left|center|upperLeft|upperCenter","baseColor":"#hex",` +
       `"accentColor":"#hex","uppercase":true,"underlineAccent":true,` +
-      `"font":"impact"|"marker"|"bebas" (impact=bold modern default; marker=hand-drawn-but-readable Ã¢â‚¬â€ USE for ` +
+      `"font":"impact"|"marker"|"bebas" (impact=bold modern default; marker=hand-drawn-but-readable — USE for ` +
       `sketch/whiteboard/cozy/playful identities; bebas=tall minimal premium),` +
       `"badge":"${args.channelName.toUpperCase()}"} ` +
-      `Ã¢â‚¬â€ placeholders ONLY in line texts and numberCallout.\n` +
+      `— placeholders ONLY in line texts and numberCallout.\n` +
       `Return STRICT JSON {"energy":"spectacle"|"bold"|"cozy_pop","visualLanguage":{"font","treatment","baseColor","accentColor","textObject","composition","imageStyle","badgeStyle","uppercase"},"rules":string[],"avoid":string[],"patterns":[{"name","when","fluxRecipe","textRecipeJson"}]} - energy AND visualLanguage are REQUIRED keys.`,
   });
 
@@ -358,8 +493,9 @@ export async function distillPlaybook(args: {
     );
   }
 
-  log(`thumbnailLab: playbook distilled Ã¢â‚¬â€ ${play.rules?.length ?? 0} rules, ${patterns.length} patterns (${patterns.map((p) => p.name).join(" / ")})`);
+  log(`thumbnailLab: playbook distilled — ${play.rules?.length ?? 0} rules, ${patterns.length} patterns (${patterns.map((p) => p.name).join(" / ")})`);
   return {
+    source: "verified_references",
     energy: (["spectacle", "bold", "cozy_pop"].includes(String(play.energy)) ? play.energy : "bold") as ThumbnailPlaybook["energy"],
     visualLanguage: play.visualLanguage,
     rules: play.rules ?? [],
@@ -397,12 +533,17 @@ export async function renderCandidate(args: {
   outJpg: string;
   tmpDir: string;
   idx: number;
+  /** Optional scene-still reuse. Ignored unless its producer supplied the
+   * explicit text-free + matching-safe-zone provenance contract. */
+  baseArt?: ThumbnailBaseArtifact;
   log?: Logger;
 }): Promise<string> {
-  if (!hasBanana()) throw new Error("thumbnailLab: GEMINI_API_KEY required (banana engine)");
+  if (!hasBanana()) {
+    throw new Error("thumbnailLab: no configured image provider (Gemini or Fal)");
+  }
   // TWO-PASS DESIGN: the LAYOUT is decided FIRST (which zone the text owns),
   // the image is generated WITH that zone deliberately reserved as negative
-  // space, then the text lands in its planned home Ã¢â‚¬â€ never fighting the image.
+  // space, then the text lands in its planned home — never fighting the image.
   const inst = await claudeJson<{ heroProp?: string; background?: string; details?: string[]; fluxPrompt?: string; textPropsJson?: string; textZone?: string }>({
     maxTokens: 1000,
     temperature: 0.75,
@@ -414,20 +555,20 @@ export async function renderCandidate(args: {
       `PATTERN "${args.pattern.name}": ${args.pattern.fluxRecipe}\n` +
       `TEXT TEMPLATE: ${JSON.stringify(args.pattern.textRecipe)}\n` +
       `HARD RULES:\n- ${args.playbook.rules.slice(0, 6).join("\n- ")}\n\n` +
-      `STEP 1 Ã¢â‚¬â€ LAYOUT: choose textZone ("left"|"right"|"upperLeft"|"upperRight") Ã¢â‚¬â€ where the typography will live.\n` +
-      `STEP 2 Ã¢â‚¬â€ fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY Ã¢â‚¬â€ ` +
+      `STEP 1 — LAYOUT: choose textZone ("left"|"right"|"upperLeft"|"upperRight") — where the typography will live.\n` +
+      `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
       `never reproduce its literal scene). ENERGY TIER = "${args.playbook.energy ?? "bold"}":\n` +
       (args.playbook.energy === "spectacle"
-        ? `SPECTACLE: go to the edge of absurd Ã¢â‚¬â€ IMPOSSIBLE SCALE (a tsunami of coins crashing toward a tiny figure, ` +
+        ? `SPECTACLE: go to the edge of absurd — IMPOSSIBLE SCALE (a tsunami of coins crashing toward a tiny figure, ` +
           `a banknote the size of a skyscraper), PHYSICS-DEFYING moments frozen mid-action, cinematic catastrophe/` +
           `triumph. The viewer's reaction must be "WHAT?!".\n`
         : args.playbook.energy === "cozy_pop"
-          ? `COZY-POP: irresistibly charming and warm Ã¢â‚¬â€ but PUNCHY: one adorable/magical focal moment (impossibly ` +
+          ? `COZY-POP: irresistibly charming and warm — but PUNCHY: one adorable/magical focal moment (impossibly ` +
             `cozy light, oversized moon, glowing window, a cat doing something delightful), saturated inviting ` +
             `color, storybook wonder. Catchy and clickable, never sleepy or flat.\n`
-          : `BOLD: grounded but dramatic Ã¢â‚¬â€ one striking focal subject at heroic scale, charged atmosphere (storm ` +
+          : `BOLD: grounded but dramatic — one striking focal subject at heroic scale, charged atmosphere (storm ` +
             `light, golden hour blaze, deep shadow), strong tension or payoff in the frame. Punchy, never generic.\n`) +
-      `Keep ONLY the channel's palette + grade + finish from its world Ã¢â‚¬â€ the SCENE must be new each time. ` +
+      `Keep ONLY the channel's palette + grade + finish from its world — the SCENE must be new each time. ` +
       `Hyper-saturated, volumetric light. COMPOSED FOR THE LAYOUT: the subject occupies the side OPPOSITE the ` +
       `textZone (large, partially cropped for scale); the textZone 40% is clean darker negative space. ` +
       `TEXT-FREE image (no words/letters).\n` +
@@ -442,11 +583,12 @@ export async function renderCandidate(args: {
       `OPPOSITE the textZone.\n` +
       `background: a SEPARATE supporting layer behind the hero - darker, simpler, with depth (torn tabloid strips, ` +
       `a blurred crowd in red, a burning skyline, a storm sky). It frames the hero, never competes.\n` +
-      `details: 1-3 SYMBOLIC story-carrying additions ON or AROUND the hero that make the click irresistible ` +
-      `(fire reflected in glasses lenses, a glowing crack across the chest, torn headline strips reading into ` +
-      `frame, a red zigzag crash line). Each detail must deepen the SAME story - nothing random.\n` +
-      `STEP 3 Ã¢â‚¬â€ textPropsJson: the template as a JSON-ENCODED STRING with placeholders replaced (line texts: 1-3 ` +
-      `punchy words each, Ã¢â€°Â¤5 words total, NOT restating the title - every line must be a real English hook word, NEVER meta-words like "omit"/"none"; ` +
+      `details: 1-3 NON-TEXTUAL SYMBOLIC story-carrying additions ON or AROUND the hero that make the click irresistible ` +
+      `(fire reflected in glasses lenses, a glowing crack across the chest, a red zigzag crash line). ` +
+      `Never request newspapers, signs, posters, labels, screens, letters, words, or any other textual prop. ` +
+      `Each detail must deepen the SAME story - nothing random.\n` +
+      `STEP 3 — textPropsJson: the template as a JSON-ENCODED STRING with placeholders replaced (line texts: 1-3 ` +
+      `punchy words each, ≤5 words total, NOT restating the title - every line must be a real English hook word, NEVER meta-words like "omit"/"none"; ` +
       `numberCallout: a REAL number from the topic, or LEAVE THE KEY OUT of the JSON entirely when none exists; set "position" to your chosen textZone).\n` +
       `Return STRICT JSON {"heroProp":string,"background":string,"details":string[],"textPropsJson":string,"textZone":string}.`,
   });
@@ -463,7 +605,7 @@ export async function renderCandidate(args: {
   try { textProps = JSON.parse(inst.textPropsJson) as Record<string, unknown>; } catch {
     throw new Error("pattern textPropsJson unparseable");
   }
-  // The channel's VISUAL LANGUAGE is constant Ã¢â‚¬â€ it overrides whatever the
+  // The channel's VISUAL LANGUAGE is constant — it overrides whatever the
   // pattern template carried (patterns vary composition, never identity).
   const vl = args.playbook.visualLanguage ?? {};
   textProps = {
@@ -492,34 +634,57 @@ export async function renderCandidate(args: {
     delete textProps["numberCallout"];
   }
 
-  // THE ENGINE: one rich design brief -> Nano Banana Pro -> vision gate ->
-  // one feedback retry. The old multi-path machine (recraft/integrated/
-  // layered/template + zone contracts + critique loops + badge compositing)
-  // is GONE - the design-native model does all of it in one pass, better.
-  const { buildThumbBrief, bananaThumbnail } = await import("@/lib/banana");
-  const words = cleanLines.map((l) => l.text);
-  if (textProps["numberCallout"]) words.unshift(String(textProps["numberCallout"]));
+  // UNIVERSAL ENGINE: every provider renders scene pixels only. Typography is
+  // always local and deterministic, so a provider/environment switch cannot
+  // reintroduce misspellings or a more expensive Pro typography request.
+  const numberCallout = textProps["numberCallout"]
+    ? String(textProps["numberCallout"])
+    : undefined;
   const payoffIdx = Math.max(cleanLines.findIndex((l) => l.accent), 0);
-  const brief = buildThumbBrief({
-    channelName: String(textProps["badge"] ?? "channel"),
-    imageStyle: vl.imageStyle,
-    palette: (args.playbook.visualLanguage as { palette?: string[] } | undefined)?.palette,
-    accentColor: vl.accentColor,
-    textObject: (vl as { textObject?: string }).textObject,
-    composition: (vl as { composition?: string }).composition,
-    scene: `${inst.fluxPrompt}${textProps["numberCallout"] ? ` Feature the real number "${textProps["numberCallout"]}" prominently.` : ""}`,
-    lines: cleanLines.map((l, i) => ({ text: l.text, payoff: i === payoffIdx, accent: l.accent })),
-    badge: String(textProps["badge"] ?? ""),
-  });
-  const { verdict } = await bananaThumbnail({
-    brief,
+  const zones = new Set<ThumbnailTextZone>([
+    "left", "right", "upperLeft", "upperRight", "center", "upperCenter",
+  ]);
+  const requestedZone = String(inst.textZone ?? textProps["position"] ?? "left") as ThumbnailTextZone;
+  const zone = zones.has(requestedZone) ? requestedZone : "left";
+  const overlayLines = [
+    ...(numberCallout ? [{ text: numberCallout, accent: true, payoff: true }] : []),
+    ...cleanLines.map((line, index) => ({
+      text: line.text,
+      accent: line.accent,
+      payoff: !numberCallout && index === payoffIdx,
+    })),
+  ];
+  const rendered = await renderThumbnail({
+    spec: {
+      scene: {
+        description: inst.fluxPrompt,
+        imageStyle: vl.imageStyle,
+        palette: [vl.baseColor, vl.accentColor].filter((color): color is string => Boolean(color)),
+        accentColor: vl.accentColor,
+        composition: (vl as { composition?: string }).composition,
+        textZone: zone,
+        visualAvoid: args.playbook.avoid,
+      },
+      typography: {
+        lines: overlayLines,
+        subtitle: String(textProps["badge"] ?? "") || undefined,
+        baseColor: vl.baseColor,
+        accentColor: vl.accentColor,
+        badgeStyle: vl.badgeStyle,
+        font: vl.font ?? "sans",
+        uppercase: textProps["uppercase"] !== false,
+        treatment: vl.treatment,
+        textObject: vl.textObject,
+      },
+    },
     outJpg: args.outJpg,
-    expectWords: words,
-    imageStyle: vl.imageStyle,
-    title: args.title,
-    log: args.log,
+    tmpDir: args.tmpDir,
+    baseArt: args.baseArt,
   });
-  args.log?.(`thumbnailLab: candidate ${args.idx + 1} "${args.pattern.name}" rendered (banana, punch ${verdict.punch ?? "?"}/10)`);
+  args.log?.(
+    `thumbnailLab: candidate ${args.idx + 1} "${args.pattern.name}" rendered ` +
+    `(${rendered.baseSource} text-free scene + deterministic type)`,
+  );
   return args.outJpg;
 }
 /** Comparative feed judgment: candidates vs the verified real winners. */
@@ -532,7 +697,7 @@ export async function judgeTournament(args: {
 }): Promise<TournamentResult> {
   const n = args.candidates.length;
   const refPaths = args.refs.slice(0, 4).map((r) => r.path);
-  // Judge at FEED size Ã¢â‚¬â€ the size the click decision actually happens at.
+  // Judge at FEED size — the size the click decision actually happens at.
   const smalls: string[] = [];
   for (let i = 0; i < n; i++) {
     smalls.push(await imageToJpeg(args.candidates[i].path, join(args.tmpDir, `cand_${i}_small.jpg`), 480, 270));
@@ -545,7 +710,7 @@ export async function judgeTournament(args: {
       `For each candidate: clickScore 1-10 (would it WIN the click in this feed), beatsRefs = how many of the ` +
       `references it visually out-competes, strengths, and the ONE fix that would most raise its score. ` +
       `Judge composition, instant readability, number/text impact, color authority, and premium feel. ` +
-      `Be harsh Ã¢â‚¬â€ 8+ means it genuinely belongs among the winners.\n` +
+      `Be harsh — 8+ means it genuinely belongs among the winners.\n` +
       `Return STRICT JSON {"candidates":[{"idx":1-based,"clickScore":1-10,"beatsRefs":number,"strengths":string,"fix":string}],` +
       `"winner":1-based,"why":string}.`,
     imagePaths: [...smalls, ...refPaths],
@@ -569,7 +734,7 @@ export async function judgeTournament(args: {
   });
   const winnerIdx = Math.min(n - 1, Math.max(0, (parsed.winner ?? 1) - 1));
   args.log?.(
-    `thumbnailLab: tournament Ã¢â‚¬â€ ${out.map((c, i) => `#${i + 1} ${c.pattern}: ${c.clickScore ?? "?"}/10 (beats ${c.beatsRefs ?? "?"} refs)`).join("; ")} Ã¢â€ â€™ winner #${winnerIdx + 1}`,
+    `thumbnailLab: tournament — ${out.map((c, i) => `#${i + 1} ${c.pattern}: ${c.clickScore ?? "?"}/10 (beats ${c.beatsRefs ?? "?"} refs)`).join("; ")} → winner #${winnerIdx + 1}`,
   );
   return { candidates: out, winnerIdx, judgeWhy: parsed.why ?? "" };
 }

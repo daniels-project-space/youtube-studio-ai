@@ -27,7 +27,9 @@ export interface Family {
   /** Whether this family narrates (drives wizard voice questions). */
   narrated: boolean;
   requiresKeys: string[];
-  defaultThumbnailStyle: string;
+  /** Production channel creation always uses the Style-DNA/playbook engine.
+   * Plain title cards remain a draft-only renderer, never a family default. */
+  defaultThumbnailStyle: "banana";
 }
 
 export const FAMILIES: Record<FamilyKey, Family> = {
@@ -70,7 +72,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // fallback default voice while the architect saw a loop-only toolbox.
     narrated: true,
     requiresKeys: ["mureka", "pexels", "fish-audio"],
-    defaultThumbnailStyle: "title_card",
+    defaultThumbnailStyle: "banana",
   },
   comic: {
     key: "comic",

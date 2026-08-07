@@ -10,10 +10,11 @@
  *
  * SAFETY: matches ONLY keys containing `/footage/run/` whose filename starts with
  * `clip_` or `pre_overlay`, older than AGE_DAYS. Gated OFF by default — set env
- * `ENABLE_FOOTAGE_PRUNE=true` in the Trigger project to activate. Until then it is a
- * scheduled no-op (safe to ship inert).
+ * `ENABLE_FOOTAGE_PRUNE=true` in the Trigger project to activate. It is
+ * operator-triggered rather than scheduled, so disabled cleanup never spends a
+ * daily Trigger run.
  */
-import { schedules, logger } from "@trigger.dev/sdk/v3";
+import { task, logger } from "@trigger.dev/sdk/v3";
 import { ListObjectsV2Command, DeleteObjectsCommand } from "@aws-sdk/client-s3";
 import { getR2Client, getBucket } from "../lib/storage";
 
@@ -63,10 +64,9 @@ async function pruneFootage(dryRun: boolean) {
   return { scanned, matched: toDelete.length, deleted: dryRun ? 0 : toDelete.length, bytes };
 }
 
-// Scheduled daily at 05:40, but a NO-OP unless ENABLE_FOOTAGE_PRUNE=true.
-export const pruneFootageSchedule = schedules.task({
+// Run deliberately after enabling cleanup; disabled cleanup creates no runs.
+export const pruneFootageSchedule = task({
   id: "prune-footage",
-  cron: "40 5 * * *",
   run: async () => {
     if (process.env.ENABLE_FOOTAGE_PRUNE !== "true") {
       logger.info("prune-footage: disabled (set ENABLE_FOOTAGE_PRUNE=true to activate)");

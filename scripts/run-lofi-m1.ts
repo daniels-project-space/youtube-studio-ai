@@ -11,7 +11,7 @@
  *
  * Reuses an existing channel via REUSE_CHANNEL_ID to avoid duplicate seeds.
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";

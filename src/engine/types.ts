@@ -1,3 +1,5 @@
+import type { ImageUsageSummary } from "@/lib/imageUsage";
+
 /**
  * Core block-engine contract (MASTER-PLAN §D).
  *
@@ -17,6 +19,22 @@ export type BlockPatch = Record<string, unknown>;
  */
 export const COST_PATCH_KEY = "__costUsd";
 
+/** Model-call families a composite block can inspect in its exact usage scope. */
+export type CostModelUsageKind =
+  | "text"
+  | "vision"
+  | "audio"
+  | "video"
+  | "embedding"
+  | "other";
+
+export interface ModelUsageCostSnapshot {
+  calls: number;
+  cacheHits: number;
+  costUsd: number;
+  unpricedCalls: number;
+}
+
 /**
  * Execution context handed to every block. Carries run identity plus a
  * key/value store of outputs produced by upstream blocks. A block reads its
@@ -30,12 +48,35 @@ export interface StageContext {
   keyPrefix: string;
   /** Block params from the channel's pipeline entry. */
   params: Record<string, unknown>;
-  /** Accumulated outputs from upstream blocks (the produced key/value store). */
-  store: Record<string, unknown>;
+  /** Declared, read-only inputs from upstream artifacts. Ambient reads throw. */
+  store: Readonly<Record<string, unknown>>;
+  /** Exact immutable artifact ids behind the values visible to this module. */
+  artifactRefs?: Readonly<Record<string, ArtifactRef>>;
   /** Per-run budget ceiling in USD (preflight asserts this is set). */
   budgetUsd: number;
+  /** Exact provider-token spend observed in this block's runner scope so a
+   * composite cost/checkpoint can include it without estimating or hiding it. */
+  modelUsageCostUsd?: (kinds?: readonly CostModelUsageKind[]) => number;
+  /** Per-kind accounting detail. `costUsd` contains only exact priced usage;
+   * `unpricedCalls` lets a composite apply an explicit documented fallback. */
+  modelUsageAccounting?: (
+    kinds?: readonly CostModelUsageKind[],
+  ) => ModelUsageCostSnapshot;
+  /** Exact image-provider responses observed in this block's async-local
+   * scope, including model route, output dimensions, and authoritative cost. */
+  imageUsageAccounting?: () => ImageUsageSummary;
   /** Structured log sink; defaults to console in the local runner. */
   log: (msg: string, extra?: Record<string, unknown>) => void;
+}
+
+export interface ArtifactRef {
+  artifactId: string;
+  key: string;
+  type: string;
+  schemaVersion: string;
+  producerModule: string;
+  producerVersion: string;
+  payloadHash: string;
 }
 
 /** A registered, executable pipeline step. */
@@ -80,4 +121,34 @@ export interface RunStageSink {
    * for this run, so a resumed run can skip them (no double-spend on paid blocks).
    */
   getCompleted?(runId: string): Promise<Array<{ block: string; outputs: unknown; cost?: number }>>;
+  /**
+   * Optional full resume snapshot. Production sinks should implement this so a
+   * worker retry can distinguish a fresh stage from paid work that was already
+   * started but whose provider response was lost with the previous process.
+   * Implementations should return this from the same read used for completed
+   * stages; the runner must not add a second persistence query for the fence.
+   */
+  getResumeState?(runId: string): Promise<
+    Array<{
+      block: string;
+      status: string;
+      outputs?: unknown;
+      cost?: number;
+      startedAt?: number;
+      error?: string;
+    }>
+  >;
+  /** Persist a first-class, content-addressed artifact and its exact lineage. */
+  upsertArtifact?(args: {
+    ownerId: string;
+    channelId: string;
+    runId: string;
+    artifact: ArtifactRef;
+    inputArtifactIds: string[];
+    optionalFallbacks: string[];
+    persistence: "inline" | "reference" | "summary";
+    payload?: unknown;
+    summary?: string;
+    createdAt: number;
+  }): Promise<void>;
 }

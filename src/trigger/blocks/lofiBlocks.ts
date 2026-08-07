@@ -33,16 +33,22 @@
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
 import { PRICE } from "@/engine/pricing";
-import { bananaCounters } from "@/lib/banana";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { generateFalFluxProImage } from "@/lib/falImage";
-import { generateFalI2V } from "@/lib/falVideo";
+import { renderNovitaI2V, renderNovitaImage } from "@/lib/novitaMedia";
 import { upscaleLoopUnit } from "@/lib/replicate";
 // (Real-ESRGAN image upscaler intentionally not used for video — Topaz only.)
-import { generateMusic, generateSuno, selfLoopAudio, type MusicProvider, type MusicTrack } from "@/lib/music";
-import { uploadPrivateDraft, setVideoThumbnail } from "@/lib/youtube";
+import {
+  generateMureka,
+  generateSuno,
+  MusicError,
+  selfLoopAudio,
+  withMusicGenerationCost,
+  type MusicProvider,
+  type MusicTrack,
+} from "@/lib/music";
+import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
 import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
@@ -80,6 +86,26 @@ import {
   type SceneLibraryEntry,
 } from "@/engine/prompt/scenePlanner";
 import { buildChapters } from "@/lib/metacraft";
+import {
+  bytesSha256,
+  dispatchPublishIntent,
+  fileSha256,
+  publishMetadataSha256,
+} from "@/lib/publishDispatcher";
+import {
+  buildPublishIdempotencyKey,
+  YOUTUBE_UPLOAD_SCOPES,
+} from "@/lib/publishingPolicy";
+import {
+  assertScheduledPublishIsFuture,
+  resolveScheduledPublishAtMs,
+} from "@/lib/scheduledPlanRuntime";
+import { uploadDurableVideo } from "@/lib/youtubeDurableUpload";
+import {
+  evaluateChannelPublishAction,
+  requireChannelPublishAction,
+  type ChannelPublishDecision,
+} from "@/lib/channelPublishPolicy";
 
 /* ----------------------------- helpers --------------------------------- */
 
@@ -192,8 +218,16 @@ async function recordAsset(
 export const topicSelect: Block = {
   id: "topic_select",
   consumes: [],
-  produces: ["topic"],
+  produces: ["topic", "topicBet"],
   run: async (ctx) => {
+    // A scheduler-claimed plan item is committed intent, not a candidate to
+    // exclude. Use it verbatim without another model call; completion records
+    // topic memory only after the full pipeline succeeds.
+    const plannedTopic = ctx.store["plannedTopic"] as string | undefined;
+    if (typeof plannedTopic === "string" && plannedTopic.trim()) {
+      ctx.log(`topic_select: CLAIMED plan topic "${plannedTopic}"`);
+      return { topic: plannedTopic };
+    }
     // RENDER-GROUP REUSE: a language sibling renders the SAME topic as the base
     // (shared video, different language) — skip selection + history recording.
     const reuseTopic = ctx.store["reuseTopic"] as string | undefined;
@@ -436,10 +470,9 @@ export const keyframes: Block = {
     const vs = visualStyle(ctx);
     const scene = scenesFromStore(ctx)[0];
     const aspect = (ctx.params.aspectRatio as string) ?? "16:9";
-    // 16:9 still sized for a 4K-bound loop (multiple of 16); portrait if asked.
-    const portrait = aspect === "9:16";
-    const W = portrait ? 768 : 1344;
-    const H = portrait ? 1344 : 768;
+    if (aspect !== "16:9") {
+      throw new Error(`keyframes: ${aspect} is not covered by the pinned Novita production profile`);
+    }
 
     const baseFluxPrompt = composeFluxPrompt({
       sceneDescription: scene.fluxPrompt,
@@ -457,8 +490,8 @@ export const keyframes: Block = {
     // silently disabled the critic in zero-Google deployments).
     const canCritique = hasVisionKey() && !!(dna && dna.recurringSubject?.trim());
     let stills = 0;
-    const countersBefore = { ...bananaCounters };
-    const loop = await produceAndCritique<{ url: string; local: string }>({
+    let imageCostUsd = 0;
+    const loop = await produceAndCritique<{ url: string; local: string; key: string; jobId: string; model: string }>({
       label: "keyframe",
       threshold: 0.8,
       maxIters: canCritique ? 2 : 1,
@@ -468,11 +501,16 @@ export const keyframes: Block = {
           ? ` Correct these problems from the previous attempt: ${priorIssues.join("; ")}.`
           : "";
         stills++;
-        ctx.log(`keyframes: generating still (fal flux-pro), attempt ${stills}…`);
-        const url = await generateFalFluxProImage({ prompt: baseFluxPrompt + fix, width: W, height: H });
-        if (!url) throw new Error("keyframes: fal flux-pro produced no URL");
-        const local = await downloadTo(url, join(tmp, `f1_${stills}.jpg`));
-        return { url, local };
+        ctx.log(`keyframes: generating still (Novita local Z-Image Turbo), attempt ${stills}…`);
+        const rendered = await renderNovitaImage({
+          prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-keyframe`,
+          id: `keyframe-${stills}`,
+          prompt: baseFluxPrompt + fix,
+          profileId: "production",
+        });
+        imageCostUsd += rendered.costUsd;
+        const local = await downloadTo(rendered.url, join(tmp, `f1_${stills}.png`));
+        return { url: rendered.url, local, key: rendered.key, jobId: rendered.jobId, model: rendered.model };
       },
       critique: async (cand) => {
         if (!canCritique) return { score: 1, pass: true, issues: [] };
@@ -511,11 +549,14 @@ export const keyframes: Block = {
     const f1Local = loop.value.local;
     ctx.log(`keyframes: best still after ${stills} attempt(s) (score=${loop.critique.score.toFixed(2)}, accepted=${loop.accepted})`);
 
-    // Persist the chosen still to R2 (thumbnail base + audit). The fal CDN url is
-    // passed straight to i2v as the source image (fresh + publicly fetchable).
-    const f1Key = `${ctx.keyPrefix}runs/${ctx.runId}/f1.jpg`;
-    await putObject(f1Key, await readBytes(f1Local), { contentType: "image/jpeg" });
-    await recordAsset(ctx, "keyframe", f1Key, { provider: "fal-flux-pro", attempts: stills, identityScore: loop.critique.score });
+    const f1Key = loop.value.key;
+    await recordAsset(ctx, "keyframe", f1Key, {
+      provider: "novita-z-image-turbo-local",
+      jobId: loop.value.jobId,
+      model: loop.value.model,
+      attempts: stills,
+      identityScore: loop.critique.score,
+    });
 
     // SCENE DIRECTOR (golden v1 mechanic) — Gemini Vision reads the ACTUAL still
     // and names the animatable elements + subtle motion (static camera), so i2v
@@ -546,15 +587,7 @@ export const keyframes: Block = {
       f1Url,
       f1Key,
       motionPrompt,
-      // Real spend: banana stills at their true rate (the flat fluxStillUsd
-      // billed a Pro banana still at $0.01 — a 13x undercount); router-delegated
-      // fal FLUX renders bill at ≈$0.04/image (the banana-flash rate — same
-      // price point); non-banana (direct Flux) attempts keep the flux rate.
-      [COST_PATCH_KEY]:
-        (bananaCounters.pro - countersBefore.pro) * PRICE.bananaProUsd +
-        (bananaCounters.flash - countersBefore.flash) * PRICE.bananaFlashUsd +
-        (bananaCounters.fal - countersBefore.fal) * PRICE.bananaFlashUsd +
-        Math.max(0, stills - (bananaCounters.pro - countersBefore.pro) - (bananaCounters.flash - countersBefore.flash) - (bananaCounters.fal - countersBefore.fal)) * PRICE.fluxStillUsd,
+      [COST_PATCH_KEY]: imageCostUsd,
     };
   },
 };
@@ -563,7 +596,7 @@ export const keyframes: Block = {
 
 export const loopClips: Block = {
   id: "loop_clips",
-  consumes: ["f1Url"],
+  consumes: ["f1Key"],
   produces: ["loopRawKey", "loopRawUrl"],
   paid: true,
   run: async (ctx) => {
@@ -572,12 +605,11 @@ export const loopClips: Block = {
     // reversal artifacts. Replaces the Higgsfield F1→F2 / F2→F1 start+end-image
     // pair (needs a local authed CLI). One generation per render (frugal +
     // honours the "≤2 renders" budget).
-    const f1Url = str(ctx, "f1Url");
+    const f1Key = str(ctx, "f1Key");
     const style = styleGrammar(ctx);
     const vs = visualStyle(ctx);
     const scene = scenesFromStore(ctx)[0];
     const dur = Number(ctx.params.clipDurationSec ?? scene.durationSec ?? 5);
-    const aspect = (ctx.params.aspectRatio as string) ?? "16:9";
     const crossfadeSec = Number(ctx.params.crossfadeSec ?? 0.8);
     // "flf2v" (default) = first-frame==last-frame i2v: the animated clip RETURNS
     // to its start so the elements keep moving forward (waves foam, curtains
@@ -608,17 +640,17 @@ export const loopClips: Block = {
       extraNegative: "zoom, push in, dolly, camera move, scale change, framing change, pan, tilt",
     });
 
-    ctx.log(`loop_clips: i2v (fal, loop=${loopMode}${flf ? ", end frame=start" : ""}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
-    const clip = await generateFalI2V({
+    ctx.log(`loop_clips: Novita LTX-2.3 (loop=${loopMode}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
+    const clip = await renderNovitaI2V({
+      prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-loop`,
+      id: "loop-clip",
       prompt: fwd.prompt,
       negativePrompt: fwd.negativePrompt,
-      imageUrl: f1Url,
-      // FLF2V: end frame = start frame → the animated clip returns to its start.
-      tailImageUrl: flf ? f1Url : undefined,
+      imageKey: f1Key,
       durationSec: dur,
-      aspectRatio: aspect,
+      profileId: "production",
     });
-    if (!clip.url) throw new Error("loop_clips: fal i2v produced no URL");
+    if (!clip.url) throw new Error("loop_clips: Novita i2v produced no URL");
 
     const tmp = await makeRunTempDir(ctx.runId);
     const clipLocal = await downloadTo(clip.url, join(tmp, "clip.mp4"));
@@ -638,7 +670,7 @@ export const loopClips: Block = {
     return {
       loopRawKey,
       loopRawUrl: loopRaw, // local path; upscale reads it directly
-      [COST_PATCH_KEY]: PRICE.videoClipUsd, // one i2v clip
+      [COST_PATCH_KEY]: clip.costUsd,
     };
   },
 };
@@ -737,7 +769,12 @@ export const music: Block = {
       ctx.log(`music: REUSED base music track ${reuseMusicKey} (no generation)`);
       let reuseUrl = "";
       try { reuseUrl = publicUrl(reuseMusicKey); } catch { reuseUrl = `r2://${reuseMusicKey}`; }
-      return { musicKey: reuseMusicKey, musicProvider: "reuse", musicUrl: reuseUrl };
+      return {
+        musicKey: reuseMusicKey,
+        musicProvider: "reuse",
+        musicUrl: reuseUrl,
+        [COST_PATCH_KEY]: 0,
+      };
     }
     const provider = ((ctx.params.provider as MusicProvider) ?? "mureka");
     // Phase 2 grounding: "Suno generated by the STYLE OF THE CHANNEL" — the frozen
@@ -786,8 +823,10 @@ export const music: Block = {
     let tracks: MusicTrack[] = [];
     let jobIds: string[] = [];
     let generations = 0;
+    let billedGenerations = 0;
     let usedProvider: MusicProvider = provider;
 
+    try {
     const generateWith = async (prov: MusicProvider): Promise<void> => {
       tracks = [];
       jobIds = [];
@@ -812,13 +851,20 @@ export const music: Block = {
             timeoutMs: 600_000,
           });
           generations++;
+          billedGenerations++;
           jobIds.push(res.jobId);
           tracks.push(...res.tracks.slice(0, trackCount - tracks.length));
         }
       } else {
         ctx.log(`music: generating via ${prov}…`);
-        const res = await generateMusic({ provider: prov, prompt, model: ctx.params.model as string | undefined, timeoutMs: 600_000 });
+        const res = await generateMureka({
+          prompt,
+          model: ctx.params.model as string | undefined,
+          timeoutMs: 600_000,
+        });
         generations = 1;
+        billedGenerations++;
+        usedProvider = res.provider;
         jobIds = [res.jobId];
         tracks = res.tracks;
       }
@@ -835,8 +881,12 @@ export const music: Block = {
       await generateWith(provider);
     } catch (e) {
       const msg = e instanceof Error ? e.message : String(e);
-      const quotaDead = /429|quota|billing|insufficient|credit/i.test(msg);
-      if (quotaDead && hasProviderKey(altProvider)) {
+      const admissionRejected =
+        e instanceof MusicError &&
+        e.safeToFallback &&
+        e.acceptedUnits === 0 &&
+        billedGenerations === 0;
+      if (admissionRejected && hasProviderKey(altProvider)) {
         ctx.log(`music: ${provider} is quota/billing-dead (${msg.slice(0, 120)}) — FAILING OVER to ${altProvider}`);
         usedProvider = altProvider;
         await generateWith(altProvider);
@@ -896,8 +946,16 @@ export const music: Block = {
       musicKey,
       musicProvider: usedProvider,
       musicUrl,
-      [COST_PATCH_KEY]: PRICE.musicTrackUsd * generations,
+      // Keep spend from successful generations made before provider failover;
+      // resetting the selected provider's tracks must not erase paid work.
+      [COST_PATCH_KEY]: PRICE.musicTrackUsd * billedGenerations,
     };
+    } catch (error) {
+      // Preserve every confirmed accepted generation if a later generation,
+      // download, mix, or R2 write fails. This also makes the failure terminal,
+      // preventing the runner from buying the completed jobs again.
+      throw withMusicGenerationCost(error, billedGenerations, PRICE.musicTrackUsd);
+    }
   },
 };
 
@@ -1016,11 +1074,17 @@ export const assemble: Block = {
 
 export const uploadDraft: Block = {
   id: "upload_draft",
-  consumes: ["videoLocalPath", "title", "description", "tags", "qaPassed", "thumbnailKey"],
+  consumes: [
+    "videoKey", "videoLocalPath", "title", "description", "tags", "qaPassed",
+    "thumbnailKey", "thumbnailPublishable",
+  ],
   produces: ["youtubeVideoId", "watchUrl", "youtubePrivacy"],
   run: async (ctx) => {
     if (ctx.store["qaPassed"] !== true) {
       throw new Error("upload_draft: qa did not pass — refusing to upload");
+    }
+    if (ctx.store["thumbnailPublishable"] !== true) {
+      throw new Error("upload_draft: thumbnail is a nonpublishable draft preview — refusing to upload");
     }
     const filePath = str(ctx, "videoLocalPath");
     const title = str(ctx, "title");
@@ -1043,77 +1107,166 @@ export const uploadDraft: Block = {
       ctx.log(`upload_draft: appended ${chapters.split("\n").length} chapters to the description`);
     }
 
+    const client = convex();
+    const internalSecret = requireInternalQuerySecret();
+    const channelId = ctx.channelId as Id<"channels">;
+    const [channel, run] = await Promise.all([
+      client.query(api.channels.getChannel, { channelId }),
+      client.query(api.runs.getRun, { runId: ctx.runId as Id<"runs"> }),
+    ]);
+    if (!channel || channel.ownerId !== ctx.ownerId || !run?.startedAt) {
+      throw new Error("upload_draft: run/channel tenancy could not be verified");
+    }
+
     // Publish mode (per-channel pipeline param; default "draft" = private, human
-    // approves). "scheduled" → drip-publish at now+offset (humanized jitter to
-    // avoid a metronomic, auto-looking cadence). "public" → immediate.
+    // approves). A scheduled timestamp is reused from the durable upload row so
+    // a worker retry cannot change metadata and accidentally create a duplicate.
     const publishMode = (ctx.params["publishMode"] as string | undefined) ?? "draft";
+    const dispatchRequestedAt = Date.now();
     let privacyStatus: "private" | "public" | "unlisted" = "private";
     let publishAt: string | undefined;
+    let publishAtMs: number | undefined;
     if (publishMode === "public") {
       privacyStatus = "public";
     } else if (publishMode === "scheduled") {
-      const offsetH = Number(ctx.params["publishOffsetHours"] ?? 6);
-      const jitterH = Math.random() * Number(ctx.params["publishJitterHours"] ?? 4);
-      publishAt = new Date(Date.now() + (offsetH + jitterH) * 3_600_000).toISOString();
-    }
-
-    // Per-channel YouTube token (uploads to THIS channel's own YouTube channel).
-    // Falls back to the global YOUTUBE_REFRESH_TOKEN when the channel isn't linked.
-    let refreshToken: string | undefined;
-    try {
-      const auth = await convex().query(api.youtubeAuth.getForChannel, {
-        channelId: ctx.channelId as Id<"channels">,
-        secret: process.env.INTERNAL_QUERY_SECRET ?? "",
+      publishAtMs = resolveScheduledPublishAtMs({
+        publishMode,
+        pinnedScheduledAt: typeof ctx.store["scheduledPublishAt"] === "number"
+          ? ctx.store["scheduledPublishAt"] as number
+          : undefined,
+        runStartedAt: run.startedAt,
+        runId: ctx.runId,
+        publishOffsetHours: Number(ctx.params["publishOffsetHours"] ?? 6),
+        publishJitterHours: Number(ctx.params["publishJitterHours"] ?? 4),
       });
-      if (auth?.refreshToken) {
-        refreshToken = auth.refreshToken;
-        ctx.log(`upload_draft: using linked YouTube channel "${auth.ytTitle ?? "?"}"`);
-      } else {
-        ctx.log("upload_draft: no per-channel token — using global token");
-      }
-    } catch (e) {
-      ctx.log(`upload_draft: token lookup failed (using global): ${e instanceof Error ? e.message : e}`);
+      if (publishAtMs === undefined) throw new Error("upload_draft: scheduled publish time is missing");
+      assertScheduledPublishIsFuture(publishAtMs, dispatchRequestedAt);
+      publishAt = new Date(publishAtMs).toISOString();
     }
 
-    ctx.log(`upload_draft: uploading to YouTube (mode=${publishMode}${publishAt ? `, publishAt=${publishAt}` : ""})…`);
-    const res = await uploadPrivateDraft({
-      filePath,
+    // Every write is bound to this exact app owner/channel connector. Missing,
+    // mismatched, legacy-unmigrated, or undecryptable credentials stop the run.
+    const connector = await requireYouTubeConnector(client, {
+      channelId,
+      ownerId: ctx.ownerId,
+      requiredScopes: YOUTUBE_UPLOAD_SCOPES,
+    });
+    ctx.log(
+      `upload_draft: using linked YouTube channel "${connector.ytTitle ?? connector.ytChannelId ?? "?"}" (${connector.storage})`,
+    );
+
+    if (publishAt && !Number.isFinite(publishAtMs)) {
+      throw new Error("upload_draft: invalid scheduled publish timestamp");
+    }
+    let policyDecision: ChannelPublishDecision | undefined;
+    if (publishMode === "public" || publishMode === "scheduled") {
+      policyDecision = await evaluateChannelPublishAction({
+        ownerId: ctx.ownerId,
+        channelId,
+        action: publishMode === "public" ? "youtube_public" : "youtube_scheduled",
+        channel,
+        convex: client,
+      });
+      if (!policyDecision.authorized) {
+        ctx.log(
+          `upload_draft: channel policy did not authorize ${publishMode} (${policyDecision.reason}); creating an awaiting-approval intent`,
+        );
+      }
+    }
+    const madeForKids =
+      typeof ctx.params["madeForKids"] === "boolean"
+        ? (ctx.params["madeForKids"] as boolean)
+        : (channel.schedule?.madeForKids ?? false);
+    const metadata = {
       title,
       description,
       tags,
+      categoryId: String(ctx.params["categoryId"] ?? "10"),
       privacyStatus,
-      publishAt,
-      refreshToken,
+      publishAt: publishAtMs,
+      containsSyntheticMedia: true,
+      madeForKids,
+    } as const;
+    const videoSha256 = await fileSha256(filePath);
+    const videoArtifactId = `sha256:${videoSha256}`;
+    const intentVersion = Number(ctx.params["intentVersion"] ?? 1);
+    const idempotencyKey = buildPublishIdempotencyKey({
+      connectorId: String(connector.connectorId),
+      videoArtifactId,
+      intentVersion,
     });
-
-    // Set the custom thumbnail (generated by thumbnail_gen, stored in R2).
-    // Non-fatal: a 403 means the channel isn't verified for custom thumbnails —
-    // the video still uploaded; the operator can verify the channel + re-run.
     const thumbKey = opt(ctx, "thumbnailKey");
-    if (thumbKey) {
-      try {
-        const bytes = await getObjectBytes(thumbKey);
-        await setVideoThumbnail(res.videoId, bytes, "image/jpeg", refreshToken);
-        ctx.log(`upload_draft: custom thumbnail set (${thumbKey})`);
-      } catch (e) {
-        ctx.log(`upload_draft: thumbnail set FAILED (non-fatal): ${e instanceof Error ? e.message : e}`);
-      }
-    }
+    const thumbnailSha256 = thumbKey
+      ? bytesSha256(await getObjectBytes(thumbKey))
+      : undefined;
+    const intent = await client.mutation(api.publishIntents.createOrGet, {
+      secret: internalSecret,
+      ownerId: ctx.ownerId,
+      channelId,
+      connectorId: connector.connectorId,
+      connectorVersion: connector.tokenVersion,
+      runId: ctx.runId as Id<"runs">,
+      videoArtifactId,
+      videoArtifactKey: str(ctx, "videoKey"),
+      videoSha256,
+      thumbnailArtifactKey: thumbKey,
+      thumbnailSha256,
+      intentVersion,
+      idempotencyKey,
+      metadataSha256: publishMetadataSha256(metadata),
+      ...metadata,
+      approvedForPublish:
+        privacyStatus === "private" && publishAtMs === undefined
+          ? true
+          : policyDecision?.authorized === true,
+      approvedBy: policyDecision?.authorized ? policyDecision.approvedBy : undefined,
+      approvalEvidence: policyDecision?.authorized
+        ? policyDecision.approvalEvidence
+        : undefined,
+      approvalPolicyVersion: policyDecision?.authorized
+        ? policyDecision.policyVersion
+        : undefined,
+      approvalPolicyFingerprint: policyDecision?.authorized
+        ? policyDecision.pipelineFingerprint
+        : undefined,
+      hypothesis:
+        typeof ctx.params["experimentHypothesis"] === "string"
+          ? (ctx.params["experimentHypothesis"] as string)
+          : undefined,
+      hookVariant:
+        typeof ctx.params["hookVariant"] === "string"
+          ? (ctx.params["hookVariant"] as string)
+          : undefined,
+      visualVariant:
+        typeof ctx.params["visualVariant"] === "string"
+          ? (ctx.params["visualVariant"] as string)
+          : undefined,
+      dispatchRequestedAt,
+      createdAt: run.startedAt,
+    });
+    if (!intent) throw new Error("upload_draft: publish intent was not persisted");
 
-    // Persist the youtube id on the run.
-    try {
-      await convex().mutation(api.runs.updateRun, {
-        runId: ctx.runId as Id<"runs">,
-        youtubeVideoId: res.videoId,
-      });
-    } catch (e) {
-      ctx.log(`upload_draft: updateRun failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+    ctx.log(
+      `upload_draft: dispatching intent ${intent._id} (mode=${publishMode}${publishAt ? `, publishAt=${publishAt}` : ""})…`,
+    );
+    const dispatched = await dispatchPublishIntent({
+      intentId: intent._id,
+      workerId: `pipeline:${ctx.runId}`,
+      preferredLocalFilePath: filePath,
+      log: ctx.log,
+    });
+    if (dispatched.kind !== "uploaded") {
+      throw new Error(
+        `upload_draft: publish intent deferred (${dispatched.reason}, status=${dispatched.status})`,
+      );
     }
-    ctx.log(`upload_draft ok: ${res.watchUrl} (privacy=${res.privacyStatus})`);
+    ctx.log(
+      `upload_draft ok: ${dispatched.watchUrl} (privacy=${dispatched.privacyStatus})`,
+    );
     return {
-      youtubeVideoId: res.videoId,
-      watchUrl: res.watchUrl,
-      youtubePrivacy: res.privacyStatus,
+      youtubeVideoId: dispatched.videoId,
+      watchUrl: dispatched.watchUrl,
+      youtubePrivacy: dispatched.privacyStatus,
     };
   },
 };
@@ -1149,7 +1302,7 @@ export const notify: Block = {
 export const cleanup: Block = {
   id: "cleanup",
   consumes: ["watchUrl"], // gated on a successful upload — never runs on a failed render
-  produces: ["cleaned"],
+  produces: ["cleaned", "removedObjects"],
   run: async (ctx) => {
     const prefix = `${ctx.keyPrefix}runs/${ctx.runId}/`;
     const keepNames = (ctx.params["keep"] as string[] | undefined) ?? ["final.mp4", "thumbnail.jpg"];
@@ -1236,30 +1389,51 @@ export const shortsSpinoff: Block = {
 
     // Upload as a YouTube Short (PRIVATE unless the param opts into public).
     let shortVideoId = "";
-    let refreshToken: string | undefined;
-    try {
-      const auth = await convex().query(api.youtubeAuth.getForChannel, { channelId: ctx.channelId as Id<"channels">, secret: process.env.INTERNAL_QUERY_SECRET ?? "" });
-      if (auth?.refreshToken) refreshToken = auth.refreshToken;
-    } catch { /* fall back to global token */ }
-    try {
-      const desc = (ctx.store["description"] as string | undefined) ?? "";
-      const res = await uploadPrivateDraft({
+    const client = convex();
+    const channelId = ctx.channelId as Id<"channels">;
+    const connector = await requireYouTubeConnector(client, {
+      channelId,
+      ownerId: ctx.ownerId,
+      requiredScopes: YOUTUBE_UPLOAD_SCOPES,
+    });
+    const desc = (ctx.store["description"] as string | undefined) ?? "";
+    const publishShort = ctx.params["publishShort"] === "public";
+    if (publishShort) {
+      await requireChannelPublishAction({
+        ownerId: ctx.ownerId,
+        channelId,
+        action: "youtube_short_public",
+        convex: client,
+      });
+    }
+    const res = await uploadDurableVideo({
+      convex: client,
+      ownerId: ctx.ownerId,
+      channelId,
+      uploadKey: `${ctx.runId}:short-video:${connector.connectorId}:v${connector.tokenVersion}`,
+      upload: {
         filePath: final,
         title: `${title} #Shorts`.slice(0, 100),
         description: `#Shorts\n\n${desc}`.slice(0, 4900),
         tags: ((ctx.store["tags"] as string[]) ?? []).slice(0, 15),
-        privacyStatus: ctx.params["publishShort"] === "public" ? "public" : "private",
-        refreshToken,
-      });
-      shortVideoId = res.videoId;
-      ctx.log(`shorts_spinoff: uploaded Short ${res.watchUrl} (privacy=${res.privacyStatus})`);
-    } catch (e) {
-      ctx.log(`shorts_spinoff: Short upload failed (non-fatal): ${e instanceof Error ? e.message : e}`);
-    }
+        privacyStatus: publishShort ? "public" : "private",
+        refreshToken: connector.refreshToken,
+        containsSyntheticMedia: true,
+      },
+      log: ctx.log,
+    });
+    shortVideoId = res.videoId;
+    ctx.log(`shorts_spinoff: uploaded Short ${res.watchUrl} (privacy=${res.privacyStatus})`);
 
     // Optional multi-platform crosspost of the SHORT via Ayrshare — explicit opt-in
     // only (so private brand content is never auto-published off-platform).
     if (ctx.params["crosspostShort"] === true && hasAyrshareKey()) {
+      await requireChannelPublishAction({
+        ownerId: ctx.ownerId,
+        channelId,
+        action: "crosspost",
+        convex: client,
+      });
       try {
         const platforms = (ctx.params["platforms"] as string[] | undefined) ?? ["tiktok", "instagram"];
         const r = await ayrCrosspost({ mediaUrl: publicUrl(shortKey), caption: title.slice(0, 2000), platforms });

@@ -15,13 +15,20 @@
  * cuts the overlay/xfade OOMs (SYSTEM_FAILURE) the shared monolith was hitting.
  */
 import { task, logger } from "@trigger.dev/sdk/v3";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { registerAllBlocks } from "@/engine/blocks";
 import { get } from "@/engine/registry";
 import { makeConvexSink } from "@/engine/convexSink";
 import { rehydrateOutputs } from "@/lib/rehydrate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
 import type { StageContext } from "@/engine/types";
+import {
+  assertRenderBlockAdmission,
+  assertRenderBlockInvocation,
+} from "@/lib/renderBlockAdmission";
+import { api } from "../../convex/_generated/api";
+import type { Id } from "../../convex/_generated/dataModel";
 
 export interface RenderBlockInput {
   runId: string;
@@ -48,6 +55,38 @@ export const renderBlockTask = task({
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("render-block: NEXT_PUBLIC_CONVEX_URL not configured");
     const convex = new ConvexHttpClient(url);
+
+    // Authenticate the complete execution tuple before registry lookup,
+    // rehydration, large-worker billing, or block execution. The parent marks
+    // the run `running` before dispatching this child, including on retries.
+    const [run, channel] = await Promise.all([
+      convex.query(api.runs.getRun, { runId: payload.runId as Id<"runs"> }),
+      convex.query(api.channels.getChannel, {
+        channelId: payload.channelId as Id<"channels">,
+      }),
+    ]);
+    const admission = {
+      blockId: payload.blockId,
+      run,
+      channel,
+      runId: payload.runId,
+      ownerId: payload.ownerId,
+      channelId: payload.channelId,
+    };
+    assertRenderBlockAdmission(admission);
+    assertRenderBlockInvocation({
+      blockId: payload.blockId,
+      run: admission.run,
+      runId: payload.runId,
+      ownerId: payload.ownerId,
+      channelId: payload.channelId,
+      input: {
+        keyPrefix: payload.keyPrefix,
+        budgetUsd: payload.budgetUsd,
+        params: payload.params,
+        seedStore: payload.seedStore,
+      },
+    });
 
     const block = get(payload.blockId);
     if (!block) throw new Error(`render-block: unknown block "${payload.blockId}"`);
@@ -89,7 +128,23 @@ export const renderBlockTask = task({
       log: (msg: string, extra?: Record<string, unknown>) => logger.info(`[render-block] ${msg}`, extra),
     };
 
-    const patch = await block.run(ctx);
-    return { patch };
+    try {
+      const patch = await block.run(ctx);
+      return { patch };
+    } catch (error) {
+      const taskError = taskErrorForRetryPolicy(error);
+      const { classification } = taskError;
+      logger.error(`[render-block] ${payload.blockId} failed`, {
+        error: classification.message,
+        errorKind: classification.kind,
+        retryReason: classification.reason,
+        ...(classification.status !== undefined ? { status: classification.status } : {}),
+        ...(classification.code ? { code: classification.code } : {}),
+      });
+      // Trigger task retries are reserved for crashes/OOM and failures with a
+      // concrete transient signal. Re-running malformed inputs, provider 4xx,
+      // or a deterministic FFmpeg command just burns another large-2x attempt.
+      throw taskError.error;
+    }
   },
 });

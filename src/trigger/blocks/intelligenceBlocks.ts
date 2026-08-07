@@ -8,27 +8,39 @@
  *   metadata_optimized  → base metadata + title optimised against the databank
  *                         + competitor titles + power words, plus an
  *                         overlap-weighted view estimate. Replaces `metadata`.
- *   thumbnail_gen       → BANANA thumbnail (playbook or DNA-direct brief →
- *                         one-pass Nano Banana Pro → vision judge + retry),
- *                         real-scene overlay for keyframe channels, title_card
- *                         only as explicit operator choice. Produces
- *                         `thumbnailKey`; failure is LOUD (heal loop retries).
+ *   thumbnail_gen       → one Style-DNA/playbook route: text-free flash base →
+ *                         deterministic local typography → one production QA
+ *                         alarm. Generic cards are explicit nonpublishable
+ *                         draft previews only; failures never swap renderers.
  */
-import type { Block, StageContext } from "@/engine/types";
-import { ConvexHttpClient } from "convex/browser";
+import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { PRICE, thumbnailGenerationCost } from "@/engine/pricing";
+import { accountedModelUsageCost } from "@/engine/modelUsageCost";
+import {
+  assertThumbnailGate,
+  assertThumbnailStrategy,
+  qualityProfile,
+  thumbnailGatePassed,
+  type ThumbnailGateVerdict,
+} from "@/engine/qualityPolicy";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { makeRunTempDir, downloadTo, readBytes, writeBytes } from "@/lib/files";
 import { putObject, getObjectBytes } from "@/lib/storage";
-import { titleCard, thumbnailText, imageToJpeg, solidImage } from "@/lib/ffmpeg";
-import { generateFluxImage } from "@/lib/replicate";
-import { hasBanana } from "@/lib/banana";
+import {
+  beginThumbnailPaidWork,
+  openThumbnailCheckpoint,
+  saveThumbnailGenerationCheckpoint,
+  saveThumbnailQaCheckpoint,
+  thumbnailRequestHash,
+} from "@/lib/thumbnailCheckpoint";
+import { titleCard, imageToJpeg, solidImage } from "@/lib/ffmpeg";
+import { bananaCounters, hasBanana } from "@/lib/banana";
 import { craftMetadata } from "@/lib/metacraft";
-import { generateKeyframe } from "@/lib/higgsfield";
-import { resolveThumbnailStyle, styleFromDNA, shortTitleFallback } from "@/lib/thumbnailFormula";
-import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
+import { hasAnthropicKey } from "@/lib/anthropic";
 import { parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { hasVisionKey, visionLocal } from "@/lib/vision";
 import { agentJson } from "@/agents/mastra";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { loadPerformanceContext } from "@/lib/performance";
@@ -48,7 +60,6 @@ const seoDirectorSchema = z.object({
 const LOFI_LEAK = /lo-?fi|beats to (relax|study)|study music|chill beats/i;
 import { refreshNicheResearchCore } from "@/lib/nicheResearch";
 import { loadOutlierBank } from "@/lib/topicraft";
-import { publicUrl } from "@/lib/storage";
 import { join } from "node:path";
 
 /* ----------------------------- helpers --------------------------------- */
@@ -118,14 +129,22 @@ function resolveNiche(
 export const competitorResearch: Block = {
   id: "competitor_research",
   consumes: [],
-  produces: ["nicheReady"],
+  produces: [
+    "nicheReady",
+    "niche",
+    "nicheIntel",
+    "seoDatabank",
+    "competitors",
+    "thumbnailIdentity",
+    "persona",
+    "thumbnailer",
+  ],
   run: async (ctx) => {
     const channel = await loadChannel(ctx);
     const niche = resolveNiche(ctx, channel);
 
     if (!niche) {
-      ctx.log("competitor_research: no niche configured — skipping research");
-      return { nicheReady: false, niche: "" };
+      throw new Error("competitor_research: no niche configured — Golden research cannot be skipped");
     }
 
     // Ensure the databank is fresh (no-op if <7d old or no YouTube key).
@@ -266,6 +285,12 @@ export const metadataOptimized: Block = {
   ],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
+    const plannedTitle = typeof ctx.store["plannedTitle"] === "string"
+      ? (ctx.store["plannedTitle"] as string).trim()
+      : "";
+    if (plannedTitle.length > 100) {
+      throw new Error("metadata: claimed plan title exceeds YouTube's 100-character limit");
+    }
     const channelName = (ctx.store["channelName"] as string | undefined) ?? "this channel";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
     const persona = (ctx.store["persona"] as string | undefined) ?? "";
@@ -346,7 +371,7 @@ export const metadataOptimized: Block = {
       const tags = [topic.toLowerCase(), niche].filter(Boolean) as string[];
       const ve = await viewEstimate(tags);
       ctx.log(`metadata (degraded, no Gemini): "${title}"`);
-      return { title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
+      return { title: plannedTitle || title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
     }
 
     // Phase 7: bias titles toward past high-CTR/retention winners ("" until data).
@@ -389,7 +414,14 @@ export const metadataOptimized: Block = {
       ({ title, description, tags } = finishMetadata(ctx, { title, description, tags, channelName, nicheIntel }));
       const ve = await viewEstimate(tags);
       ctx.log(`metadata: METACRAFT [${m.frame}] click ${m.clickScore}/10 — "${title.slice(0, 60)}" est=${ve.estimatedViews} (${ve.estimatedViewsSource})`);
-      return { title, description, tags, pinnedComment: m.pinnedComment, titleAlternate: m.titleAlternate, ...ve };
+      return {
+        title: plannedTitle || title,
+        description,
+        tags,
+        pinnedComment: m.pinnedComment,
+        titleAlternate: m.titleAlternate,
+        ...ve,
+      };
     } catch (e) {
       ctx.log(`metadata: metacraft failed (${e instanceof Error ? e.message : e}) — legacy tournament fallback`);
     }
@@ -607,116 +639,38 @@ export const metadataOptimized: Block = {
     ctx.log(
       `metadata: title="${title.slice(0, 60)}…" (${tournament ? `tournament ${(tournament.score * 10).toFixed(0)}/10` : `score=${loop!.critique.score.toFixed(2)}, accepted=${loop!.accepted}`}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
     );
-    return { title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
+    return { title: plannedTitle || title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
   },
 };
 
 /* -------------------------- 3. thumbnail_gen ---------------------------- */
 
-interface ThumbConcept {
-  flux_prompt: string;
-  thumbnail_title: string;
-  text_color: string;
-  text_shadow: boolean;
-  visual_rationale: string;
-}
-interface ThumbIdentity {
-  colorPalette?: string[];
-  visualStyle?: string;
-  textPosition?: string;
-  avoid?: string[];
-}
-
-/** Base-image fallback when fal.ai is unavailable: gpt_image_2 → Replicate Flux. */
-async function fallbackBase(ctx: StageContext, basePrompt: string): Promise<string> {
-  try {
-    const r = await generateKeyframe({
-      model: "gpt_image_2",
-      prompt: basePrompt,
-      aspectRatio: "16:9",
-      resolution: "2k",
-    });
-    if (!r.url) throw new Error("gpt_image_2 returned no url");
-    ctx.log("thumbnail_gen: base via gpt_image_2 (Higgsfield)");
-    return r.url;
-  } catch (e) {
-    ctx.log(`thumbnail_gen: gpt_image_2 failed (${e instanceof Error ? e.message : e}) — Replicate Flux fallback`);
-    return generateFluxImage({ prompt: basePrompt, aspectRatio: "16:9" });
-  }
-}
-
-/** Legacy title_card fallback — guaranteed to yield a thumbnailKey. */
-async function titleCardFallback(ctx: StageContext): Promise<string> {
+/**
+ * Explicit draft preview only. This is deliberately free, visibly labelled,
+ * and marked nonpublishable; it is never an automatic recovery path.
+ */
+async function draftTitleCardPreview(ctx: StageContext): Promise<{ thumbnailKey: string; costUsd: 0 }> {
   const channelName = (ctx.store["channelName"] as string | undefined) ?? "Lofi";
   const topic = (ctx.store["topic"] as string | undefined) ?? "";
-  const baseUrl = (ctx.store["f1Url"] as string | undefined) ?? "";
   const tmp = await makeRunTempDir(ctx.runId);
   const outJpg = join(tmp, "thumbnail.jpg");
-  // ON-BRAND BG MEDIUM: an illustrative-only channel (comic) kept degrading to a
-  // PHOTOREAL fallback card that violated its own "illustrative only" playbook.
-  // Derive the card's art medium from the channel's style DNA / grammar so the
-  // fallback stays on-brand instead of always cinematic-photoreal.
-  const styleText = [
-    (ctx.store["styleGrammar"] as string | undefined) ?? "",
-    JSON.stringify((ctx.store["styleDNA"] as { visualStyle?: string; medium?: string } | null) ?? {}),
-    (ctx.store["family"] as string | undefined) ?? "",
-  ].join(" ").toLowerCase();
-  const medium =
-    /comic|graphic.?novel|illustrat|cartoon|anime|hand.?drawn|painterly|watercolou?r|ink/.test(styleText)
-      ? "illustrated graphic-novel"
-      : /whiteboard|chalk|sketch|doodle/.test(styleText)
-        ? "clean hand-drawn"
-        : "cinematic photographic";
-  let base: string;
-  if (baseUrl) {
-    base = await downloadTo(baseUrl, join(tmp, "thumb_base.png"));
-  } else {
-    // No keyframe (narrated archetypes) — synthesise a base: Flux, else solid.
-    // BAKED-TEXT GUARD: FLUX ignores "no text" often enough that a live card
-    // shipped with a misspelled pseudo-headline ("conceptal") baked into the
-    // bg. Vision-check the base; one regen, then a solid color (a clean solid
-    // beats gibberish on the most-visible surface).
-    try {
-      const gen = async (extra = "") =>
-        downloadTo(
-          await generateFluxImage({
-            prompt: `${medium} background image for a video about "${topic}", empty negative space, ABSOLUTELY NO text, NO words, NO letters, NO typography, NO signage${extra}`,
-            aspectRatio: "16:9",
-          }),
-          join(tmp, "thumb_base.png"),
-        );
-      base = await gen();
-      try {
-        const { visionLocal } = await import("@/lib/vision");
-        const { parseJsonLoose } = await import("@/lib/gemini");
-        const check = async (p2: string) =>
-          parseJsonLoose<{ hasText?: boolean }>(
-            await visionLocal({
-              prompt: 'Does this image contain ANY visible text, letters, words, numbers or typography (even faint/stylized)? Return STRICT JSON {"hasText": boolean}.',
-              imagePaths: [p2],
-              json: true,
-              maxTokens: 60,
-            }),
-          ).hasText === true;
-        if (await check(base)) {
-          base = await gen(", plain textureless surfaces only");
-          if (await check(base)) base = await solidImage(join(tmp, "thumb_base.jpg"));
-        }
-      } catch { /* vision unavailable — keep the base */ }
-    } catch {
-      base = await solidImage(join(tmp, "thumb_base.jpg"));
-    }
-  }
-  // Card carries the VIDEO's short title (SEO title trimmed to a card-sized
-  // clause) with the channel as subtitle — the raw topic string clipped at
-  // both edges on a live comic card, and QA rightly called it unmatched.
+  const base = await solidImage(join(tmp, "thumb_base.jpg"), 1_280, 720, "#172033");
   const seoTitle = ((ctx.store["title"] as string | undefined) ?? topic ?? channelName).split(/[:|]/)[0].trim();
   const cardTitle = seoTitle.length > 34 ? seoTitle.slice(0, 34).replace(/\s+\S*$/, "") : seoTitle;
-  await titleCard({ basePath: base, outJpg, title: cardTitle || channelName, subtitle: channelName });
+  await titleCard({
+    basePath: base,
+    outJpg,
+    title: cardTitle || channelName,
+    subtitle: `DRAFT PREVIEW — ${channelName}`,
+  });
   const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
   await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
-  await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "title_card_fallback", thumbnailTitle: channelName });
-  return thumbnailKey;
+  await recordAsset(ctx, "thumbnail", thumbnailKey, {
+    strategy: "draft_preview_placeholder",
+    publishable: false,
+    thumbnailTitle: channelName,
+  });
+  return { thumbnailKey, costUsd: 0 };
 }
 
 export const thumbnailGen: Block = {
@@ -724,19 +678,33 @@ export const thumbnailGen: Block = {
   consumes: ["title"],
   // `strategy` feeds the thumbnail learning loop (which path produced the
   // shipped thumbnail); every return path below must include it.
-  produces: ["thumbnailKey", "strategy"],
+  produces: ["thumbnailKey", "strategy", "thumbnailPublishable"],
   paid: true,
   run: async (ctx) => {
+    const quality = qualityProfile(ctx.params["qualityProfile"]);
     const title = str(ctx, "title");
-    const persona = (ctx.store["persona"] as string | undefined) ?? "";
-    const thumbId = (ctx.store["thumbnailIdentity"] as ThumbIdentity | null) ?? null;
-    const styleGuide = (ctx.store["nicheIntel"] as { thumbnailStyleGuide?: unknown } | null)
-      ?.thumbnailStyleGuide;
     const thumbnailer =
       (ctx.store["thumbnailer"] as string | undefined) ??
       (ctx.params["thumbnailer"] as string | undefined) ??
       "banana";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
+    const countersBefore = { ...bananaCounters };
+    let checkpointGenerationCostUsd = 0;
+    let checkpointQaCostUsd = 0;
+    const observedConceptCost = (): number =>
+      accountedModelUsageCost(ctx, ["text"], PRICE.thumbnailConceptUsd);
+    const observedImageCost = (): number =>
+      ctx.imageUsageAccounting?.().costUsd ??
+      thumbnailGenerationCost(countersBefore, bananaCounters, 0);
+    const observedQaCost = (): number =>
+      accountedModelUsageCost(ctx, ["vision"], PRICE.visionGraderUsd);
+    const thumbnailCost = (extraCostUsd = 0): number =>
+      Math.max(
+        checkpointGenerationCostUsd,
+        observedImageCost() + observedConceptCost(),
+      ) + Math.max(checkpointQaCostUsd, observedQaCost()) + Math.max(0, extraCostUsd);
+
+    try {
 
     // CHANNEL GROUNDING that previously never reached generation:
     //  - styleDNA.thumbnail — the research-distilled per-channel thumbnail spec
@@ -779,24 +747,17 @@ export const thumbnailGen: Block = {
     const rulesClause = thumbnailRules.length
       ? `Niche thumbnail rules (scraped from this niche's top performers): ${thumbnailRules.join("; ")}.\n`
       : "";
-    // Self-heal guidance: when the healer re-runs this block over a QA defect,
-    // the defect text steers the regeneration instead of rolling the same dice.
-    const healHints = ((ctx.store["healHints"] as Record<string, string[]> | undefined)?.["thumbnail_gen"] ?? []);
-    const healClause = healHints.length
-      ? `PREVIOUS ATTEMPT WAS REJECTED BY QA FOR: ${healHints.join("; ")} — the new design MUST fix this.\n`
-      : "";
-
     /**
      * REFERENCE + MOBILE QA — the missing half of validation: (1) downscale the
      * candidate to real browse-strip size (~168px) and check legibility there,
      * (2) judge it SIDE-BY-SIDE against the scraped top competitor thumbnails.
-     * Returns null when it can't run (no key/refs) — never blocks on infra.
+     * A null verdict is tolerated only by an explicitly draft-quality run.
      */
     const referenceMobileQA = async (
       tmp: string,
       outJpg: string,
-    ): Promise<{ pass: boolean; reason: string } | null> => {
-      if (!hasGeminiKey()) return null;
+    ): Promise<ThumbnailGateVerdict | null> => {
+      if (!hasVisionKey()) return null;
       try {
         const mobileJpg = join(tmp, "thumb_mobile.jpg");
         await imageToJpeg(outJpg, mobileJpg, 168, 94);
@@ -812,235 +773,255 @@ export const thumbnailGen: Block = {
             (refPaths.length
               ? `Images 2-${refPaths.length + 1} are thumbnails of the TOP-PERFORMING videos in the same niche (the bar to beat). `
               : "") +
-            `Video title: "${title}"${niche ? `, niche: ${niche}` : ""}. Judge the candidate:\n` +
-            `(1) Is every word of overlay text still easily readable at THIS size?\n` +
-            `(2) Does it have a single clear focal subject that reads instantly at this size?\n` +
+            `Video title: "${title}"${niche ? `, niche: ${niche}` : ""}. ${dnaSpecClause}${rulesClause}` +
+            `Judge the candidate against the production gate:\n` +
+            `(1) textOk: every visible word is correctly spelled and readable at THIS size.\n` +
+            `(2) faceClear: any intended face is clear and undistorted (true when no face is intended).\n` +
             (refPaths.length
-              ? `(3) Placed next to the reference thumbnails in a browse feed, would it hold its own or look amateur? Rate competitiveness 1-10.\n`
-              : `(3) Rate overall click-appeal 1-10.\n`) +
-            `Return ONLY JSON {"legible":true|false,"focal":true|false,"score":1-10,"reason":"..."}.`,
+              ? `(3) Placed next to the references, rate punch, styleMatch, and storyMatch 1-10.\n`
+              : `(3) Rate punch, styleMatch, and storyMatch 1-10.\n`) +
+            `(4) uiClean: no broken glyphs, watermarks, accidental UI, clipping, or unreadable clutter.\n` +
+            `Return ONLY JSON {"textOk":boolean,"faceClear":boolean,"punch":1-10,"styleMatch":1-10,` +
+            `"storyMatch":1-10,"uiClean":boolean,"reason":"..."}.`,
           imagePaths: [mobileJpg, ...refPaths],
           json: true,
           maxTokens: 250,
         });
-        const v = parseJsonLoose<{ legible?: boolean; focal?: boolean; score?: number; reason?: string }>(raw);
-        const pass = v.legible !== false && v.focal !== false && (typeof v.score !== "number" || v.score >= 6);
-        return { pass, reason: `${v.reason ?? ""} (score ${v.score ?? "?"})` };
+        const v = parseJsonLoose<Partial<ThumbnailGateVerdict>>(raw);
+        return {
+          textOk: v.textOk === true,
+          faceClear: v.faceClear === true,
+          punch: Number(v.punch ?? 0),
+          styleMatch: Number(v.styleMatch ?? 0),
+          storyMatch: Number(v.storyMatch ?? 0),
+          uiClean: v.uiClean === true,
+          reason: String(v.reason ?? "judge omitted its reason"),
+        };
       } catch (e) {
         ctx.log(`thumbnail_gen: reference/mobile QA errored (skipping): ${e instanceof Error ? e.message : e}`);
         return null;
       }
     };
 
-    // Resolve the channel's locked thumbnail STYLE (brand consistency). Source:
-    // explicit param → channel.identity.thumbnailStyle → archetype template
-    // letter (A/B/C/D/E) → generic default. Used by the real-scene path below.
     const channelDoc = await loadChannel(ctx);
-    const explicitStyleKey =
-      (ctx.params["thumbnailStyle"] as string | undefined) ??
-      (channelDoc?.identity as { thumbnailStyle?: string } | undefined)?.thumbnailStyle;
-    const styleKey =
-      explicitStyleKey ??
-      (channelDoc as { template?: string } | null)?.template ??
-      undefined;
-    let style = resolveThumbnailStyle(styleKey);
-    // STYLE DNA WINS over the template-letter preset: every template-A channel
-    // used to inherit the stoic marble bust regardless of what it was about.
-    // An explicit per-channel thumbnailStyle still overrides everything.
-    // (Shared styleFromDNA — the SAME source the week-ahead planner uses.)
-    if (!explicitStyleKey) {
-      const dnaStyle = styleFromDNA(dna);
-      if (dnaStyle) {
-        style = dnaStyle;
-        ctx.log(`thumbnail_gen: style derived from Style DNA (template preset "${styleKey ?? "?"}" overridden)`);
-      }
-    }
-
-    // PLAYBOOK PATH — the Thumbnail Lab's distilled patterns (evidence-derived
-    // rules from VERIFIED high-view references + Remotion typography). Patterns
-    // rotate per run for anti-repetition; the comparative reference QA still
-    // gates the result. Falls through to the legacy paths on any failure.
-    const playbook = (channelDoc as { thumbnailPlaybook?: import("@/lib/thumbnailLab").ThumbnailPlaybook } | null)
-      ?.thumbnailPlaybook;
-    let rejectedPlaybookJpg: string | null = null;
-    if (playbook?.patterns?.length && hasBanana() && thumbnailer !== "title_card") {
-      try {
-        const { renderCandidate } = await import("@/lib/thumbnailLab");
-        const tmp = await makeRunTempDir(ctx.runId);
-        // Deterministic per-run rotation (no Math.random in resumable runs).
-        // patternBias (architect knob): rotate within the favored subset.
-        const bias = (ctx.params["patternBias"] as string[] | undefined)?.filter((n) =>
-          playbook.patterns.some((p) => p.name === n),
-        );
-        const pool = bias?.length ? playbook.patterns.filter((p) => bias.includes(p.name)) : playbook.patterns;
-        const idx = [...ctx.runId].reduce((s, c) => s + c.charCodeAt(0), 0) % pool.length;
-        const pattern = pool[idx];
-        const outJpg = join(tmp, "thumbnail.jpg");
-        const scriptHint = String(ctx.store["narrationText"] ?? "").slice(0, 500);
-        // Architect's per-channel energy override (param beats playbook tier).
-        const energyOverride = ctx.params["thumbEnergy"] as "spectacle" | "bold" | "cozy_pop" | undefined;
-        const pb = energyOverride ? { ...playbook, energy: energyOverride } : playbook;
-        const dnaSubject = (ctx.store["styleDNA"] as { thumbnail?: { subject?: string } } | null)?.thumbnail?.subject;
-        await renderCandidate({
-          pattern, title, scriptHint, playbook: pb, outJpg, tmpDir: tmp, idx, log: ctx.log,
-          ...(dnaSubject ? { sceneMandate: dnaSubject } : {}),
-        });
-        const refQA = await referenceMobileQA(tmp, outJpg);
-        if (refQA && !refQA.pass) {
-          // Keep the PAID render as a last-resort fallback — the old path threw
-          // it away, spent 2 more Pro gens on the DNA path, and on a double
-          // gate-fail shipped NOTHING (then the heal loop re-bought it all).
-          rejectedPlaybookJpg = outJpg;
-          ctx.log(`thumbnail_gen: playbook candidate rejected (${refQA.reason}) — falling through`);
-        } else {
-          const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-          await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
-          await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook", pattern: pattern.name, thumbnailTitle: title });
-          ctx.log(`thumbnail_gen: PLAYBOOK thumbnail ✓ (pattern "${pattern.name}")${refQA ? ` — ref QA: ${refQA.reason}` : ""}`);
-          return { thumbnailKey, strategy: "playbook" };
-        }
-      } catch (e) {
-        ctx.log(`thumbnail_gen: playbook path failed (${e instanceof Error ? e.message : e}) — falling through`);
-      }
-    }
-
-    // REAL-SCENE PATH (music_loop/lofi): the run's own keyframe still IS the
-    // most on-brand thumbnail base — it is literally the video. Use it (free,
-    // perfectly DNA-grounded) with a styled contrasty title overlay; only fall
-    // through to generated bases if QA rejects the composite.
-    const sceneStillKey = ctx.store["f1Key"] as string | undefined;
-    if (sceneStillKey && thumbnailer !== "title_card") {
-      try {
-        const tmp = await makeRunTempDir(ctx.runId);
-        const base = await writeBytes(join(tmp, "scene_base.png"), await getObjectBytes(sceneStillKey));
-        let ttl = shortTitleFallback(title);
-        if (hasAnthropicKey()) {
-          try {
-            const c = await claudeJson<{ thumbnail_title?: string }>({
-              maxTokens: 200,
-              system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
-              prompt:
-                `The thumbnail base is the video's own scene (a ${style.label} still). Video title: "${title}"` +
-                (niche ? ` (niche: ${niche})` : "") +
-                `.\n${dnaSpecClause}${rulesClause}` +
-                `Write the overlay text: 2-4 punchy words, high curiosity, storybook-warm but BOLD ` +
-                `(it must pop against a cozy illustrated scene). Return JSON {"thumbnail_title": string}.`,
-            });
-            if (c.thumbnail_title?.trim()) ttl = c.thumbnail_title.trim();
-          } catch { /* fallback title below */ }
-        }
-        const outJpg = join(tmp, "thumbnail.jpg");
-        await thumbnailText({
-          basePath: base,
-          outJpg,
-          title: ttl,
-          subtitle: (ctx.store["channelName"] as string | undefined) ?? "",
-          font: style.title.font,
-          uppercase: style.title.uppercase,
-          textShadow: true,
-        });
-        const refQA = await referenceMobileQA(tmp, outJpg);
-        if (refQA && !refQA.pass) {
-          ctx.log(`thumbnail_gen: real-scene composite rejected (${refQA.reason}) — generating a fresh base`);
-        } else {
-          const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-          await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
-          await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "scene_still", thumbnailTitle: ttl });
-          ctx.log(`thumbnail_gen: real-scene thumbnail ✓ ("${ttl}")${refQA ? ` — ref QA: ${refQA.reason}` : ""}`);
-          return { thumbnailKey, strategy: "scene_still" };
-        }
-      } catch (e) {
-        ctx.log(`thumbnail_gen: real-scene path failed (${e instanceof Error ? e.message : e}) — falling through`);
-      }
-    }
-
-    // Operator explicitly selected the deterministic title card.
+    // The generic card is an explicit UI preview, never a provider/gate
+    // fallback. Production stops before creating or uploading it.
     if (thumbnailer === "title_card") {
-      const thumbnailKey = await titleCardFallback(ctx);
-      return { thumbnailKey, strategy: "title_card_fallback" };
+      assertThumbnailStrategy(quality, "draft_preview_placeholder");
+      const preview = await draftTitleCardPreview(ctx);
+      return {
+        thumbnailKey: preview.thumbnailKey,
+        strategy: "draft_preview_placeholder",
+        thumbnailPublishable: false,
+        [COST_PATCH_KEY]: thumbnailCost(preview.costUsd),
+      };
     }
 
-    // THE ENGINE (no playbook yet): DNA-direct Nano Banana Pro brief - the
-    // same one-pass design-native render the playbook path uses. Judged with
-    // one feedback retry; failure is LOUD (block heal retries - the legacy
-    // ideogram/claude_flux/brush_swash machine is gone).
-    const { buildThumbBrief, bananaThumbnail } = await import("@/lib/banana");
-    let bananaLines: { text: string; payoff: boolean }[] = [];
-    try {
-      const c = await claudeJson<{ lines?: { text?: string; payoff?: boolean }[] }>({
-        maxTokens: 300,
-        system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
-        prompt:
-          `Headline for a YouTube thumbnail. Video: "${title}"${niche ? ` (niche ${niche})` : ""}. ` +
-          `2-3 lines, 1-3 punchy words each, <=5 words total, NOT restating the title, real English hook ` +
-          `words, never meta-words. Mark exactly ONE line as the payoff. ` +
-          `Return STRICT JSON {"lines":[{"text":string,"payoff":boolean}]}.`,
+    const { buildStyleDnaPlaybook, renderCandidate } = await import("@/lib/thumbnailLab");
+    let playbook = (channelDoc as {
+      thumbnailPlaybook?: import("@/lib/thumbnailLab").ThumbnailPlaybook;
+    } | null)?.thumbnailPlaybook;
+    let strategy = "playbook";
+
+    // No separate "DNA-direct" renderer: missing playbooks are derived from the
+    // same Style-DNA foundation and travel through the exact same renderer.
+    if (!playbook?.patterns?.length) {
+      const fullDna = (
+        (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null | undefined) ??
+        (channelDoc as { styleDNA?: import("@/engine/creative/types").StyleDNA } | null)?.styleDNA ??
+        null
+      );
+      const familyRaw = String(
+        ctx.store["family"] ?? (channelDoc as { family?: string } | null)?.family ?? "",
+      );
+      const families = new Set([
+        "narrated_stock", "cinematic", "music_loop", "sleep", "shorts", "whiteboard", "comic",
+      ]);
+      if (
+        !fullDna?.recurringSubject?.trim() ||
+        !fullDna.thumbnail?.subject?.trim() ||
+        !Array.isArray(fullDna.thumbnail.palette) ||
+        !families.has(familyRaw)
+      ) {
+        throw new Error(
+          "thumbnail_gen: production thumbnail readiness missing (need Style DNA + family or a stored playbook)",
+        );
+      }
+      playbook = buildStyleDnaPlaybook({
+        dna: fullDna,
+        family: familyRaw as import("@/engine/families").FamilyKey,
+        channelName: String(ctx.store["channelName"] ?? channelDoc?.name ?? "channel"),
       });
-      bananaLines = (c.lines ?? [])
-        .filter((l) => l.text && l.text.trim())
-        .map((l) => ({ text: String(l.text).trim(), payoff: l.payoff === true }));
-    } catch { /* hook fallback below */ }
-    if (!bananaLines.length) {
-      const hook = title.split(/[\s:—-]+/).filter((w) => w.length > 2).slice(0, 2);
-      bananaLines = [{ text: hook[0] ?? "WATCH", payoff: false }, { text: hook[1] ?? "THIS", payoff: true }];
+      strategy = "style_dna_foundation";
+      ctx.log("thumbnail_gen: built the missing playbook from the channel's Style DNA");
     }
-    const btmp = await makeRunTempDir(ctx.runId);
-    const bOut = join(btmp, "thumbnail.jpg");
-    const bScene = dnaThumb?.subject || dna?.recurringSubject
-      ? `${dnaThumb?.subject ?? dna?.recurringSubject} - staged to literally dramatize "${title}".`
-      : `a dramatic scene that literally enacts "${title}"${niche ? ` for a ${niche} channel` : ""}.`;
-    try {
-      const { verdict } = await bananaThumbnail({
-        brief: buildThumbBrief({
-          channelName: String(ctx.store["channelName"] ?? "channel"),
-          imageStyle: dna?.colorGrade ?? undefined,
-          palette: dnaThumb?.palette ?? dna?.palette,
-          scene: bScene,
-          lines: bananaLines,
-          badge: String(ctx.store["channelName"] ?? ""),
-        }),
-        outJpg: bOut,
-        expectWords: bananaLines.map((w) => w.text),
-        imageStyle: dna?.colorGrade ?? undefined,
-        // The channel's own thumbnail text-rule → the judge grades the brand's
-        // bar (restrained/illustrative channels stop getting rejected for
-        // lacking clickbait punch).
-        styleRubric: dnaThumb?.textRule ?? undefined,
+
+    const bias = (ctx.params["patternBias"] as string[] | undefined)?.filter((name) =>
+      playbook.patterns.some((pattern) => pattern.name === name),
+    );
+    const pool = bias?.length
+      ? playbook.patterns.filter((pattern) => bias.includes(pattern.name))
+      : playbook.patterns;
+    const idx = [...ctx.runId].reduce((sum, char) => sum + char.charCodeAt(0), 0) % pool.length;
+    const pattern = pool[idx];
+    const energyOverride = ctx.params["thumbEnergy"] as "spectacle" | "bold" | "cozy_pop" | undefined;
+    const effectivePlaybook = energyOverride ? { ...playbook, energy: energyOverride } : playbook;
+
+    // A raw video keyframe is NOT automatically safe thumbnail art. Only a
+    // future producer carrying the explicit text-free + safe-zone contract may
+    // reuse it; current f1 frames therefore generate a dedicated cheap base.
+    const sceneStillKey = ctx.store["f1Key"] as string | undefined;
+    const provenance = ctx.store["f1ThumbnailBaseProvenance"];
+    const { isThumbnailBaseProvenance } = await import("@/lib/thumbnailRenderer");
+    const verifiedSceneBase = Boolean(sceneStillKey && isThumbnailBaseProvenance(provenance));
+    if (sceneStillKey && !verifiedSceneBase) {
+      ctx.log("thumbnail_gen: f1 reuse disabled (missing text-free + safe-zone provenance)");
+    }
+
+    const scriptHint = String(ctx.store["narrationText"] ?? "").slice(0, 500);
+    const requestHash = thumbnailRequestHash({
+      contract: "thumbnail-gen-checkpoint-v1",
+      title,
+      scriptHint,
+      sceneMandate: dnaThumb?.subject,
+      pattern,
+      playbook: effectivePlaybook,
+      patternIndex: idx,
+      verifiedSceneBase: verifiedSceneBase ? { sceneStillKey, provenance } : null,
+      providerRoute: {
+        imageDisableGemini: process.env.IMAGE_DISABLE_GEMINI ?? "",
+        imageProviders: process.env.IMAGE_PROVIDERS ?? "",
+        bananaForceModel: process.env.BANANA_FORCE_MODEL ?? "",
+        falFlashModel: process.env.FAL_IMAGE_MODEL_FLASH ?? "",
+      },
+    });
+    const tmp = await makeRunTempDir(ctx.runId, `thumbnail-${requestHash.slice(0, 20)}`);
+    const outJpg = join(tmp, "thumbnail.jpg");
+    let checkpoint = await openThumbnailCheckpoint({
+      checkpointRoot: `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,
+      requestHash,
+      localImagePath: outJpg,
+      beforeClaim: () => {
+        if (!hasGeminiKey()) {
+          throw new Error("thumbnail_gen: no configured concept provider");
+        }
+        if (!hasBanana()) {
+          throw new Error("thumbnail_gen: no configured text-free image provider");
+        }
+        if (quality === "production" && !hasVisionKey()) {
+          throw new Error("thumbnail_gen: no configured production QA provider");
+        }
+      },
+    });
+
+    if (checkpoint.manifest) {
+      checkpointGenerationCostUsd = checkpoint.manifest.generationCostUsd;
+      ctx.log(
+        `thumbnail_gen: reused ${checkpoint.source} paid candidate checkpoint ${requestHash.slice(0, 12)}`,
+      );
+    } else {
+      let baseArt: import("@/lib/thumbnailRenderer").ThumbnailBaseArtifact | undefined;
+      if (sceneStillKey && isThumbnailBaseProvenance(provenance)) {
+        baseArt = {
+          path: await writeBytes(
+            join(tmp, "verified-scene-base.jpg"),
+            await getObjectBytes(sceneStillKey),
+          ),
+          provenance,
+        };
+      }
+      checkpoint = await beginThumbnailPaidWork(checkpoint);
+      await renderCandidate({
+        pattern,
         title,
+        scriptHint,
+        playbook: effectivePlaybook,
+        outJpg,
+        tmpDir: tmp,
+        idx,
         log: ctx.log,
+        ...(dnaThumb?.subject ? { sceneMandate: dnaThumb.subject } : {}),
+        ...(baseArt ? { baseArt } : {}),
       });
-      const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-      await putObject(thumbnailKey, await readBytes(bOut), { contentType: "image/jpeg" });
-      await recordAsset(ctx, "thumbnail", thumbnailKey, {
-        strategy: "banana_dna",
-        punch: verdict.punch,
-        thumbnailTitle: bananaLines.map((l) => l.text).join(" "),
+      // Persist the whole authoritative generation spend: the exact concept
+      // token usage plus the actual image counter delta. This local manifest is
+      // written before R2, so a storage retry on this worker cannot re-purchase.
+      checkpointGenerationCostUsd = observedImageCost() + observedConceptCost();
+      checkpoint = await saveThumbnailGenerationCheckpoint(
+        checkpoint,
+        checkpointGenerationCostUsd,
+      );
+    }
+
+    // One post-render alarm. It can block publishing; it never starts another
+    // paid renderer or swaps in a generic card.
+    const qaRequestHash = thumbnailRequestHash({
+      contract: "thumbnail-mobile-reference-qa-v2-exact-accounting",
+      candidateRequestHash: requestHash,
+      quality,
+      title,
+      niche,
+      dnaSpecClause,
+      rulesClause,
+      referenceThumbs,
+    });
+    let refQA: ThumbnailGateVerdict | null;
+    const cachedQa = checkpoint.manifest?.qa;
+    if (cachedQa?.completed && cachedQa.requestHash === qaRequestHash) {
+      checkpointQaCostUsd = cachedQa.costUsd;
+      if (cachedQa.verdict === null) {
+        refQA = null;
+      } else {
+        const verdict = cachedQa.verdict as Partial<ThumbnailGateVerdict> | undefined;
+        if (
+          !verdict ||
+          typeof verdict.textOk !== "boolean" ||
+          typeof verdict.faceClear !== "boolean" ||
+          !Number.isFinite(verdict.punch) ||
+          !Number.isFinite(verdict.styleMatch) ||
+          !Number.isFinite(verdict.storyMatch) ||
+          typeof verdict.uiClean !== "boolean" ||
+          typeof verdict.reason !== "string"
+        ) {
+          throw new Error("thumbnail_gen: cached QA verdict is invalid");
+        }
+        refQA = verdict as ThumbnailGateVerdict;
+      }
+      ctx.log("thumbnail_gen: reused checkpointed mobile/reference QA verdict");
+    } else {
+      refQA = await referenceMobileQA(tmp, outJpg);
+      checkpointQaCostUsd = observedQaCost();
+      checkpoint = await saveThumbnailQaCheckpoint(checkpoint, {
+        requestHash: qaRequestHash,
+        verdict: refQA,
+        costUsd: checkpointQaCostUsd,
       });
-      ctx.log(`thumbnail_gen: BANANA thumbnail OK (DNA-direct, punch ${verdict.punch ?? "?"}/10)`);
-      return { thumbnailKey, strategy: "banana_dna" };
-    } catch (e) {
-      // Ship the best PAID render instead of nothing: the rejected playbook
-      // candidate beats a missing thumbnail (which fails QA and triggers the
-      // heal loop to re-buy every generation ×3).
-      if (rejectedPlaybookJpg) {
-        ctx.log(`thumbnail_gen: DNA-direct failed (${e instanceof Error ? e.message : e}) — shipping the below-bar playbook candidate instead of nothing`);
-        const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-        await putObject(thumbnailKey, await readBytes(rejectedPlaybookJpg), { contentType: "image/jpeg" });
-        await recordAsset(ctx, "thumbnail", thumbnailKey, { strategy: "playbook_belowbar", thumbnailTitle: title });
-        return { thumbnailKey, strategy: "playbook_belowbar" };
-      }
-      // NO-GOOGLE ROUTE DEGRADE: FLUX typography is measurably weaker than the
-      // banana engine at design-native text — when the fal route is active and
-      // the judge (rightly) rejects both attempts, a deterministic title card
-      // beats killing a run that already carries the full render spend
-      // (observed live: a $1.22 whiteboard run died here). Banana mode keeps
-      // the strict loud failure — its craft bar is the whole point.
-      if (process.env.IMAGE_DISABLE_GEMINI === "1" && /failed the gate/i.test(e instanceof Error ? e.message : String(e))) {
-        ctx.log(`thumbnail_gen: fal-route judge rejection (${e instanceof Error ? e.message.slice(0, 120) : e}) — degrading to the deterministic title card`);
-        const thumbnailKey = await titleCardFallback(ctx);
-        return { thumbnailKey, strategy: "title_card_fallback" };
-      }
-      throw e;
+    }
+    assertThumbnailGate(quality, refQA, `${strategy} candidate`);
+    const passed = refQA !== null && thumbnailGatePassed(refQA);
+    const publishable = quality === "production" ? true : passed;
+    const finalStrategy = publishable ? strategy : "playbook_belowbar";
+    const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
+    await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
+    await recordAsset(ctx, "thumbnail", thumbnailKey, {
+      strategy: finalStrategy,
+      pattern: pattern.name,
+      publishable,
+      thumbnailTitle: title,
+    });
+    ctx.log(
+      `thumbnail_gen: ${finalStrategy} thumbnail rendered${refQA ? ` — ref QA: ${refQA.reason}` : " (draft, unverified)"}`,
+    );
+    return {
+      thumbnailKey,
+      strategy: finalStrategy,
+      thumbnailPublishable: publishable,
+      [COST_PATCH_KEY]: thumbnailCost(),
+    };
+    } catch (error) {
+      const failure = error instanceof Error ? error : new Error(String(error));
+      Object.assign(failure, { observedCostUsd: thumbnailCost() });
+      throw failure;
     }
   },
 };

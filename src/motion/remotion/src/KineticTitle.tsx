@@ -21,7 +21,6 @@ export const KineticTitle: React.FC<KineticTitleProps> = ({ kicker, lines, sub }
   const line = interpolate(frame, [10, 26], [0, 640], { extrapolateRight: "clamp", extrapolateLeft: "clamp" });
   const subIn = spring({ frame: frame - 70, fps, config: { damping: 200 } });
   const fade = interpolate(frame, [0, 12, durationInFrames - 14, durationInFrames], [0, 1, 1, 0]);
-  let wd = 16;
   return (
     <AbsoluteFill style={{ fontFamily, background: "radial-gradient(130% 130% at 50% 35%, #0c1626 0%, #060a12 60%, #04060c 100%)", justifyContent: "center", alignItems: "center", textAlign: "center" }}>
       <AbsoluteFill style={{ opacity: 0.4, backgroundImage: "linear-gradient(#13243a 1px, transparent 1px), linear-gradient(90deg, #13243a 1px, transparent 1px)", backgroundSize: "64px 64px", maskImage: "radial-gradient(120% 90% at 50% 45%, black 25%, transparent 78%)" as React.CSSProperties["maskImage"] }} />
@@ -30,7 +29,10 @@ export const KineticTitle: React.FC<KineticTitleProps> = ({ kicker, lines, sub }
         <div style={{ width: line, height: 4, borderRadius: 2, background: "#e8b23a", marginBottom: 30, boxShadow: "0 0 18px #e8b23a99" }} />
         {lines.map((ln, li) => (
           <div key={li} style={{ lineHeight: 0.98 }}>
-            {ln.split(" ").map((w, wi) => { wd += 4; return <Word key={wi} word={w} delay={wd} size={li === 0 ? 168 : 168} color="#eef4fa" />; })}
+            {ln.split(" ").map((w, wi) => {
+              const precedingWords = lines.slice(0, li).reduce((total, lineText) => total + lineText.split(" ").length, 0);
+              return <Word key={wi} word={w} delay={16 + (precedingWords + wi + 1) * 4} size={168} color="#eef4fa" />;
+            })}
           </div>
         ))}
         <div style={{ opacity: subIn, transform: `translateY(${interpolate(subIn, [0, 1], [30, 0])}px)`, fontSize: 36, fontWeight: 600, letterSpacing: "0.22em", color: "#9fb0c0", marginTop: 30 }}>{sub}</div>

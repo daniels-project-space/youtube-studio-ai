@@ -48,7 +48,15 @@ import type { QuoteOverlaySpec } from "@/lib/ffmpeg";
   assert.equal(pi.closingLine, "Stay curious.", "script.closingLine → closingLine");
   assert.equal(pi.channelName, "Investory", "channelName passthrough");
   assert.equal(pi.cardBgSrc, "brand/avatar.png", "channelAvatarKey → cardBgSrc");
-  assert.equal(pi.overlays?.length, 2, "quoteOverlays + insertOverlays → 2 Overlay[]");
+  const overlays = pi.overlays ?? [];
+  assert.equal(overlays.length, 3, "quote + insert + unblocked caption → 3 Overlay[]");
+  assert.equal(overlays.filter((overlay) => overlay.kind === "quote").length, 1, "quote overlay preserved");
+  assert.equal(overlays.filter((overlay) => overlay.kind === "insert").length, 1, "insert overlay preserved");
+  assert.equal(
+    overlays.filter((overlay) => overlay.kind === "caption").length,
+    1,
+    "caption mapping stays active while the chapter-window caption is suppressed",
+  );
   console.log("STORE→PLANINPUT PASS: every god-block store key mapped");
 }
 

@@ -12,6 +12,11 @@ import { nichePreset } from "./golden";
 import { registerAllBlocks } from "./blocks";
 import { validatePipeline } from "./validate";
 import type { PipelineEntry } from "./types";
+import {
+  compilePipeline,
+  completePipelineForPolicy,
+  type PipelineCompilation,
+} from "./pipelineCompiler";
 
 export interface DesignOptions {
   family: FamilyKey;
@@ -22,6 +27,8 @@ export interface DesignOptions {
   footageTheme?: string; // narrated-stock visual theme, e.g. "nature"
   voiceFx?: string; // narration filter, e.g. "radio"
   publishMode?: string; // draft | scheduled | public
+  /** Set only at an authenticated operator boundary after explicit confirmation. */
+  approvedForPublish?: boolean;
   seriesTitle?: string; // ordered series mode, e.g. "7 Days of Stoic Calm"
   seriesCount?: number; // total episodes in the series (0/undefined = open-ended)
   /** Advanced editor: per-block param overrides, keyed by block id. */
@@ -30,7 +37,6 @@ export interface DesignOptions {
     quotes?: boolean;
     captions?: boolean;
     chapters?: boolean;
-    refine?: boolean;
     notify?: boolean;
     crosspost?: boolean;
     /** Auto-spin a 9:16 Short from each long-form (private-first). Default OFF. */
@@ -44,12 +50,12 @@ export interface DesignResult {
   pipeline: PipelineEntry[];
   available: boolean; // false → family's visual engine not built yet (save as draft)
   warnings: string[];
+  compilation?: PipelineCompilation;
 }
 
 const OPTIONAL_BLOCKS = new Set([
   "quote_overlays",
   "captions",
-  "qa_refine",
   "notify",
   "crosspost",
 ]);
@@ -64,7 +70,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
 
   const t = opts.toggles ?? {};
   const warnings: string[] = [];
-  // Per-niche golden preset auto-populates length + script style on channel
+  // Per-niche reference preset auto-populates length + script style on channel
   // inception when the operator/AI didn't specify them (so every niche launches
   // with its research-tuned defaults — covers wizard, API, and autopilot creation).
   const preset = nichePreset(opts.nicheKey);
@@ -72,11 +78,10 @@ export function designPipeline(opts: DesignOptions): DesignResult {
 
   let pipeline: PipelineEntry[] = base.pipeline
     .filter((e) => {
-      // honor optional-module toggles (default ON for quotes/captions/refine/notify
+      // honor optional-module toggles (default ON for quotes/captions/notify
       // when the base archetype includes them; crosspost default OFF).
       if (e.block === "quote_overlays" && t.quotes === false) return false;
       if (e.block === "captions" && t.captions === false) return false;
-      if (e.block === "qa_refine" && t.refine === false) return false;
       if (e.block === "notify" && t.notify === false) return false;
       return true;
     })
@@ -113,7 +118,15 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         const seed = subcategoryTags(opts.nicheKey, opts.subcategory);
         if (seed.length) params.baseTags = seed;
       }
-      if (e.block === "upload_draft" && opts.publishMode) params.publishMode = opts.publishMode;
+      if (e.block === "upload_draft" && opts.publishMode) {
+        params.publishMode = opts.publishMode;
+        if (
+          (opts.publishMode === "public" || opts.publishMode === "scheduled") &&
+          opts.approvedForPublish === true
+        ) {
+          params.approvedForPublish = true;
+        }
+      }
       // MUSIC-LOOP LENGTH actually honored: the wizard length used to reach only
       // script_gen/length_check (narrated-only blocks), so every lofi channel
       // shipped the archetype's hardcoded 3-min test render.
@@ -123,6 +136,9 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       // Music channels: the audio IS the product — score it (audiobox advisory).
       if (e.block === "qa_visual" && opts.family === "music_loop" && params.audioQa === undefined) {
         params.audioQa = true;
+      }
+      if (e.block === "qa_visual" && params.qaProfile === undefined) {
+        params.qaProfile = "production";
       }
       if (e.block === "music" && opts.family === "music_loop") {
         // V5 = highest-quality Suno tier; trackCount sizes the crossfaded mix to
@@ -143,14 +159,23 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       return { block: e.block, params: Object.keys(params).length ? params : undefined };
     });
 
-  // GENERATED-VISUALS families (whiteboard, cinematic): the world cannot come
-  // from a stock library — swap stock_footage for gen_footage IN PLACE (same
-  // footageClips contract, timeline unchanged). entity_imagery (photoreal
-  // portraits) is dropped too: real photographs break a drawn/painted world.
+  // GENERATED-VISUALS families use the complete authored-shot chain. Each shot
+  // gets a pinned keyframe render, required asset selection, pinned I2V render,
+  // and required shot QA before timeline assembly. Entity photos are excluded:
+  // they would bypass the continuity ledger and exact editor timecodes.
   if (fam.visualEngine === "gen_footage" || fam.visualEngine === "ai_scenes") {
     pipeline = pipeline
       .filter((e) => e.block !== "entity_imagery")
-      .map((e) => (e.block === "stock_footage" ? { block: "gen_footage", params: e.params } : e));
+      .flatMap((e) => (
+        e.block === "stock_footage" || e.block === "gen_footage"
+          ? [
+              { block: "novita_render_images", params: { generationProfile: "production" } },
+              { block: "qa_assets" },
+              { block: "novita_render_video", params: { generationProfile: "production" } },
+              { block: "qa_shots" },
+            ]
+          : [e]
+      ));
   }
 
   // SIGNATURE CLIPS as an explicit block: if the architect set signatureGenClips
@@ -278,6 +303,19 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     }
   }
 
+  // Every externally narrated family gets the versioned story artifact spine.
+  // Self-contained comic/whiteboard engines own equivalent internal timing.
+  if (
+    pipeline.some((entry) => entry.block === "narration_tts") &&
+    !pipeline.some((entry) => entry.block === "story_spine")
+  ) {
+    const narrationIndex = pipeline.findIndex((entry) => entry.block === "narration_tts");
+    pipeline.splice(narrationIndex + 1, 0, {
+      block: "story_spine",
+      params: { generationProfile: "production", targetShotSec: opts.family === "shorts" ? 4 : 6 },
+    });
+  }
+
   // Script-synced DATA-VIZ inserts (visual_inserts): identity-driven module
   // selection — niches that speak numbers (finance/health/tech/history…) get
   // the Remotion motion-graphics layer; others skip it entirely. Placed after
@@ -306,7 +344,10 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // crosspost is opt-in — append before notify/cleanup if requested.
   if (t.crosspost) {
     const idx = pipeline.findIndex((e) => e.block === "notify" || e.block === "cleanup");
-    const entry: PipelineEntry = { block: "crosspost" };
+    const entry: PipelineEntry = {
+      block: "crosspost",
+      params: opts.approvedForPublish === true ? { approvedForPublish: true } : undefined,
+    };
     if (idx >= 0) pipeline.splice(idx, 0, entry);
     else pipeline.push(entry);
   }
@@ -333,14 +374,24 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     );
   }
 
+  // Resolve uniquely identifiable policy/crew capability gaps from certified
+  // manifests. Creative engine choices remain the designer's responsibility.
+  const completed = completePipelineForPolicy(pipeline);
+  pipeline = completed.entries;
+  if (completed.inserted.length) {
+    warnings.push(`Production compiler added required modules: ${completed.inserted.join(", ")}.`);
+  }
+
   // Never persist an invalid graph.
+  let compilation: PipelineCompilation | undefined;
   try {
-    validatePipeline(pipeline);
+    const resolved = validatePipeline(pipeline);
+    if (fam.available) compilation = compilePipeline(resolved);
   } catch (e) {
     throw new Error(`designed pipeline invalid: ${e instanceof Error ? e.message : e}`);
   }
 
-  return { pipeline, available: fam.available, warnings };
+  return { pipeline, available: fam.available, warnings, compilation };
 }
 
 /**

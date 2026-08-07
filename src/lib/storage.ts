@@ -20,6 +20,7 @@ import {
   S3Client,
   PutObjectCommand,
   GetObjectCommand,
+  HeadObjectCommand,
   ListObjectsV2Command,
   DeleteObjectsCommand,
 } from "@aws-sdk/client-s3";
@@ -132,6 +133,8 @@ export interface PutOptions {
   bucket?: string;
   contentType?: string;
   metadata?: Record<string, string>;
+  /** Atomic create-only write, used for paid-provider idempotency claims. */
+  ifNoneMatch?: "*";
 }
 
 /**
@@ -150,9 +153,37 @@ export async function putObject(
     Body: body,
     ContentType: opts.contentType,
     Metadata: opts.metadata,
+    IfNoneMatch: opts.ifNoneMatch,
   });
   await getR2Client().send(command);
   return key;
+}
+
+/** Read object metadata without downloading the media body (recovery/checkpoint path). */
+export async function headObjectMetadata(
+  key: string,
+  bucket?: string,
+): Promise<{
+  contentLength?: number;
+  contentType?: string;
+  metadata: Record<string, string>;
+} | null> {
+  try {
+    const response = await getR2Client().send(new HeadObjectCommand({
+      Bucket: getBucket(bucket),
+      Key: key,
+    }));
+    return {
+      ...(typeof response.ContentLength === "number" ? { contentLength: response.ContentLength } : {}),
+      ...(response.ContentType ? { contentType: response.ContentType } : {}),
+      metadata: response.Metadata ?? {},
+    };
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    const name = (error as { name?: string }).name;
+    if (status === 404 || name === "NotFound" || name === "NoSuchKey") return null;
+    throw error;
+  }
 }
 
 /**
@@ -234,4 +265,28 @@ export async function getObjectBytes(
   return await (
     res.Body as { transformToByteArray: () => Promise<Uint8Array> }
   ).transformToByteArray();
+}
+
+/** Stream a large R2 object directly to disk without buffering the render. */
+export async function getObjectToFile(
+  key: string,
+  filePath: string,
+  bucket?: string,
+): Promise<string> {
+  const command = new GetObjectCommand({
+    Bucket: getBucket(bucket),
+    Key: key,
+  });
+  const res = await getR2Client().send(command);
+  if (!res.Body) throw new Error(`R2 object has no body: ${key}`);
+  const body = res.Body as NodeJS.ReadableStream;
+  if (typeof body.pipe !== "function") {
+    throw new Error(`R2 object body is not a Node stream: ${key}`);
+  }
+  const [{ createWriteStream }, { pipeline }] = await Promise.all([
+    import("node:fs"),
+    import("node:stream/promises"),
+  ]);
+  await pipeline(body, createWriteStream(filePath));
+  return filePath;
 }

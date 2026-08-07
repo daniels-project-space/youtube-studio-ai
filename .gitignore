@@ -51,8 +51,17 @@ next-env.d.ts
 # motion-graphics (Remotion render project) — never commit deps or render outputs
 /motion-graphics/node_modules
 /motion-graphics/output
+/motion-graphics/out/
+/motion-graphics/public/
 /motion-graphics/.cache
 scripts/.yt-refresh-token.txt
+scripts/__pycache__/
+
+# Local agent/navigation state; never ship or review as application source.
+/.agents/
+/.codex/
+/.serena/
+graphify-out/
 
 # dead-agent experiment render outputs (36GB) — never commit generated media
 /output

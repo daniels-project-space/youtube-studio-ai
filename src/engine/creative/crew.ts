@@ -30,6 +30,8 @@ export interface CrewContext {
   dnaDigest?: string;
   /** Audio slice of the DNA (composer only). */
   dnaAudio?: string;
+  /** Resolved per-channel role controls; must influence the actual brief. */
+  roleDirectives?: string;
   log?: Logger;
 }
 
@@ -42,6 +44,7 @@ function header(bible: ShowBible, ctx: CrewContext): string {
     bible.worksInSpace.length ? `WORKS in this space: ${bible.worksInSpace.join("; ")}` : "",
     bible.avoidInSpace.length ? `NEVER do (fails here): ${bible.avoidInSpace.join("; ")}` : "",
     ctx.dnaDigest ?? "",
+    ctx.roleDirectives ? `Operator role directives: ${ctx.roleDirectives}` : "",
     `Video topic: "${ctx.topic}".`,
     ctx.targetSeconds ? `Target length: ~${Math.round(ctx.targetSeconds / 60)} min.` : "",
   ].filter(Boolean).join("\n");

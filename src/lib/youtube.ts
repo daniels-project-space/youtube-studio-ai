@@ -15,7 +15,8 @@
  *
  * privacyStatus is forced to "private" — this never publishes publicly.
  */
-import { readFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
+import { open, type FileHandle } from "node:fs/promises";
 
 export class YouTubeError extends Error {
   constructor(message: string) {
@@ -31,22 +32,37 @@ function reqEnv(name: string): string {
 }
 
 /**
- * Exchange a refresh token for a fresh access token. Pass a per-channel token to
- * upload to that channel's YouTube; omit to use the global YOUTUBE_REFRESH_TOKEN.
+ * Exchange an exact connector refresh token for a short-lived access token.
+ * Global account fallback is deliberately forbidden for account isolation.
  */
-export async function getAccessToken(refreshToken?: string): Promise<string> {
+export interface YouTubeAccessTokenGrant {
+  accessToken: string;
+  grantedScopes: string[];
+  expiresIn?: number;
+}
+
+export async function refreshAccessTokenGrant(
+  refreshToken: string,
+): Promise<YouTubeAccessTokenGrant> {
+  if (!refreshToken) {
+    throw new YouTubeError(
+      "a channel-bound YouTube refresh token is required; global fallback is disabled",
+    );
+  }
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({
       client_id: reqEnv("YOUTUBE_CLIENT_ID"),
       client_secret: reqEnv("YOUTUBE_CLIENT_SECRET"),
-      refresh_token: refreshToken || reqEnv("YOUTUBE_REFRESH_TOKEN"),
+      refresh_token: refreshToken,
       grant_type: "refresh_token",
     }),
   });
   const json = (await res.json()) as {
     access_token?: string;
+    scope?: string;
+    expires_in?: number;
     error?: string;
     error_description?: string;
   };
@@ -55,7 +71,15 @@ export async function getAccessToken(refreshToken?: string): Promise<string> {
       `token refresh failed: ${json.error ?? res.status} ${json.error_description ?? ""}`,
     );
   }
-  return json.access_token;
+  return {
+    accessToken: json.access_token,
+    grantedScopes: (json.scope ?? "").split(/\s+/).filter(Boolean),
+    expiresIn: json.expires_in,
+  };
+}
+
+export async function getAccessToken(refreshToken: string): Promise<string> {
+  return (await refreshAccessTokenGrant(refreshToken)).accessToken;
 }
 
 /** OAuth scopes needed to upload + manage branding/captions/localizations. */
@@ -63,6 +87,8 @@ export const YT_SCOPES = [
   "https://www.googleapis.com/auth/youtube",
   "https://www.googleapis.com/auth/youtube.upload",
   "https://www.googleapis.com/auth/youtube.force-ssl",
+  "https://www.googleapis.com/auth/youtube.readonly",
+  "https://www.googleapis.com/auth/yt-analytics.readonly",
 ].join(" ");
 
 /**
@@ -89,7 +115,7 @@ export function getConsentUrl(redirectUri: string, state: string): string {
 export async function exchangeCode(
   code: string,
   redirectUri: string,
-): Promise<{ refreshToken: string; accessToken: string }> {
+): Promise<{ refreshToken: string; accessToken: string; grantedScopes: string[] }> {
   const res = await fetch("https://oauth2.googleapis.com/token", {
     method: "POST",
     headers: { "Content-Type": "application/x-www-form-urlencoded" },
@@ -102,14 +128,22 @@ export async function exchangeCode(
     }),
   });
   const json = (await res.json()) as {
-    refresh_token?: string; access_token?: string; error?: string; error_description?: string;
+    refresh_token?: string;
+    access_token?: string;
+    scope?: string;
+    error?: string;
+    error_description?: string;
   };
   if (!res.ok || !json.refresh_token || !json.access_token) {
     throw new YouTubeError(
       `code exchange failed: ${json.error ?? res.status} ${json.error_description ?? ""} (codes are single-use; ensure access_type=offline + prompt=consent)`,
     );
   }
-  return { refreshToken: json.refresh_token, accessToken: json.access_token };
+  return {
+    refreshToken: json.refresh_token,
+    accessToken: json.access_token,
+    grantedScopes: (json.scope ?? "").split(/\s+/).filter(Boolean),
+  };
 }
 
 /** The authenticated user's selected YouTube channel (id + title). */
@@ -131,7 +165,7 @@ export async function getChannelMine(
  * (PUT replaces), merges, then writes. Native — runs after the channel is linked.
  */
 export async function updateChannelBranding(args: {
-  refreshToken?: string;
+  refreshToken: string;
   ytChannelId: string;
   description?: string;
   country?: string;
@@ -170,7 +204,7 @@ export async function updateChannelBranding(args: {
  * the SEO re-optimizer to fix underperforming titles without re-uploading.
  */
 export async function updateVideoMetadata(args: {
-  refreshToken?: string;
+  refreshToken: string;
   videoId: string;
   title?: string;
   tags?: string[];
@@ -200,7 +234,7 @@ export async function updateVideoMetadata(args: {
 
 /** Upload a banner image; returns the bannerExternalUrl for brandingSettings.image. */
 export async function uploadChannelBanner(
-  refreshToken: string | undefined,
+  refreshToken: string,
   imageBytes: Uint8Array,
   contentType = "image/png",
 ): Promise<string> {
@@ -229,14 +263,44 @@ export interface UploadVideoArgs {
    * private and YouTube flips it public at this time (drip-publishing).
    */
   publishAt?: string;
-  /** Per-channel refresh token; falls back to the global env token when omitted. */
-  refreshToken?: string;
+  /** Exact per-channel connector token. Global account fallback is forbidden. */
+  refreshToken: string;
+  /** Disclose realistic altered/synthetic media in the YouTube video status. */
+  containsSyntheticMedia?: boolean;
+  /** Audience declaration stored on status.selfDeclaredMadeForKids. */
+  madeForKids?: boolean;
+  /** Durable state loaded for this exact owner/channel/upload key. */
+  resumeCheckpoint?: YouTubeUploadCheckpoint;
+  /** Persist a newly-created session and every confirmed remote byte range. */
+  onCheckpoint?: (checkpoint: YouTubeUploadCheckpoint) => Promise<void>;
+  /** Mark an expired or identity-mismatched session before replacing it. */
+  onCheckpointInvalidated?: (
+    checkpoint: YouTubeUploadCheckpoint,
+    reason: string,
+  ) => Promise<void>;
+  /** Must be a multiple of 256 KiB; defaults to 16 MiB. */
+  chunkSizeBytes?: number;
+  /** Test seam; production callers use global fetch. */
+  fetchImpl?: typeof fetch;
+  /** Test seam; production callers exchange the exact connector refresh token. */
+  accessTokenProvider?: () => Promise<string>;
 }
 
 export interface UploadVideoResult {
   videoId: string;
   watchUrl: string;
   privacyStatus: string;
+}
+
+export interface YouTubeUploadCheckpoint {
+  sessionUrl: string;
+  fileSize: number;
+  fileSha256: string;
+  metadataSha256: string;
+  uploadedBytes: number;
+  chunkSize: number;
+  createdAt: number;
+  expiresAt: number;
 }
 
 /**
@@ -262,77 +326,358 @@ function clampTags(tags: string[], maxTotal = 460): string[] {
   return out;
 }
 
-export async function uploadPrivateDraft(
-  args: UploadVideoArgs,
-): Promise<UploadVideoResult> {
-  const accessToken = await getAccessToken(args.refreshToken);
-  const bytes = await readFile(args.filePath);
+const DEFAULT_UPLOAD_CHUNK_SIZE = 16 * 1024 * 1024;
+const HASH_READ_SIZE = 4 * 1024 * 1024;
+const SESSION_SAFETY_LIFETIME_MS = 6 * 24 * 60 * 60 * 1000;
 
-  const metadata = {
-    snippet: {
-      title: args.title.slice(0, 100),
-      description: args.description.slice(0, 5000),
-      tags: clampTags(args.tags),
-      categoryId: args.categoryId ?? "10",
-    },
-    status: {
-      // Scheduling requires the video be uploaded private with a publishAt; it
-      // flips public at that time. Otherwise honour the requested privacy.
-      privacyStatus: args.publishAt ? "private" : (args.privacyStatus ?? "private"),
-      ...(args.publishAt ? { publishAt: args.publishAt } : {}),
-      selfDeclaredMadeForKids: false,
-    },
-  };
+interface UploadApiVideo {
+  id?: string;
+  status?: { privacyStatus?: string };
+  error?: { message?: string };
+}
 
-  // Step 1: open a resumable session.
-  const initRes = await fetch(
-    "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
-    {
-      method: "POST",
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "Content-Type": "application/json; charset=UTF-8",
-        "X-Upload-Content-Type": "video/mp4",
-        "X-Upload-Content-Length": String(bytes.byteLength),
-      },
-      body: JSON.stringify(metadata),
-    },
-  );
-  if (!initRes.ok) {
-    const text = await initRes.text();
-    throw new YouTubeError(
-      `resumable init failed HTTP ${initRes.status}: ${text.slice(0, 300)}`,
-    );
+type SessionState =
+  | { kind: "incomplete"; nextOffset: number; sessionUrl: string }
+  | { kind: "complete"; result: UploadVideoResult }
+  | { kind: "expired" };
+
+function assertChunkSize(chunkSize: number): void {
+  if (!Number.isSafeInteger(chunkSize)
+      || chunkSize < 256 * 1024
+      || chunkSize % (256 * 1024) !== 0) {
+    throw new YouTubeError("upload chunk size must be a positive multiple of 256 KiB");
   }
-  const sessionUrl = initRes.headers.get("location");
-  if (!sessionUrl) {
-    throw new YouTubeError("resumable init returned no Location header");
-  }
+}
 
-  // Step 2: upload the bytes in a single PUT (fine for short M1 videos).
-  const putRes = await fetch(sessionUrl, {
-    method: "PUT",
-    headers: {
-      "Content-Type": "video/mp4",
-      "Content-Length": String(bytes.byteLength),
-    },
-    body: bytes,
-  });
-  const putJson = (await putRes.json()) as {
-    id?: string;
-    status?: { privacyStatus?: string };
-    error?: { message?: string };
-  };
-  if (!putRes.ok || !putJson.id) {
+function assertYouTubeSessionUrl(raw: string): string {
+  const url = new URL(raw);
+  if (url.protocol !== "https:"
+      || url.hostname !== "www.googleapis.com"
+      || !url.pathname.startsWith("/upload/youtube/v3/videos")) {
+    throw new YouTubeError("resumable upload returned an untrusted session URL");
+  }
+  return url.toString();
+}
+
+export function nextUploadOffset(range: string | null, totalBytes: number): number {
+  if (!range) return 0;
+  const match = /^bytes=0-(\d+)$/.exec(range.trim());
+  if (!match) throw new YouTubeError(`invalid resumable upload Range header: ${range}`);
+  const lastByte = Number(match[1]);
+  if (!Number.isSafeInteger(lastByte) || lastByte < 0 || lastByte >= totalBytes) {
+    throw new YouTubeError(`resumable upload Range is outside the file: ${range}`);
+  }
+  return lastByte + 1;
+}
+
+async function sha256File(handle: FileHandle, fileSize: number): Promise<string> {
+  const hash = createHash("sha256");
+  let offset = 0;
+  while (offset < fileSize) {
+    const buffer = Buffer.allocUnsafe(Math.min(HASH_READ_SIZE, fileSize - offset));
+    const { bytesRead } = await handle.read(buffer, 0, buffer.length, offset);
+    if (bytesRead < 1) throw new YouTubeError("video file ended while hashing");
+    hash.update(buffer.subarray(0, bytesRead));
+    offset += bytesRead;
+  }
+  return hash.digest("hex");
+}
+
+async function responseVideo(response: Response): Promise<UploadVideoResult> {
+  const payload = (await response.json().catch(() => null)) as UploadApiVideo | null;
+  if (!payload?.id) {
     throw new YouTubeError(
-      `upload PUT failed HTTP ${putRes.status}: ${putJson.error?.message ?? JSON.stringify(putJson).slice(0, 300)}`,
+      `YouTube completed an upload without a video id: ${payload?.error?.message ?? "invalid response"}`,
     );
   }
   return {
-    videoId: putJson.id,
-    watchUrl: `https://www.youtube.com/watch?v=${putJson.id}`,
-    privacyStatus: putJson.status?.privacyStatus ?? "private",
+    videoId: payload.id,
+    watchUrl: `https://www.youtube.com/watch?v=${payload.id}`,
+    privacyStatus: payload.status?.privacyStatus ?? "private",
   };
+}
+
+function retryDelayMs(response: Response | undefined, attempt: number): number {
+  const retryAfter = response?.headers.get("retry-after");
+  if (retryAfter && /^\d+$/.test(retryAfter)) {
+    return Math.min(60_000, Math.max(1_000, Number(retryAfter) * 1000));
+  }
+  return Math.min(30_000, 1_000 * 2 ** Math.min(attempt, 5));
+}
+
+async function delay(ms: number): Promise<void> {
+  await new Promise((resolve) => setTimeout(resolve, ms));
+}
+
+export async function uploadPrivateDraft(
+  args: UploadVideoArgs,
+): Promise<UploadVideoResult> {
+  const fetchImpl = args.fetchImpl ?? fetch;
+  const file = await open(args.filePath, "r");
+  try {
+    const fileStat = await file.stat();
+    if (!fileStat.isFile() || !Number.isSafeInteger(fileStat.size) || fileStat.size < 1) {
+      throw new YouTubeError("upload source must be a non-empty regular file");
+    }
+    const fileSize = fileStat.size;
+    const requestedChunkSize = args.chunkSizeBytes ?? DEFAULT_UPLOAD_CHUNK_SIZE;
+    assertChunkSize(requestedChunkSize);
+
+    const metadata = {
+      snippet: {
+        title: args.title.slice(0, 100),
+        description: args.description.slice(0, 5000),
+        tags: clampTags(args.tags),
+        categoryId: args.categoryId ?? "10",
+      },
+      status: {
+        privacyStatus: args.publishAt ? "private" : (args.privacyStatus ?? "private"),
+        ...(args.publishAt ? { publishAt: args.publishAt } : {}),
+        selfDeclaredMadeForKids: args.madeForKids ?? false,
+        containsSyntheticMedia: args.containsSyntheticMedia ?? true,
+      },
+    };
+    const metadataBody = JSON.stringify(metadata);
+    const metadataSha256 = createHash("sha256").update(metadataBody).digest("hex");
+    const fileSha256 = await sha256File(file, fileSize);
+
+    let accessToken = "";
+    let tokenRefreshedAt = 0;
+    async function token(force = false): Promise<string> {
+      if (force || !accessToken || Date.now() - tokenRefreshedAt > 45 * 60 * 1000) {
+        accessToken = args.accessTokenProvider
+          ? await args.accessTokenProvider()
+          : await getAccessToken(args.refreshToken);
+        tokenRefreshedAt = Date.now();
+      }
+      return accessToken;
+    }
+    async function authorizedFetch(
+      url: string,
+      init: RequestInit,
+      timeoutMs: number,
+    ): Promise<Response> {
+      for (let authAttempt = 0; authAttempt < 2; authAttempt += 1) {
+        const headers = new Headers(init.headers);
+        headers.set("Authorization", `Bearer ${await token(authAttempt > 0)}`);
+        const response = await fetchImpl(url, {
+          ...init,
+          headers,
+          redirect: "manual",
+          signal: AbortSignal.timeout(timeoutMs),
+        });
+        if (response.status !== 401 || authAttempt > 0) return response;
+      }
+      throw new YouTubeError("YouTube authorization retry failed");
+    }
+
+    function checkpointMatches(value: YouTubeUploadCheckpoint): boolean {
+      return value.fileSize === fileSize
+        && value.fileSha256 === fileSha256
+        && value.metadataSha256 === metadataSha256
+        && value.expiresAt > Date.now()
+        && value.uploadedBytes >= 0
+        && value.uploadedBytes <= fileSize;
+    }
+
+    async function persist(checkpoint: YouTubeUploadCheckpoint): Promise<void> {
+      await args.onCheckpoint?.(checkpoint);
+    }
+
+    async function initializeSession(chunkSize: number): Promise<YouTubeUploadCheckpoint> {
+      const response = await authorizedFetch(
+        "https://www.googleapis.com/upload/youtube/v3/videos?uploadType=resumable&part=snippet,status",
+        {
+          method: "POST",
+          headers: {
+            "Content-Type": "application/json; charset=UTF-8",
+            "X-Upload-Content-Type": "video/mp4",
+            "X-Upload-Content-Length": String(fileSize),
+          },
+          body: metadataBody,
+        },
+        45_000,
+      );
+      if (!response.ok) {
+        throw new YouTubeError(
+          `resumable init failed HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`,
+        );
+      }
+      const location = response.headers.get("location");
+      if (!location) throw new YouTubeError("resumable init returned no Location header");
+      const now = Date.now();
+      const checkpoint: YouTubeUploadCheckpoint = {
+        sessionUrl: assertYouTubeSessionUrl(location),
+        fileSize,
+        fileSha256,
+        metadataSha256,
+        uploadedBytes: 0,
+        chunkSize,
+        createdAt: now,
+        expiresAt: now + SESSION_SAFETY_LIFETIME_MS,
+      };
+      await persist(checkpoint);
+      return checkpoint;
+    }
+
+    async function probe(checkpoint: YouTubeUploadCheckpoint): Promise<SessionState> {
+      for (let attempt = 0; attempt < 6; attempt += 1) {
+        let response: Response | undefined;
+        try {
+          response = await authorizedFetch(
+            checkpoint.sessionUrl,
+            {
+              method: "PUT",
+              headers: {
+                "Content-Length": "0",
+                "Content-Range": `bytes */${fileSize}`,
+              },
+            },
+            30_000,
+          );
+        } catch (error) {
+          if (attempt === 5) throw error;
+          await delay(retryDelayMs(undefined, attempt));
+          continue;
+        }
+        if (response.status === 308) {
+          const moved = response.headers.get("location");
+          return {
+            kind: "incomplete",
+            nextOffset: nextUploadOffset(response.headers.get("range"), fileSize),
+            sessionUrl: moved ? assertYouTubeSessionUrl(moved) : checkpoint.sessionUrl,
+          };
+        }
+        if (response.status === 200 || response.status === 201) {
+          return { kind: "complete", result: await responseVideo(response) };
+        }
+        if (response.status === 404 || response.status === 410) return { kind: "expired" };
+        if ([500, 502, 503, 504].includes(response.status) && attempt < 5) {
+          await delay(retryDelayMs(response, attempt));
+          continue;
+        }
+        throw new YouTubeError(
+          `resumable status failed HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`,
+        );
+      }
+      throw new YouTubeError("resumable status retry budget exhausted");
+    }
+
+    async function sendChunk(
+      checkpoint: YouTubeUploadCheckpoint,
+      offset: number,
+      attempt: number,
+    ): Promise<SessionState> {
+      const length = Math.min(checkpoint.chunkSize, fileSize - offset);
+      const buffer = Buffer.allocUnsafe(length);
+      const { bytesRead } = await file.read(buffer, 0, length, offset);
+      if (bytesRead !== length) throw new YouTubeError("video file changed or ended during upload");
+      let response: Response;
+      try {
+        response = await authorizedFetch(
+          checkpoint.sessionUrl,
+          {
+            method: "PUT",
+            headers: {
+              "Content-Type": "video/mp4",
+              "Content-Length": String(length),
+              "Content-Range": `bytes ${offset}-${offset + length - 1}/${fileSize}`,
+            },
+            body: buffer,
+          },
+          5 * 60 * 1000,
+        );
+      } catch {
+        await delay(retryDelayMs(undefined, attempt));
+        return probe(checkpoint);
+      }
+      if (response.status === 308) {
+        const moved = response.headers.get("location");
+        return {
+          kind: "incomplete",
+          nextOffset: nextUploadOffset(response.headers.get("range"), fileSize),
+          sessionUrl: moved ? assertYouTubeSessionUrl(moved) : checkpoint.sessionUrl,
+        };
+      }
+      if (response.status === 200 || response.status === 201) {
+        return { kind: "complete", result: await responseVideo(response) };
+      }
+      if (response.status === 404 || response.status === 410) return { kind: "expired" };
+      if ([500, 502, 503, 504].includes(response.status)) {
+        await delay(retryDelayMs(response, attempt));
+        return probe(checkpoint);
+      }
+      throw new YouTubeError(
+        `upload chunk failed HTTP ${response.status}: ${(await response.text()).slice(0, 300)}`,
+      );
+    }
+
+    let checkpoint = args.resumeCheckpoint;
+    if (checkpoint) {
+      assertChunkSize(checkpoint.chunkSize);
+      assertYouTubeSessionUrl(checkpoint.sessionUrl);
+      if (!checkpointMatches(checkpoint)) {
+        await args.onCheckpointInvalidated?.(checkpoint, "file, metadata, or session lifetime changed");
+        checkpoint = undefined;
+      }
+    }
+
+    let sessionReplacements = 0;
+    for (;;) {
+      if (!checkpoint) checkpoint = await initializeSession(requestedChunkSize);
+      let state = await probe(checkpoint);
+      if (state.kind === "complete") return state.result;
+      if (state.kind === "expired") {
+        await args.onCheckpointInvalidated?.(checkpoint, "YouTube session expired");
+        checkpoint = undefined;
+        sessionReplacements += 1;
+        if (sessionReplacements > 1) {
+          throw new YouTubeError("YouTube resumable session expired repeatedly");
+        }
+        continue;
+      }
+
+      let offset = state.nextOffset;
+      if (offset < checkpoint.uploadedBytes) {
+        throw new YouTubeError("YouTube reported fewer uploaded bytes than the durable checkpoint");
+      }
+      if (state.sessionUrl !== checkpoint.sessionUrl || offset !== checkpoint.uploadedBytes) {
+        checkpoint = { ...checkpoint, sessionUrl: state.sessionUrl, uploadedBytes: offset };
+        await persist(checkpoint);
+      }
+
+      let stalledAttempts = 0;
+      while (offset < fileSize) {
+        state = await sendChunk(checkpoint, offset, stalledAttempts);
+        if (state.kind === "complete") return state.result;
+        if (state.kind === "expired") break;
+        if (state.nextOffset < offset) {
+          throw new YouTubeError("YouTube resumable byte range regressed");
+        }
+        if (state.nextOffset === offset) {
+          stalledAttempts += 1;
+          if (stalledAttempts > 8) {
+            throw new YouTubeError("YouTube resumable upload made no progress after repeated retries");
+          }
+        } else {
+          stalledAttempts = 0;
+        }
+        offset = state.nextOffset;
+        checkpoint = { ...checkpoint, sessionUrl: state.sessionUrl, uploadedBytes: offset };
+        await persist(checkpoint);
+      }
+      if (state.kind === "expired") {
+        await args.onCheckpointInvalidated?.(checkpoint, "YouTube session expired during upload");
+        checkpoint = undefined;
+        sessionReplacements += 1;
+        if (sessionReplacements > 1) {
+          throw new YouTubeError("YouTube resumable session expired repeatedly");
+        }
+      }
+    }
+  } finally {
+    await file.close();
+  }
 }
 
 /**
@@ -344,7 +689,7 @@ export async function setVideoThumbnail(
   videoId: string,
   imageBytes: Uint8Array,
   contentType = "image/jpeg",
-  refreshToken?: string,
+  refreshToken: string,
 ): Promise<void> {
   const accessToken = await getAccessToken(refreshToken);
   const res = await fetch(
@@ -366,7 +711,7 @@ export async function setVideoThumbnail(
 }
 
 /** The authenticated channel's id (channels.list mine=true). */
-export async function getMyChannelId(refreshToken?: string): Promise<string | null> {
+export async function getMyChannelId(refreshToken: string): Promise<string | null> {
   try {
     const token = await getAccessToken(refreshToken);
     const res = await fetch("https://www.googleapis.com/youtube/v3/channels?part=id&mine=true", {
@@ -381,7 +726,7 @@ export async function getMyChannelId(refreshToken?: string): Promise<string | nu
 }
 
 /** Current privacy status of a video (private|unlisted|public), or null. */
-export async function getVideoPrivacy(videoId: string, refreshToken?: string): Promise<string | null> {
+export async function getVideoPrivacy(videoId: string, refreshToken: string): Promise<string | null> {
   try {
     const token = await getAccessToken(refreshToken);
     const res = await fetch(
@@ -400,7 +745,7 @@ export async function getVideoPrivacy(videoId: string, refreshToken?: string): P
 export async function hasChannelComment(
   videoId: string,
   channelId: string,
-  refreshToken?: string,
+  refreshToken: string,
 ): Promise<boolean> {
   try {
     const token = await getAccessToken(refreshToken);
@@ -424,7 +769,7 @@ export async function hasChannelComment(
  * Post a top-level OWNER comment (the "hook question" engagement device).
  * NOTE: PINNING has no public API - pin manually in Studio if desired.
  */
-export async function postComment(videoId: string, text: string, refreshToken?: string): Promise<boolean> {
+export async function postComment(videoId: string, text: string, refreshToken: string): Promise<boolean> {
   const token = await getAccessToken(refreshToken);
   const res = await fetch("https://www.googleapis.com/youtube/v3/commentThreads?part=snippet", {
     method: "POST",

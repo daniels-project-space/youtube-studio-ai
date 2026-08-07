@@ -106,6 +106,68 @@ function noIntroCollapses(): void {
   console.log("NO-INTRO PASS: missing intro card collapses introSec to 0");
 }
 
+function authoredShotMapping(): void {
+  const generation = {
+    contractVersion: "1.0.0" as const,
+    profileId: "production" as const,
+    model: "Lightricks/LTX-2.3",
+    revision: "4229404625088d21c4f112eb640fb04a0900ee25",
+    checkpoint: "ltx-2.3-22b-dev",
+    precision: "bf16" as const,
+    width: 1920,
+    height: 1088,
+    steps: 40,
+    allowFallback: false as const,
+    fps: 25,
+    guidanceScale: 4,
+    twoStageRefine: false,
+  };
+  const shotRenderManifest = {
+    version: "1.0.0" as const,
+    generation,
+    durationSec: 120,
+    items: [
+      { shotId: "shot-a", clipKey: "r2/a.mp4", t0: 0, t1: 47.5, sourceSentenceIds: ["sentence-1"], continuityState: "state-a" },
+      { shotId: "shot-b", clipKey: "r2/b.mp4", t0: 47.5, t1: 120, sourceSentenceIds: ["sentence-2"], continuityState: "state-b" },
+    ],
+  };
+  const shotQaReport = {
+    version: "1.0.0" as const,
+    required: true as const,
+    graderRan: true as const,
+    passed: true as const,
+    shots: ["shot-a", "shot-b"].map((shotId) => ({
+      shotId, score: 0.9, threshold: 0.8, semanticAlignment: 0.9, continuity: 0.9,
+      motionIntegrity: 0.9, artifactFree: 0.9, notes: [],
+    })),
+  };
+  const visualCoverage = {
+    version: "1.0.0" as const,
+    mappedSec: 120,
+    totalSec: 120,
+    ratio: 1 as const,
+    missingShotIds: [],
+    duplicateShotIds: [],
+  };
+  const input = baseInput({
+    chapterPlan: [{ kind: "card", durSec: 10, heading: "must not replace authored shots" }],
+    shotRenderManifest,
+    shotQaReport,
+    visualCoverage,
+  });
+  const timeline = planTimeline(input);
+  const body = timeline.segments.filter((segment) => segment.kind === "footage");
+  assert.deepEqual(body.map((segment) => (segment as { src: string }).src), ["r2/a.mp4", "r2/b.mp4"]);
+  assert.deepEqual(body.map((segment) => segment.durSec), [47.5, 72.5]);
+  assert.equal(body.reduce((sum, segment) => sum + segment.durSec, 0), 120, "authored body covers narration exactly");
+  assert.throws(
+    () => planTimeline({ ...input, shotQaReport: undefined }),
+    /Required|expected|invalid_type/i,
+    "authored assembly fails closed without per-shot QA proof",
+  );
+  console.log("AUTHORED PASS: exact shot identity/order/timecodes + fail-closed QA proof");
+}
+
 function perAccountParams(): void {
   // a channel that runs assemble at 9:16 with a tight max + custom duck
   const profile = buildChannelProfile({
@@ -129,6 +191,7 @@ function main(): void {
   verticalReframe();
   chapterMode();
   noIntroCollapses();
+  authoredShotMapping();
   perAccountParams();
   console.log("\nALL PLANTIMELINE TESTS PASSED");
 }

@@ -336,7 +336,10 @@ const VOX_EXPLAINER: DocuStyleDef = {
     accent: "#e8641a",
     accent2: "#d6402a",
     fontDisplay: "Special Elite, monospace",
-    displayCharW: 0.5,
+    // Special Elite is a wide typewriter face (measured near 0.64em for this
+    // quote-card weight). The old 0.5 estimate under-counted real browser wraps
+    // at 960x540 and let the attribution collide with the quote.
+    displayCharW: 0.65,
     fontLabel: "Oswald, sans-serif",
     fontHand: "Caveat, cursive",
     plateFilter: "saturate(0.92) contrast(1.02)",

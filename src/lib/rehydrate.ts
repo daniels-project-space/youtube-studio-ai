@@ -11,6 +11,7 @@
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
+import { classifyExecutionError } from "@/engine/executionErrors";
 import { getObjectBytes } from "@/lib/storage";
 import { makeRunTempDir, writeBytes } from "@/lib/files";
 
@@ -31,6 +32,21 @@ function isLocalPath(v: unknown): v is string {
 
 function looksLikeR2Key(v: unknown): v is string {
   return typeof v === "string" && v.length > 0 && !/^https?:\/\//i.test(v) && !/^[/\\]/.test(v) && !/^[a-zA-Z]:\\/.test(v);
+}
+
+/** A confirmed missing object can be regenerated; infra failures must not bill. */
+function isMissingStoredObject(error: unknown): boolean {
+  const classified = classifyExecutionError(error);
+  const name =
+    error && typeof error === "object" && "name" in error
+      ? String((error as { name?: unknown }).name).toUpperCase()
+      : "";
+  return (
+    classified.status === 404 ||
+    classified.code === "NOSUCHKEY" ||
+    name === "NOSUCHKEY" ||
+    name === "NOTFOUND"
+  );
 }
 
 /** Recursively: does this value contain a local-path string that's missing? */
@@ -60,8 +76,9 @@ export async function rehydrateOutputs(
           const dest = join(tmp, `resume_${k}${ext}`);
           await writeBytes(dest, await getObjectBytes(r2));
           outputs[k] = dest;
-        } catch {
-          return { ok: false, outputs };
+        } catch (error) {
+          if (isMissingStoredObject(error)) return { ok: false, outputs };
+          throw error;
         }
       }
     }
@@ -88,8 +105,9 @@ export async function rehydrateOutputs(
             restored.push(dest);
           }
           outputs[k] = restored;
-        } catch {
-          return { ok: false, outputs };
+        } catch (error) {
+          if (isMissingStoredObject(error)) return { ok: false, outputs };
+          throw error;
         }
       }
     }
@@ -111,8 +129,9 @@ export async function rehydrateOutputs(
           const dest = join(tmp, `resume_ovl_${String(item.key).replace(/[^a-z0-9]/gi, "_").slice(-32)}${ext}`);
           await writeBytes(dest, await getObjectBytes(item.key));
           (item as { path: string }).path = dest;
-        } catch {
-          return { ok: false, outputs };
+        } catch (error) {
+          if (isMissingStoredObject(error)) return { ok: false, outputs };
+          throw error;
         }
       }
     }

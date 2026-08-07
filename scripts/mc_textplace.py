@@ -7,9 +7,42 @@
 # on important content. Fast (one numpy pass, O(candidates) search), no API.
 import numpy as np
 from scipy.ndimage import gaussian_filter, sobel
-from PIL import Image, ImageDraw, ImageFont
+from PIL import Image, ImageDraw
+from mc_font import load_font
 
-FONT = (lambda: __import__("os").environ.get("MC_FONT") or next((f for f in ["src/assets/fonts/ComicNeue-Bold.otf", "/usr/share/fonts/opentype/comic-neue/ComicNeue-Bold.otf", "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"] if __import__("os").path.exists(f)), "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf"))()
+
+def cover_geometry(source_w, source_h, target_w, target_h):
+    """Exact resize/crop geometry used by the page renderer's cover operation."""
+    scale = max(target_w / source_w, target_h / source_h)
+    resized_w = max(target_w, int(source_w * scale + 0.5))
+    resized_h = max(target_h, int(source_h * scale + 0.5))
+    return resized_w, resized_h, (resized_w - target_w) // 2, (resized_h - target_h) // 2
+
+
+def remap_cover_point(point, geometry, target_w, target_h):
+    """Map a normalized source-image point into center-cropped tile pixels."""
+    resized_w, resized_h, crop_x, crop_y = geometry
+    x = float(point[0]) * resized_w - crop_x
+    y = float(point[1]) * resized_h - crop_y
+    return (max(0.0, min(target_w - 1.0, x)), max(0.0, min(target_h - 1.0, y)))
+
+
+def remap_cover_box(box, geometry, target_w, target_h):
+    """Map and clip a normalized source-image keep-clear box into tile pixels."""
+    if not isinstance(box, list) or len(box) < 4:
+        return None
+    resized_w, resized_h, crop_x, crop_y = geometry
+    try:
+        x, y, width, height = [float(v) for v in box[:4]]
+    except (TypeError, ValueError):
+        return None
+    x0, y0 = x * resized_w - crop_x, y * resized_h - crop_y
+    x1, y1 = (x + width) * resized_w - crop_x, (y + height) * resized_h - crop_y
+    x0, y0 = max(0.0, x0), max(0.0, y0)
+    x1, y1 = min(float(target_w), x1), min(float(target_h), y1)
+    if x1 <= x0 or y1 <= y0:
+        return None
+    return (int(x0), int(y0), max(1, int(x1 - x0)), max(1, int(y1 - y0)))
 
 
 def detail_map(img):
@@ -23,7 +56,7 @@ def detail_map(img):
 
 
 def bubble_size(text, box_w, box_h):
-    fs = max(19, int(box_h * 0.068)); font = ImageFont.truetype(FONT, fs)
+    fs = max(19, int(box_h * 0.068)); font = load_font(fs)
     maxw = int(box_w * 0.78); dd = ImageDraw.Draw(Image.new("RGB", (4, 4)))
     words, lines, cur = text.split(), [], ""
     for w in words:
@@ -74,7 +107,7 @@ def box_detail(det, x, y, bw, bh):
 
 
 def _measure(text, fs, max_w):
-    font = ImageFont.truetype(FONT, fs); dd = ImageDraw.Draw(Image.new("RGB", (4, 4)))
+    font = load_font(fs); dd = ImageDraw.Draw(Image.new("RGB", (4, 4)))
     words, lines, cur = text.split(), [], ""
     for w in words:
         t = (cur + " " + w).strip()

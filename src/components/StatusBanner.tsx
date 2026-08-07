@@ -35,13 +35,13 @@ export function StatusBanner() {
   }, [convex]);
 
   // persisted dismissals
-  const [dismissed, setDismissed] = useState<Set<string>>(new Set());
-  useEffect(() => {
+  const [dismissed, setDismissed] = useState<Set<string>>(() => {
     try {
       const raw = localStorage.getItem(DISMISS_KEY);
-      if (raw) setDismissed(new Set(JSON.parse(raw) as string[]));
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set<string>();
     } catch { /* ignore */ }
-  }, []);
+    return new Set<string>();
+  });
   const dismiss = (id: string) => {
     setDismissed((prev) => {
       const next = new Set(prev).add(id);

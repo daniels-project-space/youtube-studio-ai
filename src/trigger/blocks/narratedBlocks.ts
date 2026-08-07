@@ -8,19 +8,29 @@
  * All degrade gracefully on a missing key so the pipeline never hard-fails.
  */
 import { join } from "node:path";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
-import { PRICE } from "@/engine/pricing";
+import {
+  assertVoiceGatePreconditions,
+  qualityProfile,
+} from "@/engine/qualityPolicy";
+import {
+  validateQualifiedShotRender,
+} from "@/engine/renderArtifacts";
+import { narrationTtsCost, qaVisualCost } from "@/engine/pricing";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
-import { geminiJson, geminiVideo, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
 import { existsSync } from "node:fs";
-import { copyFile } from "node:fs/promises";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
-import { narrationPhysics, gateColdOpen } from "@/lib/voicecraft";
+import { narrationPhysics, gateColdOpen, judgeNarrationTake } from "@/lib/voicecraft";
+import {
+  boundNarrationChapterHeadings,
+  boundNarrationColdOpen,
+} from "@/lib/narrationBounds";
 import { sanitizeSpoken } from "@/lib/scriptGen";
 import { buildFootageQueries, castFootage, hasAnyFootageProvider, type FootageBrief } from "@/lib/footagecraft";
 import { searchWikimediaImage } from "@/lib/wikimedia";
@@ -35,6 +45,7 @@ import {
 import {
   probe,
   assembleBeatBody,
+  assembleAuthoredBody,
   composeWithIntro,
   concatAudioWithGaps,
   applyVoiceFx,
@@ -122,15 +133,28 @@ function bodySegSeconds(
 async function mapPool<T, R>(items: T[], limit: number, fn: (t: T, i: number) => Promise<R>): Promise<R[]> {
   const out: R[] = new Array(items.length);
   let next = 0;
+  let failed = false;
+  let firstError: unknown;
   await Promise.all(
     Array.from({ length: Math.min(limit, Math.max(1, items.length)) }, async () => {
       for (;;) {
+        // Stop admitting new paid work after the first failure, but wait for
+        // already in-flight workers to settle so their billable callbacks are
+        // included in the failed-stage ledger before this pool rejects.
+        if (failed) return;
         const idx = next++;
         if (idx >= items.length) return;
-        out[idx] = await fn(items[idx], idx);
+        try {
+          out[idx] = await fn(items[idx], idx);
+        } catch (error) {
+          if (!failed) firstError = error;
+          failed = true;
+          return;
+        }
       }
     }),
   );
+  if (failed) throw firstError;
   return out;
 }
 
@@ -337,6 +361,7 @@ export const narrationTts: Block = {
   ],
   paid: true,
   run: async (ctx) => {
+    const quality = qualityProfile(ctx.params["qualityProfile"]);
     // TTS engine: fish (default) or elevenlabs (v3 expressive â€” PERFORMS inline
     // [audio tags] the script writer placed; tags survive sanitization here but
     // are stripped from all DISPLAY surfaces below).
@@ -345,6 +370,18 @@ export const narrationTts: Block = {
     // sanitizeSpoken strips any markdown/slashes/stage-directions that slipped
     // through script_gen so the voice never reads a symbol aloud.
     const text = sanitizeSpoken(str(ctx, "narrationText"), { keepAudioTags: ttsProvider === "elevenlabs" });
+    // Count provider-accepted responses rather than estimating from the final
+    // script. This includes cold-open auditions, a verdict-driven second take,
+    // and spoken chapter headings; 429/5xx/network retries do not increment.
+    let billableTtsCharacters = 0;
+    let audioJudgeCalls = 0;
+    const onBillableCharacters = (characters: number) => {
+      billableTtsCharacters += characters;
+    };
+    const onAudioJudgeCall = () => {
+      audioJudgeCalls += 1;
+    };
+    try {
     if (ttsProvider === "elevenlabs") {
       if (!process.env.ELEVENLABS_API_KEY) throw new Error("narration_tts: ELEVENLABS_API_KEY missing");
     } else if (!hasFishKey()) {
@@ -380,22 +417,74 @@ export const narrationTts: Block = {
       ? { stability: physics.stability, ...(physics.style ? { style: physics.style } : {}) }
       : undefined;
 
-    // COLD-OPEN GATE — render the first lines once and let Gemini LISTEN
-    // before the full-script spend: a wrong cast or wrong physics fails loud
-    // HERE, not after the whole paid render. ~250 chars; voiceGate=false opts out.
-    if (ttsProvider === "elevenlabs" && hasGeminiKey() && ctx.params["voiceGate"] !== false) {
-      const probe = splitSentences(text).slice(0, 2).join(" ");
-      if (probe.trim()) {
+    // COLD-OPEN GATE — production requires a persisted >=7 audition, an
+    // explicit voice, the audio judge, and a passing real-audio probe. Draft is
+    // the only profile that may opt out. Fish and ElevenLabs are both judged.
+    const gateEnabled = ctx.params["voiceGate"] !== false;
+    const castScore = Number(ctx.params["voiceCastScore"] ?? Number.NaN);
+    const selectedVoiceId = ttsProvider === "elevenlabs" ? (elevenVoiceId ?? voiceId) : voiceId;
+    assertVoiceGatePreconditions({
+      profile: quality,
+      gateEnabled,
+      judgeAvailable: hasGeminiKey(),
+      channelId: ctx.channelId,
+      provider: ttsProvider,
+      voiceId: selectedVoiceId,
+      castScore,
+      castEvidence: ctx.params["voiceCastEvidence"],
+      readinessStatus: ctx.params["voiceReadinessStatus"],
+      readinessReason: ctx.params["voiceReadinessReason"],
+    });
+    if (gateEnabled && hasGeminiKey()) {
+      const probe = boundNarrationColdOpen(splitSentences(text).slice(0, 2).join(" "));
+      if (!probe.trim() && quality === "production") {
+        throw new Error("narration_tts: production cold-open probe is empty");
+      }
+      if (probe.trim() && ttsProvider === "elevenlabs") {
         const gate = await gateColdOpen({
           text: probe,
-          elevenVoiceId: elevenVoiceId ?? "JBFqnCBsd6RMkjVDRZzb",
+          elevenVoiceId: selectedVoiceId ?? "JBFqnCBsd6RMkjVDRZzb",
           physics,
           log: (m) => ctx.log(m),
+          onBillableCharacters,
+          onAudioJudgeCall,
         });
         elevenSeed = gate.seed;
         ctx.log(
           `narration_tts: cold-open gate PASSED (register ${gate.verdict.register} | pace ${gate.verdict.pace} | performance ${gate.verdict.performance} | clean ${gate.verdict.clean}, seed ${gate.seed})`,
         );
+      } else if (probe.trim()) {
+        let passed = false;
+        let lastWhy = "judge returned no verdict";
+        for (let attempt = 0; attempt < 2; attempt++) {
+          const bytes = await synthNarration({
+            text: probe,
+            voiceId: selectedVoiceId,
+            niche,
+            speed,
+            provider: ttsProvider,
+            onBillableCharacters,
+          });
+          const verdict = await judgeNarrationTake({
+            mp3: bytes,
+            physics,
+            text: probe,
+            log: (message) => ctx.log(message),
+            onAudioJudgeCall,
+          });
+          if (verdict.pass) {
+            passed = true;
+            ctx.log(
+              `narration_tts: cold-open gate PASSED (register ${verdict.register} | pace ${verdict.pace} | performance ${verdict.performance} | clean ${verdict.clean})`,
+            );
+            break;
+          }
+          lastWhy = verdict.why;
+          ctx.log(`narration_tts: cold-open attempt ${attempt + 1} failed — ${lastWhy}`);
+        }
+        if (!passed) {
+          throw new Error(`narration_tts: cold-open failed the gate twice — ${lastWhy}`);
+        }
       }
     }
     // Optional stylized voice filter (e.g. "radio" â†’ vintage AM set). Applied to
@@ -425,9 +514,23 @@ export const narrationTts: Block = {
       // straight out of the cold open with no "Chapter 1" interrupt, and the
       // OUTRO (final section) lands as the closing narration with no card.
       const lastIdx = script.sections.length - 1;
+      const eligibleChapterSections = script.sections
+        .map((sec, idx) => ({ heading: sec.heading, idx }))
+        .filter(({ idx }) => idx !== lastIdx && !(idx === 0 && script.sections!.length >= 3));
+      const boundedChapterHeadings = boundNarrationChapterHeadings(
+        eligibleChapterSections.map(({ heading }) => heading),
+      );
+      const chapterBySection = new Map<number, { heading: string; chap: number }>();
+      boundedChapterHeadings.forEach((heading, candidateIndex) => {
+        if (!heading) return;
+        chapterBySection.set(eligibleChapterSections[candidateIndex].idx, {
+          heading,
+          chap: chapterBySection.size + 1,
+        });
+      });
       script.sections.forEach((sec, idx) => {
-        const isIntro = idx === 0 && script.sections!.length >= 3;
-        if (idx !== lastIdx && !isIntro) items.push({ kind: "heading", text: sec.heading, chap: items.filter((x) => x.kind === "heading").length + 1 });
+        const chapter = chapterBySection.get(idx);
+        if (chapter) items.push({ kind: "heading", text: chapter.heading, chap: chapter.chap });
         for (const s of splitSentences(sanitizeSpoken(sec.narration))) items.push({ kind: "narration", text: s });
       });
 
@@ -457,7 +560,7 @@ export const narrationTts: Block = {
               nextText: i < items.length - 1 ? speakOf(items[i + 1]) : undefined,
             }
           : undefined;
-        const bytes = await synthNarration({ text: speak, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId, eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined, stitch });
+        const bytes = await synthNarration({ text: speak, voiceId: selectedVoiceId, niche, speed, provider: ttsProvider, elevenVoiceId: selectedVoiceId, eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined, stitch, onBillableCharacters });
         const p = join(tmp, `utt_${i}.mp3`);
         await writeBytes(p, bytes);
         let dur = 0;
@@ -519,7 +622,7 @@ export const narrationTts: Block = {
         narrationLocalPath: local,
         sentenceTimings,
         chapterPlan,
-        [COST_PATCH_KEY]: ((ttsProvider === "elevenlabs" ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd) * text.length) / 1000,
+        [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, audioJudgeCalls),
       };
     }
 
@@ -545,7 +648,7 @@ export const narrationTts: Block = {
             nextText: i < sentences.length - 1 ? sentences[i + 1] : undefined,
           }
         : undefined;
-      const bytes = await synthNarration({ text: s, voiceId, niche, speed, provider: ttsProvider, elevenVoiceId, eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined, stitch });
+      const bytes = await synthNarration({ text: s, voiceId: selectedVoiceId, niche, speed, provider: ttsProvider, elevenVoiceId: selectedVoiceId, eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined, stitch, onBillableCharacters });
       const p = join(tmp, `sent_${i}.mp3`);
       await writeBytes(p, bytes);
       let dur = 0;
@@ -607,8 +710,22 @@ export const narrationTts: Block = {
       // means "no chapter cards". (chapterCards:false channels hit the engine's
       // undefined-produce guard here on their very first render.)
       chapterPlan: [],
-      [COST_PATCH_KEY]: ((ttsProvider === "elevenlabs" ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd) * text.length) / 1000,
+      [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, audioJudgeCalls),
     };
+    } catch (error) {
+      const observedCostUsd = narrationTtsCost(
+        ttsProvider,
+        billableTtsCharacters,
+        audioJudgeCalls,
+      );
+      if (observedCostUsd <= 0) throw error;
+      // The provider work has already happened. Make the failure terminal so an
+      // outer block/task retry cannot repurchase it, and expose the exact spend
+      // for the runner's failed-stage ledger.
+      const chargedError = error instanceof Error ? error : new Error(String(error));
+      Object.assign(chargedError, { retryable: false, observedCostUsd });
+      throw chargedError;
+    }
   },
 };
 
@@ -1252,20 +1369,32 @@ export const timelineAssemble: Block = {
   ],
   run: async (ctx) => {
     const footage = ctx.store["footageClips"] as string[] | undefined;
-    if (!footage || footage.length === 0) {
+    const authoredManifest = ctx.store["shotRenderManifest"]
+      ? validateQualifiedShotRender({
+          manifest: ctx.store["shotRenderManifest"],
+          qaReport: ctx.store["shotQaReport"],
+          coverage: ctx.store["visualCoverage"],
+        }).manifest
+      : undefined;
+    if ((!footage || footage.length === 0) && !authoredManifest) {
       throw new Error("timeline_assemble: no footageClips");
     }
     // Interleave entity images (Ken Burns) amongst the stock b-roll so named
     // figures (e.g. Marcus Aurelius) appear when relevant.
-    const entity = (ctx.store["entityClips"] as string[] | undefined) ?? [];
+    const entity = authoredManifest ? [] : ((ctx.store["entityClips"] as string[] | undefined) ?? []);
     const clips: string[] = [];
-    const maxn = Math.max(footage.length, entity.length);
+    const maxn = Math.max(footage?.length ?? 0, entity.length);
     for (let k = 0; k < maxn; k++) {
-      if (footage[k]) clips.push(footage[k]);
+      if (footage?.[k]) clips.push(footage[k]);
       if (entity[k]) clips.push(entity[k]);
     }
     const narration = str(ctx, "narrationLocalPath");
     const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
+    if (authoredManifest && Math.abs(authoredManifest.durationSec - narrationSec) > 0.02) {
+      throw new Error(
+        `timeline_assemble: authored story duration ${authoredManifest.durationSec}s does not match narration ${narrationSec}s`,
+      );
+    }
     const portrait = (ctx.params["aspect"] as string | undefined) === "9:16";
     const W = portrait ? 1080 : 1920;
     const H = portrait ? 1920 : 1080;
@@ -1399,7 +1528,24 @@ export const timelineAssemble: Block = {
       } catch { /* default bust */ }
     }
 
-    if (chapterPlan && chapterPlan.length > 0) {
+    if (authoredManifest) {
+      const authoredPaths: string[] = [];
+      for (const [index, item] of authoredManifest.items.entries()) {
+        const local = join(tmp, `authored_source_${String(index).padStart(4, "0")}.mp4`);
+        await writeBytes(local, await getObjectBytes(item.clipKey));
+        authoredPaths.push(local);
+      }
+      ctx.log(`timeline_assemble: exact authored body from ${authoredPaths.length} QA-passed shot(s)`);
+      concat = await assembleAuthoredBody({
+        clipPaths: authoredPaths,
+        segDurationsSec: authoredManifest.items.map((item) => item.t1 - item.t0),
+        outPath: join(tmp, "body.mp4"),
+        tmpDir: tmp,
+        tailHoldSec: tailSec,
+        width: W,
+        height: H,
+      });
+    } else if (chapterPlan && chapterPlan.length > 0) {
       ctx.log(`timeline_assemble: chapter mode â€” ${chapterPlan.filter((w) => w.kind === "card").length} chapter cards`);
       const chapBg = brandCardBg;
       let chapNo = 0;
@@ -1439,7 +1585,7 @@ export const timelineAssemble: Block = {
         maxSegSec: bodyMaxSeg,
       });
     } else {
-      ctx.log(`timeline_assemble: beat-body from ${clips.length} clips (${footage.length} footage + ${entity.length} entity) @ ${W}x${H}â€¦`);
+      ctx.log(`timeline_assemble: beat-body from ${clips.length} clips (${footage?.length ?? 0} footage + ${entity.length} entity) @ ${W}x${H}â€¦`);
       concat = await assembleBeatBody({
         clipPaths: clips,
         outPath: join(tmp, "body.mp4"),
@@ -1807,7 +1953,10 @@ export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
   produces: ["qaPassed", "qaReport"],
+  paid: true,
   run: async (ctx) => {
+    const productionQa = ctx.params["qaProfile"] !== "draft";
+    const qaCost = qaVisualCost(ctx.params);
     const video = str(ctx, "videoLocalPath");
     const title = str(ctx, "title");
     const dur = Number(ctx.store["videoDurationSec"] ?? 0);
@@ -1841,11 +1990,19 @@ export const qaVisual: Block = {
       try {
         await grabFrame(video, Math.max(0, dur * frac), f);
         vframes.push(f);
-      } catch {
-        /* skip frame */
+      } catch (e) {
+        if (productionQa) {
+          throw new Error(`qa_visual FAILED (required frame extraction @${frac}): ${e instanceof Error ? e.message : e}`);
+        }
       }
     }
+    if (productionQa && vframes.length !== 3) {
+      throw new Error(`qa_visual FAILED: required 3 overview frames, extracted ${vframes.length}`);
+    }
     const video_ = await evaluateVisualFrames(vframes, { topic, niche });
+    if (productionQa && video_.skipped) {
+      throw new Error("qa_visual FAILED: required overview vision grader did not run");
+    }
 
     // 3b) HOLISTIC WATCH â€” the reliable core of post-render QA. One intent-grounded
     // reviewer watches the FULL timeline (guaranteed first frame = title card, last =
@@ -1866,6 +2023,9 @@ export const qaVisual: Block = {
           ctx.log(`qa_visual: LOW AUDIO production quality ${aq.productionQuality}/10 (ADVISORY â€” check the mix/mastering)`);
         }
       } catch (e) {
+        if (productionQa) {
+          throw new Error(`qa_visual FAILED: required audio aesthetic grader failed: ${e instanceof Error ? e.message : e}`);
+        }
         ctx.log(`qa_visual: audio scoring skipped: ${e instanceof Error ? e.message : e}`);
       }
     }
@@ -1912,12 +2072,19 @@ export const qaVisual: Block = {
       (ctx.store["healHints"] as Record<string, unknown> | undefined) ?? {},
     );
     const thumbnailOnlyHeal = healOwners.length > 0 && healOwners.every((k) => k === "thumbnail_gen");
-    if (!watch && thumbnailOnlyHeal) {
+    if (!watch && thumbnailOnlyHeal && !productionQa) {
       ctx.log("qa_visual: thumbnail-only heal — video unchanged, skipping the render watch (thumbnail still judged)");
       watch = { ran: false, verdict: "pass", defects: [], framePaths: [], summary: "skipped (thumbnail-only heal — video unchanged)" };
     }
     if (!watch) {
-      watch = await watchRender(video, p.durationSec, watchIntent, { runId: ctx.runId, log: ctx.log });
+      watch = await watchRender(video, p.durationSec, watchIntent, {
+        runId: ctx.runId,
+        required: productionQa,
+        log: ctx.log,
+      });
+    }
+    if (productionQa && !watch.ran) {
+      throw new Error("qa_visual FAILED: required holistic render grader did not run");
     }
 
     // 4) Thumbnail (vision, separate) â€” download from R2.
@@ -1934,7 +2101,13 @@ export const qaVisual: Block = {
         });
       }
     } catch (e) {
+      if (productionQa) {
+        throw new Error(`qa_visual FAILED: required thumbnail grader failed: ${e instanceof Error ? e.message : e}`);
+      }
       ctx.log(`qa_visual: thumbnail check skipped (${e instanceof Error ? e.message : e})`);
+    }
+    if (productionQa && thumbnail.skipped) {
+      throw new Error("qa_visual FAILED: required thumbnail grader did not run");
     }
 
     // 5) Stock-footage appropriateness: DROPPED as a QA re-check. Relevance is
@@ -1992,17 +2165,20 @@ export const qaVisual: Block = {
     // cosmetic verdict about a card that was working as designed).
     const thumbStrategy = String(ctx.store["strategy"] ?? "");
     const thumbIsDeliberateCard =
-      thumbStrategy === "title_card_fallback" || String(ctx.store["thumbnailer"] ?? "") === "title_card";
+      thumbStrategy === "title_card_fallback" ||
+      thumbStrategy === "draft_preview_placeholder" ||
+      String(ctx.store["thumbnailer"] ?? "") === "title_card";
     for (const [name, v] of [
       ["video", video_],
       ["thumbnail", thumbnail],
     ] as const) {
-      if (!v.skipped && v.score < 4) {
+      const minScore = productionQa ? (name === "video" ? 6 : 5) : 4;
+      if (!v.skipped && v.score < minScore) {
         if (name === "thumbnail" && thumbIsDeliberateCard) {
           ctx.log(`qa_visual: thumbnail ${v.score}/10 on a deliberate title card (ADVISORY, not gating): ${v.issues.slice(0, 2).join("; ")}`);
           continue;
         }
-        critical.push(`${name} score ${v.score}: ${v.issues.slice(0, 2).join("; ")}`);
+        critical.push(`${name} score ${v.score} below ${minScore}: ${v.issues.slice(0, 2).join("; ")}`);
       }
     }
     if (!footage.skipped && footage.score < 5) {
@@ -2024,24 +2200,13 @@ export const qaVisual: Block = {
       critical.push(`render-validate: ${rv.defects.filter((d) => d.severity === "critical").map((d) => d.issue).join(" | ")}`);
     }
     if (watch.ran && watch.verdict === "fail") {
-      // CRITICAL watch findings BLOCK â€” except TITLE/OUTRO-card text claims,
-      // which are ADVISORY: the watcher mis-called cards twice in live trials
-      // (claimed a frame-verified outro was "blank"; demanded the full SEO
-      // title on the deliberately short intro card). Card PRESENCE is owned by
-      // the deterministic introApplied/outro pipeline facts; black screens,
-      // frozen frames and wrong-topic-throughout still block.
       const watchCritical = watch.defects.filter((d) => d.severity === "critical");
-      const isCardClaim = (d: { category?: string; issue?: string }) =>
-        /title\s*card|outro/i.test(`${d.category ?? ""} ${d.issue ?? ""}`);
-      const blocking = watchCritical.filter((d) => !isCardClaim(d));
-      const advisoryCards = watchCritical.filter(isCardClaim);
+      const watchMajor = watch.defects.filter((d) => d.severity === "major");
+      const blocking = watchCritical.length ? watchCritical : watchMajor;
       if (blocking.length) {
         critical.push(
           `watch: ${blocking.slice(0, 4).map((d) => `[@${d.tSec ?? "?"}s] ${d.issue}`).join(" | ")}`,
         );
-      }
-      if (advisoryCards.length || !blocking.length) {
-        ctx.log(`qa_visual: watch ADVISORY flagged (NOT blocking): ${[...advisoryCards, ...watch.defects.filter((d) => d.severity !== "critical")].slice(0, 6).map((d) => `[${d.severity}@${d.tSec ?? "?"}s] ${d.issue}`).join(" | ")}`);
       }
     }
     // FEATURE-PRESENCE gate â€” fail loud when an intended feature silently didn't
@@ -2089,15 +2254,25 @@ export const qaVisual: Block = {
         windowStartSec: 0.5,
         windowDurSec: introW >= 2.5 ? introW - 1 : 0,
       });
+      if (productionQa && ears.integratedLufs === null) {
+        critical.push("audio loudness unavailable: production QA requires a measurable final mix");
+      }
       if (ears.integratedLufs !== null && (ears.integratedLufs < -30 || ears.integratedLufs > -8)) {
         critical.push(`audio loudness ${ears.integratedLufs.toFixed(1)} LUFS outside the sane band [-30,-8]`);
+      }
+      if (productionQa && music.present && introW >= 2.5 && ears.windowMeanDb === null) {
+        critical.push("music audibility unavailable: production QA requires a measurable intro window");
       }
       if (music.present && ears.windowMeanDb !== null && ears.windowMeanDb < -50) {
         critical.push(`music missing from mix: intro-window mean ${ears.windowMeanDb.toFixed(1)} dB despite a produced music track`);
       }
       ctx.log(`qa_visual: ears — integrated ${ears.integratedLufs ?? "?"} LUFS, intro-window ${ears.windowMeanDb ?? "?"} dB`);
     } catch (e) {
-      ctx.log(`qa_visual: audio meters skipped: ${e instanceof Error ? e.message : e}`);
+      if (productionQa) {
+        critical.push(`audio meters unavailable: ${e instanceof Error ? e.message : e}`);
+      } else {
+        ctx.log(`qa_visual: audio meters skipped: ${e instanceof Error ? e.message : e}`);
+      }
     }
     // 8) Critic (crew) VALIDATION SPEC â€” the per-video checklist this content must
     // pass. Deterministic assertions compare metrics we computed; vision ones are
@@ -2126,7 +2301,7 @@ export const qaVisual: Block = {
       const judgeFrames = (watch.framePaths.length ? watch.framePaths : vframes).slice(0, 24);
       let visionVerdicts: Map<string, boolean | null> | undefined;
       const visionAssertions = spec.assertions.filter((a) => a.check === "vision");
-      if (hasGeminiKey() && judgeFrames.length && visionAssertions.length) {
+      if (judgeFrames.length && visionAssertions.length) {
         try {
           const raw = await visionLocal({
             prompt:
@@ -2144,7 +2319,18 @@ export const qaVisual: Block = {
             (v.verdicts ?? []).map((x) => [String(x.id), typeof x.pass === "boolean" ? x.pass : null]),
           );
         } catch (e) {
-          ctx.log(`qa_visual: batched vision judge failed (assertions skipped): ${e instanceof Error ? e.message : e}`);
+          if (productionQa) {
+            critical.push(`validation-spec vision grader failed: ${e instanceof Error ? e.message : e}`);
+          } else {
+            ctx.log(`qa_visual: batched vision judge failed (assertions skipped): ${e instanceof Error ? e.message : e}`);
+          }
+        }
+      }
+      if (productionQa) {
+        for (const assertion of visionAssertions.filter((item) => item.severity === "block")) {
+          if (typeof visionVerdicts?.get(assertion.id) !== "boolean") {
+            critical.push(`validation-spec vision assertion ${assertion.id} was not graded`);
+          }
         }
       }
       const visionJudge = visionVerdicts
@@ -2156,8 +2342,6 @@ export const qaVisual: Block = {
         const failed = specOutcome.results.filter((r) => !r.passed && !r.skipped && r.severity === "block");
         // SPLIT VERDICT: DETERMINISTIC block-severity assertions are trustworthy
         // math (durationSec, caption coverage, overlapâ€¦) â€” those now BLOCK.
-        // Vision-judged assertions stay ADVISORY (LLM-authored spec judged by an
-        // LLM â€” the flaky half that caused the original false rejections).
         const detFailed = failed.filter(
           (r) => spec.assertions.find((a) => a.id === r.id)?.check === "deterministic",
         );
@@ -2168,7 +2352,13 @@ export const qaVisual: Block = {
           );
         }
         if (visFailed.length) {
-          ctx.log(`qa_visual: validation-spec vision ADVISORY (NOT blocking): ${visFailed.map((r) => `${r.id} (${r.note ?? "failed"})`).join("; ")}`);
+          if (productionQa) {
+            critical.push(
+              `validation-spec (vision): ${visFailed.map((r) => `${r.id} (${r.note ?? "failed"})`).join("; ")}`,
+            );
+          } else {
+            ctx.log(`qa_visual: validation-spec vision ADVISORY (NOT blocking): ${visFailed.map((r) => `${r.id} (${r.note ?? "failed"})`).join("; ")}`);
+          }
         }
       }
     }
@@ -2195,56 +2385,8 @@ export const qaVisual: Block = {
     return {
       qaPassed: true,
       qaReport: specOutcome ? { ...report, validation: specOutcome.results } : report,
+      [COST_PATCH_KEY]: qaCost,
     };
-  },
-};
-
-/* ----------------------------- qa_refine -------------------------------- *
- * Closed-loop quality control: GEMINI WATCHES THE WHOLE RENDERED VIDEO against
- * a do/don't rubric â†’ structured findings â†’ a Mastra EDITOR agent maps the
- * fixable ones to bounded ops (drop/shorten/retime quote cards) â†’ an executor
- * re-applies the corrected overlays onto the persisted PRE-OVERLAY video and
- * overwrites the canonical output (no full re-render). Non-fixable findings are
- * recorded (refineNotes) so source-level gates can absorb them next run. Runs
- * after timeline_assemble, before qa_visual/upload. Fully guarded â€” any failure
- * leaves the original video untouched. */
-const REFINE_RUBRIC =
-  `You are the QUALITY DIRECTOR for a faceless Stoic-philosophy YouTube channel. WATCH the entire video and ` +
-  `report every violation of these DO/DON'T rules, each with a timestamp (atSec) and a concrete fix:\n` +
-  `1. QUOTE CARDS: must be fully on-screen, legible, SHORT enough to read in their time, and at least ~5s apart ` +
-  `(consecutive cards must NEVER overlap or run back-to-back). Flag any card with too much text or any pair too ` +
-  `close together.\n` +
-  `2. NO channel name / handle on the intro title card or burned into any frame.\n` +
-  `3. FOOTAGE must be on-theme and must NOT contradict the Stoic message (no luxury cars, money, brands, ` +
-  `shopping/markets, busy offices, parties).\n` +
-  `4. NO repeated/looped/duplicate footage; clips should feel distinct.\n` +
-  `5. TEXT must never overlap a face/subject and must have strong contrast.\n` +
-  `6. The intro should dissolve into the body; the video must END on a deliberate OUTRO CARD (a closing line over ` +
-  `the bust) that fades cleanly to black with the music â€” flag if the ending feels abrupt or is just footage ` +
-  `cutting off.\n` +
-  `7. MUSIC after the intro must duck DOWN GRADUALLY (a smooth ~3s ease, never an instant drop) when the voice ` +
-  `starts.\n` +
-  `8. Quote-card blur and text must fade in/out SLOWLY and calmly (not snappy/jarring).\n` +
-  `9. INTRO TITLE CARD must look sophisticated (elegant type, the bust faint behind at ~50% opacity, text fading ` +
-  `in and out) and must NOT show the channel name.\n` +
-  `10. Overall pacing, polish, and on-brand premium feel.\n` +
-  `Return STRICT JSON {"findings":[{"issue":string,"severity":"low|medium|high","atSec":number,"fix":string}],"overall":string}.`;
-
-export const qaRefine: Block = {
-  id: "qa_refine",
-  consumes: ["videoKey"],
-  produces: ["refineNotes"],
-  paid: false,
-  run: async (ctx) => {
-    // SUPERSEDED by qa_visual (deterministic renderValidate gate + advisory
-    // watchRender). qa_refine's old full-video geminiVideo upload + auto-patch/re-
-    // encode was slow and 503-prone and could HANG a render for 20+ min, for no gate
-    // value. It is now a no-op; QA happens reliably in qa_visual. Kept as a block so
-    // existing channel pipelines that reference it still validate.
-    ctx.log("qa_refine: skipped (superseded by qa_visual deterministic gate)");
-    return { refineNotes: { skipped: "superseded_by_qa_visual" } };
-    // (legacy auto-refine implementation deleted — it was unreachable dead code
-    // that still type-checked and broke the Vercel build. git history has it.)
   },
 };
 
@@ -2258,11 +2400,7 @@ export const narratedBlocks: Block[] = [
   introCard,
   quoteOverlaysBlock,
   timelineAssemble,
-  qaRefine,
   lengthCheck,
   captions,
   qaVisual,
 ];
-
-
-

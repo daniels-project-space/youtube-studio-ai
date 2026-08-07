@@ -1,5 +1,5 @@
 /**
- * Higgsfield CLI wrapper — VERIFIED live surface (2026-05-31, CLI v0.1.40).
+ * Retired Higgsfield compatibility surface.
  *
  * Command shape (verbatim from `higgsfield generate create --help`):
  *   higgsfield generate create <model> --prompt "..." [--param value]... --json --wait
@@ -20,8 +20,6 @@
  * Live gate: real spawn only runs when HIGGSFIELD_LIVE=1 (set after a verified
  * `higgsfield auth login`); otherwise we throw rather than silently fake media.
  */
-import { spawn } from "node:child_process";
-
 export class HiggsfieldSessionExpiredError extends Error {
   constructor(
     message = "Higgsfield session expired — run `higgsfield auth login`",
@@ -38,47 +36,11 @@ export class HiggsfieldError extends Error {
   }
 }
 
-const SESSION_EXPIRED_RE =
-  /session\s+expired|not\s+authenticated|please\s+log\s*in|unauthorized/i;
-
 export interface HiggsfieldRunOptions {
   /** CLI binary path (default: `higgsfield`, overridable for tests). */
   bin?: string;
   /** Hard timeout in ms for a single CLI call (default 20m to match --wait). */
   timeoutMs?: number;
-}
-
-interface CliResult {
-  stdout: string;
-  stderr: string;
-  code: number | null;
-}
-
-/** Promisified spawn capturing stdout/stderr with a timeout. */
-function exec(
-  bin: string,
-  args: string[],
-  timeoutMs = 1_200_000,
-): Promise<CliResult> {
-  return new Promise((resolve, reject) => {
-    const child = spawn(bin, args, { stdio: ["ignore", "pipe", "pipe"] });
-    let stdout = "";
-    let stderr = "";
-    const timer = setTimeout(() => {
-      child.kill("SIGKILL");
-      reject(new HiggsfieldError(`higgsfield timed out after ${timeoutMs}ms`));
-    }, timeoutMs);
-    child.stdout.on("data", (d) => (stdout += d.toString()));
-    child.stderr.on("data", (d) => (stderr += d.toString()));
-    child.on("error", (e) => {
-      clearTimeout(timer);
-      reject(new HiggsfieldError(`spawn failed: ${e.message}`));
-    });
-    child.on("close", (code) => {
-      clearTimeout(timer);
-      resolve({ stdout, stderr, code });
-    });
-  });
 }
 
 /**
@@ -87,48 +49,14 @@ function exec(
  * session-expired signature on both exit code and text.
  */
 export async function runCli(
-  args: string[],
-  opts: HiggsfieldRunOptions = {},
+  _args: string[],
+  _opts: HiggsfieldRunOptions = {},
 ): Promise<unknown> {
-  if (process.env.HIGGSFIELD_LIVE !== "1") {
-    throw new HiggsfieldError(
-      "higgsfield CLI not wired (set HIGGSFIELD_LIVE=1 after `higgsfield auth login`)",
-    );
-  }
-  const bin = opts.bin ?? process.env.HIGGSFIELD_BIN ?? "higgsfield";
-  const result = await exec(bin, [...args, "--json"], opts.timeoutMs);
-  const combined = `${result.stdout}\n${result.stderr}`;
-  if (SESSION_EXPIRED_RE.test(combined)) {
-    throw new HiggsfieldSessionExpiredError();
-  }
-  if (result.code !== 0) {
-    throw new HiggsfieldError(
-      `higgsfield exited ${result.code}: ${result.stderr.trim() || result.stdout.trim()}`,
-    );
-  }
-  return parseLastJson(result.stdout);
-}
-
-/** Parse the last top-level JSON object/array printed on stdout. */
-function parseLastJson(stdout: string): unknown {
-  const text = stdout.trim();
-  try {
-    return JSON.parse(text);
-  } catch {
-    const lastObj = text.lastIndexOf("{");
-    const lastArr = text.lastIndexOf("[");
-    const start = Math.max(lastObj, lastArr);
-    if (start >= 0) {
-      try {
-        return JSON.parse(text.slice(start));
-      } catch {
-        /* fall through */
-      }
-    }
-    throw new HiggsfieldError(
-      `higgsfield returned non-JSON output: ${text.slice(0, 200)}`,
-    );
-  }
+  void _args;
+  void _opts;
+  throw new HiggsfieldError(
+    "Higgsfield rendering is retired from production; use the attested Novita Z-Image/LTX runtime",
+  );
 }
 
 /** account status → { email, credits, subscription_plan_type }. */

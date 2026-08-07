@@ -4,7 +4,7 @@
  * profile a Gemini audio analysis produced from its REAL preview audio, so
  * casting matches on what voices actually SOUND like, not on their labels.
  */
-import { mutation, query } from "./_generated/server";
+import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
 
 const profileValidator = v.object({

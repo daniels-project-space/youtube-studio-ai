@@ -217,11 +217,18 @@ export async function watchRender(
   videoPath: string,
   durationSec: number,
   intent: RenderIntent,
-  opts: { runId: string; stepSec?: number; maxFrames?: number; log?: (m: string) => void },
+  opts: { runId: string; stepSec?: number; maxFrames?: number; required?: boolean; log?: (m: string) => void },
 ): Promise<RenderWatchResult> {
   const log = opts.log ?? (() => {});
   const skipped: RenderWatchResult = { ran: false, verdict: "pass", defects: [], framePaths: [], summary: "vision unavailable — skipped (advisory)" };
-  if (!hasVisionKey() || durationSec < 2) return skipped;
+  if (!hasVisionKey() || durationSec < 2) {
+    if (opts.required) {
+      throw new Error(
+        `watchRender required grader unavailable (${!hasVisionKey() ? "no configured vision provider" : `duration ${durationSec}s is too short`})`,
+      );
+    }
+    return skipped;
+  }
 
   // 12 frames max: the old default grabbed 60 full-res frames but the vision
   // wrapper only ever sent 12 — 48 wasted grabs per run, and the prompt listed
@@ -234,7 +241,10 @@ export async function watchRender(
     const f = join(tmp, `watch_${String(i).padStart(3, "0")}.jpg`);
     try { await grabFrame(videoPath, times[i], f); framePaths.push(f); stamps.push(times[i]); } catch { /* skip */ }
   }
-  if (framePaths.length < 3) return { ...skipped, framePaths };
+  if (framePaths.length < 3) {
+    if (opts.required) throw new Error(`watchRender required 3+ frames, extracted ${framePaths.length}`);
+    return { ...skipped, framePaths };
+  }
 
   const prompt =
     `You are a meticulous video QA reviewer WATCHING a rendered video end-to-end to catch PRODUCTION defects ` +
@@ -286,6 +296,9 @@ export async function watchRender(
     log(`watchRender: ${framePaths.length} frames → ${defects.length} defects (crit ${crit}, major ${major}) → ${verdict.toUpperCase()}`);
     return { ran: true, verdict, defects, framePaths, summary: parsed?.summary ?? "" };
   } catch (e) {
+    if (opts.required) {
+      throw new Error(`watchRender required grader failed: ${e instanceof Error ? e.message : e}`);
+    }
     log(`watchRender: vision failed (advisory, not blocking): ${e instanceof Error ? e.message : e}`);
     return { ...skipped, framePaths };
   }

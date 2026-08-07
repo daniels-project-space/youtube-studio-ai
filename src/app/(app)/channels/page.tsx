@@ -6,25 +6,61 @@ import { useQuery, useMutation } from "convex/react";
 import { api } from "../../../../convex/_generated/api";
 import type { Id } from "../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
-import type { ChannelRow, RunRow } from "@/lib/types";
+import type { ChannelRow } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
 import { StageBadge } from "@/components/StageBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
-import { ChannelAvatar } from "@/components/ChannelArt";
+import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
 import { IconChannels } from "@/components/icons";
 import { fmtUsd } from "@/lib/format";
+import {
+  formatZonedScheduleTimestamp,
+  nextProjectedPlanItem,
+} from "@/lib/scheduleCalendar";
+
+type ChannelCardRow = ChannelRow & {
+  folder?: string;
+  schedule?: { frequency?: string; days?: number[]; localTime?: string; timezone?: string; enabled?: boolean };
+};
+
+type PlanCardRow = {
+  _id: string;
+  channelSlug: string;
+  order: number;
+  title?: string;
+  topic: string;
+  status: string;
+  scheduledAt?: number;
+  thumbnailKey?: string;
+};
+
+type ChannelCardArtwork = {
+  channelId: string;
+  channelSlug: string;
+  latestThumbnailKey: string | null;
+  recentRunCount: number;
+  recentPublishedCount: number;
+  recentSpend: number;
+  lastRunStatus: string | null;
+};
+
+const blockLabel = (block: string) =>
+  block.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
 
 export default function ChannelsPage() {
   const ownerId = useOwnerId();
   const channels = useQuery(api.channels.listChannels, { ownerId }) as
-    | (ChannelRow & { folder?: string })[]
+    | ChannelCardRow[]
     | undefined;
   const folders = useQuery(api.folders.list, { ownerId }) as
     | { _id: string; name: string }[]
     | undefined;
-  const recent = useQuery(api.runs.listRecent, { ownerId, limit: 200 }) as
-    | RunRow[]
+  const plan = useQuery(api.contentPlan.listPlanByOwner, { ownerId }) as
+    | PlanCardRow[]
+    | undefined;
+  const channelArtwork = useQuery(api.channels.listChannelCards, { ownerId }) as
+    | ChannelCardArtwork[]
     | undefined;
   const links = useQuery(api.youtubeAuth.linkStatus, { ownerId }) as
     | { channelId: string; ytChannelId?: string | null }[]
@@ -34,6 +70,13 @@ export default function ChannelsPage() {
   const update = useMutation(api.channels.updateChannel);
   const [openFolder, setOpenFolder] = useState<string | null>(null);
   const [dragOver, setDragOver] = useState<string | null>(null);
+  const [viewStartedAt] = useState(() => Date.now());
+  const loading =
+    channels === undefined ||
+    folders === undefined ||
+    plan === undefined ||
+    channelArtwork === undefined ||
+    links === undefined;
   const linkedIds = new Set((links ?? []).map((l) => l.channelId));
   const ytIdByChannel = new Map((links ?? []).map((l) => [l.channelId, l.ytChannelId ?? null]));
 
@@ -41,6 +84,13 @@ export default function ChannelsPage() {
   const inFolder = (name: string) => (channels ?? []).filter((c) => c.folder === name);
   const unfiled = (channels ?? []).filter((c) => !c.folder || !folderNames.has(c.folder));
   const visible = openFolder ? inFolder(openFolder) : unfiled;
+  const readyPlanBySlug = new Map<string, PlanCardRow[]>();
+  for (const item of plan ?? []) {
+    if (item.status !== "ready") continue;
+    const items = readyPlanBySlug.get(item.channelSlug) ?? [];
+    items.push(item);
+    readyPlanBySlug.set(item.channelSlug, items);
+  }
 
   const onDropToFolder = async (e: React.DragEvent, folderName: string | null) => {
     e.preventDefault();
@@ -167,7 +217,7 @@ export default function ChannelsPage() {
         </div>
       )}
 
-      {channels === undefined ? (
+      {loading ? (
         <SkeletonList rows={4} />
       ) : channels.length === 0 ? (
         <EmptyState
@@ -176,90 +226,114 @@ export default function ChannelsPage() {
           icon={<IconChannels width={24} height={24} />}
         />
       ) : (
-        <div
-          style={{
-            display: "grid",
-            gridTemplateColumns: "repeat(auto-fill, minmax(260px, 1fr))",
-            gap: "1rem",
-          }}
-        >
+        <div className="channel-card-grid">
           {visible.map((c) => {
-            const chRuns = recent?.filter((r) => r.channelSlug === c.slug) ?? [];
-            const count = chRuns.length;
-            const videos = chRuns.filter((r) => r.youtubeVideoId).length;
-            const cost = chRuns.reduce((s, r) => s + (r.costTotal ?? 0), 0);
+            const cardData = channelArtwork.find(
+              (art) => art.channelId === c._id || art.channelSlug === c.slug,
+            );
+            const count = cardData?.recentRunCount ?? 0;
+            const videos = cardData?.recentPublishedCount ?? 0;
+            const cost = cardData?.recentSpend ?? 0;
             const linked = linkedIds.has(c._id);
             const creating = c.youtubeCreated?.status === "creating";
             const needsLink = !linked && !creating;
             const ytId = ytIdByChannel.get(c._id) || c.youtubeCreated?.ytChannelId || null;
+            const readyPlan = readyPlanBySlug.get(c.slug) ?? [];
+            const next = nextProjectedPlanItem({
+              items: readyPlan,
+              schedule: c.schedule,
+              cadence: c.identity?.cadence,
+              fromTimestamp: viewStartedAt,
+            });
+            const planArtwork = next?.item.thumbnailKey ?? readyPlan.find(
+              (item) => item.thumbnailKey,
+            )?.thumbnailKey;
+            const latestArtwork = cardData?.latestThumbnailKey;
+            const previewArtwork = latestArtwork ?? planArtwork ?? c.identity?.bannerKey;
+            const setupChecks = [
+              linked,
+              Boolean(c.identity?.imageKey && c.identity?.niche),
+              Boolean(c.identity?.voiceId),
+              Boolean(c.identity?.thumbnailTemplate),
+              Boolean(c.pipeline?.length),
+            ];
+            const setupDone = setupChecks.filter(Boolean).length;
+            const cadence = c.schedule?.frequency || c.identity?.cadence || "Not set";
+            const modulePath = (c.pipeline ?? []).map((entry) => blockLabel(entry.block));
             return (
-              <Link
+              <article
                 key={c._id}
-                href={`/channels/${c.slug}`}
-                className="glass glass-shine lift"
+                className={`channel-card glass glass-shine${needsLink ? " channel-card-attention" : ""}`}
                 draggable
                 onDragStart={(e) => e.dataTransfer.setData("text/channel-id", c._id)}
-                style={{
-                  padding: "1.25rem",
-                  display: "grid",
-                  gap: "0.85rem",
-                  ...(creating
-                    ? { border: "1px solid rgba(245,158,11,0.7)", animation: "pulseAmber 1.6s ease-in-out infinite" }
-                    : needsLink
-                      ? { border: "1px solid rgba(248,113,113,0.7)", animation: "pulseRed 1.6s ease-in-out infinite" }
-                      : {}),
-                }}
               >
-                <div style={{ display: "flex", alignItems: "flex-start", gap: "0.8rem" }}>
+                <ChannelBanner
+                  bannerKey={previewArtwork}
+                  fallbackKeys={[planArtwork, c.identity?.bannerKey]}
+                  name={c.name}
+                  palette={c.identity?.palette}
+                  aspectRatio="16 / 9"
+                >
+                  <span className="channel-card-preview-label">
+                    {latestArtwork ? "Latest accepted thumbnail" : planArtwork ? "Planned thumbnail" : "Channel artwork"}
+                  </span>
+                </ChannelBanner>
+                <div className="channel-card-identity">
                   <ChannelAvatar
                     imageKey={c.identity?.imageKey}
                     name={c.name}
                     palette={c.identity?.palette}
-                    size={48}
-                    radius={12}
+                    size={66}
+                    radius={16}
                   />
-                  <div style={{ flex: 1, minWidth: 0 }}>
-                    <div style={{ display: "flex", justifyContent: "space-between", alignItems: "flex-start", gap: "0.45rem" }}>
-                      <h3
-                        style={{
-                          fontSize: "0.98rem",
-                          lineHeight: 1.25,
-                          minWidth: 0,
-                          overflow: "hidden",
-                          display: "-webkit-box",
-                          WebkitLineClamp: 2,
-                          WebkitBoxOrient: "vertical",
-                          wordBreak: "break-word",
-                        }}
-                      >
-                        {c.name}
-                      </h3>
-                      <div style={{ display: "flex", alignItems: "center", gap: "0.3rem", flexShrink: 0 }}>
-                        <ChannelToggle id={c._id} active={c.status === "active"} />
-                        <StageBadge status={c.status === "active" ? "ok" : "queued"} size="sm" />
-                        <DeleteChannelX id={c._id} name={c.name} />
-                      </div>
-                    </div>
-                    <div style={{ fontSize: "0.78rem", color: "var(--color-muted)", marginTop: "0.2rem" }}>
-                      {c.identity?.niche ?? `Template ${c.template}`}
+                  <div className="channel-card-title">
+                    <Link href={`/channels/${c.slug}`}>
+                      <h2>{c.name}</h2>
+                    </Link>
+                    <p>{c.identity?.niche ?? `Template ${c.template}`}</p>
+                    <div className="channel-card-state">
+                      <StageBadge status={c.status === "active" ? "ok" : "queued"} size="sm" />
+                      <span>{cadence}</span>
                     </div>
                   </div>
+                  <div className="channel-card-controls">
+                    <ChannelToggle id={c._id} active={c.status === "active"} />
+                    <DeleteChannelX id={c._id} name={c.name} />
+                  </div>
                 </div>
-                <div
-                  style={{
-                    display: "grid",
-                    gridTemplateColumns: "repeat(3, 1fr)",
-                    gap: "0.5rem",
-                    borderTop: "1px solid var(--color-border)",
-                    paddingTop: "0.7rem",
-                  }}
-                >
-                  <CardStat label="Runs" value={String(count)} />
-                  <CardStat label="Videos" value={String(videos)} />
-                  <CardStat label="Spend" value={fmtUsd(cost)} />
+
+                <div className="channel-card-operating-row">
+                  <div>
+                    <small>Next item</small>
+                    <strong>{next?.timestamp ? formatZonedScheduleTimestamp(next.timestamp, next.timeZone) : next ? "Time unavailable" : "No ready item"}</strong>
+                    <span>{next ? `${next.pinned ? "Pinned" : "Projected"} · ${next.item.title || next.item.topic}` : "Open schedule to plan"}</span>
+                  </div>
+                  <div>
+                    <small>Setup</small>
+                    <strong className={setupDone === setupChecks.length ? "channel-ready" : "channel-incomplete"}>
+                      {setupDone}/{setupChecks.length} complete
+                    </strong>
+                    <span>{cardData?.lastRunStatus ? `Last run ${cardData.lastRunStatus}` : "No run history"}</span>
+                  </div>
                 </div>
+
+                <div className="channel-module-path" title={modulePath.join(" → ")}>
+                  <small>Module path</small>
+                  <span>
+                    {modulePath.length
+                      ? `${modulePath.slice(0, 3).join(" → ")}${modulePath.length > 3 ? ` → +${modulePath.length - 3}` : ""}`
+                      : "No pipeline configured"}
+                  </span>
+                </div>
+
+                <div className="channel-card-stats" title="Latest 20 runs for this channel">
+                  <CardStat label="Recent runs" value={String(count)} />
+                  <CardStat label="Published" value={String(videos)} />
+                  <CardStat label="Recent spend" value={fmtUsd(cost)} />
+                </div>
+
                 {creating && (
-                  <div style={{ fontSize: "0.78rem", fontWeight: 600, color: "#fbbf24", display: "flex", alignItems: "center", gap: "0.4rem" }}>
+                  <div className="channel-card-notice channel-card-notice-warning">
                     <span className="studio-pulse">●</span> Setting up YouTube channel…
                   </div>
                 )}
@@ -267,10 +341,14 @@ export default function ChannelsPage() {
                 {linked && c.identity?.imageKey && ytId && (
                   <SetAvatarButton imageKey={c.identity.imageKey} ytChannelId={ytId} slug={c.slug} />
                 )}
-                <div style={{ fontSize: "0.72rem", fontFamily: "var(--font-mono)", color: "var(--color-faint)" }}>
-                  {c.slug}
-                </div>
-              </Link>
+
+                <nav className="channel-card-actions" aria-label={`${c.name} actions`}>
+                  <Link href={`/channels/${c.slug}?tab=settings`}>Settings</Link>
+                  <Link href={`/channels/${c.slug}?tab=week-ahead`}>Schedule</Link>
+                  <Link href={`/channels/${c.slug}?tab=pipeline`}>Pipeline</Link>
+                  <Link href={`/channels/${c.slug}`} className="channel-card-open">Open →</Link>
+                </nav>
+              </article>
             );
           })}
         </div>
@@ -376,7 +454,9 @@ function LinkYouTubeButton({ channelId, created }: { channelId: string; created:
   const onClick = (e: React.MouseEvent) => {
     e.preventDefault();
     e.stopPropagation();
-    window.location.href = `/api/youtube-connect?channelId=${channelId}`;
+    window.location.assign(
+      new URL(`/api/youtube-connect?channelId=${channelId}`, window.location.origin),
+    );
   };
   return (
     <button

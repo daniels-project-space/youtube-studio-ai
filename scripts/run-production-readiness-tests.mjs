@@ -1,0 +1,48 @@
+import { spawnSync } from "node:child_process";
+import { readdirSync } from "node:fs";
+import { dirname, join, relative } from "node:path";
+import { fileURLToPath } from "node:url";
+
+const root = join(dirname(fileURLToPath(import.meta.url)), "..");
+const sourceRoot = join(root, "src");
+const tsx = join(
+  root,
+  "node_modules",
+  ".bin",
+  process.platform === "win32" ? "tsx.cmd" : "tsx",
+);
+
+function directTests(directory) {
+  return readdirSync(directory, { withFileTypes: true }).flatMap((entry) => {
+    if (entry.isDirectory() && entry.name === "node_modules") return [];
+    const path = join(directory, entry.name);
+    if (entry.isDirectory()) return directTests(path);
+    return /\.test\.(?:ts|tsx|mts|mjs)$/.test(entry.name) ? [path] : [];
+  });
+}
+
+const tests = directTests(sourceRoot).sort();
+if (tests.length === 0) {
+  console.error("No direct production-readiness tests were discovered under src/");
+  process.exit(1);
+}
+
+for (const test of tests) {
+  const label = relative(root, test);
+  console.log(`\n=== ${label} ===`);
+  const result = spawnSync(tsx, [test], {
+    cwd: root,
+    env: process.env,
+    stdio: "inherit",
+  });
+  if (result.error) {
+    console.error(`Unable to execute ${label}: ${result.error.message}`);
+    process.exit(1);
+  }
+  if (result.status !== 0) {
+    console.error(`${label} failed with exit code ${result.status ?? "unknown"}`);
+    process.exit(result.status ?? 1);
+  }
+}
+
+console.log(`\nAll ${tests.length} direct production-readiness tests passed.`);

@@ -1,4 +1,5 @@
-import { mutation, query, type QueryCtx } from "./_generated/server";
+import type { QueryCtx } from "./_generated/server";
+import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 
@@ -72,13 +73,21 @@ export const overview = query({
       .query("runs")
       .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
       .collect();
-    const totalCost = runs.reduce((sum, r) => sum + (r.costTotal ?? 0), 0);
+    const planBatches = await ctx.db
+      .query("planBatches")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .collect();
+    // Plan batches never create run rows, so adding their idempotent batch total
+    // exposes real planner spend without double-counting pipeline cost.
+    const planningCost = planBatches.reduce((sum, batch) => sum + batch.actualCostUsd, 0);
+    const totalCost = runs.reduce((sum, r) => sum + (r.costTotal ?? 0), 0) + planningCost;
     const videoCount = runs.filter((r) => Boolean(r.youtubeVideoId)).length;
 
     return {
       totalSubscribers,
       totalViews,
       totalCost,
+      planningCost,
       videoCount,
       channelCount: channels.length,
     };
@@ -105,7 +114,14 @@ export const channelSummary = query({
           .query("runs")
           .withIndex("by_channel", (q) => q.eq("channelId", ch._id))
           .collect();
-        const costTotal = runs.reduce((s, r) => s + (r.costTotal ?? 0), 0);
+        const planBatches = await ctx.db
+          .query("planBatches")
+          .withIndex("by_channel", (q) => q.eq("channelId", ch._id))
+          .collect();
+        const planningCost = planBatches
+          .filter((batch) => batch.ownerId === args.ownerId)
+          .reduce((sum, batch) => sum + batch.actualCostUsd, 0);
+        const costTotal = runs.reduce((s, r) => s + (r.costTotal ?? 0), 0) + planningCost;
         const videoCount = runs.filter((r) => Boolean(r.youtubeVideoId)).length;
         return {
           channelId: ch._id,
@@ -116,6 +132,7 @@ export const channelSummary = query({
           totalViews: latest?.totalViews ?? 0,
           videoCount,
           costTotal,
+          planningCost,
         };
       }),
     );
@@ -186,8 +203,20 @@ async function latestChannelDay(ctx: QueryCtx, channelId: Id<"channels">) {
 /** Insert one per-video snapshot row (append-only). Used by stats-refresh. */
 export const recordVideoSnapshot = mutation({
   args: {
+    secret: v.string(),
     ownerId: v.string(),
     channelId: v.id("channels"),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    ingestionId: v.id("analyticsIngestions"),
+    source: v.union(
+      v.literal("youtube_data_api"),
+      v.literal("youtube_analytics_api"),
+    ),
+    metricDefinitionVersion: v.string(),
+    windowStart: v.optional(v.string()),
+    windowEnd: v.optional(v.string()),
+    confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
     youtubeVideoId: v.string(),
     views: v.number(),
     likes: v.number(),
@@ -200,9 +229,48 @@ export const recordVideoSnapshot = mutation({
   },
   returns: v.id("videoAnalytics"),
   handler: async (ctx, args) => {
+    const expected = process.env.INTERNAL_QUERY_SECRET;
+    if (!expected || args.secret !== expected) {
+      throw new Error("analytics.recordVideoSnapshot: invalid internal secret");
+    }
+    const [channel, connector, ingestion] = await Promise.all([
+      ctx.db.get(args.channelId),
+      ctx.db.get(args.connectorId),
+      ctx.db.get(args.ingestionId),
+    ]);
+    if (!channel || channel.ownerId !== args.ownerId) {
+      throw new Error("analytics.recordVideoSnapshot: channel owner mismatch");
+    }
+    if (
+      !connector ||
+      connector.ownerId !== args.ownerId ||
+      connector.channelId !== args.channelId ||
+      (connector.tokenVersion ?? 1) !== args.connectorVersion ||
+      (connector.status ?? "active") !== "active"
+    ) {
+      throw new Error("analytics.recordVideoSnapshot: connector provenance mismatch");
+    }
+    if (
+      !ingestion ||
+      ingestion.ownerId !== args.ownerId ||
+      ingestion.channelId !== args.channelId ||
+      ingestion.connectorId !== args.connectorId ||
+      ingestion.connectorVersion !== args.connectorVersion ||
+      ingestion.source !== args.source
+    ) {
+      throw new Error("analytics.recordVideoSnapshot: ingestion provenance mismatch");
+    }
     return await ctx.db.insert("videoAnalytics", {
       ownerId: args.ownerId,
       channelId: args.channelId,
+      connectorId: args.connectorId,
+      connectorVersion: args.connectorVersion,
+      ingestionId: args.ingestionId,
+      source: args.source,
+      metricDefinitionVersion: args.metricDefinitionVersion,
+      windowStart: args.windowStart,
+      windowEnd: args.windowEnd,
+      confidence: args.confidence,
       youtubeVideoId: args.youtubeVideoId,
       views: args.views,
       likes: args.likes,
@@ -224,8 +292,15 @@ export const recordVideoSnapshot = mutation({
  */
 export const upsertChannelDay = mutation({
   args: {
+    secret: v.string(),
     ownerId: v.string(),
     channelId: v.id("channels"),
+    connectorId: v.id("youtubeAuth"),
+    connectorVersion: v.number(),
+    ingestionId: v.id("analyticsIngestions"),
+    source: v.literal("youtube_data_api"),
+    metricDefinitionVersion: v.string(),
+    confidence: v.union(v.literal("high"), v.literal("medium"), v.literal("low")),
     date: v.string(),
     totalViews: v.number(),
     totalWatchHours: v.optional(v.number()),
@@ -235,6 +310,31 @@ export const upsertChannelDay = mutation({
   },
   returns: v.id("channelAnalytics"),
   handler: async (ctx, args) => {
+    const expected = process.env.INTERNAL_QUERY_SECRET;
+    if (!expected || args.secret !== expected) {
+      throw new Error("analytics.upsertChannelDay: invalid internal secret");
+    }
+    const [channel, connector, ingestion] = await Promise.all([
+      ctx.db.get(args.channelId),
+      ctx.db.get(args.connectorId),
+      ctx.db.get(args.ingestionId),
+    ]);
+    if (!channel || channel.ownerId !== args.ownerId) {
+      throw new Error("analytics.upsertChannelDay: channel owner mismatch");
+    }
+    if (
+      !connector ||
+      connector.ownerId !== args.ownerId ||
+      connector.channelId !== args.channelId ||
+      (connector.tokenVersion ?? 1) !== args.connectorVersion ||
+      (connector.status ?? "active") !== "active" ||
+      !ingestion ||
+      ingestion.connectorId !== args.connectorId ||
+      ingestion.connectorVersion !== args.connectorVersion ||
+      ingestion.channelId !== args.channelId
+    ) {
+      throw new Error("analytics.upsertChannelDay: connector provenance mismatch");
+    }
     const rows = await ctx.db
       .query("channelAnalytics")
       .withIndex("by_channel_date", (q) => q.eq("channelId", args.channelId))
@@ -252,6 +352,12 @@ export const upsertChannelDay = mutation({
     const doc = {
       ownerId: args.ownerId,
       channelId: args.channelId,
+      connectorId: args.connectorId,
+      connectorVersion: args.connectorVersion,
+      ingestionId: args.ingestionId,
+      source: args.source,
+      metricDefinitionVersion: args.metricDefinitionVersion,
+      confidence: args.confidence,
       date: args.date,
       totalViews: args.totalViews,
       totalWatchHours: args.totalWatchHours,

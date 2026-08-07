@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { selectFormat, type FormatSelectionInput } from "@/engine/creative/selectFormat";
+import { authorizeStudioRoute } from "@/lib/operatorSession";
 
 /**
  * POST /api/suggest-format
@@ -14,6 +15,8 @@ import { selectFormat, type FormatSelectionInput } from "@/engine/creative/selec
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const authFailure = await authorizeStudioRoute(request);
+  if (authFailure) return authFailure;
   let body: FormatSelectionInput;
   try {
     body = (await request.json()) as FormatSelectionInput;

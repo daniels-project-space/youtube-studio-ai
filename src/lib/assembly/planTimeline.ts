@@ -8,12 +8,22 @@
  */
 import { moduleParams, type ChannelProfile } from "@/engine/channelProfile";
 import { resolveKnobs, type KnobValue } from "@/engine/customization";
+import {
+  validateQualifiedShotRender,
+  type ShotRenderManifest,
+} from "@/engine/renderArtifacts";
 import { ASSEMBLY_SURFACE } from "./module";
 import { TimelineSchema, type Timeline, type Segment, type Overlay } from "./timeline";
 
 /** The raw decision inputs (mirrors what the god-block pulled from ctx.store). */
 export interface PlanInput {
   footageClips: string[];
+  /** Authored, one-to-one story clip mapping. When present it owns the body edit. */
+  shotRenderManifest?: ShotRenderManifest;
+  /** Required proof that every manifest clip cleared the per-shot grader. */
+  shotQaReport?: unknown;
+  /** Required proof that the manifest covers the full narration with no gaps. */
+  visualCoverage?: unknown;
   entityClips?: string[];
   narrationSrc?: string;
   narrationDurationSec: number;
@@ -288,15 +298,38 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
   const introSec = input.introCardSrc && input.introCardSrc.length > 0 ? params.introSec : 0;
   const hasIntro = introSec > 0; // introStyle 'none'/'cold_open' collapses introSec to 0
   const tailSec = params.tailSec;
+  const storyManifest = input.shotRenderManifest
+    ? validateQualifiedShotRender({
+        manifest: input.shotRenderManifest,
+        qaReport: input.shotQaReport,
+        coverage: input.visualCoverage,
+      }).manifest
+    : undefined;
+  if (storyManifest) {
+    if (Math.abs(storyManifest.durationSec - narrationSec) > 0.02) {
+      throw new Error(
+        `planTimeline: authored shot duration ${storyManifest.durationSec}s does not match narration ${narrationSec}s`,
+      );
+    }
+    for (let index = 0; index < storyManifest.items.length; index++) {
+      const item = storyManifest.items[index];
+      if (index === 0 && Math.abs(item.t0) > 0.02) {
+        throw new Error("planTimeline: authored shots must begin at t=0");
+      }
+      if (index > 0 && Math.abs(item.t0 - storyManifest.items[index - 1].t1) > 0.02) {
+        throw new Error(`planTimeline: authored shot coverage gap/overlap before ${item.shotId}`);
+      }
+    }
+  }
 
   // Silence-trim (editor): carve dead air out of the narration. Beat-body path only —
   // chapter timing is the director's lane, so trim sits out when a chapterPlan drives it.
   // Needs BOTH the editor directive (thresholds) and measured intervals (the probe).
-  const inChapterMode = !!(params.chapterCards && input.chapterPlan && input.chapterPlan.length > 0);
+  const inChapterMode = !storyManifest && !!(params.chapterCards && input.chapterPlan && input.chapterPlan.length > 0);
   const trim = input.editor?.trim;
   let keepRanges: TimeRange[] | undefined;
   let effectiveNarrationSec = narrationSec;
-  if (trim && input.silenceIntervals && input.silenceIntervals.length > 0 && !inChapterMode) {
+  if (trim && input.silenceIntervals && input.silenceIntervals.length > 0 && !inChapterMode && !storyManifest) {
     const kr = computeKeepRanges(narrationSec, input.silenceIntervals, trim);
     const trimmed = sumRanges(kr);
     // only adopt the trim if it actually shortens AND leaves real content (no zero-length narration)
@@ -324,7 +357,24 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
   const segments: Segment[] = [];
   if (hasIntro) segments.push({ kind: "card", role: "intro", durSec: introSec, bgSrc: input.cardBgSrc });
 
-  if (params.chapterCards && input.chapterPlan && input.chapterPlan.length > 0) {
+  if (storyManifest) {
+    segments.push(...storyManifest.items.map((item) => ({
+      kind: "footage" as const,
+      src: item.clipKey,
+      durSec: item.t1 - item.t0,
+      onBeat: true,
+    })));
+    // With no outro card, hold the final authored frame through the tail. The
+    // narration body itself remains exactly one segment per authored shot.
+    if (!params.outroCard && tailSec > 0) {
+      segments.push({
+        kind: "footage",
+        src: storyManifest.items.at(-1)!.clipKey,
+        durSec: tailSec,
+        onBeat: false,
+      });
+    }
+  } else if (params.chapterCards && input.chapterPlan && input.chapterPlan.length > 0) {
     let chapNo = 0;
     let ci = 0;
     for (const wndw of input.chapterPlan) {

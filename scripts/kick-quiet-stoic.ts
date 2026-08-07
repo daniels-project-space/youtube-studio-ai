@@ -1,4 +1,4 @@
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { tasks, configure } from "@trigger.dev/sdk";
 import { api } from "../convex/_generated/api";
 
@@ -6,7 +6,7 @@ async function main() {
   const url = "https://astute-camel-689.convex.cloud";
   const convex = new ConvexHttpClient(url);
   configure({ secretKey: process.env.TRIGGER_SECRET_KEY! });
-  const chans = (await convex.query(api.channels.listChannels, { ownerId: "owner_daniel" })) as Array<any>;
+  const chans = await convex.query(api.channels.listChannels, { ownerId: "owner_daniel" });
   const ch = chans.find((c) => /quiet stoic/i.test(c.name));
   if (!ch) throw new Error("Quiet Stoic channel not found");
   const channelId = ch._id;

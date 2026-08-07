@@ -19,17 +19,18 @@ export function AssetImg({
   style?: CSSProperties;
   fallbackSrc?: string;
 }) {
-  const [url, setUrl] = useState<string | null>(null);
+  const [resolved, setResolved] = useState<{ key: string; url: string | null } | null>(null);
   useEffect(() => {
-    if (!k) {
-      setUrl(null);
-      return;
-    }
+    if (!k) return;
     let live = true;
     fetch(`/api/asset-url?key=${encodeURIComponent(k)}`)
-      .then((r) => r.json())
-      .then((d) => { if (live && d.url) setUrl(d.url); })
-      .catch(() => {});
+      .then((r) => r.json() as Promise<{ url?: string }>)
+      .then((data) => {
+        if (live) setResolved({ key: k, url: data.url ?? null });
+      })
+      .catch(() => {
+        if (live) setResolved({ key: k, url: null });
+      });
     return () => { live = false; };
   }, [k]);
 
@@ -42,6 +43,7 @@ export function AssetImg({
     fontSize: "0.72rem",
     ...style,
   };
+  const url = resolved && resolved.key === k ? resolved.url : null;
   const src = url ?? (!k ? fallbackSrc : undefined);
   if (!src) return <div style={base}>{k ? "rendering…" : "no thumbnail"}</div>;
   // eslint-disable-next-line @next/next/no-img-element

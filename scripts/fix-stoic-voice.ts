@@ -6,7 +6,7 @@
  *
  * Run:  set -a; . .env.local; set +a; npx tsx scripts/fix-stoic-voice.ts
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../convex/_generated/api";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { recruitVoice, removeAccountVoice, NARRATION_PHYSICS } from "@/lib/voicecraft";

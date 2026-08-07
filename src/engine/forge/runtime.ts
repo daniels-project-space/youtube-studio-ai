@@ -13,12 +13,13 @@ import { register as registerBlock, get as getRegistered } from "@/engine/regist
 import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { geminiJson, parseJsonLoose } from "@/lib/gemini";
-import { generateFalFluxProImage } from "@/lib/falImage";
+import { PRICE } from "@/engine/pricing";
 import { generateI2V } from "@/lib/i2v";
+import { renderNovitaImage } from "@/lib/novitaMedia";
 import type { ForgedModuleSpec, ForgeStep } from "./spec";
 
-const STILL_COST = Number(process.env.FAL_FLUX_COST_USD ?? 0.04);
-const CLIP_COST = Number(process.env.FAL_I2V_COST_USD ?? 0.13);
+const STILL_COST = PRICE.novitaImageUsd;
+const CLIP_COST = PRICE.novitaVideoUsd;
 
 type Scope = {
   store: Record<string, unknown>;
@@ -69,13 +70,23 @@ async function runStep(
   step: ForgeStep,
   scope: Scope,
   ctx: StageContext,
-  state: { tmp: string; cost: number; maxCost: number; overlays: { path: string; startSec: number; durSec: number; noBlur?: boolean; text?: string }[]; n: number },
+  state: { tmp: string; cost: number; imageCost: number; maxCost: number; overlays: { path: string; startSec: number; durSec: number; noBlur?: boolean; text?: string }[]; n: number },
 ): Promise<unknown> {
   const guardCost = (add: number) => {
     if (state.cost + add > state.maxCost) {
       throw new Error(`forged module exceeded its cost ceiling ($${state.maxCost}) â€” step skipped the budget gate`);
     }
     state.cost += add;
+  };
+  const reconcileProviderCost = (reserved: number, actual: number, label: string) => {
+    if (!Number.isFinite(actual) || actual < 0) {
+      throw new Error(`${label} returned an invalid provider billing receipt`);
+    }
+    state.cost += actual - reserved;
+    if (state.cost > state.maxCost) {
+      const error = new Error(`${label} provider receipt exceeded the forged module cost ceiling ($${state.maxCost})`);
+      throw Object.assign(error, { additionalObservedCostUsd: actual, retryable: false });
+    }
   };
 
   if (step.op === "llm_json") {
@@ -88,22 +99,32 @@ async function runStep(
   }
   if (step.op === "image") {
     guardCost(STILL_COST);
-    const url = await generateFalFluxProImage({
+    const rendered = await renderNovitaImage({
+      prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/forge`,
+      id: `forge-image-${state.n++}`,
       prompt: `${interp(step.prompt, scope)} Absolutely NO text, NO words, NO letters, NO watermark.`,
+      profileId: "production",
     });
-    return { url };
+    reconcileProviderCost(STILL_COST, rendered.costUsd, "forged Novita image");
+    state.imageCost += rendered.costUsd;
+    return rendered;
   }
   if (step.op === "i2v") {
     guardCost(CLIP_COST);
-    const img = resolveRef(step.imageFrom, scope) as { url?: string } | string | undefined;
+    const img = resolveRef(step.imageFrom, scope) as { url?: string; key?: string } | string | undefined;
     const imageUrl = typeof img === "string" ? img : img?.url;
-    if (!imageUrl) throw new Error(`forged i2v: imageFrom "${step.imageFrom}" resolved to nothing`);
+    const imageKey = typeof img === "string" ? undefined : img?.key;
+    if (!imageUrl && !imageKey) throw new Error(`forged i2v: imageFrom "${step.imageFrom}" resolved to nothing`);
     const clip = await generateI2V({
       prompt: interp(step.prompt, scope),
       imageUrl,
+      imageKey,
       durationSec: step.durationSec ?? 5,
       aspectRatio: "16:9",
+      runId: ctx.runId,
+      keyPrefix: ctx.keyPrefix,
     });
+    reconcileProviderCost(CLIP_COST, clip.costUsd, "forged Novita i2v");
     const path = await downloadTo(clip.url, join(state.tmp, `forge_${state.n++}.mp4`));
     return { path, url: clip.url };
   }
@@ -179,7 +200,7 @@ export function makeForgedBlock(spec: ForgedModuleSpec): Block {
       for (const k of spec.consumes) store[k] = ctx.store[k];
 
       const scope: Scope = { store, params, steps: [] };
-      const state = { tmp, cost: 0, maxCost: spec.maxCostUsd, overlays: [] as { path: string; startSec: number; durSec: number; noBlur?: boolean; text?: string }[], n: 0 };
+      const state = { tmp, cost: 0, imageCost: 0, maxCost: spec.maxCostUsd, overlays: [] as { path: string; startSec: number; durSec: number; noBlur?: boolean; text?: string }[], n: 0 };
       ctx.log(`${spec.id}: forged module starting (${spec.steps.length} steps, ceiling $${spec.maxCostUsd})`);
       for (const step of spec.steps) {
         scope.steps.push(await runStep(step, scope, ctx, state));
@@ -201,8 +222,9 @@ export function makeForgedBlock(spec: ForgedModuleSpec): Block {
       }
       // APPEND to extraOverlays (forged modules compose; they never clobber).
       const prior = (ctx.store["extraOverlays"] as unknown[] | undefined) ?? [];
-      ctx.log(`${spec.id}: done â€” ${keyed.length} overlay(s), $${state.cost.toFixed(2)}`);
-      return { extraOverlays: [...prior, ...keyed], [COST_PATCH_KEY]: state.cost };
+      const exactCost = Math.max(0, state.cost);
+      ctx.log(`${spec.id}: done â€” ${keyed.length} overlay(s), $${exactCost.toFixed(2)}`);
+      return { extraOverlays: [...prior, ...keyed], [COST_PATCH_KEY]: exactCost };
     },
   };
 }

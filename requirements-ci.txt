@@ -1,0 +1,6 @@
+# Motion-comic regression tests execute the real placement and page-analysis
+# modules. Keep their clean-runner Python surface explicit and reproducible.
+pillow==12.1.1
+numpy==2.2.6
+scipy==1.13.1
+scikit-image==0.26.0

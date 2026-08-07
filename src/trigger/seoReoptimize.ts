@@ -10,13 +10,19 @@
  * token / enough data.
  */
 import { schedules, task } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import {
+  STUDIO_AUTOMATION_GATES,
+  studioAutomationGate,
+} from "@/lib/automationGate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix } from "@/lib/storage";
 import { loadLedger, saveLedger, type PerfEntry } from "@/lib/performance";
 import { updateVideoMetadata } from "@/lib/youtube";
+import { requireYouTubeConnector } from "@/lib/youtubeConnector";
+import { YOUTUBE_WRITE_SCOPES } from "@/lib/publishingPolicy";
 import { hasGeminiKey, geminiJson } from "@/lib/gemini";
 
 const MS_30D = 30 * 86_400_000;
@@ -26,7 +32,11 @@ const score = (e: PerfEntry) => e.avgViewPct * 0.7 + (e.ctr ?? 0) * 0.3;
 
 type Logger = (m: string) => void;
 
-async function reoptimize(ownerId: string, log: Logger) {
+async function reoptimize(ownerId: string, log: Logger, approvedForMetadataChanges = false) {
+  if (!approvedForMetadataChanges) {
+    log("seo-reopt: external metadata changes require explicit operator approval — skip");
+    return { ok: true, skipped: "approval_required", updated: 0 };
+  }
   await bootstrapSecrets((m) => log(m));
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL not configured");
@@ -56,11 +66,21 @@ async function reoptimize(ownerId: string, log: Logger) {
       .slice(-MAX_PER_CHANNEL);
     if (cands.length === 0) continue;
 
-    let refreshToken: string | undefined;
+    let refreshToken: string;
     try {
-      const auth = await convex.query(api.youtubeAuth.getForChannel, { channelId: ch._id, secret: process.env.INTERNAL_QUERY_SECRET ?? "" });
-      refreshToken = auth?.refreshToken;
-    } catch { /* fall back to global token */ }
+      refreshToken = (
+        await requireYouTubeConnector(convex, {
+          channelId: ch._id,
+          ownerId,
+          requiredScopes: YOUTUBE_WRITE_SCOPES,
+        })
+      ).refreshToken;
+    } catch (error) {
+      log(
+        `seo-reopt: ${ch.name} skipped — ${error instanceof Error ? error.message : String(error)}`,
+      );
+      continue;
+    }
 
     for (const c of cands) {
       try {
@@ -95,12 +115,25 @@ async function reoptimize(ownerId: string, log: Logger) {
 
 export const seoReoptimizeSchedule = schedules.task({
   id: "seo-reoptimize",
-  // cron: "0 9 * * 1", // weekly, Monday 09:00 — after the weekend's metrics settle // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
-  run: async () => reoptimize(process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[seo-reopt] ${m}`)),
+  cron: "0 9 * * 1", // weekly, Monday 09:00 — after the weekend's metrics settle
+  run: async () => {
+    const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.insights);
+    if (!gate.enabled) return gate;
+
+    return reoptimize(
+      process.env.STUDIO_OWNER_ID ?? "owner_daniel",
+      (m) => console.log(`[seo-reopt] ${m}`),
+      false,
+    );
+  },
 });
 
 export const seoReoptimizeTask = task({
   id: "seo-reoptimize-now",
-  run: async (payload: { ownerId?: string }) =>
-    reoptimize(payload?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel", (m) => console.log(`[seo-reopt] ${m}`)),
+  run: async (payload: { ownerId?: string; approvedForMetadataChanges?: boolean }) =>
+    reoptimize(
+      payload?.ownerId ?? process.env.STUDIO_OWNER_ID ?? "owner_daniel",
+      (m) => console.log(`[seo-reopt] ${m}`),
+      payload?.approvedForMetadataChanges === true,
+    ),
 });

@@ -28,7 +28,6 @@ export const HeroTitle: React.FC<HeroTitleProps> = ({ base, near, kicker, lines,
   const kIn = spring({ frame: frame - 8, fps, config: { damping: 200 } });
   const lineW = interpolate(frame, [16, 34], [0, 380], { extrapolateLeft: "clamp", extrapolateRight: "clamp" });
   const subIn = spring({ frame: frame - 60, fps, config: { damping: 200 } });
-  let wd = 22;
   const bigSize = 132;
   return (
     <AbsoluteFill style={{ background: "#04060c", fontFamily, overflow: "hidden" }}>
@@ -45,7 +44,10 @@ export const HeroTitle: React.FC<HeroTitleProps> = ({ base, near, kicker, lines,
           <div style={{ opacity: kIn, transform: `translateY(${interpolate(kIn, [0, 1], [18, 0])}px)`, fontSize: 30, fontWeight: 600, letterSpacing: "0.4em", color: accent, textTransform: "uppercase" }}>{kicker}</div>
           <div style={{ width: lineW, height: 4, borderRadius: 2, background: accent, margin: "16px 0 22px", boxShadow: `0 0 16px ${accent}aa` }} />
           {lines.map((ln, li) => (
-            <div key={li} style={{ lineHeight: 0.98 }}>{ln.split(" ").map((w, wi) => { wd += 4; return <Word key={wi} word={w} delay={wd} size={bigSize} />; })}</div>
+            <div key={li} style={{ lineHeight: 0.98 }}>{ln.split(" ").map((w, wi) => {
+              const precedingWords = lines.slice(0, li).reduce((total, line) => total + line.split(" ").length, 0);
+              return <Word key={wi} word={w} delay={22 + (precedingWords + wi + 1) * 4} size={bigSize} />;
+            })}</div>
           ))}
           <div style={{ opacity: subIn, transform: `translateY(${interpolate(subIn, [0, 1], [22, 0])}px)`, fontSize: 30, fontWeight: 600, letterSpacing: "0.24em", color: "#aebccb", marginTop: 22 }}>{sub}</div>
         </div>

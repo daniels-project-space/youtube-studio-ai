@@ -5,9 +5,14 @@
  *   NEXT_PUBLIC_CONVEX_URL=https://astute-camel-689.convex.cloud \
  *   npx tsx scripts/check-overlap.ts <runId> [introSec=5] [gapSec=3]
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../convex/_generated/api";
 import type { Id } from "../convex/_generated/dataModel";
+
+interface StageOutputs {
+  chapterPlan?: Array<{ kind: string; durSec: number; heading?: string }>;
+  quoteOverlays?: Array<{ startSec: number; durSec: number; text?: string }>;
+}
 
 function cardWindows(plan: { kind: string; durSec: number; heading?: string }[], introSec: number) {
   const out: { start: number; end: number; heading?: string }[] = [];
@@ -25,9 +30,11 @@ async function main() {
   const gap = Number(process.argv[4] ?? 3);
   if (!runId) throw new Error("usage: check-overlap.ts <runId> [introSec] [gapSec]");
   const c = new ConvexHttpClient(process.env.NEXT_PUBLIC_CONVEX_URL!);
-  const st = (await c.query(api.runStages.listRunStages, { runId: runId as Id<"runs"> })) as Array<{ block: string; outputs?: any }>;
-  const plan = st.find((s) => s.block === "narration_tts")?.outputs?.chapterPlan ?? [];
-  const quotes = st.find((s) => s.block === "quote_overlays")?.outputs?.quoteOverlays ?? [];
+  const st = await c.query(api.runStages.listRunStages, { runId: runId as Id<"runs"> });
+  const narration = st.find((stage) => stage.block === "narration_tts")?.outputs as StageOutputs | undefined;
+  const overlays = st.find((stage) => stage.block === "quote_overlays")?.outputs as StageOutputs | undefined;
+  const plan = narration?.chapterPlan ?? [];
+  const quotes = overlays?.quoteOverlays ?? [];
   const cards = cardWindows(plan, introSec);
 
   console.log(`chapter cards: ${cards.length}, quote cards: ${quotes.length}, gap=${gap}s`);

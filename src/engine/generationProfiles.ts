@@ -1,0 +1,183 @@
+import { z } from "zod";
+
+const ProfileSchema = z.object({
+  contractVersion: z.literal("1.0.0"),
+  id: z.enum(["draft", "production", "hero"]),
+  infrastructure: z.object({
+    provider: z.literal("novita"),
+    capacityMode: z.literal("spot"),
+    weightStorage: z.literal("local-persistent-disk"),
+    cacheMount: z.literal("/workspace/model-cache"),
+    checkpointing: z.literal(true),
+    idleShutdownSeconds: z.number().int().min(60).max(900),
+    elasticGpuCeiling: z.literal(8),
+  }),
+  image: z.object({
+    provider: z.literal("novita"),
+    model: z.string().min(1),
+    revision: z.string().regex(/^[a-f0-9]{40}$/),
+    checkpoint: z.string().min(1),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    steps: z.number().int().positive(),
+    guidanceScale: z.number().min(0),
+    precision: z.enum(["bf16", "fp16"]),
+    candidates: z.number().int().min(1).max(4),
+  }),
+  video: z.object({
+    provider: z.literal("novita"),
+    model: z.string().min(1),
+    revision: z.string().regex(/^[a-f0-9]{40}$/),
+    checkpoint: z.string().min(1),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+    fps: z.number().int().positive(),
+    steps: z.number().int().positive(),
+    guidanceScale: z.number().positive(),
+    precision: z.enum(["bf16", "fp16"]),
+    pipeline: z.enum(["distilled", "two-stage-hq"]),
+    twoStageRefine: z.boolean(),
+    distilledLoraCheckpoint: z.string().min(1).optional(),
+    spatialUpscalerCheckpoint: z.string().min(1).optional(),
+    candidates: z.number().int().min(1).max(3),
+  }),
+  qa: z.object({
+    imageMinScore: z.number().min(0).max(1),
+    shotMinScore: z.number().min(0).max(1),
+    maxFreezeFraction: z.number().min(0).max(0.2),
+    required: z.literal(true),
+  }),
+  allowFallback: z.literal(false),
+});
+
+export type GenerationProfile = z.infer<typeof ProfileSchema>;
+
+export const LTX_23_MODEL_REVISION = "7caa482d5cd10a2eae6b34cb48f093ebc45a263e" as const;
+export const NOVITA_ELASTIC_GPU_CEILING = 8 as const;
+
+const NOVITA_LOCAL_SPOT_INFRA = {
+  provider: "novita" as const,
+  capacityMode: "spot" as const,
+  weightStorage: "local-persistent-disk" as const,
+  cacheMount: "/workspace/model-cache" as const,
+  checkpointing: true as const,
+  idleShutdownSeconds: 300,
+  elasticGpuCeiling: NOVITA_ELASTIC_GPU_CEILING,
+};
+
+export const GENERATION_PROFILES: Readonly<Record<GenerationProfile["id"], GenerationProfile>> = {
+  draft: ProfileSchema.parse({
+    contractVersion: "1.0.0",
+    id: "draft",
+    infrastructure: NOVITA_LOCAL_SPOT_INFRA,
+    image: {
+      provider: "novita",
+      model: "Tongyi-MAI/Z-Image-Turbo",
+      revision: "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      checkpoint: "Z-Image-Turbo",
+      width: 1280,
+      height: 736,
+      steps: 9,
+      guidanceScale: 0,
+      precision: "bf16",
+      candidates: 1,
+    },
+    video: {
+      provider: "novita",
+      model: "Lightricks/LTX-2.3",
+      revision: LTX_23_MODEL_REVISION,
+      checkpoint: "ltx-2.3-22b-distilled-1.1.safetensors",
+      width: 1280,
+      height: 704,
+      fps: 25,
+      steps: 8,
+      guidanceScale: 1,
+      precision: "bf16",
+      pipeline: "distilled",
+      twoStageRefine: false,
+      spatialUpscalerCheckpoint: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+      candidates: 1,
+    },
+    qa: { imageMinScore: 0.72, shotMinScore: 0.72, maxFreezeFraction: 0.08, required: true },
+    allowFallback: false,
+  }),
+  production: ProfileSchema.parse({
+    contractVersion: "1.0.0",
+    id: "production",
+    infrastructure: NOVITA_LOCAL_SPOT_INFRA,
+    image: {
+      provider: "novita",
+      model: "Tongyi-MAI/Z-Image-Turbo",
+      revision: "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      checkpoint: "Z-Image-Turbo",
+      width: 1920,
+      height: 1088,
+      steps: 9,
+      guidanceScale: 0,
+      precision: "bf16",
+      candidates: 1,
+    },
+    video: {
+      provider: "novita",
+      model: "Lightricks/LTX-2.3",
+      revision: LTX_23_MODEL_REVISION,
+      checkpoint: "ltx-2.3-22b-dev.safetensors",
+      width: 1920,
+      height: 1088,
+      fps: 25,
+      steps: 40,
+      guidanceScale: 4,
+      precision: "bf16",
+      pipeline: "two-stage-hq",
+      twoStageRefine: true,
+      distilledLoraCheckpoint: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
+      spatialUpscalerCheckpoint: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+      candidates: 1,
+    },
+    qa: { imageMinScore: 0.8, shotMinScore: 0.8, maxFreezeFraction: 0.04, required: true },
+    allowFallback: false,
+  }),
+  hero: ProfileSchema.parse({
+    contractVersion: "1.0.0",
+    id: "hero",
+    infrastructure: NOVITA_LOCAL_SPOT_INFRA,
+    image: {
+      provider: "novita",
+      model: "Tongyi-MAI/Z-Image-Turbo",
+      revision: "f332072aa78be7aecdf3ee76d5c247082da564a6",
+      checkpoint: "Z-Image-Turbo",
+      width: 2048,
+      height: 1152,
+      steps: 9,
+      guidanceScale: 0,
+      precision: "bf16",
+      candidates: 2,
+    },
+    video: {
+      provider: "novita",
+      model: "Lightricks/LTX-2.3",
+      revision: LTX_23_MODEL_REVISION,
+      checkpoint: "ltx-2.3-22b-dev.safetensors",
+      width: 1920,
+      height: 1088,
+      fps: 25,
+      steps: 48,
+      guidanceScale: 4,
+      precision: "bf16",
+      pipeline: "two-stage-hq",
+      twoStageRefine: true,
+      distilledLoraCheckpoint: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
+      spatialUpscalerCheckpoint: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+      candidates: 1,
+    },
+    qa: { imageMinScore: 0.86, shotMinScore: 0.84, maxFreezeFraction: 0.025, required: true },
+    allowFallback: false,
+  }),
+};
+
+export function generationProfile(id: unknown): GenerationProfile {
+  const key = typeof id === "string" ? id : "production";
+  const profile = GENERATION_PROFILES[key as GenerationProfile["id"]];
+  if (!profile) throw new Error(`unknown generation profile "${key}"`);
+  return ProfileSchema.parse(profile);
+}

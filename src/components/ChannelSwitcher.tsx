@@ -24,22 +24,41 @@ export function ChannelSwitcher() {
   const ref = useRef<HTMLDivElement>(null);
 
   useEffect(() => {
-    function onDoc(e: MouseEvent) {
+    function onDoc(e: PointerEvent) {
       if (ref.current && !ref.current.contains(e.target as Node)) setOpen(false);
     }
-    document.addEventListener("mousedown", onDoc);
-    return () => document.removeEventListener("mousedown", onDoc);
+    function onKey(e: KeyboardEvent) {
+      if (e.key === "Escape") setOpen(false);
+    }
+    document.addEventListener("pointerdown", onDoc);
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.removeEventListener("pointerdown", onDoc);
+      document.removeEventListener("keydown", onKey);
+    };
   }, []);
+
+  useEffect(() => {
+    if (
+      channels !== undefined &&
+      selectedSlug &&
+      !channels.some((channel) => channel.slug === selectedSlug)
+    ) {
+      setSelectedSlug(null);
+    }
+  }, [channels, selectedSlug, setSelectedSlug]);
 
   const current = channels?.find((c) => c.slug === selectedSlug);
   const label = current ? current.name : "All channels";
 
   return (
-    <div ref={ref} style={{ position: "relative" }}>
+    <div ref={ref} className="channel-switcher">
       <button
         type="button"
         onClick={() => setOpen((o) => !o)}
-        className="lift"
+        className="channel-switcher-button lift"
+        aria-expanded={open}
+        aria-haspopup="listbox"
         style={{
           display: "flex",
           alignItems: "center",
@@ -54,7 +73,7 @@ export function ChannelSwitcher() {
           font: "inherit",
           fontSize: "0.88rem",
           cursor: "pointer",
-          minWidth: 180,
+          width: "100%",
         }}
       >
         <span
@@ -73,7 +92,8 @@ export function ChannelSwitcher() {
 
       {open && (
         <div
-          className="glass"
+          className="glass channel-switcher-menu"
+          role="listbox"
           style={{
             position: "absolute",
             top: "calc(100% + 6px)",

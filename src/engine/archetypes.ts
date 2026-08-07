@@ -99,7 +99,7 @@ export const ARCHETYPES: Record<string, Archetype> = {
     description:
       "Looping AI-generated visuals under generated music. No narration. (Fully implemented.)",
     template: "C",
-    thumbnailTemplate: "title_card",
+    thumbnailTemplate: "banana",
     pipeline: LOFI,
   },
   "narrated-essay": {

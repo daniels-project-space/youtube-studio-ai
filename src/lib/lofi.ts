@@ -310,11 +310,31 @@ const TOPAZ_VERSION = "f4dad23bbe2d0bf4736d2ea8c9156f1911d8eeb511c8d0bb390931e25
 
 export interface LofiResult { videoPath: string; url: string; scene: string; durationSec: number; width: number; height: number; }
 
+type ResolvedLofiCfg = LofiCfg & Required<Pick<LofiCfg, "host" | "upscale" | "webDir">>;
+
+interface ReplicatePrediction {
+  status?: string;
+  output?: string | string[];
+  error?: unknown;
+  detail?: unknown;
+  urls?: { get?: string };
+}
+
+interface GeminiMotionResponse {
+  candidates?: Array<{ content?: { parts?: Array<{ text?: string }> } }>;
+}
+
+interface GroundedMotion {
+  motion_prompt?: unknown;
+  element_types?: unknown;
+}
+
 /** Run the full lofi-loop pipeline for one config. Resumable; returns the published video. */
 export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
-  const pathPreset: any = userCfg.path ? LOFI_PATHS[userCfg.path] : {};
-  const cfg: any = { ...DEFAULTS, ...pathPreset, ...userCfg };
-  const missing = ["slug", "scene", "channel", "title", "music"].filter((k) => !cfg[k] || !String(cfg[k]).trim());
+  const pathPreset = userCfg.path ? LOFI_PATHS[userCfg.path] : {};
+  const cfg = { ...DEFAULTS, ...pathPreset, ...userCfg } as ResolvedLofiCfg;
+  const requiredFields = ["slug", "scene", "channel", "title", "music"] as const;
+  const missing = requiredFields.filter((key) => !String(cfg[key] ?? "").trim());
   if (missing.length) throw new Error(`lofi: missing required input(s): ${missing.join(", ")}. See LOFI_MODULE.requires.`);
   const scene: LofiScene = LOFI_SCENES[cfg.scene];
   if (!scene) throw new Error(`lofi: unknown scene '${cfg.scene}'. Known: ${Object.keys(LOFI_SCENES).join(", ")}`);
@@ -324,22 +344,22 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
   await bootstrapSecrets(() => {}, { required: ["GEMINI_API_KEY", "REPLICATE_API_TOKEN"] });
   const GK = process.env.GEMINI_API_KEY as string, RT = process.env.REPLICATE_API_TOKEN as string;
   const RUN = join(process.cwd(), "output", "lofi", cfg.slug);
-  const WEB = cfg.webDir as string;
+  const WEB = cfg.webDir;
   await mkdir(RUN, { recursive: true });
   await mkdir(WEB, { recursive: true });
   const rd = (f: string) => join(RUN, f);
   const log = (m: string) => console.error("[lofi]", m);
   const sh = (c: string, a: string[]) => new Promise<void>((res, rej) => { const p = spawn(c, a, { stdio: ["ignore", "inherit", "inherit"] }); p.on("close", (x) => (x === 0 ? res() : rej(new Error(c + " exit " + x)))); });
   const probe = ffprobeDuration; // shared (was a local ffprobe-duration one-liner)
-  const rfetch = async (url: string, opts?: any, tries = 6): Promise<Response> => { for (let a = 0; ; a++) { try { return await fetch(url, opts); } catch (e) { if (a >= tries - 1) throw e; await new Promise((r) => setTimeout(r, 4000 * (a + 1))); } } };
+  const rfetch = async (url: string, opts?: RequestInit, tries = 6): Promise<Response> => { for (let a = 0; ; a++) { try { return await fetch(url, opts); } catch (e) { if (a >= tries - 1) throw e; await new Promise((r) => setTimeout(r, 4000 * (a + 1))); } } };
 
   // Replicate official-model prediction → returns first output url (Flux/Kling). Retries + polls.
-  async function replicate(model: string, input: any, label: string, byVersion = false): Promise<string> {
+  async function replicate(model: string, input: Record<string, unknown>, label: string, byVersion = false): Promise<string> {
     const endpoint = byVersion ? "https://api.replicate.com/v1/predictions" : `https://api.replicate.com/v1/models/${model}/predictions`;
     const body = byVersion ? { version: model, input } : { input };
     for (let a = 0; a < 4; a++) {
       const sub = await rfetch(endpoint, { method: "POST", headers: { Authorization: `Bearer ${RT}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      let j: any = await sub.json(); const getUrl = j.urls?.get; const t0 = Date.now();
+      let j = await sub.json() as ReplicatePrediction; const getUrl = j.urls?.get; const t0 = Date.now();
       while (getUrl && (j.status === "starting" || j.status === "processing")) { await new Promise((r) => setTimeout(r, 6000)); j = await (await rfetch(getUrl, { headers: { Authorization: `Bearer ${RT}` } })).json(); if (Date.now() - t0 > 900000) break; }
       const url = Array.isArray(j.output) ? j.output[0] : j.output;
       if (url) return url as string;
@@ -353,8 +373,10 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
   async function uploadFile(p: string, name: string): Promise<string> {
     const form = new FormData();
     form.append("content", new Blob([await readFile(p)], { type: "image/png" }), name);
-    const r = await rfetch("https://api.replicate.com/v1/files", { method: "POST", headers: { Authorization: `Bearer ${RT}` }, body: form as any });
-    return (await r.json()).urls.get as string;
+    const r = await rfetch("https://api.replicate.com/v1/files", { method: "POST", headers: { Authorization: `Bearer ${RT}` }, body: form });
+    const uploaded = await r.json() as { urls?: { get?: string } };
+    if (!uploaded.urls?.get) throw new Error("Replicate file upload returned no URL");
+    return uploaded.urls.get;
   }
 
   // 1 ── STILL — Nano Banana Pro (STANDARD: obeys negative rules like no-rain-inside, which Flux ignores).
@@ -393,10 +415,11 @@ export async function craftLofi(userCfg: LofiCfg): Promise<LofiResult> {
       method: "POST", headers: { "content-type": "application/json" },
       body: JSON.stringify({ contents: [{ parts: [{ text: tmpl }, { inline_data: { mime_type: "image/png", data: b64 } }] }], generationConfig: { temperature: 0.3, maxOutputTokens: 1024, thinkingConfig: { thinkingBudget: 0 } } }),
     });
-    const j: any = await r.json();
-    const raw = (j?.candidates?.[0]?.content?.parts ?? []).map((p: any) => p.text).join("").trim().replace(/^```json?\n?/, "").replace(/`+$/, "").trim();
-    let parsed: any = {}; try { parsed = JSON.parse(raw.startsWith("{") ? raw : (raw.match(/\{[\s\S]*\}/)?.[0] || "{}")); } catch { parsed = {}; }
-    motion = (parsed.motion_prompt && String(parsed.motion_prompt).length > 40) ? parsed.motion_prompt : scene.priorities.join(". ") + ".";
+    const j = await r.json() as GeminiMotionResponse;
+    const raw = (j.candidates?.[0]?.content?.parts ?? []).map((part) => part.text ?? "").join("").trim().replace(/^```json?\n?/, "").replace(/`+$/, "").trim();
+    let parsed: GroundedMotion = {};
+    try { parsed = JSON.parse(raw.startsWith("{") ? raw : (raw.match(/\{[\s\S]*\}/)?.[0] || "{}")) as GroundedMotion; } catch { parsed = {}; }
+    motion = typeof parsed.motion_prompt === "string" && parsed.motion_prompt.length > 40 ? parsed.motion_prompt : scene.priorities.join(". ") + ".";
     const nTypes = Array.isArray(parsed.element_types) ? parsed.element_types.length : 0;
     log(`motion: ${motion.length} chars, ${nTypes} element types${nTypes < 5 ? " (LOW — proceeding)" : ""}`);
     await writeFile(rd("motion.txt"), motion);

@@ -13,7 +13,7 @@
  *   NEXT_PUBLIC_CONVEX_URL=https://astute-camel-689.convex.cloud \
  *   NEXT_PUBLIC_OWNER_ID=owner_daniel npx tsx scripts/migrate-channel-pipelines.ts
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "@/../convex/_generated/api";
 import type { Id } from "@/../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";

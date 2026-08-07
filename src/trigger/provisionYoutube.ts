@@ -9,9 +9,10 @@
  * Requires BROWSERBASE_CONTEXT_ID (a context pre-authed with Google login).
  */
 import { task } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { withStagehand, hasBrowserbase } from "@/lib/browserbase";
 
@@ -52,6 +53,10 @@ export const provisionYoutubeTask = task({
     const convex = new ConvexHttpClient(url);
     const name = payload.name.trim();
     const appChannelId = payload.appChannelId as Id<"channels">;
+    const appChannel = await convex.query(api.channels.getChannel, {
+      channelId: appChannelId,
+    });
+    if (!appChannel) return { ok: false, error: "app channel not found" };
 
     try {
       const { value, sessionId } = await withStagehand(async (shU) => {
@@ -91,7 +96,11 @@ export const provisionYoutubeTask = task({
       // Verify the callback actually stored a token for this channel.
       let linked = null as { ytTitle?: string; ytChannelId?: string } | null;
       for (let i = 0; i < 6; i++) {
-        const row = await convex.query(api.youtubeAuth.getForChannel, { channelId: appChannelId, secret: process.env.INTERNAL_QUERY_SECRET ?? "" }).catch(() => null);
+        const row = await convex.query(api.youtubeAuth.getForChannel, {
+          channelId: appChannelId,
+          ownerId: appChannel.ownerId,
+          secret: requireInternalQuerySecret(),
+        }).catch(() => null);
         if (row) { linked = { ytTitle: row.ytTitle ?? undefined, ytChannelId: row.ytChannelId ?? undefined }; break; }
         await new Promise((r) => setTimeout(r, 2500));
       }

@@ -45,7 +45,10 @@ import { cinematicDoctrineFor, type CinematicDoctrine } from "@/engine/golden";
 export { cinematicDoctrineFor, type CinematicDoctrine } from "@/engine/golden";
 
 export function hasCinecraft(): boolean {
-  return process.env.HIGGSFIELD_LIVE === "1" && hasGeminiKey();
+  // Kept as a catalog/type compatibility surface until its subject/Soul tools
+  // have a full Novita replacement. It must never reopen the retired paid
+  // Higgsfield renderer merely because a legacy environment flag is present.
+  return false;
 }
 
 /* ------------------------------- models -------------------------------- */

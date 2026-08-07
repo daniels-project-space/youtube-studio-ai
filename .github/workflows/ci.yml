@@ -26,6 +26,13 @@ jobs:
         with:
           node-version: 24
           cache: ${{ steps.pm.outputs.pm }}
+      - uses: actions/setup-python@v5
+        with:
+          python-version: '3.12'
+      - name: Install declared renderer system dependency
+        run: |
+          sudo apt-get update
+          sudo apt-get install --yes --no-install-recommends ffmpeg
       - name: Install
         run: |
           if [ "${{ steps.pm.outputs.pm }}" = "pnpm" ]; then
@@ -40,10 +47,13 @@ jobs:
           else
             npx --yes tsc --noEmit
           fi
-      - name: Tests (if a test script exists)
-        run: |
-          if node -e "process.exit(require('./package.json').scripts?.test?0:1)"; then
-            ${{ steps.pm.outputs.pm }} test
-          else
-            echo "no test script — skipping"
-          fi
+      - name: Lint
+        run: ${{ steps.pm.outputs.pm }} run lint
+      - name: Production dependency audit
+        run: npm audit --omit=dev --audit-level=high
+      - name: Install declared Python renderer test dependency
+        run: python -m pip install --disable-pip-version-check --no-cache-dir -r requirements-ci.txt
+      - name: Novita worker contract tests
+        run: PYTHONDONTWRITEBYTECODE=1 python -m unittest -v infra/novita/test_worker.py
+      - name: Production-readiness tests
+        run: ${{ steps.pm.outputs.pm }} run test:production-readiness

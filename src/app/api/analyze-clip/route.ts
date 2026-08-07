@@ -1,4 +1,5 @@
 import { NextResponse } from "next/server";
+import { authorizeStudioRoute } from "@/lib/operatorSession";
 
 /**
  * POST /api/analyze-clip  { url }            → { id }  (Trigger run handle)
@@ -9,6 +10,8 @@ import { NextResponse } from "next/server";
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
+  const authFailure = await authorizeStudioRoute(request);
+  if (authFailure) return authFailure;
   let body: { url?: string };
   try { body = await request.json(); } catch { return NextResponse.json({ error: "invalid JSON" }, { status: 400 }); }
   const url = body.url?.trim();
@@ -26,6 +29,8 @@ export async function POST(request: Request) {
 }
 
 export async function GET(request: Request) {
+  const authFailure = await authorizeStudioRoute(request);
+  if (authFailure) return authFailure;
   const id = new URL(request.url).searchParams.get("id");
   if (!id) return NextResponse.json({ error: "missing id" }, { status: 400 });
   if (!process.env.TRIGGER_SECRET_KEY) return NextResponse.json({ error: "inactive", inactive: true }, { status: 503 });

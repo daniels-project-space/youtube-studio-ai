@@ -9,7 +9,12 @@
  *   - no silent skips (backend overlay warnings surface in the Receipt)
  */
 import assert from "node:assert/strict";
-import { renderTimeline, hashTimeline, type RenderBackend } from "../renderTimeline";
+import {
+  renderTimeline,
+  hashTimeline,
+  preOverlayCacheKey,
+  type RenderBackend,
+} from "../renderTimeline";
 import { planTimeline, type PlanInput } from "../planTimeline";
 import type { Timeline } from "../timeline";
 
@@ -91,7 +96,7 @@ async function idempotency(): Promise<void> {
 
 async function healFromCheckpoint(): Promise<void> {
   const t = plan();
-  const preKey = `render/${hashTimeline(t, "v1:preoverlay")}.mp4`;
+  const preKey = preOverlayCacheKey(t);
   const { be, calls } = fake({ [preKey]: "pre_overlay.mp4" });
   const r = await renderTimeline(t, be);
   assert.equal(r.healedFrom, "preOverlay", "re-finished from the pre-overlay checkpoint");

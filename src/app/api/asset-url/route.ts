@@ -1,6 +1,7 @@
 import { NextResponse } from "next/server";
 import { presignDownload } from "@/lib/storage";
 import { OWNER_ID } from "@/lib/config";
+import { authorizeStudioRoute } from "@/lib/operatorSession";
 
 /**
  * GET /api/asset-url?key=<r2Key>
@@ -19,6 +20,8 @@ import { OWNER_ID } from "@/lib/config";
 export const runtime = "nodejs";
 
 export async function GET(request: Request) {
+  const authFailure = await authorizeStudioRoute(request);
+  if (authFailure) return authFailure;
   const { searchParams } = new URL(request.url);
   const key = searchParams.get("key");
 

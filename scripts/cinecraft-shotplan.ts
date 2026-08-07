@@ -3,7 +3,7 @@ import { geminiJsonPro } from "@/lib/gemini";
 (async () => {
   await bootstrapSecrets();
   const narration = `Paris, 1925. A man is sitting in a luxury hotel suite counting hundreds of thousands of francs in cash. He just sold the Eiffel Tower and he never owned it. His name is Victor Lustig. Congratulations, Mr. Poisson. The tower is yours. He shakes hands, picks up his briefcase, walks out of the suite, down the corridor, through the lobby, onto the Paris streets. He hails a taxi, sits in the back with a briefcase full of cash, and he smiles.`;
-  const plan = await geminiJsonPro<{ shots?: any[] }>({
+  const plan = await geminiJsonPro<{ shots?: Array<Record<string, unknown>> }>({
     prompt: [
       "You are the DIRECTOR of a cinematic AI history-documentary (Cipher / ago. style). Turn this narration into a SHOT LIST.",
       "The recurring CHARACTER is Victor Lustig, a 35-year-old 1925 European con artist in a charcoal 1920s three-piece suit (a trained character reference exists — keep him identical every shot).",

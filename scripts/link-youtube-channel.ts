@@ -10,8 +10,14 @@
  * channel's uploads go to its OWN YouTube channel. Falls back to the global
  * token for unlinked channels.
  */
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../convex/_generated/api";
+import { encryptSecret } from "@/lib/secretEnvelope";
+import { YT_SCOPES } from "@/lib/youtube";
+import {
+  requireInternalQuerySecret,
+  youtubeConnectorAad,
+} from "@/lib/youtubeConnector";
 
 const VAULT = "https://fantastic-roadrunner-485.convex.cloud/api/query";
 const CONVEX = "https://astute-camel-689.convex.cloud";
@@ -36,12 +42,15 @@ async function main() {
   const yt = await vaultYouTube();
   const clientId = yt.YOUTUBE_CLIENT_ID, clientSecret = yt.YOUTUBE_CLIENT_SECRET;
   if (!clientId || !clientSecret) throw new Error("missing YOUTUBE_CLIENT_ID/SECRET in vault");
+  if (!process.env.YOUTUBE_TOKEN_ENCRYPTION_KEY && yt.YOUTUBE_TOKEN_ENCRYPTION_KEY) {
+    process.env.YOUTUBE_TOKEN_ENCRYPTION_KEY = yt.YOUTUBE_TOKEN_ENCRYPTION_KEY;
+  }
 
   // Exchange the auth code for a refresh token.
   const tok = await (await fetch("https://oauth2.googleapis.com/token", {
     method: "POST", headers: { "content-type": "application/x-www-form-urlencoded" },
     body: new URLSearchParams({ client_id: clientId, client_secret: clientSecret, code, redirect_uri: REDIRECT, grant_type: "authorization_code" }),
-  })).json() as { refresh_token?: string; access_token?: string; error?: string; error_description?: string };
+  })).json() as { refresh_token?: string; access_token?: string; scope?: string; error?: string; error_description?: string };
   if (!tok.refresh_token) throw new Error(`no refresh_token: ${tok.error ?? ""} ${tok.error_description ?? ""} (codes are single-use — re-run the consent URL for a fresh code, and ensure offline access/prompt=consent)`);
 
   // Which YouTube channel did this token land on?
@@ -57,12 +66,24 @@ async function main() {
   const app = channels.find((c) => c.slug === slug || c.slug.startsWith(slug));
   if (!app) throw new Error(`app channel not found for slug "${slug}". Available: ${channels.map((c) => c.slug).join(", ")}`);
 
+  const ownerId = "owner_daniel";
+  const refreshTokenCiphertext = encryptSecret(tok.refresh_token, {
+    envName: "YOUTUBE_TOKEN_ENCRYPTION_KEY",
+    aad: youtubeConnectorAad(ownerId, app._id),
+  });
   await convex.mutation(api.youtubeAuth.set, {
-    ownerId: "owner_daniel",
+    secret: requireInternalQuerySecret(),
+    ownerId,
     channelId: app._id as never,
-    refreshToken: tok.refresh_token,
+    refreshTokenCiphertext,
     ytChannelId: yc?.id,
     ytTitle: yc?.snippet.title,
+    grantedScopes: (tok.scope ?? "").split(/\s+/).filter(Boolean),
+    scopeHealth: tok.scope
+      ? YT_SCOPES.split(" ").every((scope) => tok.scope!.split(/\s+/).includes(scope))
+        ? "healthy"
+        : "partial"
+      : "unknown",
     updatedAt: Date.now(),
   });
   console.log(`✓ linked app channel "${app.name}" (${app.slug}) → YouTube "${yc?.snippet.title}". Future uploads go there.`);

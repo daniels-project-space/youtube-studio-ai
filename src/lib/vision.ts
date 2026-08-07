@@ -11,8 +11,8 @@
  *      identical questions.
  *   3. ROUTES to the cheapest available provider, in VISION_PROVIDERS order
  *      (default "groq,fal,gemini"):
- *        groq   → llama-4-scout (FREE tier: 1k req/day, vision, JSON mode)
- *        fal    → any-llm/vision (existing paid key; ~$0.01/request)
+ *        groq   → Qwen 3.6 27B (current production multimodal model)
+ *        fal    → any-llm/vision (provider-routed; exact usage not exposed)
  *        gemini → gemini-2.5-flash (LAST resort — set VISION_DISABLE_GEMINI=1
  *                 to hard-forbid Google vision)
  *
@@ -26,6 +26,7 @@ import { createHash } from "node:crypto";
 import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
+import { recordModelUsage } from "@/lib/modelUsage";
 
 export class VisionError extends Error {
   constructor(message: string) {
@@ -166,7 +167,7 @@ async function cachePut(key: string, text: string): Promise<void> {
  * ------------------------------------------------------------------ */
 
 const GROQ_VISION_MODEL =
-  process.env.GROQ_VISION_MODEL || "meta-llama/llama-4-scout-17b-16e-instruct";
+  process.env.GROQ_VISION_MODEL || "qwen/qwen3.6-27b";
 /** Groq caps vision requests at 5 images — beyond that, sample evenly. */
 const GROQ_MAX_IMAGES = 5;
 
@@ -211,7 +212,34 @@ async function groqVision(
       continue;
     }
     if (!res.ok) throw new VisionError(`groq vision HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const j = (await res.json()) as { choices?: { message?: { content?: string } }[] };
+    const j = (await res.json()) as {
+      id?: string;
+      model?: string;
+      choices?: { message?: { content?: string } }[];
+      usage?: {
+        prompt_tokens?: number;
+        completion_tokens?: number;
+        total_tokens?: number;
+        prompt_tokens_details?: { cached_tokens?: number };
+        completion_tokens_details?: { reasoning_tokens?: number };
+      };
+    };
+    const reasoning = j.usage?.completion_tokens_details?.reasoning_tokens ?? 0;
+    recordModelUsage({
+      provider: "groq",
+      model: j.model ?? GROQ_VISION_MODEL,
+      kind: "vision",
+      requestId: j.id,
+      inputTokens: j.usage?.prompt_tokens,
+      outputTokens:
+        j.usage?.completion_tokens === undefined
+          ? undefined
+          : Math.max(0, j.usage.completion_tokens - reasoning),
+      reasoningTokens: reasoning,
+      cachedInputTokens: j.usage?.prompt_tokens_details?.cached_tokens,
+      totalTokens: j.usage?.total_tokens,
+      ...(!j.usage ? { unpricedReason: "Groq response omitted usage" } : {}),
+    });
     const text = j.choices?.[0]?.message?.content?.trim();
     if (!text) throw new VisionError("groq vision: empty response");
     return text;
@@ -251,7 +279,14 @@ async function falVision(
       continue;
     }
     if (!res.ok) throw new VisionError(`fal vision HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
-    const j = (await res.json()) as { output?: string };
+    const j = (await res.json()) as { output?: string; request_id?: string };
+    recordModelUsage({
+      provider: "fal",
+      model: "fal-ai/any-llm/vision",
+      kind: "vision",
+      requestId: j.request_id,
+      unpricedReason: "fal any-llm/vision response omitted billable usage and routed model",
+    });
     const text = j.output?.trim();
     if (!text) throw new VisionError("fal vision: empty response");
     return text;
@@ -292,17 +327,19 @@ async function visionBuffers(
   args: { json?: boolean; maxTokens?: number; noCache?: boolean },
 ): Promise<string> {
   if (buffers.length === 0) throw new VisionError("no readable images");
+  const chain = providerChain();
   const cacheKey = createHash("sha1")
     .update(prompt)
     .update(String(!!args.json))
+    .update(String(args.maxTokens ?? 1024))
+    .update(chain.join(","))
+    .update(GROQ_VISION_MODEL)
     .update(buffers.map((b) => createHash("sha1").update(b).digest("hex")).join(","))
     .digest("hex");
   if (!args.noCache) {
     const hit = await cacheGet(cacheKey);
     if (hit) return hit;
   }
-
-  const chain = providerChain();
   if (chain.length === 0) throw new VisionError("no vision provider keyed (GROQ_API_KEY / FAL_KEY / GEMINI_API_KEY)");
   const errors: string[] = [];
   for (const provider of chain) {
@@ -339,6 +376,8 @@ export async function visionUrls(args: {
   model?: string;
   json?: boolean;
   maxTokens?: number;
+  /** Skip the verdict cache (for deliberately-stochastic judging/tests). */
+  noCache?: boolean;
 }): Promise<string> {
   const buffers: Buffer[] = [];
   for (const u of args.imageUrls.slice(0, 12)) {

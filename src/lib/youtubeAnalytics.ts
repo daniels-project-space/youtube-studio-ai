@@ -7,8 +7,8 @@
  */
 const BASE = "https://youtubeanalytics.googleapis.com/v2/reports";
 
-export function hasAnalyticsAccess(): boolean {
-  return Boolean(process.env.YOUTUBE_REFRESH_TOKEN && process.env.YOUTUBE_CLIENT_ID);
+export function hasAnalyticsAccess(refreshToken?: string): boolean {
+  return Boolean(refreshToken && process.env.YOUTUBE_CLIENT_ID);
 }
 
 export interface VideoAnalytics {
@@ -52,11 +52,12 @@ export async function fetchRetentionCurve(args: {
   videoId: string;
   startDate: string;
   endDate: string;
+  refreshToken: string;
 }): Promise<RetentionPoint[] | null> {
-  if (!hasAnalyticsAccess()) return null;
+  if (!hasAnalyticsAccess(args.refreshToken)) return null;
   const { getAccessToken } = await import("@/lib/youtube");
   let accessToken: string;
-  try { accessToken = await getAccessToken(); } catch { return null; }
+  try { accessToken = await getAccessToken(args.refreshToken); } catch { return null; }
   const url = `${BASE}?${new URLSearchParams({
     ids: "channel==MINE",
     startDate: args.startDate,
@@ -88,12 +89,13 @@ export async function fetchVideoAnalytics(args: {
   videoId: string;
   startDate: string;
   endDate: string;
+  refreshToken: string;
 }): Promise<VideoAnalytics | null> {
-  if (!hasAnalyticsAccess()) return null;
+  if (!hasAnalyticsAccess(args.refreshToken)) return null;
   const { getAccessToken } = await import("@/lib/youtube");
   let accessToken: string;
   try {
-    accessToken = await getAccessToken();
+    accessToken = await getAccessToken(args.refreshToken);
   } catch {
     return null;
   }

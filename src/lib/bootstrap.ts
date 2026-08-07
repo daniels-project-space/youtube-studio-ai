@@ -1,20 +1,16 @@
 /**
  * Runtime secret bootstrap. Hydrates process.env from the centralized vault for
- * every service the lofi pipeline needs, then arms the Higgsfield live gate.
+ * every service the production pipeline needs.
  *
  * Idempotent: hydrateEnv only sets keys not already present, so an explicit
  * .env.local (or Trigger-deployed env var) always wins. No secret is ever
  * logged — only the count + key NAMES that were loaded.
  */
-import { createRequire } from "node:module";
-import { mkdirSync, writeFileSync } from "node:fs";
-import { join } from "node:path";
 import { hydrateEnv } from "@/lib/vault";
 
 const SERVICES = [
   "cloudflare", // R2_*
-  "salad", // SALAD_API_KEY, SALAD_LTX_GATEWAY, SALAD_R2_*, SALAD_LTX_WORKFLOW_JSON (LTX-2.3 Salad render)
-  "novita", // NOVITA_API_KEY (Novita 4090 render farm — imagecraft-novita / videocraft-novita bridge)
+  "novita", // Novita render bridge + local persistent-disk Z-Image/LTX fleet
   "youtube", // YOUTUBE_CLIENT_ID/SECRET/REFRESH_TOKEN (+ YOUTUBE_DATA_API_KEY)
   "mureka", // MUREKA_API_KEY
   "suno", // SUNO_API_KEY
@@ -26,7 +22,6 @@ const SERVICES = [
   "replicate", // REPLICATE_API_TOKEN
   "fal", // FAL_KEY (FLUX1.1 [pro] thumbnail base via fal.ai)
   "groq", // GROQ_API_KEY (llama-4-scout vision — the FREE first hop of the vision router chain)
-  "higgsfield", // HIGGSFIELD_CREDENTIALS_JSON / HIGGSFIELD_ACCESS_TOKEN+REFRESH_TOKEN (CLI auth → seamless loop engine)
   "telegram", // TELEGRAM_BOT_TOKEN (+ admin chat id)
   "browserbase", // BROWSERBASE_API_KEY/PROJECT_ID (+ optional CONTEXT_ID) — headless YouTube channel creation
   // Competitor-intelligence engine. hydrateEnv tolerates a missing service
@@ -85,80 +80,8 @@ export async function bootstrapSecrets(
     if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY)
       process.env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GEMINI_API_KEY;
   }
-  // Higgsfield: hydrate the CLI credential so it runs hostless (in the Trigger
-  // image) on your SUBSCRIPTION credits — replacing the old `higgsfield auth
-  // login` on the VPS. Must run before the live gate so generate calls work.
-  hydrateHiggsfieldCli(log);
-
-  // Arm the Higgsfield CLI live gate.
-  if (!process.env.HIGGSFIELD_LIVE) process.env.HIGGSFIELD_LIVE = "1";
   done = true;
   log(`bootstrap: hydrated ${loaded.length} keys`, { keys: loaded });
   if (opts?.required) requireKeys(opts.required);
   return loaded;
-}
-
-/**
- * Write the Higgsfield CLI credential into a writable XDG config dir and point
- * the CLI at it + at the baked binary. The official `@higgsfield/cli` reads
- * `$XDG_CONFIG_HOME/higgsfield/credentials.json` = `{access_token, refresh_token}`
- * and auto-refreshes; that file alone authenticates anywhere (verified — not
- * IP/host-locked), so this is the hostless replacement for `higgsfield auth login`.
- *
- * Source (first that exists): HIGGSFIELD_CREDENTIALS_JSON (the raw blob), or
- * HIGGSFIELD_ACCESS_TOKEN + HIGGSFIELD_REFRESH_TOKEN. No secret is ever logged.
- */
-function hydrateHiggsfieldCli(
-  log: (msg: string, extra?: Record<string, unknown>) => void,
-): void {
-  let creds = process.env.HIGGSFIELD_CREDENTIALS_JSON;
-  if (
-    !creds &&
-    process.env.HIGGSFIELD_ACCESS_TOKEN &&
-    process.env.HIGGSFIELD_REFRESH_TOKEN
-  ) {
-    creds = JSON.stringify({
-      access_token: process.env.HIGGSFIELD_ACCESS_TOKEN,
-      refresh_token: process.env.HIGGSFIELD_REFRESH_TOKEN,
-    });
-  }
-  if (!creds) {
-    log("higgsfield: no CLI credentials in env — CLI will be unauthenticated");
-    return;
-  }
-
-  // The CLI needs a writable HOME (the Trigger container leaves $HOME unset →
-  // the Go binary errors "$HOME is not defined"). Anchor HOME at a writable dir
-  // and place creds at $HOME/.config/higgsfield/ (its native location).
-  const home =
-    process.env.HOME && process.env.HOME.length > 0
-      ? process.env.HOME
-      : "/tmp/hf-home";
-  process.env.HOME = home;
-  const dir = join(home, ".config", "higgsfield");
-  try {
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, "credentials.json"), creds, { mode: 0o600 });
-  } catch (e) {
-    log(`higgsfield: failed to write credentials.json: ${e instanceof Error ? e.message : e}`);
-    return;
-  }
-
-  // Point spawn() at the baked CLI wrapper if we can resolve it; else rely on
-  // PATH ("higgsfield"). The wrapper is executable (shebang), so spawn works.
-  if (!process.env.HIGGSFIELD_BIN) {
-    try {
-      // cwd-anchored require (works in both ESM and CJS bundles — avoids
-      // import.meta, which Next may compile away).
-      const req = createRequire(join(process.cwd(), "index.js"));
-      const pkg = req.resolve("@higgsfield/cli/package.json");
-      process.env.HIGGSFIELD_BIN = join(pkg, "..", "bin", "higgsfield.js");
-    } catch {
-      /* fall back to PATH lookup of `higgsfield` */
-    }
-  }
-  log("higgsfield: CLI credentials hydrated", {
-    home,
-    bin: process.env.HIGGSFIELD_BIN ?? "higgsfield",
-  });
 }

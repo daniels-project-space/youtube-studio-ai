@@ -5,7 +5,8 @@
  * status active|draft based on whether the family's visual engine is built.
  */
 import { task } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { admitProviderTaskOwner } from "@/lib/providerTaskOwnerAdmission";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -13,7 +14,6 @@ import { synthChannelConcept } from "@/lib/conceptSynth";
 import { generateChannelArt } from "@/lib/channelArt";
 import { designPipeline, enforceLengthContract, type DesignOptions } from "@/engine/designer";
 import type { PipelineEntry } from "@/engine/types";
-import { nichePreset } from "@/engine/golden";
 import { FAMILIES, type FamilyKey } from "@/engine/families";
 import { getArchetype } from "@/engine/archetypes";
 import { getNiche } from "@/lib/nicheCatalog";
@@ -23,6 +23,11 @@ import { channelPrefix } from "@/lib/storage";
 import { synthShowBible } from "@/engine/creative/showBible";
 import { synthStyleDNA, buildQualityBar, ESTABLISHED_CONFIDENCE } from "@/engine/creative/styleDNA";
 import { architectPipeline } from "@/engine/creative/architect";
+import {
+  channelPublishConfiguration,
+  replaceChannelPublishPolicy,
+} from "@/lib/channelPublishPolicy";
+import { makeVoicecraftAuditionEvidence } from "@/lib/voiceReadiness";
 
 export interface DesignChannelArgs extends Omit<DesignOptions, "family"> {
   ownerId?: string;
@@ -31,6 +36,9 @@ export interface DesignChannelArgs extends Omit<DesignOptions, "family"> {
   cadence?: string;
   days?: number[];
   budget?: number;
+  /** Added only by the authenticated build route; never trusted from the browser. */
+  approvalActor?: string;
+  approvalEvidence?: string;
   persona?: string;
   palette?: string[];
   /** Auto-create + link a YouTube channel via Browserbase (default true). */
@@ -70,7 +78,12 @@ export const designChannelTask = task({
     // that poisons every future render — fail loudly instead.
     await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
 
-    const ownerId = payload.ownerId ?? process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel";
+    const ownerId = admitProviderTaskOwner({
+      requestedOwnerId: payload.ownerId,
+      configuredOwnerId: process.env.STUDIO_OWNER_ID,
+      runtime: process.env.NODE_ENV,
+      developmentFallbackOwnerId: process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel",
+    });
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
     const convex = new ConvexHttpClient(url);
@@ -91,6 +104,7 @@ export const designChannelTask = task({
       // PRIVATE-FIRST: default uploads to private "draft" unless the operator
       // explicitly chose public/scheduled — nothing goes live by accident.
       publishMode: payload.publishMode ?? "draft",
+      approvedForPublish: payload.approvedForPublish === true,
       seriesTitle: payload.seriesTitle,
       seriesCount: payload.seriesCount,
       toggles: payload.toggles,
@@ -157,9 +171,9 @@ export const designChannelTask = task({
     ].filter(Boolean);
     const channelId = (await convex.mutation(api.channels.createChannel, {
       ownerId, slug, name, identity,
-      // Niche preset thumbnail engine wins over the family default when set.
-      thumbnailer: nichePreset(payload.nicheKey)?.thumbnailer
-        ?? (fam.defaultThumbnailStyle === "title_card" ? "title_card" : "banana"),
+      // Production families always use the real Style-DNA/playbook engine.
+      // Deterministic title cards remain available only as explicit draft UI.
+      thumbnailer: fam.defaultThumbnailStyle,
       template: archetype.template,
       pipeline: design.pipeline,
       // Single source of family truth (no more template-letter guessing).
@@ -389,12 +403,15 @@ export const designChannelTask = task({
     // and the identityValidator rejected the full CastResult anyway. We keep a
     // slim projection and carry it into every later identity write.
     let voiceCastingSlim:
-      | { voiceId: string; name?: string; character?: string; score?: number; why?: string; at?: number }
+      | { voiceId: string; name?: string; character?: string; score: number; why?: string; at: number }
       | undefined;
     await Promise.all([
       (async () => {
         try {
-          if (!styleDNA) return;
+          if (!styleDNA) {
+            if (fam.narrated) throw new Error("narrated channel has no Style DNA for voice casting");
+            return;
+          }
           // VOICE CASTING — voicecraft: the profiled voice bank (operator's
           // real ElevenLabs voices, heard + carded) is prefiltered by the
           // archetype's casting law and auditioned by a model that LISTENS;
@@ -427,7 +444,10 @@ export const designChannelTask = task({
                 };
                 log(`voiceCasting: winner persisted to identity (${voiceCasting.name}, ${voiceCasting.score}/10)`);
               }
-            } catch (e) { log(`voiceCasting skipped: ${e instanceof Error ? e.message : e}`); }
+              if (!voiceCasting) throw new Error("voicecraft returned no cast winner");
+            } catch (e) {
+              throw new Error(`voiceCasting failed closed: ${e instanceof Error ? e.message : e}`);
+            }
           }
           const arch = await architectPipeline({
             family: payload.family,
@@ -505,36 +525,74 @@ export const designChannelTask = task({
         } catch (e) { log(`channel art failed (non-fatal): ${e instanceof Error ? e.message : e}`); }
       })(),
       (async () => {
+        if (!styleDNA) {
+          throw new Error("thumbnail lab cannot initialize without persisted Style DNA");
+        }
+        const {
+          acquireReferences,
+          buildStyleDnaPlaybook,
+          distillPlaybook,
+          verifyReferences,
+        } = await import("@/lib/thumbnailLab");
+        const { distillScriptPlaybook } = await import("@/lib/scriptLab");
+        const { makeRunTempDir } = await import("@/lib/files");
+        const positioning = creativeBrief?.positioning ?? identity.persona ?? "";
+        let fresh: Awaited<ReturnType<typeof acquireReferences>> = [];
         try {
-          if (!styleDNA) return;
-          const { acquireReferences, verifyReferences, distillPlaybook } = await import("@/lib/thumbnailLab");
-          const { distillScriptPlaybook } = await import("@/lib/scriptLab");
-          const { makeRunTempDir } = await import("@/lib/files");
-          const positioning = creativeBrief?.positioning ?? identity.persona ?? "";
-          const fresh = await acquireReferences({ channelName: name, positioning, niche: identity.niche, log });
-          const tmpDir = await makeRunTempDir(`lab_${slug}`);
-          const [thumbPlay, scriptPlay] = await Promise.all([
-            (async () => {
-              const refs = await verifyReferences({ candidates: fresh, channelName: name, positioning, tmpDir, log });
-              return distillPlaybook({ refs, dna: styleDNA!, channelName: name, positioning, log });
-            })(),
-            distillScriptPlaybook({
-              refs: fresh.map((r) => ({ videoId: r.videoId, title: r.title, views: r.views })),
-              dna: styleDNA!,
-              channelName: name,
-              positioning,
-              log,
-            }),
-          ]);
+          fresh = await acquireReferences({ channelName: name, positioning, niche: identity.niche, log });
+        } catch (error) {
+          log(`thumbnailLab: reference acquisition unavailable — using Style-DNA foundation (${error instanceof Error ? error.message : error})`);
+        }
+        const tmpDir = await makeRunTempDir(`lab_${slug}`);
+        let thumbPlay;
+        try {
+          const refs = await verifyReferences({ candidates: fresh, channelName: name, positioning, tmpDir, log });
+          thumbPlay = await distillPlaybook({ refs, dna: styleDNA, channelName: name, positioning, log });
+        } catch (error) {
+          thumbPlay = buildStyleDnaPlaybook({
+            dna: styleDNA,
+            family: payload.family,
+            channelName: name,
+            now,
+          });
+          log(
+            `thumbnailLab: persisted executable Style-DNA foundation after reference lab failure ` +
+            `(${error instanceof Error ? error.message : error})`,
+          );
+        }
+        // Thumbnail readiness is a creation invariant: persist it independently
+        // from the script lab so an unrelated script-model failure can never
+        // discard a successfully built thumbnail playbook.
+        await convex.mutation(api.channels.updateChannel, {
+          channelId,
+          thumbnailPlaybook: thumbPlay,
+        });
+
+        try {
+          const scriptPlay = await distillScriptPlaybook({
+            refs: fresh.map((r) => ({ videoId: r.videoId, title: r.title, views: r.views })),
+            dna: styleDNA,
+            channelName: name,
+            positioning,
+            log,
+          });
           await convex.mutation(api.channels.updateChannel, {
             channelId,
-            thumbnailPlaybook: thumbPlay,
             scriptPlaybook: scriptPlay,
           });
-          log(`labs: BORN WITH PLAYBOOKS — ${thumbPlay.patterns.length} thumbnail patterns, ${scriptPlay.openingDevices.length} opening devices`);
-        } catch (e) { log(`labs failed (non-fatal — runnable later via scripts/run-*-lab): ${e instanceof Error ? e.message : e}`); }
+          log(
+            `labs: BORN WITH PLAYBOOKS — ${thumbPlay.patterns.length} thumbnail patterns ` +
+            `(${thumbPlay.source}), ${scriptPlay.openingDevices.length} opening devices`,
+          );
+        } catch (error) {
+          log(`scriptLab failed independently (thumbnail playbook retained): ${error instanceof Error ? error.message : error}`);
+        }
       })(),
     ]);
+
+    if (fam.narrated && (!voiceCastingSlim || (voiceCastingSlim.score ?? 0) < 7)) {
+      throw new Error("voiceCasting failed closed: narrated channels require a persisted audition winner scored >= 7");
+    }
 
     // Single identity write carrying art, the SEO-expanded pool, the Show
     // Bible AND the voice-casting winner (previously clobbered here).
@@ -560,8 +618,28 @@ export const designChannelTask = task({
         const wired: string[] = [];
         const tts = pipe.find((e) => e.block === "narration_tts");
         const p = (tts?.params ?? {}) as Record<string, unknown>;
-        if (tts && p["ttsProvider"] === "elevenlabs" && !p["elevenVoiceId"]) {
-          tts.params = { ...p, elevenVoiceId: voiceCastingSlim.voiceId };
+        const existingElevenVoice = p["elevenVoiceId"] as string | undefined;
+        if (
+          tts &&
+          p["qualityProfile"] !== "draft" &&
+          (!p["ttsProvider"] || p["ttsProvider"] === "elevenlabs") &&
+          (!existingElevenVoice || existingElevenVoice === voiceCastingSlim.voiceId)
+        ) {
+          const castEvidence = makeVoicecraftAuditionEvidence({
+            channelId: String(channelId),
+            provider: "elevenlabs",
+            voiceId: voiceCastingSlim.voiceId,
+            castScore: voiceCastingSlim.score,
+            castJudgedAt: voiceCastingSlim.at,
+          });
+          tts.params = {
+            ...p,
+            ttsProvider: "elevenlabs",
+            elevenVoiceId: voiceCastingSlim.voiceId,
+            voiceCastScore: voiceCastingSlim.score,
+            voiceCastEvidence: castEvidence,
+            voiceReadinessStatus: "qualified",
+          };
           wired.push("narration_tts");
         }
         // The whiteboard scribe is a self-contained narrated engine — wire the
@@ -579,7 +657,9 @@ export const designChannelTask = task({
           await convex.mutation(api.channels.updateChannel, { channelId, pipeline: pipe });
           log(`voiceCasting: cast winner (${voiceCastingSlim.name ?? voiceCastingSlim.voiceId}) wired into ${wired.join(" + ")}`);
         }
-      } catch (e) { log(`voiceCasting runtime wire skipped: ${e instanceof Error ? e.message : e}`); }
+      } catch (e) {
+        throw new Error(`voiceCasting runtime wire failed closed: ${e instanceof Error ? e.message : e}`);
+      }
     }
 
     // 6b. Auto-PLAN the first batch of upcoming videos — topics + SEO titles +
@@ -699,10 +779,44 @@ export const designChannelTask = task({
       } catch (e) { log(`probe loop error (channel kept as designed): ${e instanceof Error ? e.message : e}`); }
     }
 
+    // Persist external-publishing authority only after every architect/probe
+    // rewrite is finished, bound to the exact final external-module config.
+    // Mutable pipeline booleans are never sufficient at runtime.
+    let publishPolicyWarning: string | undefined;
+    const finalChannel = await convex.query(api.channels.getChannel, { channelId });
+    const publishConfiguration = channelPublishConfiguration(finalChannel?.pipeline);
+    if (publishConfiguration.actions.length && payload.approvedForPublish === true) {
+      try {
+        if (!finalChannel) throw new Error("final channel row is missing");
+        await replaceChannelPublishPolicy({
+          ownerId,
+          channelId,
+          channel: finalChannel,
+          allowedActions: publishConfiguration.actions,
+          actor: payload.approvalActor ?? `authenticated-operator:${ownerId}`,
+          evidence:
+            payload.approvalEvidence ??
+            "explicit channel-creation approval for configured external publishing",
+          convex,
+        });
+        log(
+          `publish policy: approved ${publishConfiguration.actions.join(", ")} against final pipeline`,
+        );
+      } catch (error) {
+        publishPolicyWarning = `external publishing remains blocked: ${
+          error instanceof Error ? error.message : String(error)
+        }`;
+        log(`publish policy: ${publishPolicyWarning}`);
+      }
+    }
+
     return {
       ok: true, channelId, slug, name, family: payload.family,
       status: !design.available ? "draft" : probeOutcome.ok ? "paused" : "draft",
-      probe: probeOutcome, warnings: design.warnings,
+      probe: probeOutcome,
+      warnings: publishPolicyWarning
+        ? [...design.warnings, publishPolicyWarning]
+        : design.warnings,
     };
   },
 });

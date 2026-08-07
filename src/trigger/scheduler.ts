@@ -5,32 +5,23 @@
  *
  * CONTROL = the channel's ACTIVE toggle (no surprise auto-spend): new channels are
  * created "paused", so the scheduler ignores them until the operator flips them on.
- * Safety valves: STUDIO_AUTOPILOT="off" disables everything globally; if
+ * Safety valves: only STUDIO_AUTOPILOT="on" enables scheduled generation; if
  * STUDIO_AUTO_CHANNELS is set (comma-separated slugs/ids) it acts as an extra
  * allow-LIST filter, but when empty ALL active channels are eligible (the toggle is
  * the control). Uploads are PRIVATE-first via the upload_draft `publishMode` param
  * (draft|scheduled|public) — this scheduler only kicks off GENERATION.
  */
-import { schedules, tasks } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { idempotencyKeys, schedules, tasks } from "@trigger.dev/sdk";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import {
+  STUDIO_AUTOMATION_GATES,
+  studioAutomationGate,
+} from "@/lib/automationGate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
-
-const DAY = 86_400_000;
-function cadenceMs(c?: string): number {
-  switch (c) {
-    case "daily":
-      return DAY;
-    case "biweekly":
-      return 14 * DAY;
-    case "monthly":
-      return 30 * DAY;
-    case "weekly":
-    default:
-      return 7 * DAY;
-  }
-}
+import type { ChannelSchedulePolicy } from "@/lib/publishingPolicy";
+import { parsePlanGenerationLeadMs } from "@/lib/scheduledPlanRuntime";
 
 interface ChannelRow {
   _id: Id<"channels">;
@@ -38,24 +29,18 @@ interface ChannelRow {
   slug: string;
   status?: string;
   identity?: { cadence?: string };
+  schedule?: ChannelSchedulePolicy;
 }
-interface RunRow {
-  status?: string;
-  startedAt?: number;
-}
-
 export const generationScheduler = schedules.task({
   id: "generation-scheduler",
   // Every 6h; the per-channel cadence + due-check decides what actually fires.
-  // cron: "0 */6 * * *", // PAUSED 2026-06-14 per request: manual-trigger only. Restore this line to re-enable the cron.
+  cron: "0 */6 * * *",
   run: async () => {
+    const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.autopilot);
+    if (!gate.enabled) return gate;
+
     await bootstrapSecrets((m) => console.log(`[scheduler] ${m}`));
     const owner = process.env.STUDIO_OWNER_ID ?? "owner_daniel";
-    // Global kill switch.
-    if ((process.env.STUDIO_AUTOPILOT ?? "").toLowerCase() === "off") {
-      console.log("[scheduler] STUDIO_AUTOPILOT=off — disabled globally. Nothing to do.");
-      return { triggered: 0, enabled: 0 };
-    }
     // Optional extra allow-list FILTER. Empty → every active channel is eligible
     // (the per-channel Active toggle is the real control).
     const allow = (process.env.STUDIO_AUTO_CHANNELS ?? "")
@@ -69,6 +54,7 @@ export const generationScheduler = schedules.task({
     const channels = (await convex.query(api.channels.listChannels, {
       ownerId: owner,
     })) as ChannelRow[];
+    const leadMs = parsePlanGenerationLeadMs(process.env.STUDIO_PLAN_GENERATION_LEAD_HOURS);
     let triggered = 0;
     let enabled = 0;
     for (const ch of channels) {
@@ -76,26 +62,48 @@ export const generationScheduler = schedules.task({
       if (!isOn) continue;
       enabled++;
 
-      const runs = (await convex.query(api.runs.listRunsByChannel, {
-        channelId: ch._id,
-      })) as RunRow[];
-      if (runs.some((r) => r.status === "queued" || r.status === "running")) {
-        console.log(`[scheduler] ${ch.name}: a run is already in progress — skip`);
-        continue;
-      }
-      const last = runs.reduce((m, r) => Math.max(m, r.startedAt ?? 0), 0);
-      const interval = cadenceMs(ch.identity?.cadence);
-      // Due if never run, or at least (interval - 1h slack for the 6h cron grain).
-      if (last && Date.now() - last < interval - 3_600_000) continue;
-
-      const runId = await convex.mutation(api.runs.createRun, {
+      const admitted = await convex.mutation(api.contentPlan.claimNextPlanRun, {
         ownerId: owner,
         channelId: ch._id,
+        dueBefore: Date.now() + leadMs,
       });
+      if (admitted.state === "busy" || admitted.state === "disabled" || admitted.state === "not_due") {
+        continue;
+      }
+      if (admitted.state === "blocked") {
+        console.error(
+          `[scheduler] ${ch.name}: ${admitted.reason} — ` +
+            (admitted.runId ? "manual same-run recovery required" : "manual plan repair required"),
+        );
+        continue;
+      }
+      if (admitted.state === "finalized") {
+        console.log(`[scheduler] ${ch.name}: repaired completed plan item ${admitted.planItemId}`);
+        continue;
+      }
+
+      const runId = admitted.runId;
+      const scheduledPlan = admitted.state === "claimed"
+        ? {
+            planItemId: String(admitted.planItemId),
+            topic: admitted.topic,
+            title: admitted.title,
+            thumbnailKey: admitted.thumbnailKey,
+            ...(admitted.scheduledAt !== undefined ? { scheduledAt: admitted.scheduledAt } : {}),
+          }
+        : undefined;
+      const idempotencyKey = await idempotencyKeys.create(`generation-scheduler:${runId}`);
       // concurrencyKey: one render at a time PER CHANNEL; channels in parallel.
-      await tasks.trigger("run-pipeline", { channelId: ch._id, runId }, { concurrencyKey: String(ch._id) });
+      await tasks.trigger(
+        "run-pipeline",
+        { channelId: ch._id, runId, ...(scheduledPlan ? { scheduledPlan } : {}) },
+        { concurrencyKey: String(ch._id), idempotencyKey },
+      );
       triggered++;
-      console.log(`[scheduler] triggered run for "${ch.name}" (cadence=${ch.identity?.cadence ?? "weekly"})`);
+      console.log(
+        `[scheduler] ${admitted.reused ? "reattached" : "triggered"} ${scheduledPlan ? `plan ${scheduledPlan.planItemId}` : "cadence run"} ` +
+          `for "${ch.name}" (lead=${Math.round(leadMs / 3_600_000)}h)`,
+      );
     }
     console.log(`[scheduler] done — ${enabled} enabled, ${triggered} run(s) triggered`);
     return { triggered, enabled };

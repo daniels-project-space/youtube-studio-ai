@@ -12,6 +12,11 @@
 import { spawn } from "node:child_process";
 import { stat, copyFile, writeFile, unlink } from "node:fs/promises";
 import { join } from "node:path";
+import {
+  planThumbnailText,
+  type ThumbnailHeadlineLine,
+  type ThumbnailTextZone,
+} from "@/lib/thumbnailLayout";
 
 export class FfmpegError extends Error {
   constructor(message: string) {
@@ -427,6 +432,105 @@ export async function assembleBeatBody(args: {
     segFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"),
   );
   await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  return args.outPath;
+}
+
+/**
+ * Assemble an authored story body without reordering, recycling, center-cuts,
+ * scene substitution, or silent segment drops. Each source starts at frame 0
+ * and occupies its declared duration; the final frame may be held only for the
+ * explicit post-narration tail.
+ */
+export async function assembleAuthoredBody(args: {
+  clipPaths: string[];
+  segDurationsSec: number[];
+  outPath: string;
+  tmpDir: string;
+  tailHoldSec?: number;
+  width?: number;
+  height?: number;
+  fps?: number;
+  preset?: string;
+}): Promise<string> {
+  if (args.clipPaths.length === 0 || args.clipPaths.length !== args.segDurationsSec.length) {
+    throw new FfmpegError("assembleAuthoredBody: clip/duration mapping must be non-empty and one-to-one");
+  }
+  const W = args.width ?? 1920;
+  const H = args.height ?? 1080;
+  const fps = args.fps ?? 30;
+  const tailHold = Math.max(0, args.tailHoldSec ?? 0);
+  const segFiles: string[] = [];
+  let expectedTotal = 0;
+
+  for (let index = 0; index < args.clipPaths.length; index++) {
+    const authored = args.segDurationsSec[index];
+    if (!Number.isFinite(authored) || authored <= 0) {
+      throw new FfmpegError(`assembleAuthoredBody: invalid duration for segment ${index}`);
+    }
+    const media = await probe(args.clipPaths[index]);
+    if (!media.hasVideo || !Number.isFinite(media.durationSec) || media.durationSec <= 0) {
+      throw new FfmpegError(`assembleAuthoredBody: segment ${index} is not a valid video`);
+    }
+    // LTX clips are quantized to 8n+1 frames, so their container duration can
+    // differ from the authored window by a few frames. Larger deficits are a
+    // provider contract violation; tiny deficits are held to the exact cut.
+    if (media.durationSec < authored - Math.max(0.2, 3 / fps)) {
+      throw new FfmpegError(
+        `assembleAuthoredBody: segment ${index} is ${media.durationSec.toFixed(3)}s, shorter than authored ${authored.toFixed(3)}s`,
+      );
+    }
+    const outputDur = authored + (index === args.clipPaths.length - 1 ? tailHold : 0);
+    const pad = Math.max(0, outputDur - media.durationSec);
+    const vf =
+      `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
+      `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps},` +
+      `tpad=stop_mode=clone:stop_duration=${pad.toFixed(3)},` +
+      `trim=duration=${outputDur.toFixed(3)},setpts=PTS-STARTPTS`;
+    const segmentPath = join(args.tmpDir, `authored_${String(index).padStart(4, "0")}.mp4`);
+    await run(FFMPEG, [
+      "-y",
+      "-i",
+      args.clipPaths[index],
+      "-vf",
+      vf,
+      "-an",
+      "-c:v",
+      "libx264",
+      "-preset",
+      args.preset ?? "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      segmentPath,
+    ]);
+
+    const q1 = `${segmentPath}.q1.jpg`;
+    const q3 = `${segmentPath}.q3.jpg`;
+    await grabFrame(segmentPath, Math.max(0.08, Math.min(outputDur * 0.25, outputDur - 0.08)), q1);
+    await grabFrame(segmentPath, Math.max(0.08, Math.min(outputDur * 0.75, outputDur - 0.08)), q3);
+    const [l1, l2] = await Promise.all([regionLuma(q1, 0, 1), regionLuma(q3, 0, 1)]);
+    if (l1 < 14 && l2 < 14) {
+      throw new FfmpegError(
+        `assembleAuthoredBody: segment ${index} is black (luma ${l1.toFixed(0)}/${l2.toFixed(0)})`,
+      );
+    }
+    segFiles.push(segmentPath);
+    expectedTotal += outputDur;
+  }
+
+  const listFile = join(args.tmpDir, "authored_segments.txt");
+  await writeFile(
+    listFile,
+    segFiles.map((file) => `file '${file.replace(/'/g, "'\\\\''")}'`).join("\n"),
+  );
+  await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  const assembled = await probe(args.outPath);
+  if (Math.abs(assembled.durationSec - expectedTotal) > Math.max(0.2, 3 / fps)) {
+    throw new FfmpegError(
+      `assembleAuthoredBody: assembled duration ${assembled.durationSec.toFixed(3)}s != ${expectedTotal.toFixed(3)}s`,
+    );
+  }
   return args.outPath;
 }
 
@@ -1209,7 +1313,7 @@ export interface QuoteOverlaySpec {
   /** Absolute start time in the final video (seconds). */
   startSec: number;
   durSec: number;
-  /** Source quote text (so qa_refine can re-render a shortened card). */
+  /** Source quote text for deterministic re-render or targeted self-heal. */
   text?: string;
   /** Highlight words (yellow) for re-render. */
   highlights?: string[];
@@ -1443,14 +1547,14 @@ export async function composeMusicLoopDeblur(args: {
   // translucent backing pill; the channel tag sits just below it.
   if (args.title) {
     draws.push(
-      `drawtext=fontfile=${font}:text='${esc(args.title)}':fontcolor=white:fontsize=${fsTitle}:` +
+      `drawtext=fontfile=${font}:text='${esc(args.title)}':expansion=none:fontcolor=white:fontsize=${fsTitle}:` +
         `box=1:boxcolor=black@0.32:boxborderw=${Math.round(fsTitle * 0.6)}:` +
         `shadowcolor=black@0.6:shadowx=2:shadowy=2:alpha='${aTitle}':x=(w-text_w)/2:y=${Math.round(H * 0.72)}`,
     );
   }
   if (args.channel) {
     draws.push(
-      `drawtext=fontfile=${font}:text='${esc(args.channel.toUpperCase())}':fontcolor=white@0.92:fontsize=${fsName}:` +
+      `drawtext=fontfile=${font}:text='${esc(args.channel.toUpperCase())}':expansion=none:fontcolor=white@0.92:fontsize=${fsName}:` +
         `borderw=2:bordercolor=black@0.6:alpha='${aName}':x=(w-text_w)/2:y=${Math.round(H * 0.82)}`,
     );
   }
@@ -1638,7 +1742,7 @@ export function captionCuesFromTimings(
 
 /**
  * Patch a time window of a video with a REPLACEMENT clip (opaque, full-frame) —
- * used by qa_refine to swap footage Gemini flagged as off-theme without
+ * used by the assembly backend to replace a bounded timeline window without
  * re-rendering the whole body. The replacement is scaled/cropped to fill, trimmed
  * to the window, and overlaid only during [startSec, startSec+durSec] via the
  * same memory-flat `tpad`+`enable` technique as the quote overlays (no buffering).
@@ -1775,9 +1879,22 @@ export async function grabFrame(
 }
 
 /**
- * Title-card thumbnail: draw the channel name + topic over a still using
- * drawtext. Pure ffmpeg, $0. Uses DejaVu Sans Bold (present on Ubuntu).
+ * Size title-card text to stay inside the thumbnail safe area. Drawtext does not
+ * wrap automatically, and a fixed 72px size previously shipped clipped titles
+ * on both edges. The conservative glyph ratio covers wide uppercase text too.
  */
+export function fitTitleCardFontSize(
+  text: string,
+  options: { min?: number; max?: number; safeWidth?: number; glyphWidthRatio?: number } = {},
+): number {
+  const min = options.min ?? 38;
+  const max = options.max ?? 72;
+  const safeWidth = options.safeWidth ?? 1_104;
+  const glyphWidthRatio = options.glyphWidthRatio ?? 0.72;
+  const glyphs = Math.max(1, Array.from(text.trim()).length);
+  return Math.max(min, Math.min(max, Math.floor(safeWidth / (glyphs * glyphWidthRatio))));
+}
+
 export async function titleCard(args: {
   basePath: string;
   outJpg: string;
@@ -1789,10 +1906,17 @@ export async function titleCard(args: {
     args.fontFile ?? "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf";
   const esc = (s: string) =>
     s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "’");
+  const titleSize = fitTitleCardFontSize(args.title);
+  const subtitleSize = fitTitleCardFontSize(args.subtitle, {
+    min: 26,
+    max: 40,
+    safeWidth: 1_040,
+    glyphWidthRatio: 0.68,
+  });
   const draw =
-    `drawtext=fontfile=${font}:text='${esc(args.title)}':fontcolor=white:fontsize=72:` +
+    `drawtext=fontfile=${font}:text='${esc(args.title)}':expansion=none:fontcolor=white:fontsize=${titleSize}:` +
     `box=1:boxcolor=black@0.5:boxborderw=24:x=(w-text_w)/2:y=(h-text_h)/2-40,` +
-    `drawtext=fontfile=${font}:text='${esc(args.subtitle)}':fontcolor=white@0.85:fontsize=40:` +
+    `drawtext=fontfile=${font}:text='${esc(args.subtitle)}':expansion=none:fontcolor=white@0.85:fontsize=${subtitleSize}:` +
     `box=1:boxcolor=black@0.4:boxborderw=16:x=(w-text_w)/2:y=(h-text_h)/2+70`;
   await run(FFMPEG, [
     "-y",
@@ -1818,75 +1942,347 @@ export async function titleCard(args: {
 const CLOUD_FONTS = {
   sans: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
   serif: "/usr/share/fonts/truetype/dejavu/DejaVuSerif-Bold.ttf",
+  impact: "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
+  bebas: "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-Bold.ttf",
+  marker: "/usr/share/fonts/truetype/dejavu/DejaVuSansCondensed-BoldOblique.ttf",
+  rounded: "/usr/share/fonts/truetype/dejavu/DejaVuSans-Bold.ttf",
 };
+
+export const THUMBNAIL_TEXT_OBJECTS = [
+  "torn_strip",
+  "paint_smear",
+  "censor_bar",
+  "grunge_sticker",
+  "spaced_elegant",
+  "block_plate",
+  "neon_sign",
+  "spray_paint",
+  "stamp_ink",
+  "movie_poster",
+  "ransom_note",
+  "carved",
+] as const;
+
+export type ThumbnailTextObject = typeof THUMBNAIL_TEXT_OBJECTS[number];
+type ThumbnailFontPreset = keyof typeof CLOUD_FONTS;
+type ThumbnailTreatment = "plate" | "sticker" | "stamp" | "neon" | "clean";
+type ThumbnailTextSurface =
+  | "none"
+  | "paper_strips"
+  | "paint_smear"
+  | "censor_bar"
+  | "grunge_sticker"
+  | "block_plates"
+  | "letter_tiles";
+type ThumbnailTextEffect = "clean" | "hard_shadow" | "glow" | "spray" | "double_stamp" | "bevel" | "carved";
+
+export interface ResolvedThumbnailTextStyle {
+  motif: ThumbnailTextObject | "legacy";
+  font: ThumbnailFontPreset;
+  casing: "upper" | "lower" | "configured";
+  tracking: 0 | 1 | 2;
+  fontScale: number;
+  surface: ThumbnailTextSurface;
+  effect: ThumbnailTextEffect;
+}
+
+const THUMBNAIL_TEXT_STYLES: Record<ThumbnailTextObject, Omit<ResolvedThumbnailTextStyle, "motif">> = {
+  torn_strip: { font: "serif", casing: "upper", tracking: 0, fontScale: 0.92, surface: "paper_strips", effect: "hard_shadow" },
+  paint_smear: { font: "serif", casing: "upper", tracking: 1, fontScale: 0.78, surface: "paint_smear", effect: "clean" },
+  censor_bar: { font: "impact", casing: "upper", tracking: 0, fontScale: 0.94, surface: "censor_bar", effect: "clean" },
+  grunge_sticker: { font: "marker", casing: "lower", tracking: 0, fontScale: 0.94, surface: "grunge_sticker", effect: "hard_shadow" },
+  spaced_elegant: { font: "serif", casing: "upper", tracking: 2, fontScale: 0.64, surface: "none", effect: "clean" },
+  block_plate: { font: "impact", casing: "upper", tracking: 0, fontScale: 1, surface: "block_plates", effect: "hard_shadow" },
+  neon_sign: { font: "rounded", casing: "upper", tracking: 0, fontScale: 0.9, surface: "none", effect: "glow" },
+  spray_paint: { font: "marker", casing: "upper", tracking: 0, fontScale: 0.94, surface: "none", effect: "spray" },
+  stamp_ink: { font: "marker", casing: "upper", tracking: 0, fontScale: 0.96, surface: "none", effect: "double_stamp" },
+  movie_poster: { font: "bebas", casing: "upper", tracking: 1, fontScale: 0.8, surface: "none", effect: "bevel" },
+  ransom_note: { font: "sans", casing: "configured", tracking: 0, fontScale: 0.72, surface: "letter_tiles", effect: "hard_shadow" },
+  carved: { font: "serif", casing: "upper", tracking: 0, fontScale: 0.92, surface: "none", effect: "carved" },
+};
+
+export function isThumbnailTextObject(value: unknown): value is ThumbnailTextObject {
+  return typeof value === "string" &&
+    (THUMBNAIL_TEXT_OBJECTS as readonly string[]).includes(value);
+}
+
+/** Resolve the executable visual contract behind a Style-DNA text-object key. */
+export function resolveThumbnailTextStyle(args: {
+  textObject?: string;
+  treatment?: ThumbnailTreatment;
+  font?: ThumbnailFontPreset;
+}): ResolvedThumbnailTextStyle {
+  if (isThumbnailTextObject(args.textObject)) {
+    const motif = THUMBNAIL_TEXT_STYLES[args.textObject];
+    return { ...motif, motif: args.textObject, font: args.font ?? motif.font };
+  }
+  const treatment = args.treatment ?? "plate";
+  const legacy: Omit<ResolvedThumbnailTextStyle, "motif" | "font"> = treatment === "plate"
+    ? { casing: "configured", tracking: 0, fontScale: 1, surface: "block_plates", effect: "hard_shadow" }
+    : treatment === "sticker"
+      ? { casing: "configured", tracking: 0, fontScale: 1, surface: "paper_strips", effect: "hard_shadow" }
+      : treatment === "stamp"
+        ? { casing: "configured", tracking: 0, fontScale: 1, surface: "none", effect: "double_stamp" }
+        : treatment === "neon"
+          ? { casing: "configured", tracking: 0, fontScale: 1, surface: "none", effect: "glow" }
+          : { casing: "configured", tracking: 0, fontScale: 1, surface: "none", effect: "clean" };
+  return { ...legacy, motif: "legacy", font: args.font ?? "sans" };
+}
+
+export interface ThumbnailTextOverlayArgs {
+  title: string;
+  lines?: ThumbnailHeadlineLine[];
+  position?: ThumbnailTextZone;
+  subtitle?: string;
+  footerLabel?: string;
+  badgePlacement?: "bottomCenter" | "topRight";
+  textColor?: string;
+  baseColor?: string;
+  accentColor?: string;
+  badgeStyle?: "center" | "pill";
+  textShadow?: boolean;
+  fontFile?: string;
+  font?: ThumbnailFontPreset;
+  uppercase?: boolean;
+  treatment?: ThumbnailTreatment;
+  textObject?: ThumbnailTextObject;
+}
+
+function thumbnailColor(value: string | undefined, fallback: string): string {
+  if (!value) return fallback;
+  const hex = value.trim().replace(/^#/, "");
+  return /^[0-9a-f]{6}$/i.test(hex) ? `0x${hex}` : fallback;
+}
+
+/** Choose the higher-contrast black/white foreground for an opaque surface. */
+function thumbnailContrastText(surface: string): "black" | "white" {
+  const match = /^(?:0x|#)?([0-9a-f]{6})$/i.exec(surface.trim());
+  if (!match) return "white";
+  const rgb = [0, 2, 4].map((offset) => Number.parseInt(match[1].slice(offset, offset + 2), 16) / 255);
+  const linear = rgb.map((channel) =>
+    channel <= 0.04045 ? channel / 12.92 : ((channel + 0.055) / 1.055) ** 2.4,
+  );
+  const luminance = 0.2126 * linear[0] + 0.7152 * linear[1] + 0.0722 * linear[2];
+  return luminance > 0.179 ? "black" : "white";
+}
+
+function escapeDrawtext(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/:/g, "\\:")
+    .replace(/'/g, "’")
+    .replace(/%/g, "\\%");
+}
+
+function applyThumbnailCasing(
+  value: string,
+  style: ResolvedThumbnailTextStyle,
+  uppercase: boolean | undefined,
+): string {
+  if (style.casing === "upper") return value.toUpperCase();
+  if (style.casing === "lower") {
+    const lower = value.toLowerCase().trim();
+    return /[.!?:;]$/.test(lower) ? lower : `${lower}.`;
+  }
+  return uppercase === false ? value : value.toUpperCase();
+}
+
+function trackThumbnailText(value: string, tracking: 0 | 1 | 2): string {
+  if (tracking === 0) return value;
+  const gap = "\u2009".repeat(tracking);
+  return Array.from(value).join(gap);
+}
+
+function drawtextX(align: "left" | "right" | "center", safeInset: number, offset = 0): string {
+  const delta = offset === 0 ? "" : offset > 0 ? `+${offset}` : String(offset);
+  if (align === "left") return `${safeInset + 16}${delta}`;
+  if (align === "right") return `w-${safeInset + 16}-text_w${delta}`;
+  return `(w-text_w)/2${delta}`;
+}
+
+/** Build the exact local FFmpeg filter graph. Exported so every promised motif
+ * is regression-tested at the renderer boundary, without a provider call. */
+export function buildThumbnailTextFilterGraph(args: ThumbnailTextOverlayArgs): string {
+  const style = resolveThumbnailTextStyle(args);
+  const textColor = thumbnailColor(args.textColor, "white");
+  const baseColor = thumbnailColor(args.baseColor, "black");
+  const accent = thumbnailColor(args.accentColor, "0xffd400");
+  const preparedLines = (args.lines?.length ? args.lines : [{ text: args.title }]).map((line) => ({
+    ...line,
+    text: applyThumbnailCasing(line.text, style, args.uppercase),
+  }));
+  const plan = planThumbnailText({
+    lines: preparedLines,
+    zone: args.position,
+    uppercase: false,
+    tracking: style.tracking,
+    fontScale: style.fontScale,
+  });
+  const defaultFont = args.fontFile ?? CLOUD_FONTS[style.font];
+  const filters: string[] = [];
+
+  const addText = (line: typeof plan.lines[number], options: {
+    text?: string;
+    font?: string;
+    color?: string;
+    fontSize?: number;
+    xOffset?: number;
+    yOffset?: number;
+    borderWidth?: number;
+    borderColor?: string;
+    shadow?: string;
+    box?: string;
+  } = {}): void => {
+    filters.push(
+      `drawtext=fontfile=${options.font ?? defaultFont}:text='${escapeDrawtext(options.text ?? line.text)}':expansion=none:` +
+      `fontcolor=${options.color ?? textColor}:fontsize=${Math.max(20, Math.round(options.fontSize ?? line.fontSize * style.fontScale))}:` +
+      `${options.box ?? ""}borderw=${options.borderWidth ?? 0}:bordercolor=${options.borderColor ?? "black@0.92"}:` +
+      `${options.shadow ?? ""}x=${drawtextX(plan.align, plan.safeInset, options.xOffset)}:` +
+      `y=${Math.round(line.y + 10 + (options.yOffset ?? 0))}`,
+    );
+  };
+
+  for (const [index, line] of plan.lines.entries()) {
+    const payoff = line.accent === true || line.payoff === true;
+    const fontSize = Math.max(20, Math.round(line.fontSize * style.fontScale));
+    const y = Math.round(line.y + 7);
+    const jitter = index % 2 === 0 ? -5 : 6;
+
+    if (style.surface === "letter_tiles") {
+      const chars = Array.from(line.text);
+      const advance = Math.max(20, Math.round(fontSize * 0.7));
+      const totalWidth = chars.length * advance;
+      const startX = plan.align === "left"
+        ? plan.safeInset + 16
+        : plan.align === "right"
+          ? plan.width - plan.safeInset - 16 - totalWidth
+          : Math.round((plan.width - totalWidth) / 2);
+      const tileColors = ["0xfff4d6", "0xffd166", "0xf4f4f4", "0xff8f80", "0x8fd7ff"];
+      const tileFonts = [CLOUD_FONTS.serif, CLOUD_FONTS.sans, CLOUD_FONTS.marker];
+      chars.forEach((char, charIndex) => {
+        if (/\s/.test(char)) return;
+        const tileX = startX + charIndex * advance;
+        const tileY = y + [-5, 3, 0, 5, -2][charIndex % 5];
+        filters.push(
+          `drawbox=x=${tileX - 4}:y=${tileY - 3}:w=${advance}:h=${fontSize + 13}:` +
+          `color=${tileColors[charIndex % tileColors.length]}@0.96:t=fill`,
+        );
+        filters.push(
+          `drawtext=fontfile=${tileFonts[charIndex % tileFonts.length]}:text='${escapeDrawtext(char)}':expansion=none:` +
+          `fontcolor=0x151515:fontsize=${fontSize}:borderw=0:` +
+          `shadowcolor=black@0.45:shadowx=3:shadowy=4:x=${tileX}:y=${tileY}`,
+        );
+      });
+      continue;
+    }
+
+    if (style.surface === "paper_strips") {
+      const paper = index % 2 === 0 ? "0xfff4d6" : "0xf5efe4";
+      filters.push(`drawbox=x=${line.x + jitter + 7}:y=${y + 7}:w=${line.width + 18}:h=${line.height + 9}:color=${baseColor}@0.48:t=fill`);
+      filters.push(`drawbox=x=${line.x + jitter}:y=${y}:w=${line.width + 18}:h=${line.height + 9}:color=${paper}@0.97:t=fill`);
+    } else if (style.surface === "paint_smear") {
+      const smearY = y + Math.round(fontSize * 0.31);
+      filters.push(`drawbox=x=${line.x - 14}:y=${smearY}:w=${line.width + 34}:h=${Math.round(fontSize * 0.58)}:color=${accent}@0.82:t=fill`);
+      filters.push(`drawbox=x=${line.x - 25}:y=${smearY + 8}:w=13:h=5:color=${accent}@0.68:t=fill`);
+      filters.push(`drawbox=x=${line.x + line.width + 22}:y=${smearY + 17}:w=19:h=4:color=${accent}@0.58:t=fill`);
+    } else if (style.surface === "censor_bar") {
+      filters.push(`drawbox=x=${line.x - 18}:y=${y - 3}:w=${line.width + 52}:h=${line.height + 10}:color=${accent}@0.96:t=fill`);
+    } else if (style.surface === "grunge_sticker") {
+      filters.push(`drawbox=x=${line.x + 8}:y=${y + 8}:w=${line.width + 28}:h=${line.height + 12}:color=${accent}@0.78:t=fill`);
+      filters.push(`drawbox=x=${line.x - 5}:y=${y - 3}:w=${line.width + 28}:h=${line.height + 12}:color=${baseColor}@0.96:t=fill`);
+    } else if (style.surface === "block_plates") {
+      const plateColor = payoff ? accent : baseColor;
+      filters.push(`drawbox=x=${line.x - 5}:y=${y - 3}:w=${line.width + 26}:h=${line.height + 11}:color=${plateColor}@0.9:t=fill`);
+      if (payoff) {
+        filters.push(`drawbox=x=${line.x - 2}:y=${y + line.height + 4}:w=${line.width + 20}:h=8:color=${accent}@0.95:t=fill`);
+      }
+    }
+
+    const tracked = trackThumbnailText(line.text, style.tracking);
+    const surfaceColor = style.surface === "paper_strips"
+      ? (payoff ? accent : "0x151515")
+      : style.surface === "paint_smear"
+        ? thumbnailContrastText(accent)
+      : style.surface === "censor_bar"
+        ? "white"
+        : style.surface === "grunge_sticker"
+          ? "white"
+          : style.surface === "block_plates" && payoff
+            ? "0x111111"
+            : payoff
+              ? accent
+              : textColor;
+    const baseOffset = style.surface === "paper_strips" ? jitter : 0;
+
+    if (style.effect === "glow") {
+      addText(line, { text: tracked, color: `${accent}@0.32`, fontSize, xOffset: baseOffset, borderWidth: 15, borderColor: `${accent}@0.20` });
+      addText(line, { text: tracked, color: "white", fontSize, xOffset: baseOffset, borderWidth: 3, borderColor: accent, shadow: `shadowcolor=${accent}@0.95:shadowx=4:shadowy=4:` });
+    } else if (style.effect === "double_stamp") {
+      addText(line, { text: tracked, color: `${surfaceColor}@0.34`, fontSize, xOffset: baseOffset + 5, yOffset: 4, borderWidth: 1, borderColor: `${surfaceColor}@0.25` });
+      addText(line, { text: tracked, color: surfaceColor, fontSize, xOffset: baseOffset, borderWidth: 2, borderColor: "black@0.38" });
+    } else if (style.effect === "bevel") {
+      addText(line, { text: tracked, color: "black@0.72", fontSize, xOffset: baseOffset + 6, yOffset: 7, borderWidth: 7, borderColor: "black@0.55" });
+      addText(line, { text: tracked, color: payoff ? accent : "white", fontSize, xOffset: baseOffset, borderWidth: 5, borderColor: `${accent}@0.78` });
+      addText(line, { text: tracked, color: payoff ? "white" : "0xfff1c2", fontSize, xOffset: baseOffset - 2, yOffset: -2, borderWidth: 1, borderColor: "white@0.55" });
+    } else if (style.effect === "carved") {
+      addText(line, { text: tracked, color: "white@0.34", fontSize, xOffset: baseOffset - 3, yOffset: -3, borderWidth: 2, borderColor: "white@0.25" });
+      addText(line, { text: tracked, color: "black@0.76", fontSize, xOffset: baseOffset + 4, yOffset: 5, borderWidth: 4, borderColor: "black@0.66" });
+      addText(line, { text: tracked, color: payoff ? accent : "0xb9b2a5", fontSize, xOffset: baseOffset, borderWidth: 2, borderColor: "0x27231f@0.9" });
+    } else {
+      const shadow = args.textShadow === false || style.effect === "clean"
+        ? ""
+        : "shadowcolor=black@0.9:shadowx=5:shadowy=5:";
+      addText(line, {
+        text: tracked,
+        color: surfaceColor,
+        fontSize,
+        xOffset: baseOffset,
+        borderWidth: style.surface === "paint_smear" ? 2 : style.surface === "censor_bar" ? 0 : 4,
+        borderColor: "black@0.88",
+        shadow,
+      });
+      if (style.effect === "spray") {
+        const dripX = line.x + Math.round(line.width * (0.28 + (index % 3) * 0.16));
+        filters.push(`drawbox=x=${dripX}:y=${y + line.height - 2}:w=5:h=${18 + index * 4}:color=${accent}@0.76:t=fill`);
+        filters.push(`drawbox=x=${dripX + 13}:y=${y + line.height + 2}:w=3:h=${10 + index * 3}:color=${accent}@0.54:t=fill`);
+      }
+    }
+  }
+
+  if (args.subtitle) {
+    const badge = args.badgeStyle === "pill"
+      ? `box=1:boxcolor=${baseColor}@0.82:boxborderw=10:`
+      : "";
+    const badgeAtTop = args.badgePlacement === "topRight" || Boolean(args.footerLabel);
+    filters.push(
+      `drawtext=fontfile=${CLOUD_FONTS.sans}:text='${escapeDrawtext(args.subtitle.toUpperCase())}':expansion=none:` +
+      `fontcolor=white@0.9:fontsize=30:${badge}borderw=2:bordercolor=black:` +
+      `shadowcolor=black@0.9:shadowx=2:shadowy=2:` +
+      (badgeAtTop ? `x=w-text_w-44:y=38` : `x=(w-text_w)/2:y=h*0.92`),
+    );
+  }
+  if (args.footerLabel) {
+    const footer = Array.from(args.footerLabel.toUpperCase()).join("\u2009");
+    filters.push(
+      `drawtext=fontfile=${CLOUD_FONTS.sans}:text='${escapeDrawtext(footer)}':expansion=none:` +
+      `fontcolor=${accent}:fontsize=30:borderw=1:bordercolor=black@0.7:` +
+      `shadowcolor=black@0.8:shadowx=2:shadowy=2:x=(w-text_w)/2:y=h-58`,
+    );
+  }
+  return filters.join(",");
+}
 
 export async function thumbnailText(args: {
   basePath: string;
   outJpg: string;
-  title: string;
-  /** Channel name shown small at the bottom. */
-  subtitle?: string;
-  /** Main title color (def white). */
-  textColor?: string;
-  textShadow?: boolean;
-  /** Explicit font path (wins over `font`). */
-  fontFile?: string;
-  /** Font family preset → concrete cloud font. Def "sans" (heavier/bolder). */
-  font?: "serif" | "sans";
-  /** Uppercase the title for max impact (def true). */
-  uppercase?: boolean;
-}): Promise<string> {
-  // BOLD, high-CTR overlay: large title in the reserved negative space, drawn
-  // LINE BY LINE (an embedded newline renders as a tofu box on the cloud font),
-  // with a thick black outline + drop shadow so it stays legible over bright OR
-  // dark areas. The image carries the thumbnail; text is big but uncluttered.
-  const font =
-    args.fontFile ?? CLOUD_FONTS[args.font ?? "sans"] ?? CLOUD_FONTS.sans;
-  const color = args.textColor ?? "white";
-  const esc = (s: string) =>
-    s.replace(/\\/g, "\\\\").replace(/:/g, "\\:").replace(/'/g, "’");
-
-  // Word-wrap ~15 chars/line so a punchy 3-5 word title renders large.
-  const raw = args.uppercase === false ? args.title.trim() : args.title.toUpperCase().trim();
-  const words = raw.split(/\s+/);
-  const lines: string[] = [];
-  let cur = "";
-  for (const w of words) {
-    if ((cur + " " + w).trim().length > 15 && cur) {
-      lines.push(cur.trim());
-      cur = w;
-    } else {
-      cur = (cur + " " + w).trim();
-    }
-  }
-  if (cur) lines.push(cur);
-
-  // Scale font to line count; bigger = punchier.
-  const size = lines.length >= 4 ? 64 : lines.length === 3 ? 80 : lines.length === 2 ? 96 : 110;
-  const lineH = Math.round(size * 1.12);
-  const block = lines.length * lineH;
-
-  // Stack lines centered vertically around y=0.66h (sits in the lower-mid third).
-  const draws: string[] = lines.map((ln, i) => {
-    const y = `h*0.66-${Math.round(block / 2)}+${i * lineH}`;
-    return (
-      `drawtext=fontfile=${font}:text='${esc(ln)}':fontcolor=${color}:fontsize=${size}:` +
-      `borderw=7:bordercolor=black:shadowcolor=black@0.9:shadowx=5:shadowy=5:x=(w-text_w)/2:y=${y}`
-    );
-  });
-  if (args.subtitle) {
-    draws.push(
-      `drawtext=fontfile=${font}:text='${esc(args.subtitle.toUpperCase())}':fontcolor=white@0.9:fontsize=30:` +
-        `borderw=2:bordercolor=black:shadowcolor=black@0.9:shadowx=2:shadowy=2:x=(w-text_w)/2:y=h*0.92`,
-    );
-  }
-
+} & ThumbnailTextOverlayArgs): Promise<string> {
+  const filterGraph = buildThumbnailTextFilterGraph(args);
   await run(FFMPEG, [
     "-y",
     "-i",
     args.basePath,
     "-vf",
-    `scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,${draws.join(",")}`,
+    `scale=1280:720:force_original_aspect_ratio=increase,crop=1280:720,${filterGraph}`,
     "-frames:v",
     "1",
     "-q:v",

@@ -9,7 +9,13 @@ const eslintConfig = defineConfig([
   globalIgnores([
     // Default ignores of eslint-config-next:
     ".next/**",
+    ".trigger/**",
+    "graphify-out/**",
+    "motion-graphics/out/**",
+    "motion-graphics/public/**",
     "out/**",
+    "public/**",
+    "src/geo/assets/**",
     "build/**",
     "next-env.d.ts",
   ]),

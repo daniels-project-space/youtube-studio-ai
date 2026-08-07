@@ -16,6 +16,11 @@ export interface PerfEntry {
   avgViewPct: number; // audience retention 0..100
   ctr?: number; // thumbnail CTR 0..100 (if available)
   updatedAt: number;
+  /** Exact OAuth/data-ingestion provenance for this outcome. */
+  connectorId?: string;
+  connectorVersion?: number;
+  ingestionId?: string;
+  metricDefinitionVersion?: string;
   /** When the SEO re-optimizer last rewrote this video's title/tags (epoch ms). */
   reoptimizedAt?: number;
 }
@@ -50,10 +55,19 @@ const score = (e: PerfEntry) => e.avgViewPct * 0.7 + (e.ctr ?? 0) * 0.3;
  */
 export async function loadPerformanceContext(
   keyPrefix: string,
-  opts: { minViews?: number } = {},
+  opts: {
+    minViews?: number;
+    connectorId?: string;
+    connectorVersion?: number;
+  } = {},
 ): Promise<string> {
   const ledger = (await loadLedger(keyPrefix)).filter(
-    (e) => e.views >= (opts.minViews ?? 50) && e.avgViewPct > 0,
+    (e) =>
+      e.views >= (opts.minViews ?? 50) &&
+      e.avgViewPct > 0 &&
+      (opts.connectorId === undefined || e.connectorId === opts.connectorId) &&
+      (opts.connectorVersion === undefined ||
+        e.connectorVersion === opts.connectorVersion),
   );
   if (ledger.length < 4) return "";
   const sorted = [...ledger].sort((a, b) => score(b) - score(a));

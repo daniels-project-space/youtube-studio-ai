@@ -11,7 +11,8 @@
  * pass, so un-ported archetypes land as drafts until Stage 3.
  */
 import { task } from "@trigger.dev/sdk";
-import { ConvexHttpClient } from "convex/browser";
+import { admitProviderTaskOwner } from "@/lib/providerTaskOwnerAdmission";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
@@ -48,7 +49,12 @@ export const buildChannelPackageTask = task({
 
     const seed = (payload.seed ?? "").trim();
     if (!seed) throw new Error("seed is required");
-    const ownerId = payload.ownerId ?? process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel";
+    const ownerId = admitProviderTaskOwner({
+      requestedOwnerId: payload.ownerId,
+      configuredOwnerId: process.env.STUDIO_OWNER_ID,
+      runtime: process.env.NODE_ENV,
+      developmentFallbackOwnerId: process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel",
+    });
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
@@ -91,8 +97,9 @@ export const buildChannelPackageTask = task({
       slug,
       name: concept.name,
       identity,
-      thumbnailer:
-        archetype.thumbnailTemplate === "title_card" ? "title_card" : "banana",
+      // This compatibility path is paused-first, but it must still use the real
+      // thumbnail engine rather than creating another legacy title-card row.
+      thumbnailer: "banana",
       template: archetype.template,
       pipeline,
       budget: payload.budget ?? 5,

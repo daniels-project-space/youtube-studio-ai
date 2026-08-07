@@ -57,7 +57,7 @@ export default function LoreShortPage() {
               <span className="golden-chip">★ GOLDEN</span>
             </div>
             <span style={DEVICE}>{v.device}</span>
-            {/* eslint-disable-next-line jsx-a11y/media-has-caption -- example render */}
+            { }
             <video controls preload="none" poster={`/golden/loreshort/${v.file}.jpg`} src={`/golden/loreshort/${v.file}.mp4`} style={{ width: "100%", borderRadius: 8, background: "#000" }} />
             <span style={META}>{v.meta}</span>
           </div>

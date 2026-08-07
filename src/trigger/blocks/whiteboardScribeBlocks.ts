@@ -20,13 +20,13 @@
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
-import { ConvexHttpClient } from "convex/browser";
+import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
-import { makeRunTempDir, readBytes, downloadTo } from "@/lib/files";
-import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
+import { makeRunTempDir, downloadTo } from "@/lib/files";
+import { putObjectFromFile, getObjectBytes } from "@/lib/storage";
 import { castWhiteboardSync, hasWhiteboardSync } from "@/lib/whiteboardSync";
 import { bananaCounters } from "@/lib/banana";
 import { PRICE } from "@/engine/pricing";
@@ -53,7 +53,6 @@ async function recordAsset(ctx: StageContext, kind: string, r2Key: string, meta?
 }
 
 /** Fallback per-video spend when counters are unavailable (art + Fish TTS). */
-const SCRIBE_COST = Number(process.env.WB_SYNC_COST_USD ?? 2.0);
 
 /** Minimal spawn helper (pattern: motionComic's run()) — logs stdout, collects stderr. */
 function run(cmd: string, args: string[], log: (msg: string) => void): Promise<void> {
@@ -139,17 +138,25 @@ export const whiteboardScribe: Block = {
     });
     // Real image spend from the banana counters (the flat $2 guess undercounted
     // Pro-heavy runs and overcounted cached re-runs alike).
-    const genPro = bananaCounters.pro - countersBefore.pro;
-    const genFlash = bananaCounters.flash - countersBefore.flash;
-    const genFal = (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0);
-    const artCost = genPro * PRICE.bananaProUsd + genFlash * PRICE.bananaFlashUsd + genFal * PRICE.bananaFalUsd;
-    // Include the fal route — the all-fal path used to book the flat $2 guess,
-    // which alone ate a $2 channel budget and aborted the run after this block.
-    // ZERO deltas = the engine's disk caches served everything (heal/self-heal
-    // re-run on the same worker): booking the flat guess here charged $2.00 of
-    // PHANTOM spend and tripped the budget ceiling mid-heal (observed live).
-    const scribeCost = genPro + genFlash + genFal > 0 ? artCost + 0.05 /* Fish TTS */ : 0.05;
-    ctx.log(`whiteboard_scribe: image spend ${genPro} pro + ${genFlash} flash + ${genFal} fal ≈ $${scribeCost.toFixed(2)}`);
+    const genPro = Math.max(0, bananaCounters.pro - countersBefore.pro);
+    const genFlash = Math.max(0, bananaCounters.flash - countersBefore.flash);
+    const genFal = Math.max(0, (bananaCounters.fal ?? 0) - (countersBefore.fal ?? 0));
+    const legacyArtCost =
+      genPro * PRICE.bananaProUsd +
+      genFlash * PRICE.bananaFlashUsd +
+      Math.max(0, bananaCounters.falCostUsd - countersBefore.falCostUsd);
+    const artCost = ctx.imageUsageAccounting?.().costUsd ?? legacyArtCost;
+    const usedEleven = ttsProvider === "elevenlabs" && Boolean(elevenVoiceId);
+    const ttsCost =
+      (res.ttsCharactersGenerated / 1000) *
+      (usedEleven ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd);
+    // Cache hits return zero generated characters/images: never book a phantom
+    // fallback charge merely because this is a paid-capable block.
+    const scribeCost = artCost + ttsCost;
+    ctx.log(
+      `whiteboard_scribe: spend ${genPro} pro + ${genFlash} flash + ${genFal} fal + ` +
+      `${res.ttsCharactersGenerated} TTS chars ≈ $${scribeCost.toFixed(2)}`,
+    );
 
     // MUSIC BED (P1-8): whiteboard-family pipelines generate a PAID music track
     // upstream (musicKey/musicUrl) that this engine never consumed — the bed

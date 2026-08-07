@@ -1,5 +1,5 @@
 /** Read tombstones of deleted channels (compact structural prints). */
-import { query } from "./_generated/server";
+import { query } from "./studioFunctions";
 import { v } from "convex/values";
 
 export const list = query({

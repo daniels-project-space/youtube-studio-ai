@@ -124,6 +124,30 @@ export function hashTimeline(t: Timeline, salt = ""): string {
   return createHash("sha1").update(salt + "|" + canonical(t)).digest("hex").slice(0, 16);
 }
 
+/**
+ * Content-addressed checkpoint for the composed video before overlays.
+ *
+ * Keep this derivation in one place: overlay-only heals deliberately change
+ * `overlays` and `captionStyle`, while the expensive body/intro/outro render is
+ * unchanged. Callers and tests must use this helper instead of reconstructing
+ * the checkpoint identity from the full timeline.
+ */
+export function preOverlayCacheKey(timeline: Timeline, toolVersion = "v1"): string {
+  const checkpointTimeline: Timeline = {
+    ...timeline,
+    overlays: [],
+    ...(timeline.renderHints
+      ? {
+          renderHints: {
+            ...timeline.renderHints,
+            captionStyle: undefined,
+          },
+        }
+      : {}),
+  };
+  return `render/${hashTimeline(checkpointTimeline, `${toolVersion}:preoverlay`)}.mp4`;
+}
+
 export interface RenderOpts {
   /** Bumped when the renderer's behavior changes, to invalidate the cache. */
   toolVersion?: string;
@@ -183,12 +207,7 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
   // overlays or captionStyle, and an overlay-class heal CHANGES those — hashing the
   // full timeline meant every overlay retune missed this checkpoint and paid a full
   // rebuild (the exact case the checkpoint exists for).
-  const preTimeline: Timeline = {
-    ...t,
-    overlays: [],
-    ...(t.renderHints ? { renderHints: { ...t.renderHints, captionStyle: undefined } } : {}),
-  };
-  const preKey = `render/${hashTimeline(preTimeline, ver + ":preoverlay")}.mp4`;
+  const preKey = preOverlayCacheKey(t, ver);
   let composed = await backend.cacheGet(preKey);
   let healedFrom: "full" | "preOverlay";
   let cardsRendered = 0;

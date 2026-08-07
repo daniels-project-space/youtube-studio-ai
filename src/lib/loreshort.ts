@@ -156,18 +156,53 @@ const HOLD: Record<string, string> = {
 const NEG_BASE = "warping, morphing, deforming, melting, distorted, glitch, flicker artifacts, extra limbs, duplicated objects, wobbling, jitter, text, watermark, blurry";
 const NEG_ANTISTATIC = ", static, still image, frozen, motionless"; // added ONLY for moderate/strong so calm scenes aren't forced to move
 
-export interface LoreShortResult { videoPath: string; url: string; scenes: any[]; durationSec: number; width: number; height: number; }
+interface LoreScene {
+  line: string;
+  shot?: string;
+  visual: string;
+  camera: string;
+}
+
+interface LorePlan {
+  scenes?: LoreScene[];
+}
+
+interface MotionAnalysis {
+  camera?: string;
+  subject_action?: string;
+  particles?: string;
+  secondary?: string;
+  intensity?: "gentle" | "moderate" | "strong";
+}
+
+interface ReplicatePrediction {
+  status?: string;
+  output?: string | string[];
+  detail?: unknown;
+  error?: unknown;
+  title?: unknown;
+  urls?: { get?: string };
+}
+
+type ResolvedLoreShortCfg = LoreShortCfg & Required<Pick<LoreShortCfg,
+  "analyzeMotion" | "dissolve" | "elaborateMoves" | "frames" | "host" | "introSec" |
+  "model" | "nScenes" | "pause" | "seedanceDur" | "seedanceRes" | "subStyle" |
+  "upscale" | "upscaleRes" | "voiceId" | "webDir"
+>>;
+
+export interface LoreShortResult { videoPath: string; url: string; scenes: LoreScene[]; durationSec: number; width: number; height: number; }
 
 /** Run the full lore-short pipeline for one config. Resumable; returns the published video. */
 export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortResult> {
-  const pathPreset: any = userCfg.path ? LORESHORT_PATHS[userCfg.path] : {};
-  const cfg: any = { ...DEFAULTS, ...pathPreset, ...userCfg }; // explicit fields override the path lane
+  const pathPreset = userCfg.path ? LORESHORT_PATHS[userCfg.path] : {};
+  const cfg = { ...DEFAULTS, ...pathPreset, ...userCfg } as ResolvedLoreShortCfg; // explicit fields override the path lane
   // VALIDATE required inputs — fail clearly whether run alone or inside an orchestrator
-  const missing = ["slug", "title", "kicker", "topic", "narrator"].filter((k) => !cfg[k] || !String(cfg[k]).trim());
+  const requiredFields = ["slug", "title", "kicker", "topic", "narrator"] as const;
+  const missing = requiredFields.filter((key) => !String(cfg[key] ?? "").trim());
   if (missing.length) throw new Error(`loreshort: missing required input(s): ${missing.join(", ")}. See LORESHORT_MODULE.requires.`);
   const style = SUB_STYLES[cfg.subStyle] ?? SUB_STYLES.cinematic;
   await bootstrapSecrets(() => {}, { required: ["GEMINI_API_KEY", "ELEVENLABS_API_KEY", "REPLICATE_API_TOKEN"] });
-  const GK = process.env.GEMINI_API_KEY as string, RT = process.env.REPLICATE_API_TOKEN as string;
+  const RT = process.env.REPLICATE_API_TOKEN as string;
   const RUN = join(process.cwd(), "output", "loreshort", cfg.slug);
   const WEB = cfg.webDir;
   await mkdir(RUN, { recursive: true });
@@ -181,18 +216,18 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
   const sh = (c: string, a: string[]) => new Promise<void>((res, rej) => { const p = spawn(c, a, { stdio: ["ignore", "inherit", "inherit"] }); p.on("close", (x) => (x === 0 ? res() : rej(new Error(c + " " + x)))); });
   const probe = ffprobeDuration; // shared (was a local ffprobe-duration one-liner)
   // VPS DNS/network flakes (EAI_AGAIN); retry with backoff so a blip can't kill a long run
-  const rfetch = async (url: string, opts?: any, tries = 6): Promise<Response> => { for (let a = 0; ; a++) { try { return await fetch(url, opts); } catch (e) { if (a >= tries - 1) throw e; await new Promise((r) => setTimeout(r, 4000 * (a + 1))); } } };
+  const rfetch = async (url: string, opts?: RequestInit, tries = 6): Promise<Response> => { for (let a = 0; ; a++) { try { return await fetch(url, opts); } catch (e) { if (a >= tries - 1) throw e; await new Promise((r) => setTimeout(r, 4000 * (a + 1))); } } };
   // bounded concurrency — burst-submitting 9 predictions trips Replicate rate limits; keep a few in flight
-  const pool = async (n: number, items: any[], fn: (it: any, i: number) => Promise<any>) => { let idx = 0; const workers = Array.from({ length: Math.min(n, items.length) }, async () => { while (idx < items.length) { const i = idx++; await fn(items[i], i); } }); await Promise.all(workers); };
+  const pool = async <T>(n: number, items: readonly T[], fn: (item: T, index: number) => Promise<void>) => { let idx = 0; const workers = Array.from({ length: Math.min(n, items.length) }, async () => { while (idx < items.length) { const i = idx++; await fn(items[i], i); } }); await Promise.all(workers); };
   // FAIL-PROOF inputs: embed files as base64 data URIs so Replicate never has to fetch from our (OOM-prone) nginx
   const dataUri = async (p: string, mime: string) => `data:${mime};base64,${(await readFile(p)).toString("base64")}`;
 
   // 1 ── STORY ────────────────────────────────────────────────────────────────
-  let plan: any;
-  if (existsSync(rd("plan.json"))) plan = JSON.parse(await readFile(rd("plan.json"), "utf8"));
+  let plan: LorePlan = {};
+  if (existsSync(rd("plan.json"))) plan = JSON.parse(await readFile(rd("plan.json"), "utf8")) as LorePlan;
   else {
     for (let attempt = 0; attempt < 3; attempt++) {
-      plan = await geminiJsonPro({
+      plan = await geminiJsonPro<LorePlan>({
         prompt:
           `Write a lore micro-documentary in the EXACT spirit of the Game of Thrones "Histories & Lore" featurettes: a single ` +
           `figure narrates history in FIRST PERSON — proud, intimate, epic, measured, never breathless, with DRAMATIC PACING ` +
@@ -206,13 +241,13 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
           `The "scenes" array MUST contain EXACTLY ${cfg.nScenes} complete objects — do not stop early, do not summarise. Keep each "visual" to ~40 words.`,
         maxTokens: 28000, temperature: 0.75,
       });
-      if (plan?.scenes?.length >= cfg.nScenes) break;
+      if ((plan.scenes?.length ?? 0) >= cfg.nScenes) break;
       log(`story attempt ${attempt + 1}: got ${plan?.scenes?.length || 0}/${cfg.nScenes} beats, retrying`);
     }
     if (!plan?.scenes || plan.scenes.length < cfg.nScenes) throw new Error(`story only produced ${plan?.scenes?.length || 0} beats`);
     await writeFile(rd("plan.json"), JSON.stringify(plan, null, 2));
   }
-  const scenes = plan.scenes.slice(0, cfg.nScenes);
+  const scenes = (plan.scenes ?? []).slice(0, cfg.nScenes);
   log(`story: ${scenes.length} beats`);
 
   // 2 ── ART (layered depth, parallel) ────────────────────────────────────────
@@ -227,14 +262,14 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
       log(`scene ${i} art FAILED: ${e instanceof Error ? e.message : e}`);
     }
   }
-  await pool(4, scenes, (_: any, i: number) => genArt(i));
+  await pool(4, scenes, (_, i) => genArt(i));
   for (let i = 0; i < scenes.length; i++) if (!existsSync(rd(`scene_${i}.png`))) throw new Error(`art ${i} missing (likely content-policy refusal — de-brand the topic)`);
 
   // 3 ── PER-LINE NARRATION (for exact timing) ────────────────────────────────
   const lineDur: number[] = [];
   for (let i = 0; i < scenes.length; i++) {
     const f = rd(`line_${i}.mp3`);
-    if (!existsSync(f)) { const b = await synthNarration({ text: scenes[i].line, provider: "elevenlabs", elevenVoiceId: cfg.voiceId, speed: cfg.narrationSpeed ?? 0.96 }); await writeFile(f, Buffer.from(b as any)); }
+    if (!existsSync(f)) { const b = await synthNarration({ text: scenes[i].line, provider: "elevenlabs", elevenVoiceId: cfg.voiceId, speed: cfg.narrationSpeed ?? 0.96 }); await writeFile(f, Buffer.from(b)); }
     lineDur[i] = await probe(f);
   }
   log(`lines: ${lineDur.map((d) => d.toFixed(1)).join(", ")}s  total≈${(lineDur.reduce((a, b) => a + b, 0) + scenes.length * cfg.pause).toFixed(0)}s`);
@@ -242,7 +277,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
   // 3b ── MOTION ANALYSIS — LOOK at each painting, decide what is animatable, write the shot ──
   // This is the core: a vision pass grounds the i2v prompt in the REAL subject + particles + depth
   // of the actual image, so the clip animates the smith's arm/hammer/sparks, not just a slow pan.
-  const motion: any[] = new Array(scenes.length);
+  const motion: Array<MotionAnalysis | undefined> = new Array(scenes.length);
   async function analyzeMotion(i: number) {
     const out = rd(`motion_${i}.json`);
     if (existsSync(out)) { motion[i] = JSON.parse(await readFile(out, "utf8")); return; }
@@ -259,15 +294,16 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
         `"intensity" = how much TOTAL motion HONESTLY suits this moment: "gentle" for calm, quiet, still, contemplative or portrait scenes (MOST lore scenes), "moderate" for normal activity, "strong" ONLY for genuine action/chaos/battle/cataclysm. Default to gentle or moderate; reserve strong. ` +
         `Be concrete and specific to THIS picture. Output ONLY the JSON object.`,
     }).catch(() => "");
-    let plan: any = {}; try { plan = parseJsonLoose(raw) || {}; } catch { plan = {}; }
-    motion[i] = plan;
-    await writeFile(out, JSON.stringify(plan, null, 2));
-    log(`motion ${i}: ${String(plan.subject_action || plan.camera || "?").slice(0, 56)}`);
+    let analysis: MotionAnalysis = {};
+    try { analysis = (parseJsonLoose(raw) || {}) as MotionAnalysis; } catch { analysis = {}; }
+    motion[i] = analysis;
+    await writeFile(out, JSON.stringify(analysis, null, 2));
+    log(`motion ${i}: ${String(analysis.subject_action || analysis.camera || "?").slice(0, 56)}`);
   }
-  if (cfg.analyzeMotion) await pool(4, scenes, (_: any, i: number) => analyzeMotion(i));
+  if (cfg.analyzeMotion) await pool(4, scenes, (_, i) => analyzeMotion(i));
 
   // 4 ── CAMERA MOVES (cheap i2v) — parallel ──────────────────────────────────
-  const real = (x: any) => x && String(x).trim() && !/^none\b/i.test(String(x).trim());
+  const real = (value: unknown): value is string => typeof value === "string" && value.trim().length > 0 && !/^none\b/i.test(value.trim());
   function shotPrompt(i: number): { prompt: string; negative: string } {
     const m = motion[i];
     if (cfg.analyzeMotion && m && (real(m.subject_action) || real(m.camera))) {
@@ -287,7 +323,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
     if (!existsSync(imgJpg)) await sh("ffmpeg", ["-y", "-loglevel", "error", "-i", rd(`scene_${i}.png`), "-vf", "scale=1280:-2", "-q:v", "3", imgJpg]);
     const image = await dataUri(imgJpg, "image/jpeg");
     const { prompt, negative } = shotPrompt(i);
-    let endpoint: string, input: any, body: any;
+    let endpoint: string, input: Record<string, unknown>, body: Record<string, unknown>;
     if (cfg.model === "seedance") {
       endpoint = "https://api.replicate.com/v1/predictions";
       input = { image, prompt, duration: cfg.seedanceDur, resolution: cfg.seedanceRes, aspect_ratio: "16:9" }; // Seedance has no negative_prompt
@@ -303,7 +339,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
     }
     for (let attempt = 0; attempt < 4; attempt++) {
       const sub = await rfetch(endpoint, { method: "POST", headers: { Authorization: `Bearer ${RT}`, "Content-Type": "application/json" }, body: JSON.stringify(body) });
-      let j: any = await sub.json(); const getUrl = j.urls?.get; const t0 = Date.now();
+      let j = await sub.json() as ReplicatePrediction; const getUrl = j.urls?.get; const t0 = Date.now();
       while (getUrl && (j.status === "starting" || j.status === "processing")) { await new Promise((r) => setTimeout(r, 5000)); j = await (await rfetch(getUrl, { headers: { Authorization: `Bearer ${RT}` } })).json(); if (Date.now() - t0 > 540000) break; }
       const url = Array.isArray(j.output) ? j.output[0] : j.output;
       if (url) { await writeFile(rd(`clip_${i}.mp4`), Buffer.from(await (await rfetch(url)).arrayBuffer())); log(`clip ${i} ✓`); return; }
@@ -312,7 +348,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
     }
     throw new Error(`scene ${i} i2v failed after retries`);
   }
-  await pool(4, scenes, (_: any, i: number) => repI2V(i));
+  await pool(4, scenes, (_, i) => repI2V(i));
 
   // 4b ── 2K UPSCALE (cheap AI), parallel — Replicate real-esrgan-video → 2560x1440 ──
   async function upscaleClip(i: number) {
@@ -320,7 +356,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
     const vpath = await dataUri(rd(`clip_${i}.mp4`), "video/mp4"); // embed clip directly — Replicate never fetches from nginx
     for (let attempt = 0; attempt < 4; attempt++) {
       const sub = await rfetch("https://api.replicate.com/v1/predictions", { method: "POST", headers: { Authorization: `Bearer ${RT}`, "Content-Type": "application/json" }, body: JSON.stringify({ version: ESRGAN_VER, input: { video_path: vpath, model: "RealESRGAN_x4plus", resolution: cfg.upscaleRes } }) });
-      let j: any = await sub.json(); const getUrl = j.urls?.get; const t0 = Date.now();
+      let j = await sub.json() as ReplicatePrediction; const getUrl = j.urls?.get; const t0 = Date.now();
       while (getUrl && (j.status === "starting" || j.status === "processing")) { await new Promise((r) => setTimeout(r, 5000)); j = await (await rfetch(getUrl, { headers: { Authorization: `Bearer ${RT}` } })).json(); if (Date.now() - t0 > 600000) break; }
       const url = Array.isArray(j.output) ? j.output[0] : j.output;
       if (url) { await writeFile(rd(`up_${i}.mp4`), Buffer.from(await (await rfetch(url)).arrayBuffer())); log(`upscale ${i} ✓`); return; }
@@ -329,7 +365,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
     }
     throw new Error(`scene ${i} upscale failed after retries`);
   }
-  await pool(4, scenes, (_: any, i: number) => upscaleClip(i));
+  await pool(4, scenes, (_, i) => upscaleClip(i));
   const vid = (i: number) => (cfg.upscale === "realesrgan" ? rd(`up_${i}.mp4`) : rd(`clip_${i}.mp4`));
 
   // 5 ── EDIT: fit each shot to its line (+breath), cut on beats, dissolve, title, grade ──
@@ -349,9 +385,9 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
   let fc = "", prev = "0:v";
   for (let i = 1; i < scenes.length; i++) { const lbl = i === scenes.length - 1 ? "vx" : `x${i}`; fc += `[${prev}][${i}:v]xfade=transition=fade:duration=${cfg.dissolve}:offset=${offs[i - 1].toFixed(3)}[${lbl}];`; prev = lbl; }
   fc += `[${prev}]${style.grade}[v]`;
-  const vin = scenes.flatMap((_: any, i: number) => ["-i", rd(`fit_${i}.mp4`)]);
+  const vin = scenes.flatMap((_, i) => ["-i", rd(`fit_${i}.mp4`)]);
   await sh("ffmpeg", ["-y", "-loglevel", "error", ...vin, "-filter_complex", fc, "-map", "[v]", "-r", "24", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-crf", "18", "-preset", PRESET, rd("visual.mp4")]);
-  await writeFile(rd("aconcat.txt"), scenes.map((_: any, i: number) => `file '${rd(`a_${i}.m4a`)}'`).join("\n"));
+  await writeFile(rd("aconcat.txt"), scenes.map((_, i) => `file '${rd(`a_${i}.m4a`)}'`).join("\n"));
   await sh("ffmpeg", ["-y", "-loglevel", "error", "-f", "concat", "-safe", "0", "-i", rd("aconcat.txt"), "-c:a", "aac", rd("audio.m4a")]);
   const F_SC = "/usr/share/fonts/opentype/ebgaramond/EBGaramondSC08-Regular.otf";
   const F_IT = ["/usr/share/fonts/truetype/ebgaramond/EBGaramond12-Italic.ttf"].find(existsSync) || F_SC;

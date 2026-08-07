@@ -333,7 +333,7 @@ export const MapArcRoutesV2: React.FC = () => {
           }}
         >
           <div style={{ whiteSpace: "nowrap" }}>
-            <CaptionWord index={0} start={48}>IT'S BEING</CaptionWord>
+            <CaptionWord index={0} start={48}>IT&apos;S BEING</CaptionWord>
             <CaptionWord index={1} start={48}>EXPORTED</CaptionWord>
           </div>
           <div style={{ whiteSpace: "nowrap" }}>

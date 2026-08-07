@@ -1,10 +1,10 @@
 "use client";
 
 import {
+  useCallback,
   createContext,
   useContext,
-  useEffect,
-  useState,
+  useSyncExternalStore,
   type ReactNode,
 } from "react";
 
@@ -24,29 +24,40 @@ const ChannelContext = createContext<ChannelContextValue>({
 });
 
 const STORAGE_KEY = "studio.selectedChannel";
+const CHANGE_EVENT = "studio:selected-channel-change";
+
+function readSelectedSlug(): string | null {
+  try {
+    return window.localStorage.getItem(STORAGE_KEY);
+  } catch {
+    return null;
+  }
+}
+
+function subscribeToSelectedSlug(onStoreChange: () => void): () => void {
+  const onStorage = (event: StorageEvent) => {
+    if (event.key === STORAGE_KEY) onStoreChange();
+  };
+  window.addEventListener("storage", onStorage);
+  window.addEventListener(CHANGE_EVENT, onStoreChange);
+  return () => {
+    window.removeEventListener("storage", onStorage);
+    window.removeEventListener(CHANGE_EVENT, onStoreChange);
+  };
+}
 
 export function ChannelProvider({ children }: { children: ReactNode }) {
-  const [selectedSlug, setSelectedSlugState] = useState<string | null>(null);
+  const selectedSlug = useSyncExternalStore(subscribeToSelectedSlug, readSelectedSlug, () => null);
 
-  // Hydrate from localStorage after mount (avoids SSR mismatch).
-  useEffect(() => {
+  const setSelectedSlug = useCallback((slug: string | null) => {
     try {
-      const saved = window.localStorage.getItem(STORAGE_KEY);
-      if (saved) setSelectedSlugState(saved);
+      if (slug) window.localStorage.setItem(STORAGE_KEY, slug);
+      else window.localStorage.removeItem(STORAGE_KEY);
+      window.dispatchEvent(new Event(CHANGE_EVENT));
     } catch {
       /* ignore */
     }
   }, []);
-
-  const setSelectedSlug = (slug: string | null) => {
-    setSelectedSlugState(slug);
-    try {
-      if (slug) window.localStorage.setItem(STORAGE_KEY, slug);
-      else window.localStorage.removeItem(STORAGE_KEY);
-    } catch {
-      /* ignore */
-    }
-  };
 
   return (
     <ChannelContext.Provider value={{ selectedSlug, setSelectedSlug }}>
