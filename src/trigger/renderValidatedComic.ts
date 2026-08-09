@@ -15,6 +15,7 @@ import {
   type MotionComicImageRequest,
   type MotionComicResult,
 } from "@/lib/motionComic";
+import { generatePinnedGeminiProImage } from "@/lib/banana";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { presignDownload, publicUrl, putObjectFromFile } from "@/lib/storage";
@@ -46,6 +47,12 @@ export interface RenderValidatedComicInput {
   runId?: string;
   topic?: string;
   facts?: string;
+  /**
+   * `novita` is the normal channel renderer. `gemini_pro_one_off` is an
+   * explicit, audited delivery-only route for when the production fleet is
+   * unavailable; it is never selected automatically by a channel pipeline.
+   */
+  renderer?: "novita" | "gemini_pro_one_off";
 }
 
 function safeId(value: string): string {
@@ -138,10 +145,20 @@ export const renderValidatedComicTask = task({
   retry: { maxAttempts: 1 },
   run: async (input: RenderValidatedComicInput) => {
     await bootstrapSecrets((message) => console.log(`[render-validated-comic] ${message}`));
-    if (!hasMotionComic() || !hasNovitaRenderFarmConfig()) {
+    const renderer = input.renderer ?? "novita";
+    if (renderer !== "novita" && renderer !== "gemini_pro_one_off") {
+      throw new Error("render-validated-comic renderer must be novita or gemini_pro_one_off");
+    }
+    if (!hasMotionComic()) {
       throw new Error(
-        "render-validated-comic requires the production storyboard, ElevenLabs, and attested Novita renderer configuration",
+        "render-validated-comic requires the production storyboard and ElevenLabs configuration",
       );
+    }
+    if (renderer === "novita" && !hasNovitaRenderFarmConfig()) {
+      throw new Error("render-validated-comic requires the attested Novita renderer configuration");
+    }
+    if (renderer === "gemini_pro_one_off" && !process.env.GEMINI_API_KEY) {
+      throw new Error("render-validated-comic one-off Gemini Pro route requires GEMINI_API_KEY");
     }
 
     const runId = safeId(input.runId ?? `validated-comic-${randomUUID()}`);
@@ -151,11 +168,34 @@ export const renderValidatedComicTask = task({
     const topic = input.topic ?? "The Christmas Truce of 1914 — the night enemies met in No Man's Land";
     const facts = input.facts ??
       "December 1914, the Western Front, Flanders. British and German soldiers spent Christmas Eve in freezing trenches yards apart. German troops lit candles and small trees and sang carols; British troops answered. Men called greetings across the lines, then climbed into No Man's Land unarmed. They exchanged cigarettes, chocolate and family photographs, helped bury the dead, and in some places played football. The guns fell silent briefly before the war resumed.";
-    const imageGenerator = createAttestedNovitaImageGenerator<MotionComicImageRequest>({
-      prefix: `${keyPrefix}motion-comic-art`,
-      id: (request) => request.id,
-      profileId: "production",
-    });
+    const imageReceipts: Array<{ model: string; route: string; width: number; height: number; responseId?: string }> = [];
+    const imageGenerator: (request: MotionComicImageRequest) => Promise<Buffer> = renderer === "novita"
+      ? createAttestedNovitaImageGenerator<MotionComicImageRequest>({
+        prefix: `${keyPrefix}motion-comic-art`,
+        id: (request) => request.id,
+        profileId: "production",
+      })
+      : async (request) => {
+        const generated = await generatePinnedGeminiProImage({
+          prompt: [
+            request.prompt,
+            request.negativePrompt ? `Avoid: ${request.negativePrompt}` : "",
+            NO_TEXT_GUARD,
+          ].filter(Boolean).join("\n\n"),
+          aspectRatio: "16:9",
+          imageSize: "2K",
+          maxProviderAttempts: 1,
+          idempotencyContext: `${runId}:${request.id}`,
+        });
+        imageReceipts.push({
+          model: generated.model,
+          route: generated.route,
+          width: generated.width,
+          height: generated.height,
+          ...(generated.responseId ? { responseId: generated.responseId } : {}),
+        });
+        return generated.bytes;
+      };
 
     const baseBrief: MotionComicBrief = {
       topic,
@@ -172,6 +212,7 @@ export const renderValidatedComicTask = task({
     };
 
     let repairs: VisualRepairSignal[] = [];
+    let repairCycles = 0;
     let latest: { result: MotionComicResult; durationSec: number; review: Awaited<ReturnType<typeof reviewRender>> } | null = null;
 
     for (let cycle = 0; cycle <= MAX_LAYOUT_REPAIR_CYCLES; cycle += 1) {
@@ -215,6 +256,7 @@ export const renderValidatedComicTask = task({
         throw new Error(`render-validated-comic found no safe layout-only repair for: ${review.summary}`);
       }
       repairs = [...repairs, ...signals];
+      repairCycles += 1;
       console.log(`[render-validated-comic] applying ${signals.length} layout-only repair signal(s), then focused rereview`);
     }
 
@@ -231,10 +273,13 @@ export const renderValidatedComicTask = task({
     return {
       status: "pass" as const,
       channel: CHANNEL.name,
+      renderer: renderer === "novita" ? "novita-production" : "gemini-3-pro-image-one-off",
+      oneOffRenderer: renderer === "gemini_pro_one_off",
+      imageReceipts,
       title: latest.result.title,
       durationSec: Number(latest.durationSec.toFixed(2)),
       panels: latest.result.panels,
-      repairCycles: repairs.length ? Math.min(MAX_LAYOUT_REPAIR_CYCLES, repairs.length) : 0,
+      repairCycles,
       visualReview: {
         verdict: latest.review.verdict,
         framesReviewed: latest.review.evidence.frames.length,
