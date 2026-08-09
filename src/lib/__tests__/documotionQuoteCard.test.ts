@@ -220,8 +220,18 @@ async function assertSourceContract(): Promise<void> {
   assert.match(remotionSource, /planQuoteCardLayout/, "the production component must use the tested responsive planner");
   assert.match(remotionSource, /data-docu-quote-text/, "the production card must expose its actual measured quote box");
   assert.match(docuSource, /maxProviderAttempts: 1/, "the outer quality loop must own the bounded provider retry budget");
+  const cachedPlanNormalization = docuSource.indexOf("plan = normalizeDocuPlan(JSON.parse");
+  const cachedPlanValidation = docuSource.indexOf(
+    "const cachedProblems = validatePlan(plan",
+    cachedPlanNormalization,
+  );
+  const firstAssetProviderCall = docuSource.indexOf(
+    'generateDocuAssets(plan, style, join(runDir, "assets")',
+  );
   assert.ok(
-    docuSource.indexOf("plan = normalizeDocuPlan(JSON.parse") < docuSource.indexOf("let assets = await generateDocuAssets"),
+    cachedPlanNormalization >= 0 &&
+      cachedPlanValidation > cachedPlanNormalization &&
+      firstAssetProviderCall > cachedPlanValidation,
     "cached plans must normalize and validate before any downstream provider spend",
   );
 }
