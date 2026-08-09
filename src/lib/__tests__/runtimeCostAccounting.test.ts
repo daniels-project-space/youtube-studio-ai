@@ -192,10 +192,10 @@ async function successfulTinyTtsIsTerminal(): Promise<void> {
       return new Response(new Uint8Array(32), { status: 200 });
     };
     await assert.rejects(
-      synthNarration({ text: "paced fish test", provider: "fish", speed: 1.3 }),
+      synthNarration({ text: "paced fish test", provider: "fish", speed: 1.4 }),
       /tiny audio after a successful response/,
     );
-    assert.deepEqual(fishPayloads.at(-1)?.prosody, { speed: 1.3 });
+    assert.deepEqual(fishPayloads.at(-1)?.prosody, { speed: 1.4 });
 
     globalThis.fetch = async (_input, init) => {
       fishPayloads.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
