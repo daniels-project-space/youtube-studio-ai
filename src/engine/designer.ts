@@ -37,6 +37,16 @@ export interface DesignOptions {
   approvedForPublish?: boolean;
   seriesTitle?: string; // ordered series mode, e.g. "7 Days of Stoic Calm"
   seriesCount?: number; // total episodes in the series (0/undefined = open-ended)
+  /**
+   * Structured external sources for the documentary-collage Short lane. These
+   * are persisted on short_strategy and validated again before a render spends.
+   */
+  sourceReferences?: unknown;
+  /**
+   * Per-claim excerpts/locators for the documentary-collage Short lane. The
+   * strategy lock refuses to map a claim to a source without this evidence.
+   */
+  claimEvidence?: unknown;
   /** Advanced editor: per-block param overrides, keyed by block id. */
   paramOverrides?: Record<string, Record<string, unknown>>;
   toggles?: {
@@ -47,6 +57,8 @@ export interface DesignOptions {
     crosspost?: boolean;
     /** Auto-spin a 9:16 Short from each long-form (private-first). Default OFF. */
     shorts?: boolean;
+    /** Mine source-windowed documentary Short candidates after a long-form draft. */
+    documentaryCandidates?: boolean;
     /** Film-crew creative-direction layer. Default ON. */
     crew?: boolean;
   };
@@ -83,6 +95,24 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // with its research-tuned defaults — covers wizard, API, and autopilot creation).
   const preset = nichePreset(opts.nicheKey);
   const lenSec = opts.lengthMinutes ? Math.round(opts.lengthMinutes * 60) : preset?.targetSeconds;
+  // Documentary collage Shorts are a distinct native-vertical product, not a
+  // cropped long-form output. Keep every upstream sizing knob inside the
+  // renderer's validated 5-7 beat window even when a channel preset is long.
+  const documentaryShortTargetSec = opts.family === "documentary_collage_short"
+    ? Math.max(35, Math.min(60, Number(lenSec ?? 52)))
+    : undefined;
+  const documentaryShortSources = opts.sourceReferences
+    ?? opts.paramOverrides?.["short_strategy"]?.["sourceReferences"];
+  const documentaryShortClaimEvidence = opts.claimEvidence
+    ?? opts.paramOverrides?.["short_strategy"]?.["claimEvidence"];
+  if (
+    opts.family === "documentary_collage_short" &&
+    (documentaryShortSources === undefined || documentaryShortClaimEvidence === undefined)
+  ) {
+    warnings.push(
+      "Documentary collage Shorts require structured external sourceReferences and per-claim claimEvidence before a draft can render.",
+    );
+  }
 
   let pipeline: PipelineEntry[] = base.pipeline
     .filter((e) => {
@@ -102,6 +132,22 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         params.minSeconds = Math.round(lenSec * 0.6);
         params.maxSeconds = Math.round(lenSec * 1.8);
       }
+      if (documentaryShortTargetSec !== undefined) {
+        if (e.block === "topic_select" || e.block === "short_strategy" || e.block === "documotion_short") {
+          params.targetSeconds = documentaryShortTargetSec;
+        }
+        if (e.block === "script_gen") params.maxSeconds = documentaryShortTargetSec;
+        if (e.block === "length_check") {
+          params.minSeconds = 20;
+          params.maxSeconds = 60;
+        }
+      }
+      if (e.block === "short_strategy" && documentaryShortSources !== undefined) {
+        params.sourceReferences = documentaryShortSources;
+      }
+      if (e.block === "short_strategy" && documentaryShortClaimEvidence !== undefined) {
+        params.claimEvidence = documentaryShortClaimEvidence;
+      }
       if (e.block === "stock_footage") {
         if (opts.footageTheme) params.footageTheme = opts.footageTheme;
         else if (preset?.footageTheme) params.footageTheme = preset.footageTheme;
@@ -112,7 +158,12 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       }
       // Topic SCOPE guard: topicraft must know the video length — probes picked
       // "the complete history of the Roman Empire" for an 8-panel 3-min comic.
-      if (e.block === "topic_select" && lenSec) params.targetSeconds = lenSec;
+      if (e.block === "topic_select" && lenSec) {
+        // Preserve the native-Short clamp above. Topic research needs the same
+        // story scope as the renderer; otherwise a five-minute channel preset
+        // quietly restores a five-minute topic brief after we pinned a 60s Short.
+        params.targetSeconds = documentaryShortTargetSec ?? lenSec;
+      }
       if (e.block === "script_gen" && opts.locale) params.language = opts.locale;
       if (e.block === "narration_tts") {
         if (opts.voiceFx) params.voiceFx = opts.voiceFx;
@@ -373,6 +424,27 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       else pipeline.push(entry);
     } else {
       warnings.push("shorts spinoff skipped: family has no narration upload to clip from.");
+    }
+  }
+
+  // Documentary candidate mining is intentionally planning-only. It scans the
+  // finished long-form's full narration timeline for diverse 35–60s windows,
+  // but never crops/reuploads the parent master or silently launches a child
+  // Short without a fresh source/evidence-backed strategy lock.
+  if (t.documentaryCandidates) {
+    const hasUpload = pipeline.some((e) => e.block === "upload_draft");
+    const hasTimings = pipeline.some((e) => e.block === "narration_tts");
+    const hasMetadata = pipeline.some((e) => e.block === "metadata");
+    if (hasUpload && hasTimings && hasMetadata) {
+      const idx = pipeline.findIndex((e) => e.block === "notify" || e.block === "cleanup");
+      const entry: PipelineEntry = {
+        block: "documentary_short_candidates",
+        params: { targetSeconds: 52, maxCandidates: 6 },
+      };
+      if (idx >= 0) pipeline.splice(idx, 0, entry);
+      else pipeline.push(entry);
+    } else {
+      warnings.push("documentary Short candidate mining skipped: a narrated draft with metadata is required.");
     }
   }
 

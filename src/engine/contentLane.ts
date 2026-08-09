@@ -18,6 +18,7 @@ export const ContentLaneKeySchema = z.enum([
   "music_loop",
   "ambient_guided",
   "short_form",
+  "documentary_collage_short",
   "whiteboard_explainer",
   "motion_comic",
   "legacy_unclassified",
@@ -114,6 +115,24 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "motion_comic",
     ],
   },
+  documentary_collage_short: {
+    key: "documentary_collage_short",
+    family: "documentary_collage_short",
+    primaryRenderer: "documotion_short",
+    requiredBlocks: ["short_strategy", "documotion_short", "short_scene_qa", "qa_visual"],
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
+    ],
+    // This lane renders a portrait master directly. A legacy timeline/crop path
+    // would silently discard the locked beat map and portrait-safe treatment.
+    forbiddenBlocks: ["timeline_assemble", "assemble", "shorts_spinoff"],
+  },
   whiteboard_explainer: {
     key: "whiteboard_explainer",
     family: "whiteboard",
@@ -158,6 +177,7 @@ export const CONTENT_LANE_BY_FAMILY: Record<FamilyKey, ContentLaneKey> = {
   music_loop: "music_loop",
   sleep: "ambient_guided",
   shorts: "short_form",
+  documentary_collage_short: "documentary_collage_short",
   whiteboard: "whiteboard_explainer",
   comic: "motion_comic",
 };
@@ -238,6 +258,7 @@ export function inferContentLane(
   const inferred = new Set<ContentLaneKey>();
   if (blocks.has("whiteboard_scribe")) inferred.add("whiteboard_explainer");
   if (blocks.has("motion_comic")) inferred.add("motion_comic");
+  if (blocks.has("documotion_short")) inferred.add("documentary_collage_short");
   if (blocks.has("loop_clips")) inferred.add("music_loop");
   if (blocks.has("novita_render_images") || blocks.has("novita_render_video")) inferred.add("cinematic_ai");
   if (blocks.has("stock_footage")) inferred.add("narrated_documentary");

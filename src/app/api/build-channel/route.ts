@@ -75,6 +75,7 @@ export async function POST(request: Request) {
       if (!(familyKey in FAMILIES)) {
         return NextResponse.json({ error: "unsupported channel family" }, { status: 400 });
       }
+      const family = FAMILIES[familyKey as FamilyKey];
       const nicheKey = typeof design.nicheKey === "string" ? design.nicheKey.trim() : "";
       if (!nicheKey) {
         return NextResponse.json({ error: "missing channel niche" }, { status: 400 });
@@ -85,9 +86,26 @@ export async function POST(request: Request) {
       const approvedForPublish = design.approvedForPublish === true;
       const approvedForYoutubeCreation = design.autoYoutube === true;
       const approvedForProbe = design.runProbe === true;
-      const perVideoBudgetUsd = Number(design.budget ?? 5);
-      if (!Number.isFinite(perVideoBudgetUsd) || perVideoBudgetUsd <= 0 || perVideoBudgetUsd > 100) {
+      const minimumBudgetUsd = family.defaultRunBudgetUsd ?? 0.5;
+      const perVideoBudgetUsd = Number(design.budget ?? family.defaultRunBudgetUsd ?? 5);
+      if (
+        !Number.isFinite(perVideoBudgetUsd) ||
+        perVideoBudgetUsd < minimumBudgetUsd ||
+        perVideoBudgetUsd > 100
+      ) {
         return NextResponse.json({ error: "per-video budget must be greater than $0 and at most $100" }, { status: 400 });
+      }
+      if (familyKey === "documentary_collage_short") {
+        if (!Array.isArray(design.sourceReferences) || design.sourceReferences.length === 0) {
+          return NextResponse.json({
+            error: "documentary collage Shorts require a non-empty sourceReferences array",
+          }, { status: 400 });
+        }
+        if (!Array.isArray(design.claimEvidence) || design.claimEvidence.length === 0) {
+          return NextResponse.json({
+            error: "documentary collage Shorts require a non-empty claimEvidence array",
+          }, { status: 400 });
+        }
       }
       if ((approvedForProbe || approvedForYoutubeCreation) && !approvedForSetupSpend) {
         return NextResponse.json(
@@ -135,6 +153,7 @@ export async function POST(request: Request) {
       }
       design = {
         ...design,
+        budget: perVideoBudgetUsd,
         ...(approvedForYoutubeCreation
           ? { requestedYoutubeName, requestedYoutubeHandle }
           : {}),

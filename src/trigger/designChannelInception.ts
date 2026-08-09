@@ -864,7 +864,7 @@ export async function executeDesignChannel(
     }) &&
     payload.inceptionApproval.maxCostUsd === CHANNEL_INCEPTION_SETUP_COST_CEILING_USD;
   const requestedProbeCapUsd = Math.min(
-    Math.max(payload.budget ?? 5, 0),
+    Math.max(payload.budget ?? family.defaultRunBudgetUsd ?? 5, 0),
     MAX_CHANNEL_INCEPTION_PROBE_COST_USD,
   );
   const probeApproved = payload.runProbe === true && verifyStudioActionApproval(payload.probeApproval, {
@@ -912,6 +912,8 @@ export async function executeDesignChannel(
     approvedForPublish: publishingApproved,
     seriesTitle: payload.seriesTitle,
     seriesCount: payload.seriesCount,
+    sourceReferences: payload.sourceReferences,
+    claimEvidence: payload.claimEvidence,
     toggles: payload.toggles,
     paramOverrides: payload.paramOverrides,
   });
@@ -960,7 +962,7 @@ export async function executeDesignChannel(
     family: payload.family,
     contentLane: design.contentLane,
     disabledBlocks,
-    budget: payload.budget ?? 5,
+    budget: payload.budget ?? family.defaultRunBudgetUsd ?? 5,
     status: "draft",
   });
   log(existingAtStart ? "resuming existing channel inception" : "created resumable draft shell", {

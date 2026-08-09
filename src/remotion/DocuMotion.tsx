@@ -125,6 +125,8 @@ export interface DocuShotSpec {
 
 export type DocuMotionProps = {
   shots: DocuShotSpec[];
+  /** Native delivery layout; short keeps labels inside platform-safe insets. */
+  layout?: DocuLayout;
   /** Channel world theme — defaults to the archival style. */
   theme?: DocuTheme;
   /** Google Fonts URL + family probes for this theme. */
@@ -137,6 +139,45 @@ export type DocuMotionProps = {
 const DEFAULT_THEME = getStyle("archival_collage").theme;
 const ThemeCtx = createContext<DocuTheme>(DEFAULT_THEME);
 export const useTheme = () => useContext(ThemeCtx);
+
+export type DocuLayout = "long" | "short";
+
+export interface DocuSafeFrame {
+  top: number;
+  right: number;
+  bottom: number;
+  left: number;
+}
+
+/** Shared safe frame for every deterministic text layer in the composition. */
+export function safeFrameForDocuLayout(
+  width: number,
+  height: number,
+  layout: DocuLayout = "long",
+): DocuSafeFrame {
+  const portrait = layout === "short" || height > width;
+  return portrait
+    ? {
+        top: height * 0.075,
+        right: width * 0.075,
+        // Leave a real lower-third/caption-safe zone on native Shorts.
+        bottom: height * 0.18,
+        left: width * 0.075,
+      }
+    : {
+        top: height * 0.08,
+        right: width * 0.06,
+        bottom: height * 0.08,
+        left: width * 0.06,
+      };
+}
+
+const DocuLayoutCtx = createContext<DocuLayout>("long");
+export const useDocuLayout = () => useContext(DocuLayoutCtx);
+export const useDocuSafeFrame = () => {
+  const { width, height } = useVideoConfig();
+  return safeFrameForDocuLayout(width, height, useDocuLayout());
+};
 
 /* ----------------------------------------------------------------- utils -- */
 
@@ -613,14 +654,15 @@ const TextScrim: React.FC<{ cx: number; cy: number; w: number; h: number; opacit
 
 const LabelRail: React.FC<{ shot: DocuShotSpec; baseDelay?: number; scale?: number }> = ({ shot, baseDelay = 18, scale = 1 }) => {
   const { width, height } = useVideoConfig();
+  const safe = useDocuSafeFrame();
   if (!shot.labels?.length && !shot.annotations?.length) return null;
   const pos = shot.labelPos ?? "top_right";
   const style: React.CSSProperties =
     pos === "bottom_left"
-      ? { alignItems: "flex-start", justifyContent: "flex-end", paddingLeft: width * 0.055, paddingBottom: height * 0.09 }
+      ? { alignItems: "flex-start", justifyContent: "flex-end", paddingLeft: Math.max(width * 0.055, safe.left), paddingBottom: Math.max(height * 0.09, safe.bottom) }
       : pos === "bottom_center"
-        ? { alignItems: "center", justifyContent: "flex-end", paddingBottom: height * 0.07 }
-        : { alignItems: "flex-end", justifyContent: "flex-start", paddingRight: width * 0.055, paddingTop: height * 0.1 };
+        ? { alignItems: "center", justifyContent: "flex-end", paddingBottom: Math.max(height * 0.07, safe.bottom) }
+        : { alignItems: "flex-end", justifyContent: "flex-start", paddingRight: Math.max(width * 0.055, safe.right), paddingTop: Math.max(height * 0.1, safe.top) };
   const scrim = pos === "bottom_left" ? { cx: 18, cy: 82 } : pos === "bottom_center" ? { cx: 50, cy: 86 } : { cx: 84, cy: 26 };
   return (
     <>
@@ -1451,6 +1493,7 @@ const ObjectDropShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, 
 const EvidenceBoardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
   const frame = useCurrentFrame();
   const { width, height } = useVideoConfig();
+  const safe = useDocuSafeFrame();
   const t = useTheme();
   const dur = shot.durationInFrames;
   const photos = (shot.images ?? []).slice(0, 6);
@@ -1612,7 +1655,7 @@ const EvidenceBoardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ sho
       {shot.title ? (
         <>
           <TextScrim cx={50} cy={14} w={82} h={34} opacity={0.52} />
-          <AbsoluteFill style={{ alignItems: "center", justifyContent: "flex-start", paddingTop: height * 0.06 }}>
+          <AbsoluteFill style={{ alignItems: "center", justifyContent: "flex-start", paddingTop: Math.max(height * 0.06, safe.top) }}>
             <KineticTitle text={shot.title} kicker={shot.kicker} align="center" size={Math.round(width * 0.07)} />
           </AbsoluteFill>
         </>
@@ -1624,6 +1667,7 @@ const EvidenceBoardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ sho
 const QuoteCardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
   const frame = useCurrentFrame();
   const { width, height, fps } = useVideoConfig();
+  const safe = useDocuSafeFrame();
   const t = useTheme();
   const dur = shot.durationInFrames;
   const cam = useCam(shot.camera ?? { move: "drift", intensity: "subtle" }, dur, seed);
@@ -1660,7 +1704,7 @@ const QuoteCardShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, s
         </div>
       </AbsoluteFill>
       <TextScrim cx={50} cy={50} w={88} h={76} opacity={0.6} />
-      <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", padding: `${height * 0.08}px ${width * 0.08}px`, transform: camTransform(cam, 1.025) }}>
+      <AbsoluteFill style={{ alignItems: "center", justifyContent: "center", padding: `${Math.max(height * 0.08, safe.top)}px ${Math.max(width * 0.08, safe.right)}px ${Math.max(height * 0.08, safe.bottom)}px ${Math.max(width * 0.08, safe.left)}px`, transform: camTransform(cam, 1.025) }}>
         <div
           ref={panelRef}
           data-docu-quote-panel="true"
@@ -1777,20 +1821,22 @@ const renderShot = (shot: DocuShotSpec, i: number) => {
   }
 };
 
-export const DocuMotion: React.FC<DocuMotionProps> = ({ shots, theme }) => {
+export const DocuMotion: React.FC<DocuMotionProps> = ({ shots, theme, layout = "long" }) => {
   const th = theme ?? DEFAULT_THEME;
   return (
     <ThemeCtx.Provider value={th}>
-      <AbsoluteFill style={{ backgroundColor: th.base }}>
-        <Series>
-          {shots.map((s, i) => (
-            <Series.Sequence key={i} durationInFrames={Math.max(1, s.durationInFrames)}>
-              <CutIn first={i === 0}>{renderShot(s, i)}</CutIn>
-            </Series.Sequence>
-          ))}
-        </Series>
-        <Grade />
-      </AbsoluteFill>
+      <DocuLayoutCtx.Provider value={layout}>
+        <AbsoluteFill style={{ backgroundColor: th.base }}>
+          <Series>
+            {shots.map((s, i) => (
+              <Series.Sequence key={i} durationInFrames={Math.max(1, s.durationInFrames)}>
+                <CutIn first={i === 0}>{renderShot(s, i)}</CutIn>
+              </Series.Sequence>
+            ))}
+          </Series>
+          <Grade />
+        </AbsoluteFill>
+      </DocuLayoutCtx.Provider>
     </ThemeCtx.Provider>
   );
 };

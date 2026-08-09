@@ -141,6 +141,10 @@ const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
     energy: "spectacle", font: "impact", treatment: "sticker", textObject: "grunge_sticker",
     imageStyle: "high-energy editorial poster with sharp subject separation",
   },
+  documentary_collage_short: {
+    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    imageStyle: "premium archival evidence-board collage with one dramatic portrait-safe focal subject",
+  },
   whiteboard: {
     energy: "bold", font: "marker", treatment: "stamp", textObject: "stamp_ink",
     imageStyle: "hand-drawn editorial chalk illustration with tactile board grain",
@@ -246,6 +250,7 @@ const THUMBNAIL_FAMILIES = new Set<FamilyKey>([
   "music_loop",
   "sleep",
   "shorts",
+  "documentary_collage_short",
   "whiteboard",
   "comic",
 ]);

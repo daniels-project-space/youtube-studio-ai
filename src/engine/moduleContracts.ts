@@ -272,6 +272,24 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     },
     qualityRequired: true,
   }),
+  short_strategy: contract(["shorts.strategy_locked", "shorts.source_traceable", "shorts.retention_mapped"], {
+    requiredConsumes: ["topic", "narrationText"],
+    qualityRequired: true,
+  }),
+  documentary_short_candidates: contract(["shorts.candidates_mined", "shorts.source_windowed"], {
+    requiredConsumes: ["sentenceTimings", "title"],
+    optionalConsumes: ["youtubeVideoId"],
+  }),
+  documotion_short: contract(["narration.timed", "visuals.documentary_collage", "master.native_vertical", "master.assembled"], {
+    requiredConsumes: ["topic", "beatManifest"],
+    providerProfiles: [managed, local],
+    maxCostUsd: 25,
+    qualityRequired: true,
+  }),
+  short_scene_qa: contract(["qa.short_scene_required", "qa.short_safe_area", "qa.short_provenance"], {
+    requiredConsumes: ["beatManifest", "documotionVerdict", "documotionRender"],
+    qualityRequired: true,
+  }),
   stock_footage: contract(["visuals.sourced"], {
     optionalConsumes: [
       "reuseFootageKeys", "narrationDurationSec", "narrationText", "cutSheet", "styleDNA", "healHints",
@@ -305,6 +323,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec",
       "overlaysDropped", "qualityBar", "description", "musicKey", "niche", "persona", "styleGrammar", "topic",
       "narrativeBeats", "shotList", "storyCoverage", "assetQaReport", "shotQaReport", "healAttempt",
+      "shortStrategyBrief", "beatManifest", "shortRetentionManifest", "shortSceneQa", "documotionVerdict", "documotionRender",
     ],
     providerProfiles: [managed, local],
     maxCostUsd: 5,

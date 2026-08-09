@@ -586,7 +586,12 @@ export const runPipelineTask = task({
             )
           : channel.budget ?? 0,
         keyPrefix: payload.probeInvocationContext?.keyPrefix ?? channelPrefix(ownerId, channel.slug),
-        remoteBlocks: ["timeline_assemble"],
+        // Both modules create a full-resolution master and must run on the
+        // durable large-2x render worker. Keep the list derived from the
+        // frozen pipeline so a Short never authorizes an unrelated module.
+        remoteBlocks: entries
+          .filter((entry) => entry.block === "timeline_assemble" || entry.block === "documotion_short")
+          .map((entry) => entry.block),
         defaultRetries: 2,
         compilationFingerprint: compilation.fingerprint,
         compilationPolicyId: compilation.policyId,

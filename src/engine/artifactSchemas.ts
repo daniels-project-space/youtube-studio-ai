@@ -16,6 +16,13 @@ import {
 } from "./renderArtifacts";
 import { ContentLaneSchema } from "./contentLane";
 import { EpisodeSpecSchema, QualityEvidenceSchema } from "./qualityEvidence";
+import {
+  ShortCandidateSelectionSchema,
+  ShortCandidateSetSchema,
+  ShortStrategyBriefSchema,
+  ShortStrategyManifestSchema,
+} from "./shortStrategyManifest";
+import { ShortRetentionManifestSchema, ShortSceneQaSchema } from "./documentaryCollageShort";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -97,6 +104,39 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   qaReport: { type: "FinalQaReport", schema: qaReport },
   episodeSpec: { type: "EpisodeSpec", schema: EpisodeSpecSchema },
   qualityEvidence: { type: "EpisodeQualityEvidence", schema: QualityEvidenceSchema },
+  shortStrategyBrief: { type: "ShortStrategyBrief", schema: ShortStrategyBriefSchema },
+  shortCandidateSet: { type: "ShortCandidateSet", schema: ShortCandidateSetSchema },
+  shortCandidateSelection: { type: "ShortCandidateSelection", schema: ShortCandidateSelectionSchema },
+  beatManifest: { type: "ShortStrategyManifest", schema: ShortStrategyManifestSchema, persist: "reference" },
+  shortRetentionManifest: { type: "ShortRetentionManifest", schema: ShortRetentionManifestSchema },
+  shortSceneQa: { type: "ShortSceneQa", schema: ShortSceneQaSchema },
+  documotionVerdict: {
+    type: "DocuMotionVerdict",
+    schema: z.object({ pass: z.boolean().optional(), audioOk: z.boolean().optional() }).passthrough(),
+  },
+  documotionRender: {
+    type: "DocuMotionRenderReceipt",
+    schema: z.object({
+      version: z.literal("documotion-short-render/v1"),
+      geometry: z.object({ width: z.number().int().positive(), height: z.number().int().positive(), layout: z.literal("short") }).passthrough(),
+      durationSec: z.number().finite().positive(),
+      beatWindows: z.array(z.object({ id: z.string().min(1), durationSec: z.number().finite().positive() })).min(5).max(7),
+      captionSafeFrame: z.object({
+        top: z.number().finite().nonnegative(),
+        right: z.number().finite().nonnegative(),
+        bottom: z.number().finite().nonnegative(),
+        left: z.number().finite().nonnegative(),
+      }).strict(),
+      assetReceiptKey: z.string().min(1),
+      assetReceipts: z.array(z.object({
+        receiptId: z.string().min(1),
+        assetId: z.string().min(1),
+        rendererAssetId: z.string().min(1),
+        beatId: z.string().min(1),
+        approvalSha256: z.array(z.string().regex(/^[a-f0-9]{64}$/i)).min(1),
+      }).strict()).min(5).max(7),
+    }).strict(),
+  },
   originalityOk: { type: "OriginalityDecision", schema: z.boolean() },
   structure: {
     type: "DirectorTreatment",

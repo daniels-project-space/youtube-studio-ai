@@ -16,6 +16,7 @@ import type {
   SpeechWord,
 } from "../remotion/speech/types";
 import type { CinematicTheme } from "../remotion/speech/CinematicFrame";
+import type { DocuLayout } from "../remotion/DocuMotion";
 
 let serveUrlCache: string | null = null;
 
@@ -103,9 +104,12 @@ export interface DocuRenderProps {
   shots: unknown[];
   width?: number;
   height?: number;
+  layout?: DocuLayout;
   theme?: unknown;
   fontCss?: string;
   fontProbe?: [string, string, string];
+  /** Maximum time allowed for a complex portrait frame to render. */
+  timeoutInMilliseconds?: number;
 }
 
 function docuInputProps(args: DocuRenderProps) {
@@ -113,6 +117,7 @@ function docuInputProps(args: DocuRenderProps) {
     shots: args.shots,
     width: args.width ?? 1920,
     height: args.height ?? 1080,
+    layout: args.layout ?? "long",
     ...(args.theme ? { theme: args.theme } : {}),
     ...(args.fontCss ? { fontCss: args.fontCss } : {}),
     ...(args.fontProbe ? { fontProbe: args.fontProbe } : {}),
@@ -140,6 +145,10 @@ export async function renderDocuMotion(args: DocuRenderProps & {
     codec: "h264",
     outputLocation: args.outPath,
     chromiumOptions: { gl: "angle" },
+    // Portrait collage scenes can layer multiple high-resolution plates and
+    // deliberate typography. The Remotion default (30s per frame) is too
+    // short for an otherwise healthy high-detail frame on a cold worker.
+    timeoutInMilliseconds: args.timeoutInMilliseconds ?? 120_000,
     ...(args.concurrency ? { concurrency: args.concurrency } : {}),
     onProgress: ({ progress }) => {
       const pct = Math.round(progress * 100);

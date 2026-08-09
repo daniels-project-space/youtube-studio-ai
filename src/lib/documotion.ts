@@ -44,19 +44,43 @@ import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
 import { searchWikimediaImageUrl } from "@/lib/wikimedia";
 import { synthNarration } from "@/lib/tts";
 import { generateMusic } from "@/lib/music";
+import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
+import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
+import { narrationTtsCost, PRICE } from "@/engine/pricing";
 import { CINEMATOGRAPHER_DOCTRINE } from "@/lib/visualDirection";
 import { renderDocuMotion, renderDocuStills } from "@/lib/remotionRender";
 import {
+  getDocuRoleFraming,
   getStyle,
+  type DocuFormat,
   type DocuAssetRole,
   type DocuShotKind,
   type DocuStyleDef,
 } from "@/remotion/docuStyles";
 import type { DocuCamera, DocuLabel, DocuLabelPos, DocuShotSpec, DocuThread } from "@/remotion/DocuMotion";
+import type { DocuLayout } from "@/remotion/DocuMotion";
 
 type Logger = (msg: string) => void;
 
 const FPS = 30;
+
+export type { DocuFormat } from "@/remotion/docuStyles";
+
+export interface DocuRenderGeometry {
+  format: DocuFormat;
+  layout: DocuLayout;
+  width: number;
+  height: number;
+  verifyWidth: number;
+  verifyHeight: number;
+}
+
+/** Canonical geometry used by both proof stills and the final master. */
+export function docuRenderGeometry(format: DocuFormat = "long"): DocuRenderGeometry {
+  return format === "short"
+    ? { format, layout: "short", width: 1080, height: 1920, verifyWidth: 540, verifyHeight: 960 }
+    : { format, layout: "long", width: 1920, height: 1080, verifyWidth: 960, verifyHeight: 540 };
+}
 
 /** Banana/Gemini-image concurrency — capped to stay under image rate limits. */
 const ASSET_CONCURRENCY = Number(process.env.DOCU_ASSET_CONCURRENCY ?? 4);
@@ -138,6 +162,11 @@ interface ShotVO {
   durSec: number;
 }
 
+interface DocuNarrationUsage {
+  provider: string;
+  billableCharacters: number;
+}
+
 /** ElevenLabs v3 (expressive, documentary-grade) when its key is present — the
  *  right narration tool for this format; Fish Audio otherwise. */
 function pickNarrationTts(): { provider?: string; elevenVoiceId?: string } {
@@ -156,8 +185,15 @@ async function audioDurationSec(path: string): Promise<number> {
 
 /** Voice EACH shot's narration line separately (documentary pace) so timing and
  *  visuals can lock to the spoken word. Returns per-shot VO files + durations. */
-async function synthShotVOs(plan: DocuPlan, runDir: string, niche: string | undefined, log: Logger): Promise<ShotVO[]> {
+async function synthShotVOs(
+  plan: DocuPlan,
+  runDir: string,
+  niche: string | undefined,
+  log: Logger,
+  usage: DocuNarrationUsage,
+): Promise<ShotVO[]> {
   const tts = pickNarrationTts();
+  usage.provider = tts.provider ?? "fish";
   const voDir = join(runDir, "vo");
   await mkdir(voDir, { recursive: true });
   const lines = plan.shots.map((s) => (s.narration ?? "").trim());
@@ -172,6 +208,9 @@ async function synthShotVOs(plan: DocuPlan, runDir: string, niche: string | unde
       ...tts,
       eleven: { stability: 0.45, seed: 4242 },
       stitch: { previousText: lines[i - 1] || undefined, nextText: lines[i + 1] || undefined },
+      onBillableCharacters: (characters) => {
+        usage.billableCharacters += characters;
+      },
     });
     await writeFile(path, Buffer.from(bytes));
     out.push({ idx: i, path, durSec: await audioDurationSec(path) });
@@ -198,8 +237,11 @@ function narrationDurations(plan: DocuPlan, shotVOs: ShotVO[], fallbackSec: numb
  *  fallback). Returns the new audio-video path. */
 async function assembleNarration(o: {
   videoPath: string; runDir: string; shotVOs: ShotVO[]; shotDursSec: number[]; plan: DocuPlan; log: Logger;
-}): Promise<string> {
-  if (!o.shotVOs.length) { o.log("documotion narrate: plan carries no narration — leaving silent"); return o.videoPath; }
+}): Promise<{ path: string; musicTracks: number }> {
+  if (!o.shotVOs.length) {
+    o.log("documotion narrate: plan carries no narration — leaving silent");
+    return { path: o.videoPath, musicTracks: 0 };
+  }
   // exact rendered start (sec) of each shot = cumulative rendered duration (frame-quantized to match the render)
   const renderedSec = o.shotDursSec.map((d) => Math.round(d * FPS) / FPS);
   const starts: number[] = [];
@@ -208,13 +250,20 @@ async function assembleNarration(o: {
 
   // music bed (best-effort, provider fallback, looped under the whole thing)
   let musPath = "";
+  let musicTracks = 0;
   try {
     const m = await generateMusic({
       prompt: "cinematic documentary underscore — restrained strings and soft piano, slow build, tension and wonder, NO drums, fully instrumental",
       title: o.plan.title,
       log: o.log,
     });
-    if (m.url) { musPath = join(o.runDir, "music.mp3"); await downloadTo(m.url, musPath); o.log(`documotion narrate: music bed via ${m.provider}`); }
+    if (m.url) {
+      musPath = join(o.runDir, "music.mp3");
+      await downloadTo(m.url, musPath);
+      // A provider can return multiple billable takes from one generation.
+      musicTracks = Math.max(1, m.tracks.length);
+      o.log(`documotion narrate: music bed via ${m.provider}`);
+    }
   } catch (e) { o.log(`documotion narrate: music unavailable (${e instanceof Error ? e.message : e}) — VO only`); }
 
   // ---- BROADCAST MIX: dialogue is the ANCHOR, music a quiet bed under it ----
@@ -250,7 +299,7 @@ async function assembleNarration(o: {
   const out = o.videoPath.replace(/\.mp4$/i, "_av.mp4");
   await run(ffmpegBin(), ["-y", ...inputs, "-filter_complex", parts.join(";"), "-map", "0:v", "-map", "[a]", "-t", totalSec.toFixed(3), "-c:v", "copy", "-c:a", "aac", "-b:a", "192k", out]);
   o.log(`documotion narrate: muxed ${musPath ? "VO + ducked music bed" : "VO"} aligned over ${totalSec.toFixed(1)}s → ${out}`);
-  return out;
+  return { path: out, musicTracks };
 }
 
 /** Mean dBFS of one time-window of a file's audio. */
@@ -905,12 +954,14 @@ async function hasCurrentAssetApproval(path: string): Promise<boolean> {
   }
 }
 
-async function persistAssetApproval(path: string): Promise<void> {
+async function persistAssetApproval(path: string): Promise<string> {
+  const sha256 = await assetDigest(path);
   await writeFile(
     `${path}.approval.json`,
-    JSON.stringify({ contract: ASSET_APPROVAL_CONTRACT, sha256: await assetDigest(path) }),
+    JSON.stringify({ contract: ASSET_APPROVAL_CONTRACT, sha256 }),
     "utf8",
   );
+  return sha256;
 }
 
 /** Per-still vision gate — catches weird crops/text/style drift before assembly. */
@@ -960,6 +1011,15 @@ export interface DocuAssetFile {
   id: string;
   role: DocuAssetRole;
   path: string;
+  /** Hash attested by the local approval sidecar after the asset gate passed. */
+  approvalSha256: string;
+}
+
+export interface DocuAssetReceipt {
+  shotIdx: number;
+  rendererAssetId: string;
+  role: DocuAssetRole;
+  approvalSha256: string;
 }
 
 interface AssetJob {
@@ -977,6 +1037,7 @@ export async function generateDocuAssets(
   assetsDir: string,
   log?: Logger,
   fixNotes?: Record<string, string>,
+  format: DocuFormat = "long",
 ): Promise<DocuAssetFile[]> {
   await mkdir(assetsDir, { recursive: true });
   const jobs: AssetJob[] = [];
@@ -992,10 +1053,10 @@ export async function generateDocuAssets(
       shot.kind === "quote_card"
         ? `Atmospheric closing background plate with calm negative space, visually expressing: ${(shot.visualCues ?? []).join("; ") || shot.beat || "a restrained documentary conclusion"}`
         : a.brief;
-    const framing = style.roleFraming[a.role];
+    const framing = getDocuRoleFraming(style, a.role, format);
     if (existsSync(finalPath) && !externalFix) {
       if (await hasCurrentAssetApproval(finalPath)) {
-        return { shotIdx: i, id: a.id, role: a.role, path: finalPath };
+        return { shotIdx: i, id: a.id, role: a.role, path: finalPath, approvalSha256: await assetDigest(finalPath) };
       }
       // Legacy caches predate the proof sidecar. Verify once, persist the
       // content hash, then future resumes remain zero-provider and tamper-safe.
@@ -1004,8 +1065,8 @@ export async function generateDocuAssets(
         throw new Error(`documotion asset s${i}/${a.id}: ${cachedGate.fix}; refusing image spend without a working gate`);
       }
       if (isAssetGateApproved(cachedGate)) {
-        await persistAssetApproval(finalPath);
-        return { shotIdx: i, id: a.id, role: a.role, path: finalPath };
+        const approvalSha256 = await persistAssetApproval(finalPath);
+        return { shotIdx: i, id: a.id, role: a.role, path: finalPath, approvalSha256 };
       }
       log?.(
         `documotion asset s${i}/${a.id}: unapproved cache rejected ` +
@@ -1108,8 +1169,8 @@ export async function generateDocuAssets(
     } else {
       await normalizeAsset(rawPath, finalPath, 1280);
     }
-    await persistAssetApproval(finalPath);
-    return { shotIdx: i, id: a.id, role: a.role, path: finalPath };
+    const approvalSha256 = await persistAssetApproval(finalPath);
+    return { shotIdx: i, id: a.id, role: a.role, path: finalPath, approvalSha256 };
   });
 
   // depth_parallax: derive the near 2.5D layer from each scene's base image and
@@ -1123,10 +1184,22 @@ export async function generateDocuAssets(
     const baseFile = base!;
     const nearPath = join(assetsDir, `s${i}_near.png`);
     if (existsSync(nearPath) && !fixNotes?.[`${i}:${baseFile.id}`]) {
-      return [{ shotIdx: i, id: `${baseFile.id}_near`, role: "image" as const, path: nearPath }];
+      return [{
+        shotIdx: i,
+        id: `${baseFile.id}_near`,
+        role: "image" as const,
+        path: nearPath,
+        approvalSha256: await persistAssetApproval(nearPath),
+      }];
     }
     const layers = await deriveDepthLayers(baseFile.path, assetsDir, i, log);
-    return layers.map((p) => ({ shotIdx: i, id: `${baseFile.id}_near`, role: "image" as const, path: p }));
+    return Promise.all(layers.map(async (p) => ({
+      shotIdx: i,
+      id: `${baseFile.id}_near`,
+      role: "image" as const,
+      path: p,
+      approvalSha256: await persistAssetApproval(p),
+    })));
   });
   for (const adds of depthAdds) for (const a of adds) out.push(a);
 
@@ -1361,10 +1434,11 @@ async function renderVerifySet(args: {
   plan: DocuPlan;
   specs: DocuShotSpec[];
   style: DocuStyleDef;
+  geometry: DocuRenderGeometry;
   framesDir: string;
   log?: Logger;
 }): Promise<{ framePaths: string[]; labels: string[] }> {
-  const { plan, specs, style, framesDir, log } = args;
+  const { plan, specs, style, geometry, framesDir, log } = args;
   await mkdir(framesDir, { recursive: true });
   const frames: number[] = [];
   const outPaths: string[] = [];
@@ -1395,8 +1469,9 @@ async function renderVerifySet(args: {
     shots: specs,
     frames,
     outPaths,
-    width: 960,
-    height: 540,
+    width: geometry.verifyWidth,
+    height: geometry.verifyHeight,
+    layout: geometry.layout,
     theme: style.theme,
     fontCss: style.fontCss,
     fontProbe: style.fontProbe,
@@ -1422,6 +1497,12 @@ export interface CraftDocuArgs {
   /** Voice the plan narration + bed ducked music into the final video, and
    *  validate the result actually carries audio. Default ON (a documentary speaks). */
   narrate?: boolean;
+  /** Render native landscape long-form or a native vertical Short from the asset request onward. */
+  format?: DocuFormat;
+  /** A verified strategy adapter may supply its locked beat plan instead of asking the planner to invent one. */
+  plan?: DocuPlan;
+  /** Keep supplied beat windows authoritative after per-shot narration is voiced. */
+  lockShotDurations?: boolean;
   log?: Logger;
 }
 
@@ -1430,22 +1511,60 @@ export interface CraftDocuResult {
   plan: DocuPlan;
   verdict: DocuVerdict;
   rounds: number;
+  geometry: DocuRenderGeometry;
+  /** Exact per-shot visual windows used by the final render, in timeline order. */
+  shotDurationsSec: number[];
+  /** Content hashes for every approved renderer asset used in the final plan. */
+  assetReceipts: DocuAssetReceipt[];
+  /** Exact provider usage observed inside the isolated DocuMotion worker. */
+  usage: DocuMotionUsage;
+}
+
+export interface DocuMotionUsage {
+  model: ModelUsageSummary;
+  image: ImageUsageSummary;
+  narration: {
+    provider: string;
+    billableCharacters: number;
+    costUsd: number;
+  };
+  music: {
+    generatedTracks: number;
+    costUsd: number;
+  };
+  totalCostUsd: number;
 }
 
 /** The full visual engine — see module header. */
 export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuResult> {
+  const modelUsageScope = createModelUsageScope();
+  return modelUsageScope.run(async () => {
   const log = args.log ?? (() => {});
   const durationSec = args.durationSec ?? 60;
+  const geometry = docuRenderGeometry(args.format ?? "long");
   const runDir = args.runDir;
   const maxRounds = args.maxRefineRounds ?? 2;
   const style = getStyle(args.style);
+  // Render children do not inherit the parent runner's async-local usage
+  // scopes. Keep an explicit local scope so their real provider spend returns
+  // with the patch and the parent can enforce the frozen run budget.
+  const imageUsageScope = createImageUsageScope();
+  const narrationUsage: DocuNarrationUsage = { provider: "fish", billableCharacters: 0 };
   await mkdir(runDir, { recursive: true });
 
   // 1. PLAN (cached) — then the CINEMATOGRAPHER pass realises each line into a
   //    specific, composed image + informative text (runs once, persisted).
   const planPath = join(runDir, "plan.json");
   let plan: DocuPlan;
-  if (existsSync(planPath)) {
+  if (args.plan) {
+    plan = normalizeDocuPlan(args.plan);
+    const suppliedProblems = validatePlan(plan, durationSec, style);
+    if (suppliedProblems.length) {
+      throw new Error(`documotion: supplied plan failed validation (${suppliedProblems.join("; ")})`);
+    }
+    await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
+    log(`documotion: using supplied locked plan (${plan.shots.length} shots, style ${plan.styleId})`);
+  } else if (existsSync(planPath)) {
     plan = normalizeDocuPlan(JSON.parse(await readFile(planPath, "utf8")));
     const cachedProblems = validatePlan(plan, durationSec, style);
     if (cachedProblems.length) {
@@ -1467,7 +1586,9 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   }
 
   // 2. ASSETS (gated, pooled, cached) + GEO geometry for any geo_map shots
-  let assets = await generateDocuAssets(plan, style, join(runDir, "assets"), log);
+  let assets = await imageUsageScope.run(() =>
+    generateDocuAssets(plan, style, join(runDir, "assets"), log, undefined, geometry.format),
+  );
   const geoByShot: Record<number, CityGeo> = {};
   for (const [i, s] of plan.shots.entries()) {
     if (s.kind === "geo_map" && s.geoQuery) geoByShot[i] = await fetchCityGeo(s.geoQuery, join(runDir, "geo"), log);
@@ -1483,8 +1604,24 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   let shotVOs: ShotVO[] = [];
   let fixedDursSec: number[] | undefined;
   if (args.narrate !== false) {
-    shotVOs = await synthShotVOs(plan, runDir, style.label, log);
-    if (shotVOs.length) fixedDursSec = narrationDurations(plan, shotVOs, durationSec / Math.max(1, plan.shots.length));
+    shotVOs = await synthShotVOs(plan, runDir, style.label, log, narrationUsage);
+    if (shotVOs.length) {
+      if (args.lockShotDurations) {
+        fixedDursSec = plan.shots.map((shot) => shot.durationSec);
+        const overrun = shotVOs.find((voice) =>
+          voice.durSec + NARR.lead + NARR.tail > (fixedDursSec?.[voice.idx] ?? 0) + 0.05,
+        );
+        if (overrun) {
+          throw new Error(
+            `documotion: locked beat ${overrun.idx + 1} cannot contain its narration ` +
+            `(${overrun.durSec.toFixed(2)}s voice exceeds ${(fixedDursSec[overrun.idx] ?? 0).toFixed(2)}s visual window).`,
+          );
+        }
+        log("documotion: locked strategy beat windows retained after narration timing check");
+      } else {
+        fixedDursSec = narrationDurations(plan, shotVOs, durationSec / Math.max(1, plan.shots.length));
+      }
+    }
   }
 
   // 4. VERIFY & REFINE on fast stills
@@ -1494,14 +1631,18 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   let rounds = 0;
   for (let round = 1; round <= maxRounds + 1; round++) {
     const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, fixedDursSec);
-    const { framePaths, labels } = await renderVerifySet({ plan, specs, style, framesDir: join(runDir, `verify_r${round}`), log });
+    const { framePaths, labels } = await renderVerifySet({ plan, specs, style, geometry, framesDir: join(runDir, `verify_r${round}`), log });
     verdict = await verifyDocu({ framePaths, labels, worldHint: style.label, log });
     rounds = round;
     if (verdict.pass || round > maxRounds || !verdict.actions?.length) break;
     const applied = applyActions(verdict.actions, overrides, log);
     overrides = applied.overrides;
     await writeFile(overridesPath, JSON.stringify(overrides, null, 2), "utf8");
-    if (Object.keys(applied.assetFixes).length) assets = await generateDocuAssets(plan, style, join(runDir, "assets"), log, applied.assetFixes);
+    if (Object.keys(applied.assetFixes).length) {
+      assets = await imageUsageScope.run(() =>
+        generateDocuAssets(plan, style, join(runDir, "assets"), log, applied.assetFixes, geometry.format),
+      );
+    }
   }
   if (!verdict.pass) log(`documotion: verifier unsatisfied after ${rounds} rounds — shipping with honest verdict`);
 
@@ -1511,8 +1652,9 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   await renderDocuMotion({
     shots: specs,
     outPath,
-    width: 1920,
-    height: 1080,
+    width: geometry.width,
+    height: geometry.height,
+    layout: geometry.layout,
     theme: style.theme,
     fontCss: style.fontCss,
     fontProbe: style.fontProbe,
@@ -1527,10 +1669,20 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   //    (picture matches the words), duck a quiet music bed under them, then FAIL
   //    unless the audio COVERS the timeline AND the narration DOMINATES the bed.
   let deliverPath = outPath;
+  let generatedMusicTracks = 0;
   let audio: { audioOk: boolean; meanVolumeDb: number; coverage: number; dialogueLeadDb: number | null } = { audioOk: true, meanVolumeDb: 0, coverage: 1, dialogueLeadDb: null };
   if (args.narrate !== false && shotVOs.length && fixedDursSec) {
     const hadMusic = Boolean(process.env.SUNO_API_KEY || process.env.MUREKA_API_KEY);
-    deliverPath = await assembleNarration({ videoPath: outPath, runDir, shotVOs, shotDursSec: fixedDursSec, plan, log });
+    const assembly = await assembleNarration({
+      videoPath: outPath,
+      runDir,
+      shotVOs,
+      shotDursSec: fixedDursSec,
+      plan,
+      log,
+    });
+    deliverPath = assembly.path;
+    generatedMusicTracks = assembly.musicTracks;
     const rendered = fixedDursSec.map((d) => Math.round(d * FPS) / FPS);
     const totalSec = rendered.reduce((a, d) => a + d, 0);
     // sample a VO window (inside shot 0's line) and a music-only GAP window (shot 0's tail breath)
@@ -1544,5 +1696,38 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
       );
     }
   }
-  return { outPath: deliverPath, plan, verdict: { ...verdict, audioOk: audio.audioOk, meanVolumeDb: audio.meanVolumeDb }, rounds };
+  const imageUsage = imageUsageScope.snapshot();
+  const modelUsage = modelUsageScope.snapshot();
+  const narrationCostUsd = narrationTtsCost(
+    narrationUsage.provider,
+    narrationUsage.billableCharacters,
+    0,
+  );
+  const musicCostUsd = generatedMusicTracks * PRICE.musicTrackUsd;
+  return {
+    outPath: deliverPath,
+    plan,
+    verdict: { ...verdict, audioOk: audio.audioOk, meanVolumeDb: audio.meanVolumeDb },
+    rounds,
+    geometry,
+    shotDurationsSec: fixedDursSec ?? plan.shots.map((shot) => shot.durationSec),
+    assetReceipts: assets.map((asset) => ({
+      shotIdx: asset.shotIdx,
+      rendererAssetId: asset.id,
+      role: asset.role,
+      approvalSha256: asset.approvalSha256,
+    })),
+    usage: {
+      model: modelUsage,
+      image: imageUsage,
+      narration: {
+        provider: narrationUsage.provider,
+        billableCharacters: narrationUsage.billableCharacters,
+        costUsd: narrationCostUsd,
+      },
+      music: { generatedTracks: generatedMusicTracks, costUsd: musicCostUsd },
+      totalCostUsd: modelUsage.costUsd + imageUsage.costUsd + narrationCostUsd + musicCostUsd,
+    },
+  };
+  });
 }

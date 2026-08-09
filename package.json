@@ -75,6 +75,7 @@
     },
     "hono": "4.13.0",
     "ip-address": "10.4.0",
+    "nanoid": "3.3.17",
     "protobufjs": "7.6.5",
     "socket.io": "4.8.3",
     "socket.io-adapter": "2.5.8",

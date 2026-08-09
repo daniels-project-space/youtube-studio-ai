@@ -144,19 +144,28 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   music: { kind: "pipeline-module", executableIds: ["music"] },
   visuals: { kind: "pipeline-module", executableIds: ["stock_footage", "entity_imagery", "gen_footage", "signature_clips"] },
   cinematic: { kind: "catalog-only", executableIds: [], note: "Cinecraft exists as a library; the family remains unavailable." },
-  documotion: { kind: "catalog-only", executableIds: [], note: "Standalone library; no production block manifest." },
+  documotion: {
+    kind: "pipeline-module",
+    executableIds: ["short_strategy", "documotion_short"],
+    note: "Native 9:16 documentary-collage lane; direct Short uploads remain private-first through upload_draft.",
+  },
   motioncraft: { kind: "catalog-only", executableIds: [], note: "Standalone library; the production data-viz subset is owned by Inserts." },
   "speech-tv": { kind: "catalog-only", executableIds: [], note: "Proof composition is not a production pipeline module." },
   inserts: { kind: "pipeline-module", executableIds: ["visual_inserts"] },
   layer: { kind: "pipeline-module", executableIds: ["intro_card", "quote_overlays", "captions"] },
   assemble: { kind: "pipeline-module", executableIds: ["timeline_assemble"] },
   metadata: { kind: "pipeline-module", executableIds: ["metadata"] },
-  verify: { kind: "pipeline-module", executableIds: ["qa_assets", "qa_shots", "length_check", "qa_visual"] },
+  verify: { kind: "pipeline-module", executableIds: ["qa_assets", "qa_shots", "short_scene_qa", "length_check", "qa_visual"] },
   whiteboard: { kind: "pipeline-module", executableIds: ["whiteboard_scribe"] },
   comic: { kind: "pipeline-module", executableIds: ["motion_comic"] },
   ship: { kind: "pipeline-module", executableIds: ["upload_draft", "crosspost", "notify", "emit_bundle", "cleanup"] },
   "channel-planner": { kind: "external-task", executableIds: ["plan-week-ahead"], note: "Executable Trigger task, outside the module ABI." },
-  shorts: { kind: "pipeline-module", executableIds: ["shorts_spinoff"] },
+  shorts: {
+    kind: "pipeline-module",
+    // Candidate mining is planning-only: it identifies full-documentary windows
+    // for a later, freshly rendered native Short and never crops or publishes.
+    executableIds: ["shorts_spinoff", "documentary_short_candidates"],
+  },
 };
 
 /**

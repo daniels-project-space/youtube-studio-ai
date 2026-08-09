@@ -101,6 +101,76 @@ for (const family of Object.keys(FAMILIES) as Array<keyof typeof FAMILIES>) {
   assert.doesNotThrow(() => assertPipelineMatchesContentLane(design.contentLane, design.pipeline));
 }
 
+// A long-form channel preset must not reopen the topic scope after the native
+// documentary Short lane has clamped every production stage to 60 seconds.
+const documentaryShortWithLongPreset = designPipeline({
+  family: "documentary_collage_short",
+  lengthMinutes: 5,
+});
+for (const block of ["topic_select", "script_gen", "short_strategy", "documotion_short"]) {
+  const entry = documentaryShortWithLongPreset.pipeline.find((candidate) => candidate.block === block);
+  assert(entry, `documentary Short pipeline must contain ${block}`);
+  const seconds = Number(entry.params?.[block === "script_gen" ? "maxSeconds" : "targetSeconds"]);
+  assert.equal(seconds, 60, `${block} must retain the native-Short duration clamp`);
+}
+
+const documentarySources = [
+  {
+    id: "source:archive",
+    type: "archive",
+    title: "Primary archive record",
+    citation: "Primary archive record, 1911.",
+    url: "https://example.com/archive-record",
+  },
+];
+const documentaryClaimEvidence = Array.from({ length: 7 }, (_, index) => ({
+  claimId: `claim:${index + 1}`,
+  sourceId: "source:archive",
+  excerpt: `Archive excerpt for locked documentary beat ${index + 1}.`,
+  locator: `folio ${index + 1}`,
+}));
+const documentaryShortWithSources = designPipeline({
+  family: "documentary_collage_short",
+  sourceReferences: documentarySources,
+  claimEvidence: documentaryClaimEvidence,
+});
+const documentaryStrategy = documentaryShortWithSources.pipeline.find(
+  (entry) => entry.block === "short_strategy",
+);
+assert.deepEqual(
+  documentaryStrategy?.params?.sourceReferences,
+  documentarySources,
+  "documentary source references must persist into the executable short_strategy entry",
+);
+assert.deepEqual(
+  documentaryStrategy?.params?.claimEvidence,
+  documentaryClaimEvidence,
+  "documentary claim evidence must persist into the executable short_strategy entry",
+);
+assert.equal(
+  documentaryShortWithSources.warnings.some((warning) => /sourceReferences|claimEvidence/.test(warning)),
+  false,
+  "an explicit structured source bundle clears the documentary Short source warning",
+);
+
+const longFormDocumentaryCandidates = designPipeline({
+  family: "narrated_stock",
+  toggles: { documentaryCandidates: true },
+});
+const candidateIndex = longFormDocumentaryCandidates.pipeline.findIndex(
+  (entry) => entry.block === "documentary_short_candidates",
+);
+assert(candidateIndex >= 0, "long-form documentary candidate mining must be reachable from the designed pipeline");
+assert.equal(
+  longFormDocumentaryCandidates.pipeline.some((entry) => entry.block === "shorts_spinoff"),
+  false,
+  "planning a documentary candidate set must not crop or upload a parent-video Short",
+);
+assert(
+  candidateIndex > longFormDocumentaryCandidates.pipeline.findIndex((entry) => entry.block === "upload_draft"),
+  "candidate mining must occur after the parent draft has completed",
+);
+
 const music = contentLaneForFamily("music_loop");
 assert(music, "music loop must have a canonical lane");
 const musicInjected = injectContentLaneIntoPipeline([
