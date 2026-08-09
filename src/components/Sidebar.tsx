@@ -6,15 +6,12 @@ import { NavItem } from "./NavItem";
 import {
   IconOverview,
   IconChannels,
-  IconRuns,
   IconLibrary,
   IconAnalytics,
-  IconSeo,
   IconSettings,
   IconSpark,
   IconCalendar,
   IconGolden,
-  IconTerminal,
 } from "./icons";
 
 const NAV_GROUPS = [
@@ -24,7 +21,6 @@ const NAV_GROUPS = [
       { href: "/", label: "Overview", icon: <IconOverview /> },
       { href: "/channels", label: "Channels", icon: <IconChannels /> },
       { href: "/schedule", label: "Schedule", icon: <IconCalendar /> },
-      { href: "/runs", label: "Runs", icon: <IconRuns /> },
     ],
   },
   {
@@ -32,25 +28,22 @@ const NAV_GROUPS = [
     items: [
       { href: "/library", label: "Library", icon: <IconLibrary /> },
       { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
-      { href: "/seo", label: "SEO", icon: <IconSeo /> },
     ],
   },
   {
     label: "Production",
-    items: [
-      { href: "/golden", label: "Golden modules", icon: <IconGolden /> },
-      { href: "/novita-render", label: "Novita render", icon: <IconTerminal /> },
-    ],
+    items: [{ href: "/golden", label: "Golden modules", icon: <IconGolden /> }],
   },
   {
     label: "System",
-    items: [
-      { href: "/settings", label: "Settings", icon: <IconSettings /> },
-    ],
+    items: [{ href: "/settings", label: "Settings", icon: <IconSettings /> }],
   },
 ];
 
-const MOBILE_MORE_ITEMS = NAV_GROUPS.flatMap((group) => group.items).slice(4);
+const MOBILE_PRIMARY_COUNT = NAV_GROUPS[0].items.length;
+const MOBILE_MORE_ITEMS = NAV_GROUPS.flatMap((group) => group.items).slice(
+  MOBILE_PRIMARY_COUNT,
+);
 
 /** Grouped desktop rail that becomes a five-item mobile dock with an overflow menu. */
 export function Sidebar() {
@@ -65,7 +58,8 @@ export function Sidebar() {
   useEffect(() => {
     if (!moreOpen) return;
     const closeOutside = (event: PointerEvent) => {
-      if (!moreRef.current?.contains(event.target as Node)) setMoreOpenForPath(null);
+      if (!moreRef.current?.contains(event.target as Node))
+        setMoreOpenForPath(null);
     };
     const closeOnEscape = (event: KeyboardEvent) => {
       if (event.key === "Escape") setMoreOpenForPath(null);
@@ -94,7 +88,10 @@ export function Sidebar() {
         <span className="studio-brand-mark">
           <IconSpark width={19} height={19} />
         </span>
-        <span><strong>AutoStudio</strong><small>Production OS</small></span>
+        <span>
+          <strong>AutoStudio</strong>
+          <small>Production OS</small>
+        </span>
       </div>
 
       <nav className="studio-nav">
@@ -108,7 +105,12 @@ export function Sidebar() {
             <span className="studio-nav-label">{group.label}</span>
             <div className="studio-nav-items">
               {group.items.map((item) => (
-                <NavItem key={item.href} href={item.href} label={item.label} icon={item.icon} />
+                <NavItem
+                  key={item.href}
+                  href={item.href}
+                  label={item.label}
+                  icon={item.icon}
+                />
               ))}
             </div>
           </section>
@@ -123,7 +125,9 @@ export function Sidebar() {
             data-active={moreActive ? "true" : undefined}
             onClick={() => setMoreOpenForPath(moreOpen ? null : pathname)}
           >
-            <span className="studio-nav-icon"><IconSpark /></span>
+            <span className="studio-nav-icon">
+              <IconSpark />
+            </span>
             <span className="studio-nav-copy">More</span>
           </button>
           {moreOpen && (
@@ -134,16 +138,19 @@ export function Sidebar() {
               onClick={() => setMoreOpenForPath(null)}
             >
               {MOBILE_MORE_ITEMS.map((item) => (
-                <NavItem key={item.href} href={item.href} label={item.label} icon={item.icon} />
+                <NavItem
+                  key={item.href}
+                  href={item.href}
+                  label={item.label}
+                  icon={item.icon}
+                />
               ))}
             </div>
           )}
         </div>
       </nav>
 
-      <div className="studio-sidebar-footer">
-        Studio workspace
-      </div>
+      <div className="studio-sidebar-footer">Studio workspace</div>
     </aside>
   );
 }

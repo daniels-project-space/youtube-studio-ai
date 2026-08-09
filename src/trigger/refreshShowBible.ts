@@ -58,6 +58,10 @@ function withCrew(pipeline: PipelineEntry[], family: FamilyKey, targetSeconds?: 
   return [...pipeline.slice(0, i), ...entries, ...pipeline.slice(i)];
 }
 
+function isFamilyKey(value: unknown): value is FamilyKey {
+  return typeof value === "string" && Object.prototype.hasOwnProperty.call(FAMILY_CREW, value);
+}
+
 export const refreshShowBibleTask = task({
   id: "refresh-show-bible",
   maxDuration: 600,
@@ -78,7 +82,21 @@ export const refreshShowBibleTask = task({
         : null;
     if (!ch) throw new Error("refresh-show-bible: channel not found (pass slug or channelId)");
     const identity = ch.identity;
-    const family = (payload.family ?? "narrated_stock") as FamilyKey;
+    // A Show Bible is part of the channel's locked visual language. Never
+    // silently default a specialist channel to narrated_stock: that used to
+    // give whiteboard/comic channels the wrong crew doctrine on refresh.
+    const laneFamily = (ch as { contentLane?: { family?: unknown } }).contentLane?.family;
+    const persistedFamily = isFamilyKey(laneFamily)
+      ? laneFamily
+      : isFamilyKey(ch.family)
+        ? ch.family
+        : "narrated_stock";
+    if (payload.family && payload.family !== persistedFamily) {
+      throw new Error(
+        `refresh-show-bible family mismatch: channel is locked to ${persistedFamily}, requested ${payload.family}`,
+      );
+    }
+    const family = persistedFamily;
     const now = Date.now();
 
     // Competitor context (best-effort).

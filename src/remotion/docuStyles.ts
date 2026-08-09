@@ -68,6 +68,9 @@ export interface RoleFraming {
   ar: string;
 }
 
+/** Delivery format affects how source plates are generated, not just canvas size. */
+export type DocuFormat = "long" | "short";
+
 export interface DocuStyleDef {
   id: string;
   label: string;
@@ -94,6 +97,46 @@ export interface DocuStyleDef {
   /** Font families to verify are loaded (display, label, hand). */
   fontProbe: [string, string, string];
   theme: DocuTheme;
+}
+
+/**
+ * Portrait Shorts are composed as portrait from the first image request.  This
+ * deliberately lives beside the style registry so planners, asset generation,
+ * and the Remotion renderer cannot silently disagree about the delivery frame.
+ */
+export function getDocuRoleFraming(
+  style: DocuStyleDef,
+  role: DocuAssetRole,
+  format: DocuFormat = "long",
+): RoleFraming {
+  const framing = style.roleFraming[role];
+  if (format !== "short") return framing;
+
+  if (role === "bg") {
+    return {
+      ar: "9:16",
+      prefix:
+        "Native vertical 9:16 full-bleed plate for a YouTube Short; keep the central vertical column readable, " +
+        "leave calm negative space near the top and lower caption-safe area, never crop a key subject at either side: ",
+    };
+  }
+  if (role === "fg") {
+    return {
+      ar: "4:5",
+      prefix:
+        "Portrait collage cutout for a vertical 9:16 Short: ONE subject, head, shoulders, and hands fully inside a " +
+        "tall central frame; clean edges and plain backdrop, with no text or competing objects: ",
+    };
+  }
+  if (role === "image") {
+    return {
+      ar: "4:5",
+      prefix:
+        "Tall editorial photograph for a vertical 9:16 documentary collage; one clear focal subject centered with " +
+        "room above and below for deterministic overlays, no text or borders: ",
+    };
+  }
+  return framing;
 }
 
 /* ------------------------------------------------------ shared framing -- */

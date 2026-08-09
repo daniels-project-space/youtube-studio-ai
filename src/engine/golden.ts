@@ -45,17 +45,17 @@ export interface GoldenStage {
 
 export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "intel", blocks: ["competitor_research", "topic_select"], note: "Pick topics from real outliers + competitor signal, learning-weighted." },
-  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine"], note: "Show Bible crew and timed story spine â€” selected per channel." },
+  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine", "short_strategy"], note: "Show Bible crew and timed story spine; collage Shorts lock claim/source/beat/motion evidence before render." },
   { stage: "write", blocks: ["script_gen", "hook_craft"], note: "Hook-first, CRAFT_RULES applied." },
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check"], note: "Quality + originality + compliance floor." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
   { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
-  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic"], note: "The family selects only the visual engine and QA chain it needs." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "documotion_short"], note: "The family selects only the visual engine and QA chain it needs; documentary Shorts render natively at 9:16." },
   { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz." },
   { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both." },
   { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + text-free Flash scene, deterministic Style-DNA typography, and one publishing gate." },
-  { stage: "verify", blocks: ["qa_assets", "qa_shots", "length_check", "qa_visual"], note: "Required asset/shot checks plus deterministic final quality gate and bounded self-heal." },
-  { stage: "ship", blocks: ["upload_draft", "emit_bundle", "shorts_spinoff", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + multilang reuse + optional distribution + scoped cleanup." },
+  { stage: "verify", blocks: ["qa_assets", "qa_shots", "short_scene_qa", "length_check", "qa_visual"], note: "Required asset/shot checks, portrait scene-safe-area proof, and deterministic final quality gate." },
+  { stage: "ship", blocks: ["upload_draft", "emit_bundle", "shorts_spinoff", "documentary_short_candidates", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + optional planning-only Short window selection + multilang reuse + optional distribution + scoped cleanup." },
 ];
 
 /**

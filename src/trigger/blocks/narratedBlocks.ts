@@ -19,6 +19,8 @@ import {
 import {
   validateQualifiedShotRender,
 } from "@/engine/renderArtifacts";
+import { resolveContentLane } from "@/engine/contentLane";
+import { buildQualityEvidence } from "@/engine/qualityEvidence";
 import { narrationTtsCost, qaVisualCost } from "@/engine/pricing";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
 import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
@@ -1952,7 +1954,7 @@ export const captions: Block = {
 export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
-  produces: ["qaPassed", "qaReport"],
+  produces: ["qaPassed", "qaReport", "qualityEvidence"],
   paid: true,
   run: async (ctx) => {
     const productionQa = ctx.params["qaProfile"] !== "draft";
@@ -1962,6 +1964,31 @@ export const qaVisual: Block = {
     const dur = Number(ctx.store["videoDurationSec"] ?? 0);
     const topic = opt(ctx, "topic") ?? title;
     const niche = opt(ctx, "niche");
+    const contentLane = resolveContentLane({
+      stored: ctx.params["contentLane"],
+      pipeline: [],
+    });
+    // Make the channel's stored QualityBar executable where an evaluator can
+    // genuinely measure it. Its historic 0..2 target maps to the 0..10 QA
+    // scales; dimensions without a matching evaluator remain visible gaps,
+    // never invented scores.
+    const qualityBar = ctx.store["qualityBar"] as {
+      target?: unknown;
+      dimensions?: Array<{ id?: unknown }>;
+    } | null;
+    const qualityFloor = (dimensionIds: readonly string[], fallback: number): number => {
+      if (!productionQa) return fallback;
+      const target = Number(qualityBar?.target);
+      const applies = Array.isArray(qualityBar?.dimensions) && qualityBar.dimensions.some(
+        (dimension) => typeof dimension?.id === "string" && dimensionIds.includes(dimension.id),
+      );
+      if (!applies || !Number.isFinite(target) || target < 0 || target > 2) return fallback;
+      return Math.max(fallback, Math.min(10, target * 5));
+    };
+    const videoMinimum = qualityFloor(["footage"], productionQa ? 6 : 4);
+    const thumbnailMinimum = qualityFloor(["thumbnail"], productionQa ? 5 : 4);
+    const audioMinimum = qualityFloor(["music", "voice"], 5);
+    const brandMinimum = qualityFloor(["identity"], 5);
     const tmp = await makeRunTempDir(ctx.runId);
 
     // 1) Structural + resolution (hard) â€” never ship a broken file.
@@ -2004,23 +2031,22 @@ export const qaVisual: Block = {
       throw new Error("qa_visual FAILED: required overview vision grader did not run");
     }
 
-    // 3b) HOLISTIC WATCH â€” the reliable core of post-render QA. One intent-grounded
-    // reviewer watches the FULL timeline (guaranteed first frame = title card, last =
-    // outro card) instead of 3 blind spot-checks + boolean presence flags. This is
-    // what catches the real defects the legacy checks missed: a missing title card,
-    // a mid-video / empty outro, a missing or mis-numbered chapter, irrelevant inserts,
-    // duplicate clips, and broken/obscured overlays. (The per-frame checks above are
-    // now superseded by this; kept only as cheap advisory signals.)
-    // AUDIO QA (advisory, opt-in â€” the ear vision QA never had): Meta's
-    // audiobox-aesthetics scores production quality/enjoyment of the final
-    // audio. Music channels default it on (audio IS the product).
+    // 3b) CHRONOLOGICAL RENDER WATCH. This is a sampled review, not a claim to
+    // have watched every video frame. It catches defects spanning the sampled
+    // timeline; the evidence ledger below records its coverage honestly.
+    // AUDIO QA: Meta's audiobox-aesthetics scores production quality/enjoyment
+    // of the final audio. Music lanes require it because audio is the product.
+    let audioAestheticScore: number | undefined;
     if (ctx.params["audioQa"] === true) {
       try {
         const { scoreAudio } = await import("@/lib/audioQa");
         const tmpA = await makeRunTempDir(ctx.runId);
         const aq = await scoreAudio(video, tmpA, p.durationSec, (m) => ctx.log(`qa_visual: ${m}`));
+        if (aq && Number.isFinite(aq.productionQuality)) {
+          audioAestheticScore = aq.productionQuality;
+        }
         if (aq && aq.productionQuality > 0 && aq.productionQuality < 5) {
-          ctx.log(`qa_visual: LOW AUDIO production quality ${aq.productionQuality}/10 (ADVISORY â€” check the mix/mastering)`);
+          ctx.log(`qa_visual: LOW AUDIO production quality ${aq.productionQuality}/10`);
         }
       } catch (e) {
         if (productionQa) {
@@ -2172,7 +2198,7 @@ export const qaVisual: Block = {
       ["video", video_],
       ["thumbnail", thumbnail],
     ] as const) {
-      const minScore = productionQa ? (name === "video" ? 6 : 5) : 4;
+      const minScore = name === "video" ? videoMinimum : thumbnailMinimum;
       if (!v.skipped && v.score < minScore) {
         if (name === "thumbnail" && thumbIsDeliberateCard) {
           ctx.log(`qa_visual: thumbnail ${v.score}/10 on a deliberate title card (ADVISORY, not gating): ${v.issues.slice(0, 2).join("; ")}`);
@@ -2248,12 +2274,14 @@ export const qaVisual: Block = {
     // final mix must land in a sane band, and when a music track was produced
     // it must be AUDIBLE in the mix (an R2 key existing is not a mix): measure
     // the narration-free intro window. null = unmeasurable = skip, never fail.
+    let finalAudioMeters: { integratedLufs: number | null; windowMeanDb: number | null } | undefined;
     try {
       const introW = Number(ctx.store["introSec"] ?? 0);
       const ears = await measureAudio(video, {
         windowStartSec: 0.5,
         windowDurSec: introW >= 2.5 ? introW - 1 : 0,
       });
+      finalAudioMeters = ears;
       if (productionQa && ears.integratedLufs === null) {
         critical.push("audio loudness unavailable: production QA requires a measurable final mix");
       }
@@ -2363,6 +2391,126 @@ export const qaVisual: Block = {
       }
     }
 
+    // A release result is evidence, not a marketing label. The ledger records
+    // the evaluators that actually ran and explicitly surfaces unmeasured
+    // dimensions; only its explicit hard blockers can fail the release.
+    const assetQa = ctx.store["assetQaReport"] as Record<string, unknown> | undefined;
+    const shotQa = ctx.store["shotQaReport"] as Record<string, unknown> | undefined;
+    const storyCoverage = ctx.store["storyCoverage"] as Record<string, unknown> | undefined;
+    const shotGrades = Array.isArray(shotQa?.["shots"])
+      ? shotQa["shots"] as Array<Record<string, unknown>>
+      : [];
+    const scoredShots = shotGrades
+      .map((grade) => ({ score: Number(grade["score"]), threshold: Number(grade["threshold"]) }))
+      .filter((grade) => Number.isFinite(grade.score) && Number.isFinite(grade.threshold));
+    const shotScore = scoredShots.length
+      ? (scoredShots.reduce((sum, grade) => sum + grade.score, 0) / scoredShots.length) * 10
+      : undefined;
+    const shotMinimum = scoredShots.length
+      ? (scoredShots.reduce((sum, grade) => sum + grade.threshold, 0) / scoredShots.length) * 10
+      : undefined;
+    const candidateCount = Number(assetQa?.["candidateCount"]);
+    const selectedCandidates = Array.isArray(assetQa?.["selected"])
+      ? assetQa!["selected"].length
+      : undefined;
+    const storyRatio = Number(storyCoverage?.["ratio"]);
+    const qualityEvidence = buildQualityEvidence({
+      episode: {
+        lane: { key: contentLane.key, renderer: contentLane.primaryRenderer },
+        topic,
+        title,
+        durationSec: p.durationSec,
+        story: {
+          source: Array.isArray(ctx.store["shotList"]) ? "validated-story-spine/v1" : undefined,
+          beatCount: Array.isArray(ctx.store["narrativeBeats"]) ? ctx.store["narrativeBeats"].length : undefined,
+          shotCount: Array.isArray(ctx.store["shotList"]) ? ctx.store["shotList"].length : undefined,
+          coverageRatio: Number.isFinite(storyRatio) ? storyRatio : undefined,
+        },
+        candidateSelection: Number.isFinite(candidateCount) && selectedCandidates !== undefined
+          ? {
+              generated: candidateCount,
+              selected: selectedCandidates,
+              rejected: Math.max(0, candidateCount - selectedCandidates),
+              evidence: ["assetQaReport"],
+            }
+          : undefined,
+      },
+      technical: {
+        passed: rv.verdict === "pass" && p.hasVideo && p.hasAudio && lengthOk,
+        evaluator: "ffprobe + deterministic render validation",
+        evidence: [
+          `render=${rv.verdict}`,
+          `resolution=${p.width}x${p.height}`,
+          `duration=${p.durationSec.toFixed(2)}s`,
+          ...(finalAudioMeters ? [`loudness=${finalAudioMeters.integratedLufs ?? "unmeasured"}`] : []),
+        ],
+      },
+      visual: video_.skipped
+        ? undefined
+        : {
+            passed: video_.score >= videoMinimum,
+            score: video_.score,
+            minimumScore: videoMinimum,
+            evaluator: "overview visual grader",
+            evidence: [`frames=${vframes.length}`, ...video_.issues.slice(0, 3)],
+          },
+      temporal: shotScore !== undefined && shotMinimum !== undefined
+        ? {
+            passed: shotScore >= shotMinimum,
+            score: shotScore,
+            minimumScore: shotMinimum,
+            evaluator: "qualified per-shot render QA",
+            evidence: [`gradedShots=${scoredShots.length}`],
+          }
+        : watch.ran
+          ? {
+              passed: watch.verdict === "pass",
+              evaluator: "chronological frame-sampled render watch",
+              evidence: [`sampledFrames=${watch.framePaths.length}`, watch.summary],
+            }
+          : undefined,
+      narrative: specOutcome
+        ? {
+            passed: specOutcome.passed,
+            evaluator: "critic validation specification",
+            evidence: [`assertions=${specOutcome.results.length}`],
+          }
+        : undefined,
+      audio: audioAestheticScore !== undefined
+        ? {
+            passed: audioAestheticScore >= audioMinimum,
+            score: audioAestheticScore,
+            minimumScore: audioMinimum,
+            evaluator: "audio aesthetics grader",
+            evidence: ["audiobox production quality"],
+          }
+        : finalAudioMeters
+          ? {
+              passed: finalAudioMeters.integratedLufs !== null,
+              evaluator: "final-mix loudness meter (not an aesthetics score)",
+              evidence: [
+                `integratedLufs=${finalAudioMeters.integratedLufs ?? "unmeasured"}`,
+                `introWindowDb=${finalAudioMeters.windowMeanDb ?? "unmeasured"}`,
+              ],
+            }
+          : undefined,
+      brand: identity.skipped
+        ? undefined
+        : {
+            passed: identity.score >= brandMinimum,
+            score: identity.score,
+            minimumScore: brandMinimum,
+            evaluator: "channel identity grader",
+            evidence: identity.issues.slice(0, 3),
+          },
+      requiredAudio: contentLane.key === "music_loop"
+        ? { required: true, minimumScore: audioMinimum, label: "music-lane audio aesthetics" }
+        : undefined,
+    });
+    if (!qualityEvidence.release.hardGateReady) {
+      critical.push(`quality evidence: ${qualityEvidence.release.blockers.join("; ")}`);
+    }
+
     if (critical.length > 0) {
       // Throw ONLY the critical list. The old throw appended the full JSON
       // report, and the healer's regex rules then pattern-matched ADVISORY
@@ -2385,6 +2533,7 @@ export const qaVisual: Block = {
     return {
       qaPassed: true,
       qaReport: specOutcome ? { ...report, validation: specOutcome.results } : report,
+      qualityEvidence,
       [COST_PATCH_KEY]: qaCost,
     };
   },

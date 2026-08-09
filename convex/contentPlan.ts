@@ -1,9 +1,10 @@
 import { v } from "convex/values";
 import { mutation, query } from "./studioFunctions";
-import type { Doc } from "./_generated/dataModel";
+import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
 import { canonicalJson } from "../src/lib/canonicalJson";
 import {
+  planWeekProviderReceiptImageUsage,
   type PlanWeekProviderRenderReceipt,
   verifyFinalizedPlanWeekRenderReceipt,
 } from "../src/lib/planWeekRenderReceipt";
@@ -11,6 +12,14 @@ import {
   PLAN_WEEK_CONTRACT_VERSION,
   planWeekContractReservation,
 } from "../src/lib/planWeekContract";
+import {
+  PLAN_WEEK_RECOVERY_GUARD_VERSION,
+  assertExactFailedPlanWeekRecoveryState,
+  assertExactPlanWeekRecoveryIdentity,
+  assertSameClaimedPlanWeekRecovery,
+  type PlanWeekRecoveryExpectation,
+  type PlanWeekRecoveryState,
+} from "../src/lib/planWeekRecoveryContract";
 import {
   assertScheduledPlanPayloadMatches,
   assertScheduledPublishIsFuture,
@@ -87,6 +96,7 @@ function imageUsageMatchesProviderReceipt(
   if (!Array.isArray(summary.records) || summary.records.length !== 1 ||
       summary.images !== 1 || typeof summary.costUsd !== "number" ||
       Math.abs(summary.costUsd - receipt.costUsd) > 0.000001) return false;
+  const expected = planWeekProviderReceiptImageUsage(receipt);
   return summary.records.every((record) => {
     if (typeof record !== "object" || record === null) return false;
     const values = record as {
@@ -98,10 +108,10 @@ function imageUsageMatchesProviderReceipt(
       width?: unknown;
       height?: unknown;
     };
-    return values.images === 1 && values.costUsd === receipt.costUsd &&
-      values.provider === "novita" && values.route === "local-z-image-turbo" &&
-      values.model === `${receipt.model}@${receipt.modelRevision}`.toLowerCase() &&
-      values.width === receipt.width && values.height === receipt.height;
+    return values.images === expected.images && values.costUsd === expected.costUsd &&
+      values.provider === expected.provider && values.route === expected.route &&
+      values.model === expected.model && values.width === expected.width &&
+      values.height === expected.height;
   });
 }
 
@@ -122,6 +132,92 @@ async function requirePlannerService(ctx: {
   const identity = await ctx.auth.getUserIdentity() as { role?: unknown } | null;
   if (identity?.role !== "service") throw new Error("plan generation requires a studio service identity");
 }
+
+function requirePlanRecoverySecret(secret: string): void {
+  const expected = process.env.INTERNAL_QUERY_SECRET;
+  if (!expected || secret !== expected) {
+    throw new Error("contentPlan recovery: invalid internal secret");
+  }
+}
+
+async function loadPlanWeekRecoveryState(
+  ctx: Pick<QueryCtx, "db">,
+  args: { batchId: Id<"planBatches">; itemIds: Id<"contentPlan">[] },
+): Promise<PlanWeekRecoveryState> {
+  const batch = await ctx.db.get(args.batchId);
+  const [items, usageRows, renderRows] = await Promise.all([
+    Promise.all(args.itemIds.map((itemId) => ctx.db.get(itemId))),
+    ctx.db.query("planBatchUsage").withIndex("by_batch", (q) => q.eq("batchId", args.batchId)).take(65),
+    ctx.db.query("planWeekRenderReceipts").withIndex("by_batch", (q) => q.eq("batchId", args.batchId)).take(13),
+  ]);
+  const loadedUsageRows = usageRows.slice(0, 64);
+  const itemUsageRows = loadedUsageRows.filter((row) => row.itemId !== undefined);
+  const roundUsd = (value: number) => Number(value.toFixed(6));
+  return {
+    batch: batch
+      ? {
+          id: String(batch._id),
+          ownerId: batch.ownerId,
+          channelId: String(batch.channelId),
+          requestKey: batch.requestKey,
+          contractVersion: batch.contractVersion,
+          requestedCount: batch.requestedCount,
+          actualCostUsd: batch.actualCostUsd,
+          status: batch.status,
+          topicState: batch.topicState,
+          accountingComplete: batch.accountingComplete,
+          budgetExceeded: batch.budgetExceeded,
+          retryable: batch.retryable,
+          itemIds: (batch.itemIds ?? []).map(String),
+          recoveryGuardVersion: batch.recoveryGuardVersion ?? null,
+          recoveryTaskRunId: batch.recoveryTaskRunId ?? null,
+          recoveryExpectedItemIds: (batch.recoveryExpectedItemIds ?? []).map(String),
+          recoveryExpectedActualCostUsd: batch.recoveryExpectedActualCostUsd ?? null,
+          recoveryExpectedProviderRoute: batch.recoveryExpectedProviderRoute ?? null,
+          recoveryExpectedTaskVersion: batch.recoveryExpectedTaskVersion ?? null,
+        }
+      : null,
+    items: items.map((item) => item
+      ? {
+          id: String(item._id),
+          ownerId: item.ownerId,
+          channelId: String(item.channelId),
+          batchId: item.batchId ? String(item.batchId) : null,
+          status: item.status,
+          generationState: item.generationState ?? null,
+          generationAttempt: item.generationAttempt ?? 0,
+          generationRetryable: item.generationRetryable ?? false,
+          generationProviderStartedAt: item.generationProviderStartedAt ?? null,
+          thumbnailKey: item.thumbnailKey ?? null,
+        }
+      : null),
+    renderReceiptCount: renderRows.slice(0, 12).length,
+    renderReceiptOverflow: renderRows.length > 12,
+    usageOverflow: usageRows.length > 64,
+    usageTotalUsd: roundUsd(loadedUsageRows.reduce((sum, row) => sum + row.costUsd, 0)),
+    usageAccountingComplete: loadedUsageRows.every((row) => row.accountingComplete),
+    itemUsageCostUsd: roundUsd(itemUsageRows.reduce((sum, row) => sum + row.costUsd, 0)),
+    itemUsageAccountingComplete: itemUsageRows.every((row) => row.accountingComplete),
+  };
+}
+
+/** Read-only operator/Trigger preflight. The atomic mutation repeats this proof. */
+export const getPlanBatchRecoveryState = query({
+  args: {
+    ownerId: v.string(),
+    secret: v.string(),
+    batchId: v.id("planBatches"),
+    itemIds: v.array(v.id("contentPlan")),
+  },
+  handler: async (ctx, args) => {
+    requirePlanRecoverySecret(args.secret);
+    const state = await loadPlanWeekRecoveryState(ctx, args);
+    if (state.batch && state.batch.ownerId !== args.ownerId) {
+      throw new Error("plan-week recovery guard: batch owner mismatch");
+    }
+    return state;
+  },
+});
 
 function scheduledItemPayload(item: {
   _id: unknown;
@@ -470,6 +566,14 @@ export const reservePlanBatch = mutation({
     contractVersion: v.string(),
     requestedCount: v.number(),
     reservedCostUsd: v.number(),
+    recovery: v.optional(v.object({
+      guardVersion: v.literal(PLAN_WEEK_RECOVERY_GUARD_VERSION),
+      batchId: v.id("planBatches"),
+      itemIds: v.array(v.id("contentPlan")),
+      expectedActualCostUsd: v.number(),
+      providerRoute: v.string(),
+      taskVersion: v.string(),
+    })),
   },
   handler: async (ctx, args) => {
     await requirePlannerService(ctx);
@@ -499,6 +603,48 @@ export const reservePlanBatch = mutation({
         q.eq("ownerId", args.ownerId).eq("channelId", args.channelId).eq("requestKey", requestKey),
       )
       .unique();
+    const recoveryExpectation: PlanWeekRecoveryExpectation | undefined = args.recovery
+      ? {
+          ...args.recovery,
+          batchId: String(args.recovery.batchId),
+          itemIds: args.recovery.itemIds.map(String),
+          contractVersion: args.contractVersion as PlanWeekRecoveryExpectation["contractVersion"],
+          providerRoute: args.recovery.providerRoute as PlanWeekRecoveryExpectation["providerRoute"],
+        }
+      : undefined;
+    if (recoveryExpectation) {
+      const state = await loadPlanWeekRecoveryState(ctx, {
+        batchId: args.recovery!.batchId,
+        itemIds: args.recovery!.itemIds,
+      });
+      assertExactPlanWeekRecoveryIdentity({
+        recovery: recoveryExpectation,
+        ownerId: args.ownerId,
+        channelId: String(args.channelId),
+        requestKey,
+        requestedCount: args.requestedCount,
+        state,
+      });
+      if (!existing || existing._id !== args.recovery!.batchId) {
+        throw new Error("plan-week recovery guard: request key does not resolve to the exact batch");
+      }
+      if (state.batch?.recoveryGuardVersion !== null) {
+        assertSameClaimedPlanWeekRecovery({
+          recovery: recoveryExpectation,
+          taskRunId: args.triggerRunId,
+          state,
+        });
+      } else {
+        assertExactFailedPlanWeekRecoveryState({
+          recovery: recoveryExpectation,
+          ownerId: args.ownerId,
+          channelId: String(args.channelId),
+          requestKey,
+          requestedCount: args.requestedCount,
+          state,
+        });
+      }
+    }
     if (existing) {
       if (existing.requestedCount !== args.requestedCount || existing.contractVersion !== args.contractVersion ||
           Math.abs(existing.reservedCostUsd - reservedCostUsd) > 0.000001) {
@@ -518,6 +664,15 @@ export const reservePlanBatch = mutation({
           finishedAt: undefined,
           leaseExpiresAt: now + PLAN_BATCH_LEASE_MS,
           updatedAt: now,
+          ...(recoveryExpectation ? {
+            triggerRunId: args.triggerRunId,
+            recoveryGuardVersion: recoveryExpectation.guardVersion,
+            recoveryTaskRunId: args.triggerRunId,
+            recoveryExpectedItemIds: args.recovery!.itemIds,
+            recoveryExpectedActualCostUsd: recoveryExpectation.expectedActualCostUsd,
+            recoveryExpectedProviderRoute: recoveryExpectation.providerRoute,
+            recoveryExpectedTaskVersion: recoveryExpectation.taskVersion,
+          } : {}),
         };
         await ctx.db.patch(existing._id, readmitted);
         return { ...existing, ...readmitted, batchId: existing._id, reused: true };
@@ -554,11 +709,24 @@ export const reservePlanBatch = mutation({
           finishedAt: undefined,
           leaseExpiresAt: now + PLAN_BATCH_LEASE_MS,
           updatedAt: now,
+          ...(recoveryExpectation ? {
+            triggerRunId: args.triggerRunId,
+            recoveryGuardVersion: recoveryExpectation.guardVersion,
+            recoveryTaskRunId: args.triggerRunId,
+            recoveryExpectedItemIds: args.recovery!.itemIds,
+            recoveryExpectedActualCostUsd: recoveryExpectation.expectedActualCostUsd,
+            recoveryExpectedProviderRoute: recoveryExpectation.providerRoute,
+            recoveryExpectedTaskVersion: recoveryExpectation.taskVersion,
+          } : {}),
         };
         await ctx.db.patch(existing._id, readmitted);
         return { ...existing, ...readmitted, batchId: existing._id, reused: true };
       }
       return { ...existing, batchId: existing._id, reused: true };
+    }
+
+    if (recoveryExpectation) {
+      throw new Error("plan-week recovery guard: exact failed batch is missing; fresh batch creation is forbidden");
     }
 
     if (reservedCostUsd > channel.budget + 0.000001) {
@@ -1193,7 +1361,7 @@ export const completePlanItem = mutation({
       throw new Error("plan batch ownership mismatch");
     }
     if (batch.contractVersion !== PLAN_WEEK_CONTRACT_VERSION) {
-      throw new Error("plan item does not belong to the active attested Novita contract");
+      throw new Error("plan item does not belong to the active generation contract");
     }
     const cleanKeyPart = (value: string) => value.replace(/^\/+|\/+$/g, "");
     const expectedThumbnailKey =
@@ -1218,7 +1386,7 @@ export const completePlanItem = mutation({
     if (!usage || usage.itemId !== args.itemId || !usage.accountingComplete) {
       throw new Error("plan item usage checkpoint is missing or unpriced");
     }
-    if (!renderReceipt) throw new Error("plan item finalized Novita receipt is missing");
+    if (!renderReceipt) throw new Error("plan item finalized provider receipt is missing");
     if (!(await verifyFinalizedPlanWeekRenderReceipt(renderReceipt, {
       ownerId: args.ownerId,
       channelId: String(args.channelId),
@@ -1229,15 +1397,15 @@ export const completePlanItem = mutation({
       checkpointKey: args.usageCheckpointKey,
       destinationKey: thumbnailKey,
     }))) {
-      throw new Error("plan item Novita receipt is not artifact-finalized");
+      throw new Error("plan item provider receipt is not artifact-finalized");
     }
     if (renderReceipt.batchId !== args.batchId || renderReceipt.itemId !== args.itemId ||
         renderReceipt.attempt !== args.attempt || renderReceipt.requestKey !== batch.requestKey ||
         renderReceipt.destinationKey !== thumbnailKey) {
-      throw new Error("plan item finalized Novita receipt is not bound to the item attempt");
+      throw new Error("plan item finalized provider receipt is not bound to the item attempt");
     }
     if (!imageUsageMatchesProviderReceipt(usage.imageUsage, renderReceipt.providerReceipt)) {
-      throw new Error("plan item usage does not match its finalized Novita provider receipt");
+      throw new Error("plan item usage does not match its finalized provider receipt");
     }
     if (alreadyReady) return item.thumbnailKey!;
     await ctx.db.patch(args.itemId, {

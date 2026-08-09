@@ -1,0 +1,293 @@
+.section {
+  min-width: 0;
+  padding-block: 0.15rem 0.25rem;
+}
+
+.header {
+  display: flex;
+  align-items: end;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.68rem;
+}
+
+.header > div:first-child {
+  display: flex;
+  align-items: baseline;
+  gap: 0.55rem;
+}
+
+.header h2 {
+  font-size: 0.95rem;
+  font-weight: 600;
+}
+
+.header span {
+  color: var(--color-faint);
+  font-family: var(--font-mono);
+  font-size: 0.59rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.controls {
+  display: flex;
+  gap: 0.34rem;
+}
+
+.controls button,
+.dialogHeader button {
+  display: grid;
+  width: 32px;
+  height: 32px;
+  place-items: center;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: var(--color-surface);
+  color: var(--color-muted);
+  cursor: pointer;
+  font: inherit;
+  font-size: 1.08rem;
+}
+
+.controls button:hover,
+.dialogHeader button:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-fg);
+}
+
+.track {
+  display: grid;
+  grid-auto-columns: minmax(235px, 30%);
+  grid-auto-flow: column;
+  gap: 0.72rem;
+  overflow-x: auto;
+  padding: 0.08rem 0.05rem 0.42rem;
+  scroll-behavior: smooth;
+  scroll-snap-type: x mandatory;
+  scrollbar-color: var(--color-border-strong) transparent;
+  scrollbar-width: thin;
+}
+
+.card {
+  display: grid;
+  min-width: 0;
+  scroll-snap-align: start;
+  overflow: hidden;
+  border: 1px solid var(--color-border);
+  border-radius: 13px;
+  background: rgba(255, 255, 255, 0.024);
+  color: var(--color-fg);
+  cursor: pointer;
+  font: inherit;
+  padding: 0;
+  text-align: left;
+  transition: border-color 0.16s ease, transform 0.16s ease, background 0.16s ease;
+}
+
+.card:hover {
+  border-color: var(--color-border-strong);
+  background: rgba(255, 255, 255, 0.038);
+  transform: translateY(-2px);
+}
+
+.card:focus-visible,
+.controls button:focus-visible,
+.dialogHeader button:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.media {
+  position: relative;
+  display: block;
+  aspect-ratio: 16 / 9;
+  overflow: hidden;
+  background: rgba(255, 255, 255, 0.025);
+}
+
+.media img {
+  transition: transform 0.28s ease;
+}
+
+.card:hover .media img {
+  transform: scale(1.025);
+}
+
+.play {
+  position: absolute;
+  left: 0.72rem;
+  bottom: 0.68rem;
+  display: grid;
+  width: 31px;
+  height: 31px;
+  place-items: center;
+  border: 1px solid rgba(255, 255, 255, 0.24);
+  border-radius: 999px;
+  background: rgba(5, 5, 7, 0.7);
+  color: #fff;
+  font-size: 0.63rem;
+  line-height: 1;
+  padding-left: 2px;
+  backdrop-filter: blur(8px);
+}
+
+.duration {
+  position: absolute;
+  right: 0.56rem;
+  bottom: 0.56rem;
+  border-radius: 6px;
+  background: rgba(5, 5, 7, 0.78);
+  color: #fff;
+  font: 0.62rem var(--font-mono);
+  padding: 0.18rem 0.36rem;
+}
+
+.copy {
+  display: grid;
+  min-width: 0;
+  gap: 0.28rem;
+  padding: 0.68rem 0.72rem 0.72rem;
+}
+
+.copy strong {
+  display: -webkit-box;
+  overflow: hidden;
+  font-size: 0.78rem;
+  font-weight: 600;
+  line-height: 1.36;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+}
+
+.copy small {
+  overflow: hidden;
+  color: var(--color-faint);
+  font-size: 0.62rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.skeleton {
+  min-height: 190px;
+  cursor: wait;
+  background:
+    linear-gradient(90deg, transparent, rgba(255, 255, 255, 0.045), transparent),
+    rgba(255, 255, 255, 0.02);
+  background-size: 200% 100%;
+  animation: shimmer 1.45s linear infinite;
+}
+
+.backdrop {
+  position: fixed;
+  inset: 0;
+  z-index: 120;
+  display: grid;
+  place-items: center;
+  background: rgba(3, 3, 5, 0.82);
+  padding: clamp(0.7rem, 3vw, 2rem);
+  backdrop-filter: blur(13px);
+}
+
+.dialog {
+  width: min(980px, 100%);
+  max-height: calc(100dvh - 1.4rem);
+  overflow: auto;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 15px;
+  background: var(--color-bg);
+  box-shadow: var(--shadow-lift);
+}
+
+.dialogHeader {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.86rem 0.92rem;
+}
+
+.dialogHeader > div {
+  display: grid;
+  min-width: 0;
+  gap: 0.18rem;
+}
+
+.dialogHeader span {
+  color: var(--color-faint);
+  font-size: 0.62rem;
+}
+
+.dialogHeader h2 {
+  overflow: hidden;
+  font-size: 0.96rem;
+  font-weight: 600;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.dialogHeader button {
+  flex: 0 0 auto;
+}
+
+.player {
+  display: grid;
+  width: 100%;
+  max-height: calc(100dvh - 6rem);
+  aspect-ratio: 16 / 9;
+  place-items: center;
+  border-top: 1px solid var(--color-border);
+  background: #000;
+}
+
+.player video {
+  width: 100%;
+  height: 100%;
+  max-height: calc(100dvh - 6rem);
+  object-fit: contain;
+}
+
+.player span {
+  color: rgba(255, 255, 255, 0.52);
+  font-size: 0.78rem;
+}
+
+@keyframes shimmer {
+  to { background-position: -200% 0; }
+}
+
+@media (max-width: 900px) {
+  .track {
+    grid-auto-columns: minmax(235px, 44%);
+  }
+}
+
+@media (max-width: 620px) {
+  .track {
+    grid-auto-columns: minmax(225px, 82%);
+  }
+
+  .header > div:first-child {
+    display: grid;
+    gap: 0.08rem;
+  }
+
+  .dialogHeader h2 {
+    white-space: normal;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .track {
+    scroll-behavior: auto;
+  }
+
+  .card,
+  .media img {
+    transition: none;
+  }
+
+  .skeleton {
+    animation: none;
+  }
+}

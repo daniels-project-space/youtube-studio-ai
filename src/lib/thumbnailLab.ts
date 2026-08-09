@@ -26,12 +26,13 @@ import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { imageToJpeg } from "@/lib/ffmpeg";
 import {
   renderThumbnail,
-  type ThumbnailBaseArtifact,
   type GenerateScene,
+  type ThumbnailRenderResult,
 } from "@/lib/thumbnailRenderer";
 import { downloadTo } from "@/lib/files";
 import type { StyleDNA } from "@/engine/creative/types";
 import type { FamilyKey } from "@/engine/families";
+import type { ThumbnailGateVerdict } from "@/engine/qualityPolicy";
 import type { ThumbnailTextZone } from "@/lib/thumbnailLayout";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
@@ -140,6 +141,10 @@ const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
     energy: "spectacle", font: "impact", treatment: "sticker", textObject: "grunge_sticker",
     imageStyle: "high-energy editorial poster with sharp subject separation",
   },
+  documentary_collage_short: {
+    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    imageStyle: "premium archival evidence-board collage with one dramatic portrait-safe focal subject",
+  },
   whiteboard: {
     energy: "bold", font: "marker", treatment: "stamp", textObject: "stamp_ink",
     imageStyle: "hand-drawn editorial chalk illustration with tactile board grain",
@@ -236,6 +241,156 @@ export function buildStyleDnaPlaybook(args: {
     ],
     refsUsed: [],
     distilledAt: args.now ?? Date.now(),
+  };
+}
+
+const THUMBNAIL_FAMILIES = new Set<FamilyKey>([
+  "narrated_stock",
+  "cinematic",
+  "music_loop",
+  "sleep",
+  "shorts",
+  "documentary_collage_short",
+  "whiteboard",
+  "comic",
+]);
+
+function assertExecutablePlaybook(playbook: ThumbnailPlaybook): void {
+  if (!playbook.rules.length) {
+    throw new Error("thumbnailLab: stored playbook has no Golden rules");
+  }
+  if (!playbook.patterns.length || playbook.patterns.some((pattern) =>
+    !pattern.name?.trim() || !pattern.fluxRecipe?.trim() || !Object.keys(pattern.textRecipe ?? {}).length
+  )) {
+    throw new Error("thumbnailLab: stored playbook has no complete executable patterns");
+  }
+  if (
+    !playbook.visualLanguage?.font ||
+    !playbook.visualLanguage.imageStyle ||
+    !playbook.visualLanguage.accentColor
+  ) {
+    throw new Error("thumbnailLab: stored playbook has incomplete visual language");
+  }
+}
+
+/**
+ * The one production playbook resolver used by both full renders and the
+ * week-ahead queue. A present-but-corrupt stored playbook fails closed; only a
+ * genuinely absent playbook may be rebuilt from complete Style DNA.
+ */
+export function resolveGoldenThumbnailPlaybook(args: {
+  storedPlaybook?: ThumbnailPlaybook | null;
+  dna?: StyleDNA | null;
+  family?: string | null;
+  channelName: string;
+}): { playbook: ThumbnailPlaybook; strategy: "playbook" | "style_dna_foundation" } {
+  if (args.storedPlaybook) {
+    assertExecutablePlaybook(args.storedPlaybook);
+    return { playbook: args.storedPlaybook, strategy: "playbook" };
+  }
+  const family = args.family as FamilyKey | undefined;
+  if (
+    !args.dna?.recurringSubject?.trim() ||
+    !args.dna.thumbnail?.subject?.trim() ||
+    !Array.isArray(args.dna.thumbnail.palette) ||
+    !family ||
+    !THUMBNAIL_FAMILIES.has(family)
+  ) {
+    throw new Error(
+      "thumbnailLab: production thumbnail readiness missing (need Style DNA + family or a stored playbook)",
+    );
+  }
+  const playbook = buildStyleDnaPlaybook({
+    dna: args.dna,
+    family,
+    channelName: args.channelName,
+  });
+  assertExecutablePlaybook(playbook);
+  return { playbook, strategy: "style_dna_foundation" };
+}
+
+/** Deterministically chooses the exact stored Golden pattern for one artifact. */
+export function selectGoldenThumbnailPattern(args: {
+  playbook: ThumbnailPlaybook;
+  seed: string;
+  patternBias?: readonly string[];
+}): { pattern: ThumbPattern; patternIndex: number } {
+  assertExecutablePlaybook(args.playbook);
+  const requested = new Set((args.patternBias ?? []).filter(Boolean));
+  const pool = requested.size
+    ? args.playbook.patterns.filter((pattern) => requested.has(pattern.name))
+    : args.playbook.patterns;
+  const candidates = pool.length ? pool : args.playbook.patterns;
+  const patternIndex = [...args.seed]
+    .reduce((sum, char) => sum + char.charCodeAt(0), 0) % candidates.length;
+  return { pattern: candidates[patternIndex], patternIndex };
+}
+
+/**
+ * The production browse-strip gate shared by normal and week-ahead
+ * thumbnails. Provider absence and judge errors are deliberately surfaced to
+ * the caller; production callers must fail closed via assertThumbnailGate.
+ */
+export async function runThumbnailMobileReferenceQa(args: {
+  outJpg: string;
+  tmpDir: string;
+  title: string;
+  niche?: string;
+  playbook: ThumbnailPlaybook;
+  referenceUrls?: readonly string[];
+  brandContext?: Record<string, unknown> | null;
+  log?: Logger;
+}): Promise<ThumbnailGateVerdict> {
+  if (!hasVisionKey()) {
+    throw new Error("thumbnailLab: a configured production QA provider is required");
+  }
+  assertExecutablePlaybook(args.playbook);
+  const mobileJpg = join(args.tmpDir, "thumbnail_mobile_168.jpg");
+  await imageToJpeg(args.outJpg, mobileJpg, 168, 94);
+  const refPaths: string[] = [];
+  const referenceUrls = [...new Set(args.referenceUrls ?? [])].filter(Boolean).slice(0, 4);
+  for (let index = 0; index < referenceUrls.length; index++) {
+    try {
+      refPaths.push(await downloadTo(referenceUrls[index], join(args.tmpDir, `qa_ref_${index}.jpg`)));
+    } catch (error) {
+      args.log?.(
+        `thumbnailLab: skipped unreachable QA reference ${index + 1}: ${error instanceof Error ? error.message : error}`,
+      );
+    }
+  }
+  const raw = await visionLocal({
+    prompt:
+      `Image 1 is a CANDIDATE YouTube thumbnail rendered at real mobile browse size (~168px wide). ` +
+      (refPaths.length
+        ? `Images 2-${refPaths.length + 1} are verified high-performing reference thumbnails from the same channel playbook. `
+        : "No reference image was reachable, so apply the same production bar without comparative evidence. ") +
+      `Video title: "${args.title}"${args.niche ? `, niche: ${args.niche}` : ""}.\n` +
+      (args.brandContext ? `CHANNEL STYLE DNA: ${JSON.stringify(args.brandContext)}.\n` : "") +
+      `FULL GOLDEN PLAYBOOK RULES:\n- ${args.playbook.rules.join("\n- ")}\n` +
+      (args.playbook.avoid.length
+        ? `REJECTED ANTI-PATTERNS:\n- ${args.playbook.avoid.join("\n- ")}\n`
+        : "") +
+      `Judge the candidate against the production gate:\n` +
+      `(1) textOk: every visible word is correctly spelled and readable at THIS size.\n` +
+      `(2) faceClear: any intended face is clear and undistorted (true when no face is intended).\n` +
+      `(3) Rate punch, styleMatch, and storyMatch 1-10` +
+      (refPaths.length ? ` against the reference set.\n` : `.\n`) +
+      `(4) uiClean: no broken glyphs, watermarks, accidental UI, clipping, or unreadable clutter.\n` +
+      `Return ONLY JSON {"textOk":boolean,"faceClear":boolean,"punch":1-10,"styleMatch":1-10,` +
+      `"storyMatch":1-10,"uiClean":boolean,"reason":"..."}.`,
+    imagePaths: [mobileJpg, ...refPaths],
+    json: true,
+    maxTokens: 250,
+  });
+  const verdict = parseJsonLoose<Partial<ThumbnailGateVerdict>>(raw);
+  return {
+    textOk: verdict.textOk === true,
+    faceClear: verdict.faceClear === true,
+    punch: Number(verdict.punch ?? 0),
+    styleMatch: Number(verdict.styleMatch ?? 0),
+    storyMatch: Number(verdict.storyMatch ?? 0),
+    uiClean: verdict.uiClean === true,
+    reason: String(verdict.reason ?? "judge omitted its reason"),
   };
 }
 
@@ -521,24 +676,34 @@ export interface TournamentResult {
   judgeWhy: string;
 }
 
+export interface ThumbnailCandidateRenderResult extends ThumbnailRenderResult {
+  pattern: string;
+  concept: {
+    heroProp: string | null;
+    background: string | null;
+    details: string[];
+    scenePrompt: string;
+  };
+}
+
 /** Instantiate ONE pattern into a finished candidate (base + typography). */
 export async function renderCandidate(args: {
   pattern: ThumbPattern;
   title: string;
   scriptHint?: string;
+  /** Topicraft's already-judged physical story moment. The Golden pattern may
+   * compose it, but must not replace its actors, objects, action, or causal beat. */
+  sceneSeed?: string;
   /** DNA/operator-locked scene: the heroProp MUST be this subject (hard rail, not inspiration). */
   sceneMandate?: string;
   playbook: ThumbnailPlaybook;
   outJpg: string;
   tmpDir: string;
   idx: number;
-  /** Optional scene-still reuse. Ignored unless its producer supplied the
-   * explicit text-free + matching-safe-zone provenance contract. */
-  baseArt?: ThumbnailBaseArtifact;
   /** Explicit production still route. There is deliberately no provider fallback. */
-  generateScene: GenerateScene;
+  generateScene?: GenerateScene;
   log?: Logger;
-}): Promise<string> {
+}): Promise<ThumbnailCandidateRenderResult> {
   // TWO-PASS DESIGN: the LAYOUT is decided FIRST (which zone the text owns),
   // the image is generated WITH that zone deliberately reserved as negative
   // space, then the text lands in its planned home — never fighting the image.
@@ -549,10 +714,16 @@ export async function renderCandidate(args: {
     prompt:
       `Instantiate this thumbnail PATTERN for the video "${args.title}".\n` +
       `${args.sceneMandate ? `MANDATORY SCENE (operator/DNA-locked - NOT inspiration, NOT optional): the heroProp MUST be exactly this subject, adapted to this topic: ${args.sceneMandate}. Invent background and details AROUND it - never replace it.\n` : ""}` +
+      (args.sceneSeed
+        ? `TOPICRAFT-JUDGED STORY MOMENT (mandatory grounding): ${args.sceneSeed}. Preserve its actors, objects, physical action, and cause/effect. The pattern controls composition and styling; it may not substitute a different story.\n`
+        : "") +
       (args.scriptHint ? `Video content hint: ${args.scriptHint.slice(0, 500)}\n` : "") +
       `PATTERN "${args.pattern.name}": ${args.pattern.fluxRecipe}\n` +
       `TEXT TEMPLATE: ${JSON.stringify(args.pattern.textRecipe)}\n` +
-      `HARD RULES:\n- ${args.playbook.rules.slice(0, 6).join("\n- ")}\n\n` +
+      `FULL GOLDEN PLAYBOOK RULES:\n- ${args.playbook.rules.join("\n- ")}\n` +
+      (args.playbook.avoid.length
+        ? `FULL PLAYBOOK AVOID LIST:\n- ${args.playbook.avoid.join("\n- ")}\n\n`
+        : "\n") +
       `STEP 1 — LAYOUT: choose textZone ("left"|"right"|"upperLeft"|"upperRight") — where the typography will live.\n` +
       `STEP 2 — fluxPrompt: INVENT A NEW CONCEPT for this topic (the pattern recipe above is INSPIRATION ONLY — ` +
       `never reproduce its literal scene). ENERGY TIER = "${args.playbook.energy ?? "bold"}":\n` +
@@ -677,14 +848,22 @@ export async function renderCandidate(args: {
     },
     outJpg: args.outJpg,
     tmpDir: args.tmpDir,
-    baseArt: args.baseArt,
     generateScene: args.generateScene,
   });
   args.log?.(
     `thumbnailLab: candidate ${args.idx + 1} "${args.pattern.name}" rendered ` +
     `(${rendered.baseSource} text-free scene + deterministic type)`,
   );
-  return args.outJpg;
+  return {
+    ...rendered,
+    pattern: args.pattern.name,
+    concept: {
+      heroProp: inst.heroProp?.trim() || null,
+      background: inst.background?.trim() || null,
+      details: (inst.details ?? []).map((detail) => detail.trim()).filter(Boolean),
+      scenePrompt: inst.fluxPrompt,
+    },
+  };
 }
 /** Comparative feed judgment: candidates vs the verified real winners. */
 export async function judgeTournament(args: {

@@ -107,7 +107,9 @@ export function normalizePipelineInvocationSnapshot(
   }
   if (
     !Array.isArray(snapshot.remoteBlocks) ||
-    snapshot.remoteBlocks.some((block) => block !== "timeline_assemble") ||
+    snapshot.remoteBlocks.some(
+      (block) => block !== "timeline_assemble" && block !== "documotion_short",
+    ) ||
     new Set(snapshot.remoteBlocks).size !== snapshot.remoteBlocks.length
   ) {
     throw new Error("pipeline invocation remote block routing is invalid");

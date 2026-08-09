@@ -11,6 +11,7 @@ export type FamilyKey =
   | "music_loop"
   | "sleep"
   | "shorts"
+  | "documentary_collage_short"
   | "whiteboard"
   | "comic";
 
@@ -30,6 +31,8 @@ export interface Family {
   /** Production channel creation always uses the Style-DNA/playbook engine.
    * Plain title cards remain a draft-only renderer, never a family default. */
   defaultThumbnailStyle: "banana";
+  /** Default per-video spend envelope when the operator did not set one. */
+  defaultRunBudgetUsd?: number;
 }
 
 export const FAMILIES: Record<FamilyKey, Family> = {
@@ -98,6 +101,22 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     requiresKeys: ["fish-audio", "pexels"],
     defaultThumbnailStyle: "banana",
   },
+  documentary_collage_short: {
+    key: "documentary_collage_short",
+    label: "Documentary collage Shorts",
+    description:
+      "Source-backed, native 9:16 documentary Shorts: locked narration beats, evidence-board/collage motion, portrait-safe scene QA.",
+    visualEngine: "documotion_short",
+    archetypeKey: "documentary-collage-short",
+    available: true,
+    narrated: true,
+    requiresKeys: ["gemini", "fal", "fish-audio"],
+    defaultThumbnailStyle: "banana",
+    // Seven gated Nano Banana plates, portrait verification, and a high-memory
+    // native master have a truthful $25.29 reserved envelope. Keep a modest
+    // buffer rather than silently weakening the existing preflight rail.
+    defaultRunBudgetUsd: 30,
+  },
   whiteboard: {
     key: "whiteboard",
     label: "Whiteboard explainer (drawn cinema)",
@@ -139,6 +158,7 @@ export const FAMILY_CREW: Record<FamilyKey, string[]> = {
   sleep: ["cinematographer", "composer", "critic"],
   narrated_stock: ["director", "cinematographer", "editor", "composer", "critic"],
   shorts: ["director", "editor", "critic"],
+  documentary_collage_short: ["director", "cinematographer", "editor", "critic"],
   whiteboard: ["director", "editor", "composer", "critic"],
   // NO composer: the comic engine scores itself (its own Suno bed) — a
   // composer_brief here was re-inserted by the crew pass after the designer

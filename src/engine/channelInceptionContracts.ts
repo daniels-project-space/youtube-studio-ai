@@ -144,6 +144,14 @@ export const CHANNEL_INCEPTION_FAMILY_POLICIES: Readonly<
     starterTopicCount: 3,
     starterPreviewCount: 3,
   },
+  documentary_collage_short: {
+    family: "documentary_collage_short",
+    voiceOwnership: "channel-cast",
+    requiresNarrativePlaybook: true,
+    probeProfile: "vertical-short",
+    starterTopicCount: 3,
+    starterPreviewCount: 3,
+  },
   whiteboard: {
     family: "whiteboard",
     voiceOwnership: "channel-cast",

@@ -1,4 +1,5 @@
 import type { PipelineEntry } from "@/engine/types";
+import { QualityEvidenceSchema } from "@/engine/qualityEvidence";
 import {
   pipelineOverrideFingerprint,
   pipelineProbeApprovalSubject,
@@ -50,6 +51,7 @@ interface ProbeChannelSnapshot {
   scriptPlaybook?: unknown;
   styleDNA?: unknown;
   qaRubric?: unknown;
+  contentLane?: unknown;
 }
 
 function finiteUsd(value: number, label: string): number {
@@ -101,6 +103,7 @@ export function assessChannelInceptionProbeQuality(
   const video = objectRecord(report?.video);
   const thumbnail = objectRecord(report?.thumbnail);
   const watch = objectRecord(report?.watch);
+  const qualityEvidence = QualityEvidenceSchema.safeParse(outputs?.qualityEvidence);
   const videoScore = finiteScore(video?.score);
   const thumbnailScore = finiteScore(thumbnail?.score);
   const watchVerdict = typeof watch?.verdict === "string" ? watch.verdict : undefined;
@@ -108,6 +111,13 @@ export function assessChannelInceptionProbeQuality(
 
   if (outputs?.qaPassed !== true) reasons.push("qa_visual did not issue a passing receipt");
   if (!report) reasons.push("qa_visual report is missing");
+  if (!qualityEvidence.success) {
+    reasons.push("typed final quality evidence is missing or malformed");
+  } else if (!qualityEvidence.data.release.hardGateReady) {
+    reasons.push(
+      `typed final quality evidence did not clear hard gates: ${qualityEvidence.data.release.blockers.join("; ")}`,
+    );
+  }
   if (structural?.ok !== true) reasons.push("structural render QA did not pass");
   if (lengthMatch?.ok !== true) reasons.push("render length QA did not pass");
   if (video?.skipped === true || videoScore === undefined) {
@@ -182,6 +192,7 @@ export function freezeChannelInceptionProbeContext(args: {
       : {}),
     styleDNA: structuredClone(args.channel.styleDNA ?? null),
     qualityBar: structuredClone(args.channel.qaRubric ?? null),
+    contentLane: structuredClone(args.channel.contentLane ?? null),
   };
   return {
     channelBudgetUsd: finiteUsd(args.channel.budget ?? 0, "probe channel budget"),

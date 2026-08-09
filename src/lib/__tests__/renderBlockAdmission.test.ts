@@ -12,11 +12,14 @@ const snapshot = {
   runId: "run-1",
   channelId: "channel-1",
   source: "channel",
-  entries: [{ block: "timeline_assemble", params: { quality: "production" } }],
+  entries: [
+    { block: "timeline_assemble", params: { quality: "production" } },
+    { block: "documotion_short", params: { targetSeconds: 52, layout: "short" } },
+  ],
   seedStore: { channelName: "Frozen channel" },
   budgetUsd: 8,
   keyPrefix: "owners/owner-1/channels/frozen/",
-  remoteBlocks: ["timeline_assemble"],
+  remoteBlocks: ["timeline_assemble", "documotion_short"],
   defaultRetries: 2,
   compilationFingerprint: "a".repeat(64),
   compilationPolicyId: "production",
@@ -45,6 +48,7 @@ const valid = {
 };
 
 assert.doesNotThrow(() => assertRenderBlockAdmission(valid));
+assert.doesNotThrow(() => assertRenderBlockAdmission({ ...valid, blockId: "documotion_short" }));
 const frozenInvocation = {
   blockId: "timeline_assemble",
   run,
@@ -59,6 +63,15 @@ const frozenInvocation = {
   },
 };
 assert.doesNotThrow(() => assertRenderBlockInvocation(frozenInvocation));
+const documotionFrozenInvocation = {
+  ...frozenInvocation,
+  blockId: "documotion_short",
+  input: {
+    ...frozenInvocation.input,
+    params: snapshot.entries[1].params ?? {},
+  },
+};
+assert.doesNotThrow(() => assertRenderBlockInvocation(documotionFrozenInvocation));
 assert.throws(
   () => assertRenderBlockAdmission({ ...valid, blockId: "upload_draft" }),
   /refuses non-render module/,

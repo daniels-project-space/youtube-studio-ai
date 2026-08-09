@@ -64,8 +64,24 @@ interface BuildProgress {
   }>;
 }
 
-interface Toggles { quotes: boolean; captions: boolean; chapters: boolean; notify: boolean; crosspost: boolean; shorts: boolean }
-const DEFAULT_TOGGLES: Toggles = { quotes: true, captions: true, chapters: true, notify: true, crosspost: false, shorts: false };
+interface Toggles {
+  quotes: boolean;
+  captions: boolean;
+  chapters: boolean;
+  notify: boolean;
+  crosspost: boolean;
+  shorts: boolean;
+  documentaryCandidates: boolean;
+}
+const DEFAULT_TOGGLES: Toggles = {
+  quotes: true,
+  captions: true,
+  chapters: true,
+  notify: true,
+  crosspost: false,
+  shorts: false,
+  documentaryCandidates: false,
+};
 
 async function browserSha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
@@ -99,6 +115,12 @@ function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string): str
   if (t.shorts && familyKey !== "music_loop" && blocks.includes("upload_draft") && blocks.includes("narration_tts")) {
     const i = blocks.findIndex((b) => b === "notify" || b === "cleanup");
     blocks = i >= 0 ? [...blocks.slice(0, i), "shorts_spinoff", ...blocks.slice(i)] : [...blocks, "shorts_spinoff"];
+  }
+  if (t.documentaryCandidates && blocks.includes("upload_draft") && blocks.includes("narration_tts") && blocks.includes("metadata")) {
+    const i = blocks.findIndex((b) => b === "notify" || b === "cleanup");
+    blocks = i >= 0
+      ? [...blocks.slice(0, i), "documentary_short_candidates", ...blocks.slice(i)]
+      : [...blocks, "documentary_short_candidates"];
   }
   return blocks;
 }
@@ -135,6 +157,8 @@ export default function NewChannelWizard() {
   const [cadence, setCadence] = useState("weekly");
   const [days, setDays] = useState<number[]>([1]);
   const [budget, setBudget] = useState(5);
+  const [sourceReferencesJson, setSourceReferencesJson] = useState("");
+  const [claimEvidenceJson, setClaimEvidenceJson] = useState("");
   const [publishMode, setPublishMode] = useState("draft");
   const [approvedForPublish, setApprovedForPublish] = useState(false);
   const [approveSetupSpend, setApproveSetupSpend] = useState(false);
@@ -165,11 +189,18 @@ export default function NewChannelWizard() {
     perVideoBudgetUsd: budget,
   });
 
+  const selectFamily = (next: FamilyKey) => {
+    setFamily(next);
+    // The native documentary master has a truthful reserved cost envelope;
+    // selecting it must not leave a newly-created channel below preflight.
+    setBudget((current) => Math.max(current, FAMILIES[next].defaultRunBudgetUsd ?? 0.5));
+  };
+
   // pick niche → default its family + subcategory + research-tuned target length
   const pickNiche = (k: string) => {
     setNicheKey(k);
     const n = getNiche(k);
-    if (n) { setFamily(n.defaultFamily); setSubcategory(n.subcategories[0]?.name ?? ""); }
+    if (n) { selectFamily(n.defaultFamily); setSubcategory(n.subcategories[0]?.name ?? ""); }
     const preset = nichePreset(k);
     if (preset) setLengthMinutes(Math.min(60, Math.max(1, Math.round(preset.targetSeconds / 60))));
   };
@@ -186,7 +217,7 @@ export default function NewChannelWizard() {
         const res = await fetch("/api/suggest-format", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ concept: c, niche: nicheKey || undefined }) });
         const d = await res.json();
         if (!res.ok || !d.family) { setClipNote(d.error ?? "Could not suggest a format."); setSuggesting(false); return; }
-        setFamily(d.family as FamilyKey);
+        selectFamily(d.family as FamilyKey);
         const fam = FAMILIES[d.family as FamilyKey]?.label ?? d.family;
         const alts = Array.isArray(d.alternates) && d.alternates.length
           ? ` Alternates: ${d.alternates.map((a: { family: string }) => FAMILIES[a.family as FamilyKey]?.label ?? a.family).join(", ")}.`
@@ -223,7 +254,9 @@ export default function NewChannelWizard() {
                 setAnalyzing(false);
                 return;
               }
-              if (a.recommendedFamily) setFamily(a.recommendedFamily);
+              if (a.recommendedFamily && a.recommendedFamily in FAMILIES) {
+                selectFamily(a.recommendedFamily as FamilyKey);
+              }
               if (a.recommendedNicheKey) { setNicheKey(a.recommendedNicheKey); }
               if (a.recommendedFootageTheme) setFootageTheme(a.recommendedFootageTheme);
               if (typeof a.approxLengthSec === "number" && a.approxLengthSec > 0) setLengthMinutes(Math.max(1, Math.round(a.approxLengthSec / 60)));
@@ -253,6 +286,28 @@ export default function NewChannelWizard() {
       const requestedYoutubeHandle = autoYoutube
         ? suggestYoutubeHandle(requestedYoutubeName)
         : undefined;
+      let sourceReferences: unknown;
+      let claimEvidence: unknown;
+      if (family === "documentary_collage_short") {
+        try {
+          sourceReferences = JSON.parse(sourceReferencesJson);
+          claimEvidence = JSON.parse(claimEvidenceJson);
+        } catch {
+          setError("Documentary collage Shorts need valid JSON source references and claim evidence.");
+          setPhase("error");
+          return;
+        }
+        if (!Array.isArray(sourceReferences) || sourceReferences.length === 0) {
+          setError("Documentary collage Shorts need at least one external source reference.");
+          setPhase("error");
+          return;
+        }
+        if (!Array.isArray(claimEvidence) || claimEvidence.length === 0) {
+          setError("Documentary collage Shorts need claim evidence for every locked beat.");
+          setPhase("error");
+          return;
+        }
+      }
       const design: Record<string, unknown> = {
         nicheKey, subcategory, family, name: requestedYoutubeName || undefined,
         lengthMinutes: fam?.narrated ? lengthMinutes : undefined,
@@ -261,6 +316,7 @@ export default function NewChannelWizard() {
         seriesTitle: seriesTitle.trim() || undefined,
         seriesCount: seriesTitle.trim() && seriesCount > 0 ? seriesCount : undefined,
         cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube, runProbe,
+        ...(family === "documentary_collage_short" ? { sourceReferences, claimEvidence } : {}),
         ...(autoYoutube ? { requestedYoutubeName, requestedYoutubeHandle } : {}),
         approveSetupSpend,
         setupBudgetUsd: costAuthority.setupCapUsd,
@@ -637,7 +693,7 @@ export default function NewChannelWizard() {
             {FAMILY_KEYS.map((k) => {
               const f = FAMILIES[k]; const on = k === family;
               return (
-                <button key={k} disabled={!f.available} onClick={() => f.available && setFamily(k)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: f.available ? "pointer" : "not-allowed", opacity: f.available ? 1 : 0.55,
+                <button key={k} disabled={!f.available} onClick={() => f.available && selectFamily(k)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: f.available ? "pointer" : "not-allowed", opacity: f.available ? 1 : 0.55,
                   border: on ? "1px solid var(--color-accent)" : "1px solid var(--color-border)", background: on ? "rgba(124,124,255,0.08)" : undefined }}>
                   <div style={{ fontWeight: 600 }}>{f.label}{!f.available && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· unavailable — no spend</span>}</div>
                   <div style={{ fontSize: "0.78rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{f.description}</div>
@@ -679,6 +735,32 @@ export default function NewChannelWizard() {
             )}
             {fam?.narrated && (
               <Row label="Voice effect"><select value={voiceFx} onChange={(e) => setVoiceFx(e.target.value)} style={selStyle}><option value="none">None (clean)</option><option value="radio">Old radio (vintage AM)</option></select></Row>
+            )}
+            {family === "documentary_collage_short" && (
+              <>
+                <label style={lblStyle}>
+                  <span style={capStyle}>External source references (required JSON)</span>
+                  <textarea
+                    value={sourceReferencesJson}
+                    onChange={(e) => setSourceReferencesJson(e.target.value)}
+                    rows={5}
+                    placeholder={'[{"id":"source:archive","type":"archive","title":"Archive title","citation":"Publisher, date","url":"https://example.org/record"}]'}
+                    style={{ ...inpStyle, resize: "vertical", fontFamily: "monospace" }}
+                  />
+                  <span style={muted}>Every source must be externally reachable with a stable URL.</span>
+                </label>
+                <label style={lblStyle}>
+                  <span style={capStyle}>Claim evidence (required JSON)</span>
+                  <textarea
+                    value={claimEvidenceJson}
+                    onChange={(e) => setClaimEvidenceJson(e.target.value)}
+                    rows={6}
+                    placeholder={'[{"claimId":"claim:1","sourceId":"source:archive","excerpt":"Exact supporting passage or finding.","locator":"p. 14"}]'}
+                    style={{ ...inpStyle, resize: "vertical", fontFamily: "monospace" }}
+                  />
+                  <span style={muted}>Provide at least one cited excerpt for each of the seven locked narrative beats.</span>
+                </label>
+              </>
             )}
             <Row label="Series (optional)">
               <div style={{ display: "flex", alignItems: "center", gap: "0.4rem", flexWrap: "wrap", justifyContent: "flex-end" }}>
@@ -734,11 +816,11 @@ export default function NewChannelWizard() {
                 <span style={muted}>run one bounded private proof · up to ${costAuthority.validationCapUsd.toFixed(2)} extra</span>
               </label>
             </Row>
-            <Row label="Production budget / video"><input type="number" min={0.5} max={100} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD</span></Row>
+            <Row label="Production budget / video"><input type="number" min={fam?.defaultRunBudgetUsd ?? 0.5} max={100} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD{family === "documentary_collage_short" ? " · native master requires at least $30" : ""}</span></Row>
           </div>
           <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.6rem" }}>
             <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Advanced — optional modules</div>
-            {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
+            {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
               <label key={k} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
                 <input type="checkbox" checked={toggles[k]} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}
               </label>

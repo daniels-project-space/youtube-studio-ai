@@ -5,7 +5,10 @@ import {
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import { stableJson } from "@/lib/publishingPolicy";
 
-const REMOTE_RENDER_BLOCK = "timeline_assemble" as const;
+// Only full-resolution master renderers may be delegated to the durable
+// high-memory worker. Each invocation is still constrained by its frozen
+// per-run allowlist below.
+const REMOTE_RENDER_BLOCKS = new Set(["timeline_assemble", "documotion_short"]);
 
 interface DurableRenderRunIdentity {
   _id: string;
@@ -44,7 +47,7 @@ export function assertRenderBlockAdmission(args: {
   run: DurableRenderRunIdentity;
   channel: DurableRenderChannelIdentity;
 } {
-  if (args.blockId !== REMOTE_RENDER_BLOCK) {
+  if (!REMOTE_RENDER_BLOCKS.has(args.blockId)) {
     throw new Error(`render-block refuses non-render module: ${args.blockId}`);
   }
   if (!args.run || !args.channel) {

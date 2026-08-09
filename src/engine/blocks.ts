@@ -16,6 +16,7 @@ import { novitaRenderBlocks } from "@/trigger/blocks/novitaRenderBlocks";
 import { STORY_SPINE_BLOCKS } from "@/trigger/blocks/storySpineBlocks";
 import { whiteboardScribeBlocks } from "@/trigger/blocks/whiteboardScribeBlocks";
 import { motionComicBlocks } from "@/trigger/blocks/motionComicBlocks";
+import { documentaryCollageShortBlocks } from "@/trigger/blocks/documentaryCollageShortBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
 
 let registered = false;
@@ -56,6 +57,9 @@ export function registerAllBlocks(): void {
   // DRAWN-COMIC self-contained engine (motion_comic): narrated comic page that
   // draws itself in (src/lib/motionComic.ts) — produces the final video.
   for (const b of motionComicBlocks) register(b);
+  // Native documentary-collage Shorts: source/claim/beat manifest → portrait
+  // DocuMotion master → scene-level safe-area and provenance gate.
+  for (const b of documentaryCollageShortBlocks) register(b);
   // Render-group reuse: emit_bundle (persist assets + fan out to language siblings).
   register(emitBundle);
   registered = true;

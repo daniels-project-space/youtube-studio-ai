@@ -32,6 +32,10 @@ import { registerAllBlocks } from "@/engine/blocks";
 import { get as getBlock } from "@/engine/registry";
 import { validatePipeline } from "@/engine/validate";
 import type { PipelineEntry } from "@/engine/types";
+import {
+  assertPipelineMatchesContentLane,
+  resolveContentLane,
+} from "@/engine/contentLane";
 import type { ShowBible, StyleDNA, QualityBar } from "./types";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
@@ -516,6 +520,12 @@ export function applyArchitectPlan(
   registerAllBlocks();
   const log = opts.log ?? (() => {});
   const kind = familyKind(opts.family);
+  // The architect can tune a lane, but it cannot exchange the channel's
+  // primary visual engine. This also closes the swap pre-pass loophole where
+  // producer-compatible blocks could replace one another before appliesTo was
+  // evaluated.
+  const contentLane = resolveContentLane({ family: opts.family, pipeline: base });
+  assertPipelineMatchesContentLane(contentLane, base);
   const byBlock = new Map([...ARCHITECT_TOOLBOX, ...(opts.extraTools ?? [])].map((t) => [t.block, t]));
 
   let pipeline: PipelineEntry[] = base.map((e) => ({
@@ -530,6 +540,7 @@ export function applyArchitectPlan(
       const probe = next.map((e) => ({ block: e.block, params: e.params }));
       enforceInvariants(probe);
       validatePipeline(probe);
+      assertPipelineMatchesContentLane(contentLane, probe);
       pipeline = probe;
       return true;
     } catch (e) {
@@ -650,6 +661,7 @@ export function applyArchitectPlan(
   enforceInvariants(pipeline);
   try {
     validatePipeline(pipeline.map((e) => ({ block: e.block, params: e.params })));
+    assertPipelineMatchesContentLane(contentLane, pipeline);
   } catch (e) {
     // Should be unreachable (incremental gates) — fall back to the floor.
     log(`architect: FINAL validation failed (${e instanceof Error ? e.message : e}) — keeping the floor pipeline`);

@@ -1,107 +1,140 @@
 "use client";
 
-import { useEffect, useMemo, useState, type CSSProperties } from "react";
+import Link from "next/link";
+import { useEffect, useMemo, useState } from "react";
 import { useConvex, useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
 import { useOwnerId } from "@/lib/owner-context";
 import { failureReason } from "@/lib/failureReason";
 import type { RunRow } from "@/lib/types";
+import styles from "./StatusBanner.module.css";
 
 const DISMISS_KEY = "studio.dismissedFailures";
 
-/**
- * Compact status strip — MAIN OVERVIEW ONLY (mounted on the home page, not the
- * app shell). Shows small horizontal PILLS for recent failed runs (friendly
- * reason) + a connection pill if the realtime websocket is down. Dismissed pills
- * are remembered in localStorage and never reappear.
- */
-export function StatusBanner() {
+/** Compact, expandable issue inbox for the Overview status bar. */
+export function StatusBanner({
+  overdueCount = 0,
+  channelSlug,
+}: {
+  overdueCount?: number;
+  channelSlug?: string | null;
+}) {
   const convex = useConvex();
   const ownerId = useOwnerId();
-
-  // connection state (grace period avoids a startup flash)
   const [wsDown, setWsDown] = useState(false);
-  useEffect(() => {
-    let mountedFor = 0;
-    const tick = () => {
-      let connected = true;
-      try { connected = convex.connectionState().isWebSocketConnected; } catch { connected = false; }
-      mountedFor += 1;
-      setWsDown(!connected && mountedFor >= 4);
-    };
-    const id = setInterval(tick, 1500);
-    tick();
-    return () => clearInterval(id);
-  }, [convex]);
-
-  // persisted dismissals
   const [dismissed, setDismissed] = useState<Set<string>>(() => {
+    if (typeof window === "undefined") return new Set();
     try {
       const raw = localStorage.getItem(DISMISS_KEY);
-      return raw ? new Set(JSON.parse(raw) as string[]) : new Set<string>();
-    } catch { /* ignore */ }
-    return new Set<string>();
+      return raw ? new Set(JSON.parse(raw) as string[]) : new Set();
+    } catch {
+      return new Set();
+    }
   });
+
+  useEffect(() => {
+    let checks = 0;
+    const tick = () => {
+      let connected = true;
+      try {
+        connected = convex.connectionState().isWebSocketConnected;
+      } catch {
+        connected = false;
+      }
+      checks += 1;
+      setWsDown(!connected && checks >= 4);
+    };
+    const timer = window.setInterval(tick, 1500);
+    tick();
+    return () => window.clearInterval(timer);
+  }, [convex]);
+
+  const recent = useQuery(api.runs.listRecent, { ownerId, limit: 30 }) as
+    | RunRow[]
+    | undefined;
+  const failures = useMemo(() => {
+    if (!recent) return [];
+    return recent
+      .filter((run) => !channelSlug || run.channelSlug === channelSlug)
+      .filter((run) => run.status === "failed")
+      .filter((run) => !dismissed.has(run._id))
+      .filter((run) => !/cancell?ed/i.test(run.error ?? ""));
+  }, [recent, dismissed, channelSlug]);
+  const visibleFailures = failures.slice(0, 6);
+
   const dismiss = (id: string) => {
-    setDismissed((prev) => {
-      const next = new Set(prev).add(id);
-      try { localStorage.setItem(DISMISS_KEY, JSON.stringify([...next].slice(-200))); } catch { /* ignore */ }
+    setDismissed((previous) => {
+      const next = new Set(previous).add(id);
+      try {
+        localStorage.setItem(DISMISS_KEY, JSON.stringify([...next].slice(-200)));
+      } catch {
+        // The widget still dismisses for this session.
+      }
       return next;
     });
   };
 
-  const recent = useQuery(api.runs.listRecent, { ownerId, limit: 30 }) as RunRow[] | undefined;
-  const failures = useMemo(() => {
-    if (!recent) return [];
-    return recent
-      .filter((r) => r.status === "failed")
-      .filter((r) => !dismissed.has(r._id))
-      .filter((r) => !/cancell?ed/i.test(r.error ?? ""))
-      .slice(0, 6);
-  }, [recent, dismissed]);
-
-  if (!wsDown && failures.length === 0) return null;
+  const issueCount = failures.length + (wsDown ? 1 : 0) + overdueCount;
+  if (issueCount === 0) return null;
 
   return (
-    <div style={{ display: "flex", flexWrap: "wrap", gap: "0.4rem", marginBottom: "1.1rem" }}>
-      {wsDown && (
-        <span style={pill("rgba(245,158,11,0.45)", "rgba(245,158,11,0.12)", "#fbbf24")} title="Realtime backend unreachable — usually a VPN/proxy blocking the websocket">
-          ⚠ offline — retrying
-        </span>
-      )}
-      {failures.map((r) => {
-        const info = failureReason(r.error);
-        return (
-          <span key={r._id} style={pill("rgba(248,113,113,0.4)", "rgba(248,113,113,0.10)", "#fca5a5")} title={`${r.channelName}: ${info.reason}${info.block ? ` (${info.block})` : ""}`}>
-            <a href={`/runs/${r._id}`} style={{ color: "inherit", textDecoration: "none", maxWidth: 230, overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>
-              {r.channelName} — {info.reason}
-            </a>
-            <button
-              onClick={() => dismiss(r._id)}
-              aria-label="Dismiss"
-              style={{ background: "transparent", border: "none", color: "rgba(252,165,165,0.8)", cursor: "pointer", fontSize: "0.78rem", lineHeight: 1, padding: 0, marginLeft: 2 }}
-            >
-              ✕
-            </button>
-          </span>
-        );
-      })}
-    </div>
-  );
-}
+    <details className={styles.widget}>
+      <summary aria-label={`Open ${issueCount} studio issue${issueCount === 1 ? "" : "s"}`}>
+        <span aria-hidden="true" />
+        {issueCount} issue{issueCount === 1 ? "" : "s"}
+      </summary>
+      <div className={styles.panel}>
+        <header>
+          <strong>Needs review</strong>
+          <small>{issueCount} open</small>
+        </header>
 
-function pill(border: string, bg: string, color: string): CSSProperties {
-  return {
-    display: "inline-flex",
-    alignItems: "center",
-    gap: "0.4rem",
-    maxWidth: 280,
-    padding: "0.2rem 0.55rem",
-    borderRadius: 999,
-    border: `1px solid ${border}`,
-    background: bg,
-    color,
-    fontSize: "0.72rem",
-    lineHeight: 1.2,
-  };
+        {wsDown && (
+          <div className={styles.issueRow}>
+            <span className={styles.warningDot} aria-hidden="true" />
+            <span>
+              <strong>Realtime connection</strong>
+              <small>Offline — retrying automatically</small>
+            </span>
+          </div>
+        )}
+
+        {visibleFailures.map((run) => {
+          const info = failureReason(run.error);
+          return (
+            <div className={styles.issueRow} key={run._id}>
+              <span className={styles.errorDot} aria-hidden="true" />
+              <Link href={`/runs/${run._id}`}>
+                <strong>{run.channelName}</strong>
+                <small>{info.reason}{info.block ? ` · ${info.block}` : ""}</small>
+              </Link>
+              <button
+                type="button"
+                onClick={() => dismiss(run._id)}
+                aria-label={`Dismiss ${run.channelName} failure`}
+              >
+                ×
+              </button>
+            </div>
+          );
+        })}
+
+        {failures.length > visibleFailures.length && (
+          <Link className={styles.moreIssues} href="/runs?status=failed">
+            +{failures.length - visibleFailures.length} more failed run{failures.length - visibleFailures.length === 1 ? "" : "s"}
+          </Link>
+        )}
+
+        {overdueCount > 0 && (
+          <div className={styles.issueRow}>
+            <span className={styles.warningDot} aria-hidden="true" />
+            <Link href="/schedule">
+              <strong>{overdueCount} overdue item{overdueCount === 1 ? "" : "s"}</strong>
+              <small>Review the publishing schedule</small>
+            </Link>
+          </div>
+        )}
+      </div>
+    </details>
+  );
 }

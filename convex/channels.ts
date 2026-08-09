@@ -25,10 +25,38 @@ import {
 } from "@/engine/channelInceptionContracts";
 import { comparablePipeline } from "@/engine/channelPipelineComparable";
 import { channelInceptionInvalidationRoots } from "@/engine/channelInceptionInvalidation";
+import {
+  assertContentLaneMatchesFamily,
+  assertPipelineMatchesContentLane,
+  contentLaneFingerprint,
+  parseContentLane,
+  resolveContentLane,
+} from "@/engine/contentLane";
 
 const MAX_INCEPTION_OUTPUT_CHARS = 16_000;
 const MAX_INCEPTION_STAGES = 10;
 const INCEPTION_MODULE_KEYS = new Set<string>(CHANNEL_INCEPTION_MODULE_KEYS);
+
+const contentLaneValidator = v.object({
+  version: v.literal("content-lane/v1"),
+  key: v.string(),
+  family: v.optional(v.string()),
+  primaryRenderer: v.string(),
+});
+
+function channelContentLane(channel: {
+  contentLane?: unknown;
+  family?: unknown;
+  pipeline?: unknown;
+}) {
+  const lane = resolveContentLane({
+    stored: channel.contentLane,
+    family: channel.family,
+    pipeline: Array.isArray(channel.pipeline) ? channel.pipeline : [],
+  });
+  assertContentLaneMatchesFamily(lane, channel.family);
+  return lane;
+}
 
 function invalidatePersistedInceptionProofs(
   inception: unknown,
@@ -320,6 +348,9 @@ export const createChannel = mutation({
     // doctor/re-architect never re-derive it from template letters (the old
     // template→family guess collapsed whiteboard/shorts into narrated_stock).
     family: v.optional(v.string()),
+    // A sibling/import may supply its inherited lock, but the mutation always
+    // re-derives and verifies it against the pipeline before persisting.
+    contentLane: v.optional(contentLaneValidator),
     // Operator hard rail: wizard-disabled blocks the architect may NEVER
     // re-add — persisted so every later architect pass can honor it.
     disabledBlocks: v.optional(v.array(v.string())),
@@ -341,6 +372,27 @@ export const createChannel = mutation({
       )
       .unique();
 
+    const existingLane = existing ? channelContentLane(existing) : undefined;
+    if (existing?.family !== undefined && args.family !== undefined && args.family !== existing.family) {
+      throw new Error(
+        `channel family is locked to ${existing.family}; use an explicit lane migration to change it`,
+      );
+    }
+    const family = args.family ?? existing?.family;
+    const lane = resolveContentLane({
+      stored: existingLane,
+      family,
+      pipeline: args.pipeline,
+    });
+    assertContentLaneMatchesFamily(lane, family);
+    assertPipelineMatchesContentLane(lane, args.pipeline);
+    if (
+      args.contentLane !== undefined &&
+      contentLaneFingerprint(parseContentLane(args.contentLane)) !== contentLaneFingerprint(lane)
+    ) {
+      throw new Error("supplied content lane does not match the channel's immutable family/pipeline lane");
+    }
+
     const doc = {
       ownerId: args.ownerId,
       slug: args.slug,
@@ -354,8 +406,9 @@ export const createChannel = mutation({
       styleDNA: args.styleDNA,
       // Validate the onboarding-supplied module config (illegal → throws).
       moduleConfig: validateModuleConfigMap(args.moduleConfig),
-      family: args.family,
-      disabledBlocks: args.disabledBlocks,
+      family,
+      contentLane: lane,
+      disabledBlocks: args.disabledBlocks ?? existing?.disabledBlocks,
       budget: args.budget,
       status: args.status ?? "draft",
       groupId: args.groupId,
@@ -571,10 +624,22 @@ export const updateChannel = mutation({
     const { channelId, ...rest } = args;
     const existing = await ctx.db.get(channelId);
     if (!existing) throw new Error(`channel not found: ${channelId}`);
+    if (rest.family !== undefined && rest.family !== existing.family && existing.family !== undefined) {
+      throw new Error(
+        `channel family is locked to ${existing.family}; use an explicit lane migration to change it`,
+      );
+    }
+    const lane = channelContentLane(existing);
+    const nextFamily = rest.family ?? existing.family;
+    assertContentLaneMatchesFamily(lane, nextFamily);
+    assertPipelineMatchesContentLane(lane, rest.pipeline ?? existing.pipeline);
     const patch: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(rest)) {
       if (val !== undefined) patch[k] = val;
     }
+    // Opportunistically migrate legacy rows to an explicit lock whenever they
+    // are touched. This is a no-op for already locked channels.
+    patch.contentLane = lane;
     // "" means UNFILE (optional args can't carry null).
     if (rest.folder === "") patch.folder = undefined;
     const roots = channelInceptionInvalidationRoots(existing, { ...existing, ...patch });
@@ -625,7 +690,9 @@ export const updatePipelineIfCurrent = mutation({
     if (comparablePipeline(current) === comparablePipeline(args.pipeline)) {
       return { state: "current" as const };
     }
-    const patch: Record<string, unknown> = { pipeline: args.pipeline };
+    const lane = channelContentLane(channel);
+    assertPipelineMatchesContentLane(lane, args.pipeline);
+    const patch: Record<string, unknown> = { pipeline: args.pipeline, contentLane: lane };
     const invalidated = invalidatePersistedInceptionProofs(
       channel.inception,
       channelInceptionInvalidationRoots(channel, { ...channel, ...patch }),

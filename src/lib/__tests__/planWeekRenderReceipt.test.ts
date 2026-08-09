@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import { canonicalJson } from "@/lib/canonicalJson";
 import {
   finalizedPlanWeekRenderReceiptFixture,
+  legacyPlanWeekProviderReceiptFixture,
   planWeekProviderResultFixture,
 } from "@/lib/__tests__/planWeekRenderReceiptFixture";
 import {
@@ -9,6 +10,7 @@ import {
   isFinalizedPlanWeekRenderReceipt,
   makePlanWeekProviderRenderReceipt,
   planWeekArtifactHeadMatches,
+  planWeekProviderEvidenceSha256,
   validatePlanWeekProviderRenderReceipt,
   verifyFinalizedPlanWeekRenderReceipt,
   verifyPlanWeekProviderReceiptCryptography,
@@ -28,27 +30,48 @@ async function main(): Promise<void> {
   };
   const receipt = makePlanWeekProviderRenderReceipt(
     scope,
-    planWeekProviderResultFixture(),
-    1_900_000_000_000,
+    planWeekProviderResultFixture(scope),
   );
+  assert.equal(receipt.provider, "gemini");
+  assert.equal(receipt.route, "nano-banana-flash");
+  assert.equal(receipt.model, "gemini-2.5-flash-image");
   assert.equal(validatePlanWeekProviderRenderReceipt(receipt, scope), true);
   assert.equal(await verifyPlanWeekProviderReceiptCryptography(receipt), true);
 
-  const wrongIdle = structuredClone(receipt);
-  wrongIdle.runtimeAttestation.idleShutdownSeconds += 1;
-  assert.equal(validatePlanWeekProviderRenderReceipt(wrongIdle, scope), false);
+  const wrongModel = structuredClone(receipt);
+  (wrongModel as { model: string }).model = "gemini-image-unpinned";
+  assert.equal(validatePlanWeekProviderRenderReceipt(wrongModel, scope), false);
 
-  const forgedBillingHash = structuredClone(receipt);
-  forgedBillingHash.billingReceipt.gpuSku = "forged-sku";
-  assert.equal(validatePlanWeekProviderRenderReceipt(forgedBillingHash, scope), true);
-  assert.equal(await verifyPlanWeekProviderReceiptCryptography(forgedBillingHash), false);
+  const wrongContext = structuredClone(receipt);
+  const wrongContextRequest = JSON.parse(wrongContext.requestCanonicalJson) as Record<string, unknown>;
+  wrongContextRequest["context"] = "foreign-scope";
+  wrongContext.requestCanonicalJson = canonicalJson(wrongContextRequest);
+  assert.equal(validatePlanWeekProviderRenderReceipt(wrongContext, scope), false);
 
   const forgedRequestHash = structuredClone(receipt);
   const request = JSON.parse(forgedRequestHash.requestCanonicalJson) as Record<string, unknown>;
-  request["prefix"] = "forged/prefix";
+  const body = request["body"] as Record<string, unknown>;
+  const contents = body["contents"] as Array<Record<string, unknown>>;
+  const parts = contents[0]["parts"] as Array<Record<string, unknown>>;
+  parts[0] = {
+    text: "Forged scene. ABSOLUTE RULE — PICTURE ONLY, NO TEXT: no letters.",
+  };
   forgedRequestHash.requestCanonicalJson = canonicalJson(request);
-  assert.equal(validatePlanWeekProviderRenderReceipt(forgedRequestHash, scope), false);
+  assert.equal(
+    validatePlanWeekProviderRenderReceipt(forgedRequestHash, scope),
+    false,
+    "prompt byte evidence must reject a mutated canonical request before hash verification",
+  );
   assert.equal(await verifyPlanWeekProviderReceiptCryptography(forgedRequestHash), false);
+
+  const legacy = legacyPlanWeekProviderReceiptFixture(scope);
+  assert.equal(validatePlanWeekProviderRenderReceipt(legacy, scope), true,
+    "historical immutable Novita receipts must remain readable");
+  assert.equal(await verifyPlanWeekProviderReceiptCryptography(legacy), true);
+  const forgedLegacy = structuredClone(legacy);
+  forgedLegacy.billingReceipt.gpuSku = "forged-sku";
+  assert.equal(validatePlanWeekProviderRenderReceipt(forgedLegacy, scope), true);
+  assert.equal(await verifyPlanWeekProviderReceiptCryptography(forgedLegacy), false);
 
   const { artifactReceipt: artifact } = finalizedPlanWeekRenderReceiptFixture(scope);
   assert.equal(isFinalizedPlanWeekRenderReceipt({ providerReceipt: receipt, artifactReceipt: artifact }), true);
@@ -93,19 +116,29 @@ async function main(): Promise<void> {
     providerReceipt: foreignNested.providerReceipt,
     artifactReceipt: foreignNested.artifactReceipt,
   }, scope), false, "a foreign nested receipt cannot be transplanted under the target row");
+
   const forgedFinalized = structuredClone(finalizedRow);
   const forgedCanonicalRequest = JSON.parse(
     forgedFinalized.providerReceipt.requestCanonicalJson,
   ) as Record<string, unknown>;
-  const jobs = forgedCanonicalRequest["jobs"] as Array<Record<string, unknown>>;
-  jobs[0] = { ...jobs[0], prompt: "forged but structurally valid prompt" };
+  const forgedBody = forgedCanonicalRequest["body"] as Record<string, unknown>;
+  const forgedContents = forgedBody["contents"] as Array<Record<string, unknown>>;
+  const forgedParts = forgedContents[0]["parts"] as Array<Record<string, unknown>>;
+  forgedParts[0] = {
+    text: "Structurally valid forgery. ABSOLUTE RULE — PICTURE ONLY, NO TEXT: no letters.",
+  };
   forgedFinalized.providerReceipt.requestCanonicalJson = canonicalJson(forgedCanonicalRequest);
   forgedFinalized.providerReceipt.requestSha256 = "e".repeat(64);
   forgedFinalized.providerRequestSha256 = "e".repeat(64);
   forgedFinalized.artifactReceipt.providerRequestSha256 = "e".repeat(64);
-  assert.equal(isFinalizedPlanWeekRenderReceipt(forgedFinalized), true);
+  assert.equal(
+    isFinalizedPlanWeekRenderReceipt(forgedFinalized),
+    false,
+    "nested prompt-byte evidence must reject canonical request tampering at the shape gate",
+  );
   assert.equal(await verifyFinalizedPlanWeekRenderReceipt(forgedFinalized, scope), false,
     "shape-valid canonical request tampering must fail cryptographic verification");
+
   const exactHead = {
     contentLength: artifact.byteLength,
     contentType: "image/jpeg",
@@ -113,7 +146,8 @@ async function main(): Promise<void> {
     metadata: {
       [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.checkpointKey]: scope.checkpointKey,
       [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerRequestSha256]: receipt.requestSha256,
-      [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256]: receipt.billingReceiptSha256,
+      [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerEvidenceSha256]:
+        planWeekProviderEvidenceSha256(receipt),
       [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactSha256]: artifact.sha256,
       [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactCreatedAt]: String(artifact.createdAt),
     },
@@ -138,7 +172,7 @@ async function main(): Promise<void> {
     artifact,
   }), false, "a replaced artifact must not satisfy readiness");
 
-  console.log("PLAN-WEEK RENDER RECEIPT PASS: exact profile, canonical hashes, and final artifact binding");
+  console.log("PLAN-WEEK RENDER RECEIPT PASS: strict Nano profile, canonical hashes, legacy reads, artifact binding");
 }
 
 main().catch((error) => {

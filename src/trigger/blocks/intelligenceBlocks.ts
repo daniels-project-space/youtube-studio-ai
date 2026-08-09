@@ -26,22 +26,34 @@ import {
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { makeRunTempDir, downloadTo, readBytes, writeBytes } from "@/lib/files";
-import { putObject, getObjectBytes } from "@/lib/storage";
+import { makeRunTempDir, readBytes } from "@/lib/files";
+import { putObject } from "@/lib/storage";
 import {
   beginThumbnailPaidWork,
   openThumbnailCheckpoint,
   saveThumbnailGenerationCheckpoint,
   saveThumbnailQaCheckpoint,
+  thumbnailNanoBananaRequestContext,
   thumbnailRequestHash,
+  type ThumbnailNanoBananaEvidence,
 } from "@/lib/thumbnailCheckpoint";
-import { titleCard, imageToJpeg, solidImage } from "@/lib/ffmpeg";
-import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
-import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
+import { titleCard, solidImage } from "@/lib/ffmpeg";
+import {
+  generateNanoBananaImageWithReceipt,
+  hasNanoBanana,
+  NANO_BANANA_THUMBNAIL_PROFILE,
+} from "@/lib/banana";
 import { craftMetadata } from "@/lib/metacraft";
 import { hasAnthropicKey } from "@/lib/anthropic";
-import { parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
-import { hasVisionKey, visionLocal } from "@/lib/vision";
+import { hasGeminiKey } from "@/lib/gemini";
+import { hasVisionKey } from "@/lib/vision";
+import {
+  renderCandidate,
+  resolveGoldenThumbnailPlaybook,
+  runThumbnailMobileReferenceQa,
+  selectGoldenThumbnailPattern,
+  type ThumbnailPlaybook,
+} from "@/lib/thumbnailLab";
 import { agentJson } from "@/agents/mastra";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { loadPerformanceContext } from "@/lib/performance";
@@ -689,13 +701,13 @@ export const thumbnailGen: Block = {
       (ctx.params["thumbnailer"] as string | undefined) ??
       "banana";
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
-    let novitaImageCostUsd = 0;
+    let nanoBananaImageCostUsd = 0;
     let checkpointGenerationCostUsd = 0;
     let checkpointQaCostUsd = 0;
     const observedConceptCost = (): number =>
       accountedModelUsageCost(ctx, ["text"], PRICE.thumbnailConceptUsd);
     const observedImageCost = (): number =>
-      ctx.imageUsageAccounting?.().costUsd ?? novitaImageCostUsd;
+      ctx.imageUsageAccounting?.().costUsd ?? nanoBananaImageCostUsd;
     const observedQaCost = (): number =>
       accountedModelUsageCost(ctx, ["vision"], PRICE.visionGraderUsd);
     const thumbnailCost = (extraCostUsd = 0): number =>
@@ -733,75 +745,17 @@ export const thumbnailGen: Block = {
       .sort((a, b) => (b.views ?? 0) - (a.views ?? 0))
       .slice(0, 4)
       .map((v) => v.thumbnailUrl as string);
-    const dnaSpecClause =
-      dnaThumb || dna?.recurringSubject
-        ? `Channel Style-DNA thumbnail spec (FOLLOW IT — this is the locked brand): ${JSON.stringify({
-            subject: dnaThumb?.subject || dna?.recurringSubject || undefined,
-            composition: dnaThumb?.composition,
-            textRule: dnaThumb?.textRule,
-            palette: dnaThumb?.palette?.length ? dnaThumb.palette : dna?.palette,
-            setting: dna?.setting,
-            colorGrade: dna?.colorGrade,
-          })}.\n`
-        : "";
-    const rulesClause = thumbnailRules.length
-      ? `Niche thumbnail rules (scraped from this niche's top performers): ${thumbnailRules.join("; ")}.\n`
-      : "";
-    /**
-     * REFERENCE + MOBILE QA — the missing half of validation: (1) downscale the
-     * candidate to real browse-strip size (~168px) and check legibility there,
-     * (2) judge it SIDE-BY-SIDE against the scraped top competitor thumbnails.
-     * A null verdict is tolerated only by an explicitly draft-quality run.
-     */
-    const referenceMobileQA = async (
-      tmp: string,
-      outJpg: string,
-    ): Promise<ThumbnailGateVerdict | null> => {
-      if (!hasVisionKey()) return null;
-      try {
-        const mobileJpg = join(tmp, "thumb_mobile.jpg");
-        await imageToJpeg(outJpg, mobileJpg, 168, 94);
-        const refPaths: string[] = [];
-        for (let i = 0; i < referenceThumbs.length; i++) {
-          try {
-            refPaths.push(await downloadTo(referenceThumbs[i], join(tmp, `ref_${i}.jpg`)));
-          } catch { /* unreachable reference — skip it */ }
+    const qaBrandContext = dnaThumb || dna?.recurringSubject || thumbnailRules.length
+      ? {
+          subject: dnaThumb?.subject || dna?.recurringSubject || undefined,
+          composition: dnaThumb?.composition,
+          textRule: dnaThumb?.textRule,
+          palette: dnaThumb?.palette?.length ? dnaThumb.palette : dna?.palette,
+          setting: dna?.setting,
+          colorGrade: dna?.colorGrade,
+          nicheResearchRules: thumbnailRules,
         }
-        const raw = await visionLocal({
-          prompt:
-            `Image 1 is a CANDIDATE YouTube thumbnail rendered at real mobile browse size (~168px wide). ` +
-            (refPaths.length
-              ? `Images 2-${refPaths.length + 1} are thumbnails of the TOP-PERFORMING videos in the same niche (the bar to beat). `
-              : "") +
-            `Video title: "${title}"${niche ? `, niche: ${niche}` : ""}. ${dnaSpecClause}${rulesClause}` +
-            `Judge the candidate against the production gate:\n` +
-            `(1) textOk: every visible word is correctly spelled and readable at THIS size.\n` +
-            `(2) faceClear: any intended face is clear and undistorted (true when no face is intended).\n` +
-            (refPaths.length
-              ? `(3) Placed next to the references, rate punch, styleMatch, and storyMatch 1-10.\n`
-              : `(3) Rate punch, styleMatch, and storyMatch 1-10.\n`) +
-            `(4) uiClean: no broken glyphs, watermarks, accidental UI, clipping, or unreadable clutter.\n` +
-            `Return ONLY JSON {"textOk":boolean,"faceClear":boolean,"punch":1-10,"styleMatch":1-10,` +
-            `"storyMatch":1-10,"uiClean":boolean,"reason":"..."}.`,
-          imagePaths: [mobileJpg, ...refPaths],
-          json: true,
-          maxTokens: 250,
-        });
-        const v = parseJsonLoose<Partial<ThumbnailGateVerdict>>(raw);
-        return {
-          textOk: v.textOk === true,
-          faceClear: v.faceClear === true,
-          punch: Number(v.punch ?? 0),
-          styleMatch: Number(v.styleMatch ?? 0),
-          storyMatch: Number(v.storyMatch ?? 0),
-          uiClean: v.uiClean === true,
-          reason: String(v.reason ?? "judge omitted its reason"),
-        };
-      } catch (e) {
-        ctx.log(`thumbnail_gen: reference/mobile QA errored (skipping): ${e instanceof Error ? e.message : e}`);
-        return null;
-      }
-    };
+      : null;
 
     const channelDoc = await loadChannel(ctx);
     // The generic card is an explicit UI preview, never a provider/gate
@@ -817,86 +771,49 @@ export const thumbnailGen: Block = {
       };
     }
 
-    const { buildStyleDnaPlaybook, renderCandidate } = await import("@/lib/thumbnailLab");
-    let playbook = (channelDoc as {
-      thumbnailPlaybook?: import("@/lib/thumbnailLab").ThumbnailPlaybook;
-    } | null)?.thumbnailPlaybook;
-    let strategy = "playbook";
-
-    // No separate "DNA-direct" renderer: missing playbooks are derived from the
-    // same Style-DNA foundation and travel through the exact same renderer.
-    if (!playbook?.patterns?.length) {
-      const fullDna = (
-        (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null | undefined) ??
-        (channelDoc as { styleDNA?: import("@/engine/creative/types").StyleDNA } | null)?.styleDNA ??
-        null
-      );
-      const familyRaw = String(
-        ctx.store["family"] ?? (channelDoc as { family?: string } | null)?.family ?? "",
-      );
-      const families = new Set([
-        "narrated_stock", "cinematic", "music_loop", "sleep", "shorts", "whiteboard", "comic",
-      ]);
-      if (
-        !fullDna?.recurringSubject?.trim() ||
-        !fullDna.thumbnail?.subject?.trim() ||
-        !Array.isArray(fullDna.thumbnail.palette) ||
-        !families.has(familyRaw)
-      ) {
-        throw new Error(
-          "thumbnail_gen: production thumbnail readiness missing (need Style DNA + family or a stored playbook)",
-        );
-      }
-      playbook = buildStyleDnaPlaybook({
-        dna: fullDna,
-        family: familyRaw as import("@/engine/families").FamilyKey,
-        channelName: String(ctx.store["channelName"] ?? channelDoc?.name ?? "channel"),
-      });
-      strategy = "style_dna_foundation";
+    const fullDna = (
+      (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null | undefined) ??
+      (channelDoc as { styleDNA?: import("@/engine/creative/types").StyleDNA } | null)?.styleDNA ??
+      null
+    );
+    const resolved = resolveGoldenThumbnailPlaybook({
+      storedPlaybook: (channelDoc as { thumbnailPlaybook?: ThumbnailPlaybook } | null)?.thumbnailPlaybook,
+      dna: fullDna,
+      family: String(ctx.store["family"] ?? (channelDoc as { family?: string } | null)?.family ?? ""),
+      channelName: String(ctx.store["channelName"] ?? channelDoc?.name ?? "channel"),
+    });
+    const playbook = resolved.playbook;
+    const strategy = resolved.strategy;
+    if (strategy === "style_dna_foundation") {
       ctx.log("thumbnail_gen: built the missing playbook from the channel's Style DNA");
     }
-
-    const bias = (ctx.params["patternBias"] as string[] | undefined)?.filter((name) =>
-      playbook.patterns.some((pattern) => pattern.name === name),
-    );
-    const pool = bias?.length
-      ? playbook.patterns.filter((pattern) => bias.includes(pattern.name))
-      : playbook.patterns;
-    const idx = [...ctx.runId].reduce((sum, char) => sum + char.charCodeAt(0), 0) % pool.length;
-    const pattern = pool[idx];
+    const selected = selectGoldenThumbnailPattern({
+      playbook,
+      seed: ctx.runId,
+      patternBias: ctx.params["patternBias"] as string[] | undefined,
+    });
+    const { pattern, patternIndex: idx } = selected;
     const energyOverride = ctx.params["thumbEnergy"] as "spectacle" | "bold" | "cozy_pop" | undefined;
     const effectivePlaybook = energyOverride ? { ...playbook, energy: energyOverride } : playbook;
 
-    // A raw video keyframe is NOT automatically safe thumbnail art. Only a
-    // future producer carrying the explicit text-free + safe-zone contract may
-    // reuse it; current f1 frames therefore generate a dedicated cheap base.
-    const sceneStillKey = ctx.store["f1Key"] as string | undefined;
-    const provenance = ctx.store["f1ThumbnailBaseProvenance"];
-    const { isThumbnailBaseProvenance } = await import("@/lib/thumbnailRenderer");
-    const verifiedSceneBase = Boolean(sceneStillKey && isThumbnailBaseProvenance(provenance));
-    if (sceneStillKey && !verifiedSceneBase) {
-      ctx.log("thumbnail_gen: f1 reuse disabled (missing text-free + safe-zone provenance)");
-    }
-
     const scriptHint = String(ctx.store["narrationText"] ?? "").slice(0, 500);
     const requestHash = thumbnailRequestHash({
-      contract: "thumbnail-gen-checkpoint-v2-attested-novita",
+      contract: "thumbnail-gen-checkpoint-v4-nano-banana-only",
       title,
       scriptHint,
       sceneMandate: dnaThumb?.subject,
       pattern,
       playbook: effectivePlaybook,
       patternIndex: idx,
-      verifiedSceneBase: verifiedSceneBase ? { sceneStillKey, provenance } : null,
-      providerRoute: {
-        provider: "novita",
-        profile: "production",
-        model: "Tongyi-MAI/Z-Image-Turbo@f332072aa78be7aecdf3ee76d5c247082da564a6",
-        fallback: false,
-      },
+      providerRoute: NANO_BANANA_THUMBNAIL_PROFILE,
     });
     const tmp = await makeRunTempDir(ctx.runId, `thumbnail-${requestHash.slice(0, 20)}`);
     const outJpg = join(tmp, "thumbnail.jpg");
+    const nanoBananaRequestContext = thumbnailNanoBananaRequestContext({
+      keyPrefix: ctx.keyPrefix,
+      runId: ctx.runId,
+      requestHash,
+    });
     let checkpoint = await openThumbnailCheckpoint({
       checkpointRoot: `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,
       requestHash,
@@ -905,8 +822,8 @@ export const thumbnailGen: Block = {
         if (!hasGeminiKey()) {
           throw new Error("thumbnail_gen: no configured concept provider");
         }
-        if (!hasNovitaRenderFarmConfig()) {
-          throw new Error("thumbnail_gen: attested Novita render farm is not configured");
+        if (!hasNanoBanana()) {
+          throw new Error("thumbnail_gen: Nano Banana is not configured");
         }
         if (quality === "production" && !hasVisionKey()) {
           throw new Error("thumbnail_gen: no configured production QA provider");
@@ -915,30 +832,37 @@ export const thumbnailGen: Block = {
     });
 
     if (checkpoint.manifest) {
+      if (
+        (checkpoint.manifest.version !== 2 || !checkpoint.manifest.providerEvidence)
+      ) {
+        throw new Error(
+          "thumbnail_gen: generated Nano Banana checkpoint is missing durable provider evidence",
+        );
+      }
       checkpointGenerationCostUsd = checkpoint.manifest.generationCostUsd;
       ctx.log(
         `thumbnail_gen: reused ${checkpoint.source} paid candidate checkpoint ${requestHash.slice(0, 12)}`,
       );
     } else {
-      let baseArt: import("@/lib/thumbnailRenderer").ThumbnailBaseArtifact | undefined;
-      if (sceneStillKey && isThumbnailBaseProvenance(provenance)) {
-        baseArt = {
-          path: await writeBytes(
-            join(tmp, "verified-scene-base.jpg"),
-            await getObjectBytes(sceneStillKey),
-          ),
-          provenance,
-        };
-      }
       checkpoint = await beginThumbnailPaidWork(checkpoint);
-      const generateScene = createAttestedNovitaImageGenerator<
-        import("@/lib/thumbnailRenderer").ThumbnailImageRequest
-      >({
-        prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/thumbnail/${requestHash}`,
-        id: () => `candidate-${idx}`,
-        profileId: "production",
-        onReceipt: (receipt) => { novitaImageCostUsd += receipt.costUsd; },
-      });
+      let nanoBananaProviderEvidence: ThumbnailNanoBananaEvidence | undefined;
+      const generateScene = async (
+        request: import("@/lib/thumbnailRenderer").ThumbnailImageRequest,
+      ): Promise<Buffer> => {
+        const generated = await generateNanoBananaImageWithReceipt({
+          prompt: request.prompt,
+          aspectRatio: request.aspectRatio,
+          maxProviderAttempts: 1,
+          idempotencyContext: nanoBananaRequestContext,
+        });
+        nanoBananaImageCostUsd += generated.receipt.costUsd;
+        nanoBananaProviderEvidence = {
+          version: "thumbnail-nano-banana-evidence/v1",
+          requestContext: nanoBananaRequestContext,
+          receipt: generated.receipt,
+        };
+        return generated.bytes;
+      };
       await renderCandidate({
         pattern,
         title,
@@ -950,7 +874,6 @@ export const thumbnailGen: Block = {
         generateScene,
         log: ctx.log,
         ...(dnaThumb?.subject ? { sceneMandate: dnaThumb.subject } : {}),
-        ...(baseArt ? { baseArt } : {}),
       });
       // Persist the whole authoritative generation spend: the exact concept
       // token usage plus the actual image counter delta. This local manifest is
@@ -959,6 +882,7 @@ export const thumbnailGen: Block = {
       checkpoint = await saveThumbnailGenerationCheckpoint(
         checkpoint,
         checkpointGenerationCostUsd,
+        nanoBananaProviderEvidence,
       );
     }
 
@@ -970,8 +894,9 @@ export const thumbnailGen: Block = {
       quality,
       title,
       niche,
-      dnaSpecClause,
-      rulesClause,
+      qaBrandContext,
+      playbookRules: effectivePlaybook.rules,
+      playbookAvoid: effectivePlaybook.avoid,
       referenceThumbs,
     });
     let refQA: ThumbnailGateVerdict | null;
@@ -998,7 +923,23 @@ export const thumbnailGen: Block = {
       }
       ctx.log("thumbnail_gen: reused checkpointed mobile/reference QA verdict");
     } else {
-      refQA = await referenceMobileQA(tmp, outJpg);
+      try {
+        refQA = await runThumbnailMobileReferenceQa({
+          outJpg,
+          tmpDir: tmp,
+          title,
+          niche,
+          playbook: effectivePlaybook,
+          referenceUrls: referenceThumbs,
+          brandContext: qaBrandContext,
+          log: ctx.log,
+        });
+      } catch (error) {
+        ctx.log(
+          `thumbnail_gen: reference/mobile QA errored: ${error instanceof Error ? error.message : error}`,
+        );
+        refQA = null;
+      }
       checkpointQaCostUsd = observedQaCost();
       checkpoint = await saveThumbnailQaCheckpoint(checkpoint, {
         requestHash: qaRequestHash,
@@ -1011,12 +952,28 @@ export const thumbnailGen: Block = {
     const publishable = quality === "production" ? true : passed;
     const finalStrategy = publishable ? strategy : "playbook_belowbar";
     const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-    await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
+    const providerEvidence = checkpoint.manifest?.version === 2
+      ? checkpoint.manifest.providerEvidence
+      : undefined;
+    await putObject(thumbnailKey, await readBytes(outJpg), {
+      contentType: "image/jpeg",
+      metadata: {
+        "thumbnail-request-sha256": requestHash,
+        ...(providerEvidence ? {
+          "thumbnail-provider-request-sha256": providerEvidence.receipt.providerRequestSha256,
+          "thumbnail-provider-response-sha256": providerEvidence.receipt.responseSha256,
+          "thumbnail-provider-route": providerEvidence.receipt.route,
+        } : {}),
+      },
+    });
     await recordAsset(ctx, "thumbnail", thumbnailKey, {
       strategy: finalStrategy,
       pattern: pattern.name,
       publishable,
       thumbnailTitle: title,
+      providerRoute: providerEvidence?.receipt.route ?? "verified-video-still",
+      providerRequestSha256: providerEvidence?.receipt.providerRequestSha256,
+      providerResponseSha256: providerEvidence?.receipt.responseSha256,
     });
     ctx.log(
       `thumbnail_gen: ${finalStrategy} thumbnail rendered${refQA ? ` — ref QA: ${refQA.reason}` : " (draft, unverified)"}`,

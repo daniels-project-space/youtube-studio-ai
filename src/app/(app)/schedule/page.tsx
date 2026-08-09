@@ -97,9 +97,6 @@ export default function SchedulePage() {
     [channelById, channelColors, effectiveScope, plan, publishedHistory, todayMs],
   );
 
-  const viewedEvents = calendar.flat.filter(
-    (event) => event.date.getFullYear() === view.getFullYear() && event.date.getMonth() === view.getMonth(),
-  );
   const plannedEvents = calendar.flat.filter((event) => event.type === "planned");
   const upcoming = plannedEvents
     .filter((event) => event.date.getTime() >= today.getTime())
@@ -107,17 +104,12 @@ export default function SchedulePage() {
     .slice(0, 12);
   const weekEnd = new Date(today.getFullYear(), today.getMonth(), today.getDate() + 7).getTime();
   const summary = {
-    planned: viewedEvents.filter((event) => event.type === "planned").length,
-    published: viewedEvents.filter(
-      (event) => event.type === "published" && event.status !== "scheduled",
-    ).length,
     ready: plannedEvents.filter((event) => event.readiness === "ready").length,
     attention: plannedEvents.filter((event) => event.readiness === "attention").length,
     nextSevenDays: calendar.flat.filter((event) => {
       const timestamp = event.date.getTime();
       return timestamp >= today.getTime() && timestamp < weekEnd;
     }).length,
-    activeCadences: visibleChannels.filter((channel) => channel.schedule?.enabled).length,
   };
   const loading = plan === undefined || publishedHistory === undefined || channels === undefined;
 
@@ -154,27 +146,15 @@ export default function SchedulePage() {
 
   return (
     <>
-      <PageHeader
-        title="Publishing calendar"
-        subtitle="One live view of every channel's cadence, production readiness and published history"
-      />
+      <PageHeader title="Schedule" />
 
       <section
         className={`${styles.controlDeck} glass`}
         aria-label="Calendar scope and summary"
         aria-busy={loading}
       >
-        <div className={styles.scopeControl}>
-          <div>
-            <span className={styles.eyebrow}>Calendar scope</span>
-            <strong>
-              {loading
-                ? "Loading calendar…"
-                : effectiveScope === "all"
-                  ? "All-channel overlay"
-                  : channelById.get(effectiveScope)?.name}
-            </strong>
-          </div>
+        <label className={styles.scopeControl}>
+          <span>Channel</span>
           <select
             className={styles.scopeSelect}
             value={effectiveScope}
@@ -182,21 +162,18 @@ export default function SchedulePage() {
             aria-label="Filter calendar by channel"
             disabled={loading}
           >
-            <option value="all">All channels · overlay</option>
+            <option value="all">All channels</option>
             {(channels ?? []).map((channel) => <option key={channel._id} value={channel._id}>{channel.name}</option>)}
           </select>
-        </div>
+        </label>
         <div className={styles.metrics}>
-          <Metric value={loading ? "—" : summary.planned} label={offset === 0 ? "Planned this month" : "Planned in view"} />
-          <Metric value={loading ? "—" : summary.published} label={offset === 0 ? "Published this month" : "Published in view"} />
-          <Metric value={loading ? "—" : summary.ready} label="Ready in queue" tone={loading ? undefined : "ok"} />
+          <Metric value={loading ? "—" : summary.nextSevenDays} label="Next 7 days" />
+          <Metric value={loading ? "—" : summary.ready} label="Ready" tone={loading ? undefined : "ok"} />
           <Metric
             value={loading ? "—" : summary.attention}
-            label="Need attention"
+            label="Attention"
             tone={!loading && summary.attention ? "warn" : undefined}
           />
-          <Metric value={loading ? "—" : summary.nextSevenDays} label="Next 7 days" />
-          <Metric value={loading ? "—" : summary.activeCadences} label="Active cadences" />
         </div>
       </section>
 

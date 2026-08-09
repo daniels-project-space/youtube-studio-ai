@@ -544,7 +544,7 @@ function configurationSpecificCostEnvelopes(): void {
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
-  assert.equal(manifests.length, 45, "all 45 executable blocks must have manifests");
+  assert.equal(manifests.length, 49, "all 49 executable blocks must have manifests");
   assert.deepEqual(
     manifests.filter((manifest) => manifest.certification.status === "legacy").map((manifest) => manifest.id),
     [],

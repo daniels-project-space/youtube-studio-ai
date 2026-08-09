@@ -21,6 +21,11 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline, preflight } from "@/engine/validate";
 import {
+  assertPipelineMatchesContentLane,
+  injectContentLaneIntoPipeline,
+  resolveContentLane,
+} from "@/engine/contentLane";
+import {
   compilePipeline,
   completePipelineForPolicy,
   materializeRuntimePipelineParams,
@@ -371,6 +376,14 @@ export const runPipelineTask = task({
     let entries = (
       durableInvocation?.entries ?? payload.pipelineOverride ?? channel.pipeline ?? []
     ) as PipelineEntry[];
+    // A run may use an admitted one-off override, but it may never exchange the
+    // channel's visual engine. The persisted lock is the authority; legacy rows
+    // are safely derived from their family/pipeline for this invocation.
+    const contentLane = resolveContentLane({
+      stored: (channel as { contentLane?: unknown }).contentLane,
+      family: (channel as { family?: unknown }).family,
+      pipeline: (channel.pipeline ?? []) as PipelineEntry[],
+    });
     if (!durableInvocation && payload.pipelineOverride) {
       console.log(`[run-pipeline] using one-off pipelineOverride (${entries.length} blocks) — channel config untouched`);
     }
@@ -503,6 +516,11 @@ export const runPipelineTask = task({
         );
       }
 
+      assertPipelineMatchesContentLane(contentLane, entries);
+      if (!durableInvocation) {
+        entries = injectContentLaneIntoPipeline(entries, contentLane);
+      }
+
       // Compile the exact frozen entries. On a retry, a changed/revoked module
       // implementation must fail closed before any stage/provider executes.
       const resolved = validatePipeline(entries);
@@ -536,6 +554,7 @@ export const runPipelineTask = task({
             : {}),
           styleDNA: (channel as { styleDNA?: unknown }).styleDNA ?? null,
           qualityBar: (channel as { qaRubric?: unknown }).qaRubric ?? null,
+          contentLane,
           ...(scheduledPlan ? scheduledPlanSeed(scheduledPlan) : {}),
         };
         if (payload.reuse) {
@@ -567,7 +586,12 @@ export const runPipelineTask = task({
             )
           : channel.budget ?? 0,
         keyPrefix: payload.probeInvocationContext?.keyPrefix ?? channelPrefix(ownerId, channel.slug),
-        remoteBlocks: ["timeline_assemble"],
+        // Both modules create a full-resolution master and must run on the
+        // durable large-2x render worker. Keep the list derived from the
+        // frozen pipeline so a Short never authorizes an unrelated module.
+        remoteBlocks: entries
+          .filter((entry) => entry.block === "timeline_assemble" || entry.block === "documotion_short")
+          .map((entry) => entry.block),
         defaultRetries: 2,
         compilationFingerprint: compilation.fingerprint,
         compilationPolicyId: compilation.policyId,

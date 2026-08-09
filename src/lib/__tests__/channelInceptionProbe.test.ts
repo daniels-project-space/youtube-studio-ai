@@ -25,6 +25,7 @@ import {
 } from "@/lib/studioActionApproval";
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import { normalizePipelineInvocationSnapshot } from "@/lib/pipelineInvocationSnapshot";
+import { buildQualityEvidence } from "@/engine/qualityEvidence";
 
 const originalSigningKey = process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY;
 process.env.STUDIO_CONVEX_JWT_PRIVATE_KEY = "probe-test-signing-key";
@@ -110,6 +111,20 @@ assert.equal(lowBudgetClaim.ledger.costReservations.at(-1)?.maximumCostUsd, 1);
 
 const passingQaOutput = {
   qaPassed: true,
+  qualityEvidence: buildQualityEvidence({
+    episode: {
+      lane: { key: "narrated_documentary", renderer: "stock_footage" },
+      topic: "A frozen probe episode",
+      durationSec: 61,
+      story: { source: "test", beatCount: 4, shotCount: 8, coverageRatio: 1 },
+    },
+    technical: { passed: true, evaluator: "test", evidence: ["ffprobe"] },
+    visual: { passed: true, score: 8, minimumScore: 6, evaluator: "test", evidence: ["frames"] },
+    temporal: { passed: true, evaluator: "test", evidence: ["samples"] },
+    narrative: { passed: true, evaluator: "test", evidence: ["spec"] },
+    audio: { passed: true, evaluator: "test", evidence: ["meters"] },
+    brand: { passed: true, evaluator: "test", evidence: ["identity"] },
+  }),
   qaReport: {
     structural: { ok: true, durationSec: 61, width: 1920, height: 1080 },
     lengthMatch: { ok: true, ratio: 1.01 },
@@ -127,6 +142,14 @@ assert.equal(
   assessChannelInceptionProbeQuality({ qaPassed: true }).status,
   "rejected",
   "technical completion without the golden QA report must fail closed",
+);
+assert.match(
+  assessChannelInceptionProbeQuality({
+    qaPassed: true,
+    qaReport: passingQaOutput.qaReport,
+  }).reasons.join(" "),
+  /typed final quality evidence is missing/,
+  "a probe cannot be promoted from legacy opaque QA data",
 );
 assert.match(
   assessChannelInceptionProbeQuality({

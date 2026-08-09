@@ -1,0 +1,472 @@
+.page {
+  max-width: 1180px;
+  margin: 0 auto;
+}
+
+.scopeCard {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.85rem 1rem;
+  margin-bottom: 0.85rem;
+}
+
+.scopeCard > div {
+  display: grid;
+  gap: 0.18rem;
+}
+
+.scopeCard strong {
+  font-size: 0.98rem;
+}
+
+.eyebrow {
+  color: var(--color-muted);
+  font-size: 0.68rem;
+  font-weight: 700;
+  letter-spacing: 0.09em;
+  text-transform: uppercase;
+}
+
+.tabs {
+  display: flex;
+  gap: 0.35rem;
+  margin-bottom: 1.25rem;
+  padding: 0.28rem;
+  width: max-content;
+  max-width: 100%;
+  overflow-x: auto;
+  border: 1px solid var(--color-border);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-surface) 78%, transparent);
+}
+
+.tab {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+  min-height: 34px;
+  padding: 0.42rem 0.78rem;
+  border: 0;
+  border-radius: 9px;
+  color: var(--color-muted);
+  background: transparent;
+  font: inherit;
+  font-size: 0.78rem;
+  font-weight: 650;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.tab span {
+  min-width: 18px;
+  padding: 0.08rem 0.32rem;
+  border-radius: 999px;
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  font-family: var(--font-mono);
+  font-size: 0.64rem;
+  text-align: center;
+}
+
+.tabActive {
+  color: var(--color-fg);
+  background: var(--color-surface);
+  box-shadow: 0 1px 8px rgba(0, 0, 0, 0.18);
+}
+
+.content,
+.stack,
+.list {
+  display: grid;
+  gap: 1rem;
+}
+
+.twoColumn {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 1rem;
+}
+
+.card {
+  display: grid;
+  align-content: start;
+  gap: 1rem;
+  padding: 1.1rem;
+}
+
+.cardHeader,
+.queueTitle,
+.sectionHeading {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 1rem;
+}
+
+.cardHeader h2,
+.sectionHeading h2 {
+  margin: 0.16rem 0 0;
+  font-size: 1rem;
+}
+
+.cardHeader p,
+.queueCard p,
+.historyRows p {
+  margin: 0.3rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.76rem;
+  line-height: 1.45;
+}
+
+.facts {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+  margin: 0;
+}
+
+.facts div {
+  display: grid;
+  gap: 0.16rem;
+  min-width: 0;
+  padding: 0.72rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: color-mix(in srgb, var(--color-surface) 72%, transparent);
+}
+
+.facts dt {
+  color: var(--color-faint);
+  font-size: 0.66rem;
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.facts dd {
+  margin: 0;
+  overflow: hidden;
+  color: var(--color-fg);
+  font-size: 0.8rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.state,
+.count {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  flex: 0 0 auto;
+  min-height: 24px;
+  padding: 0.2rem 0.52rem;
+  border: 1px solid var(--color-border);
+  border-radius: 999px;
+  color: var(--color-muted);
+  background: var(--color-surface);
+  font-family: var(--font-mono);
+  font-size: 0.65rem;
+  text-transform: uppercase;
+}
+
+.stateOk {
+  color: var(--color-ok);
+  border-color: color-mix(in srgb, var(--color-ok) 38%, var(--color-border));
+  background: color-mix(in srgb, var(--color-ok) 10%, transparent);
+}
+
+.stateBad {
+  color: var(--color-failed);
+  border-color: color-mix(
+    in srgb,
+    var(--color-failed) 38%,
+    var(--color-border)
+  );
+}
+
+.actions,
+.formRow,
+.checks,
+.dayPicker {
+  display: flex;
+  align-items: center;
+  flex-wrap: wrap;
+  gap: 0.55rem;
+}
+
+.formRow {
+  align-items: flex-end;
+}
+
+.formGrid {
+  display: grid;
+  grid-template-columns: repeat(4, minmax(140px, 1fr));
+  gap: 0.75rem;
+}
+
+.field {
+  display: grid;
+  gap: 0.38rem;
+  min-width: 160px;
+  color: var(--color-muted);
+  font-size: 0.72rem;
+}
+
+.input,
+.select {
+  min-height: 38px;
+  padding: 0.48rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  outline: none;
+  color: var(--color-fg);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: 0.8rem;
+}
+
+.input:focus,
+.select:focus {
+  border-color: var(--color-border-strong);
+  box-shadow: 0 0 0 3px var(--color-accent-soft);
+}
+
+.scopeCard .select {
+  width: min(320px, 48vw);
+}
+
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  min-height: 36px;
+  padding: 0.44rem 0.72rem;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  color: var(--color-fg);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: 0.74rem;
+  font-weight: 650;
+  text-decoration: none;
+  cursor: pointer;
+}
+
+.button:hover:not(:disabled),
+.tab:hover {
+  border-color: var(--color-border-strong);
+  color: var(--color-accent);
+}
+
+.button:disabled {
+  opacity: 0.55;
+  cursor: wait;
+}
+
+.primaryButton {
+  color: #0a0a0b;
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.primaryButton:hover:not(:disabled) {
+  color: #0a0a0b;
+}
+
+.dangerButton {
+  color: var(--color-failed);
+  border-color: color-mix(
+    in srgb,
+    var(--color-failed) 34%,
+    var(--color-border)
+  );
+}
+
+.day {
+  min-width: 44px;
+  min-height: 34px;
+  padding: 0.34rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-muted);
+  background: var(--color-surface);
+  font: inherit;
+  font-size: 0.7rem;
+  cursor: pointer;
+}
+
+.dayActive {
+  color: #0a0a0b;
+  border-color: var(--color-accent);
+  background: var(--color-accent);
+}
+
+.checks {
+  color: var(--color-muted);
+  font-size: 0.76rem;
+}
+
+.checks label {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.42rem;
+}
+
+.sectionHeading {
+  align-items: center;
+  margin: 0.2rem 0 0.7rem;
+}
+
+.queueCard {
+  display: grid;
+  gap: 0.65rem;
+  padding: 0.9rem 1rem;
+}
+
+.queueTitle strong {
+  font-size: 0.88rem;
+  line-height: 1.35;
+}
+
+.notes {
+  color: var(--color-fg) !important;
+}
+
+.policyNote {
+  margin: 0;
+  padding: 0.58rem 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-muted);
+  background: rgba(255, 255, 255, 0.018);
+  font-size: 0.7rem;
+  line-height: 1.45;
+}
+
+.policyNote[data-operational="true"] {
+  border-color: color-mix(in srgb, var(--color-ok) 24%, var(--color-border));
+  color: color-mix(in srgb, var(--color-ok) 78%, var(--color-muted));
+}
+
+.code {
+  max-height: 112px;
+  overflow: auto;
+  padding: 0.65rem;
+  border: 1px solid var(--color-border);
+  border-radius: 8px;
+  color: var(--color-muted);
+  background: color-mix(in srgb, var(--color-bg) 76%, transparent);
+  font-size: 0.68rem;
+  line-height: 1.45;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+
+.history {
+  padding: 0.85rem 1rem;
+}
+
+.history summary {
+  color: var(--color-muted);
+  font-size: 0.78rem;
+  font-weight: 650;
+  cursor: pointer;
+}
+
+.historyRows {
+  display: grid;
+  gap: 0.1rem;
+  margin-top: 0.75rem;
+}
+
+.historyRows div {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.52rem 0;
+  border-top: 1px solid var(--color-border);
+  font-size: 0.74rem;
+}
+
+.historyRows small {
+  flex: 0 0 auto;
+  color: var(--color-muted);
+}
+
+.error,
+.success {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  margin-bottom: 0.85rem;
+  padding: 0.65rem 0.8rem;
+  border: 1px solid
+    color-mix(in srgb, var(--color-failed) 42%, var(--color-border));
+  border-radius: 10px;
+  color: var(--color-failed);
+  background: color-mix(in srgb, var(--color-failed) 7%, var(--color-surface));
+  font-size: 0.76rem;
+}
+
+.success {
+  border-color: color-mix(in srgb, var(--color-ok) 42%, var(--color-border));
+  color: var(--color-ok);
+  background: color-mix(in srgb, var(--color-ok) 7%, var(--color-surface));
+}
+
+.error button,
+.success button {
+  border: 0;
+  color: inherit;
+  background: transparent;
+  font-size: 1rem;
+  cursor: pointer;
+}
+
+.empty {
+  padding: 1.2rem;
+  color: var(--color-muted);
+  font-size: 0.8rem;
+}
+
+@media (max-width: 900px) {
+  .twoColumn {
+    grid-template-columns: 1fr;
+  }
+
+  .formGrid {
+    grid-template-columns: repeat(2, minmax(130px, 1fr));
+  }
+}
+
+@media (max-width: 620px) {
+  .scopeCard {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .scopeCard .select {
+    width: 100%;
+  }
+
+  .tabs {
+    width: 100%;
+  }
+
+  .tab {
+    flex: 1 0 auto;
+  }
+
+  .facts,
+  .formGrid {
+    grid-template-columns: 1fr;
+  }
+
+  .historyRows div {
+    align-items: flex-start;
+    flex-direction: column;
+    gap: 0.18rem;
+  }
+}

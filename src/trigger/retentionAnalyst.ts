@@ -24,6 +24,7 @@ import {
 } from "@/lib/youtubeConnector";
 import { YOUTUBE_ANALYTICS_SCOPE } from "@/lib/publishingPolicy";
 import { claudeJson } from "@/lib/anthropic";
+import { ShortRetentionManifestSchema } from "@/engine/documentaryCollageShort";
 
 interface Drop {
   atRatio: number;
@@ -66,7 +67,16 @@ export const retentionAnalystTask = task({
     if (!hasAnalyticsAccess(connector.refreshToken)) {
       return { ok: false, reason: "no channel-bound yt-analytics OAuth access" };
     }
-    const durationSec = Number(out("timeline_assemble")["videoDurationSec"] ?? 0);
+    const shortRetention = ShortRetentionManifestSchema.safeParse(
+      out("short_strategy")["shortRetentionManifest"],
+    );
+    // Native documentary Shorts have no timeline_assemble stage. Their locked
+    // beat map is the ground truth, and must win over the long-form fallback.
+    const durationSec = Number(
+      shortRetention.success
+        ? shortRetention.data.durationSec
+        : out("documotion_short")["videoDurationSec"] ?? out("timeline_assemble")["videoDurationSec"] ?? 0,
+    );
     const introSec = Number(out("intro_card")["introSec"] ?? 0);
     const timings = (out("narration_tts")["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined) ?? [];
     const chapterPlan = (out("narration_tts")["chapterPlan"] as { kind: string; durSec: number; heading?: string }[] | undefined) ?? [];
@@ -94,6 +104,19 @@ export const retentionAnalystTask = task({
     // 3. Steep drops: ≥4% of REMAINING viewers lost within one curve step.
     const describeAt = (sec: number): string[] => {
       const ctx: string[] = [];
+      if (shortRetention.success) {
+        const frame = Math.round(sec * shortRetention.data.fps);
+        const beat = shortRetention.data.beats.find(
+          (candidate) => frame >= candidate.startFrame && frame < candidate.endFrame,
+        );
+        if (beat) {
+          ctx.push(`beat:${beat.id}`);
+          ctx.push(`purpose:${beat.purpose}`);
+          ctx.push(`motion:${beat.motionRecipe}`);
+          if (beat.claimIds.length) ctx.push(`claims:${beat.claimIds.join(",")}`);
+          if (beat.assetProvenanceIds.length) ctx.push(`asset-provenance:${beat.assetProvenanceIds.join(",")}`);
+        }
+      }
       if (sec < introSec) ctx.push("intro title card");
       const sent = timings.find((t) => sec >= introSec + t.start && sec <= introSec + t.end);
       if (sent) ctx.push(`narration: "${sent.text.slice(0, 90)}"`);
@@ -121,6 +144,11 @@ export const retentionAnalystTask = task({
       }
     }
     drops.sort((a, b) => b.lostPctOfRemaining - a.lostPctOfRemaining);
+    const affectedShortBeatIds = [...new Set(
+      drops.flatMap((drop) => drop.context
+        .filter((entry) => entry.startsWith("beat:"))
+        .map((entry) => entry.slice("beat:".length))),
+    )];
     const hookHold = curve.find((p) => p.ratio >= 0.05)?.watch ?? 1; // survivors at 5%
     log(`curve: ${curve.length} pts | hook hold ${(hookHold * 100).toFixed(0)}% | ${drops.length} steep drop(s) | avgView ${summary?.avgViewPct?.toFixed(1) ?? "?"}%`);
 
@@ -158,7 +186,16 @@ export const retentionAnalystTask = task({
     // explicitly approves activation.
     if (!payload.dryRun && playbook) {
       const entries = learnings.length
-        ? learnings.map((l) => ({ ...l, videoId, runId: payload.runId, deviceUsed, at: Date.now() }))
+        ? learnings.map((l) => ({
+            ...l,
+            videoId,
+            runId: payload.runId,
+            deviceUsed,
+            ...(shortRetention.success
+              ? { lane: shortRetention.data.lane, shortBeatIds: affectedShortBeatIds }
+              : {}),
+            at: Date.now(),
+          }))
         : [{ rule: "(no confident rule — data too thin)", evidence: "analysis ran; digest ignores low confidence", confidence: "low" as const, videoId, runId: payload.runId, deviceUsed, at: Date.now() }];
       const existing = (playbook["retentionLearnings"] as unknown[] | undefined) ?? [];
       const updated = {
@@ -182,6 +219,13 @@ export const retentionAnalystTask = task({
           nextValue: updated,
           diagnosis: analysis.diagnosis,
           runId: payload.runId,
+          ...(shortRetention.success
+            ? {
+                lane: shortRetention.data.lane,
+                shortBeatIds: affectedShortBeatIds,
+                shortBeatRetention: shortRetention.data.beats,
+              }
+            : {}),
         },
         offlineEvaluation: {
           method: "settled_retention_curve_evidence_v1",

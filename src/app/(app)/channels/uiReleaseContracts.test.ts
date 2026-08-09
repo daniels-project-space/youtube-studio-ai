@@ -5,6 +5,11 @@ import { join } from "node:path";
 const root = process.cwd();
 const wizard = readFileSync(join(root, "src/app/(app)/channels/new/page.tsx"), "utf8");
 const detail = readFileSync(join(root, "src/app/(app)/channels/[slug]/page.tsx"), "utf8");
+const channels = readFileSync(join(root, "src/app/(app)/channels/page.tsx"), "utf8");
+const overview = readFileSync(join(root, "src/app/(app)/page.tsx"), "utf8");
+const recentVideos = readFileSync(join(root, "src/components/RecentVideos.tsx"), "utf8");
+const statusBanner = readFileSync(join(root, "src/components/StatusBanner.tsx"), "utf8");
+const settings = readFileSync(join(root, "src/app/(app)/settings/page.tsx"), "utf8");
 const sidebar = readFileSync(join(root, "src/components/Sidebar.tsx"), "utf8");
 const scheduleCss = readFileSync(join(root, "src/app/(app)/schedule/schedule.module.css"), "utf8");
 
@@ -19,6 +24,24 @@ assert.match(detail, /channel-inception-stage-error[\s\S]*role="alert"/);
 
 assert.doesNotMatch(sidebar, /health-dot-ready/);
 assert.doesNotMatch(sidebar, /Live production workspace/);
+assert.doesNotMatch(sidebar, /href:\s*["']\/runs["']/);
+assert.doesNotMatch(sidebar, /href:\s*["']\/seo["']/);
+assert.doesNotMatch(sidebar, /Novita Render/);
+assert.match(sidebar, /MOBILE_PRIMARY_COUNT/);
+assert.match(channels, /channel-live-state/);
+assert.match(channels, /link\.status === "active"/);
+assert.match(channels, /link\.scopeHealth !== "partial"/);
+assert.match(channels, /\?tab=seo/);
+assert.match(detail, /Refresh intelligence/);
+assert.match(overview, /item\.status === "ready"/);
+assert.doesNotMatch(overview, /need review/);
+assert.match(overview, /<details className=\{`\$\{styles\.runsWidget\}/);
+assert.match(statusBanner, /run\.channelSlug === channelSlug/);
+assert.match(recentVideos, /Boolean\(video\.videoKey\)/);
+assert.match(recentVideos, /R2VideoDialog/);
+assert.doesNotMatch(recentVideos, /youtube\.com\/watch/);
+assert.match(settings, /\/api\/channel-settings/);
+assert.match(settings, /\/api\/youtube-revoke/);
 
 function remValue(selector: string, property: "font" | "font-size") {
   const escaped = selector.replace(/[.*+?^${}()|[\]\\]/g, "\\$&");

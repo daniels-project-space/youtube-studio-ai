@@ -16,19 +16,23 @@ import { hasGeminiKey } from "@/lib/gemini";
 import { optimizeTopics } from "@/lib/topicOptimizer";
 import { loadLedger } from "@/lib/performance";
 import { detectFollowups } from "@/lib/followups";
-import { renderThumbnail } from "@/lib/thumbnailRenderer";
 import {
-  createAttestedNovitaImageGenerator,
-  type NovitaImageProviderReceipt,
-} from "@/lib/novitaMedia";
-import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
-import type { ThumbnailPlaybook } from "@/lib/thumbnailLab";
-import type { ThumbnailTextZone } from "@/lib/thumbnailLayout";
+  generateNanoBananaImageWithReceipt,
+  hasNanoBanana,
+} from "@/lib/banana";
+import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
+import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
 import {
-  resolveThumbnailStyle,
-  styleFromDNA,
-  shortTitleFallback,
-} from "@/lib/thumbnailFormula";
+  renderCandidate,
+  resolveGoldenThumbnailPlaybook,
+  runThumbnailMobileReferenceQa,
+  selectGoldenThumbnailPattern,
+  type ThumbnailPlaybook,
+} from "@/lib/thumbnailLab";
+import { hasAnthropicKey } from "@/lib/anthropic";
+import { hasVisionKey } from "@/lib/vision";
+import { assertThumbnailGate } from "@/engine/qualityPolicy";
+import { thumbnailRequestHash } from "@/lib/thumbnailCheckpoint";
 import { readFileSync, mkdirSync } from "node:fs";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
@@ -39,14 +43,20 @@ import {
   PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA,
   makePlanWeekArtifactReceipt,
   makePlanWeekProviderRenderReceipt,
+  planWeekArtifactHeadMatches,
+  planWeekNanoBananaRequestContext,
+  planWeekProviderEvidenceSha256,
   planWeekProviderReceiptImageUsage,
+  samePlanWeekProviderRenderReceipt,
   validatePlanWeekProviderRenderReceipt,
+  verifyPlanWeekProviderReceiptCryptography,
   type PlanWeekArtifactReceipt,
+  type PlanWeekNanoBananaProviderRenderReceipt,
   type PlanWeekProviderRenderReceipt,
+  type PlanWeekRenderScope,
 } from "@/lib/planWeekRenderReceipt";
 import {
   PLAN_WEEK_CONTRACT_VERSION,
-  PLAN_WEEK_IMAGE_UNIT_USD,
   buildPlanWeekTopicCheckpoint,
   buildPlanWeekUsageCheckpoint,
   dedupePlanCandidates,
@@ -58,6 +68,18 @@ import {
   type PlanWeekUsageCheckpoint,
   type PlanWeekTopicCheckpoint,
 } from "@/lib/planWeekBatch";
+import {
+  PLAN_WEEK_RECOVERY_GUARD_VERSION,
+  assertExactFailedPlanWeekRecoveryState,
+  assertPlanWeekRecoveryRuntime,
+  type PlanWeekRecoveryExpectation,
+} from "@/lib/planWeekRecoveryContract";
+import {
+  makePlanWeekThumbnailQaCheckpoint,
+  planWeekThumbnailQaCheckpointSha256,
+  validatePlanWeekThumbnailQaCheckpoint,
+  type PlanWeekThumbnailQaCheckpoint,
+} from "@/lib/planWeekThumbnailQa";
 
 export interface PlanWeekArgs {
   ownerId: string;
@@ -67,11 +89,74 @@ export interface PlanWeekArgs {
   budgetCapUsd?: number;
   /** Stable caller key; Trigger run identity is the fallback for automatic retries. */
   requestKey?: string;
+  /** Fail-closed contract for an audited, already-existing failed batch. */
+  recovery?: PlanWeekRecoveryExpectation;
 }
 
 class AmbiguousTopicCheckpointError extends Error {}
 class AmbiguousThumbnailCheckpointError extends Error {}
+class AmbiguousThumbnailSourceCheckpointError extends Error {}
+class AmbiguousThumbnailQaCheckpointError extends Error {}
 class InvalidPlanCheckpointError extends Error {}
+
+function exactRecoveryInvocation(
+  payload: PlanWeekArgs,
+  runVersion: unknown,
+): {
+  recovery: PlanWeekRecoveryExpectation;
+  requestKey: string;
+  count: number;
+} {
+  if (!payload.recovery) throw new Error("plan-week recovery guard: recovery payload is required");
+  assertPlanWeekRecoveryRuntime({ recovery: payload.recovery, runVersion });
+  const requestKey = payload.requestKey?.trim() ?? "";
+  const count = payload.count;
+  if (!requestKey) throw new Error("plan-week recovery guard: pinned request key is required");
+  if (!Number.isInteger(count) || count !== payload.recovery.itemIds.length) {
+    throw new Error("plan-week recovery guard: count does not match the exact item list");
+  }
+  return { recovery: payload.recovery, requestKey, count };
+}
+
+/**
+ * Zero-provider deployment/live-state probe. The launcher pins this and the
+ * paid task to the same deployment version; Convex repeats the state proof in
+ * the serializable reservation mutation.
+ */
+export const planWeekAheadRecoveryPreflightTask = task({
+  id: "plan-week-ahead-recovery-preflight",
+  maxDuration: 60,
+  retry: { maxAttempts: 1 },
+  run: async (payload: PlanWeekArgs, { ctx }) => {
+    await bootstrapSecrets(() => undefined);
+    const invocation = exactRecoveryInvocation(payload, ctx.run.version);
+    const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
+    if (!url) throw new Error("plan-week recovery guard: NEXT_PUBLIC_CONVEX_URL is not configured");
+    const convex = new ConvexHttpClient(url);
+    const state = await convex.query(api.contentPlan.getPlanBatchRecoveryState, {
+      ownerId: payload.ownerId,
+      secret: requireInternalQuerySecret(),
+      batchId: invocation.recovery.batchId as Id<"planBatches">,
+      itemIds: invocation.recovery.itemIds as Id<"contentPlan">[],
+    });
+    assertExactFailedPlanWeekRecoveryState({
+      recovery: invocation.recovery,
+      ownerId: payload.ownerId,
+      channelId: payload.channelId,
+      requestKey: invocation.requestKey,
+      requestedCount: invocation.count,
+      state,
+    });
+    return {
+      ok: true,
+      guardVersion: PLAN_WEEK_RECOVERY_GUARD_VERSION,
+      taskVersion: ctx.run.version,
+      providerRoute: NANO_BANANA_THUMBNAIL_PROFILE.route,
+      batchId: invocation.recovery.batchId,
+      itemIds: invocation.recovery.itemIds,
+    };
+  },
+});
 
 export const planWeekAheadTask = task({
   id: "plan-week-ahead",
@@ -80,6 +165,7 @@ export const planWeekAheadTask = task({
   run: async (payload: PlanWeekArgs, { ctx }) => {
     const log = (m: string, x?: Record<string, unknown>) => console.log(`[plan-week-ahead] ${m}`, x ?? "");
     await bootstrapSecrets(log);
+    if (payload.recovery) exactRecoveryInvocation(payload, ctx.run.version);
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) abortTask("NEXT_PUBLIC_CONVEX_URL is not configured");
     const convex = new ConvexHttpClient(url);
@@ -116,15 +202,28 @@ export const planWeekAheadTask = task({
           contractVersion: PLAN_WEEK_CONTRACT_VERSION,
           requestedCount: count,
           reservedCostUsd: reservation.totalUsd,
+          ...(payload.recovery ? {
+            recovery: {
+              guardVersion: payload.recovery.guardVersion,
+              batchId: payload.recovery.batchId as Id<"planBatches">,
+              itemIds: payload.recovery.itemIds as Id<"contentPlan">[],
+              expectedActualCostUsd: payload.recovery.expectedActualCostUsd,
+              providerRoute: payload.recovery.providerRoute,
+              taskVersion: payload.recovery.taskVersion,
+            },
+          } : {}),
         });
       } catch (error) {
-        if (/budget admission|ownership mismatch|idempotency|invalid plan|requestedCount/i.test(errorMessage(error))) {
+        if (/budget admission|ownership mismatch|idempotency|invalid plan|requestedCount|recovery guard/i.test(errorMessage(error))) {
           abortTask(error);
         }
         throw error;
       }
     })();
     const batchId = admitted.batchId as Id<"planBatches">;
+    if (payload.recovery && String(batchId) !== payload.recovery.batchId) {
+      abortTask("plan-week recovery guard: Convex returned a different batch");
+    }
     if (admitted.status === "ready") {
       return { ok: true, planned: admitted.itemIds?.length ?? count, reused: true, costUsd: admitted.actualCostUsd };
     }
@@ -134,20 +233,23 @@ export const planWeekAheadTask = task({
       reused: admitted.reused,
     });
 
-    // STYLE DNA FIRST — same source of truth as the render pipeline's
-    // thumbnail_gen. The template-letter fallback put Greek marble busts on a
-    // finance channel's entire week-ahead plan.
-    const style =
-      styleFromDNA((channel as { styleDNA?: Parameters<typeof styleFromDNA>[0] }).styleDNA) ??
-      resolveThumbnailStyle((channel as { template?: string }).template);
-    log(`thumbnail style source: ${style.label === "Style DNA" ? "Style DNA" : `template preset (${style.label})`}`);
+    const resolvedThumbnailPlaybook = resolveGoldenThumbnailPlaybook({
+      storedPlaybook: (channel as { thumbnailPlaybook?: ThumbnailPlaybook }).thumbnailPlaybook,
+      dna: (channel as {
+        styleDNA?: import("@/engine/creative/types").StyleDNA;
+      }).styleDNA ?? null,
+      family: (channel as { family?: string }).family,
+      channelName,
+    });
+    const thumbnailPlaybook = resolvedThumbnailPlaybook.playbook;
+    log(`thumbnail playbook source: ${resolvedThumbnailPlaybook.strategy}`);
 
     let existing = await convex.query(api.contentPlan.listPlan, { ownerId, channelId });
     const keyPrefix = channelPrefix(ownerId, channel.slug);
 
     let itemIds = admitted.itemIds as Id<"contentPlan">[] | undefined;
     if (admitted.topicState !== "complete") {
-      if (!hasGeminiKey() || !hasNovitaRenderFarmConfig()) {
+      if (!hasGeminiKey() || !hasNanoBanana()) {
         const modelScope = createModelUsageScope();
         const imageScope = createImageUsageScope();
         const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
@@ -160,7 +262,7 @@ export const planWeekAheadTask = task({
         });
         const error = !hasGeminiKey()
           ? "plan-week-ahead: Gemini topic provider is not configured"
-          : "plan-week-ahead: attested Novita render farm is not configured";
+          : "plan-week-ahead: Nano Banana thumbnail provider is not configured";
         await convex.mutation(api.contentPlan.failPlanTopics, {
           ownerId, channelId, batchId, attempt: admitted.topicAttempt,
           usageCheckpointKey, error, retryable: true,
@@ -315,6 +417,15 @@ export const planWeekAheadTask = task({
       sceneSeed?: string;
     }>;
     if (!itemIds?.length || !batchItems.length) abortTask("plan-week-ahead: admitted batch has no persisted items");
+    if (payload.recovery) {
+      const actualItemIds = batchItems.map((item) => String(item._id));
+      if (
+        actualItemIds.length !== payload.recovery.itemIds.length ||
+        actualItemIds.some((id, index) => id !== payload.recovery!.itemIds[index])
+      ) {
+        abortTask("plan-week recovery guard: loaded batch items differ from the exact ordered recovery list");
+      }
+    }
     const dir = join(tmpdir(), `plan_${channelId}_${batchId}`);
     mkdirSync(dir, { recursive: true });
 
@@ -327,6 +438,21 @@ export const planWeekAheadTask = task({
       });
       if (claim.state === "complete") continue;
       const usageCheckpointKey = `thumbnail:${item._id}:${claim.attempt}`;
+      const renderPrefix =
+        `${keyPrefix.replace(/\/$/, "")}/plan-batches/${batchId}` +
+        `/items/${item._id}/attempt-${claim.attempt}`;
+      const sourceKey = `${renderPrefix}/nano-banana/source.json`;
+      const qaKey = `${renderPrefix}/golden/qa.json`;
+      const receiptScope: PlanWeekRenderScope = {
+        ownerId,
+        channelId: String(channelId),
+        batchId: String(batchId),
+        itemId: String(item._id),
+        attempt: claim.attempt,
+        requestKey,
+        checkpointKey: usageCheckpointKey,
+        destinationKey: thumbnailKey,
+      };
       let providerReceipt: PlanWeekProviderRenderReceipt | null = null;
 
       try {
@@ -341,7 +467,27 @@ export const planWeekAheadTask = task({
           usageCheckpointKey,
           destinationKey: thumbnailKey,
         });
-        const recovered = await recoverThumbnailCheckpoint(thumbnailKey, providerReceipt ?? undefined);
+        if (!providerReceipt) {
+          const recoveredSource = await loadNanoBananaSourceCheckpoint(sourceKey, receiptScope);
+          if (recoveredSource) {
+            providerReceipt = recoveredSource.providerReceipt;
+            await convex.mutation(api.planWeekRenderReceipts.recordProviderReceipt, {
+              ownerId,
+              channelId,
+              batchId,
+              itemId: item._id,
+              requestKey,
+              checkpointKey: usageCheckpointKey,
+              providerReceipt,
+            });
+            log(`reattached Nano Banana source receipt for ${index + 1}/${batchItems.length}`);
+          }
+        }
+        const recovered = await recoverThumbnailCheckpoint(
+          thumbnailKey,
+          qaKey,
+          providerReceipt ?? undefined,
+        );
         if (recovered) {
           await persistThumbnailCheckpoint({
             convex, ownerId, channelId, batchId, itemId: item._id,
@@ -386,7 +532,15 @@ export const planWeekAheadTask = task({
           failures.push(`${item.topic}: ${error}`);
           break;
         }
-        log(`reattached paid provider receipt for ${index + 1}/${batchItems.length}; no provider replay`);
+        const error =
+          "paid thumbnail response exists without a complete QA-bound artifact; " +
+          "refusing Golden instantiation, QA, or provider replay";
+        await convex.mutation(api.contentPlan.failPlanItem, {
+          ownerId, channelId, batchId, itemId: item._id, attempt: claim.attempt,
+          usageCheckpointKey, error, retryable: false,
+        });
+        failures.push(`${item.topic}: ${error}`);
+        break;
       }
 
       if (claim.state === "busy") {
@@ -401,7 +555,6 @@ export const planWeekAheadTask = task({
           id: item._id,
           topic: item.topic,
           title: item.title?.trim() || item.topic,
-          style,
           channelName,
           niche,
           ownerId,
@@ -409,31 +562,29 @@ export const planWeekAheadTask = task({
           dir,
           log,
           sceneSeed: item.sceneSeed,
-          playbook: (channel as { thumbnailPlaybook?: ThumbnailPlaybook }).thumbnailPlaybook,
+          playbook: thumbnailPlaybook,
           usageCheckpointKey,
-          renderPrefix:
-            `${keyPrefix.replace(/\/$/, "")}/runs/${ctx.run.id}/plan-week/${batchId}` +
-            `/items/${item._id}/attempt-${claim.attempt}`,
+          receiptScope,
+          sourceKey,
+          qaKey,
           providerReceipt: providerReceipt ?? undefined,
-          usageMetadata: () => planWeekUsageMetadata(
+          usageSnapshot: () =>
             buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot()),
-          ),
+          brandContext: {
+            thumbnail: (channel as { styleDNA?: { thumbnail?: unknown } }).styleDNA?.thumbnail,
+            recurringSubject: (channel as { styleDNA?: { recurringSubject?: string } }).styleDNA?.recurringSubject,
+            setting: (channel as { styleDNA?: { setting?: string } }).styleDNA?.setting,
+          },
           beforeProviderSpend: async () => {
             await convex.mutation(api.contentPlan.markPlanItemProviderStarted, {
               ownerId, channelId, batchId, itemId: item._id, attempt: claim.attempt, claimant,
             });
           },
-          onProviderReceipt: async (rendered) => {
-            const receipt = makePlanWeekProviderRenderReceipt({
-              ownerId,
-              channelId: String(channelId),
-              batchId: String(batchId),
-              itemId: String(item._id),
-              attempt: claim.attempt,
-              requestKey,
-              checkpointKey: usageCheckpointKey,
-              destinationKey: thumbnailKey,
-            }, rendered);
+          onProviderReceipt: async (receipt) => {
+            // Expose the paid response to the outer recovery boundary before
+            // either durable write. A failure can never make this worker look
+            // pre-spend or authorize another provider call.
+            providerReceipt = receipt;
             await convex.mutation(api.planWeekRenderReceipts.recordProviderReceipt, {
               ownerId,
               channelId,
@@ -443,19 +594,10 @@ export const planWeekAheadTask = task({
               checkpointKey: usageCheckpointKey,
               providerReceipt: receipt,
             });
-            providerReceipt = receipt;
-            // renderNovitaImage records the exact provider cost before invoking
-            // this callback. Persist that snapshot before presign/download.
-            await persistThumbnailCheckpoint({
-              convex, ownerId, channelId, batchId, itemId: item._id,
-              usageCheckpointKey,
-              checkpoint: buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot()),
-            });
-            return receipt;
           },
         })));
         providerReceipt = generated.providerReceipt;
-        const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
+        const checkpoint = generated.usageCheckpoint;
         await persistThumbnailCheckpoint({
           convex, ownerId, channelId, batchId, itemId: item._id,
           usageCheckpointKey, checkpoint,
@@ -497,6 +639,7 @@ export const planWeekAheadTask = task({
           try {
             const recovered = await recoverThumbnailCheckpoint(
               thumbnailKey,
+              qaKey,
               providerReceipt ?? undefined,
             );
             if (recovered) {
@@ -670,8 +813,96 @@ async function persistTopicCheckpoint(args: {
   return saved.itemIds as Id<"contentPlan">[];
 }
 
+const PLAN_WEEK_QA_METADATA = {
+  key: "plan-week-qa-key",
+  checkpointSha256: "plan-week-qa-checkpoint-sha256",
+  requestSha256: "plan-week-qa-request-sha256",
+  verdictSha256: "plan-week-qa-verdict-sha256",
+  costUsd: "plan-week-qa-cost-usd",
+} as const;
+
+async function loadPlanWeekThumbnailQaCheckpoint(args: {
+  qaKey: string;
+  checkpointKey: string;
+  providerRequestSha256: string;
+  candidateSha256: string;
+}): Promise<PlanWeekThumbnailQaCheckpoint | null> {
+  let bytes: Uint8Array;
+  try {
+    bytes = await getObjectBytes(args.qaKey);
+  } catch (error) {
+    if (objectNotFound(error)) return null;
+    throw error;
+  }
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(Buffer.from(bytes).toString("utf8"));
+  } catch {
+    throw new InvalidPlanCheckpointError("plan thumbnail QA checkpoint is not valid JSON");
+  }
+  if (!validatePlanWeekThumbnailQaCheckpoint(parsed, args)) {
+    throw new InvalidPlanCheckpointError("plan thumbnail QA checkpoint is corrupt, below-bar, or misbound");
+  }
+  return parsed;
+}
+
+async function persistPlanWeekThumbnailQaCheckpoint(
+  qaKey: string,
+  checkpoint: PlanWeekThumbnailQaCheckpoint,
+): Promise<void> {
+  const body = JSON.stringify(checkpoint);
+  const checkpointSha256 = planWeekThumbnailQaCheckpointSha256(checkpoint);
+  const metadata = {
+    [PLAN_WEEK_QA_METADATA.checkpointSha256]: checkpointSha256,
+    [PLAN_WEEK_QA_METADATA.requestSha256]: checkpoint.qaRequestSha256,
+    [PLAN_WEEK_QA_METADATA.verdictSha256]: checkpoint.verdictSha256,
+    [PLAN_WEEK_QA_METADATA.costUsd]: String(checkpoint.costUsd),
+  };
+  try {
+    await putObject(qaKey, body, {
+      contentType: "application/json",
+      metadata,
+      ifNoneMatch: "*",
+    });
+    const head = await headObjectMetadata(qaKey);
+    if (
+      !head ||
+      head.contentType !== "application/json" ||
+      head.contentLength !== Buffer.byteLength(body) ||
+      head.metadata[PLAN_WEEK_QA_METADATA.checkpointSha256] !== checkpointSha256 ||
+      head.metadata[PLAN_WEEK_QA_METADATA.requestSha256] !== checkpoint.qaRequestSha256 ||
+      head.metadata[PLAN_WEEK_QA_METADATA.verdictSha256] !== checkpoint.verdictSha256 ||
+      Number(head.metadata[PLAN_WEEK_QA_METADATA.costUsd]) !== checkpoint.costUsd
+    ) {
+      throw new AmbiguousThumbnailQaCheckpointError(
+        "plan thumbnail QA upload did not produce an exact HEAD checkpoint",
+      );
+    }
+  } catch (error) {
+    let existing: PlanWeekThumbnailQaCheckpoint | null = null;
+    try {
+      existing = await loadPlanWeekThumbnailQaCheckpoint({
+        qaKey,
+        checkpointKey: checkpoint.checkpointKey,
+        providerRequestSha256: checkpoint.providerRequestSha256,
+        candidateSha256: checkpoint.candidateSha256,
+      });
+    } catch {
+      // Preserve the original ambiguous storage result below.
+    }
+    if (
+      existing &&
+      planWeekThumbnailQaCheckpointSha256(existing) === checkpointSha256
+    ) return;
+    throw new AmbiguousThumbnailQaCheckpointError(
+      `plan thumbnail QA checkpoint outcome is ambiguous: ${errorMessage(error)}`,
+    );
+  }
+}
+
 async function recoverThumbnailCheckpoint(
   key: string,
+  qaKey: string,
   providerReceipt?: PlanWeekProviderRenderReceipt,
 ): Promise<{
   checkpoint: PlanWeekUsageCheckpoint;
@@ -697,22 +928,42 @@ async function recoverThumbnailCheckpoint(
   const providerRequestSha256 = head.metadata[
     PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerRequestSha256
   ]?.trim();
-  const billingReceiptSha256 = head.metadata[
-    PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256
-  ]?.trim();
+  const evidenceMetadataKey = providerReceipt.version === "plan-week-provider-render/v2"
+    ? PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerEvidenceSha256
+    : PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256;
+  const providerEvidenceSha256 = head.metadata[evidenceMetadataKey]?.trim();
   const artifactSha256 = head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactSha256]?.trim();
   const artifactCreatedAt = Number(
     head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactCreatedAt],
   );
+  const qaCheckpoint = artifactSha256
+    ? await loadPlanWeekThumbnailQaCheckpoint({
+        qaKey,
+        checkpointKey: providerReceipt.checkpointKey,
+        providerRequestSha256: providerReceipt.requestSha256,
+        candidateSha256: artifactSha256,
+      })
+    : null;
+  const qaCheckpointSha256 = qaCheckpoint
+    ? planWeekThumbnailQaCheckpointSha256(qaCheckpoint)
+    : "";
   if (
     !checkpoint ||
+    !qaCheckpoint ||
     !thumbnailUsageMatchesProviderReceipt(checkpoint, providerReceipt) ||
+    checkpoint.fingerprint !== qaCheckpoint.usageFingerprint ||
     usageCheckpointKey !== providerReceipt.checkpointKey ||
     providerRequestSha256 !== providerReceipt.requestSha256 ||
-    billingReceiptSha256 !== providerReceipt.billingReceiptSha256 ||
+    providerEvidenceSha256 !== planWeekProviderEvidenceSha256(providerReceipt) ||
     !artifactSha256 ||
     !/^[a-f0-9]{64}$/.test(artifactSha256) ||
-    !Number.isFinite(artifactCreatedAt)
+    !Number.isFinite(artifactCreatedAt) ||
+    head.metadata[PLAN_WEEK_QA_METADATA.key] !== qaKey ||
+    head.metadata[PLAN_WEEK_QA_METADATA.checkpointSha256] !== qaCheckpointSha256 ||
+    head.metadata[PLAN_WEEK_QA_METADATA.requestSha256] !== qaCheckpoint.qaRequestSha256 ||
+    head.metadata[PLAN_WEEK_QA_METADATA.verdictSha256] !== qaCheckpoint.verdictSha256 ||
+    Number(head.metadata[PLAN_WEEK_QA_METADATA.costUsd]) !== qaCheckpoint.costUsd ||
+    artifactCreatedAt < qaCheckpoint.createdAt
   ) {
     throw new InvalidPlanCheckpointError(
       "existing plan thumbnail is missing or mismatches its exact receipt metadata",
@@ -741,14 +992,14 @@ function thumbnailUsageMatchesProviderReceipt(
   const expected = planWeekProviderReceiptImageUsage(receipt);
   const record = checkpoint.imageUsage.records[0];
   return checkpoint.accountingComplete === true &&
-    checkpoint.modelUsage.calls === 0 &&
     checkpoint.modelUsage.unpricedCalls === 0 &&
-    checkpoint.modelUsage.costUsd === 0 &&
     checkpoint.imageUsage.calls === 1 &&
     checkpoint.imageUsage.images === 1 &&
     checkpoint.imageUsage.records.length === 1 &&
     Math.abs(checkpoint.imageUsage.costUsd - receipt.costUsd) <= 0.000001 &&
-    Math.abs(checkpoint.costUsd - receipt.costUsd) <= 0.000001 &&
+    Math.abs(
+      checkpoint.costUsd - (checkpoint.modelUsage.costUsd + receipt.costUsd),
+    ) <= 0.000001 &&
     record?.provider === expected.provider &&
     record.model === expected.model &&
     record.route === expected.route &&
@@ -841,16 +1092,131 @@ async function persistThumbnailCheckpoint(args: {
   }
 }
 
+interface PlanWeekNanoBananaSourceCheckpoint {
+  version: "plan-week-nano-banana-source/v1";
+  providerReceipt: PlanWeekNanoBananaProviderRenderReceipt;
+  imageBase64: string;
+}
+
+function objectNotFound(error: unknown): boolean {
+  const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+  const name = (error as { name?: string }).name;
+  return status === 404 || name === "NoSuchKey" || name === "NotFound";
+}
+
+async function loadNanoBananaSourceCheckpoint(
+  sourceKey: string,
+  scope: PlanWeekRenderScope,
+): Promise<{
+  providerReceipt: PlanWeekNanoBananaProviderRenderReceipt;
+  imageBytes: Buffer;
+} | null> {
+  let stored: Uint8Array;
+  try {
+    stored = await getObjectBytes(sourceKey);
+  } catch (error) {
+    if (objectNotFound(error)) return null;
+    throw error;
+  }
+  if (!stored.length || stored.length > 42 * 1024 * 1024) {
+    throw new InvalidPlanCheckpointError("Nano Banana source checkpoint is outside its size contract");
+  }
+  let parsed: PlanWeekNanoBananaSourceCheckpoint;
+  try {
+    parsed = JSON.parse(Buffer.from(stored).toString("utf8")) as PlanWeekNanoBananaSourceCheckpoint;
+  } catch {
+    throw new InvalidPlanCheckpointError("Nano Banana source checkpoint is not valid JSON");
+  }
+  if (
+    parsed?.version !== "plan-week-nano-banana-source/v1" ||
+    typeof parsed.imageBase64 !== "string" ||
+    parsed.imageBase64.length === 0 ||
+    parsed.imageBase64.length > 40 * 1024 * 1024 ||
+    parsed.imageBase64.length % 4 !== 0 ||
+    !/^[A-Za-z0-9+/]+={0,2}$/.test(parsed.imageBase64) ||
+    !validatePlanWeekProviderRenderReceipt(parsed.providerReceipt, scope) ||
+    parsed.providerReceipt.version !== "plan-week-provider-render/v2" ||
+    parsed.providerReceipt.sourceKey !== sourceKey ||
+    !(await verifyPlanWeekProviderReceiptCryptography(parsed.providerReceipt))
+  ) {
+    throw new InvalidPlanCheckpointError("Nano Banana source checkpoint receipt is corrupt or misbound");
+  }
+  const imageBytes = Buffer.from(parsed.imageBase64, "base64");
+  if (
+    !imageBytes.length ||
+    imageBytes.length > 30 * 1024 * 1024 ||
+    imageBytes.toString("base64") !== parsed.imageBase64 ||
+    createHash("sha256").update(imageBytes).digest("hex") !== parsed.providerReceipt.responseSha256
+  ) {
+    throw new InvalidPlanCheckpointError("Nano Banana source bytes do not match the durable receipt");
+  }
+  return { providerReceipt: parsed.providerReceipt, imageBytes };
+}
+
+async function persistNanoBananaSourceCheckpoint(args: {
+  sourceKey: string;
+  scope: PlanWeekRenderScope;
+  providerReceipt: PlanWeekNanoBananaProviderRenderReceipt;
+  imageBytes: Buffer;
+}): Promise<void> {
+  const checkpoint: PlanWeekNanoBananaSourceCheckpoint = {
+    version: "plan-week-nano-banana-source/v1",
+    providerReceipt: args.providerReceipt,
+    imageBase64: args.imageBytes.toString("base64"),
+  };
+  const body = JSON.stringify(checkpoint);
+  const metadata = {
+    "nano-banana-contract": args.providerReceipt.profileId,
+    "nano-banana-request-sha256": args.providerReceipt.requestSha256,
+    "nano-banana-response-sha256": args.providerReceipt.responseSha256,
+  };
+  try {
+    await putObject(args.sourceKey, body, {
+      contentType: "application/json",
+      metadata,
+      ifNoneMatch: "*",
+    });
+    const head = await headObjectMetadata(args.sourceKey);
+    if (
+      !head ||
+      head.contentType !== "application/json" ||
+      head.contentLength !== Buffer.byteLength(body) ||
+      head.metadata["nano-banana-contract"] !== metadata["nano-banana-contract"] ||
+      head.metadata["nano-banana-request-sha256"] !== metadata["nano-banana-request-sha256"] ||
+      head.metadata["nano-banana-response-sha256"] !== metadata["nano-banana-response-sha256"]
+    ) {
+      throw new AmbiguousThumbnailSourceCheckpointError(
+        "Nano Banana source upload did not produce an exact HEAD checkpoint",
+      );
+    }
+  } catch (error) {
+    let existing: Awaited<ReturnType<typeof loadNanoBananaSourceCheckpoint>> = null;
+    try {
+      existing = await loadNanoBananaSourceCheckpoint(args.sourceKey, args.scope);
+    } catch {
+      // Preserve the original ambiguous write below.
+    }
+    if (
+      existing &&
+      samePlanWeekProviderRenderReceipt(existing.providerReceipt, args.providerReceipt) &&
+      createHash("sha256").update(existing.imageBytes).digest("hex") ===
+        createHash("sha256").update(args.imageBytes).digest("hex")
+    ) return;
+    throw new AmbiguousThumbnailSourceCheckpointError(
+      `Nano Banana source upload outcome is ambiguous: ${errorMessage(error)}`,
+    );
+  }
+}
+
 /**
- * One plan-preview thumbnail from Topicraft's already-judged scene (or a
- * deterministic topic-grounded fallback). There is no per-thumbnail LLM
- * concept/meta call: one claimed Flash image plus local exact typography.
+ * One production-gated plan thumbnail through the same Golden playbook
+ * instantiation, Nano Banana scene route, local typography, and comparative
+ * mobile QA used by thumbnail_gen.
  */
 async function genThumb(o: {
   id: string;
   topic: string;
   title: string;
-  style: ReturnType<typeof resolveThumbnailStyle>;
   channelName: string;
   niche: string;
   ownerId: string;
@@ -859,98 +1225,113 @@ async function genThumb(o: {
   log: (m: string) => void;
   /** Topicraft's judged thumbnail moment — the scene the bet was gated on. */
   sceneSeed?: string;
-  playbook?: ThumbnailPlaybook;
+  playbook: ThumbnailPlaybook;
   usageCheckpointKey: string;
-  /** Run/attempt-scoped namespace used by the bridge idempotency contract. */
-  renderPrefix: string;
+  receiptScope: PlanWeekRenderScope;
+  sourceKey: string;
+  qaKey: string;
   /** Durable terminal provider result used by recovery; skips provider launch. */
   providerReceipt?: PlanWeekProviderRenderReceipt;
-  usageMetadata: () => Record<string, string>;
+  usageSnapshot: () => PlanWeekUsageCheckpoint;
+  brandContext?: Record<string, unknown> | null;
   beforeProviderSpend: () => Promise<void>;
   onProviderReceipt?: (
-    receipt: NovitaImageProviderReceipt,
-  ) => Promise<PlanWeekProviderRenderReceipt>;
+    receipt: PlanWeekProviderRenderReceipt,
+  ) => Promise<void>;
 }): Promise<{
   key: string;
   providerReceipt: PlanWeekProviderRenderReceipt;
   artifactReceipt: PlanWeekArtifactReceipt;
+  usageCheckpoint: PlanWeekUsageCheckpoint;
 }> {
-  if (!o.providerReceipt && !hasNovitaRenderFarmConfig()) {
-    throw new Error("plan thumbnail attested Novita render farm is not configured");
+  if (!o.providerReceipt && !hasNanoBanana()) {
+    throw new Error("plan thumbnail Nano Banana provider is not configured");
+  }
+  if (!hasAnthropicKey()) {
+    throw new Error("plan thumbnail Golden pattern instantiation provider is not configured");
+  }
+  if (!hasVisionKey()) {
+    throw new Error("plan thumbnail production QA provider is not configured");
   }
   const scene = o.sceneSeed?.trim() ||
     `A dramatic physical scene that communicates this subject through people, objects, and action: ${o.topic}.` +
     (o.niche ? ` Visual context: ${o.niche}.` : "");
-  const lines: { text: string; payoff?: boolean }[] = [{ text: shortTitleFallback(o.title), payoff: true }];
   const outJpg = join(o.dir, `t_${o.id}.jpg`);
-  const vl = o.playbook?.visualLanguage;
-  const patterns = o.playbook?.patterns ?? [];
-  const patternIndex = patterns.length
-    ? [...o.id].reduce((sum, char) => sum + char.charCodeAt(0), 0) % patterns.length
-    : 0;
-  const requestedZone = String(patterns[patternIndex]?.textRecipe?.position ?? "left");
-  const zones = new Set<ThumbnailTextZone>([
-    "left", "right", "upperLeft", "upperRight", "center", "upperCenter",
-  ]);
-  const textZone = zones.has(requestedZone as ThumbnailTextZone)
-    ? requestedZone as ThumbnailTextZone
-    : "left";
+  const { pattern, patternIndex } = selectGoldenThumbnailPattern({
+    playbook: o.playbook,
+    seed: o.id,
+  });
   let providerReceipt = o.providerReceipt;
   const generateScene = providerReceipt
     ? async () => {
         recordImageUsage(planWeekProviderReceiptImageUsage(providerReceipt!));
-        const bytes = Buffer.from(await getObjectBytes(providerReceipt!.sourceKey));
+        const bytes = providerReceipt!.version === "plan-week-provider-render/v2"
+          ? (await loadNanoBananaSourceCheckpoint(
+              providerReceipt!.sourceKey,
+              o.receiptScope,
+            ))?.imageBytes
+          : Buffer.from(await getObjectBytes(providerReceipt!.sourceKey));
+        if (!bytes) {
+          throw new InvalidPlanCheckpointError("durable Nano Banana source checkpoint is missing");
+        }
         if (!bytes.length || bytes.length > 30 * 1024 * 1024) {
           throw new Error("plan thumbnail provider source is outside the 1B..30MiB contract");
         }
         return bytes;
       }
-    : createAttestedNovitaImageGenerator<
-        import("@/lib/thumbnailRenderer").ThumbnailImageRequest
-      >({
-        prefix: o.renderPrefix,
-        id: () => `thumbnail-${o.id}`,
-        profileId: "production",
-        maxCostUsd: PLAN_WEEK_IMAGE_UNIT_USD,
-        beforeProviderSpend: o.beforeProviderSpend,
-        onProviderReceipt: async (receipt) => {
-          if (!o.onProviderReceipt) {
-            throw new Error("plan thumbnail provider receipt persistence is not configured");
-          }
-          providerReceipt = await o.onProviderReceipt(receipt);
-        },
-      });
-  await renderThumbnail({
-    spec: {
-      scene: {
-        description: scene,
-        imageStyle: vl?.imageStyle ?? o.style.art,
-        palette: [vl?.baseColor, vl?.accentColor, o.style.palette]
-          .filter((value): value is string => Boolean(value)),
-        accentColor: vl?.accentColor ?? o.style.title.accent ?? undefined,
-        composition: vl?.composition,
-        textZone,
-        visualAvoid: o.playbook?.avoid,
-      },
-      typography: {
-        lines: lines.map((line) => ({
-          text: line.text,
-          payoff: line.payoff,
-          accent: line.payoff,
-        })),
-        subtitle: o.channelName,
-        font: vl?.font ?? o.style.title.font,
-        uppercase: vl?.uppercase ?? o.style.title.uppercase,
-        treatment: vl?.treatment ?? "clean",
-        textObject: vl?.textObject,
-        baseColor: vl?.baseColor,
-        accentColor: vl?.accentColor ?? o.style.title.accent ?? undefined,
-        badgeStyle: vl?.badgeStyle,
-      },
-    },
+    : async (request: import("@/lib/thumbnailRenderer").ThumbnailImageRequest) => {
+        if (!o.onProviderReceipt) {
+          throw new Error("plan thumbnail provider receipt persistence is not configured");
+        }
+        await o.beforeProviderSpend();
+        const rendered = await generateNanoBananaImageWithReceipt({
+          prompt: request.prompt,
+          aspectRatio: request.aspectRatio,
+          maxProviderAttempts: 1,
+          idempotencyContext: planWeekNanoBananaRequestContext(o.receiptScope, o.sourceKey),
+        });
+        const receipt = makePlanWeekProviderRenderReceipt(o.receiptScope, {
+          ...rendered.receipt,
+          sourceKey: o.sourceKey,
+        });
+        providerReceipt = receipt;
+        let receiptError: unknown;
+        let sourceError: unknown;
+        try {
+          await o.onProviderReceipt(receipt);
+        } catch (error) {
+          receiptError = error;
+        }
+        try {
+          await persistNanoBananaSourceCheckpoint({
+            sourceKey: o.sourceKey,
+            scope: o.receiptScope,
+            providerReceipt: receipt,
+            imageBytes: rendered.bytes,
+          });
+        } catch (error) {
+          sourceError = error;
+        }
+        if (receiptError || sourceError) {
+          throw new AmbiguousThumbnailSourceCheckpointError(
+            `paid Nano Banana response persistence incomplete ` +
+            `(receipt=${receiptError ? errorMessage(receiptError) : "durable"}; ` +
+            `source=${sourceError ? errorMessage(sourceError) : "durable"})`,
+          );
+        }
+        return rendered.bytes;
+      };
+  await renderCandidate({
+    pattern,
+    title: o.title,
+    scriptHint: o.topic,
+    sceneSeed: scene,
+    playbook: o.playbook,
     outJpg,
     tmpDir: o.dir,
+    idx: patternIndex,
     generateScene,
+    log: o.log,
   });
   if (!providerReceipt) {
     throw new Error("plan thumbnail render completed without its durable provider receipt");
@@ -961,19 +1342,69 @@ async function genThumb(o: {
     throw new Error("plan thumbnail artifact is outside the 1B..30MiB contract");
   }
   const artifactSha256 = createHash("sha256").update(artifactBytes).digest("hex");
-  const artifactCreatedAt = Math.max(Date.now(), providerReceipt.createdAt);
+  const qaRequestSha256 = thumbnailRequestHash({
+    contract: "plan-week-golden-mobile-reference-qa-v1",
+    providerRequestSha256: providerReceipt.requestSha256,
+    candidateSha256: artifactSha256,
+    title: o.title,
+    topic: o.topic,
+    sceneSeed: scene,
+    pattern,
+    patternIndex,
+    playbook: o.playbook,
+    referenceUrls: o.playbook.refsUsed.map((reference) => reference.url),
+  });
+  const beforeQa = o.usageSnapshot();
+  const verdict = await runThumbnailMobileReferenceQa({
+    outJpg,
+    tmpDir: o.dir,
+    title: o.title,
+    niche: o.niche,
+    playbook: o.playbook,
+    referenceUrls: o.playbook.refsUsed.map((reference) => reference.url),
+    brandContext: o.brandContext,
+    log: o.log,
+  });
+  const usageCheckpoint = o.usageSnapshot();
+  const qaCostUsd = Number((usageCheckpoint.modelUsage.costUsd - beforeQa.modelUsage.costUsd).toFixed(6));
+  if (
+    qaCostUsd < 0 ||
+    usageCheckpoint.modelUsage.unpricedCalls !== beforeQa.modelUsage.unpricedCalls
+  ) {
+    throw new Error("plan thumbnail QA model usage is missing exact pricing evidence");
+  }
+  assertThumbnailGate("production", verdict, "plan-week Golden candidate");
+  const qaCheckpoint = makePlanWeekThumbnailQaCheckpoint({
+    checkpointKey: o.usageCheckpointKey,
+    providerRequestSha256: providerReceipt.requestSha256,
+    candidateSha256: artifactSha256,
+    qaRequestSha256,
+    verdict,
+    costUsd: qaCostUsd,
+    usageFingerprint: usageCheckpoint.fingerprint,
+  });
+  await persistPlanWeekThumbnailQaCheckpoint(o.qaKey, qaCheckpoint);
+  const qaCheckpointSha256 = planWeekThumbnailQaCheckpointSha256(qaCheckpoint);
+  const artifactCreatedAt = Math.max(Date.now(), providerReceipt.createdAt, qaCheckpoint.createdAt);
+  const providerEvidenceKey = providerReceipt.version === "plan-week-provider-render/v2"
+    ? PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerEvidenceSha256
+    : PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256;
   try {
     await putObject(key, artifactBytes, {
       contentType: "image/jpeg",
       metadata: {
-        ...o.usageMetadata(),
+        ...planWeekUsageMetadata(usageCheckpoint),
         [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.checkpointKey]: o.usageCheckpointKey,
         [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerRequestSha256]:
           providerReceipt.requestSha256,
-        [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256]:
-          providerReceipt.billingReceiptSha256,
+        [providerEvidenceKey]: planWeekProviderEvidenceSha256(providerReceipt),
         [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactSha256]: artifactSha256,
         [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactCreatedAt]: String(artifactCreatedAt),
+        [PLAN_WEEK_QA_METADATA.key]: o.qaKey,
+        [PLAN_WEEK_QA_METADATA.checkpointSha256]: qaCheckpointSha256,
+        [PLAN_WEEK_QA_METADATA.requestSha256]: qaCheckpoint.qaRequestSha256,
+        [PLAN_WEEK_QA_METADATA.verdictSha256]: qaCheckpoint.verdictSha256,
+        [PLAN_WEEK_QA_METADATA.costUsd]: String(qaCheckpoint.costUsd),
       },
       ifNoneMatch: "*",
     });
@@ -983,17 +1414,25 @@ async function genThumb(o: {
     );
   }
   const head = await headObjectMetadata(key);
-  if (
-    !head ||
-    head.contentLength !== artifactBytes.length ||
-    head.contentType !== "image/jpeg" ||
-    !head.etag?.trim() ||
-    head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactSha256] !== artifactSha256 ||
-    head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerRequestSha256] !==
-      providerReceipt.requestSha256 ||
-    head.metadata[PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256] !==
-      providerReceipt.billingReceiptSha256
-  ) {
+  if (!head?.etag?.trim()) {
+    throw new AmbiguousThumbnailCheckpointError(
+      "plan thumbnail upload did not produce an exact HEAD receipt",
+    );
+  }
+  const artifactReceipt = makePlanWeekArtifactReceipt({
+    provider: providerReceipt,
+    destinationKey: key,
+    byteLength: artifactBytes.length,
+    sha256: artifactSha256,
+    etag: head.etag,
+    createdAt: artifactCreatedAt,
+  });
+  if (!planWeekArtifactHeadMatches({
+    head,
+    checkpointKey: o.usageCheckpointKey,
+    provider: providerReceipt,
+    artifact: artifactReceipt,
+  })) {
     throw new AmbiguousThumbnailCheckpointError(
       "plan thumbnail upload did not produce an exact HEAD receipt",
     );
@@ -1001,13 +1440,7 @@ async function genThumb(o: {
   return {
     key,
     providerReceipt,
-    artifactReceipt: makePlanWeekArtifactReceipt({
-      provider: providerReceipt,
-      destinationKey: key,
-      byteLength: artifactBytes.length,
-      sha256: artifactSha256,
-      etag: head.etag,
-      createdAt: artifactCreatedAt,
-    }),
+    artifactReceipt,
+    usageCheckpoint,
   };
 }

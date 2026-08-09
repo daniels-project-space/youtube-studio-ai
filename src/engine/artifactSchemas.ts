@@ -14,6 +14,15 @@ import {
   StillRenderManifestSchema,
   VisualCoverageSchema,
 } from "./renderArtifacts";
+import { ContentLaneSchema } from "./contentLane";
+import { EpisodeSpecSchema, QualityEvidenceSchema } from "./qualityEvidence";
+import {
+  ShortCandidateSelectionSchema,
+  ShortCandidateSetSchema,
+  ShortStrategyBriefSchema,
+  ShortStrategyManifestSchema,
+} from "./shortStrategyManifest";
+import { ShortRetentionManifestSchema, ShortSceneQaSchema } from "./documentaryCollageShort";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -49,6 +58,37 @@ const timedSentence = z.object({
   end: z.number().finite().positive(),
 }).refine((value) => value.end > value.start, "sentence end must follow start");
 
+// The final QA receipt used to fall through to LegacyArtifact<qaReport> even
+// though the probe and publishing code parsed it structurally. Keep it
+// extensible while pinning every release-critical field to a real type.
+const qaVerdict = z.object({
+  score: z.number().finite().min(0).max(10),
+  issues: z.array(z.string()),
+  skipped: z.boolean().optional(),
+}).passthrough();
+const qaReport = z.object({
+  structural: z.object({
+    ok: z.boolean(),
+    durationSec: z.number().finite().positive(),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+  }),
+  lengthMatch: z.object({
+    videoSec: z.number().finite().positive(),
+    targetSec: z.number().finite().positive(),
+    ratio: z.number().finite().positive(),
+    ok: z.boolean(),
+  }),
+  video: qaVerdict,
+  thumbnail: qaVerdict,
+  watch: z.object({
+    ran: z.boolean(),
+    verdict: z.enum(["pass", "fail"]),
+    defects: z.array(z.record(z.string(), jsonValue)),
+    summary: z.string(),
+  }),
+}).passthrough();
+
 const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; persist?: ArtifactContract["persist"] }> = {
   topic: { type: "VideoIntent", schema: nonEmpty },
   title: { type: "PublicationTitle", schema: nonEmpty.max(100) },
@@ -59,7 +99,44 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   sentenceTimings: { type: "TimedSentence[]", schema: z.array(timedSentence) },
   narrationDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
   videoDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
+  contentLane: { type: "ContentLane", schema: ContentLaneSchema },
   qaPassed: { type: "QualityGateDecision", schema: z.boolean() },
+  qaReport: { type: "FinalQaReport", schema: qaReport },
+  episodeSpec: { type: "EpisodeSpec", schema: EpisodeSpecSchema },
+  qualityEvidence: { type: "EpisodeQualityEvidence", schema: QualityEvidenceSchema },
+  shortStrategyBrief: { type: "ShortStrategyBrief", schema: ShortStrategyBriefSchema },
+  shortCandidateSet: { type: "ShortCandidateSet", schema: ShortCandidateSetSchema },
+  shortCandidateSelection: { type: "ShortCandidateSelection", schema: ShortCandidateSelectionSchema },
+  beatManifest: { type: "ShortStrategyManifest", schema: ShortStrategyManifestSchema, persist: "reference" },
+  shortRetentionManifest: { type: "ShortRetentionManifest", schema: ShortRetentionManifestSchema },
+  shortSceneQa: { type: "ShortSceneQa", schema: ShortSceneQaSchema },
+  documotionVerdict: {
+    type: "DocuMotionVerdict",
+    schema: z.object({ pass: z.boolean().optional(), audioOk: z.boolean().optional() }).passthrough(),
+  },
+  documotionRender: {
+    type: "DocuMotionRenderReceipt",
+    schema: z.object({
+      version: z.literal("documotion-short-render/v1"),
+      geometry: z.object({ width: z.number().int().positive(), height: z.number().int().positive(), layout: z.literal("short") }).passthrough(),
+      durationSec: z.number().finite().positive(),
+      beatWindows: z.array(z.object({ id: z.string().min(1), durationSec: z.number().finite().positive() })).min(5).max(7),
+      captionSafeFrame: z.object({
+        top: z.number().finite().nonnegative(),
+        right: z.number().finite().nonnegative(),
+        bottom: z.number().finite().nonnegative(),
+        left: z.number().finite().nonnegative(),
+      }).strict(),
+      assetReceiptKey: z.string().min(1),
+      assetReceipts: z.array(z.object({
+        receiptId: z.string().min(1),
+        assetId: z.string().min(1),
+        rendererAssetId: z.string().min(1),
+        beatId: z.string().min(1),
+        approvalSha256: z.array(z.string().regex(/^[a-f0-9]{64}$/i)).min(1),
+      }).strict()).min(5).max(7),
+    }).strict(),
+  },
   originalityOk: { type: "OriginalityDecision", schema: z.boolean() },
   structure: {
     type: "DirectorTreatment",

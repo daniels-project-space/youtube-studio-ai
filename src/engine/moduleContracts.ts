@@ -207,7 +207,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   upload_draft: contract(
     ["publish.connector_bound", "publish.resumable", "publish.synthetic_disclosed", "publish.private_first"],
-    { optionalConsumes: ["chapterPlan", "scheduledPublishAt"], sideEffects: ["publish_media"], qualityRequired: true },
+    { optionalConsumes: ["chapterPlan", "scheduledPublishAt", "contentLane"], sideEffects: ["publish_media"], qualityRequired: true },
   ),
   notify: contract(["notify.operator"], { sideEffects: ["external_message"] }),
   cleanup: contract(["storage.scoped_cleanup"], { sideEffects: ["delete_scoped_artifacts"] }),
@@ -272,6 +272,24 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     },
     qualityRequired: true,
   }),
+  short_strategy: contract(["shorts.strategy_locked", "shorts.source_traceable", "shorts.retention_mapped"], {
+    requiredConsumes: ["topic", "narrationText"],
+    qualityRequired: true,
+  }),
+  documentary_short_candidates: contract(["shorts.candidates_mined", "shorts.source_windowed"], {
+    requiredConsumes: ["sentenceTimings", "title"],
+    optionalConsumes: ["youtubeVideoId"],
+  }),
+  documotion_short: contract(["narration.timed", "visuals.documentary_collage", "master.native_vertical", "master.assembled"], {
+    requiredConsumes: ["topic", "beatManifest"],
+    providerProfiles: [managed, local],
+    maxCostUsd: 25,
+    qualityRequired: true,
+  }),
+  short_scene_qa: contract(["qa.short_scene_required", "qa.short_safe_area", "qa.short_provenance"], {
+    requiredConsumes: ["beatManifest", "documotionVerdict", "documotionRender"],
+    qualityRequired: true,
+  }),
   stock_footage: contract(["visuals.sourced"], {
     optionalConsumes: [
       "reuseFootageKeys", "narrationDurationSec", "narrationText", "cutSheet", "styleDNA", "healHints",
@@ -304,6 +322,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "tags", "strategy", "thumbnailer", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec",
       "overlaysDropped", "qualityBar", "description", "musicKey", "niche", "persona", "styleGrammar", "topic",
+      "narrativeBeats", "shotList", "storyCoverage", "assetQaReport", "shotQaReport", "healAttempt",
+      "shortStrategyBrief", "beatManifest", "shortRetentionManifest", "shortSceneQa", "documotionVerdict", "documotionRender",
     ],
     providerProfiles: [managed, local],
     maxCostUsd: 5,
@@ -320,7 +340,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   critic_spec: contract(["crew.critic_validation_spec"], { optionalConsumes: ["styleDNA", "niche", "channelName"] }),
 
   story_spine: contract(["story.timed", "visuals.story_planned"], {
-    optionalConsumes: ["structure", "visualBrief", "cutSheet", "styleDNA"],
+    optionalConsumes: ["structure", "visualBrief", "cutSheet", "styleDNA", "contentLane"],
     qualityRequired: true,
   }),
 

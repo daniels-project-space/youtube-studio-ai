@@ -177,26 +177,25 @@ async function providerReceiptSurvivesDeliveryCrash(): Promise<void> {
 }
 
 async function routingProof(): Promise<void> {
-  const liveFiles = [
+  const thumbnailFiles = [
     "src/lib/thumbnailRenderer.ts",
     "src/lib/thumbnailLab.ts",
+    "src/lib/speechThumbnail.ts",
     "src/trigger/planWeekAhead.ts",
     "src/trigger/blocks/intelligenceBlocks.ts",
-    "src/lib/motionComic.ts",
-    "src/trigger/blocks/motionComicBlocks.ts",
-    "src/lib/whiteboardSync.ts",
-    "src/trigger/blocks/whiteboardScribeBlocks.ts",
-    "src/trigger/blocks/lofiBlocks.ts",
   ];
-  const forbidden = /\bgenerateBananaImage\b|\bgenerateFal(?:FluxPro)?Image\b|from\s+["']@\/lib\/(?:banana|falImage|replicate)["']/;
-  for (const relative of liveFiles) {
+  const forbiddenThumbnailRoute =
+    /\bcreateAttestedNovitaImageGenerator\b|\brenderNovitaImage\b|\bgenerateBananaImage\b|\bgenerateFal(?:FluxPro)?Image\b|from\s+["']@\/lib\/(?:novitaMedia|falImage|replicate)["']/;
+  for (const relative of thumbnailFiles) {
     const source = await readFile(join(process.cwd(), relative), "utf8");
-    assert.doesNotMatch(source, forbidden, `${relative} must not invoke a legacy production image route`);
+    assert.doesNotMatch(source, forbiddenThumbnailRoute,
+      `${relative} must not invoke Novita, Fal, or the generic image router for thumbnail pixels`);
   }
 
   const explicitInjection: Record<string, RegExp> = {
-    "src/trigger/planWeekAhead.ts": /createAttestedNovitaImageGenerator/,
-    "src/trigger/blocks/intelligenceBlocks.ts": /createAttestedNovitaImageGenerator/,
+    "src/lib/thumbnailRenderer.ts": /generateNanoBananaImage/,
+    "src/trigger/planWeekAhead.ts": /generateNanoBananaImageWithReceipt/,
+    "src/trigger/blocks/intelligenceBlocks.ts": /generateNanoBananaImageWithReceipt/,
     "src/trigger/blocks/motionComicBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/whiteboardScribeBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/lofiBlocks.ts": /renderNovitaImage/,
@@ -204,11 +203,16 @@ async function routingProof(): Promise<void> {
   for (const [relative, expected] of Object.entries(explicitInjection)) {
     assert.match(await readFile(join(process.cwd(), relative), "utf8"), expected);
   }
+  const triggerConfig = await readFile(join(process.cwd(), "trigger.config.ts"), "utf8");
+  assert.match(triggerConfig, /FORWARDED_ENV[\s\S]*"GEMINI_API_KEY"/,
+    "Trigger deploys must forward the direct Nano Banana credential when present");
 
-  for (const key of ["documotion", "motioncraft", "loreshort"] as const) {
+  for (const key of ["motioncraft", "loreshort"] as const) {
     assert.equal(CATALOG_EXECUTION_BINDINGS[key]?.kind, "catalog-only");
     assert.deepEqual(CATALOG_EXECUTION_BINDINGS[key]?.executableIds, []);
   }
+  assert.equal(CATALOG_EXECUTION_BINDINGS.documotion.kind, "pipeline-module");
+  assert.deepEqual(CATALOG_EXECUTION_BINDINGS.documotion.executableIds, ["short_strategy", "documotion_short"]);
   assert.deepEqual(CATALOG_EXECUTION_BINDINGS.thumbnail.executableIds, ["thumbnail_gen"]);
   assert.deepEqual(CATALOG_EXECUTION_BINDINGS.whiteboard.executableIds, ["whiteboard_scribe"]);
   assert.deepEqual(CATALOG_EXECUTION_BINDINGS.comic.executableIds, ["motion_comic"]);
@@ -220,7 +224,7 @@ async function main(): Promise<void> {
   await rejectedAttestationStillAccounts();
   await providerReceiptSurvivesDeliveryCrash();
   await routingProof();
-  console.log("PRODUCTION IMAGE ROUTING PASS: Novita-only, attested, accounted, and fail-closed");
+  console.log("PRODUCTION IMAGE ROUTING PASS: strict Nano thumbnails; Novita footage stays attested and fail-closed");
 }
 
 main().catch((error) => {
