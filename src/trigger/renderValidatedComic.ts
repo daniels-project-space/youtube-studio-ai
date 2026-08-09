@@ -53,6 +53,8 @@ export interface RenderValidatedComicInput {
    * unavailable; it is never selected automatically by a channel pipeline.
    */
   renderer?: "novita" | "gemini_pro_one_off";
+  /** Explicitly select Fish only for a proof run when ElevenLabs is unavailable. */
+  voiceProvider?: "elevenlabs" | "fish_one_off";
 }
 
 function safeId(value: string): string {
@@ -149,6 +151,10 @@ export const renderValidatedComicTask = task({
     if (renderer !== "novita" && renderer !== "gemini_pro_one_off") {
       throw new Error("render-validated-comic renderer must be novita or gemini_pro_one_off");
     }
+    const voiceProvider = input.voiceProvider ?? "elevenlabs";
+    if (voiceProvider !== "elevenlabs" && voiceProvider !== "fish_one_off") {
+      throw new Error("render-validated-comic voiceProvider must be elevenlabs or fish_one_off");
+    }
     if (!hasMotionComic()) {
       throw new Error(
         "render-validated-comic requires the production storyboard and ElevenLabs configuration",
@@ -159,6 +165,9 @@ export const renderValidatedComicTask = task({
     }
     if (renderer === "gemini_pro_one_off" && !process.env.GEMINI_API_KEY) {
       throw new Error("render-validated-comic one-off Gemini Pro route requires GEMINI_API_KEY");
+    }
+    if (voiceProvider === "fish_one_off" && !process.env.FISH_AUDIO_API_KEY) {
+      throw new Error("render-validated-comic one-off Fish route requires FISH_AUDIO_API_KEY");
     }
 
     const runId = safeId(input.runId ?? `validated-comic-${randomUUID()}`);
@@ -205,6 +214,7 @@ export const renderValidatedComicTask = task({
       panels: 4,
       targetSeconds: 30,
       width: 1920,
+      ttsProvider: voiceProvider === "fish_one_off" ? "fish" : "elevenlabs",
       music: true,
       musicPrompt:
         "Tender, aching historical cinematic underscore: solo piano, warm strings, faint carol-like motif, hopeful but sorrowful, restrained, instrumental, no vocals",
@@ -276,6 +286,8 @@ export const renderValidatedComicTask = task({
       renderer: renderer === "novita" ? "novita-production" : "gemini-3-pro-image-one-off",
       oneOffRenderer: renderer === "gemini_pro_one_off",
       imageReceipts,
+      voiceRenderer: voiceProvider === "fish_one_off" ? "fish-one-off" : "elevenlabs-production",
+      oneOffVoiceRenderer: voiceProvider === "fish_one_off",
       title: latest.result.title,
       durationSec: Number(latest.durationSec.toFixed(2)),
       panels: latest.result.panels,

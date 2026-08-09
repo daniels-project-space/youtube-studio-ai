@@ -34,6 +34,7 @@ import { generateMusic } from "@/lib/music";
 import { ffprobeDuration } from "@/lib/ffmpeg";
 import { preflightPythonRenderer } from "@/lib/pydeps";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
+import { synthNarration } from "@/lib/tts";
 
 type Logger = (msg: string) => void;
 
@@ -50,6 +51,8 @@ export interface MotionComicBrief {
   height?: number;
   musicPrompt?: string;
   music?: boolean;
+  /** Defaults to ElevenLabs; Fish is an explicitly selected alternate voice route. */
+  ttsProvider?: "elevenlabs" | "fish";
   /** Layout-only repair instructions from the post-render visual reviewer. */
   layoutRepair?: Array<{
     action: "reflow_bubble";
@@ -1414,13 +1417,22 @@ export async function castMotionComic(args: {
       if (!existsSync(lf)) {
         // elevenDialogue owns the complete bounded provider retry cycle; cache
         // writes are handled separately below so they never repurchase audio.
-        const input = [{ text: lines[k].text.trim(), voice_id: voiceOf(lines[k].speaker) }];
         let audio: Buffer;
         try {
-          audio = await elevenDialogue(
-            input,
-            (characters) => { ttsCharactersGenerated += characters; },
-          );
+          if (brief.ttsProvider === "fish") {
+            audio = Buffer.from(await synthNarration({
+              text: lines[k].text.trim(),
+              provider: "fish",
+              niche: "history",
+              onBillableCharacters: (characters) => { ttsCharactersGenerated += characters; },
+            }));
+          } else {
+            const input = [{ text: lines[k].text.trim(), voice_id: voiceOf(lines[k].speaker) }];
+            audio = await elevenDialogue(
+              input,
+              (characters) => { ttsCharactersGenerated += characters; },
+            );
+          }
         } catch (e) {
           // elevenDialogue already exhausted its three bounded transport
           // attempts. Never start a second synthesis cycle here.
