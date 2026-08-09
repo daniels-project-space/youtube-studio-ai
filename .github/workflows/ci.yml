@@ -1,4 +1,5 @@
-# CI gate — catches tsc/test breakage before Vercel builds. NON-DEPLOY-GATING (pure signal).
+# CI gate — validates code before Vercel and, on a trusted main push, deploys
+# the cloud runtime only after the quality gate passes.
 name: CI
 on:
   push:
@@ -6,9 +7,12 @@ on:
     paths-ignore: ['**.md', 'docs/**', '.serena/**']
   pull_request:
     branches: [main]
+  workflow_dispatch:
 concurrency:
-  group: ci-${{ github.ref }}
-  cancel-in-progress: true
+  # Supersede obsolete pull-request checks, but never cancel a main release
+  # while its Convex/Trigger deployment is in flight.
+  group: ci-${{ github.workflow }}-${{ github.event.pull_request.number || github.run_id }}
+  cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
   typecheck:
     runs-on: ubuntu-latest
@@ -57,3 +61,73 @@ jobs:
         run: PYTHONDONTWRITEBYTECODE=1 python -m unittest -v infra/novita/test_worker.py
       - name: Production-readiness tests
         run: ${{ steps.pm.outputs.pm }} run test:production-readiness
+
+  cloud-runtime-preflight:
+    name: Cloud runtime deployment preflight
+    needs: typecheck
+    if: >
+      (github.event_name == 'push' && github.ref == 'refs/heads/main') ||
+      (github.event_name == 'workflow_dispatch' && github.ref == 'refs/heads/main')
+    runs-on: ubuntu-latest
+    # The Production environment currently has no reviewer gate. It keeps the
+    # two release credentials scoped away from pull requests and previews.
+    environment: Production
+    permissions:
+      contents: read
+    outputs:
+      ready: ${{ steps.credentials.outputs.ready }}
+    steps:
+      - id: credentials
+        name: Verify cloud deployment credentials
+        env:
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+          TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
+        run: |
+          if [ -n "$CONVEX_DEPLOY_KEY" ] && [ -n "$TRIGGER_ACCESS_TOKEN" ]; then
+            echo "ready=true" >> "$GITHUB_OUTPUT"
+            echo "Cloud runtime credentials are present." >> "$GITHUB_STEP_SUMMARY"
+            exit 0
+          fi
+
+          echo "ready=false" >> "$GITHUB_OUTPUT"
+          {
+            echo "### Cloud runtime deployment held"
+            echo
+            echo "Convex and Trigger were not deployed. Add **CONVEX_DEPLOY_KEY** and **TRIGGER_ACCESS_TOKEN** to the GitHub Production environment, then rerun this workflow on main."
+            echo
+            echo "This is intentionally fail-closed: the Vercel web deployment may succeed, but it must not claim that the cloud runtime was deployed without both credentials."
+          } >> "$GITHUB_STEP_SUMMARY"
+
+  deploy-cloud-runtimes:
+    name: Deploy Convex and Trigger cloud runtimes
+    needs: cloud-runtime-preflight
+    if: needs.cloud-runtime-preflight.outputs.ready == 'true'
+    runs-on: ubuntu-latest
+    timeout-minutes: 45
+    environment: Production
+    permissions:
+      contents: read
+    concurrency:
+      group: youtube-studio-cloud-runtimes
+      cancel-in-progress: false
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+      - name: Install deploy tooling
+        run: npm ci --no-audit --no-fund
+      - name: Deploy canonical Convex runtime
+        env:
+          # This deploy key is created for dev:astute-camel-689, the canonical
+          # live data/function deployment. Never substitute `convex deploy`:
+          # that targets the documented empty production deployment.
+          CONVEX_DEPLOY_KEY: ${{ secrets.CONVEX_DEPLOY_KEY }}
+        run: npx --no-install convex dev --once --typecheck=disable
+      - name: Deploy Trigger production tasks
+        env:
+          TRIGGER_ACCESS_TOKEN: ${{ secrets.TRIGGER_ACCESS_TOKEN }}
+        # Runtime/provider values stay in Trigger's protected Production
+        # environment. Do not replace them with an empty GitHub runner env.
+        run: npm run trigger:deploy -- --skip-sync-env-vars
