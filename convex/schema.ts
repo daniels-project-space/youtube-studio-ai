@@ -881,6 +881,10 @@ export default defineSchema({
     fingerprint: v.string(),
     modelUsage: v.any(),
     imageUsage: v.any(),
+    // Older completed production rows include this immutable pricing/QA
+    // evidence. Keep it optional so schema deployment validates both those
+    // rows and newer rows that do not need a reconciliation record.
+    reconciliationEvidence: v.optional(v.any()),
     costUsd: v.number(),
     accountingComplete: v.boolean(),
     createdAt: v.number(),
