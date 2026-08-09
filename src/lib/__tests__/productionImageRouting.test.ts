@@ -207,10 +207,12 @@ async function routingProof(): Promise<void> {
   assert.match(triggerConfig, /FORWARDED_ENV[\s\S]*"GEMINI_API_KEY"/,
     "Trigger deploys must forward the direct Nano Banana credential when present");
 
-  for (const key of ["documotion", "motioncraft", "loreshort"] as const) {
+  for (const key of ["motioncraft", "loreshort"] as const) {
     assert.equal(CATALOG_EXECUTION_BINDINGS[key]?.kind, "catalog-only");
     assert.deepEqual(CATALOG_EXECUTION_BINDINGS[key]?.executableIds, []);
   }
+  assert.equal(CATALOG_EXECUTION_BINDINGS.documotion.kind, "pipeline-module");
+  assert.deepEqual(CATALOG_EXECUTION_BINDINGS.documotion.executableIds, ["short_strategy", "documotion_short"]);
   assert.deepEqual(CATALOG_EXECUTION_BINDINGS.thumbnail.executableIds, ["thumbnail_gen"]);
   assert.deepEqual(CATALOG_EXECUTION_BINDINGS.whiteboard.executableIds, ["whiteboard_scribe"]);
   assert.deepEqual(CATALOG_EXECUTION_BINDINGS.comic.executableIds, ["motion_comic"]);
