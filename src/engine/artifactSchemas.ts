@@ -14,6 +14,8 @@ import {
   StillRenderManifestSchema,
   VisualCoverageSchema,
 } from "./renderArtifacts";
+import { ContentLaneSchema } from "./contentLane";
+import { EpisodeSpecSchema, QualityEvidenceSchema } from "./qualityEvidence";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -49,6 +51,37 @@ const timedSentence = z.object({
   end: z.number().finite().positive(),
 }).refine((value) => value.end > value.start, "sentence end must follow start");
 
+// The final QA receipt used to fall through to LegacyArtifact<qaReport> even
+// though the probe and publishing code parsed it structurally. Keep it
+// extensible while pinning every release-critical field to a real type.
+const qaVerdict = z.object({
+  score: z.number().finite().min(0).max(10),
+  issues: z.array(z.string()),
+  skipped: z.boolean().optional(),
+}).passthrough();
+const qaReport = z.object({
+  structural: z.object({
+    ok: z.boolean(),
+    durationSec: z.number().finite().positive(),
+    width: z.number().int().positive(),
+    height: z.number().int().positive(),
+  }),
+  lengthMatch: z.object({
+    videoSec: z.number().finite().positive(),
+    targetSec: z.number().finite().positive(),
+    ratio: z.number().finite().positive(),
+    ok: z.boolean(),
+  }),
+  video: qaVerdict,
+  thumbnail: qaVerdict,
+  watch: z.object({
+    ran: z.boolean(),
+    verdict: z.enum(["pass", "fail"]),
+    defects: z.array(z.record(z.string(), jsonValue)),
+    summary: z.string(),
+  }),
+}).passthrough();
+
 const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; persist?: ArtifactContract["persist"] }> = {
   topic: { type: "VideoIntent", schema: nonEmpty },
   title: { type: "PublicationTitle", schema: nonEmpty.max(100) },
@@ -59,7 +92,11 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   sentenceTimings: { type: "TimedSentence[]", schema: z.array(timedSentence) },
   narrationDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
   videoDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
+  contentLane: { type: "ContentLane", schema: ContentLaneSchema },
   qaPassed: { type: "QualityGateDecision", schema: z.boolean() },
+  qaReport: { type: "FinalQaReport", schema: qaReport },
+  episodeSpec: { type: "EpisodeSpec", schema: EpisodeSpecSchema },
+  qualityEvidence: { type: "EpisodeQualityEvidence", schema: QualityEvidenceSchema },
   originalityOk: { type: "OriginalityDecision", schema: z.boolean() },
   structure: {
     type: "DirectorTreatment",

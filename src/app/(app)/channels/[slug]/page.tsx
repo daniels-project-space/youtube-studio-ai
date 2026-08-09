@@ -30,6 +30,7 @@ import {
   formatZonedScheduleTimestamp,
   nextProjectedPlanItem,
 } from "@/lib/scheduleCalendar";
+import seoStyles from "./seo.module.css";
 
 type ChannelDoc = {
   _id: string;
@@ -313,7 +314,7 @@ export default function ChannelHubPage({
               <span>{channel.schedule?.frequency ?? id.cadence ?? "Cadence not set"}</span>
             </div>
           </div>
-          <StageBadge status={channel.status === "active" ? "ok" : "queued"} />
+          <StageBadge status={channel.status === "active" ? "ok" : channel.status} />
         </div>
       </ChannelBanner>
 
@@ -365,7 +366,30 @@ export default function ChannelHubPage({
             onClick={() => selectTab(group.tabs[0])}
             role="tab"
             aria-selected={activeTabGroup.label === group.label}
+            tabIndex={activeTabGroup.label === group.label ? 0 : -1}
             className="channel-tab"
+            onKeyDown={(event) => {
+              const currentIndex = TAB_GROUPS.indexOf(group);
+              let nextIndex = currentIndex;
+              if (event.key === "ArrowRight") {
+                nextIndex = (currentIndex + 1) % TAB_GROUPS.length;
+              } else if (event.key === "ArrowLeft") {
+                nextIndex =
+                  (currentIndex - 1 + TAB_GROUPS.length) % TAB_GROUPS.length;
+              } else if (event.key === "Home") {
+                nextIndex = 0;
+              } else if (event.key === "End") {
+                nextIndex = TAB_GROUPS.length - 1;
+              } else {
+                return;
+              }
+              event.preventDefault();
+              selectTab(TAB_GROUPS[nextIndex].tabs[0]);
+              const tabs = event.currentTarget.parentElement?.querySelectorAll<HTMLButtonElement>(
+                '[role="tab"]',
+              );
+              tabs?.[nextIndex]?.focus();
+            }}
           >
             {group.label}
           </button>
@@ -416,7 +440,7 @@ export default function ChannelHubPage({
       {tab === "Library" && (
         <LibraryTab ownerId={ownerId} channelId={channelId} />
       )}
-      {tab === "SEO" && <SeoTab ownerId={ownerId} niche={id.niche} />}
+      {tab === "SEO" && <SeoTab ownerId={ownerId} channelId={channel._id} niche={id.niche} />}
       {tab === "Pipeline" && <PipelineTab pipeline={channel.pipeline ?? []} />}
       {tab === "Identity" && <IdentityTab id={id} budget={channel.budget} />}
       {tab === "Settings" && <SettingsTab channel={channel} />}
@@ -1484,7 +1508,11 @@ function LibraryTab({
 
 /* --------------------------------- SEO ---------------------------------- */
 
-function SeoTab({ ownerId, niche }: { ownerId: string; niche?: string }) {
+function SeoTab({ ownerId, channelId, niche }: { ownerId: string; channelId: string; niche?: string }) {
+  const [researchState, setResearchState] = useState<{
+    status: "idle" | "queuing" | "queued" | "error";
+    message?: string;
+  }>({ status: "idle" });
   const intel = useQuery(
     api.seo.getNiche,
     niche ? { ownerId, niche } : "skip",
@@ -1516,7 +1544,30 @@ function SeoTab({ ownerId, niche }: { ownerId: string; niche?: string }) {
   const topVids = (competitors ?? [])
     .flatMap((c) => c.topVideos ?? [])
     .sort((a, b) => b.views - a.views)
-    .slice(0, 12);
+    .slice(0, 10);
+
+  const refreshResearch = async () => {
+    if (!niche || researchState.status === "queuing") return;
+    setResearchState({ status: "queuing" });
+    try {
+      const response = await fetch("/api/research", {
+        method: "POST",
+        headers: { "content-type": "application/json" },
+        body: JSON.stringify({ niche, channelId }),
+      });
+      const payload = (await response.json().catch(() => ({}))) as { error?: string };
+      if (!response.ok) throw new Error(payload.error || "Research could not be queued");
+      setResearchState({
+        status: "queued",
+        message: "Refresh queued. This view updates automatically when the research lands.",
+      });
+    } catch (error) {
+      setResearchState({
+        status: "error",
+        message: error instanceof Error ? error.message : "Research could not be queued",
+      });
+    }
+  };
 
   if (!niche)
     return (
@@ -1525,81 +1576,141 @@ function SeoTab({ ownerId, niche }: { ownerId: string; niche?: string }) {
         description="Set this channel's niche (Identity tab) to unlock competitor research and SEO intelligence."
       />
     );
-  if (intel === undefined) return <SkeletonList rows={3} />;
-  if (!intel)
-    return (
-      <EmptyState
-        title="No research yet"
-        description={`Niche "${niche}" hasn't been researched. Run the research task (needs the YouTube Data API enabled) to populate competitor intelligence.`}
-      />
-    );
-
   return (
-    <div style={{ display: "grid", gap: "1.4rem" }}>
-      <div
-        style={{
-          display: "grid",
-          gridTemplateColumns: "repeat(auto-fit, minmax(150px, 1fr))",
-          gap: "0.9rem",
-        }}
-      >
-        <StatCard label="Optimal title length" value={intel.optimalTitleLen ?? "—"} />
-        <StatCard
-          label="Avg views (top 50)"
-          value={intel.avgViewsTop50 ? compact(intel.avgViewsTop50) : "—"}
-          accent="var(--color-secondary)"
-        />
-        <StatCard
-          label="Median views (top 50)"
-          value={intel.medianViewsTop50 ? compact(intel.medianViewsTop50) : "—"}
-          accent="var(--color-secondary)"
-        />
-      </div>
+    <div className={seoStyles.workspace}>
+      <header className={seoStyles.header}>
+        <div className={seoStyles.headerText}>
+          <span className={seoStyles.eyebrow}>Channel SEO intelligence</span>
+          <h2>{niche}</h2>
+        </div>
+        <button
+          type="button"
+          className={seoStyles.refresh}
+          onClick={refreshResearch}
+          disabled={researchState.status === "queuing"}
+        >
+          {researchState.status === "queuing" ? "Queuing…" : "Refresh intelligence"}
+        </button>
+      </header>
 
-      {topVids.length > 0 && (
-        <section>
-          <SectionTitle>Top competitor videos</SectionTitle>
-          <div style={{ display: "grid", gap: "0.4rem" }}>
-            {topVids.map((v, i) => (
-              <div
-                key={i}
-                className="glass"
-                style={{ display: "flex", justifyContent: "space-between", gap: "1rem", padding: "0.6rem 0.9rem", fontSize: "0.84rem" }}
-              >
-                <span style={{ color: "var(--color-fg)", overflow: "hidden", textOverflow: "ellipsis", whiteSpace: "nowrap" }}>{v.title}</span>
-                <span style={{ color: "var(--color-secondary)", whiteSpace: "nowrap" }}>{compact(v.views)} views</span>
-              </div>
-            ))}
+      {researchState.message && (
+        <p
+          className={`${seoStyles.notice}${researchState.status === "error" ? ` ${seoStyles.noticeError}` : ""}`}
+          role={researchState.status === "error" ? "alert" : "status"}
+        >
+          {researchState.message}
+        </p>
+      )}
+
+      {intel === undefined ? (
+        <SkeletonList rows={3} />
+      ) : !intel ? (
+        <div className={seoStyles.emptyPanel}>
+          <strong>No intelligence snapshot yet</strong>
+          <span>Refresh to build competitor benchmarks, reusable title patterns, and content gaps.</span>
+        </div>
+      ) : (
+        <>
+          <div className={seoStyles.benchmarkGrid} aria-label="SEO benchmarks">
+            <StatCard label="Ideal title length" value={intel.optimalTitleLen ?? "—"} />
+            <StatCard
+              label="Top-50 average views"
+              value={intel.avgViewsTop50 ? compact(intel.avgViewsTop50) : "—"}
+              accent="var(--color-secondary)"
+            />
+            <StatCard
+              label="Top-50 median views"
+              value={intel.medianViewsTop50 ? compact(intel.medianViewsTop50) : "—"}
+              accent="var(--color-secondary)"
+            />
           </div>
-        </section>
-      )}
 
-      {intel.powerWords && intel.powerWords.length > 0 && (
-        <section>
-          <SectionTitle>Power words</SectionTitle>
-          <ChipRow
-            items={intel.powerWords.slice(0, 24).map((p) => `${p.word} ·${p.count}`)}
-            tone="accent"
-          />
-        </section>
-      )}
-      {databank?.titleTemplates && databank.titleTemplates.length > 0 && (
-        <section>
-          <SectionTitle>Title templates</SectionTitle>
-          <List items={databank.titleTemplates} />
-        </section>
-      )}
-      {databank?.hookPatterns && databank.hookPatterns.length > 0 && (
-        <section>
-          <SectionTitle>Hook patterns</SectionTitle>
-          <List items={databank.hookPatterns} />
-        </section>
-      )}
-      {databank?.competitorGaps && databank.competitorGaps.length > 0 && (
-        <section>
-          <SectionTitle>Competitor gaps</SectionTitle>
-          <List items={databank.competitorGaps} />
-        </section>
+          <div className={seoStyles.decisionGrid}>
+            <section className={seoStyles.panel}>
+              <div className={seoStyles.panelHeader}>
+                <h3>Content opportunities</h3>
+                <span>Prioritize</span>
+              </div>
+              {databank?.competitorGaps?.length ? (
+                <ul className={`${seoStyles.patternList} ${seoStyles.opportunityList}`}>
+                  {databank.competitorGaps.map((gap, index) => <li key={`${gap}-${index}`}>{gap}</li>)}
+                </ul>
+              ) : (
+                <p className={seoStyles.guide}>No competitor gaps have been identified yet.</p>
+              )}
+            </section>
+
+            <section className={seoStyles.panel}>
+              <div className={seoStyles.panelHeader}>
+                <h3>Thumbnail direction</h3>
+                <span>Apply</span>
+              </div>
+              <p className={seoStyles.guide}>
+                {intel.thumbnailStyleGuide?.notes || "No niche-specific thumbnail direction has been recorded yet."}
+              </p>
+            </section>
+          </div>
+
+          <div className={seoStyles.decisionGrid}>
+            <section className={seoStyles.panel}>
+              <div className={seoStyles.panelHeader}>
+                <h3>Title patterns</h3>
+                <span>{databank?.titleTemplates?.length ?? 0} saved</span>
+              </div>
+              {databank?.titleTemplates?.length ? (
+                <ul className={seoStyles.patternList}>
+                  {databank.titleTemplates.map((pattern, index) => <li key={`${pattern}-${index}`}>{pattern}</li>)}
+                </ul>
+              ) : <p className={seoStyles.guide}>No reusable title patterns yet.</p>}
+            </section>
+
+            <section className={seoStyles.panel}>
+              <div className={seoStyles.panelHeader}>
+                <h3>Opening hooks</h3>
+                <span>{databank?.hookPatterns?.length ?? 0} saved</span>
+              </div>
+              {databank?.hookPatterns?.length ? (
+                <ul className={seoStyles.patternList}>
+                  {databank.hookPatterns.map((pattern, index) => <li key={`${pattern}-${index}`}>{pattern}</li>)}
+                </ul>
+              ) : <p className={seoStyles.guide}>No reusable hook patterns yet.</p>}
+            </section>
+          </div>
+
+          {topVids.length > 0 && (
+            <section className={seoStyles.panel}>
+              <div className={seoStyles.panelHeader}>
+                <h3>Top competitor videos</h3>
+                <span>By views</span>
+              </div>
+              <ol className={seoStyles.competitorList}>
+                {topVids.map((video, index) => (
+                  <li key={`${video.title}-${index}`} className={seoStyles.competitorRow}>
+                    <span className={seoStyles.rank}>{String(index + 1).padStart(2, "0")}</span>
+                    <span className={seoStyles.competitorTitle}>{video.title}</span>
+                    <span className={seoStyles.views}>{compact(video.views)}</span>
+                  </li>
+                ))}
+              </ol>
+            </section>
+          )}
+
+          {intel.powerWords?.length ? (
+            <section className={seoStyles.panel}>
+              <div className={seoStyles.panelHeader}>
+                <h3>High-performing language</h3>
+                <span>Observed frequency</span>
+              </div>
+              <div className={seoStyles.chips}>
+                {intel.powerWords.slice(0, 24).map((item) => (
+                  <span key={item.word} className={seoStyles.chip}>
+                    {item.word}<small>×{item.count}</small>
+                  </span>
+                ))}
+              </div>
+            </section>
+          ) : null}
+        </>
       )}
     </div>
   );

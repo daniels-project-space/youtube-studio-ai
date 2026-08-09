@@ -207,7 +207,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   upload_draft: contract(
     ["publish.connector_bound", "publish.resumable", "publish.synthetic_disclosed", "publish.private_first"],
-    { optionalConsumes: ["chapterPlan", "scheduledPublishAt"], sideEffects: ["publish_media"], qualityRequired: true },
+    { optionalConsumes: ["chapterPlan", "scheduledPublishAt", "contentLane"], sideEffects: ["publish_media"], qualityRequired: true },
   ),
   notify: contract(["notify.operator"], { sideEffects: ["external_message"] }),
   cleanup: contract(["storage.scoped_cleanup"], { sideEffects: ["delete_scoped_artifacts"] }),
@@ -304,6 +304,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "tags", "strategy", "thumbnailer", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec",
       "overlaysDropped", "qualityBar", "description", "musicKey", "niche", "persona", "styleGrammar", "topic",
+      "narrativeBeats", "shotList", "storyCoverage", "assetQaReport", "shotQaReport", "healAttempt",
     ],
     providerProfiles: [managed, local],
     maxCostUsd: 5,
@@ -320,7 +321,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   critic_spec: contract(["crew.critic_validation_spec"], { optionalConsumes: ["styleDNA", "niche", "channelName"] }),
 
   story_spine: contract(["story.timed", "visuals.story_planned"], {
-    optionalConsumes: ["structure", "visualBrief", "cutSheet", "styleDNA"],
+    optionalConsumes: ["structure", "visualBrief", "cutSheet", "styleDNA", "contentLane"],
     qualityRequired: true,
   }),
 

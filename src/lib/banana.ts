@@ -2,16 +2,31 @@
  * BANANA — shared still-image provider adapter.
  *
  * Real thumbnail paths use `thumbnailRenderer.ts`: this module renders their
- * text-free base art, while exact typography is composited locally. Set
- * IMAGE_DISABLE_GEMINI=1 (or IMAGE_PROVIDERS=fal,…) to render every image on
- * fal FLUX instead — zero Google image spend, with identical type correctness.
+ * text-free base art, while exact typography is composited locally. Thumbnail
+ * callers use the strict Nano Banana exports below; the legacy provider router
+ * remains available only to non-thumbnail still-image workloads.
  */
+import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
+import { dirname } from "node:path";
+import { canonicalJson } from "@/lib/canonicalJson";
 import { parseJsonLoose } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
 import { PRICE } from "@/engine/pricing";
 import { recordImageUsage } from "@/lib/imageUsage";
+import { rasterImageDimensions } from "@/lib/imageDimensions";
+import {
+  NANO_BANANA_THUMBNAIL_PROFILE,
+  nanoBananaThumbnailCostUsd,
+  nanoBananaThumbnailPromptCostUsd,
+  type NanoBananaImageReceipt,
+} from "@/lib/nanoBananaThumbnailContract";
+
+export {
+  NANO_BANANA_THUMBNAIL_PROFILE,
+  type NanoBananaImageReceipt,
+} from "@/lib/nanoBananaThumbnailContract";
 
 /**
  * MODEL TIERS. Pro (gemini-3-pro-image, ~$0.13/img) remains available for
@@ -73,6 +88,11 @@ function falImageRouteActive(): boolean {
 
 export function hasBanana(): boolean {
   if (falImageRouteActive()) return !!process.env.FAL_KEY;
+  return !!process.env.GEMINI_API_KEY;
+}
+
+/** Thumbnail readiness ignores the generic image router by design. */
+export function hasNanoBanana(): boolean {
   return !!process.env.GEMINI_API_KEY;
 }
 
@@ -269,7 +289,7 @@ export const NO_TEXT_CLAUSE =
   "Every title and label is added afterwards by the engine as an overlay. If a scene would naturally contain " +
   "writing (a sign, a page, a map), render it as ILLEGIBLE texture, not real words.";
 
-export async function generateBananaImage(args: {
+export interface BananaImageArgs {
   prompt: string;
   aspectRatio?: string;
   /** "1K" | "2K" | "4K" — Pro model only; defaults to "2K". */
@@ -288,7 +308,310 @@ export async function generateBananaImage(args: {
    * callers may still own a separate, intentional quality attempt after they
    * received and graded a real image. */
   maxProviderAttempts?: 1 | 2 | 3;
-}): Promise<Buffer> {
+}
+
+export interface NanoBananaImageResult {
+  bytes: Buffer;
+  receipt: NanoBananaImageReceipt;
+}
+
+interface GeminiImageResult {
+  bytes: Buffer;
+  model: string;
+  route: string;
+  width: number;
+  height: number;
+  costUsd: number;
+  sourceContentType: string;
+  requestCanonicalJson: string;
+  promptUtf8Bytes?: number;
+  promptTokenCount?: number;
+  promptCostUsd?: number;
+  outputCostUsd?: number;
+  modelVersion?: string;
+  responseId?: string;
+  providerResponseMetadataCanonicalJson?: string;
+  providerResponseMetadataSha256?: string;
+}
+
+function sha256(value: string | Uint8Array): string {
+  return createHash("sha256").update(value).digest("hex");
+}
+
+async function generateGeminiImage(
+  args: BananaImageArgs,
+  options: {
+    models: readonly string[];
+    route?: string;
+    requestContext?: string;
+    strictNanoThumbnail?: boolean;
+  },
+): Promise<GeminiImageResult> {
+  const key = process.env.GEMINI_API_KEY;
+  if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
+  const prompt = args.allowText ? args.prompt : args.prompt + NO_TEXT_CLAUSE;
+  const promptUtf8Bytes = Buffer.byteLength(prompt, "utf8");
+  if (
+    options.strictNanoThumbnail &&
+    promptUtf8Bytes > NANO_BANANA_THUMBNAIL_PROFILE.maxPromptUtf8Bytes
+  ) {
+    throw new Error(
+      `nano banana thumbnail prompt is ${promptUtf8Bytes} UTF-8 bytes; ` +
+      `the fail-closed maximum is ${NANO_BANANA_THUMBNAIL_PROFILE.maxPromptUtf8Bytes}`,
+    );
+  }
+  const maxProviderAttempts = Math.max(1, Math.min(2, args.maxProviderAttempts ?? 2));
+  const parts: Record<string, unknown>[] = [{ text: prompt }];
+  for (const im of args.images ?? []) {
+    parts.push({ inlineData: { mimeType: im.mimeType ?? "image/png", data: im.data } });
+  }
+  let lastErr = "";
+  for (const model of options.models) {
+    const imageConfig: Record<string, string> = { aspectRatio: args.aspectRatio ?? "16:9" };
+    if (model.includes("gemini-3-pro-image")) imageConfig.imageSize = args.imageSize ?? "2K";
+    const body = {
+      contents: [{ parts }],
+      generationConfig: {
+        responseModalities: ["IMAGE"],
+        imageConfig,
+      },
+    };
+    const requestCanonicalJson = canonicalJson({
+      apiVersion: "v1beta",
+      ...(options.requestContext ? { context: options.requestContext } : {}),
+      model,
+      operation: "generateContent",
+      body,
+    });
+    for (let attempt = 0; attempt < maxProviderAttempts; attempt++) {
+      let res: Response;
+      try {
+        res = await fetch(
+          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
+          {
+            method: "POST",
+            headers: { "content-type": "application/json" },
+            body: JSON.stringify(body),
+            signal: AbortSignal.timeout(180_000),
+          },
+        );
+      } catch (error) {
+        throw new BananaImageSubmissionError(
+          `${model}: image submission transport failed without a durable response; refusing automatic resubmission`,
+          { cause: error },
+        );
+      }
+
+      const raw = await res.text();
+      let json: {
+        candidates?: {
+          content?: { parts?: { inlineData?: { data?: string; mimeType?: string } }[] };
+        }[];
+        modelVersion?: string;
+        responseId?: string;
+        usageMetadata?: Record<string, unknown> & { promptTokenCount?: number };
+        error?: { message?: string };
+      } = {};
+      try {
+        json = raw ? JSON.parse(raw) as typeof json : {};
+      } catch (error) {
+        throw new BananaImageSubmissionError(
+          `${model}: provider returned an unreadable HTTP ${res.status} response without a durable image; ` +
+            "refusing automatic resubmission",
+          { status: res.status, cause: error },
+        );
+      }
+
+      if (res.status === 429) {
+        lastErr = `${model} HTTP 429: ${json.error?.message ?? "rate limited"}`;
+        if (attempt + 1 < maxProviderAttempts) {
+          await new Promise((resolve) => setTimeout(resolve, 4_000));
+        }
+        continue;
+      }
+      if (!res.ok) {
+        throw new BananaImageSubmissionError(
+          `${model}: provider returned HTTP ${res.status} without a durable image; ` +
+            `refusing automatic resubmission: ${json.error?.message ?? raw.slice(0, 240)}`,
+          { status: res.status },
+        );
+      }
+      const part = (json.candidates?.[0]?.content?.parts ?? [])
+        .find((candidate) => candidate.inlineData?.data);
+      if (!part?.inlineData?.data) {
+        throw new BananaImageSubmissionError(
+          `${model}: provider accepted the request but returned no durable image; refusing model fallback/resubmission`,
+          { status: res.status },
+        );
+      }
+      const bytes = Buffer.from(part.inlineData.data, "base64");
+      const dimensions = rasterImageDimensions(bytes);
+      const declaredContentType = (part.inlineData.mimeType?.split(";", 1)[0] ?? "")
+        .trim()
+        .toLowerCase()
+        .replace(/^image\/jpg$/, "image/jpeg");
+      if (declaredContentType && declaredContentType !== dimensions.contentType) {
+        throw new BananaImageSubmissionError(
+          `${model}: provider declared ${declaredContentType} but returned ${dimensions.contentType} bytes`,
+          { status: res.status },
+        );
+      }
+      const isPro = model.includes("gemini-3-pro-image");
+      let costUsd = isPro ? PRICE.bananaProUsd : PRICE.bananaFlashUsd;
+      let promptTokenCount: number | undefined;
+      let promptCostUsd: number | undefined;
+      let outputCostUsd: number | undefined;
+      let modelVersion: string | undefined;
+      let responseId: string | undefined;
+      let providerResponseMetadataCanonicalJson: string | undefined;
+      let providerResponseMetadataSha256: string | undefined;
+      if (options.strictNanoThumbnail) {
+        promptTokenCount = json.usageMetadata?.promptTokenCount;
+        if (
+          !Number.isInteger(promptTokenCount) ||
+          (promptTokenCount ?? 0) < 1 ||
+          (promptTokenCount ?? 0) > NANO_BANANA_THUMBNAIL_PROFILE.maxPromptTokenCount
+        ) {
+          throw new BananaImageSubmissionError(
+            `${model}: provider usageMetadata.promptTokenCount is missing or outside the admitted bound`,
+            { status: res.status },
+          );
+        }
+        modelVersion = json.modelVersion?.trim();
+        responseId = json.responseId?.trim();
+        if (!modelVersion || modelVersion.length > 256 || !responseId || responseId.length > 256) {
+          throw new BananaImageSubmissionError(
+            `${model}: provider response is missing bounded modelVersion/responseId evidence`,
+            { status: res.status },
+          );
+        }
+        providerResponseMetadataCanonicalJson = canonicalJson({
+          modelVersion,
+          responseId,
+          usageMetadata: json.usageMetadata,
+        });
+        providerResponseMetadataSha256 = sha256(
+          `nano-banana-response-metadata\0${providerResponseMetadataCanonicalJson}`,
+        );
+        promptCostUsd = nanoBananaThumbnailPromptCostUsd(promptTokenCount!);
+        outputCostUsd = NANO_BANANA_THUMBNAIL_PROFILE.outputImageUsd;
+        costUsd = nanoBananaThumbnailCostUsd(promptTokenCount!);
+        if (costUsd > NANO_BANANA_THUMBNAIL_PROFILE.admissionCeilingUsd + Number.EPSILON) {
+          throw new BananaImageSubmissionError(
+            `${model}: exact provider cost ${costUsd} exceeded the admitted thumbnail ceiling`,
+            { status: res.status },
+          );
+        }
+      }
+      const route = options.route ?? (isPro ? "banana-pro" : "banana-flash");
+      bananaCounters[isPro ? "pro" : "flash"]++;
+      recordImageUsage({
+        provider: "gemini",
+        model,
+        route,
+        images: 1,
+        width: dimensions.width,
+        height: dimensions.height,
+        costUsd,
+      });
+      return {
+        bytes,
+        model,
+        route,
+        width: dimensions.width,
+        height: dimensions.height,
+        costUsd,
+        sourceContentType: dimensions.contentType,
+        requestCanonicalJson,
+        ...(options.strictNanoThumbnail ? {
+          promptUtf8Bytes,
+          promptTokenCount: promptTokenCount!,
+          promptCostUsd: promptCostUsd!,
+          outputCostUsd: outputCostUsd!,
+          modelVersion: modelVersion!,
+          responseId: responseId!,
+          providerResponseMetadataCanonicalJson: providerResponseMetadataCanonicalJson!,
+          providerResponseMetadataSha256: providerResponseMetadataSha256!,
+        } : {}),
+      };
+    }
+  }
+  throw new Error(`banana: provider retry budget exhausted (${lastErr})`);
+}
+
+/**
+ * Strict thumbnail route. It deliberately ignores IMAGE_DISABLE_GEMINI,
+ * IMAGE_PROVIDERS, BANANA_FORCE_MODEL, Fal, and Novita: generated thumbnail
+ * pixels always come from the pinned Nano Banana Flash model.
+ */
+export async function generateNanoBananaImageWithReceipt(
+  args: Pick<BananaImageArgs, "prompt" | "aspectRatio" | "maxProviderAttempts"> & {
+    /** Durable caller scope included in the request hash, never sent as prompt text. */
+    idempotencyContext?: string;
+  },
+): Promise<NanoBananaImageResult> {
+  const profile = NANO_BANANA_THUMBNAIL_PROFILE;
+  const generated = await generateGeminiImage({
+    prompt: args.prompt,
+    aspectRatio: profile.aspectRatio,
+    allowText: false,
+    tier: profile.tier,
+    maxProviderAttempts: args.maxProviderAttempts ?? 1,
+  }, {
+    models: [profile.model],
+    route: profile.route,
+    requestContext: args.idempotencyContext,
+    strictNanoThumbnail: true,
+  });
+  if (generated.model !== profile.model || generated.route !== profile.route) {
+    throw new Error("nano banana thumbnail route escaped its pinned provider profile");
+  }
+  if (
+    generated.width !== profile.providerOutputWidth ||
+    generated.height !== profile.providerOutputHeight
+  ) {
+    throw new Error(
+      `nano banana thumbnail returned ${generated.width}x${generated.height}; ` +
+      `the pinned 16:9 source contract requires ${profile.providerOutputWidth}x${profile.providerOutputHeight}`,
+    );
+  }
+  const providerRequestSha256 = sha256(`nano-banana-provider\0${generated.requestCanonicalJson}`);
+  return {
+    bytes: generated.bytes,
+    receipt: {
+      provider: profile.provider,
+      model: profile.model,
+      apiVersion: profile.apiVersion,
+      modelVersion: generated.modelVersion!,
+      responseId: generated.responseId!,
+      route: profile.route,
+      width: generated.width as typeof profile.providerOutputWidth,
+      height: generated.height as typeof profile.providerOutputHeight,
+      promptUtf8Bytes: generated.promptUtf8Bytes!,
+      promptTokenCount: generated.promptTokenCount!,
+      promptCostUsd: generated.promptCostUsd!,
+      outputCostUsd: profile.outputImageUsd,
+      costUsd: generated.costUsd,
+      sourceContentType: generated.sourceContentType,
+      providerRequestCanonicalJson: generated.requestCanonicalJson,
+      providerRequestSha256,
+      providerResponseMetadataCanonicalJson: generated.providerResponseMetadataCanonicalJson!,
+      providerResponseMetadataSha256: generated.providerResponseMetadataSha256!,
+      responseSha256: sha256(generated.bytes),
+      createdAt: Date.now(),
+    },
+  };
+}
+
+export async function generateNanoBananaImage(
+  args: Pick<BananaImageArgs, "prompt" | "aspectRatio" | "maxProviderAttempts"> & {
+    idempotencyContext?: string;
+  },
+): Promise<Buffer> {
+  return (await generateNanoBananaImageWithReceipt(args)).bytes;
+}
+
+export async function generateBananaImage(args: BananaImageArgs): Promise<Buffer> {
   // PROVIDER ROUTER: when the operator disabled Google image gen, EVERY engine
   // that calls generateBananaImage transparently renders on fal FLUX instead
   // (same args, bytes out). A missing FAL_KEY throws — never silently fall back
@@ -317,95 +640,8 @@ export async function generateBananaImage(args: {
     });
     return bytes;
   }
-  const key = process.env.GEMINI_API_KEY;
-  if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
-  const prompt = args.allowText ? args.prompt : args.prompt + NO_TEXT_CLAUSE;
   const tier = args.tier ?? (args.allowText ? "pro" : "flash");
-  const maxProviderAttempts = Math.max(1, Math.min(2, args.maxProviderAttempts ?? 2));
-  // Text first, then any conditioning images (img2img / style reference).
-  const parts: Record<string, unknown>[] = [{ text: prompt }];
-  for (const im of args.images ?? []) parts.push({ inlineData: { mimeType: im.mimeType ?? "image/png", data: im.data } });
-  let lastErr = "";
-  for (const model of modelsFor(tier)) {
-    // Nano Banana Pro (gemini-3-pro-image) honours imageConfig.imageSize for 2K/4K
-    // output; the classic gemini-2.5-flash-image fallback rejects it (400) and caps
-    // ~1024px anyway, so it silently degrades.
-    const imageConfig: Record<string, string> = { aspectRatio: args.aspectRatio ?? "16:9" };
-    if (model.includes("gemini-3-pro-image")) imageConfig.imageSize = args.imageSize ?? "2K";
-    for (let attempt = 0; attempt < maxProviderAttempts; attempt++) {
-      let res: Response;
-      try {
-        res = await fetch(
-          `https://generativelanguage.googleapis.com/v1beta/models/${model}:generateContent?key=${key}`,
-          {
-            method: "POST",
-            headers: { "content-type": "application/json" },
-            body: JSON.stringify({
-              contents: [{ parts }],
-              generationConfig: {
-                responseModalities: ["IMAGE"],
-                imageConfig,
-              },
-            }),
-            signal: AbortSignal.timeout(180_000),
-          },
-        );
-      } catch (error) {
-        throw new BananaImageSubmissionError(
-          `${model}: image submission transport failed without a durable response; refusing automatic resubmission`,
-          { cause: error },
-        );
-      }
-
-      const raw = await res.text();
-      let json: {
-        candidates?: { content?: { parts?: { inlineData?: { data?: string } }[] } }[];
-        error?: { message?: string };
-      } = {};
-      try {
-        json = raw ? JSON.parse(raw) as typeof json : {};
-      } catch (error) {
-        throw new BananaImageSubmissionError(
-          `${model}: provider returned an unreadable HTTP ${res.status} response without a durable image; ` +
-            "refusing automatic resubmission",
-          { status: res.status, cause: error },
-        );
-      }
-
-      if (res.status === 429) {
-        lastErr = `${model} HTTP 429: ${json.error?.message ?? "rate limited"}`;
-        if (attempt + 1 < maxProviderAttempts) {
-          await new Promise((r) => setTimeout(r, 4000));
-        }
-        continue;
-      }
-      if (!res.ok) {
-        throw new BananaImageSubmissionError(
-          `${model}: provider returned HTTP ${res.status} without a durable image; ` +
-            `refusing automatic resubmission: ${json.error?.message ?? raw.slice(0, 240)}`,
-          { status: res.status },
-        );
-      }
-      const part = (json.candidates?.[0]?.content?.parts ?? []).find((candidate) => candidate.inlineData?.data);
-      if (!part?.inlineData?.data) {
-        throw new BananaImageSubmissionError(
-          `${model}: provider accepted the request but returned no durable image; refusing model fallback/resubmission`,
-          { status: res.status },
-        );
-      }
-      const isPro = model.includes("gemini-3-pro-image");
-      bananaCounters[isPro ? "pro" : "flash"]++;
-      recordImageUsage({
-        provider: "gemini",
-        model,
-        route: isPro ? "banana-pro" : "banana-flash",
-        images: 1,
-        costUsd: isPro ? PRICE.bananaProUsd : PRICE.bananaFlashUsd,
-      });
-      return Buffer.from(part.inlineData.data, "base64");
-    }
-  }
-  throw new Error(`banana: provider retry budget exhausted (${lastErr})`);
+  return (await generateGeminiImage(args, { models: modelsFor(tier) })).bytes;
 }
 
 export interface BananaVerdict {
@@ -424,15 +660,13 @@ export interface BananaVerdict {
  * an honest failure, never a silent bad thumbnail).
  */
 export async function bananaThumbnail(args: {
-  brief: string;
+  /** Structured brief is mandatory so provider scene pixels and local type cannot be conflated. */
+  brief: ThumbBriefArgs & { textZone?: "left" | "right" | "upperLeft" | "upperRight" };
   outJpg: string;
   /** for the judge: exact headline words + channel style to verify against */
   expectWords?: string[];
   imageStyle?: string;
   title?: string;
-  /** "flash" for plan-stage PREVIEW thumbnails (may never become videos);
-   *  default "pro" — publish thumbnails keep the proven typography model. */
-  tier?: "pro" | "flash";
   /** Channel thumbnail text-rule (from Style DNA). When it signals a RESTRAINED
    *  aesthetic (minimal/no baked hype text — comic "illustrative only",
    *  whiteboard "anti-sensationalist"), the judge stops demanding clickbait
@@ -441,9 +675,11 @@ export async function bananaThumbnail(args: {
   styleRubric?: string;
   log?: (msg: string) => void;
 }): Promise<{ path: string; verdict: BananaVerdict }> {
-  // Legacy experiment compatibility only. Deployed thumbnail paths must use
-  // thumbnailRenderer, whose typed scene/type split makes this unsafe one-pass
-  // API unreachable from production.
+  if (!args.brief || typeof args.brief !== "object" || Array.isArray(args.brief)) {
+    throw new Error(
+      "bananaThumbnail requires a structured ThumbBriefArgs value; one-pass baked-text briefs are forbidden",
+    );
+  }
   let fixNote = "";
   let lastVerdict: BananaVerdict = {};
   // Restrained brands: relax the scroll-stopping "punch" floor and tell the
@@ -451,8 +687,31 @@ export async function bananaThumbnail(args: {
   const restrained = /minimal|no text|clean|understated|restrained|illustrat|no hype|anti.?sensational/i.test(args.styleRubric ?? "");
   const punchFloor = restrained ? 5 : 7;
   for (let attempt = 0; attempt < 2; attempt++) {
-    const bytes = await generateBananaImage({ prompt: args.brief + fixNote, allowText: true, tier: args.tier });
-    await writeFile(args.outJpg, bytes);
+    const { renderThumbnail } = await import("@/lib/thumbnailRenderer");
+    await renderThumbnail({
+      spec: {
+        scene: {
+          description: `${args.brief.scene}${fixNote}`,
+          imageStyle: args.brief.imageStyle,
+          palette: args.brief.palette,
+          accentColor: args.brief.accentColor,
+          composition: args.brief.composition,
+          textZone: args.brief.textZone ?? "left",
+        },
+        typography: {
+          lines: args.brief.lines,
+          subtitle: args.brief.badge,
+          accentColor: args.brief.accentColor,
+          font: "impact",
+          uppercase: true,
+          treatment: "plate",
+          textObject: args.brief.textObject as
+            import("@/lib/thumbnailRenderer").ThumbnailTypographySpec["textObject"],
+        },
+      },
+      outJpg: args.outJpg,
+      tmpDir: dirname(args.outJpg),
+    });
     const wordList = (args.expectWords ?? []).map((w) => `"${w.toUpperCase()}"`).join(" and ");
     const raw = await judgeVision({
       prompt:
@@ -477,7 +736,7 @@ export async function bananaThumbnail(args: {
       args.log?.(
         `banana: VISION JUDGE UNAVAILABLE on attempt ${attempt + 1} — treating textOk as FAILED (spelling cannot ship unverified)`,
       );
-      fixNote = " CRITICAL FIX FROM THE LAST ATTEMPT: render every headline word spelled exactly as quoted.";
+      fixNote = " Improve subject separation and preserve the planned empty text zone.";
       continue;
     }
     const v: BananaVerdict = parseJsonLoose<BananaVerdict>(raw);
@@ -489,7 +748,7 @@ export async function bananaThumbnail(args: {
       args.log?.(`banana: render OK (punch ${v.punch ?? "?"}/10, style ${v.styleMatch ?? "?"}/10)`);
       return { path: args.outJpg, verdict: v };
     }
-    fixNote = ` CRITICAL FIX FROM THE LAST ATTEMPT: ${v.fix ?? "stronger composition, exact spelling, text clear of faces"}.`;
+    fixNote = ` CRITICAL SCENE FIX FROM THE LAST ATTEMPT: ${v.fix ?? "stronger composition and text clear of faces"}.`;
     args.log?.(
       `banana: attempt ${attempt + 1} rejected (textOk=${v.textOk} faceClear=${v.faceClear} punch=${v.punch} style=${v.styleMatch} story=${v.storyMatch}) -> ${attempt === 0 ? "retrying with fix" : "FAILING LOUD"}`,
     );

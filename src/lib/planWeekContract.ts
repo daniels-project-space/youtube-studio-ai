@@ -1,6 +1,23 @@
-export const PLAN_WEEK_CONTRACT_VERSION = "plan-week-v3-attested-novita" as const;
-/** Budget reservation only; actual billing always uses the signed GPU receipt. */
-export const PLAN_WEEK_IMAGE_UNIT_USD = 0.04;
+import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
+
+/** Fresh admissions. Provider and creative-route migrations must bump this. */
+export const PLAN_WEEK_CONTRACT_VERSION = "plan-week-v4-golden-nano-banana" as const;
+
+/**
+ * Read/recovery compatibility only. No fresh batch may ever be admitted under
+ * this misleading historical identifier.
+ */
+export const LEGACY_PLAN_WEEK_CONTRACT_VERSION = "plan-week-v3-attested-novita" as const;
+
+export type PlanWeekContractVersion =
+  | typeof PLAN_WEEK_CONTRACT_VERSION
+  | typeof LEGACY_PLAN_WEEK_CONTRACT_VERSION;
+
+/** Admission only; actual Nano Banana receipt cost remains exact. */
+export const PLAN_WEEK_IMAGE_UNIT_USD = NANO_BANANA_THUMBNAIL_PROFILE.admissionCeilingUsd;
+/** Admission ceilings for one Golden pattern instantiation and one mobile/reference judge. */
+export const PLAN_WEEK_THUMBNAIL_CONCEPT_UNIT_USD = 0.01;
+export const PLAN_WEEK_THUMBNAIL_QA_UNIT_USD = 0.003;
 
 function roundUsd(value: number): number {
   return Number(value.toFixed(6));
@@ -18,12 +35,20 @@ export function planWeekContractReservation(count: number) {
   const proOutputUsd = 4 * proMaxOutputTokens * (12 / 1_000_000);
   const proInputUsd = 4 * 50_000 * (2 / 1_000_000);
   const judgeUsd = 2 * ((1_500 * 2.5 + 50_000 * 0.3) / 1_000_000);
-  const modelUsd = roundUsd(proOutputUsd + proInputUsd + judgeUsd + 0.08);
+  const thumbnailQaUsd = roundUsd(accepted * PLAN_WEEK_THUMBNAIL_QA_UNIT_USD);
+  const thumbnailConceptUsd = roundUsd(accepted * PLAN_WEEK_THUMBNAIL_CONCEPT_UNIT_USD);
+  // Keep the historical floor for normal batches while explicitly reserving
+  // every Golden-instantiation + QA call in larger batches.
+  const thumbnailModelUsd = roundUsd(Math.max(0.08, thumbnailQaUsd + thumbnailConceptUsd));
+  const modelUsd = roundUsd(proOutputUsd + proInputUsd + judgeUsd + thumbnailModelUsd);
   const imageUsd = roundUsd(accepted * PLAN_WEEK_IMAGE_UNIT_USD);
   return {
     modelUsd,
     imageUsd,
     imageUnitUsd: PLAN_WEEK_IMAGE_UNIT_USD,
+    thumbnailConceptUsd,
+    thumbnailQaUsd,
+    thumbnailModelUsd,
     totalUsd: roundUsd(modelUsd + imageUsd),
   };
 }

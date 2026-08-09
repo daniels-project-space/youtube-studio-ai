@@ -2,7 +2,7 @@
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 import { bootstrapSecrets } from "../src/lib/bootstrap.ts";
-import { buildThumbBrief, bananaThumbnail } from "../src/lib/banana.ts";
+import { bananaThumbnail } from "../src/lib/banana.ts";
 
 await bootstrapSecrets(() => {}, { required: ["GEMINI_API_KEY"] });
 
@@ -46,7 +46,7 @@ for (const j of JOBS) {
   const outJpg = join(tmpdir(), j.out);
   try {
     const { verdict } = await bananaThumbnail({
-      brief: buildThumbBrief({ ...CHANNEL, scene: j.scene, lines: j.lines }),
+      brief: { ...CHANNEL, scene: j.scene, lines: j.lines },
       outJpg,
       expectWords: j.lines.flatMap((l) => l.text.split(" ")),
       imageStyle: CHANNEL.imageStyle,

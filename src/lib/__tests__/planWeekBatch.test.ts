@@ -36,6 +36,8 @@ import {
   planWeekProviderResultFixture,
 } from "@/lib/__tests__/planWeekRenderReceiptFixture";
 import { isFinalizedPlanWeekRenderReceipt } from "@/lib/planWeekRenderReceipt";
+import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
+import { PLAN_WEEK_RECOVERY_GUARD_VERSION } from "@/lib/planWeekRecoveryContract";
 
 type Row = Record<string, unknown> & { _id: string; _creationTime: number };
 
@@ -199,6 +201,13 @@ async function main() {
   const ctx = testContext(db, ownerId);
   const reservation = planWeekReservation(5);
   assert.equal(reservation.imageUnitUsd, 0.04);
+  assert.equal(reservation.thumbnailConceptUsd, 0.05);
+  assert.equal(reservation.thumbnailQaUsd, 0.015);
+  assert.equal(reservation.thumbnailModelUsd, 0.08);
+  const largeReservation = planWeekReservation(12);
+  assert.equal(largeReservation.thumbnailConceptUsd, 0.12);
+  assert.equal(largeReservation.thumbnailQaUsd, 0.036);
+  assert.equal(largeReservation.thumbnailModelUsd, 0.156);
   assert.ok(reservation.totalUsd > 0 && reservation.totalUsd <= 2);
 
   const common = {
@@ -223,7 +232,7 @@ async function main() {
     invoke(reservePlanBatch, testContext(bypassDb, ownerId), {
       ...common, requestKey: "under-reserved", reservedCostUsd: 0.01,
     }),
-    /below plan-week-v3-attested-novita floor/,
+    new RegExp(`below ${PLAN_WEEK_CONTRACT_VERSION} floor`),
   );
   await assert.rejects(
     invoke(reservePlanBatch, testContext(bypassDb, ownerId), {
@@ -232,6 +241,115 @@ async function main() {
     /unsupported plan reservation contract/,
   );
   assert.equal(bypassDb.rows("planBatches").length, 0, "caller-supplied reservations cannot bypass admission");
+
+  const exactRecoveryDb = new MemoryDb();
+  exactRecoveryDb.seed("channels", {
+    ownerId, name: "Exact recovery", slug: "exact-recovery", budget: 2, status: "active",
+  }, channelId);
+  const exactBatchId = "planBatches:exact-recovery";
+  const exactItemIds = [
+    "contentPlan:exact-a",
+    "contentPlan:exact-b",
+    "contentPlan:exact-c",
+  ];
+  const exactCostUsd = 0.024551;
+  for (let index = 0; index < exactItemIds.length; index++) {
+    exactRecoveryDb.seed("contentPlan", {
+      ownerId,
+      channelId,
+      batchId: exactBatchId,
+      itemKey: `exact-request:${index}`,
+      order: index,
+      topic: `Exact topic ${index + 1}`,
+      status: "failed",
+      generationState: "failed",
+      generationAttempt: 3,
+      generationRetryable: true,
+      createdAt: 1_900_000_000_000 + index,
+    }, exactItemIds[index]);
+  }
+  const exactReservation = planWeekReservation(exactItemIds.length);
+  exactRecoveryDb.seed("planBatches", {
+    ownerId,
+    channelId,
+    channelSlug: "exact-recovery",
+    requestKey: "exact-request",
+    triggerRunId: "original-failed-run",
+    contractVersion: PLAN_WEEK_CONTRACT_VERSION,
+    requestedCount: exactItemIds.length,
+    reservedCostUsd: exactReservation.totalUsd,
+    actualCostUsd: exactCostUsd,
+    status: "failed",
+    topicState: "complete",
+    topicAttempt: 1,
+    itemIds: exactItemIds,
+    accountingComplete: true,
+    budgetExceeded: false,
+    retryable: true,
+    leaseExpiresAt: 1,
+    createdAt: 1,
+    updatedAt: 1,
+  }, exactBatchId);
+  exactRecoveryDb.seed("planBatchUsage", {
+    ownerId,
+    channelId,
+    batchId: exactBatchId,
+    checkpointKey: "topics:1",
+    fingerprint: "a".repeat(64),
+    modelUsage: {},
+    imageUsage: {},
+    costUsd: exactCostUsd,
+    accountingComplete: true,
+    createdAt: 1,
+  }, "planBatchUsage:exact-topics");
+  const exactRecoveryArgs = {
+    ownerId,
+    channelId,
+    requestKey: "exact-request",
+    triggerRunId: "exact-recovery-run",
+    contractVersion: PLAN_WEEK_CONTRACT_VERSION,
+    requestedCount: exactItemIds.length,
+    reservedCostUsd: exactReservation.totalUsd,
+    recovery: {
+      guardVersion: PLAN_WEEK_RECOVERY_GUARD_VERSION,
+      batchId: exactBatchId,
+      itemIds: exactItemIds,
+      expectedActualCostUsd: exactCostUsd,
+      providerRoute: NANO_BANANA_THUMBNAIL_PROFILE.route,
+      taskVersion: "20260809.3",
+    },
+  };
+  const exactRecovered = await invoke(
+    reservePlanBatch,
+    testContext(exactRecoveryDb, ownerId),
+    exactRecoveryArgs,
+  );
+  assert.equal(exactRecovered.batchId, exactBatchId);
+  assert.equal(exactRecoveryDb.rows("planBatches").length, 1, "recovery must never create a second batch");
+  assert.equal((await exactRecoveryDb.get(exactBatchId))?.recoveryTaskRunId, "exact-recovery-run");
+  const sameRunReplay = await invoke(
+    reservePlanBatch,
+    testContext(exactRecoveryDb, ownerId),
+    exactRecoveryArgs,
+  );
+  assert.equal(sameRunReplay.batchId, exactBatchId, "same Trigger run may resume its claimed recovery");
+  await assert.rejects(
+    invoke(reservePlanBatch, testContext(exactRecoveryDb, ownerId), {
+      ...exactRecoveryArgs,
+      triggerRunId: "different-recovery-run",
+    }),
+    /different recovery run or contract/,
+  );
+
+  const missingRecoveryDb = new MemoryDb();
+  missingRecoveryDb.seed("channels", {
+    ownerId, name: "Missing recovery", slug: "missing-recovery", budget: 2, status: "active",
+  }, channelId);
+  await assert.rejects(
+    invoke(reservePlanBatch, testContext(missingRecoveryDb, ownerId), exactRecoveryArgs),
+    /batch planBatches:exact-recovery is missing/,
+  );
+  assert.equal(missingRecoveryDb.rows("planBatches").length, 0, "missing recovery may not create a fresh batch");
 
   const admitted = await invoke(reservePlanBatch, ctx, common);
   const replay = await invoke(reservePlanBatch, ctx, common);
@@ -481,19 +599,19 @@ async function main() {
     attempt: retryClaim.attempt, claimant: "run-1:2",
   });
 
-  const nonNovitaImageScope = createImageUsageScope();
-  await nonNovitaImageScope.run(async () => {
+  const nonNanoImageScope = createImageUsageScope();
+  await nonNanoImageScope.run(async () => {
     recordImageUsage({
       provider: "other", model: "unattested-image-model", route: "generic-image-route",
       images: 1, width: 1280, height: 720, costUsd: 0,
     });
   });
-  const nonNovitaUsage = buildPlanWeekUsageCheckpoint(emptyModel, nonNovitaImageScope.snapshot());
+  const nonNanoUsage = buildPlanWeekUsageCheckpoint(emptyModel, nonNanoImageScope.snapshot());
   await invoke(recordPlanBatchUsage, ctx, {
     ownerId, channelId, batchId: admitted.batchId, itemId,
-    checkpointKey: "thumbnail:item:unattested", fingerprint: nonNovitaUsage.fingerprint,
-    modelUsage: nonNovitaUsage.modelUsage, imageUsage: nonNovitaUsage.imageUsage,
-    costUsd: nonNovitaUsage.costUsd, accountingComplete: nonNovitaUsage.accountingComplete,
+    checkpointKey: "thumbnail:item:unattested", fingerprint: nonNanoUsage.fingerprint,
+    modelUsage: nonNanoUsage.modelUsage, imageUsage: nonNanoUsage.imageUsage,
+    costUsd: nonNanoUsage.costUsd, accountingComplete: nonNanoUsage.accountingComplete,
   });
   await assert.rejects(
     invoke(completePlanItem, ctx, {
@@ -501,20 +619,31 @@ async function main() {
       thumbnailKey: `owner/${ownerId}/channel/test-channel/plan/${itemId}.jpg`,
       usageCheckpointKey: "thumbnail:item:unattested",
     }),
-    /finalized Novita receipt is missing/,
+    /finalized provider receipt is missing/,
   );
 
+  const thumbnailKey = `owner/${ownerId}/channel/test-channel/plan/${itemId}.jpg`;
+  const receiptScope = {
+    ownerId,
+    channelId,
+    batchId: admitted.batchId,
+    itemId,
+    attempt: retryClaim.attempt,
+    requestKey: common.requestKey,
+    checkpointKey: paidCheckpointKey,
+    destinationKey: thumbnailKey,
+  };
   const imageScope = createImageUsageScope();
-  const attestedProviderResult = planWeekProviderResultFixture();
+  const nanoProviderResult = planWeekProviderResultFixture(receiptScope);
   await imageScope.run(async () => {
     recordImageUsage({
-      provider: "novita",
-      model: attestedProviderResult.model,
-      route: "local-z-image-turbo",
+      provider: nanoProviderResult.provider,
+      model: nanoProviderResult.model,
+      route: nanoProviderResult.route,
       images: 1,
-      width: attestedProviderResult.width,
-      height: attestedProviderResult.height,
-      costUsd: attestedProviderResult.costUsd,
+      width: nanoProviderResult.width,
+      height: nanoProviderResult.height,
+      costUsd: nanoProviderResult.costUsd,
     });
   });
   const paidUsage = buildPlanWeekUsageCheckpoint(emptyModel, imageScope.snapshot());
@@ -576,9 +705,8 @@ async function main() {
       ownerId, channelId, batchId: admitted.batchId, itemId, attempt: recoveryOnly.attempt,
       thumbnailKey: "owner/wrong/channel/wrong/plan/item.jpg", usageCheckpointKey: paidCheckpointKey,
     }),
-    /does not match its admitted artifact path|no matching finalized Novita provider and artifact receipt/,
+    /does not match its admitted artifact path|no matching finalized provider and artifact receipt/,
   );
-  const thumbnailKey = `owner/${ownerId}/channel/test-channel/plan/${itemId}.jpg`;
   const receiptCreatedAt = Date.now();
   const finalizedRender = finalizedPlanWeekRenderReceiptFixture({
     ownerId,
@@ -635,15 +763,12 @@ async function main() {
   });
   const storedRender = await db.get(recordedRender.receiptId);
   assert.equal(isFinalizedPlanWeekRenderReceipt(storedRender), true);
-  assert.equal(finalizedRender.providerReceipt.model, attestedProviderResult.runtimeAttestation.model);
-  assert.equal(
-    `${finalizedRender.providerReceipt.model}@${finalizedRender.providerReceipt.modelRevision}`,
-    attestedProviderResult.model,
-  );
+  assert.equal(finalizedRender.providerReceipt.model, nanoProviderResult.model);
+  assert.equal(finalizedRender.providerReceipt.modelVersion, nanoProviderResult.modelVersion);
   assert.deepEqual(paidUsage.imageUsage.records, [{
-    provider: "novita",
-    model: `${finalizedRender.providerReceipt.model}@${finalizedRender.providerReceipt.modelRevision}`.toLowerCase(),
-    route: "local-z-image-turbo",
+    provider: "gemini",
+    model: finalizedRender.providerReceipt.model,
+    route: "nano-banana-flash",
     images: 1,
     width: finalizedRender.providerReceipt.width,
     height: finalizedRender.providerReceipt.height,
@@ -656,7 +781,7 @@ async function main() {
   });
   const final = await invoke(finalizePlanBatch, ctx, { ownerId, channelId, batchId: admitted.batchId });
   assert.equal(final.status, "ready");
-  assert.equal(final.actualCostUsd, 0.04);
+  assert.equal(final.actualCostUsd, finalizedRender.providerReceipt.costUsd);
   for (let index = 0; index < 30; index++) {
     db.seed("contentPlan", {
       ownerId,
@@ -744,8 +869,12 @@ async function main() {
 
   db.seed("runs", { ownerId, channelId, status: "ok", costTotal: 0.5 }, "runs:test");
   const analytics = await invoke(overview, ctx, { ownerId });
-  assert.equal(analytics.planningCost, 0.04);
-  assert.equal(analytics.totalCost, 0.54, "analytics must include planner spend exactly once");
+  assert.equal(analytics.planningCost, finalizedRender.providerReceipt.costUsd);
+  assert.equal(
+    analytics.totalCost,
+    0.5 + finalizedRender.providerReceipt.costUsd,
+    "analytics must include planner spend exactly once",
+  );
 
   // Simulate provider output durably checkpointed, then a Convex network
   // failure before topic rows were saved. Restoring the exact R2 payload writes

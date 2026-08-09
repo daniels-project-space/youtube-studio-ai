@@ -1,0 +1,172 @@
+.widget {
+  position: relative;
+  z-index: 40;
+}
+
+.widget > summary {
+  display: inline-flex;
+  min-height: 32px;
+  align-items: center;
+  gap: 0.4rem;
+  border: 1px solid color-mix(in srgb, var(--color-failed) 28%, var(--color-border));
+  border-radius: 999px;
+  background: color-mix(in srgb, var(--color-failed) 8%, transparent);
+  color: #f0aaaa;
+  cursor: pointer;
+  font-size: 0.66rem;
+  font-weight: 650;
+  list-style: none;
+  padding: 0.3rem 0.58rem;
+  white-space: nowrap;
+}
+
+.widget > summary::-webkit-details-marker {
+  display: none;
+}
+
+.widget > summary > span {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-failed);
+}
+
+.widget > summary::after {
+  content: "+";
+  color: currentColor;
+  font-size: 0.78rem;
+}
+
+.widget[open] > summary::after {
+  content: "−";
+}
+
+.widget > summary:focus-visible,
+.issueRow button:focus-visible,
+.issueRow a:focus-visible {
+  outline: 2px solid var(--color-accent);
+  outline-offset: 2px;
+}
+
+.panel {
+  position: absolute;
+  top: calc(100% + 0.48rem);
+  right: 0;
+  display: grid;
+  width: min(350px, calc(100vw - 2rem));
+  gap: 0.28rem;
+  border: 1px solid var(--color-border-strong);
+  border-radius: 12px;
+  background: color-mix(in srgb, var(--color-bg) 94%, transparent);
+  box-shadow: var(--shadow-lift);
+  padding: 0.54rem;
+  backdrop-filter: blur(18px);
+}
+
+.panel > header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.24rem 0.34rem 0.42rem;
+}
+
+.panel > header strong {
+  font-size: 0.75rem;
+  font-weight: 600;
+}
+
+.panel > header small {
+  color: var(--color-faint);
+  font-size: 0.61rem;
+}
+
+.issueRow {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.48rem;
+  border-radius: 8px;
+  padding: 0.46rem 0.48rem;
+}
+
+.issueRow:hover {
+  background: rgba(255, 255, 255, 0.035);
+}
+
+.issueRow > span:nth-child(2),
+.issueRow > a {
+  display: grid;
+  min-width: 0;
+  gap: 0.08rem;
+}
+
+.issueRow strong,
+.issueRow small {
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.issueRow strong {
+  font-size: 0.7rem;
+  font-weight: 600;
+}
+
+.issueRow small {
+  color: var(--color-faint);
+  font-size: 0.61rem;
+}
+
+.errorDot,
+.warningDot {
+  width: 6px;
+  height: 6px;
+  border-radius: 999px;
+  background: var(--color-failed);
+}
+
+.warningDot {
+  background: var(--color-amber);
+}
+
+.issueRow button {
+  display: grid;
+  width: 25px;
+  height: 25px;
+  place-items: center;
+  border: 0;
+  border-radius: 7px;
+  background: transparent;
+  color: var(--color-faint);
+  cursor: pointer;
+  font: inherit;
+}
+
+.issueRow button:hover {
+  background: rgba(255, 255, 255, 0.05);
+  color: var(--color-fg);
+}
+
+.moreIssues {
+  display: block;
+  padding: 0.42rem 0.48rem;
+  color: var(--color-muted);
+  font-size: 0.64rem;
+  text-align: center;
+}
+
+.moreIssues:hover {
+  color: var(--color-fg);
+}
+
+@media (max-width: 520px) {
+  .panel {
+    position: fixed;
+    top: auto;
+    right: 0.7rem;
+    bottom: calc(78px + env(safe-area-inset-bottom));
+    left: 0.7rem;
+    width: auto;
+  }
+}

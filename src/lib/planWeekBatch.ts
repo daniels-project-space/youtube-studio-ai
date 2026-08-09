@@ -1,15 +1,18 @@
 import { createHash } from "node:crypto";
-import { PRICE } from "@/engine/pricing";
 import { canonicalJson } from "@/lib/canonicalJson";
 import type { ImageUsageSummary } from "@/lib/imageUsage";
 import type { ModelUsageSummary } from "@/lib/modelUsage";
 import {
+  LEGACY_PLAN_WEEK_CONTRACT_VERSION,
   PLAN_WEEK_CONTRACT_VERSION,
   PLAN_WEEK_IMAGE_UNIT_USD,
   planWeekContractReservation,
+  type PlanWeekContractVersion,
 } from "@/lib/planWeekContract";
+import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
 
 export {
+  LEGACY_PLAN_WEEK_CONTRACT_VERSION,
   PLAN_WEEK_CONTRACT_VERSION,
   PLAN_WEEK_IMAGE_UNIT_USD,
 } from "@/lib/planWeekContract";
@@ -24,10 +27,13 @@ export interface PlanWeekReservation {
   imageUsd: number;
   totalUsd: number;
   imageUnitUsd: number;
+  thumbnailConceptUsd: number;
+  thumbnailQaUsd: number;
+  thumbnailModelUsd: number;
 }
 
 export interface PlanWeekUsageCheckpoint {
-  contractVersion: typeof PLAN_WEEK_CONTRACT_VERSION;
+  contractVersion: PlanWeekContractVersion;
   fingerprint: string;
   costUsd: number;
   accountingComplete: boolean;
@@ -58,12 +64,12 @@ function roundUsd(value: number): number {
 
 /**
  * Conservative pre-provider envelope for the only paid paths left in the
- * planner: Topicraft's bounded two-slate generator/judge and one attested
- * Novita image per accepted item. Actual spend comes from signed receipts; the
- * reservation uses the hard per-image admission ceiling.
+ * planner: Topicraft's bounded two-slate generator/judge and one strict Nano
+ * Banana image per accepted item. Actual spend comes from provider receipts;
+ * the reservation uses the hard per-image admission ceiling.
  */
 export function planWeekReservation(count: number): PlanWeekReservation {
-  const liveImageUnitUsd = roundUsd(PRICE.novitaImageUsd);
+  const liveImageUnitUsd = roundUsd(NANO_BANANA_THUMBNAIL_PROFILE.admissionCeilingUsd);
   if (liveImageUnitUsd > PLAN_WEEK_IMAGE_UNIT_USD + 0.000001) {
     throw new Error(
       `plan-week pricing $${liveImageUnitUsd.toFixed(4)} exceeds ${PLAN_WEEK_CONTRACT_VERSION}; bump the contract`,
@@ -123,7 +129,8 @@ export function dedupePlanCandidates<T extends { topic: string }>(
   return accepted;
 }
 
-export function buildPlanWeekUsageCheckpoint(
+export function buildPlanWeekUsageCheckpointForContract(
+  contractVersion: PlanWeekContractVersion,
   modelUsage: ModelUsageSummary,
   imageUsage: ImageUsageSummary,
 ): PlanWeekUsageCheckpoint {
@@ -131,7 +138,7 @@ export function buildPlanWeekUsageCheckpoint(
   const accountingComplete = modelUsage.unpricedCalls === 0 &&
     imageUsage.records.every((record) => Number.isFinite(record.costUsd) && record.costUsd >= 0);
   const payload = {
-    contractVersion: PLAN_WEEK_CONTRACT_VERSION as typeof PLAN_WEEK_CONTRACT_VERSION,
+    contractVersion,
     costUsd,
     accountingComplete,
     modelUsage,
@@ -141,6 +148,17 @@ export function buildPlanWeekUsageCheckpoint(
     ...payload,
     fingerprint: createHash("sha256").update(canonicalJson(payload)).digest("hex"),
   };
+}
+
+export function buildPlanWeekUsageCheckpoint(
+  modelUsage: ModelUsageSummary,
+  imageUsage: ImageUsageSummary,
+): PlanWeekUsageCheckpoint {
+  return buildPlanWeekUsageCheckpointForContract(
+    PLAN_WEEK_CONTRACT_VERSION,
+    modelUsage,
+    imageUsage,
+  );
 }
 
 export function buildPlanWeekTopicCheckpoint(args: {
@@ -196,7 +214,7 @@ export function planWeekUsageMetadata(checkpoint: PlanWeekUsageCheckpoint): Reco
   if (encoded.length > 6_000) throw new Error("plan-week usage metadata exceeds safe R2 metadata size");
   return {
     [USAGE_METADATA_KEY]: encoded,
-    "plan-week-contract": PLAN_WEEK_CONTRACT_VERSION,
+    "plan-week-contract": checkpoint.contractVersion,
     "plan-week-fingerprint": checkpoint.fingerprint,
   };
 }
@@ -208,8 +226,16 @@ export function parsePlanWeekUsageMetadata(
   if (!encoded) return null;
   try {
     const value = JSON.parse(Buffer.from(encoded, "base64url").toString("utf8")) as PlanWeekUsageCheckpoint;
-    const rebuilt = buildPlanWeekUsageCheckpoint(value.modelUsage, value.imageUsage);
-    if (value.contractVersion !== PLAN_WEEK_CONTRACT_VERSION || value.fingerprint !== rebuilt.fingerprint) return null;
+    if (
+      value.contractVersion !== PLAN_WEEK_CONTRACT_VERSION &&
+      value.contractVersion !== LEGACY_PLAN_WEEK_CONTRACT_VERSION
+    ) return null;
+    const rebuilt = buildPlanWeekUsageCheckpointForContract(
+      value.contractVersion,
+      value.modelUsage,
+      value.imageUsage,
+    );
+    if (value.fingerprint !== rebuilt.fingerprint) return null;
     return rebuilt;
   } catch {
     return null;

@@ -33,6 +33,8 @@
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
 import { PRICE } from "@/engine/pricing";
+import { resolveContentLane } from "@/engine/contentLane";
+import { QualityEvidenceSchema } from "@/engine/qualityEvidence";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -1078,12 +1080,32 @@ export const uploadDraft: Block = {
   id: "upload_draft",
   consumes: [
     "videoKey", "videoLocalPath", "title", "description", "tags", "qaPassed",
-    "thumbnailKey", "thumbnailPublishable",
+    "qualityEvidence", "thumbnailKey", "thumbnailPublishable",
   ],
   produces: ["youtubeVideoId", "watchUrl", "youtubePrivacy"],
   run: async (ctx) => {
     if (ctx.store["qaPassed"] !== true) {
       throw new Error("upload_draft: qa did not pass — refusing to upload");
+    }
+    const quality = QualityEvidenceSchema.safeParse(ctx.store["qualityEvidence"]);
+    if (!quality.success) {
+      throw new Error("upload_draft: final quality evidence is missing or malformed — refusing to upload");
+    }
+    if (!quality.data.release.hardGateReady) {
+      throw new Error(
+        `upload_draft: final quality evidence did not clear its hard gates — ${quality.data.release.blockers.join("; ")}`,
+      );
+    }
+    const lane = resolveContentLane({ stored: ctx.store["contentLane"], pipeline: [] });
+    if (
+      quality.data.episode.lane.key !== lane.key ||
+      (quality.data.episode.lane.renderer !== undefined &&
+        quality.data.episode.lane.renderer !== lane.primaryRenderer)
+    ) {
+      throw new Error("upload_draft: final quality evidence belongs to a different content lane — refusing to upload");
+    }
+    if (!quality.data.release.calibrationComplete) {
+      ctx.log(`upload_draft: quality calibration gaps retained for review: ${quality.data.calibrationGaps.join(" | ")}`);
     }
     if (ctx.store["thumbnailPublishable"] !== true) {
       throw new Error("upload_draft: thumbnail is a nonpublishable draft preview — refusing to upload");

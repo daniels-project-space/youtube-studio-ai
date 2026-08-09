@@ -7,9 +7,17 @@
  * the channel's typography contract.
  */
 import { basename, extname, join } from "node:path";
-import { writeFile } from "node:fs/promises";
+import { readFile, writeFile } from "node:fs/promises";
+import { generateNanoBananaImage } from "@/lib/banana";
+import { rasterImageDimensions } from "@/lib/imageDimensions";
+import { NANO_BANANA_THUMBNAIL_PROFILE } from "@/lib/nanoBananaThumbnailContract";
 import { thumbnailText, type ThumbnailTextObject } from "@/lib/ffmpeg";
 import type { ThumbnailHeadlineLine, ThumbnailTextZone } from "@/lib/thumbnailLayout";
+import {
+  resolveGoldenThumbnailTextZoneFromImage,
+  trustedThumbnailTextZoneResolution,
+  type ThumbnailTextZoneResolution,
+} from "@/lib/thumbnailSafeZone";
 
 export type ThumbnailFont = "serif" | "sans" | "impact" | "marker" | "bebas" | "rounded";
 export type ThumbnailTreatment = "plate" | "sticker" | "stamp" | "neon" | "clean";
@@ -70,7 +78,24 @@ export interface ThumbnailImageRequest {
 }
 
 export type GenerateScene = (request: ThumbnailImageRequest) => Promise<Buffer>;
-type CompositeTypography = typeof thumbnailText;
+/**
+ * The renderer resolves a safe zone before typography is applied. Custom
+ * compositors must receive that decision rather than falling back to their
+ * own default placement.
+ */
+type CompositeTypography = (
+  args: Parameters<typeof thumbnailText>[0] & { position: ThumbnailTextZone },
+) => ReturnType<typeof thumbnailText>;
+
+export interface ThumbnailRenderResult {
+  path: string;
+  basePath: string;
+  baseSource: "generated" | "reused";
+  requestedTextZone: ThumbnailTextZone;
+  resolvedTextZone: ThumbnailTextZone;
+  zoneResolution: ThumbnailTextZoneResolution;
+  request?: ThumbnailImageRequest;
+}
 
 export function isThumbnailBaseProvenance(
   value: unknown,
@@ -113,12 +138,8 @@ export async function renderThumbnail(args: {
   baseArt?: ThumbnailBaseArtifact;
   generateScene?: GenerateScene;
   compositeTypography?: CompositeTypography;
-}): Promise<{
-  path: string;
-  basePath: string;
-  baseSource: "generated" | "reused";
-  request?: ThumbnailImageRequest;
-}> {
+}): Promise<ThumbnailRenderResult> {
+  const generateScene = args.generateScene ?? generateNanoBananaImage;
   const compositeTypography = args.compositeTypography ?? thumbnailText;
   const reusable = args.baseArt &&
     isThumbnailBaseProvenance(args.baseArt.provenance, args.spec.scene.textZone);
@@ -128,23 +149,27 @@ export async function renderThumbnail(args: {
   if (reusable) {
     basePath = args.baseArt!.path;
   } else {
-    if (!args.generateScene) {
-      throw new Error("thumbnailRenderer: an explicit production image generator is required");
-    }
     request = buildThumbnailImageRequest(args.spec.scene);
     const extension = extname(args.outJpg);
     const stem = basename(args.outJpg, extension || undefined);
     basePath = join(args.tmpDir, `${stem}.text-free-base.jpg`);
-    await writeFile(basePath, await args.generateScene(request));
+    await writeFile(basePath, await generateScene(request));
   }
 
+  const requestedTextZone = args.spec.scene.textZone;
+  const zoneResolution = reusable
+    ? trustedThumbnailTextZoneResolution(requestedTextZone)
+    : await resolveGoldenThumbnailTextZoneFromImage({
+        imagePath: basePath,
+        requestedZone: requestedTextZone,
+      });
   const type = args.spec.typography;
   await compositeTypography({
     basePath,
     outJpg: args.outJpg,
     title: type.lines.map((line) => line.text).join(" "),
     lines: type.lines,
-    position: args.spec.scene.textZone,
+    position: zoneResolution.resolvedZone,
     subtitle: type.subtitle,
     footerLabel: type.footerLabel,
     badgePlacement: type.badgePlacement,
@@ -158,10 +183,25 @@ export async function renderThumbnail(args: {
     textObject: type.textObject,
   });
 
+  const finalDimensions = rasterImageDimensions(await readFile(args.outJpg));
+  if (
+    finalDimensions.width !== NANO_BANANA_THUMBNAIL_PROFILE.goldenWidth ||
+    finalDimensions.height !== NANO_BANANA_THUMBNAIL_PROFILE.goldenHeight
+  ) {
+    throw new Error(
+      `thumbnail renderer produced ${finalDimensions.width}x${finalDimensions.height}; ` +
+      `Golden delivery requires ${NANO_BANANA_THUMBNAIL_PROFILE.goldenWidth}x` +
+      `${NANO_BANANA_THUMBNAIL_PROFILE.goldenHeight}`,
+    );
+  }
+
   return {
     path: args.outJpg,
     basePath,
     baseSource: reusable ? "reused" : "generated",
+    requestedTextZone,
+    resolvedTextZone: zoneResolution.resolvedZone,
+    zoneResolution,
     ...(request ? { request } : {}),
   };
 }

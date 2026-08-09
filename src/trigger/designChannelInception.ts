@@ -958,6 +958,7 @@ export async function executeDesignChannel(
     template: archetype.template,
     pipeline: design.pipeline,
     family: payload.family,
+    contentLane: design.contentLane,
     disabledBlocks,
     budget: payload.budget ?? 5,
     status: "draft",

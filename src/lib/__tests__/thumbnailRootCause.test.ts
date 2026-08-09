@@ -10,7 +10,10 @@ import { FAMILIES, type FamilyKey } from "@/engine/families";
 import {
   BananaImageSubmissionError,
   generateBananaImage,
+  generateNanoBananaImageWithReceipt,
+  NANO_BANANA_THUMBNAIL_PROFILE,
 } from "@/lib/banana";
+import { createImageUsageScope } from "@/lib/imageUsage";
 import {
   buildThumbnailTextFilterGraph,
   probe,
@@ -229,7 +232,11 @@ async function assertRealCallPaths(): Promise<void> {
     join(process.cwd(), "src/trigger/blocks/intelligenceBlocks.ts"),
     "utf8",
   );
-  assert.match(production, /buildStyleDnaPlaybook/, "no-playbook path must use the Style-DNA foundation");
+  assert.match(
+    production,
+    /resolveGoldenThumbnailPlaybook/,
+    "no-playbook path must use the shared Golden Style-DNA foundation",
+  );
   assert.doesNotMatch(production, /titleCardFallback|fal-route judge rejection/,
     "generic cards must not be automatic recovery");
   assert.match(production, /draft_preview_placeholder/);
@@ -427,6 +434,99 @@ async function assertRetryBoundarySignal(): Promise<void> {
   }
 }
 
+async function assertStrictNanoBananaRoute(): Promise<void> {
+  const previous = {
+    fetch: globalThis.fetch,
+    geminiKey: process.env.GEMINI_API_KEY,
+    disableGemini: process.env.IMAGE_DISABLE_GEMINI,
+    providers: process.env.IMAGE_PROVIDERS,
+    forcedModel: process.env.BANANA_FORCE_MODEL,
+    falKey: process.env.FAL_KEY,
+  };
+  let calls = 0;
+  const providerPng = Buffer.alloc(24);
+  Buffer.from([0x89, 0x50, 0x4e, 0x47, 0x0d, 0x0a, 0x1a, 0x0a]).copy(providerPng, 0);
+  providerPng.writeUInt32BE(13, 8);
+  providerPng.write("IHDR", 12, "ascii");
+  providerPng.writeUInt32BE(1_344, 16);
+  providerPng.writeUInt32BE(768, 20);
+  try {
+    process.env.GEMINI_API_KEY = "fixture";
+    process.env.IMAGE_DISABLE_GEMINI = "1";
+    process.env.IMAGE_PROVIDERS = "fal,gemini";
+    process.env.BANANA_FORCE_MODEL = "forbidden-model-override";
+    process.env.FAL_KEY = "fixture-fal-that-must-not-be-used";
+    globalThis.fetch = (async (input, init) => {
+      calls += 1;
+      assert.match(String(input), /\/v1beta\/models\/gemini-2\.5-flash-image:generateContent/);
+      const body = JSON.parse(String(init?.body)) as {
+        contents: Array<{ parts: Array<{ text: string }> }>;
+        generationConfig: { responseModalities: string[]; imageConfig: Record<string, string> };
+      };
+      assert.deepEqual(body.generationConfig.responseModalities, ["IMAGE"]);
+      assert.deepEqual(body.generationConfig.imageConfig, { aspectRatio: "16:9" });
+      assert.match(body.contents[0].parts[0].text, /ABSOLUTE RULE — PICTURE ONLY, NO TEXT/);
+      return new Response(JSON.stringify({
+        modelVersion: "gemini-2.5-flash-image-2025-08",
+        responseId: "fixture-nano-response",
+        usageMetadata: {
+          candidatesTokenCount: 1_290,
+          promptTokenCount: 96,
+          totalTokenCount: 1_386,
+        },
+        candidates: [{ content: { parts: [{
+          inlineData: { data: providerPng.toString("base64"), mimeType: "image/png" },
+        }] } }],
+      }), { status: 200, headers: { "content-type": "application/json" } });
+    }) as typeof fetch;
+
+    const usageScope = createImageUsageScope();
+    const result = await usageScope.run(() => generateNanoBananaImageWithReceipt({
+      prompt: "A text-free Stoic scene",
+      idempotencyContext: "fixture-attempt-1",
+    }));
+    assert.equal(calls, 1);
+    assert.deepEqual(result.bytes, providerPng);
+    assert.equal(result.receipt.provider, NANO_BANANA_THUMBNAIL_PROFILE.provider);
+    assert.equal(result.receipt.model, NANO_BANANA_THUMBNAIL_PROFILE.model);
+    assert.equal(result.receipt.route, NANO_BANANA_THUMBNAIL_PROFILE.route);
+    assert.equal(result.receipt.width, 1344);
+    assert.equal(result.receipt.height, 768);
+    assert.equal(result.receipt.promptTokenCount, 96);
+    assert.equal(result.receipt.promptCostUsd, 0.0000288);
+    assert.equal(result.receipt.outputCostUsd, 0.039);
+    assert.equal(result.receipt.costUsd, 0.0390288);
+    assert.equal(result.receipt.modelVersion, "gemini-2.5-flash-image-2025-08");
+    assert.equal(result.receipt.responseId, "fixture-nano-response");
+    const usage = usageScope.snapshot();
+    assert.equal(usage.calls, 1);
+    assert.equal(usage.records[0]?.provider, "gemini");
+    assert.equal(usage.records[0]?.route, "nano-banana-flash");
+    assert.equal(usage.records[0]?.width, 1344);
+    assert.equal(usage.records[0]?.height, 768);
+    assert.equal(usage.records[0]?.costUsd, 0.0390288);
+    await assert.rejects(
+      generateNanoBananaImageWithReceipt({
+        prompt: "x".repeat(NANO_BANANA_THUMBNAIL_PROFILE.maxPromptUtf8Bytes),
+      }),
+      /fail-closed maximum/,
+    );
+    assert.equal(calls, 1, "oversized prompt must be rejected before a provider submission");
+  } finally {
+    globalThis.fetch = previous.fetch;
+    for (const [name, value] of [
+      ["GEMINI_API_KEY", previous.geminiKey],
+      ["IMAGE_DISABLE_GEMINI", previous.disableGemini],
+      ["IMAGE_PROVIDERS", previous.providers],
+      ["BANANA_FORCE_MODEL", previous.forcedModel],
+      ["FAL_KEY", previous.falKey],
+    ] as const) {
+      if (value === undefined) delete process.env[name];
+      else process.env[name] = value;
+    }
+  }
+}
+
 async function main(): Promise<void> {
   assertFamilyPolicy();
   assertSceneTypographySplit();
@@ -435,6 +535,7 @@ async function main(): Promise<void> {
   await assertRealCallPaths();
   await assertRenderedLayout();
   await assertRetryBoundarySignal();
+  await assertStrictNanoBananaRoute();
   console.log("THUMBNAIL ROOT-CAUSE PASS");
 }
 

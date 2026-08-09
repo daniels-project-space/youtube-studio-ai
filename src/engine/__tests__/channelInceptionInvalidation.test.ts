@@ -46,6 +46,18 @@ assert.deepEqual(roots({ identity: { thumbnailTemplate: "bold" } }), ["channel-i
 assert.deepEqual(roots({ identity: { niche: "history" } }), ["channel-inception-research"]);
 assert.deepEqual(roots({ styleDNA: { confidence: 0.95 } }), ["channel-inception-positioning"]);
 assert.deepEqual(roots({ pipeline: [{ block: "whiteboard_scribe" }] }), ["channel-inception-pipeline"]);
+assert.deepEqual(
+  roots({
+    contentLane: {
+      version: "content-lane/v1",
+      key: "narrated_documentary",
+      family: "narrated_stock",
+      primaryRenderer: "stock_footage",
+    },
+  }),
+  ["channel-inception-research", "channel-inception-pipeline"],
+  "installing or changing a style lane must stale both its family research and certified pipeline proof",
+);
 assert.deepEqual(roots({ schedule: { frequency: "daily" }, budget: 9, status: "paused" }), []);
 
 const downstreamIdentity = {

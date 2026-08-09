@@ -14,8 +14,10 @@ import {
  *    (must match the Convex deployment's env var of the same name),
  *  - STUDIO_CONVEX_JWT_PRIVATE_KEY — signs short-lived, owner-scoped Convex
  *    service identities for durable workers (ES256 PKCS#8 PEM),
- *  - IMAGE_DISABLE_GEMINI   — 1 → all image gen routes to fal FLUX (zero
- *    Google image spend; banana stays the default when unset),
+ *  - GEMINI_API_KEY         — direct Nano Banana + Gemini runtime credential;
+ *    vault bootstrap remains the fallback when it is not present at deploy,
+ *  - IMAGE_DISABLE_GEMINI   — 1 → generic non-thumbnail still-image routes use
+ *    fal FLUX; strict thumbnail generation deliberately ignores this switch,
  *  - VISION_DISABLE_GEMINI  — 1 → vision router never falls back to Gemini,
  *  - GROQ_API_KEY           — frees the vision chain's free tier when present.
  */
@@ -31,11 +33,25 @@ const FORWARDED_ENV = [
   "YOUTUBE_ALLOW_LEGACY_PLAINTEXT_TOKENS",
   "NOVITA_RENDER_FARM_API",
   "NOVITA_RENDER_FARM_TOKEN",
+  "GEMINI_API_KEY",
   "IMAGE_DISABLE_GEMINI",
   "VISION_DISABLE_GEMINI",
   "GROQ_API_KEY",
   "VAULT_ACCESS_TOKEN",
 ];
+
+const SECRET_FORWARDED_ENV = new Set([
+  "INTERNAL_QUERY_SECRET",
+  "STUDIO_CONVEX_JWT_PRIVATE_KEY",
+  "STUDIO_INTERNAL_API_TOKEN",
+  "YOUTUBE_CLIENT_SECRET",
+  "YOUTUBE_TOKEN_ENCRYPTION_KEY",
+  "YOUTUBE_OAUTH_STATE_SECRET",
+  "NOVITA_RENDER_FARM_TOKEN",
+  "GEMINI_API_KEY",
+  "GROQ_API_KEY",
+  "VAULT_ACCESS_TOKEN",
+]);
 
 /**
  * Trigger.dev config for YouTube Studio AI.
@@ -97,6 +113,7 @@ export default defineConfig({
         FORWARDED_ENV.filter((n) => process.env[n]).map((name) => ({
           name,
           value: process.env[name] as string,
+          isSecret: SECRET_FORWARDED_ENV.has(name),
         })),
       ),
       ffmpeg(),

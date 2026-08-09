@@ -4,9 +4,16 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 
 import { ExecutionError } from "@/engine/executionErrors";
+import { canonicalJson } from "@/lib/canonicalJson";
+import {
+  NANO_BANANA_THUMBNAIL_PROFILE,
+  nanoBananaThumbnailCostUsd,
+  nanoBananaThumbnailPromptCostUsd,
+  type NanoBananaImageReceipt,
+} from "@/lib/nanoBananaThumbnailContract";
 import { getObjectBytes, putObject } from "@/lib/storage";
 
-export interface ThumbnailCheckpointManifest {
+interface LegacyThumbnailCheckpointManifest {
   version: 1;
   requestHash: string;
   generationCostUsd: number;
@@ -17,6 +24,25 @@ export interface ThumbnailCheckpointManifest {
     costUsd: number;
   };
 }
+
+export interface ThumbnailNanoBananaEvidence {
+  version: "thumbnail-nano-banana-evidence/v1";
+  requestContext: string;
+  receipt: NanoBananaImageReceipt;
+}
+
+interface CurrentThumbnailCheckpointManifest {
+  version: 2;
+  requestHash: string;
+  generationCostUsd: number;
+  artifactSha256: string;
+  providerEvidence?: ThumbnailNanoBananaEvidence;
+  qa?: LegacyThumbnailCheckpointManifest["qa"];
+}
+
+export type ThumbnailCheckpointManifest =
+  | LegacyThumbnailCheckpointManifest
+  | CurrentThumbnailCheckpointManifest;
 
 interface CheckpointPutOptions {
   contentType?: string;
@@ -83,21 +109,135 @@ export function thumbnailRequestHash(value: unknown): string {
   return createHash("sha256").update(stableJson(value)).digest("hex");
 }
 
+/** Stable tenant/run/request binding included in the provider request hash. */
+export function thumbnailNanoBananaRequestContext(args: {
+  keyPrefix: string;
+  runId: string;
+  requestHash: string;
+}): string {
+  if (!/^[a-f0-9]{64}$/.test(args.requestHash)) {
+    throw new Error("thumbnail Nano Banana context requires a SHA-256 request hash");
+  }
+  if (!args.keyPrefix.trim() || !args.runId.trim()) {
+    throw new Error("thumbnail Nano Banana context requires a tenant prefix and run id");
+  }
+  return canonicalJson({
+    contractVersion: "thumbnail-gen-nano-banana-context/v1",
+    keyPrefix: args.keyPrefix.replace(/\/+$/, ""),
+    requestHash: args.requestHash,
+    runId: args.runId,
+  });
+}
+
 function finiteCost(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) && value >= 0
     ? value
     : undefined;
 }
 
+const SHA256 = /^[a-f0-9]{64}$/;
+
+function validNanoBananaEvidence(
+  value: unknown,
+  requestHash: string,
+): value is ThumbnailNanoBananaEvidence {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return false;
+  const evidence = value as ThumbnailNanoBananaEvidence;
+  const receipt = evidence.receipt;
+  if (
+    evidence.version !== "thumbnail-nano-banana-evidence/v1" ||
+    typeof evidence.requestContext !== "string" ||
+    evidence.requestContext.length > 8_192 ||
+    !receipt ||
+    receipt.provider !== NANO_BANANA_THUMBNAIL_PROFILE.provider ||
+    receipt.model !== NANO_BANANA_THUMBNAIL_PROFILE.model ||
+    receipt.apiVersion !== NANO_BANANA_THUMBNAIL_PROFILE.apiVersion ||
+    typeof receipt.modelVersion !== "string" || !receipt.modelVersion.trim() ||
+    receipt.modelVersion.length > 256 ||
+    typeof receipt.responseId !== "string" || !receipt.responseId.trim() ||
+    receipt.responseId.length > 256 ||
+    receipt.route !== NANO_BANANA_THUMBNAIL_PROFILE.route ||
+    receipt.width !== NANO_BANANA_THUMBNAIL_PROFILE.providerOutputWidth ||
+    receipt.height !== NANO_BANANA_THUMBNAIL_PROFILE.providerOutputHeight ||
+    !Number.isInteger(receipt.promptUtf8Bytes) ||
+    receipt.promptUtf8Bytes < 1 ||
+    receipt.promptUtf8Bytes > NANO_BANANA_THUMBNAIL_PROFILE.maxPromptUtf8Bytes ||
+    !Number.isInteger(receipt.promptTokenCount) ||
+    receipt.promptTokenCount < 1 ||
+    receipt.promptTokenCount > NANO_BANANA_THUMBNAIL_PROFILE.maxPromptTokenCount ||
+    receipt.promptCostUsd !== nanoBananaThumbnailPromptCostUsd(receipt.promptTokenCount) ||
+    receipt.outputCostUsd !== NANO_BANANA_THUMBNAIL_PROFILE.outputImageUsd ||
+    receipt.costUsd !== nanoBananaThumbnailCostUsd(receipt.promptTokenCount) ||
+    !Number.isFinite(receipt.costUsd) ||
+    receipt.costUsd < 0 ||
+    receipt.costUsd > NANO_BANANA_THUMBNAIL_PROFILE.admissionCeilingUsd + Number.EPSILON ||
+    !/^image\/(?:png|jpeg|webp)$/i.test(receipt.sourceContentType) ||
+    !SHA256.test(receipt.providerRequestSha256) ||
+    !SHA256.test(receipt.providerResponseMetadataSha256) ||
+    !SHA256.test(receipt.responseSha256) ||
+    !Number.isFinite(receipt.createdAt) ||
+    receipt.createdAt <= 0 ||
+    typeof receipt.providerRequestCanonicalJson !== "string" ||
+    receipt.providerRequestCanonicalJson.length > 200_000 ||
+    typeof receipt.providerResponseMetadataCanonicalJson !== "string" ||
+    receipt.providerResponseMetadataCanonicalJson.length > 100_000
+  ) return false;
+  try {
+    const context = JSON.parse(evidence.requestContext) as Record<string, unknown>;
+    const request = JSON.parse(receipt.providerRequestCanonicalJson) as Record<string, unknown>;
+    const body = request["body"] as Record<string, unknown>;
+    const contents = body?.["contents"] as Array<Record<string, unknown>>;
+    const parts = contents?.[0]?.["parts"] as Array<Record<string, unknown>>;
+    const prompt = parts?.[0]?.["text"];
+    const generationConfig = body?.["generationConfig"] as Record<string, unknown>;
+    const imageConfig = generationConfig?.["imageConfig"] as Record<string, unknown>;
+    const modalities = generationConfig?.["responseModalities"] as unknown[];
+    const responseMetadata = JSON.parse(
+      receipt.providerResponseMetadataCanonicalJson,
+    ) as Record<string, unknown>;
+    const usageMetadata = responseMetadata["usageMetadata"] as Record<string, unknown>;
+    return canonicalJson(context) === evidence.requestContext &&
+      context["contractVersion"] === "thumbnail-gen-nano-banana-context/v1" &&
+      context["requestHash"] === requestHash &&
+      typeof context["keyPrefix"] === "string" && Boolean((context["keyPrefix"] as string).trim()) &&
+      typeof context["runId"] === "string" && Boolean((context["runId"] as string).trim()) &&
+      canonicalJson(request) === receipt.providerRequestCanonicalJson &&
+      request["apiVersion"] === NANO_BANANA_THUMBNAIL_PROFILE.apiVersion &&
+      request["model"] === NANO_BANANA_THUMBNAIL_PROFILE.model &&
+      request["operation"] === "generateContent" &&
+      request["context"] === evidence.requestContext &&
+      Array.isArray(contents) && contents.length === 1 &&
+      Array.isArray(parts) && parts.length === 1 &&
+      typeof prompt === "string" &&
+      Buffer.byteLength(prompt, "utf8") === receipt.promptUtf8Bytes &&
+      prompt.includes("ABSOLUTE RULE — PICTURE ONLY, NO TEXT") &&
+      Array.isArray(modalities) && modalities.length === 1 && modalities[0] === "IMAGE" &&
+      imageConfig?.["aspectRatio"] === NANO_BANANA_THUMBNAIL_PROFILE.aspectRatio &&
+      imageConfig?.["imageSize"] === undefined &&
+      canonicalJson(responseMetadata) === receipt.providerResponseMetadataCanonicalJson &&
+      responseMetadata["modelVersion"] === receipt.modelVersion &&
+      responseMetadata["responseId"] === receipt.responseId &&
+      usageMetadata?.["promptTokenCount"] === receipt.promptTokenCount &&
+      createHash("sha256")
+        .update(`nano-banana-provider\0${receipt.providerRequestCanonicalJson}`)
+        .digest("hex") === receipt.providerRequestSha256 &&
+      createHash("sha256")
+        .update(`nano-banana-response-metadata\0${receipt.providerResponseMetadataCanonicalJson}`)
+        .digest("hex") === receipt.providerResponseMetadataSha256;
+  } catch {
+    return false;
+  }
+}
+
 function parseManifest(
   raw: Uint8Array | string,
   requestHash: string,
 ): ThumbnailCheckpointManifest {
-  let parsed: Partial<ThumbnailCheckpointManifest>;
+  let parsed: Record<string, unknown>;
   try {
     parsed = JSON.parse(
       typeof raw === "string" ? raw : Buffer.from(raw).toString("utf8"),
-    ) as Partial<ThumbnailCheckpointManifest>;
+    ) as Record<string, unknown>;
   } catch {
     throw new ExecutionError("thumbnail_gen: checkpoint manifest is unreadable", {
       code: "THUMBNAIL_CHECKPOINT_CORRUPT",
@@ -106,7 +246,7 @@ function parseManifest(
     });
   }
   if (
-    parsed.version !== 1 ||
+    (parsed.version !== 1 && parsed.version !== 2) ||
     parsed.requestHash !== requestHash ||
     finiteCost(parsed.generationCostUsd) === undefined
   ) {
@@ -117,11 +257,27 @@ function parseManifest(
     });
   }
   if (
-    parsed.qa &&
+    parsed.version === 2 &&
     (
-      parsed.qa.completed !== true ||
-      !/^[a-f0-9]{64}$/.test(parsed.qa.requestHash ?? "") ||
-      finiteCost(parsed.qa.costUsd) === undefined
+      !SHA256.test(String(parsed.artifactSha256 ?? "")) ||
+      (parsed.providerEvidence !== undefined &&
+        !validNanoBananaEvidence(parsed.providerEvidence, requestHash))
+    )
+  ) {
+    throw new ExecutionError("thumbnail_gen: checkpoint provider evidence is invalid", {
+      code: "THUMBNAIL_CHECKPOINT_CORRUPT",
+      retryable: false,
+      phase: "storage",
+    });
+  }
+  const qa = parsed.qa as Record<string, unknown> | undefined;
+  if (
+    parsed.qa !== undefined &&
+    (
+      !qa || typeof qa !== "object" || Array.isArray(qa) ||
+      qa.completed !== true ||
+      !/^[a-f0-9]{64}$/.test(String(qa.requestHash ?? "")) ||
+      finiteCost(qa.costUsd) === undefined
     )
   ) {
     throw new ExecutionError("thumbnail_gen: checkpoint QA record is invalid", {
@@ -130,7 +286,23 @@ function parseManifest(
       phase: "storage",
     });
   }
-  return parsed as ThumbnailCheckpointManifest;
+  return parsed as unknown as ThumbnailCheckpointManifest;
+}
+
+function assertArtifactIntegrity(
+  manifest: ThumbnailCheckpointManifest,
+  bytes: Uint8Array,
+): void {
+  if (
+    manifest.version === 2 &&
+    createHash("sha256").update(bytes).digest("hex") !== manifest.artifactSha256
+  ) {
+    throw new ExecutionError("thumbnail_gen: checkpoint image does not match its manifest", {
+      code: "THUMBNAIL_CHECKPOINT_CORRUPT",
+      retryable: false,
+      phase: "storage",
+    });
+  }
 }
 
 function httpStatus(error: unknown): number | undefined {
@@ -190,6 +362,7 @@ async function localCheckpoint(
     await readFile(session.localManifestPath),
     session.requestHash,
   );
+  assertArtifactIntegrity(manifest, await readFile(session.localImagePath));
   return { ...session, source: "local", manifest };
 }
 
@@ -219,6 +392,7 @@ async function remoteCheckpoint(
       },
     );
   }
+  assertArtifactIntegrity(manifest, image);
   await mkdir(dirname(session.localImagePath), { recursive: true });
   await writeFile(session.localImagePath, image);
   await writeFile(session.localManifestPath, JSON.stringify(manifest));
@@ -354,6 +528,7 @@ export async function beginThumbnailPaidWork(
 export async function saveThumbnailGenerationCheckpoint(
   session: ThumbnailCheckpointSession,
   generationCostUsd: number,
+  providerEvidence?: ThumbnailNanoBananaEvidence,
   io: ThumbnailCheckpointIo = productionIo,
 ): Promise<ThumbnailCheckpointSession> {
   const cost = finiteCost(generationCostUsd);
@@ -364,13 +539,19 @@ export async function saveThumbnailGenerationCheckpoint(
   if (!existsSync(session.localImagePath)) {
     throw new Error("thumbnail checkpoint image does not exist locally");
   }
-  const manifest: ThumbnailCheckpointManifest = {
-    version: 1,
+  if (providerEvidence && !validNanoBananaEvidence(providerEvidence, session.requestHash)) {
+    throw new Error("thumbnail checkpoint Nano Banana provider evidence is invalid");
+  }
+  const imageBytes = await readFile(session.localImagePath);
+  const manifest: CurrentThumbnailCheckpointManifest = {
+    version: 2,
     requestHash: session.requestHash,
     generationCostUsd: cost,
+    artifactSha256: createHash("sha256").update(imageBytes).digest("hex"),
+    ...(providerEvidence ? { providerEvidence } : {}),
   };
   await writeFile(session.localManifestPath, JSON.stringify(manifest));
-  await io.putObject(session.imageKey, await readFile(session.localImagePath), {
+  await io.putObject(session.imageKey, imageBytes, {
     contentType: "image/jpeg",
   });
   await io.putObject(session.manifestKey, JSON.stringify(manifest), {

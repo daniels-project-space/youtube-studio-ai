@@ -1,7 +1,13 @@
 "use client";
 
-import { useMemo, useState } from "react";
+import {
+  Suspense,
+  useMemo,
+  useState,
+  type KeyboardEvent,
+} from "react";
 import { useQuery } from "convex/react";
+import { useSearchParams } from "next/navigation";
 import { api } from "../../../../convex/_generated/api";
 import { useOwnerId } from "@/lib/owner-context";
 import { useSelectedChannel } from "@/lib/channel-context";
@@ -11,13 +17,99 @@ import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
 import { compact } from "@/components/Chart";
 import { IconSeo, IconSpark, IconExternal } from "@/components/icons";
+import styles from "./seo.module.css";
 
 /** A channel row enriched with its identity.niche (from listChannels). */
 type ChannelWithNiche = ChannelRow & { niche: string | null };
 
+type SeoSection = "brief" | "signals" | "strategy";
+
+export type SeoWorkspaceProps = {
+  channelSlug?: string | null;
+  embedded?: boolean;
+  initialSection?: SeoSection;
+};
+
+const SEO_SECTIONS: { id: SeoSection; label: string; description: string }[] = [
+  {
+    id: "brief",
+    label: "Next upload",
+    description: "Actionable brief and estimate",
+  },
+  {
+    id: "signals",
+    label: "Search signals",
+    description: "Titles, tags, and thumbnails",
+  },
+  {
+    id: "strategy",
+    label: "Market map",
+    description: "Gaps, hooks, and competitors",
+  },
+];
+
+function validSection(value: string | null): SeoSection {
+  return value === "signals" || value === "strategy" ? value : "brief";
+}
+
 export default function SeoPage() {
+  return (
+    <Suspense fallback={<SkeletonList rows={4} />}>
+      <SeoRoute />
+    </Suspense>
+  );
+}
+
+function SeoRoute() {
+  const searchParams = useSearchParams();
+  const channelSlug = searchParams.get("channel");
+  const section = validSection(searchParams.get("section"));
+  return (
+    <SeoWorkspace
+      key={`${channelSlug ?? "selected"}:${section}`}
+      channelSlug={channelSlug}
+      initialSection={section}
+    />
+  );
+}
+
+export function SeoWorkspace({
+  channelSlug,
+  embedded = false,
+  initialSection = "brief",
+}: SeoWorkspaceProps) {
   const ownerId = useOwnerId();
   const { selectedSlug } = useSelectedChannel();
+  const effectiveSlug = channelSlug ?? selectedSlug;
+  const [activeSection, setActiveSection] =
+    useState<SeoSection>(initialSection);
+
+  const handleSectionKeyDown = (
+    event: KeyboardEvent<HTMLButtonElement>,
+    currentSection: SeoSection,
+  ) => {
+    const currentIndex = SEO_SECTIONS.findIndex(
+      (section) => section.id === currentSection,
+    );
+    let nextIndex = currentIndex;
+    if (event.key === "ArrowRight") {
+      nextIndex = (currentIndex + 1) % SEO_SECTIONS.length;
+    } else if (event.key === "ArrowLeft") {
+      nextIndex =
+        (currentIndex - 1 + SEO_SECTIONS.length) % SEO_SECTIONS.length;
+    } else if (event.key === "Home") {
+      nextIndex = 0;
+    } else if (event.key === "End") {
+      nextIndex = SEO_SECTIONS.length - 1;
+    } else {
+      return;
+    }
+
+    event.preventDefault();
+    const nextSection = SEO_SECTIONS[nextIndex].id;
+    setActiveSection(nextSection);
+    document.getElementById(`seo-tab-${nextSection}`)?.focus();
+  };
 
   // listChannels carries identity.niche — we read it for the niche selector.
   const channels = useQuery(api.channels.listChannels, { ownerId }) as
@@ -39,23 +131,27 @@ export default function SeoPage() {
   );
 
   // Niche resolution: selected channel's niche wins; else a manual selector.
-  const selectedChannel = channelNiches.find((c) => c.slug === selectedSlug);
+  const selectedChannel = channelNiches.find((c) => c.slug === effectiveSlug);
   const channelNiche = selectedChannel?.niche ?? null;
   const [manualSelection, setManualSelection] = useState<{
     selectedSlug: string | null;
     niche: string;
   } | null>(null);
-  const manualNiche = manualSelection?.selectedSlug === selectedSlug
-    ? manualSelection.niche
-    : null;
+  const manualNiche =
+    !selectedChannel && manualSelection?.selectedSlug === effectiveSlug
+      ? manualSelection.niche
+      : null;
   const setManualNiche = (niche: string) => {
-    setManualSelection({ selectedSlug, niche });
+    setManualSelection({ selectedSlug: effectiveSlug, niche });
   };
   const niche = channelNiche ?? manualNiche;
 
   // Distinct niches across channels, for the fallback selector.
   const availableNiches = useMemo(
-    () => [...new Set(channelNiches.map((c) => c.niche).filter(Boolean))] as string[],
+    () =>
+      [
+        ...new Set(channelNiches.map((c) => c.niche).filter(Boolean)),
+      ] as string[],
     [channelNiches],
   );
 
@@ -70,34 +166,63 @@ export default function SeoPage() {
   );
 
   const loadingChannels = channels === undefined;
+  const requestedChannelMissing = Boolean(
+    channelSlug && channels !== undefined && !selectedChannel,
+  );
 
   return (
     <>
-      <PageHeader
-        title="SEO studio"
-        subtitle="Turn live niche intelligence into the next stronger upload"
-        actions={
-          niche ? (
-            <ResearchButton niche={niche} channelId={selectedChannel?._id} />
-          ) : undefined
-        }
-      />
+      {embedded ? (
+        <header className={styles.embeddedHeader}>
+          <div>
+            <span>SEO intelligence</span>
+            <h2>{selectedChannel?.name ?? "Channel intelligence"}</h2>
+          </div>
+          {niche ? (
+            <ResearchButton niche={niche} channelId={channelNiche ? selectedChannel?._id : undefined} />
+          ) : null}
+        </header>
+      ) : (
+        <PageHeader
+          title="SEO intelligence"
+          subtitle="A channel-specific brief built from stored search and competitor evidence"
+          actions={
+            niche ? (
+              <ResearchButton niche={niche} channelId={channelNiche ? selectedChannel?._id : undefined} />
+            ) : undefined
+          }
+        />
+      )}
 
       {loadingChannels ? (
         <SkeletonList rows={4} />
-      ) : !niche ? (
-        <NicheSelector
-          niches={availableNiches}
-          onSelect={setManualNiche}
-          hasChannel={Boolean(selectedSlug)}
+      ) : requestedChannelMissing ? (
+        <EmptyState
+          title="Channel not found"
+          description={`The channel “${channelSlug}” is not available in this workspace.`}
+          icon={<IconSeo width={24} height={24} />}
         />
+      ) : !niche ? (
+        selectedChannel ? (
+          <EmptyState
+            title="No niche set"
+            description={`Set ${selectedChannel.name}'s niche in its Identity tab before running channel-specific research.`}
+            icon={<IconSeo width={24} height={24} />}
+          />
+        ) : (
+          <NicheSelector
+            niches={availableNiches}
+            onSelect={setManualNiche}
+            hasChannel={false}
+          />
+        )
       ) : (
-        <div className="seo-workspace">
+        <div className={`seo-workspace ${styles.workspace}`}>
           {!channelNiche && (
             <NicheSelector
               niches={availableNiches}
               onSelect={setManualNiche}
-              hasChannel={Boolean(selectedSlug)}
+              hasChannel={false}
               current={niche}
               compactMode
             />
@@ -113,33 +238,77 @@ export default function SeoPage() {
             />
           ) : (
             <>
-              <SeoFocus
-                niche={niche}
-                channelName={selectedChannel?.name}
-                intel={intel}
-                databank={databank}
-                competitors={competitors}
-              />
-              <ViewEstimateWidget ownerId={ownerId} niche={niche} />
+              <nav
+                className={styles.sectionTabs}
+                aria-label="SEO intelligence sections"
+                role="tablist"
+              >
+                {SEO_SECTIONS.map((section) => (
+                  <button
+                    key={section.id}
+                    id={`seo-tab-${section.id}`}
+                    type="button"
+                    role="tab"
+                    aria-selected={activeSection === section.id}
+                    aria-controls={`seo-panel-${section.id}`}
+                    tabIndex={activeSection === section.id ? 0 : -1}
+                    className={`${styles.sectionTab} ${activeSection === section.id ? styles.sectionTabActive : ""}`}
+                    onClick={() => setActiveSection(section.id)}
+                    onKeyDown={(event) =>
+                      handleSectionKeyDown(event, section.id)
+                    }
+                  >
+                    <strong>{section.label}</strong>
+                    <span>{section.description}</span>
+                  </button>
+                ))}
+              </nav>
 
-              {intel && (
-                <InsightDetails
-                  title="Detailed niche intelligence"
-                  description="Title patterns, tags, power words, and the measured thumbnail style guide"
-                >
-                  <NicheIntelligence intel={intel} />
-                </InsightDetails>
-              )}
+              <div
+                id={`seo-panel-${activeSection}`}
+                className={styles.sectionPane}
+                role="tabpanel"
+                aria-labelledby={`seo-tab-${activeSection}`}
+              >
+                {activeSection === "brief" && (
+                  <>
+                    <SeoFocus
+                      niche={niche}
+                      channelName={channelNiche ? selectedChannel?.name : undefined}
+                      intel={intel}
+                      databank={databank}
+                      competitors={competitors}
+                    />
+                    <ViewEstimateWidget ownerId={ownerId} niche={niche} />
+                  </>
+                )}
 
-              {(databank || competitors) && (
-                <InsightDetails
-                  title="Strategy databank and competitors"
-                  description="Reusable hooks, opportunity gaps, and the source videos behind the guidance"
-                >
-                  {databank && <SeoDatabank databank={databank} />}
-                  <CompetitorTopVideos competitors={competitors} />
-                </InsightDetails>
-              )}
+                {activeSection === "signals" &&
+                  (intel ? (
+                    <NicheIntelligence intel={intel} />
+                  ) : (
+                    <EmptyState
+                      title="No search signals yet"
+                      description="Run research to collect title, tag, and thumbnail evidence for this niche."
+                      icon={<IconSeo width={24} height={24} />}
+                    />
+                  ))}
+
+                {activeSection === "strategy" && (
+                  <>
+                    {databank ? (
+                      <SeoDatabank databank={databank} />
+                    ) : (
+                      <EmptyState
+                        title="No strategy databank yet"
+                        description="Run research to identify reusable hooks and open competitor gaps."
+                        icon={<IconSeo width={24} height={24} />}
+                      />
+                    )}
+                    <CompetitorTopVideos competitors={competitors} />
+                  </>
+                )}
+              </div>
             </>
           )}
         </div>
@@ -186,7 +355,10 @@ function SeoFocus({
     : undefined;
   const opportunity = databank?.competitorGaps[0];
   const sourceVideos =
-    competitors?.reduce((total, competitor) => total + competitor.topVideos.length, 0) ?? 0;
+    competitors?.reduce(
+      (total, competitor) => total + competitor.topVideos.length,
+      0,
+    ) ?? 0;
 
   return (
     <section className="glass overview-panel seo-focus">
@@ -205,12 +377,18 @@ function SeoFocus({
           <strong>
             {intel ? `${intel.optimalTitleLen} characters` : "Research needed"}
           </strong>
-          <span>{titlePattern ?? "Run research to learn the winning title structure."}</span>
+          <span>
+            {titlePattern ??
+              "Run research to learn the winning title structure."}
+          </span>
         </div>
         <div>
           <small>Content opportunity</small>
           <strong>{opportunity ? "Gap identified" : "No gap recorded"}</strong>
-          <span>{opportunity ?? "The strategy databank has no open competitor gap yet."}</span>
+          <span>
+            {opportunity ??
+              "The strategy databank has no open competitor gap yet."}
+          </span>
         </div>
         <div>
           <small>Thumbnail signal</small>
@@ -227,29 +405,6 @@ function SeoFocus({
         </div>
       </div>
     </section>
-  );
-}
-
-function InsightDetails({
-  title,
-  description,
-  children,
-}: {
-  title: string;
-  description: string;
-  children: React.ReactNode;
-}) {
-  return (
-    <details className="channel-advanced glass">
-      <summary>
-        <span>
-          <strong>{title}</strong>
-          <small>{description}</small>
-        </span>
-        <span aria-hidden="true">+</span>
-      </summary>
-      <div className="channel-advanced-content">{children}</div>
-    </details>
   );
 }
 
@@ -327,9 +482,7 @@ function ResearchButton({
             maxWidth: 280,
             textAlign: "right",
             color:
-              state === "error"
-                ? "var(--color-failed)"
-                : "var(--color-muted)",
+              state === "error" ? "var(--color-failed)" : "var(--color-muted)",
           }}
         >
           {msg}
@@ -391,7 +544,9 @@ function NicheSelector({
             borderRadius: 999,
             border: "1px solid var(--color-border)",
             background:
-              n === current ? "var(--color-accent-soft)" : "var(--color-surface)",
+              n === current
+                ? "var(--color-accent-soft)"
+                : "var(--color-surface)",
             color: n === current ? "var(--color-accent)" : "var(--color-muted)",
             font: "inherit",
             fontSize: "0.82rem",
@@ -407,11 +562,7 @@ function NicheSelector({
 
 // -------------------------- Niche intelligence --------------------------
 
-function NicheIntelligence({
-  intel,
-}: {
-  intel: SeoIntel;
-}) {
+function NicheIntelligence({ intel }: { intel: SeoIntel }) {
   const tags = labeled(intel.topTags, "tag");
   const patterns = labeled(intel.topTitlePatterns, "pattern");
   const power = labeled(intel.powerWords, "word");
@@ -442,7 +593,13 @@ function NicheIntelligence({
               chars
             </span>
           </div>
-          <div style={{ marginTop: "0.5rem", fontSize: "0.8rem", color: "var(--color-faint)" }}>
+          <div
+            style={{
+              marginTop: "0.5rem",
+              fontSize: "0.8rem",
+              color: "var(--color-faint)",
+            }}
+          >
             Avg {compact(intel.avgViewsTop50)} · median{" "}
             {compact(intel.medianViewsTop50)} views (top 50)
           </div>
@@ -461,7 +618,9 @@ function NicheIntelligence({
         </Panel>
 
         <Panel title="Thumbnail style guide">
-          <div style={{ display: "flex", gap: "0.4rem", marginBottom: "0.6rem" }}>
+          <div
+            style={{ display: "flex", gap: "0.4rem", marginBottom: "0.6rem" }}
+          >
             {guide.dominantColors.slice(0, 6).map((c, i) => (
               <span
                 key={i}
@@ -480,7 +639,14 @@ function NicheIntelligence({
             Text overlay: {guide.hasTextOverlayPct}% of top thumbnails
           </div>
           {guide.notes && (
-            <p style={{ margin: "0.5rem 0 0", fontSize: "0.82rem", color: "var(--color-faint)", lineHeight: 1.5 }}>
+            <p
+              style={{
+                margin: "0.5rem 0 0",
+                fontSize: "0.82rem",
+                color: "var(--color-faint)",
+                lineHeight: 1.5,
+              }}
+            >
               {guide.notes}
             </p>
           )}
@@ -492,11 +658,7 @@ function NicheIntelligence({
 
 // ----------------------------- SEO databank -----------------------------
 
-function SeoDatabank({
-  databank,
-}: {
-  databank: SeoDatabankRow;
-}) {
+function SeoDatabank({ databank }: { databank: SeoDatabankRow }) {
   return (
     <section>
       <SectionTitle>Strategy databank</SectionTitle>
@@ -546,7 +708,10 @@ function ViewEstimateWidget({
   return (
     <section>
       <SectionTitle>View estimate</SectionTitle>
-      <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.85rem" }}>
+      <div
+        className="glass"
+        style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.85rem" }}
+      >
         <label style={{ fontSize: "0.82rem", color: "var(--color-muted)" }}>
           Enter comma-separated tags to estimate views for this niche:
           <input
@@ -620,7 +785,9 @@ function CompetitorTopVideos({
   if (competitors === undefined) return <SkeletonList rows={3} />;
 
   const top = competitors
-    .flatMap((c) => c.topVideos.map((v) => ({ ...v, channelName: c.channelName })))
+    .flatMap((c) =>
+      c.topVideos.map((v) => ({ ...v, channelName: c.channelName })),
+    )
     .sort((a, b) => b.views - a.views)
     .slice(0, 10);
 
@@ -634,7 +801,10 @@ function CompetitorTopVideos({
           icon={<IconExternal width={24} height={24} />}
         />
       ) : (
-        <div className="glass" style={{ padding: "0.5rem", display: "grid", gap: "0.25rem" }}>
+        <div
+          className="glass"
+          style={{ padding: "0.5rem", display: "grid", gap: "0.25rem" }}
+        >
           {top.map((v) => (
             <a
               key={v.youtubeVideoId}
@@ -664,7 +834,9 @@ function CompetitorTopVideos({
                 >
                   {v.title}
                 </div>
-                <div style={{ fontSize: "0.74rem", color: "var(--color-faint)" }}>
+                <div
+                  style={{ fontSize: "0.74rem", color: "var(--color-faint)" }}
+                >
                   {v.channelName}
                 </div>
               </div>
@@ -688,7 +860,13 @@ function CompetitorTopVideos({
 
 // ------------------------------- Helpers -------------------------------
 
-function Panel({ title, children }: { title: string; children: React.ReactNode }) {
+function Panel({
+  title,
+  children,
+}: {
+  title: string;
+  children: React.ReactNode;
+}) {
   return (
     <div className="glass" style={{ padding: "1rem 1.1rem" }}>
       <div
@@ -709,7 +887,9 @@ function Panel({ title, children }: { title: string; children: React.ReactNode }
 
 function ChipList({ items, accent }: { items: string[]; accent?: boolean }) {
   if (items.length === 0)
-    return <span style={{ fontSize: "0.8rem", color: "var(--color-faint)" }}>—</span>;
+    return (
+      <span style={{ fontSize: "0.8rem", color: "var(--color-faint)" }}>—</span>
+    );
   return (
     <div style={{ display: "flex", flexWrap: "wrap", gap: "0.35rem" }}>
       {items.map((it, i) => (
@@ -719,7 +899,9 @@ function ChipList({ items, accent }: { items: string[]; accent?: boolean }) {
             padding: "0.2rem 0.55rem",
             borderRadius: 999,
             fontSize: "0.76rem",
-            background: accent ? "var(--color-accent-soft)" : "var(--color-surface)",
+            background: accent
+              ? "var(--color-accent-soft)"
+              : "var(--color-surface)",
             color: accent ? "var(--color-accent)" : "var(--color-muted)",
             border: "1px solid var(--color-border)",
           }}
@@ -733,9 +915,19 @@ function ChipList({ items, accent }: { items: string[]; accent?: boolean }) {
 
 function List({ items, mono }: { items: string[]; mono?: boolean }) {
   if (items.length === 0)
-    return <span style={{ fontSize: "0.8rem", color: "var(--color-faint)" }}>—</span>;
+    return (
+      <span style={{ fontSize: "0.8rem", color: "var(--color-faint)" }}>—</span>
+    );
   return (
-    <ul style={{ margin: 0, padding: 0, listStyle: "none", display: "grid", gap: "0.45rem" }}>
+    <ul
+      style={{
+        margin: 0,
+        padding: 0,
+        listStyle: "none",
+        display: "grid",
+        gap: "0.45rem",
+      }}
+    >
       {items.map((it, i) => (
         <li
           key={i}

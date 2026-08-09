@@ -11,7 +11,7 @@ import { craftDocuMotion } from "../src/lib/documotion.ts";
 import { synthNarration } from "../src/lib/tts.ts";
 import { generateSuno } from "../src/lib/music.ts";
 import { craftMetadata } from "../src/lib/metacraft.ts";
-import { buildThumbBrief, bananaThumbnail } from "../src/lib/banana.ts";
+import { bananaThumbnail } from "../src/lib/banana.ts";
 
 const log = (m) => console.error(`[robbery] ${m}`);
 await bootstrapSecrets((m) => console.error(`[boot] ${m}`), { required: ["GEMINI_API_KEY", "FAL_KEY", "SUNO_API_KEY"] });
@@ -94,7 +94,7 @@ log(`muxed → ${full}`);
 
 // 6. GOLDEN THUMBNAIL (banana)
 const thumb = join(RUN, "thumbnail.jpg");
-const brief = buildThumbBrief({
+const brief = {
   channelName: "Vault Files",
   imageStyle: "cinematic heist-thriller still, teal-and-amber night grade, deep film noir shadows, 35mm grain",
   palette: ["#0a0e12", "#e8b23a", "#3fb6a0"],
@@ -104,7 +104,7 @@ const brief = buildThumbBrief({
   scene: "a gloved hand on a brass vault dial in a dark Antwerp diamond vault, scattered loose diamonds catching amber light, tense and cinematic",
   lines: [{ text: "10 LAYERS", accent: true }, { text: "1 MISTAKE", payoff: true }],
   badge: "TRUE CRIME",
-});
+};
 const tr = await bananaThumbnail({ brief, outJpg: thumb, expectWords: ["10 LAYERS", "1 MISTAKE"], imageStyle: "cinematic heist-thriller noir still", title, log }).catch((e) => { log(`thumb failed: ${e.message}`); return null; });
 
 // 7. OUTPUT — local artifacts only (serve via the VPS; no external publishing)

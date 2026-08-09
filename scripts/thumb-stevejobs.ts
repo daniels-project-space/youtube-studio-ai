@@ -3,12 +3,12 @@
  * "Steve Jobs — Never Give Up On Your Dreams" (one person, one topic).
  *   node --env-file=.env.local --import tsx scripts/thumb-stevejobs.ts
  */
-import { buildThumbBrief, bananaThumbnail } from "../src/lib/banana";
+import { bananaThumbnail } from "../src/lib/banana";
 
 const imageStyle =
   "cinematic high-contrast portrait, dramatic single-source rim light, moody charcoal background, premium editorial movie-poster look, crisp photographic detail";
 
-const brief = buildThumbBrief({
+const brief = {
   channelName: "MINDSET",
   imageStyle,
   palette: ["charcoal black", "deep slate", "warm gold"],
@@ -20,7 +20,7 @@ const brief = buildThumbBrief({
     { text: "Dreams", payoff: true, accent: true },
   ],
   badge: "Mindset",
-});
+};
 
 async function main() {
   const out = "/var/www/html/speech-tv/thumb-stevejobs.jpg";

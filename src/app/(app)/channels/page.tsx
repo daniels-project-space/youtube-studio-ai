@@ -8,7 +8,6 @@ import type { Id } from "../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
 import type { ChannelRow } from "@/lib/types";
 import { PageHeader } from "@/components/PageHeader";
-import { StageBadge } from "@/components/StageBadge";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
 import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
@@ -20,9 +19,23 @@ import {
 } from "@/lib/scheduleCalendar";
 import { channelsVisibleForFolder } from "./channelCardVisibility";
 
+type ChannelSchedule = {
+  frequency?: string;
+  days?: number[];
+  localTime?: string;
+  timezone?: string;
+  enabled?: boolean;
+  approvalMode?: "manual" | "private_auto";
+  dailyQuota?: number;
+  maxConcurrent?: number;
+  retryMaxAttempts?: number;
+  retryBaseMinutes?: number;
+  madeForKids?: boolean;
+};
+
 type ChannelCardRow = ChannelRow & {
   folder?: string;
-  schedule?: { frequency?: string; days?: number[]; localTime?: string; timezone?: string; enabled?: boolean };
+  schedule?: ChannelSchedule;
 };
 
 type PlanCardRow = {
@@ -46,8 +59,28 @@ type ChannelCardArtwork = {
   lastRunStatus: string | null;
 };
 
+type YoutubeLinkStatus = {
+  channelId: string;
+  ytChannelId?: string | null;
+  status: "active" | "revoked" | "error";
+  scopeHealth: "healthy" | "partial" | "unknown";
+};
+
 const blockLabel = (block: string) =>
   block.replaceAll("_", " ").replace(/\b\w/g, (char) => char.toUpperCase());
+
+function youtubeConnectionIssue(
+  connector: YoutubeLinkStatus | undefined,
+  creating: boolean,
+): string {
+  if (creating) return "YouTube setup running";
+  if (!connector) return "YouTube not linked";
+  if (connector.status === "revoked") return "YouTube link revoked";
+  if (connector.status === "error") return "YouTube link error";
+  if (connector.scopeHealth === "partial") return "OAuth scopes incomplete";
+  if (!connector.ytChannelId) return "Destination unverified";
+  return "YouTube not linked";
+}
 
 export default function ChannelsPage() {
   const ownerId = useOwnerId();
@@ -64,7 +97,7 @@ export default function ChannelsPage() {
     | ChannelCardArtwork[]
     | undefined;
   const links = useQuery(api.youtubeAuth.linkStatus, { ownerId }) as
-    | { channelId: string; ytChannelId?: string | null }[]
+    | YoutubeLinkStatus[]
     | undefined;
   const createFolder = useMutation(api.folders.create);
   const removeFolder = useMutation(api.folders.remove);
@@ -78,8 +111,17 @@ export default function ChannelsPage() {
     plan === undefined ||
     channelArtwork === undefined ||
     links === undefined;
-  const linkedIds = new Set((links ?? []).map((l) => l.channelId));
-  const ytIdByChannel = new Map((links ?? []).map((l) => [l.channelId, l.ytChannelId ?? null]));
+  const linkByChannel = new Map((links ?? []).map((link) => [link.channelId, link]));
+  const publishReadyLinks = (links ?? []).filter(
+    (link) =>
+      link.status === "active" &&
+      link.scopeHealth !== "partial" &&
+      Boolean(link.ytChannelId),
+  );
+  const linkedIds = new Set(publishReadyLinks.map((link) => link.channelId));
+  const ytIdByChannel = new Map(
+    publishReadyLinks.map((link) => [link.channelId, link.ytChannelId ?? null]),
+  );
 
   const inFolder = (name: string) => (channels ?? []).filter((c) => c.folder === name);
   const visible = channelsVisibleForFolder(channels ?? [], openFolder);
@@ -101,11 +143,9 @@ export default function ChannelsPage() {
 
   return (
     <>
-      {/* Pulse cues: red = needs linking, amber = agent is creating it now. */}
-      <style>{`@keyframes pulseRed{0%,100%{box-shadow:0 0 0 0 rgba(248,113,113,0);border-color:rgba(248,113,113,0.55)}50%{box-shadow:0 0 0 4px rgba(248,113,113,0.22);border-color:rgba(248,113,113,1)}}@keyframes pulseAmber{0%,100%{box-shadow:0 0 0 0 rgba(245,158,11,0);border-color:rgba(245,158,11,0.5)}50%{box-shadow:0 0 0 4px rgba(245,158,11,0.22);border-color:rgba(245,158,11,1)}}`}</style>
       <PageHeader
         title="Channels"
-        subtitle="Every channel and its pipeline status"
+        subtitle="Account health, queue, and next publish."
         actions={
           <div className="channel-page-actions">
             <button
@@ -211,6 +251,7 @@ export default function ChannelsPage() {
             const count = cardData?.recentRunCount ?? 0;
             const videos = cardData?.recentPublishedCount ?? 0;
             const cost = cardData?.recentSpend ?? 0;
+            const connector = linkByChannel.get(c._id);
             const linked = linkedIds.has(c._id);
             const creating = c.youtubeCreated?.status === "creating";
             const needsLink = !linked && !creating;
@@ -237,6 +278,19 @@ export default function ChannelsPage() {
             const setupDone = setupChecks.filter(Boolean).length;
             const cadence = c.schedule?.frequency || c.identity?.cadence || "Not set";
             const modulePath = (c.pipeline ?? []).map((entry) => blockLabel(entry.block));
+            const autopilotEnabled = c.status === "active" && c.schedule?.enabled !== false;
+            const inactive = !autopilotEnabled || !linked;
+            const operatingState = inactive
+              ? {
+                  tone: "inactive",
+                  label: "Inactive",
+                  detail: !linked
+                    ? `${autopilotEnabled ? "Generation on · " : ""}${youtubeConnectionIssue(connector, creating)}`
+                    : "Autopilot paused",
+                }
+              : readyPlan.length > 0
+                ? { tone: "queued", label: "Queued", detail: `${readyPlan.length} ready` }
+                : { tone: "online", label: "Online", detail: "Awaiting next plan" };
             return (
               <article
                 key={c._id}
@@ -268,36 +322,34 @@ export default function ChannelsPage() {
                       <h2>{c.name}</h2>
                     </Link>
                     <p>{c.identity?.niche ?? `Template ${c.template}`}</p>
-                    <div className="channel-card-state">
-                      <StageBadge status={c.status === "active" ? "ok" : "queued"} size="sm" />
-                      <span>{cadence}</span>
-                    </div>
                   </div>
-                  <div className="channel-card-controls">
-                    <ChannelToggle id={c._id} active={c.status === "active"} />
-                    <DeleteChannelX id={c._id} name={c.name} />
+                  <div
+                    className={`channel-live-state channel-live-state-${operatingState.tone}`}
+                    aria-label={`${operatingState.label}: ${operatingState.detail}`}
+                  >
+                    <span aria-hidden="true" />
+                    <strong>{operatingState.label}</strong>
+                    <small>{operatingState.detail}</small>
                   </div>
                 </div>
 
                 <div className="channel-card-operating-row">
                   <div>
-                    <small>Next item</small>
+                    <small>Next publish</small>
                     <strong>{next?.timestamp ? formatZonedScheduleTimestamp(next.timestamp, next.timeZone) : next ? "Time unavailable" : "No ready item"}</strong>
-                    <span>{next ? `${next.pinned ? "Pinned" : "Projected"} · ${next.item.title || next.item.topic}` : "Open schedule to plan"}</span>
+                    <span>{next ? next.item.title || next.item.topic : cadence}</span>
                   </div>
                   <div>
-                    <small>Setup</small>
-                    <strong className={setupDone === setupChecks.length ? "channel-ready" : "channel-incomplete"}>
-                      {setupDone}/{setupChecks.length} complete
-                    </strong>
-                    <span>{cardData?.lastRunStatus ? `Last run ${cardData.lastRunStatus}` : "No run history"}</span>
+                    <small>Output</small>
+                    <strong>{videos} published</strong>
+                    <span>{cardData?.lastRunStatus ? `Last run · ${cardData.lastRunStatus}` : "No run history"}</span>
                   </div>
                 </div>
 
                 <details className="channel-card-details">
                   <summary>
-                    <span>Pipeline &amp; recent activity</span>
-                    <small>{modulePath.length} modules · {count} runs</small>
+                    <span>Manage channel</span>
+                    <small>{setupDone}/{setupChecks.length} ready</small>
                   </summary>
                   <div className="channel-card-details-body">
                     <div className="channel-module-path" title={modulePath.join(" → ")}>
@@ -315,10 +367,18 @@ export default function ChannelsPage() {
                       <CardStat label="Recent spend" value={fmtUsd(cost)} />
                     </div>
                     <nav className="channel-card-secondary-actions" aria-label={`${c.name} setup actions`}>
-                      <Link href={`/channels/${c.slug}?tab=settings`}>Settings</Link>
                       <Link href={`/channels/${c.slug}?tab=week-ahead`}>Schedule</Link>
-                      <Link href={`/channels/${c.slug}?tab=pipeline`}>Pipeline</Link>
+                      <Link href={`/channels/${c.slug}?tab=seo`}>SEO</Link>
+                      <Link href={`/channels/${c.slug}?tab=settings`}>Settings</Link>
                     </nav>
+                    <div className="channel-card-account-actions">
+                      <ChannelToggle id={c._id} active={autopilotEnabled} schedule={c.schedule} />
+                      {needsLink && <LinkYouTubeButton channelId={c._id} created={Boolean(c.youtubeCreated?.ytChannelId)} />}
+                      {linked && c.identity?.imageKey && ytId && (
+                        <SetAvatarButton imageKey={c.identity.imageKey} ytChannelId={ytId} slug={c.slug} />
+                      )}
+                      <DeleteChannelX id={c._id} name={c.name} />
+                    </div>
                   </div>
                 </details>
 
@@ -327,9 +387,8 @@ export default function ChannelsPage() {
                     <span className="studio-pulse">●</span> Setting up YouTube channel…
                   </div>
                 )}
-                {needsLink && <LinkYouTubeButton channelId={c._id} created={Boolean(c.youtubeCreated?.ytChannelId)} />}
-                {linked && c.identity?.imageKey && ytId && (
-                  <SetAvatarButton imageKey={c.identity.imageKey} ytChannelId={ytId} slug={c.slug} />
+                {needsLink && !creating && (
+                  <div className="channel-card-notice channel-card-notice-danger">YouTube connection required</div>
                 )}
 
                 <nav className="channel-card-actions" aria-label={`${c.name} actions`}>
@@ -345,7 +404,7 @@ export default function ChannelsPage() {
 }
 
 /**
- * Two-step delete X on a channel card: first click arms ("Sure?"), second
+ * Two-step delete control inside the card's management panel: first click arms, second
  * click within 4s deletes. Stops the parent Link navigation.
  */
 function DeleteChannelX({ id, name }: { id: string; name: string }) {
@@ -372,30 +431,17 @@ function DeleteChannelX({ id, name }: { id: string; name: string }) {
     <button
       onClick={onClick}
       disabled={busy}
+      className="channel-account-action channel-account-action-danger"
       title={armed ? `Click again to permanently delete "${name}"` : `Delete "${name}"…`}
-      style={{
-        minWidth: armed ? 44 : 20,
-        height: 20,
-        padding: armed ? "0 0.45rem" : 0,
-        borderRadius: 6,
-        cursor: busy ? "default" : "pointer",
-        border: armed ? "1px solid rgba(248,113,113,0.8)" : "1px solid var(--color-border)",
-        background: armed ? "rgba(248,113,113,0.22)" : "transparent",
-        color: armed ? "#fca5a5" : "var(--color-faint)",
-        fontWeight: 700,
-        fontSize: armed ? "0.62rem" : "0.8rem",
-        lineHeight: 1,
-        opacity: busy ? 0.5 : 1,
-        whiteSpace: "nowrap",
-      }}
+      data-armed={armed ? "true" : undefined}
     >
-      {busy ? "…" : armed ? "Sure?" : "×"}
+      {busy ? "Deleting…" : armed ? "Confirm delete" : "Delete channel"}
     </button>
   );
 }
 
 /** Inline on/off toggle on a channel card. Stops the parent Link navigation. */
-function ChannelToggle({ id, active }: { id: string; active: boolean }) {
+function ChannelToggle({ id, active, schedule }: { id: string; active: boolean; schedule?: ChannelSchedule }) {
   const update = useMutation(api.channels.updateChannel);
   const [busy, setBusy] = useState(false);
   const toggle = async (e: React.MouseEvent) => {
@@ -404,7 +450,20 @@ function ChannelToggle({ id, active }: { id: string; active: boolean }) {
     if (busy) return;
     setBusy(true);
     try {
-      await update({ channelId: id as Id<"channels">, status: active ? "paused" : "active" });
+      const shouldEnableSchedule = !active && schedule?.enabled === false;
+      await update({
+        channelId: id as Id<"channels">,
+        status: active ? "paused" : "active",
+        ...(shouldEnableSchedule
+          ? {
+              schedule: {
+                ...schedule,
+                frequency: schedule.frequency || "weekly",
+                enabled: true,
+              },
+            }
+          : {}),
+      });
     } finally {
       setBusy(false);
     }
@@ -413,25 +472,12 @@ function ChannelToggle({ id, active }: { id: string; active: boolean }) {
     <button
       onClick={toggle}
       disabled={busy}
+      className="channel-account-action"
       title={active
         ? "Autopilot ON — builds + uploads (private) on the channel's cadence. Click to pause."
         : "Paused — no auto-builds. Click to enable autopilot."}
-      style={{
-        width: 38,
-        height: 20,
-        borderRadius: 999,
-        flexShrink: 0,
-        cursor: busy ? "default" : "pointer",
-        border: "1px solid var(--color-border)",
-        background: active ? "rgba(52,211,153,0.20)" : "rgba(148,148,148,0.15)",
-        color: active ? "var(--color-ok)" : "var(--color-muted)",
-        fontWeight: 700,
-        fontSize: "0.55rem",
-        letterSpacing: "0.04em",
-        opacity: busy ? 0.6 : 1,
-      }}
     >
-      {active ? "ON" : "OFF"}
+      {busy ? "Updating…" : active ? "Pause autopilot" : "Resume autopilot"}
     </button>
   );
 }
@@ -448,23 +494,10 @@ function LinkYouTubeButton({ channelId, created }: { channelId: string; created:
   return (
     <button
       onClick={onClick}
+      className="channel-account-action channel-account-action-attention"
       title={created ? "A YouTube channel was created for this — click to link it" : "Link this channel to YouTube"}
-      style={{
-        background: "rgba(248,113,113,0.15)",
-        color: "#fca5a5",
-        border: "1px solid rgba(248,113,113,0.6)",
-        borderRadius: 7,
-        padding: "0.35rem 0.5rem",
-        fontSize: "0.72rem",
-        fontWeight: 700,
-        cursor: "pointer",
-        maxWidth: "100%",
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-      }}
     >
-      🔗 Link to YouTube
+      Link YouTube
     </button>
   );
 }
@@ -504,24 +537,10 @@ function SetAvatarButton({ imageKey, ytChannelId, slug }: { imageKey: string; yt
     <button
       onClick={onClick}
       disabled={busy}
+      className="channel-account-action"
       title="Download the generated avatar + open YouTube Studio to set it (one manual step)"
-      style={{
-        background: "rgba(125,211,252,0.12)",
-        color: "#7dd3fc",
-        border: "1px solid rgba(125,211,252,0.5)",
-        borderRadius: 7,
-        padding: "0.35rem 0.5rem",
-        fontSize: "0.72rem",
-        fontWeight: 700,
-        cursor: busy ? "default" : "pointer",
-        opacity: busy ? 0.6 : 1,
-        maxWidth: "100%",
-        whiteSpace: "nowrap",
-        overflow: "hidden",
-        textOverflow: "ellipsis",
-      }}
     >
-      🖼️ {busy ? "Opening…" : "Set profile picture"}
+      {busy ? "Opening…" : "Set profile picture"}
     </button>
   );
 }

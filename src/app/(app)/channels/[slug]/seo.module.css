@@ -1,0 +1,212 @@
+.workspace {
+  display: grid;
+  gap: 1rem;
+}
+
+.header {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 1rem;
+  padding: 0.95rem 1rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.headerText {
+  min-width: 0;
+}
+
+.eyebrow {
+  display: block;
+  color: var(--color-faint);
+  font: 0.62rem var(--font-mono);
+  letter-spacing: 0.1em;
+  text-transform: uppercase;
+}
+
+.header h2 {
+  margin-top: 0.22rem;
+  overflow: hidden;
+  font-size: 1rem;
+  font-weight: 690;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.refresh {
+  flex: 0 0 auto;
+  min-height: 34px;
+  padding: 0.42rem 0.7rem;
+  cursor: pointer;
+  border: 1px solid rgba(212, 165, 116, 0.28);
+  border-radius: 7px;
+  color: var(--color-accent);
+  background: var(--color-accent-soft);
+  font-size: 0.7rem;
+  font-weight: 670;
+}
+
+.refresh:disabled {
+  cursor: default;
+  opacity: 0.58;
+}
+
+.notice {
+  margin: -0.35rem 0 0;
+  color: var(--color-muted);
+  font-size: 0.68rem;
+}
+
+.noticeError {
+  color: #fca5a5;
+}
+
+.benchmarkGrid {
+  display: grid;
+  grid-template-columns: repeat(3, minmax(0, 1fr));
+  gap: 0.65rem;
+}
+
+.decisionGrid {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 0.7rem;
+}
+
+.panel {
+  min-width: 0;
+  padding: 0.85rem 0.9rem;
+  border: 1px solid var(--color-border);
+  border-radius: 9px;
+  background: rgba(255, 255, 255, 0.018);
+}
+
+.panelHeader {
+  display: flex;
+  align-items: baseline;
+  justify-content: space-between;
+  gap: 0.8rem;
+  margin-bottom: 0.62rem;
+}
+
+.panelHeader h3 {
+  font-size: 0.78rem;
+  font-weight: 690;
+}
+
+.panelHeader span {
+  color: var(--color-faint);
+  font: 0.58rem var(--font-mono);
+  letter-spacing: 0.06em;
+  text-transform: uppercase;
+}
+
+.guide {
+  color: var(--color-muted);
+  font-size: 0.76rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+}
+
+.patternList,
+.competitorList {
+  display: grid;
+  gap: 0.38rem;
+  list-style: none;
+}
+
+.patternList li {
+  padding: 0.48rem 0.55rem;
+  border-radius: 6px;
+  color: var(--color-muted);
+  background: rgba(255, 255, 255, 0.025);
+  font-size: 0.72rem;
+  line-height: 1.42;
+}
+
+.opportunityList li {
+  border-left: 2px solid var(--color-accent);
+  color: var(--color-fg);
+}
+
+.competitorRow {
+  display: grid;
+  grid-template-columns: 24px minmax(0, 1fr) auto;
+  align-items: center;
+  gap: 0.55rem;
+  min-height: 34px;
+  padding: 0.35rem 0.45rem;
+  border-bottom: 1px solid var(--color-border);
+}
+
+.competitorRow:last-child {
+  border-bottom: 0;
+}
+
+.rank {
+  color: var(--color-faint);
+  font: 0.6rem var(--font-mono);
+}
+
+.competitorTitle {
+  overflow: hidden;
+  font-size: 0.72rem;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+
+.views {
+  color: var(--color-secondary);
+  font: 0.65rem var(--font-mono);
+  white-space: nowrap;
+}
+
+.chips {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.36rem;
+}
+
+.chip {
+  padding: 0.3rem 0.42rem;
+  border: 1px solid rgba(212, 165, 116, 0.18);
+  border-radius: 999px;
+  color: var(--color-muted);
+  background: rgba(212, 165, 116, 0.045);
+  font-size: 0.64rem;
+}
+
+.chip small {
+  margin-left: 0.2rem;
+  color: var(--color-faint);
+  font-family: var(--font-mono);
+}
+
+.emptyPanel {
+  display: grid;
+  justify-items: start;
+  gap: 0.55rem;
+  padding: 1.2rem;
+  border: 1px dashed var(--color-border-strong);
+  border-radius: 10px;
+  color: var(--color-muted);
+  font-size: 0.76rem;
+}
+
+@media (max-width: 760px) {
+  .header {
+    align-items: stretch;
+    flex-direction: column;
+  }
+
+  .refresh {
+    width: 100%;
+  }
+
+  .benchmarkGrid,
+  .decisionGrid {
+    grid-template-columns: 1fr;
+  }
+}

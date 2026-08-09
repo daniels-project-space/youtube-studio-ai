@@ -118,6 +118,16 @@ export const makeMultilingualTask = task({
         thumbnailer: base.thumbnailer,
         template: base.template,
         pipeline,
+        // A language sibling is the same show in another language, not a new
+        // format experiment. Copy the full visual/quality contract so it cannot
+        // fall back to template inference or drift out of the base's lane.
+        family: base.family,
+        contentLane: base.contentLane,
+        disabledBlocks: base.disabledBlocks,
+        modelRouting: base.modelRouting,
+        qaRubric: base.qaRubric,
+        styleDNA: base.styleDNA,
+        moduleConfig: base.moduleConfig,
         budget: base.budget,
         status: "draft", // until its YouTube channel is connected
         groupId,

@@ -13,6 +13,12 @@ import { registerAllBlocks } from "./blocks";
 import { validatePipeline } from "./validate";
 import type { PipelineEntry } from "./types";
 import {
+  assertPipelineMatchesContentLane,
+  contentLaneForFamily,
+  injectContentLaneIntoPipeline,
+  type ContentLane,
+} from "./contentLane";
+import {
   compilePipeline,
   completePipelineForPolicy,
   type PipelineCompilation,
@@ -48,6 +54,8 @@ export interface DesignOptions {
 
 export interface DesignResult {
   pipeline: PipelineEntry[];
+  /** Immutable production lane persisted with the channel at creation. */
+  contentLane: ContentLane;
   available: boolean; // false → family's visual engine not built yet (save as draft)
   warnings: string[];
   compilation?: PipelineCompilation;
@@ -382,6 +390,11 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     warnings.push(`Production compiler added required modules: ${completed.inserted.join(", ")}.`);
   }
 
+  const contentLane = contentLaneForFamily(opts.family);
+  if (!contentLane) throw new Error(`family ${opts.family} has no content lane policy`);
+  assertPipelineMatchesContentLane(contentLane, pipeline);
+  pipeline = injectContentLaneIntoPipeline(pipeline, contentLane);
+
   // Never persist an invalid graph.
   let compilation: PipelineCompilation | undefined;
   try {
@@ -391,7 +404,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     throw new Error(`designed pipeline invalid: ${e instanceof Error ? e.message : e}`);
   }
 
-  return { pipeline, available: fam.available, warnings, compilation };
+  return { pipeline, contentLane, available: fam.available, warnings, compilation };
 }
 
 /**

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import type { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import {
   PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA,
+  planWeekProviderEvidenceSha256,
   type PlanWeekArtifactReceipt,
   type PlanWeekProviderRenderReceipt,
 } from "@/lib/planWeekRenderReceipt";
@@ -58,7 +59,8 @@ function exactHead(row: ReadyRow) {
     metadata: {
       [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.checkpointKey]: row.usageCheckpointKey,
       [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerRequestSha256]: provider.requestSha256,
-      [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.billingReceiptSha256]: provider.billingReceiptSha256,
+      [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.providerEvidenceSha256]:
+        planWeekProviderEvidenceSha256(provider),
       [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactSha256]: artifact.sha256,
       [PLAN_WEEK_THUMBNAIL_RECEIPT_METADATA.artifactCreatedAt]: String(artifact.createdAt),
     },

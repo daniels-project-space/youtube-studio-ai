@@ -51,7 +51,11 @@ export function channelInceptionInvalidationRoots(
   const after = record(afterValue);
   const roots = new Set<ChannelInceptionModuleKey>();
 
-  if (changed(before["family"], after["family"]) || changed(before["language"], after["language"])) {
+  if (
+    changed(before["family"], after["family"]) ||
+    changed(before["contentLane"], after["contentLane"]) ||
+    changed(before["language"], after["language"])
+  ) {
     roots.add("channel-inception-research");
   }
   if (changed(before["name"], after["name"])) {
@@ -100,6 +104,7 @@ export function channelInceptionInvalidationRoots(
     changed(before["disabledBlocks"], after["disabledBlocks"]) ||
     changed(before["modelRouting"], after["modelRouting"]) ||
     changed(before["architectReport"], after["architectReport"]) ||
+    changed(before["contentLane"], after["contentLane"]) ||
     changed(before["template"], after["template"])
   ) {
     roots.add("channel-inception-pipeline");

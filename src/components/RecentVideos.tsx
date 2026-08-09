@@ -1,81 +1,219 @@
 "use client";
 
+import { useEffect, useId, useRef, useState } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../convex/_generated/api";
-import { AssetImg } from "./AssetImg";
-import { SectionTitle } from "./PageHeader";
 import type { Id } from "../../convex/_generated/dataModel";
+import { useAssetUrlState } from "@/lib/asset-url";
+import { AssetImg } from "./AssetImg";
+import styles from "./RecentVideos.module.css";
 
-type V = {
+type RenderedVideo = {
   _id: string;
   title: string;
   channelName: string;
   youtubeVideoId?: string;
   thumbnailKey?: string | null;
+  videoKey?: string | null;
   durationSec?: number;
+  createdAt?: number;
 };
 
-function fmtDur(s?: number) {
-  if (!s) return "";
-  const m = Math.floor(s / 60);
-  return `${m}:${String(Math.round(s % 60)).padStart(2, "0")}`;
+const renderDate = new Intl.DateTimeFormat("en-GB", {
+  day: "numeric",
+  month: "short",
+});
+
+function fmtDur(seconds?: number) {
+  if (!seconds) return "";
+  const rounded = Math.max(0, Math.round(seconds));
+  const minutes = Math.floor(rounded / 60);
+  return `${minutes}:${String(rounded % 60).padStart(2, "0")}`;
 }
 
-/** A strip of the N most recently finished videos (R2 thumbnails, watch links). */
+/** Recent rendered masters. Cards always open the saved R2 video, never YouTube. */
 export function RecentVideos({
   ownerId,
   channelId,
-  limit = 5,
+  limit = 10,
 }: {
   ownerId: string;
   channelId?: Id<"channels">;
   limit?: number;
 }) {
+  const trackRef = useRef<HTMLDivElement>(null);
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const [selected, setSelected] = useState<RenderedVideo | null>(null);
   const videos = useQuery(api.videos.listVideos, {
     ownerId,
     ...(channelId ? { channelId } : {}),
     limit,
-  }) as V[] | undefined;
+  }) as RenderedVideo[] | undefined;
 
-  if (videos !== undefined && videos.length === 0) return null;
+  const renders = videos?.filter(
+    (video): video is RenderedVideo & { videoKey: string } => Boolean(video.videoKey),
+  );
 
-  const cells: (V | null)[] = videos ?? Array.from({ length: limit }, () => null);
+  if (renders !== undefined && renders.length === 0) return null;
+
+  const move = (direction: -1 | 1) => {
+    const track = trackRef.current;
+    if (!track) return;
+    track.scrollBy({
+      left: direction * Math.max(track.clientWidth * 0.78, 260),
+      behavior: "smooth",
+    });
+  };
+
+  const closeSelected = () => {
+    setSelected(null);
+    window.requestAnimationFrame(() => openerRef.current?.focus());
+  };
 
   return (
-    <section style={{ marginBottom: "1.8rem" }}>
-      <SectionTitle>Recent videos</SectionTitle>
-      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(190px, 1fr))", gap: "0.85rem" }}>
-        {cells.map((v, i) => {
-          const card = (
-            <>
-              <div style={{ position: "relative", aspectRatio: "16 / 9", borderRadius: 10, overflow: "hidden" }}>
-                <AssetImg
-                  k={v?.thumbnailKey ?? undefined}
-                  alt={v?.title ?? "video"}
-                  fallbackSrc={v?.youtubeVideoId ? `https://i.ytimg.com/vi/${v.youtubeVideoId}/hqdefault.jpg` : undefined}
-                  style={{ width: "100%", height: "100%" }}
-                />
-                {v?.durationSec ? (
-                  <span style={{ position: "absolute", right: 6, bottom: 6, background: "rgba(0,0,0,0.78)", color: "#fff", fontSize: "0.7rem", padding: "1px 6px", borderRadius: 5 }}>
-                    {fmtDur(v.durationSec)}
-                  </span>
-                ) : null}
-              </div>
-              <div style={{ marginTop: "0.5rem", fontSize: "0.85rem", fontWeight: 500, lineHeight: 1.3, display: "-webkit-box", WebkitLineClamp: 2, WebkitBoxOrient: "vertical", overflow: "hidden" }}>
-                {v ? v.title : "—"}
-              </div>
-              <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginTop: 2 }}>{v?.channelName ?? ""}</div>
-            </>
-          );
-          return v?.youtubeVideoId ? (
-            <a key={v._id} href={`https://www.youtube.com/watch?v=${v.youtubeVideoId}`} target="_blank" rel="noopener noreferrer" className="glass glass-shine lift" style={{ padding: "0.5rem", display: "block" }}>
-              {card}
-            </a>
-          ) : (
-            <div key={v?._id ?? i} className="glass" style={{ padding: "0.5rem" }}>{card}</div>
-          );
-        })}
+    <section className={styles.section} aria-labelledby="recent-renders-title">
+      <header className={styles.header}>
+        <div>
+          <h2 id="recent-renders-title">Recent renders</h2>
+          <span>R2 masters</span>
+        </div>
+        <div className={styles.controls} aria-label="Carousel controls">
+          <button type="button" onClick={() => move(-1)} aria-label="Previous renders">
+            ‹
+          </button>
+          <button type="button" onClick={() => move(1)} aria-label="Next renders">
+            ›
+          </button>
+        </div>
+      </header>
+
+      <div ref={trackRef} className={styles.track}>
+        {renders === undefined
+          ? Array.from({ length: 3 }, (_, index) => (
+              <div key={index} className={`${styles.card} ${styles.skeleton}`} aria-hidden="true" />
+            ))
+          : renders.map((video) => (
+              <button
+                type="button"
+                key={video._id}
+                className={styles.card}
+                onClick={(event) => {
+                  openerRef.current = event.currentTarget;
+                  setSelected(video);
+                }}
+                aria-label={`Open R2 render: ${video.title}`}
+              >
+                <span className={styles.media}>
+                  <AssetImg
+                    k={video.thumbnailKey ?? undefined}
+                    alt=""
+                    fallbackSrc={
+                      video.youtubeVideoId
+                        ? `https://i.ytimg.com/vi/${video.youtubeVideoId}/hqdefault.jpg`
+                        : undefined
+                    }
+                    style={{ width: "100%", height: "100%" }}
+                  />
+                  <span className={styles.play} aria-hidden="true">▶</span>
+                  {video.durationSec ? (
+                    <span className={styles.duration}>{fmtDur(video.durationSec)}</span>
+                  ) : null}
+                </span>
+                <span className={styles.copy}>
+                  <strong>{video.title}</strong>
+                  <small>
+                    {video.channelName}
+                    {video.createdAt ? ` · ${renderDate.format(new Date(video.createdAt))}` : ""}
+                  </small>
+                </span>
+              </button>
+            ))}
       </div>
+
+      {selected && <R2VideoDialog video={selected} onClose={closeSelected} />}
     </section>
+  );
+}
+
+function R2VideoDialog({
+  video,
+  onClose,
+}: {
+  video: RenderedVideo;
+  onClose: () => void;
+}) {
+  const titleId = useId();
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const asset = useAssetUrlState(video.videoKey);
+
+  useEffect(() => {
+    const previousOverflow = document.body.style.overflow;
+    const onKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") {
+        onClose();
+        return;
+      }
+      if (event.key !== "Tab") return;
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLElement>(
+          'button, video[controls], a[href], [tabindex]:not([tabindex="-1"])',
+        ) ?? [],
+      ).filter((element) => !element.hasAttribute("disabled"));
+      if (focusable.length === 0) {
+        event.preventDefault();
+        closeRef.current?.focus();
+        return;
+      }
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (event.shiftKey && document.activeElement === first) {
+        event.preventDefault();
+        last.focus();
+      } else if (!event.shiftKey && document.activeElement === last) {
+        event.preventDefault();
+        first.focus();
+      }
+    };
+    document.body.style.overflow = "hidden";
+    window.addEventListener("keydown", onKeyDown);
+    closeRef.current?.focus();
+    return () => {
+      document.body.style.overflow = previousOverflow;
+      window.removeEventListener("keydown", onKeyDown);
+    };
+  }, [onClose]);
+
+  return (
+    <div className={styles.backdrop} onMouseDown={onClose}>
+      <div
+        ref={dialogRef}
+        className={styles.dialog}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        onMouseDown={(event) => event.stopPropagation()}
+      >
+        <header className={styles.dialogHeader}>
+          <div>
+            <span>{video.channelName} · R2 master</span>
+            <h2 id={titleId}>{video.title}</h2>
+          </div>
+          <button ref={closeRef} type="button" onClick={onClose} aria-label="Close video">
+            ×
+          </button>
+        </header>
+
+        <div className={styles.player}>
+          {asset.status === "ready" && asset.url ? (
+            <video src={asset.url} controls autoPlay playsInline preload="metadata" />
+          ) : asset.status === "error" ? (
+            <span>Could not open this R2 master.</span>
+          ) : (
+            <span>Opening R2 master…</span>
+          )}
+        </div>
+      </div>
+    </div>
   );
 }

@@ -1,14 +1,22 @@
 import assert from "node:assert/strict";
+import { createHash } from "node:crypto";
 import { mkdtemp, mkdir, readFile, rm, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { tmpdir } from "node:os";
 
 import { ExecutionError } from "@/engine/executionErrors";
+import { canonicalJson } from "@/lib/canonicalJson";
+import {
+  NANO_BANANA_THUMBNAIL_PROFILE,
+  nanoBananaThumbnailCostUsd,
+  nanoBananaThumbnailPromptCostUsd,
+} from "@/lib/nanoBananaThumbnailContract";
 import {
   beginThumbnailPaidWork,
   openThumbnailCheckpoint,
   saveThumbnailGenerationCheckpoint,
   saveThumbnailQaCheckpoint,
+  thumbnailNanoBananaRequestContext,
   thumbnailRequestHash,
   type ThumbnailCheckpointIo,
 } from "@/lib/thumbnailCheckpoint";
@@ -52,6 +60,105 @@ class MemoryCheckpointIo implements ThumbnailCheckpointIo {
   }
 }
 
+async function nanoEvidenceSurvivesRemoteRecovery(root: string): Promise<void> {
+  const io = new MemoryCheckpointIo();
+  const requestHash = thumbnailRequestHash({ title: "Bound Nano receipt", pattern: 1 });
+  const requestContext = thumbnailNanoBananaRequestContext({
+    keyPrefix: "owner/o/channel/c/",
+    runId: "run-bound-1",
+    requestHash,
+  });
+  const profile = NANO_BANANA_THUMBNAIL_PROFILE;
+  const providerRequestCanonicalJson = canonicalJson({
+    apiVersion: profile.apiVersion,
+    context: requestContext,
+    model: profile.model,
+    operation: "generateContent",
+    body: {
+      contents: [{ parts: [{
+        text: "Cinematic scene. ABSOLUTE RULE — PICTURE ONLY, NO TEXT: no words.",
+      }] }],
+      generationConfig: {
+        responseModalities: ["IMAGE"],
+        imageConfig: { aspectRatio: profile.aspectRatio },
+      },
+    },
+  });
+  const prompt = (
+    JSON.parse(providerRequestCanonicalJson) as {
+      body: { contents: Array<{ parts: Array<{ text: string }> }> };
+    }
+  ).body.contents[0].parts[0].text;
+  const promptTokenCount = 80;
+  const providerResponseMetadataCanonicalJson = canonicalJson({
+    modelVersion: "gemini-2.5-flash-image-2025-08",
+    responseId: "checkpoint-response-1",
+    usageMetadata: { promptTokenCount, candidatesTokenCount: 1_290, totalTokenCount: 1_370 },
+  });
+  const evidence = {
+    version: "thumbnail-nano-banana-evidence/v1" as const,
+    requestContext,
+    receipt: {
+      provider: profile.provider,
+      model: profile.model,
+      apiVersion: profile.apiVersion,
+      modelVersion: "gemini-2.5-flash-image-2025-08",
+      responseId: "checkpoint-response-1",
+      route: profile.route,
+      width: profile.providerOutputWidth,
+      height: profile.providerOutputHeight,
+      promptUtf8Bytes: Buffer.byteLength(prompt, "utf8"),
+      promptTokenCount,
+      promptCostUsd: nanoBananaThumbnailPromptCostUsd(promptTokenCount),
+      outputCostUsd: profile.outputImageUsd,
+      costUsd: nanoBananaThumbnailCostUsd(promptTokenCount),
+      sourceContentType: "image/png",
+      providerRequestCanonicalJson,
+      providerRequestSha256: createHash("sha256")
+        .update(`nano-banana-provider\0${providerRequestCanonicalJson}`)
+        .digest("hex"),
+      providerResponseMetadataCanonicalJson,
+      providerResponseMetadataSha256: createHash("sha256")
+        .update(`nano-banana-response-metadata\0${providerResponseMetadataCanonicalJson}`)
+        .digest("hex"),
+      responseSha256: "a".repeat(64),
+      createdAt: 1_900_000_000_000,
+    },
+  };
+  const localImagePath = join(root, "nano-evidence", "thumbnail.jpg");
+  await mkdir(join(root, "nano-evidence"), { recursive: true });
+  let session = await openThumbnailCheckpoint({
+    checkpointRoot: "owner/o/channel/c/runs/run-bound-1/thumbnail-checkpoints",
+    requestHash,
+    localImagePath,
+  }, io);
+  session = await beginThumbnailPaidWork(session, io);
+  await writeFile(localImagePath, Buffer.from("composited thumbnail bytes"));
+  session = await saveThumbnailGenerationCheckpoint(session, evidence.receipt.costUsd, evidence, io);
+  assert.equal(session.manifest?.version, 2);
+  assert.equal(
+    session.manifest?.version === 2
+      ? session.manifest.providerEvidence?.receipt.providerRequestSha256
+      : undefined,
+    evidence.receipt.providerRequestSha256,
+  );
+
+  await rm(join(root, "nano-evidence"), { recursive: true, force: true });
+  const restored = await openThumbnailCheckpoint({
+    checkpointRoot: "owner/o/channel/c/runs/run-bound-1/thumbnail-checkpoints",
+    requestHash,
+    localImagePath: join(root, "nano-restored", "thumbnail.jpg"),
+  }, io);
+  assert.equal(restored.source, "remote");
+  assert.equal(restored.manifest?.version, 2);
+  assert.equal(
+    restored.manifest?.version === 2
+      ? restored.manifest.providerEvidence?.receipt.route
+      : undefined,
+    "nano-banana-flash",
+  );
+}
+
 async function completedCheckpointReusesPixelsAndQa(root: string): Promise<void> {
   const io = new MemoryCheckpointIo();
   const requestHash = thumbnailRequestHash({ title: "Crash proof", pattern: 2 });
@@ -73,7 +180,7 @@ async function completedCheckpointReusesPixelsAndQa(root: string): Promise<void>
   first = await beginThumbnailPaidWork(first, io);
   providerPurchases += 1;
   await writeFile(firstPath, Buffer.from([0xff, 0xd8, 0xff, 0xd9]));
-  first = await saveThumbnailGenerationCheckpoint(first, 0.047321, io);
+  first = await saveThumbnailGenerationCheckpoint(first, 0.047321, undefined, io);
   qaPurchases += 1;
   const qaRequestHash = thumbnailRequestHash({ requestHash, quality: "production" });
   first = await saveThumbnailQaCheckpoint(
@@ -130,7 +237,7 @@ async function uploadFailureUsesLocalCheckpoint(root: string): Promise<void> {
   await writeFile(localImagePath, Buffer.from("real rendered jpeg bytes"));
   io.failNextImagePut = true;
   await assert.rejects(
-    saveThumbnailGenerationCheckpoint(session, 0.051, io),
+    saveThumbnailGenerationCheckpoint(session, 0.051, undefined, io),
     /simulated R2 upload outage/,
   );
 
@@ -140,7 +247,7 @@ async function uploadFailureUsesLocalCheckpoint(root: string): Promise<void> {
   );
   assert.equal(session.source, "local");
   assert.equal(session.manifest?.generationCostUsd, 0.051);
-  await saveThumbnailGenerationCheckpoint(session, 0.051, io);
+  await saveThumbnailGenerationCheckpoint(session, 0.051, undefined, io);
   assert.equal(providerPurchases, 1, "storage retry cannot repurchase the thumbnail");
 }
 
@@ -218,6 +325,7 @@ async function main(): Promise<void> {
     await completedCheckpointReusesPixelsAndQa(root);
     await uploadFailureUsesLocalCheckpoint(root);
     await incompleteClaimFailsClosed(root);
+    await nanoEvidenceSurvivesRemoteRecovery(root);
     console.log("thumbnail checkpoint tests: ok");
   } finally {
     await rm(root, { recursive: true, force: true });

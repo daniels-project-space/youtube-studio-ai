@@ -1,6 +1,8 @@
 import type { Block } from "@/engine/types";
 import { getCutSheet, getStructure, getVisualBrief } from "@/engine/creative/brief";
 import { planStorySpine } from "@/engine/storySpine";
+import { resolveContentLane } from "@/engine/contentLane";
+import { buildEpisodeSpec } from "@/engine/qualityEvidence";
 
 export const storySpine: Block = {
   id: "story_spine",
@@ -19,6 +21,7 @@ export const storySpine: Block = {
     "dpVisualSpecs",
     "editorEdl",
     "storyCoverage",
+    "episodeSpec",
   ],
   run: async (ctx) => {
     const timings = ctx.store["sentenceTimings"] as
@@ -45,6 +48,21 @@ export const storySpine: Block = {
       ...spine.editorEdl,
       editorBrief: cutSheet ?? null,
     };
+    const lane = resolveContentLane({
+      stored: ctx.store["contentLane"],
+      pipeline: [],
+    });
+    const episodeSpec = buildEpisodeSpec({
+      lane: { key: lane.key, renderer: lane.primaryRenderer },
+      topic: String(ctx.store["topic"]),
+      durationSec: spine.timedScript.narrationDurationSec,
+      story: {
+        source: "validated-story-spine/v1",
+        beatCount: spine.narrativeBeats.length,
+        shotCount: spine.shotList.length,
+        coverageRatio: spine.coverage.ratio,
+      },
+    });
     ctx.log(
       `story_spine: ${spine.timedScript.sentences.length} timed sentences → ` +
         `${spine.narrativeBeats.length} beats → ${spine.shotList.length} shots; coverage 100%`,
@@ -57,6 +75,7 @@ export const storySpine: Block = {
       dpVisualSpecs: spine.dpVisualSpecs,
       editorEdl,
       storyCoverage: spine.coverage,
+      episodeSpec,
     };
   },
 };
