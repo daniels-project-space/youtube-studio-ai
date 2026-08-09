@@ -8,30 +8,30 @@ orchestrator reads it (via the `secrets_status` tool + a preflight in
 
 ## The vaults (where values live), by authority
 
-1. **Trigger.dev PROD env** — the RUNTIME vault the deployed pipeline reads.
-   - list/read/write via API (PAT at `/root/.config/trigger/config.json` on the VPS):
-     ```
-     GET  https://api.trigger.dev/api/v1/projects/$TRIGGER_PROJECT_REF/envvars/prod
-     POST https://api.trigger.dev/api/v1/projects/$TRIGGER_PROJECT_REF/envvars/prod
-          -d '{"name":"KEY","value":"..."}'
-     ```
-2. **Convex env** (`dev:astute-camel-689`) — BACKUP. The VPS checkout is authed:
-   ```
-   npx convex env list
-   npx convex env set KEY value
-   ```
-3. **`.env.local`** (local dev + the VPS checkout) — for local/VPS script runs. Gitignored.
+1. **GitHub Production environment** — deploy credentials only:
+   `CONVEX_DEPLOY_KEY` and `TRIGGER_ACCESS_TOKEN`. The post-CI cloud deployment
+   job reads these; it never receives provider/runtime credentials.
+2. **Trigger.dev PROD env** — the RUNTIME vault deployed pipeline workers read.
+   Manage it in Trigger Cloud or from a protected cloud-admin workflow; never
+   use a VPS as a deployment source.
+3. **Convex env** (`dev:astute-camel-689`) — runtime values that must agree with
+   Trigger (notably `INTERNAL_QUERY_SECRET`).
+4. **`.env.local`** — development-only, gitignored. It is not an approved
+   deployment source.
 
-To add a key everywhere: set it in all three (Trigger prod = runtime, Convex =
-backup, `.env.local` = local), then add a row to `KEY_REGISTRY` if it's new.
+To add a runtime key: set it in Trigger prod and any matching Convex runtime
+location, then add a row to `KEY_REGISTRY` if it's new. Do not put provider
+credentials in GitHub Actions or Vercel merely to deploy code.
 
 ## Keys
 
 | key | tier | unlocks | obtain |
 |---|---|---|---|
 | `GEMINI_API_KEY` | core | Gemini LLM + Banana image gen | aistudio.google.com |
+| `CONVEX_DEPLOY_KEY` | infra | GitHub-only deploy key scoped to `astute-camel-689` | Convex dashboard |
+| `TRIGGER_ACCESS_TOKEN` | infra | GitHub-only CI token for Trigger task deploys | Trigger.dev dashboard |
 | `FAL_KEY` | core | fal.ai cutouts / depth / image-to-video | fal.ai/dashboard/keys |
-| `TRIGGER_SECRET_KEY` | infra | Trigger.dev task runtime | Trigger dashboard |
+| `TRIGGER_SECRET_KEY` | infra | Trigger.dev task invocation/runtime (not the CI deploy token) | Trigger dashboard |
 | `ELEVENLABS_API_KEY` | feature | ElevenLabs v3 narration (preferred) | elevenlabs.io |
 | `FISH_AUDIO_API_KEY` | feature | Fish Audio narration (fallback) | fish.audio |
 | `SUNO_API_KEY` | feature | Suno music beds | sunoapi.org (credits: `GET /api/v1/generate/credit`) |
