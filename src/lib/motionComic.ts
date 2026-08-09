@@ -53,6 +53,11 @@ export interface MotionComicBrief {
   music?: boolean;
   /** Defaults to ElevenLabs; Fish is an explicitly selected alternate voice route. */
   ttsProvider?: "elevenlabs" | "fish";
+  /**
+   * Fish-only speaking-rate multiplier. Omit it to retain each provider's
+   * native pacing; callers must opt in deliberately for a bounded proof run.
+   */
+  ttsSpeed?: number;
   /** Layout-only repair instructions from the post-render visual reviewer. */
   layoutRepair?: Array<{
     action: "reflow_bubble";
@@ -1246,6 +1251,9 @@ export async function castMotionComic(args: {
   if (!hasMotionComic() || typeof args.generateImage !== "function") {
     throw new Error("motionComic: storyboard, voice, and an explicit attested image generator must all be ready before any generation");
   }
+  if (brief.ttsSpeed !== undefined && (!Number.isFinite(brief.ttsSpeed) || brief.ttsSpeed < 0.5 || brief.ttsSpeed > 2)) {
+    throw new Error("motionComic: ttsSpeed must be between 0.5 and 2.0 when explicitly set");
+  }
   const W = brief.width ?? 1920, H = brief.height ?? Math.round((brief.width ?? 1920) * 9 / 16);
   const style = projectMotionComicVisualStyle(brief.style ?? DEFAULT_STYLE);
   const nPanels = motionComicPanelCount(brief.panels);
@@ -1424,6 +1432,7 @@ export async function castMotionComic(args: {
               text: lines[k].text.trim(),
               provider: "fish",
               niche: "history",
+              ...(brief.ttsSpeed === undefined ? {} : { speed: brief.ttsSpeed }),
               onBillableCharacters: (characters) => { ttsCharactersGenerated += characters; },
             }));
           } else {

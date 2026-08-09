@@ -104,11 +104,12 @@ function costPatches(): void {
   const judges = 2 * PRICE.visionGraderUsd;
   assert.equal(thumbnail, images + judges + 0.01);
 
+  const evidenceBatches = Math.ceil(48 / 12) + Math.ceil(24 / 12);
   assert.equal(qaVisual.paid, true);
-  assert.equal(qaVisualCost({}), PRICE.qaBaseUsd);
+  assert.equal(qaVisualCost({}), PRICE.qaBaseUsd * evidenceBatches);
   assert.equal(
     qaVisualCost({ nativeWatch: true, audioQa: true }),
-    PRICE.qaBaseUsd + PRICE.nativeVideoQaUsd + PRICE.audioQaUsd,
+    PRICE.qaBaseUsd * evidenceBatches + PRICE.nativeVideoQaUsd + PRICE.audioQaUsd,
   );
 }
 
@@ -185,6 +186,27 @@ async function successfulTinyTtsIsTerminal(): Promise<void> {
   process.env.ELEVENLABS_API_KEY = "test-eleven-key";
 
   try {
+    const fishPayloads: Record<string, unknown>[] = [];
+    globalThis.fetch = async (_input, init) => {
+      fishPayloads.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(new Uint8Array(32), { status: 200 });
+    };
+    await assert.rejects(
+      synthNarration({ text: "paced fish test", provider: "fish", speed: 1.3 }),
+      /tiny audio after a successful response/,
+    );
+    assert.deepEqual(fishPayloads.at(-1)?.prosody, { speed: 1.3 });
+
+    globalThis.fetch = async (_input, init) => {
+      fishPayloads.push(JSON.parse(String(init?.body)) as Record<string, unknown>);
+      return new Response(new Uint8Array(32), { status: 200 });
+    };
+    await assert.rejects(
+      synthNarration({ text: "native fish test", provider: "fish" }),
+      /tiny audio after a successful response/,
+    );
+    assert.equal(fishPayloads.at(-1)?.prosody, undefined, "Fish native pace must remain the default");
+
     for (const provider of ["fish", "elevenlabs"] as const) {
       let calls = 0;
       let billableCharacters = 0;

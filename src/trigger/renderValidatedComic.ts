@@ -215,6 +215,10 @@ export const renderValidatedComicTask = task({
       targetSeconds: 30,
       width: 1920,
       ttsProvider: voiceProvider === "fish_one_off" ? "fish" : "elevenlabs",
+      // This is deliberately confined to the labelled proof route.  It keeps
+      // its narration inside the 30-second delivery gate without changing the
+      // normal channel voice cadence or provider defaults.
+      ...(voiceProvider === "fish_one_off" ? { ttsSpeed: 1.3 } : {}),
       music: true,
       musicPrompt:
         "Tender, aching historical cinematic underscore: solo piano, warm strings, faint carol-like motif, hopeful but sorrowful, restrained, instrumental, no vocals",
