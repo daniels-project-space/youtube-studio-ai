@@ -611,6 +611,37 @@ export async function generateNanoBananaImage(
   return (await generateNanoBananaImageWithReceipt(args)).bytes;
 }
 
+/**
+ * An explicitly selected, no-fallback premium still renderer. This remains
+ * separate from the normal provider router so a caller can prove the exact
+ * model that made a one-off delivery artifact.
+ */
+export async function generatePinnedGeminiProImage(
+  args: Pick<BananaImageArgs, "prompt" | "aspectRatio" | "imageSize" | "images" | "maxProviderAttempts"> & {
+    /** Durable caller scope included in the request hash, never sent as prompt text. */
+    idempotencyContext?: string;
+  },
+): Promise<GeminiImageResult> {
+  const model = "gemini-3-pro-image-preview";
+  const generated = await generateGeminiImage({
+    prompt: args.prompt,
+    aspectRatio: args.aspectRatio ?? "16:9",
+    imageSize: args.imageSize ?? "2K",
+    images: args.images,
+    allowText: false,
+    tier: "pro",
+    maxProviderAttempts: args.maxProviderAttempts ?? 1,
+  }, {
+    models: [model],
+    route: "gemini-3-pro-image-one-off",
+    requestContext: args.idempotencyContext,
+  });
+  if (generated.model !== model || generated.route !== "gemini-3-pro-image-one-off") {
+    throw new Error("pinned Gemini Pro image route escaped its declared provider profile");
+  }
+  return generated;
+}
+
 export async function generateBananaImage(args: BananaImageArgs): Promise<Buffer> {
   // PROVIDER ROUTER: when the operator disabled Google image gen, EVERY engine
   // that calls generateBananaImage transparently renders on fal FLUX instead

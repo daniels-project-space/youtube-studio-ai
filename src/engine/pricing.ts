@@ -97,8 +97,19 @@ export function bananaUnitRate(
 }
 
 export function qaVisualCost(params: Readonly<Record<string, unknown>>): number {
+  const clampFrames = (value: unknown, fallback: number, max: number): number => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(8, Math.min(max, Math.floor(parsed)));
+  };
+  // The evidence review performs a broad pass plus a focused re-watch. Reserve
+  // a full managed-vision allowance per 12-image batch; runtime accounting
+  // still records the provider's observed usage separately.
+  const broadFrames = clampFrames(params["visualReviewFrames"], 48, 72);
+  const focusFrames = clampFrames(params["visualReviewFocusFrames"], 24, 36);
+  const evidenceBatches = Math.ceil(broadFrames / 12) + Math.ceil(focusFrames / 12);
   return (
-    PRICE.qaBaseUsd +
+    PRICE.qaBaseUsd * evidenceBatches +
     (params["nativeWatch"] === true ? PRICE.nativeVideoQaUsd : 0) +
     (params["audioQa"] === true ? PRICE.audioQaUsd : 0)
   );

@@ -185,6 +185,52 @@ function insertCapabilityProvider(
   return null;
 }
 
+function producesArtifact(entry: PipelineEntry, artifact: string): boolean {
+  const manifest = getManifest(entry.block);
+  return Boolean(
+    manifest &&
+      (artifact in manifest.produces || artifact in manifest.optionalProduces),
+  );
+}
+
+/**
+ * A channel that can upload a master must visually review that exact master
+ * before the side effect. Older/custom channel rows may predate qa_visual, so
+ * insert the shared evidence-backed gate at the one safe point instead of
+ * trusting every caller to remember it.
+ */
+function ensureReleaseVisualReview(entries: PipelineEntry[]): boolean {
+  const uploadIndex = entries.findIndex((entry) => entry.block === "upload_draft");
+  if (uploadIndex < 0) return false;
+
+  const qaIndexes = entries
+    .map((entry, index) => entry.block === "qa_visual" ? index : -1)
+    .filter((index) => index >= 0);
+  if (qaIndexes.length > 1) {
+    throw new PipelinePolicyError("publish pipeline has multiple qa_visual stages; one final evidence review is required");
+  }
+  if (qaIndexes.length === 1) {
+    const qaIndex = qaIndexes[0];
+    if (qaIndex > uploadIndex) {
+      throw new PipelinePolicyError("qa_visual must run before upload_draft");
+    }
+    if (entries[qaIndex].params?.["qaProfile"] === "draft") {
+      throw new PipelinePolicyError("upload_draft cannot use qa_visual qaProfile=draft");
+    }
+    return false;
+  }
+
+  const upstream = entries.slice(0, uploadIndex);
+  if (!upstream.some((entry) => producesArtifact(entry, "videoLocalPath"))) {
+    throw new PipelinePolicyError("cannot add qa_visual: upload_draft has no rendered video upstream");
+  }
+  if (!upstream.some((entry) => producesArtifact(entry, "thumbnailKey"))) {
+    throw new PipelinePolicyError("cannot add qa_visual: upload_draft has no thumbnail upstream");
+  }
+  entries.splice(uploadIndex, 0, { block: "qa_visual", params: { qaProfile: "production" } });
+  return true;
+}
+
 /**
  * Deterministically fills policy/crew capability gaps using certified manifests.
  * It never invents params or replaces an implementation chosen by the designer;
@@ -255,6 +301,10 @@ export function completePipelineForPolicy(
   if (pipelineCapabilities(entries).has("script.generated")) {
     const moduleId = insertCapabilityProvider(entries, "script.qa_passed");
     if (moduleId) inserted.push(moduleId);
+  }
+
+  if (ensureReleaseVisualReview(entries)) {
+    inserted.push("qa_visual");
   }
 
   for (const binding of CREW_ARTIFACT_BINDINGS) {

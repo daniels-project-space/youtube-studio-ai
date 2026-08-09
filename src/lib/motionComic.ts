@@ -34,6 +34,7 @@ import { generateMusic } from "@/lib/music";
 import { ffprobeDuration } from "@/lib/ffmpeg";
 import { preflightPythonRenderer } from "@/lib/pydeps";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
+import { synthNarration } from "@/lib/tts";
 
 type Logger = (msg: string) => void;
 
@@ -50,6 +51,20 @@ export interface MotionComicBrief {
   height?: number;
   musicPrompt?: string;
   music?: boolean;
+  /** Defaults to ElevenLabs; Fish is an explicitly selected alternate voice route. */
+  ttsProvider?: "elevenlabs" | "fish";
+  /**
+   * Fish-only speaking-rate multiplier. Omit it to retain each provider's
+   * native pacing; callers must opt in deliberately for a bounded proof run.
+   */
+  ttsSpeed?: number;
+  /** Layout-only repair instructions from the post-render visual reviewer. */
+  layoutRepair?: Array<{
+    action: "reflow_bubble";
+    panelIndex?: number;
+    targetId?: string;
+    forbiddenRects?: Array<[number, number, number, number]>;
+  }>;
 }
 
 /** Curated ElevenLabs cast (probed live). Model picks voiceIds from here. */
@@ -512,10 +527,27 @@ export async function writeMotionComicArtCache(
 }
 
 export interface MotionComicTimelineBubble {
+  id: string;
   text: string;
   at: number;
   mouth?: [number, number];
   anchor?: [number, number];
+}
+
+export interface MotionComicReviewBubble {
+  id: string;
+  panelIndex: number;
+  startSec: number;
+  endSec: number;
+  /** Bubble rectangle normalized to the panel, after deterministic placement. */
+  rect: [number, number, number, number];
+  /** Face/hero-object safe zones normalized to the same panel. */
+  keepClear: Array<[number, number, number, number]>;
+}
+
+export interface MotionComicReviewTimeline {
+  version: "motion-comic-review/v1";
+  bubbles: MotionComicReviewBubble[];
 }
 
 export interface MotionComicResult {
@@ -533,6 +565,8 @@ export interface MotionComicResult {
   musicGenerations: number;
   /** Vision-letterer requests made during this invocation (zero on cache hit). */
   visionGraderCalls: number;
+  /** Durable geometry used by post-render review and layout-only repair. */
+  reviewTimeline: MotionComicReviewTimeline;
 }
 
 export const MOTION_COMIC_MIN_PANELS = 4;
@@ -1052,9 +1086,11 @@ export function buildMotionComicTimelineBubble(
   line: Pick<PlanLine, "speaker" | "text">,
   at: number,
   placement?: BubbleAnchor,
+  id = "bubble",
 ): MotionComicTimelineBubble | null {
   if (line.speaker === "narrator") return null;
   return {
+    id,
     text: stripTags(line.text),
     at,
     mouth: placement?.mouth,
@@ -1215,6 +1251,9 @@ export async function castMotionComic(args: {
   if (!hasMotionComic() || typeof args.generateImage !== "function") {
     throw new Error("motionComic: storyboard, voice, and an explicit attested image generator must all be ready before any generation");
   }
+  if (brief.ttsSpeed !== undefined && (!Number.isFinite(brief.ttsSpeed) || brief.ttsSpeed < 0.5 || brief.ttsSpeed > 2)) {
+    throw new Error("motionComic: ttsSpeed must be between 0.5 and 2.0 when explicitly set");
+  }
   const W = brief.width ?? 1920, H = brief.height ?? Math.round((brief.width ?? 1920) * 9 / 16);
   const style = projectMotionComicVisualStyle(brief.style ?? DEFAULT_STYLE);
   const nPanels = motionComicPanelCount(brief.panels);
@@ -1373,6 +1412,11 @@ export async function castMotionComic(args: {
   const TAIL_GAP = 0.6;
   let ttsCharactersGenerated = 0;
   const panelDur: number[] = [], panelBubbles: MotionComicTimelineBubble[][] = [], panelAvoid: number[][][] = [], panelHasAudio: boolean[] = [];
+  const repairAvoidForPanel = (panelIndex: number): number[][] =>
+    (brief.layoutRepair ?? [])
+      .filter((repair) => repair.action === "reflow_bubble" && repair.panelIndex === panelIndex)
+      .flatMap((repair) => repair.forbiddenRects ?? [])
+      .map((rect) => rect.map(n01));
   for (let i = 0; i < plan.panels.length; i++) {
     const lines = plan.panels[i].lines;
     let off = 0; const bubbles: MotionComicTimelineBubble[] = []; const lineFiles: string[] = [];
@@ -1381,13 +1425,23 @@ export async function castMotionComic(args: {
       if (!existsSync(lf)) {
         // elevenDialogue owns the complete bounded provider retry cycle; cache
         // writes are handled separately below so they never repurchase audio.
-        const input = [{ text: lines[k].text.trim(), voice_id: voiceOf(lines[k].speaker) }];
         let audio: Buffer;
         try {
-          audio = await elevenDialogue(
-            input,
-            (characters) => { ttsCharactersGenerated += characters; },
-          );
+          if (brief.ttsProvider === "fish") {
+            audio = Buffer.from(await synthNarration({
+              text: lines[k].text.trim(),
+              provider: "fish",
+              niche: "history",
+              ...(brief.ttsSpeed === undefined ? {} : { speed: brief.ttsSpeed }),
+              onBillableCharacters: (characters) => { ttsCharactersGenerated += characters; },
+            }));
+          } else {
+            const input = [{ text: lines[k].text.trim(), voice_id: voiceOf(lines[k].speaker) }];
+            audio = await elevenDialogue(
+              input,
+              (characters) => { ttsCharactersGenerated += characters; },
+            );
+          }
         } catch (e) {
           // elevenDialogue already exhausted its three bounded transport
           // attempts. Never start a second synthesis cycle here.
@@ -1409,6 +1463,7 @@ export async function castMotionComic(args: {
         lines[k],
         off,
         vision[i]?.anchors[lines[k].speaker],
+        `p${i}-b${k}`,
       );
       if (bubble) bubbles.push(bubble);
       lineFiles.push(`line_${i}_${k}.mp3`);
@@ -1420,7 +1475,10 @@ export async function castMotionComic(args: {
     if (lines.length && !lineFiles.length) {
       throw new Error(`motionComic: panel ${i} lost ALL ${lines.length} voice line(s) — aborting before render spend`);
     }
-    panelAvoid[i] = vision[i]?.keepClear ?? [];
+    // A post-render overlay defect must change the local layout inputs, not
+    // replay the exact same cached bubble placement.  Keep art, voice and
+    // music intact; only the forbidden geometry changes before page render.
+    panelAvoid[i] = [...(vision[i]?.keepClear ?? []), ...repairAvoidForPanel(i)];
     const dur = off + TAIL_GAP;
     panelBubbles[i] = bubbles; panelDur[i] = dur; panelHasAudio[i] = lineFiles.length > 0;
     // build padded per-panel audio = concat lines, padded with silence to `dur`
@@ -1450,10 +1508,44 @@ export async function castMotionComic(args: {
 
   // 6. TIMELINE + page render
   const tlPanels = plan.panels.map((p, i) => existsSync(rd(`panel_${i}.png`)) && panelHasAudio[i]
-    ? { img: `panel_${i}.png`, dur: panelDur[i], bubbles: panelBubbles[i], avoid: panelAvoid[i] } : null).filter(Boolean);
+    ? { panelIndex: i, img: `panel_${i}.png`, dur: panelDur[i], bubbles: panelBubbles[i], avoid: panelAvoid[i] } : null).filter(Boolean);
   await writeFile(rd("timeline.json"), JSON.stringify({ out_w: W, out_h: H, fps: 30, est: PREROLL_MS / 1000, per_page: PER_PAGE, turn: TURN_SEC, title: plan.title, panels: tlPanels }, null, 2));
   const silent = rd("silent.mp4");
   await run("python3", [join("scripts", "mc_page_render.py"), rd("timeline.json"), args.runDir, silent, join(ASSET_DIR, "hand.png")], log);
+  const reviewLayoutPath = rd("motion_comic_review_timeline.json");
+  let reviewTimeline: MotionComicReviewTimeline;
+  try {
+    const raw = JSON.parse(await readFile(reviewLayoutPath, "utf8")) as Partial<MotionComicReviewTimeline>;
+    const bubbles = Array.isArray(raw.bubbles)
+      ? raw.bubbles.flatMap((bubble): MotionComicReviewBubble[] => {
+          const rect = Array.isArray(bubble?.rect) ? bubble.rect.slice(0, 4).map(Number) : [];
+          const keepClear = Array.isArray(bubble?.keepClear)
+            ? bubble.keepClear.flatMap((box) => Array.isArray(box) && box.length >= 4
+              ? [box.slice(0, 4).map(Number) as [number, number, number, number]]
+              : [])
+            : [];
+          if (
+            typeof bubble?.id !== "string" ||
+            !Number.isFinite(Number(bubble?.panelIndex)) ||
+            !Number.isFinite(Number(bubble?.startSec)) ||
+            !Number.isFinite(Number(bubble?.endSec)) ||
+            rect.length !== 4 ||
+            !rect.every(Number.isFinite)
+          ) return [];
+          return [{
+            id: bubble.id,
+            panelIndex: Number(bubble.panelIndex),
+            startSec: Number(bubble.startSec),
+            endSec: Number(bubble.endSec),
+            rect: rect as [number, number, number, number],
+            keepClear,
+          }];
+        })
+      : [];
+    reviewTimeline = { version: "motion-comic-review/v1", bubbles };
+  } catch (error) {
+    throw new Error(`motionComic: page renderer did not emit review geometry: ${error instanceof Error ? error.message : error}`);
+  }
 
   // 7. NARRATION = concat per-panel audios, with TURN_SEC of silence at each page
   //    break so the narration stays in sync with the page-turn pauses.
@@ -1506,5 +1598,6 @@ export async function castMotionComic(args: {
     ttsCharactersGenerated,
     musicGenerations,
     visionGraderCalls,
+    reviewTimeline,
   };
 }

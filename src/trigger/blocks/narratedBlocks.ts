@@ -66,7 +66,15 @@ import {
 import { renderTitleCard, renderQuoteOverlay } from "@/lib/remotionRender";
 import { runValidationSpec } from "@/engine/creative/validate";
 import { getVisualBrief, getMusicBrief, getValidationSpec, getStructure, getCutSheet } from "@/engine/creative/brief";
-import { watchRender, nativeWatchRender } from "@/lib/renderWatch";
+import { nativeWatchRender } from "@/lib/renderWatch";
+import {
+  channelVisualReviewProfile,
+  reviewRender,
+  visualRepairSignals,
+  visualReviewFailureMessage,
+  VisualReviewFailure,
+  type VisualReviewOverlay,
+} from "@/lib/visualReview";
 import { validateRender } from "@/lib/renderValidate";
 import type { ValidationSpec, ValidationAssertion } from "@/engine/creative/types";
 
@@ -1954,7 +1962,7 @@ export const captions: Block = {
 export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
-  produces: ["qaPassed", "qaReport", "qualityEvidence"],
+  produces: ["qaPassed", "qaReport", "qualityEvidence", "reviewEvidence", "reviewResult", "reviewFingerprint"],
   paid: true,
   run: async (ctx) => {
     const productionQa = ctx.params["qaProfile"] !== "draft";
@@ -2059,58 +2067,131 @@ export const qaVisual: Block = {
     const watchDna = ctx.store["styleDNA"] as
       | { recurringSubject?: string; setting?: string; motifs?: string[] }
       | null;
-    const watchIntent = {
+    const transcriptCues = ((ctx.store["sentenceTimings"] as Array<{ text?: unknown; start?: unknown; end?: unknown }> | undefined) ?? [])
+      .flatMap((cue) => {
+        const startSec = Number(cue.start);
+        const endSec = Number(cue.end);
+        const text = typeof cue.text === "string" ? cue.text.trim() : "";
+        return Number.isFinite(startSec) && Number.isFinite(endSec) && endSec >= startSec && text
+          ? [{ text, startSec, endSec }]
+          : [];
+      });
+    const reviewOverlays: VisualReviewOverlay[] = [];
+    const rect = (value: unknown): [number, number, number, number] | undefined => {
+      if (!Array.isArray(value) || value.length < 4) return undefined;
+      const values = value.slice(0, 4).map(Number);
+      return values.every(Number.isFinite) ? values as [number, number, number, number] : undefined;
+    };
+    const comicTimeline = ctx.store["motionComicTimeline"] as {
+      bubbles?: Array<{ id?: unknown; startSec?: unknown; endSec?: unknown; rect?: unknown; keepClear?: unknown }>;
+    } | undefined;
+    for (const [index, bubble] of (comicTimeline?.bubbles ?? []).entries()) {
+      const startSec = Number(bubble.startSec);
+      const endSec = Number(bubble.endSec);
+      const bubbleRect = rect(bubble.rect);
+      if (!Number.isFinite(startSec) || !Number.isFinite(endSec) || endSec < startSec) continue;
+      reviewOverlays.push({
+        id: typeof bubble.id === "string" ? bubble.id : `comic-bubble-${index}`,
+        startSec,
+        endSec,
+        kind: "comic_bubble",
+        ...(bubbleRect ? { rect: bubbleRect } : {}),
+        keepClear: Array.isArray(bubble.keepClear)
+          ? bubble.keepClear.flatMap((box) => rect(box) ? [rect(box)!] : [])
+          : [],
+        expected: "A speech bubble that is fully inside its panel and does not cover a face or hero object",
+      });
+    }
+    const addTimedOverlays = (raw: unknown, kind: VisualReviewOverlay["kind"]) => {
+      if (!Array.isArray(raw)) return;
+      raw.forEach((item, index) => {
+        if (!item || typeof item !== "object") return;
+        const record = item as Record<string, unknown>;
+        const startSec = Number(record["startSec"] ?? record["start"] ?? record["at"]);
+        const duration = Number(record["durSec"] ?? record["durationSec"] ?? record["duration"] ?? 1.5);
+        if (!Number.isFinite(startSec) || !Number.isFinite(duration)) return;
+        reviewOverlays.push({
+          id: `${kind ?? "overlay"}-${index}`,
+          startSec,
+          endSec: Math.max(startSec + 0.2, startSec + duration),
+          kind,
+        });
+      });
+    };
+    addTimedOverlays(ctx.store["quoteOverlays"], "quote");
+    addTimedOverlays(ctx.store["insertOverlays"], "insert");
+    const repairFocus = Array.isArray(ctx.store["visualRepair"])
+      ? ctx.store["visualRepair"].flatMap((signal) => {
+          if (!signal || typeof signal !== "object") return [];
+          const record = signal as Record<string, unknown>;
+          const startSec = Number(record["startSec"]);
+          const endSec = Number(record["endSec"] ?? startSec);
+          return Number.isFinite(startSec) && Number.isFinite(endSec)
+            ? [{ startSec, endSec, reason: "repair" as const }]
+            : [];
+        })
+      : [];
+    const channelReviewProfile = channelVisualReviewProfile({
+      contentLaneKey: contentLane.key,
+      primaryRenderer: contentLane.primaryRenderer,
+      channelName: opt(ctx, "channelName"),
+      persona: opt(ctx, "persona"),
+      styleGrammar: opt(ctx, "styleGrammar"),
+      qualityDimensions: (qualityBar?.dimensions ?? []).flatMap((dimension) =>
+        typeof dimension?.id === "string" ? [dimension.id] : [],
+      ),
+    });
+    const channelWorld = [
+      watchDna?.recurringSubject
+        ? [watchDna.recurringSubject, watchDna.setting, ...(watchDna.motifs ?? []).slice(0, 4)]
+            .filter(Boolean)
+            .join("; ")
+        : "",
+      channelReviewProfile.channelWorld ?? "",
+    ].filter(Boolean).join("; ") || undefined;
+    const reviewIntent = {
       title,
       topic,
       niche: niche ?? undefined,
       expectTitleCard: ctx.store["introApplied"] === true,
+      expectOutroCard: ctx.store["outroApplied"] === true,
       expectChapters: ctx.params["chapterCards"] === true,
-      channelWorld: watchDna?.recurringSubject
-        ? [watchDna.recurringSubject, watchDna.setting, ...(watchDna.motifs ?? []).slice(0, 4)]
-            .filter(Boolean)
-            .join("; ")
-        : undefined,
+      channelWorld,
+      expectedStructure: channelReviewProfile.expectedStructure,
+      allowedVisualConditions: channelReviewProfile.allowedVisualConditions,
+      transcriptCues,
+      overlays: reviewOverlays,
+      focusWindows: repairFocus,
     };
-    // NATIVE FULL-WATCH is now OPT-IN (params.nativeWatch === true): uploading
-    // the whole render for 2 Gemini video passes cost up to ~1.3M video tokens
-    // on long-form, and its exclusive outputs (mood/pacing/musicFit) are
-    // ADVISORY logs. The frame-sampled watch below + deterministic audio
-    // meters (validateAudioCoverage, ebur128) cover everything that gates.
-    let watch: Awaited<ReturnType<typeof watchRender>> & {
-      moodMatch?: number; pacing?: number; musicFit?: number;
-    } | null = null;
+    // This is the visual release gate. It persists timestamped scene/cue/overlay
+    // evidence, reviews <=12-image chronological batches, then creates a dense
+    // 2-fps focus pass for suspect or previously repaired intervals.
+    const visualReview = await reviewRender(video, p.durationSec, reviewIntent, {
+      runId: ctx.runId,
+      keyPrefix: ctx.keyPrefix,
+      required: productionQa,
+      maxFrames: Number(ctx.params["visualReviewFrames"] ?? 48),
+      maxFocusFrames: Number(ctx.params["visualReviewFocusFrames"] ?? 24),
+      log: (message) => ctx.log(message),
+    });
+    if (productionQa && !visualReview.ran) {
+      throw new Error("qa_visual FAILED: required evidence-backed visual reviewer did not run");
+    }
+
+    // Native Gemini video review remains an opt-in, full-audio escalation path.
+    // Its mood/pacing findings are valuable evidence but never replace the
+    // structured, repairable frame/overlay review above.
+    let nativeWatch: Awaited<ReturnType<typeof nativeWatchRender>> | null = null;
     if (ctx.params["nativeWatch"] === true) {
-      watch = await nativeWatchRender(video, p.durationSec, watchIntent, { log: ctx.log });
-      if (watch?.moodMatch !== undefined || watch?.musicFit !== undefined) {
+      nativeWatch = await nativeWatchRender(video, p.durationSec, reviewIntent, { log: ctx.log });
+      if (nativeWatch?.moodMatch !== undefined || nativeWatch?.musicFit !== undefined) {
         const low = [
-          (watch.moodMatch ?? 10) < 6 ? `mood coherence ${watch.moodMatch}/10` : "",
-          (watch.pacing ?? 10) < 6 ? `pacing ${watch.pacing}/10` : "",
-          (watch.musicFit ?? 10) < 6 ? `music fit ${watch.musicFit}/10` : "",
+          (nativeWatch.moodMatch ?? 10) < 6 ? `mood coherence ${nativeWatch.moodMatch}/10` : "",
+          (nativeWatch.pacing ?? 10) < 6 ? `pacing ${nativeWatch.pacing}/10` : "",
+          (nativeWatch.musicFit ?? 10) < 6 ? `music fit ${nativeWatch.musicFit}/10` : "",
         ].filter(Boolean);
-        if (low.length) ctx.log(`qa_visual: LOW FEEL SCORES (ADVISORY): ${low.join(", ")} â€” ${watch.summary.slice(0, 120)}`);
+        if (low.length) ctx.log(`qa_visual: LOW NATIVE WATCH FEEL SCORES (advisory): ${low.join(", ")} — ${nativeWatch.summary.slice(0, 120)}`);
       }
-    }
-    // THUMBNAIL-ONLY HEAL: when the self-heal that re-ran this block only touched
-    // the thumbnail, the VIDEO is byte-identical to the pass that already
-    // watched it — re-running the 12-frame vision watch is pure waste. Skip it
-    // (the thumbnail is still judged separately below).
-    const healOwners = Object.keys(
-      (ctx.store["healHints"] as Record<string, unknown> | undefined) ?? {},
-    );
-    const thumbnailOnlyHeal = healOwners.length > 0 && healOwners.every((k) => k === "thumbnail_gen");
-    if (!watch && thumbnailOnlyHeal && !productionQa) {
-      ctx.log("qa_visual: thumbnail-only heal — video unchanged, skipping the render watch (thumbnail still judged)");
-      watch = { ran: false, verdict: "pass", defects: [], framePaths: [], summary: "skipped (thumbnail-only heal — video unchanged)" };
-    }
-    if (!watch) {
-      watch = await watchRender(video, p.durationSec, watchIntent, {
-        runId: ctx.runId,
-        required: productionQa,
-        log: ctx.log,
-      });
-    }
-    if (productionQa && !watch.ran) {
-      throw new Error("qa_visual FAILED: required holistic render grader did not run");
     }
 
     // 4) Thumbnail (vision, separate) â€” download from R2.
@@ -2175,7 +2256,25 @@ export const qaVisual: Block = {
       identity,
       music,
       intro,
-      watch: { ran: watch.ran, verdict: watch.verdict, defects: watch.defects, summary: watch.summary },
+      visualReview: {
+        ran: visualReview.ran,
+        verdict: visualReview.verdict,
+        defects: visualReview.defects,
+        evidence: visualReview.evidence,
+        summary: visualReview.summary,
+        reviewFingerprint: visualReview.reviewFingerprint,
+      },
+      nativeWatch: nativeWatch
+        ? {
+            ran: nativeWatch.ran,
+            verdict: nativeWatch.verdict,
+            defects: nativeWatch.defects,
+            summary: nativeWatch.summary,
+            moodMatch: nativeWatch.moodMatch,
+            pacing: nativeWatch.pacing,
+            musicFit: nativeWatch.musicFit,
+          }
+        : undefined,
     };
 
     // Hard-gate on egregious VISUAL defects (video frames + thumbnail). Footage
@@ -2194,26 +2293,23 @@ export const qaVisual: Block = {
       thumbStrategy === "title_card_fallback" ||
       thumbStrategy === "draft_preview_placeholder" ||
       String(ctx.store["thumbnailer"] ?? "") === "title_card";
-    for (const [name, v] of [
-      ["video", video_],
-      ["thumbnail", thumbnail],
-    ] as const) {
-      const minScore = name === "video" ? videoMinimum : thumbnailMinimum;
-      if (!v.skipped && v.score < minScore) {
-        if (name === "thumbnail" && thumbIsDeliberateCard) {
-          ctx.log(`qa_visual: thumbnail ${v.score}/10 on a deliberate title card (ADVISORY, not gating): ${v.issues.slice(0, 2).join("; ")}`);
-          continue;
-        }
-        critical.push(`${name} score ${v.score} below ${minScore}: ${v.issues.slice(0, 2).join("; ")}`);
+    if (!video_.skipped && video_.score < videoMinimum) {
+      // Three overview frames are retained as a cheap health signal, but they
+      // cannot overrule the evidence-backed chronological reviewer.
+      ctx.log(`qa_visual: LOW overview score ${video_.score}/10 (advisory; visual review is authoritative): ${video_.issues.slice(0, 2).join("; ")}`);
+    }
+    if (!thumbnail.skipped && thumbnail.score < thumbnailMinimum) {
+      if (thumbIsDeliberateCard) {
+        ctx.log(`qa_visual: thumbnail ${thumbnail.score}/10 on a deliberate title card (ADVISORY, not gating): ${thumbnail.issues.slice(0, 2).join("; ")}`);
+      } else {
+        critical.push(`thumbnail score ${thumbnail.score} below ${thumbnailMinimum}: ${thumbnail.issues.slice(0, 2).join("; ")}`);
       }
     }
     if (!footage.skipped && footage.score < 5) {
       ctx.log(`qa_visual: LOW FOOTAGE score ${footage.score} (advisory): ${footage.issues.slice(0, 2).join("; ")}`);
     }
-    // PRIMARY GATE = DETERMINISTIC validateRender (no LLM, never flaky): it decides
-    // the hard pass/fail from signals + plan facts (dead-air/black segments, intro
-    // presence). The Gemini holistic watch is ADVISORY ONLY now â€” its 503s must never
-    // block a finished, paid render (that flakiness was the whole problem).
+    // Deterministic FFmpeg/file/audio checks remain hard technical safety rails.
+    // The visual release decision itself comes from visualReview below.
     const rv = await validateRender({
       videoPath: video,
       durationSec: p.durationSec,
@@ -2225,15 +2321,10 @@ export const qaVisual: Block = {
     if (rv.verdict === "fail") {
       critical.push(`render-validate: ${rv.defects.filter((d) => d.severity === "critical").map((d) => d.issue).join(" | ")}`);
     }
-    if (watch.ran && watch.verdict === "fail") {
-      const watchCritical = watch.defects.filter((d) => d.severity === "critical");
-      const watchMajor = watch.defects.filter((d) => d.severity === "major");
-      const blocking = watchCritical.length ? watchCritical : watchMajor;
-      if (blocking.length) {
-        critical.push(
-          `watch: ${blocking.slice(0, 4).map((d) => `[@${d.tSec ?? "?"}s] ${d.issue}`).join(" | ")}`,
-        );
-      }
+    if (visualReview.verdict === "fail") {
+      critical.push(visualReviewFailureMessage(visualReview));
+    } else if (visualReview.verdict === "needs_human") {
+      critical.push(`visual review needs human confirmation: ${visualReview.summary}`);
     }
     // FEATURE-PRESENCE gate â€” fail loud when an intended feature silently didn't
     // land (these were the "no thumbnail" / "no quotes" bugs). Assert the
@@ -2326,7 +2417,10 @@ export const qaVisual: Block = {
 
       // BATCHED vision judging: ALL vision assertions in ONE call (the
       // per-assertion loop cost up to 12 separate multi-image vision calls).
-      const judgeFrames = (watch.framePaths.length ? watch.framePaths : vframes).slice(0, 24);
+      // visionLocal has a hard 12-image input cap. The review module already
+      // batches the full evidence ledger; the critic gets a bounded subset
+      // here instead of silently dropping unseen paths.
+      const judgeFrames = (visualReview.framePaths.length ? visualReview.framePaths : vframes).slice(0, 12);
       let visionVerdicts: Map<string, boolean | null> | undefined;
       const visionAssertions = spec.assertions.filter((a) => a.check === "vision");
       if (judgeFrames.length && visionAssertions.length) {
@@ -2445,15 +2539,17 @@ export const qaVisual: Block = {
           ...(finalAudioMeters ? [`loudness=${finalAudioMeters.integratedLufs ?? "unmeasured"}`] : []),
         ],
       },
-      visual: video_.skipped
-        ? undefined
-        : {
-            passed: video_.score >= videoMinimum,
-            score: video_.score,
-            minimumScore: videoMinimum,
-            evaluator: "overview visual grader",
-            evidence: [`frames=${vframes.length}`, ...video_.issues.slice(0, 3)],
-          },
+      visual: visualReview.ran
+        ? {
+            passed: visualReview.verdict === "pass",
+            evaluator: "scene/cue-aware evidence-backed visual review",
+            evidence: [
+              `frames=${visualReview.evidence.frames.length}`,
+              `manifest=${visualReview.evidence.manifestKey ?? "not-persisted"}`,
+              ...visualReview.defects.slice(0, 3).map((defect) => `@${defect.startSec.toFixed(1)} ${defect.category}`),
+            ],
+          }
+        : undefined,
       temporal: shotScore !== undefined && shotMinimum !== undefined
         ? {
             passed: shotScore >= shotMinimum,
@@ -2462,11 +2558,16 @@ export const qaVisual: Block = {
             evaluator: "qualified per-shot render QA",
             evidence: [`gradedShots=${scoredShots.length}`],
           }
-        : watch.ran
+        : visualReview.ran
           ? {
-              passed: watch.verdict === "pass",
-              evaluator: "chronological frame-sampled render watch",
-              evidence: [`sampledFrames=${watch.framePaths.length}`, watch.summary],
+              passed: visualReview.verdict === "pass",
+              evaluator: "scene/cue-aware evidence-backed visual review",
+              evidence: [
+                `reviewedFrames=${visualReview.evidence.frames.length}`,
+                `maxGapSec=${visualReview.evidence.coverage.maxGapSec}`,
+                `manifest=${visualReview.evidence.manifestKey ?? "not-persisted"}`,
+                visualReview.summary,
+              ],
             }
           : undefined,
       narrative: specOutcome
@@ -2518,7 +2619,10 @@ export const qaVisual: Block = {
       // wrong blocks and even tripping UNHEALABLE on non-gating text. The full
       // report still reaches the run record via the log line below.
       ctx.log(`qa_visual FAILED — full report (advisory context): ${JSON.stringify(report).slice(0, 4000)}`);
-      throw new Error(`qa_visual FAILED: ${critical.join(" | ")}`);
+      throw new VisualReviewFailure(
+        `qa_visual FAILED: ${critical.join(" | ")}`,
+        visualRepairSignals(visualReview, reviewIntent),
+      );
     }
     ctx.log("qa_visual PASS (per-artifact)", {
       video: video_.score,
@@ -2534,6 +2638,14 @@ export const qaVisual: Block = {
       qaPassed: true,
       qaReport: specOutcome ? { ...report, validation: specOutcome.results } : report,
       qualityEvidence,
+      reviewEvidence: visualReview.evidence,
+      reviewResult: {
+        verdict: visualReview.verdict,
+        defects: visualReview.defects,
+        summary: visualReview.summary,
+        focusWindows: visualReview.focusWindows,
+      },
+      reviewFingerprint: visualReview.reviewFingerprint,
       [COST_PATCH_KEY]: qaCost,
     };
   },

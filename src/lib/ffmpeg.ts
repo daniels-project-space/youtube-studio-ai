@@ -251,7 +251,12 @@ export async function parallaxLoopUnit(
  * Detect internal scene-change timestamps (hard cuts) in a clip — downscaled
  * decode pass, cheap. Returns [] on any failure (callers fall back).
  */
-async function detectSceneChanges(path: string, timeoutMs = 30_000): Promise<number[]> {
+/**
+ * Return the approximate timestamps of visible scene changes.  Keep this
+ * lightweight helper shared by assembly and post-render visual review so the
+ * reviewer sees edit boundaries instead of only evenly-spaced stills.
+ */
+export async function detectSceneChanges(path: string, timeoutMs = 30_000): Promise<number[]> {
   try {
     const { stderr } = await run(
       FFMPEG,

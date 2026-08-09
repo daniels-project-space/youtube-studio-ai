@@ -17,7 +17,7 @@ const legacy: PipelineEntry[] = [
   "competitor_research", "topic_select", "script_gen", "qa_script", "originality_gate",
   "compliance_check", "narration_tts", "stock_footage", "entity_imagery", "music",
   "timeline_assemble", "qa_refine", "length_check", "captions", "metadata",
-  "thumbnail_gen", "qa_visual", "upload_draft", "notify", "cleanup",
+  "thumbnail_gen", "upload_draft", "notify", "cleanup",
 ].map((block) => ({ block }));
 
 const channel = {
@@ -46,6 +46,12 @@ const conflict = await syncChannelPipelines({
 });
 assert.equal(writes.length, 1);
 assert.deepEqual((writes[0] as { expectedPipeline: PipelineEntry[] }).expectedPipeline, legacy);
+const compiledConflictPipeline = (writes[0] as { pipeline: PipelineEntry[] }).pipeline;
+assert.equal(
+  compiledConflictPipeline.findIndex((entry) => entry.block === "qa_visual"),
+  compiledConflictPipeline.findIndex((entry) => entry.block === "upload_draft") - 1,
+  "fleet sync must add the visual release gate immediately before upload",
+);
 assert.equal(conflict.conflicts, 1);
 assert.equal(conflict.applied, 0);
 assert.equal(conflict.verified, false);
@@ -130,6 +136,11 @@ assert.equal(verifiedWrite.applied, 1);
 assert.equal(verifiedWrite.conflicts, 0);
 assert.equal(verifiedWrite.verified, true);
 assert.equal(verifiedWrite.verification, "verified");
+assert.equal(
+  verifiedPipeline.findIndex((entry) => entry.block === "qa_visual"),
+  verifiedPipeline.findIndex((entry) => entry.block === "upload_draft") - 1,
+  "persisted fleet upgrade must retain the visual gate",
+);
 
 console.log("GOLDEN CHANNEL SYNC CAS TESTS PASS");
 }
