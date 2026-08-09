@@ -866,6 +866,12 @@ export default defineSchema({
     // validates those rows without deleting or rewriting production evidence.
     quietStoicItem3Rescue: v.optional(v.any()),
     quietStoicItem3RescueV2: v.optional(v.any()),
+    // The same completed historical recovery recorded its golden-run fence at
+    // the top level. These values are provenance, not live control inputs.
+    recoveryGoldenStartedAt: v.optional(v.number()),
+    recoveryGoldenStartedBy: v.optional(v.string()),
+    recoveryGoldenFinishedAt: v.optional(v.number()),
+    recoveryGoldenTerminal: v.optional(v.boolean()),
     leaseExpiresAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
