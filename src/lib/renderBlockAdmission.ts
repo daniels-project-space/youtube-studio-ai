@@ -1,14 +1,15 @@
 import {
   normalizePipelineInvocationSnapshot,
+  REMOTE_RENDER_BLOCK_IDS,
   type PipelineInvocationSnapshot,
 } from "@/lib/pipelineInvocationSnapshot";
 import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import { stableJson } from "@/lib/publishingPolicy";
 
-// Only full-resolution master renderers may be delegated to the durable
-// high-memory worker. Each invocation is still constrained by its frozen
-// per-run allowlist below.
-const REMOTE_RENDER_BLOCKS = new Set(["timeline_assemble", "documotion_short"]);
+// Cloud-only render stages may be delegated to a child task. Each invocation
+// remains constrained by its frozen per-run allowlist below; this is not a
+// general remote-code execution surface.
+const REMOTE_RENDER_BLOCKS = new Set<string>(REMOTE_RENDER_BLOCK_IDS);
 
 interface DurableRenderRunIdentity {
   _id: string;
@@ -32,9 +33,9 @@ interface DurableRenderChannelIdentity {
 }
 
 /**
- * Fail closed before a large render worker rehydrates data or executes code.
- * The child is intentionally a single-purpose timeline renderer, not a generic
- * remote entry point for every registered (including paid/publishing) block.
+ * Fail closed before a cloud render child rehydrates data or executes code.
+ * The child admits only the frozen render-stage allowlist, never arbitrary
+ * registered, paid, or publishing blocks.
  */
 export function assertRenderBlockAdmission(args: {
   blockId: string;

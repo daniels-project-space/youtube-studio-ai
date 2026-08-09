@@ -132,6 +132,12 @@ export const whiteboardScribe: Block = {
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/whiteboard-art`,
       id: (request) => request.id,
       profileId: "production",
+      lifecycle: {
+        ownerId: ctx.ownerId,
+        channelId: ctx.channelId,
+        runId: ctx.runId,
+        blockId: "whiteboard_scribe",
+      },
       onReceipt: (receipt) => { novitaImageCostUsd += receipt.costUsd; },
     });
     const res = await castWhiteboardSync({

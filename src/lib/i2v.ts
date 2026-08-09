@@ -7,7 +7,7 @@
  * Fal/Salad/Higgsfield fallbacks are rejected before paid work starts.
  */
 import { createHash } from "node:crypto";
-import { renderNovitaI2V } from "@/lib/novitaMedia";
+import { renderNovitaI2V, type NovitaRenderLifecycle } from "@/lib/novitaMedia";
 
 export interface I2VRequest {
   prompt: string;
@@ -21,6 +21,7 @@ export interface I2VRequest {
   provider?: string;
   runId?: string;
   keyPrefix?: string;
+  lifecycle?: NovitaRenderLifecycle;
   log?: (message: string) => void;
 }
 
@@ -62,6 +63,7 @@ export async function generateI2V(req: I2VRequest): Promise<I2VResult> {
     durationSec: req.durationSec,
     negativePrompt: req.negativePrompt,
     profileId: "production",
+    lifecycle: req.lifecycle,
   });
   req.log?.(`i2v: Novita LTX-2.3 ${result.jobId} accepted`);
   return result;

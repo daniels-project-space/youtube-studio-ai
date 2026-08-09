@@ -70,7 +70,7 @@ async function runStep(
   step: ForgeStep,
   scope: Scope,
   ctx: StageContext,
-  state: { tmp: string; cost: number; imageCost: number; maxCost: number; overlays: { path: string; startSec: number; durSec: number; noBlur?: boolean; text?: string }[]; n: number },
+  state: { tmp: string; blockId: string; cost: number; imageCost: number; maxCost: number; overlays: { path: string; startSec: number; durSec: number; noBlur?: boolean; text?: string }[]; n: number },
 ): Promise<unknown> {
   const guardCost = (add: number) => {
     if (state.cost + add > state.maxCost) {
@@ -104,6 +104,12 @@ async function runStep(
       id: `forge-image-${state.n++}`,
       prompt: `${interp(step.prompt, scope)} Absolutely NO text, NO words, NO letters, NO watermark.`,
       profileId: "production",
+      lifecycle: {
+        ownerId: ctx.ownerId,
+        channelId: ctx.channelId,
+        runId: ctx.runId,
+        blockId: state.blockId,
+      },
     });
     reconcileProviderCost(STILL_COST, rendered.costUsd, "forged Novita image");
     state.imageCost += rendered.costUsd;
@@ -123,6 +129,12 @@ async function runStep(
       aspectRatio: "16:9",
       runId: ctx.runId,
       keyPrefix: ctx.keyPrefix,
+      lifecycle: {
+        ownerId: ctx.ownerId,
+        channelId: ctx.channelId,
+        runId: ctx.runId,
+        blockId: state.blockId,
+      },
     });
     reconcileProviderCost(CLIP_COST, clip.costUsd, "forged Novita i2v");
     const path = await downloadTo(clip.url, join(state.tmp, `forge_${state.n++}.mp4`));
@@ -200,7 +212,7 @@ export function makeForgedBlock(spec: ForgedModuleSpec): Block {
       for (const k of spec.consumes) store[k] = ctx.store[k];
 
       const scope: Scope = { store, params, steps: [] };
-      const state = { tmp, cost: 0, imageCost: 0, maxCost: spec.maxCostUsd, overlays: [] as { path: string; startSec: number; durSec: number; noBlur?: boolean; text?: string }[], n: 0 };
+      const state = { tmp, blockId: spec.id, cost: 0, imageCost: 0, maxCost: spec.maxCostUsd, overlays: [] as { path: string; startSec: number; durSec: number; noBlur?: boolean; text?: string }[], n: 0 };
       ctx.log(`${spec.id}: forged module starting (${spec.steps.length} steps, ceiling $${spec.maxCostUsd})`);
       for (const step of spec.steps) {
         scope.steps.push(await runStep(step, scope, ctx, state));

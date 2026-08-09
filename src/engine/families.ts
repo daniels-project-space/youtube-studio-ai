@@ -133,12 +133,12 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     key: "cinematic",
     label: "Cinematic AI scenes",
     description:
-      "Fully produced multi-scene AI-rendered video with edits + score + structure (crime, heist, docu). Visual engine in progress.",
+      "Fully produced multi-scene AI-rendered video with a locked Z-Image-to-LTX shot chain, automatic identity QA, edits, score, and structure. Requires a preflighted per-video spend plan; insufficient caps fail closed.",
     visualEngine: "ai_scenes",
     archetypeKey: "crime-narrative",
-    available: false,
+    available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "fal", "mureka"],
+    requiresKeys: ["fish-audio", "mureka", "novita"],
     defaultThumbnailStyle: "banana",
   },
 };

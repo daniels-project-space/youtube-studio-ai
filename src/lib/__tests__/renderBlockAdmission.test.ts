@@ -15,11 +15,13 @@ const snapshot = {
   entries: [
     { block: "timeline_assemble", params: { quality: "production" } },
     { block: "documotion_short", params: { targetSeconds: 52, layout: "short" } },
+    { block: "novita_render_images", params: { generationProfile: "production" } },
+    { block: "novita_render_video", params: { generationProfile: "production" } },
   ],
   seedStore: { channelName: "Frozen channel" },
   budgetUsd: 8,
   keyPrefix: "owners/owner-1/channels/frozen/",
-  remoteBlocks: ["timeline_assemble", "documotion_short"],
+  remoteBlocks: ["timeline_assemble", "documotion_short", "novita_render_images", "novita_render_video"],
   defaultRetries: 2,
   compilationFingerprint: "a".repeat(64),
   compilationPolicyId: "production",
@@ -49,6 +51,8 @@ const valid = {
 
 assert.doesNotThrow(() => assertRenderBlockAdmission(valid));
 assert.doesNotThrow(() => assertRenderBlockAdmission({ ...valid, blockId: "documotion_short" }));
+assert.doesNotThrow(() => assertRenderBlockAdmission({ ...valid, blockId: "novita_render_images" }));
+assert.doesNotThrow(() => assertRenderBlockAdmission({ ...valid, blockId: "novita_render_video" }));
 const frozenInvocation = {
   blockId: "timeline_assemble",
   run,
@@ -72,6 +76,16 @@ const documotionFrozenInvocation = {
   },
 };
 assert.doesNotThrow(() => assertRenderBlockInvocation(documotionFrozenInvocation));
+for (const [index, blockId] of ["novita_render_images", "novita_render_video"].entries()) {
+  assert.doesNotThrow(() => assertRenderBlockInvocation({
+    ...frozenInvocation,
+    blockId,
+    input: {
+      ...frozenInvocation.input,
+      params: snapshot.entries[index + 2].params ?? {},
+    },
+  }));
+}
 assert.throws(
   () => assertRenderBlockAdmission({ ...valid, blockId: "upload_draft" }),
   /refuses non-render module/,

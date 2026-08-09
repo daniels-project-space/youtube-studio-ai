@@ -143,7 +143,14 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   narration: { kind: "pipeline-module", executableIds: ["narration_tts"] },
   music: { kind: "pipeline-module", executableIds: ["music"] },
   visuals: { kind: "pipeline-module", executableIds: ["stock_footage", "entity_imagery", "gen_footage", "signature_clips"] },
-  cinematic: { kind: "catalog-only", executableIds: [], note: "Cinecraft exists as a library; the family remains unavailable." },
+  // Cinematic is the editorial composition of the Novita render-farm modules.
+  // The render modules retain their single catalog owner below, so this entry
+  // must not duplicate them or claim a separate executable ABI.
+  cinematic: {
+    kind: "catalog-only",
+    executableIds: [],
+    note: "Cinematic channels execute the enforced Z-Image → QA → LTX → QA chain owned by novita-render-farm; a frozen spend ceiling and Golden proof receipt are both required before promotion.",
+  },
   documotion: {
     kind: "pipeline-module",
     executableIds: ["short_strategy", "documotion_short"],

@@ -50,6 +50,7 @@ import { assertRunPipelineAdmission } from "@/lib/runPipelineAdmission";
 import {
   assertPipelineInvocationCompilation,
   normalizePipelineInvocationSnapshot,
+  REMOTE_RENDER_BLOCK_IDS,
   snapshotParamsByBlock,
   type PipelineInvocationSnapshot,
 } from "@/lib/pipelineInvocationSnapshot";
@@ -514,6 +515,20 @@ export const runPipelineTask = task({
           `run-pipeline: restored frozen ${durableInvocation.source} invocation ` +
             `${durableRun.pipelineInvocationSha256}`,
         );
+        // Frozen snapshots are hash-bound and must not be silently rewritten.
+        // A pre-visual-review snapshot that can upload is therefore failed
+        // closed; a fresh invocation will be completed by the policy compiler
+        // and receive qa_visual immediately before upload_draft.
+        const uploadIndex = entries.findIndex((entry) => entry.block === "upload_draft");
+        const qaIndex = entries.findIndex((entry) => entry.block === "qa_visual");
+        if (
+          uploadIndex >= 0 &&
+          (qaIndex < 0 || qaIndex > uploadIndex || entries[qaIndex].params?.["qaProfile"] === "draft")
+        ) {
+          throw new Error(
+            "frozen upload invocation lacks a production qa_visual gate; requeue a fresh run so the visual-review policy can be applied",
+          );
+        }
       }
 
       assertPipelineMatchesContentLane(contentLane, entries);
@@ -586,11 +601,11 @@ export const runPipelineTask = task({
             )
           : channel.budget ?? 0,
         keyPrefix: payload.probeInvocationContext?.keyPrefix ?? channelPrefix(ownerId, channel.slug),
-        // Both modules create a full-resolution master and must run on the
-        // durable large-2x render worker. Keep the list derived from the
-        // frozen pipeline so a Short never authorizes an unrelated module.
+        // GPU/provider render stages and full-resolution masters run as
+        // isolated cloud child tasks. Keep the allowlist derived from the
+        // frozen pipeline so a run never authorizes an unrelated renderer.
         remoteBlocks: entries
-          .filter((entry) => entry.block === "timeline_assemble" || entry.block === "documotion_short")
+          .filter((entry) => (REMOTE_RENDER_BLOCK_IDS as readonly string[]).includes(entry.block))
           .map((entry) => entry.block),
         defaultRetries: 2,
         compilationFingerprint: compilation.fingerprint,
@@ -721,7 +736,7 @@ export const runPipelineTask = task({
         paid: (b as { paid?: boolean }).paid,
       }));
       while (!result.ok && heals < MAX_HEALS) {
-        const plan = planHeal(result.error ?? "", healable, (m) => log(m));
+        const plan = planHeal(result.error ?? "", healable, (m) => log(m), result.visualRepair);
         if (!plan) break;
         heals++;
         log(
@@ -749,7 +764,12 @@ export const runPipelineTask = task({
         });
         result = await runEngine(resolved, {
           ...engineOpts,
-          seedStore: { ...seedStore, healHints: plan.hints, healAttempt: heals },
+          seedStore: {
+            ...seedStore,
+            healHints: plan.hints,
+            healAttempt: heals,
+            ...(plan.visualRepair?.length ? { visualRepair: plan.visualRepair } : {}),
+          },
         });
         observedCostTotal = result.costTotal;
       }

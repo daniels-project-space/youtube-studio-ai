@@ -1,6 +1,7 @@
 import importlib.util
 import json
 import tempfile
+import threading
 import time
 import unittest
 from pathlib import Path
@@ -27,6 +28,8 @@ class WorkerContractTests(unittest.TestCase):
             "contractVersion": worker.CONTRACT_VERSION,
             "manifestId": manifest_id,
             "phase": "image",
+            "gpuSku": worker.REQUIRED_GPU_SKU,
+            "gpuCount": worker.REQUIRED_GPU_COUNT,
             "expiresAt": int(time.time() * 1000) + 60_000,
             "maxCostUsd": 1.25,
             "profile": profile,
@@ -64,12 +67,56 @@ class WorkerContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "hash mismatch"):
             worker.validate_manifest(manifest, digest)
 
+    def test_manifest_requires_exactly_one_rtx_4090(self):
+        manifest, _ = self._sealed_manifest()
+        wrong_sku = {key: value for key, value in manifest.items() if key != "manifestSha256"}
+        wrong_sku["gpuSku"] = "RTX 4090D"
+        wrong_sku_manifest, wrong_sku_digest = self._seal(wrong_sku)
+        with self.assertRaisesRegex(ValueError, "exactly one RTX 4090"):
+            worker.validate_manifest(wrong_sku_manifest, wrong_sku_digest)
+
+        wrong_count = {key: value for key, value in manifest.items() if key != "manifestSha256"}
+        wrong_count["gpuCount"] = 2
+        wrong_count_manifest, wrong_count_digest = self._seal(wrong_count)
+        with self.assertRaisesRegex(ValueError, "exactly one RTX 4090"):
+            worker.validate_manifest(wrong_count_manifest, wrong_count_digest)
+
+    def test_host_attestation_only_accepts_one_rtx_4090(self):
+        original_run = worker.subprocess.run
+        calls = []
+
+        def fake_run(argv, **kwargs):
+            calls.append((argv, kwargs))
+            return worker.subprocess.CompletedProcess(argv, 0, "NVIDIA GeForce RTX 4090 24GB\n", "")
+
+        try:
+            worker.subprocess.run = fake_run
+            worker.assert_rtx_4090_host()
+            self.assertEqual(calls[0][0], ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"])
+            self.assertTrue(calls[0][1]["check"])
+
+            worker.subprocess.run = lambda argv, **kwargs: worker.subprocess.CompletedProcess(
+                argv, 0, "NVIDIA H100 80GB HBM3\n", "",
+            )
+            with self.assertRaisesRegex(RuntimeError, "exactly one RTX 4090"):
+                worker.assert_rtx_4090_host()
+
+            worker.subprocess.run = lambda argv, **kwargs: worker.subprocess.CompletedProcess(
+                argv, 0, "RTX 4090\nRTX 4090\n", "",
+            )
+            with self.assertRaisesRegex(RuntimeError, "exactly one RTX 4090"):
+                worker.assert_rtx_4090_host()
+        finally:
+            worker.subprocess.run = original_run
+
     def test_unpinned_ltx_runtime_is_rejected(self):
         profile = worker.approved_profile("production", "video")
         unsigned = {
             "contractVersion": worker.CONTRACT_VERSION,
             "manifestId": "video-" + "b" * 32,
             "phase": "video",
+            "gpuSku": worker.REQUIRED_GPU_SKU,
+            "gpuCount": worker.REQUIRED_GPU_COUNT,
             "expiresAt": int(time.time() * 1000) + 60_000,
             "maxCostUsd": 2,
             "profile": profile,
@@ -102,6 +149,42 @@ class WorkerContractTests(unittest.TestCase):
         drifted, drifted_digest = self._seal(unsigned)
         with self.assertRaisesRegex(ValueError, "drifts"):
             worker.validate_manifest(drifted, drifted_digest)
+
+    def test_manifest_validates_optional_sealed_runtime_cap(self):
+        manifest, _ = self._sealed_manifest()
+        for invalid in (True, 59, worker.MAX_WORKER_RUNTIME_SECONDS + 1, 61.5):
+            unsigned = {key: value for key, value in manifest.items() if key != "manifestSha256"}
+            unsigned["maxRuntimeSeconds"] = invalid
+            bounded, digest = self._seal(unsigned)
+            with self.assertRaisesRegex(ValueError, "maxRuntimeSeconds"):
+                worker.validate_manifest(bounded, digest)
+
+        unsigned = {key: value for key, value in manifest.items() if key != "manifestSha256"}
+        unsigned["expiresAt"] = int(time.time() * 1000) + 600_000
+        unsigned["maxRuntimeSeconds"] = worker.MIN_WORKER_RUNTIME_SECONDS
+        bounded, digest = self._seal(unsigned)
+        accepted = worker.validate_manifest(bounded, digest)
+        before = time.monotonic()
+        deadline, deadline_at = worker.sealed_deadline(accepted)
+        self.assertLessEqual(deadline - before, worker.MIN_WORKER_RUNTIME_SECONDS + 1)
+        self.assertLessEqual(deadline_at, int(time.time() * 1000) + worker.MIN_WORKER_RUNTIME_SECONDS * 1_000 + 100)
+
+    def test_sealed_deadline_arms_stop_fence(self):
+        event = threading.Event()
+        timer = worker.arm_sealed_deadline(time.monotonic() + 0.02, event)
+        try:
+            self.assertTrue(event.wait(0.5), "sealed deadline must stop the worker cooperatively")
+        finally:
+            timer.cancel()
+
+    def test_deadline_check_interrupts_model_or_inference_work(self):
+        worker.STOP.clear()
+        try:
+            with self.assertRaisesRegex(InterruptedError, "sealed lifetime"):
+                worker._check_deadline(time.monotonic() - 0.01)
+            self.assertTrue(worker.STOP.is_set())
+        finally:
+            worker.STOP.clear()
 
     def test_ltx_cli_contract_matches_distilled_and_hq_modules(self):
         models = {

@@ -99,6 +99,12 @@ export async function generateSignatureClips(
     prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/signature-clips`,
     profileId: "production",
     maxConcurrent: Math.min(8, Math.max(1, scenes.length)),
+    lifecycle: {
+      ownerId: ctx.ownerId,
+      channelId: ctx.channelId,
+      runId: ctx.runId,
+      blockId: "signature_clips",
+    },
     scenes: scenes.map((scene, index) => ({
       id: `signature-${index + 1}`,
       imagePrompt: `${scene.still}. Absolutely NO text, NO words, NO letters.`,
@@ -214,6 +220,12 @@ export const genFootage: Block = {
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/generated-footage`,
       profileId: "production",
       maxConcurrent,
+      lifecycle: {
+        ownerId: ctx.ownerId,
+        channelId: ctx.channelId,
+        runId: ctx.runId,
+        blockId: "gen_footage",
+      },
       scenes: scenes.map((scene, index) => ({
         id: `scene-${index + 1}`,
         imagePrompt: `${scene.still}. Absolutely NO text, NO words, NO letters, NO watermark.`,

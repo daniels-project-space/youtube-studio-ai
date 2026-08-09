@@ -1,21 +1,12 @@
 /**
- * NOVITA RENDER FARM — standalone image + video render module driven by the
- * elastic Novita GPU control plane
- * on the VPS): static modulo sharding, spot-pod autoclose + reclaim-requeue,
- * R2-backed checkpoint resume (workers skip jobs recorded as uploaded in the
- * manifest-bound checkpoint; the bridge reconciles artifacts after a hard kill).
- *
- * EXECUTION MODEL — the orchestrator is a long-running Python driver that
- * launches/monitors Novita GPU pods; it does NOT run inside Vercel or a
- * Trigger.dev task (no spot-pod lifecycle, no multi-hour process there). This
- * module therefore never spawns python directly — it POSTs the render cfg to
- * an authenticated HTTPS control-plane bridge, then polls that bridge for
- * completion. Both `NOVITA_RENDER_FARM_API` and `NOVITA_RENDER_FARM_TOKEN` are required;
- * there is deliberately no public or unauthenticated fallback.
+ * NOVITA RENDER FARM — cloud-only image + video render module driven by the
+ * elastic Novita GPU control plane. Trigger owns a short-lived, one-GPU RTX
+ * 4090 lease for every immutable R2 manifest, with checkpoint recovery and a
+ * deletion-verifying reaper. Workers never receive provider credentials.
  */
 import { createHash, createHmac } from "node:crypto";
 import { NOVITA_ELASTIC_GPU_CEILING, type GenerationProfile } from "@/engine/generationProfiles";
-import { requireNovitaFleetReadiness } from "@/lib/novitaFleet";
+import { NovitaAdmissionError, requireNovitaFleetReadiness } from "@/lib/novitaFleet";
 import {
   waitForNovitaRenderPoll,
   type NovitaRenderPollWait,
@@ -106,7 +97,7 @@ export interface NovitaRuntimeAttestation {
   spatialUpscalerCheckpoint?: string;
 }
 
-/** Convert one approved studio profile into the exact phase contract accepted by the bridge. */
+/** Convert one approved studio profile into the exact direct-worker phase contract. */
 export function toNovitaPhaseProfile(
   profile: GenerationProfile,
   phase: "image" | "video",
@@ -174,6 +165,17 @@ export interface NovitaRenderCfg {
   maxConcurrent?: number;
   /** Optional stricter caller cap, always intersected with fleet admission. */
   maxCostUsd?: number;
+  /**
+   * Durable identity for the cloud-only worker lease. Direct Novita renders
+   * reject anonymous calls so every billable GPU has an owner, run, and stage
+   * that the reaper can close and attest.
+   */
+  lifecycle?: {
+    ownerId: string;
+    channelId: string;
+    runId: string;
+    blockId: string;
+  };
   /** Called after fleet/budget attestation and immediately before paid POST. */
   beforeProviderSpend?: () => void | Promise<void>;
 }
@@ -184,7 +186,7 @@ export interface NovitaRenderResult {
   phase: "image" | "video";
   /** R2 keys of stills produced (image phase). */
   stillKeys?: string[];
-  /** Local/streamed clip paths (video phase, if the bridge returns them). */
+  /** Local/streamed clip paths (video phase, normally R2-only in direct mode). */
   footageClips?: string[];
   /** R2 keys of clips produced (video phase). */
   footageKeys?: string[];
@@ -208,7 +210,7 @@ export const NOVITA_RENDER_FARM_MODULE = {
   key: "novita-render-farm",
   title: "Novita Render Farm",
   stage: "visual",
-  does: "Renders a full shot list on an elastic Novita spot fleet (up to eight GPUs) through a signed HTTPS bridge. Approved immutable profiles pin model revision, local persistent-disk cache, checkpoint, dimensions, steps, guidance, precision, FPS, and candidate count; the bridge rejects drift and cross-engine fallback.",
+  does: "Renders a full shot list on an elastic Novita RTX 4090 spot fleet (up to eight one-GPU workers) from Trigger. Immutable R2 manifests pin model revision, local persistent-disk cache, checkpoint, dimensions, steps, guidance, precision, FPS, and candidate count; every worker self-attests its physical GPU and is deletion-verified after completion.",
   produces: {
     kind: "shot_list_render",
     file: "R2-backed stills (png/jpg) + clips (mp4, H.264)",
@@ -229,22 +231,22 @@ export const NOVITA_RENDER_FARM_MODULE = {
     fps: "compatibility guard — if supplied, must exactly equal the pinned video profile",
     width: "compatibility guard — if supplied, must exactly equal the pinned profile",
     height: "compatibility guard — if supplied, must exactly equal the pinned profile",
-    nshard: "Novita pods to shard across, ≤8 (subject to the bridge-attested account quota)",
+    nshard: "Novita one-GPU RTX 4090 workers to shard across, ≤8 (subject to live provider quota)",
     jobs: "'val' | 'full' — val proves on 1 shard before a full run",
     maxConcurrent: "max pods in flight at once (default 1, hard ceiling 8)",
   },
   needs: { // environment
-    secrets: ["NOVITA_RENDER_FARM_TOKEN"],
-    tools: ["authenticated HTTPS render bridge (NOVITA_RENDER_FARM_API)"],
-    note: "The GPU control plane owns the Novita and R2 credentials; Vercel/Trigger only receives a scoped bridge token.",
+    secrets: ["NOVITA_API_KEY (Trigger only)", "R2 scoped manifest credentials"],
+    tools: ["Novita GPU API", "Convex worker leases", "Trigger durable waits", "Cloudflare R2"],
+    note: "Vercel has no provider credential. Trigger owns admission and workers receive only scoped object URLs.",
   },
   rules: [
     "Video frames are ALWAYS 8n+1 (LTX/Wan temporal requirement) — seconds are rounded to the nearest valid frame count, never truncated silently.",
     "Every shot needs a motion cue (cameraMove !== 'static' OR a non-empty motion field) — a shot with neither is a still, not a video shot.",
     "width/height MUST be a multiple of 32 (VAE tiling requirement) — never submitted unrounded.",
-    "nshard is capped at 8 and the bridge may admit fewer from its live provider-attested quota — a request above the hard ceiling fails validate(), it does not silently clamp.",
+    "nshard is capped at 8 and the direct controller may admit fewer from its live provider-attested quota — a request above the hard ceiling fails validate(), it does not silently clamp.",
     "NO cross-engine fallback: a failed shard retries the SAME engine/pod pattern, then fails loud.",
-    "R2-backed checkpoint resume — workers skip uploaded jobs recorded in the manifest-bound checkpoint; bridge-side artifact reconciliation closes the hard-kill gap before requeue.",
+    "R2-backed checkpoint resume — workers skip uploaded jobs recorded in the manifest-bound checkpoint; deterministic leases and artifact metadata close the hard-kill gap before requeue.",
   ],
 } as const;
 
@@ -288,6 +290,8 @@ const BillingReceiptSchema = z.object({
   startupUsd: z.number().finite().nonnegative(),
   storageUsd: z.number().finite().nonnegative(),
   costUsd: z.number().finite().nonnegative(),
+  /** Direct workers report a lifecycle estimate until Novita exposes an immutable bill line item. */
+  costSource: z.enum(["provider_reported", "lifecycle_estimate"]).optional(),
 });
 
 export type NovitaBillingReceipt = z.infer<typeof BillingReceiptSchema>;
@@ -345,21 +349,10 @@ function canonicalJson(value: unknown): string {
 }
 
 function renderBridgeConfig(): { baseUrl: string; token: string } {
-  const rawUrl = process.env.NOVITA_RENDER_FARM_API?.trim();
-  const token = process.env.NOVITA_RENDER_FARM_TOKEN?.trim();
-  if (!rawUrl) throw new Error("novitaRenderFarm: NOVITA_RENDER_FARM_API is required");
-  if (!token || token.length < 32) {
-    throw new Error("novitaRenderFarm: NOVITA_RENDER_FARM_TOKEN must contain at least 32 characters");
-  }
-  const url = new URL(rawUrl);
-  const loopback = ["localhost", "127.0.0.1", "[::1]"].includes(url.hostname);
-  if (url.protocol !== "https:" && !(loopback && url.protocol === "http:")) {
-    throw new Error("novitaRenderFarm: NOVITA_RENDER_FARM_API must use HTTPS (HTTP is allowed only for loopback)");
-  }
-  if (url.username || url.password || url.search || url.hash) {
-    throw new Error("novitaRenderFarm: NOVITA_RENDER_FARM_API must not contain credentials, query parameters, or a fragment");
-  }
-  return { baseUrl: url.toString().replace(/\/$/, ""), token };
+  // Deliberately fail hard if an old caller survives. The VPS/HTTPS bridge is
+  // retired; all billable work now enters only through the direct Trigger
+  // controller and durable Convex lease.
+  throw new NovitaAdmissionError("legacy Novita bridge is disabled; use the direct Trigger render controller");
 }
 
 /**
@@ -368,9 +361,24 @@ function renderBridgeConfig(): { baseUrl: string; token: string } {
  * fleet-readiness request still runs immediately before every paid launch.
  */
 export function hasNovitaRenderFarmConfig(): boolean {
+  // Compatibility name retained for callers. The former bridge is not a
+  // runtime dependency: a render is configured only when the direct Trigger
+  // worker lease can be constructed from its cloud-only environment.
   try {
-    renderBridgeConfig();
-    return true;
+    // `require` would break the ESM/Next boundary; this fast path deliberately
+    // mirrors the direct config's required names without loading provider code.
+    return [
+      "NOVITA_API_KEY",
+      "NOVITA_RENDER_WORKER_IMAGE",
+      "NOVITA_RENDER_IMAGE_AUTH_ID",
+      "NOVITA_RENDER_4090_PRODUCT_ID",
+      "NOVITA_VERIFIED_4090_GPU_QUOTA",
+      "NOVITA_MODEL_MANIFEST_KEY",
+      "NOVITA_MODEL_MANIFEST_SHA256",
+      "NOVITA_RENDER_MAX_JOB_USD",
+      "NOVITA_RENDER_MAX_FLEET_USD",
+      "INTERNAL_QUERY_SECRET",
+    ].every((name) => Boolean(process.env[name]?.trim()));
   } catch {
     return false;
   }
@@ -378,16 +386,10 @@ export function hasNovitaRenderFarmConfig(): boolean {
 
 /** True only when the scoped HTTPS bridge configuration passes all local checks. */
 export async function hasNovitaRenderBridge(): Promise<boolean> {
-  if (!process.env.NOVITA_RENDER_FARM_API || !process.env.NOVITA_RENDER_FARM_TOKEN) {
-    try {
-      await bootstrapSecrets();
-    } catch {
-      return false;
-    }
-  }
   try {
-    renderBridgeConfig();
-    return true;
+    await bootstrapSecrets();
+    const { hasDirectNovitaRenderConfig } = await import("./novitaDirectRender");
+    return hasDirectNovitaRenderConfig();
   } catch {
     return false;
   }
@@ -796,7 +798,7 @@ function normalizedCfg(userCfg: NovitaRenderCfg): NovitaRenderCfg {
   };
 }
 
-function imageJobs(cfg: NovitaRenderCfg) {
+export function imageJobs(cfg: NovitaRenderCfg) {
   return cfg.shots
     .filter((shot) => shot.prompt && shot.prompt.trim())
     .flatMap((shot) => Array.from(
@@ -816,13 +818,14 @@ function imageJobs(cfg: NovitaRenderCfg) {
     ));
 }
 
-function videoJobs(cfg: NovitaRenderCfg) {
+export function videoJobs(cfg: NovitaRenderCfg) {
   const fps = cfg.profile.fps;
   if (!fps) throw new Error("novitaRenderFarm: video profile is missing fps");
   return cfg.shots
     .filter((shot) => shot.prompt && shot.prompt.trim() && shot.stillKey)
     .map((shot) => ({
       id: shot.id,
+      prompt: shotPrompt(cfg, shot),
       stillKey: shot.stillKey,
       cameraMove: shot.cameraMove,
       shotScale: shot.shotScale,
@@ -883,29 +886,14 @@ export async function launchVideo(userCfg: NovitaRenderCfg): Promise<NovitaRende
  * then polls until all shards report done. Returns R2 stillKeys.
  */
 export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
-  const t0 = Date.now();
-  const { jobs, launch } = await startImageRender(userCfg);
-  const st = await waitForBridgeRender(launch);
-
-  const candidates = jobs.map((job) => ({
-    shotId: job.sourceShotId,
-    candidateIndex: job.candidateIndex,
-    outputId: job.id,
-    key: `${st.outputPrefix}/${job.id}.png`,
-  }));
-
-  return {
-    ok: true,
-    phase: "image",
-    stillKeys: candidates.map((candidate) => candidate.key),
-    candidates,
-    outputs: candidates.length,
-    durationSec: Math.round((Date.now() - t0) / 1000),
-    costUsd: st.billingReceipt.costUsd,
-    billingReceipt: st.billingReceipt,
-    requestCanonicalJson: launch.requestCanonicalJson,
-    raw: st,
-  };
+  const cfg = normalizedCfg(userCfg);
+  validate(cfg, "image");
+  // Dynamic import prevents the type-only direct controller dependency from
+  // creating a module cycle while retaining the old bridge helpers solely for
+  // historical receipt validation. Runtime rendering never reaches the VPS
+  // bridge.
+  const { renderDirectNovita } = await import("./novitaDirectRender");
+  return await renderDirectNovita(cfg, "image");
 }
 
 /**
@@ -915,28 +903,8 @@ export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRend
  * `timeline_assemble` (and any other downstream block) consumes it unmodified.
  */
 export async function renderVideo(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
-  const t0 = Date.now();
-  const { jobs, launch } = await startVideoRender(userCfg);
-  const st = await waitForBridgeRender(launch);
-
-  const candidates = jobs.map((job) => ({
-    shotId: job.id,
-    candidateIndex: 0,
-    outputId: job.id,
-    key: `${st.outputPrefix}/${job.id}.mp4`,
-  }));
-  const footageKeys = candidates.map((candidate) => candidate.key);
-  return {
-    ok: true,
-    phase: "video",
-    footageClips: st.footageClips ?? [],
-    footageKeys,
-    candidates,
-    outputs: footageKeys.length,
-    durationSec: Math.round((Date.now() - t0) / 1000),
-    costUsd: st.billingReceipt.costUsd,
-    billingReceipt: st.billingReceipt,
-    requestCanonicalJson: launch.requestCanonicalJson,
-    raw: st,
-  };
+  const cfg = normalizedCfg(userCfg);
+  validate(cfg, "video");
+  const { renderDirectNovita } = await import("./novitaDirectRender");
+  return await renderDirectNovita(cfg, "video");
 }

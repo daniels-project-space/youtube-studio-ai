@@ -21,6 +21,7 @@ import {
   type StageStatus,
 } from "./types";
 import type { ResolvedPipeline } from "./validate";
+import type { VisualRepairSignal } from "./healer";
 import { createHash } from "node:crypto";
 import { artifactContract, validateArtifact } from "./artifactSchemas";
 import {
@@ -86,6 +87,8 @@ export interface RunResult {
   store: Record<string, unknown>;
   failedBlock?: string;
   error?: string;
+  /** Bounded visual-review repair signals preserved across the runner boundary. */
+  visualRepair?: VisualRepairSignal[];
   /** Sum of every block's reported spend (USD). */
   costTotal: number;
   stages: { block: string; status: StageStatus }[];
@@ -118,6 +121,22 @@ function additionalObservedCostFromError(error: unknown): number | undefined {
   return typeof raw === "number" && Number.isFinite(raw) && raw >= 0
     ? raw
     : undefined;
+}
+
+function visualRepairFromError(error: unknown): VisualRepairSignal[] | undefined {
+  if (!error || typeof error !== "object") return undefined;
+  const raw = (error as { visualRepair?: unknown }).visualRepair;
+  if (!Array.isArray(raw)) return undefined;
+  const signals = raw.filter((signal): signal is VisualRepairSignal =>
+    Boolean(
+      signal &&
+      typeof signal === "object" &&
+      (signal as { schemaVersion?: unknown }).schemaVersion === 1 &&
+      typeof (signal as { owner?: unknown }).owner === "string" &&
+      typeof (signal as { action?: unknown }).action === "string",
+    ),
+  );
+  return signals.length ? signals : undefined;
 }
 
 function trackedUsageForKinds(
@@ -476,7 +495,7 @@ export async function runPipeline(
   const executeBlock = async (
     block: Block,
     blockIndex: number,
-  ): Promise<{ status: "ok" | "failed"; cost: number; error?: string }> => {
+  ): Promise<{ status: "ok" | "failed"; cost: number; error?: string; visualRepair?: VisualRepairSignal[] }> => {
     const manifest = resolved.manifests[blockIndex];
     if (!manifest) {
       throw new Error(`resolved block "${block.id}" has no executable manifest`);
@@ -796,15 +815,21 @@ export async function runPipeline(
       });
       stages.push({ block: block.id, status: "failed" });
       log(`block failed: ${block.id}`, { error: message });
-      return { status: "failed", cost: observedCost, error: message };
+      return {
+        status: "failed",
+        cost: observedCost,
+        error: message,
+        ...(visualRepairFromError(err) ? { visualRepair: visualRepairFromError(err) } : {}),
+      };
     }
   };
 
-  const fail = (block: string, error: string): RunResult => ({
+  const fail = (block: string, error: string, visualRepair?: VisualRepairSignal[]): RunResult => ({
     ok: false,
     store,
     failedBlock: block,
     error,
+    ...(visualRepair?.length ? { visualRepair } : {}),
     costTotal: spentUsd,
     stages,
   });
@@ -838,7 +863,7 @@ export async function runPipeline(
         const results = await Promise.all(group.map((b, offset) => executeBlock(b, i + offset)));
         for (let k = 0; k < group.length; k++) {
           if (results[k].status === "failed") {
-            return fail(group[k].id, results[k].error ?? "block failed");
+            return fail(group[k].id, results[k].error ?? "block failed", results[k].visualRepair);
           }
         }
         const ob = overBudget(group[group.length - 1].id);
@@ -849,7 +874,7 @@ export async function runPipeline(
     }
 
     const res = await executeBlock(block, i);
-    if (res.status === "failed") return fail(block.id, res.error ?? "block failed");
+    if (res.status === "failed") return fail(block.id, res.error ?? "block failed", res.visualRepair);
     const ob = overBudget(block.id);
     if (ob) return ob;
     i++;

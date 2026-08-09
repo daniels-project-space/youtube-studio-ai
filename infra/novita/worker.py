@@ -49,8 +49,12 @@ LTX_FILE_CONTRACTS = {
 STATUS_BATCH_SECONDS = 60
 MAX_HTTP_ATTEMPTS = 4
 MAX_MANIFEST_JOBS = 240
+MIN_WORKER_RUNTIME_SECONDS = 60
+MAX_WORKER_RUNTIME_SECONDS = 2 * 60 * 60
 SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
+REQUIRED_GPU_SKU = "RTX 4090"
+REQUIRED_GPU_COUNT = 1
 
 STOP = threading.Event()
 _IMAGE_PIPELINES: dict[str, Any] = {}
@@ -156,14 +160,53 @@ def sha256_bytes(value: bytes) -> str:
     return hashlib.sha256(value).hexdigest()
 
 
-def sha256_file(path: Path, chunk_size: int = 8 * 1024 * 1024) -> str:
+def _check_deadline(deadline_monotonic: float | None = None) -> None:
+    """Raise promptly once the sealed worker lifetime has elapsed."""
+    if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+        STOP.set()
+    if STOP.is_set():
+        raise InterruptedError("worker exceeded its sealed lifetime")
+
+
+def sha256_file(
+    path: Path,
+    chunk_size: int = 8 * 1024 * 1024,
+    deadline_monotonic: float | None = None,
+) -> str:
     digest = hashlib.sha256()
     with path.open("rb") as source:
         for chunk in iter(lambda: source.read(chunk_size), b""):
-            if STOP.is_set():
-                raise InterruptedError("model verification interrupted")
+            _check_deadline(deadline_monotonic)
             digest.update(chunk)
     return digest.hexdigest()
+
+
+def _normalized_gpu_sku(value: str) -> str:
+    return re.sub(r"[^a-z0-9]", "", re.sub(r"nvidia|geforce|graphics|gpu", "", value.lower()))
+
+
+def _is_rtx_4090_sku(value: str) -> bool:
+    """Accept only canonical naming variants of the one permitted 4090 SKU."""
+    return bool(re.fullmatch(r"rtx4090(?:24gb(?:highfrequency)?)?", _normalized_gpu_sku(value)))
+
+
+def assert_rtx_4090_host() -> None:
+    """Fail closed if Novita ever starts this worker on another GPU SKU."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=name", "--format=csv,noheader"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("unable to attest the required RTX 4090 GPU") from error
+    names = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if len(names) != REQUIRED_GPU_COUNT or any(not _is_rtx_4090_sku(name) for name in names):
+        raise RuntimeError(
+            f"worker requires exactly one {REQUIRED_GPU_SKU}; provider reported {names or 'no GPU'}"
+        )
 
 
 def _parse_https_url(url: str) -> urllib.parse.SplitResult:
@@ -184,9 +227,12 @@ def _request(
     _parse_https_url(url)
     request = urllib.request.Request(url, data=body, headers=headers or {}, method=method)
     for attempt in range(MAX_HTTP_ATTEMPTS):
+        _check_deadline()
         try:
             with urllib.request.urlopen(request, timeout=timeout) as response:
-                return response.read()
+                value = response.read()
+                _check_deadline()
+                return value
         except (urllib.error.HTTPError, urllib.error.URLError, TimeoutError) as error:
             retryable = not isinstance(error, urllib.error.HTTPError) or error.code in (408, 425, 429, 500, 502, 503, 504)
             if not retryable or attempt + 1 >= MAX_HTTP_ATTEMPTS:
@@ -237,29 +283,44 @@ def _within(root: Path, value: str) -> Path:
     return candidate
 
 
-def _copy_verified_file(source: Path, target: Path, expected_sha256: str, expected_size: int | None = None) -> None:
+def _copy_verified_file(
+    source: Path,
+    target: Path,
+    expected_sha256: str,
+    expected_size: int | None = None,
+    deadline_monotonic: float | None = None,
+) -> None:
+    _check_deadline(deadline_monotonic)
     if target.is_file() and (expected_size is None or target.stat().st_size == expected_size):
-        if sha256_file(target) == expected_sha256:
+        if sha256_file(target, deadline_monotonic=deadline_monotonic) == expected_sha256:
             return
     if not source.is_file() or (expected_size is not None and source.stat().st_size != expected_size):
         raise FileNotFoundError(f"staged model file is missing or incomplete: {source}")
-    if sha256_file(source) != expected_sha256:
+    if sha256_file(source, deadline_monotonic=deadline_monotonic) != expected_sha256:
         raise ValueError(f"staged model file hash mismatch: {source}")
     target.parent.mkdir(parents=True, exist_ok=True)
     temporary = target.with_name(f".{target.name}.{os.getpid()}.partial")
     with source.open("rb") as source_file, temporary.open("wb") as target_file:
         while chunk := source_file.read(8 * 1024 * 1024):
-            if STOP.is_set():
+            try:
+                _check_deadline(deadline_monotonic)
+            except InterruptedError:
                 temporary.unlink(missing_ok=True)
-                raise InterruptedError("model hydration interrupted")
+                raise
             target_file.write(chunk)
-    if sha256_file(temporary) != expected_sha256:
+    if sha256_file(temporary, deadline_monotonic=deadline_monotonic) != expected_sha256:
         temporary.unlink(missing_ok=True)
         raise ValueError(f"local model copy hash mismatch: {target}")
     os.replace(temporary, target)
 
 
-def hydrate_model(spec: dict[str, Any], volume_root: Path, cache_root: Path) -> Path:
+def hydrate_model(
+    spec: dict[str, Any],
+    volume_root: Path,
+    cache_root: Path,
+    deadline_monotonic: float | None = None,
+) -> Path:
+    _check_deadline(deadline_monotonic)
     model_id = str(spec.get("id") or "")
     kind = str(spec.get("kind") or "")
     expected = str(spec.get("manifestSha256") or "")
@@ -272,8 +333,15 @@ def hydrate_model(spec: dict[str, Any], volume_root: Path, cache_root: Path) -> 
     lock_path.parent.mkdir(parents=True, exist_ok=True)
     with lock_path.open("a+b") as lock:
         fcntl.flock(lock.fileno(), fcntl.LOCK_EX)
+        _check_deadline(deadline_monotonic)
         if kind == "file":
-            _copy_verified_file(source, target, expected, int(spec["sizeBytes"]) if spec.get("sizeBytes") else None)
+            _copy_verified_file(
+                source,
+                target,
+                expected,
+                int(spec["sizeBytes"]) if spec.get("sizeBytes") else None,
+                deadline_monotonic,
+            )
             return target
 
         source_manifest = source / ".model-manifest.json"
@@ -305,14 +373,20 @@ def hydrate_model(spec: dict[str, Any], volume_root: Path, cache_root: Path) -> 
                 if cached.get("manifestSha256") == expected and all(
                     (_within(target, relative)).is_file()
                     and (_within(target, relative)).stat().st_size == size
-                    and sha256_file(_within(target, relative)) == file_hash
+                    and sha256_file(_within(target, relative), deadline_monotonic=deadline_monotonic) == file_hash
                     for relative, file_hash, size in validated_files
                 ):
                     return target
             except Exception:
                 pass
         for relative, file_hash, size in validated_files:
-            _copy_verified_file(_within(source, relative), _within(target, relative), file_hash, size)
+            _copy_verified_file(
+                _within(source, relative),
+                _within(target, relative),
+                file_hash,
+                size,
+                deadline_monotonic,
+            )
         sentinel.parent.mkdir(parents=True, exist_ok=True)
         sentinel.write_text(json.dumps({"manifestSha256": expected, "verifiedAt": int(time.time())}), "utf-8")
         return target
@@ -329,6 +403,8 @@ def validate_manifest(manifest: Any, expected_sha256: str) -> dict[str, Any]:
         raise ValueError("unsupported render manifest contract")
     if manifest.get("phase") not in ("image", "video") or not isinstance(manifest.get("jobs"), list):
         raise ValueError("invalid render manifest phase or jobs")
+    if manifest.get("gpuSku") != REQUIRED_GPU_SKU or manifest.get("gpuCount") != REQUIRED_GPU_COUNT:
+        raise ValueError(f"render manifest must pin exactly one {REQUIRED_GPU_SKU}")
     manifest_id = str(manifest.get("manifestId") or "")
     if not re.fullmatch(rf"{manifest['phase']}-[a-f0-9]{{32}}", manifest_id):
         raise ValueError("render manifest identity does not match its phase")
@@ -337,8 +413,19 @@ def validate_manifest(manifest: Any, expected_sha256: str) -> dict[str, Any]:
     max_cost_usd = manifest.get("maxCostUsd")
     if isinstance(max_cost_usd, bool) or not isinstance(max_cost_usd, (int, float)) or not math.isfinite(max_cost_usd) or max_cost_usd <= 0:
         raise ValueError("render manifest requires a positive finite hard spend cap")
-    if int(manifest.get("expiresAt") or 0) <= int(time.time() * 1000):
+    expires_at = manifest.get("expiresAt")
+    if isinstance(expires_at, bool) or not isinstance(expires_at, int) or expires_at <= int(time.time() * 1000):
         raise ValueError("render manifest expired")
+    max_runtime_seconds = manifest.get("maxRuntimeSeconds")
+    if max_runtime_seconds is not None and (
+        isinstance(max_runtime_seconds, bool)
+        or not isinstance(max_runtime_seconds, int)
+        or not MIN_WORKER_RUNTIME_SECONDS <= max_runtime_seconds <= MAX_WORKER_RUNTIME_SECONDS
+    ):
+        raise ValueError(
+            f"render manifest maxRuntimeSeconds must be an integer from "
+            f"{MIN_WORKER_RUNTIME_SECONDS} to {MAX_WORKER_RUNTIME_SECONDS}",
+        )
     profile = manifest.get("profile")
     if not isinstance(profile, dict) or profile.get("allowFallback") is not False:
         raise ValueError("render profile must be immutable and fail closed")
@@ -414,12 +501,47 @@ def validate_manifest(manifest: Any, expected_sha256: str) -> dict[str, Any]:
     return manifest
 
 
+def sealed_deadline(manifest: dict[str, Any]) -> tuple[float, int]:
+    """Return the monotonic deadline and its wall-clock receipt value.
+
+    `expiresAt` is signed into every manifest and is the outer billing bound.
+    A controller may add `maxRuntimeSeconds` as a stricter per-worker bound;
+    neither value can extend the other.  This conversion happens once after
+    validation so wall-clock adjustments cannot prolong a running worker.
+    """
+    now_ms = int(time.time() * 1000)
+    expires_at = int(manifest["expiresAt"])
+    deadline_at = expires_at
+    max_runtime_seconds = manifest.get("maxRuntimeSeconds")
+    if max_runtime_seconds is not None:
+        deadline_at = min(deadline_at, now_ms + int(max_runtime_seconds) * 1_000)
+    remaining_seconds = (deadline_at - now_ms) / 1_000
+    if remaining_seconds <= 0:
+        raise ValueError("render manifest sealed lifetime has elapsed")
+    return time.monotonic() + remaining_seconds, deadline_at
+
+
+def arm_sealed_deadline(deadline_monotonic: float, stop_event: threading.Event = STOP) -> threading.Timer:
+    """Set the cooperative worker stop fence at the immutable deadline."""
+    delay = max(0.0, deadline_monotonic - time.monotonic())
+    timer = threading.Timer(delay, stop_event.set)
+    timer.daemon = True
+    timer.start()
+    return timer
+
+
 def _job_output(job: dict[str, Any], workdir: Path) -> Path:
     extension = ".png" if job["phase"] == "image" else ".mp4"
     return workdir / f"{job['id']}{extension}"
 
 
-def render_image(job: dict[str, Any], models: dict[str, Path], output: Path) -> None:
+def render_image(
+    job: dict[str, Any],
+    models: dict[str, Path],
+    output: Path,
+    deadline_monotonic: float | None = None,
+) -> None:
+    _check_deadline(deadline_monotonic)
     import torch
     from diffusers import ZImagePipeline
 
@@ -427,13 +549,14 @@ def render_image(job: dict[str, Any], models: dict[str, Path], output: Path) -> 
     pipe = _IMAGE_PIPELINES.get(model_path)
     if pipe is None:
         pipe = ZImagePipeline.from_pretrained(model_path, torch_dtype=torch.bfloat16, local_files_only=True)
+        _check_deadline(deadline_monotonic)
         pipe.to("cuda")
+        _check_deadline(deadline_monotonic)
         _IMAGE_PIPELINES[model_path] = pipe
     generator = torch.Generator(device="cuda").manual_seed(int(job["seed"]))
 
     def interrupt_after_step(_pipe: Any, _step: int, _timestep: Any, callback_kwargs: dict[str, Any]) -> dict[str, Any]:
-        if STOP.is_set():
-            raise InterruptedError("image render interrupted")
+        _check_deadline(deadline_monotonic)
         return callback_kwargs
 
     result = pipe(
@@ -465,13 +588,23 @@ def _terminate_process_group(process: subprocess.Popen[Any]) -> None:
         process.wait(timeout=10)
 
 
-def _run_bounded(command: list[str], timeout_seconds: int) -> None:
+def _run_bounded(
+    command: list[str],
+    timeout_seconds: int,
+    deadline_monotonic: float | None = None,
+) -> None:
+    _check_deadline(deadline_monotonic)
     process = subprocess.Popen(command, start_new_session=True)
     started = time.monotonic()
     while process.poll() is None:
         if STOP.wait(2):
             _terminate_process_group(process)
+            _check_deadline(deadline_monotonic)
             raise InterruptedError("render interrupted")
+        if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+            STOP.set()
+            _terminate_process_group(process)
+            raise InterruptedError("render exceeded sealed lifetime")
         if time.monotonic() - started > timeout_seconds:
             _terminate_process_group(process)
             raise TimeoutError("render exceeded bounded worker timeout")
@@ -518,7 +651,15 @@ def build_video_command(
     return command
 
 
-def render_video(job: dict[str, Any], profile: dict[str, Any], models: dict[str, Path], output: Path, workdir: Path) -> None:
+def render_video(
+    job: dict[str, Any],
+    profile: dict[str, Any],
+    models: dict[str, Path],
+    output: Path,
+    workdir: Path,
+    deadline_monotonic: float | None = None,
+) -> None:
+    _check_deadline(deadline_monotonic)
     pipeline = profile.get("pipeline")
     if pipeline not in ("distilled", "two-stage-hq"):
         raise ValueError("unsupported LTX pipeline")
@@ -531,11 +672,20 @@ def render_video(job: dict[str, Any], profile: dict[str, Any], models: dict[str,
         source = job["input"]
         image_path = workdir / f"{job['id']}-input.png"
         download(str(source["getUrl"]), image_path, source.get("sha256"))
+        _check_deadline(deadline_monotonic)
     command = build_video_command(job, profile, models, output, image_path)
-    _run_bounded(command, int(job.get("timeoutSeconds", 7_200)))
+    timeout_seconds = int(job.get("timeoutSeconds", 7_200))
+    if deadline_monotonic is not None:
+        remaining_seconds = math.floor(deadline_monotonic - time.monotonic())
+        if remaining_seconds < 1:
+            _check_deadline(deadline_monotonic)
+            raise InterruptedError("render exceeded sealed lifetime")
+        timeout_seconds = min(timeout_seconds, remaining_seconds)
+    _run_bounded(command, timeout_seconds, deadline_monotonic)
 
 
 def _put_file(url: str, output: Path, headers: dict[str, str]) -> None:
+    _check_deadline()
     parsed = _parse_https_url(url)
     request_path = urllib.parse.urlunsplit(("", "", parsed.path or "/", parsed.query, ""))
     size = output.stat().st_size
@@ -571,6 +721,7 @@ def _put_file(url: str, output: Path, headers: dict[str, str]) -> None:
 
 
 def upload_artifact(job: dict[str, Any], output: Path, manifest: dict[str, Any]) -> None:
+    _check_deadline()
     artifact = job.get("artifact")
     if not isinstance(artifact, dict) or not str(artifact.get("putUrl") or "").startswith("https://"):
         raise ValueError("job artifact delivery contract is missing")
@@ -611,10 +762,24 @@ def _load_checkpoint(target: dict[str, Any] | None, manifest_id: str, expected_j
     return completed
 
 
-def _heartbeat_loop(target: dict[str, Any] | None, state: dict[str, Any]) -> None:
-    while not STOP.wait(STATUS_BATCH_SECONDS):
+def _heartbeat_loop(
+    target: dict[str, Any] | None,
+    state: dict[str, Any],
+    deadline_monotonic: float,
+) -> None:
+    while True:
         try:
+            _check_deadline(deadline_monotonic)
+        except InterruptedError:
+            return
+        remaining_seconds = max(0.0, deadline_monotonic - time.monotonic())
+        if STOP.wait(min(STATUS_BATCH_SECONDS, remaining_seconds)):
+            return
+        try:
+            _check_deadline(deadline_monotonic)
             put_json(target, {**state, "status": "running", "heartbeatAt": int(time.time())})
+        except InterruptedError:
+            return
         except Exception as error:
             print(f"heartbeat warning: {type(error).__name__}", flush=True)
 
@@ -634,11 +799,21 @@ def main() -> int:
     if not manifest_url.startswith("https://") or not SHA256_RE.fullmatch(manifest_hash):
         raise ValueError("SHA-bound HTTPS render manifest is required")
     manifest = validate_manifest(json.loads(_request(manifest_url, timeout=30)), manifest_hash)
+    deadline_monotonic, deadline_at = sealed_deadline(manifest)
+    expiry_timer = arm_sealed_deadline(deadline_monotonic)
     expected_job_ids = {str(job["id"]) for job in manifest["jobs"]}
     checkpoint = manifest.get("checkpoint")
     completed: set[str] = set()
-    state = {"manifestId": manifest["manifestId"], "completedJobIds": []}
-    heartbeat = threading.Thread(target=_heartbeat_loop, args=(manifest.get("heartbeat"), state), daemon=True)
+    state = {
+        "manifestId": manifest["manifestId"],
+        "completedJobIds": [],
+        "deadlineAt": deadline_at,
+    }
+    heartbeat = threading.Thread(
+        target=_heartbeat_loop,
+        args=(manifest.get("heartbeat"), state, deadline_monotonic),
+        daemon=True,
+    )
     heartbeat.start()
     failure: str | None = None
     done = False
@@ -646,12 +821,25 @@ def main() -> int:
     try:
         completed = _load_checkpoint(checkpoint, manifest["manifestId"], expected_job_ids)
         state["completedJobIds"] = sorted(completed)
+        # The cloud control plane performs a catalog check before creation, but
+        # the data plane independently verifies the physical device before any
+        # model cache or inference work begins. This makes a SKU mismatch
+        # non-billable model work rather than a silent hardware fallback.
+        assert_rtx_4090_host()
+        # Completion is accepted by the cloud controller only with this
+        # data-plane attestation. It is populated *after* nvidia-smi succeeds,
+        # never merely echoed from the controller manifest.
+        state["gpuSku"] = REQUIRED_GPU_SKU
+        state["gpuCount"] = REQUIRED_GPU_COUNT
         volume_root = Path(os.environ.get("NOVITA_MODEL_VOLUME", "/network"))
         cache_root = Path(os.environ.get("NOVITA_LOCAL_MODEL_CACHE", "/workspace/model-cache"))
         model_specs = validate_model_specs(
             manifest.get("models"), manifest["phase"], manifest["profile"].get("pipeline"),
         )
-        models = {str(spec["id"]): hydrate_model(spec, volume_root, cache_root) for spec in model_specs}
+        models = {
+            str(spec["id"]): hydrate_model(spec, volume_root, cache_root, deadline_monotonic)
+            for spec in model_specs
+        }
 
         with tempfile.TemporaryDirectory(prefix="novita-render-") as temporary:
             workdir = Path(temporary)
@@ -663,9 +851,9 @@ def main() -> int:
                     continue
                 output = _job_output(job, workdir)
                 if manifest["phase"] == "image":
-                    render_image(job, models, output)
+                    render_image(job, models, output, deadline_monotonic)
                 else:
-                    render_video(job, manifest["profile"], models, output, workdir)
+                    render_video(job, manifest["profile"], models, output, workdir, deadline_monotonic)
                 upload_artifact(job, output, manifest)
                 completed.add(job["id"])
                 state["completedJobIds"] = sorted(completed)
@@ -686,6 +874,7 @@ def main() -> int:
             "error": failure,
         }, "completion")
         STOP.set()
+        expiry_timer.cancel()
         heartbeat.join(timeout=2)
     done = done and failure is None and completion_reported
     return 0 if done else 2
