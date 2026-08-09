@@ -5,6 +5,13 @@ export const NOVITA_HARD_GPU_LIMIT = 8 as const;
 export const NOVITA_DEFAULT_VERIFIED_GPU_QUOTA = 3 as const;
 export const NOVITA_STATUS_BATCH_SECONDS = 60 as const;
 export const NOVITA_IDLE_SHUTDOWN_SECONDS = 300 as const;
+/**
+ * This is deliberately not configurable. The cinematic data plane is a
+ * single-SKU fleet: any product other than an RTX 4090 is a hard admission
+ * failure, even when another GPU happens to be cheaper or available.
+ */
+export const NOVITA_REQUIRED_GPU_SKU = "RTX 4090" as const;
+export const NOVITA_REQUIRED_GPU_COUNT = 1 as const;
 
 export const OFFICIAL_RENDER_PINS = Object.freeze({
   gemma: {
@@ -26,13 +33,14 @@ export const OFFICIAL_RENDER_PINS = Object.freeze({
   },
 });
 
-type InventoryState = "high" | "normal" | "low" | "none";
+export type NovitaInventoryState = "high" | "normal" | "low" | "none";
 
 export interface NovitaProductSummary {
   id: string;
   name: string;
+  gpuCount?: number;
   availableDeploy: boolean;
-  inventoryState: InventoryState;
+  inventoryState: NovitaInventoryState;
   spotPriceUsdPerHour: number;
   regions: string[];
 }
@@ -53,6 +61,13 @@ export interface NovitaAccountSnapshot {
   prewarmedImageDigests: string[];
 }
 
+/** Minimal provider state used solely by the managed-worker reaper. */
+export interface NovitaManagedInstance {
+  id: string;
+  name: string;
+  status: string;
+}
+
 export interface NovitaFleetAttestation {
   ok: boolean;
   contractVersion: string;
@@ -61,7 +76,7 @@ export interface NovitaFleetAttestation {
     activeInstanceCount: number;
     verifiedGpuQuota: number;
     compatibleProductId: string;
-    inventoryState: InventoryState;
+    inventoryState: NovitaInventoryState;
     spotPriceUsdPerHour: number;
   };
   registry: {
@@ -119,7 +134,7 @@ export interface NovitaCapacityPlan {
   waves: string[][];
   estimatedUpperCostUsd: number;
   maxBudgetUsd: number;
-  inventoryState: InventoryState;
+  inventoryState: NovitaInventoryState;
 }
 
 export class NovitaAdmissionError extends Error {
@@ -129,21 +144,66 @@ export class NovitaAdmissionError extends Error {
   }
 }
 
-function isSha256(value: unknown): value is string {
+export function isSha256(value: unknown): value is string {
   return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
 }
 
-function isPinnedImage(value: unknown): value is string {
+export function isPinnedImage(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$/i.test(value);
 }
 
-function canonicalJson(value: unknown): string {
+export function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
   if (value && typeof value === "object") {
     const record = value as Record<string, unknown>;
     return `{${Object.keys(record).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(record[key])}`).join(",")}}`;
   }
   return JSON.stringify(value);
+}
+
+function normalizedGpuSku(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/nvidia|geforce|graphics|gpu/g, "")
+    .replace(/[^a-z0-9]/g, "");
+}
+
+/** Exact product gate shared by live admission and test fixtures. */
+export function isRtx4090Sku(value: unknown): value is string {
+  // Novita currently advertises the valid SKU as "RTX 4090 24GB". Permit only
+  // capacity/frequency suffixes on the exact 4090 model; notably reject 4090D,
+  // RTX PRO, 5090, A/H-series, and every other accelerator.
+  return typeof value === "string" && /^rtx4090(?:24gb(?:highfrequency)?)?$/.test(normalizedGpuSku(value));
+}
+
+export function requireRtx4090Product(product: Pick<NovitaProductSummary, "id" | "name" | "gpuCount">): void {
+  if (!product.id.trim() || !isRtx4090Sku(product.name)) {
+    throw new NovitaAdmissionError(`Novita product must be exactly ${NOVITA_REQUIRED_GPU_SKU}`);
+  }
+  if (product.gpuCount !== undefined && product.gpuCount !== NOVITA_REQUIRED_GPU_COUNT) {
+    throw new NovitaAdmissionError(`Novita worker product must expose exactly ${NOVITA_REQUIRED_GPU_COUNT} GPU`);
+  }
+}
+
+/**
+ * Resolves a pre-pinned product only if the live catalog still proves that it
+ * is the required RTX 4090 spot SKU. There is intentionally no fallback to a
+ * different GPU or a best-effort catalog choice.
+ */
+export function selectRtx4090SpotProduct(
+  products: readonly NovitaProductSummary[],
+  productId: string,
+): NovitaProductSummary {
+  const product = products.find((item) => item.id === productId);
+  if (!product) throw new NovitaAdmissionError("configured RTX 4090 product is absent from the live Novita catalog");
+  requireRtx4090Product(product);
+  if (!product.availableDeploy || product.inventoryState === "none") {
+    throw new NovitaAdmissionError("configured RTX 4090 spot product has no deployable live capacity");
+  }
+  if (!finitePositive(product.spotPriceUsdPerHour)) {
+    throw new NovitaAdmissionError("configured RTX 4090 spot product has no valid live spot price");
+  }
+  return product;
 }
 
 function finitePositive(value: unknown): value is number {
@@ -275,9 +335,12 @@ export async function requireNovitaFleetReadiness(args: {
   return readiness;
 }
 
-function inventoryLimit(state: InventoryState, verifiedQuota: number): number {
+function inventoryLimit(state: NovitaInventoryState, verifiedQuota: number): number {
   if (state === "high") return verifiedQuota;
-  if (state === "normal") return Math.min(verifiedQuota, NOVITA_DEFAULT_VERIFIED_GPU_QUOTA);
+  // "normal" is a live availability signal, not a silent three-GPU cap. The
+  // controller re-checks product availability before each one-GPU create, and
+  // the verified quota is still bounded by the non-negotiable hard ceiling.
+  if (state === "normal") return verifiedQuota;
   if (state === "low") return 1;
   return 0;
 }
@@ -286,10 +349,11 @@ export function planNovitaCapacityWaves(args: {
   jobIds: string[];
   requestedWorkers?: number;
   verifiedGpuQuota?: number | string;
-  inventoryState: InventoryState;
+  inventoryState: NovitaInventoryState;
   spotPriceUsdPerHour: number;
   estimatedMinutesPerJob: number;
   coldStartMinutes?: number;
+  coldStartPerJob?: boolean;
   maxBudgetUsd: number;
 }): NovitaCapacityPlan {
   if (args.jobIds.length < 1 || new Set(args.jobIds).size !== args.jobIds.length) {
@@ -314,7 +378,11 @@ export function planNovitaCapacityWaves(args: {
   if (!Number.isFinite(coldStartMinutes) || coldStartMinutes < 0 || coldStartMinutes > 60) {
     throw new NovitaAdmissionError("cold-start estimate must be between 0 and 60 minutes");
   }
-  const gpuMinutes = args.jobIds.length * args.estimatedMinutesPerJob + workerCount * coldStartMinutes;
+  // A direct worker is deliberately destroyed after its one sealed job. The
+  // admission estimate must therefore charge every cold start, not merely the
+  // simultaneous worker count in the first wave.
+  const coldStartCount = args.coldStartPerJob ? args.jobIds.length : workerCount;
+  const gpuMinutes = args.jobIds.length * args.estimatedMinutesPerJob + coldStartCount * coldStartMinutes;
   const estimatedUpperCostUsd = Math.ceil((gpuMinutes / 60) * args.spotPriceUsdPerHour * 10_000) / 10_000;
   if (estimatedUpperCostUsd > args.maxBudgetUsd) {
     throw new NovitaAdmissionError(
@@ -397,6 +465,8 @@ export function sealNovitaWorkerManifest<T extends Record<string, unknown>>(
 export interface NovitaCreateWorkerRequestArgs {
   name: string;
   productId: string;
+  /** Live catalog name, checked against the non-negotiable RTX 4090 policy. */
+  gpuSku: string;
   clusterId: string;
   storageId: string;
   image: string;
@@ -416,20 +486,25 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
   if (!isSha256(args.manifestSha256) || !/^https:\/\//.test(args.manifestUrl)) {
     throw new NovitaAdmissionError("worker manifest must use a signed HTTPS URL and SHA-256 identity");
   }
+  if (!isRtx4090Sku(args.gpuSku)) {
+    throw new NovitaAdmissionError(`render worker GPU must be exactly ${NOVITA_REQUIRED_GPU_SKU}`);
+  }
   if (![args.name, args.productId, args.clusterId, args.storageId].every((value) => value.trim().length > 0)) {
     throw new NovitaAdmissionError("worker identity, product, cluster, and persistent volume are required");
+  }
+  if (!/^yt-render-[a-z0-9-]+$/.test(args.name)) {
+    throw new NovitaAdmissionError("worker name must use the managed yt-render namespace");
   }
   return {
     name: args.name,
     productId: args.productId,
     clusterId: args.clusterId,
-    gpuNum: 1,
+    gpuNum: NOVITA_REQUIRED_GPU_COUNT,
     kind: "gpu",
     billingMode: "spot",
     imageUrl: args.image,
     imageAuthId: args.imageAuthId,
     rootfsSize: 120,
-    localStorageMountPoint: "/workspace",
     networkStorages: [{ Id: args.storageId, mountPoint: "/network" }],
     envs: [
       { key: "NOVITA_JOB_MANIFEST_URL", value: args.manifestUrl },
@@ -487,22 +562,57 @@ export class NovitaGpuApiClient {
     return text ? JSON.parse(text) : {};
   }
 
-  async accountSnapshot(): Promise<NovitaAccountSnapshot> {
-    const [productsRaw, instancesRaw, volumesRaw, registryRaw, prewarmRaw] = await Promise.all([
-      this.request("/products?productName=4090&billingMethod=spot"),
-      this.request("/gpu/instances?pageSize=100&pageNum=0"),
+  /**
+   * Provider quota is account-wide. A first-page count is not evidence that a
+   * later page lacks active GPUs, so both admission and absence proofs use a
+   * complete bounded listing and fail closed if Novita cannot provide one.
+   */
+  private async listAllInstanceRows(): Promise<Record<string, unknown>[]> {
+    const rows: Record<string, unknown>[] = [];
+    const pageSize = 100;
+    for (let pageNum = 0; pageNum < 20; pageNum += 1) {
+      const raw = await this.request(`/gpu/instances?pageSize=${pageSize}&pageNum=${pageNum}`);
+      const envelope = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+      const page = Array.isArray(envelope.instances)
+        ? envelope.instances
+        : Array.isArray(envelope.data) ? envelope.data : [];
+      rows.push(...page.flatMap((value) => value && typeof value === "object"
+        ? [value as Record<string, unknown>]
+        : []));
+      const declaredTotal = Number(envelope.total ?? envelope.totalCount ?? NaN);
+      if (page.length < pageSize || (Number.isFinite(declaredTotal) && (pageNum + 1) * pageSize >= declaredTotal)) {
+        return rows;
+      }
+    }
+    throw new Error("Novita instance pagination did not reach a complete bounded listing");
+  }
+
+  async accountSnapshot(options: { clusterId?: string } = {}): Promise<NovitaAccountSnapshot> {
+    const productQuery = new URLSearchParams({
+      productName: "4090",
+      billingMethod: "spot",
+      // The native product API defaults can otherwise surface a multi-GPU SKU.
+      gpuNum: String(NOVITA_REQUIRED_GPU_COUNT),
+      ...(options.clusterId ? { clusterId: options.clusterId } : {}),
+    });
+    const [productsRaw, instanceRows, volumesRaw, registryRaw, prewarmRaw] = await Promise.all([
+      this.request(`/products?${productQuery.toString()}`),
+      this.listAllInstanceRows(),
       this.request("/networkstorages/list?pageSize=100&pageNo=0"),
       this.request("/repository/auths"),
-      this.request("/image/prewarm?pageSize=100&pageNum=0"),
-    ]) as Array<Record<string, unknown>>;
+      this.request("/image/prewarm?pageSize=100&page=1"),
+    ]) as [
+      Record<string, unknown>,
+      Record<string, unknown>[],
+      Record<string, unknown>,
+      Record<string, unknown>,
+      Record<string, unknown>,
+    ];
     const productRows = Array.isArray(productsRaw.data) ? productsRaw.data : [];
-    const instanceRows = Array.isArray(instancesRaw.instances)
-      ? instancesRaw.instances
-      : Array.isArray(instancesRaw.data) ? instancesRaw.data : [];
     const volumeRows = Array.isArray(volumesRaw.data) ? volumesRaw.data : [];
     const registryRows = Array.isArray(registryRaw.data) ? registryRaw.data : [];
     const prewarmRows = Array.isArray(prewarmRaw.data) ? prewarmRaw.data : [];
-    const inventory = (value: unknown): InventoryState =>
+    const inventory = (value: unknown): NovitaInventoryState =>
       value === "high" || value === "normal" || value === "low" ? value : "none";
     const usd = (value: unknown) => {
       const number = Number(value);
@@ -510,14 +620,17 @@ export class NovitaGpuApiClient {
     };
     return {
       activeInstanceCount: instanceRows.filter((row) => {
-        const status = String((row as Record<string, unknown>).status ?? "");
-        return !["removed", "toRemove", "removing"].includes(status);
+        const status = String(row.status ?? "").toLowerCase();
+        return !["removed", "toremove", "removing"].includes(status);
       }).length,
       products: productRows.map((value) => {
         const row = value as Record<string, unknown>;
         return {
           id: String(row.id ?? ""),
           name: String(row.name ?? ""),
+          ...(Number.isInteger(Number(row.gpuNum)) && Number(row.gpuNum) > 0
+            ? { gpuCount: Number(row.gpuNum) }
+            : {}),
           availableDeploy: row.availableDeploy === true,
           inventoryState: inventory(row.inventoryState),
           spotPriceUsdPerHour: usd(row.spotPrice),
@@ -538,14 +651,21 @@ export class NovitaGpuApiClient {
       prewarmedImageDigests: prewarmRows.flatMap((value) => {
         const row = value as Record<string, unknown>;
         const match = /@sha256:[a-f0-9]{64}$/i.exec(String(row.imageUrl ?? ""));
-        return row.state === "success" && match ? [match[0].slice(1).toLowerCase()] : [];
+        return String(row.state ?? "").toLowerCase() === "succeeded" && match
+          ? [match[0].slice(1).toLowerCase()]
+          : [];
       }),
     };
   }
 
   async createSpotWorker(request: NovitaCreateWorkerRequest): Promise<string> {
-    if (request.billingMode !== "spot" || request.gpuNum !== 1 || !isPinnedImage(request.imageUrl)) {
-      throw new NovitaAdmissionError("only one-GPU, digest-pinned Novita spot workers may be dispatched");
+    if (
+      request.billingMode !== "spot"
+      || request.gpuNum !== NOVITA_REQUIRED_GPU_COUNT
+      || !isPinnedImage(request.imageUrl)
+      || !/^yt-render-[a-z0-9-]+$/.test(request.name)
+    ) {
+      throw new NovitaAdmissionError("only managed one-GPU RTX 4090, digest-pinned Novita spot workers may be dispatched");
     }
     const response = await this.request("/gpu/instance/create", {
       method: "POST",
@@ -556,24 +676,88 @@ export class NovitaGpuApiClient {
     return id;
   }
 
+  /**
+   * Return only the minimal state required for a deletion receipt. Provider
+   * responses have changed shape over time, so unwrap the documented `data`
+   * envelope without ever exposing arbitrary provider payloads to callers.
+   */
+  async getInstance(instanceId: string): Promise<NovitaManagedInstance> {
+    if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,255}$/.test(instanceId)) {
+      throw new Error("invalid Novita instance identity");
+    }
+    const raw = await this.request(`/gpu/instance?instanceId=${encodeURIComponent(instanceId)}`);
+    const envelope = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+    const row = envelope.data && typeof envelope.data === "object"
+      ? envelope.data as Record<string, unknown>
+      : envelope;
+    return {
+      id: String(row.id ?? row.instanceId ?? instanceId),
+      name: String(row.name ?? row.instanceName ?? ""),
+      status: String(row.status ?? "unknown"),
+    };
+  }
+
+  /**
+   * Reapers must never discover or mutate arbitrary customer instances. This
+   * method deliberately returns only workers in our immutable namespace.
+   */
+  async listManagedInstances(): Promise<NovitaManagedInstance[]> {
+    const managed = new Map<string, NovitaManagedInstance>();
+    for (const row of await this.listAllInstanceRows()) {
+      const id = String(row.id ?? row.instanceId ?? "");
+      const name = String(row.name ?? row.instanceName ?? "");
+      if (!id || !/^yt-render-4090-[a-z0-9-]+$/.test(name)) continue;
+      managed.set(id, { id, name, status: String(row.status ?? "unknown") });
+    }
+    return [...managed.values()];
+  }
+
   async deleteAndVerify(
     instanceId: string,
     wait: (milliseconds: number) => Promise<void> = (milliseconds) =>
       new Promise((resolve) => setTimeout(resolve, milliseconds)),
   ): Promise<void> {
     if (!/^[A-Za-z0-9][A-Za-z0-9._-]{2,255}$/.test(instanceId)) throw new Error("invalid Novita instance identity");
-    await this.request("/gpu/instance/stop", { method: "POST", body: JSON.stringify({ instanceId }) });
-    await this.request("/gpu/instance/delete", { method: "POST", body: JSON.stringify({ instanceId }) });
+    // `toRemove` / `removing` merely mean that billing teardown is in flight;
+    // only a terminal `removed` state (or provider 404) is a deletion receipt.
+    const isRemoved = (status: string) => status.toLowerCase() === "removed";
+    let current: NovitaManagedInstance | undefined;
+    try {
+      current = await this.getInstance(instanceId);
+      if (isRemoved(current.status)) return;
+    } catch (error) {
+      if (error instanceof Error && /HTTP 404$/.test(error.message)) return;
+      throw error;
+    }
+
+    // A reclaim or a concurrent reaper can make stop fail. Deletion is still
+    // compulsory; never leave a billable worker alive because stop raced.
+    const currentStatus = current?.status.toLowerCase() ?? "unknown";
+    if (!["stopping", "exited", "stopped", "toremove", "removing"].includes(currentStatus)) {
+      try {
+        await this.request("/gpu/instance/stop", { method: "POST", body: JSON.stringify({ instanceId }) });
+      } catch {
+        // The deletion/poll below is the authoritative lifecycle outcome.
+      }
+    }
+
+    let deleteFailure: unknown;
+    try {
+      await this.request("/gpu/instance/delete", { method: "POST", body: JSON.stringify({ instanceId }) });
+    } catch (error) {
+      deleteFailure = error;
+    }
     for (const delay of boundedNovitaPollSchedule(12, 5_000, 20_000)) {
       await wait(delay);
       try {
-        const current = await this.request(`/gpu/instance?instanceId=${encodeURIComponent(instanceId)}`) as Record<string, unknown>;
-        if (current.status === "removed") return;
+        const observed = await this.getInstance(instanceId);
+        if (isRemoved(observed.status)) return;
       } catch (error) {
         if (error instanceof Error && /HTTP 404$/.test(error.message)) return;
         throw error;
       }
     }
+    if (deleteFailure instanceof Error) throw deleteFailure;
     throw new Error(`Novita instance ${instanceId} deletion could not be verified`);
   }
 }

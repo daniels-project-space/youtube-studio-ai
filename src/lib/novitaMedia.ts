@@ -7,6 +7,7 @@ import {
   type NovitaRenderResult,
   type NovitaBillingReceipt,
   type NovitaRuntimeAttestation,
+  type NovitaRenderCfg,
   type Shot,
 } from "@/lib/novitaRenderFarm";
 import { recordImageUsage } from "@/lib/imageUsage";
@@ -14,6 +15,12 @@ import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 
 export type NovitaProfileId = GenerationProfile["id"];
+/**
+ * Durable identity for a billable direct-Novita worker. Pipeline callers pass
+ * their real StageContext identity; callers without an active run intentionally
+ * remain unable to acquire a GPU.
+ */
+export type NovitaRenderLifecycle = NonNullable<NovitaRenderCfg["lifecycle"]>;
 
 export interface NovitaGeneratedScene {
   id: string;
@@ -63,6 +70,7 @@ export interface NovitaImageByteRequest {
   seed?: number;
   profileId?: NovitaProfileId;
   maxCostUsd?: number;
+  lifecycle?: NovitaRenderLifecycle;
   /** Runs after all local work but immediately before the paid bridge launch. */
   beforeProviderSpend?: () => void | Promise<void>;
   /** Runs after a validated paid provider result and before presign/download. */
@@ -86,6 +94,7 @@ type RenderNovitaImageFn = (args: {
   seed?: number;
   profileId?: NovitaProfileId;
   maxCostUsd?: number;
+  lifecycle?: NovitaRenderLifecycle;
   beforeProviderSpend?: () => void | Promise<void>;
   onProviderReceipt?: NovitaImageProviderReceiptObserver;
 }) => Promise<NovitaRenderedImage>;
@@ -138,6 +147,7 @@ export async function renderNovitaGeneratedScenes(args: {
   scenes: readonly NovitaGeneratedScene[];
   profileId?: NovitaProfileId;
   maxConcurrent?: number;
+  lifecycle?: NovitaRenderLifecycle;
 }): Promise<{
   scenes: NovitaRenderedScene[];
   costUsd: number;
@@ -157,6 +167,7 @@ export async function renderNovitaGeneratedScenes(args: {
     nshard: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
     maxConcurrent: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
     jobs: "full",
+    lifecycle: args.lifecycle,
   });
   const ids = imageShots.map((shot) => shot.id);
   const stillByShot = exactCandidateByShot(imageResult, ids);
@@ -173,6 +184,7 @@ export async function renderNovitaGeneratedScenes(args: {
       nshard: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
       maxConcurrent: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
       jobs: "full",
+      lifecycle: args.lifecycle,
     });
   } catch (error) {
     if (error && typeof error === "object") {
@@ -213,6 +225,7 @@ export async function renderNovitaImage(args: {
   seed?: number;
   profileId?: NovitaProfileId;
   maxCostUsd?: number;
+  lifecycle?: NovitaRenderLifecycle;
   beforeProviderSpend?: () => void | Promise<void>;
   onProviderReceipt?: NovitaImageProviderReceiptObserver;
 }): Promise<NovitaRenderedImage> {
@@ -234,6 +247,7 @@ export async function renderNovitaImage(args: {
     maxConcurrent: 1,
     jobs: "full",
     maxCostUsd: args.maxCostUsd,
+    lifecycle: args.lifecycle,
     beforeProviderSpend: args.beforeProviderSpend,
   });
   const key = exactCandidateByShot(result, [id]).get(id)!;
@@ -389,6 +403,7 @@ export async function renderAttestedNovitaImageBytes(
     seed: args.seed,
     profileId,
     maxCostUsd: args.maxCostUsd,
+    lifecycle: args.lifecycle,
     beforeProviderSpend: args.beforeProviderSpend,
     onProviderReceipt: args.onProviderReceipt,
   });
@@ -430,6 +445,7 @@ export function createAttestedNovitaImageGenerator<T extends NovitaPromptImageRe
   id: (request: T) => string;
   profileId?: NovitaProfileId;
   maxCostUsd?: number;
+  lifecycle?: NovitaRenderLifecycle;
   beforeProviderSpend?: () => void | Promise<void>;
   onProviderReceipt?: NovitaImageProviderReceiptObserver;
   onReceipt?: NovitaImageReceiptObserver;
@@ -443,6 +459,7 @@ export function createAttestedNovitaImageGenerator<T extends NovitaPromptImageRe
       seed: request.seed,
       profileId: args.profileId ?? "production",
       maxCostUsd: args.maxCostUsd,
+      lifecycle: args.lifecycle,
       beforeProviderSpend: args.beforeProviderSpend,
       onProviderReceipt: args.onProviderReceipt,
     });
@@ -480,6 +497,7 @@ export async function renderNovitaI2V(args: {
   negativePrompt?: string;
   seed?: number;
   profileId?: NovitaProfileId;
+  lifecycle?: NovitaRenderLifecycle;
 }): Promise<{ url: string; key: string; jobId: string; model: string; costUsd: number; billingReceipt: NovitaBillingReceipt }> {
   if (Boolean(args.imageKey) === Boolean(args.imageUrl)) {
     throw new Error("novita i2v requires exactly one of imageKey or imageUrl");
@@ -503,6 +521,7 @@ export async function renderNovitaI2V(args: {
     nshard: 1,
     maxConcurrent: 1,
     jobs: "full",
+    lifecycle: args.lifecycle,
   });
   const key = exactCandidateByShot(result, [id]).get(id)!;
   return {

@@ -509,6 +509,12 @@ export const keyframes: Block = {
           id: `keyframe-${stills}`,
           prompt: baseFluxPrompt + fix,
           profileId: "production",
+          lifecycle: {
+            ownerId: ctx.ownerId,
+            channelId: ctx.channelId,
+            runId: ctx.runId,
+            blockId: "keyframes",
+          },
         });
         imageCostUsd += rendered.costUsd;
         const local = await downloadTo(rendered.url, join(tmp, `f1_${stills}.png`));
@@ -651,6 +657,12 @@ export const loopClips: Block = {
       imageKey: f1Key,
       durationSec: dur,
       profileId: "production",
+      lifecycle: {
+        ownerId: ctx.ownerId,
+        channelId: ctx.channelId,
+        runId: ctx.runId,
+        blockId: "loop_clips",
+      },
     });
     if (!clip.url) throw new Error("loop_clips: Novita i2v produced no URL");
 

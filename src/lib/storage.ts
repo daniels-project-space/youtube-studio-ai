@@ -68,6 +68,8 @@ export interface PresignOptions {
   /** URL lifetime in seconds (default 1 hour). */
   expiresIn?: number;
   contentType?: string;
+  /** Metadata signed into a scoped upload URL (never bucket credentials). */
+  metadata?: Record<string, string>;
 }
 
 /** Presigned PUT URL for direct browser -> R2 uploads. */
@@ -79,6 +81,7 @@ export async function presignUpload(
     Bucket: getBucket(opts.bucket),
     Key: key,
     ContentType: opts.contentType,
+    Metadata: opts.metadata,
   });
   return getSignedUrl(getR2Client(), command, {
     expiresIn: opts.expiresIn ?? 3600,

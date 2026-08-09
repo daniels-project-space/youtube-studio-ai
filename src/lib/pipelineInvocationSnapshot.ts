@@ -3,6 +3,15 @@ import { stableJson } from "@/lib/publishingPolicy";
 
 export const PIPELINE_INVOCATION_SNAPSHOT_VERSION = 1 as const;
 export const MAX_PIPELINE_INVOCATION_SNAPSHOT_BYTES = 750_000;
+/** The only child-task render stages that may appear in a frozen invocation. */
+export const REMOTE_RENDER_BLOCK_IDS = [
+  "timeline_assemble",
+  "documotion_short",
+  "novita_render_images",
+  "novita_render_video",
+] as const;
+
+const REMOTE_RENDER_BLOCK_ID_SET = new Set<string>(REMOTE_RENDER_BLOCK_IDS);
 
 export interface PipelineInvocationSnapshot {
   version: typeof PIPELINE_INVOCATION_SNAPSHOT_VERSION;
@@ -107,9 +116,7 @@ export function normalizePipelineInvocationSnapshot(
   }
   if (
     !Array.isArray(snapshot.remoteBlocks) ||
-    snapshot.remoteBlocks.some(
-      (block) => block !== "timeline_assemble" && block !== "documotion_short",
-    ) ||
+    snapshot.remoteBlocks.some((block) => !REMOTE_RENDER_BLOCK_ID_SET.has(block)) ||
     new Set(snapshot.remoteBlocks).size !== snapshot.remoteBlocks.length
   ) {
     throw new Error("pipeline invocation remote block routing is invalid");

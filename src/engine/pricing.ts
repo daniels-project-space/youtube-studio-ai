@@ -26,6 +26,14 @@ function rate(envName: string, fallback: number): number {
 
 const falRates = falImageRates();
 
+/**
+ * A cinematic QA stage may make at most this many targeted regeneration
+ * attempts for one rejected still or LTX shot. This is intentionally a source
+ * constant rather than a channel parameter: a bad channel configuration must
+ * never turn quality recovery into an unbounded paid loop.
+ */
+export const NOVITA_CINEMATIC_QA_REPAIR_CAP = 2;
+
 export const PRICE = {
   /** Per keyframe still (Higgsfield/Flux). keyframes renders 2. */
   fluxStillUsd: rate("PRICE_FLUX_STILL_USD", 0.01),
@@ -51,13 +59,19 @@ export const PRICE = {
   falSchnellUsdPerMegapixel: falRates.schnellUsdPerMegapixel,
   falKontextUsdPerImage: falRates.kontextUsdPerImage,
   falFluxProV11UsdPerMegapixel: falRates.fluxProV11UsdPerMegapixel,
-  /** Legacy planning estimate only; runtime accounting uses the signed bridge receipt. */
+  /** Planning estimate only; direct workers persist a teardown-verified lifecycle receipt. */
   novitaImageUsd: rate("NOVITA_IMAGE_COST_USD", 0.02),
-  /** Legacy planning estimate only; runtime accounting uses the signed bridge receipt. */
+  /** Planning estimate only; direct workers persist a teardown-verified lifecycle receipt. */
   novitaVideoUsd: rate("NOVITA_VIDEO_COST_USD", 0.08),
-  /** Hard admission ceilings. These reserve budget but never claim actual spend. */
-  novitaImageMaxUsd: rate("NOVITA_IMAGE_MAX_COST_USD", 0.5),
-  novitaVideoMaxUsd: rate("NOVITA_VIDEO_MAX_COST_USD", 5),
+  /**
+   * One direct render worker is exactly one RTX 4090 and is hard-killed within
+   * two hours. $0.35 is the rounded upper bound at the verified $0.17/hr spot
+   * rate, not a quality downgrade or a cross-GPU fallback allowance. Runtime
+   * admission still intersects these with the live provider price and the
+   * configured per-job/fleet ceiling.
+   */
+  novitaImageMaxUsd: rate("NOVITA_IMAGE_MAX_COST_USD", 0.35),
+  novitaVideoMaxUsd: rate("NOVITA_VIDEO_MAX_COST_USD", 0.35),
   /** One managed vision-grader request. */
   visionGraderUsd: rate("VISION_GRADER_COST_USD", 0.003),
   /** Conservative ceiling for the bounded 1,000-token Flash thumbnail concept
@@ -97,8 +111,19 @@ export function bananaUnitRate(
 }
 
 export function qaVisualCost(params: Readonly<Record<string, unknown>>): number {
+  const clampFrames = (value: unknown, fallback: number, max: number): number => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(8, Math.min(max, Math.floor(parsed)));
+  };
+  // The evidence review performs a broad pass plus a focused re-watch. Reserve
+  // a full managed-vision allowance per 12-image batch; runtime accounting
+  // still records the provider's observed usage separately.
+  const broadFrames = clampFrames(params["visualReviewFrames"], 48, 72);
+  const focusFrames = clampFrames(params["visualReviewFocusFrames"], 24, 36);
+  const evidenceBatches = Math.ceil(broadFrames / 12) + Math.ceil(focusFrames / 12);
   return (
-    PRICE.qaBaseUsd +
+    PRICE.qaBaseUsd * evidenceBatches +
     (params["nativeWatch"] === true ? PRICE.nativeVideoQaUsd : 0) +
     (params["audioQa"] === true ? PRICE.audioQaUsd : 0)
   );

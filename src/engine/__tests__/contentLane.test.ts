@@ -28,6 +28,11 @@ const whiteboardPipeline: PipelineEntry[] = [
 
 assert.doesNotThrow(() => assertPipelineMatchesContentLane(whiteboard, whiteboardPipeline));
 assert.throws(
+  () => assertPipelineMatchesContentLane(whiteboard, whiteboardPipeline.filter((entry) => entry.block !== "qa_visual")),
+  /requires qa_visual/,
+  "every defined channel lane must retain the visual release gate",
+);
+assert.throws(
   () => assertPipelineMatchesContentLane(whiteboard, [...whiteboardPipeline, { block: "stock_footage" }]),
   /forbids stock_footage/,
   "a whiteboard channel cannot silently add stock footage",

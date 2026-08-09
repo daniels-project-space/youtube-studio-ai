@@ -70,7 +70,7 @@ const NO_TEXT_GUARD =
 export const motionComicBlock: Block = {
   id: "motion_comic",
   consumes: ["topic"],
-  produces: ["videoKey", "videoLocalPath", "videoDurationSec", "narrationText"],
+  produces: ["videoKey", "videoLocalPath", "videoDurationSec", "narrationText", "motionComicTimeline"],
   paid: true,
   run: async (ctx) => {
     if (!hasMotionComic() || !hasNovitaRenderFarmConfig()) {
@@ -94,6 +94,33 @@ export const motionComicBlock: Block = {
     const styleBase = (styleParam || visualBrief?.promptStyle || "").replace(/[.\s]+$/, "");
     const style = styleBase ? `${styleBase}. ${NO_TEXT_GUARD}` : undefined;
     const width = Math.max(1280, Math.min(2560, Number(ctx.params["width"] ?? 1920)));
+    const layoutRepair = Array.isArray(ctx.store["visualRepair"])
+      ? ctx.store["visualRepair"].flatMap((signal) => {
+          if (!signal || typeof signal !== "object") return [];
+          const repair = signal as {
+            owner?: unknown;
+            action?: unknown;
+            targetId?: unknown;
+            forbiddenRects?: unknown;
+          };
+          if (repair.owner !== "motion_comic" || repair.action !== "reflow_bubble") return [];
+          const forbiddenRects = Array.isArray(repair.forbiddenRects)
+            ? repair.forbiddenRects.flatMap((rect) => Array.isArray(rect) && rect.length >= 4
+              ? [rect.slice(0, 4).map(Number) as [number, number, number, number]]
+              : [])
+            : [];
+          const panelMatch = typeof repair.targetId === "string" ? repair.targetId.match(/^p(\d+)-b\d+$/) : null;
+          return [{
+            action: "reflow_bubble" as const,
+            ...(panelMatch ? { panelIndex: Number(panelMatch[1]) } : {}),
+            ...(typeof repair.targetId === "string" ? { targetId: repair.targetId } : {}),
+            forbiddenRects,
+          }];
+        })
+      : [];
+    if (layoutRepair.length) {
+      ctx.log(`motion_comic: layout-only repair for ${layoutRepair.length} reviewed bubble(s); reusing cached art, voices, and music`);
+    }
 
     // DETERMINISTIC dir (scoped): motionComic's plan/sheet/panel/line caches
     // are path-keyed — a random mkdtemp would make every Trigger retry
@@ -107,10 +134,24 @@ export const motionComicBlock: Block = {
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/motion-comic-art`,
       id: (request) => request.id,
       profileId: "production",
+      lifecycle: {
+        ownerId: ctx.ownerId,
+        channelId: ctx.channelId,
+        runId: ctx.runId,
+        blockId: "motion_comic",
+      },
       onReceipt: (receipt) => { novitaImageCostUsd += receipt.costUsd; },
     });
     const res = await castMotionComic({
-      brief: { topic, facts, panels, style, width, targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined },
+      brief: {
+        topic,
+        facts,
+        panels,
+        style,
+        width,
+        targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined,
+        ...(layoutRepair.length ? { layoutRepair } : {}),
+      },
       runDir,
       outPath,
       generateImage,
@@ -146,6 +187,7 @@ export const motionComicBlock: Block = {
       videoLocalPath: res.outPath,
       videoDurationSec,
       narrationText: res.narrationText,
+      motionComicTimeline: res.reviewTimeline,
       [COST_PATCH_KEY]: comicCost,
     };
   },

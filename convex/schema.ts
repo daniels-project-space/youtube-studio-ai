@@ -579,6 +579,81 @@ export default defineSchema({
       "publishContinuationUpdatedAt",
     ]),
 
+  // One disposable RTX 4090 worker for one immutable Novita manifest. This is
+  // deliberately separate from `runs`: a run can have image/video phases,
+  // retries, and parallel waves, while every provider instance must receive an
+  // independently verifiable deletion receipt before billing is considered
+  // closed.
+  novitaWorkerLeases: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.id("runs"),
+    blockId: v.string(),
+    phase: v.union(v.literal("image"), v.literal("video")),
+    manifestId: v.string(),
+    manifestSha256: v.string(),
+    workerName: v.string(),
+    productId: v.string(),
+    gpuSku: v.literal("RTX 4090"),
+    gpuCount: v.literal(1),
+    clusterId: v.string(),
+    storageId: v.string(),
+    imageDigest: v.string(),
+    maximumCostUsd: v.number(),
+    status: v.union(
+      v.literal("requested"),
+      v.literal("create_claimed"),
+      v.literal("create_dispatched"),
+      v.literal("provisioning"),
+      v.literal("booting"),
+      v.literal("rendering"),
+      v.literal("draining"),
+      v.literal("delete_requested"),
+      v.literal("deleted_verified"),
+      v.literal("failed"),
+      v.literal("deletion_unverified"),
+    ),
+    instanceId: v.optional(v.string()),
+    createAttemptToken: v.optional(v.string()),
+    createClaimedAt: v.optional(v.number()),
+    // Persisted before the external create POST. If an HTTP response is lost,
+    // this makes the resulting provider resource ambiguous until a real
+    // provider instance id can be reconciled and deleted.
+    createDispatchedAt: v.optional(v.number()),
+    // Only one Trigger execution may observe/delete a bound worker. The token
+    // is an execution fence, distinct from the physical-create claim above.
+    executionAttemptToken: v.optional(v.string()),
+    executionClaimedAt: v.optional(v.number()),
+    // Conservative billing anchor for resumed lifecycle estimates.
+    instanceCreatedAt: v.optional(v.number()),
+    requestedAt: v.number(),
+    bootDeadlineAt: v.number(),
+    absoluteDeadlineAt: v.number(),
+    lastHeartbeatAt: v.number(),
+    lastWorkAt: v.number(),
+    completionKey: v.optional(v.string()),
+    deletedVerifiedAt: v.optional(v.number()),
+    deletionRequestedAt: v.optional(v.number()),
+    billingReceipt: v.optional(v.any()),
+    lastError: v.optional(v.string()),
+  })
+    .index("by_worker_name", ["workerName"])
+    .index("by_manifest", ["manifestId"])
+    .index("by_instance", ["instanceId"])
+    .index("by_status_last_work", ["status", "lastWorkAt"])
+    .index("by_run", ["runId"]),
+
+  // A managed provider worker can exceptionally outlive its lease write (for
+  // example if Convex is unavailable immediately after Novita accepts create).
+  // The reaper writes one immutable audit receipt after verified removal; this
+  // makes orphan cleanup observable rather than merely a transient log line.
+  novitaOrphanTeardownAudits: defineTable({
+    workerName: v.string(),
+    instanceId: v.string(),
+    deletedVerifiedAt: v.number(),
+    receipt: v.any(),
+  }).index("by_worker_instance", ["workerName", "instanceId"]),
+
   // Per-block progress for a run — drives the live UI.
   runStages: defineTable({
     ownerId: v.string(),

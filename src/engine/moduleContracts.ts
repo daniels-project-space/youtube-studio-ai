@@ -1,5 +1,6 @@
 import { generationProfile } from "./generationProfiles";
 import {
+  NOVITA_CINEMATIC_QA_REPAIR_CAP,
   PRICE,
   bananaUnitRate,
   qaVisualCost,
@@ -321,8 +322,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "narrationDurationSec", "script", "sentenceTimings", "styleDNA", "introApplied", "healHints", "palette",
       "tags", "strategy", "thumbnailer", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec",
-      "overlaysDropped", "qualityBar", "description", "musicKey", "niche", "persona", "styleGrammar", "topic",
+      "overlaysDropped", "qualityBar", "description", "musicKey", "channelName", "niche", "persona", "styleGrammar", "topic",
       "narrativeBeats", "shotList", "storyCoverage", "assetQaReport", "shotQaReport", "healAttempt",
+      "motionComicTimeline", "visualRepair",
       "shortStrategyBrief", "beatManifest", "shortRetentionManifest", "shortSceneQa", "documotionVerdict", "documotionRender",
     ],
     providerProfiles: [managed, local],
@@ -368,8 +370,12 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     },
   }),
   novita_render_images: contract(["visuals.keyframes_generated", "render.profile_pinned", "render.spot_only"], {
+    optionalConsumes: ["visualBrief"],
     providerProfiles: [{ id: "novita-zimage-production", provider: "novita", quality: "production", allowFallback: false }],
-    maxCostUsd: 20,
+    // 50 hero shots × two candidates × the single-4090 two-hour hard bound.
+    // This is a reservation ceiling, not an instruction to spend it; runtime
+    // still requires a stricter configured direct-fleet admission.
+    maxCostUsd: 35,
     // The first shot and every named-entity shot are high risk and therefore
     // receive at least two candidates. Respect higher future profile fanout.
     maxCostUsdFor: (params, context) =>
@@ -378,23 +384,56 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       PRICE.novitaImageMaxUsd,
   }),
   qa_assets: contract(["qa.assets_required", "visuals.keyframes_selected"], {
+    // Channel identity is frozen in the invocation seed store. It is optional
+    // only for legacy channels; when present, the grader reads it as a strict
+    // policy input rather than an ambient store escape hatch.
+    optionalConsumes: [
+      "qualityBar",
+      "styleDNA",
+      "styleGrammar",
+      "palette",
+      "persona",
+      "niche",
+      "validationSpec",
+    ],
     providerProfiles: [managed],
-    maxCostUsd: 5,
-    maxCostUsdFor: (params, context) => shotCount(params, context) * PRICE.visionGraderUsd,
+    // Initial grading plus at most two one-candidate, quality-directed repairs
+    // per shot. The recovery path is intentionally budget-reserved instead of
+    // being an unaccounted side effect of QA.
+    maxCostUsd: 36,
+    maxCostUsdFor: (params, context) => shotCount(params, context) * (
+      PRICE.visionGraderUsd +
+      NOVITA_CINEMATIC_QA_REPAIR_CAP * (PRICE.novitaImageMaxUsd + PRICE.visionGraderUsd)
+    ),
     qualityRequired: true,
   }),
   novita_render_video: contract(["visuals.shots_rendered", "render.profile_pinned", "render.spot_only"], {
+    optionalConsumes: ["visualBrief"],
     providerProfiles: [{ id: "novita-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
-    maxCostUsd: 80,
+    maxCostUsd: 35,
     maxCostUsdFor: (params, context) =>
       shotCount(params, context) *
       generationProfile(generationProfileId(params, context)).video.candidates *
       PRICE.novitaVideoMaxUsd,
   }),
   qa_shots: contract(["visuals.generated", "visuals.story_aligned", "qa.shots_required"], {
+    optionalConsumes: [
+      "qualityBar",
+      "styleDNA",
+      "styleGrammar",
+      "palette",
+      "persona",
+      "niche",
+      "validationSpec",
+    ],
     providerProfiles: [managed, local],
-    maxCostUsd: 10,
-    maxCostUsdFor: (params, context) => shotCount(params, context) * PRICE.visionGraderUsd,
+    // See qa_assets: one selected still is held fixed while LTX may receive a
+    // small, deterministic number of targeted motion repairs.
+    maxCostUsd: 36,
+    maxCostUsdFor: (params, context) => shotCount(params, context) * (
+      PRICE.visionGraderUsd +
+      NOVITA_CINEMATIC_QA_REPAIR_CAP * (PRICE.novitaVideoMaxUsd + PRICE.visionGraderUsd)
+    ),
     qualityRequired: true,
   }),
   whiteboard_scribe: contract(
@@ -412,7 +451,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   motion_comic: contract(
     ["script.generated", "script.qa_passed", "narration.timed", "visuals.generated", "visuals.story_aligned", "master.assembled"],
     {
-      optionalConsumes: ["researchNotes", "factSheet", "visualBrief"],
+      optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "visualRepair", "healHints", "healAttempt"],
       providerProfiles: [managed, local],
       maxCostUsd: 40,
       // Cold-run bound includes character sheets/panels, bounded ElevenLabs

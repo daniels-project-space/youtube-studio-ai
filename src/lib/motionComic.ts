@@ -50,6 +50,13 @@ export interface MotionComicBrief {
   height?: number;
   musicPrompt?: string;
   music?: boolean;
+  /** Layout-only repair instructions from the post-render visual reviewer. */
+  layoutRepair?: Array<{
+    action: "reflow_bubble";
+    panelIndex?: number;
+    targetId?: string;
+    forbiddenRects?: Array<[number, number, number, number]>;
+  }>;
 }
 
 /** Curated ElevenLabs cast (probed live). Model picks voiceIds from here. */
@@ -512,10 +519,27 @@ export async function writeMotionComicArtCache(
 }
 
 export interface MotionComicTimelineBubble {
+  id: string;
   text: string;
   at: number;
   mouth?: [number, number];
   anchor?: [number, number];
+}
+
+export interface MotionComicReviewBubble {
+  id: string;
+  panelIndex: number;
+  startSec: number;
+  endSec: number;
+  /** Bubble rectangle normalized to the panel, after deterministic placement. */
+  rect: [number, number, number, number];
+  /** Face/hero-object safe zones normalized to the same panel. */
+  keepClear: Array<[number, number, number, number]>;
+}
+
+export interface MotionComicReviewTimeline {
+  version: "motion-comic-review/v1";
+  bubbles: MotionComicReviewBubble[];
 }
 
 export interface MotionComicResult {
@@ -533,6 +557,8 @@ export interface MotionComicResult {
   musicGenerations: number;
   /** Vision-letterer requests made during this invocation (zero on cache hit). */
   visionGraderCalls: number;
+  /** Durable geometry used by post-render review and layout-only repair. */
+  reviewTimeline: MotionComicReviewTimeline;
 }
 
 export const MOTION_COMIC_MIN_PANELS = 4;
@@ -1052,9 +1078,11 @@ export function buildMotionComicTimelineBubble(
   line: Pick<PlanLine, "speaker" | "text">,
   at: number,
   placement?: BubbleAnchor,
+  id = "bubble",
 ): MotionComicTimelineBubble | null {
   if (line.speaker === "narrator") return null;
   return {
+    id,
     text: stripTags(line.text),
     at,
     mouth: placement?.mouth,
@@ -1373,6 +1401,11 @@ export async function castMotionComic(args: {
   const TAIL_GAP = 0.6;
   let ttsCharactersGenerated = 0;
   const panelDur: number[] = [], panelBubbles: MotionComicTimelineBubble[][] = [], panelAvoid: number[][][] = [], panelHasAudio: boolean[] = [];
+  const repairAvoidForPanel = (panelIndex: number): number[][] =>
+    (brief.layoutRepair ?? [])
+      .filter((repair) => repair.action === "reflow_bubble" && repair.panelIndex === panelIndex)
+      .flatMap((repair) => repair.forbiddenRects ?? [])
+      .map((rect) => rect.map(n01));
   for (let i = 0; i < plan.panels.length; i++) {
     const lines = plan.panels[i].lines;
     let off = 0; const bubbles: MotionComicTimelineBubble[] = []; const lineFiles: string[] = [];
@@ -1409,6 +1442,7 @@ export async function castMotionComic(args: {
         lines[k],
         off,
         vision[i]?.anchors[lines[k].speaker],
+        `p${i}-b${k}`,
       );
       if (bubble) bubbles.push(bubble);
       lineFiles.push(`line_${i}_${k}.mp3`);
@@ -1420,7 +1454,10 @@ export async function castMotionComic(args: {
     if (lines.length && !lineFiles.length) {
       throw new Error(`motionComic: panel ${i} lost ALL ${lines.length} voice line(s) — aborting before render spend`);
     }
-    panelAvoid[i] = vision[i]?.keepClear ?? [];
+    // A post-render overlay defect must change the local layout inputs, not
+    // replay the exact same cached bubble placement.  Keep art, voice and
+    // music intact; only the forbidden geometry changes before page render.
+    panelAvoid[i] = [...(vision[i]?.keepClear ?? []), ...repairAvoidForPanel(i)];
     const dur = off + TAIL_GAP;
     panelBubbles[i] = bubbles; panelDur[i] = dur; panelHasAudio[i] = lineFiles.length > 0;
     // build padded per-panel audio = concat lines, padded with silence to `dur`
@@ -1450,10 +1487,44 @@ export async function castMotionComic(args: {
 
   // 6. TIMELINE + page render
   const tlPanels = plan.panels.map((p, i) => existsSync(rd(`panel_${i}.png`)) && panelHasAudio[i]
-    ? { img: `panel_${i}.png`, dur: panelDur[i], bubbles: panelBubbles[i], avoid: panelAvoid[i] } : null).filter(Boolean);
+    ? { panelIndex: i, img: `panel_${i}.png`, dur: panelDur[i], bubbles: panelBubbles[i], avoid: panelAvoid[i] } : null).filter(Boolean);
   await writeFile(rd("timeline.json"), JSON.stringify({ out_w: W, out_h: H, fps: 30, est: PREROLL_MS / 1000, per_page: PER_PAGE, turn: TURN_SEC, title: plan.title, panels: tlPanels }, null, 2));
   const silent = rd("silent.mp4");
   await run("python3", [join("scripts", "mc_page_render.py"), rd("timeline.json"), args.runDir, silent, join(ASSET_DIR, "hand.png")], log);
+  const reviewLayoutPath = rd("motion_comic_review_timeline.json");
+  let reviewTimeline: MotionComicReviewTimeline;
+  try {
+    const raw = JSON.parse(await readFile(reviewLayoutPath, "utf8")) as Partial<MotionComicReviewTimeline>;
+    const bubbles = Array.isArray(raw.bubbles)
+      ? raw.bubbles.flatMap((bubble): MotionComicReviewBubble[] => {
+          const rect = Array.isArray(bubble?.rect) ? bubble.rect.slice(0, 4).map(Number) : [];
+          const keepClear = Array.isArray(bubble?.keepClear)
+            ? bubble.keepClear.flatMap((box) => Array.isArray(box) && box.length >= 4
+              ? [box.slice(0, 4).map(Number) as [number, number, number, number]]
+              : [])
+            : [];
+          if (
+            typeof bubble?.id !== "string" ||
+            !Number.isFinite(Number(bubble?.panelIndex)) ||
+            !Number.isFinite(Number(bubble?.startSec)) ||
+            !Number.isFinite(Number(bubble?.endSec)) ||
+            rect.length !== 4 ||
+            !rect.every(Number.isFinite)
+          ) return [];
+          return [{
+            id: bubble.id,
+            panelIndex: Number(bubble.panelIndex),
+            startSec: Number(bubble.startSec),
+            endSec: Number(bubble.endSec),
+            rect: rect as [number, number, number, number],
+            keepClear,
+          }];
+        })
+      : [];
+    reviewTimeline = { version: "motion-comic-review/v1", bubbles };
+  } catch (error) {
+    throw new Error(`motionComic: page renderer did not emit review geometry: ${error instanceof Error ? error.message : error}`);
+  }
 
   // 7. NARRATION = concat per-panel audios, with TURN_SEC of silence at each page
   //    break so the narration stays in sync with the page-turn pauses.
@@ -1506,5 +1577,6 @@ export async function castMotionComic(args: {
     ttsCharactersGenerated,
     musicGenerations,
     visionGraderCalls,
+    reviewTimeline,
   };
 }

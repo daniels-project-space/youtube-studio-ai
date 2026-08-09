@@ -32,6 +32,44 @@ export interface HealPlan {
   reason: string;
   /** Per-block guidance derived from the defect text (seeded as store.healHints). */
   hints: Record<string, string[]>;
+  /** Structured, reviewer-grounded repair instructions for the next heal pass. */
+  visualRepair?: VisualRepairSignal[];
+}
+
+/**
+ * A visual reviewer may only request one of these bounded owner actions.  This
+ * deliberately lives beside the healer rather than in a model prompt: free-form
+ * model prose must never choose an arbitrary block to execute.
+ */
+export type VisualRepairOwner =
+  | "motion_comic"
+  | "timeline_assemble"
+  | "stock_footage"
+  | "intro_card";
+
+export type VisualRepairAction =
+  | "reflow_bubble"
+  | "recompose_overlay"
+  | "resample_footage"
+  | "rerender_card"
+  | "rebuild_timeline";
+
+export interface VisualRepairSignal {
+  schemaVersion: 1;
+  owner: VisualRepairOwner;
+  action: VisualRepairAction;
+  category: string;
+  severity: "critical" | "major" | "minor";
+  startSec: number;
+  endSec: number;
+  observed: string;
+  expected: string;
+  confidence: number;
+  evidenceKey?: string;
+  frameIds?: string[];
+  targetId?: string;
+  /** Normalized panel rectangles that must not be reused by a comic reflow. */
+  forbiddenRects?: Array<[number, number, number, number]>;
 }
 
 interface HealRule {
@@ -162,6 +200,7 @@ export function planHeal(
   failureMsg: string,
   blocks: HealableBlock[],
   log: (msg: string) => void = () => {},
+  visualRepair: readonly VisualRepairSignal[] = [],
 ): HealPlan | null {
   if (!failureMsg) return null;
 
@@ -176,6 +215,25 @@ export function planHeal(
     owners.add(rule.owner);
     labels.push(rule.label);
     (hints[rule.owner] ??= []).push(m[0].slice(0, 200));
+  }
+
+  // Structured reviewer signals are intentionally handled separately from the
+  // legacy regex catalog.  In particular, do not add a broad /overlay/ rule:
+  // a model's vague aesthetic complaint must never start a paid rerender loop.
+  const acceptedVisualRepair: VisualRepairSignal[] = [];
+  for (const signal of visualRepair) {
+    if (signal.severity === "minor") continue;
+    if (!blocks.some((block) => block.id === signal.owner)) {
+      log(`healer: visual repair owner ${signal.owner} is not in this pipeline; leaving it for human review`);
+      continue;
+    }
+    owners.add(signal.owner);
+    labels.push(`visual ${signal.category} → ${signal.action}`);
+    const at = Number.isFinite(signal.startSec) ? ` @${signal.startSec.toFixed(1)}s` : "";
+    (hints[signal.owner] ??= []).push(
+      `[visual-review${at}] ${signal.category}: ${signal.observed}`.slice(0, 300),
+    );
+    acceptedVisualRepair.push(signal);
   }
 
   if (owners.size === 0) {
@@ -206,5 +264,6 @@ export function planHeal(
     rerunBlocks,
     reason: labels.join("; "),
     hints,
+    ...(acceptedVisualRepair.length ? { visualRepair: acceptedVisualRepair } : {}),
   };
 }

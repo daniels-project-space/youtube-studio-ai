@@ -50,7 +50,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     key: "narrated_documentary",
     family: "narrated_stock",
     primaryRenderer: "stock_footage",
-    requiredBlocks: ["stock_footage", "timeline_assemble"],
+    requiredBlocks: ["stock_footage", "timeline_assemble", "qa_visual"],
     forbiddenRendererBlocks: [
       "gen_footage",
       "novita_render_images",
@@ -64,7 +64,14 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     key: "cinematic_ai",
     family: "cinematic",
     primaryRenderer: "novita_render_video",
-    requiredBlocks: ["novita_render_images", "novita_render_video", "timeline_assemble"],
+    requiredBlocks: [
+      "novita_render_images",
+      "qa_assets",
+      "novita_render_video",
+      "qa_shots",
+      "timeline_assemble",
+      "qa_visual",
+    ],
     forbiddenRendererBlocks: [
       "stock_footage",
       "gen_footage",
@@ -77,7 +84,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     key: "music_loop",
     family: "music_loop",
     primaryRenderer: "loop_clips",
-    requiredBlocks: ["loop_clips", "assemble"],
+    requiredBlocks: ["loop_clips", "assemble", "qa_visual"],
     forbiddenRendererBlocks: [
       "stock_footage",
       "gen_footage",
@@ -91,7 +98,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     key: "ambient_guided",
     family: "sleep",
     primaryRenderer: "stock_footage",
-    requiredBlocks: ["stock_footage", "timeline_assemble"],
+    requiredBlocks: ["stock_footage", "timeline_assemble", "qa_visual"],
     forbiddenRendererBlocks: [
       "gen_footage",
       "novita_render_images",
@@ -105,7 +112,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     key: "short_form",
     family: "shorts",
     primaryRenderer: "stock_footage",
-    requiredBlocks: ["stock_footage", "timeline_assemble"],
+    requiredBlocks: ["stock_footage", "timeline_assemble", "qa_visual"],
     forbiddenRendererBlocks: [
       "gen_footage",
       "novita_render_images",
@@ -137,7 +144,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     key: "whiteboard_explainer",
     family: "whiteboard",
     primaryRenderer: "whiteboard_scribe",
-    requiredBlocks: ["whiteboard_scribe"],
+    requiredBlocks: ["whiteboard_scribe", "qa_visual"],
     forbiddenRendererBlocks: [
       "stock_footage",
       "gen_footage",
@@ -152,7 +159,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     key: "motion_comic",
     family: "comic",
     primaryRenderer: "motion_comic",
-    requiredBlocks: ["motion_comic"],
+    requiredBlocks: ["motion_comic", "qa_visual"],
     forbiddenRendererBlocks: [
       "stock_footage",
       "gen_footage",

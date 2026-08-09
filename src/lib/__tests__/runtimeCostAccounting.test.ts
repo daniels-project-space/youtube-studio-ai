@@ -105,10 +105,13 @@ function costPatches(): void {
   assert.equal(thumbnail, images + judges + 0.01);
 
   assert.equal(qaVisual.paid, true);
-  assert.equal(qaVisualCost({}), PRICE.qaBaseUsd);
+  // A release review has a 48-frame broad pass and 24-frame focused re-review:
+  // six managed-vision batches at the 12-image batch size.
+  const qaEvidenceBatches = 6;
+  assert.equal(qaVisualCost({}), PRICE.qaBaseUsd * qaEvidenceBatches);
   assert.equal(
     qaVisualCost({ nativeWatch: true, audioQa: true }),
-    PRICE.qaBaseUsd + PRICE.nativeVideoQaUsd + PRICE.audioQaUsd,
+    PRICE.qaBaseUsd * qaEvidenceBatches + PRICE.nativeVideoQaUsd + PRICE.audioQaUsd,
   );
 }
 
