@@ -861,6 +861,11 @@ export default defineSchema({
     recoveryExpectedActualCostUsd: v.optional(v.number()),
     recoveryExpectedProviderRoute: v.optional(v.string()),
     recoveryExpectedTaskVersion: v.optional(v.string()),
+    // Historical Quiet Stoic recovery attempts recorded immutable diagnostics
+    // directly on the batch. Keep both fields optional so deploying the schema
+    // validates those rows without deleting or rewriting production evidence.
+    quietStoicItem3Rescue: v.optional(v.any()),
+    quietStoicItem3RescueV2: v.optional(v.any()),
     leaseExpiresAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
