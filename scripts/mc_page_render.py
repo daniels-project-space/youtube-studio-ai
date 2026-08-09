@@ -216,7 +216,7 @@ def build_page(subset):
             mapped = remap_cover_box(raw, crop_geometry, w, h)
             if mapped:
                 avoid.append(mapped)
-        for b in p.get("bubbles", []):
+        for bi, b in enumerate(p.get("bubbles", [])):
             has = bool(b.get("mouth"))
             ml = remap_cover_point(b["mouth"], crop_geometry, w, h) if has else None
             al = remap_cover_point(b["anchor"], crop_geometry, w, h) if b.get("anchor") else None
@@ -230,12 +230,31 @@ def build_page(subset):
             body = make_bubble(b["text"], w, h, font_size=fs, max_text_width=int(w * 0.42))
             if body.width != bw or body.height != bh:
                 raise RuntimeError("motionComic bubble measurement/render metrics diverged")
+            # Preserve the already-known safe regions in panel-normalized
+            # coordinates.  The post-render reviewer uses this receipt to
+            # prove whether a visible bubble covers a face/hero object.
+            keep_clear = [
+                [round(a[0] / max(w, 1), 5), round(a[1] / max(h, 1), 5), round(a[2] / max(w, 1), 5), round(a[3] / max(h, 1), 5)]
+                for a in avoid
+            ]
             det[max(0, ly):ly + body.height, max(0, lx):lx + body.width] = 1.0   # mark taken so co-panel bubbles avoid it
             avoid.append((lx, ly, body.width, body.height))
             bx, by = PX + x + lx, PY + y + ly
             local_mouth = ml if has else (0.5 * w, 0.18 * h)
             mouth = (PX + x + local_mouth[0], PY + y + local_mouth[1])
-            bubraw.append((li, body, bx, by, mouth, has, float(b.get("at", 0.0))))
+            bubraw.append({
+                "local_index": li,
+                "id": str(b.get("id", f"p{p.get('panelIndex', li)}-b{bi}")),
+                "panelIndex": int(p.get("panelIndex", li)),
+                "body": body,
+                "bx": bx,
+                "by": by,
+                "mouth": mouth,
+                "has": has,
+                "at": float(b.get("at", 0.0)),
+                "rect": [round(lx / max(w, 1), 5), round(ly / max(h, 1), 5), round(body.width / max(w, 1), 5), round(body.height / max(h, 1), 5)],
+                "keepClear": keep_clear,
+            })
     return {"panels": subset, "PW": PW, "PH": PH, "BOXES": BOXES, "WDW": WDW, "WDH": WDH,
             "PX": PX, "PY": PY, "world": world, "panes": panes, "bubraw": bubraw, "bubbles": []}
 
@@ -298,18 +317,29 @@ def page_turn(Pold, Pnew, q):
 
 
 # ---------------- schedule (segments) ----------------
-segments = []; t = 0.0
+segments = []; review_bubbles = []; t = 0.0
 segments.append(("est", 0, None, 0.0, EST)); t = EST
 for pi, pg in enumerate(PAGES):
     for li, panel in enumerate(pg["panels"]):
         st = t; segments.append(("panel", pi, li, st, st + panel["dur"])); t += panel["dur"]
-        for (bli, body, bx, by, mouth, has, at_rel) in pg["bubraw"]:
-            if bli == li:
-                pg["bubbles"].append((st + at_rel + 0.12, body, bx, by, mouth, has))
+        for bubble in pg["bubraw"]:
+            if bubble["local_index"] == li:
+                start_bubble = st + bubble["at"] + 0.12
+                pg["bubbles"].append((start_bubble, bubble["body"], bubble["bx"], bubble["by"], bubble["mouth"], bubble["has"]))
+                review_bubbles.append({
+                    "id": bubble["id"],
+                    "panelIndex": bubble["panelIndex"],
+                    "startSec": round(start_bubble, 3),
+                    "endSec": round(st + panel["dur"], 3),
+                    "rect": bubble["rect"],
+                    "keepClear": bubble["keepClear"],
+                })
     if pi < len(PAGES) - 1:
         segments.append(("turn", pi, None, t, t + PT)); t += PT
 segments.append(("tail", len(PAGES) - 1, None, t, t + TAIL)); t += TAIL
 total = t; nframes = int(total * FPS)
+with open(os.path.join(RUN_DIR, "motion_comic_review_timeline.json"), "w") as review_out:
+    json.dump({"version": "motion-comic-review/v1", "bubbles": review_bubbles}, review_out)
 
 est_from = frame_top(PAGES[0]); est_from = [est_from[0], est_from[1], est_from[2] * 1.12]
 BR = lambda c, tt: (c[0] + 2.4 * math.sin(tt * 0.42 + 1.3), c[1] + 1.9 * math.sin(tt * 0.34 + 0.4), c[2])
@@ -358,4 +388,4 @@ for f in range(nframes):
     ff.stdin.write(frame.tobytes())
 
 ff.stdin.close(); ff.wait()
-print(json.dumps({"out": OUT, "frames": nframes, "dur": round(total, 1), "pages": len(PAGES)}))
+print(json.dumps({"out": OUT, "frames": nframes, "dur": round(total, 1), "pages": len(PAGES), "reviewTimeline": len(review_bubbles)}))

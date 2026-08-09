@@ -303,8 +303,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "narrationDurationSec", "script", "sentenceTimings", "styleDNA", "introApplied", "healHints", "palette",
       "tags", "strategy", "thumbnailer", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec",
-      "overlaysDropped", "qualityBar", "description", "musicKey", "niche", "persona", "styleGrammar", "topic",
+      "overlaysDropped", "qualityBar", "description", "musicKey", "channelName", "niche", "persona", "styleGrammar", "topic",
       "narrativeBeats", "shotList", "storyCoverage", "assetQaReport", "shotQaReport", "healAttempt",
+      "motionComicTimeline", "visualRepair",
     ],
     providerProfiles: [managed, local],
     maxCostUsd: 5,
@@ -393,7 +394,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   motion_comic: contract(
     ["script.generated", "script.qa_passed", "narration.timed", "visuals.generated", "visuals.story_aligned", "master.assembled"],
     {
-      optionalConsumes: ["researchNotes", "factSheet", "visualBrief"],
+      optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "visualRepair", "healHints", "healAttempt"],
       providerProfiles: [managed, local],
       maxCostUsd: 40,
       // Cold-run bound includes character sheets/panels, bounded ElevenLabs

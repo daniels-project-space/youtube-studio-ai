@@ -44,6 +44,26 @@ for (const unrelated of ["script_gen", "narration_tts", "stock_footage", "timeli
   );
 }
 
+// A persisted/custom channel may have been authored before evidence-backed
+// visual QA existed. The production compiler must add exactly one real release
+// gate directly before upload instead of trusting a caller-specific checklist.
+const noVisualGate = liveWhiteboard.filter((entry) => entry.block !== "qa_visual");
+const noVisualGatePlan = planChannelPipelineUpgrade(noVisualGate);
+assert(noVisualGatePlan.inserted.includes("qa_visual"), "legacy upload pipelines must receive qa_visual");
+const qaIndex = noVisualGatePlan.entries.findIndex((entry) => entry.block === "qa_visual");
+const uploadIndex = noVisualGatePlan.entries.findIndex((entry) => entry.block === "upload_draft");
+assert.equal(qaIndex, uploadIndex - 1, "qa_visual must review the final render immediately before upload");
+assert.equal(noVisualGatePlan.entries[qaIndex]?.params?.qaProfile, "production");
+
+const draftVisualGate = liveWhiteboard.map((entry) =>
+  entry.block === "qa_visual" ? { ...entry, params: { qaProfile: "draft" } } : entry,
+);
+assert.throws(
+  () => planChannelPipelineUpgrade(draftVisualGate),
+  /upload_draft cannot use qa_visual qaProfile=draft/,
+  "an upload pipeline cannot silently downgrade the mandatory visual gate",
+);
+
 const liveLofi: PipelineEntry[] = [
   { block: "competitor_research" },
   { block: "topic_select" },
