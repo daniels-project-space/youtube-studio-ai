@@ -248,7 +248,13 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "criticDoctrine", "contentLane",
     ],
   }),
-  hook_craft: contract(["script.hook_refined"], { optionalConsumes: ["script"] }),
+  hook_craft: contract(["script.hook_refined"], {
+    optionalConsumes: [
+      "script",
+      // Per-channel grounding for the hook produce→critique loop (P1-4).
+      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane",
+    ],
+  }),
   qa_script: contract(["script.qa_passed"], {
     optionalConsumes: ["script", "styleDNA", "persona"],
     qualityRequired: true,
@@ -291,6 +297,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   documotion_short: contract(["narration.timed", "visuals.documentary_collage", "master.native_vertical", "master.assembled"], {
     requiredConsumes: ["topic", "beatManifest"],
+    // The lane can only LOWER the engine's verifier refine-round cap; it is read
+    // for spend tuning, never as an ambient content input.
+    optionalConsumes: ["contentLane"],
     providerProfiles: [managed, local],
     maxCostUsd: 25,
     qualityRequired: true,
@@ -305,7 +314,13 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "visualBrief", "signatureClips", "niche",
     ],
   }),
-  entity_imagery: contract(["visuals.entities"], { optionalConsumes: ["styleDNA", "visualBrief"] }),
+  entity_imagery: contract(["visuals.entities"], {
+    optionalConsumes: [
+      "styleDNA", "visualBrief",
+      // Per-channel grounding for the entity-selection produce→critique loop (P1-4).
+      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane",
+    ],
+  }),
   intro_card: contract(["graphics.intro"], { optionalConsumes: ["palette", "channelAvatarKey", "channelName"] }),
   quote_overlays: contract(["graphics.quotes"], { optionalConsumes: ["introSec", "chapterPlan"] }),
   visual_inserts: contract(["graphics.data"], {
@@ -314,7 +329,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   timeline_assemble: contract(["master.assembled"], {
     requiredConsumes: ["footageClips", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
     optionalConsumes: [
-      "entityClips", "introCardPath", "introApplied", "introCardKey", "introSec", "healHints", "sentenceTimings", "cutSheet",
+      "entityClips", "introCardPath", "introApplied", "introCardKey", "introSec", "healHints", "healClasses", "sentenceTimings", "cutSheet",
       "chapterPlan", "channelAvatarKey", "script", "channelName", "quoteOverlays", "insertOverlays",
       "extraOverlays", "musicKey", "styleDNA", "shotRenderManifest", "shotQaReport", "visualCoverage",
     ],
@@ -370,7 +385,18 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
 
   gen_footage: contract(["visuals.generated", "render.profile_pinned", "render.spot_only"], {
-    optionalConsumes: ["styleDNA", "visualBrief", "narrationDurationSec"],
+    // channelName/persona/styleGrammar/criticDoctrine/contentLane ground the
+    // pre-spend shot-plan critique loop; all are frozen into the run seed store.
+    optionalConsumes: [
+      "styleDNA",
+      "visualBrief",
+      "narrationDurationSec",
+      "channelName",
+      "persona",
+      "styleGrammar",
+      "criticDoctrine",
+      "contentLane",
+    ],
     providerProfiles: [{ id: "novita-zimage-ltx23-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 132,
     maxCostUsdFor: (params, context) => {
@@ -382,7 +408,16 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     },
   }),
   signature_clips: contract(["visuals.signature_generated", "render.profile_pinned", "render.spot_only"], {
-    optionalConsumes: ["styleDNA", "visualBrief"],
+    // See gen_footage: the same pre-spend shot-plan critique loop runs here.
+    optionalConsumes: [
+      "styleDNA",
+      "visualBrief",
+      "channelName",
+      "persona",
+      "styleGrammar",
+      "criticDoctrine",
+      "contentLane",
+    ],
     providerProfiles: [{ id: "novita-zimage-ltx23-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 33,
     maxCostUsdFor: (params) => {
@@ -420,6 +455,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "persona",
       "niche",
       "validationSpec",
+      // P1-1/P1-17: the operator's critic doctrine and the durable content lane
+      // now ground this grader's prompt via the shared channelCritiqueBrief.
+      "channelName",
+      "criticDoctrine",
+      "contentLane",
     ],
     providerProfiles: [managed],
     // Initial grading plus at most two one-candidate, quality-directed repairs
@@ -452,6 +492,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "persona",
       "niche",
       "validationSpec",
+      // P1-1/P1-17: the operator's critic doctrine and the durable content lane
+      // now ground this grader's prompt via the shared channelCritiqueBrief.
+      "channelName",
+      "criticDoctrine",
+      "contentLane",
     ],
     providerProfiles: [managed, local],
     // See qa_assets: one selected still is held fixed while LTX may receive a

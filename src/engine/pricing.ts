@@ -45,6 +45,12 @@ export const PRICE = {
   bananaProUsd: rate("PRICE_BANANA_PRO_USD", 0.135),
   /** Per classic Nano Banana image (gemini-2.5-flash-image). */
   bananaFlashUsd: rate("PRICE_BANANA_FLASH_USD", 0.04),
+  /**
+   * Conservative preflight ceiling for one fal.ai Nano Banana 2 Visual Matter
+   * anchor at 1K. Runtime refuses to spend unless the operator-reviewed
+   * FAL_NANO_BANANA_2_COST_USD rate is explicitly configured.
+   */
+  falNanoBanana2Usd: rate("FAL_NANO_BANANA_2_COST_USD", 0.08),
   /** Per loop-unit Topaz upscale (block comment anchor: ~$0.25). */
   topazUpscaleUsd: rate("PRICE_TOPAZ_UPSCALE_USD", 0.25),
   /** Per generated music track (Mureka/Suno). */
@@ -74,6 +80,13 @@ export const PRICE = {
   novitaVideoMaxUsd: rate("NOVITA_VIDEO_MAX_COST_USD", 0.35),
   /** One managed vision-grader request. */
   visionGraderUsd: rate("VISION_GRADER_COST_USD", 0.003),
+  /**
+   * Conservative ceiling for ONE bounded (<1.5k token) text pass — entity
+   * extraction, hook drafting, and the per-candidate critiques in their
+   * produce→critique loops. These calls were previously accounted at zero,
+   * so their spend was invisible to the budget guard entirely.
+   */
+  boundedTextPassUsd: rate("PRICE_BOUNDED_TEXT_PASS_USD", 0.004),
   /** Conservative ceiling for the bounded 1,000-token Flash thumbnail concept
    * pass (actual token spend is recorded by the runner scope). */
   thumbnailConceptUsd: rate("PRICE_THUMBNAIL_CONCEPT_USD", 0.01),

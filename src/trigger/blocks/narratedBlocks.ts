@@ -8,6 +8,7 @@
  * All degrade gracefully on a missing key so the pipeline never hard-fails.
  */
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -25,8 +26,9 @@ import {
   produceAndCritique,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
+import type { HealClass } from "@/engine/healer";
 import { buildQualityEvidence } from "@/engine/qualityEvidence";
-import { narrationTtsCost, qaVisualCost } from "@/engine/pricing";
+import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
 import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
@@ -179,6 +181,66 @@ function str(ctx: StageContext, key: string): string {
 function opt(ctx: StageContext, key: string): string | undefined {
   const v = ctx.store[key];
   return typeof v === "string" && v.length > 0 ? v : undefined;
+}
+
+/**
+ * CONTENT-ADDRESSED ITERATION CHECKPOINT — the cost-safety primitive behind
+ * every produce→critique loop in this file that spends money.
+ *
+ * A produce→critique loop multiplies a block's spend by its iteration count,
+ * and the self-healer re-runs blocks. Without a checkpoint, one heal of a
+ * two-iteration loop re-purchases BOTH candidates. So each iteration derives a
+ * hash over everything that determines its result — including the iteration
+ * index and the prior critique issues, without which a regenerate would just
+ * re-read the rejected candidate and change nothing — and persists its paid
+ * outcome under that hash. A replay re-reads; it never re-buys.
+ *
+ * Deliberately JSON + R2 rather than a bespoke manifest type: what these loops
+ * buy is *decisions* (which entities, which hook), not large binaries, and the
+ * local derivation from those decisions (download, Ken Burns) is free.
+ */
+function iterationRequestHash(payload: unknown): string {
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+async function readIterationCheckpoint<T>(key: string, log: (msg: string) => void): Promise<T | null> {
+  try {
+    return JSON.parse(new TextDecoder().decode(await getObjectBytes(key))) as T;
+  } catch {
+    // Absent (the normal first-run case) or unreadable — either way, produce it.
+    log(`checkpoint miss: ${key.split("/").pop() ?? key}`);
+    return null;
+  }
+}
+
+async function writeIterationCheckpoint(key: string, value: unknown, log: (msg: string) => void): Promise<void> {
+  try {
+    await putObject(key, Buffer.from(JSON.stringify(value)), { contentType: "application/json" });
+  } catch (e) {
+    // A checkpoint is an optimisation, never a correctness requirement: losing
+    // the write costs a future replay money, but failing the run costs more.
+    log(`checkpoint write failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+const HEAL_CLASSES: readonly HealClass[] = ["overlay_finish", "body_rebuild", "asset_regen"];
+
+/**
+ * Read the healer's DECLARED repair strategy for one block out of the seed
+ * store (P0-1 step 2).
+ *
+ * Validated rather than cast: `store.healClasses` crosses a run boundary (it is
+ * re-seeded on resume), so an unrecognised value must degrade to "no declared
+ * class" — which sends the caller to its conservative branch — instead of
+ * type-asserting a bad string into a repair decision that costs money.
+ */
+function readDeclaredHealClasses(raw: unknown, blockId: string): HealClass[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const declared = (raw as Record<string, unknown>)[blockId];
+  if (!Array.isArray(declared)) return [];
+  return declared.filter((value): value is HealClass =>
+    typeof value === "string" && (HEAL_CLASSES as readonly string[]).includes(value),
+  );
 }
 
 /**
@@ -350,23 +412,149 @@ export const hookCraft: Block = {
     const narration = str(ctx, "narrationText");
     const firstLine = () => narration.split(/\n+/)[0].slice(0, 140);
     if (!hasGeminiKey()) return { hook: firstLine() };
-    let hook = "";
-    try {
-      const out = await geminiJson<{ hook?: string }>({
-        prompt:
-          "Write ONE scroll-stopping hook line for this video (for the title/thumbnail). " +
-          'Return STRICT JSON {"hook": string}. No markdown.\n\n' +
-          narration.slice(0, 2000),
-        maxTokens: 200,
-        temperature: 0.9,
-      });
-      hook = typeof out.hook === "string" ? out.hook.trim() : "";
-    } catch (e) {
-      ctx.log(`hook_craft: gemini failed (${e instanceof Error ? e.message : e})`);
-    }
-    if (!hook) hook = firstLine();
-    ctx.log(`hook_craft: "${hook.slice(0, 60)}â€¦"`);
-    return { hook };
+
+    // ── PRODUCE → CRITIQUE → REGENERATE (P1-4) ───────────────────────────────
+    // The hook is the title/thumbnail line — the single highest-leverage string
+    // in the run — and used to be a one-shot generation that shipped whatever
+    // came back, including a hook that over-promises something the narration
+    // never delivers. It now runs on the shared `produceAndCritique` primitive.
+    //
+    // Cost safety (this block spends on every produce):
+    //   - Each iteration is content-addressed and checkpointed, so a self-heal
+    //     replay re-reads the drafted hook and re-purchases NOTHING.
+    //   - Deterministic defects (empty, too long, markdown, or just the
+    //     narration's first line echoed back) are computed in code — they cost
+    //     nothing and can drive a retry with no critic at all.
+    //   - A critic OUTAGE accepts the current draft instead of blind-spending
+    //     another draft that would be equally ungraded.
+    //   - Cap 2 (one informed retry), the established convention here.
+    const hookChannel = channelCritiqueContext(ctx);
+    const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
+    const critiqueEnabled = hasAnthropicKey();
+    const checkpointRoot = `${ctx.keyPrefix}runs/${ctx.runId}/hook-checkpoints`;
+    const narrationDigest = iterationRequestHash(narration);
+    let observedCostUsd = 0;
+
+    const loop = await produceAndCritique<string>({
+      label: "hook_craft",
+      threshold: laneQuality.critiqueThreshold,
+      maxIters: critiqueEnabled ? Math.min(2, Math.max(1, laneQuality.maxCritiqueIters)) : 1,
+      log: (message, extra) => ctx.log(message, extra),
+      channel: hookChannel,
+      produce: async (priorIssues, iter) => {
+        const requestHash = iterationRequestHash({
+          contract: "hook-craft-checkpoint-v1",
+          narrationDigest,
+          critiqueIteration: iter,
+          critiqueIssues: priorIssues,
+          criticDoctrine: hookChannel.criticDoctrine ?? null,
+        });
+        const checkpointKey = `${checkpointRoot}/${requestHash}.json`;
+        const cached = await readIterationCheckpoint<{ hook: string; costUsd: number }>(
+          checkpointKey,
+          (m) => ctx.log(`hook_craft: ${m}`),
+        );
+        if (cached && typeof cached.hook === "string") {
+          observedCostUsd += Number(cached.costUsd) || 0;
+          ctx.log(`hook_craft: reused checkpointed draft ${requestHash.slice(0, 12)} (no re-spend)`);
+          return cached.hook;
+        }
+        let drafted = "";
+        try {
+          const out = await geminiJson<{ hook?: string }>({
+            prompt:
+              "Write ONE scroll-stopping hook line for this video (for the title/thumbnail). " +
+              "It must be concrete and must promise ONLY something this narration actually " +
+              "delivers — a hook the video does not pay off is a failure, not a win. " +
+              (priorIssues.length
+                ? `A previous attempt was REJECTED for: ${priorIssues.join("; ")}. Fix all of it. `
+                : "") +
+              channelCritiqueBrief(hookChannel) +
+              'Return STRICT JSON {"hook": string}. No markdown.\n\n' +
+              narration.slice(0, 2000),
+            maxTokens: 200,
+            temperature: 0.9,
+          });
+          observedCostUsd += PRICE.boundedTextPassUsd;
+          drafted = typeof out.hook === "string" ? out.hook.trim() : "";
+        } catch (e) {
+          ctx.log(`hook_craft: gemini failed (${e instanceof Error ? e.message : e})`);
+        }
+        const hook = drafted || firstLine();
+        await writeIterationCheckpoint(
+          checkpointKey,
+          { hook, costUsd: drafted ? PRICE.boundedTextPassUsd : 0 },
+          (m) => ctx.log(`hook_craft: ${m}`),
+        );
+        return hook;
+      },
+      critique: async (candidate, iter) => {
+        // DETERMINISTIC first — free, and the primitive's contract says the
+        // caller must compute countable facts rather than ask a model to count.
+        const trimmed = candidate.trim();
+        const deterministic = [
+          trimmed.length === 0 ? "the hook is empty" : "",
+          trimmed.length > 120 ? `the hook is ${trimmed.length} chars — too long for a title/thumbnail line` : "",
+          /^[*_#>`]|[*_`]{2}/.test(trimmed) ? "the hook contains markdown formatting" : "",
+          trimmed && trimmed === firstLine().trim()
+            ? "the hook is just the narration's opening line echoed back, not a crafted hook"
+            : "",
+        ].filter(Boolean);
+        if (deterministic.length) {
+          ctx.log(`hook_craft: candidate ${iter} failed deterministic checks`, { issues: deterministic });
+          return { score: 0.2, pass: false, issues: deterministic };
+        }
+        if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
+        try {
+          const verdict = await claudeJson<{ pass?: boolean; score?: number; issues?: string[] }>({
+            prompt:
+              `Judge ONE hook line written for a YouTube title/thumbnail. Reject it if it is generic, ` +
+              `vague, clickbait that the narration does not pay off, or indistinguishable from every ` +
+              `other video in its niche. Accept it if it would genuinely stop a scroll AND is honest ` +
+              `about what the video delivers.` +
+              channelCritiqueBrief(hookChannel) +
+              ` Return STRICT JSON {"pass": boolean, "score": number 0..1, "issues": string[]} — at most ` +
+              `4 issues, each under 140 characters.\n\nHOOK: ${trimmed}\n\nNARRATION (excerpt):\n` +
+              narration.slice(0, 2500),
+            maxTokens: 700,
+            temperature: 0.3,
+          });
+          observedCostUsd += PRICE.boundedTextPassUsd;
+          const issues = (Array.isArray(verdict.issues) ? verdict.issues : []).filter(Boolean).slice(0, 4);
+          // Same actionability rule as script_gen: `pass:false` with no concrete
+          // issue is not something a regenerate can act on, so the draft stands
+          // rather than buying a blind retry.
+          const rejected = verdict.pass === false && issues.length > 0;
+          const score = Number.isFinite(verdict.score)
+            ? Math.max(0, Math.min(1, Number(verdict.score)))
+            : rejected ? 0.4 : 1;
+          if (rejected) {
+            ctx.log(
+              `hook_craft: candidate ${iter} rejected by the critic` +
+              (iter < 2 ? " — regenerating with the defects fed back" : " — iteration cap reached"),
+              { issues },
+            );
+          }
+          // The +0.01*iter tiebreak keeps the INFORMED retry when it merely ties
+          // the first draft (produceAndCritique picks the best by strict >).
+          return rejected
+            ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues }
+            : { score, pass: true, issues: [] };
+        } catch (e) {
+          // Critic outage: regenerating cannot help (the next draft would be
+          // ungraded too) and costs another paid call. Keep this one.
+          ctx.log(`hook_craft: critic unavailable (kept draft): ${e instanceof Error ? e.message : e}`);
+          return { score: iter === 1 ? 1 : 0, pass: true, issues: [] };
+        }
+      },
+    });
+
+    const hook = loop.value || firstLine();
+    ctx.log(
+      `hook_craft: "${hook.slice(0, 60)}â€¦" (${loop.iterations} iter, ` +
+      `${loop.accepted ? "accepted" : "best-effort"})`,
+    );
+    return { hook, [COST_PATCH_KEY]: observedCostUsd };
   },
 };
 
@@ -1025,68 +1213,229 @@ export const entityImagery: Block = {
     const W = portrait ? 1080 : 1920;
     const H = portrait ? 1920 : 1080;
 
-    // Pull SPECIFIC named entities that have real imagery (people/places/artworks).
-    let entities: string[] = [];
-    try {
-      const out = await geminiJson<{ entities?: string[] }>({
-        prompt:
-          "From this narration, list up to 4 SPECIFIC named entities with well-known " +
-          'real photographs/portraits (e.g. "Marcus Aurelius", "the Colosseum"). ' +
-          "Skip abstract concepts. Return STRICT JSON {\"entities\":string[]}.\n\n" +
-          narration.slice(0, 3000),
-        maxTokens: 250,
-        temperature: 0.3,
-      });
-      entities = (out.entities ?? [])
-        .filter((e): e is string => typeof e === "string" && e.trim().length > 0)
-        .slice(0, 4);
-    } catch (e) {
-      ctx.log(`entity_imagery: extraction failed (${e instanceof Error ? e.message : e})`);
+    // ── PRODUCE → CRITIQUE → REGENERATE (P1-4) ───────────────────────────────
+    // Entity imagery had no judge at all: whatever four names the extractor
+    // returned became on-screen visuals, so an off-topic or unillustratable
+    // pick (an abstract noun, a person with no usable portrait) simply produced
+    // a worse video that nothing noticed until qa_visual — after the spend.
+    // The candidate here is the RESOLVED SET, which is the thing worth judging:
+    // an individually plausible entity can still be a bad set (all four from one
+    // paragraph, none from the argument the video actually makes).
+    //
+    // Cost safety (this block buys an extraction pass + a vision identity check
+    // per image):
+    //   - Every iteration checkpoints its RESOLUTION (chosen entities, image
+    //     URLs, verify verdicts) content-addressed by narration+iteration+prior
+    //     issues, so a self-heal replay re-reads those decisions and re-buys
+    //     nothing. Only the free local work (download, Ken Burns) repeats.
+    //   - An extraction that legitimately finds NO entities is accepted, never
+    //     retried: paying again to be told the same true thing is pure waste.
+    //   - A critic outage accepts the current set rather than blind-spending.
+    //   - Cap 2 (one informed retry).
+    const entityChannel = channelCritiqueContext(ctx);
+    const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
+    const critiqueEnabled = hasAnthropicKey();
+    const checkpointRoot = `${ctx.keyPrefix}runs/${ctx.runId}/entity-checkpoints`;
+    const narrationDigest = iterationRequestHash(narration);
+    let observedCostUsd = 0;
+
+    interface ResolvedEntity {
+      entity: string;
+      url: string;
+      attribution?: string;
+    }
+    interface EntityCandidate {
+      /** Everything the extractor proposed — distinguishes "found nothing" from "found nothing usable". */
+      proposed: string[];
+      resolved: ResolvedEntity[];
     }
 
-    const tmp = await makeRunTempDir(ctx.runId);
-    let i = 0;
-    for (const e of entities) {
-      try {
-        const wi = await searchWikimediaImage(e);
-        if (!wi) {
-          ctx.log(`entity_imagery: no Wikimedia image for "${e}"`);
-          continue;
+    const loop = await produceAndCritique<EntityCandidate>({
+      label: "entity_imagery",
+      threshold: laneQuality.critiqueThreshold,
+      maxIters: critiqueEnabled ? Math.min(2, Math.max(1, laneQuality.maxCritiqueIters)) : 1,
+      log: (message, extra) => ctx.log(message, extra),
+      channel: entityChannel,
+      produce: async (priorIssues, iter): Promise<EntityCandidate> => {
+        const requestHash = iterationRequestHash({
+          contract: "entity-imagery-checkpoint-v1",
+          narrationDigest,
+          critiqueIteration: iter,
+          critiqueIssues: priorIssues,
+          criticDoctrine: entityChannel.criticDoctrine ?? null,
+        });
+        const checkpointKey = `${checkpointRoot}/${requestHash}.json`;
+        const cached = await readIterationCheckpoint<EntityCandidate & { costUsd: number }>(
+          checkpointKey,
+          (m) => ctx.log(`entity_imagery: ${m}`),
+        );
+        if (cached && Array.isArray(cached.resolved) && Array.isArray(cached.proposed)) {
+          observedCostUsd += Number(cached.costUsd) || 0;
+          ctx.log(
+            `entity_imagery: reused checkpointed resolution ${requestHash.slice(0, 12)} ` +
+            `(${cached.resolved.length} entity/entities, no re-spend)`,
+          );
+          return { proposed: cached.proposed, resolved: cached.resolved };
         }
-        const img = await downloadTo(wi.url, join(tmp, `entity_${i}.jpg`));
-        // Verify the Wikimedia image actually depicts the entity (search can
-        // return the wrong person/place). Reject mismatches rather than show a
-        // wrong face. Verify failure (not mismatch) keeps the image.
-        if (hasGeminiKey()) {
+
+        let iterationCostUsd = 0;
+        // Pull SPECIFIC named entities that have real imagery (people/places/artworks).
+        let proposed: string[] = [];
+        try {
+          const out = await geminiJson<{ entities?: string[] }>({
+            prompt:
+              "From this narration, list up to 4 SPECIFIC named entities with well-known " +
+              'real photographs/portraits (e.g. "Marcus Aurelius", "the Colosseum"). ' +
+              "Skip abstract concepts. Prefer entities central to the narration's ARGUMENT, " +
+              "spread across the whole piece rather than clustered in one passage. " +
+              (priorIssues.length
+                ? `A previous selection was REJECTED for: ${priorIssues.join("; ")}. Choose differently. `
+                : "") +
+              channelCritiqueBrief(entityChannel) +
+              "Return STRICT JSON {\"entities\":string[]}.\n\n" +
+              narration.slice(0, 3000),
+            maxTokens: 250,
+            temperature: 0.3,
+          });
+          iterationCostUsd += PRICE.boundedTextPassUsd;
+          proposed = (out.entities ?? [])
+            .filter((e): e is string => typeof e === "string" && e.trim().length > 0)
+            .slice(0, 4);
+        } catch (e) {
+          ctx.log(`entity_imagery: extraction failed (${e instanceof Error ? e.message : e})`);
+        }
+
+        const resolved: ResolvedEntity[] = [];
+        for (const e of proposed) {
           try {
-            const raw = await visionLocal({
-              prompt:
-                `Does this image clearly depict "${e}"? Be strict about identity for ` +
-                `people and specific places. Return STRICT JSON {"match":boolean,"reason":string}.`,
-              imagePaths: [img],
-              json: true,
-              maxTokens: 120,
-            });
-            const v = parseJsonLoose<{ match?: boolean; reason?: string }>(raw);
-            if (v.match === false) {
-              ctx.log(`entity_imagery: image for "${e}" did NOT verify (${v.reason ?? ""}) â€” skipping`);
+            const wi = await searchWikimediaImage(e);
+            if (!wi) {
+              ctx.log(`entity_imagery: no Wikimedia image for "${e}"`);
               continue;
             }
-          } catch {
-            /* verification failed â†’ keep the image rather than drop the entity */
+            const probeDir = await makeRunTempDir(ctx.runId);
+            const img = await downloadTo(wi.url, join(probeDir, `entity_probe_${resolved.length}.jpg`));
+            // Verify the Wikimedia image actually depicts the entity (search can
+            // return the wrong person/place). Reject mismatches rather than show a
+            // wrong face. Verify failure (not mismatch) keeps the image.
+            try {
+              const raw = await visionLocal({
+                prompt:
+                  `Does this image clearly depict "${e}"? Be strict about identity for ` +
+                  `people and specific places. Return STRICT JSON {"match":boolean,"reason":string}.`,
+                imagePaths: [img],
+                json: true,
+                maxTokens: 120,
+              });
+              iterationCostUsd += PRICE.visionGraderUsd;
+              const v = parseJsonLoose<{ match?: boolean; reason?: string }>(raw);
+              if (v.match === false) {
+                ctx.log(`entity_imagery: image for "${e}" did NOT verify (${v.reason ?? ""}) â€” skipping`);
+                continue;
+              }
+            } catch {
+              /* verification failed â†’ keep the image rather than drop the entity */
+            }
+            resolved.push({ entity: e, url: wi.url, ...(wi.attribution ? { attribution: wi.attribution } : {}) });
+          } catch (err) {
+            ctx.log(`entity_imagery: "${e}" failed (${err instanceof Error ? err.message : err})`);
           }
         }
+
+        observedCostUsd += iterationCostUsd;
+        await writeIterationCheckpoint(
+          checkpointKey,
+          { proposed, resolved, costUsd: iterationCostUsd },
+          (m) => ctx.log(`entity_imagery: ${m}`),
+        );
+        return { proposed, resolved };
+      },
+      critique: async (candidate, iter) => {
+        // A narration with no depictable named entities is a legitimate, common
+        // outcome (abstract//essayistic scripts). Retrying buys the identical
+        // answer, so accept and let the footage layer carry the visuals.
+        if (candidate.proposed.length === 0) {
+          ctx.log("entity_imagery: no named entities in this narration — accepting the empty set");
+          return { score: 1, pass: true, issues: [] };
+        }
+        // DETERMINISTIC: entities were proposed but none survived lookup +
+        // identity verification. That IS worth one informed retry with
+        // different picks, and it costs nothing to detect.
+        if (candidate.resolved.length === 0) {
+          return {
+            score: 0.2,
+            pass: false,
+            issues: [
+              `none of [${candidate.proposed.join(", ")}] resolved to a verified image — ` +
+              `pick entities with well-known, unambiguous photographs`,
+            ],
+          };
+        }
+        if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
+        try {
+          const verdict = await claudeJson<{ pass?: boolean; score?: number; issues?: string[] }>({
+            prompt:
+              `Judge a set of named entities chosen to be shown as on-screen imagery during this ` +
+              `narration. Reject the SET if the entities are peripheral to the argument, redundant ` +
+              `with each other, clustered in one passage instead of spread across the piece, or ` +
+              `tonally wrong for the channel.` +
+              channelCritiqueBrief(entityChannel) +
+              ` Return STRICT JSON {"pass": boolean, "score": number 0..1, "issues": string[]} — at ` +
+              `most 4 issues, each under 140 characters.\n\nENTITIES: ` +
+              candidate.resolved.map((r) => r.entity).join(", ") +
+              `\n\nNARRATION (excerpt):\n` + narration.slice(0, 3000),
+            maxTokens: 700,
+            temperature: 0.3,
+          });
+          observedCostUsd += PRICE.boundedTextPassUsd;
+          const issues = (Array.isArray(verdict.issues) ? verdict.issues : []).filter(Boolean).slice(0, 4);
+          const rejected = verdict.pass === false && issues.length > 0;
+          const score = Number.isFinite(verdict.score)
+            ? Math.max(0, Math.min(1, Number(verdict.score)))
+            : rejected ? 0.4 : 1;
+          if (rejected) {
+            ctx.log(
+              `entity_imagery: selection ${iter} rejected by the critic` +
+              (iter < 2 ? " — re-selecting with the defects fed back" : " — iteration cap reached"),
+              { issues },
+            );
+          }
+          return rejected
+            ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues }
+            : { score, pass: true, issues: [] };
+        } catch (e) {
+          ctx.log(`entity_imagery: critic unavailable (kept selection): ${e instanceof Error ? e.message : e}`);
+          return { score: iter === 1 ? 1 : 0, pass: true, issues: [] };
+        }
+      },
+    });
+
+    // Materialize ONLY the winning set. Ken Burns encoding is local compute, so
+    // deferring it out of `produce` means a rejected candidate never pays for it.
+    const tmp = await makeRunTempDir(ctx.runId);
+    let i = 0;
+    for (const r of loop.value.resolved) {
+      try {
+        const img = await downloadTo(r.url, join(tmp, `entity_${i}.jpg`));
         const clip = await kenBurns(img, join(tmp, `entity_${i}.mp4`), 5, W, H);
         clips.push(clip);
-        if (wi.attribution) attributions.push(`${e}: ${wi.attribution}`);
-        ctx.log(`entity_imagery: "${e}" â†’ verified Ken Burns clip`);
+        if (r.attribution) attributions.push(`${r.entity}: ${r.attribution}`);
+        ctx.log(`entity_imagery: "${r.entity}" â†’ verified Ken Burns clip`);
         i++;
       } catch (err) {
-        ctx.log(`entity_imagery: "${e}" failed (${err instanceof Error ? err.message : err})`);
+        ctx.log(`entity_imagery: "${r.entity}" failed (${err instanceof Error ? err.message : err})`);
       }
     }
-    ctx.log(`entity_imagery: ${clips.length} entity clip(s), ${attributions.length} attribution(s)`);
-    return { entityClips: clips, entityKeys: await uploadEntityKeys(clips), attributions };
+    ctx.log(
+      `entity_imagery: ${clips.length} entity clip(s), ${attributions.length} attribution(s) ` +
+      `(${loop.iterations} iter, ${loop.accepted ? "accepted" : "best-effort"})`,
+    );
+    return {
+      entityClips: clips,
+      entityKeys: await uploadEntityKeys(clips),
+      attributions,
+      [COST_PATCH_KEY]: observedCostUsd,
+    };
   },
 };
 
@@ -1571,10 +1920,40 @@ export const timelineAssemble: Block = {
           ? (healHintsRaw["timeline_assemble"] ?? []).map(String)
           : [];
     const healHints = healHintsArr.join(" | ");
-    const overlayClassHeal =
-      healHints.length > 0 &&
-      /overlay|caption|quote|insert|card text|outro text/i.test(healHints) &&
-      !/black|dead.?air|footage|off.?world|cut|loop|duration|length/i.test(healHints);
+
+    // TYPED HEAL CLASS (P0-1 step 2) — the repair strategy is now DECLARED by
+    // the healer's defect catalog (`HealClass` in engine/healer.ts) and read
+    // here as a typed field, instead of being re-derived by running a regex
+    // over the hint prose.
+    //
+    // The regex below it is what that replaced, and it is the reason this
+    // comment exists: the hints are human-readable diagnosis strings whose
+    // wording is not a contract, so a hint reworded upstream silently stopped
+    // matching and EVERY overlay-class heal paid the full ~40-min recompose —
+    // a permanent heal outage nothing could detect, because both branches
+    // produce a correct video and only the bill differs.
+    //
+    // It is kept ONLY as the fallback for a heal payload that carries no
+    // declared class (a run resumed from a store seeded by the previous
+    // deploy). Once a class is present it is authoritative and the prose is
+    // never consulted.
+    const declaredHealClasses = readDeclaredHealClasses(ctx.store["healClasses"], "timeline_assemble");
+    const overlayClassHeal = declaredHealClasses.length > 0
+      // `every`, not `some`: a mixed diagnosis (an overlay defect AND a body
+      // defect in the same failure) must take the branch that can actually fix
+      // both. Re-finishing cannot repair the body, so it loses the tie.
+      ? declaredHealClasses.every((healClass) => healClass === "overlay_finish")
+      : healHints.length > 0 &&
+        /overlay|caption|quote|insert|card text|outro text/i.test(healHints) &&
+        !/black|dead.?air|footage|off.?world|cut|loop|duration|length/i.test(healHints);
+    if (declaredHealClasses.length > 0) {
+      ctx.log(
+        `timeline_assemble: heal class declared by the healer [${declaredHealClasses.join(", ")}] → ` +
+        `${overlayClassHeal ? "surgical re-finish" : "full rebuild"} (no prose matching)`,
+      );
+    } else if (healHints.length > 0) {
+      ctx.log("timeline_assemble: heal payload carries no declared heal class — falling back to legacy hint matching");
+    }
     if (overlayClassHeal) {
       try {
         const preKey = `${ctx.keyPrefix}runs/${ctx.runId}/pre_overlay.mp4`;

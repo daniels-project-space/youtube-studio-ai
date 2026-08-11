@@ -785,6 +785,10 @@ export const runPipelineTask = task({
           seedStore: {
             ...seedStore,
             healHints: plan.hints,
+            // The DECLARED repair strategy per block (healer.ts `HealClass`).
+            // Blocks switch on this instead of pattern-matching the hint prose,
+            // whose wording is not a contract.
+            healClasses: plan.healClasses,
             healAttempt: heals,
             ...(plan.visualRepair?.length ? { visualRepair: plan.visualRepair } : {}),
           },
