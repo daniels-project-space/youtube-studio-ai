@@ -10,8 +10,17 @@
  * the god-block's quotesApplied / insertsApplied).
  */
 import assert from "node:assert/strict";
-import { buildPlanInput, quoteSpecsToOverlays, paramsToAssemble } from "../cutover";
+import {
+  buildPlanInput,
+  quoteSpecsToOverlays,
+  paramsToAssemble,
+  deriveProducesExtras,
+  assembleViaEdl,
+  type AssembleProduces,
+} from "../cutover";
 import { overlaysToCuesAndSpecs } from "../overlays";
+import { TimelineSchema, ReceiptSchema, type Timeline, type Receipt, type Overlay, type Segment } from "../timeline";
+import { preOverlayCacheKey, type RenderBackend } from "../renderTimeline";
 import type { QuoteOverlaySpec } from "@/lib/ffmpeg";
 
 /* ---------- 1. store → PlanInput field-by-field ---------- */
@@ -142,4 +151,315 @@ import type { QuoteOverlaySpec } from "@/lib/ffmpeg";
   console.log("PARAMS PASS: ctx.params → AssembleParams mirrors god-block reads");
 }
 
-console.log("\nALL CUTOVER TESTS PASSED");
+/* ================================================================== *
+ * PRODUCED-KEY CONTRACT — all 11 keys `timelineAssemble.produces`
+ * declares (narratedBlocks.ts:1376-1388). A missing key lands as
+ * `undefined` in ctx.store and silently voids the verify-stage gates
+ * at narratedBlocks.ts:2170, 2365-2366, 2375-2376.
+ * ================================================================== */
+
+/** The exact 11 keys the live block declares, in declaration order. */
+const PRODUCES_KEYS = [
+  "videoKey",
+  "videoLocalPath",
+  "videoDurationSec",
+  "quotesApplied",
+  "insertsApplied",
+  "captionsApplied",
+  "captionCues",
+  "outroApplied",
+  "overlaysDropped",
+  "preOverlayKey",
+  "preOverlayLocalPath",
+] as const;
+
+/** Minimal VALID Timeline (zod-parsed so declared defaults are filled). */
+function mkTimeline(o: { overlays?: Overlay[]; withOutro?: boolean; captionStyle?: "none" | "bold" } = {}): Timeline {
+  const segments: Segment[] = [
+    { kind: "card", role: "intro", durSec: 5, title: "T" },
+    { kind: "footage", src: "f0.mp4", durSec: 40 },
+    { kind: "footage", src: "f1.mp4", durSec: 25 },
+  ];
+  if (o.withOutro !== false) segments.push({ kind: "card", role: "outro", durSec: 3, title: "Thanks" });
+  return TimelineSchema.parse({
+    format: { w: 1920, h: 1080, fps: 30 },
+    segments,
+    audio: { introSec: 5, bodySec: 60, tailSec: 3, narrationSrc: "n.wav" },
+    overlays: o.overlays ?? [],
+    ...(o.captionStyle ? { renderHints: { captionStyle: o.captionStyle } } : {}),
+  });
+}
+
+const cap = (startSec: number, text: string): Overlay => ({ kind: "caption", startSec, endSec: startSec + 2, text });
+const quote = (startSec: number, src = "q.webm"): Overlay => ({ kind: "quote", startSec, endSec: startSec + 5, src });
+
+function mkReceipt(o: { overlaysApplied: number; warnings?: string[] }): Receipt {
+  return ReceiptSchema.parse({
+    videoKey: "assembly/runs/r1/final.mp4",
+    videoLocalPath: "/tmp/final.mp4",
+    durationSec: 68,
+    segmentsRendered: 2,
+    cardsRendered: 2,
+    overlaysApplied: o.overlaysApplied,
+    warnings: o.warnings ?? [],
+    cacheHits: 0,
+    healedFrom: "full",
+  });
+}
+
+/* ---------- 8. captions PRESENT and burned ---------- */
+{
+  const t = mkTimeline({ overlays: [cap(10, "Hello."), cap(14, "World."), quote(30)] });
+  const x = deriveProducesExtras(t, mkReceipt({ overlaysApplied: 3 }));
+  assert.equal(x.captionCues, 2, "2 caption overlays → 2 prepared cues");
+  assert.equal(x.captionsApplied, true, "cues prepared + finishing pass composited ⇒ captionsApplied");
+  assert.equal(x.overlaysDropped, 0, "nothing dropped when applied === planned");
+  assert.equal(x.outroApplied, true, "outro card segment in the plan ⇒ outroApplied");
+  console.log("CAPTIONS-PRESENT PASS: captionCues=2, captionsApplied=true, dropped=0");
+}
+
+/* ---------- 9. captions ABSENT (quote-only plan) ---------- */
+{
+  const t = mkTimeline({ overlays: [quote(30)] });
+  const x = deriveProducesExtras(t, mkReceipt({ overlaysApplied: 1 }));
+  assert.equal(x.captionCues, 0, "no caption overlays ⇒ 0 cues");
+  assert.equal(x.captionsApplied, false, "no cues ⇒ captionsApplied false (and the 2365 gate stays quiet)");
+  assert.equal(x.overlaysDropped, 0, "quote applied, nothing dropped");
+  console.log("CAPTIONS-ABSENT PASS: captionCues=0 ⇒ captionsApplied=false, gate not tripped");
+}
+
+/* ---------- 10. a text-less caption is DROPPED (warning-derived count) ---------- */
+{
+  const t = mkTimeline({ overlays: [cap(10, "Kept."), { kind: "caption", startSec: 14, endSec: 16 }, quote(30)] });
+  // overlaysToCuesAndSpecs drops the text-less caption and says so.
+  const mapped = overlaysToCuesAndSpecs(t.overlays);
+  assert.equal(mapped.cues.length, 1, "text-less caption never becomes a cue");
+  assert.equal(mapped.warnings.length, 1, "the drop is surfaced as a warning, never silent");
+  const x = deriveProducesExtras(t, mkReceipt({ overlaysApplied: 2, warnings: mapped.warnings }));
+  assert.equal(x.captionCues, 1, "only the burnable caption counts");
+  assert.equal(x.captionsApplied, true, "the surviving cue was burned");
+  assert.equal(x.overlaysDropped, 1, "the text-less caption counts as exactly one drop");
+  console.log("CAPTION-DROP PASS: overlaysDropped=1 from the typed warning");
+}
+
+/* ---------- 11. a media-less quote is DROPPED ---------- */
+{
+  const t = mkTimeline({ overlays: [cap(10, "Kept."), { kind: "quote", startSec: 30, endSec: 35 }] });
+  const mapped = overlaysToCuesAndSpecs(t.overlays);
+  assert.equal(mapped.specs.length, 0, "a quote with no renderable media is never faked");
+  const x = deriveProducesExtras(t, mkReceipt({ overlaysApplied: 1, warnings: mapped.warnings }));
+  assert.equal(x.overlaysDropped, 1, "media-less quote counted once");
+  assert.equal(x.captionCues, 1, "the caption still burns");
+  console.log("QUOTE-DROP PASS: media-less quote ⇒ overlaysDropped=1");
+}
+
+/* ---------- 12. TOTAL compositing failure — arithmetic floor catches it ---------- */
+{
+  // ffmpegBackend.ts:332-333 warns ONCE and returns applied:0 with the clean video.
+  // A warnings-only count would under-report 1; the planned−applied floor reports all 3.
+  const t = mkTimeline({ overlays: [cap(10, "A."), cap(14, "B."), quote(30)] });
+  const x = deriveProducesExtras(
+    t,
+    mkReceipt({ overlaysApplied: 0, warnings: ["overlay compositing FAILED (clean video kept): ffmpeg exit 1"] }),
+  );
+  assert.equal(x.overlaysDropped, 3, "every planned overlay is reported dropped, not just the 1 warning");
+  assert.equal(x.captionsApplied, false, "nothing composited ⇒ captionsApplied false");
+  assert.equal(x.captionCues, 2, "cues were still PREPARED — captionCues>0 + applied=false is exactly the 2365 gate");
+  console.log("TOTAL-FAILURE PASS: dropped=3 (arithmetic floor beats the single warning)");
+}
+
+/* ---------- 13. captionStyle:'none' — intentional suppression, not a gate trip ---------- */
+{
+  const t = mkTimeline({ overlays: [cap(10, "A."), cap(14, "B."), quote(30)], captionStyle: "none" });
+  const x = deriveProducesExtras(
+    t,
+    mkReceipt({ overlaysApplied: 1, warnings: ["captionStyle=none — 2 caption(s) suppressed (not burned)"] }),
+  );
+  assert.equal(x.captionCues, 0, "style 'none' ⇒ 0 prepared cues (parity with the god-block's burnCaptions:false)");
+  assert.equal(x.captionsApplied, false, "nothing burned");
+  // capCues === 0 ⇒ narratedBlocks.ts:2366 (`capCues > 0 && captionsApplied === false`) does NOT fire.
+  assert.ok(!(x.captionCues > 0 && x.captionsApplied === false), "an intentional style choice must not raise a critical");
+  assert.equal(x.overlaysDropped, 2, "the 2 suppressed captions are still counted once (no double-count)");
+  console.log("CAPTIONSTYLE-NONE PASS: cues=0, no false critical, dropped=2 counted once");
+}
+
+/* ---------- 14. no outro card in the plan ---------- */
+{
+  const t = mkTimeline({ withOutro: false, overlays: [] });
+  const x = deriveProducesExtras(t, mkReceipt({ overlaysApplied: 0 }));
+  assert.equal(x.outroApplied, false, "no outro card segment ⇒ outroApplied false");
+  assert.equal(x.overlaysDropped, 0, "zero planned overlays ⇒ zero dropped (not a false positive)");
+  assert.equal(x.captionsApplied, false, "no cues ⇒ false");
+  console.log("NO-OUTRO PASS: outroApplied=false, dropped=0");
+}
+
+/* ================================================================== *
+ * 15-17. END-TO-END assembleViaEdl through a FAKE RenderBackend.
+ * Pins all 11 produced keys + the run-scoped pre-overlay checkpoint.
+ * ================================================================== */
+
+function fakeBackend(o: { applied?: (n: number) => number; warnings?: string[]; failCachePut?: string } = {}) {
+  const cache = new Map<string, string>();
+  const puts: string[] = [];
+  const be: RenderBackend = {
+    async renderCard(c) { return `card_${c.role}.mp4`; },
+    async buildBody() { return "body.mp4"; },
+    async composeIntro() { return "composed.mp4"; },
+    async patchOutro() { return "withOutro.mp4"; },
+    async applyOverlays(_b, ov) {
+      return { path: "finished.mp4", applied: o.applied ? o.applied(ov.length) : ov.length, warnings: o.warnings ?? [] };
+    },
+    async probe() { return 128; },
+    async cacheGet(k) { return cache.get(k) ?? null; },
+    async cachePut(k, p) {
+      if (o.failCachePut && k === o.failCachePut) throw new Error("R2 write refused");
+      puts.push(k);
+      cache.set(k, p);
+    },
+    async publish() { return "assembly/runs/r1/final.mp4"; },
+  };
+  return { be, cache, puts };
+}
+
+/** The god-block store shape, sized so planTimeline emits a coverage-valid plan. */
+const e2eStore: Record<string, unknown> = {
+  footageClips: ["f0.mp4", "f1.mp4", "f2.mp4", "f3.mp4", "f4.mp4", "f5.mp4"],
+  entityClips: [],
+  narrationLocalPath: "narr.wav",
+  narrationDurationSec: 120,
+  introCardPath: "intro.mp4",
+  introSec: 5,
+  musicKey: "music/mix.mp3",
+  sentenceTimings: [
+    { text: "One.", start: 0, end: 4 },
+    { text: "Two.", start: 4, end: 9 },
+    { text: "Three.", start: 9, end: 15 },
+  ],
+  channelName: "Investory",
+  script: { closingLine: "Stay curious." },
+  quoteOverlays: [{ path: "q0.webm", startSec: 40, durSec: 6, text: "A quote." }],
+  insertOverlays: [{ path: "i0.webm", startSec: 70, durSec: 8 }],
+};
+
+/* ---------- 15. every produced key is present, typed, and non-blank ---------- */
+async function producedKeyContract(): Promise<void> {
+  const { be, puts } = fakeBackend();
+  const out: AssembleProduces = await assembleViaEdl({
+    store: e2eStore,
+    params: { tailSec: 3 },
+    runId: "r1",
+    keyPrefix: "assembly/",
+    backend: be,
+  });
+
+  for (const k of PRODUCES_KEYS) {
+    assert.ok(k in out, `produces key "${k}" is emitted (undefined would void its verify gate)`);
+    assert.notEqual((out as unknown as Record<string, unknown>)[k], undefined, `produces key "${k}" is not undefined`);
+  }
+  assert.equal(Object.keys(out).length, PRODUCES_KEYS.length, "exactly the 11 declared keys — no more, no fewer");
+
+  assert.equal(typeof out.captionsApplied, "boolean", "captionsApplied is a boolean (gate compares === false)");
+  assert.equal(typeof out.captionCues, "number", "captionCues is a number (gate does Number(...) > 0)");
+  assert.equal(typeof out.outroApplied, "boolean", "outroApplied is a boolean (gate compares === true/false)");
+  assert.equal(typeof out.overlaysDropped, "number", "overlaysDropped is a number");
+
+  assert.equal(out.quotesApplied, 1, "the quote overlay composited");
+  assert.equal(out.insertsApplied, 1, "the insert overlay composited");
+  assert.ok(out.captionCues > 0, "captions were planned from sentenceTimings and prepared");
+  assert.equal(out.captionsApplied, true, "…and burned");
+  assert.equal(out.overlaysDropped, 0, "clean render drops nothing");
+  assert.equal(out.outroApplied, true, "tailSec 3 ⇒ an outro card is planned and rendered");
+
+  // THE CHECKPOINT FIX: preOverlayKey is now the god-block's run-scoped key, not "".
+  assert.equal(
+    out.preOverlayKey,
+    "assembly/runs/r1/pre_overlay.mp4",
+    "preOverlayKey matches narratedBlocks.ts:1874 `${keyPrefix}runs/${runId}/pre_overlay.mp4` exactly",
+  );
+  assert.notEqual(out.preOverlayLocalPath, "", "preOverlayLocalPath points at the composed pre-overlay video");
+  assert.ok(
+    puts.includes("runs/r1/pre_overlay.mp4"),
+    "the checkpoint was actually WRITTEN to that key — never advertise an object that does not exist",
+  );
+  console.log("E2E CONTRACT PASS: all 11 keys emitted; preOverlayKey non-blank and backed by a real write");
+}
+
+/* ---------- 16. the advertised key holds the SAME artifact as the content-addressed checkpoint ---------- */
+async function checkpointIdentity(): Promise<void> {
+  const { be, cache } = fakeBackend();
+  const out = await assembleViaEdl({
+    store: e2eStore,
+    params: { tailSec: 3 },
+    runId: "r1",
+    keyPrefix: "assembly/",
+    backend: be,
+  });
+  // renderTimeline wrote TWO render/* keys: the pre-overlay checkpoint and the final.
+  // The run-scoped copy must be the PRE-OVERLAY one (the composed body+outro the heal
+  // re-finishes from), NOT the finished video — copying the wrong one would make a
+  // heal re-burn overlays onto an already-overlaid video.
+  const runScoped = cache.get("runs/r1/pre_overlay.mp4");
+  assert.ok(runScoped, "the run-scoped key exists in the cache");
+  assert.equal(runScoped, "withOutro.mp4", "it is the composed body INCLUDING the outro, pre-overlay");
+  assert.notEqual(runScoped, "finished.mp4", "it is NOT the finished (overlaid) video");
+  assert.equal(
+    out.preOverlayLocalPath,
+    runScoped,
+    "the returned local path is the composed checkpoint the heal re-finishes from",
+  );
+  // And it was published under exactly the content-addressed checkpoint's contents.
+  const contentKeys = [...cache.keys()].filter((k) => k.startsWith("render/"));
+  assert.ok(contentKeys.length >= 2, "content-addressed checkpoint + final key both written");
+  assert.ok(
+    contentKeys.some((k) => cache.get(k) === runScoped),
+    "the run-scoped copy mirrors a real content-addressed entry (not an invented artifact)",
+  );
+  console.log("CHECKPOINT-IDENTITY PASS: run-scoped key holds the PRE-OVERLAY composed video");
+}
+
+/* ---------- 17. checkpoint publish FAILS ⇒ fail-soft blank, never a dangling key ---------- */
+async function checkpointFailSoft(): Promise<void> {
+  const { be } = fakeBackend({ failCachePut: "runs/r1/pre_overlay.mp4" });
+  const out = await assembleViaEdl({
+    store: e2eStore,
+    params: { tailSec: 3 },
+    runId: "r1",
+    keyPrefix: "assembly/",
+    backend: be,
+  });
+  assert.equal(out.preOverlayKey, "", "a failed checkpoint upload degrades to blank (god-block parity, :1877-1881)");
+  assert.equal(out.preOverlayLocalPath, "", "…and blanks the local path with it");
+  // The rest of the contract must survive the degrade.
+  assert.equal(Object.keys(out).length, PRODUCES_KEYS.length, "still all 11 keys");
+  assert.ok(out.videoKey.length > 0, "the video itself still published");
+  assert.equal(out.outroApplied, true, "unrelated keys unaffected by the checkpoint degrade");
+  console.log("CHECKPOINT-FAILSOFT PASS: blank pointers, never a dangling key, contract intact");
+}
+
+/* ---------- 18. a real drop end-to-end lands in overlaysDropped ---------- */
+async function e2eDrop(): Promise<void> {
+  const { be } = fakeBackend({
+    applied: (n) => n - 1,
+    warnings: ["overlay[2] (quote): no renderable media path (needs src or data.path — a Remotion-rendered alpha card) — skipped"],
+  });
+  const out = await assembleViaEdl({
+    store: e2eStore,
+    params: { tailSec: 3 },
+    runId: "r1",
+    keyPrefix: "assembly/",
+    backend: be,
+  });
+  assert.equal(out.overlaysDropped, 1, "one dropped overlay is reported, not swallowed");
+  assert.equal(out.captionsApplied, true, "the rest still composited");
+  console.log("E2E DROP PASS: overlaysDropped=1 surfaced through the adapter");
+}
+
+async function main(): Promise<void> {
+  await producedKeyContract();
+  await checkpointIdentity();
+  await checkpointFailSoft();
+  await e2eDrop();
+  console.log("\nALL CUTOVER TESTS PASSED");
+}
+
+main().catch((e) => { console.error("CUTOVER TEST FAILED:", e); process.exit(1); });
