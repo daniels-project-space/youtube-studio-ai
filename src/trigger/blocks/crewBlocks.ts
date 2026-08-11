@@ -17,7 +17,9 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { ShowBible, StyleDNA } from "@/engine/creative/types";
-import type { ChannelProfile } from "@/engine/channelProfile";
+import { buildChannelProfile, type ChannelProfile } from "@/engine/channelProfile";
+import { resolveCrew } from "@/lib/crew/crewProfile";
+import type { CrewRoleId } from "@/lib/crew/roles";
 import { resolveDirectorConfig } from "@/lib/crew/director";
 import {
   cinematographerDirectives,
@@ -53,6 +55,13 @@ interface ChannelGrounding {
   niche?: string;
   persona?: string;
   styleGrammar?: string;
+  /** Raw channel fields needed only to build the scoped ChannelProfile that
+   *  feeds resolveCrew (see crewProfileFor below) — not used for anything else. */
+  slug?: string;
+  status?: string;
+  template?: string;
+  budget?: number;
+  moduleConfig?: Record<string, Record<string, unknown>>;
 }
 
 /** Load the channel + its Show Bible and Style DNA. */
@@ -65,13 +74,28 @@ async function loadGrounding(ctx: StageContext): Promise<ChannelGrounding> {
       | { creativeBrief?: ShowBible; persona?: string; styleGrammar?: string; niche?: string }
       | undefined;
     const storeDna = ctx.store["styleDNA"] as StyleDNA | null | undefined;
+    const row = channel as
+      | {
+          styleDNA?: StyleDNA;
+          slug?: string;
+          status?: string;
+          template?: string;
+          budget?: number;
+          moduleConfig?: Record<string, Record<string, unknown>>;
+        }
+      | null;
     return {
       bible: identity?.creativeBrief ?? null,
-      dna: storeDna ?? ((channel as { styleDNA?: StyleDNA } | null)?.styleDNA ?? null),
+      dna: storeDna ?? (row?.styleDNA ?? null),
       channelName: channel?.name,
       niche: identity?.niche,
       persona: identity?.persona,
       styleGrammar: identity?.styleGrammar,
+      slug: row?.slug,
+      status: row?.status,
+      template: row?.template,
+      budget: row?.budget,
+      moduleConfig: row?.moduleConfig,
     };
   } catch (e) {
     ctx.log(`crew: loadGrounding failed (non-fatal): ${e instanceof Error ? e.message : e}`);
@@ -103,6 +127,73 @@ function resolveBible(g: ChannelGrounding, blockId: string, log: (m: string) => 
     `${blockId}: channel has NO Show Bible and NO Style DNA — refusing a generic brief. ` +
       `Run refresh-show-bible (or re-run design-channel grounding) for this channel.`,
   );
+}
+
+/**
+ * Build the minimal ChannelProfile resolveCrew needs (pipeline + moduleOverrides
+ * only — resolveCrew never touches identity/styleDNA/archetype). This is a
+ * local, read-only construction scoped to this check: the pipeline-wide
+ * ChannelProfile cutover (`src/engine/channelProfile.ts`'s documented TODO) is
+ * a separate, much larger change and is NOT what this does. moduleOverrides
+ * comes straight from the channel's real `moduleConfig['show-bible']` (preset +
+ * role toggles, written by Settings' "Pipeline modules" section); an empty
+ * `pipeline` is fine because `moduleParams()` merges moduleOverrides on top of
+ * (or in place of) any pipeline-entry params for the same block id.
+ */
+function crewProfileFor(ctx: StageContext, g: ChannelGrounding): ChannelProfile {
+  return buildChannelProfile({
+    row: {
+      _id: ctx.channelId,
+      name: g.channelName ?? "",
+      slug: g.slug ?? "",
+      status: g.status ?? "active",
+      template: g.template ?? "",
+      budget: g.budget ?? 0,
+      identity: undefined,
+    },
+    archetype: g.template ?? "unknown",
+    pipeline: [],
+    moduleOverrides: g.moduleConfig,
+  });
+}
+
+/**
+ * Actually calls resolveCrew — the catalog's documented "no silent gaps"
+ * resolver (golden.ts's show-bible engine) — against this channel's real crew
+ * config + the bible this block is about to brief from, and surfaces its typed
+ * per-role warning into the pipeline log if this role is active without an
+ * authored doctrine. Previously resolveCrew had zero non-test callers, so this
+ * guarantee was unreachable outside the test suite (P1-8 in
+ * docs/GOLDEN_MODULE_AUDIT_2026-08.md).
+ *
+ * Deliberately does NOT throw or change what gets briefed: `resolveBible`
+ * above already made the "no doctrine" call for generation (pseudo-bible
+ * fallback, dated 2026-06-10, "channel with no Show Bible still runs") and
+ * that behavior is preserved as-is. This only makes the gap visible instead of
+ * silent.
+ */
+function logCrewDoctrineGap(
+  ctx: StageContext,
+  g: ChannelGrounding,
+  bible: ShowBible,
+  blockId: string,
+  role: CrewRoleId,
+): void {
+  try {
+    const rc = resolveCrew(crewProfileFor(ctx, g), bible);
+    const member = rc.members.find((m) => m.role === role);
+    if (member && !member.hasDoctrine) {
+      const warning = rc.warnings.find((w) => w.startsWith(`${role} `));
+      ctx.log(`${blockId}: resolveCrew — ${warning ?? `${role} active but no authored doctrine`}`);
+    } else if (!member) {
+      ctx.log(
+        `${blockId}: resolveCrew — ${role} is toggled off in moduleConfig['show-bible'] but this ` +
+          `block still ran (pipeline/crew-config mismatch); briefing anyway.`,
+      );
+    }
+  } catch (e) {
+    ctx.log(`${blockId}: resolveCrew check failed (non-fatal, brief still proceeds): ${e instanceof Error ? e.message : e}`);
+  }
 }
 
 /** Compact Style-DNA digest injected into every crew prompt. */
@@ -177,6 +268,7 @@ export const directorBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "director_brief", ctx.log);
+    logCrewDoctrineGap(ctx, g, bible, "director_brief", "director");
     const config = resolveDirectorConfig(roleProfile(ctx, "director_brief"));
     const out = await briefDirector(bible, crewCtx(ctx, g, config));
     if (!out) failLoud("director_brief");
@@ -194,6 +286,7 @@ export const dpBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "dp_brief", ctx.log);
+    logCrewDoctrineGap(ctx, g, bible, "dp_brief", "cinematographer");
     const config = resolveCinematographerConfig(roleProfile(ctx, "dp_brief"));
     const directives = cinematographerDirectives(config);
     const out = await briefCinematographer(bible, crewCtx(ctx, g, directives));
@@ -219,6 +312,7 @@ export const editorBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "editor_brief", ctx.log);
+    logCrewDoctrineGap(ctx, g, bible, "editor_brief", "editor");
     const config = resolveEditorConfig(roleProfile(ctx, "editor_brief"));
     const directives = editorDirectives(config);
     const out = await briefEditor(bible, crewCtx(ctx, g, directives));
@@ -237,6 +331,7 @@ export const composerBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "composer_brief", ctx.log);
+    logCrewDoctrineGap(ctx, g, bible, "composer_brief", "composer");
     const config = resolveComposerConfig(roleProfile(ctx, "composer_brief"));
     const directives = composerDirectives(config);
     const out = await briefComposer(bible, crewCtx(ctx, g, { config, directives }));
@@ -255,6 +350,7 @@ export const criticSpecBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "critic_spec", ctx.log);
+    logCrewDoctrineGap(ctx, g, bible, "critic_spec", "critic");
     const config = resolveCriticConfig(roleProfile(ctx, "critic_spec"));
     const out = await briefCritic(bible, crewCtx(ctx, g, config));
     if (!out) failLoud("critic_spec");
