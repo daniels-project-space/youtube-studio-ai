@@ -400,7 +400,12 @@ async function checkpointIdentity(): Promise<void> {
   // heal re-burn overlays onto an already-overlaid video.
   const runScoped = cache.get("runs/r1/pre_overlay.mp4");
   assert.ok(runScoped, "the run-scoped key exists in the cache");
-  assert.equal(runScoped, "withOutro.mp4", "it is the composed body INCLUDING the outro, pre-overlay");
+  // "composed.mp4" (the fake's composeIntro output) IS the body-including-outro
+  // now: the outro is folded into that single compose graph rather than patched
+  // on afterwards, so there is no longer a separate "withOutro.mp4" stage. The
+  // invariant under test is unchanged — the checkpoint is the PRE-OVERLAY
+  // composite, never the finished video.
+  assert.equal(runScoped, "composed.mp4", "it is the composed body INCLUDING the folded-in outro, pre-overlay");
   assert.notEqual(runScoped, "finished.mp4", "it is NOT the finished (overlaid) video");
   assert.equal(
     out.preOverlayLocalPath,

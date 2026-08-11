@@ -202,6 +202,11 @@ export function paramsToAssemble(params: ParamsBag): AssembleParams {
     introMusicVol: num("introMusicVol", ASSEMBLE_DEFAULTS.introMusicVol),
     bodyMusicVol: num("bodyMusicVol", ASSEMBLE_DEFAULTS.bodyMusicVol),
     musicDuckRampSec: num("musicDuckRampSec", ASSEMBLE_DEFAULTS.musicDuckRampSec),
+    // Mirrors the god-block's own read verbatim: `Number(ctx.params["targetLufs"]
+    // ?? -14)` (narratedBlocks.ts:2368). The normalize pass is UNCONDITIONAL
+    // there, so this must always resolve to a number — leaving it undefined made
+    // renderTimeline skip loudness entirely (~8 LUFS below every legacy video).
+    targetLufs: num("targetLufs", ASSEMBLE_DEFAULTS.targetLufs ?? -14),
     captions: params["burnCaptions"] !== false,
     reframe: aspect === "16:9" ? "none" : (ASSEMBLE_DEFAULTS.reframe ?? "none"),
   };

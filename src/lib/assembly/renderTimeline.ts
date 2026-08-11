@@ -28,6 +28,13 @@ export interface CardSpec {
   bgSrc?: string;
   durSec: number;
   fadeInSec?: number;
+  /**
+   * An ALREADY-RENDERED card clip to REUSE verbatim (CardSeg.src). Set for the
+   * intro card, which the upstream `intro_card` block already produced — the
+   * god-block composites that same file. A backend that sees `src` must return
+   * it (resolved to a local path) instead of rendering a new card.
+   */
+  src?: string;
 }
 
 /** The concrete render ops. Real impl wraps ffmpeg.ts + Remotion + R2; tests inject a fake. */
@@ -66,10 +73,30 @@ export interface RenderBackend {
      * the trimmed length. Optional; a backend may ignore it (⇒ narration plays whole).
      */
     narrationKeepRanges?: { startSec: number; endSec: number }[];
+    /**
+     * Outro card FOLDED INTO THIS SAME ENCODE (xfade across the tail window).
+     *
+     * This is how the god-block does it (narratedBlocks.ts:2200-2201) and its own
+     * comment says why: the previous post-hoc `patchSegment` approach "paid an
+     * ENTIRE second full-video x264 pass for a 3-second change, and its probe-based
+     * anchor was a standing drift risk". The EDL path had re-introduced exactly
+     * that pattern — costing a whole extra encode and producing a measurable
+     * frame-count mismatch (non-CFR output from the patch pass).
+     */
+    outroCardPath?: string;
+    /** Outro dissolve length. God-block uses 1.2s (narratedBlocks.ts:2201). */
+    outroFadeInSec?: number;
     fmt: Format;
   }): Promise<string>;
-  /** Crossfade an outro card over the tail → local path. */
-  patchOutro(basePath: string, outroCardPath: string, startSec: number, durSec: number, fmt: Format): Promise<string>;
+  /**
+   * Crossfade a clip over a window of an existing video (a full re-encode).
+   *
+   * NO LONGER USED FOR THE OUTRO — that is folded into `composeIntro`'s single
+   * filter graph, matching the god-block. Kept OPTIONAL for any future targeted
+   * patch use (and so existing fake backends keep type-checking); renderTimeline
+   * never calls it.
+   */
+  patchOutro?(basePath: string, outroCardPath: string, startSec: number, durSec: number, fmt: Format): Promise<string>;
   /**
    * OPTIONAL post-compose reframe to the target aspect (portrait repurpose).
    * `strategy` is the renderHints.reframe value (center | subject_track). Omitting
@@ -223,12 +250,30 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
 
     let introCardPath: string | undefined;
     if (intro) {
-      introCardPath = await backend.renderCard({ role: "intro", title: intro.title, subtitle: intro.subtitle, bgSrc: intro.bgSrc, durSec: intro.durSec }, fmt);
+      // `src` (when the plan carries an already-rendered upstream card) makes the
+      // backend REUSE that file rather than render a second, different one.
+      introCardPath = await backend.renderCard({ role: "intro", title: intro.title, subtitle: intro.subtitle, bgSrc: intro.bgSrc, durSec: intro.durSec, src: intro.src }, fmt);
       cardsRendered++;
     }
     cardsRendered += middle.filter(isCard).length; // chapter cards built inside buildBody
 
-    const bodyPath = await backend.buildBody(middle, { targetSec: t.audio.bodySec + t.audio.tailSec, fmt });
+    // OUTRO IS RENDERED BEFORE THE COMPOSE and folded into its single filter
+    // graph — the god-block's order and method (narratedBlocks.ts:2152-2202).
+    let outroCardPath: string | undefined;
+    if (outro) {
+      outroCardPath = await backend.renderCard({ role: "outro", title: outro.title, subtitle: outro.subtitle, bgSrc: outro.bgSrc, durSec: outro.durSec, fadeInSec: outro.fadeInSec, src: outro.src }, fmt);
+      cardsRendered++;
+    }
+
+    // BODY TARGET — the PLAN is the source of truth for how much footage to lay
+    // down. The beat body plans `bodySec + tailSec + BODY_BUFFER_SEC` of clips
+    // (god-block parity); asking for only `bodySec + tailSec` here would throw
+    // that anti-loop margin away and let the body underrun → composeWithIntro
+    // loops back to clip 1 at the tail. `Math.max` keeps the exact-coverage
+    // paths (chapter windows, authored shot manifest) at their old target.
+    const clipCoverageSec = t.segments.filter((s) => !isCard(s)).reduce((a, s) => a + s.durSec, 0);
+    const bodyTargetSec = Math.max(t.audio.bodySec + t.audio.tailSec, clipCoverageSec);
+    const bodyPath = await backend.buildBody(middle, { targetSec: bodyTargetSec, fmt });
 
     composed = await backend.composeIntro({
       introCardPath,
@@ -246,15 +291,10 @@ export async function renderTimeline(timeline: Timeline, backend: RenderBackend,
       crossfadeSec: crossfadeSecFromHints(t.renderHints?.transitions),
       transition: transitionFromHints(t.renderHints?.transitions),
       ...(t.audio.narrationKeepRanges ? { narrationKeepRanges: t.audio.narrationKeepRanges } : {}),
+      // ONE pass, not two: no separate patchSegment re-encode for the outro.
+      ...(outroCardPath ? { outroCardPath, outroFadeInSec: outro?.fadeInSec ?? 1.2 } : {}),
       fmt,
     });
-
-    if (outro) {
-      const outroCard = await backend.renderCard({ role: "outro", title: outro.title, subtitle: outro.subtitle, bgSrc: outro.bgSrc, durSec: outro.durSec, fadeInSec: outro.fadeInSec }, fmt);
-      cardsRendered++;
-      const bodyDur = await backend.probe(composed);
-      composed = await backend.patchOutro(composed, outroCard, Math.max(0, bodyDur - outro.durSec), outro.durSec, fmt);
-    }
 
     await backend.cachePut(preKey, composed); // checkpoint for future overlay-class heals
   }

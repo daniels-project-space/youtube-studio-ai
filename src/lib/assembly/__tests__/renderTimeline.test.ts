@@ -59,11 +59,18 @@ async function fullRender(): Promise<void> {
   const { be, calls } = fake();
   const r = await renderTimeline(t, be);
   // ops issued in the right order
+  // BOTH cards render BEFORE the compose, and the outro is FOLDED INTO that
+  // single compose graph — the god-block's order/method (narratedBlocks.ts:
+  // 2152-2202). The old order ended in a separate `patchOutro` pass: an entire
+  // extra full-video x264 encode for a 3-second change, which the god-block's
+  // own comment says was deliberately removed for cost (and which produced a
+  // measured non-CFR frame-count mismatch).
   assert.deepEqual(
     calls.filter((c) => !c.startsWith("buildBody") && !c.startsWith("applyOverlays")),
-    ["renderCard:intro", "composeIntro", "renderCard:outro", "patchOutro", "publish"],
-    "render pipeline runs cards → compose → outro → publish in order",
+    ["renderCard:intro", "renderCard:outro", "composeIntro", "publish"],
+    "render pipeline renders both cards, folds the outro into ONE compose, then publishes",
   );
+  assert.ok(!calls.includes("patchOutro"), "outro must NOT cost a second full-video encode");
   assert.ok(calls.some((c) => c.startsWith("buildBody")), "body was built");
   assert.equal(r.healedFrom, "full", "full render path");
   assert.equal(r.overlaysApplied, 3, "all 3 overlays applied");

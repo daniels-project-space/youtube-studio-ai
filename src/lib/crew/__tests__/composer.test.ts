@@ -52,7 +52,12 @@ function composerBeatsDefault(): void {
 function noComposerParity(): void {
   const t = planTimeline(body, ASSEMBLE_DEFAULTS);
   assert.equal(t.audio.duck.bodyVol, 0.1026, "no composer ⇒ legacy duck (parity)");
-  assert.equal(t.audio.targetLufs, undefined, "no composer ⇒ no loudness override (parity)");
+  // Parity is -14, NOT undefined. The god-block normalizes UNCONDITIONALLY —
+  // `normalizeAudioOnly(…, Number(ctx.params["targetLufs"] ?? -14))`
+  // (narratedBlocks.ts:2366-2374). Asserting `undefined` here previously locked
+  // in a real defect: renderTimeline skips the loudness pass when targetLufs is
+  // unset, so the EDL path shipped ~8 LUFS quieter than every legacy video.
+  assert.equal(t.audio.targetLufs, -14, "no composer ⇒ god-block's unconditional -14 LUFS master (parity)");
   console.log("PARITY PASS: no composer directive ⇒ Assembly audio unchanged");
 }
 

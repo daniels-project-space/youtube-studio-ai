@@ -24,7 +24,12 @@ export const ASSEMBLY_SURFACE: CustomizationSurface = {
     { id: "chapterCards", type: "boolean", default: false, describes: "splice heading cards on chapter beats", servesStyles: ["documentary", "essay"] },
     { id: "musicDuckProfile", type: "enum", values: ["none", "gentle", "standard", "aggressive"], default: "standard", describes: "how hard music ducks under the voice", servesStyles: ["asmr", "meditation", "hype"] },
     { id: "targetLufs", type: "number", range: [-23, -12], default: -14, describes: "integrated loudness target", servesStyles: ["platform"] },
-    { id: "transitions", type: "enum", values: ["hardcut", "crossfade", "dip_to_black"], default: "hardcut", describes: "between-shot transition", servesStyles: ["documentary", "hype"] },
+    // default "crossfade" DESCRIBES PRODUCTION: the live god-block passes no
+    // crossfadeSec to composeWithIntro, whose default is 0.8s — so a channel that
+    // never touches this knob gets a title→body dissolve today. `hardcut` here
+    // used to misreport that (and forced crossfadeSec 0 on the EDL path). The
+    // `hype` preset still opts into a straight cut explicitly.
+    { id: "transitions", type: "enum", values: ["hardcut", "crossfade", "dip_to_black"], default: "crossfade", describes: "between-shot transition", servesStyles: ["documentary", "hype"] },
     { id: "reframe", type: "enum", values: ["none", "center", "subject_track"], default: "none", describes: "repurpose horizontal → vertical", servesStyles: ["shorts", "social"] },
     { id: "tailSec", type: "number", range: [0, 8], default: 3, describes: "silent fade-out tail", servesStyles: ["shorts", "ambient"] },
     { id: "captions", type: "boolean", default: true, describes: "burn word-level captions over the video (toggle off to ship caption-free)", servesStyles: ["accessibility", "shorts", "social"] },

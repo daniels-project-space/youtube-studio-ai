@@ -63,10 +63,14 @@ function lengthAndStructure(): void {
 function bodyCoverageAndCadence(): void {
   const t = planTimeline(baseInput());
   const body = t.segments.filter((s) => s.kind !== "card");
-  // 10s clips covering narration+tail = 123s → 13 clips (12×10 + 1×3)
-  assert.equal(body.length, 13, "body covers narration+tail at 10s cadence");
+  // 10s clips covering narration + tail + the 3s ANTI-LOOP BUFFER = 126s
+  // → 13 clips (12×10 + 1×6). The buffer is god-block parity
+  // (`targetSec: narrationSec + tailSec + 3`, narratedBlocks.ts:2122): clips that
+  // come up short of their planned window would otherwise leave the body under
+  // length, and composeWithIntro LOOPS a short body back to clip 1 at the tail.
+  assert.equal(body.length, 13, "body covers narration+tail+buffer at 10s cadence");
   assert.ok(body.slice(0, 12).every((s) => s.durSec === 10), "full body clips are 10s");
-  assert.equal(body[12].durSec, 3, "last body clip is the 3s remainder");
+  assert.equal(body[12].durSec, 6, "last body clip is the 6s remainder (3s tail + 3s buffer)");
   // interleave order: f0, e0, f1, e1, f2, f3, then cycle
   const srcs = body.map((s) => (s as { src: string }).src);
   assert.deepEqual(srcs.slice(0, 6), ["f0.mp4", "e0.jpg", "f1.mp4", "e1.jpg", "f2.mp4", "f3.mp4"], "footage⇄entity interleave");

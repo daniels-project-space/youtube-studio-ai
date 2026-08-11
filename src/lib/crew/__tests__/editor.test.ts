@@ -51,9 +51,12 @@ function wiredIntoAssembly(): void {
 }
 
 function editorBeatsChannelDefault(): void {
-  // ASSEMBLE_DEFAULTS.transitions = hardcut; the editor overrides it.
-  const t = planTimeline({ ...body, editor: { transitions: "crossfade", cutsPerMin: 8 } }, ASSEMBLE_DEFAULTS);
-  assert.equal(t.renderHints?.transitions, "crossfade", "editor directive beats the channel assemble default");
+  // ASSEMBLE_DEFAULTS.transitions is "crossfade" (god-block parity: the live block
+  // passes no crossfadeSec, so composeWithIntro's 0.8s default applies). Override
+  // with "hardcut" — the value that DIFFERS from the default — so this still proves
+  // the editor wins rather than just re-asserting the default.
+  const t = planTimeline({ ...body, editor: { transitions: "hardcut", cutsPerMin: 8 } }, ASSEMBLE_DEFAULTS);
+  assert.equal(t.renderHints?.transitions, "hardcut", "editor directive beats the channel assemble default");
   const firstClip = t.segments.find((s) => s.kind !== "card");
   assert.equal((firstClip as { durSec: number }).durSec, 8, "editor cadence (8 cuts/min) → ~8s cuts");
   console.log("AUTHORITY PASS: the editor directs Assembly (overrides the channel default)");
@@ -62,7 +65,11 @@ function editorBeatsChannelDefault(): void {
 function noEditorParity(): void {
   // no editor directive ⇒ Assembly behaves exactly as before (parity)
   const t = planTimeline(body, ASSEMBLE_DEFAULTS);
-  assert.equal(t.renderHints?.transitions, "hardcut", "no editor ⇒ channel default transition");
+  // Parity is "crossfade", NOT "hardcut": the god-block passes no crossfadeSec to
+  // composeWithIntro, whose default is 0.8s — so every legacy video dissolves
+  // title→body. "hardcut" here used to lock in a mismatch (the EDL path forced
+  // crossfadeSec 0 against a legacy path that never did).
+  assert.equal(t.renderHints?.transitions, "crossfade", "no editor ⇒ channel default transition (god-block's 0.8s dissolve)");
   const firstClip = t.segments.find((s) => s.kind !== "card");
   assert.equal((firstClip as { durSec: number }).durSec, 10, "no editor ⇒ legacy 10s cadence (parity)");
   console.log("PARITY PASS: no editor directive ⇒ Assembly unchanged");

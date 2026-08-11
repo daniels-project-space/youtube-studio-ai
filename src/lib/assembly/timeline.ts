@@ -37,6 +37,21 @@ const CardSeg = z.object({
   subtitle: z.string().optional(),
   bgSrc: z.string().optional(),
   fadeInSec: z.number().nonnegative().optional(),
+  /**
+   * An ALREADY-RENDERED card clip (local path / R2 key / url). When present the
+   * renderer REUSES this file verbatim instead of rendering a fresh card.
+   *
+   * This exists because the intro card is produced (and paid for) UPSTREAM by
+   * the `intro_card` block; the god-block composites that exact file
+   * (`ctx.store.introCardPath` → composeWithIntro). Without this field the EDL
+   * path threw the upstream card away and rendered a structurally DIFFERENT one
+   * through Remotion — a wasted render plus a real picture divergence.
+   *
+   * Only cards that genuinely have an upstream artifact set this (intro today).
+   * Outro/chapter cards are authored from the plan's own title/subtitle and are
+   * still rendered fresh, exactly as the god-block does.
+   */
+  src: z.string().optional(),
 });
 export const SegmentSchema = z.discriminatedUnion("kind", [FootageSeg, EntitySeg, CardSeg]);
 

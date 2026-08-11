@@ -75,6 +75,24 @@ export interface AssembleParams {
   reframe?: string;
 }
 
+/**
+ * ANTI-LOOP BUFFER — extra footage the BEAT body lays down beyond the visible
+ * runtime (narration + tail), so the body track can never underrun.
+ *
+ * The god-block asks its body renderer for `narrationSec + tailSec + 3`
+ * (narratedBlocks.ts:2122). The margin is not cosmetic: `composeWithIntro`
+ * LOOPS a short body to fill the runtime, so a body even a fraction under
+ * length replays earlier clips at the tail — the "duplicate footage" defect QA
+ * flags. The EDL path planned exactly `bodySec + tailSec`, so any clip shorter
+ * than its planned window (very common: a 10s window on a 9.7s stock clip) made
+ * the body underrun and loop.
+ *
+ * Applies to the BEAT body only — the chapter (structured) and authored
+ * shot-manifest paths are exact-coverage by construction and the god-block adds
+ * no buffer there either.
+ */
+export const BODY_BUFFER_SEC = 3;
+
 /** God-block defaults, preserved verbatim. */
 export const ASSEMBLE_DEFAULTS: AssembleParams = {
   aspect: "16:9",
@@ -88,9 +106,18 @@ export const ASSEMBLE_DEFAULTS: AssembleParams = {
   introMusicVol: 0.513,
   bodyMusicVol: 0.1026,
   musicDuckRampSec: 4,
+  // The god-block ALWAYS loudness-normalizes the final mix, defaulting to -14
+  // LUFS (`Number(ctx.params["targetLufs"] ?? -14)`, narratedBlocks.ts:2368) —
+  // it is not an opt-in. Leaving this undefined made renderTimeline skip the
+  // normalize pass entirely, shipping ~8 LUFS quieter than every legacy video.
+  targetLufs: -14,
   outroCard: true,
   chapterCards: true,
-  transitions: "hardcut",
+  // The god-block passes NO crossfadeSec to composeWithIntro, whose documented
+  // default is 0.8s — so every legacy video dissolves title→body. "hardcut" here
+  // was a mis-transcription that forced crossfadeSec 0 on the EDL path. Presets
+  // that genuinely want a straight cut (e.g. `hype`) still set it explicitly.
+  transitions: "crossfade",
   captions: true,
   reframe: "none",
   // cutsPerMin omitted ⇒ legacy length-based cadence (god-block parity for the default/essay path)
@@ -211,7 +238,9 @@ export function resolveAssembleParams(profile: ChannelProfile, block = "timeline
     introMusicVol: num("introMusicVol", duck.introVol),
     bodyMusicVol: num("bodyMusicVol", duck.bodyVol),
     musicDuckRampSec: num("musicDuckRampSec", ASSEMBLE_DEFAULTS.musicDuckRampSec),
-    targetLufs: Number(k.targetLufs),
+    // Never let an absent/!finite knob become NaN — that would silently disable
+    // the loudness pass again (the exact class of bug this path just fixed).
+    targetLufs: Number.isFinite(Number(k.targetLufs)) ? Number(k.targetLufs) : ASSEMBLE_DEFAULTS.targetLufs,
     cutsPerMin: CUT_ENERGY_CPM[String(k.cutEnergy)],
     outroCard: k.outroStyle !== "none",
     chapterCards: Boolean(k.chapterCards),
@@ -355,7 +384,10 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
   const onBeat = (input.sentenceTimings?.length ?? 0) > 0;
 
   const segments: Segment[] = [];
-  if (hasIntro) segments.push({ kind: "card", role: "intro", durSec: introSec, bgSrc: input.cardBgSrc });
+  // The intro card is ALREADY RENDERED upstream (the `intro_card` block) and the
+  // god-block composites that exact file. Carry its path on the segment so the
+  // renderer reuses it instead of paying for a second, different Remotion card.
+  if (hasIntro) segments.push({ kind: "card", role: "intro", durSec: introSec, bgSrc: input.cardBgSrc, src: input.introCardSrc });
 
   if (storyManifest) {
     segments.push(...storyManifest.items.map((item) => ({
@@ -401,7 +433,10 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
     // bodyMaxSeg is used (flat cadence = parity with the old averaged behaviour).
     const curve = input.editor?.pacingCurve;
     const segAt = curve && curve.length ? (f: number) => segSecondsFromCpm(cpmAtFrac(curve, f)) : () => bodyMaxSeg;
-    segments.push(...fillBody(clips, entitySet, effectiveNarrationSec + tailSec, segAt, onBeat));
+    // +BODY_BUFFER_SEC — god-block parity (narratedBlocks.ts:2122). The extra
+    // footage is never SHOWN (runtime is intro+body+tail); it exists so the body
+    // track cannot underrun and make composeWithIntro loop back to clip 1.
+    segments.push(...fillBody(clips, entitySet, effectiveNarrationSec + tailSec + BODY_BUFFER_SEC, segAt, onBeat));
   }
 
   if (params.outroCard && tailSec >= 2) {
