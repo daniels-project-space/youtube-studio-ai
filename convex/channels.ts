@@ -1,4 +1,4 @@
-import { mutation, query } from "./studioFunctions";
+import { mutation, query, requireStudioServiceIdentity } from "./studioFunctions";
 import { v } from "convex/values";
 import type { QueryCtx } from "./_generated/server";
 import type { Doc } from "./_generated/dataModel";
@@ -34,6 +34,7 @@ import {
   assertContentLaneMatchesFamily,
   assertPipelineMatchesContentLane,
   contentLaneFingerprint,
+  contentLaneForFamily,
   parseContentLane,
   resolveContentLane,
 } from "@/engine/contentLane";
@@ -462,6 +463,82 @@ export const createChannel = mutation({
     }
 
     return await ctx.db.insert("channels", doc);
+  },
+});
+
+/**
+ * MIGRATION (additive, idempotent): make a legacy channel's IMPLICIT family
+ * EXPLICIT. It writes `family` + `contentLane` and nothing else.
+ *
+ * Channels created before `family` was persisted work today only because
+ * `inferContentLane` happens to find exactly ONE known visual producer in their
+ * stored pipeline. A later pipeline edit that adds or swaps a renderer would
+ * make that inference ambiguous and silently drop the channel into
+ * `legacy_unclassified` — losing its style lock with no warning. This freezes
+ * the lane the runtime ALREADY resolves for the channel.
+ *
+ * Deliberately narrow, because it runs against live channels:
+ *   - Never overwrites an existing `family`; an already-classified channel is
+ *     reported back untouched rather than re-labelled.
+ *   - Re-derives the lane from the channel's OWN stored pipeline and REFUSES
+ *     any family whose lane differs from the one resolved today, so the write
+ *     cannot change runtime behaviour — it can only make it explicit.
+ *   - Re-asserts the stored pipeline against the lane contract before freezing.
+ *   - Idempotent: re-running on a backfilled channel is a reported no-op.
+ */
+export const backfillChannelFamily = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    family: v.string(),
+  },
+  returns: v.object({
+    changed: v.boolean(),
+    reason: v.string(),
+    family: v.optional(v.string()),
+    contentLane: v.optional(contentLaneValidator),
+  }),
+  handler: async (ctx, args) => {
+    await requireStudioServiceIdentity(ctx, args.ownerId, "channel family backfill");
+
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel) throw new Error("channel not found");
+    assertChannelWritable(channel, "family backfill");
+
+    // Defensive: this migration only ever fills a hole. It must not relabel a
+    // channel whose family is already known (the 4 wizard-created channels).
+    if (channel.family !== undefined && channel.family !== null) {
+      return {
+        changed: false,
+        reason:
+          channel.family === args.family
+            ? `no-op: family already set to ${channel.family}`
+            : `refused: family already set to ${channel.family}; will not overwrite with ${args.family}`,
+        family: channel.family,
+        contentLane: channel.contentLane,
+      };
+    }
+
+    const pipeline = Array.isArray(channel.pipeline) ? channel.pipeline : [];
+    // Exactly what runPipeline resolves for this channel right now (no family).
+    const currentLane = resolveContentLane({ stored: channel.contentLane, pipeline });
+    const requestedLane = contentLaneForFamily(args.family);
+    if (!requestedLane) throw new Error(`unknown family: ${args.family}`);
+    if (requestedLane.key !== currentLane.key) {
+      throw new Error(
+        `refusing backfill: family ${args.family} implies lane ${requestedLane.key}, ` +
+          `but this channel currently resolves to ${currentLane.key}`,
+      );
+    }
+    assertPipelineMatchesContentLane(requestedLane, pipeline);
+
+    await ctx.db.patch(args.channelId, { family: args.family, contentLane: requestedLane });
+    return {
+      changed: true,
+      reason: `backfilled implicit lane ${currentLane.key} as explicit family ${args.family}`,
+      family: args.family,
+      contentLane: requestedLane,
+    };
   },
 });
 
