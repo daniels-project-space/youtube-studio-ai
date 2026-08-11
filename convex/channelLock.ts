@@ -206,3 +206,61 @@ export async function patchChannelRespectingLock(
   const newChannelId = await insertChannelFork(ctx, channel, patch);
   return { forked: true, channelId, newChannelId };
 }
+
+/**
+ * Fields that record an EXTERNAL FACT about a channel rather than
+ * operator-authored content/config — something that already happened outside
+ * the app, not an edit to the channel's identity, pipeline, creative brief,
+ * or schedule. A field belongs here only if ALL of the following hold:
+ *
+ *   1. The write records a fact about the outside world (e.g. "a real
+ *      YouTube channel now exists for this row"), not a change to what the
+ *      channel IS.
+ *   2. The field is already in NON_INHERITED_FORK_FIELDS above — forking
+ *      would DROP or misrepresent the fact, so forking is not an option.
+ *   3. Refusing the write would strand an already-completed, irreversible
+ *      external side effect, not merely defer an in-app edit.
+ *
+ * `youtubeCreated` is the first and, as of this writing, only member: it is
+ * the exactly-once receipt that a real YouTube channel was created at the
+ * provider (see convex/youtubeCreationClaims.ts markCreated). Do not add a
+ * field here without re-checking all three conditions — this allowlist is
+ * the entire size of the channel-lock exception; widening it silently would
+ * silently widen what can bypass the lock.
+ */
+const EXTERNAL_FACT_FIELDS: readonly string[] = ["youtubeCreated"];
+
+/**
+ * Patch a channel with an EXTERNAL FACT field (see EXTERNAL_FACT_FIELDS),
+ * bypassing the lock guard entirely — no fork, no block, even when the
+ * channel is locked.
+ *
+ * This is deliberately narrower than patchChannelRespectingLock: every key
+ * in `patch` must be on the EXTERNAL_FACT_FIELDS allowlist or this throws.
+ * Use it only for writes that record something that already happened
+ * outside the app; never for operator-authored content. Content/config
+ * writes must go through patchChannelRespectingLock (or assertChannelWritable
+ * for non-patch writes) so a locked channel forks instead of being mutated.
+ */
+export async function patchChannelExternalFact(
+  ctx: MutationCtx,
+  channelId: Id<"channels">,
+  patch: Record<string, unknown>,
+): Promise<void> {
+  const disallowed = Object.keys(patch).filter(
+    (key) => !EXTERNAL_FACT_FIELDS.includes(key),
+  );
+  if (disallowed.length > 0) {
+    throw new Error(
+      `patchChannelExternalFact: field(s) ${disallowed.join(", ")} are not on the ` +
+        `EXTERNAL_FACT_FIELDS allowlist (convex/channelLock.ts). This helper bypasses ` +
+        `the channel lock, so only fields that record an external fact — not operator ` +
+        `content — may be written this way. Add to the allowlist deliberately after ` +
+        `re-checking the three conditions documented above, or use ` +
+        `patchChannelRespectingLock instead.`,
+    );
+  }
+  const channel = await ctx.db.get(channelId);
+  if (!channel) throw new Error(`channel not found: ${channelId}`);
+  await ctx.db.patch(channelId, patch);
+}
