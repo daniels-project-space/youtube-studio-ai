@@ -18,19 +18,30 @@
  * (src/lib/pydeps.ts) before any paid generation.
  */
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
 import { makeRunTempDir } from "@/lib/files";
-import { putObjectFromFile } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
 import {
   castMotionComic,
   hasMotionComic,
   motionComicPanelCount,
+  planMotionComicStoryboard,
+  type MotionComicBrief,
   type MotionComicImageRequest,
+  type MotionComicStoryboard,
 } from "@/lib/motionComic";
+import { geminiJson } from "@/lib/gemini";
+import {
+  channelCritiqueBrief,
+  produceAndCritique,
+  type ChannelCritiqueContext,
+} from "@/engine/critiqueLoop";
+import { laneQualityPolicy } from "@/engine/contentLane";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { PRICE } from "@/engine/pricing";
@@ -66,6 +77,270 @@ async function recordAsset(ctx: StageContext, kind: string, r2Key: string, meta?
  */
 const NO_TEXT_GUARD =
   "ABSOLUTELY NO speech bubbles, NO captions, NO lettering, NO text of any kind anywhere in the image.";
+
+/* ── PRODUCE → CRITIQUE → REGENERATE for the STORYBOARD (P1-4 follow-up) ──────
+ *
+ * This block used to hand ONE unreviewed Gemini storyboard straight into
+ * castMotionComic, which then bought every panel's art, every dialogue line's
+ * ElevenLabs voice and a Suno bed off the back of it. A weak story was only
+ * discoverable AFTER the whole budget was spent.
+ *
+ * The loop sits on the STORYBOARD, never on rendered output — the same reason
+ * gen_footage critiques its shot plan:
+ *   - Every iteration is a TEXT-only call (planMotionComicStoryboard touches no
+ *     image generator, no TTS, no music, no renderer), so a regeneration
+ *     CANNOT re-purchase art/voices/music by construction.
+ *   - castMotionComic is invoked exactly ONCE, after the loop settles, with the
+ *     accepted plan — so a rejection costs a text call, never a second render.
+ *   - The accepted storyboard is frozen into a content-addressed, immutable R2
+ *     checkpoint keyed by a hash of every planning input. A healer replay or
+ *     Trigger retry reloads that exact story, runs ZERO critique calls, and
+ *     re-derives byte-identical art prompts, whose content-hash cache then
+ *     returns the already-paid-for panels instead of buying them again.
+ *   - Hard cap of 2 iterations (one informed retry), lane-tunable downward.
+ *   - Grader outage accepts the current storyboard rather than looping or
+ *     failing the run; the deterministic checks below still run unconditionally.
+ */
+const COMIC_STORYBOARD_CHECKPOINT_VERSION = "motion-comic-storyboard/v1";
+
+/** Channel doctrine + lane grounding for this block's critique (P1-1/P1-17). */
+function comicCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
+  const lane = ctx.store["contentLane"];
+  const laneKey = typeof (lane as { key?: unknown } | null)?.key === "string"
+    ? String((lane as { key?: unknown }).key)
+    : undefined;
+  const text = (key: string): string | undefined => {
+    const value = ctx.store[key];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  };
+  return {
+    ...(text("channelName") ? { channelName: text("channelName")! } : {}),
+    ...(text("persona") ? { persona: text("persona")! } : {}),
+    ...(text("styleGrammar") ? { styleGrammar: text("styleGrammar")! } : {}),
+    ...(text("criticDoctrine") ? { criticDoctrine: text("criticDoctrine")! } : {}),
+    ...(laneKey ? { contentLaneKey: laneKey } : {}),
+    laneEmphasis: laneQualityPolicy(lane).emphasis,
+  };
+}
+
+function storyboardWords(plan: MotionComicStoryboard): number {
+  return plan.panels.reduce(
+    (total, panel) => total + panel.lines.reduce((n, line) => n + line.text.trim().split(/\s+/).filter(Boolean).length, 0),
+    0,
+  );
+}
+
+/**
+ * DETERMINISTIC defects, computed in code per critiqueLoop's design rule — the
+ * Director is never asked to count panels, words or duplicate shots.
+ */
+export function motionComicStoryboardDefects(
+  plan: MotionComicStoryboard,
+  wantPanels: number,
+  targetSeconds: number,
+): string[] {
+  const issues: string[] = [];
+  if (plan.panels.length < wantPanels) {
+    issues.push(`only ${plan.panels.length} of the ${wantPanels} requested panels came back — write exactly ${wantPanels}`);
+  }
+  if (plan.characters.length < 2) {
+    issues.push(`only ${plan.characters.length} named character(s) were cast — cast 2-4 so the panels can hold real dialogue`);
+  }
+  const castIds = new Set(plan.characters.map((character) => character.id));
+  plan.panels.forEach((panel, index) => {
+    if (!panel.lines.length) {
+      issues.push(`panel ${index + 1} has no lines — every panel needs at least a narrator beat`);
+      return;
+    }
+    // An unknown speaker is silently re-voiced as the narrator by the engine,
+    // so the character's bubble is bought in the wrong voice. Catch it here.
+    const stray = panel.lines.find((line) => line.speaker !== "narrator" && !castIds.has(line.speaker));
+    if (stray) {
+      issues.push(`panel ${index + 1} gives a line to "${stray.speaker}", who is not in the cast — use "narrator" or a cast character id`);
+    }
+    const longBubble = panel.lines.find(
+      (line) => line.speaker !== "narrator" && line.text.trim().split(/\s+/).filter(Boolean).length > 12,
+    );
+    if (longBubble) {
+      issues.push(`panel ${index + 1}'s "${longBubble.speaker}" bubble is over 12 words — speech bubbles must stay short or they cover the art`);
+    }
+  });
+  // Shot variety: a story drawn entirely in one shot scale reads as a slideshow.
+  const shots = new Set(plan.panels.map((panel) => panel.shot));
+  if (plan.panels.length >= 4 && shots.size < 2) {
+    issues.push(`every panel is a "${plan.panels[0]?.shot}" shot — vary wide/medium/close so the page has rhythm`);
+  }
+  // Consecutive panels that share environment + action + mood produce two
+  // near-identical paid images.
+  for (let i = 1; i < plan.panels.length; i++) {
+    const previous = plan.panels[i - 1].visual;
+    const current = plan.panels[i].visual;
+    if (
+      previous.environment === current.environment &&
+      previous.action === current.action &&
+      previous.mood === current.mood &&
+      plan.panels[i - 1].shot === plan.panels[i].shot
+    ) {
+      issues.push(`panels ${i} and ${i + 1} share the same environment, action, mood AND shot — they will render as duplicate art`);
+    }
+  }
+  // Length: the storyboard prompt asks for ~2.6 spoken words/second. A plan far
+  // under target renders a video far shorter than the operator asked for.
+  if (targetSeconds > 0) {
+    const want = targetSeconds * 2.6;
+    const got = storyboardWords(plan);
+    if (got < want * 0.65) {
+      issues.push(`the whole story is only ~${got} spoken words but needs ~${Math.round(want)} to run ${targetSeconds}s — give the narrator more vivid prose per panel`);
+    }
+  }
+  return issues.slice(0, 8);
+}
+
+/**
+ * Subjective grade from the Director, grounded in this channel's doctrine.
+ * Returns null when the grader is unavailable so the caller can accept rather
+ * than blind-spend another iteration.
+ */
+async function gradeStoryboard(args: {
+  plan: MotionComicStoryboard;
+  topic: string;
+  channel: ChannelCritiqueContext;
+}): Promise<{ score: number; pass: boolean; issues: string[] } | null> {
+  try {
+    const verdict = await geminiJson<{ score?: unknown; pass?: unknown; issues?: unknown }>({
+      prompt:
+        `You are the DIRECTOR reviewing a comic-book storyboard for "${args.topic}" BEFORE any paid art, voice or music is bought. ` +
+        `Producing this storyboard is expensive and irreversible — reject a story that would waste it.\n` +
+        channelCritiqueBrief(args.channel) +
+        `\nTITLE: ${args.plan.title}\nLOGLINE: ${args.plan.logline}\n` +
+        `CAST: ${args.plan.characters.map((character) => `${character.id} (${character.name})`).join(", ") || "none"}\n` +
+        `\nTHE STORYBOARD (${args.plan.panels.length} panels):\n` +
+        args.plan.panels
+          .map((panel, index) =>
+            `${index + 1}. [${panel.shot}] ${panel.visual.environment}/${panel.visual.action}/${panel.visual.mood}\n` +
+            panel.lines.map((line) => `   ${line.speaker}: ${line.text}`).join("\n"),
+          )
+          .join("\n") +
+        `\n\nJudge ONLY these: (a) a real dramatic arc — strong hook, rising tension, a turn, a resonant ending; ` +
+        `(b) every panel ADVANCES the story rather than restating the previous one; ` +
+        `(c) the narrator carries a coherent through-line in vivid prose, and character bubbles sound like people, not exposition; ` +
+        `(d) each panel's visual is a CONCRETE drawable moment that matches what its lines say; ` +
+        `(e) the story is accurate to the topic and would hold a viewer to the last panel.\n` +
+        `Return STRICT JSON {"score":0.0,"pass":true,"issues":["..."]}. Each issue must name the panel number and give ` +
+        `a concrete instruction the writer can act on. Use [] when the storyboard passes.`,
+      maxTokens: 1200,
+      temperature: 0.2,
+    });
+    const score = Number(verdict.score);
+    const issues = Array.isArray(verdict.issues)
+      ? verdict.issues.map((issue) => String(issue ?? "").trim()).filter(Boolean).slice(0, 6)
+      : [];
+    return {
+      score: Number.isFinite(score) ? Math.min(1, Math.max(0, score)) : 0.5,
+      pass: verdict.pass === true,
+      issues,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function storyboardCheckpointKey(ctx: StageContext, inputs: unknown): string {
+  const hash = createHash("sha256").update(JSON.stringify(inputs)).digest("hex").slice(0, 32);
+  return `${ctx.keyPrefix}runs/${ctx.runId}/storyboards/motion-comic-${hash}.json`;
+}
+
+async function loadStoryboardCheckpoint(key: string): Promise<MotionComicStoryboard | null> {
+  try {
+    const parsed = JSON.parse(Buffer.from(await getObjectBytes(key)).toString("utf8")) as {
+      version?: unknown;
+      storyboard?: unknown;
+    };
+    if (parsed.version !== COMIC_STORYBOARD_CHECKPOINT_VERSION) return null;
+    const storyboard = parsed.storyboard as MotionComicStoryboard | undefined;
+    if (!storyboard || !Array.isArray(storyboard.panels) || !storyboard.panels.length) return null;
+    if (!Array.isArray(storyboard.characters)) return null;
+    if (storyboard.panels.some((panel) => !Array.isArray(panel.lines) || !panel.lines.length)) return null;
+    return storyboard;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write the storyboard with the Director in the loop, then FREEZE it. The only
+ * caller renders the returned storyboard exactly once and nothing else.
+ */
+async function planComicWithCritique(
+  ctx: StageContext,
+  brief: MotionComicBrief,
+): Promise<MotionComicStoryboard> {
+  const channel = comicCritiqueChannel(ctx);
+  const wantPanels = motionComicPanelCount(brief.panels);
+  const targetSeconds = Number(brief.targetSeconds ?? 0) || 0;
+  const checkpointKey = storyboardCheckpointKey(ctx, {
+    contract: COMIC_STORYBOARD_CHECKPOINT_VERSION,
+    topic: brief.topic,
+    facts: brief.facts ?? null,
+    panels: wantPanels,
+    style: brief.style ?? null,
+    targetSeconds,
+    criticDoctrine: channel.criticDoctrine ?? null,
+    contentLaneKey: channel.contentLaneKey ?? null,
+  });
+
+  const cached = await loadStoryboardCheckpoint(checkpointKey);
+  if (cached) {
+    ctx.log(`motion_comic: reused the frozen storyboard (${cached.panels.length} panels) — no re-planning, no re-render`);
+    return cached;
+  }
+
+  const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
+  const maxIters = Math.max(1, Math.min(2, laneQuality.maxCritiqueIters));
+
+  const loop = await produceAndCritique<MotionComicStoryboard>({
+    label: "motion_comic storyboard",
+    threshold: laneQuality.critiqueThreshold,
+    maxIters,
+    log: (message) => ctx.log(message),
+    channel,
+    // TEXT ONLY. planMotionComicStoryboard reaches no image/voice/music
+    // provider, so no iteration here can spend render money.
+    produce: (priorIssues) => planMotionComicStoryboard(brief, (m) => ctx.log(`mc-plan: ${m}`), priorIssues),
+    critique: async (plan, iter) => {
+      const hard = motionComicStoryboardDefects(plan, wantPanels, targetSeconds);
+      const graded = await gradeStoryboard({ plan, topic: brief.topic, channel });
+      if (!graded) {
+        ctx.log(`motion_comic: storyboard grader unavailable — accepting candidate ${iter} on deterministic checks alone`);
+        return { score: iter === 1 ? 1 : 0, pass: true, issues: hard };
+      }
+      const issues = [...hard, ...graded.issues].slice(0, 8);
+      const pass = graded.pass && hard.length === 0;
+      if (!pass) {
+        ctx.log(
+          `motion_comic: storyboard ${iter} REJECTED (${issues.slice(0, 2).join("; ").slice(0, 160)})` +
+          (iter < maxIters ? " — rewriting with the defects fed back (text only, no render)" : " — iteration cap reached"),
+        );
+      }
+      const score = Math.max(0, graded.score - Math.min(0.5, hard.length * 0.1));
+      return { score, pass, issues };
+    },
+  });
+
+  const plan = loop.value;
+  if (!plan.panels.length) throw new Error("motion_comic: storyboard writer returned no panels");
+  ctx.log(
+    `motion_comic: storyboard settled after ${loop.iterations} candidate(s) ` +
+    `(${loop.accepted ? "accepted" : "best of the rejected set"}, score ${loop.critique.score.toFixed(2)}, ` +
+    `${plan.panels.length} panels, ~${storyboardWords(plan)} spoken words)`,
+  );
+  await putObject(
+    checkpointKey,
+    Buffer.from(JSON.stringify({ version: COMIC_STORYBOARD_CHECKPOINT_VERSION, storyboard: plan })),
+    { contentType: "application/json" },
+  );
+  return plan;
+}
 
 export const motionComicBlock: Block = {
   id: "motion_comic",
@@ -142,16 +417,22 @@ export const motionComicBlock: Block = {
       },
       onReceipt: (receipt) => { novitaImageCostUsd += receipt.costUsd; },
     });
+    const brief: MotionComicBrief = {
+      topic,
+      facts,
+      panels,
+      style,
+      width,
+      targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined,
+      ...(layoutRepair.length ? { layoutRepair } : {}),
+    };
+    // QUALITY GATE — settle the storyboard with the Director FIRST, at text
+    // prices. castMotionComic below is then called exactly once with the
+    // accepted story, so a rejected draft never costs a second paid render.
+    const storyboard = await planComicWithCritique(ctx, brief);
     const res = await castMotionComic({
-      brief: {
-        topic,
-        facts,
-        panels,
-        style,
-        width,
-        targetSeconds: Number(ctx.params["targetSeconds"] ?? 0) || undefined,
-        ...(layoutRepair.length ? { layoutRepair } : {}),
-      },
+      brief,
+      plan: storyboard,
       runDir,
       outPath,
       generateImage,

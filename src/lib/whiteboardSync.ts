@@ -33,7 +33,7 @@
  *     runDir, log,
  *   });
  */
-import { mkdir, readFile, unlink, writeFile } from "node:fs/promises";
+import { mkdir, readdir, readFile, unlink, writeFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -192,6 +192,28 @@ interface RawPlan { title?: string; panels?: RawPanel[] }
 interface NLayer { kind: "art" | "label"; draw?: string; text?: string; color: string; cue: string; box: number[]; art?: string }
 interface NPanel { idx: number; narration: string; layers: NLayer[] }
 
+/**
+ * THE PLAN/RENDER SEAM (pattern: documotion's `CraftDocuArgs.plan`).
+ *
+ * Everything in this storyboard section is CHEAP and text-only. Everything the
+ * orchestrator does with the result below — per-layer Nano-Banana art, TTS,
+ * the python scribe render — is PAID and irreversible.
+ *
+ * Exporting the storyboard as a first-class value is what lets a caller run a
+ * produce→critique→regenerate loop at TEXT prices and then hand the ACCEPTED
+ * plan to `castWhiteboardSync`, which renders it exactly once. Without this
+ * seam the only way to get quality feedback was to critique a finished video,
+ * i.e. to re-buy the whole render to fix one bad panel.
+ */
+export interface WhiteboardStoryboard {
+  title: string;
+  panels: NPanel[];
+  /** Concatenated panel narration — the exact text that will be sent to TTS. */
+  fullText: string;
+}
+export type WhiteboardStoryboardPanel = NPanel;
+export type WhiteboardStoryboardLayer = NLayer;
+
 function planContract(brief: WhiteboardSyncBrief, nPanels: number, words: number): string {
   const facts = brief.facts ? `GROUNDING FACTS (accurate, use only these):\n${brief.facts}\n\n` : "";
   const beats = brief.beats?.length
@@ -262,12 +284,27 @@ function boundNarration(panels: NPanel[], targetWords: unknown): NPanel[] {
   });
 }
 
+/**
+ * A rejected storyboard's issues, folded back into the writer's prompt. Empty
+ * notes render "" so an un-critiqued call sends the byte-identical old prompt.
+ */
+function revisionClause(revisionNotes: readonly string[]): string {
+  const notes = revisionNotes.map((note) => String(note ?? "").trim()).filter(Boolean).slice(0, 8);
+  if (!notes.length) return "";
+  return (
+    `\n\nREVISION — a director REJECTED your previous storyboard before any art or voice was bought. ` +
+    `Rewrite it so that EVERY issue below is fixed; do not repeat the rejected draft:\n` +
+    notes.map((note, index) => `${index + 1}. ${note}`).join("\n")
+  );
+}
+
 /** Generate ONE chunk of panels (retry on short/invalid output). */
-async function genChunk(brief: WhiteboardSyncBrief, beats: string[], nP: number, words: number, cont: string, log: Logger): Promise<{ title: string; panels: NPanel[] }> {
+async function genChunk(brief: WhiteboardSyncBrief, beats: string[], nP: number, words: number, cont: string, log: Logger, revisionNotes: readonly string[] = []): Promise<{ title: string; panels: NPanel[] }> {
   const sub: WhiteboardSyncBrief = { ...brief, beats, panels: nP, targetWords: words };
   for (let attempt = 0; attempt < 3; attempt++) {
     const extra =
       (cont ? `\n\nThis is PART of a longer video already in progress; the previous panel's narration ended: "${cont.slice(-160)}". Continue naturally — do NOT repeat the intro or title.` : "") +
+      revisionClause(revisionNotes) +
       (attempt ? `\n\nFIX: output EXACTLY ${nP} panels as STRICTLY VALID minified JSON.` : "");
     try {
       const raw = await geminiJsonPro<RawPlan>({ prompt: planContract(sub, nP, words) + extra, maxTokens: 14000, temperature: 0.5 });
@@ -282,7 +319,7 @@ async function genChunk(brief: WhiteboardSyncBrief, beats: string[], nP: number,
   return { title: brief.topic, panels: [] };
 }
 
-async function buildStoryboard(brief: WhiteboardSyncBrief, log: Logger): Promise<{ title: string; panels: NPanel[]; fullText: string }> {
+async function buildStoryboard(brief: WhiteboardSyncBrief, log: Logger, revisionNotes: readonly string[] = []): Promise<WhiteboardStoryboard> {
   const nPanels = whiteboardPanelCount(brief.panels);
   const words = brief.targetWords ?? 150;
   const beats = (brief.beats ?? []).slice(0, nPanels);
@@ -294,13 +331,13 @@ async function buildStoryboard(brief: WhiteboardSyncBrief, log: Logger): Promise
     for (let i = 0; i < beats.length; i += CHUNK) {
       const grp = beats.slice(i, i + CHUNK);
       const cont = all.length ? all[all.length - 1].narration : "";
-      const { title: t, panels } = await genChunk(brief, grp, grp.length, Math.round((words * grp.length) / beats.length), cont, log);
+      const { title: t, panels } = await genChunk(brief, grp, grp.length, Math.round((words * grp.length) / beats.length), cont, log, revisionNotes);
       if (i === 0 && t) title = t;
       all.push(...panels);
       log(`storyboard chunk ${Math.floor(i / CHUNK) + 1}: +${panels.length} panels (total ${all.length})`);
     }
   } else {
-    const { title: t, panels } = await genChunk(brief, beats, nPanels, words, "", log);
+    const { title: t, panels } = await genChunk(brief, beats, nPanels, words, "", log, revisionNotes);
     if (t) title = t;
     all.push(...panels);
     log(`storyboard: ${all.length} panels, ${all.reduce((n, p) => n + p.layers.length, 0)} layers`);
@@ -309,6 +346,25 @@ async function buildStoryboard(brief: WhiteboardSyncBrief, log: Logger): Promise
   bounded.forEach((p, i) => (p.idx = i));
   if (!bounded.length) throw new Error("whiteboardSync: storyboard produced no panels");
   return { title, panels: bounded, fullText: bounded.map((p) => p.narration).join(" ") };
+}
+
+/**
+ * Write the storyboard and NOTHING else — the CHEAP half of the engine.
+ *
+ * This makes ONLY Gemini text calls: no image generator is touched, no TTS
+ * provider is called, no python renderer runs. It is therefore safe to call
+ * repeatedly inside a produce→critique→regenerate loop; the resulting ACCEPTED
+ * storyboard is then passed to `castWhiteboardSync({ plan })`, which spends
+ * once. `revisionNotes` are a critic's prior issues; omit them and the prompt
+ * is byte-identical to the storyboard `castWhiteboardSync` writes for itself.
+ */
+export async function planWhiteboardStoryboard(
+  brief: WhiteboardSyncBrief,
+  log: Logger = () => {},
+  revisionNotes: readonly string[] = [],
+): Promise<WhiteboardStoryboard> {
+  if (!process.env.GEMINI_API_KEY) throw new Error("whiteboardSync: GEMINI_API_KEY missing");
+  return buildStoryboard(brief, log, revisionNotes);
 }
 
 /* ------------------------------ timing --------------------------------- */
@@ -387,6 +443,13 @@ export async function castWhiteboardSync(args: {
   outPath?: string;
   generateImage: WhiteboardImageGenerator;
   log?: Logger;
+  /**
+   * A caller-approved storyboard from `planWhiteboardStoryboard` (typically the
+   * winner of a produce→critique loop). When supplied the engine does ZERO
+   * planning calls and renders exactly this plan; omit it and the engine plans
+   * for itself exactly as it always has.
+   */
+  plan?: WhiteboardStoryboard;
 }): Promise<WhiteboardSyncResult> {
   const log = args.log ?? (() => {});
   const brief = args.brief;
@@ -407,11 +470,30 @@ export async function castWhiteboardSync(args: {
   });
   await mkdir(args.runDir, { recursive: true });
 
-  // 1. storyboard (cached → resumable reruns)
+  // 1. storyboard — SUPPLIED (already critiqued) → cached → planned here.
   const planPath = join(args.runDir, "plan.json");
   let title: string, panels: NPanel[], fullText: string;
-  if (existsSync(planPath)) {
-    ({ title, panels, fullText } = JSON.parse(await readFile(planPath, "utf8")) as { title: string; panels: NPanel[]; fullText: string });
+  if (args.plan) {
+    // Deep clone: the render mutates panel layers in place (`l.art`, cue
+    // timings), and the caller keeps this object for its frozen checkpoint.
+    ({ title, panels, fullText } = JSON.parse(JSON.stringify(args.plan)) as WhiteboardStoryboard);
+    const serialized = JSON.stringify({ title, panels, fullText }, null, 2);
+    // This engine's art cache is INDEX-keyed (art_<panel>_<layer>.png), so art
+    // bought for a different storyboard would be silently reused for the wrong
+    // layer. A resume that supplies the same frozen plan hits the equal branch
+    // and re-buys nothing; only a genuinely different plan drops the art.
+    const onDisk = existsSync(planPath) ? await readFile(planPath, "utf8") : null;
+    if (onDisk !== null && onDisk !== serialized) {
+      const stale = (await readdir(args.runDir)).filter((name) =>
+        /^(?:art_\d+_\d+\.png|narration\.mp3|wwords\.json)$/.test(name),
+      );
+      await Promise.all(stale.map((name) => unlink(join(args.runDir, name)).catch(() => {})));
+      log(`storyboard: supplied plan differs from this runDir's cached plan — dropped ${stale.length} index-keyed art/audio cache file(s)`);
+    }
+    await writeFile(planPath, serialized, "utf8");
+    log(`storyboard: using the supplied approved plan (${panels.length} panels) — zero planning calls`);
+  } else if (existsSync(planPath)) {
+    ({ title, panels, fullText } = JSON.parse(await readFile(planPath, "utf8")) as WhiteboardStoryboard);
     log(`storyboard: loaded cached plan (${panels.length} panels)`);
   } else {
     ({ title, panels, fullText } = await buildStoryboard(brief, log));

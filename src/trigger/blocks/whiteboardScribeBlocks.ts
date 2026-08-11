@@ -20,18 +20,30 @@
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { writeFile } from "node:fs/promises";
+import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief } from "@/engine/creative/brief";
 import { makeRunTempDir, downloadTo } from "@/lib/files";
-import { putObjectFromFile, getObjectBytes } from "@/lib/storage";
+import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
 import {
   castWhiteboardSync,
   hasWhiteboardSync,
+  planWhiteboardStoryboard,
+  whiteboardPanelCount,
   type WhiteboardArtRequest,
+  type WhiteboardStoryboard,
+  type WhiteboardSyncBrief,
 } from "@/lib/whiteboardSync";
+import { geminiJson } from "@/lib/gemini";
+import {
+  channelCritiqueBrief,
+  produceAndCritique,
+  type ChannelCritiqueContext,
+} from "@/engine/critiqueLoop";
+import { laneQualityPolicy } from "@/engine/contentLane";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { PRICE } from "@/engine/pricing";
@@ -69,6 +81,270 @@ function run(cmd: string, args: string[], log: (msg: string) => void): Promise<v
     c.on("error", reject);
     c.on("close", (code) => (code === 0 ? resolve() : reject(new Error(`${cmd} ${args[0]} exited ${code}: ${err.slice(-400)}`))));
   });
+}
+
+/* ── PRODUCE → CRITIQUE → REGENERATE for the STORYBOARD (P1-4 follow-up) ──────
+ *
+ * This block used to hand ONE unreviewed Gemini storyboard straight into
+ * castWhiteboardSync, which then bought 18-30 paid art layers and the whole
+ * narration off the back of it. A weak or malformed board was only discoverable
+ * AFTER the budget was spent.
+ *
+ * The loop sits on the STORYBOARD, never on rendered output:
+ *   - Every iteration is a TEXT-only call (planWhiteboardStoryboard touches no
+ *     image generator, no TTS, no python renderer), so a regeneration CANNOT
+ *     re-purchase art or narration by construction.
+ *   - castWhiteboardSync is invoked exactly ONCE, after the loop settles, with
+ *     the accepted plan — a rejection costs a text call, never a second render.
+ *   - The accepted storyboard is frozen into a content-addressed, immutable R2
+ *     checkpoint keyed by a hash of every planning input, so a healer replay or
+ *     Trigger retry reloads that exact board, runs ZERO critique calls, and
+ *     re-uses the runDir's index-keyed art instead of buying it again.
+ *   - Hard cap of 2 iterations (one informed retry), lane-tunable downward.
+ *   - Grader outage accepts the current board rather than looping or failing.
+ */
+const SCRIBE_STORYBOARD_CHECKPOINT_VERSION = "whiteboard-scribe-storyboard/v1";
+
+/** The whiteboard renderer hand-letters every word; art asking for text fights it. */
+const TEXT_IN_ART = /\b(text|caption|subtitle|title|lettering|letters|word|words|label|logo|watermark|signage|handwriting|number|numbers)\b/i;
+
+/** The board's persistent title header owns the top strip — nothing may sit in it. */
+const HEADER_FLOOR_Y = 0.17;
+
+/** Channel doctrine + lane grounding for this block's critique (P1-1/P1-17). */
+function scribeCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
+  const lane = ctx.store["contentLane"];
+  const laneKey = typeof (lane as { key?: unknown } | null)?.key === "string"
+    ? String((lane as { key?: unknown }).key)
+    : undefined;
+  const text = (key: string): string | undefined => {
+    const value = ctx.store[key];
+    return typeof value === "string" && value.trim() ? value.trim() : undefined;
+  };
+  return {
+    ...(text("channelName") ? { channelName: text("channelName")! } : {}),
+    ...(text("persona") ? { persona: text("persona")! } : {}),
+    ...(text("styleGrammar") ? { styleGrammar: text("styleGrammar")! } : {}),
+    ...(text("criticDoctrine") ? { criticDoctrine: text("criticDoctrine")! } : {}),
+    ...(laneKey ? { contentLaneKey: laneKey } : {}),
+    laneEmphasis: laneQualityPolicy(lane).emphasis,
+  };
+}
+
+function storyboardWords(plan: WhiteboardStoryboard): number {
+  return plan.fullText.trim().split(/\s+/).filter(Boolean).length;
+}
+
+/**
+ * DETERMINISTIC defects, computed in code per critiqueLoop's design rule — the
+ * Director is never asked to count panels, check box geometry or spot lettering.
+ */
+export function whiteboardStoryboardDefects(
+  plan: WhiteboardStoryboard,
+  wantPanels: number,
+  targetWords: number,
+): string[] {
+  const issues: string[] = [];
+  if (plan.panels.length < wantPanels) {
+    issues.push(`only ${plan.panels.length} of the ${wantPanels} requested panels came back — return exactly ${wantPanels}`);
+  }
+  plan.panels.forEach((panel, index) => {
+    const words = panel.narration.trim().split(/\s+/).filter(Boolean).length;
+    if (words < 8) {
+      issues.push(`panel ${index + 1}'s narration is only ${words} words — write ~2 full spoken sentences`);
+    }
+    const art = panel.layers.filter((layer) => layer.kind === "art");
+    if (!art.length) {
+      issues.push(`panel ${index + 1} has no art layers — the board would stay blank while the voice speaks`);
+    }
+    // The engine treats w >= 0.32 as the panel's hero SCENE; without one the
+    // panel is only scattered small sketches with no composed visual.
+    if (art.length && !art.some((layer) => Number(layer.box?.[2] ?? 0) >= 0.32)) {
+      issues.push(`panel ${index + 1} has no hero scene — one art layer must be a larger composed scene (w between 0.34 and 0.52)`);
+    }
+    const inHeader = panel.layers.find((layer) => Number(layer.box?.[1] ?? 1) < HEADER_FLOOR_Y);
+    if (inHeader) {
+      issues.push(`panel ${index + 1} places a layer at y=${Number(inHeader.box?.[1] ?? 0).toFixed(2)}, under the title header — every box needs y >= ${HEADER_FLOOR_Y}`);
+    }
+    const lettered = art.find((layer) => TEXT_IN_ART.test(layer.draw ?? ""));
+    if (lettered) {
+      issues.push(`panel ${index + 1} asks the art to draw words ("${(lettered.draw ?? "").slice(0, 48)}") — the renderer is hard-instructed to omit text; use a label layer instead`);
+    }
+    const blankLabel = panel.layers.find((layer) => layer.kind === "label" && !layer.text?.trim());
+    if (blankLabel) {
+      issues.push(`panel ${index + 1} has a label layer with no text — every label must carry the exact words to hand-letter`);
+    }
+    // boundNarration DROPS any layer whose cue is not in the narration, so a
+    // panel that lost most of its layers had bad cues upstream.
+    if (panel.layers.length < 2 && words >= 8) {
+      issues.push(`panel ${index + 1} only kept ${panel.layers.length} layer(s) — every "cue" must be an EXACT substring of that panel's narration`);
+    }
+  });
+  for (let i = 1; i < plan.panels.length; i++) {
+    if (plan.panels[i].narration.trim() === plan.panels[i - 1].narration.trim()) {
+      issues.push(`panels ${i} and ${i + 1} repeat the same narration — each panel must advance the explanation`);
+    }
+  }
+  if (targetWords > 0) {
+    const got = storyboardWords(plan);
+    if (got < targetWords * 0.65) {
+      issues.push(`the whole script is only ~${got} spoken words but needs ~${targetWords} to hit the requested length — deepen each panel`);
+    }
+  }
+  return issues.slice(0, 8);
+}
+
+/**
+ * Subjective grade from the Director, grounded in this channel's doctrine.
+ * Returns null when the grader is unavailable so the caller can accept rather
+ * than blind-spend another iteration.
+ */
+async function gradeStoryboard(args: {
+  plan: WhiteboardStoryboard;
+  topic: string;
+  channel: ChannelCritiqueContext;
+}): Promise<{ score: number; pass: boolean; issues: string[] } | null> {
+  try {
+    const verdict = await geminiJson<{ score?: unknown; pass?: unknown; issues?: unknown }>({
+      prompt:
+        `You are the DIRECTOR reviewing a whiteboard-explainer storyboard for "${args.topic}" BEFORE any paid art or narration is bought. ` +
+        `Drawing this board is expensive and irreversible — reject a board that would waste it.\n` +
+        channelCritiqueBrief(args.channel) +
+        `\nTITLE: ${args.plan.title}\n` +
+        `\nTHE STORYBOARD (${args.plan.panels.length} panels):\n` +
+        args.plan.panels
+          .map((panel, index) =>
+            `${index + 1}. NARRATION: ${panel.narration}\n` +
+            panel.layers
+              .map((layer) =>
+                layer.kind === "art"
+                  ? `   DRAW "${layer.draw}" @ cue "${layer.cue}"`
+                  : `   LETTER "${layer.text}" @ cue "${layer.cue}"`,
+              )
+              .join("\n"),
+          )
+          .join("\n") +
+        `\n\nJudge ONLY these: (a) the panels build ONE coherent argument in order, each advancing it rather than restating; ` +
+        `(b) the narration is genuinely INFORMATIVE and accurate, not filler; ` +
+        `(c) each drawn layer illustrates the exact thing its cue names — a viewer would understand the point from the board alone; ` +
+        `(d) each panel's hero scene is a concrete, drawable composition, not an abstract idea; ` +
+        `(e) the labels letter the numbers/dates/terms that actually matter.\n` +
+        `Return STRICT JSON {"score":0.0,"pass":true,"issues":["..."]}. Each issue must name the panel number and give ` +
+        `a concrete instruction the writer can act on. Use [] when the storyboard passes.`,
+      maxTokens: 1200,
+      temperature: 0.2,
+    });
+    const score = Number(verdict.score);
+    const issues = Array.isArray(verdict.issues)
+      ? verdict.issues.map((issue) => String(issue ?? "").trim()).filter(Boolean).slice(0, 6)
+      : [];
+    return {
+      score: Number.isFinite(score) ? Math.min(1, Math.max(0, score)) : 0.5,
+      pass: verdict.pass === true,
+      issues,
+    };
+  } catch {
+    return null;
+  }
+}
+
+function storyboardCheckpointKey(ctx: StageContext, inputs: unknown): string {
+  const hash = createHash("sha256").update(JSON.stringify(inputs)).digest("hex").slice(0, 32);
+  return `${ctx.keyPrefix}runs/${ctx.runId}/storyboards/whiteboard-scribe-${hash}.json`;
+}
+
+async function loadStoryboardCheckpoint(key: string): Promise<WhiteboardStoryboard | null> {
+  try {
+    const parsed = JSON.parse(Buffer.from(await getObjectBytes(key)).toString("utf8")) as {
+      version?: unknown;
+      storyboard?: unknown;
+    };
+    if (parsed.version !== SCRIBE_STORYBOARD_CHECKPOINT_VERSION) return null;
+    const storyboard = parsed.storyboard as WhiteboardStoryboard | undefined;
+    if (!storyboard || typeof storyboard.fullText !== "string" || !storyboard.fullText.trim()) return null;
+    if (!Array.isArray(storyboard.panels) || !storyboard.panels.length) return null;
+    if (storyboard.panels.some((panel) => typeof panel?.narration !== "string" || !Array.isArray(panel?.layers))) return null;
+    return storyboard;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Write the storyboard with the Director in the loop, then FREEZE it. The only
+ * caller renders the returned storyboard exactly once and nothing else.
+ */
+async function planScribeWithCritique(
+  ctx: StageContext,
+  brief: WhiteboardSyncBrief,
+): Promise<WhiteboardStoryboard> {
+  const channel = scribeCritiqueChannel(ctx);
+  const wantPanels = whiteboardPanelCount(brief.panels);
+  const targetWords = Number(brief.targetWords ?? 0) || 0;
+  const checkpointKey = storyboardCheckpointKey(ctx, {
+    contract: SCRIBE_STORYBOARD_CHECKPOINT_VERSION,
+    topic: brief.topic,
+    facts: brief.facts ?? null,
+    beats: brief.beats ?? null,
+    panels: wantPanels,
+    targetWords,
+    styleId: brief.styleId ?? null,
+    artStyle: brief.artStyle ?? null,
+    criticDoctrine: channel.criticDoctrine ?? null,
+    contentLaneKey: channel.contentLaneKey ?? null,
+  });
+
+  const cached = await loadStoryboardCheckpoint(checkpointKey);
+  if (cached) {
+    ctx.log(`whiteboard_scribe: reused the frozen storyboard (${cached.panels.length} panels) — no re-planning, no re-render`);
+    return cached;
+  }
+
+  const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
+  const maxIters = Math.max(1, Math.min(2, laneQuality.maxCritiqueIters));
+
+  const loop = await produceAndCritique<WhiteboardStoryboard>({
+    label: "whiteboard_scribe storyboard",
+    threshold: laneQuality.critiqueThreshold,
+    maxIters,
+    log: (message) => ctx.log(message),
+    channel,
+    // TEXT ONLY. planWhiteboardStoryboard reaches no image or TTS provider, so
+    // no iteration here can spend render money.
+    produce: (priorIssues) => planWhiteboardStoryboard(brief, (m) => ctx.log(`wb-plan: ${m}`), priorIssues),
+    critique: async (plan, iter) => {
+      const hard = whiteboardStoryboardDefects(plan, wantPanels, targetWords);
+      const graded = await gradeStoryboard({ plan, topic: brief.topic, channel });
+      if (!graded) {
+        ctx.log(`whiteboard_scribe: storyboard grader unavailable — accepting candidate ${iter} on deterministic checks alone`);
+        return { score: iter === 1 ? 1 : 0, pass: true, issues: hard };
+      }
+      const issues = [...hard, ...graded.issues].slice(0, 8);
+      const pass = graded.pass && hard.length === 0;
+      if (!pass) {
+        ctx.log(
+          `whiteboard_scribe: storyboard ${iter} REJECTED (${issues.slice(0, 2).join("; ").slice(0, 160)})` +
+          (iter < maxIters ? " — rewriting with the defects fed back (text only, no render)" : " — iteration cap reached"),
+        );
+      }
+      const score = Math.max(0, graded.score - Math.min(0.5, hard.length * 0.1));
+      return { score, pass, issues };
+    },
+  });
+
+  const plan = loop.value;
+  if (!plan.panels.length) throw new Error("whiteboard_scribe: storyboard writer returned no panels");
+  ctx.log(
+    `whiteboard_scribe: storyboard settled after ${loop.iterations} candidate(s) ` +
+    `(${loop.accepted ? "accepted" : "best of the rejected set"}, score ${loop.critique.score.toFixed(2)}, ` +
+    `${plan.panels.length} panels, ~${storyboardWords(plan)} spoken words)`,
+  );
+  await putObject(
+    checkpointKey,
+    Buffer.from(JSON.stringify({ version: SCRIBE_STORYBOARD_CHECKPOINT_VERSION, storyboard: plan })),
+    { contentType: "application/json" },
+  );
+  return plan;
 }
 
 export const whiteboardScribe: Block = {
@@ -140,16 +416,22 @@ export const whiteboardScribe: Block = {
       },
       onReceipt: (receipt) => { novitaImageCostUsd += receipt.costUsd; },
     });
+    const brief: WhiteboardSyncBrief = {
+      topic, facts, styleId, artStyle: visualBrief?.promptStyle,
+      header: visualBrief?.header, voiceId, width, height,
+      ...(ttsProvider === "elevenlabs" && elevenVoiceId ? { ttsProvider, elevenVoiceId } : {}),
+      ...(boardMode ? { boardMode } : {}),
+      ...(palette ? { palette } : {}),
+      ...(panels ? { panels } : {}),
+      ...(targetWords ? { targetWords } : {}),
+    };
+    // QUALITY GATE — settle the storyboard with the Director FIRST, at text
+    // prices. castWhiteboardSync below is then called exactly once with the
+    // accepted board, so a rejected draft never costs a second paid render.
+    const storyboard = await planScribeWithCritique(ctx, brief);
     const res = await castWhiteboardSync({
-      brief: {
-        topic, facts, styleId, artStyle: visualBrief?.promptStyle,
-        header: visualBrief?.header, voiceId, width, height,
-        ...(ttsProvider === "elevenlabs" && elevenVoiceId ? { ttsProvider, elevenVoiceId } : {}),
-        ...(boardMode ? { boardMode } : {}),
-        ...(palette ? { palette } : {}),
-        ...(panels ? { panels } : {}),
-        ...(targetWords ? { targetWords } : {}),
-      },
+      brief,
+      plan: storyboard,
       runDir,
       outPath,
       generateImage,
