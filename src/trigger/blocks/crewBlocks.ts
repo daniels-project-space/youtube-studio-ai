@@ -18,7 +18,7 @@ import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import type { ShowBible, StyleDNA } from "@/engine/creative/types";
 import { buildChannelProfile, type ChannelProfile } from "@/engine/channelProfile";
-import { resolveCrew } from "@/lib/crew/crewProfile";
+import { resolveCrew, type ResolvedCrew } from "@/lib/crew/crewProfile";
 import type { CrewRoleId } from "@/lib/crew/roles";
 import { resolveDirectorConfig } from "@/lib/crew/director";
 import {
@@ -158,41 +158,66 @@ function crewProfileFor(ctx: StageContext, g: ChannelGrounding): ChannelProfile 
 }
 
 /**
- * Actually calls resolveCrew — the catalog's documented "no silent gaps"
- * resolver (golden.ts's show-bible engine) — against this channel's real crew
- * config + the bible this block is about to brief from, and surfaces its typed
- * per-role warning into the pipeline log if this role is active without an
- * authored doctrine. Previously resolveCrew had zero non-test callers, so this
- * guarantee was unreachable outside the test suite (P1-8 in
- * docs/GOLDEN_MODULE_AUDIT_2026-08.md).
+ * Calls resolveCrew — the catalog's documented "no silent gaps" resolver
+ * (golden.ts's show-bible engine) — against this channel's REAL crew config
+ * (moduleConfig['show-bible'], read straight off the channel row via
+ * crewProfileFor, bypassing runPipeline's per-block merge entirely: "show-bible"
+ * is never itself a literal pipeline block id, so that merge never touches it)
+ * and the bible this block is about to brief from. Non-fatal: any resolution
+ * failure (malformed moduleConfig, etc.) is logged and returns null so callers
+ * degrade to today's per-role-only defaults — never blocks a brief.
  *
- * Deliberately does NOT throw or change what gets briefed: `resolveBible`
- * above already made the "no doctrine" call for generation (pseudo-bible
- * fallback, dated 2026-06-10, "channel with no Show Bible still runs") and
- * that behavior is preserved as-is. This only makes the gap visible instead of
- * silent.
+ * Called ONCE per block run and threaded to two consumers:
+ *  1. logCrewDoctrineGap (below) — the typed per-role "active but no authored
+ *     doctrine" warning (P1-8, docs/GOLDEN_MODULE_AUDIT_2026-08.md).
+ *  2. the editor_brief / critic_spec blocks — as a fallback for the ONE knob
+ *     each of those roles' OWN surface also exposes (editor cadence; critic
+ *     strictness + marketAware) — see roleProfile's crewFallback param. The
+ *     director/DP/composer surfaces have no knob with an equivalent meaning
+ *     (hookStyle/narrativeArc/coverageDensity/musicMood etc. are unrelated to
+ *     directorStyle), so directorStyle has no landing spot below the show-bible
+ *     resolver and is deliberately left unmapped.
  */
-function logCrewDoctrineGap(
+function resolveChannelCrew(
   ctx: StageContext,
   g: ChannelGrounding,
   bible: ShowBible,
+): ResolvedCrew | null {
+  try {
+    return resolveCrew(crewProfileFor(ctx, g), bible);
+  } catch (e) {
+    ctx.log(
+      `resolveCrew check failed (non-fatal, brief still proceeds): ${e instanceof Error ? e.message : e}`,
+    );
+    return null;
+  }
+}
+
+/**
+ * Surfaces resolveCrew's typed per-role "active but no authored doctrine"
+ * warning into the pipeline log. Deliberately does NOT throw or change what
+ * gets briefed: `resolveBible` above already made the "no doctrine" call for
+ * generation (pseudo-bible fallback, dated 2026-06-10, "channel with no Show
+ * Bible still runs") and that behavior is preserved as-is. This only makes the
+ * gap visible instead of silent. Pure — takes the already-resolved crew (see
+ * resolveChannelCrew) so it never throws itself.
+ */
+function logCrewDoctrineGap(
+  ctx: StageContext,
+  rc: ResolvedCrew | null,
   blockId: string,
   role: CrewRoleId,
 ): void {
-  try {
-    const rc = resolveCrew(crewProfileFor(ctx, g), bible);
-    const member = rc.members.find((m) => m.role === role);
-    if (member && !member.hasDoctrine) {
-      const warning = rc.warnings.find((w) => w.startsWith(`${role} `));
-      ctx.log(`${blockId}: resolveCrew — ${warning ?? `${role} active but no authored doctrine`}`);
-    } else if (!member) {
-      ctx.log(
-        `${blockId}: resolveCrew — ${role} is toggled off in moduleConfig['show-bible'] but this ` +
-          `block still ran (pipeline/crew-config mismatch); briefing anyway.`,
-      );
-    }
-  } catch (e) {
-    ctx.log(`${blockId}: resolveCrew check failed (non-fatal, brief still proceeds): ${e instanceof Error ? e.message : e}`);
+  if (!rc) return;
+  const member = rc.members.find((m) => m.role === role);
+  if (member && !member.hasDoctrine) {
+    const warning = rc.warnings.find((w) => w.startsWith(`${role} `));
+    ctx.log(`${blockId}: resolveCrew — ${warning ?? `${role} active but no authored doctrine`}`);
+  } else if (!member) {
+    ctx.log(
+      `${blockId}: resolveCrew — ${role} is toggled off in moduleConfig['show-bible'] but this ` +
+        `block still ran (pipeline/crew-config mismatch); briefing anyway.`,
+    );
   }
 }
 
@@ -226,9 +251,24 @@ function dnaAudioDigest(dna: StyleDNA | null): string {
   );
 }
 
-function roleProfile(ctx: StageContext, block: string): ChannelProfile {
+function roleProfile(
+  ctx: StageContext,
+  block: string,
+  /**
+   * Crew-level (moduleConfig['show-bible']) style-hint fallback for a knob
+   * this role's OWN surface also exposes (editor cadence, critic strictness /
+   * marketAware) — see resolveChannelCrew below. Spread FIRST so the role's
+   * own explicit moduleConfig[block] (already frozen into ctx.params by
+   * runPipeline's per-block merge, whether via explicit override or preset)
+   * always wins; the show-bible value only fills a gap the role's own config
+   * never touched. A channel with no saved moduleConfig['show-bible'] gets
+   * `rc === null` upstream, so no fallback object is passed here at all —
+   * behavior is byte-identical to before this function grew this parameter.
+   */
+  crewFallback?: Record<string, unknown>,
+): ChannelProfile {
   return {
-    pipeline: [{ block, params: ctx.params }],
+    pipeline: [{ block, params: { ...crewFallback, ...ctx.params } }],
     moduleOverrides: {},
   } as unknown as ChannelProfile;
 }
@@ -268,7 +308,10 @@ export const directorBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "director_brief", ctx.log);
-    logCrewDoctrineGap(ctx, g, bible, "director_brief", "director");
+    const rc = resolveChannelCrew(ctx, g, bible);
+    logCrewDoctrineGap(ctx, rc, "director_brief", "director");
+    // No equivalent knob on DIRECTOR_SURFACE for show-bible's directorStyle —
+    // see resolveChannelCrew's doc comment. Nothing to thread here.
     const config = resolveDirectorConfig(roleProfile(ctx, "director_brief"));
     const out = await briefDirector(bible, crewCtx(ctx, g, config));
     if (!out) failLoud("director_brief");
@@ -286,7 +329,10 @@ export const dpBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "dp_brief", ctx.log);
-    logCrewDoctrineGap(ctx, g, bible, "dp_brief", "cinematographer");
+    const rc = resolveChannelCrew(ctx, g, bible);
+    logCrewDoctrineGap(ctx, rc, "dp_brief", "cinematographer");
+    // No equivalent knob on CINEMATOGRAPHER_SURFACE for a show-bible hint —
+    // see resolveChannelCrew's doc comment. Nothing to thread here.
     const config = resolveCinematographerConfig(roleProfile(ctx, "dp_brief"));
     const directives = cinematographerDirectives(config);
     const out = await briefCinematographer(bible, crewCtx(ctx, g, directives));
@@ -312,8 +358,18 @@ export const editorBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "editor_brief", ctx.log);
-    logCrewDoctrineGap(ctx, g, bible, "editor_brief", "editor");
-    const config = resolveEditorConfig(roleProfile(ctx, "editor_brief"));
+    const rc = resolveChannelCrew(ctx, g, bible);
+    logCrewDoctrineGap(ctx, rc, "editor_brief", "editor");
+    // show-bible's editorCadence (CREW_SURFACE) is an equivalent knob to
+    // EDITOR_SURFACE's own `cadence` (both slow/measured/snappy/frenetic,
+    // EDITOR_SURFACE additionally allows "still") — fill it in as a fallback
+    // ONLY when this channel has never configured editor_brief's own cadence
+    // (roleProfile spreads ctx.params last, so an explicit/preset editor_brief
+    // config always wins). rc === null (no saved show-bible config, or a
+    // resolution failure) means no fallback object at all — zero regression.
+    const config = resolveEditorConfig(
+      roleProfile(ctx, "editor_brief", rc ? { cadence: rc.editorCadence } : undefined),
+    );
     const directives = editorDirectives(config);
     const out = await briefEditor(bible, crewCtx(ctx, g, directives));
     if (!out) failLoud("editor_brief");
@@ -331,7 +387,10 @@ export const composerBriefBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "composer_brief", ctx.log);
-    logCrewDoctrineGap(ctx, g, bible, "composer_brief", "composer");
+    const rc = resolveChannelCrew(ctx, g, bible);
+    logCrewDoctrineGap(ctx, rc, "composer_brief", "composer");
+    // No equivalent knob on COMPOSER_SURFACE (musicMood/duckDepth/loudness/
+    // voiceFx) for any show-bible knob — see resolveChannelCrew's doc comment.
     const config = resolveComposerConfig(roleProfile(ctx, "composer_brief"));
     const directives = composerDirectives(config);
     const out = await briefComposer(bible, crewCtx(ctx, g, { config, directives }));
@@ -350,8 +409,21 @@ export const criticSpecBlock: Block = {
   run: async (ctx) => {
     const g = await loadGrounding(ctx);
     const bible = resolveBible(g, "critic_spec", ctx.log);
-    logCrewDoctrineGap(ctx, g, bible, "critic_spec", "critic");
-    const config = resolveCriticConfig(roleProfile(ctx, "critic_spec"));
+    const rc = resolveChannelCrew(ctx, g, bible);
+    logCrewDoctrineGap(ctx, rc, "critic_spec", "critic");
+    // show-bible's criticStrictness/marketAwareCritic (CREW_SURFACE) are
+    // equivalent knobs to CRITIC_SURFACE's own strictness/marketAware (same
+    // value domains) — fill them in as a fallback ONLY when this channel has
+    // never configured critic_spec's own strictness/marketAware (roleProfile
+    // spreads ctx.params last, so an explicit/preset critic_spec config always
+    // wins). rc === null means no fallback object at all — zero regression.
+    const config = resolveCriticConfig(
+      roleProfile(
+        ctx,
+        "critic_spec",
+        rc ? { strictness: rc.criticStrictness, marketAware: rc.marketAwareCritic } : undefined,
+      ),
+    );
     const out = await briefCritic(bible, crewCtx(ctx, g, config));
     if (!out) failLoud("critic_spec");
     const validationSpec = applyCriticPolicy(out, config);
