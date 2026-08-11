@@ -11,6 +11,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { laneQualityPolicy } from "@/engine/contentLane";
 import { buildEpisodeSpec } from "@/engine/qualityEvidence";
 import {
   buildDocumentaryCollageShortStrategy,
@@ -243,8 +244,25 @@ export const documotionShort: Block = {
     const runDir = await makeRunTempDir(ctx.runId, "documotion_short");
     const outPath = join(runDir, "final.mp4");
     const targetDurationSec = shortRenderDurationSec(manifest);
+    // CRITIQUE LOOP (P1-4): unlike the other generative blocks, this one does NOT
+    // wrap `produceAndCritique` at the block level, and deliberately so.
+    //   - Its plan is DETERMINISTIC (`docuPlanForDocumentaryCollageShort` derives
+    //     every shot from the locked claim/source/beat manifest), so there is no
+    //     model-authored plan to critique before spend — replanning would return
+    //     byte-identical shots.
+    //   - Its render already runs a produce→verify→refine loop INSIDE the engine:
+    //     `craftDocuMotion` grades the assembled frames with `verifyDocu` and
+    //     applies targeted repairs via `applyActions` for up to `maxRefineRounds`
+    //     rounds, re-rendering only the shots the verifier faulted. Wrapping that
+    //     in a second outer loop would re-purchase every asset to fix one shot.
+    // What WAS missing is lane tailoring: the round cap was hardcoded, so a lane
+    // that wants a tighter spend ceiling could not lower it. The cap can only be
+    // lowered from the established 2 — a lane may not buy itself more retries.
+    const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
+    const maxRefineRounds = Math.max(1, Math.min(2, laneQuality.maxCritiqueIters));
     ctx.log(
-      `documotion_short: native portrait render ${targetDurationSec.toFixed(1)}s, ${plan.shots.length} locked beats, style=${styleId}`,
+      `documotion_short: native portrait render ${targetDurationSec.toFixed(1)}s, ${plan.shots.length} locked beats, ` +
+      `style=${styleId}, verifier refine rounds=${maxRefineRounds}`,
     );
     const result = await craftDocuMotion({
       topic,
@@ -255,7 +273,7 @@ export const documotionShort: Block = {
       format: "short",
       plan,
       lockShotDurations: true,
-      maxRefineRounds: 2,
+      maxRefineRounds,
       log: (message) => ctx.log(`documotion_short: ${message}`),
     });
     const videoKey = `${ctx.keyPrefix}runs/${ctx.runId}/final.mp4`;

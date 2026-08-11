@@ -9,6 +9,8 @@
 import { join } from "node:path";
 import { z } from "zod";
 
+import { laneQualityPolicy } from "@/engine/contentLane";
+import { channelCritiqueBrief, type ChannelCritiqueContext } from "@/engine/critiqueLoop";
 import { generationProfile, type GenerationProfile } from "@/engine/generationProfiles";
 import { NOVITA_CINEMATIC_QA_REPAIR_CAP, PRICE } from "@/engine/pricing";
 import {
@@ -25,6 +27,7 @@ import {
 import { DPVisualSpecSchema, ShotPlanSchema, type ShotPlan } from "@/engine/storySpine";
 import type { Block, StageContext } from "@/engine/types";
 import { COST_PATCH_KEY } from "@/engine/types";
+import { visualMatterDirectiveForShot, visualMatterFromUnknown, visualMatterReferenceAssetsForShot, type VisualMatterManifest } from "@/engine/visualMatter";
 import { makeRunTempDir, writeBytes } from "@/lib/files";
 import { grabFrame, probe } from "@/lib/ffmpeg";
 import { parseJsonLoose } from "@/lib/gemini";
@@ -107,6 +110,15 @@ export interface ChannelVisualQualityPolicy {
   identityFloor: number;
   /** Bounded, explicit criteria supplied to each vision grader. */
   brief: string;
+  /**
+   * P1-1/P1-17: the operator's own critic doctrine plus the channel's durable
+   * content lane, rendered by the SHARED `channelCritiqueBrief` so this grader
+   * judges the same way every other model-graded loop in the pipeline does.
+   * `brief` above is derived visual identity (Style DNA, palette, assertions);
+   * this is the operator's standing instruction to the critic, which outranks
+   * generic criteria. Empty string when the channel has neither.
+   */
+  critiqueBrief: string;
 }
 
 interface ImageQualityThresholds {
@@ -359,12 +371,31 @@ export function resolveChannelVisualQualityPolicy(
     visualAssertions.length ? `Blocking visual assertions: ${visualAssertions.join(" | ")}` : undefined,
   ].filter((item): item is string => Boolean(item));
 
+  // The critic doctrine and the content lane are frozen into the same run seed
+  // store as the rest of the identity above. Reading them here means BOTH paid
+  // repair loops (qa_assets, qa_shots) inherit the operator's stance without
+  // either grader growing its own bespoke channel-prompt dialect.
+  const lane = store["contentLane"];
+  const laneKey = typeof (lane as { key?: unknown } | null)?.key === "string"
+    ? String((lane as { key?: unknown }).key)
+    : undefined;
+  const critiqueContext: ChannelCritiqueContext = {
+    ...(boundedText(store["channelName"], 120) ? { channelName: boundedText(store["channelName"], 120)! } : {}),
+    ...(persona ? { persona } : {}),
+    ...(styleGrammar ? { styleGrammar } : {}),
+    ...(boundedText(store["criticDoctrine"], 600) ? { criticDoctrine: boundedText(store["criticDoctrine"], 600)! } : {}),
+    ...(laneKey ? { contentLaneKey: laneKey } : {}),
+    laneEmphasis: laneQualityPolicy(lane).emphasis,
+    qualityDimensions: visualDimensions.map((dimension) => dimension.id),
+  };
+
   return {
     scoreFloor,
     identityFloor,
     brief: identity.length
       ? identity.join("\n").slice(0, 2_400)
       : "Use the authored DP specification and continuity lock as mandatory visual identity constraints.",
+    critiqueBrief: channelCritiqueBrief(critiqueContext),
   };
 }
 
@@ -416,6 +447,12 @@ function requireStoryInputs(store: Readonly<Record<string, unknown>>): {
     throw new Error(`story render inputs are not one-to-one (missing=${missing.join(",") || "none"}; extra=${extra.join(",") || "none"})`);
   }
   return { shots, specs, specsByShot };
+}
+
+function requireVisualMatter(store: Readonly<Record<string, unknown>>): VisualMatterManifest {
+  const manifest = visualMatterFromUnknown(store["visualMatterManifest"]);
+  if (!manifest) throw new Error("cinematic render requires a valid Visual Matter manifest");
+  return manifest;
 }
 
 function profileForShots(shots: ShotPlan[], requested: unknown): GenerationProfile {
@@ -510,17 +547,19 @@ function videoScore(grade: z.infer<typeof ShotGradeSchema>): number {
 
 export const novitaRenderImages: Block = {
   id: "novita_render_images",
-  consumes: ["shotList", "dpVisualSpecs"],
+  consumes: ["shotList", "dpVisualSpecs", "visualMatterManifest"],
   produces: ["stillKeys", "stillRenderManifest"],
   paid: true,
   run: async (ctx) => {
     const { shots, specsByShot } = requireStoryInputs(ctx.store);
+    const visualMatter = requireVisualMatter(ctx.store);
     const profile = profileForShots(shots, ctx.params["generationProfile"]);
     const renderShots: Shot[] = shots.map((shot) => {
       const spec = specsByShot.get(shot.id)!;
+      const directive = visualMatterDirectiveForShot(visualMatter, shot.id);
       return {
         ...shot,
-        prompt: spec.keyframePrompt,
+        prompt: [spec.keyframePrompt, directive?.renderPrompt].filter(Boolean).join("\n\n"),
         negative: spec.negativePrompt,
       };
     });
@@ -568,11 +607,12 @@ export const novitaRenderImages: Block = {
 
 export const qaAssets: Block = {
   id: "qa_assets",
-  consumes: ["shotList", "dpVisualSpecs", "stillRenderManifest"],
+  consumes: ["shotList", "dpVisualSpecs", "stillRenderManifest", "visualMatterManifest"],
   produces: ["selectedStillManifest", "assetQaReport"],
   paid: true,
   run: async (ctx) => {
     const { shots, specsByShot } = requireStoryInputs(ctx.store);
+    const visualMatter = requireVisualMatter(ctx.store);
     const channelQuality = resolveChannelVisualQualityPolicy(ctx.store);
     const manifest = StillRenderManifestSchema.parse(ctx.store["stillRenderManifest"]);
     assertExactStillCandidates(shots, manifest);
@@ -591,27 +631,41 @@ export const qaAssets: Block = {
       for (const shot of shots) {
         const thresholds = imageQualityThresholds(shot, channelQuality);
         const spec = specsByShot.get(shot.id)!;
+        const visualDirective = visualMatterDirectiveForShot(visualMatter, shot.id);
+        const referenceAssets = visualMatterReferenceAssetsForShot(visualMatter, shot.id).slice(0, 4);
+        const referencePaths: string[] = [];
+        for (const [referenceIndex, reference] of referenceAssets.entries()) {
+          const path = join(tmp, `reference_${shot.id}_${referenceIndex}_${reference.id.replace(/[^a-z0-9_-]/gi, "_")}.png`);
+          await writeBytes(path, await getObjectBytes(reference.r2Key!));
+          referencePaths.push(path);
+        }
         let candidates = manifest.items
           .filter((item) => item.shotId === shot.id)
           .sort((a, b) => a.candidateIndex - b.candidateIndex);
         let repairAttempts = 0;
 
         while (true) {
-          const paths: string[] = [];
+          const candidatePaths: string[] = [];
           for (const candidate of candidates) {
             const path = join(tmp, `${candidate.outputId.replace(/[^a-z0-9_-]/gi, "_")}.png`);
             await writeBytes(path, await getObjectBytes(candidate.stillKey));
-            paths.push(path);
+            candidatePaths.push(path);
           }
+          const paths = [...referencePaths, ...candidatePaths];
           graderCalls++;
           const raw = await visionLocal({
             prompt:
               `You are the REQUIRED keyframe grader for one authored documentary shot. ` +
-              `Images are candidateIndex ${candidates.map((candidate) => candidate.candidateIndex).join(", ")} in that exact order.\n` +
+              (referencePaths.length
+                ? `The first ${referencePaths.length} image(s) are locked Visual Matter reference anchors. Do NOT score them; use them to judge continuity, mood, character, setting, and composition. `
+                : "") +
+              `The remaining images are candidateIndex ${candidates.map((candidate) => candidate.candidateIndex).join(", ")} in that exact order.\n` +
               `Literal story content: ${shot.literalContent}\nStory purpose: ${shot.coveragePurpose}\n` +
               `Required keyframe: ${spec.keyframePrompt}\nContinuity lock: ${spec.continuityState}\n` +
               `First-frame constraint: ${spec.firstFrameConstraint}\nNegative constraints: ${spec.negativePrompt}\n` +
+              (visualDirective ? `Visual Matter acceptance lock (MANDATORY): ${visualDirective.qaCriteria}\n` : "") +
               `Channel-adaptive visual identity policy (MANDATORY):\n${channelQuality.brief}\n` +
+              channelQuality.critiqueBrief +
               `Required pass thresholds: overall >= ${thresholds.score.toFixed(3)}, semantic >= ${thresholds.semanticAlignment.toFixed(3)}, ` +
               `continuity >= ${thresholds.continuity.toFixed(3)}, artifact-free >= ${thresholds.artifactFree.toFixed(3)}.\n` +
               `Score EACH image independently from 0 to 1. semanticAlignment means literal subject/action/location match, ` +
@@ -751,11 +805,12 @@ export const qaAssets: Block = {
 
 export const novitaRenderVideo: Block = {
   id: "novita_render_video",
-  consumes: ["shotList", "dpVisualSpecs", "selectedStillManifest"],
+  consumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "visualMatterManifest"],
   produces: ["shotRenderManifest"],
   paid: true,
   run: async (ctx) => {
     const { shots, specsByShot } = requireStoryInputs(ctx.store);
+    const visualMatter = requireVisualMatter(ctx.store);
     const selected = SelectedStillManifestSchema.parse(ctx.store["selectedStillManifest"]);
     const profile = profileForShots(shots, ctx.params["generationProfile"] ?? selected.generation.profileId);
     if (selected.generation.profileId !== profile.id) throw new Error("selected still profile does not match video profile");
@@ -767,11 +822,12 @@ export const novitaRenderVideo: Block = {
       const selectedStill = selectedByShot.get(shot.id);
       if (!selectedStill) throw new Error(`selected still missing for ${shot.id}`);
       const spec = specsByShot.get(shot.id)!;
+      const directive = visualMatterDirectiveForShot(visualMatter, shot.id);
       return {
         ...shot,
         stillKey: selectedStill.stillKey,
-        prompt: spec.motionPrompt,
-        motion: `${spec.motionPrompt} First frame: ${spec.firstFrameConstraint}. Last frame: ${spec.lastFrameConstraint}.`,
+        prompt: [spec.motionPrompt, directive?.motionPrompt].filter(Boolean).join("\n\n"),
+        motion: `${spec.motionPrompt}${directive ? ` ${directive.motionPrompt}` : ""} First frame: ${spec.firstFrameConstraint}. Last frame: ${spec.lastFrameConstraint}.`,
         negative: spec.negativePrompt,
       };
     });
@@ -829,11 +885,12 @@ export const novitaRenderVideo: Block = {
 
 export const qaShots: Block = {
   id: "qa_shots",
-  consumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "shotRenderManifest"],
+  consumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "shotRenderManifest", "visualMatterManifest"],
   produces: ["footageClips", "footageKeys", "shotQaReport", "visualCoverage"],
   paid: true,
   run: async (ctx) => {
     const { shots, specsByShot } = requireStoryInputs(ctx.store);
+    const visualMatter = requireVisualMatter(ctx.store);
     const channelQuality = resolveChannelVisualQualityPolicy(ctx.store);
     const manifest = ShotRenderManifestSchema.parse(ctx.store["shotRenderManifest"]);
     assertExactShotManifest(shots, manifest);
@@ -866,6 +923,14 @@ export const qaShots: Block = {
         const thresholds = videoQualityThresholds(shot, channelQuality);
         const item = manifest.items[index];
         const spec = specsByShot.get(shot.id)!;
+        const visualDirective = visualMatterDirectiveForShot(visualMatter, shot.id);
+        const referenceAssets = visualMatterReferenceAssetsForShot(visualMatter, shot.id).slice(0, 4);
+        const referencePaths: string[] = [];
+        for (const [referenceIndex, reference] of referenceAssets.entries()) {
+          const path = join(tmp, `reference_${shot.id}_${referenceIndex}_${reference.id.replace(/[^a-z0-9_-]/gi, "_")}.png`);
+          await writeBytes(path, await getObjectBytes(reference.r2Key!));
+          referencePaths.push(path);
+        }
         const selectedStill = selectedByShot.get(shot.id)!;
         let clipKey = item.clipKey;
         let repairAttempts = 0;
@@ -908,12 +973,17 @@ export const qaShots: Block = {
               graderCalls++;
               const raw = await visionLocal({
                 prompt:
-                  `You are the REQUIRED final grader for one generated documentary shot. The three images are the START, ` +
-                  `MIDDLE, and END frames in chronological order.\nLiteral story content: ${shot.literalContent}\n` +
+                  `You are the REQUIRED final grader for one generated documentary shot. ` +
+                  (referencePaths.length
+                    ? `The first ${referencePaths.length} image(s) are locked Visual Matter reference anchors. Do NOT score them; use them to judge the three rendered frames that follow. `
+                    : "") +
+                  `The final three images are the START, MIDDLE, and END frames in chronological order.\nLiteral story content: ${shot.literalContent}\n` +
                   `Story purpose: ${shot.coveragePurpose}\nRequired motion: ${spec.motionPrompt}\n` +
                   `First-frame constraint: ${spec.firstFrameConstraint}\nLast-frame constraint: ${spec.lastFrameConstraint}\n` +
                   `Continuity lock: ${spec.continuityState}\nNegative constraints: ${spec.negativePrompt}\n` +
+                  (visualDirective ? `Visual Matter acceptance lock (MANDATORY): ${visualDirective.qaCriteria}\n` : "") +
                   `Channel-adaptive visual identity policy (MANDATORY):\n${channelQuality.brief}\n` +
+                  channelQuality.critiqueBrief +
                   `Required pass thresholds: overall >= ${thresholds.score.toFixed(3)}, semantic >= ${thresholds.semanticAlignment.toFixed(3)}, ` +
                   `continuity >= ${thresholds.continuity.toFixed(3)}, motion >= ${thresholds.motionIntegrity.toFixed(3)}, ` +
                   `artifact-free >= ${thresholds.artifactFree.toFixed(3)}.\n` +
@@ -922,7 +992,7 @@ export const qaShots: Block = {
                   `without freezing or direction errors), artifactFree (no warping, morphing, duplicate limbs, text, watermark, ` +
                   `broken geometry, or temporal corruption). Return STRICT JSON only: {"semanticAlignment":0.0,` +
                   `"continuity":0.0,"motionIntegrity":0.0,"artifactFree":0.0,"notes":["concrete observations"]}.`,
-                imagePaths: frames,
+                imagePaths: [...referencePaths, ...frames],
                 json: true,
                 maxTokens: 700,
               });
