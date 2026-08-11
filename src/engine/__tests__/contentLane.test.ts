@@ -178,6 +178,16 @@ assert(
 
 const music = contentLaneForFamily("music_loop");
 assert(music, "music loop must have a canonical lane");
+assert.throws(
+  () => assertPipelineMatchesContentLane(music, [
+    { block: "loop_clips" },
+    { block: "visual_matter" },
+    { block: "assemble" },
+    { block: "qa_visual" },
+  ]),
+  /forbids visual_matter/,
+  "lo-fi must never inherit story-visual development just because the module exists",
+);
 const musicInjected = injectContentLaneIntoPipeline([
   { block: "loop_clips" },
   { block: "assemble" },

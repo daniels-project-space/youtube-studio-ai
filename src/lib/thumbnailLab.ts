@@ -700,6 +700,14 @@ export async function renderCandidate(args: {
   outJpg: string;
   tmpDir: string;
   idx: number;
+  /**
+   * Concrete defects the QA grader found in the PREVIOUS candidate for this
+   * same video (P1-3). Present only on a regenerate; the art director must fix
+   * these specifically rather than re-rolling the same concept blindly.
+   */
+  priorIssues?: readonly string[];
+  /** This channel's standing critic instruction, applied to the art direction. */
+  criticDoctrine?: string;
   /** Explicit production still route. There is deliberately no provider fallback. */
   generateScene?: GenerateScene;
   log?: Logger;
@@ -713,6 +721,15 @@ export async function renderCandidate(args: {
     system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
     prompt:
       `Instantiate this thumbnail PATTERN for the video "${args.title}".\n` +
+      // Regenerate feedback comes FIRST so it cannot be buried under the
+      // standing pattern rules — this is the whole point of the critique loop.
+      ((args.priorIssues ?? []).length
+        ? `THE PREVIOUS ATTEMPT WAS REJECTED BY THE QA GRADER. Fix these specific defects — do not simply re-roll ` +
+          `the same concept:\n${(args.priorIssues ?? []).slice(0, 6).map((issue) => `- ${String(issue).replace(/\s+/g, " ").trim().slice(0, 240)}`).join("\n")}\n`
+        : "") +
+      (args.criticDoctrine
+        ? `CHANNEL CRITIC DOCTRINE (this channel's standing standard — honour it): ${args.criticDoctrine.replace(/\s+/g, " ").trim().slice(0, 400)}\n`
+        : "") +
       `${args.sceneMandate ? `MANDATORY SCENE (operator/DNA-locked - NOT inspiration, NOT optional): the heroProp MUST be exactly this subject, adapted to this topic: ${args.sceneMandate}. Invent background and details AROUND it - never replace it.\n` : ""}` +
       (args.sceneSeed
         ? `TOPICRAFT-JUDGED STORY MOMENT (mandatory grounding): ${args.sceneSeed}. Preserve its actors, objects, physical action, and cause/effect. The pattern controls composition and styling; it may not substitute a different story.\n`

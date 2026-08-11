@@ -93,6 +93,10 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "whiteboard_scribe",
       "motion_comic",
     ],
+    // Visual Matter is a story-visual module, not a decorative-loop feature.
+    // Keeping it out of lo-fi prevents an irrelevant paid-reference option
+    // from silently appearing in music-loop channels.
+    forbiddenBlocks: ["visual_matter"],
   },
   ambient_guided: {
     key: "ambient_guided",
@@ -177,6 +181,142 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     forbiddenRendererBlocks: [],
   },
 };
+
+/**
+ * LANE-TUNED QUALITY CALIBRATION (P1-17).
+ *
+ * The lane contract above governs pipeline SHAPE. This second map governs how
+ * hard the MODEL-GRADED quality loops push on a render from that lane — a lo-fi
+ * loop and a narrated essay are not the same product and must not be judged by
+ * one generic bar.
+ *
+ * Deliberately scoped:
+ *   - Only MODEL-GRADED checks read this. Deterministic ffmpeg/file/probe rails
+ *     (resolution, audio presence, structural integrity) stay lane-agnostic —
+ *     a broken file is broken in every lane. The single exception is
+ *     `blackSegmentMinSec`, which is a genuinely lane-dependent DETERMINISTIC
+ *     fact (a night-time ambient loop legitimately holds near-black far longer
+ *     than a 45s Short does), not a taste judgement.
+ *   - `legacy_unclassified` reproduces the historic generic defaults EXACTLY,
+ *     so an unclassified channel sees zero behaviour change from this map.
+ */
+export interface LaneQualityPolicy {
+  /** Accept threshold (0..1) for produce→critique loops on this lane. */
+  critiqueThreshold: number;
+  /** Hard cap on produce→critique iterations (each iteration can cost money). */
+  maxCritiqueIters: number;
+  /** Minimum 1-10 score this lane demands from a holistic visual grader. */
+  visualScoreFloor: number;
+  /** Minimum 1-10 score this lane demands from the thumbnail grader. */
+  thumbnailScoreFloor: number;
+  /**
+   * Minimum contiguous near-black duration that counts as dead air. Higher for
+   * lanes whose visual language legitimately includes long dark holds.
+   */
+  blackSegmentMinSec: number;
+  /** Lane-specific things the critic must actively scrutinise (prompt input). */
+  emphasis: readonly string[];
+}
+
+const GENERIC_LANE_QUALITY: LaneQualityPolicy = {
+  critiqueThreshold: 0.8,
+  maxCritiqueIters: 3,
+  visualScoreFloor: 6,
+  thumbnailScoreFloor: 5,
+  blackSegmentMinSec: 2.5,
+  emphasis: [],
+};
+
+export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = {
+  narrated_documentary: {
+    ...GENERIC_LANE_QUALITY,
+    emphasis: [
+      "Every visual must be earned by the sentence being narrated over it; decorative b-roll that ignores the claim is a defect.",
+    ],
+  },
+  cinematic_ai: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.82,
+    emphasis: [
+      "Generated shots must hold ONE consistent world: subject identity, wardrobe, lighting key and grade may not drift between shots.",
+      "Anatomy, hands, text-like artefacts and morphing edges are the known failure modes of generated video — inspect for them explicitly.",
+    ],
+  },
+  music_loop: {
+    ...GENERIC_LANE_QUALITY,
+    // Music-first: the audio is the product and the visual is a decorative bed.
+    // A lower visual bar is honest here; a lower iteration cap keeps a
+    // decorative loop from out-spending the track it exists to carry.
+    critiqueThreshold: 0.75,
+    maxCritiqueIters: 2,
+    visualScoreFloor: 5,
+    blackSegmentMinSec: 6,
+    emphasis: [
+      "The loop seam must be invisible: no jump, flash, or frozen hold where the clip wraps.",
+      "Slow, uneventful, low-contrast night imagery is the INTENT of this lane, not a defect.",
+    ],
+  },
+  ambient_guided: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.75,
+    maxCritiqueIters: 2,
+    visualScoreFloor: 5,
+    blackSegmentMinSec: 6,
+    emphasis: [
+      "Deliberately slow pacing and long, near-static holds are the intent of this lane, not a defect.",
+    ],
+  },
+  short_form: {
+    ...GENERIC_LANE_QUALITY,
+    // Highest attention-per-second surface, shortest runtime: a defect costs a
+    // proportionally larger share of the video, and a regenerate is cheap.
+    critiqueThreshold: 0.85,
+    visualScoreFloor: 7,
+    thumbnailScoreFloor: 6,
+    blackSegmentMinSec: 1.2,
+    emphasis: [
+      "Judge at phone size: anything unreadable on a 6-inch screen is unreadable.",
+      "Every element must sit inside the vertical safe areas, clear of the UI chrome.",
+    ],
+  },
+  documentary_collage_short: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.85,
+    visualScoreFloor: 7,
+    thumbnailScoreFloor: 6,
+    blackSegmentMinSec: 1.2,
+    emphasis: [
+      "Judge at phone size; source/evidence cards must stay legible and inside the vertical safe areas.",
+    ],
+  },
+  whiteboard_explainer: {
+    ...GENERIC_LANE_QUALITY,
+    emphasis: [
+      "The drawing must stay in lockstep with the narration: a label that appears before or after the words that explain it is a defect.",
+    ],
+  },
+  motion_comic: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.82,
+    emphasis: [
+      "Bubbles and captions must sit inside their panel and never cover a face or hero artwork.",
+    ],
+  },
+  legacy_unclassified: { ...GENERIC_LANE_QUALITY },
+};
+
+/**
+ * Resolve the quality calibration for a lane. Accepts a parsed lane, a raw
+ * persisted lane, a bare lane key, or nothing — an unresolvable input falls
+ * back to the historic generic bar rather than inventing a stricter one.
+ */
+export function laneQualityPolicy(lane: ContentLane | ContentLaneKey | unknown): LaneQualityPolicy {
+  if (typeof lane === "string") {
+    return LANE_QUALITY_POLICIES[lane as ContentLaneKey] ?? GENERIC_LANE_QUALITY;
+  }
+  const parsed = ContentLaneSchema.safeParse(lane);
+  return parsed.success ? LANE_QUALITY_POLICIES[parsed.data.key] : GENERIC_LANE_QUALITY;
+}
 
 export const CONTENT_LANE_BY_FAMILY: Record<FamilyKey, ContentLaneKey> = {
   narrated_stock: "narrated_documentary",

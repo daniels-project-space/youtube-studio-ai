@@ -192,6 +192,28 @@ function downstreamClosure(ownerIds: Set<string>, blocks: HealableBlock[]): stri
 }
 
 /**
+ * PER-CHANNEL HEAL GROUNDING (P1-1).
+ *
+ * Deliberately bounded. Which blocks re-run stays a purely deterministic
+ * function of the defect catalog and the produces/consumes graph — free-form
+ * channel prose must never be able to elect a block for paid re-execution.
+ * What the doctrine DOES do is travel with the hints: those strings are seeded
+ * into `store.healHints` and land in the re-running block's own generation
+ * prompt, so a repair regenerates toward THIS channel's standard instead of a
+ * generic one.
+ */
+export interface HealChannelContext {
+  contentLaneKey?: string;
+  criticDoctrine?: string;
+  styleGrammar?: string;
+}
+
+function boundedDoctrine(channel?: HealChannelContext): string | undefined {
+  const doctrine = channel?.criticDoctrine?.replace(/\s+/g, " ").trim().slice(0, 240);
+  return doctrine || undefined;
+}
+
+/**
  * Diagnose a failed run and plan the surgical re-run. Returns null when the
  * failure isn't in the catalog (or is explicitly unhealable) — the caller
  * must then fail the run honestly.
@@ -201,6 +223,7 @@ export function planHeal(
   blocks: HealableBlock[],
   log: (msg: string) => void = () => {},
   visualRepair: readonly VisualRepairSignal[] = [],
+  channel?: HealChannelContext,
 ): HealPlan | null {
   if (!failureMsg) return null;
 
@@ -258,6 +281,22 @@ export function planHeal(
     .map((b) => b.id);
   if (paidReruns.length) {
     log(`healer: closure re-runs paid block(s) [${paidReruns.join(", ")}] as downstream consumers (small spend, accepted)`);
+  }
+
+  // Attach the channel's own standard to every block that is about to
+  // regenerate. This changes WHAT the repair aims at, never WHICH blocks run —
+  // the rerun set above is already fixed by this point.
+  const doctrine = boundedDoctrine(channel);
+  const laneKey = channel?.contentLaneKey?.trim();
+  if (doctrine || laneKey) {
+    const grounding = [
+      laneKey ? `content lane: ${laneKey}` : "",
+      doctrine ? `channel critic doctrine: ${doctrine}` : "",
+    ].filter(Boolean).join(" | ");
+    for (const owner of owners) {
+      (hints[owner] ??= []).push(`[channel-grounding] ${grounding}`.slice(0, 300));
+    }
+    log(`healer: heal hints grounded in ${doctrine ? "the channel's critic doctrine" : "the channel's content lane"}${laneKey ? ` (${laneKey})` : ""}`);
   }
 
   return {

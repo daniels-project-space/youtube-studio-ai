@@ -62,6 +62,11 @@ import {
   type NarrationPhysics,
 } from "@/engine/golden";
 import { boundNarrationColdOpen } from "@/lib/narrationBounds";
+import {
+  channelCritiqueBrief,
+  produceAndCritique,
+  type ChannelCritiqueContext,
+} from "@/engine/critiqueLoop";
 
 export { narrationPhysicsFor as narrationPhysics, NARRATION_PHYSICS, V3_TAG_PALETTES, type NarrationPhysics } from "@/engine/golden";
 export { stripAudioTags } from "@/lib/tts";
@@ -660,6 +665,12 @@ export async function judgeNarrationTake(o: {
   physics: NarrationPhysics & { archetype?: string };
   text: string;
   durationSec?: number;
+  /**
+   * P1-1: the channel's critic doctrine/persona, folded into the `register`
+   * judgement ("does the VOICE match the required sound"). The deterministic
+   * duration-blowout gate above runs BEFORE this and is untouched by it.
+   */
+  channel?: ChannelCritiqueContext;
   log?: (m: string) => void;
   /** Counts logical Gemini audio-grader invocations. The adapter only retries
    * non-billable transport/provider failures internally. */
@@ -688,6 +699,7 @@ export async function judgeNarrationTake(o: {
       `You hear ONE narration take. REQUIRED: ${o.physics.cast.character}. Target pace: ${paceWord} (~${o.physics.speed}x). ` +
       `The script may contain performed audio tags (pauses, sighs, whispers) — they must be PERFORMED, never read aloud.\n` +
       `SCRIPT (for fidelity reference): "${stripAudioTags(o.text).slice(0, 500)}"\n` +
+      channelCritiqueBrief(o.channel) +
       `Score 1-10: register (does the VOICE match the required sound), pace (does the delivery match the target pace), ` +
       `performance (natural delivery, tags performed not spoken, no robotic joins), clean (no artifacts, garbles, ` +
       `skipped or repeated words). Be harsh — 7 means genuinely right.\n` +
@@ -722,28 +734,69 @@ export async function gateColdOpen(o: {
   log?: (m: string) => void;
   onBillableCharacters?: (characters: number) => void;
   onAudioJudgeCall?: () => void;
+  /**
+   * P1-1: per-channel critique grounding. Only used for logging/observability
+   * here — the take verdict itself stays the four DETERMINISTIC-ish audio
+   * dimensions scored by the audio judge, because a channel's prose doctrine
+   * must not be able to talk a garbled or runaway take past the gate.
+   */
+  channel?: ChannelCritiqueContext;
 }): Promise<{ verdict: TakeVerdict; seed: number }> {
   const log = o.log ?? (() => {});
   const text = boundNarrationColdOpen(o.text);
-  let seed = o.seed ?? 4242;
-  for (let attempt = 0; attempt < 2; attempt++) {
-    const bytes = await renderNarration({
-      text,
-      elevenVoiceId: o.elevenVoiceId,
-      physics: o.physics,
-      seed,
-      onBillableCharacters: o.onBillableCharacters,
-    });
-    const verdict = await judgeNarrationTake({
-      mp3: bytes,
-      physics: o.physics,
-      text,
-      log,
-      onAudioJudgeCall: o.onAudioJudgeCall,
-    });
-    if (verdict.pass) return { verdict, seed };
-    log(`voicecraft: cold-open gate attempt ${attempt + 1} FAILED (${verdict.why}) -> ${attempt === 0 ? "seed-bumped retry" : "FAILING LOUD"}`);
-    seed += 1;
+  const baseSeed = o.seed ?? 4242;
+  // P1-15: the bespoke two-attempt loop now runs on the shared
+  // produceAndCritique primitive. Behaviour is preserved exactly — 2 attempts
+  // max, seed bumped by one per retry, a passing take returns immediately, and
+  // two failures still throw LOUD rather than shipping a bad cold open.
+  let attempt = 0;
+  const loop = await produceAndCritique<{ seed: number; verdict: TakeVerdict }>({
+    label: "voicecraft/cold-open",
+    // The judge's own `pass` is the bar; a numeric threshold would be a second,
+    // weaker gate. 1.0 + pass means "accept only a genuine pass".
+    threshold: 1,
+    maxIters: 2,
+    log: (message) => log(message),
+    ...(o.channel ? { channel: o.channel } : {}),
+    produce: async () => {
+      // Seed bumped by one per attempt, exactly as the legacy loop did. The
+      // retry is a re-roll of the SAME text, so there are no prior issues to
+      // fold into a prompt — only a different seed.
+      const seed = baseSeed + attempt;
+      attempt += 1;
+      const bytes = await renderNarration({
+        text,
+        elevenVoiceId: o.elevenVoiceId,
+        physics: o.physics,
+        seed,
+        onBillableCharacters: o.onBillableCharacters,
+      });
+      const verdict = await judgeNarrationTake({
+        mp3: bytes,
+        physics: o.physics,
+        text,
+        ...(o.channel ? { channel: o.channel } : {}),
+        log,
+        onAudioJudgeCall: o.onAudioJudgeCall,
+      });
+      return { seed, verdict };
+    },
+    critique: async (candidate, iter) => {
+      const { verdict } = candidate;
+      if (!verdict.pass) {
+        log(`voicecraft: cold-open gate attempt ${iter} FAILED (${verdict.why}) -> ${iter === 1 ? "seed-bumped retry" : "FAILING LOUD"}`);
+      }
+      return {
+        score: verdict.pass ? 1 : 0,
+        pass: verdict.pass,
+        // The judge's reason is the only actionable signal; the retry is a seed
+        // bump, so this feeds observability rather than a reworded prompt.
+        issues: verdict.pass ? [] : [verdict.why].filter(Boolean),
+      };
+    },
+  });
+  if (!loop.accepted) {
+    throw new Error(`voicecraft: cold-open failed the gate twice for voice ${o.elevenVoiceId} — wrong cast or physics for this channel`);
   }
-  throw new Error(`voicecraft: cold-open failed the gate twice for voice ${o.elevenVoiceId} — wrong cast or physics for this channel`);
+  return { verdict: loop.value.verdict, seed: loop.value.seed };
 }

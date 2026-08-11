@@ -64,6 +64,15 @@ export interface VisualReviewWindow {
   reason: "reviewer" | "repair" | "overlay";
 }
 
+/** A timed, renderer-independent creative criterion from Visual Matter. */
+export interface VisualReviewCreativeLock {
+  shotId: string;
+  startSec: number;
+  endSec: number;
+  expected: string;
+  acceptanceCriteria: string[];
+}
+
 export interface VisualReviewIntent {
   title: string;
   topic?: string;
@@ -77,8 +86,18 @@ export interface VisualReviewIntent {
   expectChapters?: boolean;
   transcriptCues?: VisualReviewTranscriptCue[];
   overlays?: VisualReviewOverlay[];
+  /** Storyboard-derived visual criteria that the reviewer must evaluate at the matching time. */
+  creativeLocks?: VisualReviewCreativeLock[];
   /** Defect windows from a prior repair pass; these get dense 2 fps coverage. */
   focusWindows?: VisualReviewWindow[];
+  /**
+   * `channels.identity.creativeBrief.criticDoctrine` — this channel's standing
+   * instruction to its critic. It grounds the reviewer in the operator's own
+   * standard instead of a uniform generic rubric (P1-1).
+   */
+  criticDoctrine?: string;
+  /** Lane-specific things this lane's critic must actively scrutinise (P1-17). */
+  criticEmphasis?: string[];
 }
 
 export interface ChannelVisualReviewProfileInput {
@@ -88,12 +107,20 @@ export interface ChannelVisualReviewProfileInput {
   persona?: string;
   styleGrammar?: string;
   qualityDimensions?: string[];
+  /** Operator-authored critic doctrine for this channel. */
+  criticDoctrine?: string;
+  /** Lane-tuned emphases (see engine/contentLane laneQualityPolicy). */
+  laneEmphasis?: readonly string[];
 }
 
 export interface ChannelVisualReviewProfile {
   channelWorld?: string;
   expectedStructure: string;
   allowedVisualConditions: string[];
+  /** Bounded per-channel critic doctrine, ready to hand to the reviewer. */
+  criticDoctrine?: string;
+  /** Bounded lane emphases, ready to hand to the reviewer. */
+  criticEmphasis: string[];
 }
 
 const CHANNEL_REQUIREMENTS: Readonly<Record<string, {
@@ -180,10 +207,20 @@ export function channelVisualReviewProfile(
     `Content lane: ${laneKey}${renderer ? ` via ${renderer}` : ""}`,
     qualityDimensions.length ? `Channel quality priorities: ${qualityDimensions.join(", ")}` : "",
   ].filter(Boolean).join("; ");
+  // The operator's own critic doctrine and the lane's scrutiny list are the two
+  // per-channel inputs that make this reviewer THIS channel's critic rather
+  // than a uniform one. Both are bounded before they reach the model.
+  const criticDoctrine = compactReviewContext(input.criticDoctrine, 600);
+  const criticEmphasis = (input.laneEmphasis ?? [])
+    .map((item) => compactReviewContext(item, 240))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 4);
   return {
     ...(channelWorld ? { channelWorld } : {}),
     expectedStructure: requirement.expected,
     allowedVisualConditions: [...requirement.allowed],
+    ...(criticDoctrine ? { criticDoctrine } : {}),
+    criticEmphasis,
   };
 }
 
@@ -269,6 +306,17 @@ export interface ReviewRenderOptions {
   persistEvidence?: boolean;
   reviewer?: VisualReviewer;
   log?: (message: string) => void;
+  /**
+   * Confidence a critical/major finding must clear before it BLOCKS the render
+   * (below it the verdict degrades to needs_human, never to a silent pass).
+   *
+   * Deliberately defaulted to the historic 0.6 and left as an explicit knob
+   * rather than being derived from the lane: shifting the gate arithmetic per
+   * channel is a spend-and-ship decision, so it stays an operator choice while
+   * the per-channel tailoring happens in the PROMPT above. See the audit note
+   * on lane-tuned thresholds (P1-17).
+   */
+  minBlockingConfidence?: number;
 }
 
 const DEFAULT_STRUCTURE =
@@ -343,6 +391,7 @@ export function planVisualReviewEvidence(input: {
   sceneTimes?: readonly number[];
   transcriptCues?: readonly VisualReviewTranscriptCue[];
   overlays?: readonly VisualReviewOverlay[];
+  creativeLocks?: readonly VisualReviewCreativeLock[];
   focusWindows?: readonly VisualReviewWindow[];
   maxFrames?: number;
 }): VisualReviewFrame[] {
@@ -379,6 +428,12 @@ export function planVisualReviewEvidence(input: {
     add(overlay.startSec + 0.1, "overlay");
     add((overlay.startSec + overlay.endSec) / 2, "overlay");
     add(overlay.endSec - 0.1, "overlay");
+  }
+
+  // A visual plan must influence evidence selection, otherwise it is merely a
+  // prompt artifact and can still be skipped by a broad uniform sample.
+  for (const lock of input.creativeLocks ?? []) {
+    add((lock.startSec + lock.endSec) / 2, "scene");
   }
 
   for (const window of mergeWindows(input.focusWindows ?? [], durationSec)) {
@@ -447,6 +502,19 @@ function cueForFrame(cues: readonly VisualReviewTranscriptCue[], tSec: number): 
   return cue?.text?.replace(/\s+/g, " ").trim().slice(0, 180) || undefined;
 }
 
+function creativeLockForFrame(
+  locks: readonly VisualReviewCreativeLock[],
+  tSec: number,
+): VisualReviewCreativeLock | undefined {
+  return locks.find((lock) => lock.startSec <= tSec && lock.endSec >= tSec) ??
+    locks.reduce<VisualReviewCreativeLock | undefined>((nearest, lock) => {
+      if (!nearest) return lock;
+      const a = Math.abs((lock.startSec + lock.endSec) / 2 - tSec);
+      const b = Math.abs((nearest.startSec + nearest.endSec) / 2 - tSec);
+      return a < b ? lock : nearest;
+    }, undefined);
+}
+
 function reviewerPrompt(
   intent: VisualReviewIntent,
   frames: readonly ExtractedFrame[],
@@ -454,15 +522,35 @@ function reviewerPrompt(
 ): string {
   const timeline = frames.map((frame) => {
     const transcript = cueForFrame(intent.transcriptCues ?? [], frame.descriptor.tSec);
+    const creativeLock = creativeLockForFrame(intent.creativeLocks ?? [], frame.descriptor.tSec);
     const reasons = frame.descriptor.selectionReasons.join(",");
-    return `- ${frame.descriptor.id} @${frame.descriptor.tSec.toFixed(1)}s [${reasons}]${transcript ? ` narration: "${transcript}"` : ""}`;
+    const lockText = creativeLock
+      ? ` visual-lock: "${creativeLock.expected.slice(0, 700)}" criteria: ${creativeLock.acceptanceCriteria.slice(0, 5).map((criterion) => `"${criterion.slice(0, 220)}"`).join("; ")}`
+      : "";
+    return `- ${frame.descriptor.id} @${frame.descriptor.tSec.toFixed(1)}s [${reasons}]${transcript ? ` narration: "${transcript}"` : ""}${lockText}`;
   }).join("\n");
   const allowedVisualConditions = (intent.allowedVisualConditions ?? [])
     .map((condition) => condition.replace(/\s+/g, " ").trim().slice(0, 300))
     .filter(Boolean);
+  const criticDoctrine = intent.criticDoctrine?.replace(/\s+/g, " ").trim().slice(0, 600);
+  const criticEmphasis = (intent.criticEmphasis ?? [])
+    .map((item) => item.replace(/\s+/g, " ").trim().slice(0, 240))
+    .filter(Boolean)
+    .slice(0, 4);
   return (
     `You are the production visual QA director for a rendered YouTube video. Review only what is visible in the ` +
     `timestamped frames below. This is the ${phase} pass; do not claim continuous-frame coverage.\n\n` +
+    // Per-channel grounding first: a critic that does not know the channel's own
+    // standard falls back to a uniform rubric, which is exactly what this gate
+    // must not do. The doctrine informs SEVERITY, never the defect vocabulary —
+    // the bounded category list below is still the only thing it may return.
+    (criticDoctrine
+      ? `CHANNEL CRITIC DOCTRINE (this channel's standing instruction — apply it when weighing how serious a ` +
+        `finding is; it does NOT license new defect categories): ${criticDoctrine}\n\n`
+      : "") +
+    (criticEmphasis.length
+      ? `LANE SCRUTINY (inspect specifically for these): ${criticEmphasis.map((item) => `"${item}"`).join("; ")}\n\n`
+      : "") +
     `INTENT\n- Title: "${intent.title}"\n` +
     (intent.topic ? `- Topic: "${intent.topic}"\n` : "") +
     (intent.niche ? `- Niche: ${intent.niche}\n` : "") +
@@ -477,6 +565,7 @@ function reviewerPrompt(
     `\nFRAME LEDGER\n${timeline}\n\n` +
     `Find only viewer-noticeable defects: overlays/captions clipped, off-canvas, colliding, covering a face or key subject, ` +
     `unreadable text, wrong/repeated footage, black/frozen frames, broken transitions, or missing/broken intro/outro. ` +
+    `For an active visual-lock violation, report wrong_footage when the literal story/subject/location is wrong; use a major general_visual defect when the visible identity, mood, continuity, or composition lock is violated. ` +
     `Never flag a short on-screen hook merely because it differs from the SEO title. Do not invent defects outside the supplied evidence.\n\n` +
     `Return STRICT JSON {"defects":[{"startSec":number,"endSec":number,"severity":"critical|major|minor",` +
     `"category":"overlay_off_canvas|overlay_occlusion|overlay_collision|caption_cutoff|caption_unreadable|wrong_footage|repeated_clip|black_frame|frozen_frame|transition_break|intro_card|outro_card|general_visual",` +
@@ -753,6 +842,7 @@ export async function reviewRender(
     sceneTimes,
     transcriptCues: intent.transcriptCues,
     overlays: intent.overlays,
+    creativeLocks: intent.creativeLocks,
     focusWindows: intent.focusWindows,
     maxFrames: finite(opts.maxFrames, 48),
   });
@@ -803,19 +893,30 @@ export async function reviewRender(
     evidence = await persistEvidence(evidence, allExtracted, { runId: opts.runId, keyPrefix: opts.keyPrefix }, reviewFingerprint);
   }
 
+  const rawMinConfidence = Number(opts.minBlockingConfidence);
+  const minBlockingConfidence = Number.isFinite(rawMinConfidence)
+    ? Math.min(1, Math.max(0, rawMinConfidence))
+    : 0.6;
   const blocking = defects.filter((defect) =>
     (defect.severity === "critical" || defect.severity === "major") &&
     defect.category !== "general_visual" &&
-    defect.confidence >= 0.6,
+    defect.confidence >= minBlockingConfidence,
   );
   const uncertain = defects.some((defect) =>
     (defect.severity === "critical" || defect.severity === "major") &&
-    (defect.category === "general_visual" || defect.confidence < 0.6),
+    (defect.category === "general_visual" || defect.confidence < minBlockingConfidence),
   );
   const verdict: VisualReviewVerdict = blocking.length ? "fail" : uncertain ? "needs_human" : "pass";
   const summary = [...firstPass.summaries, ...focusPass.summaries].filter(Boolean).join(" | ").slice(0, 1000) ||
     `${defects.length} evidence-backed defect(s); ${allFrames.length} frames reviewed`;
-  log(`visualReview: ${allFrames.length} frames (${Math.ceil(allFrames.length / 12)} batch(es)), ${defects.length} defect(s) → ${verdict.toUpperCase()}`);
+  // Record that the critique was channel-grounded: the review fingerprint
+  // already covers criticDoctrine/criticEmphasis (they are part of `intent`), so
+  // changing a channel's doctrine correctly invalidates cached review evidence.
+  const grounding = [
+    intent.criticDoctrine ? "doctrine" : "",
+    (intent.criticEmphasis ?? []).length ? `lane-emphasis×${(intent.criticEmphasis ?? []).length}` : "",
+  ].filter(Boolean).join("+");
+  log(`visualReview: ${allFrames.length} frames (${Math.ceil(allFrames.length / 12)} batch(es)), ${defects.length} defect(s)${grounding ? `, grounded by ${grounding}` : ""} → ${verdict.toUpperCase()}`);
   return {
     ran: true,
     verdict,

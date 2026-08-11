@@ -228,6 +228,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "channelName", "topic", "f1Url", "f1Key", "f1ThumbnailBaseProvenance", "styleGrammar", "styleDNA", "family", "persona",
       "thumbnailIdentity", "nicheIntel", "thumbnailer", "niche", "seoDatabank", "competitors", "healHints", "plannedThumbnailKey",
       "narrationText",
+      // Per-channel critique grounding for the produce→critique→regenerate loop.
+      "criticDoctrine", "contentLane",
     ],
     providerProfiles: [managed],
     maxCostUsd: 2,
@@ -242,6 +244,8 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: [
       "reuseScript", "structure", "styleDNA", "scriptPlaybook", "topicBet",
       "channelName", "niche", "persona", "styleGrammar",
+      // Per-channel critique grounding for the shared script critique loop.
+      "criticDoctrine", "contentLane",
     ],
   }),
   hook_craft: contract(["script.hook_refined"], { optionalConsumes: ["script"] }),
@@ -250,7 +254,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {
-    optionalConsumes: ["styleDNA", "musicBrief", "script", "voiceId", "reuseLanguage", "niche"],
+    optionalConsumes: [
+      "styleDNA", "musicBrief", "script", "voiceId", "reuseLanguage", "niche",
+      // Grounds the cold-open take judge in this channel's own voice standard.
+      "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane",
+    ],
     providerProfiles: [managed],
     maxCostUsd: 10,
     maxCostUsdFor: (params, context) => {
@@ -323,8 +331,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "tags", "strategy", "thumbnailer", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec",
       "overlaysDropped", "qualityBar", "description", "musicKey", "channelName", "niche", "persona", "styleGrammar", "topic",
+      // Grounds the mandatory holistic visual gate in this channel's doctrine.
+      "criticDoctrine", "contentLane",
       "narrativeBeats", "shotList", "storyCoverage", "assetQaReport", "shotQaReport", "healAttempt",
-      "motionComicTimeline", "visualRepair",
+      "motionComicTimeline", "visualRepair", "visualMatterManifest",
       "shortStrategyBrief", "beatManifest", "shortRetentionManifest", "shortSceneQa", "documotionVerdict", "documotionRender",
     ],
     providerProfiles: [managed, local],
@@ -343,6 +353,19 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
 
   story_spine: contract(["story.timed", "visuals.story_planned"], {
     optionalConsumes: ["structure", "visualBrief", "cutSheet", "styleDNA", "contentLane"],
+    qualityRequired: true,
+  }),
+
+  visual_matter: contract(["visuals.visual_matter_planned", "visuals.visual_lock"], {
+    requiredConsumes: ["topic", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs"],
+    optionalConsumes: ["channelName", "styleDNA", "visualBrief"],
+    providerProfiles: [{ id: "fal-nano-banana-2-visual-matter", provider: "fal", quality: "hero", allowFallback: false }],
+    maxCostUsd: 12 * PRICE.falNanoBanana2Usd,
+    maxCostUsdFor: (params) => {
+      if (params["enabled"] === false || params["renderReferenceAssets"] !== true) return 0;
+      const images = Math.ceil(boundedNumber(params["maxReferenceImages"], 8, 1, 12));
+      return images * PRICE.falNanoBanana2Usd;
+    },
     qualityRequired: true,
   }),
 
@@ -370,6 +393,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     },
   }),
   novita_render_images: contract(["visuals.keyframes_generated", "render.profile_pinned", "render.spot_only"], {
+    requiredConsumes: ["shotList", "dpVisualSpecs", "visualMatterManifest"],
     optionalConsumes: ["visualBrief"],
     providerProfiles: [{ id: "novita-zimage-production", provider: "novita", quality: "production", allowFallback: false }],
     // 50 hero shots × two candidates × the single-4090 two-hour hard bound.
@@ -384,6 +408,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       PRICE.novitaImageMaxUsd,
   }),
   qa_assets: contract(["qa.assets_required", "visuals.keyframes_selected"], {
+    requiredConsumes: ["shotList", "dpVisualSpecs", "stillRenderManifest", "visualMatterManifest"],
     // Channel identity is frozen in the invocation seed store. It is optional
     // only for legacy channels; when present, the grader reads it as a strict
     // policy input rather than an ambient store escape hatch.
@@ -408,6 +433,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
   novita_render_video: contract(["visuals.shots_rendered", "render.profile_pinned", "render.spot_only"], {
+    requiredConsumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "visualMatterManifest"],
     optionalConsumes: ["visualBrief"],
     providerProfiles: [{ id: "novita-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 35,
@@ -417,6 +443,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       PRICE.novitaVideoMaxUsd,
   }),
   qa_shots: contract(["visuals.generated", "visuals.story_aligned", "qa.shots_required"], {
+    requiredConsumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "shotRenderManifest", "visualMatterManifest"],
     optionalConsumes: [
       "qualityBar",
       "styleDNA",

@@ -36,7 +36,8 @@ import { planHeal } from "@/engine/healer";
 import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix } from "@/lib/storage";
-import { alertFailure } from "@/lib/telegram";
+import { alertBudget, alertFailure } from "@/lib/telegram";
+import { evaluateBudgetAlert } from "@/lib/budgetAlert";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { rehydrateOutputs } from "@/lib/rehydrate";
 import type { PipelineEntry } from "@/engine/types";
@@ -471,6 +472,10 @@ export const runPipelineTask = task({
             const { resolveKnobs } = await import("@/engine/customization");
             for (const [blockId, cfg] of Object.entries(moduleConfig)) {
               if (!cfg || typeof cfg !== "object") continue;
+              if (!entries.some((entry) => entry.block === blockId)) {
+                log(`moduleConfig[${blockId}] SKIPPED (module is not selected in this pipeline)`);
+                continue;
+              }
               const { preset, ...overrides } = cfg as { preset?: string } & Record<string, unknown>;
               const surface = moduleSurface(blockId);
               let values: Record<string, unknown> = overrides;
@@ -561,6 +566,13 @@ export const runPipelineTask = task({
           palette: channel.identity?.palette ?? [],
           persona: channel.identity?.persona ?? "",
           niche: channel.identity?.niche ?? "",
+          // The Showrunner-authored stance for THIS channel's critic. Frozen
+          // into the seed store alongside the rest of the identity so every
+          // model-graded gate (script, thumbnail, narration, visual review)
+          // judges against the channel's own standard, not a generic rubric.
+          ...(channel.identity?.creativeBrief?.criticDoctrine
+            ? { criticDoctrine: channel.identity.creativeBrief.criticDoctrine }
+            : {}),
           ...(channel.identity?.voiceId ? { voiceId: channel.identity.voiceId } : {}),
           bannedWords: channel.identity?.bannedWords ?? [],
           ...(channel.identity?.imageKey ? { channelAvatarKey: channel.identity.imageKey } : {}),
@@ -736,7 +748,13 @@ export const runPipelineTask = task({
         paid: (b as { paid?: boolean }).paid,
       }));
       while (!result.ok && heals < MAX_HEALS) {
-        const plan = planHeal(result.error ?? "", healable, (m) => log(m), result.visualRepair);
+        const plan = planHeal(result.error ?? "", healable, (m) => log(m), result.visualRepair, {
+          contentLaneKey: contentLane.key,
+          ...(channel.identity?.creativeBrief?.criticDoctrine
+            ? { criticDoctrine: channel.identity.creativeBrief.criticDoctrine }
+            : {}),
+          ...(channel.identity?.styleGrammar ? { styleGrammar: channel.identity.styleGrammar } : {}),
+        });
         if (!plan) break;
         heals++;
         log(
@@ -833,14 +851,19 @@ export const runPipelineTask = task({
           costTotal: result.costTotal,
         });
       }
-      // This should be unreachable for declared provider envelopes because
-      // preflight reserves the worst case before execution. Keep the alert as
-      // a second rail for a provider returning a charge above its contract.
-      if (result.costTotal > invocation.budgetUsd) {
-        await safeAlert(
-          `budget exceeded (${channel.slug})`,
-          `run cost $${result.costTotal.toFixed(2)} > budget $${invocation.budgetUsd.toFixed(2)}`,
-        );
+      // Ship-stage "budget alert" gate (GOLDEN_MODULES catalog key "ship").
+      // The hard ceiling is already enforced above (throw when costTotal >
+      // budgetUsd) and per-block in engine/runner.ts, so a true overage can't
+      // reach this line for declared provider envelopes. This is the
+      // advisory rail: fire when spend lands at/near the frozen per-run
+      // budget so the operator sees a channel running hot via Telegram
+      // before the NEXT run trips the hard ceiling.
+      const budgetAlert = evaluateBudgetAlert({
+        costUsd: result.costTotal,
+        budgetUsd: invocation.budgetUsd,
+      });
+      if (budgetAlert?.shouldAlert) {
+        await safeBudgetAlert(`budget alert (${channel.slug})`, budgetAlert.message);
       }
       return {
         ok: true,
@@ -886,6 +909,18 @@ async function safeAlert(context: string, error: string): Promise<void> {
   } catch (e) {
     console.error(
       "[run-pipeline] telegram alert failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
+/** Fire the ship-stage budget alert but never let alerting failures fail a completed run. */
+async function safeBudgetAlert(context: string, message: string): Promise<void> {
+  try {
+    await alertBudget(context, message);
+  } catch (e) {
+    console.error(
+      "[run-pipeline] telegram budget alert failed:",
       e instanceof Error ? e.message : e,
     );
   }

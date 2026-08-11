@@ -3,7 +3,7 @@
  * crime / shorts / meditation:
  *   script_gen  â†’ script + narrationText   (Gemini)
  *   hook_craft  â†’ hook + narrationText'     (Gemini; prepends a punchy opener)
- *   qa_script   â†’ scriptApproved            (Claude critique; soft gate)
+ *   qa_script   â†’ scriptApproved            (Claude critique; HARD gate -- see PARALLEL_GROUPS in runner.ts)
  *
  * All degrade gracefully on a missing key so the pipeline never hard-fails.
  */
@@ -19,9 +19,15 @@ import {
 import {
   validateQualifiedShotRender,
 } from "@/engine/renderArtifacts";
-import { resolveContentLane } from "@/engine/contentLane";
+import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
+import {
+  channelCritiqueBrief,
+  produceAndCritique,
+  type ChannelCritiqueContext,
+} from "@/engine/critiqueLoop";
 import { buildQualityEvidence } from "@/engine/qualityEvidence";
 import { narrationTtsCost, qaVisualCost } from "@/engine/pricing";
+import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
 import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
@@ -175,6 +181,26 @@ function opt(ctx: StageContext, key: string): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
+/**
+ * Assemble this channel's critique grounding from the frozen seed store (P1-1).
+ *
+ * `criticDoctrine` is `identity.creativeBrief.criticDoctrine`, seeded by
+ * runPipeline alongside the rest of the identity. Every model-graded gate in
+ * this file reads it from here, so there is exactly one place to change what a
+ * per-channel critic is told.
+ */
+function channelCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
+  const laneKey = (ctx.store["contentLane"] as { key?: unknown } | null | undefined)?.key;
+  return {
+    ...(opt(ctx, "channelName") ? { channelName: opt(ctx, "channelName") } : {}),
+    ...(opt(ctx, "persona") ? { persona: opt(ctx, "persona") } : {}),
+    ...(opt(ctx, "styleGrammar") ? { styleGrammar: opt(ctx, "styleGrammar") } : {}),
+    ...(opt(ctx, "criticDoctrine") ? { criticDoctrine: opt(ctx, "criticDoctrine") } : {}),
+    ...(typeof laneKey === "string" && laneKey ? { contentLaneKey: laneKey } : {}),
+    laneEmphasis: laneQualityPolicy(ctx.store["contentLane"]).emphasis,
+  };
+}
+
 export const scriptGen: Block = {
   id: "script_gen",
   consumes: ["topic"],
@@ -223,47 +249,92 @@ export const scriptGen: Block = {
       playbook: ctx.store["scriptPlaybook"] as import("@/lib/scriptLab").ScriptPlaybook | undefined,
       openingDeviceIdx: [...ctx.runId].reduce((s, c) => s + c.charCodeAt(0), 0),
     };
-    let script = await synthScript(req, ctx.log);
-
     // EVALUATOR-OPTIMIZER (short-form only â€” regenerating a 30-min chunked
     // script doubles cost): Claude critiques the draft; a rejected draft is
-    // regenerated ONCE with the issues injected. Keep the informed second
-    // attempt either way â€” never a generic fallback, and the critique signal
-    // actually feeds back instead of evaporating in qa_script.
+    // regenerated ONCE with the issues injected, reusing the judge-gated hook.
+    //
+    // P1-15: this now runs on the SHARED produceAndCritique primitive instead of
+    // a bespoke copy, so improvements to the loop reach the highest-volume
+    // producer. The trigger condition is byte-for-byte the old one (regenerate
+    // only when the critic returns pass:false WITH issues), the iteration cap is
+    // the same 2 (one informed retry), and a critic outage still keeps the draft.
+    // What is genuinely new: the retry is itself critiqued rather than shipped
+    // unverified, and the accept bar + doctrine now come from the channel.
     const maxSec = Number(req.maxSeconds ?? 240);
-    if (hasAnthropicKey() && maxSec <= 420) {
-      try {
-        const persona = req.persona ?? "";
-        const crit = await claudeJson<{ pass?: boolean; issues?: string[] }>({
-          prompt:
-            `Critique this YouTube narration draft for quality and on-brand voice` +
-            (persona ? ` (channel persona: ${persona})` : "") +
-            `. Flag dull sections, off-brand language, factual hedging, weak structure, or generic ` +
-            `templated writing.` +
-            (script.hookLoop
-              ? ` CRITICAL: the cold open promised "${script.hookLoop}" — flag it as an issue if the script ` +
-                `does not EXPLICITLY pay that promise off.`
-              : "") +
-            ` Return STRICT JSON {"pass": boolean, "issues": string[]} â€” at most 5 ` +
-            `issues, each under 140 characters.\n\n` +
-            (script.narrationText.length <= 9000
-              ? script.narrationText
-              : script.narrationText.slice(0, 4000) + `\n\n[... OMITTED ...]\n\n` + script.narrationText.slice(-3500)),
-          maxTokens: 1200,
-          temperature: 0.3,
-        });
-        const issues = (Array.isArray(crit.issues) ? crit.issues : []).filter(Boolean).slice(0, 6);
-        if (crit.pass === false && issues.length) {
-          ctx.log(`script_gen: draft rejected by critic â€” regenerating once`, { issues });
-          // Reuse the judge-gated hook: only the narration was rejected, so the
-          // regen must not re-bill hookcraft (Pro + grounded fact-checks).
-          script = await synthScript({ ...req, priorIssues: issues, precraftedHook: script.crafted }, ctx.log);
+    const critiqueEnabled = hasAnthropicKey() && maxSec <= 420;
+    const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
+    const scriptChannel: ChannelCritiqueContext = channelCritiqueContext(ctx);
+
+    let precraftedHook: Script["crafted"] | undefined;
+    const loop = await produceAndCritique<Script>({
+      label: "script_gen",
+      threshold: laneQuality.critiqueThreshold,
+      // One informed retry, exactly as before — a script regenerate is the most
+      // expensive text spend in the pipeline.
+      maxIters: critiqueEnabled ? 2 : 1,
+      log: (message, extra) => ctx.log(message, extra),
+      channel: scriptChannel,
+      produce: async (priorIssues) => {
+        const draft = await synthScript(
+          {
+            ...req,
+            ...(priorIssues.length ? { priorIssues } : {}),
+            // Only the narration was rejected, so the regen must not re-bill
+            // hookcraft (Pro + grounded fact-checks).
+            ...(priorIssues.length && precraftedHook ? { precraftedHook } : {}),
+          },
+          ctx.log,
+        );
+        precraftedHook = draft.crafted;
+        return draft;
+      },
+      critique: async (draft, iter) => {
+        if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
+        try {
+          const crit = await claudeJson<{ pass?: boolean; issues?: string[] }>({
+            prompt:
+              `Critique this YouTube narration draft for quality and on-brand voice` +
+              (req.persona ? ` (channel persona: ${req.persona})` : "") +
+              `. Flag dull sections, off-brand language, factual hedging, weak structure, or generic ` +
+              `templated writing.` +
+              (draft.hookLoop
+                ? ` CRITICAL: the cold open promised "${draft.hookLoop}" — flag it as an issue if the script ` +
+                  `does not EXPLICITLY pay that promise off.`
+                : "") +
+              channelCritiqueBrief(scriptChannel) +
+              ` Return STRICT JSON {"pass": boolean, "issues": string[]} â€” at most 5 ` +
+              `issues, each under 140 characters.\n\n` +
+              (draft.narrationText.length <= 9000
+                ? draft.narrationText
+                : draft.narrationText.slice(0, 4000) + `\n\n[... OMITTED ...]\n\n` + draft.narrationText.slice(-3500)),
+            maxTokens: 1200,
+            temperature: 0.3,
+          });
+          const issues = (Array.isArray(crit.issues) ? crit.issues : []).filter(Boolean).slice(0, 6);
+          // EXACT legacy trigger: only `pass:false` WITH concrete issues earns a
+          // regenerate. `pass:false` and no issues is not actionable, so — as
+          // before — the draft stands rather than burning a blind retry.
+          const rejected = crit.pass === false && issues.length > 0;
+          if (rejected) ctx.log(`script_gen: draft rejected by critic â€” regenerating once`, { issues });
+          // The `0.01 * iter` term preserves the legacy "keep the informed
+          // second attempt" rule: produceAndCritique returns the best candidate
+          // by STRICT score comparison, so without it an equally-rated retry
+          // would lose the tie to the uninformed first draft.
+          return rejected
+            ? { score: Math.max(0, 0.5 - 0.05 * issues.length) + 0.01 * iter, pass: false, issues }
+            : { score: 1, pass: true, issues: [] };
+        } catch (e) {
+          // A critic outage must never cost the run its script.
+          ctx.log(`script_gen: critic unavailable (kept draft): ${e instanceof Error ? e.message : e}`);
+          return { score: 1, pass: true, issues: [] };
         }
-      } catch (e) {
-        ctx.log(`script_gen: critic unavailable (kept draft): ${e instanceof Error ? e.message : e}`);
-      }
-    }
-    ctx.log(`script_gen: ${script.sections.length} sections, ~${script.estDurationSec}s`);
+      },
+    });
+    const script = loop.value;
+    ctx.log(
+      `script_gen: ${script.sections.length} sections, ~${script.estDurationSec}s ` +
+      `(${loop.iterations} iter, ${loop.accepted ? "accepted" : "best-effort"})`,
+    );
     return { script, narrationText: script.narrationText };
   },
 };
@@ -345,9 +416,23 @@ export const qaScript: Block = {
         temperature: 0.3,
       });
       const issues = Array.isArray(res.issues) ? res.issues : [];
-      ctx.log(`qa_script: pass=${res.pass !== false}`, { issues: issues.slice(0, 5) });
-      return { scriptApproved: res.pass !== false };
+      const pass = res.pass !== false;
+      ctx.log(`qa_script: pass=${pass}`, { issues: issues.slice(0, 5) });
+      // HARD GATE: a confirmed craft-quality failure must not proceed into the
+      // paid narration/visual stages that follow — same pattern as the sibling
+      // guard-stage blocks originality_gate / compliance_check (throw to halt
+      // the pipeline; PARALLEL_GROUPS in runner.ts fails the whole group).
+      if (!pass) {
+        throw new Error(
+          `qa_script FAILED: narration failed craft-quality critique — refusing to proceed to paid ` +
+          `narration/visual stages (${issues.slice(0, 5).join(" | ") || "no specific issues returned"})`,
+        );
+      }
+      return { scriptApproved: true };
     } catch (e) {
+      // A confirmed qa_script FAILED must propagate; a model/parse/network
+      // error must not (mirrors originality_gate's scanSpokenLines re-throw).
+      if (e instanceof Error && e.message.startsWith("qa_script FAILED")) throw e;
       ctx.log(`qa_script: critique failed (non-fatal, UNVERIFIED): ${e instanceof Error ? e.message : e}`);
       return { scriptApproved: false };
     }
@@ -450,6 +535,9 @@ export const narrationTts: Block = {
           text: probe,
           elevenVoiceId: selectedVoiceId ?? "JBFqnCBsd6RMkjVDRZzb",
           physics,
+          // P1-1: the channel's own persona + critic doctrine ground the
+          // `register` judgement instead of a generic "does it sound fine".
+          channel: channelCritiqueContext(ctx),
           log: (m) => ctx.log(m),
           onBillableCharacters,
           onAudioJudgeCall,
@@ -1971,6 +2059,10 @@ export const qaVisual: Block = {
       stored: ctx.params["contentLane"],
       pipeline: [],
     });
+    // P1-1 / P1-17: the two per-channel inputs the quality loop was missing —
+    // the operator's critic doctrine, and the lane's own quality calibration.
+    const criticDoctrine = opt(ctx, "criticDoctrine");
+    const laneQuality = laneQualityPolicy(contentLane);
     // Make the channel's stored QualityBar executable where an evaluator can
     // genuinely measure it. Its historic 0..2 target maps to the 0..10 QA
     // scales; dimensions without a matching evaluator remain visible gaps,
@@ -1988,8 +2080,16 @@ export const qaVisual: Block = {
       if (!applies || !Number.isFinite(target) || target < 0 || target > 2) return fallback;
       return Math.max(fallback, Math.min(10, target * 5));
     };
-    const videoMinimum = qualityFloor(["footage"], productionQa ? 6 : 4);
-    const thumbnailMinimum = qualityFloor(["thumbnail"], productionQa ? 5 : 4);
+    // P1-17: the lane raises the model-graded floors where that is meaningful
+    // (a Short is judged harder than a lo-fi loop). Draft runs keep the loose
+    // draft bar, and `qualityFloor` only ever RAISES, so a lane can tighten the
+    // bar but never silently ship below the historic minimum.
+    const videoMinimum = productionQa
+      ? qualityFloor(["footage"], Math.max(6, laneQuality.visualScoreFloor))
+      : qualityFloor(["footage"], 4);
+    const thumbnailMinimum = productionQa
+      ? qualityFloor(["thumbnail"], Math.max(5, laneQuality.thumbnailScoreFloor))
+      : qualityFloor(["thumbnail"], 4);
     const audioMinimum = qualityFloor(["music", "voice"], 5);
     const brandMinimum = qualityFloor(["identity"], 5);
     const tmp = await makeRunTempDir(ctx.runId);
@@ -2132,10 +2232,17 @@ export const qaVisual: Block = {
       channelName: opt(ctx, "channelName"),
       persona: opt(ctx, "persona"),
       styleGrammar: opt(ctx, "styleGrammar"),
+      // P1-1: the channel's own critic doctrine now reaches the mandatory
+      // holistic gate. P1-17: the lane supplies what this lane's critic must
+      // actively scrutinise.
+      ...(criticDoctrine ? { criticDoctrine } : {}),
+      laneEmphasis: laneQuality.emphasis,
       qualityDimensions: (qualityBar?.dimensions ?? []).flatMap((dimension) =>
         typeof dimension?.id === "string" ? [dimension.id] : [],
       ),
     });
+    const visualMatter = visualMatterFromUnknown(ctx.store["visualMatterManifest"]);
+    const visualMatterLocks = visualMatterReviewLocks(visualMatter);
     const channelWorld = [
       watchDna?.recurringSubject
         ? [watchDna.recurringSubject, watchDna.setting, ...(watchDna.motifs ?? []).slice(0, 4)]
@@ -2143,6 +2250,7 @@ export const qaVisual: Block = {
             .join("; ")
         : "",
       channelReviewProfile.channelWorld ?? "",
+      visualMatter?.status !== "disabled" ? visualMatter?.channelWorld ?? "" : "",
     ].filter(Boolean).join("; ") || undefined;
     const reviewIntent = {
       title,
@@ -2154,8 +2262,13 @@ export const qaVisual: Block = {
       channelWorld,
       expectedStructure: channelReviewProfile.expectedStructure,
       allowedVisualConditions: channelReviewProfile.allowedVisualConditions,
+      ...(channelReviewProfile.criticDoctrine
+        ? { criticDoctrine: channelReviewProfile.criticDoctrine }
+        : {}),
+      criticEmphasis: channelReviewProfile.criticEmphasis,
       transcriptCues,
       overlays: reviewOverlays,
+      creativeLocks: visualMatterLocks,
       focusWindows: repairFocus,
     };
     // This is the visual release gate. It persists timestamped scene/cue/overlay
@@ -2311,6 +2424,13 @@ export const qaVisual: Block = {
       introSec: Number(ctx.store["introSec"] ?? 0),
       tailSec: Number(ctx.params["tailSec"] ?? 3),
       introApplied: ctx.store["introApplied"] === true,
+      // Lane-aware dead-air threshold only: this gate stays deterministic and
+      // the doctrine is carried for evidence, never to flip a verdict.
+      channel: {
+        contentLaneKey: contentLane.key,
+        blackSegmentMinSec: laneQuality.blackSegmentMinSec,
+        ...(criticDoctrine ? { criticDoctrine } : {}),
+      },
       log: ctx.log,
     });
     if (rv.verdict === "fail") {
