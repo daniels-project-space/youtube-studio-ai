@@ -658,22 +658,37 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "quiz",
     stage: "visual",
-    title: "Quiz — Quizcraft (standalone multi-type quiz engine)",
+    title: "Quiz — Quizcraft (NOT BUILDABLE under current licensing — design reference only)",
     engine:
-      "Quizcraft — a standalone quiz-channel engine: trivia / flag-guess / music-guess → a deterministic dataset-backed answer → an isolated Remotion composition (depleting timer, answer reveal + image/poster), cloud-rendered",
+      "No implementation exists. This entry documents a design intent — trivia / flag-guess / music-guess → a " +
+      "deterministic dataset-backed answer → an isolated Remotion composition — that three independent audit " +
+      "passes (2026-08) each found unbuildable as specified. Nothing in this entry is wired: no executableIds, " +
+      "no family, no content lane. `public/golden/quiz/*.{jpg,mp4}` are early visual-format proofs only, not " +
+      "evidence the pipeline can produce this content lawfully or repeatably.",
     how:
-      "One engine, three capabilities, all copyright-safe. TRIVIA asks a common-knowledge question, counts down a " +
-      "depleting timer, then reveals the answer card plus a vision-verified image. FLAG-GUESS draws from 195 CC0 flags " +
-      "on an EASY→IMPOSSIBLE ramp with a deterministic country reveal — a dataset can't hallucinate the answer. " +
-      "MUSIC-GUESS plays a film's public-domain theme behind a countdown ring, then shows the poster + title. Every " +
-      "question is answered from a dataset (never a model guess), deduped by key, and laid out by a per-capability " +
-      "timing + layout pass. Renders through an ISOLATED Remotion bundle so a quiz render can't be broken by sibling " +
-      "compositions. The proofs below are real first-try renders.",
+      "All three capabilities were independently closed off, each on its own grounds, not one shared blocker: " +
+      "TRIVIA — every open trivia dataset checked either carries CC BY-SA 4.0 (ShareAlike is structurally " +
+      "incompatible with YouTube's Standard License / CC BY 3.0-only options), is NonCommercial-licensed, is " +
+      "offline, is unlicensed scraped third-party content (e.g. Jeopardy!), or is itself LLM-generated (which " +
+      "fails gate 1 below regardless of license — it launders hallucination risk through an unauditable third " +
+      "party instead of removing it). FLAG-GUESS — no source of national flag artwork carries a genuine CC0 " +
+      "dedication (the closest, flag-icons, is MIT-licensed software with an unrecorded, since-deleted artwork " +
+      "provenance); separately, national flags/emblems are subject to Paris Convention Art. 6ter and national " +
+      "statutes restricting commercial use independently of copyright, which a monetized channel triggers; the " +
+      "\"195\" sovereign-state figure is also an unresolved political classification (Taiwan/Kosovo/Palestine/" +
+      "etc.), and no confusable-pairs data exists anywhere to ground an honest EASY→IMPOSSIBLE ramp. MUSIC-GUESS " +
+      "— the shipped proof render uses the actual Star Wars theme (John Williams, 1977), which directly " +
+      "contradicts this entry's own former claim of a public-domain theme; no clearable-audio sourcing exists. " +
+      "Building any of the three today, under any of the found sources, would mean shipping a legal claim this " +
+      "codebase's own audit found to be false. Rebuilding this capability needs a product/legal decision — " +
+      "e.g. a licensed flag/trivia dataset with sourcing accepted by the business, a resolved list of which " +
+      "territories count, a curated (not automatic) difficulty methodology, and genuinely clearable music — " +
+      "not an engineering fix.",
     gates: [
-      "deterministic dataset answer (never model-guessed)",
-      "dedupe by question key",
-      "per-capability timing + layout",
-      "isolated Remotion bundle",
+      "deterministic dataset answer (never model-guessed) — no compliant dataset found for trivia or flag-guess",
+      "dedupe by question key — trivially satisfiable once a dataset exists, not itself a blocker",
+      "per-capability timing + layout — proven achievable by the visual-format proof media, not a blocker",
+      "isolated Remotion bundle — tractable new infra (second bundle entrypoint), not a blocker",
     ],
     status: "reference",
   },
