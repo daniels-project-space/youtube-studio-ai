@@ -153,6 +153,10 @@ const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
     energy: "bold", font: "bebas", treatment: "stamp", textObject: "carved",
     imageStyle: "cinematic inked graphic-novel panel with cross-hatched dimensional light",
   },
+  loreshort: {
+    energy: "spectacle", font: "serif", treatment: "clean", textObject: "movie_poster",
+    imageStyle: "epic painted concept-art tableau with chiaroscuro light and vast receding depth",
+  },
 };
 
 /**

@@ -126,7 +126,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
       },
     ]),
   ),
-  loreshort: { kind: "catalog-only", executableIds: [], note: "src/lib/loreshort.ts (420 L) has no pipeline importer — library exists, not reachable from the pipeline yet; pipeline adapter pending." },
+  loreshort: { kind: "pipeline-module", executableIds: ["lore_short"] },
   "novita-render-farm": { kind: "pipeline-module", executableIds: ["novita_render_images", "novita_render_video"] },
   "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/imagecraft-novita.ts is NOT on the executed path (no import chain reaches it from src/trigger or src/engine). Production image rendering runs through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) instead — same Z-Image family, different implementation and gate set." },
   "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/videocraft-novita.ts is NOT on the executed path (no import chain reaches it from src/trigger or src/engine). Production video rendering runs through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) instead — same LTX family, different implementation and gate set." },

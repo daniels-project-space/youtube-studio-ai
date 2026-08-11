@@ -21,6 +21,7 @@ export const ContentLaneKeySchema = z.enum([
   "documentary_collage_short",
   "whiteboard_explainer",
   "motion_comic",
+  "lore_micro_doc",
   "legacy_unclassified",
 ]);
 
@@ -56,6 +57,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -76,6 +78,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "stock_footage",
       "gen_footage",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -90,6 +93,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "gen_footage",
       "novita_render_images",
       "novita_render_video",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -108,6 +112,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -122,6 +127,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -137,6 +143,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -155,6 +162,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "motion_comic",
     ],
     forbiddenBlocks: ["timeline_assemble", "assemble"],
@@ -170,7 +178,28 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
+    ],
+    forbiddenBlocks: ["timeline_assemble", "assemble"],
+  },
+  lore_micro_doc: {
+    key: "lore_micro_doc",
+    family: "loreshort",
+    primaryRenderer: "lore_short",
+    requiredBlocks: ["lore_short", "qa_visual"],
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      // NOTE: the lore engine drives the Novita farm from INSIDE itself, so a
+      // separate novita_render_* stage in the pipeline would be a second,
+      // uncoordinated renderer — exactly the visual-language swap this contract
+      // exists to prevent.
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
     ],
     forbiddenBlocks: ["timeline_assemble", "assemble"],
   },
@@ -302,6 +331,21 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
       "Bubbles and captions must sit inside their panel and never cover a face or hero artwork.",
     ],
   },
+  lore_micro_doc: {
+    ...GENERIC_LANE_QUALITY,
+    // Every beat is a paid still AND a paid clip, so an extra critique iteration
+    // is far cheaper than an extra render pass — but the cap stays at 2 because
+    // the loop sits on the beat sheet, which is where a defect is still free.
+    critiqueThreshold: 0.82,
+    maxCritiqueIters: 2,
+    // Long, dark, near-static painterly holds are the LOOK of this lane.
+    blackSegmentMinSec: 5,
+    emphasis: [
+      "The camera must travel through real depth — foreground, midground and background sliding at different rates. A flat pan or zoom on a single plane is the defining defect of this lane.",
+      "Painted concept-art stillness is the intent: a calm beat that only breathes is correct, and forced motion on a still subject (warping, melting, drifting statues) is the defect.",
+      "The narration is one first-person voice throughout; a slip into neutral documentary register breaks the format.",
+    ],
+  },
   legacy_unclassified: { ...GENERIC_LANE_QUALITY },
 };
 
@@ -327,6 +371,7 @@ export const CONTENT_LANE_BY_FAMILY: Record<FamilyKey, ContentLaneKey> = {
   documentary_collage_short: "documentary_collage_short",
   whiteboard: "whiteboard_explainer",
   comic: "motion_comic",
+  loreshort: "lore_micro_doc",
 };
 
 export const ContentLaneSchema = z.object({

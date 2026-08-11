@@ -191,6 +191,34 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "cleanup" },
     ],
   },
+  "lore-short": {
+    key: "lore-short",
+    label: "Lore micro-documentary",
+    description:
+      "First-person 'Histories & Lore' micro-doc: one narrator over painted concept art with genuine 3D depth camera moves, cut to the voice.",
+    template: "A",
+    defaultVoiceId: "sleepless_historian",
+    thumbnailTemplate: "banana",
+    // SELF-CONTAINED: `lore_short` writes the beat sheet, paints it, animates
+    // it and cuts it to its own narration, so there is deliberately no
+    // script_gen / narration_tts / footage / timeline_assemble chain here.
+    // compliance_check gates the TOPIC before the paid engine runs;
+    // originality_gate judges the narration the engine wrote, so it sits after.
+    pipeline: [
+      { block: "competitor_research" },
+      { block: "topic_select", params: { targetSeconds: 54 } },
+      { block: "compliance_check" },
+      { block: "lore_short", params: { subStyle: "cinematic", targetSeconds: 54 } },
+      { block: "originality_gate" },
+      { block: "length_check", params: { minSeconds: 25, maxSeconds: 150 } },
+      { block: "metadata" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+      { block: "notify" },
+      { block: "cleanup" },
+    ],
+  },
   meditation: {
     key: "meditation",
     label: "Meditation / sleep",

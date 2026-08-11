@@ -198,6 +198,7 @@ async function routingProof(): Promise<void> {
     "src/trigger/blocks/intelligenceBlocks.ts": /generateNanoBananaImageWithReceipt/,
     "src/trigger/blocks/motionComicBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/whiteboardScribeBlocks.ts": /createAttestedNovitaImageGenerator/,
+    "src/trigger/blocks/loreShortBlocks.ts": /createAttestedNovitaImageGenerator/,
     "src/trigger/blocks/lofiBlocks.ts": /renderNovitaImage/,
   };
   for (const [relative, expected] of Object.entries(explicitInjection)) {
@@ -207,10 +208,15 @@ async function routingProof(): Promise<void> {
   assert.match(triggerConfig, /FORWARDED_ENV[\s\S]*"GEMINI_API_KEY"/,
     "Trigger deploys must forward the direct Nano Banana credential when present");
 
-  for (const key of ["motioncraft", "loreshort"] as const) {
+  for (const key of ["motioncraft"] as const) {
     assert.equal(CATALOG_EXECUTION_BINDINGS[key]?.kind, "catalog-only");
     assert.deepEqual(CATALOG_EXECUTION_BINDINGS[key]?.executableIds, []);
   }
+  // loreshort was catalog-only until its providers were inverted. Now that it is
+  // wired, the binding must stay honest AND its pixels must run through the
+  // attested farm — the whole reason it could not be wired as-written.
+  assert.equal(CATALOG_EXECUTION_BINDINGS.loreshort.kind, "pipeline-module");
+  assert.deepEqual(CATALOG_EXECUTION_BINDINGS.loreshort.executableIds, ["lore_short"]);
   assert.equal(CATALOG_EXECUTION_BINDINGS.documotion.kind, "pipeline-module");
   assert.deepEqual(CATALOG_EXECUTION_BINDINGS.documotion.executableIds, ["short_strategy", "documotion_short"]);
   assert.deepEqual(CATALOG_EXECUTION_BINDINGS.thumbnail.executableIds, ["thumbnail_gen"]);

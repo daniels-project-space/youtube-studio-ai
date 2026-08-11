@@ -16,7 +16,9 @@ import { novitaRenderBlocks } from "@/trigger/blocks/novitaRenderBlocks";
 import { STORY_SPINE_BLOCKS } from "@/trigger/blocks/storySpineBlocks";
 import { whiteboardScribeBlocks } from "@/trigger/blocks/whiteboardScribeBlocks";
 import { motionComicBlocks } from "@/trigger/blocks/motionComicBlocks";
+import { loreShortBlocks } from "@/trigger/blocks/loreShortBlocks";
 import { documentaryCollageShortBlocks } from "@/trigger/blocks/documentaryCollageShortBlocks";
+import { VISUAL_MATTER_BLOCKS } from "@/trigger/blocks/visualMatterBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
 
 let registered = false;
@@ -41,6 +43,10 @@ export function registerAllBlocks(): void {
   for (const b of CREW_BLOCKS) register(b);
   // Versioned TimedScript → beats → ShotPlan → DP spec → exact EDL spine.
   for (const b of STORY_SPINE_BLOCKS) register(b);
+  // Reusable visual-development contract: mood, character, setting and
+  // storyboard locks. Cinematic is its first integrated consumer; the block
+  // remains renderer-neutral for future generated-visual lanes.
+  for (const b of VISUAL_MATTER_BLOCKS) register(b);
   // Script-synced motion-graphics inserts (visual_inserts): Remotion data viz
   // planned from the numbers the narration actually speaks.
   for (const b of insertBlocks) register(b);
@@ -57,6 +63,10 @@ export function registerAllBlocks(): void {
   // DRAWN-COMIC self-contained engine (motion_comic): narrated comic page that
   // draws itself in (src/lib/motionComic.ts) — produces the final video.
   for (const b of motionComicBlocks) register(b);
+  // LORE MICRO-DOC self-contained engine (lore_short): first-person history over
+  // painted art with attested Novita depth camera moves (src/lib/loreshort.ts)
+  // — produces the final video.
+  for (const b of loreShortBlocks) register(b);
   // Native documentary-collage Shorts: source/claim/beat manifest → portrait
   // DocuMotion master → scene-level safe-area and provenance gate.
   for (const b of documentaryCollageShortBlocks) register(b);

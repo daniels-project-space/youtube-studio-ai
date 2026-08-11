@@ -113,6 +113,35 @@ function whiteboardCostCeiling(
   );
 }
 
+/**
+ * lore_short cold-run bound. The engine renders EXACTLY one attested Novita
+ * still and EXACTLY one attested Novita i2v clip per beat — no repair loop, no
+ * upscale purchase (the free ffmpeg 2K lane is pinned by the block) — so the
+ * ceiling is a bounded beat count times the per-beat still+clip max, plus the
+ * narration character budget. Kept in lockstep with loreBeatCount() in
+ * src/trigger/blocks/loreShortBlocks.ts.
+ */
+function loreShortCostCeiling(
+  params: Readonly<Record<string, unknown>>,
+  context: Readonly<ModuleCostContext> | undefined,
+): number {
+  const seconds = targetSeconds(params, context, 54);
+  const beats = Math.max(6, Math.min(16, Math.round(seconds / 6)));
+  // ~16 spoken characters per second is the same budget motion_comic uses.
+  const characters = Math.max(beats * 40, Math.ceil(seconds * 16));
+  const usesEleven =
+    String(params["ttsProvider"] ?? "fish").toLowerCase() === "elevenlabs" &&
+    typeof params["elevenVoiceId"] === "string" &&
+    params["elevenVoiceId"].trim().length > 0;
+  const ttsRate = usesEleven ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd;
+  return (
+    beats * (PRICE.novitaImageMaxUsd + PRICE.novitaVideoMaxUsd) +
+    // one vision motion-analysis call per beat (cfg.analyzeMotion)
+    beats * PRICE.visionGraderUsd +
+    (characters / 1_000) * ttsRate
+  );
+}
+
 function motionComicCostCeiling(params: Readonly<Record<string, unknown>>): number {
   const panels = Math.floor(boundedNumber(params["panels"], 8, 4, 12));
   const parsedSeconds = finiteNumber(params["targetSeconds"]);
@@ -517,6 +546,16 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Cold-run bound mirrors the engine's 5 art layers per panel and bounded
       // narration character budget. Upstream music is charged by its own block.
       maxCostUsdFor: (params, context) => whiteboardCostCeiling(params, context),
+      qualityRequired: true,
+    },
+  ),
+  lore_short: contract(
+    ["script.generated", "script.qa_passed", "narration.timed", "visuals.generated", "visuals.story_aligned", "master.assembled"],
+    {
+      optionalConsumes: ["visualBrief", "persona", "channelName", "title", "voiceId", "ttsProvider", "criticDoctrine", "styleGrammar", "contentLane"],
+      providerProfiles: [managed, local],
+      maxCostUsd: 30,
+      maxCostUsdFor: (params, context) => loreShortCostCeiling(params, context),
       qualityRequired: true,
     },
   ),

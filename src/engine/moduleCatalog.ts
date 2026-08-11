@@ -72,6 +72,19 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     params: [],
   },
   {
+    block: "visual_matter",
+    label: "Visual Matter",
+    description: "Creates mood, character, setting, and storyboard locks for a cinematic story; reference-image rendering remains explicitly paid and capped.",
+    optional: true,
+    params: [
+      { key: "enabled", label: "Use Visual Matter", type: "toggle", help: "Keep the typed visual-development handoff active for this cinematic pipeline." },
+      { key: "maxCharacters", label: "Character sheets", type: "number", min: 0, max: 6, step: 1 },
+      { key: "maxSettings", label: "Setting sheets", type: "number", min: 0, max: 6, step: 1 },
+      { key: "renderReferenceAssets", label: "Render fal.ai Nano Banana 2 references", type: "toggle", help: "Explicit paid action; requires FAL_KEY and a configured Nano Banana 2 unit-cost guard." },
+      { key: "maxReferenceImages", label: "Reference-image cap", type: "number", min: 1, max: 12, step: 1 },
+    ],
+  },
+  {
     block: "topic_select",
     label: "Topic Select",
     description: "Chooses each video's topic (no-repeat memory, optional ordered series).",
@@ -199,6 +212,17 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     params: [
       { key: "width", label: "Resolution", type: "select", options: [{ value: "1920", label: "1080p" }, { value: "2560", label: "2K (1440p)" }] },
       { key: "styleId", label: "Whiteboard style", type: "select", options: [{ value: "history", label: "History" }, { value: "finance", label: "Finance" }] },
+    ],
+  },
+  {
+    block: "lore_short",
+    label: "Lore micro-doc (depth camera)",
+    description:
+      "Self-contained first-person 'Histories & Lore' micro-documentary: Gemini writes the beat sheet, the attested Novita farm paints each beat and animates a real 3D depth camera move over it, and the cut follows the narration. Replaces script + footage + assembly for the Lore family.",
+    optional: false,
+    params: [
+      { key: "subStyle", label: "Art look", type: "select", options: [{ value: "cinematic", label: "Cinematic concept art" }, { value: "watercolor_pencil", label: "Watercolour + pencil" }] },
+      { key: "narrator", label: "Narrator identity", type: "text", help: "WHO speaks, in first person — identity plus tone. Defaults to the channel persona." },
     ],
   },
   {

@@ -359,10 +359,20 @@ function goldenPromotionGuards(manifests: readonly ModuleManifest[]): void {
     );
   }
 
+  // motioncraft is still a genuine catalog-only reference (no executable ids).
+  // loreshort used to hold this slot; it is now a real pipeline module bound to
+  // `lore_short`, so the catalog-only guard moved to a module that still is one.
   assert.throws(
-    () => selectGoldenProductionModules("loreshort", manifests),
+    () => selectGoldenProductionModules("motioncraft", manifests),
     /catalog-only|no module ids/,
     "catalog-only references must never be production-Golden",
+  );
+  // ...and the newly-wired loreshort must still refuse promotion: being
+  // executable is NOT being Golden. Only a signed promotion receipt does that.
+  assert.throws(
+    () => selectGoldenProductionModules("loreshort", manifests),
+    /contract-certified, not golden-certified/,
+    "a wired module is still not Golden without a promotion receipt",
   );
 
   const thumbnail = GOLDEN_MODULES.find((module) => module.key === "thumbnail")!;
@@ -530,6 +540,16 @@ function configurationSpecificCostEnvelopes(): void {
     "Novita video reservation must follow the pinned profile fanout",
   );
   assert.equal(
+    envelope("visual_matter", { renderReferenceAssets: false }),
+    0,
+    "planning-only Visual Matter must not reserve or silently spend image money",
+  );
+  assert.equal(
+    envelope("visual_matter", { renderReferenceAssets: true, maxReferenceImages: 8 }),
+    8 * PRICE.falNanoBanana2Usd,
+    "an explicit Visual Matter reference pack must reserve its bounded fal.ai Nano Banana 2 allowance",
+  );
+  assert.equal(
     envelope("gen_footage", { maxClips: 6 }),
     6 * (PRICE.novitaImageMaxUsd + PRICE.novitaVideoMaxUsd),
     "generated footage must reserve the pinned Novita image and video ceilings",
@@ -544,7 +564,7 @@ function configurationSpecificCostEnvelopes(): void {
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
-  assert.equal(manifests.length, 49, "all 49 executable blocks must have manifests");
+  assert.equal(manifests.length, 51, "all 51 executable blocks must have manifests");
   assert.deepEqual(
     manifests.filter((manifest) => manifest.certification.status === "legacy").map((manifest) => manifest.id),
     [],

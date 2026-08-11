@@ -50,7 +50,7 @@ export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check"], note: "Quality + originality + compliance floor." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
   { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
-  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "lore_short", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
   { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz." },
   { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
   { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + text-free Flash scene, deterministic Style-DNA typography, and one publishing gate." },
@@ -524,19 +524,21 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     stage: "visual",
     title: "Lore Short — Loreshort Engine",
     engine:
-      "Loreshort — Gemini first-person lore script + Nano Banana art + ElevenLabs per-line TTS + image-to-video camera moves (Seedance-1-lite / LTX) + 4K Real-ESRGAN — two cost/quality lanes",
+      "Loreshort — Gemini first-person lore script + attested Novita stills + per-line cast-voice TTS + attested Novita LTX image-to-video depth camera moves + FREE ffmpeg 2K finish",
     how:
       "A single figure narrates history in FIRST PERSON (GoT \"Histories & Lore\" style): one Gemini-Pro call writes a paced " +
       "narration arc plus per-beat layered-depth SCENE prompts; Nano Banana paints each beat; ElevenLabs voices each line " +
       "separately so every shot is cut to its exact spoken length. A vision pass reads each painting and writes a motion brief " +
       "(subject + particles + a DEPTH camera move, scaled to honest intensity), which drives image-to-video into a GENUINE 3D " +
-      "shot — real perspective and parallax, never a 2D pan. Two lanes: BUDGET (LTX-distilled + free ffmpeg 2K, ~$0.4/video) " +
-      "and PREMIUM (Seedance-1-lite 480p → Real-ESRGAN 4K, ~$1.35/video, far richer figures). A title card plays before the " +
+      "shot — real perspective and parallax, never a 2D pan. A title card plays before the " +
       "narration; ffmpeg fits each shot to its beat, dissolves, titles and grades. Self-describing (LORESHORT_MODULE contract), " +
-      "fail-proof (data-URI inputs, no nginx dependency, retries, no cross-engine fallback), fully resumable. src/lib/loreshort.ts. " +
-      "NOT REACHABLE FROM THE PIPELINE (P1-13): this 420-line library has no pipeline importer anywhere in src/trigger or src/engine " +
-      "-- goldenExecution.ts's own binding self-declares \"pipeline adapter pending\" (CATALOG_EXECUTION_BINDINGS.loreshort). The " +
-      "library exists; the production adapter does not yet.",
+      "fail-proof (retries, no cross-engine fallback), fully resumable. src/lib/loreshort.ts. " +
+      "WIRED: the engine's providers are now INJECTED (LoreShortDeps), and the `lore_short` block " +
+      "(src/trigger/blocks/loreShortBlocks.ts, registered in src/engine/blocks.ts) supplies the attested Novita render farm for " +
+      "both stills (createAttestedNovitaImageGenerator) and the i2v camera move (generateI2V -> renderNovitaI2V), the channel's " +
+      "cast voice instead of a hardcoded ElevenLabs id, and an R2 putObjectFromFile sink instead of the nginx docroot copy. " +
+      "Every receipt accumulates with `+=`. Real-ESRGAN is NOT purchased: the block pins the engine's free ffmpeg 2K lane. " +
+      "Calling craftLoreShort with no deps still runs the original standalone Replicate/ElevenLabs/nginx path unchanged.",
     gates: [
       "required inputs validated (topic / narrator / title / kicker / slug)",
       "de-branded visuals (content-policy safe)",
@@ -544,6 +546,8 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "title card BEFORE narration",
       "no cross-engine fallback — retry same engine or fail loud",
       "genuine-3D camera move (not a 2D pan)",
+      "beat sheet settled by the Director at TEXT prices, then frozen to a content-addressed R2 checkpoint — a rejected draft never costs a render",
+      "all paid stills and clips run through the attested Novita farm with per-call receipts",
     ],
     status: "reference",
   },

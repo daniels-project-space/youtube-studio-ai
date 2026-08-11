@@ -168,6 +168,19 @@ export const CHANNEL_INCEPTION_FAMILY_POLICIES: Readonly<
     starterTopicCount: 3,
     starterPreviewCount: 3,
   },
+  loreshort: {
+    family: "loreshort",
+    // The lore engine speaks with ONE first-person narrator for the whole
+    // channel, so the channel's cast voice is exactly the right owner (unlike
+    // the comic engine, which owns a multi-character cast of its own).
+    voiceOwnership: "channel-cast",
+    requiresNarrativePlaybook: true,
+    // 16:9 narrated micro-doc, not a vertical Short — the longform probe is the
+    // honest match even though each episode runs about a minute.
+    probeProfile: "narrated-longform",
+    starterTopicCount: 3,
+    starterPreviewCount: 3,
+  },
 };
 
 export const CHANNEL_INCEPTION_MODULE_CONTRACTS: readonly ChannelInceptionModuleContract[] = [

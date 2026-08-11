@@ -59,6 +59,8 @@ export interface DesignOptions {
     shorts?: boolean;
     /** Mine source-windowed documentary Short candidates after a long-form draft. */
     documentaryCandidates?: boolean;
+    /** Reusable visual-development contract for cinematic story renders. Default ON for cinematic. */
+    visualMatter?: boolean;
     /** Film-crew creative-direction layer. Default ON. */
     crew?: boolean;
   };
@@ -261,7 +263,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // topic/crew briefs. whiteboard KEEPS the music block (the scribe now beds
   // the produced track under the narration); comic REPLACES music too (the
   // engine scores itself with its own Suno bed).
-  if (fam.visualEngine === "whiteboard_scribe" || fam.visualEngine === "motion_comic") {
+  if (fam.visualEngine === "whiteboard_scribe" || fam.visualEngine === "motion_comic" || fam.visualEngine === "lore_short") {
     // POLICY GATES ARE NOT REPLACED: the old set stripped compliance_check +
     // originality_gate wholesale, so self-scripting engines shipped with ZERO
     // policy gate while topic intel could pick advertiser-hostile war topics.
@@ -271,7 +273,10 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       "script_gen", "hook_craft", "qa_script", "originality_gate",
       "narration_tts", "stock_footage", "gen_footage", "entity_imagery", "intro_card",
       "visual_inserts", "quote_overlays", "captions", "length_check", "timeline_assemble",
-      ...(fam.visualEngine === "motion_comic" ? ["music", "composer_brief"] : []),
+      // comic scores itself (its own Suno bed); lore_short muxes narration only
+      // and reads no music key at all — leaving `music` in would buy a track
+      // that plays in zero published videos.
+      ...(fam.visualEngine === "motion_comic" || fam.visualEngine === "lore_short" ? ["music", "composer_brief"] : []),
     ]);
     pipeline = pipeline.filter((e) => !replaced.has(e.block));
     const briefBlocks = ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec"];
@@ -295,7 +300,25 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       // panels + word budget.
       engineParams.targetSeconds = lenSec;
     }
-    pipeline.splice(anchor + 1, 0, { block: fam.visualEngine, params: engineParams });
+    if (fam.visualEngine === "lore_short" && lenSec) {
+      // The block converts this into a beat count (~6s of screen time per beat,
+      // clamped 6..16). Without it the engine falls back to its own 9-beat
+      // default no matter what length the operator chose.
+      engineParams.targetSeconds = lenSec;
+    }
+    // IDEMPOTENT: whiteboard/comic ride the generic `narrated-essay` archetype
+    // (which does NOT name their engine, so it must be spliced in), whereas a
+    // family whose archetype already declares its own engine must not get a
+    // SECOND copy — two producers of `videoKey` fail pipeline validation.
+    if (!pipeline.some((e) => e.block === fam.visualEngine)) {
+      pipeline.splice(anchor + 1, 0, { block: fam.visualEngine, params: engineParams });
+    } else if (Object.keys(engineParams).length) {
+      // engineParams carry the OPERATOR's chosen length; the archetype's baked
+      // defaults (art style, etc.) are kept but must not outrank it. Note
+      // enforceLengthContract runs separately and does not cover this path.
+      const existing = pipeline.find((e) => e.block === fam.visualEngine)!;
+      existing.params = { ...(existing.params ?? {}), ...engineParams };
+    }
     // originality_gate re-enters AFTER the engine (it judges the narration the
     // engine wrote); compliance_check must sit BEFORE it (gate the topic before
     // the paid art/voice spend, not after).
@@ -372,6 +395,26 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     pipeline.splice(narrationIndex + 1, 0, {
       block: "story_spine",
       params: { generationProfile: "production", targetShotSec: opts.family === "shorts" ? 4 : 6 },
+    });
+  }
+
+  // Visual Matter is a portable creative-development module, not a music-video
+  // family. Cinematic is the first consumer: it turns the timed story spine
+  // into mood, cast, setting, and per-shot storyboard locks before any paid
+  // keyframe/video render. A disabled setting still emits a typed no-op
+  // handoff, keeping downstream contracts deterministic.
+  if (opts.family === "cinematic" && !pipeline.some((entry) => entry.block === "visual_matter")) {
+    const storyIndex = pipeline.findIndex((entry) => entry.block === "story_spine");
+    if (storyIndex < 0) throw new Error("cinematic Visual Matter requires the timed story spine");
+    pipeline.splice(storyIndex + 1, 0, {
+      block: "visual_matter",
+      params: {
+        enabled: t.visualMatter !== false,
+        renderReferenceAssets: false,
+        maxReferenceImages: 8,
+        maxCharacters: 3,
+        maxSettings: 3,
+      },
     });
   }
 
@@ -511,6 +554,7 @@ export function enforceLengthContract(
       if (Number(p["trackCount"] ?? 0) > want) pin("trackCount", want);
     }
     if (e.block === "whiteboard_scribe") pin("targetSeconds", lenSec);
+    if (e.block === "lore_short") pin("targetSeconds", lenSec);
     if (e.block === "motion_comic") pin("panels", Math.max(4, Math.min(12, Math.round(lenSec / 22))));
     return { block: e.block, params: Object.keys(p).length ? p : undefined };
   });

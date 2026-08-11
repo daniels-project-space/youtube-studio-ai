@@ -13,7 +13,8 @@ export type FamilyKey =
   | "shorts"
   | "documentary_collage_short"
   | "whiteboard"
-  | "comic";
+  | "comic"
+  | "loreshort";
 
 export interface Family {
   key: FamilyKey;
@@ -129,6 +130,23 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     requiresKeys: ["fish-audio", "gemini"],
     defaultThumbnailStyle: "banana",
   },
+  loreshort: {
+    key: "loreshort",
+    label: "Lore micro-documentary",
+    description:
+      "First-person 'Histories & Lore' micro-doc: one narrator recounts a history over painted concept art with genuine " +
+      "3D depth camera moves, cut to the voice beat by beat. Self-contained — writes, paints, animates and edits itself.",
+    visualEngine: "lore_short",
+    archetypeKey: "lore-short",
+    available: true,
+    narrated: true,
+    requiresKeys: ["gemini", "novita", "fish-audio"],
+    defaultThumbnailStyle: "banana",
+    // Nine beats, each an attested Novita still plus one attested LTX-class i2v
+    // clip, finished with the FREE ffmpeg 2K lane (no paid upscale). Budget is
+    // a conservative envelope over that bounded shot count, not an invoice.
+    defaultRunBudgetUsd: 12,
+  },
   cinematic: {
     key: "cinematic",
     label: "Cinematic AI scenes",
@@ -166,6 +184,9 @@ export const FAMILY_CREW: Record<FamilyKey, string[]> = {
   // engine never reads.
   comic: ["director", "editor", "critic"],
   cinematic: ["director", "cinematographer", "editor", "composer", "critic"],
+  // NO composer: the lore engine muxes narration only and beds no score, so a
+  // composer_brief would cost an LLM call per run for output nothing reads.
+  loreshort: ["director", "cinematographer", "editor", "critic"],
 };
 
 /** Crew role → the brief block id that role contributes. */
