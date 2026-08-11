@@ -19,6 +19,7 @@ import type * as contentPlan from "../contentPlan.js";
 import type * as crons from "../crons.js";
 import type * as folders from "../folders.js";
 import type * as forgedModules from "../forgedModules.js";
+import type * as goals from "../goals.js";
 import type * as learningGovernance from "../learningGovernance.js";
 import type * as novitaWorkerLeases from "../novitaWorkerLeases.js";
 import type * as outlierBank from "../outlierBank.js";
@@ -56,6 +57,7 @@ declare const fullApi: ApiFromModules<{
   crons: typeof crons;
   folders: typeof folders;
   forgedModules: typeof forgedModules;
+  goals: typeof goals;
   learningGovernance: typeof learningGovernance;
   novitaWorkerLeases: typeof novitaWorkerLeases;
   outlierBank: typeof outlierBank;

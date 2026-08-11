@@ -861,6 +861,17 @@ export default defineSchema({
     recoveryExpectedActualCostUsd: v.optional(v.number()),
     recoveryExpectedProviderRoute: v.optional(v.string()),
     recoveryExpectedTaskVersion: v.optional(v.string()),
+    // Historical Quiet Stoic recovery attempts recorded immutable diagnostics
+    // directly on the batch. Keep both fields optional so deploying the schema
+    // validates those rows without deleting or rewriting production evidence.
+    quietStoicItem3Rescue: v.optional(v.any()),
+    quietStoicItem3RescueV2: v.optional(v.any()),
+    // The same completed historical recovery recorded its golden-run fence at
+    // the top level. These values are provenance, not live control inputs.
+    recoveryGoldenStartedAt: v.optional(v.number()),
+    recoveryGoldenStartedBy: v.optional(v.string()),
+    recoveryGoldenFinishedAt: v.optional(v.number()),
+    recoveryGoldenTerminal: v.optional(v.boolean()),
     leaseExpiresAt: v.number(),
     createdAt: v.number(),
     updatedAt: v.number(),
@@ -881,6 +892,10 @@ export default defineSchema({
     fingerprint: v.string(),
     modelUsage: v.any(),
     imageUsage: v.any(),
+    // Older completed production rows include this immutable pricing/QA
+    // evidence. Keep it optional so schema deployment validates both those
+    // rows and newer rows that do not need a reconciliation record.
+    reconciliationEvidence: v.optional(v.any()),
     costUsd: v.number(),
     accountingComplete: v.boolean(),
     createdAt: v.number(),
@@ -1194,4 +1209,15 @@ export default defineSchema({
     .index("by_key", ["ownerId", "recommendationKey"])
     .index("by_owner_status", ["ownerId", "status"])
     .index("by_channel_created", ["channelId", "createdAt"]),
+
+  // Single project-wide "what are we working toward right now" record, so
+  // both automation and Daniel can query current intent/priorities. Not
+  // per-owner scoped (one project, one active goal) — history is simply the
+  // set of rows ordered by updatedAt; the latest is authoritative.
+  projectGoals: defineTable({
+    statement: v.string(),
+    priorities: v.array(v.string()),
+    setBy: v.string(),
+    updatedAt: v.number(),
+  }).index("by_updatedAt", ["updatedAt"]),
 });
