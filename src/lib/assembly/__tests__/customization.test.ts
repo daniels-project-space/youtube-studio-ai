@@ -91,6 +91,93 @@ function meditationStyle(): void {
   console.log("MEDITATION STYLE PASS: gentle duck, long tail, quiet, slow holds");
 }
 
+/**
+ * CUTOVER SWITCH IS OFF — the safety proof for `useAssemblyEdl`, the per-channel
+ * operator flag that makes `timeline_assemble` compose via the standalone
+ * Assembly EDL module instead of the legacy god-block (narratedBlocks.ts).
+ *
+ * The flag exists so the cutover can be piloted on ONE channel with a config
+ * write. This test pins the "off" state so it cannot drift into a default:
+ * default false, absent from every preset, INERT on param resolution, and —
+ * critically — never even present in `ctx.params` for a channel that has not
+ * explicitly written it (the exact predicate the block branches on).
+ */
+function cutoverFlagDefaultsOff(): void {
+  const knob = ASSEMBLY_SURFACE.knobs.find((k) => k.id === "useAssemblyEdl");
+  assert.ok(knob, "useAssemblyEdl knob exists on the surface");
+  assert.equal(knob.type, "boolean", "cutover switch is a boolean knob");
+  assert.equal(knob.default, false, "CUTOVER SWITCH DEFAULT MUST BE false");
+
+  // No preset may turn it on — not even implicitly, via an Architect preset pick.
+  for (const [name, values] of Object.entries(ASSEMBLY_SURFACE.presets)) {
+    assert.ok(
+      !("useAssemblyEdl" in values),
+      `preset '${name}' must not mention the cutover switch at all`,
+    );
+    assert.equal(
+      resolveKnobs(ASSEMBLY_SURFACE, name).values.useAssemblyEdl,
+      false,
+      `preset '${name}' resolves the cutover switch to false`,
+    );
+  }
+  assert.equal(
+    resolveKnobs(ASSEMBLY_SURFACE).values.useAssemblyEdl,
+    false,
+    "no preset ⇒ cutover switch false",
+  );
+
+  // INERT: the switch selects a code path, it must not perturb ANY resolved
+  // AssembleParams — off, explicitly-off, and on must all produce identical params.
+  const base = resolveAssembleParams(profileWith({ preset: "essay" }));
+  const explicitOff = resolveAssembleParams(profileWith({ preset: "essay", useAssemblyEdl: false }));
+  const explicitOn = resolveAssembleParams(profileWith({ preset: "essay", useAssemblyEdl: true }));
+  assert.deepEqual(explicitOff, base, "useAssemblyEdl=false does not perturb AssembleParams");
+  assert.deepEqual(explicitOn, base, "useAssemblyEdl=true does not perturb AssembleParams (path switch only)");
+
+  // THE DEFAULT PATH IS UNCHANGED. Replays runPipeline.ts's moduleConfig→params
+  // merge (runPipeline.ts:479-496): only knobs the channel EXPLICITLY chose (via
+  // preset keys or overrides) are folded into ctx.params. A channel that never
+  // wrote this knob therefore has no `useAssemblyEdl` key in ctx.params at all,
+  // so narratedBlocks' `ctx.params["useAssemblyEdl"] === true` is false.
+  const mergeLikeRunPipeline = (cfg: { preset?: string } & Record<string, unknown>) => {
+    const { preset, ...overrides } = cfg;
+    const r = resolveKnobs(ASSEMBLY_SURFACE, preset, overrides as Parameters<typeof resolveKnobs>[2]);
+    assert.ok(r.ok, `moduleConfig must validate: ${r.errors.join("; ")}`);
+    const chosen = new Set([
+      ...(preset ? Object.keys(ASSEMBLY_SURFACE.presets[preset] ?? {}) : []),
+      ...Object.keys(overrides),
+    ]);
+    return Object.fromEntries(
+      Object.entries(r.values as Record<string, unknown>).filter(([k]) => chosen.has(k)),
+    );
+  };
+
+  for (const cfg of [{}, { preset: "essay" }, { preset: "documentary" }, { preset: "shorts" }, { captions: false }]) {
+    const params = mergeLikeRunPipeline(cfg);
+    assert.ok(
+      !("useAssemblyEdl" in params),
+      `channel config ${JSON.stringify(cfg)} must not put the cutover switch into ctx.params`,
+    );
+    assert.notEqual(params["useAssemblyEdl"], true, "legacy god-block path taken");
+  }
+
+  // Only an EXPLICIT per-channel opt-in reaches the branch.
+  assert.equal(mergeLikeRunPipeline({ useAssemblyEdl: true })["useAssemblyEdl"], true, "explicit opt-in propagates");
+
+  // `=== true`, not truthiness: half-written / legacy-shaped config stays legacy.
+  const takesEdl = (params: Record<string, unknown>) => params["useAssemblyEdl"] === true;
+  for (const v of [undefined, false, 0, 1, "true", "yes", null, ""]) {
+    assert.equal(takesEdl({ useAssemblyEdl: v }), false, `non-boolean-true ${JSON.stringify(v)} ⇒ legacy path`);
+  }
+  assert.equal(takesEdl({}), false, "absent key ⇒ legacy path");
+  assert.equal(takesEdl({ useAssemblyEdl: true }), true, "explicit true ⇒ EDL path");
+
+  console.log(
+    "CUTOVER FLAG PASS: useAssemblyEdl default false, in no preset, inert on params, " +
+      "absent from ctx.params unless a channel explicitly opts in (===true gate)",
+  );
+}
+
 function illegalOverrideThrows(): void {
   assert.throws(() => resolveAssembleParams(profileWith({ preset: "essay", aspect: "4:3" })), /resolveAssembleParams/, "illegal knob override fails loud");
   console.log("ILLEGAL OVERRIDE PASS: bad per-channel knob throws (no silent wrong config)");
@@ -102,6 +189,7 @@ function main(): void {
   essayParity();
   shortsStyle();
   meditationStyle();
+  cutoverFlagDefaultsOff();
   illegalOverrideThrows();
   console.log("\nALL CUSTOMIZATION TESTS PASSED");
 }

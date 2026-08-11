@@ -1810,6 +1810,64 @@ export const timelineAssemble: Block = {
     "preOverlayLocalPath",
   ],
   run: async (ctx) => {
+    // ========================================================================
+    // ⚠️  USE_ASSEMBLY_EDL — DELIBERATELY-GATED, NOT-YET-VALIDATED CUTOVER PATH
+    // ========================================================================
+    // Everything BELOW this branch is the legacy god-block: the compose/heal
+    // code that has rendered every video this studio has ever shipped. The
+    // branch swaps it wholesale for the standalone Assembly module
+    // (`assembleViaEdl` — plan → renderTimeline → ffmpeg backend).
+    //
+    // IT IS OFF FOR EVERY CHANNEL AND MUST STAY THAT WAY UNTIL A REAL RENDER
+    // PROVES PARITY. What is actually proven today is narrow: the
+    // DETERMINISTIC PLAN MATH matches (scripts/assembly-parity.ts — duration,
+    // per-clip screen time, interleave order, card presence, coverage), and
+    // the adapter emits all 11 keys this block `produces`
+    // (src/lib/assembly/__tests__/cutover.test.ts). NOTHING has proven that
+    // the finished MP4 is equivalent. The bar before this goes anywhere near a
+    // default is the `essay`-preset parity claim demonstrated on a REAL RENDER,
+    // compared side-by-side against the god-block's output for the same run.
+    //
+    // Enabling it is an OPERATOR decision, on ONE channel, reversible in one
+    // config write — never an engineering default and never a code edit:
+    //
+    //   setModuleConfig(channelId, "timeline_assemble", { useAssemblyEdl: true })
+    //
+    // The switch is the `useAssemblyEdl` knob on ASSEMBLY_SURFACE
+    // (src/lib/assembly/module.ts), default `false`, deliberately absent from
+    // every preset. runPipeline only folds EXPLICITLY-CHOSEN knobs into
+    // `ctx.params` (runPipeline.ts:488-496), so a channel that has never
+    // written this knob has no `useAssemblyEdl` key here at all.
+    //
+    // `=== true` — not truthiness — so an absent key, a stale string "true", or
+    // any half-written config falls through to the legacy path. The import is
+    // DYNAMIC so the default path does not even evaluate the module.
+    //
+    // No `profile` is passed on purpose: with one, `assembleViaEdl` layers
+    // per-account params + Editor directives on top, which ADDS divergence.
+    // Params-only is the configuration the parity script actually covers.
+    // ========================================================================
+    if (ctx.params["useAssemblyEdl"] === true) {
+      ctx.log(
+        "timeline_assemble: useAssemblyEdl=true for this channel — composing through the standalone " +
+          "Assembly EDL module (assembleViaEdl) instead of the legacy god-block path. " +
+          "UNVALIDATED CUTOVER: no real-render parity proof exists yet.",
+      );
+      const { assembleViaEdl } = await import("@/lib/assembly/cutover");
+      const produced = await assembleViaEdl({
+        // Copies, not the live bags: the adapter can never mutate this block's
+        // readonly store or the frozen run params.
+        store: { ...ctx.store },
+        params: { ...ctx.params },
+        runId: ctx.runId,
+        keyPrefix: ctx.keyPrefix,
+      });
+      // Spread widens the `AssembleProduces` interface (no index signature) into
+      // a BlockPatch. All 11 declared `produces` keys are carried — the adapter's
+      // key contract is pinned in src/lib/assembly/__tests__/cutover.test.ts.
+      return { ...produced };
+    }
+
     const footage = ctx.store["footageClips"] as string[] | undefined;
     const authoredManifest = ctx.store["shotRenderManifest"]
       ? validateQualifiedShotRender({
