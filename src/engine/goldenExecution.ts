@@ -126,10 +126,10 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
       },
     ]),
   ),
-  loreshort: { kind: "catalog-only", executableIds: [], note: "Standalone library; pipeline adapter pending." },
+  loreshort: { kind: "catalog-only", executableIds: [], note: "src/lib/loreshort.ts (420 L) has no pipeline importer — library exists, not reachable from the pipeline yet; pipeline adapter pending." },
   "novita-render-farm": { kind: "pipeline-module", executableIds: ["novita_render_images", "novita_render_video"] },
-  "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "Reference engine is executed through the Novita render-farm module." },
-  "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "Reference engine is executed through the Novita render-farm module." },
+  "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/imagecraft-novita.ts is NOT on the executed path (no import chain reaches it from src/trigger or src/engine). Production image rendering runs through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) instead — same Z-Image family, different implementation and gate set." },
+  "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/videocraft-novita.ts is NOT on the executed path (no import chain reaches it from src/trigger or src/engine). Production video rendering runs through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) instead — same LTX family, different implementation and gate set." },
   lofi: { kind: "pipeline-module", executableIds: ["scene_planner", "keyframes", "loop_clips", "upscale", "assemble"] },
   quiz: { kind: "catalog-only", executableIds: [], note: "Proof engine is not registered in the production runner." },
   thumbnail: { kind: "pipeline-module", executableIds: ["thumbnail_gen"] },
@@ -142,22 +142,22 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   guard: { kind: "pipeline-module", executableIds: ["qa_script", "originality_gate", "compliance_check"] },
   narration: { kind: "pipeline-module", executableIds: ["narration_tts"] },
   music: { kind: "pipeline-module", executableIds: ["music"] },
-  visuals: { kind: "pipeline-module", executableIds: ["stock_footage", "entity_imagery", "gen_footage", "signature_clips"] },
+  visuals: { kind: "pipeline-module", executableIds: ["stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter"] },
   // Cinematic is the editorial composition of the Novita render-farm modules.
   // The render modules retain their single catalog owner below, so this entry
   // must not duplicate them or claim a separate executable ABI.
   cinematic: {
     kind: "catalog-only",
     executableIds: [],
-    note: "Cinematic channels execute the enforced Z-Image → QA → LTX → QA chain owned by novita-render-farm; a frozen spend ceiling and Golden proof receipt are both required before promotion.",
+    note: "Cinematic channels execute the enforced Z-Image → QA → LTX → QA chain owned by novita-render-farm (src/lib/novitaRenderFarm.ts); cinecraft.ts's hero-anchor identity-lock/consistency logic is NOT applied to this chain (it survives only as a type-only ShotSpec import in src/lib/crew/cinematographer.ts:16) — a real capability gap, not just a catalog mismatch. A frozen spend ceiling and Golden proof receipt are both required before promotion.",
   },
   documotion: {
     kind: "pipeline-module",
     executableIds: ["short_strategy", "documotion_short"],
     note: "Native 9:16 documentary-collage lane; direct Short uploads remain private-first through upload_draft.",
   },
-  motioncraft: { kind: "catalog-only", executableIds: [], note: "Standalone library; the production data-viz subset is owned by Inserts." },
-  "speech-tv": { kind: "catalog-only", executableIds: [], note: "Proof composition is not a production pipeline module." },
+  motioncraft: { kind: "catalog-only", executableIds: [], note: "src/lib/motioncraft.ts (246 L) has zero pipeline importers — not reachable from any executed path. The production data-viz subset it would provide is instead owned and duplicated by the wired Inserts module (src/trigger/blocks/insertBlocks.ts, catalog key \"inserts\"). motioncraft.ts is a dead-code / removal candidate, not a pending feature." },
+  "speech-tv": { kind: "catalog-only", executableIds: [], note: "Library exists (src/lib/remotionRender.ts:360 renderMotivationalSpeech) but has zero callers anywhere in src/trigger or src/engine — not reachable from the pipeline yet, only via a manual Remotion CLI render. A real capability gap, not a doc issue." },
   inserts: { kind: "pipeline-module", executableIds: ["visual_inserts"] },
   layer: { kind: "pipeline-module", executableIds: ["intro_card", "quote_overlays", "captions"] },
   assemble: { kind: "pipeline-module", executableIds: ["timeline_assemble"] },
@@ -172,6 +172,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     // Candidate mining is planning-only: it identifies full-documentary windows
     // for a later, freshly rendered native Short and never crops or publishes.
     executableIds: ["shorts_spinoff", "documentary_short_candidates"],
+    note: "This binds ONLY the long-form -> Short repurposer/candidate-mining path. The primary 9:16 vertical archetype described in golden.ts's \"shorts\" catalog entry (script -> hook_craft -> narration -> footage -> assembly) runs through the standard narrated pipeline-module bindings above (script/guard/narration/visuals/layer/etc.) and has no dedicated executable id of its own — see docs/GOLDEN_MODULE_AUDIT_2026-08.md P1-16.",
   },
 };
 

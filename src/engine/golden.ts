@@ -50,12 +50,12 @@ export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check"], note: "Quality + originality + compliance floor." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
   { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
-  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "documotion_short"], note: "The family selects only the visual engine and QA chain it needs; documentary Shorts render natively at 9:16." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
   { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz." },
-  { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both." },
+  { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
   { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + text-free Flash scene, deterministic Style-DNA typography, and one publishing gate." },
   { stage: "verify", blocks: ["qa_assets", "qa_shots", "short_scene_qa", "length_check", "qa_visual"], note: "Required asset/shot checks, portrait scene-safe-area proof, and deterministic final quality gate." },
-  { stage: "ship", blocks: ["upload_draft", "emit_bundle", "shorts_spinoff", "documentary_short_candidates", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + optional planning-only Short window selection + multilang reuse + optional distribution + scoped cleanup." },
+  { stage: "ship", blocks: ["upload_draft", "emit_bundle", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + multilang reuse + optional distribution + scoped cleanup. NOTE (P2-9): planning-only Short window selection (shorts_spinoff / documentary_short_candidates) is NOT owned by ship — goldenExecution.ts's CATALOG_EXECUTION_BINDINGS assigns those two executables to the `shorts` catalog module (stage: visual); they were moved to the visual stage row to match." },
 ];
 
 /**
@@ -497,6 +497,20 @@ export interface GoldenModule {
   how: string;
   /** The QA gates that protect its output. */
   gates: string[];
+  /**
+   * EDITORIAL LABEL ONLY — this is NOT a runtime gate. `"reference"` vs
+   * `"active"` records a curator's judgment for this catalog page; it has no
+   * bearing on whether the module actually executes in production. The only
+   * things that enforce anything at runtime are block registration
+   * (registerAllBlocks -> runner.ts:208 block.run(ctx)) plus each block's own
+   * fail-closed checks. Golden certification — the layer that WOULD give
+   * `status` teeth (GOLDEN_PROMOTION_PROOFS, compileGoldenExecutionFlow,
+   * selectGoldenProductionModules in goldenExecution.ts) — has zero production
+   * call sites as of this audit (2026-08); see
+   * docs/GOLDEN_MODULE_AUDIT_2026-08.md P2-11. Do not read `status: "active"`
+   * as "verified running in prod" — read it as "editorially promoted on this
+   * page."
+   */
   status: CatalogModuleStatus;
 }
 
@@ -519,7 +533,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "shot — real perspective and parallax, never a 2D pan. Two lanes: BUDGET (LTX-distilled + free ffmpeg 2K, ~$0.4/video) " +
       "and PREMIUM (Seedance-1-lite 480p → Real-ESRGAN 4K, ~$1.35/video, far richer figures). A title card plays before the " +
       "narration; ffmpeg fits each shot to its beat, dissolves, titles and grades. Self-describing (LORESHORT_MODULE contract), " +
-      "fail-proof (data-URI inputs, no nginx dependency, retries, no cross-engine fallback), fully resumable. src/lib/loreshort.ts.",
+      "fail-proof (data-URI inputs, no nginx dependency, retries, no cross-engine fallback), fully resumable. src/lib/loreshort.ts. " +
+      "NOT REACHABLE FROM THE PIPELINE (P1-13): this 420-line library has no pipeline importer anywhere in src/trigger or src/engine " +
+      "-- goldenExecution.ts's own binding self-declares \"pipeline adapter pending\" (CATALOG_EXECUTION_BINDINGS.loreshort). The " +
+      "library exists; the production adapter does not yet.",
     gates: [
       "required inputs validated (topic / narrator / title / kicker / slug)",
       "de-branded visuals (content-policy safe)",
@@ -564,7 +581,11 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     engine:
       "Imagecraft — Z-Image base bf16 stills at 2048×1152 / 40 steps on Novita RTX 4090 spot pods (NAS-staged weights, slot-aware 3-pod queue, verified autoclose, R2-idempotent resume) via the live VPS render bridge",
     how:
-      "A director shot list (per-shot prompt/lens/shotScale/seed + global style/negative/director/steps/cfg/width/height) is POSTed to the live nginx bridge and polled to done; inline sharpness/exposure QA re-renders weak stills pod-side. Self-describing (IMAGECRAFT_NOVITA_MODULE contract). src/lib/imagecraft-novita.ts.",
+      "A director shot list (per-shot prompt/lens/shotScale/seed + global style/negative/director/steps/cfg/width/height) is POSTed to the live nginx bridge and polled to done; inline sharpness/exposure QA re-renders weak stills pod-side. Self-describing (IMAGECRAFT_NOVITA_MODULE contract). src/lib/imagecraft-novita.ts. " +
+      "REFERENCE DESIGN ONLY (P1-5): no import chain from the executed pipeline reaches this file. Production image rendering for " +
+      "Novita-based channels instead runs through the separate, wired novita-render-farm module (src/lib/novitaRenderFarm.ts, called " +
+      "from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) -- same Z-Image family, different codebase and " +
+      "gate set. Do not assume this file's extra gates below are enforced in production.",
     gates: [
       "inline sharpness + exposure QA on every still — weak frames re-render pod-side, never ship",
       "width/height must be a multiple of 32 (VAE tiling requirement) — validate() fails loud",
@@ -582,7 +603,11 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     engine:
       "Videocraft — LTX-2.3 22B int8 image-to-video via Wan2GP at 1920×1088 / 40 steps / guidance 4.0 on Novita RTX 4090 spot pods, driving the 10-move camera grammar over Imagecraft's R2 stills (slot-aware 3-pod queue, verified autoclose, R2-idempotent resume)",
     how:
-      "Each shot's rendered still + camera move + motion cue + seconds (rounded to 8n+1 frames) is POSTed to the live nginx bridge and polled to done; a freeze-detection QA gate rejects still-frame clips (the frozen-frame fix). Emits gen_footage-compatible footageClips/footageKeys, so timeline_assemble works unmodified. Self-describing (VIDEOCRAFT_NOVITA_MODULE contract). src/lib/videocraft-novita.ts.",
+      "Each shot's rendered still + camera move + motion cue + seconds (rounded to 8n+1 frames) is POSTed to the live nginx bridge and polled to done; a freeze-detection QA gate rejects still-frame clips (the frozen-frame fix). Emits gen_footage-compatible footageClips/footageKeys, so timeline_assemble works unmodified. Self-describing (VIDEOCRAFT_NOVITA_MODULE contract). src/lib/videocraft-novita.ts. " +
+      "REFERENCE DESIGN ONLY (P1-6): no import chain from the executed pipeline reaches this file. Production video rendering for " +
+      "Novita-based channels instead runs through the separate, wired novita-render-farm module (src/lib/novitaRenderFarm.ts, called " +
+      "from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) -- same LTX family, different codebase and gate " +
+      "set. Do not assume this file's extra gates below are enforced in production.",
     gates: [
       "freeze-detection QA (the still-frame fix) — a clip that doesn't move is rejected and re-rendered, never shipped",
       "video frames always 8n+1 — rounded, never truncated silently",
@@ -611,7 +636,11 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "hard tripod-lock clause on every Kling prompt (wind moves the subjects, never the viewpoint) AND a " +
       "motion-aware temporal de-warble that strips AI shimmer from the loop unit (seam preserved). No upscale " +
       "is baked in — Topaz 4K is a separate optional pass on the short loop unit. A deblur title intro + lofi " +
-      "music finish it. Self-describing (LOFI_MODULE contract), fully resumable. src/lib/lofi.ts.",
+      "music finish it. Self-describing (LOFI_MODULE contract), fully resumable -- as designed in src/lib/lofi.ts. " +
+      "REFERENCE DESIGN ONLY (P1-9): src/lib/lofi.ts (509 L) has zero importers repo-wide and is not on the executed path. The " +
+      "pipeline that actually runs the lofi archetype is inline in src/trigger/blocks/lofiBlocks.ts (scene/keyframe/loop generation " +
+      "~lines 41,53; music mix ~lines 774-946), calling src/lib/ffmpeg.ts and src/lib/novitaMedia.ts directly. The six gates below " +
+      "describe lofi.ts's design; they have NOT been re-verified against lofiBlocks.ts's actual implementation.",
     gates: [
       "required inputs validated (scene / channel / title / music / slug)",
       "motion ensured — ranked priorities + forbidden + spatial, ≥5 element types",
@@ -799,7 +828,13 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "image as a DIRECT reference, the prompt leads with the identity lock and names the distinctive features (never a " +
       "generic re-description — that's what made early renders \"four different people\"), a vision gate re-rolls drift, " +
       "then Seedance/Kling animates the locked keyframe. Establishing + multi-subject shots supported; any style. Operator " +
-      "approves the hero before any Soul. Standalone src/lib/cinecraft.ts, visual-only (a pipeline adds audio + assembly).",
+      "approves the hero before any Soul. Standalone src/lib/cinecraft.ts (480 L), visual-only (a pipeline adds audio + assembly). " +
+      "NOT CURRENTLY WIRED (P1-10, real capability gap, not a doc bug): production channels on this family run families.ts's " +
+      "\"ai_scenes\" visual engine, which designer.ts:227 routes into the SAME generic Z-Image -> qa_assets -> LTX -> qa_shots chain " +
+      "as novita-render-farm (src/lib/novitaRenderFarm.ts). cinecraft.ts is imported ONLY for its ShotSpec type " +
+      "(src/lib/crew/cinematographer.ts:16), never for its hero-anchor identity-lock logic. Cinematic channels therefore get generic " +
+      "rendering WITHOUT the hero-image consistency law described above -- the anchor/consistency gates below are aspirational until " +
+      "cinecraft.ts's logic (or an equivalent) is actually wired into the pipeline.",
     gates: ["hero-image identity anchor (not the soul)", "vision consistency gate \u2265 8 (re-roll on drift)", "per-kind lock: same person / place / object", "operator-approved hero before Soul"],
     status: "reference",
   },
@@ -836,7 +871,11 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "(Marigold + feathered alpha) and flies a camera through it in Remotion with a kinetic title overlaid — never " +
       "baked in; generative paints a drifting intel-network background in p5.js. One tool contract (__ready / __dur / " +
       "__frame / __settle) drives a single generic Playwright capture, so new tools plug in with zero rework. Clips are " +
-      "timed to each narration cue and per-clip failures stay isolated. Standalone src/lib/motioncraft.ts, visual-only.",
+      "timed to each narration cue and per-clip failures stay isolated. Standalone src/lib/motioncraft.ts (246 L), visual-only. " +
+      "NOT WIRED (P1-11): zero pipeline importers reach this file (kind: \"catalog-only\" in goldenExecution.ts " +
+      "CATALOG_EXECUTION_BINDINGS). Its data-viz capability is DUPLICATED, not consumed, by the production Insert module " +
+      "(src/trigger/blocks/insertBlocks.ts:22,72,107, catalog key \"inserts\"), which is the one actually wired and gated. " +
+      "motioncraft.ts is a dead-code / removal candidate pending a decision to wire it in or delete it -- see P2-7.",
     gates: ["the LLM earns each graphic (3-6 / video, never per line)", "best-tool routing per beat", "verbatim numbers only (stats)", "no text baked into the hero image — the title is a crisp overlay", "per-clip failure isolated"],
     status: "reference",
   },
@@ -855,7 +894,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "script-relevant. Driven by a typed contract — words + segments + an LLM cue-track — so the source/" +
       "transcribe/cue-gen stages plug in later with zero rework. One opaque H.264 render via " +
       "src/lib/remotionRender.ts (renderMotivationalSpeech) into both a full-frame MotivationalSpeech look and a " +
-      "letterboxed CinematicSpeech variant. Proof: the Steve Jobs 2005 Stanford commencement, motivation-edited.",
+      "letterboxed CinematicSpeech variant. Proof: the Steve Jobs 2005 Stanford commencement, motivation-edited. " +
+      "NOT REACHABLE FROM THE PIPELINE (P1-12): renderMotivationalSpeech (src/lib/remotionRender.ts:360) has zero callers anywhere " +
+      "in src/trigger or src/engine -- invocable only via a manual Remotion CLI render, not the production pipeline. The library " +
+      "exists; a production adapter does not yet.",
     gates: [
       "caption highlight synced to word-level timings",
       "segment channel bug matches plan boundaries",
@@ -936,10 +978,20 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     title: "Verify + Heal",
     engine: "Per-artifact qa_visual + critic ValidationSpec + self-heal loop",
     how:
-      "Every artifact is vision-checked — the thumbnail at real 168px browse size against scraped top " +
-      "competitors — and the critic's ValidationSpec is enforced. Failures route back through the heal " +
-      "loop with defect hints instead of shipping degraded output.",
-    gates: ["ValidationSpec", "mobile-size legibility", "reference comparison"],
+      "Every generated artifact is vision-checked inside the qa_visual block (src/trigger/blocks/narratedBlocks.ts: " +
+      "structural/length/frame checks ~2002-2212, thumbnail check ~2219-2231 via evaluateThumbnail in videoVerifier.ts, critic " +
+      "ValidationSpec ~2412-2450+ via runValidationSpec/getValidationSpec). Failures route back through the heal loop with defect " +
+      "hints instead of shipping degraded output. RECONCILED AGAINST THE REAL THROW SITES (P2-2): only \"ValidationSpec\" below is " +
+      "a directly traceable, standalone gate. \"mobile-size legibility\" is NOT implemented inside verify's own evaluateThumbnail() " +
+      "-- the real 168px-mobile-render comparison it paraphrases lives in the separate thumbnail module's own candidate judge " +
+      "(src/lib/thumbnailLab.ts:348-381), not here. \"reference comparison\" is not a standalone verify check either -- it " +
+      "corresponds to the optional marketAwareCritic knob (src/lib/crew/critic.ts:21,58, \"beats the scraped top competitors\") " +
+      "which, when enabled, authors an assertion INTO the same ValidationSpec that runValidationSpec enforces, rather than " +
+      "running as its own gate.",
+    gates: [
+      "ValidationSpec (runValidationSpec, narratedBlocks.ts ~2412-2450+ -- critic-authored BLOCK-severity assertions, incl. the optional marketAwareCritic \"reference comparison\" assertion)",
+      "thumbnail vision grade (evaluateThumbnail, videoVerifier.ts:61 -- fails closed if the required grader doesn't run; NOT the 168px mobile-render comparison, which belongs to the thumbnail module)",
+    ],
     status: "active",
   },
   {
@@ -996,7 +1048,11 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "Pre-builds the next N videos for a channel — each item's topic, thumbnail and description staged into the " +
       "contentPlan board with a generating → ready → used lifecycle. A pinned scheduledAt becomes the video's native " +
       "YouTube publish date, so scheduled-mode channels release on a fixed calendar. The autopilot scheduler consumes " +
-      "the next READY item — its exact topic — instead of picking fresh each run.",
+      "the next READY item — its exact topic — instead of picking fresh each run. " +
+      "P2-8 catalog-count reconciliation (2026-08): this is the 28th explicit GOLDEN_MODULES entry, and the one not covered by " +
+      "the audit's 27-row stage table -- its stage \"plan\" falls outside GOLDEN_SPINE's 12 stages, so the per-spine-stage audit " +
+      "methodology never reached it. Binding: kind \"external-task\", executableId \"plan-week-ahead\" (goldenExecution.ts). Now " +
+      "accounted for.",
     gates: [
       "topic + thumbnail + description pre-built per slot",
       "scheduledAt = native publish date",
@@ -1009,13 +1065,19 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "shorts",
     stage: "visual",
     title: "Shorts (vertical)",
-    engine: "9:16 short-form archetype (template D) + shorts_cuts assembly + long-form → Short repurposer",
+    engine: "9:16 short-form archetype (template D; families.ts visualEngine label \"shorts_cuts\" is a designer-internal switch, not a registered block) + long-form → Short repurposer (shorts_spinoff / documentary_short_candidates)",
     how:
       "A dedicated vertical archetype: a sub-50s shorts-style script, hook_craft, the originality + compliance gates, " +
       "then narration and 9:16 footage / entity imagery assembled at a frenetic ~4s cadence with word-level karaoke " +
       "captions and no chapter cards. A separate repurposer can cut the hook window of any long-form into a 9:16 Short " +
       "and upload it PRIVATE alongside (default OFF). The whole vertical surface — aspect, subject reframe, caption " +
-      "emphasis — is one assembly preset.",
+      "emphasis — is one assembly preset. " +
+      "CORRECTION (P1-16): \"shorts_cuts\" (families.ts:97) is only the family's internal visualEngine LABEL -- there is no block " +
+      "or file by that name; the archetype's own assembly runs through the standard timeline_assemble path, configured by this " +
+      "preset. Separately, goldenExecution.ts's CATALOG_EXECUTION_BINDINGS.shorts actually maps this catalog key's executableIds " +
+      "to the planning-only repurposer (shorts_spinoff / documentary_short_candidates), NOT to the primary vertical archetype " +
+      "described above -- two materially different capabilities share this one catalog key; see goldenExecution.ts's shorts " +
+      "binding note for the split.",
     gates: [
       "9:16 throughout (footage + imagery + assembly)",
       "originality + compliance gated",
