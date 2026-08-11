@@ -959,6 +959,7 @@ function PipelineModulesCard({ channel }: { channel: ChannelDoc }) {
       <ModuleConfigSection
         channelId={cid}
         moduleConfig={channel.moduleConfig as ModuleConfigMap | undefined}
+        activeBlockIds={(channel.pipeline ?? []).map((entry) => entry.block)}
       />
     </section>
   );

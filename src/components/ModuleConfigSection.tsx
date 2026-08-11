@@ -102,6 +102,7 @@ export function ModuleConfigSection({
   moduleConfig,
   value,
   onChange,
+  activeBlockIds,
 }: {
   /** Settings mode: the channel to persist into. */
   channelId?: Id<"channels">;
@@ -111,8 +112,10 @@ export function ModuleConfigSection({
   value?: ModuleConfigMap;
   /** Onboarding mode: receives the updated map on each change. */
   onChange?: (next: ModuleConfigMap) => void;
+  /** Only show modules actually selected in this channel's designed pipeline. */
+  activeBlockIds?: readonly string[];
 }) {
-  const mods = configurableModules();
+  const mods = configurableModules(activeBlockIds);
   const current = channelId ? (moduleConfig ?? {}) : (value ?? {});
 
   const handleControlled = (blockId: string, next: ModuleConfigValue) => {

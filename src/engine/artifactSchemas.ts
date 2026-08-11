@@ -23,6 +23,7 @@ import {
   ShortStrategyManifestSchema,
 } from "./shortStrategyManifest";
 import { ShortRetentionManifestSchema, ShortSceneQaSchema } from "./documentaryCollageShort";
+import { VisualMatterManifestSchema } from "./visualMatter";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -164,6 +165,11 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   dpVisualSpecs: { type: "DPVisualSpec[]", schema: z.array(DPVisualSpecSchema).min(1) },
   editorEdl: { type: "EditorEDL", schema: StorySpineSchema.shape.editorEdl.passthrough() },
   storyCoverage: { type: "StoryCoverage", schema: StorySpineSchema.shape.coverage },
+  visualMatterManifest: {
+    type: "VisualMatterManifest",
+    schema: VisualMatterManifestSchema,
+    persist: "reference",
+  },
   shotList: {
     type: "ShotPlan[]",
     schema: z.array(ShotPlanSchema).min(1),

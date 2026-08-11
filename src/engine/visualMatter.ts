@@ -1,0 +1,464 @@
+/**
+ * Visual Matter is the reusable visual-development contract for generated
+ * stories. It turns the channel's visual identity plus the timed story spine
+ * into a versioned set of mood, character, setting, and shot-specific locks.
+ *
+ * It deliberately lives above a renderer: cinematic Novita, motion comic, or
+ * a future renderer can consume the same package without inventing a new
+ * channel family for every creative format.
+ */
+import { createHash } from "node:crypto";
+import { z } from "zod";
+
+import { canonicalJson } from "@/lib/canonicalJson";
+import {
+  ContinuityLedgerSchema,
+  DPVisualSpecSchema,
+  NarrativeBeatSchema,
+  ShotPlanSchema,
+} from "./storySpine";
+
+const text = z.string().min(1);
+
+export const VisualMatterAssetKindSchema = z.enum([
+  "mood_board",
+  "character_sheet",
+  "setting_sheet",
+  "storyboard_frame",
+]);
+
+export const VisualMatterReferenceAssetSchema = z.object({
+  id: text,
+  kind: VisualMatterAssetKindSchema,
+  label: text,
+  prompt: text,
+  shotId: z.string().min(1).optional(),
+  r2Key: z.string().min(1).optional(),
+  contentType: z.string().min(1).optional(),
+  receipt: z.object({
+    provider: text,
+    model: text,
+    responseId: text,
+    requestSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    responseSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+    costUsd: z.number().finite().nonnegative(),
+  }).passthrough().optional(),
+}).strict();
+
+export const VisualMatterMoodBoardSchema = z.object({
+  id: z.literal("mood-primary"),
+  mood: text,
+  palette: z.array(z.string().min(1)).max(12),
+  lighting: text,
+  visualPrompt: text,
+}).strict();
+
+export const VisualMatterCharacterSchema = z.object({
+  id: text,
+  name: text,
+  identityLock: text,
+  stylePrompt: text,
+}).strict();
+
+export const VisualMatterSettingSchema = z.object({
+  id: text,
+  name: text,
+  continuityLock: text,
+  stylePrompt: text,
+}).strict();
+
+export const VisualMatterStoryboardSchema = z.object({
+  shotId: z.string().regex(/^shot-[a-z0-9-]+$/),
+  beatId: text,
+  t0: z.number().finite().nonnegative(),
+  t1: z.number().finite().positive(),
+  characterIds: z.array(text).max(6),
+  settingId: z.string().min(1).optional(),
+  promptAddendum: text,
+  motionAddendum: text,
+  acceptanceCriteria: z.array(text).min(3).max(8),
+  referenceAssetIds: z.array(text).max(10),
+}).refine((frame) => frame.t1 > frame.t0, "storyboard frame must have a positive time window");
+
+export const VisualMatterReviewLockSchema = z.object({
+  shotId: z.string().regex(/^shot-[a-z0-9-]+$/),
+  startSec: z.number().finite().nonnegative(),
+  endSec: z.number().finite().positive(),
+  expected: text,
+  acceptanceCriteria: z.array(text).min(3).max(8),
+}).refine((lock) => lock.endSec > lock.startSec, "visual review lock must have a positive time window");
+
+export const VisualMatterManifestSchema = z.object({
+  version: z.literal("visual-matter/v1"),
+  /** disabled is a deliberate no-op, not an absent or malformed handoff. */
+  status: z.enum(["disabled", "planned", "anchored"]),
+  revision: z.string().regex(/^[a-f0-9]{64}$/i),
+  topic: text,
+  channelWorld: text,
+  moodBoard: VisualMatterMoodBoardSchema,
+  characters: z.array(VisualMatterCharacterSchema).max(6),
+  settings: z.array(VisualMatterSettingSchema).max(6),
+  storyboard: z.array(VisualMatterStoryboardSchema).min(1),
+  reviewLocks: z.array(VisualMatterReviewLockSchema).min(1),
+  referenceAssets: z.array(VisualMatterReferenceAssetSchema).max(16),
+}).strict();
+
+export type VisualMatterManifest = z.infer<typeof VisualMatterManifestSchema>;
+export type VisualMatterReferenceAsset = z.infer<typeof VisualMatterReferenceAssetSchema>;
+
+export interface PlanVisualMatterInput {
+  topic: string;
+  channelName?: string;
+  styleDNA?: Record<string, unknown> | null;
+  visualBrief?: Record<string, unknown> | null;
+  continuityLedger: unknown;
+  narrativeBeats: unknown;
+  shotList: unknown;
+  dpVisualSpecs: unknown;
+  maxCharacters?: number;
+  maxSettings?: number;
+}
+
+export interface VisualMatterAssetRequest {
+  id: string;
+  kind: z.infer<typeof VisualMatterAssetKindSchema>;
+  label: string;
+  prompt: string;
+  shotId?: string;
+}
+
+export interface VisualMatterShotDirective {
+  renderPrompt: string;
+  motionPrompt: string;
+  qaCriteria: string;
+  referenceAssetLabels: string[];
+}
+
+function sha256(value: unknown): string {
+  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+}
+
+function strings(value: unknown): string[] {
+  return Array.isArray(value)
+    ? value
+        .filter((item): item is string => typeof item === "string")
+        .map((item) => item.replace(/\s+/g, " ").trim())
+        .filter(Boolean)
+    : [];
+}
+
+function stringAt(record: Record<string, unknown> | null | undefined, key: string): string | undefined {
+  const value = record?.[key];
+  return typeof value === "string" && value.trim() ? value.replace(/\s+/g, " ").trim() : undefined;
+}
+
+function boundedInteger(value: unknown, fallback: number, min: number, max: number): number {
+  const parsed = Number(value);
+  const safe = Number.isFinite(parsed) ? Math.floor(parsed) : fallback;
+  return Math.max(min, Math.min(max, safe));
+}
+
+function clipped(value: string, max = 900): string {
+  const normalized = value.replace(/\s+/g, " ").trim();
+  return normalized.length <= max ? normalized : `${normalized.slice(0, max - 1)}…`;
+}
+
+function evenlyPick<T>(values: readonly T[], count: number): T[] {
+  if (count <= 0 || values.length === 0) return [];
+  if (values.length <= count) return [...values];
+  return Array.from({ length: count }, (_, index) => {
+    const at = Math.min(values.length - 1, Math.floor(((index + 0.5) * values.length) / count));
+    return values[at];
+  });
+}
+
+/** Build the deterministic pre-production package. No image provider is called here. */
+export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterManifest {
+  const topic = clipped(input.topic || "Untitled story", 300);
+  const ledger = ContinuityLedgerSchema.parse(input.continuityLedger);
+  const beats = z.array(NarrativeBeatSchema).min(1).parse(input.narrativeBeats);
+  const shots = z.array(ShotPlanSchema).min(1).parse(input.shotList);
+  const specs = z.array(DPVisualSpecSchema).min(1).parse(input.dpVisualSpecs);
+  const specByShot = new Map(specs.map((spec) => [spec.shotId, spec]));
+  if (specByShot.size !== shots.length || shots.some((shot) => !specByShot.has(shot.id))) {
+    throw new Error("visual matter requires one DP visual spec for every story shot");
+  }
+  const beatById = new Map(beats.map((beat) => [beat.id, beat]));
+
+  const dna = input.styleDNA ?? {};
+  const visualBrief = input.visualBrief ?? {};
+  const palette = [...new Set([
+    ...strings(dna["palette"]),
+    ...ledger.palette,
+  ])].slice(0, 8);
+  const setting = stringAt(dna, "setting") ?? ledger.locations[0]?.name;
+  const recurringSubject = stringAt(dna, "recurringSubject") ?? ledger.entities[0]?.name;
+  const colorGrade = stringAt(dna, "colorGrade");
+  const mood = stringAt(visualBrief, "mood") ?? stringAt(dna, "vibe") ??
+    (colorGrade ? `${colorGrade} cinematic mood` : "intentional cinematic mood tied to the narration");
+  const lighting = stringAt(dna, "lighting") ?? "motivated, coherent lighting that supports the story beat";
+  const channelWorld = clipped([
+    input.channelName ? `Channel: ${input.channelName}` : "",
+    recurringSubject ? `Recurring subject: ${recurringSubject}` : "",
+    setting ? `World: ${setting}` : "",
+    colorGrade ? `Color grade: ${colorGrade}` : "",
+    palette.length ? `Palette: ${palette.join(", ")}` : "",
+    `Mood: ${mood}`,
+  ].filter(Boolean).join(". ") || `A deliberate cinematic world for ${topic}`);
+
+  const maxCharacters = boundedInteger(input.maxCharacters, 3, 0, 6);
+  const characters = ledger.entities.slice(0, maxCharacters).map((entity) => {
+    const wardrobe = ledger.wardrobe.length ? `Wardrobe: ${ledger.wardrobe.join(", ")}.` : "";
+    const props = ledger.props.length ? `Recurring props: ${ledger.props.join(", ")}.` : "";
+    const identityLock = clipped(`${entity.look}. ${wardrobe} ${props}`);
+    return {
+      id: entity.id,
+      name: entity.name,
+      identityLock,
+      stylePrompt: clipped(
+        `Create a consistent cinematic character reference for ${entity.name}. ${identityLock} ` +
+        `${channelWorld}. Full figure, front/three-quarter/profile turnaround, neutral readable pose, ` +
+        `no typography, labels, captions, logos, or watermarks.`,
+      ),
+    };
+  });
+
+  const maxSettings = boundedInteger(input.maxSettings, 3, 0, 6);
+  const sourceLocations = ledger.locations.length
+    ? ledger.locations
+    : setting
+      ? [{ id: "location-primary", name: setting, look: setting }]
+      : [];
+  const settings = sourceLocations.slice(0, maxSettings).map((location) => {
+    const continuityLock = clipped(
+      `${location.look}. Era: ${ledger.era}. ${ledger.props.length ? `Key props: ${ledger.props.join(", ")}.` : ""} ` +
+      `Lighting: ${lighting}. ${palette.length ? `Palette: ${palette.join(", ")}.` : ""}`,
+    );
+    return {
+      id: location.id,
+      name: location.name,
+      continuityLock,
+      stylePrompt: clipped(
+        `Create a cinematic environment reference for ${location.name}. ${continuityLock} ${channelWorld}. ` +
+        `Show spatial logic, surfaces, depth, and practical light sources. No people unless needed for scale. ` +
+        `No typography, labels, captions, logos, or watermarks.`,
+      ),
+    };
+  });
+  const characterById = new Map(characters.map((character) => [character.id, character]));
+  const settingById = new Map(settings.map((location) => [location.id, location]));
+
+  const moodBoard = {
+    id: "mood-primary" as const,
+    mood: clipped(mood, 300),
+    palette,
+    lighting: clipped(lighting, 300),
+    visualPrompt: clipped(
+      `Create a cinematic mood board for “${topic}”. ${channelWorld}. ` +
+      `Include atmosphere, material, light, framing, and color references that make the visual world unmistakable. ` +
+      `It is a visual reference only: no readable typography, labels, captions, logos, or watermarks.`,
+    ),
+  };
+
+  const storyboard = shots.map((shot) => {
+    const spec = specByShot.get(shot.id)!;
+    const beat = beatById.get(shot.beatId);
+    const characterIds = shot.entities.filter((id) => characterById.has(id));
+    const settingId = shot.locationId && settingById.has(shot.locationId) ? shot.locationId : undefined;
+    const characterLock = characterIds.length
+      ? characterIds.map((id) => characterById.get(id)!.identityLock).join(" ")
+      : "No named character is required; retain the world and subject continuity.";
+    const settingLock = settingId
+      ? settingById.get(settingId)!.continuityLock
+      : setting ?? "Use the established cinematic world without an arbitrary location change.";
+    const promptAddendum = clipped(
+      `Visual Matter lock for ${shot.id}: ${shot.literalContent}. ` +
+      `Story purpose: ${beat?.purpose ?? shot.coveragePurpose}. Character lock: ${characterLock} ` +
+      `Setting lock: ${settingLock} Mood: ${moodBoard.mood}. ` +
+      `Retain this exact story state; do not substitute generic beauty footage.`,
+    );
+    const motionAddendum = clipped(
+      `Begin from the locked storyboard state and preserve identity, setting, wardrobe, props, palette, and lighting. ` +
+      `Only advance the action implied by “${shot.literalContent}”; no unmotivated morph, costume swap, location jump, or era drift.`,
+    );
+    const acceptanceCriteria = [
+      `The frame visibly depicts the narrated moment: ${shot.literalContent}`,
+      characterIds.length
+        ? `Named-character identity remains consistent: ${characterIds.join(", ")}`
+        : "The subject and visual world remain consistent with the storyboard lock",
+      settingId
+        ? `The setting remains ${settingById.get(settingId)!.name}`
+        : "The setting remains coherent with the established channel world",
+      `Mood, lighting, palette, wardrobe, props, and era remain coherent: ${moodBoard.mood}`,
+      "No accidental text, logo, watermark, duplicate anatomy, broken geometry, or generic unrelated footage",
+    ];
+    return {
+      shotId: shot.id,
+      beatId: shot.beatId,
+      t0: shot.t0,
+      t1: shot.t1,
+      characterIds,
+      ...(settingId ? { settingId } : {}),
+      promptAddendum,
+      motionAddendum,
+      acceptanceCriteria,
+      referenceAssetIds: [
+        "mood-primary",
+        ...characterIds,
+        ...(settingId ? [settingId] : []),
+      ],
+    };
+  });
+  const reviewLocks = storyboard.map((frame) => ({
+    shotId: frame.shotId,
+    startSec: frame.t0,
+    endSec: frame.t1,
+    expected: frame.promptAddendum,
+    acceptanceCriteria: frame.acceptanceCriteria,
+  }));
+  const revision = sha256({
+    topic,
+    channelWorld,
+    moodBoard,
+    characters,
+    settings,
+    storyboard,
+  });
+
+  return VisualMatterManifestSchema.parse({
+    version: "visual-matter/v1",
+    status: "planned",
+    revision,
+    topic,
+    channelWorld,
+    moodBoard,
+    characters,
+    settings,
+    storyboard,
+    reviewLocks,
+    referenceAssets: [],
+  });
+}
+
+/**
+ * Select a bounded reference pack for a paid image pass. Storyboard frames are
+ * distributed through the story rather than spending the whole allowance on
+ * the opening seconds.
+ */
+export function visualMatterAssetRequests(
+  manifest: VisualMatterManifest,
+  maxImages: number,
+): VisualMatterAssetRequest[] {
+  if (manifest.status === "disabled") return [];
+  const limit = boundedInteger(maxImages, 8, 1, 12);
+  const requests: VisualMatterAssetRequest[] = [
+    {
+      id: manifest.moodBoard.id,
+      kind: "mood_board",
+      label: "Mood board",
+      prompt: manifest.moodBoard.visualPrompt,
+    },
+    ...manifest.characters.map((character) => ({
+      id: character.id,
+      kind: "character_sheet" as const,
+      label: `Character sheet · ${character.name}`,
+      prompt: character.stylePrompt,
+    })),
+    ...manifest.settings.map((setting) => ({
+      id: setting.id,
+      kind: "setting_sheet" as const,
+      label: `Setting sheet · ${setting.name}`,
+      prompt: setting.stylePrompt,
+    })),
+  ];
+  const fixed = requests.slice(0, limit);
+  const remaining = Math.max(0, limit - fixed.length);
+  const storyboard = evenlyPick(manifest.storyboard, remaining).map((frame) => ({
+    id: `storyboard:${frame.shotId}`,
+    kind: "storyboard_frame" as const,
+    label: `Storyboard frame · ${frame.shotId}`,
+    shotId: frame.shotId,
+    prompt: clipped(
+      `Create the locked storyboard keyframe for ${frame.shotId}. ${frame.promptAddendum} ` +
+      `Compose it as a single cinematic production reference, not an infographic or collage. ` +
+      `No typography, labels, captions, logos, or watermarks.`,
+    ),
+  }));
+  return [...fixed, ...storyboard];
+}
+
+/** Attach immutable provider/R2 receipts after an explicit reference-image pass. */
+export function attachVisualMatterReferenceAssets(
+  manifest: VisualMatterManifest,
+  assets: readonly VisualMatterReferenceAsset[],
+): VisualMatterManifest {
+  const unique = new Map<string, VisualMatterReferenceAsset>();
+  for (const asset of assets) {
+    if (unique.has(asset.id)) throw new Error(`visual matter reference asset '${asset.id}' was generated twice`);
+    unique.set(asset.id, VisualMatterReferenceAssetSchema.parse(asset));
+  }
+  return VisualMatterManifestSchema.parse({
+    ...manifest,
+    status: unique.size ? "anchored" : manifest.status,
+    storyboard: manifest.storyboard.map((frame) => {
+      const storyboardAssetId = `storyboard:${frame.shotId}`;
+      return unique.has(storyboardAssetId) && !frame.referenceAssetIds.includes(storyboardAssetId)
+        ? { ...frame, referenceAssetIds: [...frame.referenceAssetIds, storyboardAssetId] }
+        : frame;
+    }),
+    referenceAssets: [...unique.values()],
+  });
+}
+
+export function visualMatterFromUnknown(value: unknown): VisualMatterManifest | undefined {
+  const parsed = VisualMatterManifestSchema.safeParse(value);
+  return parsed.success ? parsed.data : undefined;
+}
+
+/** Compile a small, shot-specific handoff instead of dumping the whole bible into every prompt. */
+export function visualMatterDirectiveForShot(
+  manifest: VisualMatterManifest | undefined,
+  shotId: string,
+): VisualMatterShotDirective | undefined {
+  if (!manifest || manifest.status === "disabled") return undefined;
+  const frame = manifest.storyboard.find((candidate) => candidate.shotId === shotId);
+  if (!frame) return undefined;
+  const byId = new Map(manifest.referenceAssets.map((asset) => [asset.id, asset]));
+  const referenceAssetLabels = frame.referenceAssetIds
+    .map((id) => byId.get(id)?.label)
+    .filter((label): label is string => Boolean(label));
+  return {
+    renderPrompt: clipped(
+      `${frame.promptAddendum} ${referenceAssetLabels.length ? `Reference package available: ${referenceAssetLabels.join("; ")}.` : ""}`,
+    ),
+    motionPrompt: frame.motionAddendum,
+    qaCriteria: frame.acceptanceCriteria.join(" | "),
+    referenceAssetLabels,
+  };
+}
+
+/** Actual reference pixels available for a shot's visual QA comparison. */
+export function visualMatterReferenceAssetsForShot(
+  manifest: VisualMatterManifest | undefined,
+  shotId: string,
+): VisualMatterReferenceAsset[] {
+  if (!manifest || manifest.status !== "anchored") return [];
+  const frame = manifest.storyboard.find((candidate) => candidate.shotId === shotId);
+  if (!frame) return [];
+  const byId = new Map(manifest.referenceAssets.map((asset) => [asset.id, asset]));
+  return frame.referenceAssetIds
+    .map((id) => byId.get(id))
+    .filter((asset): asset is VisualMatterReferenceAsset => Boolean(asset?.r2Key))
+    .sort((left, right) => {
+      const leftPriority = left.shotId === shotId ? 0 : left.kind === "character_sheet" ? 1 : left.kind === "setting_sheet" ? 2 : 3;
+      const rightPriority = right.shotId === shotId ? 0 : right.kind === "character_sheet" ? 1 : right.kind === "setting_sheet" ? 2 : 3;
+      return leftPriority - rightPriority || left.id.localeCompare(right.id);
+    });
+}
+
+export function visualMatterReviewLocks(value: VisualMatterManifest | unknown | undefined): z.infer<typeof VisualMatterReviewLockSchema>[] {
+  const manifest = value && typeof value === "object" && "version" in value
+    ? visualMatterFromUnknown(value)
+    : undefined;
+  return manifest?.status === "disabled" ? [] : manifest?.reviewLocks ?? [];
+}

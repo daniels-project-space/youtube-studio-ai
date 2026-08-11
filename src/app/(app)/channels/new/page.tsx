@@ -72,6 +72,7 @@ interface Toggles {
   crosspost: boolean;
   shorts: boolean;
   documentaryCandidates: boolean;
+  visualMatter: boolean;
 }
 const DEFAULT_TOGGLES: Toggles = {
   quotes: true,
@@ -81,6 +82,7 @@ const DEFAULT_TOGGLES: Toggles = {
   crosspost: false,
   shorts: false,
   documentaryCandidates: false,
+  visualMatter: true,
 };
 
 async function browserSha256(value: string): Promise<string> {
@@ -106,6 +108,17 @@ function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string): str
     const at = blocks.indexOf("topic_select");
     const i = at >= 0 ? at + 1 : 0;
     blocks = [...blocks.slice(0, i), ...crew, ...blocks.slice(i)];
+  }
+  // The designer inserts a durable story spine for externally narrated lanes.
+  // Cinematic then inserts Visual Matter immediately after it; mirror that in
+  // the review preview so the optional creative module is never invisible.
+  if (fam.narrated && !blocks.includes("story_spine")) {
+    const narration = blocks.indexOf("narration_tts");
+    if (narration >= 0) blocks = [...blocks.slice(0, narration + 1), "story_spine", ...blocks.slice(narration + 1)];
+  }
+  if (familyKey === "cinematic" && !blocks.includes("visual_matter")) {
+    const story = blocks.indexOf("story_spine");
+    if (story >= 0) blocks = [...blocks.slice(0, story + 1), "visual_matter", ...blocks.slice(story + 1)];
   }
   if (t.crosspost) {
     const i = blocks.findIndex((b) => b === "notify" || b === "cleanup");
@@ -825,6 +838,28 @@ export default function NewChannelWizard() {
                 <input type="checkbox" checked={toggles[k]} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}
               </label>
             ))}
+            {family === "cinematic" && (
+              <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={toggles.visualMatter}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setToggles((current) => ({ ...current, visualMatter: enabled }));
+                    setModuleConfig((current) => {
+                      const visualMatter = { ...(current.visual_matter ?? {}) };
+                      if (enabled) delete visualMatter.enabled;
+                      else visualMatter.enabled = false;
+                      const next = { ...current };
+                      if (Object.keys(visualMatter).length) next.visual_matter = visualMatter;
+                      else delete next.visual_matter;
+                      return next;
+                    });
+                  }}
+                />
+                Visual Matter (mood board, character/settings sheets, storyboard locks)
+              </label>
+            )}
           </div>
         </div>
       )}
@@ -905,7 +940,7 @@ export default function NewChannelWizard() {
                 Pick a preset per module and flip toggles — wired into every render. Editable later in Settings.
               </div>
             </div>
-            <ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} />
+            <ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} activeBlockIds={preview} />
           </div>
         </div>
       )}

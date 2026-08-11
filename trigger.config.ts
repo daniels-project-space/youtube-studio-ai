@@ -15,7 +15,10 @@ import {
  *  - STUDIO_CONVEX_JWT_PRIVATE_KEY — signs short-lived, owner-scoped Convex
  *    service identities for durable workers (ES256 PKCS#8 PEM),
  *  - GEMINI_API_KEY         — direct Nano Banana + Gemini runtime credential;
- *    vault bootstrap remains the fallback when it is not present at deploy,
+ *  - FAL_KEY                 — fal.ai credential for explicitly enabled
+ *    Visual Matter Nano Banana 2 reference-image packs (never forwarded to Vercel),
+ *  - FAL_NANO_BANANA_2_COST_USD — operator-reviewed per-image ledger rate;
+ *    vault bootstrap remains the credential fallback when FAL_KEY is absent at deploy,
  *  - IMAGE_DISABLE_GEMINI   — 1 → generic non-thumbnail still-image routes use
  *    fal FLUX; strict thumbnail generation deliberately ignores this switch,
  *  - VISION_DISABLE_GEMINI  — 1 → vision router never falls back to Gemini,
@@ -43,6 +46,8 @@ const FORWARDED_ENV = [
   "NOVITA_RENDER_MAX_JOB_USD",
   "NOVITA_RENDER_MAX_FLEET_USD",
   "GEMINI_API_KEY",
+  "FAL_KEY",
+  "FAL_NANO_BANANA_2_COST_USD",
   "IMAGE_DISABLE_GEMINI",
   "VISION_DISABLE_GEMINI",
   "GROQ_API_KEY",
@@ -60,6 +65,7 @@ const SECRET_FORWARDED_ENV = new Set([
   "NOVITA_RENDER_WORKER_IMAGE",
   "NOVITA_RENDER_IMAGE_AUTH_ID",
   "GEMINI_API_KEY",
+  "FAL_KEY",
   "GROQ_API_KEY",
   "VAULT_ACCESS_TOKEN",
 ]);

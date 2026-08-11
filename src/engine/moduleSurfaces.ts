@@ -251,6 +251,33 @@ const UPLOAD_MODULE: ModuleCard = {
   },
 };
 
+const VISUAL_MATTER_MODULE: ModuleCard = {
+  key: "visual_matter",
+  title: "Visual Matter",
+  stage: "visual development",
+  does: "Builds a channel-and-topic-specific mood board, character and setting sheets, plus per-shot storyboard locks. fal.ai Nano Banana 2 references are an explicit paid option; the visual lock itself feeds cinematic rendering and QA.",
+  customization: {
+    capabilities: [
+      "topic-specific mood direction",
+      "character and setting continuity sheets",
+      "per-shot storyboard and visual QA locks",
+      "optional fal.ai Nano Banana 2 reference assets",
+    ],
+    knobs: [
+      { id: "enabled", type: "boolean", default: true, describes: "apply the Visual Matter contract to cinematic renders", servesStyles: ["cinematic", "story"] },
+      { id: "maxCharacters", type: "number", range: [0, 6], default: 3, describes: "maximum character sheets planned from the story continuity ledger", servesStyles: ["character", "comic", "cinematic"] },
+      { id: "maxSettings", type: "number", range: [0, 6], default: 3, describes: "maximum setting sheets planned from the channel world", servesStyles: ["worldbuilding", "cinematic"] },
+      { id: "renderReferenceAssets", type: "boolean", default: false, describes: "explicitly spend on fal.ai Nano Banana 2 mood/character/setting/storyboard reference images", servesStyles: ["reference", "cinematic"] },
+      { id: "maxReferenceImages", type: "number", range: [1, 12], default: 8, describes: "hard cap for the paid fal.ai Nano Banana 2 reference pack", servesStyles: ["reference", "budget"] },
+    ],
+    presets: {
+      planning_only: { enabled: true, renderReferenceAssets: false, maxCharacters: 3, maxSettings: 3 },
+      reference_pack: { enabled: true, renderReferenceAssets: true, maxCharacters: 3, maxSettings: 3, maxReferenceImages: 8 },
+      world_only: { enabled: true, renderReferenceAssets: false, maxCharacters: 0, maxSettings: 3 },
+    },
+  },
+};
+
 /** Core pipeline surfaces — registered into MODULE_REGISTRY. */
 export const CORE_MODULE_SURFACES: ModuleCard[] = [
   TOPIC_MODULE,
@@ -267,5 +294,6 @@ export const CORE_MODULE_SURFACES: ModuleCard[] = [
   LOOP_CLIPS_MODULE,
   UPSCALE_MODULE,
   LOOP_ASSEMBLE_MODULE,
+  VISUAL_MATTER_MODULE,
   UPLOAD_MODULE,
 ];
