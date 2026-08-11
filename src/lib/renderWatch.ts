@@ -1,19 +1,20 @@
 /**
- * Holistic post-render review — WATCH the whole film, don't spot-check it.
+ * NATIVE full-watch render review — the reviewer that can HEAR.
  *
- * The old QA sampled 3 frames (20/50/80%) and trusted boolean flags for the title/
- * outro cards, so it was blind to the start, the end, and the timeline as a whole
- * (it passed a video with a missing title card, a mid-video outro card, a missing
- * chapter, and irrelevant inserts). This replaces that sprawl of narrow rules with
- * ONE intent-grounded reviewer: sample the FULL timeline (guaranteed first + last
- * frames), tell the model what the video is SUPPOSED to be, and let it report
- * concrete defects. Fewer rules, real watching — and reusable by any post-render check.
+ * The mandatory, gating holistic visual check is `reviewRender()` in
+ * `@/lib/visualReview.ts` (evidence-driven frame extraction + multimodal
+ * judge); every archetype's `qa_visual` step calls it unconditionally and
+ * fails closed on its verdict. `nativeWatchRender` below is a DIFFERENT,
+ * deliberately advisory-only capability: it uploads the full rendered video
+ * (with audio) to Gemini and judges mood/pacing/music-fit — the "feel"
+ * dimension frame sampling can never see. It is opt-in (`nativeWatch` param)
+ * and its findings are logged as supplementary evidence, never a second gate
+ * on top of `reviewRender()`. See `nativeWatchRender`'s own docstring below.
+ *
+ * (The former frame-sampling `watchRender` — an earlier, coarser predecessor
+ * to `reviewRender()` — was removed 2026-08 as dead code with zero callers.)
  */
-import { grabFrame } from "@/lib/ffmpeg";
 import { parseJsonLoose, hasGeminiKey, uploadGeminiVideo, geminiVideoUri } from "@/lib/gemini";
-import { hasVisionKey, visionLocal } from "@/lib/vision";
-import { makeRunTempDir } from "@/lib/files";
-import { join } from "node:path";
 
 export type DefectSeverity = "critical" | "major" | "minor";
 export interface RenderDefect {
@@ -53,39 +54,6 @@ const DEFAULT_STRUCTURE =
   "correctly ordered/numbered; (3) a SINGLE closing OUTRO card near the very end with a sign-off. The outro must " +
   "NOT appear mid-video, and no chapter/segment may be missing or duplicated.";
 
-/**
- * Full-timeline timestamps. CRITICAL: a title/outro card is short (~5s) and its
- * text is only visible for ~2s, so a coarse step would sample AROUND it and false-
- * flag it missing. We therefore sample the title-card window (first ~6s) and the
- * outro window (last ~5s) DENSELY, plus an even step through the middle, with a
- * guaranteed very-first and very-last frame.
- */
-function sampleTimes(durationSec: number, stepSec: number, maxFrames: number): number[] {
-  const first = Math.min(0.6, durationSec / 2);
-  const last = Math.max(first, durationSec - 0.8);
-  const dense = (from: number, to: number, n: number) =>
-    Array.from({ length: n }, (_, i) => from + ((to - from) * (i + 1)) / (n + 1));
-  const titleWindow = dense(0.6, Math.min(6, durationSec * 0.4), 4); // ~1.5,2.5,3.5,4.5s
-  const outroWindow = dense(Math.max(first, durationSec - 5), last, 3); // last ~5s
-  const mid: number[] = [];
-  for (let t = 6; t < durationSec - 5; t += stepSec) mid.push(t);
-  let all = Array.from(new Set([first, ...titleWindow, ...mid, ...outroWindow, last].map((t) => Number(t.toFixed(1)))))
-    .filter((t) => t >= 0 && t <= durationSec)
-    .sort((a, b) => a - b);
-  if (all.length > maxFrames) {
-    // Thin the MIDDLE only; always keep the dense title + outro windows + endpoints.
-    const headKeep = 1 + titleWindow.length;
-    const tailKeep = outroWindow.length + 1;
-    const head = all.slice(0, headKeep);
-    const tail = all.slice(all.length - tailKeep);
-    const innerN = Math.max(0, maxFrames - head.length - tail.length);
-    const inner = all.slice(headKeep, all.length - tailKeep);
-    const thinned = Array.from({ length: innerN }, (_, i) => inner[Math.floor((i * inner.length) / innerN)]).filter((x) => x != null);
-    all = Array.from(new Set([...head, ...thinned, ...tail])).sort((a, b) => a - b);
-  }
-  return all;
-}
-
 export interface NativeWatchScores {
   moodMatch?: number;
   pacing?: number;
@@ -108,6 +76,14 @@ export interface NativeWatchScores {
  *
  * This judges what frame sampling never could: music-vs-mood fit, cut rhythm,
  * narration energy, dead air — the "feel" dimension of staleness.
+ *
+ * ADVISORY BY DESIGN — this does NOT gate a render. The mandatory, fail-closed
+ * holistic check is `reviewRender()` in `@/lib/visualReview.ts`, called
+ * unconditionally by every archetype's `qa_visual` step. This function is
+ * opt-in (`ctx.params.nativeWatch === true`) and its verdict/defects/scores
+ * are logged as supplementary evidence alongside `reviewRender()`'s result —
+ * never as a second pass/fail gate. See the call site in
+ * `src/trigger/blocks/narratedBlocks.ts` (search `nativeWatch`).
  */
 export async function nativeWatchRender(
   videoPath: string,
@@ -210,96 +186,5 @@ export async function nativeWatchRender(
   } catch (e) {
     log(`nativeWatch: failed (${e instanceof Error ? e.message : e}) — falling back to frame watcher`);
     return null;
-  }
-}
-
-export async function watchRender(
-  videoPath: string,
-  durationSec: number,
-  intent: RenderIntent,
-  opts: { runId: string; stepSec?: number; maxFrames?: number; required?: boolean; log?: (m: string) => void },
-): Promise<RenderWatchResult> {
-  const log = opts.log ?? (() => {});
-  const skipped: RenderWatchResult = { ran: false, verdict: "pass", defects: [], framePaths: [], summary: "vision unavailable — skipped (advisory)" };
-  if (!hasVisionKey() || durationSec < 2) {
-    if (opts.required) {
-      throw new Error(
-        `watchRender required grader unavailable (${!hasVisionKey() ? "no configured vision provider" : `duration ${durationSec}s is too short`})`,
-      );
-    }
-    return skipped;
-  }
-
-  // 12 frames max: the old default grabbed 60 full-res frames but the vision
-  // wrapper only ever sent 12 — 48 wasted grabs per run, and the prompt listed
-  // timestamps the model never saw (its judgments on those were confabulated).
-  const times = sampleTimes(durationSec, opts.stepSec ?? 4, Math.min(opts.maxFrames ?? 12, 12));
-  const tmp = await makeRunTempDir(opts.runId);
-  const framePaths: string[] = [];
-  const stamps: number[] = [];
-  for (let i = 0; i < times.length; i++) {
-    const f = join(tmp, `watch_${String(i).padStart(3, "0")}.jpg`);
-    try { await grabFrame(videoPath, times[i], f); framePaths.push(f); stamps.push(times[i]); } catch { /* skip */ }
-  }
-  if (framePaths.length < 3) {
-    if (opts.required) throw new Error(`watchRender required 3+ frames, extracted ${framePaths.length}`);
-    return { ...skipped, framePaths };
-  }
-
-  const prompt =
-    `You are a meticulous video QA reviewer WATCHING a rendered video end-to-end to catch PRODUCTION defects ` +
-    `(not content opinions).\n\nINTENT:\n- Title: "${intent.title}"\n` +
-    (intent.topic ? `- Topic: "${intent.topic}"\n` : "") +
-    (intent.niche ? `- Niche: ${intent.niche}\n` : "") +
-    (intent.channelWorld
-      ? `- CHANNEL VISUAL WORLD (these recurring subjects/motifs are the channel's BRAND and are ON-TOPIC by ` +
-        `design — never flag them as irrelevant): ${intent.channelWorld}\n`
-      : "") +
-    (intent.expectTitleCard !== false
-      ? `- A title card WAS intended at the start. CONVENTION: the card deliberately shows a SHORT topic phrase, ` +
-        `NOT the full SEO title — a short card title is CORRECT, only flag a BLANK/garbled card.\n`
-      : "") +
-    // The "Title" above is the SEARCH-OPTIMIZED SEO title. Any on-screen text
-    // (title card, persistent header, drawn heading) intentionally shows the
-    // TOPIC/hook, which reads differently by design. A whiteboard render kept
-    // failing on a fabricated "drawn title ≠ SEO title" critical — the two are
-    // never meant to match.
-    `- IMPORTANT: NEVER report a defect because on-screen text (a header, title card, or drawn heading) differs ` +
-    `from the SEO "Title" above — that difference is INTENTIONAL and correct. Only flag on-screen text that is ` +
-    `blank, garbled, misspelled, or clearly about a DIFFERENT topic.\n` +
-    `- ENDING CONVENTION: after the outro card the video fades to black over the final ~2s — near-black FINAL ` +
-    `frames are correct; judge the outro by the frames a few seconds before the end.\n` +
-    (intent.expectChapters ? `- Chapter cards are used — verify they are present, readable, and numbered in order.\n` : "") +
-    `EXPECTED STRUCTURE: ${intent.expectedStructure ?? DEFAULT_STRUCTURE}\n\n` +
-    `The images are frames sampled IN CHRONOLOGICAL ORDER at these timestamps (seconds): ${stamps.join(", ")}. ` +
-    `The FIRST frame is ~the start (title card) and the LAST is ~the end (outro card). Watch the sequence as ONE ` +
-    `film and report EVERY concrete defect: missing/blank title card; outro card appearing mid-video, missing, or ` +
-    `empty/textless; black/gray/frozen/empty frames; footage clearly irrelevant to the topic; the SAME clip ` +
-    `repeated back-to-back; random/jarring inserts that don't belong; overlays/captions cut off, hidden behind ` +
-    `images, overlapping, unreadable, or mis-timed; missing/duplicated/mis-numbered chapters; broken/abrupt ` +
-    `transitions; anything unfinished or wrong.\n\n` +
-    `SEVERITY: critical = breaks the video or a core structural element (missing title card, mid-video or absent ` +
-    `outro, missing chapter, black screen, wrong-topic footage throughout). major = clearly wrong but localized ` +
-    `(one irrelevant insert, a duplicate clip, a broken overlay). minor = cosmetic. Be specific; cite timestamps. ` +
-    `Return STRICT JSON {"defects":[{"tSec":number,"severity":"critical|major|minor","category":string,"issue":string}],"summary":string}.`;
-
-  try {
-    const raw = await visionLocal({ prompt, imagePaths: framePaths, json: true, maxTokens: 3000 });
-    const parsed = parseJsonLoose(raw) as { defects?: RenderDefect[]; summary?: string } | null;
-    const defects = Array.isArray(parsed?.defects)
-      ? parsed!.defects.filter((d): d is RenderDefect => Boolean(d && d.severity && d.issue))
-      : [];
-    const crit = defects.filter((d) => d.severity === "critical").length;
-    const major = defects.filter((d) => d.severity === "major").length;
-    // Fail on any critical, or 2+ majors — one borderline insert won't nuke a paid render.
-    const verdict: "pass" | "fail" = crit >= 1 || major >= 2 ? "fail" : "pass";
-    log(`watchRender: ${framePaths.length} frames → ${defects.length} defects (crit ${crit}, major ${major}) → ${verdict.toUpperCase()}`);
-    return { ran: true, verdict, defects, framePaths, summary: parsed?.summary ?? "" };
-  } catch (e) {
-    if (opts.required) {
-      throw new Error(`watchRender required grader failed: ${e instanceof Error ? e.message : e}`);
-    }
-    log(`watchRender: vision failed (advisory, not blocking): ${e instanceof Error ? e.message : e}`);
-    return { ...skipped, framePaths };
   }
 }
