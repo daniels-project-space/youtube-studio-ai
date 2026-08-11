@@ -149,7 +149,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   cinematic: {
     kind: "catalog-only",
     executableIds: [],
-    note: "Cinematic channels execute the enforced Z-Image → QA → LTX → QA chain owned by novita-render-farm (src/lib/novitaRenderFarm.ts); cinecraft.ts's hero-anchor identity-lock/consistency logic is NOT applied to this chain (it survives only as a type-only ShotSpec import in src/lib/crew/cinematographer.ts:16) — a real capability gap, not just a catalog mismatch. A frozen spend ceiling and Golden proof receipt are both required before promotion.",
+    note: "Cinematic channels execute the enforced Z-Image → QA → LTX → QA chain owned by novita-render-farm (src/lib/novitaRenderFarm.ts). cinecraft.ts's OWN code is not applied and never will be: its render path is hard-disabled at the source (hasCinecraft() returns a literal false, src/lib/cinecraft.ts:47-52) because it drives the retired paid Higgsfield CLI, so the file survives only as a type-only ShotSpec import (src/lib/crew/cinematographer.ts:16). This is NOT a capability gap (P1-10 superseded): the equivalent hero-anchor identity-lock is supplied by the wired `visual_matter` module — see the `visuals` binding above — whose manifest this chain HARD-REQUIRES (requireVisualMatter throws; src/trigger/blocks/novitaRenderBlocks.ts:452-456, consumed at :550/:610/:808/:888) and whose character/setting reference sheets feed the qa_assets identity floor (:635/:927). A frozen spend ceiling and Golden proof receipt are both required before promotion.",
   },
   documotion: {
     kind: "pipeline-module",

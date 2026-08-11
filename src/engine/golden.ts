@@ -829,13 +829,19 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "generic re-description — that's what made early renders \"four different people\"), a vision gate re-rolls drift, " +
       "then Seedance/Kling animates the locked keyframe. Establishing + multi-subject shots supported; any style. Operator " +
       "approves the hero before any Soul. Standalone src/lib/cinecraft.ts (480 L), visual-only (a pipeline adds audio + assembly). " +
-      "NOT CURRENTLY WIRED (P1-10, real capability gap, not a doc bug): production channels on this family run families.ts's " +
-      "\"ai_scenes\" visual engine, which designer.ts:227 routes into the SAME generic Z-Image -> qa_assets -> LTX -> qa_shots chain " +
-      "as novita-render-farm (src/lib/novitaRenderFarm.ts). cinecraft.ts is imported ONLY for its ShotSpec type " +
-      "(src/lib/crew/cinematographer.ts:16), never for its hero-anchor identity-lock logic. Cinematic channels therefore get generic " +
-      "rendering WITHOUT the hero-image consistency law described above -- the anchor/consistency gates below are aspirational until " +
-      "cinecraft.ts's logic (or an equivalent) is actually wired into the pipeline.",
-    gates: ["hero-image identity anchor (not the soul)", "vision consistency gate \u2265 8 (re-roll on drift)", "per-kind lock: same person / place / object", "operator-approved hero before Soul"],
+      "cinecraft.ts ITSELF IS RETIRED, NOT PENDING (P1-10 resolved, superseded): its render path is hard-disabled at the source " +
+      "(hasCinecraft() returns a literal false, src/lib/cinecraft.ts:47-52) because designSubject/trainSoul/renderShot all drive the " +
+      "retired PAID Higgsfield CLI; that renderer must never be reopened. The file survives as a type/catalog surface only " +
+      "(ShotSpec, src/lib/crew/cinematographer.ts:16). The hero-anchor consistency LAW described above IS nevertheless enforced in " +
+      "production, by an equivalent renderer-neutral module rather than by cinecraft: the `visual_matter` block " +
+      "(src/engine/visualMatter.ts + src/trigger/blocks/visualMatterBlocks.ts) emits per-character `identityLock` and per-setting " +
+      "`continuityLock` plus character_sheet/setting_sheet reference assets, and the Z-Image -> qa_assets -> LTX -> qa_shots chain " +
+      "HARD-REQUIRES that manifest (requireVisualMatter throws, src/trigger/blocks/novitaRenderBlocks.ts:452-456; consumed at :550, " +
+      ":610, :808, :888). Per shot the sheets are pulled from R2 and passed to the vision grader alongside the candidates " +
+      "(visualMatterReferenceAssetsForShot, :635/:927) under an enforced identity floor with bounded repair re-rolls (:626-627, :645). " +
+      "So the gates below are REAL, but they are cinecraft's law re-implemented with attested receipts and content-addressed " +
+      "idempotency -- not cinecraft's own code.",
+    gates: ["reference-sheet identity anchor via visual_matter (not the retired Soul)", "vision identity floor with bounded repair re-rolls (qa_assets)", "per-kind lock: identityLock (person) / continuityLock (place)", "operator-authorized reference-asset spend (renderReferenceAssets)"],
     status: "reference",
   },
   {
