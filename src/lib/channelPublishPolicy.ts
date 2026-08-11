@@ -142,6 +142,7 @@ export interface ChannelPublishDecision {
     | "authorized"
     | "channel_missing"
     | "tenant_mismatch"
+    | "channel_not_active"
     | "action_not_configured"
     | "policy_missing"
     | "policy_revoked"
