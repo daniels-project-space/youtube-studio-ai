@@ -12,6 +12,7 @@ import type * as analytics from "../analytics.js";
 import type * as analyticsIngestions from "../analyticsIngestions.js";
 import type * as assets from "../assets.js";
 import type * as channelArchives from "../channelArchives.js";
+import type * as channelLock from "../channelLock.js";
 import type * as channelPublishPolicies from "../channelPublishPolicies.js";
 import type * as channels from "../channels.js";
 import type * as competitors from "../competitors.js";
@@ -50,6 +51,7 @@ declare const fullApi: ApiFromModules<{
   analyticsIngestions: typeof analyticsIngestions;
   assets: typeof assets;
   channelArchives: typeof channelArchives;
+  channelLock: typeof channelLock;
   channelPublishPolicies: typeof channelPublishPolicies;
   channels: typeof channels;
   competitors: typeof competitors;

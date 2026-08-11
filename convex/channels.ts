@@ -26,6 +26,11 @@ import {
 import { comparablePipeline } from "@/engine/channelPipelineComparable";
 import { channelInceptionInvalidationRoots } from "@/engine/channelInceptionInvalidation";
 import {
+  assertChannelWritable,
+  isChannelLocked,
+  patchChannelRespectingLock,
+} from "./channelLock";
+import {
   assertContentLaneMatchesFamily,
   assertPipelineMatchesContentLane,
   contentLaneFingerprint,
@@ -89,6 +94,33 @@ async function channelMutationRole(ctx: {
   auth: { getUserIdentity: () => Promise<unknown> };
 }): Promise<unknown> {
   return (await ctx.auth.getUserIdentity() as { role?: unknown } | null)?.role;
+}
+
+/**
+ * Typed confirmation for the unlock path, mirroring contentPlan's
+ * OPERATIONAL_CALENDAR_MAINTENANCE_CONFIRMATION convention. Combined with the
+ * role check below it makes unlocking unmistakably human-initiated.
+ */
+const CHANNEL_UNLOCK_CONFIRMATION = "UNLOCK CHANNEL";
+
+/**
+ * Lock/unlock are OPERATOR-ONLY. `identityScope` (studioFunctions) resolves the
+ * caller to exactly one of "owner" | "viewer" | "service"; every automated path
+ * — Trigger tasks, crons, the channel-inception orchestrator, agents — presents
+ * the "service" identity, and viewers cannot mutate at all. Requiring "owner"
+ * therefore leaves an interactive studio session as the ONLY reachable caller.
+ */
+async function requireChannelOwnerActor(
+  ctx: { auth: { getUserIdentity: () => Promise<unknown> } },
+  purpose: string,
+): Promise<string> {
+  const identity = (await ctx.auth.getUserIdentity()) as
+    | { role?: unknown; subject?: unknown }
+    | null;
+  if (!identity || identity.role !== "owner" || typeof identity.subject !== "string") {
+    throw new Error(`${purpose} requires an interactive studio owner identity`);
+  }
+  return identity.subject;
 }
 
 async function requireInceptionService(ctx: {
@@ -314,12 +346,17 @@ function validateModuleConfig(
 /** Validate a whole `moduleConfig` map; drops blocks that aren't configurable. */
 function validateModuleConfigMap(
   map: Record<string, unknown> | undefined,
+  activeBlockIds?: readonly string[],
 ): Record<string, unknown> | undefined {
   if (!map) return undefined;
   const configurable = new Set(configurableModules().map((m) => m.blockId));
+  const active = activeBlockIds ? new Set(activeBlockIds) : undefined;
   const out: Record<string, unknown> = {};
   for (const [blockId, cfg] of Object.entries(map)) {
     if (!configurable.has(blockId)) continue; // ignore stale/unknown blocks silently
+    if (active && !active.has(blockId)) {
+      throw new Error(`moduleConfig: '${blockId}' is not selected in this channel pipeline`);
+    }
     if (cfg && typeof cfg === "object") {
       out[blockId] = validateModuleConfig(blockId, cfg as Record<string, unknown>);
     }
@@ -405,7 +442,7 @@ export const createChannel = mutation({
       qaRubric: args.qaRubric,
       styleDNA: args.styleDNA,
       // Validate the onboarding-supplied module config (illegal → throws).
-      moduleConfig: validateModuleConfigMap(args.moduleConfig),
+      moduleConfig: validateModuleConfigMap(args.moduleConfig, args.pipeline.map((entry) => entry.block)),
       family,
       contentLane: lane,
       disabledBlocks: args.disabledBlocks ?? existing?.disabledBlocks,
@@ -417,8 +454,11 @@ export const createChannel = mutation({
     };
 
     if (existing) {
-      await ctx.db.patch(existing._id, doc);
-      return existing._id;
+      // LOCK GUARD: a re-seed of a finished channel must not rewrite it. The
+      // doc lands on its editable fork head instead and we return THAT id, so
+      // the caller transparently keeps working against the live version.
+      const outcome = await patchChannelRespectingLock(ctx, existing._id, doc);
+      return outcome.forked ? outcome.newChannelId : existing._id;
     }
 
     return await ctx.db.insert("channels", doc);
@@ -495,6 +535,10 @@ export const deleteChannel = mutation({
   handler: async (ctx, args) => {
     const ch = await ctx.db.get(args.channelId);
     if (!ch) return null;
+    // LOCK GUARD: a delete has no "apply the change to a v2" reading — forking
+    // here would silently keep the row the caller asked to destroy. Block it;
+    // the operator must unlock deliberately first.
+    assertChannelWritable(ch, "deleteChannel");
 
     // 1. TOMBSTONE: a compact structural print (identity/pipeline/DNA/playbook
     // shapes — never run data or media) survives as the only residue.
@@ -619,7 +663,12 @@ export const updateChannel = mutation({
       }),
     ),
   },
-  returns: v.null(),
+  // A locked channel is never edited in place: the change is forked onto a v2
+  // row and its id is returned so callers can see the redirect.
+  returns: v.union(
+    v.object({ forked: v.literal(false) }),
+    v.object({ forked: v.literal(true), newChannelId: v.id("channels") }),
+  ),
   handler: async (ctx, args) => {
     const { channelId, ...rest } = args;
     const existing = await ctx.db.get(channelId);
@@ -654,8 +703,11 @@ export const updateChannel = mutation({
         patch.status = "draft";
       }
     }
-    await ctx.db.patch(channelId, patch);
-    return null;
+    // LOCK GUARD: forks onto a v2 row when this channel is marked done.
+    const outcome = await patchChannelRespectingLock(ctx, channelId, patch);
+    return outcome.forked
+      ? { forked: true as const, newChannelId: outcome.newChannelId }
+      : { forked: false as const };
   },
 });
 
@@ -676,7 +728,10 @@ export const updatePipelineIfCurrent = mutation({
       v.literal("updated"),
       v.literal("current"),
       v.literal("conflict"),
+      // The channel was locked: the upgrade landed on its v2 fork instead.
+      v.literal("forked"),
     ),
+    newChannelId: v.optional(v.id("channels")),
   }),
   handler: async (ctx, args) => {
     const channel = await ctx.db.get(args.channelId);
@@ -702,7 +757,11 @@ export const updatePipelineIfCurrent = mutation({
       patch.inception = invalidated;
       patch.status = "draft";
     }
-    await ctx.db.patch(args.channelId, patch);
+    // LOCK GUARD: forks onto a v2 row when this channel is marked done.
+    const outcome = await patchChannelRespectingLock(ctx, args.channelId, patch);
+    if (outcome.forked) {
+      return { state: "forked" as const, newChannelId: outcome.newChannelId };
+    }
     return { state: "updated" as const };
   },
 });
@@ -770,6 +829,13 @@ export const beginChannelInception = mutation({
     for (const stage of args.stages) assertInceptionStageDescriptor(stage as ChannelInceptionStageDescriptor);
     const channel = await ctx.db.get(args.channelId);
     if (!channel) throw new Error(`channel not found: ${args.channelId}`);
+    // LOCK GUARD (block, do NOT fork). The inception ledger is a mid-flight
+    // service state machine keyed on THIS channelId — the orchestrator holds it
+    // across begin/claim/checkpoint/heartbeat/complete. Forking would copy the
+    // channel on every ledger write while the service kept re-targeting the
+    // locked parent, spawning unbounded rows and orphaning live leases. A
+    // finished channel has no inception left to run, so refusing is correct.
+    assertChannelWritable(channel, "channel inception ledger write");
     const inception = beginChannelInceptionLedger(
       channel.inception as ChannelInceptionLedgerState | undefined,
       {
@@ -802,6 +868,8 @@ export const claimChannelInceptionStage = mutation({
     assertInceptionStageDescriptor(args.stage as ChannelInceptionStageDescriptor);
     const channel = await ctx.db.get(args.channelId);
     if (!channel?.inception) throw new Error("channel inception plan is not initialized");
+    // LOCK GUARD (block, not fork) — see beginChannelInception for why.
+    assertChannelWritable(channel, "channel inception ledger write");
     const claim = claimChannelInceptionLedgerStage({
       ledger: channel.inception as ChannelInceptionLedgerState,
       stage: args.stage as ChannelInceptionStageDescriptor,
@@ -841,6 +909,8 @@ export const completeChannelInceptionStage = mutation({
     assertInceptionOutputSize(args.outputs);
     const channel = await ctx.db.get(args.channelId);
     if (!channel?.inception) throw new Error("channel inception plan is not initialized");
+    // LOCK GUARD (block, not fork) — see beginChannelInception for why.
+    assertChannelWritable(channel, "channel inception ledger write");
     const inception = completeChannelInceptionLedgerStage({
       ledger: channel.inception as ChannelInceptionLedgerState,
       stage: args.stage as ChannelInceptionStageDescriptor,
@@ -874,6 +944,8 @@ export const checkpointChannelInceptionStage = mutation({
     assertInceptionOutputSize(args.outputs);
     const channel = await ctx.db.get(args.channelId);
     if (!channel?.inception) throw new Error("channel inception plan is not initialized");
+    // LOCK GUARD (block, not fork) — see beginChannelInception for why.
+    assertChannelWritable(channel, "channel inception ledger write");
     const inception = checkpointChannelInceptionLedgerStage({
       ledger: channel.inception as ChannelInceptionLedgerState,
       stage: args.stage as ChannelInceptionStageDescriptor,
@@ -902,6 +974,8 @@ export const heartbeatChannelInceptionStage = mutation({
     assertInceptionStageDescriptor(args.stage as ChannelInceptionStageDescriptor);
     const channel = await ctx.db.get(args.channelId);
     if (!channel?.inception) throw new Error("channel inception plan is not initialized");
+    // LOCK GUARD (block, not fork) — see beginChannelInception for why.
+    assertChannelWritable(channel, "channel inception ledger write");
     const inception = heartbeatChannelInceptionLedgerStage({
       ledger: channel.inception as ChannelInceptionLedgerState,
       stage: args.stage as ChannelInceptionStageDescriptor,
@@ -930,6 +1004,8 @@ export const failChannelInceptionStage = mutation({
     assertInceptionStageDescriptor(args.stage as ChannelInceptionStageDescriptor);
     const channel = await ctx.db.get(args.channelId);
     if (!channel?.inception) throw new Error("channel inception plan is not initialized");
+    // LOCK GUARD (block, not fork) — see beginChannelInception for why.
+    assertChannelWritable(channel, "channel inception ledger write");
     const inception = failChannelInceptionLedgerStage({
       ledger: channel.inception as ChannelInceptionLedgerState,
       stage: args.stage as ChannelInceptionStageDescriptor,
@@ -960,10 +1036,17 @@ export const setModuleConfig = mutation({
     blockId: v.string(),
     config: v.record(v.string(), v.any()),
   },
-  returns: v.null(),
+  // A locked channel is never edited in place: the change is forked onto a v2.
+  returns: v.union(
+    v.object({ forked: v.literal(false) }),
+    v.object({ forked: v.literal(true), newChannelId: v.id("channels") }),
+  ),
   handler: async (ctx, args) => {
     const existing = await ctx.db.get(args.channelId);
     if (!existing) throw new Error(`channel not found: ${args.channelId}`);
+    if (!(existing.pipeline ?? []).some((entry) => entry.block === args.blockId)) {
+      throw new Error(`setModuleConfig: '${args.blockId}' is not selected in this channel pipeline`);
+    }
 
     const next: Record<string, unknown> = { ...(existing.moduleConfig ?? {}) };
     const cleaned = validateModuleConfig(args.blockId, args.config); // throws on illegal
@@ -986,8 +1069,87 @@ export const setModuleConfig = mutation({
         patch.status = "draft";
       }
     }
-    await ctx.db.patch(args.channelId, patch);
-    return null;
+    // LOCK GUARD: forks onto a v2 row when this channel is marked done.
+    const outcome = await patchChannelRespectingLock(ctx, args.channelId, patch);
+    return outcome.forked
+      ? { forked: true as const, newChannelId: outcome.newChannelId }
+      : { forked: false as const };
+  },
+});
+
+/**
+ * Mark a channel DONE. Explicit and manual — nothing auto-detects "finished".
+ * From here every guarded write forks onto a v2 instead of touching this row.
+ *
+ * Operator-only (see requireChannelOwnerActor): no scheduled task, Trigger job,
+ * or agent can reach it, and the same is true of unlockChannel below, keeping
+ * lock and unlock symmetric.
+ */
+export const lockChannel = mutation({
+  args: { ownerId: v.string(), channelId: v.id("channels") },
+  returns: v.object({
+    locked: v.literal(true),
+    lockedAt: v.number(),
+    lockedBy: v.string(),
+    versionNumber: v.number(),
+  }),
+  handler: async (ctx, args) => {
+    const actor = await requireChannelOwnerActor(ctx, "channels.lockChannel");
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) {
+      throw new Error("channel lock ownership mismatch");
+    }
+    const versionNumber = channel.versionNumber ?? 1;
+    if (isChannelLocked(channel)) {
+      // Idempotent: re-locking keeps the original provenance.
+      return {
+        locked: true as const,
+        lockedAt: channel.lockedAt ?? 0,
+        lockedBy: channel.lockedBy ?? actor,
+        versionNumber,
+      };
+    }
+    const lockedAt = Date.now();
+    await ctx.db.patch(args.channelId, {
+      locked: true,
+      lockedAt,
+      lockedBy: actor,
+      versionNumber,
+    });
+    return { locked: true as const, lockedAt, lockedBy: actor, versionNumber };
+  },
+});
+
+/**
+ * Release a channel lock. HUMAN-ONLY by construction — it needs both an
+ * interactive "owner" identity (every automated caller authenticates as
+ * "service") and the literal typed confirmation, so no scheduled/agent code
+ * path can unlock a finished channel even by accident.
+ */
+export const unlockChannel = mutation({
+  args: {
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    confirmation: v.string(),
+  },
+  returns: v.object({ locked: v.literal(false) }),
+  handler: async (ctx, args) => {
+    await requireChannelOwnerActor(ctx, "channels.unlockChannel");
+    if (args.confirmation !== CHANNEL_UNLOCK_CONFIRMATION) {
+      throw new Error(
+        `channels.unlockChannel requires confirmation '${CHANNEL_UNLOCK_CONFIRMATION}'`,
+      );
+    }
+    const channel = await ctx.db.get(args.channelId);
+    if (!channel || channel.ownerId !== args.ownerId) {
+      throw new Error("channel unlock ownership mismatch");
+    }
+    await ctx.db.patch(args.channelId, {
+      locked: false,
+      lockedAt: undefined,
+      lockedBy: undefined,
+    });
+    return { locked: false as const };
   },
 });
 

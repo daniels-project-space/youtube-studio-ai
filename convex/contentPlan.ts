@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./studioFunctions";
 import type { Doc, Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
+import { isChannelLocked } from "./channelLock";
 import { canonicalJson } from "../src/lib/canonicalJson";
 import {
   planWeekProviderReceiptImageUsage,
@@ -2069,7 +2070,14 @@ export const reconcileOperationalCalendarData = mutation({
       readyRows,
       channels.map((channel) => channel._id),
     );
+    // LOCK GUARD (skip, do NOT fork). This is a fleet-wide backfill that reruns
+    // on demand; forking here would mint a v2 for every locked channel on every
+    // pass — the locked row would still be missing its defaults next time, so
+    // the forks would never stop. A finished channel keeps the schedule it
+    // shipped with.
+    const lockedSkipped = channels.filter((channel) => isChannelLocked(channel));
     const scheduleUpdates = channels.flatMap((channel) => {
+      if (isChannelLocked(channel)) return [];
       const result = materializeCalendarScheduleDefaults(channel);
       return result.changed ? [{ channel, ...result }] : [];
     });
@@ -2103,6 +2111,9 @@ export const reconcileOperationalCalendarData = mutation({
       scheduleDefaults: {
         channelCount: scheduleUpdates.length,
         action: args.apply ? "materialized" as const : "would_materialize" as const,
+        // Locked ("done") channels are deliberately excluded from the backfill.
+        lockedSkippedCount: lockedSkipped.length,
+        lockedSkippedIds: lockedSkipped.slice(0, 50).map((channel) => String(channel._id)),
         fieldCounts,
         channels: scheduleUpdates.slice(0, 50).map((update) => ({
           channelId: String(update.channel._id),

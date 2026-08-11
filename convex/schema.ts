@@ -293,11 +293,27 @@ export default defineSchema({
         avatarSet: v.optional(v.boolean()),
       }),
     ),
+    // CHANNEL LOCK ("done"). Set MANUALLY and explicitly by the operator via
+    // channels.lockChannel — never auto-detected from status/progress. While
+    // locked === true no config/content write lands on this row: every guarded
+    // mutation forks the change onto a v2 row (see convex/channelLock.ts) so the
+    // finished channel is frozen exactly as it shipped. Clearing it is equally
+    // manual — channels.unlockChannel, owner identity + typed confirmation only.
+    locked: v.optional(v.boolean()),
+    lockedAt: v.optional(v.number()),
+    lockedBy: v.optional(v.string()),
+    // Fork lineage. Set on a v2+ row to the locked ancestor it was forked from;
+    // versionNumber is 1 for an original channel and parent+1 for each fork.
+    parentChannelId: v.optional(v.id("channels")),
+    versionNumber: v.optional(v.number()),
   })
     .index("by_owner", ["ownerId"])
     .index("by_owner_slug", ["ownerId", "slug"])
     .index("by_group", ["groupId"])
-    .index("by_youtube_channel_id", ["youtubeCreated.ytChannelId"]),
+    .index("by_youtube_channel_id", ["youtubeCreated.ytChannelId"])
+    // Lets the lock guard find a locked channel's editable fork head without a
+    // table scan, so repeated edits reuse v2 instead of spawning v3, v4, v5…
+    .index("by_parent", ["parentChannelId"]),
 
   // Durable exactly-once boundary for the irreversible Browserbase YouTube
   // channel-create click. A request can enter provider_started only once; all

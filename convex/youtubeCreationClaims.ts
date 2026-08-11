@@ -547,6 +547,20 @@ export const markCreated = mutation({
     });
     // This is intentionally in the same Convex transaction as the durable
     // receipt. No provisional/ambiguous state is projected onto the channel.
+    //
+    // DELIBERATE CHANNEL-LOCK EXCEPTION (convex/channelLock.ts). This is the one
+    // channels write that is neither fork-guarded nor lock-blocked:
+    //   - Forking is definitionally wrong — `youtubeCreated` is in the fork's
+    //     NON_INHERITED_FORK_FIELDS (two rows may not project one ytChannelId,
+    //     enforced by assertYoutubeChannelIdUniqueBinding above), so a fork
+    //     would DROP the receipt entirely.
+    //   - Blocking is worse — the YouTube channel already exists at the
+    //     provider. Throwing here would strand the exactly-once claim in
+    //     provider_started and permanently lose the receipt for a completed
+    //     irreversible action.
+    // This records an external fact that already happened rather than editing
+    // the operator's config/content, and it is unreachable for a finished
+    // channel in practice (creation runs at inception, long before lock).
     await ctx.db.patch(args.channelId, {
       youtubeCreated: {
         ytChannelId: args.ytChannelId,
