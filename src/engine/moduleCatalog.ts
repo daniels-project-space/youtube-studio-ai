@@ -227,14 +227,20 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   },
   {
     block: "quiz_year",
-    label: "Guess the year quiz",
+    label: "Mixed trivia quiz",
     description:
-      "Self-contained multiple-choice 'guess the year' quiz: real facts are pulled from Wikidata (CC0), each round shows four year options with a depleting timer, and the correct option locks in on reveal. The answer year is always the Wikidata value — an LLM only phrases the question. Replaces script + footage + assembly for the Quiz family.",
+      "Self-contained multiple-choice trivia quiz that MIXES categories inside one video the way real trivia channels do — guess-the-year, capital cities, currencies, chemical symbols, atomic numbers and citation-verified general knowledge. Facts come from Wikidata (CC0); general-knowledge rounds are accepted only when an independently fetched Wikipedia article is shown to state the answer and to not state any of the wrong options. Each round shows four options with a depleting timer and locks in the correct one on reveal. The answer is never LLM-generated — a model only phrases the question. Replaces script + footage + assembly for the Quiz family.",
     optional: false,
     params: [
       {
+        key: "categories",
+        label: "Question categories",
+        type: "text",
+        help: "Comma-separated mix, e.g. \"guess_year, capital_city, general_knowledge\". Leave blank for the full mix. Options: guess_year, capital_city, country_currency, element_symbol, element_atomic_number, general_knowledge.",
+      },
+      {
         key: "topic",
-        label: "Topic",
+        label: "Guess-the-year topic",
         type: "select",
         options: [
           { value: "science_discovery", label: "Scientific discoveries" },

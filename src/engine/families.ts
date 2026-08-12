@@ -150,10 +150,11 @@ export const FAMILIES: Record<FamilyKey, Family> = {
   },
   quizyear: {
     key: "quizyear",
-    label: "Guess the year quiz",
+    label: "Mixed trivia quiz",
     description:
-      "Multiple-choice 'guess the year' quiz: a CC0 Wikidata fact, four year options, a depleting timer and a " +
-      "lock-in reveal. Self-contained — sources its own facts, writes its own questions and renders itself.",
+      "Multiple-choice trivia quiz that mixes categories inside one video — guess-the-year, capital cities, " +
+      "currencies, chemical symbols and citation-verified general knowledge — with four options, a depleting " +
+      "timer and a lock-in reveal. Self-contained: sources its own facts, writes its own questions and renders itself.",
     visualEngine: "quiz_year",
     archetypeKey: "quiz-year",
     available: true,

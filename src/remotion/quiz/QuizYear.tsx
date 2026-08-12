@@ -2,29 +2,39 @@ import React from "react";
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
 
 /**
- * One "guess the year" round, rendered as standard game-show multiple choice:
- * four options (A/B/C/D) sit on screen while a ring timer depletes, then time
- * runs out and the correct option locks in.
+ * One quiz round, rendered as standard game-show multiple choice: four options
+ * (A/B/C/D) sit on screen while a ring timer depletes, then time runs out and
+ * the correct option locks in.
  *
- * The ANSWER arrives as `options[i].isCorrect` — computed upstream from a
- * Wikidata time value. This component never derives, infers or reorders a
- * correct answer; it prints what it is given alongside the `sourceUrl` that
- * proves it. The three wrong options are generated decoys and carry no
+ * CATEGORY-AGNOSTIC BY DESIGN. This started as a guess-the-year component whose
+ * options were numbers. It now renders whatever its options say — a year, a
+ * capital city, a currency, a chemical symbol, an atomic number — because the
+ * quiz format mixes categories inside one video the way real trivia channels
+ * do. `label` is the single rendered field; `year` survives only so a question
+ * checkpoint written before the multi-category build still replays.
+ *
+ * The ANSWER arrives as `options[i].isCorrect`, computed upstream from a
+ * Wikidata statement or a verified citation. This component never derives,
+ * infers or reorders a correct answer; it prints what it is given alongside the
+ * `sourceUrl` that proves it. The three wrong options are decoys and carry no
  * citation, which is why only the correct one is ever shown with a source.
  */
 export interface QuizYearOptionView {
-  year: number;
+  /** Rendered text for this option. */
+  label?: string;
+  /** Legacy numeric form — pre-multi-category checkpoints only. */
+  year?: number;
   isCorrect: boolean;
 }
 
 export interface QuizYearRound {
-  /** On-screen prompt. Verified to contain no four-digit number upstream. */
+  /** On-screen prompt. Verified upstream not to contain the answer. */
   questionText: string;
-  /** Four options, pre-shuffled upstream (deterministically, by QID seed). */
+  /** Four options, pre-shuffled upstream (deterministically, by subject seed). */
   options: QuizYearOptionView[];
   /** Subject label, shown on the reveal. */
   subject: string;
-  /** Short Wikidata description, shown small under the subject. */
+  /** Short source description, shown small under the subject. */
   subtext?: string;
   /** Verifiable citation for the CORRECT option only. */
   sourceUrl: string;
@@ -32,6 +42,28 @@ export interface QuizYearRound {
   countdownSeconds: number;
   /** Seconds the reveal stays up. */
   revealSeconds: number;
+  /**
+   * Category eyebrow, e.g. "WHAT YEAR?" / "WHICH CAPITAL?". Defaults to the
+   * year wording so legacy rounds render unchanged.
+   */
+  categoryPrompt?: string;
+}
+
+/** The one field the grid actually renders, whichever shape the round came in. */
+export function optionText(option: QuizYearOptionView): string {
+  if (typeof option.label === "string" && option.label.length) return option.label;
+  return option.year === undefined ? "" : String(option.year);
+}
+
+/**
+ * Option tiles are sized to their content. A year is 4 glyphs; "Central African
+ * CFA franc" is 25 and would overflow the tile at the year build's fixed 62px.
+ */
+export function optionFontSize(text: string): number {
+  if (text.length <= 6) return 62;
+  if (text.length <= 12) return 46;
+  if (text.length <= 20) return 34;
+  return 26;
 }
 
 export interface QuizYearProps {
@@ -180,14 +212,15 @@ const OptionTile: React.FC<{
       </div>
       <div
         style={{
-          fontSize: 62,
+          fontSize: optionFontSize(optionText(option)),
           fontWeight: 800,
+          lineHeight: 1.1,
           color: win ? CORRECT_GREEN : ink,
           fontFamily: "Inter, Helvetica, Arial, sans-serif",
           fontVariantNumeric: "tabular-nums",
         }}
       >
-        {option.year}
+        {optionText(option)}
       </div>
     </div>
   );
@@ -222,7 +255,7 @@ const RoundView: React.FC<{
           opacity: enter,
         }}
       >
-        WHAT YEAR?
+        {(round.categoryPrompt ?? "WHAT YEAR?").toUpperCase()}
       </div>
       <div
         style={{
@@ -253,7 +286,7 @@ const RoundView: React.FC<{
         >
           {options.map((o, i) => (
             <OptionTile
-              key={`${o.year}-${i}`}
+              key={`${optionText(o)}-${i}`}
               letter={LETTERS[i] ?? "?"}
               option={o}
               revealed={revealed}

@@ -23,6 +23,14 @@ import { CONTENT_LANE_POLICIES, CONTENT_LANE_BY_FAMILY, LANE_QUALITY_POLICIES } 
 import { MODULE_CONTRACTS } from "@/engine/moduleContracts";
 import { GOLDEN_MODULES } from "@/engine/golden";
 import { CATALOG_EXECUTION_BINDINGS } from "@/engine/goldenExecution";
+import {
+  CATEGORY_PROMPTS,
+  planRoundCategories,
+  QUIZ_ROUND_CATEGORIES,
+  resolveCategories,
+  type PlannedRound,
+  type QuizRoundCategory,
+} from "@/trigger/blocks/quizYearBlocks";
 import { quizRoundCount, quizSetDefects, resolveTopic, quizYearBlocks } from "../quizYearBlocks";
 import { wikidataSourceUrl, type QuizYearQuestion } from "@/lib/quizYearFacts";
 
@@ -155,48 +163,131 @@ async function main(): Promise<void> {
   assert.equal(resolveTopic("not_a_topic"), "science_discovery", "unknown topics fall back safely");
   assert.equal(resolveTopic(undefined), "science_discovery");
 
-  const q = (qid: string, year: number, text: string): QuizYearQuestion => ({
-    fact: {
-      eventLabel: `Subject ${qid}`,
-      eventDescription: "",
-      year,
-      wikidataQid: qid,
-      sourceUrl: wikidataSourceUrl(qid),
-      topic: "science_discovery",
-      notability: 50,
-    },
+  // `quizSetDefects` now grades the UNIFIED round shape every category collapses
+  // to, so one set of set-level locks covers years, capitals, currencies,
+  // symbols and general knowledge rather than each category re-implementing them.
+  const q = (
+    subjectId: string,
+    answer: string,
+    text: string,
+    category: QuizRoundCategory = "guess_year",
+  ): PlannedRound => ({
+    category,
+    categoryPrompt: CATEGORY_PROMPTS[category],
+    subjectId,
+    subject: `Subject ${subjectId}`,
     questionText: text,
+    answerLabel: answer,
+    sourceUrl: wikidataSourceUrl(subjectId),
+    options: [
+      { label: answer, isCorrect: true, provenance: "wikidata-sourced" },
+      { label: `${answer}-x`, isCorrect: false, provenance: "generated-decoy" },
+      { label: `${answer}-y`, isCorrect: false, provenance: "generated-decoy" },
+      { label: `${answer}-z`, isCorrect: false, provenance: "generated-decoy" },
+    ],
     phrasedByModel: false,
   });
   assert.deepEqual(
     quizSetDefects([
-      q("Q1", 1781, "In what year was A discovered?"),
-      q("Q2", 1846, "In what year was B discovered?"),
-      q("Q3", 1900, "In what year was C discovered?"),
+      q("Q1", "1781", "In what year was A discovered?"),
+      q("Q2", "1846", "In what year was B discovered?"),
+      q("Q3", "1900", "In what year was C discovered?"),
     ]),
     [],
   );
   assert.ok(
     quizSetDefects([
-      q("Q1", 1781, "In what year was A discovered?"),
-      q("Q1", 1781, "In what year was A discovered?"),
-      q("Q3", 1900, "In what year was C discovered?"),
+      q("Q1", "1781", "In what year was A discovered?"),
+      q("Q1", "1781", "In what year was A discovered?"),
+      q("Q3", "1900", "In what year was C discovered?"),
     ]).some((d) => d.includes("duplicate subject")),
   );
   assert.ok(
     quizSetDefects([
-      q("Q1", 1900, "In what year was A discovered?"),
-      q("Q2", 1900, "In what year was B discovered?"),
-      q("Q3", 1900, "In what year was C discovered?"),
-    ]).some((d) => d.includes("same year")),
-    "a set where every answer is the same year is a bad quiz",
+      q("Q1", "1900", "In what year was A discovered?"),
+      q("Q2", "1900", "In what year was B discovered?"),
+      q("Q3", "1900", "In what year was C discovered?"),
+    ]).some((d) => d.includes("every answer is the same")),
+    "a set where every answer is identical is a bad quiz",
   );
   assert.ok(
-    quizSetDefects([q("Q1", 1781, "Was it around 1781?")]).some((d) => d.includes("spoils")),
+    quizSetDefects([q("Q1", "1781", "Was it around 1781?")]).some((d) => d.includes("spoils")),
     "a spoiling question must surface as a set defect",
   );
+  // The same spoiler lock has to hold for a NON-numeric answer, which is the
+  // whole point of generalising past years.
+  assert.ok(
+    quizSetDefects([q("Q142", "Paris", "Which city is the capital, Paris or Lyon?", "capital_city")])
+      .some((d) => d.includes("spoils")),
+    "a capital question naming its own answer must be caught too",
+  );
 
-  console.log("quizYearWiring: engine registration, lane policy, cost shape and catalog honesty locks passed");
+  // REGRESSION: the spoiler check must match on WORD BOUNDARIES.
+  //
+  // It was a raw `String.includes`, which reads two-letter chemical symbols
+  // inside ordinary words. Because this gate THROWS in the block's final
+  // integrity check — and the repair path falls back to the same deterministic
+  // template, which trips it again — every one of these rounds was an
+  // unrecoverable video failure rather than a dropped question. All five are
+  // real element rows from the live P246 pool.
+  for (const [element, symbol] of [
+    ["indium", "In"],
+    ["iodine", "I"],
+    ["nobelium", "No"],
+    ["barium", "Ba"],
+    ["astatine", "At"],
+  ] as const) {
+    assert.deepEqual(
+      quizSetDefects([
+        q("Q1", symbol, `What is the chemical symbol for ${element}?`, "element_symbol"),
+        q("Q2", "Fe", "What is the chemical symbol for iron?", "element_symbol"),
+        q("Q3", "Au", "What is the chemical symbol for gold?", "element_symbol"),
+      ]),
+      [],
+      `"${symbol}" appears inside "${element}" as a substring but not as a word — must not throw`,
+    );
+  }
+  // …and a symbol that really does stand alone in the text is still caught.
+  assert.ok(
+    quizSetDefects([q("Q1", "Au", "Is the answer Au or Ag?", "element_symbol")])
+      .some((d) => d.includes("spoils")),
+  );
+
+  /* ------------------------------------------------------------------ *
+   * Category mixing — a single video draws rounds from several categories
+   * ------------------------------------------------------------------ */
+  {
+    const plan = planRoundCategories(8, [...QUIZ_ROUND_CATEGORIES]);
+    assert.equal(plan.length, 8, "the plan fills every requested round");
+    assert.ok(
+      new Set(plan).size >= 4,
+      `a mixed 8-round video must span several categories, got ${new Set(plan).size}`,
+    );
+    // Interleaved, not blocked: no category may take the first three slots.
+    assert.ok(
+      !(plan[0] === plan[1] && plan[1] === plan[2]),
+      `categories must interleave rather than cluster: ${plan.join(",")}`,
+    );
+    // Deterministic — a healer replay must reproduce the same plan.
+    assert.deepEqual(plan, planRoundCategories(8, [...QUIZ_ROUND_CATEGORIES]));
+
+    // A restricted request is honoured exactly.
+    const only = planRoundCategories(6, ["capital_city", "guess_year"]);
+    assert.equal(only.length, 6);
+    assert.deepEqual([...new Set(only)].sort(), ["capital_city", "guess_year"]);
+
+    assert.deepEqual(resolveCategories("capital_city, guess_year"), ["capital_city", "guess_year"]);
+    assert.deepEqual(
+      resolveCategories("nonsense"),
+      [...QUIZ_ROUND_CATEGORIES],
+      "an unparseable category list falls back to the full mix rather than failing",
+    );
+    for (const c of QUIZ_ROUND_CATEGORIES) {
+      assert.ok(CATEGORY_PROMPTS[c], `every category needs an on-screen prompt (${c})`);
+    }
+  }
+
+  console.log("quizYearWiring: engine registration, lane policy, cost shape, category mixing and catalog honesty locks passed");
 }
 
 void main();

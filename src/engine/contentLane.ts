@@ -374,9 +374,10 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     critiqueThreshold: 0.8,
     maxCritiqueIters: 2,
     emphasis: [
-      "The question must never contain a year, a decade or an era — that either spoils the answer or contradicts the cited source.",
+      "The question must never contain its own answer, in any form — a year, a city, a currency, a symbol. That either spoils the round or contradicts the cited source.",
       "Every question must be readable at a glance; the viewer has seconds, not paragraphs.",
-      "The four year options must all look period-plausible, so the answer cannot be found by elimination.",
+      "All four options must look equally plausible, so the answer cannot be found by elimination: period-plausible years, same-region capitals, real currencies, real chemical symbols.",
+      "The video mixes categories on purpose. Each question must stand alone and read clearly without the one before it.",
     ],
   },
   legacy_unclassified: { ...GENERIC_LANE_QUALITY },

@@ -242,6 +242,11 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "competitor_research" },
       { block: "topic_select", params: { targetSeconds: 80 } },
       { block: "compliance_check" },
+      // No `categories` param → the block uses the full default mix, so a
+      // channel created from this archetype gets a genuinely mixed trivia video
+      // (years, capitals, currencies, symbols, general knowledge) rather than
+      // eight rounds of the same question type. `topic` still steers only the
+      // guess-the-year share of the mix.
       { block: "quiz_year", params: { topic: "science_discovery", targetSeconds: 80 } },
       { block: "length_check", params: { minSeconds: 25, maxSeconds: 400 } },
       { block: "metadata" },

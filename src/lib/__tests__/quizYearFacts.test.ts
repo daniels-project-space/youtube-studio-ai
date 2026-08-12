@@ -443,11 +443,17 @@ assert.throws(
   const fetchImpl = (async (url: string) => {
     call++;
     const isLabelQuery = decodeURIComponent(url).includes("rdfs:label");
+    // Binding names follow resolveEntityMeta (src/lib/quizSource.ts), which
+    // replaced this module's private label query when the substrate was shared
+    // across categories. It selects ?en / ?mul / ?desc / ?article rather than
+    // ?itemLabel / ?itemDescription, because a strict `@en` filter silently
+    // dropped every entity whose English label has migrated to the `mul`
+    // language code (Q4916, "euro", is the live case).
     const bindings = isLabelQuery
       ? Object.entries(labels).map(([qid, [label, description]]) => ({
           item: { value: `http://www.wikidata.org/entity/${qid}` },
-          itemLabel: { value: label },
-          itemDescription: { value: description },
+          en: { value: label },
+          desc: { value: description },
         }))
       : selectionRows.map((r) => ({
           item: { value: `http://www.wikidata.org/entity/${r.item}` },

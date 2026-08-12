@@ -53,16 +53,33 @@
  * an otherwise safe topic.
  */
 
-/** Wikidata's public SPARQL endpoint. Free, unauthenticated, CC0 data. */
-export const WIKIDATA_SPARQL_ENDPOINT = "https://query.wikidata.org/sparql";
-
 /**
- * Wikidata asks every automated client to send a descriptive User-Agent with
- * contact info (https://foundation.wikimedia.org/wiki/Policy:User-Agent_policy).
- * A generic or absent UA is throttled aggressively.
+ * TRANSPORT, TONE FILTER AND LABEL RESOLUTION NOW LIVE IN quizSource.ts.
+ * They were extracted verbatim when the quiz format grew from this one category
+ * to several (see quizFacts.ts), so capitals, currencies and chemical symbols
+ * run through the same retrying SPARQL client and the same sensitivity list
+ * this module established. Everything this module's public API already promised
+ * is re-exported below, so no caller or test had to change.
  */
-export const WIKIDATA_USER_AGENT =
-  "YouTubeStudioAI-QuizYear/1.0 (https://github.com/daniels-project-space/youtube-studio-ai)";
+import {
+  isSensitiveText,
+  qidFromUri,
+  resolveEntityMeta,
+  runSparql,
+  SENSITIVE_TERMS,
+  wikidataSourceUrl,
+  type SparqlFetchOptions,
+} from "./quizSource";
+
+export {
+  WIKIDATA_SPARQL_ENDPOINT,
+  WIKIDATA_USER_AGENT,
+  SENSITIVE_TERMS,
+  isSensitiveText,
+  runSparql,
+  wikidataSourceUrl,
+  type SparqlFetchOptions,
+} from "./quizSource";
 
 /** Minimum acceptable Wikidata time precision: 9 = year. 11 = day, 10 = month. */
 export const MIN_DATE_PRECISION = 9;
@@ -133,21 +150,6 @@ ORDER BY DESC(?links)
 LIMIT ${args.limit}`;
 }
 
-/**
- * Labels are fetched in a SECOND, trivial query keyed by QID rather than via
- * `SERVICE wikibase:label` in the selection query. Live probing showed the
- * label service returning bare QIDs ("Q94501") whenever it was combined with
- * ORDER BY + LIMIT, which would have put a raw QID on screen.
- */
-function labelQuery(qids: readonly string[]): string {
-  const values = qids.map((q) => `wd:${q}`).join(" ");
-  return `SELECT ?item ?itemLabel ?itemDescription WHERE {
-  VALUES ?item { ${values} }
-  ?item rdfs:label ?itemLabel . FILTER(LANG(?itemLabel) = "en")
-  OPTIONAL { ?item schema:description ?itemDescription . FILTER(LANG(?itemDescription) = "en") }
-}`;
-}
-
 export const QUIZ_YEAR_TOPICS: Readonly<Record<QuizYearTopicKey, TopicSpec>> = {
   space_exploration: {
     key: "space_exploration",
@@ -206,30 +208,6 @@ export const QUIZ_YEAR_TOPICS: Readonly<Record<QuizYearTopicKey, TopicSpec>> = {
 };
 
 export const QUIZ_YEAR_TOPIC_KEYS = Object.keys(QUIZ_YEAR_TOPICS) as QuizYearTopicKey[];
-
-/**
- * Terms that make a fact unsuitable for an upbeat guess-the-year channel. This
- * is a TONE filter, not a truth filter — the dropped facts are perfectly real,
- * they are simply not what this format is for. A channel that genuinely wants
- * military or disaster history should pass `allowSensitiveTopics: true` and own
- * that editorial decision explicitly rather than having it happen by default.
- */
-export const SENSITIVE_TERMS: readonly string[] = [
-  "war", "battle", "massacre", "genocide", "holocaust", "atrocity", "killed", "death",
-  "deaths", "died", "fatal", "casualt", "murder", "assassinat", "execution", "shooting",
-  "bombing", "bomb", "terror", "attack", "invasion", "uprising", "revolt", "riot",
-  "famine", "epidemic", "pandemic", "plague", "outbreak", "disaster", "catastroph",
-  "earthquake", "tsunami", "hurricane", "crash", "sinking", "wreck", "explosion",
-  "slavery", "slave", "torture", "abuse", "rape", "suicide", "nuclear weapon",
-  // Regime/abbreviation forms. Added after a live probe surfaced "Wolf's Lair"
-  // ("one of Nazi Germany's military headquarters during WW2") passing the
-  // filter cleanly: its description never contains the substring "war", only
-  // the abbreviation. Substring matching on "war" cannot catch "WW2"/"WWII",
-  // so the abbreviations and regime names are listed explicitly.
-  "nazi", "hitler", "ww2", "wwii", "ww1", "wwi", "third reich", "reich",
-  "fascist", "concentration camp", "gulag", "regime", "military", "wehrmacht",
-  "dictator", "colonial", "apartheid", "internment",
-];
 
 /** Matches a plausible historical year, 1500–2029. */
 const YEAR_PATTERN = /\b(1[5-9]\d{2}|20[0-2]\d)\b/g;
@@ -303,12 +281,6 @@ export function textYearConflict(
   return null;
 }
 
-/** True when the text reads as atrocity/disaster material. */
-export function isSensitiveText(label: string, description: string): boolean {
-  const haystack = `${label} ${description}`.toLowerCase();
-  return SENSITIVE_TERMS.some((term) => haystack.includes(term));
-}
-
 export interface FactIntegrityOptions {
   allowSensitiveTopics?: boolean;
 }
@@ -341,82 +313,6 @@ export function factDefects(
   return defects;
 }
 
-export function wikidataSourceUrl(qid: string): string {
-  return `https://www.wikidata.org/wiki/${qid}`;
-}
-
-/* ------------------------------------------------------------------ *
- * Transport
- * ------------------------------------------------------------------ */
-
-export interface SparqlFetchOptions {
-  /** Per-attempt timeout. Default 30s. */
-  timeoutMs?: number;
-  /** Total attempts including the first. Default 3. */
-  retries?: number;
-  log?: (msg: string) => void;
-  /** Injected for tests; defaults to global fetch. */
-  fetchImpl?: typeof fetch;
-  /** Injected for tests so retry backoff does not really sleep. */
-  sleepImpl?: (ms: number) => Promise<void>;
-}
-
-const defaultSleep = (ms: number) => new Promise<void>((r) => setTimeout(r, ms));
-
-interface SparqlBinding {
-  [key: string]: { value: string } | undefined;
-}
-
-/**
- * Run a SPARQL query with a bounded timeout and retry on TRANSIENT failure.
- * The public endpoint genuinely returns 429/500/502/504 under load — all four
- * were observed during development — so a single-shot fetch would make fact
- * sourcing flaky. 4xx other than 429 are permanent (bad query) and fail fast.
- */
-export async function runSparql(
-  query: string,
-  options: SparqlFetchOptions = {},
-): Promise<SparqlBinding[]> {
-  const timeoutMs = options.timeoutMs ?? 30_000;
-  const retries = Math.max(1, options.retries ?? 3);
-  const doFetch = options.fetchImpl ?? fetch;
-  const sleep = options.sleepImpl ?? defaultSleep;
-  const log = options.log ?? (() => {});
-
-  let lastError = "unknown";
-  for (let attempt = 1; attempt <= retries; attempt++) {
-    const controller = new AbortController();
-    const timer = setTimeout(() => controller.abort(), timeoutMs);
-    try {
-      const url = `${WIKIDATA_SPARQL_ENDPOINT}?format=json&query=${encodeURIComponent(query)}`;
-      const res = await doFetch(url, {
-        headers: {
-          Accept: "application/sparql-results+json",
-          "User-Agent": WIKIDATA_USER_AGENT,
-        },
-        signal: controller.signal,
-      });
-      if (res.status === 200) {
-        const body = (await res.json()) as { results?: { bindings?: SparqlBinding[] } };
-        return body.results?.bindings ?? [];
-      }
-      lastError = `HTTP ${res.status}`;
-      // 429 (rate limit) and 5xx are transient; other 4xx mean a bad query.
-      if (res.status !== 429 && res.status < 500) {
-        throw new Error(`wikidata SPARQL permanent failure: HTTP ${res.status}`);
-      }
-    } catch (e) {
-      if (e instanceof Error && e.message.startsWith("wikidata SPARQL permanent")) throw e;
-      lastError = e instanceof Error ? e.name || e.message : String(e);
-    } finally {
-      clearTimeout(timer);
-    }
-    log(`wikidata: attempt ${attempt}/${retries} failed (${lastError})`);
-    if (attempt < retries) await sleep(1_000 * 2 ** (attempt - 1));
-  }
-  throw new Error(`wikidata SPARQL failed after ${retries} attempts: ${lastError}`);
-}
-
 /* ------------------------------------------------------------------ *
  * Fact sourcing
  * ------------------------------------------------------------------ */
@@ -445,10 +341,6 @@ export interface FetchQuizYearFactsResult {
     duplicate: number;
   };
   candidatesExamined: number;
-}
-
-function qidFromUri(uri: string): string {
-  return uri.slice(uri.lastIndexOf("/") + 1);
 }
 
 /**
@@ -508,20 +400,19 @@ export async function fetchQuizYearFacts(
   }
 
   // Label in batches, keep going until we have `count` clean facts.
+  //
+  // `resolveEntityMeta` replaced a strict `rdfs:label @en` query here. That
+  // filter had a blind spot this module shared with every other category:
+  // Wikidata has begun migrating labels that are spelled identically across
+  // languages onto the `mul` language code, and an entity whose English label
+  // has moved there returns NOTHING for `LANG(?l) = "en"` — it was silently
+  // counted as `unresolvedLabel` and dropped. The shared resolver falls back
+  // en → mul → English-Wikipedia sitelink title, so those subjects come back.
   const facts: QuizYearFact[] = [];
   const batchSize = Math.min(120, Math.max(count * 4, 20));
   for (let i = 0; i < ordered.length && facts.length < count; i += batchSize) {
     const batch = ordered.slice(i, i + batchSize);
-    const labels = await runSparql(labelQuery(batch.map((r) => r.qid)), args);
-    const byQid = new Map<string, { label: string; description: string }>();
-    for (const b of labels) {
-      const qid = qidFromUri(b.item?.value ?? "");
-      if (!qid) continue;
-      byQid.set(qid, {
-        label: b.itemLabel?.value ?? "",
-        description: b.itemDescription?.value ?? "",
-      });
-    }
+    const byQid = await resolveEntityMeta(batch.map((r) => r.qid), args);
     for (const row of batch) {
       if (facts.length >= count) break;
       const meta = byQid.get(row.qid);

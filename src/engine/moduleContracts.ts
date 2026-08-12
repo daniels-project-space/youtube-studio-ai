@@ -162,10 +162,19 @@ function quizYearCostCeiling(
   const seconds = targetSeconds(params, context, 80);
   const rounds = Math.max(3, Math.min(15, Math.round(seconds / Math.max(1, countdown + reveal))));
   // 2 critique iterations is the lane cap (contentLane.ts LANE_QUALITY_POLICIES
-  // .quiz_year.maxCritiqueIters); each iteration phrases every round once and
-  // then spends one critic call over the whole set.
+  // .quiz_year.maxCritiqueIters). Per iteration the block spends:
+  //   • at most `rounds` phrasing calls — ONE per round, whichever category the
+  //     round came from, because every Wikidata category shares the same
+  //     single-call phrasing path and general-knowledge rounds arrive already
+  //     phrased (their text came from the candidate batch and was verified);
+  //   • at most 1 general-knowledge PROPOSAL call, which covers the whole
+  //     general-knowledge batch for that iteration rather than one per round;
+  //   • 1 critic call over the whole set.
+  // So mixing categories does NOT scale per-round cost — it adds exactly one
+  // bounded call per iteration versus the single-category build.
   const iterations = 2;
-  return iterations * (rounds + 1) * PRICE.boundedTextPassUsd;
+  const callsPerIteration = rounds + 1 /* GK proposal */ + 1 /* critic */;
+  return iterations * callsPerIteration * PRICE.boundedTextPassUsd;
 }
 
 function motionComicCostCeiling(params: Readonly<Record<string, unknown>>): number {
@@ -594,7 +603,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // contract system exists to catch.
     ["visuals.generated", "visuals.story_aligned", "master.assembled"],
     {
-      optionalConsumes: ["channelName", "palette", "criticDoctrine", "styleGrammar", "contentLane", "quizTopic"],
+      // `quizCategories` lets a channel pin the mix (e.g. capitals + currencies
+      // only); omitted, the block draws from every category. Declared here
+      // because the contract test enforces that a module cannot read a store key
+      // it never announced.
+      optionalConsumes: ["channelName", "palette", "criticDoctrine", "styleGrammar", "contentLane", "quizTopic", "quizCategories"],
       providerProfiles: [managed, local],
       // Deliberately tiny. A quiz run that somehow costs a dollar has a bug
       // (a runaway critique loop or a paid provider that must not be there),

@@ -1,5 +1,13 @@
 /**
- * quiz_year — the GUESS-THE-YEAR visual engine for the `quizyear` family.
+ * quiz_year — the MIXED-CATEGORY quiz engine for the `quizyear` family.
+ *
+ * The block id, catalog entry, lane and archetype binding are unchanged from
+ * the original guess-the-year build (commit df1a257) so nothing downstream had
+ * to be rewired; what changed is that one video's rounds are now drawn from a
+ * MIX of fact categories rather than a single one. Real trivia channels mix
+ * question types inside one video — two year questions, two capitals, a
+ * currency, a general-knowledge round — so the mix lives inside the format
+ * instead of spawning a module per category.
  *
  * SELF-CONTAINED, structural twin of whiteboard_scribe / motion_comic /
  * lore_short: it sources its own facts, writes its own on-screen questions and
@@ -7,30 +15,34 @@
  * footage → assemble chain rather than sitting inside one. It emits the final
  * `videoKey` directly.
  *
- * WHY THIS ONE IS BUILDABLE WHEN THE OTHER THREE QUIZ FORMATS ARE NOT
+ * WHY THIS FORMAT IS BUILDABLE WHEN THE OTHER THREE QUIZ FORMATS ARE NOT
  * The 2026-08 audits closed trivia (no compliantly-licensed dataset exists),
  * flag-guess (Paris Convention Art. 6ter + no genuine CC0 flag artwork) and
  * music-guess (no clearable audio). This format avoids all three because it
- * needs NO third-party media at all: the only external input is Wikidata's
- * structured statements, which are CC0 1.0 — a real public-domain dedication
- * with no attribution or ShareAlike obligation. Nothing is scraped, no artwork
- * or audio is reused, and the typography is rendered locally by Remotion.
+ * needs NO third-party media: the inputs are Wikidata's CC0 statements and, for
+ * the general-knowledge category, a Wikipedia lookup used purely as a
+ * VERIFICATION substrate whose prose is never rendered. Nothing is scraped, no
+ * artwork or audio is reused, and the typography is rendered locally.
  *
- * THE COST SHAPE — AND WHY IT IS SO SMALL
- * There is exactly ONE optional paid call in this whole block: a text-only
- * phrasing pass per round (`gemini-2.5-flash`, a couple of hundred tokens).
- * Facts are free (Wikidata), the render is free (local Remotion + headless
- * Chromium), and there is no image, video, TTS or music provider on the path.
- * If the phrasing model is unavailable the block still produces a complete,
- * correct video from deterministic question templates.
+ * THE COST SHAPE — AND WHY IT IS STILL TINY
+ * Facts are free. The render is free (local Remotion + headless Chromium).
+ * There is no image, video, TTS, music or upscale provider on this path. The
+ * only spend is bounded text: one phrasing call per Wikidata-sourced round, ONE
+ * proposal call for the whole general-knowledge batch, and one critic call per
+ * critique iteration. Adding categories does not multiply per-round cost —
+ * every round still costs at most one phrasing call, and the general-knowledge
+ * rounds cost less than that because they arrive pre-phrased.
  *
  * THE INVARIANT THIS BLOCK EXISTS TO PROTECT
- * The answer year is NEVER model-generated. `fetchQuizYearFacts` reads it from
- * a Wikidata time value; the phrasing model's response schema has no year
- * field; `questionTextDefects` rejects any phrasing containing a four-digit
- * number; and `assertAnswerIntegrity` re-checks QID + year immediately before
- * the render props are built, throwing rather than degrading. The critique loop
- * grades the QUESTION WORDING only and can never touch the answer.
+ * The answer is NEVER model-generated, in ANY category. Wikidata categories
+ * read it from a statement; the general-knowledge category accepts it only
+ * after an independently fetched real document is shown to state it (and to not
+ * state any of the wrong options). The phrasing model's response schema has no
+ * answer field, `questionTextDefects` rejects any phrasing that leaks the
+ * answer, and `assertQuizAnswerIntegrity` / `assertGeneralKnowledgeIntegrity`
+ * re-check every round immediately before render props are built — on every
+ * checkpoint replay, not just on the first pass. The critique loop grades
+ * QUESTION WORDING only and can never touch an answer.
  */
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -55,12 +67,31 @@ import {
   deterministicQuestionText,
   fetchQuizYearFacts,
   phraseQuizYearQuestion,
-  questionTextDefects,
   QUIZ_YEAR_TOPIC_KEYS,
-  type QuizYearFact,
-  type QuizYearQuestion,
   type QuizYearTopicKey,
 } from "@/lib/quizYearFacts";
+import {
+  assertQuizAnswerIntegrity,
+  assertQuizOptionIntegrity,
+  buildQuizOptions,
+  containsPhrase,
+  deterministicCategoryQuestion,
+  fetchCategoryFacts,
+  phraseQuizQuestion,
+  questionTextDefects,
+  QUIZ_CATEGORIES,
+  QUIZ_CATEGORY_KEYS,
+  seededRandom,
+  type QuizCategoryFact,
+  type QuizCategoryKey,
+  type QuizDecoyCandidate,
+} from "@/lib/quizFacts";
+import {
+  assertGeneralKnowledgeIntegrity,
+  buildGeneralKnowledgeOptions,
+  proposeGeneralKnowledgeCandidates,
+  verifyGeneralKnowledgeCandidates,
+} from "@/lib/quizGeneralKnowledge";
 import { renderQuizYear, type QuizYearRound } from "@/lib/quizYearRender";
 
 function convex(): ConvexHttpClient {
@@ -89,7 +120,7 @@ async function recordAsset(
   }
 }
 
-const QUIZ_QUESTIONS_CHECKPOINT_VERSION = "quiz-year-questions/v1";
+const QUIZ_QUESTIONS_CHECKPOINT_VERSION = "quiz-mixed-rounds/v1";
 
 /** Seconds a viewer gets to guess, and how long the reveal holds. */
 export const QUIZ_DEFAULT_COUNTDOWN_SECONDS = 6;
@@ -99,6 +130,45 @@ export const QUIZ_MIN_ROUNDS = 3;
 export const QUIZ_MAX_ROUNDS = 15;
 
 /**
+ * Every category a round can be drawn from. `guess_year` is the original build,
+ * kept as one option among several rather than promoted to the whole format.
+ */
+export type QuizRoundCategory = "guess_year" | QuizCategoryKey | "general_knowledge";
+
+export const QUIZ_ROUND_CATEGORIES: readonly QuizRoundCategory[] = [
+  "guess_year",
+  ...QUIZ_CATEGORY_KEYS,
+  "general_knowledge",
+];
+
+/** On-screen eyebrow per category, so a mixed video signals the switch. */
+export const CATEGORY_PROMPTS: Readonly<Record<QuizRoundCategory, string>> = {
+  guess_year: "WHAT YEAR?",
+  capital_city: "WHICH CAPITAL?",
+  country_currency: "WHICH CURRENCY?",
+  element_symbol: "WHICH SYMBOL?",
+  element_atomic_number: "WHICH ATOMIC NUMBER?",
+  general_knowledge: "GENERAL KNOWLEDGE",
+};
+
+/**
+ * The default mix. Deliberately NOT an even split across everything available:
+ * guess-the-year and capitals are the two categories with the deepest verified
+ * pools (thousands of dated entities; 189 clean countries), so they anchor the
+ * video, while the narrower pools (118 elements) and the lossiest one (general
+ * knowledge, where most candidates are rejected by verification) appear once or
+ * twice. Weights are relative, not counts.
+ */
+export const DEFAULT_CATEGORY_MIX: Readonly<Record<QuizRoundCategory, number>> = {
+  guess_year: 3,
+  capital_city: 3,
+  country_currency: 2,
+  element_symbol: 1,
+  element_atomic_number: 1,
+  general_knowledge: 2,
+};
+
+/**
  * How many rounds fit a requested runtime. Kept in lockstep with
  * quizYearCostCeiling() in src/engine/moduleContracts.ts.
  */
@@ -106,6 +176,94 @@ export function quizRoundCount(targetSeconds: number, countdown: number, reveal:
   const per = Math.max(1, countdown + reveal);
   if (!Number.isFinite(targetSeconds) || targetSeconds <= 0) return 8;
   return Math.max(QUIZ_MIN_ROUNDS, Math.min(QUIZ_MAX_ROUNDS, Math.round(targetSeconds / per)));
+}
+
+/** Resolve the requested year topic, defaulting to a broadly safe one. */
+export function resolveTopic(raw: unknown): QuizYearTopicKey {
+  const key = String(raw ?? "").trim() as QuizYearTopicKey;
+  return QUIZ_YEAR_TOPIC_KEYS.includes(key) ? key : "science_discovery";
+}
+
+/** Parse the `categories` param (array or comma-separated string). */
+export function resolveCategories(raw: unknown): QuizRoundCategory[] {
+  const parts = Array.isArray(raw)
+    ? raw.map((v) => String(v).trim())
+    : String(raw ?? "")
+        .split(",")
+        .map((v) => v.trim());
+  const picked = parts.filter((p): p is QuizRoundCategory =>
+    (QUIZ_ROUND_CATEGORIES as readonly string[]).includes(p),
+  );
+  return picked.length ? [...new Set(picked)] : [...QUIZ_ROUND_CATEGORIES];
+}
+
+/**
+ * Allocate `rounds` across the enabled categories by weight, then INTERLEAVE so
+ * the categories alternate instead of arriving in blocks. A viewer should feel
+ * a mixed quiz, not four capitals followed by four years.
+ *
+ * Deterministic: same inputs → same plan, which matters because the question set
+ * is frozen into a content-addressed checkpoint that a healer replay must
+ * reproduce exactly.
+ */
+export function planRoundCategories(
+  rounds: number,
+  enabled: readonly QuizRoundCategory[],
+): QuizRoundCategory[] {
+  const list = enabled.length ? enabled : [...QUIZ_ROUND_CATEGORIES];
+  const totalWeight = list.reduce((sum, c) => sum + (DEFAULT_CATEGORY_MIX[c] ?? 1), 0);
+  const quota = new Map<QuizRoundCategory, number>();
+  let assigned = 0;
+  for (const c of list) {
+    const share = Math.floor((rounds * (DEFAULT_CATEGORY_MIX[c] ?? 1)) / totalWeight);
+    quota.set(c, share);
+    assigned += share;
+  }
+  // Hand out the remainder in weight order so rounding never loses a round.
+  const byWeight = [...list].sort(
+    (a, b) => (DEFAULT_CATEGORY_MIX[b] ?? 1) - (DEFAULT_CATEGORY_MIX[a] ?? 1),
+  );
+  for (let i = 0; assigned < rounds; i++, assigned++) {
+    const c = byWeight[i % byWeight.length];
+    quota.set(c, (quota.get(c) ?? 0) + 1);
+  }
+  // Round-robin drain = interleaved order.
+  const plan: QuizRoundCategory[] = [];
+  const remaining = new Map(quota);
+  while (plan.length < rounds) {
+    let placed = false;
+    for (const c of byWeight) {
+      const left = remaining.get(c) ?? 0;
+      if (left > 0) {
+        plan.push(c);
+        remaining.set(c, left - 1);
+        placed = true;
+        if (plan.length >= rounds) break;
+      }
+    }
+    if (!placed) break;
+  }
+  return plan;
+}
+
+/**
+ * One fully-resolved round. This is the unified shape every category collapses
+ * to before phrasing, critique, integrity assertion and render — so a new
+ * category cannot introduce a new code path through any of those stages.
+ */
+export interface PlannedRound {
+  category: QuizRoundCategory;
+  categoryPrompt: string;
+  /** QID for Wikidata categories, article title for general knowledge. */
+  subjectId: string;
+  subject: string;
+  subtext?: string;
+  questionText: string;
+  answerLabel: string;
+  answerNumber?: number;
+  sourceUrl: string;
+  options: { label: string; isCorrect: boolean; provenance: string }[];
+  phrasedByModel: boolean;
 }
 
 /** Channel doctrine + lane grounding for this block's critique. */
@@ -129,34 +287,44 @@ function quizCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
   };
 }
 
-/** Resolve the requested topic, defaulting to a broadly safe one. */
-export function resolveTopic(raw: unknown): QuizYearTopicKey {
-  const key = String(raw ?? "").trim() as QuizYearTopicKey;
-  return QUIZ_YEAR_TOPIC_KEYS.includes(key) ? key : "science_discovery";
-}
-
 /**
- * Deterministic defects in a whole question SET — what the critique loop is
- * allowed to react to. Note what is absent: nothing here can change a year.
+ * Deterministic defects in a whole round SET — what the critique loop is allowed
+ * to react to. Note what is absent: nothing here can change an answer.
  */
-export function quizSetDefects(questions: readonly QuizYearQuestion[]): string[] {
+export function quizSetDefects(rounds: readonly PlannedRound[]): string[] {
   const defects: string[] = [];
-  if (!questions.length) return ["no questions"];
-  const seenQid = new Set<string>();
-  const seenYear = new Set<number>();
-  for (const q of questions) {
-    for (const d of questionTextDefects(q.fact, q.questionText)) {
-      defects.push(`${q.fact.wikidataQid}: ${d}`);
+  if (!rounds.length) return ["no rounds"];
+  const seenSubject = new Set<string>();
+  const seenAnswer = new Set<string>();
+  for (const r of rounds) {
+    const text = r.questionText.trim();
+    if (!text) defects.push(`${r.subjectId}: empty question text`);
+    if (!text.includes("?")) defects.push(`${r.subjectId}: not phrased as a question`);
+    if (text.length > 160) defects.push(`${r.subjectId}: question too long for a quiz card`);
+    // The one universal spoiler rule: the prompt may never contain the answer.
+    //
+    // WORD BOUNDARIES, not `String.includes`. A raw substring test reads the
+    // answer inside ordinary words and throws on legitimate rounds: measured on
+    // real element rows, "What is the chemical symbol for indium?" contains
+    // "In", "…for iodine?" contains "I", "…for nobelium?" contains "No",
+    // "…for barium?" contains "Ba", "…for astatine?" contains "At". This gate
+    // THROWS (see the block's final integrity check) and the repair path falls
+    // back to the same deterministic template, which trips it again — so the
+    // substring form made every such round an unrecoverable video failure.
+    // `containsPhrase` is what questionTextDefects already uses; this call site
+    // simply had not been switched over.
+    if (r.answerLabel && containsPhrase(text, r.answerLabel)) {
+      defects.push(`${r.subjectId}: question spoils the answer`);
     }
-    if (seenQid.has(q.fact.wikidataQid)) defects.push(`duplicate subject ${q.fact.wikidataQid}`);
-    seenQid.add(q.fact.wikidataQid);
-    seenYear.add(q.fact.year);
+    if (seenSubject.has(r.subjectId)) defects.push(`duplicate subject ${r.subjectId}`);
+    seenSubject.add(r.subjectId);
+    seenAnswer.add(`${r.category}:${r.answerLabel}`);
+    const correct = r.options.filter((o) => o.isCorrect);
+    if (correct.length !== 1) defects.push(`${r.subjectId}: ${correct.length} correct options`);
   }
-  // A round of questions that all share one year is a bad quiz even when every
+  // A set whose answers are all identical is a bad quiz even when every
   // individual answer is correct.
-  if (questions.length >= 3 && seenYear.size < 2) {
-    defects.push("every answer is the same year");
-  }
+  if (rounds.length >= 3 && seenAnswer.size < 2) defects.push("every answer is the same");
   return defects;
 }
 
@@ -166,22 +334,24 @@ export function quizSetDefects(questions: readonly QuizYearQuestion[]): string[]
  * transient LLM outage.
  */
 async function gradeQuizQuestions(args: {
-  questions: QuizYearQuestion[];
+  rounds: PlannedRound[];
   channel: ChannelCritiqueContext;
   log: (m: string) => void;
   onCall: () => void;
 }): Promise<{ score: number; pass: boolean; issues: string[] } | null> {
   if (!hasGeminiKey()) return null;
-  const listing = args.questions
-    .map((q, i) => `${i + 1}. ${q.questionText}  [subject: ${q.fact.eventLabel}]`)
+  const listing = args.rounds
+    .map((r, i) => `${i + 1}. [${r.category}] ${r.questionText}  [subject: ${r.subject}]`)
     .join("\n");
   const prompt =
-    `You are the CRITIC for a "guess the year" quiz channel. Grade ONLY the WORDING of these on-screen questions.\n\n` +
+    `You are the CRITIC for a mixed-category trivia quiz channel. Grade ONLY the WORDING of these ` +
+    `on-screen questions.\n\n` +
     channelCritiqueBrief(args.channel) +
     `\nQUESTIONS:\n${listing}\n\n` +
-    `Judge: clarity (is it instantly understandable on screen?), engagement (does it make you want to guess?), ` +
-    `and no-spoiler (does the wording give the answer away, e.g. by naming an era or a decade?).\n` +
-    `DO NOT judge factual correctness and DO NOT suggest years — the answers come from a cited dataset, not from you.\n\n` +
+    `Judge: clarity (is it instantly understandable on screen?), engagement (does it make you want to ` +
+    `guess?), and no-spoiler (does the wording give the answer away?).\n` +
+    `DO NOT judge factual correctness and DO NOT suggest answers — the answers come from cited sources, ` +
+    `not from you.\n\n` +
     `Return JSON: {"score": 0..1, "pass": boolean, "issues": ["..."]}`;
   try {
     args.onCall();
@@ -197,67 +367,319 @@ async function gradeQuizQuestions(args: {
       issues: Array.isArray(r?.issues) ? r.issues.map(String).slice(0, 8) : [],
     };
   } catch (e) {
-    args.log(`quiz_year: critic unavailable (${e instanceof Error ? e.message : e}) — accepting`);
+    args.log(`quiz: critic unavailable (${e instanceof Error ? e.message : e}) — accepting`);
     return null;
   }
 }
 
-/**
- * Phrase every question, critique the SET, and freeze the accepted set into a
- * content-addressed R2 checkpoint. The checkpoint key is derived from the facts
- * (QID+year) plus the phrasing knobs, so a healer replay with the same facts
- * re-reads the settled questions instead of re-buying the LLM calls.
- */
-async function authorQuestions(args: {
+/* ------------------------------------------------------------------ *
+ * Per-category sourcing → PlannedRound
+ * ------------------------------------------------------------------ */
+
+interface SourceArgs {
   ctx: StageContext;
-  facts: QuizYearFact[];
+  want: number;
+  brief: string;
+  onModelCall: () => void;
+  allowSensitiveTopics: boolean;
+  minNotability: number;
+}
+
+/** The original guess-the-year path, now one category among several. */
+async function sourceYearRounds(args: SourceArgs & { topic: QuizYearTopicKey }): Promise<PlannedRound[]> {
+  const { ctx } = args;
+  const sourced = await fetchQuizYearFacts({
+    topic: args.topic,
+    count: args.want,
+    minNotability: args.minNotability,
+    allowSensitiveTopics: args.allowSensitiveTopics,
+    log: (m) => ctx.log(m),
+    retries: 4,
+    timeoutMs: 45_000,
+  });
+  const out: PlannedRound[] = [];
+  for (const fact of sourced.facts.slice(0, args.want)) {
+    const q = await phraseQuizYearQuestion({
+      fact,
+      critiqueBrief: args.brief,
+      log: (m) => ctx.log(m),
+      askModel: hasGeminiKey()
+        ? async (prompt) => {
+            args.onModelCall();
+            return geminiJson<{ question?: unknown }>({ prompt, maxTokens: 220, temperature: 0.7 });
+          }
+        : undefined,
+    });
+    // Re-assert before the fact leaves this function, exactly as the original
+    // build did — a drifted year must never reach the shared round pipeline.
+    assertAnswerIntegrity(q, fact);
+    const options = buildYearOptions(fact);
+    assertOptionIntegrity(options, fact);
+    out.push({
+      category: "guess_year",
+      categoryPrompt: CATEGORY_PROMPTS.guess_year,
+      subjectId: fact.wikidataQid,
+      subject: fact.eventLabel,
+      subtext: fact.eventDescription,
+      questionText: q.questionText,
+      answerLabel: String(fact.year),
+      answerNumber: fact.year,
+      sourceUrl: fact.sourceUrl,
+      options: options.map((o) => ({
+        label: String(o.year),
+        isCorrect: o.isCorrect,
+        provenance: o.provenance,
+      })),
+      phrasedByModel: q.phrasedByModel,
+    });
+  }
+  return out;
+}
+
+/** Any of the generalised Wikidata property categories. */
+async function sourceCategoryRounds(
+  args: SourceArgs & { category: QuizCategoryKey },
+): Promise<PlannedRound[]> {
+  const { ctx } = args;
+  const sourced = await fetchCategoryFacts({
+    category: args.category,
+    count: args.want,
+    minNotability: args.minNotability,
+    allowSensitiveTopics: args.allowSensitiveTopics,
+    log: (m) => ctx.log(m),
+    retries: 4,
+    timeoutMs: 45_000,
+  });
+  const out: PlannedRound[] = [];
+  for (const fact of sourced.facts) {
+    if (out.length >= args.want) break;
+    const round = await plannedRoundForFact(fact, sourced.decoyPool, args);
+    if (round) out.push(round);
+  }
+  return out;
+}
+
+async function plannedRoundForFact(
+  fact: QuizCategoryFact,
+  pool: readonly QuizDecoyCandidate[],
+  args: SourceArgs,
+): Promise<PlannedRound | null> {
+  const { ctx } = args;
+  let options;
+  try {
+    options = buildQuizOptions(fact, { pool });
+    assertQuizOptionIntegrity(options, fact);
+  } catch (e) {
+    // A thin or too-confusable decoy pool drops the ROUND, never invents one.
+    ctx.log(`quiz: skipping ${fact.subjectQid} — ${e instanceof Error ? e.message : e}`);
+    return null;
+  }
+  const q = await phraseQuizQuestion({
+    fact,
+    critiqueBrief: args.brief,
+    log: (m) => ctx.log(m),
+    askModel: hasGeminiKey()
+      ? async (prompt) => {
+          args.onModelCall();
+          return geminiJson<{ question?: unknown }>({ prompt, maxTokens: 220, temperature: 0.7 });
+        }
+      : undefined,
+  });
+  assertQuizAnswerIntegrity(q, fact);
+  return {
+    category: fact.categoryKey,
+    categoryPrompt: CATEGORY_PROMPTS[fact.categoryKey],
+    subjectId: fact.subjectQid,
+    subject: fact.subjectLabel,
+    subtext: fact.subjectDescription,
+    questionText: q.questionText,
+    answerLabel: fact.answerLabel,
+    ...(fact.answerNumber !== undefined ? { answerNumber: fact.answerNumber } : {}),
+    sourceUrl: fact.sourceUrl,
+    options: options.map((o) => ({ label: o.label, isCorrect: o.isCorrect, provenance: o.provenance })),
+    phrasedByModel: q.phrasedByModel,
+  };
+}
+
+/**
+ * The citation-grounded category. ONE proposal call covers the whole batch;
+ * verification is free network I/O, and over-proposing is how the lossy
+ * verification stage is absorbed without extra model spend.
+ */
+async function sourceGeneralKnowledgeRounds(args: SourceArgs): Promise<PlannedRound[]> {
+  const { ctx } = args;
+  if (!hasGeminiKey()) {
+    ctx.log("quiz: no Gemini key — general-knowledge rounds skipped (they need a candidate generator)");
+    return [];
+  }
+  args.onModelCall();
+  const candidates = await proposeGeneralKnowledgeCandidates({
+    // Over-propose 3x: verification rejects a large fraction BY DESIGN.
+    count: Math.min(24, Math.max(6, args.want * 3)),
+    critiqueBrief: args.brief,
+    log: (m) => ctx.log(m),
+    askModel: async (prompt) =>
+      geminiJson<unknown>({ prompt, maxTokens: 2400, temperature: 0.9 }),
+  });
+  const verified = await verifyGeneralKnowledgeCandidates({
+    candidates,
+    want: args.want,
+    allowSensitiveTopics: args.allowSensitiveTopics,
+    log: (m) => ctx.log(m),
+    sparqlOptions: { retries: 2, timeoutMs: 20_000 },
+  });
+  ctx.log(
+    `quiz[general_knowledge]: ${verified.facts.length}/${args.want} verified from ` +
+      `${verified.examined} candidates (${JSON.stringify(verified.rejected)})`,
+  );
+  const out: PlannedRound[] = [];
+  for (const fact of verified.facts) {
+    const options = buildGeneralKnowledgeOptions(fact, seededRandom(`${fact.subjectLabel}:${fact.answerLabel}`));
+    const view = options.map((o) => ({ label: o.label, isCorrect: o.isCorrect, provenance: String(o.provenance) }));
+    try {
+      assertGeneralKnowledgeIntegrity(fact, view);
+    } catch (e) {
+      ctx.log(`quiz: dropped general-knowledge round — ${e instanceof Error ? e.message : e}`);
+      continue;
+    }
+    out.push({
+      category: "general_knowledge",
+      categoryPrompt: CATEGORY_PROMPTS.general_knowledge,
+      subjectId: fact.subjectLabel,
+      subject: fact.subjectLabel,
+      questionText: fact.questionText,
+      answerLabel: fact.answerLabel,
+      sourceUrl: fact.sourceUrl,
+      options: view,
+      phrasedByModel: true,
+    });
+  }
+  return out;
+}
+
+/**
+ * Source every enabled category, then lay the rounds out in the interleaved
+ * order `planRoundCategories` asked for. A category that under-delivers (a thin
+ * decoy pool, a rejected general-knowledge batch) yields its slots to the
+ * others rather than failing the run — the video is still a mixed quiz, just
+ * weighted differently.
+ */
+async function buildRounds(args: {
+  ctx: StageContext;
+  rounds: number;
+  categories: QuizRoundCategory[];
+  topic: QuizYearTopicKey;
+  brief: string;
+  onModelCall: () => void;
+  allowSensitiveTopics: boolean;
+  minNotability: number;
+}): Promise<PlannedRound[]> {
+  const plan = planRoundCategories(args.rounds, args.categories);
+  const wanted = new Map<QuizRoundCategory, number>();
+  for (const c of plan) wanted.set(c, (wanted.get(c) ?? 0) + 1);
+  args.ctx.log(
+    `quiz: round plan ${plan.join(" → ")} (${[...wanted].map(([c, n]) => `${c}×${n}`).join(", ")})`,
+  );
+
+  const shared: SourceArgs = {
+    ctx: args.ctx,
+    want: 0,
+    brief: args.brief,
+    onModelCall: args.onModelCall,
+    allowSensitiveTopics: args.allowSensitiveTopics,
+    minNotability: args.minNotability,
+  };
+  const bucket = new Map<QuizRoundCategory, PlannedRound[]>();
+  for (const [category, want] of wanted) {
+    try {
+      const produced =
+        category === "guess_year"
+          ? await sourceYearRounds({ ...shared, want, topic: args.topic })
+          : category === "general_knowledge"
+            ? await sourceGeneralKnowledgeRounds({ ...shared, want })
+            : await sourceCategoryRounds({ ...shared, want, category });
+      bucket.set(category, produced);
+      if (produced.length < want) {
+        args.ctx.log(`quiz: ${category} produced ${produced.length}/${want} rounds`);
+      }
+    } catch (e) {
+      // One category failing must not lose the video.
+      args.ctx.log(`quiz: category ${category} failed (${e instanceof Error ? e.message : e}) — continuing`);
+      bucket.set(category, []);
+    }
+  }
+
+  const out: PlannedRound[] = [];
+  const leftovers: PlannedRound[] = [];
+  for (const category of plan) {
+    const next = bucket.get(category)?.shift();
+    if (next) out.push(next);
+  }
+  for (const list of bucket.values()) leftovers.push(...list);
+  // Backfill any slots a category could not fill, keeping the interleave.
+  for (const extra of leftovers) {
+    if (out.length >= args.rounds) break;
+    out.push(extra);
+  }
+  return out.slice(0, args.rounds);
+}
+
+/**
+ * Author the round set, critique the WORDING, and freeze the accepted set into a
+ * content-addressed R2 checkpoint. The key is derived from the plan inputs, so a
+ * healer replay re-reads the settled rounds instead of re-buying the LLM calls.
+ */
+async function authorRounds(args: {
+  ctx: StageContext;
+  rounds: number;
+  categories: QuizRoundCategory[];
+  topic: QuizYearTopicKey;
   channel: ChannelCritiqueContext;
   onModelCall: () => void;
-}): Promise<QuizYearQuestion[]> {
-  const { ctx, facts } = args;
+  allowSensitiveTopics: boolean;
+  minNotability: number;
+}): Promise<PlannedRound[]> {
+  const { ctx } = args;
   const fingerprint = createHash("sha256")
     .update(
       JSON.stringify({
         v: QUIZ_QUESTIONS_CHECKPOINT_VERSION,
-        facts: facts.map((f) => [f.wikidataQid, f.year]),
+        rounds: args.rounds,
+        categories: [...args.categories].sort(),
+        topic: args.topic,
+        notability: args.minNotability,
         channel: args.channel.criticDoctrine ?? "",
         lane: args.channel.contentLaneKey ?? "",
       }),
     )
     .digest("hex")
     .slice(0, 16);
-  const checkpointKey = `${ctx.keyPrefix.replace(/\/$/, "")}/checkpoints/quiz-year/${fingerprint}.json`;
+  const checkpointKey = `${ctx.keyPrefix.replace(/\/$/, "")}/checkpoints/quiz-rounds/${fingerprint}.json`;
 
   try {
     const cached = await getObjectBytes(checkpointKey);
     if (cached) {
       const parsed = JSON.parse(Buffer.from(cached).toString("utf8")) as {
         version?: string;
-        questions?: QuizYearQuestion[];
+        rounds?: PlannedRound[];
       };
-      if (parsed.version === QUIZ_QUESTIONS_CHECKPOINT_VERSION && parsed.questions?.length) {
-        // Re-verify rather than trusting the checkpoint blindly: a stored
-        // question set still has to satisfy the answer-integrity invariant.
-        const byQid = new Map(facts.map((f) => [f.wikidataQid, f]));
-        let ok = true;
-        for (const q of parsed.questions) {
-          const source = byQid.get(q.fact.wikidataQid);
-          if (!source) { ok = false; break; }
-          try { assertAnswerIntegrity(q, source); } catch { ok = false; break; }
+      if (parsed.version === QUIZ_QUESTIONS_CHECKPOINT_VERSION && parsed.rounds?.length) {
+        // Re-verify rather than trusting the checkpoint blindly: a stored round
+        // set still has to satisfy every deterministic invariant.
+        const defects = quizSetDefects(parsed.rounds);
+        if (!defects.length) {
+          ctx.log(`quiz: reused round checkpoint ${fingerprint} (${parsed.rounds.length} rounds, $0)`);
+          return parsed.rounds;
         }
-        if (ok) {
-          ctx.log(`quiz_year: reused question checkpoint ${fingerprint} (${parsed.questions.length} rounds, $0)`);
-          return parsed.questions;
-        }
-        ctx.log(`quiz_year: checkpoint ${fingerprint} failed re-verification — re-authoring`);
+        ctx.log(`quiz: checkpoint ${fingerprint} failed re-verification (${defects.join("; ")}) — re-authoring`);
       }
     }
   } catch {
     /* cold checkpoint → author fresh */
   }
 
-  const loop = await produceAndCritique<QuizYearQuestion[]>({
-    label: "quiz_year:questions",
+  const loop = await produceAndCritique<PlannedRound[]>({
+    label: "quiz:rounds",
     channel: args.channel,
     maxIters: 2,
     threshold: 0.75,
@@ -268,30 +690,22 @@ async function authorQuestions(args: {
         (priorIssues.length
           ? `\nFIX THESE ISSUES FROM THE LAST PASS:\n${priorIssues.map((i) => `- ${i}`).join("\n")}\n`
           : "");
-      const out: QuizYearQuestion[] = [];
-      for (const fact of facts) {
-        const q = await phraseQuizYearQuestion({
-          fact,
-          critiqueBrief: brief,
-          log: (m) => ctx.log(m),
-          askModel: hasGeminiKey()
-            ? async (prompt) => {
-                args.onModelCall();
-                return geminiJson<{ question?: unknown }>({ prompt, maxTokens: 220, temperature: 0.7 });
-              }
-            : undefined,
-        });
-        out.push(q);
-      }
-      return out;
+      return buildRounds({
+        ctx,
+        rounds: args.rounds,
+        categories: args.categories,
+        topic: args.topic,
+        brief,
+        onModelCall: args.onModelCall,
+        allowSensitiveTopics: args.allowSensitiveTopics,
+        minNotability: args.minNotability,
+      });
     },
-    critique: async (questions) => {
-      const hard = quizSetDefects(questions);
-      if (hard.length) {
-        return { score: 0.2, pass: false, issues: hard.slice(0, 8) };
-      }
+    critique: async (rounds) => {
+      const hard = quizSetDefects(rounds);
+      if (hard.length) return { score: 0.2, pass: false, issues: hard.slice(0, 8) };
       const graded = await gradeQuizQuestions({
-        questions,
+        rounds,
         channel: args.channel,
         log: (m) => ctx.log(m),
         onCall: args.onModelCall,
@@ -301,18 +715,35 @@ async function authorQuestions(args: {
     },
   });
 
-  const questions = loop.value;
-  // Deterministic defects are NEVER shipped: fall back to the template text for
-  // any question the loop could not clean up.
-  const repaired = questions.map((q) =>
-    questionTextDefects(q.fact, q.questionText).length
-      ? { fact: q.fact, questionText: deterministicQuestionText(q.fact), phrasedByModel: false }
-      : q,
-  );
+  // Deterministic defects are NEVER shipped: fall back to template text for any
+  // round the loop could not clean up. Wikidata rounds have a deterministic
+  // template; general-knowledge rounds do not (their question came from the
+  // verified candidate), so a defective one is dropped instead.
+  const repaired: PlannedRound[] = [];
+  for (const r of loop.value) {
+    // Same word-boundary rule as quizSetDefects — these two must agree, or the
+    // "repair" writes text that the final gate then rejects.
+    if (!r.questionText.trim() || containsPhrase(r.questionText, r.answerLabel)) {
+      if (r.category === "general_knowledge") {
+        ctx.log(`quiz: dropped unrepairable general-knowledge round (${r.subjectId})`);
+        continue;
+      }
+      repaired.push({
+        ...r,
+        questionText:
+          r.category === "guess_year"
+            ? `In what year did this happen: ${r.subject}?`
+            : QUIZ_CATEGORIES[r.category as QuizCategoryKey].ask(r.subject),
+        phrasedByModel: false,
+      });
+      continue;
+    }
+    repaired.push(r);
+  }
 
   await putObject(
     checkpointKey,
-    Buffer.from(JSON.stringify({ version: QUIZ_QUESTIONS_CHECKPOINT_VERSION, questions: repaired })),
+    Buffer.from(JSON.stringify({ version: QUIZ_QUESTIONS_CHECKPOINT_VERSION, rounds: repaired })),
     { contentType: "application/json" },
   );
   return repaired;
@@ -335,71 +766,68 @@ export const quizYear: Block = {
     const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
     const rounds = quizRoundCount(targetSeconds, countdown, reveal);
     const topic = resolveTopic(ctx.params["topic"] ?? ctx.store["quizTopic"]);
-    ctx.log(`quiz_year: topic=${topic}, ${rounds} rounds (${countdown}s guess + ${reveal}s reveal)`);
+    const categories = resolveCategories(ctx.params["categories"] ?? ctx.store["quizCategories"]);
+    const allowSensitiveTopics = ctx.params["allowSensitiveTopics"] === true;
+    const minNotability = Math.max(0, Number(ctx.params["minNotability"] ?? 40));
+    ctx.log(
+      `quiz: ${rounds} rounds (${countdown}s guess + ${reveal}s reveal), ` +
+        `categories=[${categories.join(", ")}], year topic=${topic}`,
+    );
 
-    // 1) FACTS — free, CC0, deterministic. No LLM involved in the answers.
-    const sourced = await fetchQuizYearFacts({
-      topic,
-      count: rounds,
-      minNotability: Math.max(0, Number(ctx.params["minNotability"] ?? 30)),
-      allowSensitiveTopics: ctx.params["allowSensitiveTopics"] === true,
-      log: (m) => ctx.log(m),
-      retries: 4,
-      timeoutMs: 45_000,
-    });
-    if (sourced.facts.length < QUIZ_MIN_ROUNDS) {
-      throw new Error(
-        `quiz_year: only ${sourced.facts.length} clean facts for topic ${topic} ` +
-          `(need ≥ ${QUIZ_MIN_ROUNDS}); rejected ${JSON.stringify(sourced.rejected)}`,
-      );
-    }
-    const facts = sourced.facts.slice(0, rounds);
-
-    // 2) QUESTION WORDING — the only paid step, text-only, critique-looped and
-    //    checkpointed. Cannot alter any answer.
+    // 1) FACTS + QUESTION WORDING. Facts are free and never model-supplied;
+    //    wording is the only paid step, critique-looped and checkpointed.
     let modelCalls = 0;
-    const questions = await authorQuestions({
+    const planned = await authorRounds({
       ctx,
-      facts,
+      rounds,
+      categories,
+      topic,
       channel: quizCritiqueChannel(ctx),
       onModelCall: () => { modelCalls += 1; },
+      allowSensitiveTopics,
+      minNotability,
     });
 
-    // 3) FINAL INTEGRITY ASSERTION — throws if a year or subject ever drifted
-    //    from the sourced fact. This is the last gate before pixels.
-    const byQid = new Map(facts.map((f) => [f.wikidataQid, f]));
-    for (const q of questions) {
-      const source = byQid.get(q.fact.wikidataQid);
-      if (!source) throw new Error(`quiz_year: question references unsourced subject ${q.fact.wikidataQid}`);
-      assertAnswerIntegrity(q, source);
+    if (planned.length < QUIZ_MIN_ROUNDS) {
+      throw new Error(
+        `quiz: only ${planned.length} clean rounds across [${categories.join(", ")}] ` +
+          `(need ≥ ${QUIZ_MIN_ROUNDS})`,
+      );
     }
 
-    // 4) MULTIPLE-CHOICE OPTIONS — one sourced truth + three generated decoys.
-    //    The decoys are UI-only: they are never cited, never recorded as facts
-    //    and never written into the asset's provenance. assertOptionIntegrity
-    //    proves exactly one option carries `provenance: "wikidata-sourced"` and
-    //    that its year equals the Wikidata year, so a decoy cannot become the
-    //    answer. Option order is seeded from the QID, so a healer replay
-    //    reproduces the same grid rather than a differently-shuffled one.
+    // 2) FINAL INTEGRITY ASSERTION — the last gate before pixels. Everything
+    //    here is deterministic and re-run on every checkpoint replay.
+    const setDefects = quizSetDefects(planned);
+    if (setDefects.length) {
+      throw new Error(`quiz: round set failed final integrity check: ${setDefects.join("; ")}`);
+    }
+    for (const r of planned) {
+      const sourced = r.options.filter(
+        (o) => o.provenance === "wikidata-sourced" || o.provenance === "wikipedia-verified",
+      );
+      if (sourced.length !== 1 || !sourced[0].isCorrect || sourced[0].label !== r.answerLabel) {
+        throw new Error(
+          `quiz: ${r.subjectId} — the correct option must be the single sourced/verified one`,
+        );
+      }
+    }
+
+    // 3) RENDER PROPS. Only `label` + `isCorrect` cross the boundary; the
+    //    `provenance` tag stays server-side so the composition has no way to
+    //    mistake a decoy for a citable value.
     const palette = Array.isArray(ctx.store["palette"])
       ? (ctx.store["palette"] as unknown[]).map(String)
       : [];
-    const quizRounds: QuizYearRound[] = questions.map((q) => {
-      const options = buildYearOptions(q.fact);
-      assertOptionIntegrity(options, q.fact);
-      return {
-        questionText: q.questionText,
-        // Only `year` + `isCorrect` cross the render boundary; `provenance`
-        // stays server-side so the composition has no way to mistake a decoy
-        // for a citable value.
-        options: options.map((o) => ({ year: o.year, isCorrect: o.isCorrect })),
-        subject: q.fact.eventLabel,
-        subtext: q.fact.eventDescription,
-        sourceUrl: q.fact.sourceUrl,
-        countdownSeconds: countdown,
-        revealSeconds: reveal,
-      };
-    });
+    const quizRounds: QuizYearRound[] = planned.map((r) => ({
+      questionText: r.questionText,
+      options: r.options.map((o) => ({ label: o.label, isCorrect: o.isCorrect })),
+      subject: r.subject,
+      ...(r.subtext ? { subtext: r.subtext } : {}),
+      sourceUrl: r.sourceUrl,
+      countdownSeconds: countdown,
+      revealSeconds: reveal,
+      categoryPrompt: r.categoryPrompt,
+    }));
 
     const runDir = await makeRunTempDir(ctx.runId, "quiz_year");
     const outPath = join(runDir, "quiz-year.mp4");
@@ -420,17 +848,24 @@ export const quizYear: Block = {
       durationSec: videoDurationSec,
       engine: "quiz_year",
       topic,
+      categories: [...new Set(planned.map((r) => r.category))],
       rounds: quizRounds.length,
       // Provenance travels with the asset: every answer is checkable.
-      sources: questions.map((q) => ({ qid: q.fact.wikidataQid, year: q.fact.year, url: q.fact.sourceUrl })),
-      license: "CC0-1.0 (Wikidata)",
+      sources: planned.map((r) => ({
+        category: r.category,
+        subject: r.subjectId,
+        answer: r.answerLabel,
+        url: r.sourceUrl,
+      })),
+      license: "CC0-1.0 (Wikidata); general-knowledge rounds cite Wikipedia for verification only",
     });
 
     // Text-only spend. There is no image/video/TTS provider on this path.
     const costUsd = modelCalls * PRICE.boundedTextPassUsd;
     ctx.log(
-      `quiz_year ✓ → ${videoKey} (${videoDurationSec}s, ${quizRounds.length} rounds, ` +
-        `${modelCalls} text calls, $${costUsd.toFixed(4)})`,
+      `quiz ✓ → ${videoKey} (${videoDurationSec}s, ${quizRounds.length} rounds across ` +
+        `${new Set(planned.map((r) => r.category)).size} categories, ${modelCalls} text calls, ` +
+        `$${costUsd.toFixed(4)})`,
     );
 
     return {
@@ -444,3 +879,7 @@ export const quizYear: Block = {
 };
 
 export const quizYearBlocks: Block[] = [quizYear];
+
+// Re-exported so the deterministic fallback stays importable by tests that
+// exercise a model-outage path.
+export { deterministicQuestionText, deterministicCategoryQuestion, questionTextDefects };
