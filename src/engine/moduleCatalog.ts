@@ -226,6 +226,32 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     ],
   },
   {
+    block: "quiz_year",
+    label: "Guess the year quiz",
+    description:
+      "Self-contained multiple-choice 'guess the year' quiz: real facts are pulled from Wikidata (CC0), each round shows four year options with a depleting timer, and the correct option locks in on reveal. The answer year is always the Wikidata value — an LLM only phrases the question. Replaces script + footage + assembly for the Quiz family.",
+    optional: false,
+    params: [
+      {
+        key: "topic",
+        label: "Topic",
+        type: "select",
+        options: [
+          { value: "science_discovery", label: "Scientific discoveries" },
+          { value: "space_exploration", label: "Space missions" },
+          { value: "invention_technology", label: "Inventions & technology" },
+          { value: "video_games", label: "Video game releases" },
+          { value: "film_release", label: "Film releases" },
+          { value: "sports_championship", label: "Sporting events" },
+          { value: "landmark_architecture", label: "Landmarks & monuments" },
+        ],
+      },
+      { key: "countdownSeconds", label: "Guess time (sec)", type: "number", min: 3, max: 15, step: 1, help: "How long the viewer gets before the answer locks in." },
+      { key: "revealSeconds", label: "Reveal hold (sec)", type: "number", min: 2, max: 10, step: 1 },
+      { key: "minNotability", label: "Minimum fame", type: "number", min: 0, max: 200, step: 5, help: "Wikipedia language editions the subject must appear in. Higher = more widely known, fewer available facts." },
+    ],
+  },
+  {
     block: "timeline_assemble",
     label: "Assemble",
     description: "Cuts footage to narration, beds the music, and renders the final video.",

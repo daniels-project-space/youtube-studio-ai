@@ -142,6 +142,32 @@ function loreShortCostCeiling(
   );
 }
 
+/**
+ * quiz_year cold-run bound. This is the CHEAPEST engine in the catalog and the
+ * ceiling reflects a genuinely different cost shape rather than a discounted
+ * version of the others: facts come from Wikidata (free, CC0, unauthenticated)
+ * and the video is rendered locally by Remotion, so there is NO image, video,
+ * TTS, music or upscale provider anywhere on the path.
+ *
+ * The only spend is bounded text: at most `maxCritiqueIters` passes over
+ * `rounds` phrasing calls, plus one critic call per pass. Kept in lockstep with
+ * quizRoundCount() in src/trigger/blocks/quizYearBlocks.ts.
+ */
+function quizYearCostCeiling(
+  params: Readonly<Record<string, unknown>>,
+  context: Readonly<ModuleCostContext> | undefined,
+): number {
+  const countdown = boundedNumber(params["countdownSeconds"], 6, 3, 15);
+  const reveal = boundedNumber(params["revealSeconds"], 4, 2, 10);
+  const seconds = targetSeconds(params, context, 80);
+  const rounds = Math.max(3, Math.min(15, Math.round(seconds / Math.max(1, countdown + reveal))));
+  // 2 critique iterations is the lane cap (contentLane.ts LANE_QUALITY_POLICIES
+  // .quiz_year.maxCritiqueIters); each iteration phrases every round once and
+  // then spends one critic call over the whole set.
+  const iterations = 2;
+  return iterations * (rounds + 1) * PRICE.boundedTextPassUsd;
+}
+
 function motionComicCostCeiling(params: Readonly<Record<string, unknown>>): number {
   const panels = Math.floor(boundedNumber(params["panels"], 8, 4, 12));
   const parsedSeconds = finiteNumber(params["targetSeconds"]);
@@ -556,6 +582,25 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       providerProfiles: [managed, local],
       maxCostUsd: 30,
       maxCostUsdFor: (params, context) => loreShortCostCeiling(params, context),
+      qualityRequired: true,
+    },
+  ),
+  quiz_year: contract(
+    // NO script.* and NO narration.* capabilities, deliberately. This format is
+    // silent on-screen typography — there is no spoken script to time, and the
+    // production policy correctly rejects a pipeline that claims
+    // "script.generated" without ever producing "narration.timed". Declaring a
+    // script here to look complete would be exactly the kind of overclaim the
+    // contract system exists to catch.
+    ["visuals.generated", "visuals.story_aligned", "master.assembled"],
+    {
+      optionalConsumes: ["channelName", "palette", "criticDoctrine", "styleGrammar", "contentLane", "quizTopic"],
+      providerProfiles: [managed, local],
+      // Deliberately tiny. A quiz run that somehow costs a dollar has a bug
+      // (a runaway critique loop or a paid provider that must not be there),
+      // and the ceiling should catch that rather than absorb it.
+      maxCostUsd: 1,
+      maxCostUsdFor: (params, context) => quizYearCostCeiling(params, context),
       qualityRequired: true,
     },
   ),

@@ -22,6 +22,7 @@ export const ContentLaneKeySchema = z.enum([
   "whiteboard_explainer",
   "motion_comic",
   "lore_micro_doc",
+  "quiz_year",
   "legacy_unclassified",
 ]);
 
@@ -203,6 +204,25 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     ],
     forbiddenBlocks: ["timeline_assemble", "assemble"],
   },
+  quiz_year: {
+    key: "quiz_year",
+    family: "quizyear",
+    primaryRenderer: "quiz_year",
+    requiredBlocks: ["quiz_year", "qa_visual"],
+    // The quiz engine renders its own finished video from typography alone, so
+    // ANY pixel-producing sibling would be a second, uncoordinated renderer.
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
+      "lore_short",
+    ],
+    forbiddenBlocks: ["timeline_assemble", "assemble"],
+  },
   legacy_unclassified: {
     key: "legacy_unclassified",
     primaryRenderer: "unclassified",
@@ -346,6 +366,19 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
       "The narration is one first-person voice throughout; a slip into neutral documentary register breaks the format.",
     ],
   },
+  quiz_year: {
+    ...GENERIC_LANE_QUALITY,
+    // The critique loop here grades WORDING only and runs at text prices, so an
+    // extra iteration is nearly free — but it can never touch an answer, which
+    // is why the bar sits at the generic level rather than higher.
+    critiqueThreshold: 0.8,
+    maxCritiqueIters: 2,
+    emphasis: [
+      "The question must never contain a year, a decade or an era — that either spoils the answer or contradicts the cited source.",
+      "Every question must be readable at a glance; the viewer has seconds, not paragraphs.",
+      "The four year options must all look period-plausible, so the answer cannot be found by elimination.",
+    ],
+  },
   legacy_unclassified: { ...GENERIC_LANE_QUALITY },
 };
 
@@ -372,6 +405,7 @@ export const CONTENT_LANE_BY_FAMILY: Record<FamilyKey, ContentLaneKey> = {
   whiteboard: "whiteboard_explainer",
   comic: "motion_comic",
   loreshort: "lore_micro_doc",
+  quizyear: "quiz_year",
 };
 
 export const ContentLaneSchema = z.object({

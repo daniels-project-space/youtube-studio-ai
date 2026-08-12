@@ -121,6 +121,13 @@ const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
   textObject: NonNullable<VisualLanguage["textObject"]>;
   imageStyle: string;
 }> = {
+  // Quiz thumbnails live or die on a single legible question + a big "?" beat,
+  // so a bold impact plate is the right grammar — the same one narrated_stock
+  // uses, deliberately, rather than inventing a fifth treatment.
+  quizyear: {
+    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    imageStyle: "bold flat graphic quiz card, high-contrast, one clear subject, no text baked in",
+  },
   narrated_stock: {
     energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
     imageStyle: "premium cinematic editorial photograph with dramatic subject isolation",

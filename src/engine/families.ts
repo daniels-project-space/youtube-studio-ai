@@ -14,7 +14,8 @@ export type FamilyKey =
   | "documentary_collage_short"
   | "whiteboard"
   | "comic"
-  | "loreshort";
+  | "loreshort"
+  | "quizyear";
 
 export interface Family {
   key: FamilyKey;
@@ -147,6 +148,27 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // a conservative envelope over that bounded shot count, not an invoice.
     defaultRunBudgetUsd: 12,
   },
+  quizyear: {
+    key: "quizyear",
+    label: "Guess the year quiz",
+    description:
+      "Multiple-choice 'guess the year' quiz: a CC0 Wikidata fact, four year options, a depleting timer and a " +
+      "lock-in reveal. Self-contained — sources its own facts, writes its own questions and renders itself.",
+    visualEngine: "quiz_year",
+    archetypeKey: "quiz-year",
+    available: true,
+    // No spoken narration: the format is on-screen typography plus a timer.
+    narrated: false,
+    // Gemini is OPTIONAL (it only phrases questions more engagingly, and the
+    // block falls back to deterministic templates), but the family declares it
+    // because a channel that never has it would ship template wording forever.
+    requiresKeys: ["gemini"],
+    defaultThumbnailStyle: "banana",
+    // Facts are free (Wikidata CC0) and the render is local Remotion. The only
+    // spend on the whole path is a handful of bounded text calls, so this is
+    // the cheapest family in the catalog by a wide margin.
+    defaultRunBudgetUsd: 1,
+  },
   cinematic: {
     key: "cinematic",
     label: "Cinematic AI scenes",
@@ -187,6 +209,10 @@ export const FAMILY_CREW: Record<FamilyKey, string[]> = {
   // NO composer: the lore engine muxes narration only and beds no score, so a
   // composer_brief would cost an LLM call per run for output nothing reads.
   loreshort: ["director", "cinematographer", "editor", "critic"],
+  // NO cinematographer and NO composer: there is no photography and no score in
+  // this format — it is typography, a timer and a reveal. The critic is what
+  // actually matters here, since question WORDING is the only creative surface.
+  quizyear: ["director", "editor", "critic"],
 };
 
 /** Crew role → the brief block id that role contributes. */

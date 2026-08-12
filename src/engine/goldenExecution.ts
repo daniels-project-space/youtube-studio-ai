@@ -127,6 +127,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     ]),
   ),
   loreshort: { kind: "pipeline-module", executableIds: ["lore_short"] },
+  "quiz-year": { kind: "pipeline-module", executableIds: ["quiz_year"] },
   "novita-render-farm": { kind: "pipeline-module", executableIds: ["novita_render_images", "novita_render_video"] },
   "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/imagecraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production image rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) instead — same Z-Image family, different implementation and gate set." },
   "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/videocraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production video rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) instead — same LTX family, different implementation and gate set." },

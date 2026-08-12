@@ -17,6 +17,7 @@ import { STORY_SPINE_BLOCKS } from "@/trigger/blocks/storySpineBlocks";
 import { whiteboardScribeBlocks } from "@/trigger/blocks/whiteboardScribeBlocks";
 import { motionComicBlocks } from "@/trigger/blocks/motionComicBlocks";
 import { loreShortBlocks } from "@/trigger/blocks/loreShortBlocks";
+import { quizYearBlocks } from "@/trigger/blocks/quizYearBlocks";
 import { documentaryCollageShortBlocks } from "@/trigger/blocks/documentaryCollageShortBlocks";
 import { VISUAL_MATTER_BLOCKS } from "@/trigger/blocks/visualMatterBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
@@ -67,6 +68,10 @@ export function registerAllBlocks(): void {
   // painted art with attested Novita depth camera moves (src/lib/loreshort.ts)
   // — produces the final video.
   for (const b of loreShortBlocks) register(b);
+  // GUESS-THE-YEAR self-contained engine (quiz_year): CC0 Wikidata facts →
+  // four-option rounds → isolated Remotion bundle (src/lib/quizYearFacts.ts +
+  // src/lib/quizYearRender.ts) — produces the final video.
+  for (const b of quizYearBlocks) register(b);
   // Native documentary-collage Shorts: source/claim/beat manifest → portrait
   // DocuMotion master → scene-level safe-area and provenance gate.
   for (const b of documentaryCollageShortBlocks) register(b);

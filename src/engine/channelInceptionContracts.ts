@@ -168,6 +168,16 @@ export const CHANNEL_INCEPTION_FAMILY_POLICIES: Readonly<
     starterTopicCount: 3,
     starterPreviewCount: 3,
   },
+  quizyear: {
+    family: "quizyear",
+    // NOBODY speaks: the format is on-screen typography and a timer, so there
+    // is no cast voice to own and no narrative playbook to author.
+    voiceOwnership: "none",
+    requiresNarrativePlaybook: false,
+    probeProfile: "vertical-short",
+    starterTopicCount: 3,
+    starterPreviewCount: 3,
+  },
   loreshort: {
     family: "loreshort",
     // The lore engine speaks with ONE first-person narrator for the whole

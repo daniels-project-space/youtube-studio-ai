@@ -50,7 +50,7 @@ export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check"], note: "Quality + originality + compliance floor." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
   { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
-  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "lore_short", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
   { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz." },
   { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
   { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + text-free Flash scene, deterministic Style-DNA typography, and one publishing gate." },
@@ -694,6 +694,51 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "isolated Remotion bundle — tractable new infra (second bundle entrypoint), not a blocker",
     ],
     status: "reference",
+    // SUPERSEDED IN PART: the format was never the problem, only the content
+    // sourcing was. See the `quiz-year` entry below for the one guess-the-year
+    // capability that IS buildable and is now wired.
+  },
+  {
+    key: "quiz-year",
+    stage: "visual",
+    title: "Quiz — Guess the Year (Wikidata)",
+    engine:
+      "quiz_year — CC0 Wikidata facts → four-option rounds → isolated Remotion bundle " +
+      "(src/lib/quizYearFacts.ts, src/trigger/blocks/quizYearBlocks.ts:341's quiz_year block, " +
+      "src/remotion/quiz/Root.tsx, src/lib/quizYearRender.ts)",
+    how:
+      "This is the guess-the-year format that survives the licensing analysis that closed the three sub-formats " +
+      "in the `quiz` entry above. It needs NO third-party media at all: the only external input is Wikidata's " +
+      "structured statements, released under CC0 1.0 — a genuine public-domain dedication with neither " +
+      "attribution nor ShareAlike obligation (the exact property every trivia dataset in the prior audit " +
+      "lacked). Nothing is scraped, no artwork or audio is reused, and every frame is typography rendered " +
+      "locally by Remotion. THE ANSWER IS NEVER MODEL-GUESSED: the year is read from a Wikidata time value, " +
+      "the phrasing model's response schema has no year field to populate, any phrasing containing a " +
+      "four-digit number is rejected in favour of a deterministic template, and assertAnswerIntegrity re-checks " +
+      "QID + year immediately before render. Three real data-integrity failure modes found by live probing are " +
+      "gated deterministically: entities carrying multiple conflicting dates are dropped (Q49740 'Skyrim' has " +
+      "P577 values in both 2009 and 2011 — a question with two defensible answers is broken), any four-digit " +
+      "year in the label/description that disagrees with the structured year is treated as an unresolved " +
+      "contradiction and dropped (Q94501: data 1998 vs description '1997 ... video game'), and time values " +
+      "coarser than year precision are dropped. Each round shows the sourced year plus THREE GENERATED DECOYS; " +
+      "decoys carry provenance: 'generated-decoy' in the type system and are never cited, never recorded as " +
+      "facts, and proven by assertOptionIntegrity to be incapable of being the correct option. Cost is the " +
+      "smallest in the catalog — facts are free, the render is local, and the only spend is a bounded text " +
+      "phrasing pass per round, critique-looped on WORDING only and frozen into a content-addressed checkpoint.",
+    gates: [
+      "deterministic dataset answer (never model-guessed) — SATISFIED: year read from a Wikidata time value; LLM schema has no year field",
+      "no four-digit number in question text — rejected phrasings fall back to a deterministic template",
+      "exactly one sourced option among four; decoys type-tagged and provably never correct",
+      "single unambiguous year per subject (multi-date entities dropped)",
+      "label/description year must agree with the structured year",
+      "date precision ≥ year (precision 9)",
+      "sensitive/tragedy content excluded by default (allowlisted topics + term filter)",
+      "isolated Remotion bundle — src/remotion/quiz/index.ts, separate from src/remotion/index.ts",
+    ],
+    // WIRED, not yet Golden-certified: no signed promotion receipt from a real
+    // end-to-end run exists. Fact sourcing has been verified live against the
+    // real endpoint; a full pipeline run has not been performed.
+    status: "active",
   },
   {
     key: "thumbnail",

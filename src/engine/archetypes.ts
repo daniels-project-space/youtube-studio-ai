@@ -219,6 +219,39 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "cleanup" },
     ],
   },
+  "quiz-year": {
+    key: "quiz-year",
+    label: "Guess the year quiz",
+    description:
+      "Multiple-choice 'guess the year': a CC0 Wikidata fact, four year options, a depleting timer, then the correct option locks in.",
+    template: "A",
+    thumbnailTemplate: "banana",
+    // SELF-CONTAINED: `quiz_year` sources its own facts, writes its own
+    // questions and renders the finished video, so there is deliberately no
+    // script_gen / narration_tts / footage / timeline_assemble chain here.
+    //
+    // topic_select IS kept, with a clear division of responsibility: it frames
+    // the EPISODE (the title, the thumbnail promise, the crew brief — all of
+    // which consume `topic`), while the ROUNDS are chosen by quiz_year from
+    // Wikidata by notability. An LLM never picks a fact and never picks a year.
+    //
+    // originality_gate is omitted: the questions are deliberately templated
+    // around third-party facts, which is what this format IS rather than a
+    // plagiarism signal. compliance_check still gates before the engine runs.
+    pipeline: [
+      { block: "competitor_research" },
+      { block: "topic_select", params: { targetSeconds: 80 } },
+      { block: "compliance_check" },
+      { block: "quiz_year", params: { topic: "science_discovery", targetSeconds: 80 } },
+      { block: "length_check", params: { minSeconds: 25, maxSeconds: 400 } },
+      { block: "metadata" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+      { block: "notify" },
+      { block: "cleanup" },
+    ],
+  },
   meditation: {
     key: "meditation",
     label: "Meditation / sleep",
