@@ -39,6 +39,7 @@ import {
   applyQuoteOverlays,
   burnCaptions,
   writeCaptionsAss,
+  captionGeometry,
   makeVerticalClip,
   normalizeAudioOnly,
 } from "@/lib/ffmpeg";
@@ -514,30 +515,27 @@ const assTextLocal = (t: string) => t.replace(/[{}]/g, "").replace(/\r?\n/g, " "
  * Returns { styleLine, inline } — inline is prepended to each Dialogue Text.
  */
 function styleSpec(style: CaptionStyle, W: number, H: number): { styleLine: string; inline: string } {
-  // base proportions (match writeCaptionsAss): font 0.053H, sideM 0.08W, marginV 0.06H
-  const side = Math.round(W * 0.08);
+  // Proportions come from the shared aspect-aware helper (captionGeometry in
+  // ffmpeg.ts): landscape sizes off H, portrait off W with tighter side margins,
+  // so styled portrait captions no longer overflow and clip at the frame edges.
   switch (style) {
     case "minimal": {
-      const fs = Math.round(H * 0.040);
-      const mv = Math.round(H * 0.05);
+      const { fontSize: fs, marginV: mv, sideM: side } = captionGeometry(W, H, { fontRatio: 0.040, marginRatio: 0.05 });
       // PrimaryColour slightly translucent white, thin outline (1), no shadow, Bold off.
       return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H10FFFFFF,&H00000000,&H64000000,0,1,1,0,2,${side},${side},${mv},1`, inline: "" };
     }
     case "bold": {
-      const fs = Math.round(H * 0.072);
-      const mv = Math.round(H * 0.08);
+      const { fontSize: fs, marginV: mv, sideM: side } = captionGeometry(W, H, { fontRatio: 0.072, marginRatio: 0.08 });
       // Heavy: Bold on, thick outline (5) + shadow (3).
       return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H00FFFFFF,&H00000000,&H96000000,1,1,5,3,2,${side},${side},${mv},1`, inline: "" };
     }
     case "karaoke": {
-      const fs = Math.round(H * 0.056);
-      const mv = Math.round(H * 0.06);
+      const { fontSize: fs, marginV: mv, sideM: side } = captionGeometry(W, H, { fontRatio: 0.056, marginRatio: 0.06 });
       // Mid weight + a yellow active-word tint (inline \c&H0000FFFF& = yellow in BGR).
       return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H00FFFFFF,&H00000000,&H64000000,1,1,4,2,2,${side},${side},${mv},1`, inline: "{\\c&H0000FFFF&}" };
     }
     default: {
-      const fs = Math.round(H * 0.053);
-      const mv = Math.round(H * 0.06);
+      const { fontSize: fs, marginV: mv, sideM: side } = captionGeometry(W, H);
       return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H00FFFFFF,&H00000000,&H64000000,1,1,4,2,2,${side},${side},${mv},1`, inline: "" };
     }
   }
@@ -558,7 +556,8 @@ async function writeStyledCaptionsAss(
   const H = opts.height ?? 1080;
   const { styleLine, inline } = styleSpec(opts.style, W, H);
   const head =
-    `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n` +
+    // WrapStyle 0 = smart auto-wrap; 2 (no wrap) silently CLIPPED overflowing lines.
+    `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n` +
     `[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
     `${styleLine}\n\n` +
     `[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;

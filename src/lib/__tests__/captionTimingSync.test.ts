@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { captionCuesFromTimings } from "@/lib/ffmpeg";
+import { captionCuesFromTimings, captionGeometry } from "@/lib/ffmpeg";
 
 // P2-4 (GOLDEN_MODULE_AUDIT_2026-08.md): "layer timing-sync gate inferred
 // from Whisper/TTS caption-cue machinery, never asserted by a test... Add one
@@ -110,4 +110,80 @@ const EPS = 1e-9;
   assert.ok(Math.abs(cues[0].startSec - 1) < EPS);
 }
 
+/* ------------- portrait captions must FIT the frame, not clip off it ------- */
+
+// Regression guard for the 9:16 caption-clipping defect: burnCaptions/
+// writeCaptionsAss derived Fontsize from HEIGHT only, so 1080x1920 produced a
+// 102px font with 908px of usable width while a full-budget cue needs ~2.8x
+// that. With WrapStyle:2 (no auto-wrap) the overflow was CLIPPED at both frame
+// edges — every portrait Short shipped half-legible captions. Assert the
+// widest cue captionCuesFromTimings() can emit still fits the usable width.
+
+// Conservative DejaVu Sans Bold advance, averaged over mixed-case text. The
+// real burn measured ~0.55em; 0.60 keeps the assertion pessimistic.
+const EM_ADVANCE = 0.6;
+const MAX_CHARS = 42; // captionCuesFromTimings' default char budget
+
+{
+  // Widest cue the splitter can emit: MAX_CHARS of text on one line.
+  const worstCase = "M".repeat(MAX_CHARS);
+  const cues = captionCuesFromTimings([{ text: worstCase, start: 0, end: 3 }]);
+  assert.ok(
+    cues.every((c) => c.text.length <= MAX_CHARS),
+    `no cue may exceed the ${MAX_CHARS}-char budget the geometry is sized against`,
+  );
+
+  for (const [label, W, H, maxLines] of [
+    ["portrait 9:16", 1080, 1920, 2],
+    ["landscape 16:9", 1920, 1080, 1],
+  ] as const) {
+    const g = captionGeometry(W, H);
+
+    assert.ok(g.availableWidth > 0, `${label}: side margins must leave usable width`);
+    assert.ok(
+      g.fontSize > 0 && g.fontSize < H * 0.12,
+      `${label}: font ${g.fontSize} must be sane for a ${W}x${H} frame`,
+    );
+
+    // THE BUG: a full-budget cue rendered wider than the frame allows and,
+    // with wrapping disabled, was clipped instead of wrapped.
+    const widestLinePx = MAX_CHARS * g.fontSize * EM_ADVANCE;
+    const linesNeeded = Math.ceil(widestLinePx / g.availableWidth);
+    assert.ok(
+      linesNeeded <= maxLines,
+      `${label}: worst-case ${MAX_CHARS}-char cue needs ${linesNeeded} lines ` +
+      `(font ${g.fontSize}px, usable ${g.availableWidth}px) — must stay within ${maxLines}. ` +
+      `Height-only sizing regressed: portrait must size off WIDTH.`,
+    );
+
+    // Captions must never be laid out past the frame edges.
+    assert.ok(
+      g.sideM > 0 && 2 * g.sideM < W,
+      `${label}: side margin ${g.sideM} must sit inside the ${W}px frame`,
+    );
+    assert.equal(g.availableWidth, W - 2 * g.sideM, `${label}: usable width must be frame minus both margins`);
+  }
+}
+
+{
+  // Orientation branch is real: the same frame area sized differently.
+  const portrait = captionGeometry(1080, 1920);
+  const landscape = captionGeometry(1920, 1080);
+  assert.equal(portrait.portrait, true, "1080x1920 must be detected as portrait");
+  assert.equal(landscape.portrait, false, "1920x1080 must be detected as landscape");
+
+  // Landscape must NOT regress — these are the pre-fix, visually-verified values.
+  assert.equal(landscape.fontSize, 57, "landscape font must stay 0.053*H = 57px (no regression)");
+  assert.equal(landscape.sideM, 154, "landscape side margin must stay 0.08*W = 154px (no regression)");
+
+  // Portrait must use the validated width-derived sizing, NOT 0.053*H = 102px.
+  assert.equal(portrait.fontSize, 66, "portrait font must be 0.053*W*1.15 = 66px, not the clipping 102px");
+  assert.ok(
+    portrait.fontSize < Math.round(1920 * 0.053),
+    "portrait font must be smaller than the old height-derived size that caused clipping",
+  );
+  assert.equal(portrait.sideM, 65, "portrait side margin must be the tighter 0.06*W = 65px");
+}
+
 console.log("captionTimingSync.test.ts: captionCuesFromTimings() head/tail/contiguity drift bounds verified against realistic Whisper-style timing windows");
+console.log("captionTimingSync.test.ts: captionGeometry() portrait/landscape caption fit verified — worst-case cue stays inside the frame in both orientations");

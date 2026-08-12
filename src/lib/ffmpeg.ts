@@ -1612,6 +1612,46 @@ const assText = (t: string) => t.replace(/[{}]/g, "").replace(/\r?\n/g, " ").tri
  * text — no ASR errors). White text, heavy black outline + shadow, sat near the
  * bottom. Non-fatal at the call site: caller keeps the uncaptioned video on error.
  */
+/**
+ * Aspect-aware caption geometry (font size + margins), shared by every caption
+ * writer so landscape and portrait stay consistent.
+ *
+ * ASS `Fontsize` is expressed in PlayRes units, so deriving it from HEIGHT alone
+ * — correct for 16:9 — is catastrophic for 9:16. At 1080x1920 `H * 0.053` gives a
+ * 102px font with only 908px of usable width, so a 42-char cue needs ~2.8x the
+ * room it has. Combined with the old `WrapStyle: 2` (explicit `\N` breaks ONLY,
+ * no auto-wrap) the overflow was silently CLIPPED at both frame edges rather than
+ * wrapped — every portrait Short shipped with captions cut off on the left and
+ * right. For portrait frames WIDTH is the binding constraint, so we size off W.
+ *
+ * Landscape behaviour is unchanged (`H * fontRatio`, 8% side margins).
+ */
+export function captionGeometry(
+  W: number,
+  H: number,
+  opts: { fontRatio?: number; marginRatio?: number } = {},
+): { fontSize: number; marginV: number; sideM: number; availableWidth: number; portrait: boolean } {
+  const fontRatio = opts.fontRatio ?? 0.053;
+  const marginRatio = opts.marginRatio ?? 0.06;
+  const portrait = W < H;
+  // Portrait: size off width; the 1.15 bump keeps captions legible at Shorts scale.
+  const fontSize = Math.round(portrait ? W * fontRatio * 1.15 : H * fontRatio);
+  const marginV = Math.round(H * marginRatio);
+  // Tighter side margins in portrait buy back horizontal room for wrapped lines.
+  const sideM = Math.round(W * (portrait ? 0.06 : 0.08));
+  return { fontSize, marginV, sideM, availableWidth: W - 2 * sideM, portrait };
+}
+
+/**
+ * Shared `[Script Info]` header. `WrapStyle: 0` = smart auto-wrap (balanced
+ * lines). Safe for both orientations: wrapping only ever engages on a line that
+ * would otherwise overflow the available width — which under the old
+ * `WrapStyle: 2` just got clipped — so cues that already fit render identically.
+ */
+const ASS_WRAP_STYLE = 0;
+const assScriptInfo = (W: number, H: number) =>
+  `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: ${ASS_WRAP_STYLE}\nScaledBorderAndShadow: yes\n\n`;
+
 /** Write the styled .ass caption file (shared by burnCaptions + the
  * single-pass finisher). Returns null when there are no cues. */
 export async function writeCaptionsAss(
@@ -1622,11 +1662,9 @@ export async function writeCaptionsAss(
   if (cues.length === 0) return null;
   const W = opts.width ?? 1920;
   const H = opts.height ?? 1080;
-  const fontSize = Math.round(H * 0.053);
-  const marginV = Math.round(H * 0.06);
-  const sideM = Math.round(W * 0.08);
+  const { fontSize, marginV, sideM } = captionGeometry(W, H);
   const head =
-    `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n` +
+    assScriptInfo(W, H) +
     `[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
     `Style: Cap,DejaVu Sans,${fontSize},&H00FFFFFF,&H00000000,&H64000000,1,1,4,2,2,${sideM},${sideM},${marginV},1\n\n` +
     `[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
@@ -1647,11 +1685,10 @@ export async function burnCaptions(
   if (cues.length === 0) { await copyFile(videoPath, outPath); return outPath; }
   const W = opts.width ?? 1920;
   const H = opts.height ?? 1080;
-  const fontSize = Math.round(H * 0.053); // ~20% larger than before (was 0.044)
-  const marginV = Math.round(H * 0.06);
-  const sideM = Math.round(W * 0.08);
+  // Aspect-aware: 0.053H in landscape, 0.053W*1.15 in portrait (see captionGeometry).
+  const { fontSize, marginV, sideM } = captionGeometry(W, H);
   const head =
-    `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n` +
+    assScriptInfo(W, H) +
     `[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
     // BorderStyle 1 = outline+shadow; Alignment 2 = bottom-center; colours are &HAABBGGRR
     `Style: Cap,DejaVu Sans,${fontSize},&H00FFFFFF,&H00000000,&H64000000,1,1,4,2,2,${sideM},${sideM},${marginV},1\n\n` +
