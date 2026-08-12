@@ -11,7 +11,7 @@ import { writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { parseJsonLoose } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
 import { PRICE } from "@/engine/pricing";
 import { recordImageUsage } from "@/lib/imageUsage";
@@ -257,7 +257,7 @@ export async function bananaTypeCard(args: {
           `spelled, fully legible, no gibberish or extra words? Return STRICT JSON {"exact":bool,"legible":bool,"fix":"<=12 words"}.`,
         imagePaths: [args.outJpg],
         json: true,
-        maxTokens: 150,
+        maxTokens: VISION_GATE_MAX_TOKENS,
       }, args.log);
       if (raw == null) {
         // Judge unavailable after retry → spelling is UNVERIFIED. Re-rendering
@@ -726,7 +726,7 @@ export async function bananaThumbnail(args: {
         `Return STRICT JSON {"textOk":bool,"faceClear":bool,"punch":n,"styleMatch":n,"storyMatch":n,"uiClean":bool,"fix":"<=15 words"}.`,
       imagePaths: [args.outJpg],
       json: true,
-      maxTokens: 250,
+      maxTokens: VISION_GATE_MAX_TOKENS,
     }, args.log);
     if (raw == null) {
       // Judge unavailable after retry — a thumbnail is an allowText render, so

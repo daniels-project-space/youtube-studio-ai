@@ -37,7 +37,7 @@ import { spawn } from "node:child_process";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { geminiJson, geminiJsonPro, parseJsonLoose } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateBananaImage } from "@/lib/banana";
 import { getDepthMap } from "@/lib/depth";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
@@ -981,7 +981,7 @@ async function gateAsset(path: string, role: DocuAssetRole, brief: string, world
       `Return STRICT JSON {"styleOk":bool,"briefOk":bool,"noText":bool,"framingOk":bool,"fix":"<=14 words"}.`,
     imagePaths: [path],
     json: true,
-    maxTokens: 250,
+    maxTokens: VISION_GATE_MAX_TOKENS,
   }).catch(() => "");
   if (!raw) return rejectedAssetGate("asset gate unavailable; retry only after a verifiable text-free render");
   try {

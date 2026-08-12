@@ -40,7 +40,7 @@ import {
   type Shot,
 } from "@/lib/novitaRenderFarm";
 import { getObjectBytes } from "@/lib/storage";
-import { visionLocal } from "@/lib/vision";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 const EPSILON = 0.02;
 
@@ -994,7 +994,7 @@ export const qaShots: Block = {
                   `"continuity":0.0,"motionIntegrity":0.0,"artifactFree":0.0,"notes":["concrete observations"]}.`,
                 imagePaths: [...referencePaths, ...frames],
                 json: true,
-                maxTokens: 700,
+                maxTokens: VISION_GATE_MAX_TOKENS,
               });
               grade = ShotGradeSchema.parse(parseJsonLoose(raw));
               score = videoScore(grade);

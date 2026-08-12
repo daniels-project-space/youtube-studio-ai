@@ -27,7 +27,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { geminiJson, parseJsonLoose, hasGeminiKey } from "./gemini";
-import { visionLocal, hasVisionKey } from "@/lib/vision";
+import { visionLocal, hasVisionKey, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 export type SpeechTopic = {
   theme: string;
@@ -361,7 +361,7 @@ export async function visionCheckRaw(framePaths: string[], speaker = ""): Promis
   const idClause = speaker
     ? `\n\nIDENTITY: the target speaker is ${speaker}, a well-known public figure. Also return "isSpeaker" — set it FALSE only if you can clearly see the main person speaking is NOT ${speaker} (a recognizably different person, or an interviewer/host doing the talking, or you only see the audience/back of an unknown person). If you are unsure who it is, set isSpeaker TRUE. Include "isSpeaker":bool in the JSON.`
     : "";
-  const raw = await visionLocal({ prompt: VISION_PROMPT + idClause, imagePaths: framePaths, json: true, maxTokens: 400 });
+  const raw = await visionLocal({ prompt: VISION_PROMPT + idClause, imagePaths: framePaths, json: true, maxTokens: VISION_GATE_MAX_TOKENS });
   const v = parseJsonLoose<Partial<RawVerdict>>(raw);
   return {
     clean: !!v.clean,

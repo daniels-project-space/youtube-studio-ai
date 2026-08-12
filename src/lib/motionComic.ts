@@ -29,7 +29,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { geminiJsonPro } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateMusic } from "@/lib/music";
 import { ffprobeDuration } from "@/lib/ffmpeg";
 import { preflightPythonRenderer } from "@/lib/pydeps";
@@ -758,7 +758,7 @@ async function locatePanelText(imgPath: string, lines: PlanLine[], chars: PlanCh
     `"keepClear":[[x,y,w,h], ...]}\n` +
     `keepClear = a TIGHT box around EVERY face AND every important/hero object the text must not cover. No prose.`;
   try {
-    const raw = await visionLocal({ prompt, imagePaths: [imgPath], json: true, maxTokens: 900 });
+    const raw = await visionLocal({ prompt, imagePaths: [imgPath], json: true, maxTokens: VISION_GATE_MAX_TOKENS });
     const j = safeJson<{ bubbles?: { name?: string; mouth?: number[]; anchor?: number[] }[]; keepClear?: number[][] }>(raw, {});
     const anchors: Record<string, BubbleAnchor> = {};
     const point = (value: unknown): [number, number] | undefined => {

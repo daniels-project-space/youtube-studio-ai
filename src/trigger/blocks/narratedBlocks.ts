@@ -32,7 +32,7 @@ import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
 import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { existsSync } from "node:fs";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
@@ -1325,7 +1325,7 @@ export const entityImagery: Block = {
                   `people and specific places. Return STRICT JSON {"match":boolean,"reason":string}.`,
                 imagePaths: [img],
                 json: true,
-                maxTokens: 120,
+                maxTokens: VISION_GATE_MAX_TOKENS,
               });
               iterationCostUsd += PRICE.visionGraderUsd;
               const v = parseJsonLoose<{ match?: boolean; reason?: string }>(raw);

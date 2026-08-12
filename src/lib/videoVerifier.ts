@@ -7,7 +7,7 @@
  * crashes — the qa_visual block decides what is a hard failure.
  */
 import { geminiJson, hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
-import { hasVisionKey, visionLocal } from "@/lib/vision";
+import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 export interface Verdict {
   score: number; // 0-10
@@ -34,7 +34,11 @@ function coerce(raw: unknown): Verdict {
  * {score, issues} Verdict, returning SKIP on no-key / no-images / error.
  * The per-artifact evaluators below differ ONLY in their rubric prompt.
  */
-async function gradeImage(imagePaths: string[], prompt: string, maxTokens = 400): Promise<Verdict> {
+async function gradeImage(
+  imagePaths: string[],
+  prompt: string,
+  maxTokens = VISION_GATE_MAX_TOKENS,
+): Promise<Verdict> {
   if (!hasVisionKey() || imagePaths.length === 0) return SKIP;
   try {
     return coerce(parseJsonLoose(await visionLocal({ prompt, imagePaths, json: true, maxTokens })));
@@ -54,7 +58,7 @@ export async function evaluateVisualFrames(
     ". Grade visual quality: clarity, relevance to the topic, and absence of " +
     "glitches/black frames/distortion. " +
     'Return STRICT JSON {"score":0-10,"issues":string[]}.';
-  return gradeImage(imagePaths, prompt, 500);
+  return gradeImage(imagePaths, prompt, VISION_GATE_MAX_TOKENS);
 }
 
 /** Thumbnail: clickability, legible text, on-brand (palette/persona), title match. */

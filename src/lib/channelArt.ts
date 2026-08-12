@@ -16,7 +16,7 @@ import { imageToJpeg } from "@/lib/ffmpeg";
 import { hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
 import { renderNovitaImage } from "@/lib/novitaMedia";
 import { channelKey, putObject } from "@/lib/storage";
-import { visionLocal } from "@/lib/vision";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 export interface ArtIdentity {
   name: string;
@@ -119,7 +119,7 @@ const DEFAULT_RUNTIME: ChannelArtRuntime = {
       prompt,
       imagePaths,
       json: true,
-      maxTokens: 400,
+      maxTokens: VISION_GATE_MAX_TOKENS,
     });
     return parseJsonLoose(raw);
   },

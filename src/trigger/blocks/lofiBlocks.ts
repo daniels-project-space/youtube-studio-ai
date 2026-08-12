@@ -53,7 +53,7 @@ import { notifyDraftReady } from "@/lib/telegram";
 import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
 import { hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
-import { hasVisionKey, visionLocal } from "@/lib/vision";
+import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
@@ -541,7 +541,7 @@ export const keyframes: Block = {
             ].filter(Boolean).join("\n"),
             imagePaths: [cand.local],
             json: true,
-            maxTokens: 600,
+            maxTokens: VISION_GATE_MAX_TOKENS,
           });
           const v = parseJsonLoose<{ score?: number; issues?: string[] }>(raw);
           const score = Math.max(0, Math.min(1, Number(v.score) || 0));
@@ -581,7 +581,7 @@ export const keyframes: Block = {
             '{"motion":"one concise sentence describing only the subtle looping motion of the named elements"}.',
           imagePaths: [f1Local],
           json: true,
-          maxTokens: 200,
+          maxTokens: VISION_GATE_MAX_TOKENS,
         });
         const m = parseJsonLoose<{ motion?: string }>(raw).motion;
         if (m && m.length > 12) { motionPrompt = m; ctx.log(`keyframes: scene-director motion → "${m.slice(0, 90)}"`); }

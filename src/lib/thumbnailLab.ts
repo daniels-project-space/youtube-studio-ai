@@ -21,7 +21,7 @@
  */
 import { join } from "node:path";
 import { parseJsonLoose } from "@/lib/gemini";
-import { hasVisionKey, visionLocal } from "@/lib/vision";
+import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { imageToJpeg } from "@/lib/ffmpeg";
 import {
@@ -384,7 +384,7 @@ export async function runThumbnailMobileReferenceQa(args: {
       `"storyMatch":1-10,"uiClean":boolean,"reason":"..."}.`,
     imagePaths: [mobileJpg, ...refPaths],
     json: true,
-    maxTokens: 250,
+    maxTokens: VISION_GATE_MAX_TOKENS,
   });
   const verdict = parseJsonLoose<Partial<ThumbnailGateVerdict>>(raw);
   return {

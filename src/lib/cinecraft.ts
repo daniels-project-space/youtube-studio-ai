@@ -39,7 +39,7 @@ import { join } from "node:path";
 import { runCli, HiggsfieldError } from "@/lib/higgsfield";
 import { downloadTo } from "@/lib/files";
 import { geminiJson, geminiJsonPro, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { cinematicDoctrineFor, type CinematicDoctrine } from "@/engine/golden";
 
 export { cinematicDoctrineFor, type CinematicDoctrine } from "@/engine/golden";
@@ -390,7 +390,7 @@ async function consistencyScore(keyframeUrl: string, heroUrl: string, kind: Subj
     const what = kind === "location" ? "the SAME place (same architecture/layout)" : kind === "object" ? "the SAME object" : "the SAME person (same face + distinctive features)";
     const raw = await visionLocal({
       prompt: `Image 1 is the canonical reference. Image 2 is a keyframe that must show ${what}. Return STRICT JSON {"match":0-10}.`,
-      imagePaths: [a, b], json: true, maxTokens: 80,
+      imagePaths: [a, b], json: true, maxTokens: VISION_GATE_MAX_TOKENS,
     });
     const v = parseJsonLoose<{ match?: number }>(raw);
     return typeof v.match === "number" ? v.match : 8;
