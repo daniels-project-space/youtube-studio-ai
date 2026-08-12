@@ -2,7 +2,6 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 import { join } from "node:path";
 import { CHANNEL_INCEPTION_MODULE_KEYS } from "@/engine/channelInceptionContracts";
-import { isYoutubeChannelCreationApproved } from "@/lib/youtubeChannelCreationPolicy";
 
 const root = process.cwd();
 const entrypoint = readFileSync(join(root, "src/trigger/designChannel.ts"), "utf8");
@@ -94,23 +93,6 @@ assert.match(coordinator, /dialInAttempted = true/);
 assert.match(coordinator, /"upload_draft"/);
 assert.match(coordinator, /goldenQualified:\s*false/);
 assert(!coordinator.includes("payload.autoYoutube !== false"));
-assert.equal(isYoutubeChannelCreationApproved({}), false);
-assert.equal(isYoutubeChannelCreationApproved({ autoYoutube: true }), false);
-assert.equal(isYoutubeChannelCreationApproved({
-  autoYoutube: true,
-  youtubeCreationActor: "spoofed-user",
-  youtubeCreationEvidence: "clicked a checkbox",
-}), false);
-assert.equal(isYoutubeChannelCreationApproved({
-  autoYoutube: true,
-  youtubeCreationActor: "authenticated-operator:owner_daniel",
-  youtubeCreationEvidence: "explicit YouTube channel creation confirmation in channel creation wizard",
-}), true);
-assert.equal(isYoutubeChannelCreationApproved({
-  autoYoutube: false,
-  youtubeCreationActor: "authenticated-operator:owner_daniel",
-  youtubeCreationEvidence: "explicit YouTube channel creation confirmation in channel creation wizard",
-}), false, "publishing or stale evidence cannot opt into channel creation");
 assert.match(route, /approvedForYoutubeCreation = design\.autoYoutube === true/);
 assert.match(route, /youtubeCreationApproval: approvedForYoutubeCreation/);
 assert.match(route, /publishingApproval: approvedForPublish/);

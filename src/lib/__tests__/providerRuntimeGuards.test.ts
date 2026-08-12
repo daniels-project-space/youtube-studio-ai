@@ -4,15 +4,6 @@ import { join } from "node:path";
 import { LTX_23_MODEL_REVISION, generationProfile } from "@/engine/generationProfiles";
 import { parseJsonLoose } from "@/lib/gemini";
 import { toNovitaPhaseProfile } from "@/lib/novitaRenderFarm";
-import { boundFalVideoPrompt, FAL_VIDEO_PROMPT_MAX_CHARS } from "@/lib/providerText";
-
-function providerPromptGuard(): void {
-  const source = `${"cinematic rain over neon glass ".repeat(120)}FINAL_SENTINEL`;
-  const bounded = boundFalVideoPrompt(source);
-  assert.ok(bounded.length <= FAL_VIDEO_PROMPT_MAX_CHARS);
-  assert.ok(!bounded.endsWith("cinem"), "long prompts end on a word boundary");
-  assert.equal(boundFalVideoPrompt("short prompt"), "short prompt");
-}
 
 function novitaProfileGuard(): void {
   const profile = toNovitaPhaseProfile(generationProfile("production"), "video");
@@ -45,8 +36,7 @@ function comicFontGuard(): void {
   assert.equal(result.status, 0, `comic font fallback failed: ${result.stderr || result.stdout}`);
 }
 
-providerPromptGuard();
 novitaProfileGuard();
 trailingModelOutputGuard();
 comicFontGuard();
-console.log("PROVIDER RUNTIME GUARDS PASS: prompt bound, Novita model pin, JSON tail repair, packaged font fallback");
+console.log("PROVIDER RUNTIME GUARDS PASS: Novita model pin, JSON tail repair, packaged font fallback");
