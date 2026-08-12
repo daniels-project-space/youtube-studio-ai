@@ -21,7 +21,16 @@ function directTests(directory) {
   });
 }
 
-const tests = directTests(sourceRoot).sort();
+// Extra tests that live outside src/ (so the src/**/*.test.* auto-discovery above
+// can't see them) but are still cheap, deterministic, no-ffmpeg/no-Convex checks
+// that belong in the standard gate. Kept as an explicit allowlist, appended after
+// the discovered tests, and run through the same tsx/spawnSync path as everything
+// else. The slower `test:assembly-render-parity` (needs ffmpeg + Remotion) is
+// intentionally NOT included here — run it separately/opt-in when touching the
+// render path, since it would change this suite's runtime requirements.
+const extraTests = [join(root, "scripts", "assembly-parity.ts")];
+
+const tests = [...directTests(sourceRoot).sort(), ...extraTests];
 if (tests.length === 0) {
   console.error("No direct production-readiness tests were discovered under src/");
   process.exit(1);
