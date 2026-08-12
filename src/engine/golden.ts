@@ -585,11 +585,12 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     engine:
       "Imagecraft — Z-Image base bf16 stills at 2048×1152 / 40 steps on Novita RTX 4090 spot pods (NAS-staged weights, slot-aware 3-pod queue, verified autoclose, R2-idempotent resume) via the live VPS render bridge",
     how:
-      "A director shot list (per-shot prompt/lens/shotScale/seed + global style/negative/director/steps/cfg/width/height) is POSTed to the live nginx bridge and polled to done; inline sharpness/exposure QA re-renders weak stills pod-side. Self-describing (IMAGECRAFT_NOVITA_MODULE contract). src/lib/imagecraft-novita.ts. " +
-      "REFERENCE DESIGN ONLY (P1-5): no import chain from the executed pipeline reaches this file. Production image rendering for " +
-      "Novita-based channels instead runs through the separate, wired novita-render-farm module (src/lib/novitaRenderFarm.ts, called " +
+      "A director shot list (per-shot prompt/lens/shotScale/seed + global style/negative/director/steps/cfg/width/height) is POSTed to the live nginx bridge and polled to done; inline sharpness/exposure QA re-renders weak stills pod-side. Self-describing (IMAGECRAFT_NOVITA_MODULE contract), as originally designed in the now-deleted src/lib/imagecraft-novita.ts. " +
+      "DELETED, NOT PENDING (P1-5 resolved by P2-7): src/lib/imagecraft-novita.ts had no import chain from the executed pipeline and was " +
+      "removed outright as confirmed-dead in commit 183ee6a. This was never a capability gap -- production image rendering for " +
+      "Novita-based channels runs, and always ran, through the separate, wired novita-render-farm module (src/lib/novitaRenderFarm.ts, called " +
       "from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) -- same Z-Image family, different codebase and " +
-      "gate set. Do not assume this file's extra gates below are enforced in production.",
+      "gate set. The gates below describe imagecraft-novita.ts's former design; do not assume they are enforced in production.",
     gates: [
       "inline sharpness + exposure QA on every still — weak frames re-render pod-side, never ship",
       "width/height must be a multiple of 32 (VAE tiling requirement) — validate() fails loud",
@@ -607,11 +608,12 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     engine:
       "Videocraft — LTX-2.3 22B int8 image-to-video via Wan2GP at 1920×1088 / 40 steps / guidance 4.0 on Novita RTX 4090 spot pods, driving the 10-move camera grammar over Imagecraft's R2 stills (slot-aware 3-pod queue, verified autoclose, R2-idempotent resume)",
     how:
-      "Each shot's rendered still + camera move + motion cue + seconds (rounded to 8n+1 frames) is POSTed to the live nginx bridge and polled to done; a freeze-detection QA gate rejects still-frame clips (the frozen-frame fix). Emits gen_footage-compatible footageClips/footageKeys, so timeline_assemble works unmodified. Self-describing (VIDEOCRAFT_NOVITA_MODULE contract). src/lib/videocraft-novita.ts. " +
-      "REFERENCE DESIGN ONLY (P1-6): no import chain from the executed pipeline reaches this file. Production video rendering for " +
-      "Novita-based channels instead runs through the separate, wired novita-render-farm module (src/lib/novitaRenderFarm.ts, called " +
+      "Each shot's rendered still + camera move + motion cue + seconds (rounded to 8n+1 frames) is POSTed to the live nginx bridge and polled to done; a freeze-detection QA gate rejects still-frame clips (the frozen-frame fix). Emits gen_footage-compatible footageClips/footageKeys, so timeline_assemble works unmodified. Self-describing (VIDEOCRAFT_NOVITA_MODULE contract), as originally designed in the now-deleted src/lib/videocraft-novita.ts. " +
+      "DELETED, NOT PENDING (P1-6 resolved by P2-7): src/lib/videocraft-novita.ts had no import chain from the executed pipeline and was " +
+      "removed outright as confirmed-dead in commit 183ee6a. This was never a capability gap -- production video rendering for " +
+      "Novita-based channels runs, and always ran, through the separate, wired novita-render-farm module (src/lib/novitaRenderFarm.ts, called " +
       "from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) -- same LTX family, different codebase and gate " +
-      "set. Do not assume this file's extra gates below are enforced in production.",
+      "set. The gates below describe videocraft-novita.ts's former design; do not assume they are enforced in production.",
     gates: [
       "freeze-detection QA (the still-frame fix) — a clip that doesn't move is rejected and re-rendered, never shipped",
       "video frames always 8n+1 — rounded, never truncated silently",
@@ -640,11 +642,12 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "hard tripod-lock clause on every Kling prompt (wind moves the subjects, never the viewpoint) AND a " +
       "motion-aware temporal de-warble that strips AI shimmer from the loop unit (seam preserved). No upscale " +
       "is baked in — Topaz 4K is a separate optional pass on the short loop unit. A deblur title intro + lofi " +
-      "music finish it. Self-describing (LOFI_MODULE contract), fully resumable -- as designed in src/lib/lofi.ts. " +
-      "REFERENCE DESIGN ONLY (P1-9): src/lib/lofi.ts (509 L) has zero importers repo-wide and is not on the executed path. The " +
-      "pipeline that actually runs the lofi archetype is inline in src/trigger/blocks/lofiBlocks.ts (scene/keyframe/loop generation " +
+      "music finish it. Self-describing (LOFI_MODULE contract), fully resumable -- as originally designed in the now-deleted src/lib/lofi.ts. " +
+      "DELETED, NOT PENDING (P1-9 resolved by P2-7): src/lib/lofi.ts (509 L) had zero importers repo-wide and was never on the executed " +
+      "path, so it was removed outright as confirmed-dead in commit 183ee6a. This was never a capability gap -- the pipeline that " +
+      "actually runs the lofi archetype is, and always was, inline in src/trigger/blocks/lofiBlocks.ts (scene/keyframe/loop generation " +
       "~lines 41,53; music mix ~lines 774-946), calling src/lib/ffmpeg.ts and src/lib/novitaMedia.ts directly. The six gates below " +
-      "describe lofi.ts's design; they have NOT been re-verified against lofiBlocks.ts's actual implementation.",
+      "describe lofi.ts's former design; they have NOT been re-verified against lofiBlocks.ts's actual implementation.",
     gates: [
       "required inputs validated (scene / channel / title / music / slug)",
       "motion ensured — ranked priorities + forbidden + spatial, ≥5 element types",
@@ -896,11 +899,20 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "(Marigold + feathered alpha) and flies a camera through it in Remotion with a kinetic title overlaid — never " +
       "baked in; generative paints a drifting intel-network background in p5.js. One tool contract (__ready / __dur / " +
       "__frame / __settle) drives a single generic Playwright capture, so new tools plug in with zero rework. Clips are " +
-      "timed to each narration cue and per-clip failures stay isolated. Standalone src/lib/motioncraft.ts (246 L), visual-only. " +
-      "NOT WIRED (P1-11): zero pipeline importers reach this file (kind: \"catalog-only\" in goldenExecution.ts " +
-      "CATALOG_EXECUTION_BINDINGS). Its data-viz capability is DUPLICATED, not consumed, by the production Insert module " +
-      "(src/trigger/blocks/insertBlocks.ts:22,72,107, catalog key \"inserts\"), which is the one actually wired and gated. " +
-      "motioncraft.ts is a dead-code / removal candidate pending a decision to wire it in or delete it -- see P2-7.",
+      "timed to each narration cue and per-clip failures stay isolated. Was standalone in src/lib/motioncraft.ts (246 L), visual-only. " +
+      "DELETED, NOT PENDING (P1-11 resolved by P2-7): src/lib/motioncraft.ts had zero pipeline importers (it was always \"catalog-only\" " +
+      "in goldenExecution.ts CATALOG_EXECUTION_BINDINGS) and was removed outright as confirmed-dead in commit 183ee6a. Of its four " +
+      "tools, only data_stats' verbatim-number animation has a real successor: it is DUPLICATED, not consumed, by the production " +
+      "Insert module (src/trigger/blocks/insertBlocks.ts:22,72,107, catalog key \"inserts\"), which is the one actually wired and " +
+      "gated. The other three demonstrated tools do NOT have a like-for-like successor and their own implementations are now gone " +
+      "outright with the file: geo_map's live MapLibre/OSM street-tile renderer, hero_title's Marigold depth-cutout + kinetic-title " +
+      "camera-through-photo treatment, and generative's p5.js drifting intel-network background are all permanently deleted code. " +
+      "(The wired documotion.ts module separately and independently built its OWN real-place map reveal (geo_map shot kind, pulling " +
+      "live OSM street data via src/lib/geoMap.ts) and its OWN single-image depth-cutout camera-through-photo move (depth_parallax " +
+      "shot kind) -- similar creative ideas achieving a similar effect, but distinct, independently-authored code, not motioncraft's; " +
+      "generative's p5.js procedural background technique has no equivalent anywhere else in the repo and is the one capability with " +
+      "nothing standing in for it at all.) The only surviving evidence of what all four looked like is the proof media at " +
+      "public/golden/motioncraft/{map,stats,hero,crew}.mp4.",
     gates: ["the LLM earns each graphic (3-6 / video, never per line)", "best-tool routing per beat", "verbatim numbers only (stats)", "no text baked into the hero image — the title is a crisp overlay", "per-clip failure isolated"],
     status: "reference",
   },

@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { registerAllBlocks } from "@/engine/blocks";
@@ -427,6 +427,18 @@ function failClosedQualityGuards(): void {
     () => assertThumbnailGate("production", { ...passingThumbnail, storyMatch: 6 }, "fixture"),
     /failed the production gate/,
   );
+  // The BOOLEAN half of the gate is the text-integrity half: `textOk` is the
+  // judge's "every visible word is correctly spelled and readable" verdict and
+  // `uiClean` its "no broken glyphs / unreadable clutter" verdict. A provider
+  // that ignores the text-free scene request and hallucinates garbled signage
+  // must not be able to ship, so each boolean has to fail the gate on its own.
+  for (const failing of ["textOk", "faceClear", "uiClean"] as const) {
+    assert.throws(
+      () => assertThumbnailGate("production", { ...passingThumbnail, [failing]: false }, "fixture"),
+      /failed the production gate/,
+      `a false ${failing} must fail the production thumbnail gate`,
+    );
+  }
   assert.doesNotThrow(() => assertThumbnailGate("draft", null, "fixture"));
   assert.throws(() => assertThumbnailStrategy("production", "playbook_belowbar"), /draft-only/);
   assert.throws(() => assertThumbnailStrategy("production", "title_card_fallback"), /draft-only/);
@@ -561,6 +573,51 @@ function configurationSpecificCostEnvelopes(): void {
   );
 }
 
+/**
+ * A catalog entry citing "src/lib/foo.ts" as if it's present on disk, when it
+ * was actually deleted, is exactly the P2-7 regression this test guards
+ * against (lofi.ts / motioncraft.ts / imagecraft-novita.ts / videocraft-novita.ts
+ * were deleted in commit 183ee6a but their golden.ts entries kept describing
+ * them as live "pending decision" files for a full session afterward).
+ *
+ * Every literal src/lib/*.ts, src/engine/*.ts, or src/trigger/**\/*.ts path
+ * named in a module's `engine` + `how` prose must exist on disk UNLESS that
+ * same mention sits within a short window of an explicit deletion/retirement
+ * marker (DELETED, RETIRED, "removed outright", "now-deleted", "is retired",
+ * "hard-disabled") -- the vocabulary this catalog already uses for cinecraft.ts
+ * (retired) and the corrected lofi/motioncraft/imagecraft-novita/videocraft-novita
+ * entries (deleted). This intentionally does NOT try to parse English well
+ * enough to know a path is "deleted" from arbitrary phrasing -- it only
+ * recognizes this catalog's own small, consistent vocabulary, so a genuinely
+ * new phrasing must adopt one of these words rather than silently passing.
+ */
+function catalogCitedFilePathsExistOrAreExplicitlyRetired(): void {
+  const PATH_RE = /\bsrc\/(?:lib|engine|trigger)\/[A-Za-z0-9_.\/-]+\.ts\b/g;
+  const DELETION_MARKERS = /\b(DELETED|RETIRED|removed outright|now-deleted|is retired|hard-disabled)\b/i;
+  const WINDOW = 150;
+  const root = process.cwd();
+  const stale: string[] = [];
+
+  for (const mod of GOLDEN_MODULES) {
+    const text = `${mod.engine ?? ""} ${mod.how ?? ""}`;
+    for (const match of text.matchAll(PATH_RE)) {
+      const filePath = match[0];
+      const idx = match.index ?? 0;
+      const windowText = text.slice(Math.max(0, idx - WINDOW), Math.min(text.length, idx + filePath.length + WINDOW));
+      const explicitlyRetired = DELETION_MARKERS.test(windowText);
+      if (!explicitlyRetired && !existsSync(join(root, filePath))) {
+        stale.push(`${mod.key} -> ${filePath}`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    stale,
+    [],
+    `golden.ts cites file path(s) that do not exist on disk and are not flagged DELETED/RETIRED nearby: ${stale.join(", ")}`,
+  );
+}
+
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
@@ -580,6 +637,7 @@ function main(): void {
   goldenPromotionGuards(manifests);
   failClosedQualityGuards();
   configurationSpecificCostEnvelopes();
+  catalogCitedFilePathsExistOrAreExplicitlyRetired();
   console.log("module ABI, production compiler, and Golden promotion guard tests passed");
 }
 
