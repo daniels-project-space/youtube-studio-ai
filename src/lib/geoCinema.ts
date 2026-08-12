@@ -31,7 +31,7 @@ import { spawn } from "node:child_process";
 import { join, dirname } from "node:path";
 import { fileURLToPath } from "node:url";
 import { geminiJson, geminiJsonPro, parseJsonLoose } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 type Logger = (msg: string) => void;
 const MODULE_DIR = dirname(fileURLToPath(import.meta.url));
@@ -655,7 +655,7 @@ export async function verifyGeoRender(args: {
   try {
     // Provider-routed vision (groq→fal→gemini) — the Pro-model hint is gone with
     // the direct Gemini call; the verifier prompt carries all the judging context.
-    const raw = await visionLocal({ prompt, imagePaths: paths, json: true, maxTokens: 4000 });
+    const raw = await visionLocal({ prompt, imagePaths: paths, json: true, maxTokens: VISION_GATE_MAX_TOKENS });
     const v = parseJsonLoose<GeoVisionVerdict>(raw);
     v.issues = Array.isArray(v.issues) ? v.issues : [];
     // robust verdict: a truncated/partial JSON can drop "score" — infer from the

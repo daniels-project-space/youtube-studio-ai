@@ -9,7 +9,11 @@
  *   2. CACHES verdicts by content hash (prompt + image bytes) — verify→heal
  *      →re-verify loops, retried blocks and dev re-renders stop re-billing
  *      identical questions.
- *   3. ROUTES to the cheapest available provider, in VISION_PROVIDERS order
+ *   3. ANSWERS WITHOUT THINKING by default (reasoning_effort "none" on Groq) —
+ *      the <think> pass cost ~32x the completion tokens and ~8x the latency of a
+ *      gate call while producing measurably WORSE and less repeatable verdicts.
+ *      See VISION_REASONING_EFFORT for the A/B numbers.
+ *   4. ROUTES to the cheapest available provider, in VISION_PROVIDERS order
  *      (default "groq,fal,gemini"):
  *        groq   → Qwen 3.6 27B (current production multimodal model)
  *        fal    → any-llm/vision (provider-routed; exact usage not exposed)
@@ -35,6 +39,12 @@ export class VisionError extends Error {
   }
 }
 
+/**
+ * Groq's `reasoning_effort` accepts exactly two values on GROQ_VISION_MODEL:
+ * "none" (answer immediately) or "default" (run the internal <think> pass first).
+ */
+export type VisionReasoningEffort = "none" | "default";
+
 export interface VisionLocalArgs {
   prompt: string;
   imagePaths: string[];
@@ -44,6 +54,11 @@ export interface VisionLocalArgs {
   maxTokens?: number;
   /** Skip the verdict cache (for deliberately-stochastic judging). */
   noCache?: boolean;
+  /**
+   * Override the reasoning pass for THIS call. Defaults to VISION_REASONING_EFFORT
+   * ("none") — see that constant for the A/B evidence behind the default.
+   */
+  reasoningEffort?: VisionReasoningEffort;
 }
 
 /** Mirror of hasGeminiKey() guard semantics: is ANY vision provider available? */
@@ -200,10 +215,45 @@ export const VISION_GATE_MAX_TOKENS = 8192;
  */
 const GROQ_MAX_COMPLETION_TOKENS = 16384;
 
+/**
+ * Default reasoning pass for every vision GATE: OFF.
+ *
+ * GROQ_VISION_MODEL is a reasoning model, and its <think> pass is billed as plain
+ * completion tokens (Groq does not even report reasoning_tokens separately for it),
+ * so it costs real money and real latency on every gate. It was left ON only
+ * because nobody had measured whether it bought better judgment. It does not.
+ *
+ * A/B over 13 real gate cases (footagecraft relevance + natureMode, documotion
+ * asset gate, thumbnailLab QA gate, cinecraft keyframe drift), each the verbatim
+ * production prompt against real frames, 5 runs per condition (130 calls):
+ *
+ *                        reasoning "default"      reasoning "none"
+ *   accuracy vs label    49/60  (81.7%)           54/60  (90.0%)
+ *   ...excl. infra noise 49/53  (92.5%)           54/55  (98.2%)
+ *   verdict consistency  23 distinct / 13 cases   15 distinct / 13 cases
+ *   json_validate_failed 1                        0
+ *   median latency       3032 ms                  382 ms
+ *   avg completion tok   1855                     58
+ *   cost per 1000 gates  ~$2.59                   ~$0.44
+ *
+ * "none" regressed ZERO gates and strictly beat "default" on two (documotion's
+ * clean-asset case, where reasoning returned FOUR different verdicts for one
+ * unchanged image; and thumbnailLab's clutter case). It is also the safer
+ * setting: the reasoning path peaked at 6914 completion tokens — 84% of
+ * VISION_GATE_MAX_TOKENS — so it sits one long ramble away from re-triggering
+ * the exact starvation bug that budget was raised to fix, while "none" peaked
+ * at 200.
+ *
+ * Set VISION_REASONING_EFFORT=default to restore the thinking pass globally, or
+ * pass `reasoningEffort` per call for a gate that genuinely needs deliberation.
+ */
+const VISION_REASONING_EFFORT: VisionReasoningEffort =
+  process.env.VISION_REASONING_EFFORT === "default" ? "default" : "none";
+
 async function groqVision(
   prompt: string,
   images: Buffer[],
-  opts: { json?: boolean; maxTokens?: number },
+  opts: { json?: boolean; maxTokens?: number; reasoningEffort?: VisionReasoningEffort },
 ): Promise<string> {
   const key = process.env.GROQ_API_KEY;
   if (!key) throw new VisionError("no GROQ_API_KEY");
@@ -231,6 +281,9 @@ async function groqVision(
         messages: [{ role: "user", content }],
         max_tokens: Math.min(opts.maxTokens ?? VISION_GATE_MAX_TOKENS, GROQ_MAX_COMPLETION_TOKENS),
         temperature: 0.2,
+        // Groq rejects anything but "none" | "default" with a hard 400, so this is
+        // sent verbatim and never widened to the usual low/medium/high scale.
+        reasoning_effort: opts.reasoningEffort ?? VISION_REASONING_EFFORT,
         ...(opts.json ? { response_format: { type: "json_object" } } : {}),
       }),
       signal: AbortSignal.timeout(90_000),
@@ -366,7 +419,7 @@ function sampleEvenly<T>(items: T[], max: number): T[] {
 async function visionBuffers(
   prompt: string,
   buffers: Buffer[],
-  args: { json?: boolean; maxTokens?: number; noCache?: boolean },
+  args: { json?: boolean; maxTokens?: number; noCache?: boolean; reasoningEffort?: VisionReasoningEffort },
 ): Promise<string> {
   if (buffers.length === 0) throw new VisionError("no readable images");
   const chain = providerChain();
@@ -380,11 +433,16 @@ async function visionBuffers(
   const effective = {
     ...args,
     maxTokens: Math.max(args.maxTokens ?? 0, VISION_GATE_MAX_TOKENS),
+    reasoningEffort: args.reasoningEffort ?? VISION_REASONING_EFFORT,
   };
   const cacheKey = createHash("sha1")
     .update(prompt)
     .update(String(!!args.json))
     .update(String(effective.maxTokens))
+    // Reasoning mode is part of the verdict's identity: the two modes measurably
+    // disagree on borderline frames, so flipping VISION_REASONING_EFFORT must
+    // re-judge rather than replay the other mode's cached answer.
+    .update(effective.reasoningEffort)
     .update(chain.join(","))
     .update(GROQ_VISION_MODEL)
     .update(buffers.map((b) => createHash("sha1").update(b).digest("hex")).join(","))
@@ -431,6 +489,8 @@ export async function visionUrls(args: {
   maxTokens?: number;
   /** Skip the verdict cache (for deliberately-stochastic judging/tests). */
   noCache?: boolean;
+  /** See VISION_REASONING_EFFORT — defaults to "none". */
+  reasoningEffort?: VisionReasoningEffort;
 }): Promise<string> {
   const buffers: Buffer[] = [];
   for (const u of args.imageUrls.slice(0, 12)) {

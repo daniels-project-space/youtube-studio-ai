@@ -15,7 +15,7 @@ import { detectSceneChanges, grabFrame } from "@/lib/ffmpeg";
 import { makeRunTempDir } from "@/lib/files";
 import { parseJsonLoose } from "@/lib/gemini";
 import { putObject, putObjectFromFile } from "@/lib/storage";
-import { hasVisionKey, visionLocal } from "@/lib/vision";
+import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
@@ -769,7 +769,7 @@ function defaultReviewer(input: VisualReviewerInput): Promise<string> {
     prompt: input.prompt,
     imagePaths: input.frames.map((frame) => frame.localPath),
     json: true,
-    maxTokens: 2200,
+    maxTokens: VISION_GATE_MAX_TOKENS,
   });
 }
 
