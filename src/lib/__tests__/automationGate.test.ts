@@ -29,7 +29,12 @@ for (const gate of gates) {
 type ScheduleContract = {
   file: string;
   exportName: string;
-  cron: string;
+  /**
+   * `null` for schedules that are deliberately manual-only (no cron wired yet).
+   * The gate contract still applies — a fail-open gate must not be able to sneak
+   * in while the task is dormant and then go live the moment a cron is added.
+   */
+  cron: string | null;
   gate: StudioAutomationGate;
   hazardousCall: string;
 };
@@ -39,6 +44,13 @@ const scheduleContracts: ScheduleContract[] = [
     file: "src/trigger/scheduler.ts",
     exportName: "generationScheduler",
     cron: "0 */6 * * *",
+    gate: STUDIO_AUTOMATION_GATES.autopilot,
+    hazardousCall: "await bootstrapSecrets",
+  },
+  {
+    file: "src/trigger/publishScheduler.ts",
+    exportName: "publishIntentScheduler",
+    cron: null,
     gate: STUDIO_AUTOMATION_GATES.autopilot,
     hazardousCall: "await bootstrapSecrets",
   },
@@ -82,10 +94,20 @@ function exportedConstant(source: string, exportName: string): string {
 for (const contract of scheduleContracts) {
   const source = readFileSync(join(process.cwd(), contract.file), "utf8");
   const schedule = exportedConstant(source, contract.exportName);
-  assert.ok(
-    schedule.includes(`cron: "${contract.cron}"`),
-    `${contract.exportName} must declare cron ${contract.cron}`,
-  );
+  if (contract.cron === null) {
+    // Anchored to line start so the file's own "Add `cron: ...` only at that
+    // transition" comment does not count as a declaration.
+    assert.doesNotMatch(
+      schedule,
+      /^\s*cron:/m,
+      `${contract.exportName} is documented as manual-only; adding a cron must be a deliberate, reviewed change`,
+    );
+  } else {
+    assert.ok(
+      schedule.includes(`cron: "${contract.cron}"`),
+      `${contract.exportName} must declare cron ${contract.cron}`,
+    );
+  }
 
   const gateKey =
     contract.gate === STUDIO_AUTOMATION_GATES.autopilot ? "autopilot" : "insights";

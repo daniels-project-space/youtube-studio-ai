@@ -813,7 +813,7 @@ async function meanLuma(png: string): Promise<number> {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
     const ex = promisify(execFile);
-    const { stderr } = await ex(process.env.FFMPEG_PATH || "ffmpeg", ["-i", png, "-vf", "signalstats,metadata=print", "-f", "null", "-"]);
+    const { stderr } = await ex(process.env.FFMPEG_BIN ?? "ffmpeg", ["-i", png, "-vf", "signalstats,metadata=print", "-f", "null", "-"]);
     // metadata=print emits "lavfi.signalstats.YAVG=12.3" (EQUALS, not colon) —
     // the colon-only regex never matched, the gate silently never fired, and
     // two pure-black panels shipped. Accept both separators; scan all frames

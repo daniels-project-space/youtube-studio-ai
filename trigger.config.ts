@@ -23,6 +23,16 @@ import {
  *    fal FLUX; strict thumbnail generation deliberately ignores this switch,
  *  - VISION_DISABLE_GEMINI  — 1 → vision router never falls back to Gemini,
  *  - GROQ_API_KEY           — frees the vision chain's free tier when present.
+ *  - STUDIO_AUTOPILOT / STUDIO_INSIGHTS_AUTOMATION — the fail-closed scheduled
+ *    automation gates (src/lib/automationGate.ts). Only the exact value "on"
+ *    enables a schedule. These MUST be forwarded: without them the gate reads
+ *    `undefined` inside the Trigger runtime, so scheduled automation stays off
+ *    in the cloud no matter what the operator configured. Forwarding is inert
+ *    until the deploy machine actually sets them (syncEnvVars skips unset vars).
+ *  - VAULT_URL              — override for the project-hub vault base URL used
+ *    by bootstrapSecrets (src/lib/vault.ts). Its partner VAULT_ACCESS_TOKEN was
+ *    already forwarded; without VAULT_URL a relocated vault silently keeps
+ *    resolving to the hardcoded default inside workers.
  */
 const FORWARDED_ENV = [
   "INTERNAL_QUERY_SECRET",
@@ -52,6 +62,9 @@ const FORWARDED_ENV = [
   "VISION_DISABLE_GEMINI",
   "GROQ_API_KEY",
   "VAULT_ACCESS_TOKEN",
+  "VAULT_URL",
+  "STUDIO_AUTOPILOT",
+  "STUDIO_INSIGHTS_AUTOMATION",
 ];
 
 const SECRET_FORWARDED_ENV = new Set([

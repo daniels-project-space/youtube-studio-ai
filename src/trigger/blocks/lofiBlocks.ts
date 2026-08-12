@@ -734,7 +734,7 @@ export const upscale: Block = {
     const finalLoopPath = join(tmp, `loopunit_${targetResolution}.mp4`);
     const [width, height] = target;
     ctx.log(`upscale: deterministic local Lanczos finish → ${width}x${height}@${targetFps}fps…`);
-    await promisify(execFile)(process.env.FFMPEG_PATH || "ffmpeg", [
+    await promisify(execFile)(process.env.FFMPEG_BIN ?? "ffmpeg", [
       "-y", "-i", loopUnit,
       "-vf",
       `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos,` +

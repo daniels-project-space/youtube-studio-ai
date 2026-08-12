@@ -95,7 +95,7 @@ async function prepLocalImage(path: string): Promise<Buffer | null> {
       await cacheDir(),
       `prep-${createHash("sha1").update(path).digest("hex").slice(0, 16)}-${PREP_MAX_DIM}.jpg`,
     );
-    const ffmpeg = process.env.FFMPEG_PATH || "ffmpeg";
+    const ffmpeg = process.env.FFMPEG_BIN ?? "ffmpeg";
     await run(ffmpeg, [
       "-y",
       "-i",
