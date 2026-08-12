@@ -28,7 +28,10 @@ function directTests(directory) {
 // else. The slower `test:assembly-render-parity` (needs ffmpeg + Remotion) is
 // intentionally NOT included here — run it separately/opt-in when touching the
 // render path, since it would change this suite's runtime requirements.
-const extraTests = [join(root, "scripts", "assembly-parity.ts")];
+const extraTests = [
+  join(root, "scripts", "assembly-parity.ts"),
+  join(root, "scripts", "quizyear-pipeline-dryrun.ts"),
+];
 
 const tests = [...directTests(sourceRoot).sort(), ...extraTests];
 if (tests.length === 0) {

@@ -153,6 +153,34 @@ async function main(): Promise<void> {
     "registering QuizYear in the shared root would defeat the isolation gate",
   );
 
+  // …and the isolated bundle only helps if the CLOUD IMAGE actually contains it.
+  // @remotion/bundler compiles src/remotion/quiz/index.ts from source at runtime,
+  // so the raw .ts/.tsx must be baked in by the additionalFiles build extension.
+  // `src/remotion/**` covers the nested quiz/ dir today (globstar recurses —
+  // confirmed against a real `trigger deploy --dry-run`, whose build output
+  // contained all three quiz files). This lock fires if that glob is ever
+  // narrowed: the quiz bundle would vanish from the image and EVERY cloud render
+  // would fail on a missing entry point while local renders kept passing.
+  const triggerConfig = await readFile(join(ROOT, "trigger.config.ts"), "utf8");
+  const filesBlock = /additionalFiles\(\{\s*files:\s*\[([\s\S]*?)\]/.exec(triggerConfig);
+  assert.ok(filesBlock, "trigger.config.ts must bake files in via additionalFiles({ files: [...] })");
+  const bakedGlobs = [...filesBlock[1].matchAll(/"([^"]+)"/g)].map((m) => m[1]);
+  for (const quizFile of [
+    "src/remotion/quiz/index.ts",
+    "src/remotion/quiz/Root.tsx",
+    "src/remotion/quiz/QuizYear.tsx",
+  ]) {
+    assert.ok(
+      bakedGlobs.some(
+        (g) =>
+          g === quizFile ||
+          (g.endsWith("/**") && quizFile.startsWith(g.slice(0, -2))),
+      ),
+      `${quizFile} is not covered by any additionalFiles glob [${bakedGlobs.join(", ")}] — ` +
+        "the Trigger image would ship without the quiz Remotion bundle and every cloud quiz render would fail",
+    );
+  }
+
   /* round sizing + deterministic set defects */
   assert.equal(quizRoundCount(80, 6, 4), 8);
   assert.equal(quizRoundCount(0, 6, 4), 8, "no target → engine default");
