@@ -171,6 +171,35 @@ const GROQ_VISION_MODEL =
 /** Groq caps vision requests at 5 images — beyond that, sample evenly. */
 const GROQ_MAX_IMAGES = 5;
 
+/**
+ * Minimum completion budget for ANY vision gate.
+ *
+ * GROQ_VISION_MODEL is a REASONING model: its internal <think> pass is billed
+ * against max_tokens and runs BEFORE a single answer token is emitted. Measured
+ * on real frames with a full-length production gate prompt, reasoning alone came
+ * in at 1277-3928 tokens per call. Anything below that emits nothing, which Groq
+ * surfaces as a hard `400 json_validate_failed` (json mode) or a truncated
+ * `<think>` blob that fails to parse (non-json mode).
+ *
+ * The historical call-site budgets (80-400) therefore failed 100% of the time,
+ * and each caller's catch block converted that into a silent wrong answer:
+ * footagecraft's clip gate fails CLOSED (rejected ALL candidate b-roll, starving
+ * footage casting), cinecraft's drift gate and narratedBlocks' grader fail OPEN
+ * (silently no-op). 8192 is ~2x the observed reasoning ceiling.
+ *
+ * Raising this is close to free: max_tokens is a CEILING, not a reservation —
+ * you are billed for tokens actually generated, and a starved call still burns
+ * (and wastes) its whole budget producing nothing.
+ */
+export const VISION_GATE_MAX_TOKENS = 8192;
+
+/**
+ * Hard ceiling sent to Groq. Previously 4096, which silently truncated every
+ * caller that asked for more and sat right on top of the observed 3928-token
+ * reasoning peak.
+ */
+const GROQ_MAX_COMPLETION_TOKENS = 16384;
+
 async function groqVision(
   prompt: string,
   images: Buffer[],
@@ -200,7 +229,7 @@ async function groqVision(
       body: JSON.stringify({
         model: GROQ_VISION_MODEL,
         messages: [{ role: "user", content }],
-        max_tokens: Math.min(opts.maxTokens ?? 1024, 4096),
+        max_tokens: Math.min(opts.maxTokens ?? VISION_GATE_MAX_TOKENS, GROQ_MAX_COMPLETION_TOKENS),
         temperature: 0.2,
         ...(opts.json ? { response_format: { type: "json_object" } } : {}),
       }),
@@ -211,7 +240,20 @@ async function groqVision(
       await sleep(1500 * (attempt + 1) * (attempt + 1));
       continue;
     }
-    if (!res.ok) throw new VisionError(`groq vision HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
+    if (!res.ok) {
+      const body = await res.text();
+      // Token starvation, NOT a malformed request: a reasoning model can spend
+      // the whole completion budget inside <think> and emit zero answer tokens,
+      // which Groq reports as `400 json_validate_failed` with an EMPTY
+      // failed_generation. Reasoning length is stochastic (measured 1277-3928 on
+      // identical inputs), so exactly one more roll of the dice is worth it.
+      // Every other 400 is a real bad request and still throws immediately.
+      if (res.status === 400 && attempt === 0 && /json_validate_failed/.test(body)) {
+        lastErr = "HTTP 400 json_validate_failed (reasoning consumed the completion budget)";
+        continue;
+      }
+      throw new VisionError(`groq vision HTTP ${res.status}: ${body.slice(0, 200)}`);
+    }
     const j = (await res.json()) as {
       id?: string;
       model?: string;
@@ -328,10 +370,21 @@ async function visionBuffers(
 ): Promise<string> {
   if (buffers.length === 0) throw new VisionError("no readable images");
   const chain = providerChain();
+  // FLOOR, applied once for every provider: a caller asking for 80-400 tokens is
+  // asking a reasoning model to answer before it has finished thinking, which
+  // returns nothing at all rather than a short answer (see
+  // VISION_GATE_MAX_TOKENS). Enforced here rather than per-provider so the
+  // gemini/fal fallbacks — gemini-2.5-flash also thinks before answering — can
+  // never inherit a starved budget from the caller, and so a future call site
+  // cannot silently reintroduce the bug.
+  const effective = {
+    ...args,
+    maxTokens: Math.max(args.maxTokens ?? 0, VISION_GATE_MAX_TOKENS),
+  };
   const cacheKey = createHash("sha1")
     .update(prompt)
     .update(String(!!args.json))
-    .update(String(args.maxTokens ?? 1024))
+    .update(String(effective.maxTokens))
     .update(chain.join(","))
     .update(GROQ_VISION_MODEL)
     .update(buffers.map((b) => createHash("sha1").update(b).digest("hex")).join(","))
@@ -346,10 +399,10 @@ async function visionBuffers(
     try {
       const text =
         provider === "groq"
-          ? await groqVision(prompt, buffers, args)
+          ? await groqVision(prompt, buffers, effective)
           : provider === "fal"
-            ? await falVision(prompt, buffers, args)
-            : await geminiVisionBuffers(prompt, buffers, args);
+            ? await falVision(prompt, buffers, effective)
+            : await geminiVisionBuffers(prompt, buffers, effective);
       await cachePut(cacheKey, text);
       return text;
     } catch (e) {
