@@ -938,6 +938,31 @@ export async function executeDesignChannel(
   if (existingAtStart?.family && existingAtStart.family !== payload.family) {
     throw new Error(`inception key already belongs to family ${existingAtStart.family}`);
   }
+  // RESUME HOLE: `createChannel` below is the ONLY writer in this flow that
+  // stamps `family`/`contentLane`, and the `existingAtStart?._id ??`
+  // short-circuit skips it entirely whenever a row already sits on this slug.
+  // A row that predates persisted families (or one seeded by a path that
+  // omitted it) would therefore be carried through every stage and finish
+  // inception with an IMPLICIT, pipeline-inferred lane — reintroducing on a
+  // freshly built channel exactly the fragility the backfill migration exists
+  // to close. Stamp it explicitly before any stage runs.
+  //
+  // `backfillChannelFamily` is the right tool rather than a raw patch: it is
+  // idempotent, never overwrites an existing family, re-derives the lane from
+  // this row's OWN stored pipeline, and REFUSES any family whose lane differs
+  // from the one already resolved today. So it can only make current behaviour
+  // explicit, never change it — and the refusal makes an implicit-family
+  // mismatch as loud as the explicit-family mismatch rejected just above.
+  // Locked rows are skipped: the migration's writability guard refuses them and
+  // the fork path owns that case.
+  if (existingAtStart && !existingAtStart.family && existingAtStart.locked !== true) {
+    const stamped = await convex.mutation(api.channels.backfillChannelFamily, {
+      ownerId,
+      channelId: existingAtStart._id,
+      family: payload.family,
+    });
+    log(`resumed channel carried an implicit family: ${stamped.reason}`);
+  }
   const provisionalIdentity: ChannelIdentityState = existingAtStart
     ? asIdentity(existingAtStart.identity)
     : {

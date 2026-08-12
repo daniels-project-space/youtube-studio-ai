@@ -100,6 +100,56 @@ assert.match(route, /publishingApproval: approvedForPublish/);
 for (const operation of ["claim", "complete", "checkpoint", "heartbeat", "fail"] as const) {
   assert(adapter.includes(`${operation}: async`), `Convex ledger adapter must implement ${operation}`);
 }
+// EVERY NEW CHANNEL MUST START LIFE WITH AN EXPLICIT FAMILY/LANE.
+// Nine legacy channels worked only because `inferContentLane` happened to find
+// exactly one visual producer in their stored pipeline; a later pipeline edit
+// would have silently dropped them into `legacy_unclassified`. These assertions
+// keep the creation path from ever minting another channel in that state.
+assert.match(coordinator, /family:\s*payload\.family/,
+  "createChannel must be handed an EXPLICIT family, never left to pipeline inference");
+assert.match(coordinator, /contentLane:\s*design\.contentLane/,
+  "createChannel must be handed the designed content lane");
+assert.match(mutations, /const family = args\.family \?\? existing\?\.family/);
+assert.match(mutations, /\n\s+family,\n\s+contentLane: lane,/,
+  "createChannel must persist family + the verified lane on the channel doc");
+
+// The `existingAtStart?._id ??` short-circuit skips createChannel on a resume,
+// so a pre-`family` row would otherwise be carried through inception with an
+// implicit lane. It must be stamped explicitly before the first stage runs.
+assert.match(coordinator, /api\.channels\.backfillChannelFamily/,
+  "a resumed family-less channel must be stamped explicitly, not inherited as-is");
+assert(
+  coordinator.indexOf("api.channels.backfillChannelFamily") <
+    coordinator.indexOf('runStage("channel-inception-research"'),
+  "the implicit-family stamp must land before any inception stage executes",
+);
+// The migration only ever fills a hole; it must never relabel a real channel.
+assert.match(mutations, /if \(channel\.family !== undefined && channel\.family !== null\)/);
+assert.match(mutations, /refusing backfill: family/);
+
+// Style DNA / quality bar are the other field pair six legacy channels lack.
+// Positioning is an unconditional stage, and both its resume readers demand the
+// pair, so no channel can complete inception without them.
+assert.match(coordinator, /const qualityBar = buildQualityBar\(payload\.family, styleDNA, now\)/);
+assert.match(coordinator, /styleDNA,\n\s+qaRubric: qualityBar,/,
+  "positioning must persist BOTH styleDNA and qaRubric on the channel");
+assert.match(coordinator,
+  /if \(!styleDNA \|\| styleDNA\.confidence < ESTABLISHED_CONFIDENCE \|\| styleDNA\.groundingGaps\.length\) return undefined;/,
+  "a channel missing/weak styleDNA must never be adopted as completed positioning");
+assert.match(coordinator, /if \(!qualityBar \|\| !identity\.creativeBrief\) return undefined;/);
+assert(
+  coordinator.includes("loadCompleted: loadPositioning") &&
+    coordinator.includes("adoptExisting: loadPositioning"),
+  "both positioning resume readers must enforce the styleDNA/qaRubric contract",
+);
+
+// The channel-creation path must not re-implement media behaviour that was
+// fixed globally (vision token budget, audio looping, caption burn-in).
+for (const bypass of ["ffmpeg", "drawtext", "selfLoopAudio", "aloop", "max_tokens"] as const) {
+  assert(!coordinator.includes(bypass),
+    `inception must not carry its own ${bypass} path around the global fix`);
+}
+
 assert.match(mutations, /identity\?\.role !== "service"/);
 assert.match(mutations, /MAX_INCEPTION_OUTPUT_CHARS = 16_000/);
 assert.match(mutations, /MAX_INCEPTION_STAGES = 10/);
