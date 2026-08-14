@@ -44,16 +44,16 @@ export interface GoldenStage {
 }
 
 export const GOLDEN_SPINE: GoldenStage[] = [
-  { stage: "intel", blocks: ["competitor_research", "topic_select"], note: "Pick topics from real outliers + competitor signal, learning-weighted." },
-  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine", "episode_graph", "learning_contract", "short_strategy"], note: "Show Bible crew and timed story spine; episode_graph locks causal beat-to-scene continuity before render; learning_contract turns an approved objective into source-linked demonstrations and retrieval practice; collage Shorts lock claim/source/beat/motion evidence before render." },
+  { stage: "intel", blocks: ["competitor_research", "topic_select", "quiz_topic_plan"], note: "Pick topics from real outliers + competitor signal, learning-weighted; QuizYear alternatively rotates a curated CC0 Wikidata topic registry with a durable provenance receipt." },
+  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "casefile_source_packet", "casefile_evidence_shot_map", "cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence", "short_strategy"], note: "Show Bible crew and timed story spine; episode_graph locks causal beat-to-scene continuity before render; learning_contract turns an approved objective into source-linked demonstrations and retrieval practice; children_show_bible admits an operator-authored age-band, measurable objective, original recurring world/character, and five-stage participation format only with a fresh graph- and lesson-bound child-editor approval, and can emit only a private review receipt; casefile_source_packet admits only an operator-supplied, primary-source- and rights-bound Case Packet with fresh Case Packet and source-use-ledger-bound editorial approval, and can emit only a private human-review draft; casefile_evidence_shot_map additionally binds every factual claim to reviewed current Scene Manifest / ShotPlan targets under an explicit no-gore/no-unsupported-recreation policy, and can emit only a private human-review receipt; cinematic_case_sequence_draft converts that evidence into source-bound, faceless mannequin multi-shot coverage; cinematic_case_sequence_finalize accepts only a real editor’s matching signature before strict cinematic admission and Novita generation; collage Shorts lock claim/source/beat/motion evidence before render." },
   { stage: "write", blocks: ["script_gen", "hook_craft"], note: "Hook-first, CRAFT_RULES applied." },
-  { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check"], note: "Quality + originality + compliance floor." },
+  { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check", "quiz_topic_safety", "quiz_critic_spec"], note: "Quality + originality + compliance floor; QuizYear contributes deterministic topic-safety and game-format critic receipts." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
   { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
   { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "scene_compiler", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, the deterministic Scene Compiler turns a reviewed scene manifest into a local 16:9 master, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
   { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz." },
   { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
-  { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + text-free Flash scene, deterministic Style-DNA typography, and one publishing gate." },
+  { stage: "package", blocks: ["thumbnail_gen", "metadata", "quiz_metadata", "quiz_thumbnail"], note: "SEO metadata + text-free Flash scene, deterministic Style-DNA typography, and one publishing gate; QuizYear owns a source-grounded metadata package and renderer-native thumbnail." },
   { stage: "verify", blocks: ["qa_assets", "qa_shots", "short_scene_qa", "length_check", "qa_visual", "child_content_safety"], note: "Required asset/shot checks, portrait scene-safe-area proof, deterministic final quality gate, and an additional children-learning human-review admission gate where applicable." },
   { stage: "ship", blocks: ["upload_draft", "emit_bundle", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + multilang reuse + optional distribution + scoped cleanup. NOTE (P2-9): planning-only Short window selection (shorts_spinoff / documentary_short_candidates) is NOT owned by ship — goldenExecution.ts's CATALOG_EXECUTION_BINDINGS assigns those two executables to the `shorts` catalog module (stage: visual); they were moved to the visual stage row to match." },
 ];
@@ -542,18 +542,75 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "casefile-documentary",
     stage: "brief",
     title: "Casefile Documentary — Source-First Evidence Grammar",
-    engine: "Provider-independent Case Packet → rights-aware, cited evidence grammar",
+    engine: "Provider-independent Case Packet → primary-source / rights / editorial-admission receipt → cited evidence grammar",
     how:
-      "A reusable true-crime / investigation foundation rather than an automatic crime-channel switch. It requires a sourced claim " +
-      "ledger, claim state, visual rights, sensitivity classification, reconstruction disclosure, and an on-screen citation for every " +
-      "evidence scene. Active allegations, graphic details, doxxing, and actionable wrongdoing fail closed. The contract is validated " +
-      "in src/engine/casefile.ts before any future Casefile writer or renderer may consume it.",
+      "A reusable true-crime / investigation foundation rather than an automatic crime-channel switch. The registered " +
+      "casefile_source_packet block requires every claim to name an exact primary-source URL/provenance, every ledger source to declare " +
+      "citation-versus-visual use, non-public visual assets to carry matching rights evidence, and a fresh reviewer-identified approval " +
+      "bound to the exact Case Packet and source-use ledger fingerprints. It emits only a private human-review draft receipt plus cited evidence grammar; active " +
+      "allegations, graphic details, doxxing, actionable wrongdoing, stale/mismatched review, and missing evidence fail closed. No automatic " +
+      "channel family consumes it yet.",
     gates: [
-      "source ledger and claim-state completeness",
-      "rights provenance before source media is shown",
+      "primary-source URL/provenance for every claim",
+      "exhaustive citation-versus-visual source-use ledger",
+      "matching rights/usage evidence for every non-public visual asset",
+      "fresh reviewer-identified approval bound to the exact Case Packet and source-use ledger fingerprints",
       "active allegations, graphic detail, doxxing, and actionable wrongdoing blocked",
       "reconstructions require a visible disclosure",
       "every evidence scene carries an on-screen citation",
+      "private human-editorial-review draft only; no automatic family admission",
+    ],
+    status: "reference",
+  },
+  {
+    key: "casefile-evidence-shot-map",
+    stage: "brief",
+    title: "Casefile Evidence Shot Map — Claim-to-Visual Review",
+    engine:
+      "Provider-free admitted Casefile Source Packet + current Scene Manifest + current Story Spine ShotPlan → reviewer-signed factual claim map",
+    how:
+      "A reusable dark-documentary / true-crime quality handoff, not an automatic channel route. The registered " +
+      "casefile_evidence_shot_map block requires every factual Case Packet claim to bind to one or more current scene and/or shot ids, " +
+      "with a closed visual-treatment vocabulary of map, timeline, document abstraction, or a narrowly declared neutral reenactment. " +
+      "Every binding names claim-supported source ids including an admitted primary source, keeps an on-screen citation, and is reviewed " +
+      "against the exact source-packet, Scene Manifest, and ShotPlan fingerprints. The only reconstruction path requires the existing " +
+      "illustrated-reconstruction declaration and exact visible disclosure; no gore or unsupported recreation can be represented in the map. " +
+      "It emits a private human-review-only receipt and no automatic crime, documentary, or cinematic family consumes it.",
+    gates: [
+      "every factual claim maps exactly once to one or more current Scene Manifest and/or ShotPlan ids",
+      "every mapped visual names claim-supported evidence including a declared primary source and a visible citation",
+      "Scene Manifest and canonical ShotPlan fingerprints must match the editor-reviewed map",
+      "closed treatment vocabulary: map, timeline, document abstraction, or declared neutral reenactment only",
+      "no-gore and no-unsupported-recreation policy must both be explicitly true",
+      "neutral reenactment requires illustrated-reconstruction declaration plus exact visible disclosure",
+      "fresh reviewer approval bound to both the source-packet and canonical shot-map fingerprints",
+      "private human-editorial-review receipt only; no automatic family admission or public/scheduled release",
+    ],
+    status: "reference",
+  },
+  {
+    key: "cinematic-case-sequence",
+    stage: "brief",
+    title: "Cinematic Case Sequence — Evidence-Led Multi-Shot Direction",
+    engine:
+      "Admitted Casefile evidence map + Story Spine → reviewer-signed causal coverage units → exact Novita scene plan / EDL / visual-review locks",
+    how:
+      "The production bridge for a Fern-grade investigative treatment: each narrated causal beat becomes two to four purpose-specific " +
+      "shots—spatial anchor, anonymous mannequin action or relationship, cited evidence insert, and consequence/reaction—rather than a " +
+      "rotating b-roll carousel. Original faceless mannequin roles retain a distinct wardrobe silhouette, palette, prop, and movement profile; " +
+      "they are never likenesses of real people. Every camera move, lens, scale, tension state, and cut has an explicit narrative reason. " +
+      "The renderer preserves ordered scene identity across Novita batches and timeline_assemble uses the signed EDL directly; qa_visual samples " +
+      "the exact identity/reveal/contradiction windows. It remains private human-editorial-review-only and does not make crime automatic.",
+    gates: [
+      "every causal beat has continuous two-to-four-shot coverage of its exact Story Spine window",
+      "cold opens, investigations, contradictions, and reveals use geography/person/evidence scale variation—not modulo camera cycling",
+      "question → pressure/uncertainty → reversal/release/residue tension grammar and cut rationale must be explicit",
+      "every factual claim stays bound to an admitted source, cited treatment, and current scene/shot map",
+      "anonymous mannequins are faceless, non-likeness roles with distinct wardrobe/silhouette/prop/movement locks",
+      "no gore, unsupported recreation, or fact-inventing visual treatment; neutral reconstruction carries its exact disclosure",
+      "fresh cinematic-editor approval binds source packet, evidence map, prompt/camera/cut/timing content fingerprint",
+      "ordered renderer receipt and EDL must match every scene id and timing before assembly",
+      "private human-editorial-review only; no automatic family admission or public release",
     ],
     status: "reference",
   },
@@ -573,6 +630,30 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "source references must resolve to the active graph source ledger",
       "children contracts require curriculum or primary evidence and child-safe retrieval wording",
       "stale receipt / graph fingerprint mismatch fails closed",
+    ],
+    status: "reference",
+  },
+  {
+    key: "children-show-bible",
+    stage: "brief",
+    title: "Children’s Show Bible — Curriculum, Identity, and Participation",
+    engine: "Operator-authored age band + one measurable objective + original recurring world/character identity + five-stage child-participation admission",
+    how:
+      "A reusable supervised-learning format contract rather than an automatic children’s channel. The registered " +
+      "children_show_bible block binds an explicit age band, one observable objective/assessment, original recurring character and world " +
+      "locks, and familiar problem → guided attempt → varied repetition → participation → resolution/recall to the active Episode Graph and " +
+      "Learning Contract. A reviewer-identified human child-editor approval must match the exact content, graph, and lesson fingerprints. It " +
+      "blocks obvious borrowed/IP-identifying terms but does not pretend to be trademark clearance; the human editor makes the affirmative " +
+      "original-identity decision. The receipt is private-review-only and does not alter the existing children-learning family’s publishing policy.",
+    gates: [
+      "bounded declared toddler / preschool / early-primary age band",
+      "exactly one observable, measurable learning objective tied to every graph beat and the Learning Contract",
+      "original recurring guide/world identity locks must exactly match the active Episode Graph catalog",
+      "obvious borrowed/IP-identifying identity terms blocked; human child editor affirms original identity",
+      "full causal graph coverage in familiar problem → guided attempt → varied repetition → participation → resolution/recall order",
+      "varied repetition changes at least two dimensions; participation and recall use the locked assessment/retrieval prompts",
+      "fresh child-editor approval bound to the exact bible, Episode Graph, and Learning Contract fingerprints",
+      "private human child-editor-review receipt only; no automatic family admission or public/scheduled release",
     ],
     status: "reference",
   },
@@ -721,34 +802,18 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "lofi",
     stage: "visual",
-    title: "Lofi Loop — Seaside Engine",
+    title: "Lofi Loop — Novita Ambient Engine",
     engine:
-      "Lofi — Nano Banana Pro still + Gemini-Vision grounded motion prompt + Kling v3 Omni pro 2×15s seamless loop + temporal de-warble + optional Topaz 4K — a coherent Ghibli sunny-seaside world",
+      "A Style-DNA-locked Novita Z-Image Turbo still, independently reviewed by a non-Google vision provider, is the exact source frame for a certified Novita LTX-2.5 image-to-video loop. A bounded seam treatment, mastered music mix, and final visual evidence turn it into an ambient product.",
     how:
-      "A single Nano Banana Pro painting (gemini-3-pro-image-preview — the standard still engine because it " +
-      "obeys negative rules like no-rain-inside; Flux is opt-in) from a coherent Ghibli seaside catalogue (beach cafe, seaside room, sunset " +
-      "pier, hillside meadow) is brought to life as an HOURS-loopable lofi video. Each scene declares ranked " +
-      "animation priorities + forbidden motion + spatial rules, and a Gemini-Vision pass writes the motion " +
-      "prompt grounded in the actual painting, so clouds, water, foliage, a calm dark-haired host and her cat " +
-      "all move while the distance stays still. The SEAMLESS loop is the 2×15s method: clip A animates freely, " +
-      "clip B animates BACK to the origin frame, so the 30s unit's last frame == first frame and a plain " +
-      "stream_loop has an invisible seam — never a crossfade or boomerang. The camera is locked twice over: a " +
-      "hard tripod-lock clause on every Kling prompt (wind moves the subjects, never the viewpoint) AND a " +
-      "motion-aware temporal de-warble that strips AI shimmer from the loop unit (seam preserved). No upscale " +
-      "is baked in — Topaz 4K is a separate optional pass on the short loop unit. A deblur title intro + lofi " +
-      "music finish it. Self-describing (LOFI_MODULE contract), fully resumable -- as originally designed in the now-deleted src/lib/lofi.ts. " +
-      "DELETED, NOT PENDING (P1-9 resolved by P2-7): src/lib/lofi.ts (509 L) had zero importers repo-wide and was never on the executed " +
-      "path, so it was removed outright as confirmed-dead in commit 183ee6a. This was never a capability gap -- the pipeline that " +
-      "actually runs the lofi archetype is, and always was, inline in src/trigger/blocks/lofiBlocks.ts (scene/keyframe/loop generation " +
-      "~lines 41,53; music mix ~lines 774-946), calling src/lib/ffmpeg.ts and src/lib/novitaMedia.ts directly. The six gates below " +
-      "describe lofi.ts's former design; they have NOT been re-verified against lofiBlocks.ts's actual implementation.",
+      "scene_planner selects an authored ambient scene; keyframes refuses production before paid work unless the channel supplies a recurring subject and setting plus a configured Groq or FAL reviewer. It permits at most two Novita still attempts and reviews the accepted image for identity, visual motifs, physics, and baked-in text. That accepted still is the LTX source frame; the independent scene director names only its real, subtle moving elements. loop_clips adds a hard static-camera prompt, renders one LTX-2.5 clip from that frame, and uses an explicit loop mode. FLF2V uses a separately capped <=0.6s safety blend; crossfade and boomerang remain explicit alternatives. assemble measures the final loop unit's first/last-frame difference and retains it as evidence, then streams the unit under mastered music with a deblur title intro.",
     gates: [
-      "required inputs validated (scene / channel / title / music / slug)",
-      "motion ensured — ranked priorities + forbidden + spatial, ≥5 element types",
-      "seamless 2×15s loop — last frame == first frame (no crossfade, no boomerang)",
-      "static camera locked in-prompt (wind moves subjects, not the viewpoint)",
-      "temporal de-warble removes AI camera shimmer (seam preserved)",
-      "no baked-in upscale — native res; Topaz 4K is a separate optional pass",
+      "production keyframes require a grounded Style DNA subject and setting before any paid image work",
+      "production keyframes require Groq or FAL review; Google/Gemini is not an eligible reviewer",
+      "the accepted still is reviewed for channel identity, motifs, indoor-weather physics, and no baked-in text",
+      "one exact accepted still anchors the Novita LTX-2.5 image-to-video job; the camera is explicitly locked",
+      "loop mode is explicit; FLF2V's safety blend is independently capped at 0.6 seconds",
+      "the assembled loop unit retains a measured first/last-frame difference for final QA",
     ],
     status: "reference",
   },

@@ -15,6 +15,9 @@ import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { assertNovitaVideoProfileRuntime } from "@/engine/runtimeCapability";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
+import type { CinematicKeyframeReview } from "@/engine/cinematicKeyframeReview";
+import type { CinematicClipReview } from "@/engine/cinematicClipReview";
+import type { LtxCreativeAdapterSelection } from "@/lib/ltxCreativeAdapter";
 
 export type NovitaProfileId = GenerationProfile["id"];
 /**
@@ -34,6 +37,12 @@ export interface NovitaGeneratedScene {
   cameraMove?: Shot["cameraMove"];
   shotScale?: Shot["shotScale"];
   lens?: string;
+  /** Stable mannequin identities that must remain visually continuous. */
+  continuityIds?: string[];
+  /** Reviewer-facing source/camera/cut obligations for this exact first frame. */
+  keyframeRequirements?: string[];
+  /** Applied only to the LTX phase after exact worker-manifest admission. */
+  creativeAdapter?: LtxCreativeAdapterSelection;
 }
 
 export interface NovitaRenderedScene extends NovitaGeneratedScene {
@@ -41,6 +50,31 @@ export interface NovitaRenderedScene extends NovitaGeneratedScene {
   stillUrl: string;
   clipKey: string;
   clipUrl: string;
+  keyframeReview?: CinematicKeyframeReview;
+  /** Independent review of the actual LTX moving take before assembly. */
+  clipReview?: CinematicClipReview;
+}
+
+export interface NovitaKeyframeGate {
+  /** One controlled replacement still is enough to avoid duplicate spend loops. */
+  maxImageAttempts?: 1 | 2;
+  review(input: {
+    scene: NovitaGeneratedScene;
+    stillKey: string;
+    stillUrl: string;
+  }): Promise<CinematicKeyframeReview>;
+}
+
+export interface NovitaClipGate {
+  /** One controlled replacement take is enough to avoid duplicate spend loops. */
+  maxVideoAttempts?: 1 | 2;
+  review(input: {
+    scene: NovitaGeneratedScene;
+    stillKey: string;
+    stillUrl: string;
+    clipKey: string;
+    clipUrl: string;
+  }): Promise<CinematicClipReview>;
 }
 
 export interface NovitaImageProviderReceipt {
@@ -132,6 +166,7 @@ function asShot(scene: NovitaGeneratedScene, profileId: NovitaProfileId, stillKe
     negative: scene.negativePrompt,
     seed: scene.seed,
     generationProfile: profileId,
+    ...(scene.creativeAdapter ? { creativeAdapter: scene.creativeAdapter } : {}),
     ...(stillKey ? { stillKey } : {}),
   };
 }
@@ -154,6 +189,169 @@ function asLtxDistilledVideoShot(scene: NovitaGeneratedScene, profileId: NovitaP
   };
 }
 
+function keyframeRetrySeed(seed: number | undefined, attempt: number): number {
+  const base = Number.isFinite(seed) ? Math.floor(seed!) : 4_242;
+  return Math.abs((base + attempt * 104_729) % 2_147_483_647);
+}
+
+function clipRetrySeed(seed: number | undefined, attempt: number): number {
+  const base = Number.isFinite(seed) ? Math.floor(seed!) : 8_686;
+  return Math.abs((base + attempt * 154_858_63) % 2_147_483_647);
+}
+
+function imageSpendError(error: unknown, costUsd: number): Error {
+  const source = error instanceof Error ? error : new Error(String(error));
+  const target = Object.isExtensible(source)
+    ? source
+    : Object.assign(new Error(source.message), { cause: source });
+  const prior = (target as { additionalObservedCostUsd?: unknown }).additionalObservedCostUsd;
+  const priorCost = typeof prior === "number" && Number.isFinite(prior) && prior > 0 ? prior : 0;
+  return Object.assign(target, {
+    additionalObservedCostUsd: priorCost + costUsd,
+    retryable: false,
+  });
+}
+
+/**
+ * Selects source stills before LTX spends. A keyframe review may buy exactly
+ * one replacement image; it can never loop indefinitely or render video from
+ * a reviewer-rejected still. Kept injectable so the recovery contract has a
+ * real provider-free test rather than a static source assertion.
+ */
+export async function reviewKeyframesBeforeVideo(args: {
+  scenes: readonly NovitaGeneratedScene[];
+  stillByShot: ReadonlyMap<string, string>;
+  maxImageAttempts: number;
+  imageCostUsd: number;
+  imageMaxCostUsd: number;
+  imageReceipts: readonly NovitaBillingReceipt[];
+  review: (input: { scene: NovitaGeneratedScene; stillKey: string }) => Promise<CinematicKeyframeReview>;
+  renderReplacement: (input: {
+    scene: NovitaGeneratedScene;
+    repairId: string;
+    attempt: number;
+    prompt: string;
+    seed: number;
+    remainingCostUsd: number;
+  }) => Promise<{ stillKey: string; costUsd: number; billingReceipt: NovitaBillingReceipt }>;
+}): Promise<{
+  stillByShot: Map<string, string>;
+  keyframeReviewByShot: Map<string, CinematicKeyframeReview>;
+  imageCostUsd: number;
+  imageReceipts: NovitaBillingReceipt[];
+}> {
+  const stillByShot = new Map(args.stillByShot);
+  const keyframeReviewByShot = new Map<string, CinematicKeyframeReview>();
+  const imageReceipts = [...args.imageReceipts];
+  let observedImageCostUsd = args.imageCostUsd;
+  for (const scene of args.scenes) {
+    const id = safeId(scene.id);
+    let attempt = 1;
+    for (;;) {
+      const stillKey = stillByShot.get(id);
+      if (!stillKey) throw new Error(`novita keyframe gate is missing the initial still for ${id}`);
+      try {
+        const review = await args.review({ scene, stillKey });
+        keyframeReviewByShot.set(id, review);
+        break;
+      } catch (reviewError) {
+        if (attempt >= args.maxImageAttempts) throw reviewError;
+        const remainingCostUsd = args.imageMaxCostUsd - observedImageCostUsd;
+        if (remainingCostUsd <= 0) {
+          throw new Error(`novita keyframe retry has no admitted image budget remaining for ${id}`);
+        }
+        const repairId = `${id}-keyframe-retry-${attempt + 1}`;
+        const reason = reviewError instanceof Error ? reviewError.message.slice(0, 420) : String(reviewError).slice(0, 420);
+        const replacement = await args.renderReplacement({
+          scene,
+          repairId,
+          attempt: attempt + 1,
+          prompt: `${scene.imagePrompt}\n\nIndependent keyframe correction ${attempt + 1}/${args.maxImageAttempts}: preserve every literal mannequin, wardrobe, prop, setting, camera, and no-text lock. Resolve this reviewer finding: ${reason}`,
+          seed: keyframeRetrySeed(scene.seed, attempt),
+          remainingCostUsd,
+        });
+        observedImageCostUsd += replacement.costUsd;
+        imageReceipts.push(replacement.billingReceipt);
+        stillByShot.set(id, replacement.stillKey);
+        attempt += 1;
+      }
+    }
+  }
+  return { stillByShot, keyframeReviewByShot, imageCostUsd: observedImageCostUsd, imageReceipts };
+}
+
+/**
+ * Review actual LTX clips before they become an ordered editing manifest. A
+ * rejected take receives one repair using the already accepted source still;
+ * a second failure is surfaced rather than hidden by repeated paid renders.
+ */
+export async function reviewClipsBeforeAssembly(args: {
+  scenes: readonly NovitaGeneratedScene[];
+  stillByShot: ReadonlyMap<string, string>;
+  clipByShot: ReadonlyMap<string, string>;
+  maxVideoAttempts: number;
+  videoCostUsd: number;
+  videoMaxCostUsd: number;
+  videoReceipts: readonly NovitaBillingReceipt[];
+  review: (input: { scene: NovitaGeneratedScene; stillKey: string; clipKey: string }) => Promise<CinematicClipReview>;
+  renderReplacement: (input: {
+    scene: NovitaGeneratedScene;
+    stillKey: string;
+    repairId: string;
+    attempt: number;
+    motionPrompt: string;
+    seed: number;
+    remainingCostUsd: number;
+  }) => Promise<{ clipKey: string; costUsd: number; billingReceipt: NovitaBillingReceipt }>;
+}): Promise<{
+  clipByShot: Map<string, string>;
+  clipReviewByShot: Map<string, CinematicClipReview>;
+  videoCostUsd: number;
+  videoReceipts: NovitaBillingReceipt[];
+}> {
+  const clipByShot = new Map(args.clipByShot);
+  const clipReviewByShot = new Map<string, CinematicClipReview>();
+  const videoReceipts = [...args.videoReceipts];
+  let observedVideoCostUsd = args.videoCostUsd;
+  for (const scene of args.scenes) {
+    const id = safeId(scene.id);
+    const stillKey = args.stillByShot.get(id);
+    if (!stillKey) throw new Error(`novita clip gate is missing the accepted still for ${id}`);
+    let attempt = 1;
+    for (;;) {
+      const clipKey = clipByShot.get(id);
+      if (!clipKey) throw new Error(`novita clip gate is missing the initial LTX clip for ${id}`);
+      try {
+        const review = await args.review({ scene, stillKey, clipKey });
+        clipReviewByShot.set(id, review);
+        break;
+      } catch (reviewError) {
+        if (attempt >= args.maxVideoAttempts) throw reviewError;
+        const remainingCostUsd = args.videoMaxCostUsd - observedVideoCostUsd;
+        if (remainingCostUsd <= 0) {
+          throw new Error(`novita clip retry has no admitted video budget remaining for ${id}`);
+        }
+        const repairId = `${id}-motion-retry-${attempt + 1}`;
+        const reason = reviewError instanceof Error ? reviewError.message.slice(0, 420) : String(reviewError).slice(0, 420);
+        const replacement = await args.renderReplacement({
+          scene,
+          stillKey,
+          repairId,
+          attempt: attempt + 1,
+          motionPrompt: `${scene.motionPrompt}\n\nIndependent motion correction ${attempt + 1}/${args.maxVideoAttempts}: preserve the accepted first frame, mannequin identity treatment, wardrobe, props, setting, camera, and causal purpose. Execute one continuous readable action and finish its planned result. Resolve this reviewer finding: ${reason}`,
+          seed: clipRetrySeed(scene.seed, attempt),
+          remainingCostUsd,
+        });
+        observedVideoCostUsd += replacement.costUsd;
+        videoReceipts.push(replacement.billingReceipt);
+        clipByShot.set(id, replacement.clipKey);
+        attempt += 1;
+      }
+    }
+  }
+  return { clipByShot, clipReviewByShot, videoCostUsd: observedVideoCostUsd, videoReceipts };
+}
+
 function exactCandidateByShot(result: NovitaRenderResult, ids: readonly string[]): Map<string, string> {
   const candidates = (result.candidates ?? []).filter((candidate) => candidate.candidateIndex === 0);
   const byShot = new Map(candidates.map((candidate) => [candidate.shotId, candidate.key]));
@@ -171,11 +369,19 @@ export async function renderNovitaGeneratedScenes(args: {
   maxCostUsd: number;
   maxConcurrent?: number;
   lifecycle?: NovitaRenderLifecycle;
+  /** Runs after paid still generation and before any LTX video spend. */
+  keyframeGate?: NovitaKeyframeGate;
+  /** Runs after each LTX take and before any clip can reach the editor. */
+  clipGate?: NovitaClipGate;
 }): Promise<{
   scenes: NovitaRenderedScene[];
   costUsd: number;
   imageReceipt: NovitaBillingReceipt;
+  /** Every paid image receipt, including bounded keyframe replacements. */
+  imageReceipts: NovitaBillingReceipt[];
   videoReceipt: NovitaBillingReceipt;
+  /** Every paid video receipt, including bounded motion replacements. */
+  videoReceipts: NovitaBillingReceipt[];
 }> {
   if (!args.scenes.length || args.scenes.length > 24) {
     throw new Error("novita media sequence must contain between 1 and 24 scenes");
@@ -191,10 +397,16 @@ export async function renderNovitaGeneratedScenes(args: {
   }
   const prefix = cleanPrefix(args.prefix);
   const imageShots = args.scenes.map((scene) => asShot(scene, profile.id));
+  const maxImageAttempts = args.keyframeGate
+    ? Math.max(1, Math.min(2, args.keyframeGate.maxImageAttempts ?? 1))
+    : 1;
+  const maxVideoAttempts = args.clipGate
+    ? Math.max(1, Math.min(2, args.clipGate.maxVideoAttempts ?? 1))
+    : 1;
   const envelope = novitaCostEnvelope({
     label: "novita media sequence",
-    imageJobs: imageShots.length * profile.image.candidates,
-    videoJobs: imageShots.length,
+    imageJobs: imageShots.length * profile.image.candidates * maxImageAttempts,
+    videoJobs: imageShots.length * maxVideoAttempts,
     maxCostUsd: args.maxCostUsd,
   });
   const imageResult = await renderImages({
@@ -208,7 +420,48 @@ export async function renderNovitaGeneratedScenes(args: {
     lifecycle: args.lifecycle,
   });
   const ids = imageShots.map((shot) => shot.id);
-  const stillByShot = exactCandidateByShot(imageResult, ids);
+  let stillByShot = exactCandidateByShot(imageResult, ids);
+  let keyframeReviewByShot = new Map<string, CinematicKeyframeReview>();
+  let imageReceipts = [imageResult.billingReceipt];
+  let observedImageCostUsd = imageResult.costUsd;
+  if (args.keyframeGate) {
+    try {
+      const recovery = await reviewKeyframesBeforeVideo({
+        scenes: args.scenes,
+        stillByShot,
+        maxImageAttempts,
+        imageCostUsd: observedImageCostUsd,
+        imageMaxCostUsd: envelope.imageMaxCostUsd,
+        imageReceipts,
+        review: async ({ scene, stillKey }) => args.keyframeGate!.review({
+          scene,
+          stillKey,
+          stillUrl: await presignDownload(stillKey),
+        }),
+        renderReplacement: async ({ scene, repairId, prompt, seed, remainingCostUsd }) => {
+          const repairResult = await renderImages({
+            prefix: `${prefix}/images-keyframe-retry-${repairId}`,
+            shots: [asShot({ ...scene, id: repairId, imagePrompt: prompt, seed }, profile.id)],
+            profile: toNovitaPhaseProfile(profile, "image"),
+            nshard: 1,
+            maxConcurrent: 1,
+            jobs: "full",
+            maxCostUsd: remainingCostUsd,
+            lifecycle: args.lifecycle,
+          });
+          const stillKey = exactCandidateByShot(repairResult, [repairId]).get(repairId);
+          if (!stillKey) throw new Error(`novita keyframe retry did not return ${repairId}`);
+          return { stillKey, costUsd: repairResult.costUsd, billingReceipt: repairResult.billingReceipt };
+        },
+      });
+      stillByShot = recovery.stillByShot;
+      keyframeReviewByShot = recovery.keyframeReviewByShot;
+      observedImageCostUsd = recovery.imageCostUsd;
+      imageReceipts = recovery.imageReceipts;
+    } catch (error) {
+      throw imageSpendError(error, observedImageCostUsd);
+    }
+  }
   const videoShots = args.scenes.map((scene) => {
     const id = safeId(scene.id);
     return asLtxDistilledVideoShot(scene, profile.id, stillByShot.get(id)!);
@@ -226,15 +479,53 @@ export async function renderNovitaGeneratedScenes(args: {
       lifecycle: args.lifecycle,
     });
   } catch (error) {
-    if (error && typeof error === "object") {
-      Object.assign(error, {
-        additionalObservedCostUsd: imageResult.costUsd,
-        retryable: false,
-      });
-    }
-    throw error;
+    throw imageSpendError(error, observedImageCostUsd);
   }
-  const clipByShot = exactCandidateByShot(videoResult, ids);
+  let clipByShot = exactCandidateByShot(videoResult, ids);
+  let clipReviewByShot = new Map<string, CinematicClipReview>();
+  let videoReceipts = [videoResult.billingReceipt];
+  let observedVideoCostUsd = videoResult.costUsd;
+  if (args.clipGate) {
+    try {
+      const recovery = await reviewClipsBeforeAssembly({
+        scenes: args.scenes,
+        stillByShot,
+        clipByShot,
+        maxVideoAttempts,
+        videoCostUsd: observedVideoCostUsd,
+        videoMaxCostUsd: envelope.videoMaxCostUsd,
+        videoReceipts,
+        review: async ({ scene, stillKey, clipKey }) => args.clipGate!.review({
+          scene,
+          stillKey,
+          stillUrl: await presignDownload(stillKey),
+          clipKey,
+          clipUrl: await presignDownload(clipKey),
+        }),
+        renderReplacement: async ({ scene, stillKey, repairId, motionPrompt, seed, remainingCostUsd }) => {
+          const repairResult = await renderVideo({
+            prefix: `${prefix}/video-motion-retry-${repairId}`,
+            shots: [asLtxDistilledVideoShot({ ...scene, id: repairId, motionPrompt, seed }, profile.id, stillKey)],
+            profile: toNovitaPhaseProfile(profile, "video"),
+            nshard: 1,
+            maxConcurrent: 1,
+            jobs: "full",
+            maxCostUsd: remainingCostUsd,
+            lifecycle: args.lifecycle,
+          });
+          const clipKey = exactCandidateByShot(repairResult, [repairId]).get(repairId);
+          if (!clipKey) throw new Error(`novita clip retry did not return ${repairId}`);
+          return { clipKey, costUsd: repairResult.costUsd, billingReceipt: repairResult.billingReceipt };
+        },
+      });
+      clipByShot = recovery.clipByShot;
+      clipReviewByShot = recovery.clipReviewByShot;
+      observedVideoCostUsd = recovery.videoCostUsd;
+      videoReceipts = recovery.videoReceipts;
+    } catch (error) {
+      throw imageSpendError(error, observedImageCostUsd + observedVideoCostUsd);
+    }
+  }
   const scenes = await Promise.all(args.scenes.map(async (scene) => {
     const id = safeId(scene.id);
     const stillKey = stillByShot.get(id)!;
@@ -246,13 +537,17 @@ export async function renderNovitaGeneratedScenes(args: {
       clipKey,
       stillUrl: await presignDownload(stillKey),
       clipUrl: await presignDownload(clipKey),
+      ...(keyframeReviewByShot.has(id) ? { keyframeReview: keyframeReviewByShot.get(id)! } : {}),
+      ...(clipReviewByShot.has(id) ? { clipReview: clipReviewByShot.get(id)! } : {}),
     };
   }));
   return {
     scenes,
-    costUsd: imageResult.costUsd + videoResult.costUsd,
+    costUsd: observedImageCostUsd + observedVideoCostUsd,
     imageReceipt: imageResult.billingReceipt,
+    imageReceipts,
     videoReceipt: videoResult.billingReceipt,
+    videoReceipts,
   };
 }
 
@@ -544,6 +839,8 @@ export async function renderNovitaI2V(args: {
   negativePrompt?: string;
   seed?: number;
   profileId?: NovitaProfileId;
+  /** Optional sealed LTX creative adapter; runtime/benchmark admission happens in the direct worker path. */
+  creativeAdapter?: LtxCreativeAdapterSelection;
   /** Signed envelope for this one direct video worker. */
   maxCostUsd: number;
   lifecycle?: NovitaRenderLifecycle;
@@ -575,6 +872,7 @@ export async function renderNovitaI2V(args: {
     durationSec: args.durationSec ?? 5,
     negativePrompt: args.negativePrompt,
     seed: args.seed,
+    creativeAdapter: args.creativeAdapter,
   }, profile.id, stillKey);
   const result = await renderVideo({
     prefix: `${prefix}/video`,

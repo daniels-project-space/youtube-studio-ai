@@ -6,6 +6,7 @@ import {
   contentLaneForFamily,
   inferContentLane,
   injectContentLaneIntoPipeline,
+  laneQualityPolicy,
   resolveContentLane,
 } from "@/engine/contentLane";
 import type { PipelineEntry } from "@/engine/types";
@@ -101,6 +102,21 @@ assert.equal(
   "every classified production lane must score the final audience-facing audio",
 );
 assert.equal(whiteboardPipeline.find((entry) => entry.block === "qa_visual")?.params?.contentLane, undefined);
+
+// Final-master pacing is owned by the same lane contract as static-hold QA.
+// It is never a global "more cuts is better" score: only fast-paced Shorts
+// receive the measurable cadence mode, while cinematic/narrated/children lanes
+// preserve a calibrated human-review route for legitimate continuous movement.
+assert.equal(laneQualityPolicy("short_form").visualPacing.mode, "scene_rhythm");
+assert(laneQualityPolicy("short_form").visualPacing.maxMarkerHoldSec! <= 6);
+for (const lane of ["children_learning_supervised", "narrated_documentary", "cinematic_ai"] as const) {
+  assert.equal(laneQualityPolicy(lane).visualPacing.mode, "calibrated_review");
+  assert(laneQualityPolicy(lane).visualPacing.maxMarkerHoldSec !== null);
+}
+for (const lane of ["ambient_guided", "music_loop"] as const) {
+  assert.equal(laneQualityPolicy(lane).visualPacing.mode, "exempt");
+  assert.equal(laneQualityPolicy(lane).visualPacing.maxMarkerHoldSec, null);
+}
 
 // Regression: every real family design must satisfy the same lane contract
 // before it is persisted. This prevents a future compiler completion or new

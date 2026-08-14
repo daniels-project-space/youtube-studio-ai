@@ -11,6 +11,7 @@ import {
   FAMILY_CREW,
   CREW_ROLE_BLOCK,
   assertFamilyAutonomousPlanningPipeline,
+  familyAutonomousPlanningCapability,
   familyDurationContract,
   resolveFamilyEpisodeLengthSeconds,
   familyProductionReadiness,
@@ -310,10 +311,13 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // compiled graph itself makes the non-Gemini route inspectable and reusable.
   if (opts.family === "quizyear") {
     const pinnedTopic = opts.paramOverrides?.["quiz_year"]?.["topic"];
+    const planner = familyAutonomousPlanningCapability("quizyear");
+    const forbiddenPlannerBlocks = new Set(
+      planner.mode === "registered_non_gemini" ? planner.forbiddenGeminiBlocks : [],
+    );
     const safeDefaultCategories =
       "guess_year,capital_city,country_currency,element_symbol,element_atomic_number";
     pipeline = pipeline.flatMap((entry): PipelineEntry[] => {
-      if (entry.block === "competitor_research") return [];
       if (entry.block === "topic_select") {
         return [{
           block: "quiz_topic_plan",
@@ -351,6 +355,10 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         return [{ block: "quiz_critic_spec" }, { block: "quiz_metadata" }];
       }
       if (entry.block === "thumbnail_gen") return [{ block: "quiz_thumbnail" }];
+      // Every legacy crew/research entry has a Gemini-backed planner. Keep the
+      // authoritative list on the family capability, so later crew changes
+      // cannot silently reintroduce a provider call into this certified route.
+      if (forbiddenPlannerBlocks.has(entry.block)) return [];
       return [entry];
     });
   }
@@ -684,6 +692,17 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   pipeline = completed.entries;
   if (completed.inserted.length) {
     warnings.push(`Production compiler added required modules: ${completed.inserted.join(", ")}.`);
+  }
+  // Policy completion is shared with legacy families and may re-add a generic
+  // research/crew module. A registered autonomous route is stricter: its
+  // capability is the final authority over provider-backed planning entries.
+  // Apply this *after* completion so the executable graph, not an earlier
+  // intermediate, is what the admission assertion certifies.
+  if (opts.family === "quizyear") {
+    const planner = familyAutonomousPlanningCapability("quizyear");
+    if (planner.mode === "registered_non_gemini") {
+      pipeline = pipeline.filter((entry) => !planner.forbiddenGeminiBlocks.includes(entry.block));
+    }
   }
 
   const contentLane = contentLaneForFamily(opts.family);

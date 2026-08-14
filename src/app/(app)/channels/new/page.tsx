@@ -218,10 +218,7 @@ export default function NewChannelWizard() {
   // Pipeline style — per-module presets/knobs the new channel starts with
   // (validated server-side by channels.setModuleConfig in design-channel).
   const [moduleConfig, setModuleConfig] = useState<ModuleConfigMap>({});
-  // example-clip analysis
-  const [analyzing, setAnalyzing] = useState(false);
   const [clipNote, setClipNote] = useState<string | null>(null);
-  const analyzeRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [concept, setConcept] = useState("");
   const [suggesting, setSuggesting] = useState(false);
 
@@ -319,6 +316,10 @@ export default function NewChannelWizard() {
         );
         const dataStoryAdmission = dataStoryRecommendation?.automationAdmission;
         const recommendedDataStory = Boolean(dataStoryRecommendation);
+        const casefileCinematicRecommendation = preflight?.recommendedModules?.find(
+          (module) => module.block === "cinematic_case_sequence"
+            && module.profile === "faceless_source_bound_cinematic_sequence/v1",
+        );
         setDataStorySuggested(recommendedDataStory);
         if (preflight?.productionReady && isFamilyProductionReady(d.family as FamilyKey)) {
           selectFamily(d.family as FamilyKey);
@@ -347,67 +348,15 @@ export default function NewChannelWizard() {
         const dataStoryNote = recommendedDataStory
           ? ` Source-attributed Data Story is recommended; enable it in Details to explicitly accept its named-source evidence contract.${dataStoryAdmission?.autonomous === false ? ` Automatic production remains blocked: ${dataStoryAdmission.remediation ?? "register a non-Gemini visual-insert planner."}` : ""}`
           : "";
-        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (renderer unavailable)"} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${duration}${budgetFloor}${providers}${requirements}${quality}${runtime}${validation}${dataStoryNote}`);
+        const casefileNote = casefileCinematicRecommendation
+          ? " This factual cinematic route requires a source-first Case Packet, evidence-to-shot map, and reviewer-signed faceless mannequin sequence before it can enter rendering."
+          : "";
+        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (renderer unavailable)"} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${duration}${budgetFloor}${providers}${requirements}${quality}${runtime}${validation}${dataStoryNote}${casefileNote}`);
       } catch {
         setClipNote("Suggestion failed — pick a format manually below.");
       } finally {
         setSuggesting(false);
       }
-    })();
-  }
-
-  // Analyze a pasted example clip → suggest a family + style (operator confirms).
-  function analyze() {
-    const u = clipUrl.trim();
-    if (!u || analyzing) return;
-    setAnalyzing(true); setClipNote(null);
-    (async () => {
-      try {
-        const res = await fetch("/api/analyze-clip", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: u }) });
-        const d = await res.json();
-        if (!res.ok || !d.id) { setClipNote(d.error ?? "Could not start analysis."); setAnalyzing(false); return; }
-        if (analyzeRef.current) clearInterval(analyzeRef.current);
-        analyzeRef.current = setInterval(async () => {
-          try {
-            const r = await fetch(`/api/analyze-clip?id=${encodeURIComponent(d.id)}`);
-            const j = await r.json();
-            if (j.status === "COMPLETED" && j.output?.analysis) {
-              if (analyzeRef.current) clearInterval(analyzeRef.current);
-              const a = j.output.analysis;
-              if (a.couldAnalyze === false) {
-                setClipNote("Couldn't analyze this clip (live stream, private, or unavailable) — pick a format manually below.");
-                setAnalyzing(false);
-                return;
-              }
-              const analyzedFamily = a.recommendedFamily && a.recommendedFamily in FAMILIES
-                ? a.recommendedFamily as FamilyKey
-                : undefined;
-              const selectedFamily = analyzedFamily && isFamilyProductionReady(analyzedFamily)
-                ? analyzedFamily
-                : undefined;
-              if (selectedFamily) {
-                selectFamily(
-                  selectedFamily,
-                  typeof a.approxLengthSec === "number" && a.approxLengthSec > 0
-                    ? a.approxLengthSec
-                  : undefined,
-                );
-              } else if (analyzedFamily) {
-                setFamily("");
-              }
-              if (a.recommendedNicheKey) { setNicheKey(a.recommendedNicheKey); }
-              if (a.recommendedFootageTheme) setFootageTheme(a.recommendedFootageTheme);
-              setToggles((p) => ({ ...p, quotes: !!a.hasNarration && p.quotes, captions: !!a.hasNarration && p.captions, chapters: !!a.hasNarration && p.chapters }));
-              setClipNote(`Detected: ${a.visualStyle || "?"} · ${a.hasNarration ? "narrated" : "no narration"} · music ${a.musicRole}. Suggested format: ${analyzedFamily ? FAMILIES[analyzedFamily].label : a.recommendedFamily}${analyzedFamily && !selectedFamily ? " is currently renderer-blocked; no unlike substitute was selected automatically." : "."} ${a.notes ?? ""}`);
-              setAnalyzing(false);
-            } else if (["FAILED", "CRASHED", "CANCELED", "TIMED_OUT"].includes(j.status)) {
-              if (analyzeRef.current) clearInterval(analyzeRef.current);
-              setClipNote("Analysis failed (is the video public?). You can still pick a format manually.");
-              setAnalyzing(false);
-            }
-          } catch { /* keep polling */ }
-        }, 2500);
-      } catch { setClipNote("Network error starting analysis."); setAnalyzing(false); }
     })();
   }
 
@@ -707,7 +656,6 @@ export default function NewChannelWizard() {
       submissionGate.abort();
       if (pollCallbackRef.current === poll) pollCallbackRef.current = null;
       document.removeEventListener("visibilitychange", resumeVisiblePolling);
-      if (analyzeRef.current) clearInterval(analyzeRef.current);
     };
   }, [poll, submitPending]);
 
@@ -850,13 +798,10 @@ export default function NewChannelWizard() {
               setName(e.target.value);
               if (!normalizeYoutubeChannelName(e.target.value)) setAutoYoutube(false);
             }} placeholder="e.g. Stoic Truths" style={inpStyle} /></label>
-          <label style={lblStyle}><span style={capStyle}>Example clip URL (optional — Gemini analyzes it to match the style)</span>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <input value={clipUrl} onChange={(e) => setClipUrl(e.target.value)} placeholder="paste a YouTube link you like" style={{ ...inpStyle, flex: 1 }} />
-              <button onClick={analyze} disabled={!clipUrl.trim() || analyzing} style={{ ...btnGhost, opacity: !clipUrl.trim() || analyzing ? 0.5 : 1, whiteSpace: "nowrap" }}>{analyzing ? "Analyzing…" : "Analyze"}</button>
-            </div>
+          <label style={lblStyle}><span style={capStyle}>Reference video URL (optional — retained as operator context; no automatic copying or clip analysis)</span>
+            <input value={clipUrl} onChange={(e) => setClipUrl(e.target.value)} placeholder="paste a YouTube link whose qualities you want to discuss" style={inpStyle} />
           </label>
-          <label style={lblStyle}><span style={capStyle}>Or describe the channel in words (Gemini suggests a format + the crew it needs)</span>
+          <label style={lblStyle}><span style={capStyle}>Describe the channel in words (the deterministic advisor suggests a compatible format and production contract)</span>
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <input value={concept} onChange={(e) => setConcept(e.target.value)} placeholder="e.g. calm daily stoicism lessons over cinematic nature b-roll" style={{ ...inpStyle, flex: 1 }} />
               <button onClick={suggest} disabled={!concept.trim() || suggesting} style={{ ...btnGhost, opacity: !concept.trim() || suggesting ? 0.5 : 1, whiteSpace: "nowrap" }}>{suggesting ? "Thinking…" : "Suggest"}</button>

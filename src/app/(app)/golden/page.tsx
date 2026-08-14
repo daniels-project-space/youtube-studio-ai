@@ -17,9 +17,12 @@ const PROOFS: { src: string; alt: string }[] = [
 ];
 
 const CINEMATIC_PROOFS: { src: string; alt: string }[] = [
-  { src: "cinematic/cash.jpg", alt: "Victor Lustig — counting the cash" },
-  { src: "cinematic/handshake.jpg", alt: "Victor Lustig — the handshake" },
+  { src: "cinematic/cash.jpg", alt: "Legacy cinematic exploration — visible-face reference, not approved for faceless Casefile" },
+  { src: "cinematic/handshake.jpg", alt: "Legacy cinematic exploration — visible-face reference, not approved for faceless Casefile" },
 ];
+
+const CINEMATIC_IDENTITY_HOLD =
+  "Reference hold: these legacy stills contain a distinctive photorealistic face. They are not an approved visual target for source-bound Casefile work. That route requires the reviewed faceless mannequin cast, wardrobe and prop locks, LTX clip review, exact edit binding, and a promoted multi-shot render before it can be shown as Golden evidence.";
 
 interface VideoProof { file: string; poster?: string; device: string; meta: string }
 
@@ -265,7 +268,14 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
     case "loreshort": return videoStrip("loreshort", LORESHORT_PROOFS);
     case "novita-render-farm": return videoStrip("novita-render-farm", NOVITA_PROOFS);
     case "quiz": return videoStrip("quiz", QUIZ_PROOFS);
-    case "cinematic": return <GoldenImages images={take2(CINEMATIC_PROOFS)} />;
+    case "cinematic": return (
+      <>
+        <GoldenImages images={take2(CINEMATIC_PROOFS)} />
+        <p role="status" style={{ margin: "0.5rem 0 0", fontSize: "0.68rem", lineHeight: 1.35, color: "var(--color-warning)" }}>
+          {CINEMATIC_IDENTITY_HOLD}
+        </p>
+      </>
+    );
     case "documotion":
       return (
         <>

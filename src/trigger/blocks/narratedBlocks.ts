@@ -18,6 +18,7 @@ import {
   qualityProfile,
 } from "@/engine/qualityPolicy";
 import {
+  ShotRenderManifestSchema,
   validateQualifiedShotRender,
 } from "@/engine/renderArtifacts";
 import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
@@ -39,13 +40,42 @@ import {
 } from "@/engine/qualityEvidence";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
+import {
+  CinematicCreativeLocksSchema,
+  CinematicEditDecisionListSchema,
+} from "@/engine/cinematicCaseSequence";
+import {
+  assertCinematicAssemblyRoute,
+  assertCinematicSequenceRenderBinding,
+} from "@/engine/cinematicSequenceRenderBinding";
+import { cinematicFinalMasterQaEvidence } from "@/engine/cinematicQaEvidence";
+import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
+import {
+  evaluateAuthoredShotEditIntegrity,
+  evaluateCinematicEditIntegrity,
+} from "@/engine/cinematicEditIntegrity";
+import { analyzeShotBoundaries, sha256ShotAnalysisSource } from "@/lib/shotAnalysis";
+import {
+  proveOnScreenText,
+  sha256OnScreenTextSource,
+  TimedOnScreenTextCueSchema,
+} from "@/lib/onScreenTextProof";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
-import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { existsSync } from "node:fs";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
 import { narrationPhysics, gateColdOpen, judgeNarrationTake } from "@/lib/voicecraft";
+import {
+  evaluateNarrationCadence,
+  planNarrationCadence,
+  preflightNarrationPerformance,
+} from "@/lib/narrationPerformance";
+import {
+  proveNarrationTranscript,
+  sha256NarrationTranscriptSource,
+} from "@/lib/narrationTranscriptProof";
 import {
   boundNarrationChapterHeadings,
   boundNarrationColdOpen,
@@ -67,6 +97,7 @@ import {
   applyOverlaysAndCaptions,
   assembleStructuredBody,
   measureAudio,
+  measureNarrationMixCorrelation,
   normalizeAudioOnly,
   grabFrame,
   kenBurns,
@@ -423,7 +454,7 @@ export const hookCraft: Block = {
     // modify narrationText (single-producer rule).
     const narration = str(ctx, "narrationText");
     const firstLine = () => narration.split(/\n+/)[0].slice(0, 140);
-    if (!hasGeminiKey()) return { hook: firstLine() };
+    if (!hasAnthropicKey()) return { hook: firstLine() };
 
     // ── PRODUCE → CRITIQUE → REGENERATE (P1-4) ───────────────────────────────
     // The hook is the title/thumbnail line — the single highest-leverage string
@@ -473,7 +504,7 @@ export const hookCraft: Block = {
         }
         let drafted = "";
         try {
-          const out = await geminiJson<{ hook?: string }>({
+          const out = await claudeJson<{ hook?: string }>({
             prompt:
               "Write ONE scroll-stopping hook line for this video (for the title/thumbnail). " +
               "It must be concrete and must promise ONLY something this narration actually " +
@@ -490,7 +521,7 @@ export const hookCraft: Block = {
           observedCostUsd += PRICE.boundedTextPassUsd;
           drafted = typeof out.hook === "string" ? out.hook.trim() : "";
         } catch (e) {
-          ctx.log(`hook_craft: gemini failed (${e instanceof Error ? e.message : e})`);
+          ctx.log(`hook_craft: permitted text planner failed (${e instanceof Error ? e.message : e})`);
         }
         const hook = drafted || firstLine();
         await writeIterationCheckpoint(
@@ -657,6 +688,7 @@ export const narrationTts: Block = {
     "narrationKey",
     "narrationDurationSec",
     "narrationLocalPath",
+    "narrationTranscriptText",
     "sentenceTimings",
     "chapterPlan",
   ],
@@ -718,9 +750,9 @@ export const narrationTts: Block = {
       ? { stability: physics.stability, ...(physics.style ? { style: physics.style } : {}) }
       : undefined;
 
-    // COLD-OPEN GATE — production requires a persisted >=7 audition, an
-    // explicit voice, the audio judge, and a passing real-audio probe. Draft is
-    // the only profile that may opt out. Fish and ElevenLabs are both judged.
+    // COLD-OPEN GATE — production requires a persisted >=7 human audition, an
+    // explicit voice, and either an admitted audio judge or local physical
+    // evidence from the real take. Draft is the only profile that may opt out.
     const gateEnabled = ctx.params["voiceGate"] !== false;
     const castScore = Number(ctx.params["voiceCastScore"] ?? Number.NaN);
     const selectedVoiceId = ttsProvider === "elevenlabs" ? (elevenVoiceId ?? voiceId) : voiceId;
@@ -728,6 +760,7 @@ export const narrationTts: Block = {
       profile: quality,
       gateEnabled,
       judgeAvailable: hasGeminiKey(),
+      localEvidenceGateAvailable: !hasGeminiKey(),
       channelId: ctx.channelId,
       provider: ttsProvider,
       voiceId: selectedVoiceId,
@@ -736,6 +769,7 @@ export const narrationTts: Block = {
       readinessStatus: ctx.params["voiceReadinessStatus"],
       readinessReason: ctx.params["voiceReadinessReason"],
     });
+    const tmp = await makeRunTempDir(ctx.runId);
     if (gateEnabled && hasGeminiKey()) {
       const probe = boundNarrationColdOpen(splitSentences(text).slice(0, 2).join(" "));
       if (!probe.trim() && quality === "production") {
@@ -790,6 +824,34 @@ export const narrationTts: Block = {
           throw new Error(`narration_tts: cold-open failed the gate twice — ${lastWhy}`);
         }
       }
+    } else if (quality === "production" && gateEnabled) {
+      // Gemini is deliberately unavailable in autonomous production. Keep the
+      // human casting decision, then prove this *actual* cold-open take has a
+      // real audio stream, audible loudness, and plausible spoken timing.
+      const coldOpenText = boundNarrationColdOpen(splitSentences(text).slice(0, 2).join(" "));
+      if (!coldOpenText.trim()) {
+        throw new Error("narration_tts: production cold-open probe is empty");
+      }
+      const coldOpenPath = join(tmp, "cold_open_local_evidence.mp3");
+      const coldOpenBytes = await synthNarration({
+        text: coldOpenText,
+        voiceId: selectedVoiceId,
+        niche,
+        speed,
+        provider: ttsProvider,
+        elevenVoiceId: selectedVoiceId,
+        eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined,
+        onBillableCharacters,
+      });
+      await writeBytes(coldOpenPath, coldOpenBytes);
+      const evidence = await preflightNarrationPerformance({
+        audioPath: coldOpenPath,
+        text: coldOpenText,
+        speed,
+      });
+      ctx.log(
+        `narration_tts: local cold-open evidence PASSED (${evidence.durationSec.toFixed(1)}s | ${evidence.wordsPerSec.toFixed(2)} words/s | ${evidence.integratedLufs.toFixed(1)} LUFS)`,
+      );
     }
     // Optional stylized voice filter (e.g. "radio" â†’ vintage AM set). Applied to
     // the finished narration track before upload; no-op when unset. The Composer
@@ -797,8 +859,6 @@ export const narrationTts: Block = {
     const voiceFx =
       (ctx.params["voiceFx"] as string | undefined) ??
       getMusicBrief(ctx.store)?.audio?.voiceFx;
-    const tmp = await makeRunTempDir(ctx.runId);
-
     // CHAPTER MODE â€” speak each section heading as a spoken "chapter card" (the
     // card holds while it's read, then a short break, then the section narration
     // resumes). Emits `chapterPlan` (the body layout: alternating card/footage
@@ -849,6 +909,11 @@ export const narrationTts: Block = {
       // PARALLEL synthesis (small pool â€” Fish concurrency limit; see sentence mode).
       const speakOf = (it: Item) =>
         it.kind === "heading" ? `Chapter ${it.chap}: ${it.text.replace(/[.:;,\s]+$/, "")}.` : it.text;
+      const chapterCadencePlan = planNarrationCadence({
+        sentences: items.map(speakOf),
+        baseGapSec: baseGap,
+        jitterSec: jitter,
+      });
       const chPool = Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2));
       // Probe-fallback counter: an ESTIMATED duration shifts every later
       // sentenceTiming (captions/quotes/inserts) by the estimation error —
@@ -902,7 +967,7 @@ export const narrationTts: Block = {
             gapAfter = preSec;
             footAccum += dur;
           } else {
-            gapAfter = Math.max(0.2, baseGap + (Math.random() * 2 - 1) * jitter);
+            gapAfter = chapterCadencePlan.gapsSec[i] ?? baseGap;
             footAccum += dur + gapAfter;
           }
         }
@@ -916,6 +981,12 @@ export const narrationTts: Block = {
       local = await applyVoiceFx(local, voiceFx, join(tmp, "narration_fx.mp3"));
       let durationSec = 0;
       try { durationSec = (await probe(local)).durationSec; } catch { durationSec = cursor; }
+      if (quality === "production" && gateEnabled && !hasGeminiKey()) {
+        const evidence = await preflightNarrationPerformance({ audioPath: local, text, speed });
+        ctx.log(
+          `narration_tts: local final evidence PASSED (${evidence.durationSec.toFixed(1)}s | ${evidence.wordsPerSec.toFixed(2)} words/s | ${evidence.integratedLufs.toFixed(1)} LUFS)`,
+        );
+      }
       const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
       await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
       await recordAsset(ctx, "narration", narrationKey, { durationSec, chapters: chap, mode: "chapter" });
@@ -924,6 +995,10 @@ export const narrationTts: Block = {
         narrationKey,
         narrationDurationSec: durationSec,
         narrationLocalPath: local,
+        // The actually spoken sequence includes bounded chapter headings, which
+        // are deliberately absent from the display-only narrationText.  Final
+        // QA must compare against this exact source, not a nearby script.
+        narrationTranscriptText: items.map(speakOf).join(" "),
         sentenceTimings,
         chapterPlan,
         [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, audioJudgeCalls),
@@ -934,8 +1009,15 @@ export const narrationTts: Block = {
     // exact per-sentence timings (used to anchor quote overlays). Gaps are
     // jittered per sentence so the pacing feels human, not metronomic.
     const sentences = splitSentences(text);
-    const gaps = sentences.map(() => Math.max(0.2, baseGap + (Math.random() * 2 - 1) * jitter));
-    ctx.log(`narration_tts: ${sentences.length} sentences, ~${baseGap}s (Â±${jitter}) pausesâ€¦`);
+    const cadencePlan = planNarrationCadence({
+      sentences,
+      baseGapSec: baseGap,
+      jitterSec: jitter,
+    });
+    const gaps = cadencePlan.gapsSec;
+    ctx.log(
+      `narration_tts: ${sentences.length} sentences, ${cadencePlan.purposes.filter((purpose) => purpose !== "continuation").length} planned delivery beats (deterministic semantic cadence)`,
+    );
 
     // PARALLEL synthesis (order preserved) â€” sequential per-sentence HTTP calls
     // made TTS the slowest non-encode stage (~140 calls Ã— ~5s). Pool kept SMALL:
@@ -988,6 +1070,14 @@ export const narrationTts: Block = {
     // caption/quote/insert sync point. When probes failed AND the real
     // narration length disagrees with the cursor, rescale timings linearly to
     // the measured truth instead of shipping drifted sync.
+    const cadence = evaluateNarrationCadence({
+      sentences,
+      sentenceTimings,
+      plan: cadencePlan,
+    });
+    ctx.log(
+      `narration_tts: cadence evidence PASSED (${cadence.minGapSec.toFixed(2)}–${cadence.maxGapSec.toFixed(2)}s pauses; ${cadence.distinctGapCount} distinct delivery beats)`,
+    );
     if (probeFailures > 0 && durationSec > 0 && Math.abs(durationSec - cursor) > 1.5) {
       const k = durationSec / Math.max(0.1, cursor);
       for (const t of sentenceTimings) {
@@ -995,6 +1085,12 @@ export const narrationTts: Block = {
         t.end *= k;
       }
       ctx.log(`narration_tts: ${probeFailures} probe failure(s) — sentence timings rescaled ×${k.toFixed(4)} to the measured ${durationSec.toFixed(1)}s`);
+    }
+    if (quality === "production" && gateEnabled && !hasGeminiKey()) {
+      const evidence = await preflightNarrationPerformance({ audioPath: local, text, speed });
+      ctx.log(
+        `narration_tts: local final evidence PASSED (${evidence.durationSec.toFixed(1)}s | ${evidence.wordsPerSec.toFixed(2)} words/s | ${evidence.integratedLufs.toFixed(1)} LUFS)`,
+      );
     }
 
     const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
@@ -1009,6 +1105,7 @@ export const narrationTts: Block = {
       narrationKey,
       narrationDurationSec: durationSec,
       narrationLocalPath: local,
+      narrationTranscriptText: text,
       sentenceTimings,
       // Declared in `produces`, so it must ALWAYS be returned â€” an empty plan
       // means "no chapter cards". (chapterCards:false channels hit the engine's
@@ -1227,8 +1324,8 @@ export const entityImagery: Block = {
       }
       return keys;
     };
-    if (!hasGeminiKey()) {
-      ctx.log("entity_imagery: no Gemini key â€” skipping");
+    if (!hasAnthropicKey()) {
+      ctx.log("entity_imagery: no permitted text planner â€” skipping");
       return { entityClips: clips, entityKeys: [], attributions };
     }
     const narration = str(ctx, "narrationText");
@@ -1305,7 +1402,7 @@ export const entityImagery: Block = {
         // Pull SPECIFIC named entities that have real imagery (people/places/artworks).
         let proposed: string[] = [];
         try {
-          const out = await geminiJson<{ entities?: string[] }>({
+          const out = await claudeJson<{ entities?: string[] }>({
             prompt:
               "From this narration, list up to 4 SPECIFIC named entities with well-known " +
               'real photographs/portraits (e.g. "Marcus Aurelius", "the Colosseum"). ' +
@@ -1564,8 +1661,8 @@ export const quoteOverlaysBlock: Block = {
     const timings =
       (ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined) ?? [];
     const out: QuoteOverlaySpec[] = [];
-    if (!hasGeminiKey() || timings.length === 0) {
-      ctx.log("quote_overlays: skipping (no Gemini key or no sentence timings)");
+    if (!hasAnthropicKey() || timings.length === 0) {
+      ctx.log("quote_overlays: skipping (no permitted text planner or no sentence timings)");
       return { quoteOverlays: out };
     }
     const introSec = Number(ctx.store["introSec"] ?? 0);
@@ -1586,7 +1683,7 @@ export const quoteOverlaysBlock: Block = {
     let picks: { index: number; highlights: string[] }[] = [];
     try {
       const indexed = timings.map((t, i) => `${i}: ${t.text}`).join("\n");
-      const res = await geminiJson<{ quotes?: { index?: number; highlights?: string[] }[] }>({
+      const res = await claudeJson<{ quotes?: { index?: number; highlights?: string[] }[] }>({
         prompt:
           `From these narration sentences, choose the ${maxN} MOST quotable, aphoristic, or emotionally ` +
           `striking ones to show as on-screen quote cards. Pick EXACTLY ${maxN} (or all available if fewer than ` +
@@ -1833,6 +1930,12 @@ export const timelineAssemble: Block = {
     "preOverlayLocalPath",
   ],
   run: async (ctx) => {
+    assertCinematicAssemblyRoute({
+      useAssemblyEdl: ctx.params["useAssemblyEdl"],
+      scenePlan: ctx.store["cinematicGeneratedScenePlan"],
+      editDecisionList: ctx.store["cinematicEditDecisionList"],
+      footageManifest: ctx.store["generatedFootageSceneManifest"],
+    });
     // ========================================================================
     // ⚠️  USE_ASSEMBLY_EDL — DELIBERATELY-GATED, NOT-YET-VALIDATED CUTOVER PATH
     // ========================================================================
@@ -1892,6 +1995,27 @@ export const timelineAssemble: Block = {
     }
 
     const footage = ctx.store["footageClips"] as string[] | undefined;
+    const narration = str(ctx, "narrationLocalPath");
+    const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
+    const cinematicPlanRaw = ctx.store["cinematicGeneratedScenePlan"];
+    const cinematicEditRaw = ctx.store["cinematicEditDecisionList"];
+    const generatedFootageRaw = ctx.store["generatedFootageSceneManifest"];
+    const cinematicManifestSignaled = Boolean(
+      generatedFootageRaw &&
+      typeof generatedFootageRaw === "object" &&
+      (generatedFootageRaw as Record<string, unknown>)["source"] === "cinematic_case_sequence",
+    );
+    const cinematicArtifactsPresent = cinematicPlanRaw !== undefined || cinematicEditRaw !== undefined || cinematicManifestSignaled;
+    const cinematicBinding = cinematicArtifactsPresent
+      ? assertCinematicSequenceRenderBinding({
+          scenePlan: cinematicPlanRaw,
+          editDecisionList: cinematicEditRaw,
+          footageManifest: generatedFootageRaw,
+          narrationDurationSec: narrationSec,
+        })
+      : undefined;
+    const cinematicPlan = cinematicBinding?.scenePlan;
+    const cinematicFootageManifest = cinematicBinding?.footageManifest;
     const authoredManifest = ctx.store["shotRenderManifest"]
       ? validateQualifiedShotRender({
           manifest: ctx.store["shotRenderManifest"],
@@ -1899,20 +2023,21 @@ export const timelineAssemble: Block = {
           coverage: ctx.store["visualCoverage"],
         }).manifest
       : undefined;
-    if ((!footage || footage.length === 0) && !authoredManifest) {
+    if (authoredManifest && cinematicFootageManifest) {
+      throw new Error("timeline_assemble: cannot combine a shot-render manifest with an exact cinematic generated-footage manifest");
+    }
+    if ((!footage || footage.length === 0) && !authoredManifest && !cinematicFootageManifest) {
       throw new Error("timeline_assemble: no footageClips");
     }
     // Interleave entity images (Ken Burns) amongst the stock b-roll so named
     // figures (e.g. Marcus Aurelius) appear when relevant.
-    const entity = authoredManifest ? [] : ((ctx.store["entityClips"] as string[] | undefined) ?? []);
+    const entity = authoredManifest || cinematicFootageManifest ? [] : ((ctx.store["entityClips"] as string[] | undefined) ?? []);
     const clips: string[] = [];
     const maxn = Math.max(footage?.length ?? 0, entity.length);
     for (let k = 0; k < maxn; k++) {
       if (footage?.[k]) clips.push(footage[k]);
       if (entity[k]) clips.push(entity[k]);
     }
-    const narration = str(ctx, "narrationLocalPath");
-    const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
     if (authoredManifest && Math.abs(authoredManifest.durationSec - narrationSec) > 0.02) {
       throw new Error(
         `timeline_assemble: authored story duration ${authoredManifest.durationSec}s does not match narration ${narrationSec}s`,
@@ -2081,7 +2206,27 @@ export const timelineAssemble: Block = {
       } catch { /* default bust */ }
     }
 
-    if (authoredManifest) {
+    if (cinematicFootageManifest && cinematicPlan) {
+      const cinematicPaths: string[] = [];
+      for (const [index, item] of cinematicFootageManifest.items.entries()) {
+        const local = join(tmp, `cinematic_source_${String(index).padStart(4, "0")}.mp4`);
+        await writeBytes(local, await getObjectBytes(item.clipKey));
+        cinematicPaths.push(local);
+      }
+      ctx.log(
+        `timeline_assemble: exact cinematic body from ${cinematicPaths.length} source-bound multi-shot clip(s); ` +
+          `sequence ${cinematicPlan.sequenceFingerprint.slice(0, 12)}`,
+      );
+      concat = await assembleAuthoredBody({
+        clipPaths: cinematicPaths,
+        segDurationsSec: cinematicFootageManifest.items.map((item) => item.t1! - item.t0!),
+        outPath: join(tmp, "body.mp4"),
+        tmpDir: tmp,
+        tailHoldSec: tailSec,
+        width: W,
+        height: H,
+      });
+    } else if (authoredManifest) {
       const authoredPaths: string[] = [];
       for (const [index, item] of authoredManifest.items.entries()) {
         const local = join(tmp, `authored_source_${String(index).padStart(4, "0")}.mp4`);
@@ -2505,7 +2650,7 @@ export const captions: Block = {
 export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
-  produces: ["qaPassed", "qaReport", "qualityEvidence", "temporalDynamism", "reviewEvidence", "reviewResult", "reviewFingerprint"],
+  produces: ["qaPassed", "qaReport", "qualityEvidence", "temporalDynamism", "visualPacing", "reviewEvidence", "reviewResult", "reviewFingerprint"],
   paid: true,
   run: async (ctx) => {
     const productionQa = ctx.params["qaProfile"] !== "draft";
@@ -2529,7 +2674,7 @@ export const qaVisual: Block = {
     // never invented scores.
     const qualityBar = ctx.store["qualityBar"] as {
       target?: unknown;
-      dimensions?: Array<{ id?: unknown }>;
+      dimensions?: Array<{ id?: unknown; description?: unknown }>;
     } | null;
     const qualityFloor = (dimensionIds: readonly string[], fallback: number): number => {
       if (!productionQa) return fallback;
@@ -2700,9 +2845,112 @@ export const qaVisual: Block = {
       qualityDimensions: (qualityBar?.dimensions ?? []).flatMap((dimension) =>
         typeof dimension?.id === "string" ? [dimension.id] : [],
       ),
+      // Reference-quality mechanics are appended to the persisted QualityBar
+      // descriptions. Sending only short IDs made the final review generic;
+      // these bounded criteria become reviewer input and fingerprint evidence.
+      qualityCriteria: (qualityBar?.dimensions ?? []).flatMap((dimension) =>
+        typeof dimension?.id === "string" && typeof dimension?.description === "string"
+          ? [`${dimension.id}: ${dimension.description}`]
+          : [],
+      ),
     });
     const visualMatter = visualMatterFromUnknown(ctx.store["visualMatterManifest"]);
     const visualMatterLocks = visualMatterReviewLocks(visualMatter);
+    // Assembly checks this binding on its legacy path, but QA must re-check it
+    // too: Assembly EDL cutover and future assemblers must never turn a
+    // source-bound sequence into a final master without retaining every
+    // accepted keyframe and moving-clip review receipt.
+    const cinematicPlanRaw = ctx.store["cinematicGeneratedScenePlan"];
+    const cinematicEdlRaw = ctx.store["cinematicEditDecisionList"];
+    const generatedFootageRaw = ctx.store["generatedFootageSceneManifest"];
+    const cinematicManifestSignaled = Boolean(
+      generatedFootageRaw &&
+      typeof generatedFootageRaw === "object" &&
+      (generatedFootageRaw as Record<string, unknown>)["source"] === "cinematic_case_sequence",
+    );
+    const cinematicArtifactsPresent = cinematicPlanRaw !== undefined || cinematicEdlRaw !== undefined || cinematicManifestSignaled;
+    const cinematicBinding = cinematicArtifactsPresent
+      ? assertCinematicSequenceRenderBinding({
+          scenePlan: cinematicPlanRaw,
+          editDecisionList: cinematicEdlRaw,
+          footageManifest: generatedFootageRaw,
+          narrationDurationSec: target,
+        })
+      : undefined;
+    const authoredShotManifest = !cinematicBinding && ctx.store["shotRenderManifest"] !== undefined
+      ? ShotRenderManifestSchema.parse(ctx.store["shotRenderManifest"])
+      : undefined;
+    const cinematicSequencePresent = cinematicBinding !== undefined;
+    const cinematicReceiptEvidence = cinematicBinding
+      ? [
+          `cinematicSequence=${cinematicBinding.scenePlan.sequenceFingerprint}`,
+          `acceptedKeyframes=${cinematicBinding.footageManifest.items.filter((item) => item.keyframeReview?.pass).length}/${cinematicBinding.footageManifest.items.length}`,
+          `acceptedMovingTakes=${cinematicBinding.footageManifest.items.filter((item) => item.clipReview?.pass).length}/${cinematicBinding.footageManifest.items.length}`,
+          `acceptedTransitions=${cinematicBinding.footageManifest.items.filter((item) => item.transitionToNextReview?.pass).length}/${Math.max(0, cinematicBinding.footageManifest.items.length - 1)}`,
+        ]
+      : [];
+    const cinematicCreativeLocksRaw = ctx.store["cinematicCreativeLocks"];
+    const cinematicCreativeLocks = cinematicCreativeLocksRaw === undefined
+      ? undefined
+      : CinematicCreativeLocksSchema.parse(cinematicCreativeLocksRaw);
+    const cinematicEdl = cinematicEdlRaw === undefined
+      ? undefined
+      : CinematicEditDecisionListSchema.parse(cinematicEdlRaw);
+    if (cinematicSequencePresent && (!cinematicCreativeLocks || !cinematicEdl)) {
+      throw new Error(
+        "qa_visual FAILED: cinematic sequence requires its reviewer-facing creative locks and exact edit decision list",
+      );
+    }
+    if (
+      cinematicCreativeLocks && cinematicEdl &&
+      cinematicCreativeLocks.sequenceFingerprint !== cinematicEdl.sequenceFingerprint
+    ) {
+      throw new Error("qa_visual FAILED: cinematic creative locks and edit decision list do not bind the same sequence");
+    }
+    const cinematicBodyOffsetSec = ctx.store["introApplied"] === true && Number(ctx.store["introSec"]) > 0
+      ? Number(ctx.store["introSec"])
+      : 0;
+    const cinematicQaEvidence = cinematicCreativeLocks && cinematicEdl
+      ? cinematicFinalMasterQaEvidence({
+          creativeLocks: cinematicCreativeLocks,
+          editDecisionList: cinematicEdl,
+          bodyOffsetSec: cinematicBodyOffsetSec,
+        })
+      : { creativeLocks: [], focusWindows: [] };
+    const cinematicReviewLocks = cinematicQaEvidence.creativeLocks;
+    const cinematicFocus = cinematicQaEvidence.focusWindows;
+    // A Casefile cinematic sequence is stronger evidence than a family label:
+    // it has source-admission and claim→shot-map receipts. Apply the existing
+    // Fern-calibrated documentary mechanics to that final review only in this
+    // state. This is not a similarity claim and does not impose true-crime
+    // requirements on ordinary fiction that also uses the cinematic renderer.
+    const casefileCinematicReference = cinematicSequencePresent &&
+      ctx.store["casefileSourceAdmission"] !== undefined &&
+      ctx.store["casefileEvidenceShotMapAdmission"] !== undefined
+      ? referenceQualityContractFor("documentary_collage_short")
+      : undefined;
+    const casefileCinematicQualityCriteria = casefileCinematicReference
+      ? casefileCinematicReference.requirements.map((requirement) => {
+          const sources = requirement.sourceIds
+            .map((id) => casefileCinematicReference.sources.find((source) => source.id === id)?.label ?? id)
+            .join(", ");
+          return [
+            `Casefile cinematic reference-quality ${requirement.area} (${sources}; mechanics only, no automatic comparison): ${requirement.standard}`,
+            `Required evidence: ${requirement.evidence.join(", ")}`,
+          ].join(" ");
+        })
+      : [];
+    const casefileCinematicReferenceEvidence = casefileCinematicReference
+      ? [
+          `casefileReferenceMechanics=${casefileCinematicReference.sources.map((source) => source.id).join(",")}`,
+          `casefileReferenceRequirements=${casefileCinematicReference.requirements.map((requirement) => requirement.id).join(",")}`,
+          "casefileReferenceComparison=mechanics-only-no-automatic-comparison",
+        ]
+      : [];
+    const cinematicQualityEvidence = [
+      ...cinematicReceiptEvidence,
+      ...casefileCinematicReferenceEvidence,
+    ];
     const channelWorld = [
       watchDna?.recurringSubject
         ? [watchDna.recurringSubject, watchDna.setting, ...(watchDna.motifs ?? []).slice(0, 4)]
@@ -2711,6 +2959,9 @@ export const qaVisual: Block = {
         : "",
       channelReviewProfile.channelWorld ?? "",
       visualMatter?.status !== "disabled" ? visualMatter?.channelWorld ?? "" : "",
+      cinematicSequencePresent
+        ? "source-bound faceless mannequin reconstruction; wardrobe, role, prop, camera, evidence, and cut rationale are locked per reviewed scene"
+        : "",
     ].filter(Boolean).join("; ") || undefined;
     const reviewIntent = {
       title,
@@ -2726,10 +2977,11 @@ export const qaVisual: Block = {
         ? { criticDoctrine: channelReviewProfile.criticDoctrine }
         : {}),
       criticEmphasis: channelReviewProfile.criticEmphasis,
+      qualityCriteria: [...channelReviewProfile.qualityCriteria, ...casefileCinematicQualityCriteria],
       transcriptCues,
       overlays: reviewOverlays,
-      creativeLocks: visualMatterLocks,
-      focusWindows: repairFocus,
+      creativeLocks: [...visualMatterLocks, ...cinematicReviewLocks],
+      focusWindows: [...repairFocus, ...cinematicFocus],
     };
     // This is the visual release gate. It persists timestamped scene/cue/overlay
     // evidence, reviews <=12-image chronological batches, then creates a dense
@@ -2740,6 +2992,10 @@ export const qaVisual: Block = {
       required: productionQa,
       maxFrames: Number(ctx.params["visualReviewFrames"] ?? 48),
       maxFocusFrames: Number(ctx.params["visualReviewFocusFrames"] ?? 24),
+      // A source-bound cinematic sequence has an accepted receipt for every
+      // planned join. Its final review must inspect every one at 2fps; the
+      // normal 24-frame repair cap would silently skip later cuts.
+      requireCompleteFocusCoverage: cinematicSequencePresent,
       log: (message) => ctx.log(message),
     });
     if (productionQa && !visualReview.ran) {
@@ -2871,15 +3127,151 @@ export const qaVisual: Block = {
         contentLaneKey: contentLane.key,
         blackSegmentMinSec: laneQuality.blackSegmentMinSec,
         maxStaticHoldSec: laneQuality.maxStaticHoldSec,
+        visualPacingPolicy: laneQuality.visualPacing,
         ...(criticDoctrine ? { criticDoctrine } : {}),
       },
       log: ctx.log,
     });
+    let cinematicEditIntegrity: ReturnType<typeof evaluateCinematicEditIntegrity> | undefined;
+    let authoredShotEditIntegrity: ReturnType<typeof evaluateAuthoredShotEditIntegrity> | undefined;
+    // Adaptive PySceneDetect sees true shot boundaries rather than only large
+    // FFmpeg marker deltas. It is required for every production lane whose
+    // pacing policy expects moving/editable visuals; ambient and music lanes
+    // remain explicitly exempt because their long continuous holds are the
+    // deliberate product.
+    let finalShotAnalysis: ReturnType<typeof analyzeShotBoundaries> | undefined;
+    const requiresAdaptiveShotAnalysis = productionQa && rv.visualPacing.policy.mode !== "exempt";
+    if (requiresAdaptiveShotAnalysis || cinematicBinding || authoredShotManifest) {
+      try {
+        const finalMasterSha256 = await sha256ShotAnalysisSource(video);
+        finalShotAnalysis = analyzeShotBoundaries({ videoPath: video, sourceSha256: finalMasterSha256 });
+        if (cinematicBinding) {
+          cinematicEditIntegrity = evaluateCinematicEditIntegrity({
+            editDecisionList: cinematicBinding.editDecisionList,
+            shotAnalysis: finalShotAnalysis,
+            bodyOffsetSec: cinematicBodyOffsetSec,
+          });
+          if (!cinematicEditIntegrity.pass) {
+            const missed = cinematicEditIntegrity.cuts
+              .filter((cut) => !cut.matched)
+              .map((cut) => `${cut.shotId}@${cut.expectedSec.toFixed(2)}s`)
+              .join(", ");
+            critical.push(
+              `cinematic edit integrity: ${cinematicEditIntegrity.matchedCutCount}/${cinematicEditIntegrity.plannedCutCount} ` +
+                `planned causal cuts were observed in the final master (missing ${missed})`,
+            );
+          }
+        }
+        if (authoredShotManifest) {
+          authoredShotEditIntegrity = evaluateAuthoredShotEditIntegrity({
+            manifest: authoredShotManifest,
+            shotAnalysis: finalShotAnalysis,
+            bodyOffsetSec: cinematicBodyOffsetSec,
+          });
+          if (!authoredShotEditIntegrity.pass) {
+            const missed = authoredShotEditIntegrity.cuts
+              .filter((cut) => !cut.matched)
+              .map((cut) => `${cut.shotId}@${cut.expectedSec.toFixed(2)}s`)
+              .join(", ");
+            critical.push(
+              `LTX edit integrity: ${authoredShotEditIntegrity.matchedCutCount}/${authoredShotEditIntegrity.plannedCutCount} ` +
+                `authored shot boundaries were observed in the final master (missing ${missed})`,
+            );
+          }
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (productionQa) {
+          critical.push(
+            requiresAdaptiveShotAnalysis
+              ? `adaptive scene-analysis evidence unavailable: ${detail}`
+              : `LTX edit integrity evidence unavailable: ${detail}`,
+          );
+        } else {
+          ctx.log(`qa_visual: adaptive scene analysis unavailable in draft: ${detail}`);
+        }
+      }
+    }
+    const adaptiveSceneEvidence = finalShotAnalysis
+      ? [
+          `adaptiveSceneDetector=${finalShotAnalysis.provider}/${finalShotAnalysis.detector}`,
+          `adaptiveSceneSource=${finalShotAnalysis.source.sha256}`,
+          `adaptiveSceneCount=${finalShotAnalysis.scenes.length}`,
+          `adaptiveSceneMaxSec=${Math.max(...finalShotAnalysis.scenes.map((scene) => scene.endSecExclusive - scene.startSec), 0).toFixed(2)}`,
+        ]
+      : [];
+    // Any renderer can declare exact words and their intended frame times.
+    // Treat malformed declarations or unavailable OCR as release blockers in
+    // production: visible text is often the entire instructional payload.
+    const rawOnScreenTextCues = ctx.store["onScreenTextCues"];
+    const parsedOnScreenTextCues = rawOnScreenTextCues === undefined
+      ? { success: true as const, data: [] as const }
+      : TimedOnScreenTextCueSchema.array().safeParse(rawOnScreenTextCues);
+    let onScreenTextEvidence: string[] = [];
+    if (!parsedOnScreenTextCues.success) {
+      if (productionQa) {
+        critical.push(
+          `on-screen text evidence is malformed: ${parsedOnScreenTextCues.error.issues.map((issue) => issue.message).join("; ")}`,
+        );
+      }
+    } else if (parsedOnScreenTextCues.data.length) {
+      try {
+        const sourceSha256 = await sha256OnScreenTextSource(video);
+        const proof = await proveOnScreenText({
+          videoPath: video,
+          sourceSha256,
+          cues: parsedOnScreenTextCues.data,
+        });
+        const failed = proof.cues.filter((cue) => !cue.passed);
+        onScreenTextEvidence = [
+          `onScreenTextOcr=${proof.engine.name}/${proof.engine.version}`,
+          `onScreenTextCues=${proof.cues.length}`,
+          `onScreenTextPass=${proof.passed}`,
+          ...failed.slice(0, 3).map((cue) => `unreadable:${cue.id}=${cue.tokenCoverage.toFixed(2)}/${cue.minTokenCoverage.toFixed(2)}`),
+        ];
+        if (!proof.passed) {
+          critical.push(
+            `on-screen text legibility failure: ${failed.map((cue) => `${cue.id} ${cue.tokenCoverage.toFixed(2)} < ${cue.minTokenCoverage.toFixed(2)}`).join(", ")}`,
+          );
+        }
+        ctx.log(`qa_visual: on-screen text OCR ${proof.passed ? "PASSED" : "FAILED"} (${proof.cues.length} required frame(s))`);
+      } catch (error) {
+        if (productionQa) {
+          critical.push(`on-screen text evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        } else {
+          ctx.log(`qa_visual: on-screen text evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+    const ltxEditIntegrityEvidence = cinematicEditIntegrity
+      ? [
+          `cinematicCuts=${cinematicEditIntegrity.matchedCutCount}/${cinematicEditIntegrity.plannedCutCount}`,
+          `sceneMarkers=${cinematicEditIntegrity.observedCutCount}`,
+        ]
+      : authoredShotEditIntegrity
+        ? [
+            `authoredLtxCuts=${authoredShotEditIntegrity.matchedCutCount}/${authoredShotEditIntegrity.plannedCutCount}`,
+            `sceneMarkers=${authoredShotEditIntegrity.observedCutCount}`,
+          ]
+        : [];
     if (rv.verdict === "fail") {
       critical.push(`render-validate: ${rv.defects.filter((d) => d.severity === "critical").map((d) => d.issue).join(" | ")}`);
     }
     if (!rv.ran) {
       critical.push("render-validate: deterministic evidence did not complete; release is fail-closed");
+    }
+    if (rv.visualPacing.verdict === "needs_human") {
+      // A sparse scene-marker receipt is deliberately not mislabelled as a
+      // cut-count failure. In production it does mean the final master needs
+      // an accountable human confirmation that its continuous visual evolution
+      // really matches the lane, rather than auto-publishing an uncalibrated
+      // pacing claim.
+      const pacingReview = `visual pacing ${rv.visualPacing.signal}: ${rv.visualPacing.detail ?? "scene-marker calibration requires human confirmation"}`;
+      if (productionQa) {
+        critical.push(pacingReview);
+      } else {
+        ctx.log(`qa_visual: ${pacingReview} (draft retained for review)`);
+      }
     }
     if (visualReview.verdict === "fail") {
       critical.push(visualReviewFailureMessage(visualReview));
@@ -2953,6 +3345,108 @@ export const qaVisual: Block = {
         ctx.log(`qa_visual: audio meters skipped: ${e instanceof Error ? e.message : e}`);
       }
     }
+    // Whole-mix loudness cannot prove that dialogue survived a music/FX pass.
+    // Compare the actual authored narration waveform with the final master
+    // after the planned intro offset. This is local signal-presence evidence,
+    // not a claim that a waveform metric proves intelligibility.
+    const narrationDuration = Number(ctx.store["narrationDurationSec"] ?? 0);
+    const storedNarrationPath = typeof ctx.store["narrationLocalPath"] === "string"
+      ? ctx.store["narrationLocalPath"]
+      : undefined;
+    const narrationKey = opt(ctx, "narrationKey");
+    const expectsNarrationMixEvidence = narrationDuration >= 1.5 && Boolean(storedNarrationPath || narrationKey);
+    let finalNarrationMix: { correlation: number | null; narrationStartSec: number } | undefined;
+    let finalNarrationTranscript: { wordErrorRate: number; lexicalRecall: number; passed: boolean } | undefined;
+    if (expectsNarrationMixEvidence) {
+      try {
+        let narrationPath = storedNarrationPath && existsSync(storedNarrationPath)
+          ? storedNarrationPath
+          : undefined;
+        if (!narrationPath) {
+          if (!narrationKey) throw new Error("narration local path is unavailable and no narrationKey can rehydrate it");
+          narrationPath = join(tmp, "qa-narration-source.mp3");
+          await writeBytes(narrationPath, await getObjectBytes(narrationKey));
+        }
+        // Prove that the authored narration source says the approved spoken
+        // script. FFmpeg correlation below then proves that this same source
+        // survived into the final master. Neither signal alone can establish
+        // both facts.
+        const expectedNarrationText = typeof ctx.store["narrationTranscriptText"] === "string"
+          ? ctx.store["narrationTranscriptText"].trim()
+          : "";
+        if (productionQa && !expectedNarrationText) {
+          critical.push("narration transcript evidence unavailable: narration_tts did not preserve the exact spoken script");
+        } else if (expectedNarrationText) {
+          try {
+            const sourceSha256 = await sha256NarrationTranscriptSource(narrationPath);
+            const proof = proveNarrationTranscript({
+              audioPath: narrationPath,
+              expectedText: expectedNarrationText,
+              sourceSha256,
+            });
+            finalNarrationTranscript = {
+              wordErrorRate: proof.assessment.wordErrorRate,
+              lexicalRecall: proof.assessment.lexicalRecall,
+              passed: proof.assessment.passed,
+            };
+            if (!proof.assessment.passed) {
+              critical.push(
+                `narration transcript fidelity failure: WER ${proof.assessment.wordErrorRate.toFixed(3)} / recall ${proof.assessment.lexicalRecall.toFixed(3)} outside certified bounds`,
+              );
+            }
+            ctx.log(
+              `qa_visual: narration transcript WER ${proof.assessment.wordErrorRate.toFixed(3)}, recall ${proof.assessment.lexicalRecall.toFixed(3)} ` +
+              `(${proof.assessment.passed ? "passed" : "failed"})`,
+            );
+          } catch (error) {
+            if (productionQa) {
+              critical.push(`narration transcript evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+            } else {
+              ctx.log(`qa_visual: narration transcript evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+        }
+        const narrationStartSec = ctx.store["introApplied"] === true
+          ? Math.max(0, Number(ctx.store["introSec"] ?? 0))
+          : 0;
+        const evidence = await measureNarrationMixCorrelation({
+          narrationPath,
+          masterPath: video,
+          narrationStartSec,
+        });
+        finalNarrationMix = { ...evidence, narrationStartSec };
+        if (productionQa && evidence.correlation === null) {
+          critical.push("narration-mix evidence unavailable: production QA requires source-to-master correlation");
+        } else if (evidence.correlation !== null && evidence.correlation < 0.2) {
+          critical.push(`narration missing or masked in final mix: source correlation ${evidence.correlation.toFixed(2)} < 0.20`);
+        }
+        ctx.log(
+          `qa_visual: narration-to-master correlation ${evidence.correlation?.toFixed(3) ?? "unmeasured"} ` +
+            `(start ${narrationStartSec.toFixed(2)}s)`,
+        );
+      } catch (error) {
+        if (productionQa) {
+          critical.push(`narration-mix evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        } else {
+          ctx.log(`qa_visual: narration-mix evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+    const narrationMixEvidence = finalNarrationMix
+      ? [
+          `narrationMixCorrelation=${finalNarrationMix.correlation ?? "unmeasured"}`,
+          `narrationMixStartSec=${finalNarrationMix.narrationStartSec.toFixed(2)}`,
+          "narrationMixEvaluator=ffmpeg/axcorrelate-presence-only",
+        ]
+      : [];
+    const narrationTranscriptEvidence = finalNarrationTranscript
+      ? [
+          `narrationTranscriptWer=${finalNarrationTranscript.wordErrorRate.toFixed(3)}`,
+          `narrationTranscriptRecall=${finalNarrationTranscript.lexicalRecall.toFixed(3)}`,
+          `narrationTranscriptProof=${finalNarrationTranscript.passed ? "passed" : "failed"}`,
+          "narrationTranscriptEvaluator=faster-whisper-small.en/offline",
+        ]
+      : [];
     // 8) Critic (crew) VALIDATION SPEC â€” the per-video checklist this content must
     // pass. Deterministic assertions compare metrics we computed; vision ones are
     // judged on the sampled frames. A failed BLOCK-severity assertion fails QA;
@@ -3094,6 +3588,7 @@ export const qaVisual: Block = {
       ? storedEpisode.data.story
       : undefined;
     const temporalDynamismPassed = rv.temporalDynamism.verdict === "pass" || rv.temporalDynamism.verdict === "not_required";
+    const visualPacingPassed = rv.visualPacing.verdict === "pass" || rv.visualPacing.verdict === "not_required";
     const temporalDynamismEvidence = [
       `source=${rv.temporalDynamism.source}`,
       `verdict=${rv.temporalDynamism.verdict}`,
@@ -3104,6 +3599,20 @@ export const qaVisual: Block = {
       ...rv.temporalDynamism.violatingIntervals.slice(0, 6).map((interval) => (
         `repair=${interval.startSec.toFixed(2)}-${interval.endSec.toFixed(2)}s (${interval.durationSec.toFixed(2)}s frozen)`
       )),
+    ];
+    const visualPacingEvidence = [
+      `source=${rv.visualPacing.source}`,
+      `usable=${rv.visualPacing.usable}`,
+      `verdict=${rv.visualPacing.verdict}`,
+      `signal=${rv.visualPacing.signal}`,
+      `mode=${rv.visualPacing.policy.mode}`,
+      `changeCount=${rv.visualPacing.changeCount}`,
+      `maxMarkerHoldSec=${rv.visualPacing.maxHoldSec.toFixed(2)}`,
+      `medianMarkerHoldSec=${rv.visualPacing.medianHoldSec.toFixed(2)}`,
+      `targetMarkerHoldSec=${rv.visualPacing.policy.maxMarkerHoldSec ?? "exempt"}`,
+      `meetsPolicy=${rv.visualPacing.meetsPolicy ?? "exempt"}`,
+      ...rv.visualPacing.changeTimestampsSec.slice(0, 8).map((timeSec) => `change@${timeSec.toFixed(2)}s`),
+      ...(rv.visualPacing.detail ? [rv.visualPacing.detail] : []),
     ];
     const qualityEvidence = buildQualityEvidence({
       episode: {
@@ -3142,6 +3651,9 @@ export const qaVisual: Block = {
           `resolution=${p.width}x${p.height}`,
           `duration=${p.durationSec.toFixed(2)}s`,
           ...(finalAudioMeters ? [`loudness=${finalAudioMeters.integratedLufs ?? "unmeasured"}`] : []),
+          ...narrationMixEvidence,
+          ...narrationTranscriptEvidence,
+          ...onScreenTextEvidence,
         ],
       },
       visual: visualReview.ran
@@ -3151,28 +3663,42 @@ export const qaVisual: Block = {
             evidence: [
               `frames=${visualReview.evidence.frames.length}`,
               `manifest=${visualReview.evidence.manifestKey ?? "not-persisted"}`,
+              ...cinematicQualityEvidence,
+              ...ltxEditIntegrityEvidence,
+              ...adaptiveSceneEvidence,
               ...visualReview.defects.slice(0, 3).map((defect) => `@${defect.startSec.toFixed(1)} ${defect.category}`),
             ],
           }
         : undefined,
       temporal: shotScore !== undefined && shotMinimum !== undefined
         ? {
-            passed: shotScore >= shotMinimum && temporalDynamismPassed,
+            passed: shotScore >= shotMinimum && temporalDynamismPassed && visualPacingPassed,
             score: shotScore,
             minimumScore: shotMinimum,
-            evaluator: "qualified per-shot render QA + deterministic temporal dynamism",
-            evidence: [`gradedShots=${scoredShots.length}`, ...temporalDynamismEvidence],
+            evaluator: "qualified per-shot render QA + deterministic temporal dynamism + final-master visual pacing",
+            evidence: [
+              `gradedShots=${scoredShots.length}`,
+              ...cinematicQualityEvidence,
+              ...ltxEditIntegrityEvidence,
+              ...adaptiveSceneEvidence,
+              ...temporalDynamismEvidence,
+              ...visualPacingEvidence,
+            ],
           }
         : visualReview.ran
           ? {
-              passed: visualReview.verdict === "pass" && temporalDynamismPassed,
-              evaluator: "scene/cue-aware visual review + deterministic temporal dynamism",
+              passed: visualReview.verdict === "pass" && temporalDynamismPassed && visualPacingPassed,
+              evaluator: "scene/cue-aware visual review + deterministic temporal dynamism + final-master visual pacing",
               evidence: [
                 `reviewedFrames=${visualReview.evidence.frames.length}`,
                 `maxGapSec=${visualReview.evidence.coverage.maxGapSec}`,
                 `manifest=${visualReview.evidence.manifestKey ?? "not-persisted"}`,
                 visualReview.summary,
+                ...cinematicQualityEvidence,
+                ...ltxEditIntegrityEvidence,
+                ...adaptiveSceneEvidence,
                 ...temporalDynamismEvidence,
+                ...visualPacingEvidence,
               ],
             }
           : undefined,
@@ -3191,19 +3717,25 @@ export const qaVisual: Block = {
         : undefined,
       audio: audioAestheticScore !== undefined
         ? {
-            passed: audioAestheticScore >= audioMinimum,
+            passed: audioAestheticScore >= audioMinimum && (
+              !expectsNarrationMixEvidence || (finalNarrationMix?.correlation ?? 0) >= 0.2
+            ),
             score: audioAestheticScore,
             minimumScore: audioMinimum,
             evaluator: "audio aesthetics grader",
-            evidence: ["audiobox production quality"],
+            evidence: ["audiobox production quality", ...narrationMixEvidence, ...narrationTranscriptEvidence],
           }
         : finalAudioMeters
           ? {
-              passed: finalAudioMeters.integratedLufs !== null,
+              passed: finalAudioMeters.integratedLufs !== null && (
+                !expectsNarrationMixEvidence || (finalNarrationMix?.correlation ?? 0) >= 0.2
+              ),
               evaluator: "final-mix loudness meter (not an aesthetics score)",
               evidence: [
                 `integratedLufs=${finalAudioMeters.integratedLufs ?? "unmeasured"}`,
                 `introWindowDb=${finalAudioMeters.windowMeanDb ?? "unmeasured"}`,
+                ...narrationMixEvidence,
+                ...narrationTranscriptEvidence,
               ],
             }
           : undefined,
@@ -3261,9 +3793,28 @@ export const qaVisual: Block = {
     });
     return {
       qaPassed: true,
-      qaReport: specOutcome ? { ...report, validation: specOutcome.results } : report,
+      qaReport: {
+        ...report,
+        ...(specOutcome ? { validation: specOutcome.results } : {}),
+        renderValidation: {
+          verdict: rv.verdict,
+          ran: rv.ran,
+          temporalDynamism: rv.temporalDynamism,
+          visualPacing: rv.visualPacing,
+          adaptiveShotAnalysis: finalShotAnalysis
+            ? {
+                provider: finalShotAnalysis.provider,
+                detector: finalShotAnalysis.detector,
+                sourceSha256: finalShotAnalysis.source.sha256,
+                sceneCount: finalShotAnalysis.scenes.length,
+              }
+            : undefined,
+          narrationMix: finalNarrationMix ?? undefined,
+        },
+      },
       qualityEvidence,
       temporalDynamism: rv.temporalDynamism,
+      visualPacing: rv.visualPacing,
       reviewEvidence: visualReview.evidence,
       reviewResult: {
         verdict: visualReview.verdict,

@@ -1,10 +1,10 @@
 /**
  * Script generation for narrated archetypes (essay / crime / shorts / meditation).
  * The cold open comes FIRST from hookcraft (judge-gated, topic-specific); the
- * latest Gemini Pro then writes the narration continuing from it. Pure helper;
+ * configured Claude model then writes the narration continuing from it. Pure helper;
  * the `script_gen` block wraps it. Failures are loud — no thin-script fallback.
  */
-import { geminiJson, geminiJsonPro, scriptProModel, hasGeminiKey } from "@/lib/gemini";
+import { claudeJson, claudeJsonPro, scriptProModel, hasAnthropicKey } from "@/lib/anthropic";
 import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { craftHook, type CraftedHook } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
@@ -361,8 +361,8 @@ function styleGuidanceBase(style?: string): string {
 }
 
 /**
- * ONE-SHOT long script via a capable long-context model (Gemini 2.5 Pro by default;
- * set GEMINI_SCRIPT_MODEL to point at a newer model like gemini-3-pro). Pro supports
+ * ONE-SHOT long script via the configured Claude long-context model. The model
+ * is selected by ANTHROPIC_CREATIVE_PRO_MODEL and supports
  * tens of thousands of output tokens, so it writes a full 15-35 min script in a
  * SINGLE call — no flaky section-by-section stitching. Returns null if it errors or
  * under-delivers, so the caller falls back to chunked generation.
@@ -382,7 +382,7 @@ async function synthFullScriptOneShot(
   const ONE_SHOT_TIMEOUT_MS = Number(process.env.SCRIPT_ONESHOT_TIMEOUT_MS ?? 300_000);
   try {
     const o = await Promise.race([
-      geminiJson<{ sections?: { heading?: string; narration?: string }[]; closing_line?: string }>({
+      claudeJson<{ sections?: { heading?: string; narration?: string }[]; closing_line?: string }>({
       model,
       maxTokens: 22000,
       temperature: 0.8,
@@ -420,7 +420,7 @@ async function synthFullScriptOneShot(
       const missing = wordBudget - wordCount;
       log(`scriptGen one-shot (${model}): ${wordCount}/${wordBudget} words — topping up with one continuation call`);
       try {
-        const more = await geminiJson<{ sections?: { heading?: string; narration?: string }[] }>({
+        const more = await claudeJson<{ sections?: { heading?: string; narration?: string }[] }>({
           model,
           maxTokens: 9000,
           temperature: 0.8,
@@ -498,7 +498,7 @@ async function synthLongScript(
   // overshooting the length gate). Assume ~200 real words/section.
   const planSections = async (n: number, exclude: string[]): Promise<{ heading: string; brief: string }[]> => {
     try {
-      const o = await geminiJson<{ sections?: { heading?: string; brief?: string }[] }>({
+      const o = await claudeJson<{ sections?: { heading?: string; brief?: string }[] }>({
         prompt: [
           `Plan ${n} DISTINCT, non-repeating sections for a long narrated video about "${req.topic}".`,
           req.persona ? `Persona: ${req.persona}` : "",
@@ -528,7 +528,7 @@ async function synthLongScript(
   const hookRaw = crafted.coldOpen;
   let closingRaw = "";
   try {
-    const head = await geminiJson<{ closing_line?: string }>({
+    const head = await claudeJson<{ closing_line?: string }>({
       prompt:
         `For a long video about "${req.topic}"${req.niche ? ` (${req.niche})` : ""}: write closing_line — ` +
         `THE QUOTE of the episode: one resonant, quotable line (<=12 words) that distills its lesson, shown ` +
@@ -568,7 +568,7 @@ async function synthLongScript(
     const perSection = Math.max(140, Math.min(400, Math.round((targetWords - total) / remainingSections)));
     // PROMPT ORDER = COST: the static doctrine block (style/playbook/voice/
     // CRAFT_RULES, ~1.5-2k tokens) leads and the per-section variables trail,
-    // so Gemini's implicit prefix cache (≥1024 identical leading tokens, ~75%
+    // so the provider's prompt cache can reuse the stable doctrine prefix
     // input discount) hits on every section after the first — this prompt is
     // sent 10-75x per chunked long-form run.
     const sectionPrompt = [
@@ -590,9 +590,8 @@ async function synthLongScript(
     let added = false;
     for (let attempt = 0; attempt < 3 && !added; attempt++) {
       try {
-        // Narration is written by the latest Gemini Pro (best at narration);
-        // the floored budget covers Pro's thinking overhead.
-        const r = await geminiJsonPro<{ narration?: string }>({ prompt: sectionPrompt, maxTokens: 6500, temperature: 0.82, log });
+        // Narration is written by the configured non-Google creative model.
+        const r = await claudeJsonPro<{ narration?: string }>({ prompt: sectionPrompt, maxTokens: 6500, temperature: 0.82, log });
         const narration = spoken(req, typeof r.narration === "string" ? r.narration : "");
         if (narration.length > 0) {
           sections.push({ heading: s.heading, narration });
@@ -613,7 +612,7 @@ async function synthLongScript(
   // a chapter card, so this flows as the spoken ending (no "Chapter N:" separation).
   try {
     const covered = sections.map((s) => s.heading).filter(Boolean).slice(0, 12).join("; ");
-    const c = await geminiJsonPro<{ narration?: string }>({
+    const c = await claudeJsonPro<{ narration?: string }>({
       log,
       prompt: [
         `Write the CLOSING CONCLUSION (about 180-260 words, 2-3 short paragraphs) for a long narrated video about "${req.topic}".`,
@@ -654,7 +653,7 @@ async function translateText(text: string, langName: string, log: Logger): Promi
   const t = (text ?? "").trim();
   if (!t) return "";
   try {
-    const o = await geminiJson<{ translation?: string }>({
+    const o = await claudeJson<{ translation?: string }>({
       prompt:
         `Translate this spoken narration into ${langName}. Keep proper names and direct quotes in their ` +
         `ORIGINAL form (do NOT translate names). Natural, fluent ${langName} suitable for voiceover. ` +
@@ -680,7 +679,7 @@ export async function translateScript(
   language: string | undefined,
   log: Logger = () => {},
 ): Promise<Script> {
-  if (!language || language === "en" || !hasGeminiKey()) return script;
+  if (!language || language === "en" || !hasAnthropicKey()) return script;
   const name = LANG_NAMES[language] ?? language;
   log(`scriptGen: translating ${script.sections.length}-section script → ${name}`);
 
@@ -708,7 +707,7 @@ export async function translateScript(
   if (cur.length) chunks.push({ start: curStart, items: cur });
 
   const translateChunk = async (items: ScriptSection[]): Promise<ScriptSection[]> => {
-    const o = await geminiJson<{ sections?: { heading?: string; narration?: string }[] }>({
+    const o = await claudeJson<{ sections?: { heading?: string; narration?: string }[] }>({
       prompt:
         `Translate these spoken-narration sections into ${name}. Keep proper names and direct quotes in their ` +
         `ORIGINAL form (do NOT translate names). Natural, fluent ${name} suitable for voiceover. Translate BOTH ` +
@@ -762,10 +761,10 @@ export async function synthScript(
   // overshot the slot ~15% (render #6: 848s actual vs 660s target).
   const wordBudget = Math.round(maxSeconds * effectiveWps(gapSec, req.ttsSpeed ?? 1));
 
-  if (!hasGeminiKey()) {
+  if (!hasAnthropicKey()) {
     // NO silent thin-fallback: a one-sentence "script" used to ship as a full
     // video. A missing script model is a real failure — surface it.
-    throw new Error("scriptGen: GEMINI_API_KEY missing — cannot write a real script (no fallback)");
+    throw new Error("scriptGen: ANTHROPIC_API_KEY missing — no permitted creative-text provider is configured");
   }
 
   // THE COLD OPEN COMES FIRST — crafted and judge-gated by hookcraft (lint +
@@ -847,12 +846,12 @@ export async function synthScript(
     .filter(Boolean)
     .join("\n\n");
 
-  // Latest Gemini Pro writes the narration (best at narration); the wrapper
+  // The configured non-Google creative model writes the narration; the wrapper
   // retries transients and floors the budget for Pro thinking. A persistent
   // failure must FAIL the block — never ship a one-line placeholder script.
   // 13k: Pro's thinking eats the budget first — at 8k a ~1300-word script's
   // JSON came back truncated mid-string (unrepairable).
-  const raw = (await geminiJsonPro({ prompt, maxTokens: 13000, temperature: 0.8, log: (m) => log(m) })) as {
+  const raw = (await claudeJsonPro({ prompt, maxTokens: 13000, temperature: 0.8, log: (m) => log(m) })) as {
     sections?: unknown;
   };
 
@@ -888,7 +887,7 @@ export async function synthScript(
     const missing = wordBudget - wordCount;
     log(`scriptGen short: ${wordCount}/${wordBudget} words — under target, topping up with one continuation call`);
     try {
-      const more = await geminiJson<{ sections?: { heading?: string; narration?: string }[] }>({
+      const more = await claudeJson<{ sections?: { heading?: string; narration?: string }[] }>({
         maxTokens: 9000,
         temperature: 0.8,
         prompt: [

@@ -23,7 +23,11 @@ import { documentaryCollageShortBlocks } from "@/trigger/blocks/documentaryColla
 import { VISUAL_MATTER_BLOCKS } from "@/trigger/blocks/visualMatterBlocks";
 import { episodeGraphBlocks } from "@/trigger/blocks/episodeGraphBlocks";
 import { learningContractBlocks } from "@/trigger/blocks/learningContractBlocks";
+import { childrenShowBibleBlocks } from "@/trigger/blocks/childrenShowBibleBlocks";
 import { childContentSafetyBlocks } from "@/trigger/blocks/childrenSafetyBlocks";
+import { casefileSourcePacketBlocks } from "@/trigger/blocks/casefileSourcePacketBlocks";
+import { casefileEvidenceShotMapBlocks } from "@/trigger/blocks/casefileEvidenceShotMapBlocks";
+import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 import { sceneCompilerBlocks } from "@/trigger/blocks/sceneCompilerBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
 
@@ -53,8 +57,22 @@ export function registerAllBlocks(): void {
   for (const b of episodeGraphBlocks) register(b);
   // Renderer-neutral learning objective / retrieval-practice handoff.
   for (const b of learningContractBlocks) register(b);
+  // Operator-authored children show/curriculum/identity admission. It has no
+  // provider path and remains a private child-editor-review receipt, not a
+  // switch that admits the children family to autonomous publishing.
+  for (const b of childrenShowBibleBlocks) register(b);
   // Children can make a review candidate, never self-authorize publication.
   for (const b of childContentSafetyBlocks) register(b);
+  // Source-first documentary admission is provider-free and only emits a
+  // packet-bound private human-review draft receipt, never a channel planner.
+  for (const b of casefileSourcePacketBlocks) register(b);
+  // Provider-free factual-claim → reviewed scene/shot mapping. It remains a
+  // private human-review handoff and does not admit any documentary family.
+  for (const b of casefileEvidenceShotMapBlocks) register(b);
+  // Evidence-led cinematic coverage comes after the claim map. It creates the
+  // exact multi-shot/mannequin/cut handoff used by generated footage, but is
+  // still private-review-only and cannot self-admit a crime channel.
+  for (const b of cinematicCaseSequenceBlocks) register(b);
   // Local Scene Manifest → 16:9 master renderer; owns pixels, never story.
   for (const b of sceneCompilerBlocks) register(b);
   // Reusable visual-development contract: mood, character, setting and

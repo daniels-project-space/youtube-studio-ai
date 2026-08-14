@@ -26,6 +26,31 @@ import { ShortRetentionManifestSchema, ShortSceneQaSchema } from "./documentaryC
 import { VisualMatterManifestSchema } from "./visualMatter";
 import { EpisodeGraphSchema, SceneManifestSchema } from "./episodeGraph";
 import { LearningContractSchema } from "./learningContract";
+import {
+  ChildrenShowBibleApprovalReceiptSchema,
+  ChildrenShowBibleInputSchema,
+  ChildrenShowBibleSchema,
+} from "./childrenShowBible";
+import {
+  CasefileEvidenceShotMapAdmissionReceiptSchema,
+  CasefileEvidenceShotMapInputSchema,
+  CasefileEvidenceShotMapSchema,
+} from "./casefileEvidenceShotMap";
+import {
+  CinematicCaseSequenceAdmissionReceiptSchema,
+  CinematicCaseSequenceInputSchema,
+  CinematicCaseSequencePlanSchema,
+  CinematicCreativeLocksSchema,
+  CinematicEditDecisionListSchema,
+  CinematicGeneratedScenePlanSchema,
+  CinematicSequenceEditorialReviewSchema,
+} from "./cinematicCaseSequence";
+import {
+  CinematicCaseDirectionSchema,
+  CinematicCaseSequenceDraftSchema,
+} from "./cinematicCaseSequenceDraft";
+import { GeneratedFootageSceneManifestSchema } from "./generatedFootageManifest";
+import { VisualPacingEvidenceSchema } from "@/lib/visualPacing";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -107,6 +132,7 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   qaReport: { type: "FinalQaReport", schema: qaReport },
   episodeSpec: { type: "EpisodeSpec", schema: EpisodeSpecSchema },
   qualityEvidence: { type: "EpisodeQualityEvidence", schema: QualityEvidenceSchema },
+  visualPacing: { type: "FinalMasterVisualPacingEvidence", schema: VisualPacingEvidenceSchema },
   shortStrategyBrief: { type: "ShortStrategyBrief", schema: ShortStrategyBriefSchema },
   shortCandidateSet: { type: "ShortCandidateSet", schema: ShortCandidateSetSchema },
   shortCandidateSelection: { type: "ShortCandidateSelection", schema: ShortCandidateSelectionSchema },
@@ -170,6 +196,86 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   episodeGraph: { type: "EpisodeGraph", schema: EpisodeGraphSchema, persist: "reference" },
   sceneManifest: { type: "SceneManifest", schema: SceneManifestSchema, persist: "reference" },
   lessonContract: { type: "LearningContract", schema: LearningContractSchema, persist: "reference" },
+  childrenShowBibleInput: {
+    type: "ChildrenShowBibleInput",
+    schema: ChildrenShowBibleInputSchema,
+    persist: "reference",
+  },
+  childrenShowBible: {
+    type: "ChildrenShowBible",
+    schema: ChildrenShowBibleSchema,
+    persist: "reference",
+  },
+  childrenShowBibleApproval: {
+    type: "ChildrenShowBibleApprovalReceipt",
+    schema: ChildrenShowBibleApprovalReceiptSchema,
+    persist: "reference",
+  },
+  casefileEvidenceShotMapInput: {
+    type: "CasefileEvidenceShotMapInput",
+    schema: CasefileEvidenceShotMapInputSchema,
+    persist: "reference",
+  },
+  casefileEvidenceShotMap: {
+    type: "CasefileEvidenceShotMap",
+    schema: CasefileEvidenceShotMapSchema,
+    persist: "reference",
+  },
+  casefileEvidenceShotMapAdmission: {
+    type: "CasefileEvidenceShotMapAdmissionReceipt",
+    schema: CasefileEvidenceShotMapAdmissionReceiptSchema,
+    persist: "reference",
+  },
+  cinematicCaseSequenceInput: {
+    type: "CinematicCaseSequenceInput",
+    schema: CinematicCaseSequenceInputSchema,
+    persist: "reference",
+  },
+  cinematicCaseDirection: {
+    type: "CinematicCaseDirection",
+    schema: CinematicCaseDirectionSchema,
+    persist: "reference",
+  },
+  cinematicCaseSequenceDraft: {
+    type: "CinematicCaseSequenceDraft",
+    schema: CinematicCaseSequenceDraftSchema,
+    persist: "reference",
+  },
+  cinematicSequenceEditorialReview: {
+    type: "CinematicSequenceEditorialReview",
+    schema: CinematicSequenceEditorialReviewSchema,
+    persist: "reference",
+  },
+  cinematicSequencePlan: {
+    type: "CinematicCaseSequencePlan",
+    schema: CinematicCaseSequencePlanSchema,
+    persist: "reference",
+  },
+  cinematicGeneratedScenePlan: {
+    type: "CinematicGeneratedScenePlan",
+    schema: CinematicGeneratedScenePlanSchema,
+    persist: "reference",
+  },
+  cinematicCreativeLocks: {
+    type: "CinematicCreativeLocks",
+    schema: CinematicCreativeLocksSchema,
+    persist: "reference",
+  },
+  cinematicEditDecisionList: {
+    type: "CinematicEditDecisionList",
+    schema: CinematicEditDecisionListSchema,
+    persist: "reference",
+  },
+  cinematicCaseSequenceAdmission: {
+    type: "CinematicCaseSequenceAdmissionReceipt",
+    schema: CinematicCaseSequenceAdmissionReceiptSchema,
+    persist: "reference",
+  },
+  generatedFootageSceneManifest: {
+    type: "GeneratedFootageSceneManifest",
+    schema: GeneratedFootageSceneManifestSchema,
+    persist: "reference",
+  },
   childContentSafety: {
     type: "ChildContentSafetyReceipt",
     schema: z.object({

@@ -130,14 +130,43 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   loreshort: { kind: "pipeline-module", executableIds: ["lore_short"] },
   "episode-graph": { kind: "pipeline-module", executableIds: ["episode_graph"] },
   "learning-contract": { kind: "pipeline-module", executableIds: ["learning_contract"] },
+  "children-show-bible": {
+    kind: "pipeline-module",
+    executableIds: ["children_show_bible"],
+    note: "Provider-free, operator-supplied children-show admission only. It requires a fresh child-editor receipt bound to the exact age band, objective, original identity, Episode Graph, and Learning Contract; it emits a private-review-only receipt and does not auto-admit children_learning.",
+  },
   "casefile-documentary": {
-    kind: "catalog-only",
-    executableIds: [],
-    note: "Validated source-first contract only. It intentionally has no automatic channel-family binding until an operator supplies a real rights-cleared Case Packet and an editorial review workflow.",
+    kind: "pipeline-module",
+    executableIds: ["casefile_source_packet"],
+    note: "Provider-free source-admission executable only. It remains deliberately outside every automatic channel-family route: an operator must supply a rights-bound Case Packet and a fresh human editorial approval receipt, and its output is private-review-only.",
+  },
+  "casefile-evidence-shot-map": {
+    kind: "pipeline-module",
+    executableIds: ["casefile_evidence_shot_map"],
+    note: "Provider-free claim-to-visual review executable only. It requires the private source-admission receipt plus current Scene Manifest / ShotPlan fingerprints and a fresh human reviewer approval; it emits private-review-only evidence mapping and does not auto-admit crime, documentary, or cinematic families.",
+  },
+  "cinematic-case-sequence": {
+    kind: "pipeline-module",
+    executableIds: ["cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence"],
+    note: "Provider-free cinematic direction draft → human signature → strict admission. It converts the admitted Casefile map and Story Spine into a source-bound multi-shot/EDL handoff for the existing Novita renderer, but cannot mint its own crime-editor approval or auto-admit a crime family.",
   },
   "scene-compiler": { kind: "pipeline-module", executableIds: ["scene_compiler"] },
   "child-content-safety": { kind: "pipeline-module", executableIds: ["child_content_safety"] },
-  "quiz-year": { kind: "pipeline-module", executableIds: ["quiz_year"] },
+  "quiz-year": {
+    kind: "pipeline-module",
+    // The autonomous QuizYear route owns its deterministic topic/safety/cue,
+    // critic, metadata and renderer-native thumbnail receipts as one Golden
+    // module. Binding only the final renderer left its actual production
+    // planner outside the catalog proof graph.
+    executableIds: [
+      "quiz_topic_plan",
+      "quiz_topic_safety",
+      "quiz_critic_spec",
+      "quiz_metadata",
+      "quiz_thumbnail",
+      "quiz_year",
+    ],
+  },
   "novita-render-farm": { kind: "pipeline-module", executableIds: ["novita_render_images", "novita_render_video"] },
   "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/imagecraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production image rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) instead — same Z-Image family, different implementation and gate set." },
   "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/videocraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production video rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) instead — same LTX family, different implementation and gate set." },

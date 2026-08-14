@@ -391,7 +391,7 @@ async function assertRetryBoundarySignal(): Promise<void> {
       throw new Error("fixture transport failure");
     }) as typeof fetch;
     await assert.rejects(
-      generateBananaImage({ prompt: "fixture", allowText: false, tier: "flash" }),
+      generateNanoBananaImageWithReceipt({ prompt: "fixture" }),
       (error: unknown) =>
         error instanceof BananaImageSubmissionError &&
         error.retryable === false &&
@@ -411,11 +411,7 @@ async function assertRetryBoundarySignal(): Promise<void> {
       });
     }) as typeof fetch;
     await assert.rejects(
-      generateBananaImage({
-        prompt: "outer-recovery-fixture",
-        allowText: true,
-        tier: "pro",
-      }),
+      generateNanoBananaImageWithReceipt({ prompt: "outer-recovery-fixture" }),
       (error: unknown) =>
         error instanceof BananaImageSubmissionError &&
         error.status === 503 &&

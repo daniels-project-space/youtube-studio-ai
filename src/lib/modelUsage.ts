@@ -92,7 +92,7 @@ function normalizeModel(model: string): string {
     .trim()
     .toLowerCase()
     .replace(/^models\//, "")
-    .replace(/^google\//, "");
+    .replace(/^(?:google|anthropic)\//, "");
 }
 
 function validRate(value: unknown): ModelRate | undefined {
@@ -149,6 +149,13 @@ function builtInRate(provider: string, model: string, inputTokens: number): Mode
       return inputTokens > 200_000
         ? { inputUsdPerMillion: 4, outputUsdPerMillion: 18, cachedInputUsdPerMillion: 0.4 }
         : { inputUsdPerMillion: 2, outputUsdPerMillion: 12, cachedInputUsdPerMillion: 0.2 };
+    }
+  }
+  // First-party Claude API pricing. Keep this exact model family explicit so
+  // an unknown provider revision never turns into an invented zero cost.
+  if (p === "anthropic") {
+    if (m === "claude-sonnet-4-5-20250929" || m === "claude-sonnet-4.5") {
+      return { inputUsdPerMillion: 3, outputUsdPerMillion: 15, cachedInputUsdPerMillion: 0.3 };
     }
   }
   if (p === "groq") {

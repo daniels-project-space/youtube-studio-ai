@@ -81,18 +81,12 @@ export class BananaImageSubmissionError extends Error {
  * the operator sets IMAGE_DISABLE_GEMINI=1 or puts "fal" FIRST in
  * IMAGE_PROVIDERS. Default (both unset) keeps the Google path byte-for-byte.
  */
-function falImageRouteActive(): boolean {
-  if (process.env.IMAGE_DISABLE_GEMINI === "1") return true;
-  const providers = (process.env.IMAGE_PROVIDERS || "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return providers[0] === "fal";
-}
+
 
 export function hasBanana(): boolean {
-  if (falImageRouteActive()) return !!process.env.FAL_KEY;
-  return isGeminiRuntimeEnabled() && !!process.env.GEMINI_API_KEY;
+  // Generic image generation is FAL-only. Gemini's distinct capability is
+  // intentionally exposed only as `hasNanoBanana()` for sealed thumbnails.
+  return !!process.env.FAL_KEY;
 }
 
 /** Thumbnail readiness ignores the generic image router by design. */
@@ -351,7 +345,14 @@ async function generateGeminiImage(
     strictNanoThumbnail?: boolean;
   },
 ): Promise<GeminiImageResult> {
-  assertGeminiRuntimeAllowed("Nano Banana image generation");
+  // Gemini is thumbnail-only. Generic `generateBananaImage()` callers must
+  // take their FAL route; only the receipt-bound profile below can spend here.
+  assertGeminiRuntimeAllowed(
+    options.strictNanoThumbnail
+      ? "sealed Nano Banana thumbnail image generation"
+      : "Gemini image generation outside the sealed thumbnail module",
+    options.strictNanoThumbnail ? "sealed_thumbnail" : undefined,
+  );
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
   const prompt = args.allowText ? args.prompt : args.prompt + NO_TEXT_CLAUSE;
@@ -617,36 +618,27 @@ export async function generateNanoBananaImage(
 }
 
 export async function generateBananaImage(args: BananaImageArgs): Promise<Buffer> {
-  // PROVIDER ROUTER: when the operator disabled Google image gen, EVERY engine
-  // that calls generateBananaImage transparently renders on fal FLUX instead
-  // (same args, bytes out). A missing FAL_KEY throws — never silently fall back
-  // to the provider the operator explicitly turned off.
-  if (falImageRouteActive()) {
-    if (!process.env.FAL_KEY) {
-      throw new Error(
-        "banana: fal image route active (IMAGE_DISABLE_GEMINI/IMAGE_PROVIDERS) but FAL_KEY missing " +
-          "(vault service 'fal') — refusing to fall back to the disabled Google provider",
-      );
-    }
-    const bytes = await generateFalImage({
-      prompt: args.prompt,
-      aspectRatio: args.aspectRatio,
-      imageSize: args.imageSize,
-      images: (args.images ?? []).map((im) => ({ data: im.data, mimeType: im.mimeType ?? "image/png" })),
-      allowText: args.allowText, // generateFalImage appends NO_TEXT_CLAUSE itself
-      // Mirror banana's tiering on the fal route: flash (picture-only bulk
-      // assets) rides the cheap model; text-design renders stay on quality.
-      tier: args.tier ?? (args.allowText ? "pro" : "flash"),
-      maxProviderAttempts: args.maxProviderAttempts,
-      onUsage: (usage) => {
-        bananaCounters.fal += usage.images;
-        bananaCounters.falCostUsd += usage.costUsd;
-      },
-    });
-    return bytes;
+  if (!process.env.FAL_KEY) {
+    throw new Error(
+      "banana: generic image generation requires FAL_KEY; Gemini is reserved exclusively for sealed Nano Banana thumbnails",
+    );
   }
-  const tier = args.tier ?? (args.allowText ? "pro" : "flash");
-  return (await generateGeminiImage(args, { models: modelsFor(tier) })).bytes;
+  const bytes = await generateFalImage({
+    prompt: args.prompt,
+    aspectRatio: args.aspectRatio,
+    imageSize: args.imageSize,
+    images: (args.images ?? []).map((im) => ({ data: im.data, mimeType: im.mimeType ?? "image/png" })),
+    allowText: args.allowText, // generateFalImage appends NO_TEXT_CLAUSE itself
+    // Mirror banana's tiering: picture-only bulk assets ride the cheap model;
+    // text-design renders remain on the quality model.
+    tier: args.tier ?? (args.allowText ? "pro" : "flash"),
+    maxProviderAttempts: args.maxProviderAttempts,
+    onUsage: (usage) => {
+      bananaCounters.fal += usage.images;
+      bananaCounters.falCostUsd += usage.costUsd;
+    },
+  });
+  return bytes;
 }
 
 export interface BananaVerdict {

@@ -326,8 +326,11 @@ type SeoIntel = {
   medianViewsTop50: number;
   thumbnailStyleGuide: {
     dominantColors: string[];
-    hasTextOverlayPct: number;
+    hasTextOverlayPct: number | null;
     notes: string;
+    evidenceSource?: "youtube_data_api_v3_metadata";
+    visualEvidenceStatus?: "metadata_only";
+    sampledVideoCount?: number;
   };
 };
 
@@ -335,6 +338,11 @@ type SeoDatabankRow = {
   titleTemplates: string[];
   hookPatterns: string[];
   competitorGaps: string[];
+  sourceAttribution?: {
+    provider: "youtube_data_api_v3";
+    topPerformersAnalysed: number;
+    limitations: string[];
+  };
 };
 
 function SeoFocus({
@@ -359,6 +367,16 @@ function SeoFocus({
       (total, competitor) => total + competitor.topVideos.length,
       0,
     ) ?? 0;
+  const metadataOnly =
+    intel?.thumbnailStyleGuide.visualEvidenceStatus === "metadata_only" ||
+    intel?.thumbnailStyleGuide.evidenceSource === "youtube_data_api_v3_metadata" ||
+    intel?.thumbnailStyleGuide.notes.toLowerCase().startsWith("minimal guide");
+  const thumbnailSignal =
+    !intel
+      ? "Research needed"
+      : metadataOnly || typeof intel.thumbnailStyleGuide.hasTextOverlayPct !== "number"
+        ? "Visual evidence unavailable"
+        : `${intel.thumbnailStyleGuide.hasTextOverlayPct}% use text`;
 
   return (
     <section className="glass overview-panel seo-focus">
@@ -392,13 +410,11 @@ function SeoFocus({
         </div>
         <div>
           <small>Thumbnail signal</small>
-          <strong>
-            {intel
-              ? `${intel.thumbnailStyleGuide.hasTextOverlayPct}% use text`
-              : "Research needed"}
-          </strong>
+          <strong>{thumbnailSignal}</strong>
           <span>
-            {sourceVideos > 0
+            {metadataOnly
+              ? "Metadata was collected, but thumbnail pixels and overlay text were not measured."
+              : sourceVideos > 0
               ? `Grounded in ${sourceVideos} stored competitor videos.`
               : "No competitor video sample is stored for this niche yet."}
           </span>
@@ -567,6 +583,10 @@ function NicheIntelligence({ intel }: { intel: SeoIntel }) {
   const patterns = labeled(intel.topTitlePatterns, "pattern");
   const power = labeled(intel.powerWords, "word");
   const guide = intel.thumbnailStyleGuide;
+  const metadataOnly =
+    guide.visualEvidenceStatus === "metadata_only" ||
+    guide.evidenceSource === "youtube_data_api_v3_metadata" ||
+    guide.notes.toLowerCase().startsWith("minimal guide");
 
   return (
     <section>
@@ -636,7 +656,9 @@ function NicheIntelligence({ intel }: { intel: SeoIntel }) {
             ))}
           </div>
           <div style={{ fontSize: "0.8rem", color: "var(--color-muted)" }}>
-            Text overlay: {guide.hasTextOverlayPct}% of top thumbnails
+            {metadataOnly || typeof guide.hasTextOverlayPct !== "number"
+              ? "Visual thumbnail attributes: not measured from metadata"
+              : `Text overlay: ${guide.hasTextOverlayPct}% of top thumbnails`}
           </div>
           {guide.notes && (
             <p
@@ -659,9 +681,22 @@ function NicheIntelligence({ intel }: { intel: SeoIntel }) {
 // ----------------------------- SEO databank -----------------------------
 
 function SeoDatabank({ databank }: { databank: SeoDatabankRow }) {
+  const attribution = databank.sourceAttribution;
   return (
     <section>
       <SectionTitle>Strategy databank</SectionTitle>
+      {attribution && (
+        <p
+          style={{
+            margin: "0 0 0.7rem",
+            color: "var(--color-faint)",
+            fontSize: "0.8rem",
+            lineHeight: 1.45,
+          }}
+        >
+          Source: YouTube Data API v3 metadata from {attribution.topPerformersAnalysed} top performers. Visual, opening-hook, and demand-gap claims remain unavailable without separate evidence.
+        </p>
+      )}
       <div
         style={{
           display: "grid",

@@ -8,6 +8,7 @@
  */
 import { createHash } from "node:crypto";
 import { renderNovitaI2V, type NovitaRenderLifecycle } from "@/lib/novitaMedia";
+import type { LtxCreativeAdapterSelection } from "@/lib/ltxCreativeAdapter";
 
 export interface I2VRequest {
   prompt: string;
@@ -24,6 +25,8 @@ export interface I2VRequest {
   /** Conservative signed envelope for the one direct Novita video worker. */
   maxCostUsd: number;
   lifecycle?: NovitaRenderLifecycle;
+  /** Optional exact-base/benchmarked LTX adapter for this I2V shot. */
+  creativeAdapter?: LtxCreativeAdapterSelection;
   log?: (message: string) => void;
 }
 
@@ -65,6 +68,7 @@ export async function generateI2V(req: I2VRequest): Promise<I2VResult> {
     durationSec: req.durationSec,
     negativePrompt: req.negativePrompt,
     profileId: "production",
+    creativeAdapter: req.creativeAdapter,
     maxCostUsd: req.maxCostUsd,
     lifecycle: req.lifecycle,
   });

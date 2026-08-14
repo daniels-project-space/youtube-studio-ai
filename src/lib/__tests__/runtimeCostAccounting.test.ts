@@ -406,7 +406,8 @@ async function main(): Promise<void> {
     requestBounds();
     await cachedMusicIsFree();
     await successfulTinyTtsIsTerminal();
-    await coldOpenAccounting();
+    // Gemini audio judging is retired. Production narration now uses the
+    // local FFmpeg evidence tested in narrationPerformance/narrationMix tests.
     console.log("RUNTIME COST ACCOUNTING PASS: provider routes, patches, cache reuse, request bounds");
   } finally {
     if (originalGeminiRuntime === undefined) delete process.env[GEMINI_RUNTIME_OPT_IN_ENV];

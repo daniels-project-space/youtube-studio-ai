@@ -7,13 +7,13 @@
  * model (GEMINI_API_KEY — no new vendor). The per-channel index lives in R2
  * (see complianceBlocks.ts) so no Convex schema change is needed.
  */
-import { assertGeminiRuntimeAllowed, isGeminiRuntimeEnabled } from "@/lib/gemini";
+import { assertGeminiRuntimeAllowed } from "@/lib/gemini";
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 const MODEL = process.env.GEMINI_EMBED_MODEL ?? "gemini-embedding-001";
 
 export function hasEmbedKey(): boolean {
-  return isGeminiRuntimeEnabled() && Boolean(process.env.GEMINI_API_KEY);
+  return false;
 }
 
 /** Embed a single text → vector. Throws if no key (callers guard). */

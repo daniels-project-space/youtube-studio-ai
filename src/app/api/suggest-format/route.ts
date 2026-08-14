@@ -1,6 +1,5 @@
 import { NextResponse } from "next/server";
-import { bootstrapSecrets } from "@/lib/bootstrap";
-import { selectFormat, type FormatSelectionInput } from "@/engine/creative/selectFormat";
+import { recommendFormatDeterministically, type FormatSelectionInput } from "@/engine/creative/selectFormat";
 import { authorizeStudioRoute } from "@/lib/operatorSession";
 
 /**
@@ -9,8 +8,9 @@ import { authorizeStudioRoute } from "@/lib/operatorSession";
  *   → FormatRecommendation { family, available, crew, reasoning, confidence, alternates, fallback }
  *
  * The TEXT path of the channel builder: describe a channel in words and get the
- * best-fit format + the crew it actually needs. Complements /api/analyze-clip
- * (the "I have an example video" path). Gemini direct (vault-hydrated), server-only.
+ * best-fit format + the crew it actually needs. This route intentionally uses
+ * only a local deterministic advisor, so it remains truthful without a remote
+ * model/provider and never claims an unobserved clip was analyzed.
  */
 export const runtime = "nodejs";
 
@@ -26,14 +26,5 @@ export async function POST(request: Request) {
   if (!body?.concept?.trim()) {
     return NextResponse.json({ error: "missing concept" }, { status: 400 });
   }
-  try {
-    await bootstrapSecrets((m) => console.log(`[suggest-format] ${m}`));
-    const rec = await selectFormat(body, (m) => console.log(`[suggest-format] ${m}`));
-    return NextResponse.json(rec);
-  } catch (err) {
-    return NextResponse.json(
-      { error: err instanceof Error ? err.message : "selection failed" },
-      { status: 500 },
-    );
-  }
+  return NextResponse.json(recommendFormatDeterministically(body));
 }

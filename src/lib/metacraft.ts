@@ -31,12 +31,12 @@
  * youtubeData.ts (API key OR the vault's OAuth refresh token) and degrades
  * loudly when the niche databank already supplies the feed.
  */
-import { geminiJson, hasGeminiKey } from "@/lib/gemini";
+import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { searchVideoIds, fetchVideoDetails, hasYouTubeDataAccess } from "@/lib/youtubeData";
 import { resolveVoiceDoctrine } from "@/engine/golden";
 
 export function hasMetacraft(): boolean {
-  return hasGeminiKey();
+  return hasAnthropicKey();
 }
 
 const LOFI_LEAK = /\b(lo-?fi|study (beats|music)|beats to (relax|study)|chillhop)\b/i;
@@ -248,7 +248,7 @@ const FRAMES =
   "(7) direct_verdict — the episode's conclusion stated flat as the title";
 
 export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> {
-  if (!hasGeminiKey()) throw new Error("metacraft: GEMINI_API_KEY missing — cannot craft real metadata");
+  if (!hasAnthropicKey()) throw new Error("metacraft: ANTHROPIC_API_KEY missing — cannot craft real metadata");
   const t0 = Date.now();
   const doctrine = resolveVoiceDoctrine(a.niche);
   const allowHype = doctrine?.voice === "chaos-commentator";
@@ -276,7 +276,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
 
   // Pinned comment doesn't depend on the winning title — craft it in parallel
   // with the judging pass (it seeds discussion about the episode's tension).
-  const pinnedPromise = geminiJson<{ comment?: string }>({
+  const pinnedPromise = claudeJson<{ comment?: string }>({
     prompt:
       `Write ONE pinned comment (≤200 chars) for a video about "${a.topic}"${a.niche ? ` (${a.niche})` : ""}: a ` +
       `SPECIFIC, genuinely curious question that seeds discussion about the video's core tension — never generic ` +
@@ -294,7 +294,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
     // paying thinking tokens for 7 short lines.
     let gen: { candidates?: { frame?: string; title?: string }[] };
     try {
-      gen = await geminiJson<typeof gen>({
+      gen = await claudeJson<typeof gen>({
         prompt: [
           `Write SEVEN YouTube TITLE candidates for a video about "${a.topic}" on "${a.channelName ?? "this channel"}" — one per frame: ${FRAMES}.`,
           `NICHE: ${a.niche ?? "general"} | PERSONA: ${a.persona ?? "n/a"}`,
@@ -340,7 +340,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       let runner = -1;
       let score = 8;
       try {
-        const j = await geminiJson<{ rankings?: { idx?: number; clickScore?: number; direct?: number }[]; winner?: number; runnerUp?: number }>({
+        const j = await claudeJson<{ rankings?: { idx?: number; clickScore?: number; direct?: number }[]; winner?: number; runnerUp?: number }>({
           prompt: [
             `You are a YouTube CTR strategist judging a real feed. Topic: "${a.topic}".`,
             feedClause,
@@ -375,7 +375,7 @@ export async function craftMetadata(a: MetaCraftArgs): Promise<CraftedMetadata> 
       const w = survivors[best];
       // ONE description+tags, written FOR the winner (parallel work already done).
       // Mechanical structured output — flash, no thinking.
-      const pkg = await geminiJson<{ description?: string; tagsCsv?: string }>({
+      const pkg = await claudeJson<{ description?: string; tagsCsv?: string }>({
         prompt: [
           `Write the YouTube description + tags for this video.`,
           `TITLE: "${w.title}" | Channel: "${a.channelName ?? ""}" | Niche: ${a.niche ?? "general"}`,

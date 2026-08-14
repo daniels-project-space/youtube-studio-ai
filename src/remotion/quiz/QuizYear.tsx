@@ -66,6 +66,17 @@ export function optionFontSize(text: string): number {
   return 26;
 }
 
+/**
+ * The question and four choices share one card.  Keep long, source-safe
+ * questions readable without allowing their height to push the reveal proof
+ * into the source footer.
+ */
+export function questionFontSize(text: string): number {
+  if (text.length <= 85) return 56;
+  if (text.length <= 120) return 46;
+  return 38;
+}
+
 export interface QuizYearProps {
   /**
    * Optional so the type is assignable to Remotion's
@@ -159,7 +170,8 @@ const OptionTile: React.FC<{
   revealLocal: number;
   palette: string[];
   index: number;
-}> = ({ letter, option, revealed, revealLocal, palette, index }) => {
+  compact?: boolean;
+}> = ({ letter, option, revealed, revealLocal, palette, index, compact = false }) => {
   const [, accent, ink] = palette;
   const { fps } = useVideoConfig();
   const enter = spring({
@@ -180,9 +192,9 @@ const OptionTile: React.FC<{
       style={{
         display: "flex",
         alignItems: "center",
-        gap: 26,
-        padding: "26px 34px",
-        borderRadius: 22,
+        gap: compact ? 20 : 26,
+        padding: compact ? "16px 24px" : "26px 34px",
+        borderRadius: compact ? 18 : 22,
         border: `3px solid ${win ? CORRECT_GREEN : lose ? `${ink}18` : `${ink}30`}`,
         background: win ? `${CORRECT_GREEN}22` : lose ? `${ink}06` : `${ink}0d`,
         opacity: lose ? 0.42 : 1,
@@ -194,16 +206,16 @@ const OptionTile: React.FC<{
     >
       <div
         style={{
-          width: 62,
-          height: 62,
+          width: compact ? 52 : 62,
+          height: compact ? 52 : 62,
           flexShrink: 0,
-          borderRadius: 14,
+          borderRadius: compact ? 12 : 14,
           background: win ? CORRECT_GREEN : `${accent}`,
           color: "#10131f",
           display: "flex",
           alignItems: "center",
           justifyContent: "center",
-          fontSize: 32,
+          fontSize: compact ? 28 : 32,
           fontWeight: 900,
           fontFamily: "Inter, Helvetica, Arial, sans-serif",
         }}
@@ -212,7 +224,7 @@ const OptionTile: React.FC<{
       </div>
       <div
         style={{
-          fontSize: optionFontSize(optionText(option)),
+          fontSize: Math.min(optionFontSize(optionText(option)), compact ? 50 : 62),
           fontWeight: 800,
           lineHeight: 1.1,
           color: win ? CORRECT_GREEN : ink,
@@ -242,11 +254,11 @@ const RoundView: React.FC<{
   const options = (round.options ?? []).slice(0, 4);
 
   return (
-    <AbsoluteFill style={{ padding: "70px 110px", justifyContent: "center", gap: 34 }}>
+    <AbsoluteFill style={{ padding: "108px 110px 64px", justifyContent: "flex-start", gap: 16 }}>
       {/* QUESTION */}
       <div
         style={{
-          fontSize: 30,
+          fontSize: 28,
           letterSpacing: 8,
           fontWeight: 700,
           color: accent,
@@ -259,8 +271,8 @@ const RoundView: React.FC<{
       </div>
       <div
         style={{
-          fontSize: 58,
-          lineHeight: 1.18,
+          fontSize: questionFontSize(round.questionText),
+          lineHeight: 1.15,
           fontWeight: 800,
           textAlign: "center",
           color: ink,
@@ -275,12 +287,12 @@ const RoundView: React.FC<{
       </div>
 
       {/* OPTIONS + TIMER */}
-      <div style={{ display: "flex", alignItems: "center", gap: 56, justifyContent: "center" }}>
+      <div style={{ display: "flex", alignItems: "center", gap: 44, justifyContent: "center", marginTop: 4 }}>
         <div
           style={{
             display: "grid",
             gridTemplateColumns: "1fr 1fr",
-            gap: 22,
+            gap: 18,
             flex: "0 1 1180px",
           }}
         >
@@ -293,17 +305,18 @@ const RoundView: React.FC<{
               revealLocal={revealLocal}
               palette={palette}
               index={i}
+              compact
             />
           ))}
         </div>
         {!revealed ? (
-          <CountdownRing progress={progress} accent={accent} ink={ink} secondsLeft={secondsLeft} />
+          <CountdownRing progress={progress} accent={accent} ink={ink} secondsLeft={secondsLeft} size={132} />
         ) : (
           <div
             style={{
-              width: 150,
+              width: 132,
               textAlign: "center",
-              fontSize: 30,
+              fontSize: 26,
               fontWeight: 900,
               color: CORRECT_GREEN,
               fontFamily: "Inter, Helvetica, Arial, sans-serif",
@@ -319,13 +332,17 @@ const RoundView: React.FC<{
       {revealed ? (
         <div
           style={{
+            position: "absolute",
+            left: 150,
+            right: 150,
+            bottom: 62,
             textAlign: "center",
             opacity: interpolate(revealLocal, [10, 26], [0, 1], { extrapolateRight: "clamp" }),
           }}
         >
           <div
             style={{
-              fontSize: 40,
+              fontSize: 34,
               fontWeight: 700,
               color: ink,
               fontFamily: "Inter, Helvetica, Arial, sans-serif",
@@ -336,7 +353,7 @@ const RoundView: React.FC<{
           {round.subtext ? (
             <div
               style={{
-                fontSize: 26,
+                fontSize: 22,
                 color: `${ink}aa`,
                 marginTop: 8,
                 fontFamily: "Inter, Helvetica, Arial, sans-serif",
@@ -383,13 +400,17 @@ export const QuizYear: React.FC<QuizYearProps> = ({ rounds, palette, title }) =>
           style={{
             position: "absolute",
             top: 40,
-            width: "100%",
+            left: 140,
+            right: 140,
             textAlign: "center",
             fontSize: 24,
             letterSpacing: 5,
             color: `${ink}66`,
             fontFamily: "Inter, Helvetica, Arial, sans-serif",
             fontWeight: 600,
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
           {title.toUpperCase()}
@@ -420,12 +441,16 @@ export const QuizYear: React.FC<QuizYearProps> = ({ rounds, palette, title }) =>
         <div
           style={{
             position: "absolute",
-            bottom: 34,
-            width: "100%",
+            bottom: 24,
+            left: 110,
+            right: 110,
             textAlign: "center",
-            fontSize: 20,
+            fontSize: 16,
             color: `${ink}77`,
             fontFamily: "Inter, Helvetica, Arial, sans-serif",
+            overflow: "hidden",
+            textOverflow: "ellipsis",
+            whiteSpace: "nowrap",
           }}
         >
           source: {active.round.sourceUrl}

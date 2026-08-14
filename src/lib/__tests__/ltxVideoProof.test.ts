@@ -137,6 +137,8 @@ async function main(): Promise<void> {
     profile,
     jobId,
     completion: {
+      gpuSku: "RTX 4090",
+      gpuCount: 1,
       renderContract: contractFor(),
       videoOutputs: { [jobId]: proofFor() },
     },
@@ -147,7 +149,7 @@ async function main(): Promise<void> {
     () => assertLtxWorkerCompletionEvidence({
       profile,
       jobId,
-      completion: { renderContract: contractFor() },
+      completion: { gpuSku: "RTX 4090", gpuCount: 1, renderContract: contractFor() },
     }),
     /omitted its ffprobe video output evidence/,
     "a completed worker cannot turn an MP4 into an accepted artifact without ffprobe evidence",
@@ -157,6 +159,8 @@ async function main(): Promise<void> {
       profile,
       jobId,
       completion: {
+        gpuSku: "RTX 4090",
+        gpuCount: 1,
         renderContract: contractFor(),
         videoOutputs: { [jobId]: { ...proofFor(), outputWidth: profile.width - 64 } },
       },
@@ -169,12 +173,28 @@ async function main(): Promise<void> {
       profile,
       jobId,
       completion: {
+        gpuSku: "RTX 4090",
+        gpuCount: 1,
         renderContract: { ...contractFor(), spatialUpscaleFactor: 1 },
         videoOutputs: { [jobId]: proofFor() },
       },
     }),
     /sealed LTX-2.5 runtime contract/,
     "the direct worker must attest that the LTX x2 stage actually ran",
+  );
+  assert.throws(
+    () => assertLtxWorkerCompletionEvidence({
+      profile,
+      jobId,
+      completion: {
+        gpuSku: "A100",
+        gpuCount: 1,
+        renderContract: contractFor(),
+        videoOutputs: { [jobId]: proofFor() },
+      },
+    }),
+    /exactly one RTX 4090 worker/,
+    "the controller rejects a completion unless the data plane attests the exact physical GPU",
   );
 
   const outputProofs = assertLtxVideoOutputProofSet({

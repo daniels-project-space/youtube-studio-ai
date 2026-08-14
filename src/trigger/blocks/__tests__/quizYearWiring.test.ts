@@ -44,6 +44,10 @@ async function main(): Promise<void> {
   assert.equal(block.paid, true, "the block spends real (if small) money and must be preflighted");
   assert.ok(block.produces.includes("videoKey"), "self-contained engines emit the final video");
   assert.ok(block.produces.includes("videoDurationSec"));
+  assert.ok(
+    block.produces.includes("onScreenTextCues"),
+    "the final quiz master must carry an explicit readable-text contract into QA",
+  );
 
   /* 2 — family / lane / archetype plumbing */
   const family = FAMILIES.quizyear;
@@ -52,10 +56,10 @@ async function main(): Promise<void> {
   assert.equal(family.archetypeKey, "quiz-year");
   assert.equal(family.narrated, false, "nobody speaks in this format");
   assert.equal(CONTENT_LANE_BY_FAMILY.quizyear, "quiz_year");
-  assert.ok(FAMILY_CREW.quizyear.includes("critic"), "wording is the only creative surface — the critic matters");
-  assert.ok(
-    !FAMILY_CREW.quizyear.includes("composer"),
-    "no score is bedded, so a composer brief would be a paid call nothing reads",
+  assert.deepEqual(
+    FAMILY_CREW.quizyear,
+    [],
+    "the certified route owns a deterministic critic receipt; a generic crew critic would reintroduce a Gemini path",
   );
 
   const archetype = ARCHETYPES["quiz-year"];
@@ -105,6 +109,22 @@ async function main(): Promise<void> {
       `quiz_year must not reach a paid media provider (found ${banned}) — the format's entire economic case is that it needs none`,
     );
   }
+  for (const banned of ["geminiJson", "hasGeminiKey", "proposeGeneralKnowledgeCandidates"]) {
+    assert.ok(
+      !source.includes(banned),
+      `QuizYear must not retain an optional Gemini/model fallback (${banned}); Gemini is reserved for the sealed thumbnail module`,
+    );
+  }
+  assert.match(
+    source,
+    /certified only in noGemini mode/,
+    "direct invocations must fail closed unless they use the registered deterministic route",
+  );
+  assert.match(
+    source,
+    /const onScreenTextCues: TimedOnScreenTextCue\[\]/,
+    "QuizYear must derive timed OCR cues from its actual rendered questions and options",
+  );
 
   const contract = MODULE_CONTRACTS.quiz_year;
   assert.ok(contract, "quiz_year needs a module contract");
@@ -127,7 +147,18 @@ async function main(): Promise<void> {
   const binding = CATALOG_EXECUTION_BINDINGS["quiz-year"];
   assert.ok(binding, "quiz-year needs an execution binding");
   assert.equal(binding.kind, "pipeline-module", "the entry claims to be wired, so it must bind as one");
-  assert.deepEqual(binding.executableIds, ["quiz_year"]);
+  assert.deepEqual(binding.executableIds, [
+    "quiz_topic_plan",
+    "quiz_topic_safety",
+    "quiz_critic_spec",
+    "quiz_metadata",
+    "quiz_thumbnail",
+    "quiz_year",
+  ]);
+  assert.ok(
+    MODULE_CONTRACTS.quiz_critic_spec,
+    "the deterministic critic must stay registered rather than being replaced by a generic model crew role",
+  );
   // The OLD entry must stay honest: it is still not buildable.
   const oldEntry = GOLDEN_MODULES.find((m) => m.key === "quiz");
   assert.ok(oldEntry, "the original quiz entry must be preserved as the licensing record");

@@ -8,8 +8,8 @@ import { lintTitle } from "@/lib/metacraft";
 // test exists." This file exercises the two gates that are deterministic and
 // callable in isolation (lintTitle's payoff-window + claims-grounding checks),
 // then pins the clickScore/direct >=7 judge gate — which lives inside
-// craftMetadata's live Gemini/YouTube-Data round trip and cannot run without
-// network + GEMINI_API_KEY — via a source-anchored assertion so a silent
+// craftMetadata's live permitted-model/YouTube-Data round trip and cannot run without
+// network + ANTHROPIC_API_KEY — via a source-anchored assertion so a silent
 // weakening of the threshold breaks this test instead of shipping quietly.
 
 /* ------------------------ payoff-in-50-chars gate ------------------------ */
@@ -174,9 +174,9 @@ console.log("metacraftGates.test.ts: lintTitle payoff-window + claims-grounding 
 
 /* ------- craftMetadata judge gate (clickScore & direct >=7) -- pinned ------ */
 //
-// craftMetadata() ranks title candidates through a live Gemini judge call and
+// craftMetadata() ranks title candidates through a live permitted-model judge call and
 // only accepts a winner when BOTH clickScore and direct clear 7 (metacraft.ts).
-// That round trip needs GEMINI_API_KEY plus network and cannot run as a plain
+// That round trip needs ANTHROPIC_API_KEY plus network and cannot run as a plain
 // unit test, so this pins the literal threshold expression: if a future edit
 // silently loosens the gate (e.g. drops the `direct` half, or lowers either
 // number), this assertion breaks loudly instead of the regression shipping

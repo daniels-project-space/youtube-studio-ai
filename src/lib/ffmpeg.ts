@@ -1372,6 +1372,44 @@ export async function measureAudio(
 }
 
 /**
+ * Proves that an authored narration signal survives into the assembled master.
+ * Unlike final-mix loudness, this is resistant to a music bed masking a missing
+ * dialogue track: FFmpeg cross-correlates the narration waveform with the
+ * final mix after the planned intro offset. It measures presence, not speech
+ * intelligibility or aesthetic quality.
+ */
+export async function measureNarrationMixCorrelation(args: {
+  narrationPath: string;
+  masterPath: string;
+  narrationStartSec?: number;
+}): Promise<{ correlation: number | null }> {
+  const offset = Number.isFinite(args.narrationStartSec) && (args.narrationStartSec ?? 0) > 0
+    ? args.narrationStartSec!
+    : 0;
+  try {
+    const { stderr } = await run(FFMPEG, [
+      "-nostats",
+      "-i", args.narrationPath,
+      ...(offset > 0 ? ["-ss", offset.toFixed(3)] : []),
+      "-i", args.masterPath,
+      "-filter_complex",
+      "[0:a]aresample=16000,aformat=channel_layouts=mono[narration];" +
+        "[1:a]aresample=16000,aformat=channel_layouts=mono[master];" +
+        "[narration][master]axcorrelate=size=2048:algo=fast,astats=metadata=1:reset=0[correlation]",
+      "-map", "[correlation]",
+      "-f", "null", "-",
+    ], 600_000);
+    const matches = [...stderr.matchAll(/DC offset:\s*(-?\d+(?:\.\d+)?)/g)];
+    const value = matches.length ? Number(matches[matches.length - 1]![1]) : Number.NaN;
+    // Polarity can flip during a legitimate encoder/mixer pass. Presence is
+    // its magnitude; a missing narration signal remains near zero.
+    return { correlation: Number.isFinite(value) ? Math.abs(value) : null };
+  } catch {
+    return { correlation: null };
+  }
+}
+
+/**
  * Final loudness normalization — AUDIO-ONLY (video stream copied, no x264
  * pass): measure with loudnorm print_format=json, then apply LINEAR gain with
  * the measured values (one-pass dynamic loudnorm audibly pumps under music

@@ -4,28 +4,28 @@
  * This is deliberately more than a style keyword picker. A recommendation is
  * grounded in the real family catalog, durable lane contracts, provider and
  * source-evidence requirements, and the fact that no channel is promotable
- * until a held-out validation render passes. The LLM is a semantic vote; the
- * deterministic ranking and preflight keep the result useful when a
- * model/provider is absent.
+ * until a held-out validation render passes. It is deliberately deterministic:
+ * selecting a format must never make a provider call or imply that a
+ * Gemini-backed planner is autonomous.
  */
 import {
   FAMILIES,
   FAMILY_CREW,
   FAMILY_KEYS,
+  FAMILY_RUNTIME_PIPELINE,
+  familyAutonomousPlanningCapability,
   familyDurationContract,
   familyProductionReadiness,
   formatFamilyDurationContract,
-  isFamilyProductionReady,
-  productionReadyFamilyFallback,
   type FamilyKey,
 } from "@/engine/families";
 import { CONTENT_LANE_POLICIES, contentLaneForFamily } from "@/engine/contentLane";
 import {
   dataStoryRecommendationForIntent,
-  type DataStoryModuleRecommendation,
+  type DataStoryContract,
 } from "@/engine/dataStory";
 import { nichePreset } from "@/engine/golden";
-import { geminiJson } from "@/lib/gemini";
+import { assessPipelineVideoRuntimeReadiness } from "@/engine/runtimeCapability";
 
 const KNOWN_ROLES = ["director", "cinematographer", "editor", "composer", "critic"] as const;
 export type FormatCrewRole = (typeof KNOWN_ROLES)[number];
@@ -39,6 +39,10 @@ export interface FormatSelectionInput {
   nicheKey?: string;
   audience?: string;
   sampleTopics?: string[];
+  /** Optional desired final runtime. The authoritative compiler checks it again before spend. */
+  targetDurationSeconds?: number;
+  /** Optional hard creator budget cap. Omit it to receive the family floor only. */
+  maxPerVideoBudgetUsd?: number;
 }
 
 export interface FormatRecipe {
@@ -57,13 +61,76 @@ export interface RankedFormatCandidate {
   matchedSignals: string[];
 }
 
+export interface FormatPlanningPreflight {
+  /** Whether the family has a registered planner that never requires Gemini at runtime. */
+  ready: boolean;
+  mode: "registered_non_gemini" | "unregistered";
+  capabilityId?: string;
+  plannerBlock?: string;
+  provenance?: string;
+  blockers: string[];
+  remediation?: string;
+}
+
+export interface FormatRuntimePreflight {
+  /** True only when every video-producing block's pinned profile is runnable on the current fleet. */
+  ready: boolean;
+  videoRequired: boolean;
+  blockers: string[];
+  assessedBlocks: {
+    blockId: string;
+    profileId?: string;
+    ready: boolean;
+    blockers: string[];
+  }[];
+}
+
+export interface FormatModuleAdmission {
+  block: string;
+  profile: string;
+  /** The concept explicitly asked for this module's visual grammar. */
+  requiredForConcept: boolean;
+  autonomous: boolean;
+  blockers: string[];
+  remediation: string;
+  requirements: string[];
+}
+
+/**
+ * A reviewable module required by the stated channel concept. This stays
+ * deliberately small so the creator can describe real modules from different
+ * production lanes without importing their executable Trigger implementations.
+ */
+export interface FormatModuleRecommendation {
+  block: string;
+  profile: string;
+  /** Present for source-attributed Data Story; retained for existing creator clients. */
+  contract?: DataStoryContract;
+  automationAdmission: {
+    autonomous: boolean;
+    blockers: readonly string[];
+    remediation: string;
+  };
+  requirements: readonly string[];
+  qualityFocus: readonly string[];
+}
+
 export interface FormatPreflight {
   /** The catalogued family and its lane contract are available in this build. */
   templateAvailable: boolean;
   /** True only if its actual production renderer can execute on the current fleet. */
   productionReady: boolean;
-  /** Provider/hardware blockers that prevent a paid validation render. */
+  /**
+   * All current automatic-production blockers, retained under the legacy
+   * field name so existing creator clients do not mistake a blocked route for
+   * a runnable one. Use `planning`, `runtime`, and `moduleAdmissions` for the
+   * precise owner of each blocker.
+   */
   runtimeBlockers: string[];
+  /** Actual no-Gemini planning admission for this family. */
+  planning: FormatPlanningPreflight;
+  /** Actual pinned video-runtime assessment for this family. */
+  runtime: FormatRuntimePreflight;
   /** A possible substitute for explicit operator consideration; never silently selected. */
   fallbackFamily?: FamilyKey;
   /** Runtime pipeline compilation happens in the authorized design task. */
@@ -74,8 +141,16 @@ export interface FormatPreflight {
   providerRequirements: string[];
   /** Mandatory source/claim inputs that must be supplied before a render. */
   sourceRequirements: string[];
-  /** Optional certified modules the operator may explicitly add after review. */
-  recommendedModules: DataStoryModuleRecommendation[];
+  /** False whenever the creator has not supplied all source/module evidence implied by this concept. */
+  sourceRequirementsReady: boolean;
+  /** Certified modules implied by the concept, including private-review-only routes. */
+  recommendedModules: FormatModuleRecommendation[];
+  /**
+   * The automation status of modules implied by the creator's stated concept.
+   * A module with `requiredForConcept: true` blocks automatic production when
+   * it does not have a non-Gemini admission path.
+   */
+  moduleAdmissions: FormatModuleAdmission[];
   missingRequirements: string[];
   /**
    * Conservative floor for a standard episode, backed by the current default
@@ -83,6 +158,12 @@ export interface FormatPreflight {
    * again before any provider work can begin.
    */
   minimumPerVideoBudgetUsd: number;
+  budget: {
+    minimumUsd: number;
+    requestedMaxUsd?: number;
+    withinRequestedBudget: boolean;
+    shortfallUsd?: number;
+  };
   /** The authored story unit, exposed before a creator selects a length. */
   duration: {
     minimumSeconds: number;
@@ -91,6 +172,8 @@ export interface FormatPreflight {
     inputUnit: "minutes" | "seconds" | "fixed";
     label: string;
     rationale: string;
+    targetSeconds?: number;
+    withinFamilyContract: boolean;
   };
   /** Required end-to-end visual chain, not a synthetic full runtime pipeline. */
   requiredPipelineModules: string[];
@@ -112,7 +195,7 @@ export interface FormatRecommendation {
   alternates: { family: FamilyKey; why: string }[];
   /** A transparent readiness contract for the creator UI. */
   preflight: FormatPreflight;
-  /** true → semantic model output was unavailable or contradicted strong intent. */
+  /** Always true: this advisor is deterministic and never calls an AI provider. */
   fallback: boolean;
 }
 
@@ -239,11 +322,155 @@ function canonicalCrew(family: FamilyKey, input: FormatSelectionInput): FormatCr
   return KNOWN_ROLES.filter((role) => known.has(role));
 }
 
-function sourceRequirements(family: FamilyKey): string[] {
+const CASEFILE_CINEMATIC_SIGNALS = [
+  "true crime",
+  "casefile",
+  "cold case",
+  "missing person",
+  "missing people",
+  "murder",
+  "homicide",
+  "criminal investigation",
+  "crime investigation",
+  "real crime",
+  "historical crime",
+  "factual reconstruction",
+  "documentary reconstruction",
+] as const;
+
+function isCasefileCinematicIntent(input: FormatSelectionInput, family: FamilyKey): boolean {
+  if (family !== "cinematic") return false;
+  const intent = normalizedIntent(input);
+  // Preserve the fiction lane. A fictional crime/thriller is not a reason to
+  // demand real-world primary-source evidence or to mislabel it as Casefile.
+  if (/\b(fictional|fiction|screenplay|original story)\b/.test(intent)) return false;
+  return CASEFILE_CINEMATIC_SIGNALS.some((signal) => intent.includes(signal));
+}
+
+function casefileCinematicRecommendations(
+  input: FormatSelectionInput,
+  family: FamilyKey,
+): FormatModuleRecommendation[] {
+  if (!isCasefileCinematicIntent(input, family)) return [];
+
+  return [
+    {
+      block: "casefile_source_packet",
+      profile: "source_first_casefile/v1",
+      automationAdmission: {
+        autonomous: false,
+        blockers: ["Casefile source admission is private human-editorial review only."],
+        remediation: "Supply the source-first packet and a current fingerprint-bound editorial approval.",
+      },
+      requirements: [
+        "reviewed Case Packet with one allowed primary-source URL and provenance record per factual claim",
+        "exhaustive source-asset usage and rights-basis ledger",
+        "fresh fingerprint-bound human editorial approval",
+      ],
+      qualityFocus: ["primary-source claim integrity", "rights-aware visual provenance"],
+    },
+    {
+      block: "casefile_evidence_shot_map",
+      profile: "claim_to_source_to_shot_map/v1",
+      automationAdmission: {
+        autonomous: false,
+        blockers: ["Casefile evidence-to-shot mapping is private human-editorial review only."],
+        remediation: "Bind every factual claim to admitted source, scene, and coverage shots, then obtain current map approval.",
+      },
+      requirements: [
+        "admitted Casefile source packet",
+        "claim-to-source-to-scene-to-shot coverage map with a fresh reviewer signature",
+      ],
+      qualityFocus: ["no unsupported visual reconstruction", "claim-to-shot traceability"],
+    },
+    {
+      block: "cinematic_case_sequence",
+      profile: "faceless_source_bound_cinematic_sequence/v1",
+      automationAdmission: {
+        autonomous: false,
+        blockers: ["Cinematic Casefile sequences remain private human-review candidates, not automatic channel output."],
+        remediation: "Approve a fingerprint-bound sequence with faceless cast, wardrobe, prop, era, and cut-continuity locks.",
+      },
+      requirements: [
+        "admitted evidence-shot map",
+        "reviewer-signed causal multi-shot sequence with faceless mannequin wardrobe, prop, era, and location continuity locks",
+      ],
+      qualityFocus: ["causal tension-and-reveal edit", "faceless wardrobe continuity", "source-bound multi-shot coverage"],
+    },
+  ];
+}
+
+function sourceRequirements(family: FamilyKey, input: FormatSelectionInput): string[] {
   if (family === "documentary_collage_short") {
     return ["structured sourceReferences", "per-claim claimEvidence"];
   }
+  if (isCasefileCinematicIntent(input, family)) {
+    return [
+      "source-first Case Packet",
+      "claim-to-source-to-shot evidence map",
+      "current human editorial approval for the factual cinematic sequence",
+    ];
+  }
   return [];
+}
+
+function uniqueStrings(values: readonly string[]): string[] {
+  return [...new Set(values.filter((value) => value.trim().length > 0))];
+}
+
+function positiveFiniteNumber(value: unknown): number | undefined {
+  return typeof value === "number" && Number.isFinite(value) && value > 0 ? value : undefined;
+}
+
+function planningPreflight(family: FamilyKey): FormatPlanningPreflight {
+  const capability = familyAutonomousPlanningCapability(family);
+  if (capability.mode === "registered_non_gemini") {
+    return {
+      ready: true,
+      mode: capability.mode,
+      capabilityId: capability.id,
+      plannerBlock: capability.plannerBlock,
+      provenance: capability.provenance,
+      blockers: [],
+    };
+  }
+
+  return {
+    ready: false,
+    mode: capability.mode,
+    blockers: [
+      `${FAMILIES[family].label}: no-Gemini automatic planning is not registered; ` +
+        `the creator pipeline still requires Gemini-backed ${capability.geminiBackedBlocks.join(", ")}.`,
+    ],
+    remediation: "Register a deterministic or non-Gemini topic/story planner before admitting this family.",
+  };
+}
+
+function runtimePreflight(family: FamilyKey): FormatRuntimePreflight {
+  const assessment = assessPipelineVideoRuntimeReadiness(FAMILY_RUNTIME_PIPELINE[family]);
+  return {
+    ready: assessment.ready,
+    videoRequired: assessment.videoRequired,
+    blockers: [...assessment.blockers],
+    assessedBlocks: assessment.blockAssessments.map((block) => ({
+      blockId: block.blockId,
+      ...(block.profileId ? { profileId: block.profileId } : {}),
+      ready: block.ready,
+      blockers: [...block.blockers],
+    })),
+  };
+}
+
+function moduleAdmissions(modules: readonly FormatModuleRecommendation[]): FormatModuleAdmission[] {
+  return modules.map((module) => ({
+    block: module.block,
+    profile: module.profile,
+    requiredForConcept: true,
+    autonomous: module.automationAdmission.autonomous,
+    blockers: [...module.automationAdmission.blockers],
+    remediation: module.automationAdmission.remediation,
+    requirements: [...module.requirements],
+  }));
 }
 
 /**
@@ -257,29 +484,83 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
   const spec = FAMILIES[family];
   const lane = contentLaneForFamily(family);
   const laneDefinition = lane ? CONTENT_LANE_POLICIES[lane.key] : undefined;
-  const requiredSources = sourceRequirements(family);
-  const missingRequirements = [...requiredSources];
+  const planning = planningPreflight(family);
+  const runtime = runtimePreflight(family);
+  const recommendedModules: FormatModuleRecommendation[] = [
+    ...dataStoryRecommendationForIntent(input, family),
+    ...casefileCinematicRecommendations(input, family),
+  ];
+  const admittedModules = moduleAdmissions(recommendedModules);
+  const requiredSources = sourceRequirements(family, input);
+  const missingRequirements = uniqueStrings([
+    ...requiredSources,
+    ...admittedModules
+      .filter((module) => module.requiredForConcept)
+      .flatMap((module) => module.requirements),
+  ]);
+  const sourceRequirementsReady = missingRequirements.length === 0;
   const templateAvailable = Boolean(spec.available && lane);
   const readiness = familyProductionReadiness(family);
   const duration = familyDurationContract(family);
-  const productionReady = templateAvailable && readiness.productionReady;
-  const fallbackFamily = !productionReady && templateAvailable
-    ? productionReadyFamilyFallback(family)
-    : undefined;
+  const targetSeconds = positiveFiniteNumber(input.targetDurationSeconds);
+  const durationWithinFamilyContract = targetSeconds === undefined
+    || (targetSeconds >= duration.minimumSeconds && targetSeconds <= duration.maximumSeconds);
+  const requestedMaxUsd = positiveFiniteNumber(input.maxPerVideoBudgetUsd);
+  const minimumPerVideoBudgetUsd = spec.defaultRunBudgetUsd ?? 0.5;
+  const budgetWithinRequestedCap = requestedMaxUsd === undefined || requestedMaxUsd >= minimumPerVideoBudgetUsd;
+  const moduleBlockers = admittedModules
+    .filter((module) => module.requiredForConcept && !module.autonomous)
+    .flatMap((module) => module.blockers);
+  const constraintBlockers = [
+    ...(!durationWithinFamilyContract && targetSeconds !== undefined
+      ? [`${spec.label}: requested ${targetSeconds}s is outside its ${formatFamilyDurationContract(family)} contract.`]
+      : []),
+    ...(!budgetWithinRequestedCap && requestedMaxUsd !== undefined
+      ? [`${spec.label}: requested budget cap $${requestedMaxUsd.toFixed(2)} is below the $${minimumPerVideoBudgetUsd.toFixed(2)} standard-episode floor.`]
+      : []),
+  ];
+  const runtimeBlockers = uniqueStrings([
+    ...readiness.blockers,
+    ...moduleBlockers,
+    ...constraintBlockers,
+    ...(!sourceRequirementsReady
+      ? [`${spec.label}: source/module evidence must be supplied before automatic production.`]
+      : []),
+  ]);
+  // Family readiness covers its declared template, planner, and runtime. The
+  // creator-level decision additionally has to satisfy evidence and explicit
+  // duration/budget constraints implied by this particular channel concept.
+  const productionReady = templateAvailable
+    && readiness.productionReady
+    && planning.ready
+    && runtime.ready
+    && sourceRequirementsReady
+    && admittedModules.every((module) => !module.requiredForConcept || module.autonomous)
+    && durationWithinFamilyContract
+    && budgetWithinRequestedCap;
   return {
     templateAvailable,
     productionReady,
-    runtimeBlockers: [...readiness.blockers],
-    ...(fallbackFamily
-      ? { fallbackFamily }
-      : {}),
+    runtimeBlockers,
+    planning,
+    runtime,
     runtimeCompilationRequired: true,
     ...(lane ? { contentLane: lane.key, primaryRenderer: lane.primaryRenderer } : {}),
     providerRequirements: [...spec.requiresKeys],
     sourceRequirements: requiredSources,
-    recommendedModules: dataStoryRecommendationForIntent(input, family),
+    sourceRequirementsReady,
+    recommendedModules,
+    moduleAdmissions: admittedModules,
     missingRequirements,
-    minimumPerVideoBudgetUsd: spec.defaultRunBudgetUsd ?? 0.5,
+    minimumPerVideoBudgetUsd,
+    budget: {
+      minimumUsd: minimumPerVideoBudgetUsd,
+      ...(requestedMaxUsd !== undefined ? { requestedMaxUsd } : {}),
+      withinRequestedBudget: budgetWithinRequestedCap,
+      ...(!budgetWithinRequestedCap && requestedMaxUsd !== undefined
+        ? { shortfallUsd: Number((minimumPerVideoBudgetUsd - requestedMaxUsd).toFixed(2)) }
+        : {}),
+    },
     duration: {
       minimumSeconds: duration.minimumSeconds,
       maximumSeconds: duration.maximumSeconds,
@@ -287,32 +568,21 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
       inputUnit: duration.inputUnit,
       label: formatFamilyDurationContract(family),
       rationale: duration.rationale,
+      ...(targetSeconds !== undefined ? { targetSeconds } : {}),
+      withinFamilyContract: durationWithinFamilyContract,
     },
     requiredPipelineModules: laneDefinition ? [...laneDefinition.requiredBlocks] : [],
-    qualityFocus: [...FORMAT_RECIPES[family].qualityFocus],
+    qualityFocus: uniqueStrings([
+      ...FORMAT_RECIPES[family].qualityFocus,
+      ...recommendedModules.flatMap((module) => module.qualityFocus),
+    ]),
     warnings: [
       ...(templateAvailable ? [] : ["No available content-lane contract is registered for this family."]),
-      ...(productionReady ? [] : readiness.blockers),
+      ...(productionReady ? [] : runtimeBlockers),
       "The authorized channel-design task must compile the exact runtime pipeline and cost reservation before any validation render can start.",
     ],
     validationRenderRequired: true,
   };
-}
-
-/** A compact, truthful view of every runnable channel recipe for the semantic picker. */
-function catalogForPrompt(input: FormatSelectionInput): string {
-  return FAMILY_KEYS.map((family) => {
-    const spec = FAMILIES[family];
-    const recipe = FORMAT_RECIPES[family];
-    const preflight = formatPreflight(family, input);
-    return [
-      `- ${family}: ${spec.label}; channel types: ${recipe.channelTypes.join(", ")}.`,
-      `  renderer=${preflight.primaryRenderer ?? spec.visualEngine}; ${spec.narrated ? "narrated" : "not narrated"};`,
-      `  lane=${preflight.contentLane ?? "NOT registered"}; required visual chain=${preflight.requiredPipelineModules.join(", ") || "none"}; providers=${preflight.providerRequirements.join(", ") || "none"};`,
-      `  duration=${preflight.duration.label}; production=${preflight.productionReady ? "READY" : `BLOCKED (${preflight.runtimeBlockers.join(" ")})`}; source requirements=${preflight.sourceRequirements.join(", ") || "none"}; optional certified modules=${preflight.recommendedModules.map((module) => `${module.block}/${module.profile}`).join(", ") || "none"}; quality focus=${recipe.qualityFocus.join(", ")}.`,
-      `  tradeoff: ${recipe.tradeoff}`,
-    ].join(" ");
-  }).join("\n");
 }
 
 function confidenceForRank(candidate: RankedFormatCandidate, next?: RankedFormatCandidate): number {
@@ -329,6 +599,70 @@ function alternateReason(candidate: RankedFormatCandidate): string {
 }
 
 /**
+ * A capability check is only a tie-breaker between equally explicit intents.
+ * It must never replace a stronger requested visual grammar with the one
+ * currently easiest to render.
+ */
+function preflightTieBreak(preflight: FormatPreflight): number {
+  if (preflight.productionReady) return 4;
+  if (preflight.templateAvailable && preflight.planning.ready && preflight.runtime.ready) return 3;
+  if (preflight.templateAvailable) return 2;
+  return 1;
+}
+
+function chooseDeterministicCandidate(
+  ranked: readonly RankedFormatCandidate[],
+  input: FormatSelectionInput,
+): RankedFormatCandidate {
+  const defaultCandidate = { family: "narrated_stock" as FamilyKey, score: 0.1, matchedSignals: [] };
+  const first = ranked[0] ?? defaultCandidate;
+  const tied = ranked.filter((candidate) => candidate.score === first.score);
+  if (tied.length <= 1) return first;
+
+  return tied.reduce((best, candidate) => {
+    const bestPreflight = formatPreflight(best.family, input);
+    const candidatePreflight = formatPreflight(candidate.family, input);
+    return preflightTieBreak(candidatePreflight) > preflightTieBreak(bestPreflight) ? candidate : best;
+  }, tied[0]!);
+}
+
+function deterministicAlternates(
+  ranked: readonly RankedFormatCandidate[],
+  chosen: RankedFormatCandidate,
+  input: FormatSelectionInput,
+): { family: FamilyKey; why: string }[] {
+  return ranked
+    // An alternate must independently match the stated intent and be actually
+    // admitted now. A zero-signal QuizYear entry is not a genuine alternative
+    // to an unavailable cinematic/documentary request.
+    .filter((candidate) => candidate.family !== chosen.family && candidate.score > 0)
+    .map((candidate) => ({ candidate, preflight: formatPreflight(candidate.family, input) }))
+    .filter(({ preflight }) => preflight.productionReady)
+    .slice(0, 2)
+    .map(({ candidate }) => ({ family: candidate.family, why: alternateReason(candidate) }));
+}
+
+function recommendationReason(
+  chosen: RankedFormatCandidate,
+  preflight: FormatPreflight,
+): string {
+  const family = chosen.family;
+  const match = chosen.matchedSignals.length
+    ? `Matched ${chosen.matchedSignals.join(", ")} to the ${FAMILIES[family].label} production recipe.`
+    : "No specialist intent was detected, so this uses the most broadly capable narrated production recipe.";
+
+  if (preflight.productionReady) {
+    return `${match} Its registered no-Gemini planner, required source inputs, and current runtime preflight are admitted; a held-out validation render is still mandatory.`;
+  }
+
+  const blockers = preflight.runtimeBlockers.slice(0, 3).join(" ") || "The family has no admitted automatic production path.";
+  const requirements = preflight.missingRequirements.length
+    ? ` Before automatic production, supply: ${preflight.missingRequirements.join("; ")}.`
+    : "";
+  return `${match} Automatic production is currently blocked: ${blockers}${requirements} The requested format remains selected; no unrelated channel was substituted.`;
+}
+
+/**
  * Public deterministic path for tests and offline clients. It covers the full
  * family catalog and never calls a model or provider.
  */
@@ -337,112 +671,40 @@ export function recommendFormatDeterministically(
   reasoning?: string,
 ): FormatRecommendation {
   const ranked = rankFormatCandidates(input);
-  const chosen = ranked[0] ?? { family: "narrated_stock" as FamilyKey, score: 0.1, matchedSignals: [] };
+  const chosen = chooseDeterministicCandidate(ranked, input);
   const family = chosen.family;
   const preflight = formatPreflight(family, input);
   return {
     family,
     available: preflight.productionReady,
     crew: canonicalCrew(family, input),
-    reasoning: reasoning ?? (!preflight.productionReady
-      ? `${FAMILIES[family].label} is the correct authored format for this intent, but its production renderer is currently blocked. No unlike substitute was selected automatically; ${preflight.fallbackFamily ? `${FAMILIES[preflight.fallbackFamily].label} is shown only as an operator-visible alternative.` : "a benchmarked renderer is required."}`
-      : chosen.matchedSignals.length
-      ? `Matched ${chosen.matchedSignals.join(", ")} to the ${FAMILIES[family].label} production recipe.`
-      : "No specialist intent was detected, so this uses the most broadly capable narrated production recipe."),
+    reasoning: reasoning ?? recommendationReason(chosen, preflight),
     confidence: confidenceForRank(chosen, ranked[1]),
-    alternates: ranked
-      .filter((candidate) => candidate.family !== family && isFamilyProductionReady(candidate.family))
-      .slice(0, 2)
-      .map((candidate) => ({ family: candidate.family, why: alternateReason(candidate) })),
+    alternates: deterministicAlternates(ranked, chosen, input),
     preflight,
     fallback: true,
   };
 }
 
-interface RawPick {
-  family?: string;
-  reasoning?: string;
-  confidence?: number;
-  alternates?: { family?: string; why?: string }[];
-}
-
-function validFamily(value: unknown): value is FamilyKey {
-  return typeof value === "string" && FAMILY_KEYS.includes(value as FamilyKey);
-}
-
-function modelAlternates(raw: RawPick | null, chosen: FamilyKey, ranked: RankedFormatCandidate[]): { family: FamilyKey; why: string }[] {
-  const fromModel = (Array.isArray(raw?.alternates) ? raw!.alternates : [])
-    .flatMap((item) => validFamily(item?.family) && item.family !== chosen && isFamilyProductionReady(item.family)
-      ? [{ family: item.family, why: typeof item?.why === "string" && item.why.trim() ? item.why.trim() : alternateReason(ranked.find((candidate) => candidate.family === item.family) ?? { family: item.family, score: 0, matchedSignals: [] }) }]
-      : []);
-  const fallback = ranked
-    .filter((candidate) => candidate.family !== chosen && isFamilyProductionReady(candidate.family))
-    .map((candidate) => ({ family: candidate.family, why: alternateReason(candidate) }));
-  const unique = new Map<FamilyKey, { family: FamilyKey; why: string }>();
-  for (const item of [...fromModel, ...fallback]) if (!unique.has(item.family)) unique.set(item.family, item);
-  return [...unique.values()].slice(0, 2);
-}
-
 /**
- * Recommend a production format. The model gives semantic nuance, while real
+ * Recommend a production format without any model/provider call. The real
  * pipeline preflight prevents an attractive label from being represented as a
- * viable auto-created channel when its renderer or required evidence is absent.
+ * viable auto-created channel when its planner, renderer, or required evidence
+ * is absent.
  */
 export async function selectFormat(
   input: FormatSelectionInput,
   log: (message: string) => void = () => {},
 ): Promise<FormatRecommendation> {
-  const concept = input.concept?.trim();
-  if (!concept) {
-    return recommendFormatDeterministically(input, "No concept provided — defaulted to the most general narrated production recipe.");
-  }
-
-  const ranked = rankFormatCandidates(input);
-  const deterministic = recommendFormatDeterministically(input);
-  const prompt =
-    "You are a YouTube channel architect. Choose the one repeatable PRODUCTION FORMAT that best fits the channel's storytelling unit, audience, and visual grammar. " +
-    "Do not choose based on a fashionable aesthetic alone. Respect source-evidence requirements and explain the main tradeoff. " +
-    "Every selection still requires a held-out validation render before a channel can be promoted.\n\n" +
-    `CHANNEL CONCEPT: ${concept}\n` +
-    (input.niche ? `NICHE: ${input.niche}\n` : "") +
-    (input.audience ? `AUDIENCE: ${input.audience}\n` : "") +
-    (input.sampleTopics?.length ? `SAMPLE TOPICS: ${input.sampleTopics.join("; ")}\n` : "") +
-    `\nREAL FORMAT CATALOG:\n${catalogForPrompt(input)}\n\n` +
-    "Return STRICT JSON: {\"family\":\"<exact key>\",\"reasoning\":\"<=2 sentences\",\"confidence\":0..1," +
-    "\"alternates\":[{\"family\":\"<key>\",\"why\":\"<short tradeoff>\"}]}.";
-
-  let pick: RawPick | null = null;
-  try {
-    pick = await geminiJson<RawPick>({ prompt, maxTokens: 600, temperature: 0.2 });
-  } catch (error) {
-    log(`selectFormat: semantic advisor unavailable (${error instanceof Error ? error.message : error}); using deterministic ranking`);
-  }
-
-  const modelFamily = validFamily(pick?.family) ? pick.family : undefined;
-  const modelRank = modelFamily ? ranked.find((candidate) => candidate.family === modelFamily) : undefined;
-  const strongDeterministicLead = ranked[0].score >= 3 && (modelRank?.score ?? 0) === 0;
-  if (!modelFamily || strongDeterministicLead) {
-    const reason = strongDeterministicLead
-      ? `The semantic pick conflicted with a strong, explicit format signal; ${deterministic.reasoning}`
-      : pick?.reasoning?.trim() || deterministic.reasoning;
-    log(`selectFormat: deterministic → ${deterministic.family}${strongDeterministicLead ? " (model contradicted explicit format signal)" : ""}`);
-    return { ...deterministic, reasoning: reason };
-  }
-
-  const family = modelFamily;
-  const preflight = formatPreflight(family, input);
-  const confidence = Math.max(0, Math.min(1, typeof pick?.confidence === "number" ? pick.confidence : confidenceForRank(modelRank!, ranked[1])));
-  log(`selectFormat: ${modelFamily} → ${family} (confidence ${confidence.toFixed(2)}, production=${preflight.productionReady ? "ready" : "blocked"})`);
-  return {
-    family,
-    available: preflight.productionReady,
-    crew: canonicalCrew(family, input),
-    reasoning: !preflight.productionReady
-      ? `${FAMILIES[family].label} is the best semantic fit, but its production renderer is currently blocked. No unlike substitute was selected automatically; ${preflight.fallbackFamily ? `${FAMILIES[preflight.fallbackFamily].label} is shown only as an operator-visible alternative.` : "a benchmarked renderer is required."}`
-      : pick?.reasoning?.trim() || `Best semantic fit for the ${FAMILIES[modelFamily].label} production recipe.`,
-    confidence,
-    alternates: modelAlternates(pick, family, ranked),
-    preflight,
-    fallback: false,
-  };
+  const fallbackReason = input.concept?.trim()
+    ? undefined
+    : "No concept provided — defaulted to the most general narrated production recipe.";
+  const recommendation = recommendFormatDeterministically(input, fallbackReason);
+  log(
+    `selectFormat: deterministic → ${recommendation.family} ` +
+      `(planner=${recommendation.preflight.planning.ready ? "ready" : "blocked"}, ` +
+      `runtime=${recommendation.preflight.runtime.ready ? "ready" : "blocked"}, ` +
+      `production=${recommendation.available ? "ready" : "blocked"})`,
+  );
+  return recommendation;
 }

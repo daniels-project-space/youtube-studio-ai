@@ -10,14 +10,25 @@ review, and private-first release gate.
 | Lane | Useful public reference | Transferable mechanic | Must not be copied |
 | --- | --- | --- | --- |
 | Visual STEM | [Kurzgesagt](https://www.youtube.com/watch?v=isdLel273rQ), [TED-Ed](https://www.youtube.com/watch?v=2W85Dwxx218), [Domain of Science](https://www.youtube.com/watch?v=ZihywtixUYo) | One question, one legible visual model, causal re-anchoring, bounded conclusion | Art style, characters, scripts, or claimed facts without sources |
+| Children’s learning | [TED-Ed](https://www.youtube.com/@TEDEd), [Pinkfong / Baby Shark Kids’ Songs & Stories](https://www.youtube.com/@pinkfong) | One explicit objective, participatory repetition, clear action cues, and a recall moment | Songs, characters, melody, visuals, packaging, or any unsupported instructional claim |
 | Atlas / history | [Atlas Pro](https://www.youtube.com/watch?v=V0o_7T3d3mw) | Artifact → observation → implication → map/timeline proof | Decorative map motion presented as evidence |
 | Language | [Dreaming Spanish](https://www.youtube.com/watch?v=FD3cN1rUOYo), [Easy Spanish](https://www.youtube.com/watch?v=SCS1dJ35lig), [English with Lucy](https://www.youtube.com/watch?v=oUD2gUmdzeI) | One communicative objective, comprehensible audio, context, repetition, pause for retrieval | Fake interviews, falsely documentary speakers, or unsupervised pronunciation claims |
 | Original fiction | [Dead Sound](https://www.youtube.com/watch?v=mVLrBJYGxk4), [DUST](https://www.youtube.com/watch?v=rv8kOzRZK8g) | Stable visual language, staged wide/close contrast, sound-led atmosphere | Existing stories, recognizable IP, or synthetic realism passed off as filmed acting |
 | Product tutorials | [Notion Training](https://www.youtube.com/watch?v=aA7si7AmPkY), [Figma Beginners](https://www.youtube.com/watch?v=dXQ7IHkTiMM) | Outcome promise → authentic UI proof → concrete result | Invented UI, stale feature claims, or unauthenticated product access |
 | Casefile / investigation | [Fern](https://www.youtube.com/watch?v=wkVygetgeRY), [Fascinating Horror](https://www.youtube.com/watch?v=EPaBRegvkuQ) | Evidence-led hook, source object, causal timeline, explicit uncertainty | Active allegations, graphic detail, unsupported reconstructions, or how-to wrongdoing |
+| Ambient / sleep | [Soothing Relaxation](https://www.youtube.com/@SoothingRelaxation) | Functional audio continuity and unobtrusive visual support for the listening use case | Music, visual identity, titles, or a recognizable channel treatment |
+| Vertical factual Shorts | [Zack D. Films](https://www.youtube.com/@zackdfilms) | Immediate one-idea promise, visual consequence, and compact payoff | Topics, scripts, voice, 3D style, sensationalism, graphic material, or unsupported factual claims |
+| Interactive trivia | [BRIGHT SIDE](https://www.youtube.com/@BRIGHTSIDEOFFICIAL) | One legible prompt, fair participation window, and unambiguous reveal | Questions, wording, answer sets, visual branding, clickbait, or unsupported facts |
 
 Reference pacing is lane-specific. A visual-change sample from one format is a
 benchmark for that format only—not a universal instruction to cut faster.
+
+Reference standards transfer mechanics, not media. A source-bound quality
+contract must name the public reference URL, the no-copy boundary, and the
+evidence that can actually be checked (for example a reviewer-confirmed causal
+beat sheet, claim → source → shot coverage, audio evidence, thumbnail evidence,
+and originality evidence). It must never report an automatic visual comparison
+unless such a comparator was separately implemented and its receipt is present.
 
 ## Reusable module map
 

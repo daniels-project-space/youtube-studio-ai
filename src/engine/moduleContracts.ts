@@ -171,30 +171,13 @@ function loreShortCostCeiling(
  * quizRoundCount() in src/trigger/blocks/quizYearBlocks.ts.
  */
 function quizYearCostCeiling(
-  params: Readonly<Record<string, unknown>>,
-  context: Readonly<ModuleCostContext> | undefined,
+  _params: Readonly<Record<string, unknown>>,
+  _context: Readonly<ModuleCostContext> | undefined,
 ): number {
-  // The certified QuizYear route locks deterministic templates and explicitly
-  // forbids the legacy question-wording/critique model calls.
-  if (params["noGemini"] === true) return 0;
-  const countdown = boundedNumber(params["countdownSeconds"], 6, 3, 15);
-  const reveal = boundedNumber(params["revealSeconds"], 4, 2, 10);
-  const seconds = targetSeconds(params, context, 80);
-  const rounds = Math.max(3, Math.min(15, Math.round(seconds / Math.max(1, countdown + reveal))));
-  // 2 critique iterations is the lane cap (contentLane.ts LANE_QUALITY_POLICIES
-  // .quiz_year.maxCritiqueIters). Per iteration the block spends:
-  //   • at most `rounds` phrasing calls — ONE per round, whichever category the
-  //     round came from, because every Wikidata category shares the same
-  //     single-call phrasing path and general-knowledge rounds arrive already
-  //     phrased (their text came from the candidate batch and was verified);
-  //   • at most 1 general-knowledge PROPOSAL call, which covers the whole
-  //     general-knowledge batch for that iteration rather than one per round;
-  //   • 1 critic call over the whole set.
-  // So mixing categories does NOT scale per-round cost — it adds exactly one
-  // bounded call per iteration versus the single-category build.
-  const iterations = 2;
-  const callsPerIteration = rounds + 1 /* GK proposal */ + 1 /* critic */;
-  return iterations * callsPerIteration * PRICE.boundedTextPassUsd;
+  // The QuizYear engine is fully deterministic: source statements, question
+  // wording, render props, and integrity checks are local. Its preceding music
+  // block independently reserves/attests the only external creative cost.
+  return 0;
 }
 
 function motionComicCostCeiling(params: Readonly<Record<string, unknown>>): number {
@@ -248,7 +231,15 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   // The certified QuizYear planner is intentionally independent of Topicraft:
   // its source-reviewed topic registry and stable topic-memory receipt are a
   // reusable non-Gemini planning capability, not a degraded generic fallback.
-  quiz_topic_plan: contract(["topic.selected", "quiz.plan_provenanced"], {
+  // The curated registry plus independently sourceable Wikidata answers are
+  // the QuizYear route's research evidence. Advertising only `topic.selected`
+  // made shared policy completion reinsert Gemini-backed competitor research.
+  quiz_topic_plan: contract([
+    "topic.researched",
+    "topic.selected",
+    "quiz.plan_provenanced",
+    "crew.composer_cue_sheet",
+  ], {
     providerProfiles: [local],
     qualityRequired: true,
   }),
@@ -442,6 +433,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: [
       "entityClips", "introCardPath", "introApplied", "introCardKey", "introSec", "healHints", "healClasses", "sentenceTimings", "cutSheet",
       "chapterPlan", "channelAvatarKey", "script", "channelName", "quoteOverlays", "insertOverlays",
+      "cinematicGeneratedScenePlan", "cinematicEditDecisionList", "generatedFootageSceneManifest",
       "extraOverlays", "musicKey", "styleDNA", "shotRenderManifest", "shotQaReport", "visualCoverage",
     ],
     providerProfiles: [local],
@@ -464,7 +456,16 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // matches the active lane; final QA must declare that cross-block input.
       "episodeSpec",
       "motionComicTimeline", "visualRepair", "visualMatterManifest",
+      "cinematicGeneratedScenePlan", "cinematicCreativeLocks", "cinematicEditDecisionList", "generatedFootageSceneManifest",
+      // Standard Novita Story-Spine renders use this exact LTX cut plan; it is
+      // optional because non-LTX lanes do not produce a shot-render manifest.
+      "shotRenderManifest",
       "shortStrategyBrief", "beatManifest", "shortRetentionManifest", "shortSceneQa", "documotionVerdict", "documotionRender",
+      // Final QA conditionally rehydrates narration, validates admitted
+      // Casefile provenance, and now verifies renderer-declared readable text.
+      // These remain optional because each is specific to a different lane.
+      "narrationKey", "narrationLocalPath", "narrationTranscriptText", "onScreenTextCues",
+      "casefileEvidenceShotMapAdmission", "casefileSourceAdmission",
     ],
     providerProfiles: [managed, local],
     maxCostUsd: 5,
@@ -499,8 +500,93 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
 
+  // Standalone, operator-supplied curriculum / recurring-identity admission.
+  // It intentionally emits a private child-editor-review receipt only; no
+  // children family or publishing policy reads this as automatic approval.
+  children_show_bible: contract([
+    "children.show_bible_admitted",
+    "children.curriculum_continuity_locked",
+    "publish.private_only",
+  ], {
+    requiredConsumes: ["childrenShowBibleInput", "episodeGraph", "lessonContract", "contentLane"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+
   child_content_safety: contract(["safety.child_content_review_required", "publish.private_only"], {
     requiredConsumes: ["episodeGraph", "sceneManifest", "lessonContract", "contentLane"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+
+  // Operator-supplied source-first documentary evidence. This admission module
+  // is intentionally not a story planner or renderer: it proves a Case Packet
+  // has claim-level primary evidence, source-use rights boundaries, and a
+  // fresh human review receipt before any future documentary lane may read it.
+  casefile_source_packet: contract([
+    "documentary.source_packet_admitted",
+    "documentary.evidence_grammar_locked",
+    "publish.private_only",
+  ], {
+    requiredConsumes: ["casefileSourcePacketInput"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+
+  // A separate visual-editor handoff for source-admitted factual documentary
+  // work. It binds every claim to real Scene Manifest / ShotPlan targets and
+  // can only emit another private human-review receipt; no family consumes it.
+  casefile_evidence_shot_map: contract([
+    "documentary.claim_to_shot_mapping_locked",
+    "documentary.visual_safety_policy_locked",
+    "publish.private_only",
+  ], {
+    requiredConsumes: [
+      "casefileSourcePacket",
+      "casefileSourceAdmission",
+      "casefileEvidenceShotMapInput",
+      "sceneManifest",
+      "shotList",
+    ],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+
+  // The actual cinematic documentary handoff is intentionally three stages:
+  // deterministic source-bound draft, real human signature, then strict
+  // admission. It is a private human-review artifact, not a generic prompt
+  // generator or a family admission switch.
+  cinematic_case_sequence_draft: contract([
+    "documentary.cinematic_sequence_drafted",
+    "documentary.non_likeness_cast_locked",
+    "publish.private_only",
+  ], {
+    requiredConsumes: ["cinematicCaseDirection", "casefileEvidenceShotMap", "sceneManifest", "shotList"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+  cinematic_case_sequence_finalize: contract([
+    "documentary.cinematic_sequence_human_signed",
+    "publish.private_only",
+  ], {
+    requiredConsumes: ["cinematicCaseSequenceDraft", "cinematicSequenceEditorialReview"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+  cinematic_case_sequence: contract([
+    "documentary.cinematic_sequence_locked",
+    "documentary.causal_cut_coverage_locked",
+    "documentary.non_likeness_cast_locked",
+    "publish.private_only",
+  ], {
+    requiredConsumes: [
+      "casefileSourceAdmission",
+      "casefileEvidenceShotMap",
+      "casefileEvidenceShotMapAdmission",
+      "cinematicCaseSequenceInput",
+      "sceneManifest",
+      "shotList",
+    ],
     providerProfiles: [local],
     qualityRequired: true,
   }),
@@ -527,9 +613,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
 
   gen_footage: contract(["visuals.generated", "render.profile_pinned", "render.spot_only"], {
-    // The renderer accepts one of two reusable, validated scene-plan handoffs:
-    // Story Spine's shot/DP artifacts or Episode Graph's sceneManifest. The
-    // legacy free-form planning path is intentionally unavailable at runtime.
+    // The renderer accepts only reusable, validated scene-plan handoffs:
+    // an admitted Cinematic Case Sequence, Story Spine's shot/DP artifacts,
+    // or Episode Graph's sceneManifest. The legacy free-form planning path is
+    // intentionally unavailable at runtime.
     optionalConsumes: [
       "styleDNA",
       "visualBrief",
@@ -542,6 +629,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "editorEdl",
       "storyCoverage",
       "sceneManifest",
+      "cinematicGeneratedScenePlan",
       "channelName",
       "persona",
       "styleGrammar",
@@ -549,13 +637,23 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "contentLane",
     ],
     providerProfiles: [{ id: "novita-zimage-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
-    maxCostUsd: 132,
+    // A cinematic sequence can deliberately contain up to 240 short,
+    // source-bound coverage shots. It must name maxCinematicClips explicitly
+    // so reservation and actual batch count cannot drift.
+    // A source-bound cinematic shot reserves one initial still plus exactly
+    // one independently reviewed replacement before its LTX render, followed
+    // by one independently reviewed replacement LTX take. Generic generated
+    // footage retains the one-still/one-video envelope.
+    maxCostUsd: 1_980,
     maxCostUsdFor: (params, context) => {
       const seconds = targetSeconds(params, context, 300);
-      const clips = Math.ceil(
-        boundedNumber(params["maxClips"], Math.ceil(seconds / 22), 6, 24),
-      );
-      return clips * (PRICE.novitaImageMaxUsd + PRICE.novitaVideoMaxUsd);
+      const cinematicLimit = finiteNumber(params["maxCinematicClips"]);
+      const clips = cinematicLimit === undefined
+        ? Math.ceil(boundedNumber(params["maxClips"], Math.ceil(seconds / 22), 6, 24))
+        : Math.ceil(boundedNumber(cinematicLimit, 2, 2, 240));
+      const imageAttempts = cinematicLimit === undefined ? 1 : 2;
+      const videoAttempts = cinematicLimit === undefined ? 1 : 2;
+      return clips * (imageAttempts * PRICE.novitaImageMaxUsd + videoAttempts * PRICE.novitaVideoMaxUsd);
     },
   }),
   signature_clips: contract(["visuals.signature_generated", "render.profile_pinned", "render.spot_only"], {
@@ -707,15 +805,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // only); omitted, the block draws from every category. Declared here
       // because the contract test enforces that a module cannot read a store key
       // it never announced.
-      // Legacy direct quiz graphs can still be diagnosed as silent/non-admitted;
-      // the certified family registry separately requires an upstream `music`
-      // entry and the block hard-fails noGemini execution without this key.
+      // The certified family registry requires an upstream `music` entry and
+      // the block rejects an invocation that is not explicitly noGemini.
       optionalConsumes: ["musicKey", "channelName", "palette", "criticDoctrine", "styleGrammar", "contentLane", "quizTopic", "quizCategories"],
-      providerProfiles: [managed, local],
-      // Deliberately tiny. A quiz run that somehow costs a dollar has a bug
-      // (a runaway critique loop or a paid provider that must not be there),
-      // and the ceiling should catch that rather than absorb it.
-      maxCostUsd: 1,
+      providerProfiles: [local],
+      maxCostUsd: 0,
       maxCostUsdFor: (params, context) => quizYearCostCeiling(params, context),
       qualityRequired: true,
     },

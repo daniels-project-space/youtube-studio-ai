@@ -12,6 +12,8 @@ import {
 } from "@/engine/generationProfiles";
 import { NovitaAdmissionError, requireNovitaFleetReadiness } from "@/lib/novitaFleet";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
+import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
+import type { LtxCreativeAdapterSelection } from "@/lib/ltxCreativeAdapter";
 import {
   waitForNovitaRenderPoll,
   type NovitaRenderPollWait,
@@ -62,6 +64,8 @@ export interface Shot {
   continuityState?: string;
   generationProfile?: "draft" | "production" | "hero";
   candidateCount?: number;
+  /** Optional cache-pinned LTX creative LoRA; exact-base and benchmark admission is enforced before spend. */
+  creativeAdapter?: LtxCreativeAdapterSelection;
 }
 
 export interface NovitaPhaseProfile {
@@ -945,7 +949,7 @@ async function startImageRender(userCfg: NovitaRenderCfg) {
 }
 
 async function startVideoRender(userCfg: NovitaRenderCfg) {
-  const cfg = normalizedCfg(userCfg);
+  const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map(applyLtxI2vPromptContract) });
   validate(cfg, "video");
   await bootstrapSecrets(() => {}, { required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
   const jobs = videoJobs(cfg);
@@ -1004,7 +1008,7 @@ export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRend
  * `timeline_assemble` (and any other downstream block) consumes it unmodified.
  */
 export async function renderVideo(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
-  const cfg = normalizedCfg(userCfg);
+  const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map(applyLtxI2vPromptContract) });
   validate(cfg, "video");
   if (cfg.maxCostUsd === undefined) {
     throw new NovitaAdmissionError("novita video render requires an explicit signed worker cost ceiling");

@@ -1,7 +1,7 @@
 /**
  * HOOKCRAFT — the hook + opening engine (the script module's path to golden,
  * same shape as the banana thumbnail engine): one rich brief → candidate cold
- * opens on the latest Gemini Pro → deterministic craft lint → LLM judge gate →
+ * opens on the configured non-Google creative model → deterministic craft lint → LLM judge gate →
  * one feedback retry → loud failure. The hook is ALWAYS specifically about the
  * topic — generic could-open-any-video lines are structurally rejected.
  *
@@ -10,16 +10,18 @@
  * clicked promise) → explicit payoff promise by ~15s (52% vs 44% retention at
  * 1min) → stakes + open loop by 30s; the steepest drop is seconds 10-20.
  *
- * Standalone: identity in → judged cold open out. Deps: Gemini key only.
+ * Standalone: identity in → judged cold open out. Deps: explicit non-Google
+ * creative-text provider only. Factual verification remains a separate source
+ * admission concern; this module never fabricates it.
  *
  *   const open = await craftHook({ topic, channelName, niche, ... });
  *   // open.hook (≤7s), open.opening (~20-30s), open.coldOpen (both)
  */
-import { geminiJson, geminiJsonPro, geminiGroundedJson, hasGeminiKey } from "@/lib/gemini";
+import { claudeJson, claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
 import { resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 
 export function hasHookcraft(): boolean {
-  return hasGeminiKey();
+  return hasAnthropicKey();
 }
 
 /**
@@ -236,8 +238,8 @@ function isFictionRegister(niche?: string, style?: string): boolean {
 }
 
 /**
- * Grounded fact-check of a cold open's checkable claims (Google-Search-
- * grounded Gemini). Specificity pressure invites confident invention — one
+ * Grounded fact-check of a cold open's checkable claims. Specificity pressure
+ * invites confident invention — one
  * wrong number in the first sentence costs the channel its credibility, so a
  * "false" verdict on any claim rejects the candidate. "unverifiable" passes
  * with a log (soft claims and paraphrases often won't ground cleanly); a dead
@@ -247,32 +249,12 @@ async function factCheckColdOpen(
   c: { hook: string; opening: string },
   a: HookCraftArgs,
 ): Promise<{ ok: boolean; problems: string[]; status: "verified" | "unchecked" }> {
-  try {
-    const v = await geminiGroundedJson<{ claims?: { claim?: string; status?: string; note?: string }[] }>({
-      prompt:
-        `Fact-check this YouTube cold open using web search. Topic: "${a.topic}".\n\n` +
-        `"${c.hook} ${c.opening}"\n\n` +
-        `List every independently checkable factual claim (numbers, dates, dollar amounts, named people/events, ` +
-        `attributed quotes). For each, search and mark status: "verified" (sources confirm it; minor rounding is ` +
-        `fine), "false" (sources contradict it), or "unverifiable" (no sources found either way). note: <=15 words ` +
-        `(the correction when false). Framing, opinion, and clearly-hypothetical lines are NOT claims. ` +
-        `Return STRICT JSON {"claims":[{"claim":string,"status":string,"note":string}]}.`,
-      maxTokens: 3000,
-    });
-    const claims = v.claims ?? [];
-    const problems = claims
-      .filter((x) => x.status === "false")
-      .map((x) => `"${(x.claim ?? "").slice(0, 80)}" is wrong — ${x.note ?? "sources contradict it"}`);
-    const unverifiable = claims.filter((x) => x.status === "unverifiable").length;
-    a.log?.(
-      `hookcraft: fact-check — ${claims.length} claims: ${claims.length - problems.length - unverifiable} verified, ` +
-      `${problems.length} false, ${unverifiable} unverifiable`,
-    );
-    return { ok: problems.length === 0, problems, status: "verified" as const };
-  } catch (e) {
-    a.log?.(`hookcraft: fact-checker unreachable (${e instanceof Error ? e.message : e}) — passing on judge gates alone`);
-    return { ok: true, problems: [], status: "unchecked" as const };
-  }
+  void c;
+  void a;
+  // Google search grounding is not an allowed fallback. A factual channel must
+  // bind its hook to an admitted source packet before publication; absent that
+  // artifact this creative-only module marks the claim status honestly.
+  return { ok: true, problems: [], status: "unchecked" };
 }
 
 function passes(v: HookVerdict): boolean {
@@ -308,13 +290,13 @@ function registerClause(a: HookCraftArgs): string {
 }
 
 /**
- * The engine: brief → 3 device-diverse candidates (latest Gemini Pro) →
+ * The engine: brief → 3 device-diverse candidates (configured creative model) →
  * deterministic lint → judge gate → ONE feedback retry → judged cold open.
  * Throws when both attempts fail (callers get an honest failure, never a
  * could-open-any-video hook).
  */
 export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
-  if (!hasGeminiKey()) throw new Error("hookcraft: GEMINI_API_KEY missing — cannot craft a real hook");
+  if (!hasAnthropicKey()) throw new Error("hookcraft: ANTHROPIC_API_KEY missing — no permitted creative-text provider is configured");
   const skipConcreteness = a.style === "meditation";
   const deviceList = Object.entries(HOOK_DEVICES)
     .filter(([k]) => (a.style === "meditation" ? k === "you_stakes" || k === "cold_open_scene" || k === "myth_snap" : true))
@@ -331,8 +313,8 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
   for (let attempt = 0; attempt < 2; attempt++) {
     // PROMPT ORDER = COST: the static doctrine (device list, retention arc,
     // hard rules — ~1.5k tokens) leads; topic/register/fixNote trail, so
-    // Gemini's implicit prefix cache hits on attempt 2 and across runs.
-    const gen = await geminiJsonPro<{ candidates?: { device?: string; hook?: string; opening?: string; loop?: string }[] }>({
+    // provider prompt caching can reuse the stable doctrine on later attempts.
+    const gen = await claudeJsonPro<{ candidates?: { device?: string; hook?: string; opening?: string; loop?: string }[] }>({
       prompt: [
         `You are the cold-open director. Write the spoken COLD OPEN for a YouTube video.`,
         `FIRST, silently analyze the topic: its core tension, its single most surprising VERIFIED fact, the ` +
@@ -404,7 +386,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
       let verdicts: HookVerdict[] = [];
       let best = 0;
       try {
-        const j = await geminiJson<{ verdicts?: HookVerdict[]; best?: number }>({
+        const j = await claudeJson<{ verdicts?: HookVerdict[]; best?: number }>({
           prompt: [
             `You are a brutal YouTube retention judge. Topic: "${a.topic}".`,
             a.title ? `Video title (the clicked promise): "${a.title}".` : "",

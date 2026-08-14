@@ -742,6 +742,11 @@ export async function gateColdOpen(o: {
    */
   channel?: ChannelCritiqueContext;
 }): Promise<{ verdict: TakeVerdict; seed: number }> {
+  if (!hasGeminiKey()) {
+    throw new Error(
+      "voicecraft: Gemini audio judging is retired; use narration_tts local FFmpeg performance evidence instead",
+    );
+  }
   const log = o.log ?? (() => {});
   const text = boundNarrationColdOpen(o.text);
   const baseSeed = o.seed ?? 4242;

@@ -14,8 +14,20 @@ import { v } from "convex/values";
 
 const thumbnailStyleGuideValidator = v.object({
   dominantColors: v.array(v.string()),
-  hasTextOverlayPct: v.number(),
+  hasTextOverlayPct: v.union(v.number(), v.null()),
   notes: v.string(),
+  evidenceSource: v.optional(v.literal("youtube_data_api_v3_metadata")),
+  visualEvidenceStatus: v.optional(v.literal("metadata_only")),
+  sampledVideoCount: v.optional(v.number()),
+});
+
+const sourceAttributionValidator = v.object({
+  provider: v.literal("youtube_data_api_v3"),
+  sampledVideoIds: v.array(v.string()),
+  sourceFields: v.array(v.string()),
+  videosAnalysed: v.number(),
+  topPerformersAnalysed: v.number(),
+  limitations: v.array(v.string()),
 });
 
 /** Upsert (replace) the mined niche-intelligence row for (ownerId, niche). */
@@ -83,6 +95,7 @@ export const upsertDatabank = mutation({
     thumbnailRules: v.array(v.string()),
     hookPatterns: v.array(v.string()),
     competitorGaps: v.array(v.string()),
+    sourceAttribution: v.optional(sourceAttributionValidator),
   },
   returns: v.id("seoDatabank"),
   handler: async (ctx, args) => {
@@ -102,6 +115,7 @@ export const upsertDatabank = mutation({
       thumbnailRules: args.thumbnailRules,
       hookPatterns: args.hookPatterns,
       competitorGaps: args.competitorGaps,
+      sourceAttribution: args.sourceAttribution,
       refreshedAt: Date.now(),
     };
     if (existing) {

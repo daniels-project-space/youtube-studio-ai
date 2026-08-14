@@ -9,6 +9,9 @@
  *   - intro/title card present (plan fact).
  *   - accidental frozen / near-identical programme holds, with exact FFmpeg
  *     intervals returned for the owning renderer to repair.
+ *   - final-master scene-marker pacing evidence. This is deliberately a
+ *     calibrated review signal rather than a universal cut-count quality gate:
+ *     a good sustained evolving shot need not contain a hard edit.
  *
  * Reliable + instant. Detecting "card present but text missing" is left to the
  * evidence-backed visual review / optional OCR — signal stats cannot establish it.
@@ -18,6 +21,11 @@ import {
   measureTemporalDynamism,
   type TemporalDynamismEvidence,
 } from "./temporalDynamism";
+import {
+  measureVisualPacing,
+  type VisualPacingEvidence,
+  type VisualPacingPolicy,
+} from "./visualPacing";
 
 const FFMPEG = process.env.FFMPEG_BIN ?? "ffmpeg";
 
@@ -31,6 +39,7 @@ export interface RenderValidateResult {
   verdict: "pass" | "fail";
   defects: RVDefect[];
   temporalDynamism: TemporalDynamismEvidence;
+  visualPacing: VisualPacingEvidence;
 }
 
 /**
@@ -52,6 +61,8 @@ export interface RenderValidateChannelContext {
   blackSegmentMinSec?: number;
   /** `null` disables static-hold enforcement for intentional ambient formats. */
   maxStaticHoldSec?: number | null;
+  /** Lane-owned final-master scene-marker calibration. */
+  visualPacingPolicy?: VisualPacingPolicy;
 }
 
 /** Lane-dependent dead-air threshold. Unknown lanes keep the historic 2.5s. */
@@ -153,6 +164,25 @@ export async function validateRender(opts: {
     });
   }
 
+  const visualPacing = measureVisualPacing({
+    videoPath: opts.videoPath,
+    durationSec: opts.durationSec,
+    policy: opts.channel?.visualPacingPolicy,
+    excludedWindows: plannedCardWindows,
+  });
+  if (visualPacing.verdict === "unavailable") {
+    defects.push({
+      severity: "critical",
+      issue: `visual pacing evidence unavailable (${visualPacing.source}): ${visualPacing.detail ?? "unknown ffmpeg failure"}`,
+    });
+  } else if (visualPacing.verdict === "needs_human") {
+    // This is intentionally NOT a deterministic defect. FFmpeg can establish
+    // that it did not see strong discontinuities, but it cannot tell an
+    // excellent sustained move from a poorly paced master. qa_visual owns the
+    // lane-calibrated human-review decision and carries this receipt forward.
+    log(`validateRender: visual pacing ${visualPacing.signal}: ${visualPacing.detail ?? "review required"}`);
+  }
+
   if (opts.introApplied === false) {
     defects.push({ severity: "major", tSec: 0, issue: "no intro/title card was applied" });
   }
@@ -160,13 +190,16 @@ export async function validateRender(opts: {
   const crit = defects.filter((d) => d.severity === "critical").length;
   const verdict: "pass" | "fail" = crit >= 1 ? "fail" : "pass";
   const laneNote = opts.channel?.contentLaneKey
-    ? ` [lane ${opts.channel.contentLaneKey}, dead-air >=${blackMinSec}s, static-hold ${temporalDynamism.thresholdSec === null ? "exempt" : `<=${temporalDynamism.thresholdSec}s / observed ${temporalDynamism.maxFrozenHoldSec.toFixed(1)}s`}${opts.channel.criticDoctrine ? ", doctrine in scope (advisory only — this gate is deterministic)" : ""}]`
+    ? ` [lane ${opts.channel.contentLaneKey}, dead-air >=${blackMinSec}s, static-hold ${temporalDynamism.thresholdSec === null ? "exempt" : `<=${temporalDynamism.thresholdSec}s / observed ${temporalDynamism.maxFrozenHoldSec.toFixed(1)}s`}, pacing ${visualPacing.verdict} (${visualPacing.changeCount} markers, max-hold ${visualPacing.maxHoldSec.toFixed(1)}s)${opts.channel.criticDoctrine ? ", doctrine in scope (advisory only — this gate is deterministic)" : ""}]`
     : "";
   log(`validateRender: ${defects.length} defect(s) (critical ${crit})${laneNote} → ${verdict.toUpperCase()}`);
   return {
-    ran: blackCheckRan && (!temporalDynamism.enforced || temporalDynamism.ran),
+    ran: blackCheckRan &&
+      (!temporalDynamism.enforced || temporalDynamism.ran) &&
+      (!visualPacing.enforced || visualPacing.ran),
     verdict,
     defects,
     temporalDynamism,
+    visualPacing,
   };
 }

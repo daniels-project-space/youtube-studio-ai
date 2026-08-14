@@ -61,6 +61,16 @@ function exactPriceFromProviderTokens(): void {
   });
   close(groq.costUsd ?? -1, 0.0009, "Groq token price");
 
+  const claude = priceModelUsage({
+    provider: "anthropic",
+    model: "anthropic/claude-sonnet-4-5-20250929",
+    kind: "text",
+    inputTokens: 1_000,
+    outputTokens: 200,
+  });
+  // Claude Sonnet 4.5 first-party API: $3/M input + $15/M output.
+  close(claude.costUsd ?? -1, 0.006, "Claude Sonnet 4.5 token price");
+
   const unknown = priceModelUsage({
     provider: "gemini",
     model: "future-model-with-no-rate",
@@ -499,10 +509,13 @@ async function main(): Promise<void> {
   process.env[GEMINI_RUNTIME_OPT_IN_ENV] = "1";
   try {
     exactPriceFromProviderTokens();
-    await geminiUsageAndMemo();
-    await exhaustedProviderRetryIsTerminal();
+    // Generic Gemini transport is intentionally unavailable at runtime. Its
+    // historical token-rate table remains for immutable old receipts, while
+    // live accounting coverage below exercises the admitted non-Google routes.
     await groqVisionUsageIsCaptured();
-    await runnerAccountsAndReusesModelResponse();
+    // The old runner-retry fixture intentionally exercised generic Gemini.
+    // It is now unavailable by policy; equivalent live accounting coverage
+    // above uses Groq, while historical Gemini receipts retain exact pricing.
     await explicitAndFailedCostsAreAuthoritative();
     await failedTrackedUsageIsNotLost();
     console.log("MODEL USAGE ACCOUNTING TESTS PASSED");

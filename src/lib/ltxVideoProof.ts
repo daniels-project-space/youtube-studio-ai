@@ -11,6 +11,9 @@ import type {
 } from "@/lib/novitaRenderFarm";
 
 export interface LtxWorkerCompletionEvidence {
+  /** Written only after the worker's local nvidia-smi attestation succeeds. */
+  gpuSku?: unknown;
+  gpuCount?: unknown;
   renderContract?: unknown;
   videoOutputs?: unknown;
 }
@@ -94,6 +97,13 @@ export function assertLtxWorkerCompletionEvidence(args: {
 }): NovitaVideoOutputProof {
   const { profile, jobId, completion } = args;
   requireExactProfile(profile);
+  // The worker independently checks the physical device with nvidia-smi before
+  // it writes this receipt. Do not accept a correctly shaped MP4 if that
+  // hardware attestation was omitted or changed on its way back to the control
+  // plane; the exact RTX 4090 contract is part of video admission.
+  if (completion.gpuSku !== "RTX 4090" || completion.gpuCount !== 1) {
+    throw new Error("did not attest exactly one RTX 4090 worker");
+  }
   if (!renderContractMatches(completion.renderContract, profile)) {
     throw new Error("did not attest the sealed LTX-2.5 runtime contract");
   }

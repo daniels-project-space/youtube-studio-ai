@@ -49,13 +49,14 @@ const DNA: StyleDNA = {
 };
 
 const SPECIALIST_EXPECTED: Record<
-  Extract<FamilyKey, "comic" | "documentary_collage_short" | "loreshort" | "quizyear">,
+  Extract<FamilyKey, "comic" | "documentary_collage_short" | "loreshort" | "quizyear" | "shorts">,
   readonly string[]
 > = {
   comic: ["identity", "script", "voice", "footage", "motion", "thumbnail"],
   documentary_collage_short: ["identity", "script", "voice", "footage", "captions", "pacing", "thumbnail"],
   loreshort: ["identity", "script", "voice", "footage", "motion", "pacing", "thumbnail"],
-  quizyear: ["identity", "hook", "captions", "pacing", "thumbnail"],
+  quizyear: ["identity", "hook", "captions", "pacing", "thumbnail", "music"],
+  shorts: ["hook", "captions", "pacing", "thumbnail", "voice"],
 };
 
 for (const [family, expectedIds] of Object.entries(SPECIALIST_EXPECTED) as Array<

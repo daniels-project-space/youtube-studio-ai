@@ -205,6 +205,20 @@ async function recordAsset(
   }
 }
 
+function musicBriefFor(plan: QuizTopicPlan): Record<string, unknown> {
+  const presentation = QUIZ_TOPIC_PRESENTATIONS[plan.topicKey];
+  return {
+    musicPrompt: [
+      "bright modern game-show instrumental",
+      "warm marimba, light percussion and an upbeat bass pulse",
+      `evoking ${presentation.label.toLowerCase()} without vocals or lyrics`,
+      "clean loopable 100 BPM, playful and confident, never childish or frantic",
+    ].join(", "),
+    source: `${QUIZ_PLANNER_VERSION}: deterministic cue sheet`,
+    topicKey: plan.topicKey,
+  };
+}
+
 /**
  * Curated autonomous topic selection with durable, retry-stable provenance.
  * The run-specific memory key makes a recovered/retried stage reuse its exact
@@ -214,7 +228,7 @@ async function recordAsset(
 const quizTopicPlan: Block = {
   id: "quiz_topic_plan",
   consumes: [],
-  produces: ["topic", "quizTopic", "quizPlan"],
+  produces: ["topic", "quizTopic", "quizPlan", "musicBrief"],
   run: async (ctx) => {
     const client = convex();
     const rows = await client.query(
@@ -238,7 +252,12 @@ const quizTopicPlan: Block = {
         previousEpisodesForTopic: prior,
       });
       ctx.log(`quiz_topic_plan: reused ${reused.topic} from ${reused.memoryKey}`);
-      return { topic: reused.topic, quizTopic: reused.topicKey, quizPlan: reused };
+      return {
+        topic: reused.topic,
+        quizTopic: reused.topicKey,
+        quizPlan: reused,
+        musicBrief: musicBriefFor(reused),
+      };
     }
 
     const pinnedTopic = topicKeyFromUnknown(ctx.params["pinnedTopic"]);
@@ -273,7 +292,12 @@ const quizTopicPlan: Block = {
       `quiz_topic_plan: ${plan.topic} (${plan.provenance.selection}; ` +
         `${plan.provenance.previousEpisodesForTopic} prior in this topic; CC0 Wikidata source route)`,
     );
-    return { topic: plan.topic, quizTopic: plan.topicKey, quizPlan: plan };
+    return {
+      topic: plan.topic,
+      quizTopic: plan.topicKey,
+      quizPlan: plan,
+      musicBrief: musicBriefFor(plan),
+    };
   },
 };
 
@@ -433,4 +457,3 @@ export const quizPlanningBlocks: Block[] = [
   quizMetadata,
   quizThumbnail,
 ];
-

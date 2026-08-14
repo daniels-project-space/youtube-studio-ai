@@ -19,6 +19,7 @@ import { hasGeminiKey } from "@/lib/gemini";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import type { FamilyKey } from "@/engine/families";
+import { attachReferenceQualityContract } from "./referenceQuality";
 import type { QualityBar, QualityDimension, StyleDNA } from "./types";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
@@ -26,8 +27,11 @@ type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 /** Visual signals mined by `refreshNicheResearchCore` (nicheIntelligence). */
 export interface ThumbnailStyleGuide {
   dominantColors?: string[];
-  hasTextOverlayPct?: number;
+  hasTextOverlayPct?: number | null;
   notes?: string;
+  evidenceSource?: "youtube_data_api_v3_metadata";
+  visualEvidenceStatus?: "metadata_only";
+  sampledVideoCount?: number;
 }
 
 /** SEO databank slice (the parts that inform visual/narrative DNA). */
@@ -211,15 +215,18 @@ function groundingContext(input: StyleDNAInput): { text: string; gaps: string[];
   // be the exact silent-fallback we're eliminating, so detect + reject it.
   const noteLc = (tg?.notes ?? "").toLowerCase();
   const minimalNote = noteLc.startsWith("minimal guide");
+  const metadataOnly =
+    tg?.visualEvidenceStatus === "metadata_only" ||
+    tg?.evidenceSource === "youtube_data_api_v3_metadata";
   // The vision call is asked to flag OFF-NICHE thumbnails (search pollution). If
   // it says the discovered references don't match the niche, they are wrong refs
   // — grounding the DNA on them would be confidently wrong, so reject + gap it.
   const offNiche = /not consistent|off[- ]niche|do not match|don't match|not match|not related|unrelated|inconsistent with/.test(noteLc);
-  const hasVision = !minimalNote && !offNiche && !!(tg && ((tg.dominantColors && tg.dominantColors.length > 0) || tg.notes));
+  const hasVision = !minimalNote && !metadataOnly && !offNiche && !!(tg && ((tg.dominantColors && tg.dominantColors.length > 0) || tg.notes));
   if (hasVision) {
     parts.push(
       [
-        "THUMBNAIL VISION ANALYSIS (Gemini over the niche's top thumbnails):",
+        "THUMBNAIL VISUAL ANALYSIS (reviewed niche evidence):",
         tg?.dominantColors?.length ? `- dominant colors: ${tg.dominantColors.join(", ")}` : "",
         typeof tg?.hasTextOverlayPct === "number" ? `- % with bold text overlay: ${tg.hasTextOverlayPct}` : "",
         tg?.notes ? `- notes: ${tg.notes}` : "",
@@ -227,6 +234,8 @@ function groundingContext(input: StyleDNAInput): { text: string; gaps: string[];
     );
   } else if (offNiche) {
     gaps.push("thumbnail vision ran but the discovered references are OFF-NICHE (search pollution) — visual DNA NOT grounded on real niche thumbnails; Doctor must refine discovery queries");
+  } else if (metadataOnly) {
+    gaps.push("thumbnail metadata was collected, but thumbnail pixels were not analysed — visual DNA (palette/composition/subject) remains under-grounded; this is an evidence boundary, not a failed visual pass");
   } else if (minimalNote) {
     gaps.push("thumbnail vision FAILED upstream (placeholder guide) — visual DNA grounded only in titles/text, NOT the niche's real thumbnails; Doctor must repair the vision pass");
   } else {
@@ -526,5 +535,5 @@ export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): 
     ...(floors[id] ?? {}),
   }));
 
-  return { target: 1.6, dimensions, refreshedAt: now };
+  return attachReferenceQualityContract(family, { target: 1.6, dimensions, refreshedAt: now });
 }

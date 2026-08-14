@@ -14,9 +14,19 @@ import { join } from "node:path";
 import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { renderNovitaGeneratedScenes } from "@/lib/novitaMedia";
+import { hasNonGoogleVisionKey } from "@/lib/vision";
 import { requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
+import { reviewCinematicKeyframe } from "@/lib/cinematicKeyframeGate";
+import { reviewCinematicClip } from "@/lib/cinematicClipGate";
+import { reviewCinematicTransition } from "@/lib/cinematicTransitionGate";
+import { LtxCreativeAdapterSelectionSchema } from "@/lib/ltxCreativeAdapter";
 import { SceneManifestSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema, type ShotPlan, validateStorySpine } from "@/engine/storySpine";
+import { CinematicGeneratedScenePlanSchema } from "@/engine/cinematicCaseSequence";
+import {
+  GENERATED_FOOTAGE_SCENE_MANIFEST_VERSION,
+  GeneratedFootageSceneManifestSchema,
+} from "@/engine/generatedFootageManifest";
 import { COST_PATCH_KEY } from "@/engine/types";
 
 /** Ordered pool (same as narratedBlocks.mapPool â€” local copy, no cross-import). */
@@ -75,11 +85,25 @@ export interface PlannedScene {
   shotScale: ShotPlan["shotScale"];
   lens: string;
   negative?: string;
+  /** Exact source timing exists only for a reviewed cinematic sequence. */
+  t0?: number;
+  t1?: number;
+  /** Reused by the independent still gate to compare recurring mannequins. */
+  continuityIds?: string[];
+  /** Stable image prior emitted from the reviewer-approved cinematic sequence. */
+  continuitySeed?: number;
+  /** Literal causal/camera obligations that the first frame must visibly meet. */
+  keyframeRequirements?: string[];
+  /** Incoming editorial reason/state for an adjacent source-bound cut. */
+  cutReason?: string;
+  tensionState?: string;
 }
 
 export interface ResolvedGeneratedFootageScenePlan {
-  source: "story_spine" | "scene_manifest";
+  source: "story_spine" | "scene_manifest" | "cinematic_case_sequence";
   scenes: PlannedScene[];
+  /** Binds the rendered clip order to the reviewed cinematic sequence. */
+  sequenceFingerprint?: string;
 }
 
 /** Prompts that ask for baked-in lettering fight the engine's own no-text clause. */
@@ -186,6 +210,76 @@ function scenePlanFromManifest(
   }));
 }
 
+/**
+ * Cinematic Case Sequence is deliberately preferred over the generic Story
+ * Spine adapter.  It has already split each causal beat into reviewed coverage
+ * shots, so truncating, reshuffling, or replacing it with the old modulo
+ * camera plan would erase the actual editorial direction before render.
+ */
+function scenePlanFromCinematicCaseSequence(
+  store: Readonly<Record<string, unknown>>,
+  maxScenes: number,
+): ResolvedGeneratedFootageScenePlan | undefined {
+  const raw = store["cinematicGeneratedScenePlan"];
+  if (raw === undefined) return undefined;
+  const parsed = CinematicGeneratedScenePlanSchema.safeParse(raw);
+  if (!parsed.success) {
+    throw new Error(
+      "gen_footage: cinematicGeneratedScenePlan is present but invalid; " +
+        "regenerate cinematic_case_sequence rather than falling back to an unrelated scene plan.",
+    );
+  }
+  const plan = parsed.data;
+  if (plan.scenes.length > maxScenes) {
+    throw new Error(
+      `gen_footage: reviewed cinematic sequence requires ${plan.scenes.length} shots, ` +
+        `but this run allows ${maxScenes}. Raise maxCinematicClips deliberately with a sufficient Novita stage budget; scenes are never dropped.`,
+    );
+  }
+  return {
+    source: "cinematic_case_sequence",
+    sequenceFingerprint: plan.sequenceFingerprint,
+    scenes: plan.scenes.map((scene) => ({
+      id: scene.id,
+      still: withoutTextSafetyInstruction(scene.still),
+      motion: scene.motion,
+      durationSec: scene.durationSec,
+      cameraMove: scene.cameraMove,
+      shotScale: scene.shotScale,
+      lens: scene.lens,
+      negative: scene.negative,
+      t0: scene.t0,
+      t1: scene.t1,
+      continuityIds: scene.castIds,
+      continuitySeed: scene.continuitySeed,
+      cutReason: scene.cutReason,
+      tensionState: scene.tensionState,
+      keyframeRequirements: [
+        `treatment ${scene.visualMode}`,
+        `coverage ${scene.coveragePurpose}`,
+        `cut purpose ${scene.cutReason}; tension ${scene.tensionState}`,
+        `camera ${scene.cameraMove}, ${scene.shotScale}, ${scene.lens}`,
+        `source claim IDs ${scene.claimIds.join(", ")}`,
+      ],
+    })),
+  };
+}
+
+/**
+ * Casefile evidence makes the cinematic sequence mandatory.  Its reviewed
+ * claim-to-shot map is meaningful only when the resulting multi-shot plan is
+ * what reaches the renderer; falling back to a generic Story Spine here would
+ * silently discard the approved mannequin, continuity, cut, and source locks.
+ */
+function hasCasefileCinematicEvidence(store: Readonly<Record<string, unknown>>): boolean {
+  return [
+    "casefileSourceAdmission",
+    "casefileEvidenceShotMap",
+    "casefileEvidenceShotMapAdmission",
+    "cinematicCaseSequenceInput",
+  ].some((key) => store[key] !== undefined);
+}
+
 function sharedScenePlanIssues(scenes: readonly PlannedScene[], minScenes: number, avoid: string): string[] {
   const issues: string[] = [];
   if (scenes.length < minScenes) {
@@ -221,14 +315,31 @@ export function resolveGeneratedFootageScenePlan(args: {
   defaultDurationSec: number;
   avoid?: string;
 }): ResolvedGeneratedFootageScenePlan {
-  const maxScenes = Math.max(1, Math.min(24, Math.floor(args.maxScenes)));
+  // The renderer itself executes only <=24-shot transactions.  Cinematic
+  // sequences are batch-rendered below, so their admission limit is higher;
+  // legacy callers still pass their existing <=24 caps.
+  const maxScenes = Math.max(1, Math.min(240, Math.floor(args.maxScenes)));
+  const cinematic = scenePlanFromCinematicCaseSequence(args.store, maxScenes);
+  if (cinematic) {
+    const issues = sharedScenePlanIssues(cinematic.scenes, args.minScenes, args.avoid ?? "");
+    if (issues.length) {
+      throw new Error(`${args.label}: cinematic sequence failed pre-render validation: ${issues.join("; ")}`);
+    }
+    return cinematic;
+  }
+  if (hasCasefileCinematicEvidence(args.store)) {
+    throw new Error(
+      `${args.label}: Casefile evidence is present but its admitted cinematic_case_sequence is missing. ` +
+        "Do not fall back to generic Story Spine footage; regenerate and reviewer-approve the source-bound multi-shot sequence first.",
+    );
+  }
   const fromSpine = scenePlanFromStorySpine(args.store, maxScenes, args.defaultDurationSec);
   const source = fromSpine ? "story_spine" : "scene_manifest";
   const scenes = fromSpine ?? scenePlanFromManifest(args.store, maxScenes, args.defaultDurationSec);
   if (!scenes) {
     throw new Error(
-      `${args.label}: requires a validated shared scene plan from story_spine ` +
-      `(shotList + dpVisualSpecs) or episode_graph (sceneManifest) before paid rendering; ` +
+      `${args.label}: requires an admitted cinematic_case_sequence, validated story_spine ` +
+      `(shotList + dpVisualSpecs), or episode_graph (sceneManifest) before paid rendering; ` +
       "add that module upstream. Free-form planning is retired and there is no Gemini fallback.",
     );
   }
@@ -237,6 +348,66 @@ export function resolveGeneratedFootageScenePlan(args: {
     throw new Error(`${args.label}: shared scene plan failed pre-render validation: ${issues.join("; ")}`);
   }
   return { source, scenes };
+}
+
+function cinematicSceneLimit(value: unknown): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) {
+    throw new Error(
+      "gen_footage: reviewed cinematic sequences require an explicit maxCinematicClips and matching Novita stage budget; automatic scene-count/cost expansion is forbidden",
+    );
+  }
+  return Math.max(2, Math.min(240, Math.floor(parsed)));
+}
+
+type NovitaGeneratedSceneInput = Parameters<typeof renderNovitaGeneratedScenes>[0]["scenes"][number];
+type NovitaRenderLifecycle = Parameters<typeof renderNovitaGeneratedScenes>[0]["lifecycle"];
+
+/**
+ * The central Novita media primitive intentionally has a 24-scene transaction
+ * cap.  A reviewed long-form cinematic sequence must not be silently sliced
+ * to fit it, so we render ordered batches with a proportional, caller-owned
+ * budget allocation and retain exact input order across batch boundaries.
+ */
+async function renderGeneratedScenePlanInBatches(args: {
+  prefix: string;
+  scenes: readonly NovitaGeneratedSceneInput[];
+  maxCostUsd: number;
+  maxConcurrent: number;
+  lifecycle: NovitaRenderLifecycle;
+  keyframeGate?: Parameters<typeof renderNovitaGeneratedScenes>[0]["keyframeGate"];
+  clipGate?: Parameters<typeof renderNovitaGeneratedScenes>[0]["clipGate"];
+}): Promise<{ scenes: Awaited<ReturnType<typeof renderNovitaGeneratedScenes>>["scenes"]; costUsd: number }> {
+  const batches: NovitaGeneratedSceneInput[][] = [];
+  for (let start = 0; start < args.scenes.length; start += 24) {
+    batches.push([...args.scenes.slice(start, start + 24)]);
+  }
+  let assignedBudgetUsd = 0;
+  let observedCostUsd = 0;
+  const renderedScenes: Awaited<ReturnType<typeof renderNovitaGeneratedScenes>>["scenes"] = [];
+  try {
+    for (const [index, batch] of batches.entries()) {
+      const maxCostUsd = index === batches.length - 1
+        ? args.maxCostUsd - assignedBudgetUsd
+        : args.maxCostUsd * (batch.length / args.scenes.length);
+      assignedBudgetUsd += maxCostUsd;
+      const rendered = await renderNovitaGeneratedScenes({
+        prefix: `${args.prefix}/batch-${String(index + 1).padStart(3, "0")}`,
+        profileId: "production",
+        maxCostUsd,
+        maxConcurrent: args.maxConcurrent,
+        lifecycle: args.lifecycle,
+        keyframeGate: args.keyframeGate,
+        clipGate: args.clipGate,
+        scenes: batch,
+      });
+      observedCostUsd += rendered.costUsd;
+      renderedScenes.push(...rendered.scenes);
+    }
+  } catch (error) {
+    throw withAdditionalObservedCost(error, observedCostUsd);
+  }
+  return { scenes: renderedScenes, costUsd: observedCostUsd };
 }
 
 export function assertCentralNovitaSelection(value: unknown, label: string): void {
@@ -273,6 +444,13 @@ export async function generateSignatureClips(
     avoid,
   });
   const scenes = plan.scenes;
+  // Signature clips are still LTX I2V takes. Keep the same sealed creative-
+  // adapter route as the main generated-footage lane so a calibrated wardrobe
+  // or material look cannot disappear just because a channel uses a hybrid
+  // stock-plus-cinematic opening.
+  const signatureCreativeAdapter = LtxCreativeAdapterSelectionSchema.optional().parse(
+    ctx.params["ltxCreativeAdapter"],
+  );
   ctx.log(`signature_clips: using ${plan.source} (${scenes.length} validated scene(s))`);
   const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "signature_clips");
   const rendered = await renderNovitaGeneratedScenes({
@@ -295,6 +473,7 @@ export async function generateSignatureClips(
       cameraMove: scene.cameraMove,
       shotScale: scene.shotScale,
       lens: scene.lens,
+      ...(signatureCreativeAdapter ? { creativeAdapter: signatureCreativeAdapter } : {}),
     })),
   });
   const tmp = await makeRunTempDir(ctx.runId);
@@ -314,7 +493,7 @@ export const genFootage: Block = {
   // Both alternatives are declared as optional manifest inputs; the resolver
   // below validates the complete handoff and fails before paid work if absent.
   consumes: [],
-  produces: ["footageClips", "footageKeys"],
+  produces: ["footageClips", "footageKeys", "generatedFootageSceneManifest"],
   paid: true,
   run: async (ctx) => {
     assertCentralNovitaSelection(ctx.params["i2vModel"], "gen_footage");
@@ -323,10 +502,22 @@ export const genFootage: Block = {
     } | null;
     const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 300;
     const clipSec = Math.min(10, Math.max(5, Number(ctx.params["clipSec"] ?? 5)));
-    const maxClips = Math.max(
+    const genericMaxClips = Math.max(
       6,
       Math.min(24, Number(ctx.params["maxClips"] ?? Math.ceil(narrationSec / 22))),
     );
+    const hasCinematicSequence = ctx.store["cinematicGeneratedScenePlan"] !== undefined;
+    // Cinematic keyframe, take, and cut gates are independent visual evidence,
+    // not an optional after-spend review. Fail before the first Novita request
+    // when no eligible non-Google reviewer can attest the sequence.
+    if (hasCinematicSequence && !hasNonGoogleVisionKey()) {
+      throw new Error(
+        "gen_footage: admitted cinematic_case_sequence requires GROQ_API_KEY or FAL_KEY for independent visual gates before Novita rendering",
+      );
+    }
+    const maxClips = hasCinematicSequence
+      ? cinematicSceneLimit(ctx.params["maxCinematicClips"])
+      : genericMaxClips;
     const avoid = (dna?.visualAvoid ?? []).slice(0, 6).join(", ");
     if (ctx.params["dpCoverage"] === true) {
       ctx.log("gen_footage: dpCoverage is retired; using the required shared scene plan");
@@ -335,19 +526,82 @@ export const genFootage: Block = {
       store: ctx.store,
       label: "gen_footage",
       maxScenes: maxClips,
-      minScenes: 4,
+      minScenes: hasCinematicSequence ? 2 : 4,
       defaultDurationSec: clipSec,
       avoid,
     });
     const scenes = plan.scenes;
+    const creativeAdapter = LtxCreativeAdapterSelectionSchema.optional().parse(
+      ctx.params["ltxCreativeAdapter"],
+    );
     ctx.log(`gen_footage: using ${plan.source} (${scenes.length} validated scene(s))`);
 
     const requestedConcurrency = Number(ctx.params["maxConcurrent"] ?? 3);
     const maxConcurrent = Math.min(8, Math.max(1, Math.floor(requestedConcurrency)));
     const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "gen_footage");
-    const rendered = await renderNovitaGeneratedScenes({
+    // Keep the first accepted still for each recurring mannequin cast as
+    // independent visual evidence. It is deliberately not a hidden generation
+    // input: the gate proves a candidate matches the source-bound continuity
+    // contract before LTX spends, and fails rather than pretending text alone
+    // can establish character consistency.
+    const cinematicKeyframeTmp = hasCinematicSequence
+      ? await makeRunTempDir(`${ctx.runId}-cinematic-keyframes`)
+      : undefined;
+    const cinematicClipTmp = hasCinematicSequence
+      ? await makeRunTempDir(`${ctx.runId}-cinematic-clips`)
+      : undefined;
+    const acceptedReferenceByCastId = new Map<string, { sceneId: string; path: string }>();
+    const keyframeGate = hasCinematicSequence
+      ? {
+          // One replacement is the only automatic recovery. More retries hide
+          // a broken prompt behind unbounded spend instead of surfacing it.
+          maxImageAttempts: 2 as const,
+          review: async ({ scene, stillUrl }: Parameters<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["keyframeGate"]>["review"]>[0]) => {
+          const candidatePath = await downloadTo(
+            stillUrl,
+            join(cinematicKeyframeTmp!, `${scene.id.replace(/[^a-z0-9_-]/gi, "_")}.png`),
+          );
+          const continuityIds = scene.continuityIds ?? [];
+          const references = continuityIds
+            .map((castId) => acceptedReferenceByCastId.get(castId))
+            .filter((reference): reference is { sceneId: string; path: string } => Boolean(reference))
+            .filter((reference, index, all) => all.findIndex((other) => other.sceneId === reference.sceneId) === index)
+            .slice(0, 2);
+          const review = await reviewCinematicKeyframe({
+            scene,
+            candidatePath,
+            referencePaths: references.map((reference) => reference.path),
+            reviewedAgainstSceneIds: references.map((reference) => reference.sceneId),
+          });
+          for (const castId of continuityIds) {
+            if (!acceptedReferenceByCastId.has(castId)) {
+              acceptedReferenceByCastId.set(castId, { sceneId: scene.id, path: candidatePath });
+            }
+          }
+          return review;
+          },
+        }
+      : undefined;
+    const clipGate = hasCinematicSequence
+      ? {
+          // One replacement take is the only automatic motion recovery. It
+          // preserves the accepted keyframe; a bad second take stays blocked.
+          maxVideoAttempts: 2 as const,
+          review: async ({ scene, stillUrl, clipUrl }: Parameters<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["clipGate"]>["review"]>[0]) => {
+            const safeSceneId = scene.id.replace(/[^a-z0-9_-]/gi, "_");
+            const stillPath = await downloadTo(stillUrl, join(cinematicClipTmp!, `${safeSceneId}-source.png`));
+            const clipPath = await downloadTo(clipUrl, join(cinematicClipTmp!, `${safeSceneId}-candidate.mp4`));
+            return await reviewCinematicClip({
+              scene,
+              stillPath,
+              clipPath,
+              workDir: cinematicClipTmp!,
+            });
+          },
+        }
+      : undefined;
+    const rendered = await renderGeneratedScenePlanInBatches({
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/generated-footage`,
-      profileId: "production",
       maxCostUsd: stageBudgetUsd,
       maxConcurrent,
       lifecycle: {
@@ -356,8 +610,12 @@ export const genFootage: Block = {
         runId: ctx.runId,
         blockId: "gen_footage",
       },
-      scenes: scenes.map((scene, index) => ({
-        id: `scene-${index + 1}`,
+      keyframeGate,
+      clipGate,
+      scenes: scenes.map((scene) => ({
+        // Preserve the admitted id: timeline_assemble later verifies that the
+        // R2 clip order still matches this exact cinematic cut plan.
+        id: scene.id,
         imagePrompt: `${scene.still}. Absolutely NO text, NO words, NO letters, NO watermark.`,
         motionPrompt: scene.motion,
         ...(scene.negative ? { negativePrompt: scene.negative } : {}),
@@ -365,14 +623,76 @@ export const genFootage: Block = {
         cameraMove: scene.cameraMove,
         shotScale: scene.shotScale,
         lens: scene.lens,
+        ...(scene.continuityIds?.length ? { continuityIds: scene.continuityIds } : {}),
+        ...(scene.continuitySeed !== undefined ? { seed: scene.continuitySeed } : {}),
+        ...(scene.keyframeRequirements?.length ? { keyframeRequirements: scene.keyframeRequirements } : {}),
+        ...(creativeAdapter ? { creativeAdapter } : {}),
       })),
     });
+    if (
+      rendered.scenes.length !== scenes.length ||
+      rendered.scenes.some((scene, index) => scene.id !== scenes[index]?.id)
+    ) {
+      throw new Error("gen_footage: Novita completion no longer matches the admitted generated-scene order");
+    }
     const tmp = await makeRunTempDir(ctx.runId);
     try {
       const clips = await pool(rendered.scenes, 3, async (scene, index) => {
         const path = await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`));
         ctx.log(`gen_footage: scene ${index + 1}/${rendered.scenes.length} complete`);
         return path;
+      });
+      const transitionToNextReviewByIndex = new Map<number, Awaited<ReturnType<typeof reviewCinematicTransition>>>();
+      if (plan.source === "cinematic_case_sequence") {
+        for (let index = 0; index < scenes.length - 1; index++) {
+          const fromScene = scenes[index]!;
+          const toScene = scenes[index + 1]!;
+          if (!toScene.cutReason || !toScene.tensionState) {
+            throw new Error(`gen_footage: cinematic scene ${toScene.id} is missing its reviewed incoming cut rationale`);
+          }
+          const transition = await reviewCinematicTransition({
+            fromScene: {
+              id: fromScene.id,
+              imagePrompt: fromScene.still,
+              motionPrompt: fromScene.motion,
+              ...(fromScene.continuityIds?.length ? { continuityIds: fromScene.continuityIds } : {}),
+            },
+            toScene: {
+              id: toScene.id,
+              imagePrompt: toScene.still,
+              motionPrompt: toScene.motion,
+              ...(toScene.continuityIds?.length ? { continuityIds: toScene.continuityIds } : {}),
+            },
+            previousClipPath: clips[index]!,
+            nextClipPath: clips[index + 1]!,
+            cutReason: toScene.cutReason,
+            tensionState: toScene.tensionState,
+            workDir: cinematicClipTmp!,
+          });
+          transitionToNextReviewByIndex.set(index, transition);
+        }
+        ctx.log(`gen_footage: ${transitionToNextReviewByIndex.size} actual LTX cut transition(s) accepted`);
+      }
+      const generatedFootageSceneManifest = GeneratedFootageSceneManifestSchema.parse({
+        version: GENERATED_FOOTAGE_SCENE_MANIFEST_VERSION,
+        source: plan.source,
+        ...(plan.sequenceFingerprint ? { sequenceFingerprint: plan.sequenceFingerprint } : {}),
+        exactOrder: true,
+        durationSec: plan.source === "cinematic_case_sequence"
+          ? (scenes.at(-1)?.t1 ?? 0)
+          : scenes.reduce((sum, scene) => sum + scene.durationSec, 0),
+        items: rendered.scenes.map((renderedScene, index) => ({
+          sceneId: scenes[index]!.id,
+          clipKey: renderedScene.clipKey,
+          ...(renderedScene.keyframeReview ? { keyframeReview: renderedScene.keyframeReview } : {}),
+          ...(renderedScene.clipReview ? { clipReview: renderedScene.clipReview } : {}),
+          ...(transitionToNextReviewByIndex.has(index)
+            ? { transitionToNextReview: transitionToNextReviewByIndex.get(index)! }
+            : {}),
+          ...(scenes[index]!.t0 !== undefined ? { t0: scenes[index]!.t0 } : {}),
+          ...(scenes[index]!.t1 !== undefined ? { t1: scenes[index]!.t1 } : {}),
+          ...(scenes[index]!.continuitySeed !== undefined ? { continuitySeed: scenes[index]!.continuitySeed } : {}),
+        })),
       });
       const footageKeys = rendered.scenes.map((scene) => scene.clipKey);
       ctx.log(
@@ -382,6 +702,7 @@ export const genFootage: Block = {
       return {
         footageClips: clips,
         footageKeys,
+        generatedFootageSceneManifest,
         [COST_PATCH_KEY]: rendered.costUsd,
       };
     } catch (error) {

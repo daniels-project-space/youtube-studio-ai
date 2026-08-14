@@ -12,7 +12,6 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { channelPrefix, getObjectBytes, headObjectMetadata, putObject } from "@/lib/storage";
-import { hasGeminiKey } from "@/lib/gemini";
 import { optimizeTopics } from "@/lib/topicOptimizer";
 import { loadLedger } from "@/lib/performance";
 import { detectFollowups } from "@/lib/followups";
@@ -249,7 +248,7 @@ export const planWeekAheadTask = task({
 
     let itemIds = admitted.itemIds as Id<"contentPlan">[] | undefined;
     if (admitted.topicState !== "complete") {
-      if (!hasGeminiKey() || !hasNanoBanana()) {
+      if (!hasAnthropicKey() || !hasNanoBanana()) {
         const modelScope = createModelUsageScope();
         const imageScope = createImageUsageScope();
         const checkpoint = buildPlanWeekUsageCheckpoint(modelScope.snapshot(), imageScope.snapshot());
@@ -260,8 +259,8 @@ export const planWeekAheadTask = task({
           imageUsage: checkpoint.imageUsage, costUsd: checkpoint.costUsd,
           accountingComplete: checkpoint.accountingComplete,
         });
-        const error = !hasGeminiKey()
-          ? "plan-week-ahead: Gemini topic provider is not configured"
+        const error = !hasAnthropicKey()
+          ? "plan-week-ahead: Anthropic topic provider is not configured"
           : "plan-week-ahead: Nano Banana thumbnail provider is not configured";
         await convex.mutation(api.contentPlan.failPlanTopics, {
           ownerId, channelId, batchId, attempt: admitted.topicAttempt,

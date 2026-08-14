@@ -41,6 +41,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { renderNovitaI2V, renderNovitaImage } from "@/lib/novitaMedia";
+import { LtxCreativeAdapterSelectionSchema } from "@/lib/ltxCreativeAdapter";
 import {
   generateMureka,
   generateSuno,
@@ -54,8 +55,9 @@ import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtu
 import { notifyDraftReady } from "@/lib/telegram";
 import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
-import { hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
-import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
+import { parseJsonLoose } from "@/lib/gemini";
+import { hasAnthropicKey } from "@/lib/anthropic";
+import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
@@ -240,8 +242,8 @@ export const topicSelect: Block = {
       return { topic: reuseTopic };
     }
     // Director-chosen, identity-aligned, non-repeating topic (Phase 1).
-    // Producer (Gemini) proposes identity-fit candidates excluding history;
-    // Director (Claude) ranks for fit/freshness/CTR; a HARD no-repeat check runs
+    // The non-Google creative planner proposes and ranks evidence-backed
+    // candidates; a HARD no-repeat check runs
     // in code (never trusted to the model). `policy` param:
     //   "no_repeat"     — must always be a brand-new topic (error if impossible)
     //   "prefer_fresh"  — dedup; may recycle the pool when exhausted (default)
@@ -305,7 +307,7 @@ export const topicSelect: Block = {
         const label = seriesCount > 0 ? `Part ${epNum} of ${seriesCount}` : `Part ${epNum}`;
         const prior = recentList.filter((t) => t.includes(seriesTitle));
         let subtitle = "";
-        if (hasGeminiKey()) {
+        if (hasAnthropicKey()) {
           try {
             const out = await agentJson({
               role: "producer",
@@ -336,10 +338,11 @@ export const topicSelect: Block = {
       ctx.log(`topic_select(series): "${seriesTitle}" complete (${doneCount}/${seriesCount}) — falling through to normal topics`);
     }
 
-    // TOPICRAFT — the golden topic-intel engine: evidence-cited, judged BETS.
-    // No silent pool fallback: a missing key fails loud (heal loop's job).
-    if (!hasGeminiKey()) {
-      throw new Error("topic_select: GEMINI_API_KEY missing — refusing silent pool fallback");
+    // TOPICRAFT — the golden topic-intel engine: metadata-evidenced, judged
+    // bets. No silent pool fallback: a missing permitted creative provider
+    // fails loud (the recovery loop's job).
+    if (!hasAnthropicKey()) {
+      throw new Error("topic_select: ANTHROPIC_API_KEY missing — refusing silent pool fallback");
     }
     const competitorRows = niche
       ? await c.query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche }).catch(() => [])
@@ -485,14 +488,22 @@ export const keyframes: Block = {
     });
     const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
     const tmp = await makeRunTempDir(ctx.runId);
+    const productionVisualQa = ctx.params["qaProfile"] !== "draft" && ctx.params["qualityProfile"] !== "draft";
+    const hasGroundedIdentity = !!(dna?.recurringSubject?.trim() && dna.setting?.trim());
 
     // Per-block CREATIVE-DIRECTOR LOOP (Phase 2): generate the still → a vision
     // critic scores it against the channel's DNA identity → regenerate carrying the
     // critique forward. Keep the BEST attempt; NEVER fall back to a generic image.
-    // The critic only runs with a grounded DNA + ANY routed vision provider
-    // (visionLocal routes groq→fal→gemini; gating on the Gemini key alone
-    // silently disabled the critic in zero-Google deployments).
-    const canCritique = hasVisionKey() && !!(dna && dna.recurringSubject?.trim());
+    // Production loops need a concrete identity lock and an independent,
+    // non-Google reviewer before a paid keyframe is admitted. A successful
+    // render log cannot prove a loop is on-brand or free of baked-in text.
+    if (productionVisualQa && !hasGroundedIdentity) {
+      throw new Error("keyframes: production loop requires a grounded Style DNA subject and setting before image generation");
+    }
+    if (productionVisualQa && !hasNonGoogleVisionKey()) {
+      throw new Error("keyframes: production loop requires a configured non-Google vision reviewer (GROQ_API_KEY or FAL_KEY)");
+    }
+    const canCritique = hasNonGoogleVisionKey() && hasGroundedIdentity;
     const maximumImageAttempts = canCritique ? 2 : 1;
     // The director loop is deliberately bounded. Admit its complete possible
     // still fanout before the first worker so a retry can never borrow the
@@ -554,13 +565,17 @@ export const keyframes: Block = {
             imagePaths: [cand.local],
             json: true,
             maxTokens: VISION_GATE_MAX_TOKENS,
+            providers: ["groq", "fal"],
           });
           const v = parseJsonLoose<{ score?: number; issues?: string[] }>(raw);
           const score = Math.max(0, Math.min(1, Number(v.score) || 0));
           const issues = (v.issues ?? []).filter((s): s is string => typeof s === "string" && s.length > 0).slice(0, 5);
           return { score, pass: score >= 0.8, issues };
         } catch (e) {
-          ctx.log(`keyframes: critic failed (${e instanceof Error ? e.message : e}) — accepting attempt`);
+          if (productionVisualQa) {
+            throw new Error(`keyframes: independent art-direction review failed: ${e instanceof Error ? e.message : e}`);
+          }
+          ctx.log(`keyframes: critic failed (${e instanceof Error ? e.message : e}) — accepting draft attempt`);
           return { score: 0.8, pass: true, issues: [] };
         }
       },
@@ -578,11 +593,11 @@ export const keyframes: Block = {
       identityScore: loop.critique.score,
     });
 
-    // SCENE DIRECTOR (golden v1 mechanic) — Gemini Vision reads the ACTUAL still
-    // and names the animatable elements + subtle motion (static camera), so i2v
-    // animates what's really in the frame, not a templated guess.
+    // SCENE DIRECTOR reads the actual accepted still through the same independent
+    // reviewer and names animatable elements, so I2V moves real pixels rather
+    // than relying on a generic template motion guess.
     let motionPrompt = scene.klingMotionPrompt;
-    if (hasVisionKey()) {
+    if (canCritique) {
       try {
         const raw = await visionLocal({
           prompt:
@@ -594,11 +609,15 @@ export const keyframes: Block = {
           imagePaths: [f1Local],
           json: true,
           maxTokens: VISION_GATE_MAX_TOKENS,
+          providers: ["groq", "fal"],
         });
         const m = parseJsonLoose<{ motion?: string }>(raw).motion;
         if (m && m.length > 12) { motionPrompt = m; ctx.log(`keyframes: scene-director motion → "${m.slice(0, 90)}"`); }
       } catch (e) {
-        ctx.log(`keyframes: scene-director failed (using template): ${e instanceof Error ? e.message : e}`);
+        if (productionVisualQa) {
+          throw new Error(`keyframes: independent motion-direction review failed: ${e instanceof Error ? e.message : e}`);
+        }
+        ctx.log(`keyframes: scene-director failed (using draft template): ${e instanceof Error ? e.message : e}`);
       }
     }
 
@@ -645,8 +664,14 @@ export const loopClips: Block = {
     // ghost over a seam that FLF2V had already closed. flf gets its OWN small
     // param, hard-capped: anything longer than ~0.6s reads as a double exposure.
     const flfCrossfadeSec = Math.min(0.6, Math.max(0, Number(ctx.params.flfCrossfadeSec ?? 0.4)));
+    // This optional adapter travels through the same sealed direct-worker path
+    // as cinematic I2V: base/revision, benchmark, strength and trigger tokens
+    // are validated there before a GPU job starts. Do not flatten it into text.
+    const creativeAdapter = LtxCreativeAdapterSelectionSchema.optional().parse(
+      ctx.params["ltxCreativeAdapter"],
+    );
 
-    // Prefer the Gemini scene-director motion (golden v1) over the template, and
+    // Prefer the independently reviewed scene-director motion over the template, and
     // push hard for a LOCKED camera + NON-directional ambient motion so the loop
     // (esp. the boomerang's reverse half) reads naturally with no scale/pan pop.
     const motion = (ctx.store["motionPrompt"] as string | undefined) || scene.klingMotionPrompt;
@@ -670,6 +695,7 @@ export const loopClips: Block = {
       imageKey: f1Key,
       durationSec: dur,
       profileId: "production",
+      creativeAdapter,
       maxCostUsd: stageBudgetUsd,
       lifecycle: {
         ownerId: ctx.ownerId,

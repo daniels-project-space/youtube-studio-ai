@@ -17,7 +17,7 @@
  *   → deterministic lint: evidence citation REQUIRED and fuzzy-verified
  *     against the supplied signals, banned words, stale years, token-overlap
  *     dedupe vs done+planned, provisional title through metacraft's lintTitle
- *   → semantic dedupe (Gemini embeddings vs the avoid list + intra-slate)
+ *   → semantic dedupe (provider-independent embeddings when available, then lexical fallback)
  *   → ONE judge call gates demand/freshness/fit/packageability ≥ 7
  *   → winners + the judged bench (warm start for the next plan)
  *   One feedback retry, then loud failure. Two LLM calls per slate — the old
@@ -25,8 +25,8 @@
  *   gate silently dead (it scored via an Anthropic key with no credits).
  *
  * FULLY STANDALONE — one import surface, like banana/scriptcraft/metacraft:
- * identity in → judged bet portfolio out. Deps: GEMINI_API_KEY only (vault
- * "gemini"). Outliers ride youtubeData access when present and degrade LOUDLY
+ * identity in → judged bet portfolio out. Deps: ANTHROPIC_API_KEY only (vault
+ * "anthropic"). Outliers ride youtubeData access when present and degrade LOUDLY
  * to the Convex bank (loadOutlierBank — the only optional Convex touchpoint,
  * injected as a client, never required by craftTopics itself). The only
  * engine import is pure-data golden.ts doctrine; the title gate reuses the
@@ -46,7 +46,7 @@
  */
 import type { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
-import { geminiJson, geminiJsonPro, hasGeminiKey } from "@/lib/gemini";
+import { claudeJson, claudeJsonPro, hasAnthropicKey } from "@/lib/anthropic";
 import { youtubeSuggest, lintTitle } from "@/lib/metacraft";
 import { fetchNicheOutliers, type OutlierVideo } from "@/lib/outliers";
 import { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
@@ -59,7 +59,7 @@ export { fetchRedditTrends, type TrendSignal } from "@/lib/trends";
 export { youtubeSuggest } from "@/lib/metacraft";
 
 export function hasTopicraft(): boolean {
-  return hasGeminiKey();
+  return hasAnthropicKey();
 }
 
 export type BetType = "hero" | "hub" | "help";
@@ -360,7 +360,7 @@ async function semanticDedupe(
 /* ------------------------------- engine -------------------------------- */
 
 export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
-  if (!hasGeminiKey()) throw new Error("topicraft: GEMINI_API_KEY missing — cannot craft real topics");
+  if (!hasAnthropicKey()) throw new Error("topicraft: ANTHROPIC_API_KEY missing — cannot craft real topics without a fallback");
   const log = a.log ?? (() => {});
   const t0 = Date.now();
   const count = Math.max(1, a.count);
@@ -423,7 +423,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
     let gen: { bets?: Partial<TopicBet>[] };
     await markProviderSpendStarted();
     try {
-      gen = await geminiJsonPro<typeof gen>({
+      gen = await claudeJsonPro<typeof gen>({
         prompt: [
           dateAnchor,
           `You are the topic STRATEGIST for the YouTube channel "${a.channelName ?? "this channel"}" placing ${want} content BETS.`,
@@ -505,7 +505,7 @@ export async function craftTopics(a: CraftTopicsArgs): Promise<CraftedTopics> {
     if (survivors.length > 0) {
       let gated: TopicBet[] = [];
       try {
-        const j = await geminiJson<{ rankings?: { idx?: number; demand?: number; freshness?: number; fit?: number; packageability?: number }[] }>({
+        const j = await claudeJson<{ rankings?: { idx?: number; demand?: number; freshness?: number; fit?: number; packageability?: number }[] }>({
           prompt: [
             `You are a YouTube growth strategist auditing topic BETS for "${a.channelName ?? "this channel"}" (${a.niche ?? "general"}).`,
             evidenceClauses.length ? `THE EVIDENCE the bets claim to ride:\n\n${evidenceClauses.join("\n\n").slice(0, 4000)}` : "",

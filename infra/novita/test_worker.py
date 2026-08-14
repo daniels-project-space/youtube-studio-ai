@@ -224,6 +224,27 @@ class WorkerContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "unsupported LTX pipeline"):
             worker.build_video_command(job, {"pipeline": "two-stage-hq"}, models, Path("/output/nope.mp4"), None)
 
+        adapter_job = {
+            **job,
+            "prompt": "faceless mannequin enters the archive",
+            "creativeAdapter": {
+                "id": "ltx-creative-faceless-mannequin",
+                "strength": 0.8,
+                "triggerTokens": ["faceless mannequin"],
+            },
+        }
+        adapter_command = worker.build_video_command(
+            adapter_job,
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
+            {**models, "ltx-creative-faceless-mannequin": Path("/models/loras/faceless.safetensors")},
+            Path("/output/adapter.mp4"),
+            Path("/input/still.png"),
+        )
+        self.assertEqual(
+            adapter_command[adapter_command.index("--lora") + 1:adapter_command.index("--lora") + 3],
+            ["/models/loras/faceless.safetensors", "0.8"],
+        )
+
     def test_ltx_model_specs_require_official_file_hashes_and_sizes(self):
         specs = []
         for model_id, (relative_path, digest, size) in worker.LTX_FILE_CONTRACTS.items():
@@ -236,6 +257,50 @@ class WorkerContractTests(unittest.TestCase):
         specs[0] = {**specs[0], "manifestSha256": "f" * 64}
         with self.assertRaisesRegex(ValueError, "official pinned LTX file"):
             worker.validate_model_specs(specs, "video", "distilled")
+
+    def test_ltx_creative_adapter_requires_exact_runtime_and_benchmark(self):
+        specs = []
+        for model_id, (relative_path, digest, size) in worker.LTX_FILE_CONTRACTS.items():
+            specs.append({
+                "id": model_id, "kind": "file", "sourcePath": f"models/LTX-2.5/{relative_path}",
+                "localPath": f"ltx-2.5/{relative_path}", "manifestSha256": digest, "sizeBytes": size,
+                "repository": worker.LTX_MODEL, "revision": worker.LTX_REVISION,
+            })
+        adapter_id = "ltx-creative-faceless-mannequin"
+        adapter = {
+            "id": adapter_id,
+            "kind": "file",
+            "sourcePath": "models/LTX-2.5/loras/faceless.safetensors",
+            "localPath": "ltx-2.5/loras/faceless.safetensors",
+            "manifestSha256": "a" * 64,
+            "repository": worker.LTX_MODEL,
+            "revision": worker.LTX_REVISION,
+            "creativeAdapter": {
+                "contractVersion": "ltx-creative-adapter/v1",
+                "role": "material-style",
+                "baseModel": worker.LTX_MODEL,
+                "baseRevision": worker.LTX_REVISION,
+                "runtimeRevision": worker.LTX_RUNTIME_REVISION,
+                "triggerTokens": ["faceless mannequin"],
+                "benchmark": {"rtx4090ProfileBenchmarked": True, "visualVerdict": "pass"},
+            },
+        }
+        self.assertEqual(
+            worker.validate_model_specs(specs + [adapter], "video", "distilled", {adapter_id}),
+            specs + [adapter],
+        )
+        self.assertEqual(
+            worker.validate_model_specs(specs + [adapter], "video", "distilled"),
+            specs,
+            "a cached but unselected adapter must not be hydrated into an ordinary LTX job",
+        )
+        with self.assertRaisesRegex(ValueError, "exact benchmarked"):
+            worker.validate_model_specs(specs + [{**adapter, "creativeAdapter": {**adapter["creativeAdapter"], "runtimeRevision": "b" * 40}}], "video", "distilled", {adapter_id})
+        with self.assertRaisesRegex(ValueError, "trigger tokens"):
+            worker.requested_creative_adapter_ids([{
+                "creativeAdapter": {"id": adapter_id, "strength": 0.8, "triggerTokens": ["faceless mannequin"]},
+                "prompt": "cinematic archive exterior",
+            }], "video")
 
     def test_ltx_25_profile_and_ffprobe_gate_require_the_sealed_x2_target(self):
         profile = worker.approved_profile("production", "video")

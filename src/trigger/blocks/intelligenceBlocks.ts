@@ -45,7 +45,6 @@ import {
 } from "@/lib/banana";
 import { craftMetadata } from "@/lib/metacraft";
 import { hasAnthropicKey } from "@/lib/anthropic";
-import { hasGeminiKey } from "@/lib/gemini";
 import { hasVisionKey } from "@/lib/vision";
 import {
   renderCandidate,
@@ -378,13 +377,13 @@ export const metadataOptimized: Block = {
       return { estimatedViews, estimatedViewsSource };
     };
 
-    // Degrade: no model available → niche-correct (NOT lofi) static metadata.
-    if (!hasGeminiKey()) {
+    // Degrade only when the permitted non-Google text provider is unavailable.
+    if (!hasAnthropicKey()) {
       const title = topic.slice(0, titleMax);
       const description = `${topic}.\n\n${persona || channelName}.`;
       const tags = [topic.toLowerCase(), niche].filter(Boolean) as string[];
       const ve = await viewEstimate(tags);
-      ctx.log(`metadata (degraded, no Gemini): "${title}"`);
+      ctx.log(`metadata (degraded, no permitted text provider): "${title}"`);
       return { title: plannedTitle || title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
     }
 
@@ -878,9 +877,6 @@ export const thumbnailGen: Block = {
           requestHash,
           localImagePath: outJpg,
           beforeClaim: () => {
-            if (!hasGeminiKey()) {
-              throw new Error("thumbnail_gen: no configured concept provider");
-            }
             if (!hasNanoBanana()) {
               throw new Error("thumbnail_gen: Nano Banana is not configured");
             }

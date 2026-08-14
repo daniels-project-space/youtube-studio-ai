@@ -176,11 +176,69 @@ export interface QualityDimension {
   threshold?: number;
 }
 
+/**
+ * A public channel used as a craft reference. It records transferable mechanics
+ * and a provenance URL; it is never a licence to copy the work or a claim that
+ * our system automatically compared a render with that channel.
+ */
+export interface ReferenceQualitySource {
+  id: string;
+  label: string;
+  url: string;
+  transferableMechanic: string;
+  prohibitedImitation: string;
+}
+
+export type ReferenceQualityArea = "story" | "pacing" | "presentation" | "audio";
+
+/** How a reference-derived standard can honestly be checked. */
+export type ReferenceQualityVerification =
+  | "reviewer-confirmed"
+  | "source-trace-plus-review"
+  | "measured-render-evidence";
+
+export interface ReferenceQualityRequirement {
+  id: string;
+  area: ReferenceQualityArea;
+  /** Existing QualityBar dimensions this standard sharpens. */
+  dimensionIds: string[];
+  standard: string;
+  verification: ReferenceQualityVerification;
+  /** Stable proof names expected in an editorial/QA receipt. */
+  evidence: string[];
+  sourceIds: string[];
+}
+
+export type ReferenceQualityCalibration = "calibrated" | "partial" | "unconfigured";
+
+/**
+ * Versioned, source-bound standards for a channel family. A profile can be
+ * deliberately unconfigured: that is an explicit research gap, never a silent
+ * generic benchmark.
+ */
+export interface ReferenceQualityContract {
+  version: "1.0.0";
+  family: string;
+  calibration: ReferenceQualityCalibration;
+  /** Permanently rules out a fabricated automated competitor/video comparison. */
+  comparisonPolicy: "mechanics-only-no-automatic-comparison";
+  sourceDocument: string;
+  sources: ReferenceQualitySource[];
+  requirements: ReferenceQualityRequirement[];
+  unresolvedAreas: ReferenceQualityArea[];
+}
+
 export interface QualityBar {
   /** Mean dimension score that counts as "good enough to ship" (the 80%). */
   target: number;
   dimensions: QualityDimension[];
   refreshedAt: number;
+  /**
+   * Optional for legacy channel rows. New creator/reground paths attach the
+   * static, source-bound contract so reviewer-facing quality standards travel
+   * with the persisted channel rubric.
+   */
+  referenceQuality?: ReferenceQualityContract;
 }
 
 /* ----------------------------- Video Brief ----------------------------- */

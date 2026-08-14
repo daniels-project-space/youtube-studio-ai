@@ -1,4 +1,7 @@
 import { defineConfig } from "@trigger.dev/sdk";
+import type { BuildExtension } from "@trigger.dev/build/extensions";
+import { readFileSync } from "node:fs";
+import { resolve } from "node:path";
 import {
   ffmpeg,
   additionalPackages,
@@ -6,6 +9,110 @@ import {
   aptGet,
   syncEnvVars,
 } from "@trigger.dev/build/extensions/core";
+
+/**
+ * PySceneDetect must be present before a task begins.  Unlike the legacy drawn
+ * renderers, scene analysis has no task-time pip/bootstrap path: the exact
+ * lock is injected into the base image, installed in a dedicated virtualenv,
+ * and import-checked during the Trigger image build.
+ *
+ * `image.instructions` deliberately does this in Trigger's `base` stage. A
+ * `BuildLayer.commands` pip install would run in its throw-away `build` stage
+ * and would not be available to the final worker image.
+ */
+const QA_SCENE_ANALYSIS_LOCKFILE = "requirements/qa-scene-analysis.txt";
+const QA_SCENE_ANALYSIS_VENV = "/opt/youtube-studio-qa-scene-analysis";
+const PYSCENEDETECT_HEADLESS_VERSION = "0.7.1";
+const OPENCV_PYTHON_HEADLESS_VERSION = "4.12.0.88";
+const QA_NARRATION_PROOF_LOCKFILE = "requirements/qa-narration-proof.txt";
+const QA_NARRATION_PROOF_VENV = "/opt/youtube-studio-qa-narration-proof";
+const QA_NARRATION_PROOF_MODEL_DIR = `${QA_NARRATION_PROOF_VENV}/model`;
+const FASTER_WHISPER_VERSION = "1.2.1";
+const FASTER_WHISPER_SMALL_EN_REPOSITORY = "Systran/faster-whisper-small.en";
+const FASTER_WHISPER_SMALL_EN_REVISION = "d1d751a5f8271d482d14ca55d9e2deeebbae577f";
+
+function pinnedQaSceneAnalysis(): BuildExtension {
+  return {
+    name: "pinned-qa-scene-analysis",
+    onBuildComplete(context) {
+      if (context.target === "dev") return;
+
+      // Trigger inserts image.instructions before its normal package-install
+      // stage, so encode the locked requirements into the base image instead
+      // of depending on a copied application file being available there.
+      const lockBase64 = readFileSync(resolve(context.workingDir, QA_SCENE_ANALYSIS_LOCKFILE)).toString("base64");
+      const writeLockProgram = [
+        'const fs = require("node:fs");',
+        `fs.writeFileSync("/tmp/qa-scene-analysis.txt", Buffer.from("${lockBase64}", "base64"));`,
+      ].join(" ");
+      const versionCheck = [
+        "from importlib.metadata import version",
+        "import cv2, scenedetect",
+        `assert version('scenedetect-headless') == '${PYSCENEDETECT_HEADLESS_VERSION}'`,
+        `assert version('opencv-python-headless') == '${OPENCV_PYTHON_HEADLESS_VERSION}'`,
+      ].join("; ");
+
+      context.addLayer({
+        id: "pinned-qa-scene-analysis",
+        image: {
+          instructions: [
+            "RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv && apt-get clean && rm -rf /var/lib/apt/lists/*",
+            `RUN node -e ${JSON.stringify(writeLockProgram)}`,
+            `RUN python3 -m venv ${QA_SCENE_ANALYSIS_VENV}`,
+            `RUN ${QA_SCENE_ANALYSIS_VENV}/bin/python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --only-binary=:all: -r /tmp/qa-scene-analysis.txt && ${QA_SCENE_ANALYSIS_VENV}/bin/python -m pip check`,
+            `RUN ${QA_SCENE_ANALYSIS_VENV}/bin/python -c ${JSON.stringify(versionCheck)}`,
+            `ENV PATH=${QA_SCENE_ANALYSIS_VENV}/bin:$PATH`,
+          ],
+        },
+      });
+    },
+  };
+}
+
+/**
+ * Final-narration proof runs entirely in the worker: faster-whisper and its
+ * English model are both hash/revision-pinned during image construction.  A
+ * production task therefore has no model-download, API, or best-effort
+ * fallback path when it verifies that a synthesized voice actually delivered
+ * the approved narration.
+ */
+function pinnedQaNarrationProof(): BuildExtension {
+  return {
+    name: "pinned-qa-narration-proof",
+    onBuildComplete(context) {
+      if (context.target === "dev") return;
+      const lockBase64 = readFileSync(resolve(context.workingDir, QA_NARRATION_PROOF_LOCKFILE)).toString("base64");
+      const writeLockProgram = [
+        'const fs = require("node:fs");',
+        `fs.writeFileSync("/tmp/qa-narration-proof.txt", Buffer.from("${lockBase64}", "base64"));`,
+      ].join(" ");
+      const packageCheck = [
+        "from importlib.metadata import version",
+        "from faster_whisper import WhisperModel",
+        `assert version('faster-whisper') == '${FASTER_WHISPER_VERSION}'`,
+        `WhisperModel('${QA_NARRATION_PROOF_MODEL_DIR}', device='cpu', compute_type='int8')`,
+      ].join("; ");
+      const downloadModel = [
+        "from huggingface_hub import snapshot_download",
+        `snapshot_download(repo_id='${FASTER_WHISPER_SMALL_EN_REPOSITORY}', revision='${FASTER_WHISPER_SMALL_EN_REVISION}', local_dir='${QA_NARRATION_PROOF_MODEL_DIR}', allow_patterns=['config.json', 'model.bin', 'tokenizer.json', 'vocabulary.*'])`,
+      ].join("; ");
+      context.addLayer({
+        id: "pinned-qa-narration-proof",
+        image: {
+          instructions: [
+            "RUN apt-get update && apt-get install -y --no-install-recommends python3 python3-pip python3-venv libgomp1 && apt-get clean && rm -rf /var/lib/apt/lists/*",
+            `RUN node -e ${JSON.stringify(writeLockProgram)}`,
+            `RUN python3 -m venv ${QA_NARRATION_PROOF_VENV}`,
+            `RUN ${QA_NARRATION_PROOF_VENV}/bin/python -m pip install --no-cache-dir --disable-pip-version-check --require-hashes --only-binary=:all: -r /tmp/qa-narration-proof.txt && ${QA_NARRATION_PROOF_VENV}/bin/python -m pip check`,
+            `RUN ${QA_NARRATION_PROOF_VENV}/bin/python -c ${JSON.stringify(downloadModel)}`,
+            `RUN ${QA_NARRATION_PROOF_VENV}/bin/python -c ${JSON.stringify(packageCheck)}`,
+            `ENV PATH=${QA_NARRATION_PROOF_VENV}/bin:$PATH`,
+          ],
+        },
+      });
+    },
+  };
+}
 
 /**
  * Operator switches forwarded from the DEPLOY machine's env into the Trigger
@@ -173,9 +280,19 @@ export default defineConfig({
           // gated by a $0-spend preflight at the top of each engine.
           "scripts/wb_scribe_sync.py",
           "scripts/whisper_align.py",
+          // Production source-narration fidelity proof. The model itself is
+          // prewarmed in pinnedQaNarrationProof(); this is only its receipt
+          // producer, never a task-time package/model download.
+          "scripts/narration_transcript_proof.py",
           "scripts/mc_page_render.py",
           "scripts/mc_textplace.py",
           "scripts/mc_font.py",
+          // Evidence-only final-master scene analysis. Its locked runtime is
+          // installed into the worker's base image by pinnedQaSceneAnalysis()
+          // below; this bakes only the executable receipt producer.
+          "scripts/shot_analysis.py",
+          "requirements/qa-scene-analysis.txt",
+          "requirements/qa-narration-proof.txt",
         ],
       }),
       // Headless-Chromium system libraries (Remotion renderTitleCard). The image
@@ -188,6 +305,11 @@ export default defineConfig({
           // package at first use per machine — see src/lib/audioQa.ts).
           "python3",
           "python3-pip",
+          // Independent local OCR for exact on-screen-text evidence. QA calls
+          // the system binary directly and fails closed if it is unavailable;
+          // no vision model or Google service is used to infer readability.
+          "tesseract-ocr",
+          "tesseract-ocr-eng",
           // Comic-page renderer typography (mc_page_render/mc_textplace);
           // the repo also bakes the OTF under src/assets/fonts as a fallback.
           "fonts-comic-neue",
@@ -209,6 +331,8 @@ export default defineConfig({
           "libatspi2.0-0",
         ],
       }),
+      pinnedQaSceneAnalysis(),
+      pinnedQaNarrationProof(),
     ],
   },
   maxDuration: 7200, // 2h ceiling; long-form (15-35 min) renders re-encode a lot.

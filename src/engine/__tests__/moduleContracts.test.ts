@@ -515,6 +515,11 @@ function failClosedQualityGuards(): void {
   assert.doesNotThrow(() => assertVoiceGatePreconditions(voice));
   assert.throws(() => assertVoiceGatePreconditions({ ...voice, gateEnabled: false }), /cannot be disabled/);
   assert.throws(() => assertVoiceGatePreconditions({ ...voice, judgeAvailable: false }), /requires the audio judge/);
+  assert.doesNotThrow(() => assertVoiceGatePreconditions({
+    ...voice,
+    judgeAvailable: false,
+    localEvidenceGateAvailable: true,
+  }));
   assert.throws(() => assertVoiceGatePreconditions({ ...voice, voiceId: undefined }), /explicitly cast voice/);
   assert.throws(() => assertVoiceGatePreconditions({ ...voice, castScore: 6.99 }), /audition score >= 7/);
   assert.throws(
@@ -627,6 +632,11 @@ function configurationSpecificCostEnvelopes(): void {
     "generated footage must reserve the pinned Novita image and video ceilings",
   );
   assert.equal(
+    envelope("gen_footage", { maxCinematicClips: 30 }),
+    30 * (2 * PRICE.novitaImageMaxUsd + 2 * PRICE.novitaVideoMaxUsd),
+    "a cinematic sequence must reserve every source-bound shot plus one bounded keyframe and LTX-motion recovery",
+  );
+  assert.equal(
     envelope("qa_visual", { nativeWatch: true, audioQa: true }),
     qaVisualCost({ nativeWatch: true, audioQa: true }),
     "QA reservation and runtime pricing must share one calculator",
@@ -681,7 +691,7 @@ function catalogCitedFilePathsExistOrAreExplicitlyRetired(): void {
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
-  assert.equal(manifests.length, 56, "all 56 executable blocks must have manifests");
+  assert.equal(manifests.length, 67, "all 67 executable blocks must have manifests");
   assert.deepEqual(
     manifests.filter((manifest) => manifest.certification.status === "legacy").map((manifest) => manifest.id),
     [],

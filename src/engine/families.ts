@@ -3,6 +3,7 @@ import {
   NOVITA_VIDEO_RUNTIME_REMEDIATION,
   type PipelineRuntimeBlockInput,
 } from "./runtimeCapability";
+import { familyChannelInceptionCapability } from "./channelInceptionCapability";
 
 /**
  * Engine families = curated presets that map a channel format to a base pipeline
@@ -38,9 +39,12 @@ export interface Family {
   /** Whether this family narrates (drives wizard voice questions). */
   narrated: boolean;
   requiresKeys: string[];
-  /** Production channel creation always uses the Style-DNA/playbook engine.
-   * Plain title cards remain a draft-only renderer, never a family default. */
-  defaultThumbnailStyle: "banana";
+  /**
+   * The channel-level thumbnail provenance. Most families use the Style-DNA
+   * image engine; the deterministic QuizYear renderer owns its local stills.
+   * A plain title card is never a default for a provider-backed family.
+   */
+  defaultThumbnailStyle: "banana" | "title_card";
   /** Default per-video spend envelope when the operator did not set one. */
   defaultRunBudgetUsd?: number;
 }
@@ -188,7 +192,11 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // bed plus a non-Gemini vision QA provider. Gemini may still enhance legacy
     // quiz runs, but it is not a production dependency for this family.
     requiresKeys: ["mureka", "groq-or-fal-vision"],
-    defaultThumbnailStyle: "banana",
+    // The QuizYear Remotion composition emits its own deterministic still;
+    // routing this family through the generic Banana thumbnailer would make
+    // the creator advertise a provider it never needs and break the visual
+    // language between the video and its thumbnail.
+    defaultThumbnailStyle: "title_card",
     // Facts, planning, metadata, thumbnail and pixels are local/CC0. Reserve
     // an original music bed and the mandatory production QA rather than
     // pretending a silent game-show master is release-ready.
@@ -447,7 +455,12 @@ export interface FamilyProductionReadiness {
  * repeats the same check with actual parameters, protecting custom and legacy
  * graphs too.
  */
-const FAMILY_RUNTIME_PIPELINE: Readonly<Record<FamilyKey, readonly PipelineRuntimeBlockInput[]>> = {
+/**
+ * Pinned video-producing blocks by family. Read-only consumers such as the
+ * creator preflight may assess this declarative contract, but the authorized
+ * design task remains the only authority that compiles an executable run.
+ */
+export const FAMILY_RUNTIME_PIPELINE: Readonly<Record<FamilyKey, readonly PipelineRuntimeBlockInput[]>> = {
   narrated_stock: [],
   music_loop: ["loop_clips"],
   sleep: [],
@@ -586,6 +599,28 @@ function noGeminiPlanningBlocker(template: Family): string | undefined {
   );
 }
 
+/**
+ * A registered non-Gemini episode planner is only half of autonomous channel
+ * creation.  This gate keeps the creator/UI from entering shared inception
+ * stages that have not yet been given their own non-Gemini implementation.
+ */
+function noGeminiChannelInceptionBlocker(template: Family): {
+  blocker?: string;
+  remediation?: string;
+} {
+  if (familyAutonomousPlanningCapability(template.key).mode !== "registered_non_gemini") {
+    return {};
+  }
+  const capability = familyChannelInceptionCapability(template.key);
+  if (capability.mode === "registered_non_gemini") return {};
+  return {
+    blocker:
+      `${template.label}: no-Gemini channel inception is not registered; ` +
+      capability.blockers.join("; ") + ".",
+    remediation: capability.remediation,
+  };
+}
+
 export function familyProductionReadiness(family: FamilyKey): FamilyProductionReadiness {
   const template = FAMILIES[family];
   const blockers: string[] = [];
@@ -596,6 +631,8 @@ export function familyProductionReadiness(family: FamilyKey): FamilyProductionRe
   }
   const planningBlocker = noGeminiPlanningBlocker(template);
   if (planningBlocker) blockers.push(planningBlocker);
+  const inception = noGeminiChannelInceptionBlocker(template);
+  if (inception.blocker) blockers.push(inception.blocker);
   const runtime = assessPipelineVideoRuntimeReadiness(FAMILY_RUNTIME_PIPELINE[family]);
   if (!runtime.ready) {
     blockers.push(...runtime.blockers.map((blocker) => `${template.label}: ${blocker}`));
@@ -608,6 +645,7 @@ export function familyProductionReadiness(family: FamilyKey): FamilyProductionRe
       ...(planningBlocker
         ? ["Register a deterministic or non-Gemini topic/story planner before admitting this family."]
         : []),
+      ...(inception.remediation ? [inception.remediation] : []),
       ...(!runtime.ready ? [NOVITA_VIDEO_RUNTIME_REMEDIATION] : []),
     ].join(" "),
   };
@@ -619,11 +657,11 @@ export function isFamilyProductionReady(family: FamilyKey): boolean {
 
 /** The closest actually-admitted fallback; undefined means none exists. */
 export function productionReadyFamilyFallback(family: FamilyKey): FamilyKey | undefined {
-  if (isFamilyProductionReady(family)) return family;
-  const candidates: readonly FamilyKey[] = family === "cinematic"
-    ? ["comic", "narrated_stock", "quizyear"]
-    : ["narrated_stock", "quizyear", "comic"];
-  return candidates.find((candidate) => isFamilyProductionReady(candidate));
+  // Production admission is not a licence to replace the creator's requested
+  // format with an unrelated one. Until a deliberately compatible fallback is
+  // registered with its own quality/capability mapping, blocked families stay
+  // visibly blocked; QuizYear is selectable only when QuizYear was requested.
+  return isFamilyProductionReady(family) ? family : undefined;
 }
 
 export const FAMILY_KEYS = Object.keys(FAMILIES) as FamilyKey[];

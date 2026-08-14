@@ -3,6 +3,7 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { exampleClipAnalysisUnavailable } from "@/lib/exampleClipAnalysisUnavailable";
 import { synthChannelConcept } from "@/lib/conceptSynth";
 import { generateChannelArtAsset } from "@/lib/channelArt";
 import { designPipeline, enforceLengthContract, type DesignOptions } from "@/engine/designer";
@@ -22,7 +23,12 @@ import {
   type ChannelResearchEvidence,
 } from "@/lib/channelResearchEvidence";
 import { optimizeTopics } from "@/lib/topicOptimizer";
-import { channelPrefix, headObjectMetadata } from "@/lib/storage";
+import { channelPrefix, headObjectMetadata, putObject } from "@/lib/storage";
+import {
+  buildAndPersistQuizYearFoundation,
+  buildQuizYearFoundation,
+  type DeterministicFoundationObjectWriter,
+} from "@/trigger/deterministicQuizYearFoundation";
 import {
   planWeekArtifactHeadMatches,
   type PlanWeekArtifactReceipt,
@@ -265,6 +271,123 @@ function asIdentity(value: unknown): ChannelIdentityState {
   return value as ChannelIdentityState;
 }
 
+async function writeImmutableQuizYearFoundationObject(
+  artifact: Parameters<DeterministicFoundationObjectWriter["writeImmutable"]>[0],
+) {
+  let persisted = await headObjectMetadata(artifact.key);
+  if (!persisted) {
+    try {
+      await putObject(artifact.key, artifact.bytes, {
+        contentType: artifact.contentType,
+        metadata: { sha256: artifact.sha256 },
+        ifNoneMatch: "*",
+      });
+    } catch (error) {
+      // A concurrent retry may have won the immutable write. Only accept it
+      // after verifying the exact content-addressed object below.
+      persisted = await headObjectMetadata(artifact.key);
+      if (!persisted) throw error;
+    }
+  }
+  persisted = persisted ?? await headObjectMetadata(artifact.key);
+  if (
+    !persisted ||
+    persisted.contentLength !== artifact.byteLength ||
+    persisted.contentType !== artifact.contentType ||
+    persisted.metadata.sha256 !== artifact.sha256
+  ) {
+    throw new Error(
+      `QuizYear deterministic foundation object failed immutable verification: ${artifact.key}`,
+    );
+  }
+  return {
+    key: artifact.key,
+    sha256: artifact.sha256,
+    contentType: artifact.contentType,
+    byteLength: artifact.byteLength,
+  };
+}
+
+async function completeDeterministicQuizYearInception(args: {
+  readonly convex: ConvexHttpClient;
+  readonly channelId: Id<"channels">;
+  readonly ownerId: string;
+  readonly slug: string;
+  readonly channelName: string;
+  readonly family: (typeof FAMILIES)["quizyear"];
+}): Promise<{
+  readonly foundationFingerprint: string;
+  readonly receiptFingerprint: string;
+}> {
+  const expected = buildQuizYearFoundation({
+    channelName: args.channelName,
+    storagePrefix: channelPrefix(args.ownerId, args.slug),
+  });
+  const current = await currentChannel(args.convex, args.channelId);
+  const identity = asIdentity(current.identity);
+  for (const [slot, actual, intended] of [
+    ["avatar", identity.imageKey, expected.brandAssets[0].key],
+    ["banner", identity.bannerKey, expected.brandAssets[1].key],
+  ] as const) {
+    if (actual && actual !== intended) {
+      throw new Error(
+        `QuizYear deterministic inception will not replace an existing ${slot}. ` +
+          "Use a new channel identity or retain the existing draft outside the deterministic route.",
+      );
+    }
+  }
+  const persisted = await buildAndPersistQuizYearFoundation({
+    channelName: args.channelName,
+    storagePrefix: channelPrefix(args.ownerId, args.slug),
+    writer: { writeImmutable: writeImmutableQuizYearFoundationObject },
+  });
+  const foundationIdentity: ChannelIdentityState = {
+    ...identity,
+    persona: persisted.foundation.positioning.persona,
+    styleGrammar: persisted.foundation.positioning.styleGrammar,
+    palette: [...persisted.foundation.positioning.palette],
+    topicPool: [...persisted.foundation.positioning.topicPool],
+    bannedWords: [...persisted.foundation.positioning.bannedWords],
+    thumbnailTemplate: args.family.defaultThumbnailStyle,
+    niche: persisted.foundation.positioning.audience,
+    imageKey: persisted.foundation.brandAssets[0].key,
+    bannerKey: persisted.foundation.brandAssets[1].key,
+    thumbnailIdentity: {
+      colorPalette: [...persisted.foundation.positioning.palette],
+      visualStyle: "local QuizYear game-show grid",
+      textPosition: "center",
+      avoid: [...persisted.foundation.positioning.bannedWords],
+    },
+  };
+  await args.convex.mutation(api.channels.updateChannel, {
+    channelId: args.channelId,
+    name: persisted.foundation.positioning.channelName,
+    identity: foundationIdentity,
+    thumbnailer: args.family.defaultThumbnailStyle,
+    status: "draft",
+    architectReport: {
+      summary: "deterministic no-Gemini QuizYear foundation completed; draft-only until its independently admitted episode pipeline is run",
+      applied: ["deterministic-positioning", "local-brand-assets", "source-first-starter-slate"],
+      rejected: ["Gemini Style DNA/Showrunner", "Gemini visual judge", "Topicraft/Nano Banana starter slate", "automatic publishing"],
+      missingCapabilities: [],
+      groundingActions: ["CC0 Wikidata starter slate persisted with immutable hashes"],
+      deterministicFoundation: {
+        foundationFingerprint: persisted.foundation.foundationFingerprint,
+        receipt: persisted.receipt,
+        artifacts: {
+          avatarKey: persisted.foundation.brandAssets[0].key,
+          bannerKey: persisted.foundation.brandAssets[1].key,
+          starterSlateKey: persisted.foundation.manifestArtifact.key,
+        },
+      },
+    },
+  });
+  return {
+    foundationFingerprint: persisted.foundation.foundationFingerprint,
+    receiptFingerprint: persisted.receipt.fingerprint,
+  };
+}
+
 async function currentChannel(
   convex: ConvexHttpClient,
   channelId: Id<"channels">,
@@ -465,8 +588,11 @@ async function groundingSignals(
   const thumbnailStyleGuide = (nicheIntel as {
     thumbnailStyleGuide?: {
       dominantColors?: string[];
-      hasTextOverlayPct?: number;
+      hasTextOverlayPct?: number | null;
       notes?: string;
+      evidenceSource?: "youtube_data_api_v3_metadata";
+      visualEvidenceStatus?: "metadata_only";
+      sampledVideoCount?: number;
     };
   } | null)?.thumbnailStyleGuide;
   const competitorContext = [
@@ -842,10 +968,6 @@ export async function executeDesignChannel(
         : " No no-Gemini production-family fallback is registered."),
     );
   }
-  // No creator-time Gemini prerequisite: admission above rejects any family
-  // whose autonomous planning path still depends on it.
-  await bootstrapSecrets(log);
-
   const ownerId = admitProviderTaskOwner({
     requestedOwnerId: payload.ownerId,
     configuredOwnerId: process.env.STUDIO_OWNER_ID,
@@ -1023,6 +1145,37 @@ export async function executeDesignChannel(
       schedule: { frequency: payload.cadence, days: payload.days },
     });
   }
+
+  // QuizYear's complete creator path is local/source-first and draft-only.
+  // It must return before generic research, Style DNA, art, starter-thumbnail,
+  // provider bootstrap, or publishing logic can route it back to Gemini.
+  if (payload.family === "quizyear") {
+    const foundation = await completeDeterministicQuizYearInception({
+      convex,
+      channelId,
+      ownerId,
+      slug,
+      channelName: baseName,
+      family: FAMILIES.quizyear,
+    });
+    log("QuizYear deterministic foundation persisted", foundation);
+    return {
+      ok: true,
+      channelId,
+      slug,
+      name: baseName,
+      family: payload.family,
+      status: "draft" as const,
+      probe: { ok: false, attempts: 0, error: "QuizYear foundation is intentionally draft-only" },
+      zeroSpendDraft: true,
+      deterministicFoundation: foundation,
+      warnings: design.warnings,
+    };
+  }
+
+  // No creator-time Gemini prerequisite: admission above rejects any family
+  // whose autonomous planning path still depends on it.
+  await bootstrapSecrets(log);
 
   // A missing template or unavailable runtime cannot pass an end-to-end proof.
   // Persist only the deterministic shell and stop before research/model/art/
@@ -1368,23 +1521,15 @@ export async function executeDesignChannel(
         voiceId: concept.voiceId,
         thumbnailTemplate: family.defaultThumbnailStyle,
       };
-      let exampleClipNotes: string | undefined;
-      if (payload.exampleClipUrl?.trim()) {
-        const { analyzeClip } = await import("@/lib/clipAnalysis");
-        const analysis = await analyzeClip(payload.exampleClipUrl.trim());
-        if (analysis.couldAnalyze) {
-          exampleClipNotes = [
-            analysis.visualStyle ? `visual style: ${analysis.visualStyle}` : "",
-            analysis.pacing ? `pacing: ${analysis.pacing}` : "",
-            analysis.hasNarration
-              ? `narration tone: ${analysis.narrationTone ?? "unspecified"}`
-              : "no narration",
-            analysis.musicRole !== "none" ? `music role: ${analysis.musicRole}` : "",
-            analysis.captionStyle ? `captions: ${analysis.captionStyle}` : "",
-            analysis.thumbnailStyle ? `thumbnail style: ${analysis.thumbnailStyle}` : "",
-            analysis.notes,
-          ].filter(Boolean).join("; ");
-        }
+      // An example URL is optional reference material, not authority to invent
+      // unseen visual/narrative traits. Keep the channel-design route usable by
+      // skipping it, while persistently exposing the exact remediation instead
+      // of reaching the retired provider-backed analyzer.
+      const exampleClipAdmission = payload.exampleClipUrl?.trim()
+        ? exampleClipAnalysisUnavailable()
+        : undefined;
+      if (exampleClipAdmission) {
+        log(`[positioning] example clip skipped: ${exampleClipAdmission.code}; ${exampleClipAdmission.remediation}`);
       }
       const signals = await groundingSignals(convex, ownerId, identity.niche);
       const now = Date.now();
@@ -1399,7 +1544,7 @@ export async function executeDesignChannel(
         powerWords: signals.powerWords,
         thumbnailStyleGuide: signals.thumbnailStyleGuide,
         databank: signals.databank,
-        exampleClipNotes,
+        exampleClipNotes: undefined,
         now,
         log,
       });
@@ -1443,6 +1588,7 @@ export async function executeDesignChannel(
           confidence: styleDNA.confidence,
           groundingGaps: styleDNA.groundingGaps,
           competitorCount: signals.competitorCount,
+          ...(exampleClipAdmission ? { exampleClip: exampleClipAdmission } : {}),
         },
         outputFingerprint: channelInceptionContentSha256({
           ...value,

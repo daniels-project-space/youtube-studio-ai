@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -17,6 +18,22 @@ const FFMPEG = process.env.FFMPEG_BIN ?? "ffmpeg";
 const fixture = join(process.cwd(), "public", "golden", "comic", "comic3d.mp4");
 const reviewer = async () => JSON.stringify({ defects: [], summary: "No model findings in hermetic geometry test." });
 const malformedReviewer = async () => "this is not a structured review receipt";
+const reviewSource = readFileSync(new URL("../visualReview.ts", import.meta.url), "utf8");
+assert.match(
+  reviewSource,
+  /hasNonGoogleVisionKey\(\)/,
+  "the default final-master reviewer must reject a Gemini-only environment",
+);
+assert.match(
+  reviewSource,
+  /providers: \["groq", "fal"\]/,
+  "the default final-master reviewer must scope its evidence calls to non-Google providers",
+);
+assert.match(
+  reviewSource,
+  /video-review\/v4/,
+  "a pre-boundary review receipt must not be mistaken for current non-Google evidence",
+);
 const phraseReviewer = async () => JSON.stringify({
   defects: [{
     startSec: 6,
@@ -83,9 +100,35 @@ async function main(): Promise<void> {
     persona: "Comic history fans",
     styleGrammar: "inked panels; restrained captions",
     qualityDimensions: ["identity", "footage"],
+    qualityCriteria: [
+      "footage: Every visual change must clarify or advance the current spoken point; decorative novelty is a defect.",
+      "pacing: Reference-quality mechanics only, no automatic comparison with a reference channel.",
+    ],
   });
   assert.match(comicProfile.expectedStructure, /speech bubbles/i, "comic channels must tell the reviewer their layout contract");
   assert.match(comicProfile.channelWorld ?? "", /Silent Night Stories/, "frozen channel identity must reach the reviewer");
+  assert.equal(comicProfile.qualityCriteria.length, 2, "full QualityBar criteria must survive the channel-review profile");
+
+  let groundedPrompt = "";
+  const groundedReviewer = async (input: { prompt: string }) => {
+    groundedPrompt = input.prompt;
+    return JSON.stringify({ defects: [], summary: "Grounded review fixture." });
+  };
+  const grounded = await reviewRender(fixture, 18, {
+    title: "Reference-quality QA grounding fixture",
+    expectTitleCard: false,
+    qualityCriteria: comicProfile.qualityCriteria,
+  }, {
+    runId: "visual-review-quality-bar",
+    reviewer: groundedReviewer,
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(grounded.verdict, "pass");
+  assert.match(groundedPrompt, /CHANNEL QUALITY BAR/, "the final reviewer must receive the full channel quality standard");
+  assert.match(groundedPrompt, /decorative novelty is a defect/i);
+  assert.match(groundedPrompt, /not an automatic comparison/i);
 
   const planned = planVisualReviewEvidence({
     durationSec: 18,

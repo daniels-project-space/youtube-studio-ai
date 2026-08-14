@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { FamilyKey } from "./families";
 import type { PipelineEntry } from "./types";
+import type { VisualPacingPolicy } from "@/lib/visualPacing";
 
 /**
  * A content lane is the durable visual-production contract for a channel.
@@ -286,8 +287,13 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
  *     `blackSegmentMinSec` and `maxStaticHoldSec`, which are genuinely
  *     lane-dependent DETERMINISTIC facts (a night-time ambient loop can hold a
  *     frame far longer than a 45s Short), not taste judgements.
- *   - `legacy_unclassified` reproduces the historic generic defaults EXACTLY,
- *     so an unclassified channel sees zero behaviour change from this map.
+ *   - `visualPacing` is a separate final-master scene-marker receipt. It never
+ *     calls a cut count universal quality: lanes with legitimate sustained
+ *     visual evolution request a calibrated human confirmation when markers
+ *     are sparse instead of being falsely failed by automation.
+ *   - `legacy_unclassified` keeps the historic generic score/hold defaults and
+ *     receives the same conservative pacing-calibration receipt as any unknown
+ *     lane; it cannot claim automatic editorial readiness from missing context.
  */
 export interface LaneQualityPolicy {
   /** Accept threshold (0..1) for produce→critique loops on this lane. */
@@ -309,6 +315,11 @@ export interface LaneQualityPolicy {
    * as an ambient sound bed; planned title/outro cards are excluded separately.
    */
   maxStaticHoldSec: number | null;
+  /**
+   * Final-master scene-marker calibration. This complements freeze detection:
+   * a changing one-take can pass the latter while still needing a pacing review.
+   */
+  visualPacing: VisualPacingPolicy;
   /** Lane-specific things the critic must actively scrutinise (prompt input). */
   emphasis: readonly string[];
 }
@@ -320,12 +331,27 @@ const GENERIC_LANE_QUALITY: LaneQualityPolicy = {
   thumbnailScoreFloor: 5,
   blackSegmentMinSec: 2.5,
   maxStaticHoldSec: 4.5,
+  visualPacing: {
+    mode: "calibrated_review",
+    sceneThreshold: 0.12,
+    maxMarkerHoldSec: 10,
+    rationale: "Scene markers corroborate editorial movement, but a valid continuous take must be confirmed by the scene-aware reviewer rather than failed by cut count.",
+  },
   emphasis: [],
 };
 
 export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = {
   narrated_documentary: {
     ...GENERIC_LANE_QUALITY,
+    // Documentary maps, archive moves, and carefully held evidence cards can
+    // evolve without a hard cut. Ten seconds is a conservative review trigger,
+    // not a claim that every narration-led story must cut on a timer.
+    visualPacing: {
+      ...GENERIC_LANE_QUALITY.visualPacing,
+      mode: "calibrated_review",
+      maxMarkerHoldSec: 10,
+      rationale: "Narrated factual beats should visibly progress, while slow evidence maps and continuous archive moves remain legitimate human-review cases.",
+    },
     emphasis: [
       "Every visual must be earned by the sentence being narrated over it; decorative b-roll that ignores the claim is a defect.",
     ],
@@ -333,6 +359,15 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
   cinematic_ai: {
     ...GENERIC_LANE_QUALITY,
     critiqueThreshold: 0.82,
+    // A generated shot can be a deliberately sustained camera move. Sparse
+    // cut markers therefore request calibrated visual review rather than
+    // falsely condemning deliberate cinematography.
+    visualPacing: {
+      ...GENERIC_LANE_QUALITY.visualPacing,
+      mode: "calibrated_review",
+      maxMarkerHoldSec: 12,
+      rationale: "Cinematic AI may sustain an evolving camera move; a marker-free hold beyond twelve seconds needs scene-aware review, not an automatic cut-count verdict.",
+    },
     emphasis: [
       "Generated shots must hold ONE consistent world: subject identity, wardrobe, lighting key and grade may not drift between shots.",
       "Anatomy, hands, text-like artefacts and morphing edges are the known failure modes of generated video — inspect for them explicitly.",
@@ -348,6 +383,12 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     visualScoreFloor: 5,
     blackSegmentMinSec: 6,
     maxStaticHoldSec: null,
+    visualPacing: {
+      mode: "exempt",
+      sceneThreshold: 0.12,
+      maxMarkerHoldSec: null,
+      rationale: "Music-loop visuals are a decorative bed; loop continuity and audio quality are the meaningful release evidence, not scene cadence.",
+    },
     emphasis: [
       "The loop seam must be invisible: no jump, flash, or frozen hold where the clip wraps.",
       "Slow, uneventful, low-contrast night imagery is the INTENT of this lane, not a defect.",
@@ -360,6 +401,12 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     visualScoreFloor: 5,
     blackSegmentMinSec: 6,
     maxStaticHoldSec: null,
+    visualPacing: {
+      mode: "exempt",
+      sceneThreshold: 0.12,
+      maxMarkerHoldSec: null,
+      rationale: "Guided ambient visual beds can intentionally stay slow or near-static, so scene-marker cadence is not a valid quality claim.",
+    },
     emphasis: [
       "Deliberately slow pacing and long, near-static holds are the intent of this lane, not a defect.",
     ],
@@ -373,6 +420,15 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     thumbnailScoreFloor: 6,
     blackSegmentMinSec: 1.2,
     maxStaticHoldSec: 1.5,
+    // A short needs a readable rhythm signal. A one-take may still be good,
+    // however, so missing markers deliberately become `needs_human`, never a
+    // simplistic automatic "bad video" result.
+    visualPacing: {
+      ...GENERIC_LANE_QUALITY.visualPacing,
+      mode: "scene_rhythm",
+      maxMarkerHoldSec: 5.5,
+      rationale: "A viewer-facing Short should demonstrate a strong visual change within roughly six seconds; an intentional continuous take is routed to review rather than rejected by cut count.",
+    },
     emphasis: [
       "Judge at phone size: anything unreadable on a 6-inch screen is unreadable.",
       "Every element must sit inside the vertical safe areas, clear of the UI chrome.",
@@ -385,6 +441,12 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     thumbnailScoreFloor: 6,
     blackSegmentMinSec: 1.2,
     maxStaticHoldSec: 1.5,
+    visualPacing: {
+      ...GENERIC_LANE_QUALITY.visualPacing,
+      mode: "scene_rhythm",
+      maxMarkerHoldSec: 5.5,
+      rationale: "Documentary collage Shorts need visible beat-to-beat rhythm, while a deliberate continuous source clip remains a reviewer-confirmed exception.",
+    },
     emphasis: [
       "Judge at phone size; source/evidence cards must stay legible and inside the vertical safe areas.",
     ],
@@ -456,6 +518,15 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     // Calm does not mean stalled: an educational story still needs visible
     // progression after its planned title card.
     maxStaticHoldSec: 4,
+    // Children’s content must progress without the rapid attention bait of a
+    // generic Short. The receipt uses a calm eight-second review threshold and
+    // leaves a continuously animated learning scene for human confirmation.
+    visualPacing: {
+      ...GENERIC_LANE_QUALITY.visualPacing,
+      mode: "calibrated_review",
+      maxMarkerHoldSec: 8,
+      rationale: "Children’s learning scenes need calm visible progression; a long marker-free but continuously animated lesson requires review, not rapid-cut enforcement.",
+    },
     emphasis: [
       "One clear age-appropriate learning or life-skill objective must be resolved in a coherent beginning, middle, and safe prosocial ending.",
       "Dialogue, labels, and transitions must be calm, intelligible, and understandable without rapid attention bait or unexplained visual changes.",

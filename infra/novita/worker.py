@@ -137,7 +137,42 @@ def approved_profile(profile_id: str, phase: str) -> dict[str, Any]:
     raise ValueError(f"unsupported approved render profile: {profile_id}/{phase}")
 
 
-def validate_model_specs(model_specs: Any, phase: str, pipeline: str | None) -> list[dict[str, Any]]:
+def requested_creative_adapter_ids(jobs: Any, phase: str) -> set[str]:
+    if phase != "video":
+        return set()
+    if not isinstance(jobs, list):
+        raise ValueError("manifest jobs must be a list")
+    ids: set[str] = set()
+    for job in jobs:
+        adapter = job.get("creativeAdapter") if isinstance(job, dict) else None
+        if adapter is None:
+            continue
+        if not isinstance(adapter, dict):
+            raise ValueError("creative adapter must be a structured job contract")
+        adapter_id = str(adapter.get("id") or "")
+        strength = adapter.get("strength")
+        trigger_tokens = adapter.get("triggerTokens")
+        if (
+            not re.fullmatch(r"ltx-creative-[a-z0-9][a-z0-9-]{1,78}", adapter_id)
+            or isinstance(strength, bool) or not isinstance(strength, (int, float))
+            or not math.isfinite(float(strength)) or not 0.15 <= float(strength) <= 0.95
+            or not isinstance(trigger_tokens, list) or not 1 <= len(trigger_tokens) <= 8
+            or not all(isinstance(token, str) and token.strip() for token in trigger_tokens)
+        ):
+            raise ValueError("creative adapter contract is invalid")
+        if not all(token.lower() in str(job.get("prompt") or "").lower() for token in trigger_tokens):
+            raise ValueError("creative adapter trigger tokens are missing from the LTX prompt")
+        ids.add(adapter_id)
+    return ids
+
+
+def validate_model_specs(
+    model_specs: Any,
+    phase: str,
+    pipeline: str | None,
+    creative_adapter_ids: set[str] | None = None,
+) -> list[dict[str, Any]]:
+    creative_adapter_ids = creative_adapter_ids or set()
     if not isinstance(model_specs, list) or not all(isinstance(spec, dict) for spec in model_specs):
         raise ValueError("manifest model cache contract is missing")
     model_ids = [str(spec.get("id") or "") for spec in model_specs]
@@ -145,9 +180,13 @@ def validate_model_specs(model_specs: Any, phase: str, pipeline: str | None) -> 
         raise ValueError("manifest model cache identities must be unique")
     if phase == "video" and pipeline != "distilled":
         raise ValueError("manifest video profile must use the approved LTX 2.5 distilled x2 pipeline")
-    required = {"z-image-turbo"} if phase == "image" else set(LTX_FILE_CONTRACTS)
-    if set(model_ids) != required:
-        raise ValueError(f"manifest models must exactly match required cache identities: {sorted(required)}")
+    required = {"z-image-turbo"} if phase == "image" else set(LTX_FILE_CONTRACTS) | creative_adapter_ids
+    supplied = set(model_ids)
+    if not required.issubset(supplied):
+        raise ValueError(f"manifest models are missing required cache identities: {sorted(required - supplied)}")
+    optional_adapter_ids = supplied - required
+    if any(not adapter_id.startswith("ltx-creative-") for adapter_id in optional_adapter_ids):
+        raise ValueError(f"manifest models contain unexpected cache identities: {sorted(optional_adapter_ids)}")
     for spec in model_specs:
         if spec["id"] == "z-image-turbo" and (
             spec.get("kind") != "tree"
@@ -157,6 +196,28 @@ def validate_model_specs(model_specs: Any, phase: str, pipeline: str | None) -> 
             raise ValueError("manifest Z-Image tree does not match the official pinned repository revision")
         contract = LTX_FILE_CONTRACTS.get(str(spec["id"]))
         if contract is None:
+            adapter = spec.get("creativeAdapter")
+            trigger_tokens = adapter.get("triggerTokens") if isinstance(adapter, dict) else None
+            source_path = Path(str(spec.get("sourcePath") or "")).as_posix()
+            local_path = Path(str(spec.get("localPath") or "")).as_posix()
+            if (
+                spec.get("kind") != "file"
+                or spec.get("repository") != LTX_MODEL
+                or spec.get("revision") != LTX_REVISION
+                or not SHA256_RE.fullmatch(str(spec.get("manifestSha256") or ""))
+                or not isinstance(adapter, dict)
+                or adapter.get("contractVersion") != "ltx-creative-adapter/v1"
+                or adapter.get("baseModel") != LTX_MODEL
+                or adapter.get("baseRevision") != LTX_REVISION
+                or adapter.get("runtimeRevision") != LTX_RUNTIME_REVISION
+                or adapter.get("role") not in {"visual-style", "camera-control", "material-style"}
+                or not isinstance(trigger_tokens, list) or not 1 <= len(trigger_tokens) <= 8
+                or not isinstance(adapter.get("benchmark"), dict)
+                or adapter["benchmark"].get("rtx4090ProfileBenchmarked") is not True
+                or adapter["benchmark"].get("visualVerdict") != "pass"
+                or "/loras/" not in source_path or "/loras/" not in local_path
+            ):
+                raise ValueError(f"manifest creative adapter {spec['id']} is not an exact benchmarked LTX 2.5 adapter")
             continue
         relative_path, expected_sha256, expected_size = contract
         source_path = Path(str(spec.get("sourcePath") or "")).as_posix()
@@ -171,7 +232,10 @@ def validate_model_specs(model_specs: Any, phase: str, pipeline: str | None) -> 
             or not local_path.endswith(relative_path)
         ):
             raise ValueError(f"manifest model {spec['id']} does not match the official pinned LTX file")
-    return model_specs
+    # A cached optional adapter must never be hydrated into an ordinary LTX
+    # take. Keep it inspected/allowlisted, then return only the base files and
+    # explicitly selected adapters for this worker's local cache.
+    return [spec for spec in model_specs if str(spec.get("id")) in required]
 
 
 def canonical_bytes(value: Any) -> bytes:
@@ -665,6 +729,13 @@ def build_video_command(
     ]
     if image_path:
         command.extend(["--image", str(image_path), "0", "1.0"])
+    adapter = job.get("creativeAdapter")
+    if adapter is not None:
+        adapter_id = str(adapter["id"])
+        adapter_path = models.get(adapter_id)
+        if adapter_path is None:
+            raise ValueError(f"creative adapter {adapter_id} is unavailable in the local model cache")
+        command.extend(["--lora", str(adapter_path), str(float(adapter["strength"]))])
     return command
 
 
@@ -949,6 +1020,7 @@ def main() -> int:
         cache_root = Path(os.environ.get("NOVITA_LOCAL_MODEL_CACHE", "/workspace/model-cache"))
         model_specs = validate_model_specs(
             manifest.get("models"), manifest["phase"], manifest["profile"].get("pipeline"),
+            requested_creative_adapter_ids(manifest.get("jobs"), manifest["phase"]),
         )
         models = {
             str(spec["id"]): hydrate_model(spec, volume_root, cache_root, deadline_monotonic)

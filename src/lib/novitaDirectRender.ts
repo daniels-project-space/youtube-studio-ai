@@ -43,6 +43,10 @@ import {
 } from "@/lib/novitaFleet";
 import { waitForNovitaRenderPoll } from "@/lib/novitaPollWait";
 import { assertLtxWorkerCompletionEvidence } from "@/lib/ltxVideoProof";
+import {
+  resolveLtxCreativeAdapters,
+  type ResolvedLtxCreativeAdapter,
+} from "@/lib/ltxCreativeAdapter";
 import type {
   NovitaBillingReceipt,
   NovitaBridgeStatus,
@@ -305,7 +309,11 @@ function secondsToLtxFrames(seconds: number, fps: number): number {
   return Math.max(9, Math.round((raw - 1) / 8) * 8 + 1);
 }
 
-function makeRenderJobs(cfg: NovitaRenderCfg, phase: Phase): DirectRenderJob[] {
+function makeRenderJobs(
+  cfg: NovitaRenderCfg,
+  phase: Phase,
+  adapters = new Map<string, ResolvedLtxCreativeAdapter>(),
+): DirectRenderJob[] {
   const profile = cfg.profile;
   if (phase === "image") {
     return cfg.shots.flatMap((shot) => {
@@ -340,6 +348,13 @@ function makeRenderJobs(cfg: NovitaRenderCfg, phase: Phase): DirectRenderJob[] {
     if (sealedNegativePrompt) {
       throw new NovitaAdmissionError(`LTX-2.5 distilled does not support a negative prompt for ${shot.id}`);
     }
+    const creativeAdapter = adapters.get(shot.id);
+    const prompt = [
+      renderPrompt(cfg, shot),
+      ...(creativeAdapter
+        ? [`[LTX creative adapter ${creativeAdapter.id}] Activate only with these calibrated trigger tokens: ${creativeAdapter.triggerTokens.join(", ")}.`]
+        : []),
+    ].join("\n\n");
     return {
       id: shot.id,
       shotId: shot.id,
@@ -347,7 +362,7 @@ function makeRenderJobs(cfg: NovitaRenderCfg, phase: Phase): DirectRenderJob[] {
       key: "",
       payload: {
         id: shot.id,
-        prompt: renderPrompt(cfg, shot),
+        prompt,
         seed: shot.seed ?? 0,
         width: profile.width,
         height: profile.height,
@@ -358,6 +373,7 @@ function makeRenderJobs(cfg: NovitaRenderCfg, phase: Phase): DirectRenderJob[] {
         // two-hour worker lease. One worker has one bounded LTX clip.
         timeoutSeconds: 5_400,
         stillKey: shot.stillKey,
+        ...(creativeAdapter ? { creativeAdapter } : {}),
       },
     };
   });
@@ -1297,7 +1313,16 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
   if (control.activeInstanceCount >= control.config.verifiedGpuQuota) {
     throw new NovitaAdmissionError("all verified RTX 4090 capacity is currently in use");
   }
-  const jobs = makeRenderJobs(cfg, phase);
+  const adapters = phase === "video"
+    ? resolveLtxCreativeAdapters({
+        selections: new Map(cfg.shots.map((shot) => [shot.id, shot.creativeAdapter] as const)),
+        modelSpecs: control.models,
+        baseModel: cfg.profile.model,
+        baseRevision: cfg.profile.revision,
+        runtimeRevision: OFFICIAL_RENDER_PINS.ltx.runtimeRevision,
+      })
+    : new Map<string, ResolvedLtxCreativeAdapter>();
+  const jobs = makeRenderJobs(cfg, phase, adapters);
   if (!jobs.length) throw new NovitaAdmissionError("direct Novita render has no jobs");
   const requestedWorkers = automaticRtx4090Concurrency(cfg.shots);
   const totalMaximumCost = Math.min(cfg.maxCostUsd, control.config.maximumFleetUsd);

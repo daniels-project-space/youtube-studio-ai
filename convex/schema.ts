@@ -422,8 +422,11 @@ export default defineSchema({
     medianViewsTop50: v.number(),
     thumbnailStyleGuide: v.object({
       dominantColors: v.array(v.string()),
-      hasTextOverlayPct: v.number(),
+      hasTextOverlayPct: v.union(v.number(), v.null()),
       notes: v.string(),
+      evidenceSource: v.optional(v.literal("youtube_data_api_v3_metadata")),
+      visualEvidenceStatus: v.optional(v.literal("metadata_only")),
+      sampledVideoCount: v.optional(v.number()),
     }),
     refreshedAt: v.number(),
   }).index("by_owner_niche", ["ownerId", "niche"]),
@@ -451,7 +454,7 @@ export default defineSchema({
     refreshedAt: v.number(),
   }).index("by_owner_niche", ["ownerId", "niche"]),
 
-  // Derived SEO strategy databank (Gemini-synthesised from the above).
+  // Source-attributed SEO databank derived from collected YouTube metadata.
   seoDatabank: defineTable({
     ownerId: v.string(),
     niche: v.string(),
@@ -461,6 +464,14 @@ export default defineSchema({
     thumbnailRules: v.array(v.string()),
     hookPatterns: v.array(v.string()),
     competitorGaps: v.array(v.string()),
+    sourceAttribution: v.optional(v.object({
+      provider: v.literal("youtube_data_api_v3"),
+      sampledVideoIds: v.array(v.string()),
+      sourceFields: v.array(v.string()),
+      videosAnalysed: v.number(),
+      topPerformersAnalysed: v.number(),
+      limitations: v.array(v.string()),
+    })),
     refreshedAt: v.number(),
   }).index("by_owner_niche", ["ownerId", "niche"]),
 

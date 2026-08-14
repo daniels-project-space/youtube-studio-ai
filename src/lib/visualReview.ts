@@ -15,11 +15,14 @@ import { detectSceneChanges, grabFrame } from "@/lib/ffmpeg";
 import { makeRunTempDir } from "@/lib/files";
 import { parseJsonLoose } from "@/lib/gemini";
 import { putObject, putObjectFromFile } from "@/lib/storage";
-import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
+import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-export const VISUAL_REVIEW_VERSION = "video-review/v2" as const;
+// v4 adds the non-Google reviewer boundary. A receipt made under v3 may have
+// used the formerly allowed Gemini fallback, so it cannot attest the current
+// independent-review guarantee even if its frame coverage is otherwise sound.
+export const VISUAL_REVIEW_VERSION = "video-review/v4" as const;
 
 export type VisualReviewSeverity = "critical" | "major" | "minor";
 export type VisualReviewVerdict = "pass" | "fail" | "needs_human";
@@ -98,6 +101,11 @@ export interface VisualReviewIntent {
   criticDoctrine?: string;
   /** Lane-specific things this lane's critic must actively scrutinise (P1-17). */
   criticEmphasis?: string[];
+  /**
+   * Bounded criteria from the persisted channel QualityBar. These may carry
+   * source-bound reference mechanics, never an automatic reference comparison.
+   */
+  qualityCriteria?: string[];
 }
 
 export interface ChannelVisualReviewProfileInput {
@@ -107,6 +115,8 @@ export interface ChannelVisualReviewProfileInput {
   persona?: string;
   styleGrammar?: string;
   qualityDimensions?: string[];
+  /** Full QualityBar criteria, not merely short dimension IDs. */
+  qualityCriteria?: readonly string[];
   /** Operator-authored critic doctrine for this channel. */
   criticDoctrine?: string;
   /** Lane-tuned emphases (see engine/contentLane laneQualityPolicy). */
@@ -121,6 +131,8 @@ export interface ChannelVisualReviewProfile {
   criticDoctrine?: string;
   /** Bounded lane emphases, ready to hand to the reviewer. */
   criticEmphasis: string[];
+  /** Bounded full quality-bar criteria, ready to hand to the reviewer. */
+  qualityCriteria: string[];
 }
 
 const CHANNEL_REQUIREMENTS: Readonly<Record<string, {
@@ -200,6 +212,11 @@ export function channelVisualReviewProfile(
     .map((dimension) => compactReviewContext(dimension, 60))
     .filter((dimension): dimension is string => Boolean(dimension))
     .slice(0, 8);
+  const qualityCriteria = (input.qualityCriteria ?? [])
+    .map((criterion) => compactReviewContext(criterion, 360))
+    .filter((criterion): criterion is string => Boolean(criterion))
+    .filter((criterion, index, values) => values.indexOf(criterion) === index)
+    .slice(0, 6);
   const channelWorld = [
     channelName ? `Channel: ${channelName}` : "",
     persona ? `Audience/persona: ${persona}` : "",
@@ -221,6 +238,7 @@ export function channelVisualReviewProfile(
     allowedVisualConditions: [...requirement.allowed],
     ...(criticDoctrine ? { criticDoctrine } : {}),
     criticEmphasis,
+    qualityCriteria,
   };
 }
 
@@ -235,7 +253,15 @@ export interface VisualReviewEvidence {
   version: typeof VISUAL_REVIEW_VERSION;
   source: { durationSec: number };
   frames: VisualReviewFrame[];
-  coverage: { maxGapSec: number; maxAllowedGapSec: number; focusedWindows: VisualReviewWindow[] };
+  coverage: {
+    maxGapSec: number;
+    maxAllowedGapSec: number;
+    focusedWindows: VisualReviewWindow[];
+    /** Present when an exact transition/repair window must be reviewed in full. */
+    requiredFocusFrameCount?: number;
+    /** Missing required focus frames make the review fail closed. */
+    missingFocusFrameCount?: number;
+  };
   manifestKey?: string;
 }
 
@@ -303,6 +329,13 @@ export interface ReviewRenderOptions {
   maxFrames?: number;
   /** Extra evidence cap for reviewer-requested or repair-focused windows. */
   maxFocusFrames?: number;
+  /**
+   * Ignore the regular focused-frame cap and inspect every 2fps frame in every
+   * declared focus window. Use only where a source-bound edit contract makes
+   * every join material; it prevents a long cinematic sequence from claiming
+   * complete cut review while silently dropping later cuts.
+   */
+  requireCompleteFocusCoverage?: boolean;
   persistEvidence?: boolean;
   reviewer?: VisualReviewer;
   log?: (message: string) => void;
@@ -501,7 +534,38 @@ export function planVisualReviewEvidence(input: {
   }));
 }
 
-function focusOnlyEvidence(durationSec: number, windows: readonly VisualReviewWindow[], maxFrames: number): VisualReviewFrame[] {
+/**
+ * Deterministic 2fps evidence schedule for a window that must be reviewed in
+ * full. Exported for preflight/audit tests; it performs no extraction or model
+ * call and therefore makes the exact review cost visible before a run starts.
+ */
+export function planCompleteFocusEvidence(durationSec: number, windows: readonly VisualReviewWindow[]): VisualReviewFrame[] {
+  const candidates = new Map<string, number>();
+  const add = (raw: number) => {
+    if (!Number.isFinite(raw) || raw < 0 || raw > durationSec) return;
+    const tSec = clamp(roundTime(raw), 0, durationSec);
+    candidates.set(tSec.toFixed(1), tSec);
+  };
+  for (const window of mergeWindows(windows, durationSec)) {
+    for (let tSec = window.startSec; tSec <= window.endSec + 0.001; tSec += 0.5) add(tSec);
+    add(window.endSec);
+  }
+  return [...candidates.values()]
+    .sort((a, b) => a - b)
+    .map((tSec, index) => ({
+      id: `c${String(index + 1).padStart(3, "0")}`,
+      tSec,
+      selectionReasons: ["focus"],
+    }));
+}
+
+function focusOnlyEvidence(
+  durationSec: number,
+  windows: readonly VisualReviewWindow[],
+  maxFrames: number,
+  requireCompleteCoverage = false,
+): VisualReviewFrame[] {
+  if (requireCompleteCoverage) return planCompleteFocusEvidence(durationSec, windows);
   const planned = planVisualReviewEvidence({
     durationSec,
     focusWindows: windows,
@@ -590,6 +654,10 @@ function reviewerPrompt(
     .map((item) => item.replace(/\s+/g, " ").trim().slice(0, 240))
     .filter(Boolean)
     .slice(0, 4);
+  const qualityCriteria = (intent.qualityCriteria ?? [])
+    .map((item) => item.replace(/\s+/g, " ").trim().slice(0, 360))
+    .filter(Boolean)
+    .slice(0, 6);
   return (
     `You are the production visual QA director for a rendered YouTube video. Review only what is visible in the ` +
     `timestamped frames below. This is the ${phase} pass; do not claim continuous-frame coverage.\n\n` +
@@ -603,6 +671,11 @@ function reviewerPrompt(
       : "") +
     (criticEmphasis.length
       ? `LANE SCRUTINY (inspect specifically for these): ${criticEmphasis.map((item) => `"${item}"`).join("; ")}\n\n`
+      : "") +
+    (qualityCriteria.length
+      ? `CHANNEL QUALITY BAR (apply these as observable production standards when the supplied frames permit; ` +
+        `they describe transferable mechanics only, not an automatic comparison with any reference channel): ` +
+        `${qualityCriteria.map((item) => `"${item}"`).join("; ")}\n\n`
       : "") +
     `INTENT\n- Title: "${intent.title}"\n` +
     (intent.topic ? `- Topic: "${intent.topic}"\n` : "") +
@@ -844,6 +917,9 @@ function defaultReviewer(input: VisualReviewerInput): Promise<string> {
     imagePaths: input.frames.map((frame) => frame.localPath),
     json: true,
     maxTokens: VISION_GATE_MAX_TOKENS,
+    // Final render evidence is an independent non-Google gate. Do not let a
+    // Gemini fallback certify pixels generated by another pipeline stage.
+    providers: ["groq", "fal"],
   });
 }
 
@@ -896,8 +972,12 @@ export async function reviewRender(
   const log = opts.log ?? (() => {});
   const required = opts.required === true;
   const reviewer = opts.reviewer ?? defaultReviewer;
-  if (!opts.reviewer && !hasVisionKey()) {
-    if (required) throw new Error("visualReview required grader unavailable (no configured vision provider)");
+  if (!opts.reviewer && !hasNonGoogleVisionKey()) {
+    if (required) {
+      throw new Error(
+        "visualReview required grader unavailable (configure GROQ_API_KEY or FAL_KEY; Google/Gemini is not an eligible final-review provider)",
+      );
+    }
     return {
       ran: false,
       verdict: "needs_human",
@@ -956,7 +1036,16 @@ export async function reviewRender(
     ...(intent.focusWindows ?? []),
     ...focusForDefects(initialDefects, durationSec),
   ], durationSec);
-  const focusCandidates = focusOnlyEvidence(durationSec, focusWindows, Math.max(0, Math.floor(finite(opts.maxFocusFrames, 24))))
+  const requireCompleteFocusCoverage = opts.requireCompleteFocusCoverage === true;
+  const requiredFocusFrames = requireCompleteFocusCoverage
+    ? planCompleteFocusEvidence(durationSec, focusWindows)
+    : [];
+  const focusCandidates = focusOnlyEvidence(
+    durationSec,
+    focusWindows,
+    Math.max(0, Math.floor(finite(opts.maxFocusFrames, 24))),
+    requireCompleteFocusCoverage,
+  )
     .filter((candidate) => !broad.some((frame) => Math.abs(frame.descriptor.tSec - candidate.tSec) < 0.11))
     .map((candidate, index) => ({ ...candidate, id: `x${String(index + 1).padStart(3, "0")}` }));
   const focused = focusCandidates.length
@@ -968,6 +1057,9 @@ export async function reviewRender(
   const allExtracted = [...broad, ...focused];
   const defects = dedupeDefects([...geometry, ...firstPass.defects, ...focusPass.defects]);
   const allFrames = allExtracted.map((frame) => frame.descriptor);
+  const missingFocusFrameCount = requiredFocusFrames.filter((requiredFrame) =>
+    !allFrames.some((frame) => Math.abs(frame.tSec - requiredFrame.tSec) < 0.11),
+  ).length;
   const reviewFingerprint = fingerprint(intent, durationSec, allFrames);
   let evidence: VisualReviewEvidence = {
     version: VISUAL_REVIEW_VERSION,
@@ -977,6 +1069,12 @@ export async function reviewRender(
       maxGapSec: maxGap(allFrames.map((frame) => frame.tSec), durationSec),
       maxAllowedGapSec: maxAllowedVisualReviewGapSec(durationSec),
       focusedWindows: focusWindows,
+      ...(requireCompleteFocusCoverage
+        ? {
+            requiredFocusFrameCount: requiredFocusFrames.length,
+            missingFocusFrameCount,
+          }
+        : {}),
     },
   };
   if (opts.persistEvidence !== false) {
@@ -999,9 +1097,10 @@ export async function reviewRender(
   );
   const incompleteReviewerReceipts = firstPass.incompleteReceiptCount + focusPass.incompleteReceiptCount;
   const coverageIncomplete = evidence.coverage.maxGapSec > evidence.coverage.maxAllowedGapSec + 0.01;
+  const focusCoverageIncomplete = requireCompleteFocusCoverage && missingFocusFrameCount > 0;
   const verdict: VisualReviewVerdict = blocking.length
     ? "fail"
-    : incompleteReviewerReceipts > 0 || uncertain || (required && coverageIncomplete)
+    : incompleteReviewerReceipts > 0 || uncertain || focusCoverageIncomplete || (required && coverageIncomplete)
       ? "needs_human"
       : "pass";
   const reviewerSummary = [...firstPass.summaries, ...focusPass.summaries].filter(Boolean).join(" | ") ||
@@ -1014,6 +1113,9 @@ export async function reviewRender(
     coverageIncomplete
       ? `evidence gap ${evidence.coverage.maxGapSec.toFixed(2)}s exceeds ${evidence.coverage.maxAllowedGapSec.toFixed(2)}s coverage cap`
       : "",
+    focusCoverageIncomplete
+      ? `${missingFocusFrameCount}/${requiredFocusFrames.length} required focus frames were not extracted`
+      : "",
   ].filter(Boolean).join(" | ").slice(0, 1000);
   // Record that the critique was channel-grounded: the review fingerprint
   // already covers criticDoctrine/criticEmphasis (they are part of `intent`), so
@@ -1021,6 +1123,7 @@ export async function reviewRender(
   const grounding = [
     intent.criticDoctrine ? "doctrine" : "",
     (intent.criticEmphasis ?? []).length ? `lane-emphasis×${(intent.criticEmphasis ?? []).length}` : "",
+    (intent.qualityCriteria ?? []).length ? `quality-bar×${(intent.qualityCriteria ?? []).length}` : "",
   ].filter(Boolean).join("+");
   log(`visualReview: ${allFrames.length} frames (${Math.ceil(allFrames.length / 12)} batch(es)), ${defects.length} defect(s), ${incompleteReviewerReceipts} incomplete receipt(s), coverage ${evidence.coverage.maxGapSec.toFixed(2)}/${evidence.coverage.maxAllowedGapSec.toFixed(2)}s${grounding ? `, grounded by ${grounding}` : ""} → ${verdict.toUpperCase()}`);
   return {

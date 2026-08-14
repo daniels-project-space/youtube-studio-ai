@@ -1,6 +1,6 @@
 /**
- * Provider-routed VISION client — the drop-in replacement for direct Gemini
- * vision calls (the Google-bill driver). Every image-understanding call in the
+ * Provider-routed VISION client — the replacement for retired Google vision
+ * calls. Every image-understanding call in the
  * pipeline goes through visionLocal()/visionUrls(), which:
  *
  *   1. DOWNSCALES frames (ffmpeg → ≤768px JPEG) before base64-inlining —
@@ -14,13 +14,14 @@
  *      gate call while producing measurably WORSE and less repeatable verdicts.
  *      See VISION_REASONING_EFFORT for the A/B numbers.
  *   4. ROUTES to the cheapest available provider, in VISION_PROVIDERS order
- *      (default "groq,fal,gemini"):
+ *      (default "groq,fal"):
  *        groq   → Qwen 3.6 27B (current production multimodal model)
  *        fal    → any-llm/vision (provider-routed; exact usage not exposed)
- *        gemini → gemini-2.5-flash (LAST resort — set VISION_DISABLE_GEMINI=1
- *                 to hard-forbid Google vision)
  *
- * Contract preserved from geminiVisionLocal: returns the model's RAW TEXT
+ * Gemini is deliberately excluded. Its sole approved product role is sealed
+ * Nano Banana thumbnail image generation, never analysis or review.
+ *
+ * Contract preserved from the former local-vision adapter: returns the model's RAW TEXT
  * (JSON text when json:true — callers keep parsing with parseJsonLoose, which
  * tolerates fences/truncation). Throws on total failure; every caller already
  * self-guards with a fallback verdict.
@@ -48,7 +49,7 @@ export type VisionReasoningEffort = "none" | "default";
 export interface VisionLocalArgs {
   prompt: string;
   imagePaths: string[];
-  /** Legacy Gemini model hint — accepted and ignored (routing is provider-based). */
+  /** Legacy model hint — accepted and ignored (routing is provider-based). */
   model?: string;
   json?: boolean;
   maxTokens?: number;
@@ -59,33 +60,42 @@ export interface VisionLocalArgs {
    * ("none") — see that constant for the A/B evidence behind the default.
    */
   reasoningEffort?: VisionReasoningEffort;
+  /** Restrict this review to specific providers. Use this for certified no-Google gates. */
+  providers?: readonly VisionProvider[];
 }
 
-/** Mirror of hasGeminiKey() guard semantics: is ANY vision provider available? */
+/** Gemini is intentionally not a vision provider; it is sealed to Nano Banana thumbnail pixels. */
+export type VisionProvider = "groq" | "fal";
+
+/** Is an approved non-Google vision provider available? */
 export function hasVisionKey(): boolean {
   return providerChain().length > 0;
 }
 
-function geminiVisionAllowed(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY) && process.env.VISION_DISABLE_GEMINI !== "1";
+/** True only when an independent non-Google reviewer is available. */
+export function hasNonGoogleVisionKey(): boolean {
+  return providerChain(["groq", "fal"]).length > 0;
 }
 
 /** Once-per-process loud warning: an empty chain silently skips EVERY QA gate. */
 let warnedNoVisionProviders = false;
 
-function providerChain(): string[] {
-  const order = (process.env.VISION_PROVIDERS || "groq,fal,gemini").split(",").map((s) => s.trim());
+function providerChain(allowed?: readonly VisionProvider[]): VisionProvider[] {
+  const order = (process.env.VISION_PROVIDERS || "groq,fal").split(",").map((s) => s.trim());
   const chain = order.filter(
-    (p) =>
-      (p === "groq" && !!process.env.GROQ_API_KEY) ||
-      (p === "fal" && !!process.env.FAL_KEY) ||
-      (p === "gemini" && geminiVisionAllowed()),
+    (p): p is VisionProvider =>
+      (p === "groq" || p === "fal") &&
+      (!allowed || allowed.includes(p)) &&
+      (
+        (p === "groq" && !!process.env.GROQ_API_KEY) ||
+        (p === "fal" && !!process.env.FAL_KEY)
+      ),
   );
   if (chain.length === 0 && !warnedNoVisionProviders) {
     warnedNoVisionProviders = true;
     console.warn(
-      "[vision] !!! vision QA DISABLED (no providers) — set GROQ_API_KEY / FAL_KEY / GEMINI_API_KEY " +
-        "(with VISION_DISABLE_GEMINI unset) or every visual gate silently skips",
+      "[vision] !!! vision QA DISABLED (no providers) — set GROQ_API_KEY or FAL_KEY; " +
+        "Gemini is reserved for sealed Nano Banana thumbnail generation",
     );
   }
   return chain;
@@ -359,7 +369,7 @@ async function falVision(
     image_urls: picked.map((b) => `data:image/jpeg;base64,${b.toString("base64")}`),
   });
   // One retry on 429/5xx (groq's loop, shortened): a transient fal blip must not
-  // knock the whole chain down to the Gemini last resort.
+  // knock the whole approved provider chain down on a transient FAL failure.
   let lastErr = "";
   for (let attempt = 0; attempt < 2; attempt++) {
     const res = await fetch("https://fal.run/fal-ai/any-llm/vision", {
@@ -389,22 +399,6 @@ async function falVision(
   throw new VisionError(`fal vision exhausted retries (${lastErr})`);
 }
 
-async function geminiVisionBuffers(
-  prompt: string,
-  images: Buffer[],
-  opts: { json?: boolean; maxTokens?: number },
-): Promise<string> {
-  const { geminiVisionLocal } = await import("@/lib/gemini");
-  const dir = await cacheDir();
-  const paths: string[] = [];
-  for (let i = 0; i < images.length; i++) {
-    const p = join(dir, `gv-${createHash("sha1").update(images[i]).digest("hex").slice(0, 16)}.jpg`);
-    await writeFile(p, images[i]);
-    paths.push(p);
-  }
-  return geminiVisionLocal({ prompt, imagePaths: paths, json: opts.json, maxTokens: opts.maxTokens });
-}
-
 function sampleEvenly<T>(items: T[], max: number): T[] {
   if (items.length <= max) return items;
   const out: T[] = [];
@@ -413,23 +407,22 @@ function sampleEvenly<T>(items: T[], max: number): T[] {
 }
 
 /* ------------------------------------------------------------------ *
- * Public API — drop-in for geminiVisionLocal / geminiVision.
+ * Public API — local/remote image inputs → raw non-Google model text.
  * ------------------------------------------------------------------ */
 
 async function visionBuffers(
   prompt: string,
   buffers: Buffer[],
-  args: { json?: boolean; maxTokens?: number; noCache?: boolean; reasoningEffort?: VisionReasoningEffort },
+  args: { json?: boolean; maxTokens?: number; noCache?: boolean; reasoningEffort?: VisionReasoningEffort; providers?: readonly VisionProvider[] },
 ): Promise<string> {
   if (buffers.length === 0) throw new VisionError("no readable images");
-  const chain = providerChain();
+  const chain = providerChain(args.providers);
   // FLOOR, applied once for every provider: a caller asking for 80-400 tokens is
   // asking a reasoning model to answer before it has finished thinking, which
   // returns nothing at all rather than a short answer (see
   // VISION_GATE_MAX_TOKENS). Enforced here rather than per-provider so the
-  // gemini/fal fallbacks — gemini-2.5-flash also thinks before answering — can
-  // never inherit a starved budget from the caller, and so a future call site
-  // cannot silently reintroduce the bug.
+  // provider fallbacks cannot inherit a starved budget from the caller, and a
+  // future call site cannot silently reintroduce the bug.
   const effective = {
     ...args,
     maxTokens: Math.max(args.maxTokens ?? 0, VISION_GATE_MAX_TOKENS),
@@ -458,9 +451,7 @@ async function visionBuffers(
       const text =
         provider === "groq"
           ? await groqVision(prompt, buffers, effective)
-          : provider === "fal"
-            ? await falVision(prompt, buffers, effective)
-            : await geminiVisionBuffers(prompt, buffers, effective);
+          : await falVision(prompt, buffers, effective);
       await cachePut(cacheKey, text);
       return text;
     } catch (e) {
@@ -470,7 +461,7 @@ async function visionBuffers(
   throw new VisionError(`all vision providers failed: ${errors.join(" | ")}`);
 }
 
-/** Drop-in for geminiVisionLocal: local image files + prompt → raw model text. */
+/** Local image files + prompt → raw non-Google model text. */
 export async function visionLocal(args: VisionLocalArgs): Promise<string> {
   const buffers: Buffer[] = [];
   for (const p of args.imagePaths.slice(0, 12)) {
@@ -480,7 +471,7 @@ export async function visionLocal(args: VisionLocalArgs): Promise<string> {
   return visionBuffers(args.prompt, buffers, args);
 }
 
-/** Drop-in for geminiVision: remote image URLs + prompt → raw model text. */
+/** Remote image URLs + prompt → raw non-Google model text. */
 export async function visionUrls(args: {
   prompt: string;
   imageUrls: string[];

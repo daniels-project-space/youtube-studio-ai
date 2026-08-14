@@ -2,13 +2,29 @@ import assert from "node:assert/strict";
 import { readFileSync } from "node:fs";
 
 import {
+  FAMILIES,
   FAMILY_KEYS,
   familyProductionReadiness,
   productionReadyFamilyFallback,
 } from "@/engine/families";
+import { familyChannelInceptionCapability } from "@/engine/channelInceptionCapability";
 import { qaVisualCost } from "@/engine/pricing";
 
-for (const family of FAMILY_KEYS) {
+const quizyearReadiness = familyProductionReadiness("quizyear");
+assert.equal(
+  quizyearReadiness.productionReady,
+  true,
+  "QuizYear is admitted only after its deterministic draft-only creator foundation is wired",
+);
+assert.deepEqual(quizyearReadiness.blockers, []);
+assert.equal(familyChannelInceptionCapability("quizyear").mode, "registered_non_gemini");
+assert.equal(
+  FAMILIES.quizyear.defaultThumbnailStyle,
+  "title_card",
+  "QuizYear must advertise its renderer-native deterministic thumbnail rather than generic Banana generation",
+);
+
+for (const family of FAMILY_KEYS.filter((candidate) => candidate !== "quizyear")) {
   const readiness = familyProductionReadiness(family);
   assert.equal(
     readiness.productionReady,
@@ -26,8 +42,23 @@ for (const family of FAMILY_KEYS) {
 assert.equal(
   productionReadyFamilyFallback("cinematic"),
   undefined,
-  "a blocked Gemini-dependent family must not be redirected to another blocked family",
+  "a blocked cinematic family must not be silently substituted with unrelated QuizYear output",
 );
+assert.equal(
+  productionReadyFamilyFallback("quizyear"),
+  "quizyear",
+  "the fully registered deterministic channel creator remains selectable only when QuizYear was requested",
+);
+
+const inceptionSource = readFileSync(new URL("../../trigger/designChannelInception.ts", import.meta.url), "utf8");
+const readinessGate = inceptionSource.indexOf("const runtimeReadiness = familyProductionReadiness(payload.family);");
+const bootstrap = inceptionSource.indexOf("await bootstrapSecrets(log);");
+assert.ok(readinessGate >= 0 && bootstrap >= 0 && readinessGate < bootstrap);
+const quizyearBranch = inceptionSource.indexOf('if (payload.family === "quizyear")');
+assert.ok(quizyearBranch >= 0 && quizyearBranch < bootstrap);
+assert.match(inceptionSource, /buildAndPersistQuizYearFoundation/);
+assert.match(inceptionSource, /zeroSpendDraft: true/);
+
 assert.equal(
   qaVisualCost({ nativeWatch: true }),
   qaVisualCost({}),

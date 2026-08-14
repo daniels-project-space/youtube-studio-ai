@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { generationProfile } from "./generationProfiles";
+import {
+  planCinematicShotLanguage,
+  type CinematicCameraMove,
+  type CinematicShotScale,
+} from "./cinematicShotLanguage";
 
 const EPSILON = 0.02;
 
@@ -238,8 +243,6 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
   const shotList: StorySpine["shotList"] = [];
   const dpVisualSpecs: StorySpine["dpVisualSpecs"] = [];
   let shotNo = 0;
-  const moves = ["dolly_push", "truck_left", "static", "dolly_pull", "handheld_drift"] as const;
-  const scales = ["establishing", "medium", "close", "wide", "extreme_close"] as const;
   for (const beat of narrativeBeats) {
     const source = intervals.find((sentence) => sentence.id === beat.sourceSentenceIds[0]);
     if (!source) throw new Error(`missing source for ${beat.id}`);
@@ -251,8 +254,20 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
         ? beat.t1
         : beat.t0 + ((beat.t1 - beat.t0) * (chunk + 1)) / chunks;
       const id = `shot-${String(shotNo).padStart(4, "0")}`;
-      const cameraMove = moves[(shotNo - 1) % moves.length];
-      const shotScale = scales[(shotNo - 1) % scales.length];
+      const shotLanguage = planCinematicShotLanguage({
+        literalContent: source.text,
+        beatPurpose: beat.purpose,
+        shotIndex: shotNo,
+        chunkIndex: chunk,
+        chunksInBeat: chunks,
+        previous: shotList.length
+          ? {
+              cameraMove: shotList[shotList.length - 1]!.cameraMove as CinematicCameraMove,
+              shotScale: shotList[shotList.length - 1]!.shotScale as CinematicShotScale,
+            }
+          : undefined,
+      });
+      const { cameraMove, shotScale, lens } = shotLanguage;
       const styleLock = [recurringSubject, setting, String(dna.colorGrade ?? ""), palette.join(", ")]
         .filter(Boolean)
         .join(". ");
@@ -260,11 +275,13 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
       const prompt = [
         `Literal story moment: ${literalContent}`,
         styleLock ? `Locked channel world: ${styleLock}` : "",
-        `Shot scale: ${shotScale}; lens: ${shotScale === "close" ? "85mm portrait" : "35mm natural"}`,
+        `Visual purpose: ${shotLanguage.coveragePurpose}`,
+        `Cut rationale: ${shotLanguage.cutRationale}`,
+        `Shot scale: ${shotScale}; lens: ${lens}; camera: ${cameraMove.replaceAll("_", " ")}`,
         "No text, letters, captions, logos, or watermarks in the image.",
       ].filter(Boolean).join(". ");
       const motion =
-        `Continue the literal action implied by: ${literalContent}. ` +
+        `Continue the literal action implied by: ${literalContent}. ${shotLanguage.motionDirection} ` +
         `Camera performs a restrained ${cameraMove.replaceAll("_", " ")}; preserve identity, setting, wardrobe, props, and lighting through the final frame.`;
       const continuityState = `entity-primary/location-primary/shot-${shotNo}; no unmotivated identity, era, wardrobe, prop, palette, or lighting change`;
       const highRisk = shotNo === 1 || /\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(literalContent);
@@ -275,7 +292,7 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
         sourceSentenceIds: beat.sourceSentenceIds,
         t0,
         t1,
-        coveragePurpose: beat.purpose,
+        coveragePurpose: shotLanguage.coveragePurpose,
         literalContent,
         entities: recurringSubject ? ["entity-primary"] : [],
         locationId: setting ? "location-primary" : undefined,
@@ -285,7 +302,7 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
         continuityState,
         cameraMove,
         shotScale,
-        lens: shotScale === "close" || shotScale === "extreme_close" ? "85mm portrait" : "35mm natural",
+        lens,
         lighting: typeof dna.lighting === "string" ? dna.lighting : "consistent motivated natural lighting",
         motion,
         negative: negativeConstraints.join(", "),
@@ -295,7 +312,7 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
         shotMinScore: profile.qa.shotMinScore,
         prompt,
         seconds: t1 - t0,
-        storyFunction: beat.purpose,
+        storyFunction: `${beat.purpose}; ${shotLanguage.intent}; ${shotLanguage.cutRationale}`,
         section: source.sectionId,
         seed: 100_000 + shotNo,
       });

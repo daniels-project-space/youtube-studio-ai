@@ -123,12 +123,20 @@ for (const block of ["topic_select", "script_gen", "short_strategy", "documotion
 {
   const quiz = designPipeline({ family: "quizyear" });
   const repaired = enforceLengthContract(
-    corrupt(quiz.pipeline, ["topic_select", "quiz_year"]),
+    corrupt(quiz.pipeline, ["quiz_year"]),
     quiz.episodeLengthSeconds,
     "quizyear",
   ).pipeline;
   assert.equal(quiz.episodeLengthSeconds, 80);
-  assert.equal(params(repaired, "topic_select").targetSeconds, 80);
+  assert.ok(
+    repaired.some((entry) => entry.block === "quiz_topic_plan"),
+    "the fixed-cadence QuizYear route owns a deterministic curated planner instead of topic_select",
+  );
+  assert.equal(
+    repaired.some((entry) => entry.block === "topic_select"),
+    false,
+    "the no-Gemini QuizYear route must not retain generic topic selection",
+  );
   assert.equal(params(repaired, "quiz_year").targetSeconds, 80);
 }
 

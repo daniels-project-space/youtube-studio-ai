@@ -4,12 +4,14 @@ import { z } from "zod";
 import {
   GEMINI_RUNTIME_OPT_IN_ENV,
   GeminiRuntimeDisabledError,
+  assertGeminiRuntimeAllowed,
   geminiJson,
   hasGeminiKey,
+  isGeminiModelIdentifier,
   parseJsonLoose,
   uploadGeminiVideo,
 } from "@/lib/gemini";
-import { generateNanoBananaImageWithReceipt, hasNanoBanana } from "@/lib/banana";
+import { generateBananaImage, generateNanoBananaImageWithReceipt, hasNanoBanana } from "@/lib/banana";
 import { embedText, hasEmbedKey } from "@/lib/embeddings";
 import { withStagehand } from "@/lib/browserbase";
 
@@ -19,6 +21,7 @@ const GATE_ENV = [
   "BROWSERBASE_API_KEY",
   "BROWSERBASE_PROJECT_ID",
   "MASTRA_PRODUCER_MODEL",
+  "FAL_KEY",
 ] as const;
 
 function restoreEnv(snapshot: Record<(typeof GATE_ENV)[number], string | undefined>): void {
@@ -52,6 +55,9 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
     }) as typeof fetch;
 
     assert.equal(hasGeminiKey(), false, "a legacy key alone must not admit Gemini text calls");
+    for (const identifier of ["gemini-2.5-flash", "models/gemini-2.5-flash", "google/gemini-2.5-flash", "google:gemini-2.5-flash"]) {
+      assert.equal(isGeminiModelIdentifier(identifier), true, `${identifier} must be rejected outside thumbnails`);
+    }
     assert.equal(hasNanoBanana(), false, "a legacy key alone must not admit Nano Banana");
     assert.equal(hasEmbedKey(), false, "a legacy key alone must not admit Gemini embeddings");
     assert.deepEqual(parseJsonLoose<{ pure: boolean }>("{\"pure\":true}"), { pure: true });
@@ -72,8 +78,8 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
       isDisabled,
     );
 
-    // Import after pinning the model env so this verifies Mastra's direct
-    // Google route is rejected before the SDK can construct/generate.
+    // Import after pinning the model env so this proves creative agents do not
+    // inherit the thumbnail opt-in and cannot construct a Google route.
     const { agentJson } = await import("@/agents/mastra");
     await assert.rejects(
       agentJson({
@@ -81,7 +87,7 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
         prompt: "blocked Mastra Gemini request",
         schema: z.object({ answer: z.string() }),
       }),
-      isDisabled,
+      /Gemini models are thumbnail-only/,
     );
     assert.equal(stagehandCallbackCalls, 0, "Stagehand callback must not run after the provider refusal");
     assert.equal(networkCalls, 0, "every Gemini boundary must stop before fetch");
@@ -91,7 +97,7 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
   }
 }
 
-async function explicitOptInRetainsTheLegacyAdapterForApprovedTests(): Promise<void> {
+async function explicitOptInAdmitsOnlyTheSealedThumbnailPurpose(): Promise<void> {
   const snapshot = Object.fromEntries(GATE_ENV.map((name) => [name, process.env[name]])) as Record<
     (typeof GATE_ENV)[number],
     string | undefined
@@ -101,17 +107,23 @@ async function explicitOptInRetainsTheLegacyAdapterForApprovedTests(): Promise<v
   try {
     process.env.GEMINI_API_KEY = "fixture-key";
     process.env[GEMINI_RUNTIME_OPT_IN_ENV] = "1";
+    delete process.env.FAL_KEY;
     globalThis.fetch = (async () => {
       networkCalls += 1;
-      return Response.json({
-        candidates: [{ content: { parts: [{ text: "{\"approved\":true}" }] } }],
-        usageMetadata: { promptTokenCount: 1, candidatesTokenCount: 1, totalTokenCount: 2 },
-      });
+      throw new Error("generic Gemini must remain blocked before network");
     }) as typeof fetch;
 
-    assert.equal(hasGeminiKey(), true);
-    assert.deepEqual(await geminiJson({ prompt: "explicitly approved fixture request" }), { approved: true });
-    assert.equal(networkCalls, 1);
+    assert.equal(hasGeminiKey(), false, "the thumbnail latch must never masquerade as a general Gemini key");
+    assert.equal(hasNanoBanana(), true, "the sealed thumbnail capability remains opt-in");
+    assert.equal(hasEmbedKey(), false, "thumbnail opt-in must not admit Gemini embeddings");
+    assert.doesNotThrow(() => assertGeminiRuntimeAllowed("sealed thumbnail fixture", "sealed_thumbnail"));
+    await assert.rejects(geminiJson({ prompt: "still-blocked generic request" }), isDisabled);
+    await assert.rejects(embedText("still-blocked embedding"), isDisabled);
+    await assert.rejects(
+      generateBananaImage({ prompt: "still-blocked generic image" }),
+      /generic image generation requires FAL_KEY/,
+    );
+    assert.equal(networkCalls, 0, "thumbnail opt-in must not reach any generic Gemini endpoint");
   } finally {
     globalThis.fetch = originalFetch;
     restoreEnv(snapshot);
@@ -120,7 +132,7 @@ async function explicitOptInRetainsTheLegacyAdapterForApprovedTests(): Promise<v
 
 async function main(): Promise<void> {
   await defaultDenyStopsEveryGeminiBoundaryBeforeNetwork();
-  await explicitOptInRetainsTheLegacyAdapterForApprovedTests();
+  await explicitOptInAdmitsOnlyTheSealedThumbnailPurpose();
   console.log("GEMINI RUNTIME GATE TESTS PASSED");
 }
 
