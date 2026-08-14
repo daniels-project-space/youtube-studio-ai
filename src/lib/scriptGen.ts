@@ -8,6 +8,7 @@ import { geminiJson, geminiJsonPro, scriptProModel, hasGeminiKey } from "@/lib/g
 import { CRAFT_RULES, resolveVoiceDoctrine, V3_TAG_PALETTES } from "@/engine/golden";
 import { craftHook, type CraftedHook } from "@/lib/hookcraft";
 import { scriptPlaybookDigest, type ScriptPlaybook } from "@/lib/scriptLab";
+import { aiPersonaDirective } from "@/lib/aiPersona";
 
 export interface ScriptSection {
   heading: string;
@@ -150,6 +151,17 @@ export interface ScriptRequest {
   openingDeviceIdx?: number;
   /** Episodic program context (Calm-style progressive curriculum). */
   series?: SeriesContext;
+  /**
+   * The EXACT figures a chart lane will render, with their citations, as
+   * produced by `chartNarrationBrief()` in src/lib/chartSpec.ts.
+   *
+   * This is stricter than `dataRich`, which merely ASKS for concrete numbers
+   * and trusts the model to recall real ones. Here the numbers are already
+   * sourced and about to appear on screen, so the writer's job is to speak
+   * those and only those — a figure the chart does not show, or a rounding the
+   * bar does not match, is a visible contradiction rather than a style choice.
+   */
+  chartBrief?: string;
 }
 
 /** Per-request sanitize that PRESERVES audio tags on v3-voiced channels. */
@@ -294,6 +306,24 @@ function langDirective(language?: string): string {
   return ` IMPORTANT: Write ALL spoken narration text in ${name}. Names/quotes keep their original form but the surrounding narration is in ${name}.`;
 }
 
+/**
+ * Ground the narration on figures that are ALREADY SOURCED and about to be
+ * rendered. Deliberately stricter than `dataDiscipline`: there is nothing to
+ * recall or attribute here, only numbers to speak correctly.
+ */
+export function chartFidelity(chartBrief?: string): string {
+  if (!chartBrief || chartBrief.trim().length === 0) return "";
+  return (
+    "NUMBER FIDELITY (non-negotiable): the figures below are ALREADY VERIFIED and will be drawn on screen " +
+    "beside your words. Speak these and ONLY these. Do not round them, do not convert them, do not add a " +
+    "figure that is not in this list, and do not introduce a comparison number you cannot see here. " +
+    "Cover them in the order given — the chart reveals in that order. If you need a number this list does " +
+    "not contain, describe the thing qualitatively instead of inventing one.\n" +
+    chartBrief +
+    "\n"
+  );
+}
+
 function styleGuidance(req: ScriptRequest): string {
   const { style, language, narrative, niche } = req;
   // The channel's OWN narrative DNA outranks the generic per-archetype tone —
@@ -314,7 +344,13 @@ function styleGuidance(req: ScriptRequest): string {
   const doctrineClause = doctrine
     ? `VOICE ARCHETYPE "${doctrine.voice}" — the whole narration must sound like this: ${doctrine.tone} `
     : "";
-  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language);
+  return (
+    dnaClause +
+    doctrineClause +
+    styleGuidanceBase(style) +
+    chartFidelity(req.chartBrief) +
+    langDirective(language)
+  );
 }
 
 /**
@@ -332,7 +368,21 @@ export function dataDiscipline(dataRich?: boolean): string {
 }
 
 function styleGuidanceBase(style?: string): string {
+  // Speculative-hypothetical genres ("what would AI do", first-person AI POV)
+  // live in src/lib/aiPersona.ts rather than inline here: they are prompt
+  // CONFIGURATION that topic_select also reads for its seed pool, and copying
+  // the frame into two files is how the two drift apart.
+  const aiDirective = aiPersonaDirective(style);
+  if (aiDirective) return aiDirective;
   switch (style) {
+    case "ranking_countdown":
+      return (
+        "RANKING COUNTDOWN: count DOWN to number one and make each entry earn its place. Open by naming the " +
+        "measure and the surprise at the top without revealing it. For every entry give the number plainly, " +
+        "then one concrete, specific reason it is where it is — a fact about the thing, never filler. Keep " +
+        "each entry to roughly the same length so the pacing matches the reveal, and build tension toward " +
+        "the last two. Close on the number one and what it actually means at that scale."
+      );
     case "crime":
       return "True-crime / mystery tone: open on an unsettling hook, build tension, withhold-then-reveal, vivid sensory detail.";
     case "shorts":

@@ -164,6 +164,19 @@ const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
     energy: "spectacle", font: "serif", treatment: "clean", textObject: "movie_poster",
     imageStyle: "epic painted concept-art tableau with chiaroscuro light and vast receding depth",
   },
+  // Ranking thumbnails sell a NUMBER and a subject. The bold impact plate is the
+  // proven grammar for that (same as quizyear/narrated_stock) rather than a
+  // sixth treatment invented for one family.
+  datachart: {
+    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    imageStyle: "bold graphic comparison card with one dominant subject at dramatic scale, no text baked in",
+  },
+  // The simulation lane sells strangeness, not scale — a spectacle poster reads
+  // the "imagine a world where" premise better than a comparison plate.
+  simstory: {
+    energy: "spectacle", font: "bebas", treatment: "clean", textObject: "movie_poster",
+    imageStyle: "abstract emergent-systems tableau, swarming forms resolving into order, luminous depth",
+  },
 };
 
 /**

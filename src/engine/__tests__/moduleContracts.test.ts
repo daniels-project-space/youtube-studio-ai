@@ -621,7 +621,8 @@ function catalogCitedFilePathsExistOrAreExplicitlyRetired(): void {
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
-  assert.equal(manifests.length, 52, "all 52 executable blocks must have manifests");
+  // 52 + rank_data + chart_render + sim_narrative (the chart lane's three).
+  assert.equal(manifests.length, 55, "all 55 executable blocks must have manifests");
   assert.deepEqual(
     manifests.filter((manifest) => manifest.certification.status === "legacy").map((manifest) => manifest.id),
     [],

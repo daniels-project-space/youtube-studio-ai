@@ -310,6 +310,11 @@ export const scriptGen: Block = {
       // feel same-y across the channel's library.
       playbook: ctx.store["scriptPlaybook"] as import("@/lib/scriptLab").ScriptPlaybook | undefined,
       openingDeviceIdx: [...ctx.runId].reduce((s, c) => s + c.charCodeAt(0), 0),
+      // The EXACT cited figures a chart lane will render, produced by rank_data.
+      // Handing the writer the numbers (with their sources) is what keeps the
+      // spoken figure and the on-screen bar identical; without it the model
+      // narrates its own recollection over someone else's data.
+      chartBrief: ctx.store["chartBrief"] as string | undefined,
     };
     // EVALUATOR-OPTIMIZER (short-form only â€” regenerating a 30-min chunked
     // script doubles cost): Claude critiques the draft; a rejected draft is

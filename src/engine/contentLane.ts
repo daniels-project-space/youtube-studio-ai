@@ -23,6 +23,8 @@ export const ContentLaneKeySchema = z.enum([
   "motion_comic",
   "lore_micro_doc",
   "quiz_year",
+  "data_chart",
+  "sim_story",
   "legacy_unclassified",
 ]);
 
@@ -223,6 +225,58 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     ],
     forbiddenBlocks: ["timeline_assemble", "assemble"],
   },
+  data_chart: {
+    key: "data_chart",
+    family: "datachart",
+    primaryRenderer: "chart_render",
+    // The DATA block is part of the required chain, not an optional garnish: a
+    // ranking video whose figures were not sourced is a different (and
+    // dishonest) product, so removing rank_data leaves the lane.
+    requiredBlocks: ["rank_data", "chart_render", "qa_visual"],
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
+      "lore_short",
+      "quiz_year",
+    ],
+    // chart_render emits the finished master, so an assembler would be a second
+    // producer of the same artifact. `story_spine` is forbidden for a different
+    // reason: it plans SHOTS for a generated-visual renderer, and this lane has
+    // no shots — its output would cost an LLM call per run and be read by
+    // nothing. The designer honours this list instead of auto-inserting.
+    // `visual_inserts` is forbidden for a third reason: it is a data-viz overlay
+    // layer whose output is composited by timeline_assemble, which this lane
+    // does not have — and the video is already a data visualisation.
+    forbiddenBlocks: ["timeline_assemble", "assemble", "story_spine", "visual_inserts"],
+  },
+  sim_story: {
+    key: "sim_story",
+    family: "simstory",
+    primaryRenderer: "chart_render",
+    // `sim_narrative` is required for the same reason `rank_data` is above, with
+    // an extra edge: it is the module that applies the mandatory speculative
+    // disclosure. Dropping it would strip the honesty framing from the format.
+    requiredBlocks: ["sim_narrative", "chart_render", "qa_visual"],
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
+      "lore_short",
+      "quiz_year",
+    ],
+    // Also forbids `rank_data`: mixing a real cited dataset into a declared
+    // illustrative scenario is exactly the confusion this format must not create.
+    forbiddenBlocks: ["timeline_assemble", "assemble", "story_spine", "visual_inserts", "rank_data"],
+  },
   legacy_unclassified: {
     key: "legacy_unclassified",
     primaryRenderer: "unclassified",
@@ -380,6 +434,31 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
       "The video mixes categories on purpose. Each question must stand alone and read clearly without the one before it.",
     ],
   },
+  data_chart: {
+    ...GENERIC_LANE_QUALITY,
+    // The critique surface here is READABILITY and NUMBER FIDELITY, both of
+    // which are graded on text at text prices, so iterations are near-free.
+    // The bar stays generic because a chart cannot be "beautiful enough" to
+    // rescue a wrong figure, and cannot be ugly enough to make a right one fail.
+    maxCritiqueIters: 2,
+    // Solid backgrounds with typography — a long dark hold is never correct.
+    blackSegmentMinSec: 1.5,
+    emphasis: [
+      "Every number spoken in the narration must be the SAME number shown on the bar. A figure the chart does not display is a defect, and so is a bar the narration never mentions.",
+      "Labels and values must be readable at a glance and at phone size; an overflowing label is a defect, not a style choice.",
+      "The ranking order on screen must match the order the narration counts down.",
+    ],
+  },
+  sim_story: {
+    ...GENERIC_LANE_QUALITY,
+    maxCritiqueIters: 2,
+    blackSegmentMinSec: 1.5,
+    emphasis: [
+      "The illustrative disclosure must be legible on screen for the whole video. If it is missing, cropped or unreadable, that is a hard failure, not a style note.",
+      "The curve must move WHEN the narration says it moves — a spike the voice never mentions, or a dramatic sentence over a flat line, breaks the format.",
+      "The narration must never present the run as a real experiment, a real dataset or a cited study.",
+    ],
+  },
   legacy_unclassified: { ...GENERIC_LANE_QUALITY },
 };
 
@@ -407,6 +486,8 @@ export const CONTENT_LANE_BY_FAMILY: Record<FamilyKey, ContentLaneKey> = {
   comic: "motion_comic",
   loreshort: "lore_micro_doc",
   quizyear: "quiz_year",
+  datachart: "data_chart",
+  simstory: "sim_story",
 };
 
 export const ContentLaneSchema = z.object({

@@ -75,6 +75,55 @@ export async function ffprobeDuration(path: string): Promise<number> {
 }
 
 /**
+ * Mux one already-rendered audio track under one already-rendered silent video.
+ *
+ * The missing GENERIC primitive: every existing helper here either loops a short
+ * unit (`loopUnderAudio`), builds an EDL (`assemble*Body`) or prepends an intro
+ * (`composeWithIntro`). A self-contained renderer that produced a complete,
+ * correctly-timed silent master and only needs its voice track attached had no
+ * home, and would otherwise have re-implemented this inline.
+ *
+ * Video is stream-copied (no quality loss, no re-encode cost); audio is encoded
+ * to AAC. `-shortest` is deliberately NOT used: the video is authoritative and
+ * the narration is padded/truncated by the caller's own timing contract.
+ */
+export async function muxAudioOverVideo(args: {
+  videoPath: string;
+  audioPath: string;
+  outPath: string;
+  /** Fade the audio out over the last N seconds. */
+  audioFadeOutSec?: number;
+  /** Audio duration, required when fading (ffmpeg needs the start offset). */
+  audioDurationSec?: number;
+  timeoutMs?: number;
+}): Promise<string> {
+  const fade = Math.max(0, args.audioFadeOutSec ?? 0);
+  const duration = Math.max(0, args.audioDurationSec ?? 0);
+  const filter =
+    fade > 0 && duration > fade
+      ? ["-af", `afade=t=out:st=${(duration - fade).toFixed(3)}:d=${fade.toFixed(3)}`]
+      : [];
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-i", args.videoPath,
+      "-i", args.audioPath,
+      "-map", "0:v:0",
+      "-map", "1:a:0",
+      "-c:v", "copy",
+      ...filter,
+      "-c:a", "aac",
+      "-b:a", "192k",
+      "-movflags", "+faststart",
+      args.outPath,
+    ],
+    args.timeoutMs ?? 900_000,
+  );
+  return args.outPath;
+}
+
+/**
  * Concat two clips (re-encoded for safe joins of differently-encoded inputs)
  * into a single seamless loop-unit mp4. We re-encode rather than stream-copy
  * because Kling outputs may not be concat-demuxer-safe.

@@ -50,7 +50,7 @@ export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check"], note: "Quality + originality + compliance floor." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
   { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
-  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "rank_data", "sim_narrative", "chart_render", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
   { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz." },
   { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
   { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + text-free Flash scene, deterministic Style-DNA typography, and one publishing gate." },
@@ -738,6 +738,77 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     // WIRED, not yet Golden-certified: no signed promotion receipt from a real
     // end-to-end run exists. Fact sourcing has been verified live against the
     // real endpoint; a full pipeline run has not been performed.
+    status: "active",
+  },
+  {
+    key: "data-chart",
+    stage: "visual",
+    title: "Data-viz — Ranking charts (Wikidata quantities)",
+    engine:
+      "rank_data + chart_render — CC0 Wikidata quantity statements → a validated ChartSpec → an isolated " +
+      "Remotion bundle, with the narration muxed in by local ffmpeg " +
+      "(src/lib/rankFacts.ts, src/lib/chartSpec.ts, src/trigger/blocks/rankChartBlocks.ts, " +
+      "src/remotion/chart/Root.tsx, src/lib/rankChartRender.ts)",
+    how:
+      "The \"Top 10 X\" ranking format, built on the same sourcing discipline that made `quiz-year` " +
+      "buildable where the original `quiz` entry was not. THE NUMBERS ARE NEVER MODEL-GENERATED: each row's " +
+      "value is read from a Wikidata quantity statement via `psv:`/`wikibase:quantityAmount`, which is used " +
+      "specifically because it exposes `wikibase:quantityUnit` — a row measured in a different unit is " +
+      "DROPPED rather than converted, because a silent bad conversion is an invisible lie. Entities carrying " +
+      "multiple conflicting current values are dropped outright (a ranking row with two defensible heights " +
+      "is broken, not a rounding problem), unlabelled entities and bare-QID labels are dropped, and the " +
+      "sorted set is re-asserted for rank order and citation coverage immediately before the spec is built. " +
+      "The ChartSpec contract then enforces the honesty invariant structurally: with `speculative: false`, " +
+      "EVERY row must carry a resolvable https citation or the render refuses to start. The writing and the " +
+      "voice are the SHARED modules (script_gen grounded on the exact cited figures via `chartBrief`, then " +
+      "narration_tts) rather than a second copy owned by this lane. " +
+      "COST: the cheapest path in the catalog — facts are free, the render is local Remotion + headless " +
+      "Chromium, the mux is local ffmpeg, and both of this lane's own blocks are UNPAID, so the entire spend " +
+      "is one script pass plus Fish narration plus the shared thumbnail/QA modules.",
+    gates: [
+      "deterministic dataset value (never model-guessed) — read from a Wikidata quantity statement; no prompt on this path has a numeric field",
+      "unit gate — a row whose unit QID differs from the topic's is dropped, never converted",
+      "single unambiguous current value per subject (multi-valued entities dropped)",
+      "every rendered row carries a resolvable https citation, enforced by chartSpecDefects before render",
+      "sourced and invented values may never appear in the same chart",
+      "rank order is asserted; an all-identical set is rejected as 'not a ranking'",
+      "isolated Remotion bundle — src/remotion/chart/index.ts, separate from src/remotion/index.ts and from the quiz bundle",
+    ],
+    // WIRED, not Golden-certified: no signed promotion receipt from a real
+    // end-to-end run exists. Sourcing and integrity are covered by deterministic
+    // tests; a full pipeline run against the live endpoint has not been performed.
+    status: "active",
+  },
+  {
+    key: "sim-story",
+    stage: "visual",
+    title: "Data-viz — Dramatized simulation story (declared illustrative)",
+    engine:
+      "sim_narrative + chart_render — ONE bounded LLM call authors an imaginary run; the SAME chart engine " +
+      "draws it (src/trigger/blocks/simNarrativeBlocks.ts, src/lib/chartSpec.ts, src/remotion/chart/)",
+    how:
+      "The \"natural selection simulation\" / \"AI town\" narrative format WITHOUT a simulation. A real " +
+      "genetic algorithm or per-tick agent loop costs compute and model calls proportional to generations × " +
+      "population for an output the audience cannot verify, so it was rejected outright. Instead one bounded " +
+      "call returns a beat sheet — a handful of generation numbers, on-screen captions, spoken narration and " +
+      "the 0..1 level the curve sits at — and `curveFromBeats` interpolates every intermediate point " +
+      "deterministically in TypeScript. That is why the graph moves exactly when the voice does: the beats " +
+      "ARE the keyframes. " +
+      "THE HONESTY IS STRUCTURAL, NOT EDITORIAL. The emitted ChartSpec sets `speculative: true`, which makes " +
+      "the shared contract REFUSE any row carrying a citation and REQUIRE a verbatim disclosure that the " +
+      "renderer burns into every frame. The opening and closing disclosure lines are prepended/appended in " +
+      "CODE rather than requested in the prompt, so a model that ignores the instruction cannot remove them, " +
+      "and `simNarrativeDefects` rejects narration that asserts the run was real ('we ran', 'our results', " +
+      "'the data shows') — the block throws rather than shipping it. " +
+      "It introduces NO renderer of its own; reusing chart_render is the entire architectural point.",
+    gates: [
+      "no real simulation is claimed — speculative: true forces the on-screen disclosure and forbids citations",
+      "opening + closing disclosure are applied in code, not requested from the model, and asserted before narration",
+      "reality-claim phrase gate over the authored body ('we ran', 'our experiment', 'the data shows', ...)",
+      "curve is interpolated deterministically from the authored beats — never generated point-by-point",
+      "exactly one authoring call; no per-generation loop can exist within the $0.05 ceiling",
+      "shares the ranking lane's isolated Remotion bundle — no second chart engine",
+    ],
     status: "active",
   },
   {

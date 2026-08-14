@@ -257,6 +257,75 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "cleanup" },
     ],
   },
+  "data-ranking": {
+    key: "data-ranking",
+    label: "Ranking / data-viz chart",
+    description:
+      "Cited figures from a public dataset → a narrated animated ranking chart (count-up or bar race).",
+    template: "A",
+    defaultVoiceId: "sleepless_historian",
+    thumbnailTemplate: "banana",
+    // PARTIALLY self-contained: `chart_render` owns the picture and the master,
+    // but the WRITING and the VOICE are the shared modules, deliberately —
+    // script_gen and narration_tts already do those jobs well and this lane has
+    // no reason to own a second copy of either.
+    //
+    // `rank_data` runs BEFORE script_gen so the writer is grounded on the exact
+    // cited numbers that will appear on screen (chartBrief), which is what keeps
+    // the spoken figures and the rendered figures identical.
+    //
+    // No timeline_assemble: chart_render emits the finished master itself.
+    // No music: a data video with a score costs a track for no retention gain,
+    // and the composer brief that narration_tts binds to is still authored.
+    pipeline: [
+      { block: "competitor_research" },
+      { block: "topic_select", params: { policy: "no_repeat", targetSeconds: 180 } },
+      { block: "compliance_check" },
+      { block: "rank_data", params: { rankTopic: "tallest_buildings", chartMode: "count_up", targetSeconds: 180 } },
+      { block: "script_gen", params: { style: "ranking_countdown", maxSeconds: 180 } },
+      { block: "qa_script" },
+      { block: "originality_gate" },
+      { block: "narration_tts", params: { sentenceGapSec: 0.4 } },
+      { block: "chart_render" },
+      { block: "length_check", params: { minSeconds: 30, maxSeconds: 900 } },
+      { block: "metadata" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+      { block: "notify" },
+      { block: "cleanup" },
+    ],
+  },
+  "sim-story": {
+    key: "sim-story",
+    label: "Dramatized simulation story",
+    description:
+      "One LLM call authors an explicitly imaginary simulation run; the chart engine draws its curve.",
+    template: "A",
+    defaultVoiceId: "psychological",
+    thumbnailTemplate: "banana",
+    // `sim_narrative` REPLACES script_gen: the beats it authors ARE the script,
+    // and splitting them would mean writing the story twice. Everything after it
+    // is the shared chain — qa_script grades the narration it wrote,
+    // narration_tts speaks it, chart_render draws the curve keyed to its beats.
+    pipeline: [
+      { block: "competitor_research" },
+      { block: "topic_select", params: { policy: "no_repeat", targetSeconds: 240 } },
+      { block: "compliance_check" },
+      { block: "sim_narrative", params: { beats: 6 } },
+      { block: "qa_script" },
+      { block: "originality_gate" },
+      { block: "narration_tts", params: { sentenceGapSec: 0.5 } },
+      { block: "chart_render" },
+      { block: "length_check", params: { minSeconds: 30, maxSeconds: 900 } },
+      { block: "metadata" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+      { block: "notify" },
+      { block: "cleanup" },
+    ],
+  },
   meditation: {
     key: "meditation",
     label: "Meditation / sleep",

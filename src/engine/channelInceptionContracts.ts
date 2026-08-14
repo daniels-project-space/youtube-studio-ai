@@ -178,6 +178,26 @@ export const CHANNEL_INCEPTION_FAMILY_POLICIES: Readonly<
     starterTopicCount: 3,
     starterPreviewCount: 3,
   },
+  datachart: {
+    family: "datachart",
+    // ONE narrator reads the countdown for the whole channel, so the channel's
+    // cast voice is exactly the right owner (unlike the comic engine, which
+    // owns a multi-character cast of its own).
+    voiceOwnership: "channel-cast",
+    requiresNarrativePlaybook: true,
+    // 16:9 narrated chart video — the longform probe is the honest match.
+    probeProfile: "narrated-longform",
+    starterTopicCount: 3,
+    starterPreviewCount: 3,
+  },
+  simstory: {
+    family: "simstory",
+    voiceOwnership: "channel-cast",
+    requiresNarrativePlaybook: true,
+    probeProfile: "narrated-longform",
+    starterTopicCount: 3,
+    starterPreviewCount: 3,
+  },
   loreshort: {
     family: "loreshort",
     // The lore engine speaks with ONE first-person narrator for the whole

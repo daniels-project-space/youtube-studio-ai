@@ -16,6 +16,8 @@ import {
   assertPipelineMatchesContentLane,
   contentLaneForFamily,
   injectContentLaneIntoPipeline,
+  CONTENT_LANE_BY_FAMILY,
+  CONTENT_LANE_POLICIES,
   type ContentLane,
 } from "./contentLane";
 import {
@@ -387,9 +389,21 @@ export function designPipeline(opts: DesignOptions): DesignResult {
 
   // Every externally narrated family gets the versioned story artifact spine.
   // Self-contained comic/whiteboard engines own equivalent internal timing.
+  //
+  // ...UNLESS the family's own content lane explicitly forbids it. The lane is
+  // already the authority on which blocks may appear (assertPipelineMatchesContentLane
+  // rejects a forbidden block), so auto-inserting one here would have designed a
+  // pipeline that its own contract immediately invalidates. Today only the
+  // chart lanes forbid `story_spine` — a shot-planning artifact that a
+  // typography-and-data renderer has no shots to plan and never reads — so this
+  // is a no-op for every pre-existing family.
+  const laneForbiddenBlocks = new Set(
+    CONTENT_LANE_POLICIES[CONTENT_LANE_BY_FAMILY[opts.family]]?.forbiddenBlocks ?? [],
+  );
   if (
     pipeline.some((entry) => entry.block === "narration_tts") &&
-    !pipeline.some((entry) => entry.block === "story_spine")
+    !pipeline.some((entry) => entry.block === "story_spine") &&
+    !laneForbiddenBlocks.has("story_spine")
   ) {
     const narrationIndex = pipeline.findIndex((entry) => entry.block === "narration_tts");
     pipeline.splice(narrationIndex + 1, 0, {
@@ -422,7 +436,11 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // selection — niches that speak numbers (finance/health/tech/history…) get
   // the Remotion motion-graphics layer; others skip it entirely. Placed after
   // quote_overlays (shares its compositing pass + avoids window clashes).
-  if (fam.narrated && preset?.insertTypes?.length) {
+  // ...unless the lane forbids it. `visual_inserts` writes `insertOverlays` for
+  // timeline_assemble to composite; a lane with no assembler never reads them,
+  // so on the chart lanes this was an LLM call per run producing dead work — on
+  // top of being a second data-viz layer inside a video that IS one.
+  if (fam.narrated && preset?.insertTypes?.length && !laneForbiddenBlocks.has("visual_inserts")) {
     const entry: PipelineEntry = {
       block: "visual_inserts",
       params: { insertTypes: preset.insertTypes },

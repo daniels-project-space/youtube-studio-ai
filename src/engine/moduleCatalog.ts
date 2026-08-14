@@ -226,6 +226,60 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     ],
   },
   {
+    block: "rank_data",
+    label: "Ranking data (cited)",
+    description:
+      "Sources the ranked list a chart video counts down — tallest buildings, longest rivers, biggest cities — by reading Wikidata QUANTITY STATEMENTS (CC0) directly. No model is ever asked for a figure, entities carrying conflicting values are dropped rather than picked between, rows measured in the wrong unit are dropped rather than converted, and every surviving row carries a resolvable citation. Produces data only; it renders nothing.",
+    optional: false,
+    params: [
+      {
+        key: "rankTopic",
+        label: "Ranking subject",
+        type: "select",
+        options: [
+          { value: "tallest_buildings", label: "Tallest buildings" },
+          { value: "longest_rivers", label: "Longest rivers" },
+          { value: "highest_mountains", label: "Highest mountains" },
+          { value: "most_populous_countries", label: "Most populous countries" },
+          { value: "most_populous_cities", label: "Biggest cities" },
+          { value: "largest_lakes", label: "Largest lakes" },
+        ],
+      },
+      {
+        key: "chartMode",
+        label: "Chart motion",
+        type: "select",
+        options: [
+          { value: "count_up", label: "Top-N count-up reveal" },
+          { value: "bar_race", label: "Bar chart race" },
+        ],
+      },
+      { key: "secondsPerRow", label: "Seconds per entry", type: "number", min: 2, max: 20, step: 1 },
+      { key: "outroSeconds", label: "Outro hold (sec)", type: "number", min: 0, max: 20, step: 1 },
+      { key: "minNotability", label: "Minimum fame", type: "number", min: 0, max: 200, step: 5, help: "Wikipedia language editions the subject must appear in." },
+    ],
+  },
+  {
+    block: "sim_narrative",
+    label: "Dramatized simulation story",
+    description:
+      "Authors an explicitly IMAGINARY simulation run in ONE bounded LLM call — story beats at chosen generation numbers plus the level the curve sits at, from which the graph is interpolated deterministically. It is not a real genetic algorithm and never claims to be: the mandatory speculative disclosure is prepended and appended in code, and the block refuses to ship narration that asserts the run actually happened.",
+    optional: false,
+    params: [
+      { key: "beats", label: "Story beats", type: "number", min: 3, max: 8, step: 1, help: "How many dramatic turns the imagined run has." },
+      { key: "secondsPerRow", label: "Pacing unit (sec)", type: "number", min: 2, max: 20, step: 1 },
+      { key: "outroSeconds", label: "Outro hold (sec)", type: "number", min: 0, max: 20, step: 1 },
+    ],
+  },
+  {
+    block: "chart_render",
+    label: "Animated chart render",
+    description:
+      "Draws whatever ChartSpec it is given — a bar-chart race, a Top-N count-up or a single moving curve — in an ISOLATED Remotion bundle, then muxes the narration that narration_tts already produced. Shared by the ranking and dramatized-simulation families; it never sources data, writes a script or synthesizes speech. A chart declared illustrative gets its disclosure burned into every frame.",
+    optional: false,
+    params: [],
+  },
+  {
     block: "quiz_year",
     label: "Mixed trivia quiz",
     description:

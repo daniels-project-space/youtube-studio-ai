@@ -15,7 +15,9 @@ export type FamilyKey =
   | "whiteboard"
   | "comic"
   | "loreshort"
-  | "quizyear";
+  | "quizyear"
+  | "datachart"
+  | "simstory";
 
 export interface Family {
   key: FamilyKey;
@@ -170,6 +172,49 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // the cheapest family in the catalog by a wide margin.
     defaultRunBudgetUsd: 1,
   },
+  datachart: {
+    key: "datachart",
+    label: "Ranking / data-viz charts",
+    description:
+      "Animated \"Top 10\" ranking videos: a bar-chart race or count-up reveal driven by REAL, cited " +
+      "figures read from Wikidata quantity statements (CC0), narrated over a local Remotion render. " +
+      "No model is ever asked for a number, and every rendered value carries a resolvable citation.",
+    visualEngine: "chart_render",
+    archetypeKey: "data-ranking",
+    available: true,
+    narrated: true,
+    // Gemini writes the narration (script_gen) and Fish speaks it. There is no
+    // image, video, music or upscale provider anywhere on this path.
+    requiresKeys: ["gemini", "fish-audio"],
+    defaultThumbnailStyle: "banana",
+    // THE CHEAPEST FAMILY IN THE CATALOG. Facts are free (Wikidata), the chart
+    // is a local Remotion render and the mux is local ffmpeg, so the only spend
+    // is one bounded script pass, one Fish narration and the shared
+    // thumbnail/QA modules — strictly less than quizyear's envelope, which
+    // additionally reserves a per-round critique loop. The wiring test asserts
+    // this stays true rather than trusting the comment.
+    defaultRunBudgetUsd: 0.5,
+  },
+  simstory: {
+    key: "simstory",
+    label: "Dramatized simulation story",
+    description:
+      "\"Imagine a simulation where…\" — one LLM call authors an explicitly IMAGINARY evolutionary/agent " +
+      "run as story beats, and the same chart engine draws a fitness curve that spikes and collapses " +
+      "exactly when the narration does. Declared illustrative on screen in every frame; it never claims " +
+      "to be a real experiment.",
+    // Same renderer as `datachart` — the family differs only in who authors the
+    // ChartSpec, never in how it is drawn.
+    visualEngine: "chart_render",
+    archetypeKey: "sim-story",
+    available: true,
+    narrated: true,
+    requiresKeys: ["gemini", "fish-audio"],
+    defaultThumbnailStyle: "banana",
+    // One authoring call instead of a full script pass, so slightly under the
+    // ranking family; still above zero because narration is real TTS spend.
+    defaultRunBudgetUsd: 0.5,
+  },
   cinematic: {
     key: "cinematic",
     label: "Cinematic AI scenes",
@@ -214,6 +259,14 @@ export const FAMILY_CREW: Record<FamilyKey, string[]> = {
   // this format — it is typography, a timer and a reveal. The critic is what
   // actually matters here, since question WORDING is the only creative surface.
   quizyear: ["director", "editor", "critic"],
+  // NO cinematographer: there is no photography — the picture is a chart. The
+  // composer IS here despite there being no score, because narration_tts binds
+  // to the composer's `musicBrief` in CREW_ARTIFACT_BINDINGS; omitting the role
+  // would not save the call, it would just have the compiler insert it silently.
+  // NO editor: its `cutSheet` binds to timeline_assemble/story_spine, neither of
+  // which exists in these lanes.
+  datachart: ["director", "composer", "critic"],
+  simstory: ["director", "composer", "critic"],
 };
 
 /** Crew role → the brief block id that role contributes. */

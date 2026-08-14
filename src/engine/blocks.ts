@@ -18,6 +18,8 @@ import { whiteboardScribeBlocks } from "@/trigger/blocks/whiteboardScribeBlocks"
 import { motionComicBlocks } from "@/trigger/blocks/motionComicBlocks";
 import { loreShortBlocks } from "@/trigger/blocks/loreShortBlocks";
 import { quizYearBlocks } from "@/trigger/blocks/quizYearBlocks";
+import { rankChartBlocks } from "@/trigger/blocks/rankChartBlocks";
+import { simNarrativeBlocks } from "@/trigger/blocks/simNarrativeBlocks";
 import { documentaryCollageShortBlocks } from "@/trigger/blocks/documentaryCollageShortBlocks";
 import { VISUAL_MATTER_BLOCKS } from "@/trigger/blocks/visualMatterBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
@@ -72,6 +74,15 @@ export function registerAllBlocks(): void {
   // four-option rounds → isolated Remotion bundle (src/lib/quizYearFacts.ts +
   // src/lib/quizYearRender.ts) — produces the final video.
   for (const b of quizYearBlocks) register(b);
+  // CHART lane — deliberately TWO single-purpose blocks, not one engine:
+  // rank_data sources cited figures (src/lib/rankFacts.ts) and chart_render
+  // draws whatever ChartSpec it is handed (src/remotion/chart/ +
+  // src/lib/rankChartRender.ts) and muxes narration someone else synthesized.
+  for (const b of rankChartBlocks) register(b);
+  // The chart lane's SECOND producer: one bounded call authors a declared-
+  // illustrative "simulation run" whose beats key the same chart_render curve.
+  // It adds no renderer of its own — that is the point.
+  for (const b of simNarrativeBlocks) register(b);
   // Native documentary-collage Shorts: source/claim/beat manifest → portrait
   // DocuMotion master → scene-level safe-area and provenance gate.
   for (const b of documentaryCollageShortBlocks) register(b);

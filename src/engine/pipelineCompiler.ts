@@ -10,6 +10,26 @@ import {
   type CatalogExecutionStep,
   type NovitaVideoRenderAssessment,
 } from "./goldenExecution";
+import { CONTENT_LANE_POLICIES } from "./contentLane";
+
+/**
+ * Does this pipeline belong to a lane that explicitly forbids `story_spine`?
+ *
+ * Derived from the lane table rather than a family list, because the compiler is
+ * deliberately family-agnostic: it recognises the lane by the RENDERER already
+ * present in the entries. Auto-inserting a block the channel's own content-lane
+ * contract forbids would produce a pipeline that `assertPipelineMatchesContentLane`
+ * immediately rejects — a self-invalidating design. Today only the chart lanes
+ * forbid it (a shot-planning artifact is meaningless to a renderer with no
+ * shots), so this is a no-op for every pre-existing lane.
+ */
+function laneForbidsStorySpine(entries: readonly PipelineEntry[]): boolean {
+  return Object.values(CONTENT_LANE_POLICIES).some(
+    (lane) =>
+      (lane.forbiddenBlocks ?? []).includes("story_spine") &&
+      entries.some((entry) => entry.block === lane.primaryRenderer),
+  );
+}
 
 export interface PipelinePolicy {
   id: string;
@@ -279,7 +299,11 @@ export function completePipelineForPolicy(
   // spine without forcing self-contained whiteboard/comic or music-loop
   // families to adopt narration modules they do not use.
   const narrationIndex = entries.findIndex((entry) => entry.block === "narration_tts");
-  if (narrationIndex >= 0 && !entries.some((entry) => entry.block === "story_spine")) {
+  if (
+    narrationIndex >= 0 &&
+    !entries.some((entry) => entry.block === "story_spine") &&
+    !laneForbidsStorySpine(entries)
+  ) {
     const isShorts = entries.some(
       (entry) =>
         entry.params?.["style"] === "shorts" ||

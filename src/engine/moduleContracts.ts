@@ -177,6 +177,21 @@ function quizYearCostCeiling(
   return iterations * callsPerIteration * PRICE.boundedTextPassUsd;
 }
 
+/**
+ * sim_narrative cold-run bound. The entire "simulation" is ONE bounded LLM call
+ * that authors the beat sheet; the curve between beats is interpolated
+ * deterministically in TypeScript (curveFromBeats) rather than generated. There
+ * is no per-generation call, no agent loop and no media provider — which is the
+ * whole reason the dramatized format was built instead of a real one.
+ *
+ * The `+1` is a single documented retry allowance for a malformed JSON response;
+ * the block itself falls back to a deterministic arc rather than looping, so
+ * this ceiling can never be reached by a runaway loop.
+ */
+function simNarrativeCostCeiling(): number {
+  return 2 * PRICE.boundedTextPassUsd;
+}
+
 function motionComicCostCeiling(params: Readonly<Record<string, unknown>>): number {
   const panels = Math.floor(boundedNumber(params["panels"], 8, 4, 12));
   const parsedSeconds = finiteNumber(params["targetSeconds"]);
@@ -310,6 +325,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "channelName", "niche", "persona", "styleGrammar",
       // Per-channel critique grounding for the shared script critique loop.
       "criticDoctrine", "contentLane",
+      // The exact cited figures a data/ranking episode will RENDER. Declared
+      // here so the writer speaks the numbers the chart shows rather than the
+      // ones the model remembers. See src/lib/chartSpec.ts chartNarrationBrief.
+      "chartBrief",
     ],
   }),
   hook_craft: contract(["script.hook_refined"], {
@@ -614,6 +633,59 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // and the ceiling should catch that rather than absorb it.
       maxCostUsd: 1,
       maxCostUsdFor: (params, context) => quizYearCostCeiling(params, context),
+      qualityRequired: true,
+    },
+  ),
+  rank_data: contract(
+    // NO visuals.* and NO script.*: this module produces DATA. Claiming a
+    // visual capability here would let a pipeline satisfy the renderer
+    // requirement with a block that has never drawn a pixel.
+    ["data.ranked", "data.citation_backed"],
+    {
+      // `rankTopic` lets a channel pin its subject (tallest buildings, longest
+      // rivers) from the channel config rather than the pipeline params.
+      // `topic` is the episode framing used for the on-screen title.
+      optionalConsumes: ["topic", "rankTopic", "channelName", "contentLane"],
+      // Wikidata's public SPARQL endpoint is free, unauthenticated and CC0.
+      // The module is UNPAID and therefore reserves nothing: if it ever needs a
+      // budget line, that is a signal a paid provider crept onto the path.
+      providerProfiles: [local],
+    },
+  ),
+  sim_narrative: contract(
+    // It writes the script AND the chart data, and nothing else. No narration.*
+    // (narration_tts speaks it) and no master.* (chart_render builds it).
+    ["script.generated", "data.speculative_disclosed"],
+    {
+      optionalConsumes: ["persona", "channelName", "styleGrammar", "criticDoctrine", "contentLane"],
+      providerProfiles: [managed],
+      // Deliberately tiny. A dramatized run that costs more than a couple of
+      // cents means someone re-introduced the per-generation loop this format
+      // exists to avoid.
+      maxCostUsd: 0.05,
+      maxCostUsdFor: () => simNarrativeCostCeiling(),
+    },
+  ),
+  chart_render: contract(
+    // The master producer for both chart families. `visuals.story_aligned` is
+    // truthful here rather than decorative: the reveal order IS the narration
+    // order for a ranking, and the curve is keyed to the authored beats for a
+    // simulation — the block asserts both before it renders.
+    ["visuals.generated", "visuals.story_aligned", "master.assembled"],
+    {
+      requiredConsumes: ["chartSpec"],
+      optionalConsumes: [
+        "palette",
+        "channelName",
+        "narrationLocalPath",
+        "narrationDurationSec",
+        "contentLane",
+        "criticDoctrine",
+        "styleGrammar",
+      ],
+      // Local Remotion + headless Chromium + local ffmpeg. No provider, no
+      // spend, so no reservation — the same shape as timeline_assemble.
+      providerProfiles: [local],
       qualityRequired: true,
     },
   ),
