@@ -6,8 +6,24 @@ import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
 import { NICHES, getNiche } from "@/lib/nicheCatalog";
 import { nichePreset } from "@/engine/golden";
-import { FAMILIES, FAMILY_KEYS, FAMILY_CREW, CREW_ROLE_BLOCK, getFamily, type FamilyKey } from "@/engine/families";
+import {
+  FAMILIES,
+  FAMILY_KEYS,
+  FAMILY_CREW,
+  CREW_ROLE_BLOCK,
+  clampFamilyEpisodeLengthMinutes,
+  familyDurationContract,
+  familyProductionReadiness,
+  formatFamilyDurationContract,
+  getFamily,
+  isFamilyProductionReady,
+  type FamilyKey,
+} from "@/engine/families";
 import { ARCHETYPES } from "@/engine/archetypes";
+import {
+  SOURCE_ATTRIBUTED_DATA_STORY,
+  supportsDataStoryFamily,
+} from "@/engine/dataStory";
 import { MODULE_CATALOG, type ParamField } from "@/engine/moduleCatalog";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -91,7 +107,7 @@ async function browserSha256(value: string): Promise<string> {
 }
 
 // Client preview of the designed block list (mirrors src/engine/designer filter).
-function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string): string[] {
+function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string, dataStory = false): string[] {
   const fam = FAMILIES[familyKey];
   const base = ARCHETYPES[fam.archetypeKey]?.pipeline ?? [];
   let blocks = base
@@ -119,6 +135,17 @@ function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string): str
   if (familyKey === "cinematic" && !blocks.includes("visual_matter")) {
     const story = blocks.indexOf("story_spine");
     if (story >= 0) blocks = [...blocks.slice(0, story + 1), "visual_matter", ...blocks.slice(story + 1)];
+  }
+  // Mirror the design pipeline's existing niche inserts plus the explicit
+  // source-attributed data-story contract. The contract is only supported by
+  // the narrated-stock timeline, so the preview never promises a no-op module
+  // for a self-contained or scene-compiler renderer.
+  const needsDataInserts = (dataStory && supportsDataStoryFamily(familyKey))
+    || Boolean(nichePreset(nicheKey)?.insertTypes?.length);
+  if (needsDataInserts && blocks.includes("timeline_assemble") && !blocks.includes("visual_inserts")) {
+    const anchors = ["quote_overlays", "intro_card", "narration_tts"];
+    const anchor = anchors.map((block) => blocks.indexOf(block)).find((index) => index >= 0) ?? -1;
+    if (anchor >= 0) blocks = [...blocks.slice(0, anchor + 1), "visual_inserts", ...blocks.slice(anchor + 1)];
   }
   if (t.crosspost) {
     const i = blocks.findIndex((b) => b === "notify" || b === "cleanup");
@@ -181,6 +208,10 @@ export default function NewChannelWizard() {
   const [runProbe, setRunProbe] = useState(false);
   const createRequestKeyRef = useRef<{ intent: string; key: string } | null>(null);
   const [toggles, setToggles] = useState<Toggles>(DEFAULT_TOGGLES);
+  // This never turns on from a suggestion alone: accepting the named-source
+  // evidence contract is an explicit creator decision.
+  const [dataStory, setDataStory] = useState(false);
+  const [dataStorySuggested, setDataStorySuggested] = useState(false);
   // Advanced per-module param editor: paramOverrides[blockId][key] = value.
   const [paramOverrides, setParamOverrides] = useState<Record<string, Record<string, unknown>>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -196,29 +227,53 @@ export default function NewChannelWizard() {
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;
+  const duration = family ? familyDurationContract(family) : undefined;
   const costAuthority = channelBuildCostAuthority({
     approveSetupSpend,
     runProbe,
     perVideoBudgetUsd: budget,
+    family: family || undefined,
   });
 
-  const selectFamily = (next: FamilyKey) => {
+  const selectFamily = (next: FamilyKey, requestedSeconds?: number) => {
+    if (!isFamilyProductionReady(next)) {
+      const readiness = familyProductionReadiness(next);
+      setClipNote(`${FAMILIES[next].label} is registered but cannot start production today: ${readiness.blockers.join(" ")}`);
+      return;
+    }
     setFamily(next);
-    // The native documentary master has a truthful reserved cost envelope;
-    // selecting it must not leave a newly-created channel below preflight.
+    if (!supportsDataStoryFamily(next)) setDataStory(false);
     setBudget((current) => Math.max(current, FAMILIES[next].defaultRunBudgetUsd ?? 0.5));
+    const authoredMinutes = requestedSeconds === undefined
+      ? familyDurationContract(next).defaultSeconds / 60
+      : requestedSeconds / 60;
+    setLengthMinutes(clampFamilyEpisodeLengthMinutes(next, authoredMinutes));
   };
 
   // pick niche → default its family + subcategory + research-tuned target length
   const pickNiche = (k: string) => {
     setNicheKey(k);
     const n = getNiche(k);
-    if (n) { selectFamily(n.defaultFamily); setSubcategory(n.subcategories[0]?.name ?? ""); }
     const preset = nichePreset(k);
-    if (preset) setLengthMinutes(Math.min(60, Math.max(1, Math.round(preset.targetSeconds / 60))));
+    if (n) {
+      setSubcategory(n.subcategories[0]?.name ?? "");
+      if (isFamilyProductionReady(n.defaultFamily)) {
+        selectFamily(n.defaultFamily, preset?.targetSeconds);
+      } else {
+        // A blocked renderer is not permission to turn a lofi, lore, or
+        // cinematic channel into an unrelated format. Leave the format
+        // unselected until an operator deliberately chooses an available lane.
+        setFamily("");
+        const readiness = familyProductionReadiness(n.defaultFamily);
+        setClipNote(`${FAMILIES[n.defaultFamily].label} is currently blocked by its production contract: ${readiness.blockers.join(" ")}. No unlike fallback was selected automatically.`);
+      }
+    }
   };
 
-  const preview = useMemo(() => (family ? previewBlocks(family, toggles, nicheKey) : []), [family, toggles, nicheKey]);
+  const preview = useMemo(
+    () => (family ? previewBlocks(family, toggles, nicheKey, dataStory) : []),
+    [family, toggles, nicheKey, dataStory],
+  );
 
   // Describe the channel in words → suggest a format + crew (operator confirms).
   function suggest() {
@@ -227,15 +282,72 @@ export default function NewChannelWizard() {
     setSuggesting(true); setClipNote(null);
     (async () => {
       try {
-        const res = await fetch("/api/suggest-format", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ concept: c, niche: nicheKey || undefined }) });
+        const res = await fetch("/api/suggest-format", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ concept: c, niche: niche?.label, nicheKey: nicheKey || undefined }) });
         const d = await res.json();
         if (!res.ok || !d.family) { setClipNote(d.error ?? "Could not suggest a format."); setSuggesting(false); return; }
-        selectFamily(d.family as FamilyKey);
         const fam = FAMILIES[d.family as FamilyKey]?.label ?? d.family;
         const alts = Array.isArray(d.alternates) && d.alternates.length
           ? ` Alternates: ${d.alternates.map((a: { family: string }) => FAMILIES[a.family as FamilyKey]?.label ?? a.family).join(", ")}.`
           : "";
-        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (draft — engine not built yet)"} · crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}`);
+        const preflight = d.preflight as {
+          templateAvailable?: boolean;
+          productionReady?: boolean;
+          runtimeBlockers?: string[];
+          fallbackFamily?: FamilyKey;
+          runtimeCompilationRequired?: boolean;
+          primaryRenderer?: string;
+          minimumPerVideoBudgetUsd?: number;
+          missingRequirements?: string[];
+          providerRequirements?: string[];
+          requiredPipelineModules?: string[];
+          qualityFocus?: string[];
+          recommendedModules?: Array<{
+            block?: string;
+            profile?: string;
+            requirements?: string[];
+            automationAdmission?: {
+              autonomous?: boolean;
+              blockers?: string[];
+              remediation?: string;
+            };
+          }>;
+          duration?: { label?: string; rationale?: string };
+          validationRenderRequired?: boolean;
+        } | undefined;
+        const dataStoryRecommendation = preflight?.recommendedModules?.find(
+          (module) => module.block === "visual_inserts" && module.profile === "source_attributed_data_story",
+        );
+        const dataStoryAdmission = dataStoryRecommendation?.automationAdmission;
+        const recommendedDataStory = Boolean(dataStoryRecommendation);
+        setDataStorySuggested(recommendedDataStory);
+        if (preflight?.productionReady && isFamilyProductionReady(d.family as FamilyKey)) {
+          selectFamily(d.family as FamilyKey);
+        } else if (preflight?.productionReady === false) {
+          setFamily("");
+        }
+        const requirements = preflight?.missingRequirements?.length
+          ? ` Before design can compile: ${preflight.missingRequirements.join(", ")}.`
+          : preflight?.templateAvailable
+            ? " The authorized design task will compile the exact pipeline and cost reservation before any validation probe can start."
+            : " This template is not available for runtime design.";
+        const quality = preflight?.qualityFocus?.length ? ` Quality focus: ${preflight.qualityFocus.slice(0, 3).join(", ")}.` : "";
+        const providers = preflight?.providerRequirements?.length ? ` Required capabilities: ${preflight.providerRequirements.join(", ")}.` : "";
+        const chain = preflight?.requiredPipelineModules?.length
+          ? ` Required visual chain: ${preflight.requiredPipelineModules.join(" → ")}.`
+          : "";
+        const renderer = preflight?.primaryRenderer ? ` Renderer: ${preflight.primaryRenderer}.` : "";
+        const budgetFloor = typeof preflight?.minimumPerVideoBudgetUsd === "number"
+          ? ` Baseline standard-episode envelope: $${preflight.minimumPerVideoBudgetUsd.toFixed(2)} (exact runtime reservation is compiled before spend).`
+          : "";
+        const duration = preflight?.duration?.label ? ` Authored episode length: ${preflight.duration.label}.` : "";
+        const runtime = preflight?.productionReady === false
+          ? ` Renderer blocked: ${(preflight.runtimeBlockers ?? []).join(" ")}${preflight.fallbackFamily ? ` Operator-visible alternative: ${FAMILIES[preflight.fallbackFamily].label}.` : ""}`
+          : "";
+        const validation = preflight?.validationRenderRequired ? " A held-out validation render is required before promotion." : "";
+        const dataStoryNote = recommendedDataStory
+          ? ` Source-attributed Data Story is recommended; enable it in Details to explicitly accept its named-source evidence contract.${dataStoryAdmission?.autonomous === false ? ` Automatic production remains blocked: ${dataStoryAdmission.remediation ?? "register a non-Gemini visual-insert planner."}` : ""}`
+          : "";
+        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (renderer unavailable)"} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${duration}${budgetFloor}${providers}${requirements}${quality}${runtime}${validation}${dataStoryNote}`);
       } catch {
         setClipNote("Suggestion failed — pick a format manually below.");
       } finally {
@@ -267,14 +379,26 @@ export default function NewChannelWizard() {
                 setAnalyzing(false);
                 return;
               }
-              if (a.recommendedFamily && a.recommendedFamily in FAMILIES) {
-                selectFamily(a.recommendedFamily as FamilyKey);
+              const analyzedFamily = a.recommendedFamily && a.recommendedFamily in FAMILIES
+                ? a.recommendedFamily as FamilyKey
+                : undefined;
+              const selectedFamily = analyzedFamily && isFamilyProductionReady(analyzedFamily)
+                ? analyzedFamily
+                : undefined;
+              if (selectedFamily) {
+                selectFamily(
+                  selectedFamily,
+                  typeof a.approxLengthSec === "number" && a.approxLengthSec > 0
+                    ? a.approxLengthSec
+                  : undefined,
+                );
+              } else if (analyzedFamily) {
+                setFamily("");
               }
               if (a.recommendedNicheKey) { setNicheKey(a.recommendedNicheKey); }
               if (a.recommendedFootageTheme) setFootageTheme(a.recommendedFootageTheme);
-              if (typeof a.approxLengthSec === "number" && a.approxLengthSec > 0) setLengthMinutes(Math.max(1, Math.round(a.approxLengthSec / 60)));
               setToggles((p) => ({ ...p, quotes: !!a.hasNarration && p.quotes, captions: !!a.hasNarration && p.captions, chapters: !!a.hasNarration && p.chapters }));
-              setClipNote(`Detected: ${a.visualStyle || "?"} · ${a.hasNarration ? "narrated" : "no narration"} · music ${a.musicRole}. Suggested format: ${FAMILIES[a.recommendedFamily as FamilyKey]?.label ?? a.recommendedFamily}. ${a.notes ?? ""}`);
+              setClipNote(`Detected: ${a.visualStyle || "?"} · ${a.hasNarration ? "narrated" : "no narration"} · music ${a.musicRole}. Suggested format: ${analyzedFamily ? FAMILIES[analyzedFamily].label : a.recommendedFamily}${analyzedFamily && !selectedFamily ? " is currently renderer-blocked; no unlike substitute was selected automatically." : "."} ${a.notes ?? ""}`);
               setAnalyzing(false);
             } else if (["FAILED", "CRASHED", "CANCELED", "TIMED_OUT"].includes(j.status)) {
               if (analyzeRef.current) clearInterval(analyzeRef.current);
@@ -323,13 +447,16 @@ export default function NewChannelWizard() {
       }
       const design: Record<string, unknown> = {
         nicheKey, subcategory, family, name: requestedYoutubeName || undefined,
-        lengthMinutes: fam?.narrated ? lengthMinutes : undefined,
+        // Every variable-duration family receives its own authored unit. Fixed
+        // engines own their timing and never receive a misleading generic value.
+        lengthMinutes: fam && duration?.inputUnit !== "fixed" ? lengthMinutes : undefined,
         locale, footageTheme: family === "narrated_stock" ? footageTheme : undefined,
         voiceFx: fam?.narrated && voiceFx !== "none" ? voiceFx : undefined,
         seriesTitle: seriesTitle.trim() || undefined,
         seriesCount: seriesTitle.trim() && seriesCount > 0 ? seriesCount : undefined,
         cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube, runProbe,
         ...(family === "documentary_collage_short" ? { sourceReferences, claimEvidence } : {}),
+        ...(dataStory && supportsDataStoryFamily(family) ? { dataStory: SOURCE_ATTRIBUTED_DATA_STORY } : {}),
         ...(autoYoutube ? { requestedYoutubeName, requestedYoutubeHandle } : {}),
         approveSetupSpend,
         setupBudgetUsd: costAuthority.setupCapUsd,
@@ -631,7 +758,7 @@ export default function NewChannelWizard() {
   const canNext = step === 0
     ? !!nicheKey
     : step === 1
-      ? Boolean(family && fam?.available)
+      ? Boolean(family && fam?.available && isFamilyProductionReady(family))
       : true;
   const stepNames = ["Niche", "Format", "Details", "Review"];
 
@@ -705,11 +832,15 @@ export default function NewChannelWizard() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px,1fr))", gap: "0.8rem" }}>
             {FAMILY_KEYS.map((k) => {
               const f = FAMILIES[k]; const on = k === family;
+              const productionReady = isFamilyProductionReady(k);
+              const readiness = familyProductionReadiness(k);
+              const selectable = f.available && productionReady;
               return (
-                <button key={k} disabled={!f.available} onClick={() => f.available && selectFamily(k)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: f.available ? "pointer" : "not-allowed", opacity: f.available ? 1 : 0.55,
+                <button key={k} disabled={!selectable} onClick={() => selectable && selectFamily(k)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: selectable ? "pointer" : "not-allowed", opacity: selectable ? 1 : 0.55,
                   border: on ? "1px solid var(--color-accent)" : "1px solid var(--color-border)", background: on ? "rgba(124,124,255,0.08)" : undefined }}>
-                  <div style={{ fontWeight: 600 }}>{f.label}{!f.available && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· unavailable — no spend</span>}</div>
+                  <div style={{ fontWeight: 600 }}>{f.label}{!selectable && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· renderer blocked — no spend</span>}</div>
                   <div style={{ fontSize: "0.78rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{f.description}</div>
+                  {!selectable && readiness.blockers[0] && <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{readiness.blockers[0]}</div>}
                 </button>
               );
             })}
@@ -739,8 +870,29 @@ export default function NewChannelWizard() {
       {step === 2 && (
         <div style={{ display: "grid", gap: "1rem", maxWidth: 720 }}>
           <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.9rem" }}>
-            {fam?.narrated && (
-              <Row label="Target length"><input type="number" min={1} max={60} value={lengthMinutes} onChange={(e) => setLengthMinutes(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>min</span></Row>
+            {duration?.inputUnit !== "fixed" && duration && (
+              <Row label="Target length">
+                <input
+                  type="number"
+                  min={duration.inputUnit === "minutes" ? duration.minimumSeconds / 60 : duration.minimumSeconds}
+                  max={duration.inputUnit === "minutes" ? duration.maximumSeconds / 60 : duration.maximumSeconds}
+                  step={duration.inputUnit === "minutes" ? duration.stepSeconds / 60 : duration.stepSeconds}
+                  value={duration.inputUnit === "minutes" ? lengthMinutes : Math.round(lengthMinutes * 60)}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    if (!Number.isFinite(raw)) return;
+                    setLengthMinutes(clampFamilyEpisodeLengthMinutes(
+                      family as FamilyKey,
+                      duration.inputUnit === "minutes" ? raw : raw / 60,
+                    ));
+                  }}
+                  style={{ ...inpStyle, width: 90 }}
+                />
+                <span style={muted}>{duration.inputUnit === "minutes" ? "min" : "sec"} · {formatFamilyDurationContract(family as FamilyKey)} authored range</span>
+              </Row>
+            )}
+            {duration?.inputUnit === "fixed" && family && (
+              <Row label="Episode cadence"><span style={muted}>{formatFamilyDurationContract(family)} · {duration.rationale}</span></Row>
             )}
             <Row label="Language"><select value={locale} onChange={(e) => setLocale(e.target.value)} style={selStyle}><option value="en">English</option><option value="es">Spanish</option><option value="de">German</option></select></Row>
             {family === "narrated_stock" && (
@@ -748,6 +900,17 @@ export default function NewChannelWizard() {
             )}
             {fam?.narrated && (
               <Row label="Voice effect"><select value={voiceFx} onChange={(e) => setVoiceFx(e.target.value)} style={selStyle}><option value="none">None (clean)</option><option value="radio">Old radio (vintage AM)</option></select></Row>
+            )}
+            {family && supportsDataStoryFamily(family) && (
+              <Row label="Source-attributed data story">
+                <label style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", cursor: "pointer", fontSize: "0.8rem", color: "var(--color-muted)" }}>
+                  <input type="checkbox" checked={dataStory} onChange={(event) => setDataStory(event.target.checked)} />
+                  <span>
+                    {dataStorySuggested ? "Advisor recommended this for the described channel. " : ""}
+                    Enable chart-led statistics and comparisons only when every rendered number is spoken in a sentence naming a concrete source. At least 3 named-source numeric sentences are required; un-attributed figures do not render. Automatic production remains blocked until a non-Gemini visual-insert planner is registered.
+                  </span>
+                </label>
+              </Row>
             )}
             {family === "documentary_collage_short" && (
               <>
@@ -829,7 +992,7 @@ export default function NewChannelWizard() {
                 <span style={muted}>run one bounded private proof · up to ${costAuthority.validationCapUsd.toFixed(2)} extra</span>
               </label>
             </Row>
-            <Row label="Production budget / video"><input type="number" min={fam?.defaultRunBudgetUsd ?? 0.5} max={100} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD{family === "documentary_collage_short" ? " · native master requires at least $30" : ""}</span></Row>
+            <Row label="Production budget / video"><input type="number" min={fam?.defaultRunBudgetUsd ?? 0.5} max={Math.max(100, fam?.defaultRunBudgetUsd ?? 0.5)} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD{family === "documentary_collage_short" ? " · native master requires at least $30" : family === "cinematic" ? " · locked Novita chain requires at least $130" : ""}</span></Row>
           </div>
           <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.6rem" }}>
             <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Advanced — optional modules</div>
@@ -868,12 +1031,19 @@ export default function NewChannelWizard() {
       {step === 3 && fam && (
         <div style={{ display: "grid", gap: "1rem", maxWidth: 760 }}>
           {!fam.available && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {fam.label}: visual engine “{fam.visualEngine}” not built yet — channel will be created as a DRAFT until it ships.</div>}
+          {!isFamilyProductionReady(fam.key) && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {familyProductionReadiness(fam.key).blockers.join(" ")}</div>}
           <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.5rem", fontSize: "0.86rem" }}>
             <SummaryRow k="Niche" v={`${niche?.label}${subcategory ? " · " + subcategory : ""}`} />
             <SummaryRow k="Format" v={fam.label} />
             <SummaryRow k="Visual engine" v={fam.visualEngine} />
-            {fam.narrated && <SummaryRow k="Length / language" v={`~${lengthMinutes} min · ${locale.toUpperCase()}`} />}
+            {duration && <SummaryRow k="Episode unit" v={duration.inputUnit === "fixed"
+              ? formatFamilyDurationContract(family as FamilyKey)
+              : duration.inputUnit === "minutes"
+                ? `${lengthMinutes} min · ${formatFamilyDurationContract(family as FamilyKey)} contract`
+                : `${Math.round(lengthMinutes * 60)} sec · ${formatFamilyDurationContract(family as FamilyKey)} contract`} />}
+            {fam.narrated && <SummaryRow k="Language" v={locale.toUpperCase()} />}
             {fam.narrated && voiceFx !== "none" && <SummaryRow k="Voice effect" v={voiceFx === "radio" ? "Old radio" : voiceFx} />}
+            {dataStory && <SummaryRow k="Data story" v="Source-attributed charts only · 3+ named-source numeric sentences required" />}
             {seriesTitle.trim() && <SummaryRow k="Series" v={`${seriesTitle.trim()}${seriesCount > 0 ? ` · ${seriesCount} parts` : " · open-ended"}`} />}
             <SummaryRow k="Cadence" v={`${cadence}${(cadence === "weekly" || cadence === "biweekly") && days.length ? " · " + days.map((d) => DOW[d]).join(",") : ""} · ${publishMode}`} />
             <SummaryRow k="Setup" v={approveSetupSpend ? `Approved · capped at $${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)}` : "Plan only · $0 provider spend"} />

@@ -46,6 +46,7 @@
  */
 import { join } from "node:path";
 import { createHash } from "node:crypto";
+import { writeFile } from "node:fs/promises";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -93,6 +94,7 @@ import {
   verifyGeneralKnowledgeCandidates,
 } from "@/lib/quizGeneralKnowledge";
 import { renderQuizYear, type QuizYearRound } from "@/lib/quizYearRender";
+import { muxLoopedMusicBed } from "@/lib/ffmpeg";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -338,8 +340,10 @@ async function gradeQuizQuestions(args: {
   channel: ChannelCritiqueContext;
   log: (m: string) => void;
   onCall: () => void;
+  /** Certified no-Gemini runs use deterministic validation only. */
+  allowModelWording: boolean;
 }): Promise<{ score: number; pass: boolean; issues: string[] } | null> {
-  if (!hasGeminiKey()) return null;
+  if (!args.allowModelWording || !hasGeminiKey()) return null;
   const listing = args.rounds
     .map((r, i) => `${i + 1}. [${r.category}] ${r.questionText}  [subject: ${r.subject}]`)
     .join("\n");
@@ -381,6 +385,8 @@ interface SourceArgs {
   want: number;
   brief: string;
   onModelCall: () => void;
+  /** Never inspect/call Gemini when the certified planner selected this route. */
+  allowModelWording: boolean;
   allowSensitiveTopics: boolean;
   minNotability: number;
 }
@@ -403,7 +409,7 @@ async function sourceYearRounds(args: SourceArgs & { topic: QuizYearTopicKey }):
       fact,
       critiqueBrief: args.brief,
       log: (m) => ctx.log(m),
-      askModel: hasGeminiKey()
+      askModel: args.allowModelWording && hasGeminiKey()
         ? async (prompt) => {
             args.onModelCall();
             return geminiJson<{ question?: unknown }>({ prompt, maxTokens: 220, temperature: 0.7 });
@@ -478,7 +484,7 @@ async function plannedRoundForFact(
     fact,
     critiqueBrief: args.brief,
     log: (m) => ctx.log(m),
-    askModel: hasGeminiKey()
+    askModel: args.allowModelWording && hasGeminiKey()
       ? async (prompt) => {
           args.onModelCall();
           return geminiJson<{ question?: unknown }>({ prompt, maxTokens: 220, temperature: 0.7 });
@@ -508,8 +514,8 @@ async function plannedRoundForFact(
  */
 async function sourceGeneralKnowledgeRounds(args: SourceArgs): Promise<PlannedRound[]> {
   const { ctx } = args;
-  if (!hasGeminiKey()) {
-    ctx.log("quiz: no Gemini key — general-knowledge rounds skipped (they need a candidate generator)");
+  if (!args.allowModelWording || !hasGeminiKey()) {
+    ctx.log("quiz: deterministic route — general-knowledge rounds skipped (the candidate generator is intentionally unavailable)");
     return [];
   }
   args.onModelCall();
@@ -571,6 +577,7 @@ async function buildRounds(args: {
   topic: QuizYearTopicKey;
   brief: string;
   onModelCall: () => void;
+  allowModelWording: boolean;
   allowSensitiveTopics: boolean;
   minNotability: number;
 }): Promise<PlannedRound[]> {
@@ -586,6 +593,7 @@ async function buildRounds(args: {
     want: 0,
     brief: args.brief,
     onModelCall: args.onModelCall,
+    allowModelWording: args.allowModelWording,
     allowSensitiveTopics: args.allowSensitiveTopics,
     minNotability: args.minNotability,
   };
@@ -636,6 +644,7 @@ async function authorRounds(args: {
   topic: QuizYearTopicKey;
   channel: ChannelCritiqueContext;
   onModelCall: () => void;
+  allowModelWording: boolean;
   allowSensitiveTopics: boolean;
   minNotability: number;
 }): Promise<PlannedRound[]> {
@@ -647,6 +656,7 @@ async function authorRounds(args: {
         rounds: args.rounds,
         categories: [...args.categories].sort(),
         topic: args.topic,
+        allowModelWording: args.allowModelWording,
         notability: args.minNotability,
         channel: args.channel.criticDoctrine ?? "",
         lane: args.channel.contentLaneKey ?? "",
@@ -697,6 +707,7 @@ async function authorRounds(args: {
         topic: args.topic,
         brief,
         onModelCall: args.onModelCall,
+        allowModelWording: args.allowModelWording,
         allowSensitiveTopics: args.allowSensitiveTopics,
         minNotability: args.minNotability,
       });
@@ -709,6 +720,7 @@ async function authorRounds(args: {
         channel: args.channel,
         log: (m) => ctx.log(m),
         onCall: args.onModelCall,
+        allowModelWording: args.allowModelWording,
       });
       if (!graded) return { score: 1, pass: true, issues: [] };
       return { score: graded.score, pass: graded.pass, issues: graded.issues };
@@ -755,6 +767,10 @@ export const quizYear: Block = {
   produces: ["videoKey", "videoLocalPath", "videoDurationSec", "quizRounds"],
   paid: true,
   run: async (ctx) => {
+    // This is an execution guard, not a UI convention: a certified planner
+    // route must be able to run in an environment where Gemini is configured
+    // for other channel families without inspecting or calling it here.
+    const noGemini = ctx.params["noGemini"] === true;
     const countdown = Math.max(
       3,
       Math.min(15, Number(ctx.params["countdownSeconds"] ?? QUIZ_DEFAULT_COUNTDOWN_SECONDS)),
@@ -765,13 +781,25 @@ export const quizYear: Block = {
     );
     const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
     const rounds = quizRoundCount(targetSeconds, countdown, reveal);
-    const topic = resolveTopic(ctx.params["topic"] ?? ctx.store["quizTopic"]);
+    // A planner receipt wins over a legacy static renderer param. That keeps a
+    // pinned curated topic inside the provenance flow rather than allowing a
+    // raw renderer override to bypass it.
+    const topic = resolveTopic(ctx.store["quizTopic"] ?? ctx.params["topic"]);
     const categories = resolveCategories(ctx.params["categories"] ?? ctx.store["quizCategories"]);
-    const allowSensitiveTopics = ctx.params["allowSensitiveTopics"] === true;
+    if (noGemini && categories.includes("general_knowledge")) {
+      throw new Error(
+        "quiz: certified no-Gemini mode does not allow general_knowledge; use the deterministic Wikidata-backed category set",
+      );
+    }
+    const allowSensitiveTopics = noGemini ? false : ctx.params["allowSensitiveTopics"] === true;
     const minNotability = Math.max(0, Number(ctx.params["minNotability"] ?? 40));
+    const musicKey = String(ctx.store["musicKey"] ?? "").trim();
+    if (noGemini && !musicKey) {
+      throw new Error("quiz: certified no-Gemini mode requires an upstream original musicKey");
+    }
     ctx.log(
       `quiz: ${rounds} rounds (${countdown}s guess + ${reveal}s reveal), ` +
-        `categories=[${categories.join(", ")}], year topic=${topic}`,
+        `categories=[${categories.join(", ")}], year topic=${topic}, noGemini=${noGemini}`,
     );
 
     // 1) FACTS + QUESTION WORDING. Facts are free and never model-supplied;
@@ -784,6 +812,7 @@ export const quizYear: Block = {
       topic,
       channel: quizCritiqueChannel(ctx),
       onModelCall: () => { modelCalls += 1; },
+      allowModelWording: !noGemini,
       allowSensitiveTopics,
       minNotability,
     });
@@ -839,9 +868,29 @@ export const quizYear: Block = {
       log: (m) => ctx.log(m),
     });
 
+    // The Remotion composition deliberately owns a silent visual game board;
+    // this reusable mux keeps the original licensed/generated instrumental
+    // bed in a distinct module and creates a real audio stream for final QA.
+    let finalPath = outPath;
+    if (musicKey) {
+      const musicPath = join(runDir, "quiz-bed.mp3");
+      await writeFile(musicPath, await getObjectBytes(musicKey));
+      const withMusic = join(runDir, "quiz-year-with-music.mp4");
+      await muxLoopedMusicBed({
+        videoPath: outPath,
+        musicPath,
+        outPath: withMusic,
+        durationSec: quizRounds.length * (countdown + reveal),
+        volume: 0.42,
+        fadeOutSec: 0.8,
+      });
+      finalPath = withMusic;
+      ctx.log("quiz: original instrumental bed muxed into final master");
+    }
+
     const prefix = `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/quiz-year`;
     const videoKey = `${prefix}/quiz-year.mp4`;
-    await putObjectFromFile(videoKey, outPath, { contentType: "video/mp4" });
+    await putObjectFromFile(videoKey, finalPath, { contentType: "video/mp4" });
     const videoDurationSec = quizRounds.length * (countdown + reveal);
 
     await recordAsset(ctx, "video", videoKey, {
@@ -850,6 +899,7 @@ export const quizYear: Block = {
       topic,
       categories: [...new Set(planned.map((r) => r.category))],
       rounds: quizRounds.length,
+      audio: musicKey ? "original instrumental bed muxed from musicKey" : "none (legacy non-certified route)",
       // Provenance travels with the asset: every answer is checkable.
       sources: planned.map((r) => ({
         category: r.category,
@@ -860,7 +910,8 @@ export const quizYear: Block = {
       license: "CC0-1.0 (Wikidata); general-knowledge rounds cite Wikipedia for verification only",
     });
 
-    // Text-only spend. There is no image/video/TTS provider on this path.
+    // Certified no-Gemini runs make zero text calls. Legacy runs retain their
+    // bounded wording helper only outside the production-admitted route.
     const costUsd = modelCalls * PRICE.boundedTextPassUsd;
     ctx.log(
       `quiz ✓ → ${videoKey} (${videoDurationSec}s, ${quizRounds.length} rounds across ` +
@@ -870,7 +921,7 @@ export const quizYear: Block = {
 
     return {
       videoKey,
-      videoLocalPath: outPath,
+      videoLocalPath: finalPath,
       videoDurationSec,
       quizRounds,
       [COST_PATCH_KEY]: costUsd,

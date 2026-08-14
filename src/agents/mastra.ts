@@ -18,7 +18,12 @@
  * image rather than being bundled.
  */
 import type { z } from "zod";
-import { geminiJson, hasGeminiKey } from "@/lib/gemini";
+import {
+  assertGeminiRuntimeAllowed,
+  geminiJson,
+  hasGeminiKey,
+  isGeminiModelIdentifier,
+} from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import {
   cacheModelResponse,
@@ -300,6 +305,12 @@ export interface AgentJsonOptions<T> {
 export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
   const log = o.log ?? (() => {});
   const cfg = ROLE_CONFIG[o.role];
+  // Mastra can invoke Google directly, bypassing our REST helper. Gate only a
+  // resolved Gemini identifier so an explicit non-Google model override stays
+  // usable through the same agent surface.
+  if (isGeminiModelIdentifier(cfg.model)) {
+    assertGeminiRuntimeAllowed(`Mastra ${o.role} agent (${cfg.model})`);
+  }
   const requestKey = modelRequestCacheKey("mastra", cfg.model, {
     role: o.role,
     prompt: o.prompt,

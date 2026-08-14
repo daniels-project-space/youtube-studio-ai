@@ -11,10 +11,12 @@ import { randomUUID } from "node:crypto";
 import { join } from "node:path";
 
 import { produceAndCritique } from "@/engine/critiqueLoop";
+import { PRICE } from "@/engine/pricing";
 import { downloadTo, makeRunTempDir } from "@/lib/files";
 import { imageToJpeg } from "@/lib/ffmpeg";
 import { hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
-import { renderNovitaImage } from "@/lib/novitaMedia";
+import { renderNovitaImage, type NovitaRenderLifecycle } from "@/lib/novitaMedia";
+import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { channelKey, putObject } from "@/lib/storage";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
@@ -41,6 +43,9 @@ export interface ChannelArtRenderRequest {
   prompt: string;
   negativePrompt: string;
   profileId: "production";
+  /** Exact one-image worker ceiling; never a channel or stage aggregate. */
+  maxCostUsd: number;
+  lifecycle?: NovitaRenderLifecycle;
 }
 
 export interface ChannelArtRuntime {
@@ -69,6 +74,14 @@ export interface ChannelArtOptions {
   /** Stable checkpoint namespace, or independent namespaces per asset. */
   version?: string | { avatar?: string; banner?: string };
   maxAttempts?: number;
+  /**
+   * Explicit aggregate admission for one generated asset. The default Novita
+   * runtime reserves every potential critique iteration before its first
+   * image worker; a missing/undersized envelope is a zero-spend failure.
+   */
+  maxProviderSpendUsd?: number;
+  /** Durable owner/run/stage identity required by the direct Novita worker. */
+  providerLifecycle?: NovitaRenderLifecycle;
   /** Explicit dependency seam for deterministic tests; production omits it. */
   runtime?: ChannelArtRuntime;
 }
@@ -282,6 +295,8 @@ async function directArt(args: {
   maxAttempts: number;
   prompt: (issues: string[]) => string;
   runtime: ChannelArtRuntime;
+  imageWorkerMaxCostUsd: number;
+  lifecycle?: NovitaRenderLifecycle;
   log: Logger;
 }): Promise<AcceptedArt> {
   const { ownerId, slug, kind, identity, version, runtime, log } = args;
@@ -309,6 +324,8 @@ async function directArt(args: {
           prompt: args.prompt(priorIssues),
           negativePrompt: NEGATIVE_PROMPT[kind],
           profileId: "production",
+          maxCostUsd: args.imageWorkerMaxCostUsd,
+          lifecycle: args.lifecycle,
         });
         if (!rendered.key.startsWith(expectedKeyPrefix)) {
           throw new Error(`channelArt: ${kind} renderer escaped its versioned Imagecraft namespace`);
@@ -428,6 +445,39 @@ function validateSelection(options: ChannelArtOptions): void {
 }
 
 /**
+ * The default runtime owns real Novita workers. A fake/injected test runtime
+ * is deliberately excluded so deterministic unit tests need not manufacture a
+ * cloud lease, while every production call must carry a stage-signed envelope.
+ */
+function providerAdmission(
+  args: {
+    kind: ArtKind;
+    maxAttempts: number;
+    options: ChannelArtOptions;
+    runtime: ChannelArtRuntime;
+  },
+): { imageWorkerMaxCostUsd: number; lifecycle?: NovitaRenderLifecycle } {
+  if (args.runtime !== DEFAULT_RUNTIME) {
+    return { imageWorkerMaxCostUsd: PRICE.novitaImageMaxUsd };
+  }
+  if (!args.options.providerLifecycle) {
+    throw new Error(`channelArt: ${args.kind} requires an explicit provider lifecycle before paid generation`);
+  }
+  if (args.options.maxProviderSpendUsd === undefined) {
+    throw new Error(`channelArt: ${args.kind} requires an explicit aggregate provider budget before paid generation`);
+  }
+  novitaCostEnvelope({
+    label: `channel art ${args.kind}`,
+    imageJobs: args.maxAttempts,
+    maxCostUsd: args.options.maxProviderSpendUsd,
+  });
+  return {
+    imageWorkerMaxCostUsd: PRICE.novitaImageMaxUsd,
+    lifecycle: args.options.providerLifecycle,
+  };
+}
+
+/**
  * Generate one independently leased art asset. Channel Inception uses this so
  * avatar and banner provider spend is checkpointed under the correct stage.
  */
@@ -447,6 +497,7 @@ export async function generateChannelArtAsset(
   }
   const version = versionFor(kind, options, runtime);
   const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
+  const admission = providerAdmission({ kind, maxAttempts, options, runtime });
   log(`channelArt: generating versioned ${kind} through Novita Imagecraft`, { version });
   return (await directArt({
     ownerId,
@@ -459,6 +510,7 @@ export async function generateChannelArtAsset(
       ? avatarPrompt(identity, issues)
       : bannerPrompt(identity, issues),
     runtime,
+    ...admission,
     log,
   })).key;
 }
@@ -495,6 +547,7 @@ export async function generateChannelArt(
   if (generateAvatar) {
     const version = versionFor("avatar", options, runtime);
     log("channelArt: generating versioned avatar through Novita Imagecraft", { version });
+    const admission = providerAdmission({ kind: "avatar", maxAttempts, options, runtime });
     imageKey = (await directArt({
       ownerId,
       slug,
@@ -504,6 +557,7 @@ export async function generateChannelArt(
       maxAttempts,
       prompt: (issues) => avatarPrompt(identity, issues),
       runtime,
+      ...admission,
       log,
     })).key;
   }
@@ -511,6 +565,7 @@ export async function generateChannelArt(
   if (generateBanner) {
     const version = versionFor("banner", options, runtime);
     log("channelArt: generating versioned banner through Novita Imagecraft", { version });
+    const admission = providerAdmission({ kind: "banner", maxAttempts, options, runtime });
     bannerKey = (await directArt({
       ownerId,
       slug,
@@ -520,6 +575,7 @@ export async function generateChannelArt(
       maxAttempts,
       prompt: (issues) => bannerPrompt(identity, issues),
       runtime,
+      ...admission,
       log,
     })).key;
   }
@@ -537,7 +593,7 @@ export async function generateFlagBanner(
   identity: ArtIdentity,
   country: string,
   log: Logger = () => {},
-  options: Pick<ChannelArtOptions, "version" | "maxAttempts" | "runtime"> = {},
+  options: Pick<ChannelArtOptions, "version" | "maxAttempts" | "runtime" | "maxProviderSpendUsd" | "providerLifecycle"> = {},
 ): Promise<string> {
   const runtime = options.runtime ?? DEFAULT_RUNTIME;
   if (!runtime.hasJudge()) {
@@ -545,6 +601,7 @@ export async function generateFlagBanner(
   }
   const version = versionFor("banner", options, runtime);
   const maxAttempts = Math.max(1, Math.min(4, options.maxAttempts ?? 3));
+  const admission = providerAdmission({ kind: "banner", maxAttempts, options, runtime });
   const result = await directArt({
     ownerId,
     slug,
@@ -557,6 +614,7 @@ export async function generateFlagBanner(
       "keep flag detail subtle so the centered channel motif remains dominant and safe-area legible",
     ]),
     runtime,
+    ...admission,
     log,
   });
   return result.key;

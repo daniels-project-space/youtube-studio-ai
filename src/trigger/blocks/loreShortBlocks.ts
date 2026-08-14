@@ -56,6 +56,7 @@ import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { generateI2V } from "@/lib/i2v";
 import { PRICE } from "@/engine/pricing";
+import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -282,7 +283,18 @@ export const loreShort: Block = {
 
     const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
     const nScenes = loreBeatCount(targetSeconds);
+    const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "lore_short");
     if (targetSeconds > 0) ctx.log(`lore_short: sized to ~${targetSeconds}s → ${nScenes} beats`);
+    // Check the whole bounded image+motion sequence before buying its first
+    // still. Individual workers remain capped at $0.35 below; this prevents a
+    // malformed beat count from spending a partial story and discovering the
+    // stage reservation was too small halfway through.
+    novitaCostEnvelope({
+      label: "lore_short",
+      imageJobs: nScenes,
+      videoJobs: nScenes,
+      maxCostUsd: stageBudgetUsd,
+    });
 
     // VOICE CASTING — the same params narration_tts and whiteboard_scribe read,
     // instead of the engine's hardcoded ElevenLabs id.
@@ -313,6 +325,7 @@ export const loreShort: Block = {
       prefix: `${prefix}/art`,
       id: (request) => request.id,
       profileId: "production",
+      maxCostUsd: PRICE.novitaImageMaxUsd,
       lifecycle: {
         ownerId: ctx.ownerId,
         channelId: ctx.channelId,
@@ -361,6 +374,7 @@ export const loreShort: Block = {
             negativePrompt: request.negativePrompt,
             imageKey,
             durationSec: request.durationSec,
+            maxCostUsd: PRICE.novitaVideoMaxUsd,
             runId: ctx.runId,
             keyPrefix: ctx.keyPrefix,
             lifecycle: {

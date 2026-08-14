@@ -3,13 +3,13 @@
  * pipeline block, structural twin of whiteboard_scribe.
  *
  * SELF-CONTAINED like whiteboard_scribe: it writes its own storyboard (Gemini),
- * renders character-consistent panel art (Nano Banana img2img), voices every
+ * renders character-consistent panel art through bounded attested Novita workers, voices every
  * line (ElevenLabs v3 dialogue), lays a Suno bed, and draws the page with the
  * deterministic python renderer — so it REPLACES the script→narration→footage→
  * assemble chain and produces the final `videoKey` directly.
  *
- * Deterministic draw + camera = ZERO video-model credits; spend is per-panel
- * art + character sheets (Nano Banana) + ElevenLabs voices + one music track.
+ * Deterministic draw + camera use no video model; spend is bounded per-panel
+ * art + ElevenLabs voices + one music track.
  *
  * RUNTIME NOTE: the renderer shells out to python3 (scripts/mc_page_render.py,
  * which imports scripts/mc_textplace.py) with numpy/Pillow/scikit-image/scipy.
@@ -29,6 +29,7 @@ import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
 import {
   castMotionComic,
   hasMotionComic,
+  motionComicImageCallCeiling,
   motionComicPanelCount,
   planMotionComicStoryboard,
   type MotionComicBrief,
@@ -43,8 +44,32 @@ import {
 } from "@/engine/critiqueLoop";
 import { laneQualityPolicy } from "@/engine/contentLane";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
+import { novitaCostEnvelope, type NovitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { PRICE } from "@/engine/pricing";
+
+/**
+ * Checks the complete primary + bounded-recovery art envelope before the
+ * motion-comic engine can provision any direct Novita worker.
+ */
+export function motionComicNovitaImageStageEnvelope(
+  panelCount: unknown,
+  stageBudgetUsd: number | undefined,
+): NovitaCostEnvelope {
+  if (
+    typeof stageBudgetUsd !== "number" ||
+    !Number.isFinite(stageBudgetUsd) ||
+    stageBudgetUsd <= 0
+  ) {
+    throw new Error("motion_comic requires a positive compiler-signed stage budget before Novita art can start");
+  }
+  const panels = motionComicPanelCount(panelCount);
+  return novitaCostEnvelope({
+    label: "motion_comic",
+    imageJobs: motionComicImageCallCeiling(panels),
+    maxCostUsd: stageBudgetUsd,
+  });
+}
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -362,6 +387,17 @@ export const motionComicBlock: Block = {
     const visualBrief = getVisualBrief(ctx.store);
 
     const panels = motionComicPanelCount(ctx.params["panels"]);
+    // A full panel sequence is an all-or-nothing visual story. Admit every
+    // primary/recovery worker before the text storyboard or first paid frame,
+    // so malformed/direct invocations cannot strand a partial comic.
+    const novitaEnvelope = motionComicNovitaImageStageEnvelope(
+      panels,
+      ctx.stageBudgetUsd,
+    );
+    ctx.log(
+      `motion_comic: admitted ${novitaEnvelope.imageJobs} bounded Novita image worker(s) ` +
+      `($${novitaEnvelope.imageMaxCostUsd.toFixed(4)} within the signed stage budget)`,
+    );
     // Style: explicit param wins; else the DP's promptStyle; else the engine's
     // curated default (undefined → motionComic's DEFAULT_STYLE). Any custom
     // style gets the no-text guard re-appended.
@@ -409,6 +445,9 @@ export const motionComicBlock: Block = {
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/motion-comic-art`,
       id: (request) => request.id,
       profileId: "production",
+      // The aggregate admission above proves the whole comic fits. A worker
+      // itself must still never receive the unrelated whole-stage/run budget.
+      maxCostUsd: PRICE.novitaImageMaxUsd,
       lifecycle: {
         ownerId: ctx.ownerId,
         channelId: ctx.channelId,

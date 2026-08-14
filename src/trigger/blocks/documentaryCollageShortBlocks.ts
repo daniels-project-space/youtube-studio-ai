@@ -24,7 +24,7 @@ import { parseShortStrategyManifest, shortRenderDurationSec } from "@/engine/sho
 import { craftDocuMotion, hasDocumotion } from "@/lib/documotion";
 import { makeRunTempDir } from "@/lib/files";
 import { putObject, putObjectFromFile } from "@/lib/storage";
-import { safeFrameForDocuLayout } from "@/remotion/DocuMotion";
+import { safeFrameForDocuLayout } from "@/remotion/docuLayout";
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;

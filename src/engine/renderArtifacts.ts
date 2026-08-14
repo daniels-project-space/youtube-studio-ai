@@ -59,7 +59,20 @@ export const ShotRenderManifestSchema = z.object({
   generation: GenerationIdentitySchema.extend({
     fps: z.number().int().positive(),
     guidanceScale: z.number().positive(),
-    twoStageRefine: z.boolean(),
+    pipeline: z.literal("distilled"),
+    twoStageRefine: z.literal(true),
+    textEncoderCheckpoint: z.string().min(1),
+    videoVaeCheckpoint: z.string().min(1),
+    audioVaeCheckpoint: z.string().min(1),
+    spatialUpscalerCheckpoint: z.string().min(1),
+    quantization: z.literal("fp8-cast"),
+    offload: z.literal("cpu"),
+    spatialUpscaleFactor: z.literal(2),
+    stageOneWidth: z.number().int().positive(),
+    stageOneHeight: z.number().int().positive(),
+    /** Worker-observed encoded dimensions after the LTX latent x2 stage. */
+    outputWidth: z.number().int().positive(),
+    outputHeight: z.number().int().positive(),
   }),
   durationSec: z.number().finite().positive(),
   items: z.array(z.object({

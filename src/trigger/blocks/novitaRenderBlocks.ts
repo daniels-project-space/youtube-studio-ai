@@ -31,6 +31,7 @@ import { visualMatterDirectiveForShot, visualMatterFromUnknown, visualMatterRefe
 import { makeRunTempDir, writeBytes } from "@/lib/files";
 import { grabFrame, probe } from "@/lib/ffmpeg";
 import { parseJsonLoose } from "@/lib/gemini";
+import { assertLtxVideoOutputProofSet } from "@/lib/ltxVideoProof";
 import {
   renderImages,
   renderVideo,
@@ -39,6 +40,7 @@ import {
   type NovitaRenderCfg,
   type Shot,
 } from "@/lib/novitaRenderFarm";
+import { novitaCostEnvelope, type NovitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { getObjectBytes } from "@/lib/storage";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
@@ -240,18 +242,30 @@ function qualityRecoveryRenderCfg(
   profile: GenerationProfile,
   shot: Shot,
 ): NovitaRenderCfg {
-  const perRepairCeiling = phase === "image" ? PRICE.novitaImageMaxUsd : PRICE.novitaVideoMaxUsd;
+  const stageBudgetUsd = ctx.stageBudgetUsd;
+  if (!Number.isFinite(stageBudgetUsd) || !stageBudgetUsd || stageBudgetUsd <= 0) {
+    throw new Error(
+      `qa_${phase === "image" ? "assets" : "shots"} requires an authenticated per-stage budget reservation; refusing to use the aggregate run budget`,
+    );
+  }
+  const envelope = novitaCostEnvelope({
+    label: `cinematic qa ${phase} recovery`,
+    ...(phase === "image" ? { imageJobs: 1 } : { videoJobs: 1 }),
+    maxCostUsd: stageBudgetUsd,
+  });
+  const globalNegative = ctx.params["negative"] as string | undefined;
+  const recoveredShot = phase === "video" ? ltxDistilledShot(shot, [shot.negative, globalNegative]) : shot;
   return {
     prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/novita/qa-recovery-${phase}`,
-    shots: [shot],
+    shots: [recoveredShot],
     profile: toNovitaPhaseProfile(profile, phase),
     style: ctx.params["style"] as string | undefined,
-    negative: ctx.params["negative"] as string | undefined,
+    ...(phase === "image" ? { negative: globalNegative } : {}),
     director: ctx.params["director"] as string | undefined,
     maxConcurrent: 1,
-    // This is a single target repair inside a stage that has already reserved
-    // the full hard cap. It may never consume the run's whole budget itself.
-    maxCostUsd: Math.min(ctx.budgetUsd, perRepairCeiling),
+    // This is one target repair. The checked stage reservation admits it, but
+    // only the exact one-worker cap ever reaches the direct fleet.
+    maxCostUsd: phase === "image" ? envelope.imageMaxCostUsd : envelope.videoMaxCostUsd,
     lifecycle: {
       ownerId: ctx.ownerId,
       channelId: ctx.channelId,
@@ -465,6 +479,59 @@ function profileForShots(shots: ShotPlan[], requested: unknown): GenerationProfi
   return profile;
 }
 
+/** LTX 2.5 distilled has no negative-prompt switch; preserve exclusions in its positive prompt. */
+function ltxDistilledShot(shot: Shot, exclusions: readonly (string | undefined)[]): Shot {
+  const avoid = exclusions.map((value) => value?.trim()).filter((value): value is string => Boolean(value)).join(", ");
+  if (!avoid) return { ...shot, negative: undefined };
+  const constraint = `Avoid all of the following: ${avoid}.`;
+  return {
+    ...shot,
+    prompt: `${shot.prompt}\n\n${constraint}`,
+    motion: `${shot.motion}\n\n${constraint}`,
+    negative: undefined,
+  };
+}
+
+/**
+ * A cinematic stage receives the overall run admission from Trigger, not a
+ * private blank cheque. Derive its exact direct-worker envelope from the
+ * frozen shot plan and intersect it with the compiler's authenticated stage
+ * reservation before a provider bridge can be reached. Never substitute the
+ * aggregate channel budget here.
+ */
+function cinematicProviderEnvelope(
+  ctx: StageContext,
+  blockId: "novita_render_images" | "novita_render_video",
+  profile: GenerationProfile,
+  shots: readonly Shot[],
+): NovitaCostEnvelope {
+  const stageBudgetUsd = ctx.stageBudgetUsd;
+  if (!Number.isFinite(stageBudgetUsd) || !stageBudgetUsd || stageBudgetUsd <= 0) {
+    throw new Error(
+      `${blockId} requires an authenticated per-stage budget reservation; refusing to use the aggregate run budget`,
+    );
+  }
+
+  if (blockId === "novita_render_images") {
+    return novitaCostEnvelope({
+      label: blockId,
+      imageJobs: shots.reduce((total, shot) => total + (shot.candidateCount ?? profile.image.candidates), 0),
+      maxCostUsd: stageBudgetUsd,
+    });
+  }
+
+  if (profile.video.candidates !== 1) {
+    throw new Error(
+      `${blockId} cannot attest ${profile.video.candidates} video candidates per shot; explicit multi-candidate manifests are required`,
+    );
+  }
+  return novitaCostEnvelope({
+    label: blockId,
+    videoJobs: shots.length,
+    maxCostUsd: stageBudgetUsd,
+  });
+}
+
 function generationIdentity(profile: GenerationProfile, phase: "image" | "video") {
   const settings = profile[phase];
   return {
@@ -563,6 +630,7 @@ export const novitaRenderImages: Block = {
         negative: spec.negativePrompt,
       };
     });
+    const envelope = cinematicProviderEnvelope(ctx, "novita_render_images", profile, renderShots);
     const cfg: NovitaRenderCfg = {
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/novita`,
       shots: renderShots,
@@ -573,9 +641,9 @@ export const novitaRenderImages: Block = {
       nshard: ctx.params["nshard"] as number | undefined,
       jobs: ctx.params["jobs"] as "val" | "full" | undefined,
       maxConcurrent: ctx.params["maxConcurrent"] as number | undefined,
-      // The direct fleet additionally intersects this with its immutable
-      // per-worker and account-wide caps before any paid provider create.
-      maxCostUsd: ctx.budgetUsd,
+      // Exact candidate-count envelope, independently bounded by the frozen
+      // module contract. This stage never inherits the entire episode budget.
+      maxCostUsd: envelope.imageMaxCostUsd,
       lifecycle: {
         ownerId: ctx.ownerId,
         channelId: ctx.channelId,
@@ -818,28 +886,30 @@ export const novitaRenderVideo: Block = {
       throw new Error("selected still manifest is not one-to-one with the shot plan");
     }
     const selectedByShot = new Map(selected.items.map((item) => [item.shotId, item]));
+    const globalNegative = ctx.params["negative"] as string | undefined;
     const shotsWithStills: Shot[] = shots.map((shot) => {
       const selectedStill = selectedByShot.get(shot.id);
       if (!selectedStill) throw new Error(`selected still missing for ${shot.id}`);
       const spec = specsByShot.get(shot.id)!;
       const directive = visualMatterDirectiveForShot(visualMatter, shot.id);
-      return {
+      return ltxDistilledShot({
         ...shot,
         stillKey: selectedStill.stillKey,
         prompt: [spec.motionPrompt, directive?.motionPrompt].filter(Boolean).join("\n\n"),
         motion: `${spec.motionPrompt}${directive ? ` ${directive.motionPrompt}` : ""} First frame: ${spec.firstFrameConstraint}. Last frame: ${spec.lastFrameConstraint}.`,
         negative: spec.negativePrompt,
-      };
+      }, [spec.negativePrompt, globalNegative]);
     });
+    const envelope = cinematicProviderEnvelope(ctx, "novita_render_video", profile, shotsWithStills);
     const cfg: NovitaRenderCfg = {
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/novita`,
       shots: shotsWithStills,
       profile: toNovitaPhaseProfile(profile, "video"),
-      negative: ctx.params["negative"] as string | undefined,
       nshard: ctx.params["nshard"] as number | undefined,
       jobs: ctx.params["jobs"] as "val" | "full" | undefined,
       maxConcurrent: ctx.params["maxConcurrent"] as number | undefined,
-      maxCostUsd: ctx.budgetUsd,
+      // Exact one-worker-per-shot envelope, not the aggregate channel budget.
+      maxCostUsd: envelope.videoMaxCostUsd,
       lifecycle: {
         ownerId: ctx.ownerId,
         channelId: ctx.channelId,
@@ -852,13 +922,37 @@ export const novitaRenderVideo: Block = {
     const candidateByShot = new Map(result.candidates.map((candidate) => [candidate.shotId, candidate]));
     if (candidateByShot.size !== shots.length) throw new Error("novita_render_video returned duplicate or missing shot mappings");
     const durationSec = shots.at(-1)!.t1;
+    let outputProofs;
+    try {
+      outputProofs = assertLtxVideoOutputProofSet({
+        profile: cfg.profile,
+        shotIds: shots.map((shot) => shot.id),
+        proofs: result.videoOutputProofs,
+      });
+    } catch (error) {
+      const message = error instanceof Error ? error.message : "returned invalid LTX x2 output evidence";
+      throw new Error(`novita_render_video ${message}`);
+    }
+    const firstProof = outputProofs[shots[0]!.id]!;
     const shotRenderManifest = ShotRenderManifestSchema.parse({
       version: "1.0.0",
       generation: {
         ...generationIdentity(profile, "video"),
         fps: profile.video.fps,
         guidanceScale: profile.video.guidanceScale,
+        pipeline: profile.video.pipeline,
         twoStageRefine: profile.video.twoStageRefine,
+        textEncoderCheckpoint: profile.video.textEncoderCheckpoint,
+        videoVaeCheckpoint: profile.video.videoVaeCheckpoint,
+        audioVaeCheckpoint: profile.video.audioVaeCheckpoint,
+        spatialUpscalerCheckpoint: profile.video.spatialUpscalerCheckpoint,
+        quantization: profile.video.quantization,
+        offload: profile.video.offload,
+        spatialUpscaleFactor: profile.video.spatialUpscaleFactor,
+        stageOneWidth: firstProof.stageOneWidth,
+        stageOneHeight: firstProof.stageOneHeight,
+        outputWidth: firstProof.outputWidth,
+        outputHeight: firstProof.outputHeight,
       },
       durationSec,
       items: shots.map((shot) => {

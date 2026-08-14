@@ -4,13 +4,14 @@ import { join } from "node:path";
 import ts from "typescript";
 import { registerAllBlocks } from "@/engine/blocks";
 import { allManifests, getManifest } from "@/engine/registry";
-import { FAMILIES, type FamilyKey } from "@/engine/families";
+import { familyDurationContract, FAMILIES, type FamilyKey } from "@/engine/families";
 import { designPipeline } from "@/engine/designer";
 import { validatePipeline } from "@/engine/validate";
 import {
   compilePipeline,
   completePipelineForPolicy,
   materializeRuntimePipelineParams,
+  PRIVATE_PROBE_CONTRACT_POLICY,
   PipelinePolicyError,
 } from "@/engine/pipelineCompiler";
 import { declaredArtifactStore } from "@/engine/runner";
@@ -161,7 +162,10 @@ function compileRepresentativeFamilies(): void {
     const design = designPipeline({
       family,
       nicheKey: "history",
-      lengthMinutes: family === "shorts" ? 0.75 : 3,
+      // Each format is compiled at its own authored cadence. A generic
+      // three-minute probe is invalid for native Shorts and obscures a real
+      // format contract violation behind a test fixture.
+      lengthMinutes: familyDurationContract(family).defaultSeconds / 60,
       publishMode: "draft",
     });
     if (design.available) {
@@ -174,6 +178,55 @@ function compileRepresentativeFamilies(): void {
       );
     }
   }
+}
+
+function defaultBudgetsCoverCompilerReservations(): void {
+  for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
+    const design = designPipeline({ family, publishMode: "draft" });
+    assert.ok(design.compilation, `${family} must compile its default production chain`);
+    assert.ok(
+      (FAMILIES[family].defaultRunBudgetUsd ?? 0) >= design.compilation.reservedMaxCostUsd,
+      `${family}'s creator floor must cover its exact default compiler reservation`,
+    );
+  }
+}
+
+function privateProbeKeepsEveryNonPublishingQualityRequirement(): void {
+  const production = designPipeline({ family: "cinematic", publishMode: "draft" });
+  // Mirror the deliberately private probe shape: all delivery/post-processing
+  // stages are excluded, while rendering and every QA/creative gate remain.
+  const privateProbe = production.pipeline.filter(
+    (entry) => !new Set([
+      "upload_draft",
+      "notify",
+      "cleanup",
+      "shorts_spinoff",
+      "crosspost",
+      "emit_bundle",
+    ]).has(entry.block),
+  );
+  const compilation = compilePipeline(
+    validatePipeline(privateProbe),
+    PRIVATE_PROBE_CONTRACT_POLICY,
+  );
+  assert.equal(compilation.policyId, "private-probe-contract");
+  assert.equal(privateProbe.some((entry) => entry.block === "upload_draft"), false);
+  for (const capability of [
+    "topic.researched",
+    "topic.selected",
+    "final.compliance_passed",
+    "master.assembled",
+    "master.quality_passed",
+    "package.metadata",
+    "package.thumbnail",
+  ]) {
+    assert(compilation.capabilities.includes(capability), `private probe must retain ${capability}`);
+  }
+  assert.throws(
+    () => compilePipeline(validatePipeline(privateProbe)),
+    /publish\.connector_bound/,
+    "the ordinary production policy must continue to reject a non-uploading pipeline",
+  );
 }
 
 function runtimeConfigurationIsCompiledBeforeSpendReservation(): void {
@@ -514,7 +567,7 @@ function configurationSpecificCostEnvelopes(): void {
 
   const whiteboardPanels = 6;
   const whiteboardCharacters = Math.ceil(Math.round(132 * 3.1)) * 12;
-  const whiteboardArt = whiteboardPanels * 5 * bananaUnitRate("flash");
+  const whiteboardArt = whiteboardPanels * 5 * PRICE.novitaImageMaxUsd;
   assert.equal(
     envelope("whiteboard_scribe", { targetSeconds: 132 }),
     whiteboardArt + (whiteboardCharacters / 1_000) * PRICE.ttsPerKCharUsd,
@@ -534,11 +587,18 @@ function configurationSpecificCostEnvelopes(): void {
   const comicCharacters = Math.ceil(180 * 16);
   assert.equal(
     envelope("motion_comic", { panels: comicPanels, targetSeconds: 180 }),
-    (2 * comicPanels + 8) * bananaUnitRate("flash") +
+    2 * comicPanels * PRICE.novitaImageMaxUsd +
       (comicCharacters / 1_000) * PRICE.ttsElevenPerKCharUsd +
       PRICE.musicTrackUsd +
       2 * comicPanels * PRICE.visionGraderUsd,
     "motion-comic reservation must cover art, dialogue, music, and lettering graders",
+  );
+
+  const maxWhiteboardArt = 16 * 5 * PRICE.novitaImageMaxUsd;
+  const maxWhiteboardPremiumTts = (16 * 120 * 12 / 1_000) * PRICE.ttsElevenPerKCharUsd;
+  assert.ok(
+    (MODULE_CONTRACTS.whiteboard_scribe.maxCostUsd ?? 0) >= maxWhiteboardArt + maxWhiteboardPremiumTts,
+    "whiteboard hard cap must cover all 16 panels, five direct Novita art workers each, and premium narration",
   );
 
   assert.equal(
@@ -621,7 +681,7 @@ function catalogCitedFilePathsExistOrAreExplicitlyRetired(): void {
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
-  assert.equal(manifests.length, 52, "all 52 executable blocks must have manifests");
+  assert.equal(manifests.length, 56, "all 56 executable blocks must have manifests");
   assert.deepEqual(
     manifests.filter((manifest) => manifest.certification.status === "legacy").map((manifest) => manifest.id),
     [],
@@ -629,6 +689,8 @@ function main(): void {
   );
   directContractAudit();
   compileRepresentativeFamilies();
+  defaultBudgetsCoverCompilerReservations();
+  privateProbeKeepsEveryNonPublishingQualityRequirement();
   runtimeConfigurationIsCompiledBeforeSpendReservation();
   legacyMusicLoopNormalization();
   crewRemovalAndOrderFail();

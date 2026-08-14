@@ -21,6 +21,8 @@ export interface I2VRequest {
   provider?: string;
   runId?: string;
   keyPrefix?: string;
+  /** Conservative signed envelope for the one direct Novita video worker. */
+  maxCostUsd: number;
   lifecycle?: NovitaRenderLifecycle;
   log?: (message: string) => void;
 }
@@ -63,8 +65,9 @@ export async function generateI2V(req: I2VRequest): Promise<I2VResult> {
     durationSec: req.durationSec,
     negativePrompt: req.negativePrompt,
     profileId: "production",
+    maxCostUsd: req.maxCostUsd,
     lifecycle: req.lifecycle,
   });
-  req.log?.(`i2v: Novita LTX-2.3 ${result.jobId} accepted`);
+  req.log?.(`i2v: Novita LTX-2.5 distilled x2 ${result.jobId} accepted`);
   return result;
 }

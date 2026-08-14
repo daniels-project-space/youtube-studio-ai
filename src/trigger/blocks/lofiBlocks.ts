@@ -33,8 +33,10 @@
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
 import { PRICE } from "@/engine/pricing";
+import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { resolveContentLane } from "@/engine/contentLane";
-import { QualityEvidenceSchema } from "@/engine/qualityEvidence";
+import { assertChildContentRenderEvidence } from "@/trigger/blocks/childrenSafetyBlocks";
+import { assessProductionEditorialAcceptance, QualityEvidenceSchema } from "@/engine/qualityEvidence";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -50,7 +52,7 @@ import {
 } from "@/lib/music";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
-import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
+import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
 import { hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
 import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
@@ -464,8 +466,8 @@ export const keyframes: Block = {
   produces: ["f1Url", "f1Key", "motionPrompt"],
   paid: true,
   run: async (ctx) => {
-    // CLOUD REBUILD: a single FLUX-pro still via fal.ai (HTTP/key-based) replaces
-    // the Higgsfield CLI (local binary + login session — impossible on Trigger).
+    // CLOUD REBUILD: one attested Novita still replaces the old local/Higgsfield
+    // path, retaining a durable receipt and a bounded direct-worker envelope.
     // We make ONE keyframe; the seamless loop is built from one forward i2v clip
     // (crossfade self-loop), so we never need a second "frame B" still.
     const style = styleGrammar(ctx);
@@ -491,12 +493,21 @@ export const keyframes: Block = {
     // (visionLocal routes groq→fal→gemini; gating on the Gemini key alone
     // silently disabled the critic in zero-Google deployments).
     const canCritique = hasVisionKey() && !!(dna && dna.recurringSubject?.trim());
+    const maximumImageAttempts = canCritique ? 2 : 1;
+    // The director loop is deliberately bounded. Admit its complete possible
+    // still fanout before the first worker so a retry can never borrow the
+    // run-wide budget or leave a partially regenerated visual behind.
+    novitaCostEnvelope({
+      label: "keyframes",
+      imageJobs: maximumImageAttempts,
+      maxCostUsd: ctx.stageBudgetUsd,
+    });
     let stills = 0;
     let imageCostUsd = 0;
     const loop = await produceAndCritique<{ url: string; local: string; key: string; jobId: string; model: string }>({
       label: "keyframe",
       threshold: 0.8,
-      maxIters: canCritique ? 2 : 1,
+      maxIters: maximumImageAttempts,
       log: (m) => ctx.log(m),
       produce: async (priorIssues) => {
         const fix = priorIssues.length
@@ -509,6 +520,7 @@ export const keyframes: Block = {
           id: `keyframe-${stills}`,
           prompt: baseFluxPrompt + fix,
           profileId: "production",
+          maxCostUsd: PRICE.novitaImageMaxUsd,
           lifecycle: {
             ownerId: ctx.ownerId,
             channelId: ctx.channelId,
@@ -648,7 +660,8 @@ export const loopClips: Block = {
       extraNegative: "zoom, push in, dolly, camera move, scale change, framing change, pan, tilt",
     });
 
-    ctx.log(`loop_clips: Novita LTX-2.3 (loop=${loopMode}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
+    ctx.log(`loop_clips: Novita LTX-2.5 distilled x2 (loop=${loopMode}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
+    const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "loop_clips");
     const clip = await renderNovitaI2V({
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-loop`,
       id: "loop-clip",
@@ -657,6 +670,7 @@ export const loopClips: Block = {
       imageKey: f1Key,
       durationSec: dur,
       profileId: "production",
+      maxCostUsd: stageBudgetUsd,
       lifecycle: {
         ownerId: ctx.ownerId,
         channelId: ctx.channelId,
@@ -702,8 +716,8 @@ export const upscale: Block = {
   ],
   paid: false,
   run: async (ctx) => {
-    // The generative pixels already came from the attested Novita LTX-2.3
-    // two-stage HQ pipeline and its pinned spatial upscaler. This finishing
+    // The generative pixels already came from the attested Novita LTX-2.5
+    // distilled two-stage latent x2 pipeline and its pinned spatial upscaler. This finishing
     // stage performs only deterministic local Lanczos scaling on the short loop
     // unit; no Replicate/Topaz provider or hidden fallback can re-render it.
     const targetResolution = (ctx.params.targetResolution as string) ?? "4k";
@@ -754,7 +768,7 @@ export const upscale: Block = {
       upscaled,
       resolution,
       targetFps,
-      sourceRender: "novita-ltx-2.3-two-stage-hq",
+      sourceRender: "novita-ltx-distilled-two-stage-x2",
       finish: "local-lanczos",
     });
 
@@ -980,7 +994,7 @@ export const music: Block = {
 export const assemble: Block = {
   id: "assemble",
   consumes: ["loopUnitKey", "musicUrl"],
-  produces: ["videoKey", "videoLocalPath", "videoDurationSec", "introApplied"],
+  produces: ["videoKey", "videoLocalPath", "videoDurationSec", "introApplied", "loopSeamDiff"],
   run: async (ctx) => {
     // SHORT for M1; set durationSec=7200 in the channel pipeline for a 2h render.
     // The loop UNIT is already upscaled (Topaz) by the upscale block; assemble
@@ -1031,6 +1045,20 @@ export const assemble: Block = {
     W -= W % 2;
     const preset = (ctx.params.encodePreset as string) ?? "veryfast";
 
+    // The seamless unit is the actual repeated visual artifact. Measure its
+    // first/last-frame SSIM before it is streamed under the full music bed so
+    // a critic that requests a loop-seam assertion gets a real deterministic
+    // value rather than an unmeasured, silently skipped assertion.
+    let loopSeamDiff: number | undefined;
+    try {
+      loopSeamDiff = await measureLoopSeamDiff(loopUnitPath, tmp);
+      ctx.log(`assemble: loop seam diff=${loopSeamDiff.toFixed(4)} (0=perfect)`);
+    } catch (e) {
+      // Draft exploration can still surface the render. Production QA will
+      // fail closed if its critic requires this metric and it remains absent.
+      ctx.log(`assemble: loop seam metric unavailable: ${e instanceof Error ? e.message : e}`);
+    }
+
     const fadeOutSec = Number(ctx.params.fadeOutSec ?? 0);
     const finalPath = join(tmp, "final.mp4");
     // GOLDEN: deblur intro (channel + title over the animated bg, 20-step deblur,
@@ -1080,9 +1108,16 @@ export const assemble: Block = {
       durationSec: videoDurationSec,
       introSec,
       loopUnitResolution: ctx.store["loopUnitResolution"],
+      ...(loopSeamDiff === undefined ? {} : { loopSeamDiff }),
     });
 
-    return { videoKey, videoLocalPath: finalPath, videoDurationSec, introApplied };
+    return {
+      videoKey,
+      videoLocalPath: finalPath,
+      videoDurationSec,
+      introApplied,
+      ...(loopSeamDiff === undefined ? {} : { loopSeamDiff }),
+    };
   },
 };
 
@@ -1115,6 +1150,17 @@ export const uploadDraft: Block = {
         quality.data.episode.lane.renderer !== lane.primaryRenderer)
     ) {
       throw new Error("upload_draft: final quality evidence belongs to a different content lane — refusing to upload");
+    }
+    // `hardGateReady` is intentionally a narrow raw-receipt signal. Publishing
+    // needs the lane's full editorial contract: a real passing evaluator for
+    // every required axis, and a source-backed story receipt where the format
+    // exposes one. Unknown/legacy lanes have no such contract and fail closed
+    // here until migration supplies one.
+    const editorialAcceptance = assessProductionEditorialAcceptance(quality.data);
+    if (!editorialAcceptance.ready) {
+      throw new Error(
+        `upload_draft: final editorial acceptance did not pass — ${editorialAcceptance.blockers.join("; ")}`,
+      );
     }
     if (!quality.data.release.calibrationComplete) {
       ctx.log(`upload_draft: quality calibration gaps retained for review: ${quality.data.calibrationGaps.join(" | ")}`);
@@ -1158,6 +1204,33 @@ export const uploadDraft: Block = {
     // approves). A scheduled timestamp is reused from the durable upload row so
     // a worker retry cannot change metadata and accidentally create a duplicate.
     const publishMode = (ctx.params["publishMode"] as string | undefined) ?? "draft";
+    const isSupervisedChildrenLane = lane.key === "children_learning_supervised";
+    const childSafety = ctx.store["childContentSafety"] as
+      | {
+          pass?: unknown;
+          madeForKids?: unknown;
+          release?: unknown;
+          allowedPublishMode?: unknown;
+          sceneManifestFingerprint?: unknown;
+        }
+      | undefined;
+    if (isSupervisedChildrenLane) {
+      if (
+        childSafety?.pass !== true ||
+        childSafety.madeForKids !== true ||
+        childSafety.release !== "human-editorial-approval-required" ||
+        childSafety.allowedPublishMode !== "draft"
+      ) {
+        throw new Error("upload_draft: children-learning lane lacks its mandatory human-review safety receipt");
+      }
+      assertChildContentRenderEvidence({
+        childSafety,
+        sceneCompilerReceipt: ctx.store["sceneCompilerReceipt"],
+      });
+      if (publishMode !== "draft") {
+        throw new Error("upload_draft: children-learning episodes may only create private drafts; public/scheduled release is human-gated");
+      }
+    }
     const dispatchRequestedAt = Date.now();
     let privacyStatus: "private" | "public" | "unlisted" = "private";
     let publishAt: string | undefined;
@@ -1213,6 +1286,9 @@ export const uploadDraft: Block = {
       typeof ctx.params["madeForKids"] === "boolean"
         ? (ctx.params["madeForKids"] as boolean)
         : (channel.schedule?.madeForKids ?? false);
+    if (isSupervisedChildrenLane && !madeForKids) {
+      throw new Error("upload_draft: children-learning lane must set madeForKids=true");
+    }
     const metadata = {
       title,
       description,

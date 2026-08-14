@@ -21,22 +21,26 @@ const CINEMATIC_PROOFS: { src: string; alt: string }[] = [
   { src: "cinematic/handshake.jpg", alt: "Victor Lustig — the handshake" },
 ];
 
-const DOCU_PROOFS: { file: string; device: string; meta: string }[] = [
-  { file: "fordlandia", device: "reference proxy · archival collage · 720p", meta: "Fordlandia — Ford's failed Amazon rubber town" },
+interface VideoProof { file: string; poster?: string; device: string; meta: string }
+
+const DOCU_PROOFS: VideoProof[] = [
   { file: "robbery", device: "reference proxy · robbery noir · 720p", meta: "The Vault — the Antwerp diamond heist" },
 ];
 
-const MOTION_PROOFS: { file: string; device: string; meta: string }[] = [
+const DOCU_INTEGRITY_HOLD =
+  "Integrity hold: the historical Fordlandia proxy failed the black-tail screen (picture drops while narration continues), so it is not shown as Golden evidence. A fresh, attested render and promotion receipt are required before it can return.";
+
+const MOTION_PROOFS: VideoProof[] = [
   { file: "hero", device: "reference proxy · hero_title · 720p", meta: "\"Never fully solved\" — depth-parallax hero render" },
   { file: "stats", device: "reference proxy · data_stats · 720p", meta: "Ten layers · $100M · zero alarms — catalog sample, not a promotion receipt" },
 ];
 
-const QUIZ_PROOFS: { file: string; device: string; meta: string }[] = [
+const QUIZ_PROOFS: VideoProof[] = [
   { file: "trivia", device: "reference proxy · common-knowledge · 720p", meta: "\"Capital of France?\" — timer and answer-card sample" },
   { file: "flag", device: "reference proxy · flag-guess · 720p", meta: "Flag reveal sample; no executable promotion receipt" },
 ];
 
-const SPEECH_PROOFS: { file: string; device: string; meta: string }[] = [
+const SPEECH_PROOFS: VideoProof[] = [
   { file: "steve-jobs", device: "reference proxy · motivation-speech · 720p", meta: "Steve Jobs · Stanford 2005 — caption-sync sample" },
 ];
 
@@ -72,13 +76,18 @@ const VOICE_PROOFS: { file: string; device: string; meta: string }[] = [
   { file: "history.mp3", device: "narrator · 1.0x", meta: "George — storyteller" },
 ];
 
-const LORESHORT_PROOFS: { file: string; device: string; meta: string }[] = [
+const LORESHORT_PROOFS: VideoProof[] = [
   { file: "lotr", device: "reference proxy · watercolour+pencil · 720p", meta: "The Rings of Power — first-person loremaster sample" },
   { file: "smith4k", device: "reference proxy · premium-lane source · 720p", meta: "The smith forges the ring — proxy does not prove a 4K master" },
 ];
 
-const NOVITA_PROOFS: { file: string; device: string; meta: string }[] = [
-  { file: "still001", device: "8×4090 spot-pod farm · image→i2v · val proof", meta: "First rendered shot — still + camera-move clip off the Novita render farm" },
+const NOVITA_PROOFS: VideoProof[] = [
+  {
+    file: "shot001",
+    poster: "still001",
+    device: "validation sample · image→i2v · 960×544 · not a promotion receipt",
+    meta: "Single 3.71-second camera-move sample from the Novita render farm — not channel-level production proof",
+  },
 ];
 
 const LOFI_PROOFS: { file: string; kind: "video" | "image"; device: string; meta: string }[] = [
@@ -121,7 +130,7 @@ function blurb(how: string): string {
   const first = how.split(/\.\s/)[0].trim();
   return first.endsWith(".") ? first : first + ".";
 }
-function take2<T>(xs: T[]): T[] { return xs.slice(0, 2); }
+function take2<T>(xs: readonly T[]): T[] { return xs.slice(0, 2); }
 
 /**
  * Golden Pipeline — a compact, clustered render of the GOLDEN_MODULES registry.
@@ -230,14 +239,14 @@ function textStrip(items: TextProof[]) {
   );
 }
 
-function videoStrip(base: string, items: { file: string; device: string; meta: string }[]) {
+function videoStrip(base: string, items: readonly VideoProof[]) {
   return (
     <div style={STRIP}>
       {take2(items).map((p) => (
         <div key={p.file} style={CARD}>
           <span style={DEVICE}>{p.device}</span>
           { }
-          <video controls preload="none" poster={`/golden/${base}/${p.file}.jpg`} src={`/golden/${base}/${p.file}.mp4`} style={MEDIA} />
+          <video controls preload="none" poster={`/golden/${base}/${p.poster ?? p.file}.jpg`} src={`/golden/${base}/${p.file}.mp4`} style={MEDIA} />
           <span style={METAT}>{p.meta}</span>
         </div>
       ))}
@@ -257,7 +266,15 @@ function ProofStrip({ moduleKey }: { moduleKey: string }) {
     case "novita-render-farm": return videoStrip("novita-render-farm", NOVITA_PROOFS);
     case "quiz": return videoStrip("quiz", QUIZ_PROOFS);
     case "cinematic": return <GoldenImages images={take2(CINEMATIC_PROOFS)} />;
-    case "documotion": return videoStrip("documotion", DOCU_PROOFS);
+    case "documotion":
+      return (
+        <>
+          {videoStrip("documotion", DOCU_PROOFS)}
+          <p role="status" style={{ margin: "0.5rem 0 0", fontSize: "0.68rem", lineHeight: 1.35, color: "var(--color-warning)" }}>
+            {DOCU_INTEGRITY_HOLD}
+          </p>
+        </>
+      );
     case "speech-tv": return videoStrip("speech", SPEECH_PROOFS);
     case "shorts": return textStrip(SHORTS_PROOFS);
     case "lofi":

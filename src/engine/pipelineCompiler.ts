@@ -96,6 +96,24 @@ export const PRODUCTION_CONTRACT_POLICY: PipelinePolicy = {
   allowOpaqueMigrationArtifacts: true,
 };
 
+/**
+ * A Channel Inception probe is a real, private master plus the complete
+ * editorial/technical evidence chain. It deliberately omits only publishing
+ * capabilities because its source pipeline has already removed `upload_draft`.
+ * This is not a softer production policy: crew, story alignment, certification,
+ * metadata, thumbnail, compliance, and final-master QA remain mandatory.
+ */
+export const PRIVATE_PROBE_CONTRACT_POLICY: PipelinePolicy = {
+  ...PRODUCTION_CONTRACT_POLICY,
+  id: "private-probe-contract",
+  version: "1.0.0",
+  requiredCapabilities: PRODUCTION_CONTRACT_POLICY.requiredCapabilities.filter(
+    (capability) =>
+      capability !== "publish.connector_bound" &&
+      capability !== "publish.synthetic_disclosed",
+  ),
+};
+
 const certificationRank = { revoked: -1, legacy: 0, contract: 1, golden: 2 } as const;
 
 export const CREW_ARTIFACT_BINDINGS: ReadonlyArray<{

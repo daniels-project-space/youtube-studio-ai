@@ -157,6 +157,57 @@ export async function seamlessLoopUnit(
 }
 
 /**
+ * Measure the visual discontinuity at a loop boundary. The value is
+ * `1 - SSIM(firstFrame, lastFrame)`, so 0 is a perfect match and lower is
+ * better. Frames are downscaled before SSIM: this is a stable boundary check,
+ * not a perceptual-quality grade, and it should remain cheap even for a 4K
+ * loop unit.
+ */
+export async function measureLoopSeamDiff(
+  inputPath: string,
+  workDir: string,
+  opts: { sampleOffsetSec?: number; timeoutMs?: number } = {},
+): Promise<number> {
+  const durationSec = (await probe(inputPath)).durationSec;
+  if (!Number.isFinite(durationSec) || durationSec < 0.2) {
+    throw new FfmpegError(`loop seam measurement requires a video of at least 0.2s (received ${durationSec})`);
+  }
+  const offsetSec = Math.min(
+    Math.max(0.02, opts.sampleOffsetSec ?? 0.08),
+    Math.max(0.02, durationSec / 4),
+  );
+  const firstPath = join(workDir, "loop-seam-first.png");
+  const lastPath = join(workDir, "loop-seam-last.png");
+  const frameArgs = (atSec: number, outPath: string) => [
+    "-y",
+    "-i",
+    inputPath,
+    "-ss",
+    atSec.toFixed(3),
+    "-vframes",
+    "1",
+    "-vf",
+    "scale=480:-2:flags=area",
+    outPath,
+  ];
+  await Promise.all([
+    run(FFMPEG, frameArgs(offsetSec, firstPath), opts.timeoutMs ?? 60_000),
+    run(FFMPEG, frameArgs(Math.max(offsetSec, durationSec - offsetSec), lastPath), opts.timeoutMs ?? 60_000),
+  ]);
+  const { stderr } = await run(
+    FFMPEG,
+    ["-i", firstPath, "-i", lastPath, "-lavfi", "[0:v][1:v]ssim", "-f", "null", "-"],
+    opts.timeoutMs ?? 60_000,
+  );
+  const match = /All:([0-9.]+)/.exec(stderr);
+  const similarity = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isFinite(similarity)) {
+    throw new FfmpegError("loop seam measurement did not emit an SSIM score");
+  }
+  return Number(Math.max(0, Math.min(1, 1 - similarity)).toFixed(6));
+}
+
+/**
  * BOOMERANG (ping-pong) loop unit — the most RELIABLE seamless loop for AI i2v
  * output. Plays the clip forward then reversed, so the unit is seamless at BOTH
  * joins (forward-end == reverse-start, and reverse-end == forward-start) NO MATTER
@@ -750,6 +801,63 @@ export async function loopUnderAudio(args: {
   a.push(args.outPath);
 
   await run(FFMPEG, a, args.timeoutMs ?? 2_700_000);
+  return args.outPath;
+}
+
+/**
+ * Add a looped instrumental bed to a finished silent master without
+ * re-encoding its video stream. Self-contained game and data-rendered formats
+ * use this when their renderer owns pixels but a separate original-music block
+ * owns audio. The explicit duration prevents a long music source from changing
+ * the visual format's authored cadence.
+ */
+export async function muxLoopedMusicBed(args: {
+  videoPath: string;
+  musicPath: string;
+  outPath: string;
+  durationSec: number;
+  /** Linear bed gain; defaults to a present-but-background 0.42. */
+  volume?: number;
+  /** Small musical tail fade, bounded inside the authored video length. */
+  fadeOutSec?: number;
+}): Promise<string> {
+  const durationSec = Math.max(1, Number(args.durationSec) || 1);
+  const requestedVolume = Number(args.volume);
+  const volume = Number.isFinite(requestedVolume) ? Math.min(1, Math.max(0, requestedVolume)) : 0.42;
+  const fadeOutSec = Math.min(
+    Math.max(0, Number(args.fadeOutSec) || 0),
+    Math.max(0, durationSec - 0.05),
+  );
+  const fade = fadeOutSec > 0
+    ? `,afade=t=out:st=${Math.max(0, durationSec - fadeOutSec).toFixed(2)}:d=${fadeOutSec.toFixed(2)}`
+    : "";
+  await run(FFMPEG, [
+    "-y",
+    "-i",
+    args.videoPath,
+    "-stream_loop",
+    "-1",
+    "-i",
+    args.musicPath,
+    "-filter_complex",
+    `[1:a]volume=${volume.toFixed(3)}${fade}[bed]`,
+    "-map",
+    "0:v:0",
+    "-map",
+    "[bed]",
+    "-t",
+    durationSec.toFixed(3),
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "192k",
+    "-movflags",
+    "+faststart",
+    "-shortest",
+    args.outPath,
+  ]);
   return args.outPath;
 }
 

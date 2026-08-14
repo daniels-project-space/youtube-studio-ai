@@ -18,8 +18,13 @@ import { whiteboardScribeBlocks } from "@/trigger/blocks/whiteboardScribeBlocks"
 import { motionComicBlocks } from "@/trigger/blocks/motionComicBlocks";
 import { loreShortBlocks } from "@/trigger/blocks/loreShortBlocks";
 import { quizYearBlocks } from "@/trigger/blocks/quizYearBlocks";
+import { quizPlanningBlocks } from "@/trigger/blocks/quizPlanningBlocks";
 import { documentaryCollageShortBlocks } from "@/trigger/blocks/documentaryCollageShortBlocks";
 import { VISUAL_MATTER_BLOCKS } from "@/trigger/blocks/visualMatterBlocks";
+import { episodeGraphBlocks } from "@/trigger/blocks/episodeGraphBlocks";
+import { learningContractBlocks } from "@/trigger/blocks/learningContractBlocks";
+import { childContentSafetyBlocks } from "@/trigger/blocks/childrenSafetyBlocks";
+import { sceneCompilerBlocks } from "@/trigger/blocks/sceneCompilerBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
 
 let registered = false;
@@ -44,6 +49,14 @@ export function registerAllBlocks(): void {
   for (const b of CREW_BLOCKS) register(b);
   // Versioned TimedScript → beats → ShotPlan → DP spec → exact EDL spine.
   for (const b of STORY_SPINE_BLOCKS) register(b);
+  // Provider-free Story Spine → causal Episode Graph → Scene Manifest bridge.
+  for (const b of episodeGraphBlocks) register(b);
+  // Renderer-neutral learning objective / retrieval-practice handoff.
+  for (const b of learningContractBlocks) register(b);
+  // Children can make a review candidate, never self-authorize publication.
+  for (const b of childContentSafetyBlocks) register(b);
+  // Local Scene Manifest → 16:9 master renderer; owns pixels, never story.
+  for (const b of sceneCompilerBlocks) register(b);
   // Reusable visual-development contract: mood, character, setting and
   // storyboard locks. Cinematic is its first integrated consumer; the block
   // remains renderer-neutral for future generated-visual lanes.
@@ -71,6 +84,9 @@ export function registerAllBlocks(): void {
   // GUESS-THE-YEAR self-contained engine (quiz_year): CC0 Wikidata facts →
   // four-option rounds → isolated Remotion bundle (src/lib/quizYearFacts.ts +
   // src/lib/quizYearRender.ts) — produces the final video.
+  // The separate planner owns the certified no-Gemini topic, safety, critic,
+  // metadata and renderer-native thumbnail receipts used by QuizYear.
+  for (const b of quizPlanningBlocks) register(b);
   for (const b of quizYearBlocks) register(b);
   // Native documentary-collage Shorts: source/claim/beat manifest → portrait
   // DocuMotion master → scene-level safe-area and provenance gate.

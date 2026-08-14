@@ -4,6 +4,10 @@ import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { COST_PATCH_KEY, type StageContext } from "@/engine/types";
+import {
+  DATA_STORY_CONTRACT_VERSION,
+  hasNamedSourceAttribution,
+} from "@/engine/dataStory";
 import { visualInserts } from "@/trigger/blocks/insertBlocks";
 
 // P2-5 (GOLDEN_MODULE_AUDIT_2026-08.md): "inserts" was never test-run
@@ -124,6 +128,22 @@ function baseCtx(overrides: Partial<StageContext> = {}): StageContext {
 }
 
 async function runBlockSkipPaths(): Promise<void> {
+  assert.equal(
+    hasNamedSourceAttribution("According to the World Bank, inflation reached 3.2% in 2024."),
+    true,
+    "a concrete institution named after an attribution phrase qualifies for the strict profile",
+  );
+  assert.equal(
+    hasNamedSourceAttribution("Data from NASA shows 42 launches in 2025."),
+    true,
+    "an acronym source qualifies for the strict profile",
+  );
+  assert.equal(
+    hasNamedSourceAttribution("According to a study, inflation reached 3.2% in 2024."),
+    false,
+    "a vague unnamed study must not qualify a numeric claim for rendering",
+  );
+
   // No insertTypes enabled at all -> must no-op without touching Gemini.
   const noTypes = await visualInserts.run(baseCtx({
     params: {},
@@ -154,6 +174,21 @@ async function runBlockSkipPaths(): Promise<void> {
       store: { sentenceTimings: [{ text: "Nothing numeric is said here at all.", start: 0, end: 2 }] },
     }));
     assert.deepEqual(noNumbers, { insertOverlays: [] }, "narration with zero spoken numbers must no-op before any provider call");
+
+    const unsourcedDataStory = await visualInserts.run(baseCtx({
+      params: {
+        insertTypes: ["big_stat"],
+        dataStoryContract: DATA_STORY_CONTRACT_VERSION,
+        requireNamedSource: true,
+        requireSpokenNumericAnchor: true,
+      },
+      store: { sentenceTimings: [{ text: "Inflation reached 3.2% in 2024.", start: 0, end: 2 }] },
+    }));
+    assert.deepEqual(
+      unsourcedDataStory,
+      { insertOverlays: [] },
+      "a strict data-story sentence without a named source must no-op before any provider can invent an attribution",
+    );
   } finally {
     if (savedKey === undefined) delete process.env.GEMINI_API_KEY;
     else process.env.GEMINI_API_KEY = savedKey;

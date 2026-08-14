@@ -5,9 +5,10 @@
  *   - geminiJson    — structured JSON generation (SEO databank, title optimise)
  *   - geminiVision  — multimodal image analysis (thumbnail style guide / QA)
  *
- * Key: GEMINI_API_KEY. If absent, callers should `hasGeminiKey()`-guard and
- * degrade gracefully — these functions throw loud only when actually invoked
- * without a key, so the build/import never crashes.
+ * Key: GEMINI_API_KEY. Gemini execution is additionally default-deny: a key
+ * alone never authorizes a provider call. Callers should `hasGeminiKey()`-
+ * guard so a no-Gemini runtime can choose its approved alternative before
+ * reaching a paid provider boundary.
  */
 
 import {
@@ -20,10 +21,31 @@ import {
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
+/**
+ * Deliberate break-glass latch for legacy Gemini routes. The product's default
+ * is no Gemini execution even if an old vault secret remains available.
+ */
+export const GEMINI_RUNTIME_OPT_IN_ENV = "YOUTUBE_STUDIO_ALLOW_GEMINI_RUNTIME";
+
 export class GeminiError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "GeminiError";
+  }
+}
+
+/** A deterministic, non-retryable refusal before any Gemini provider request. */
+export class GeminiRuntimeDisabledError extends GeminiError {
+  readonly retryable = false;
+  readonly code = "GEMINI_RUNTIME_DISABLED";
+
+  constructor(operation: string) {
+    super(
+      `${operation}: Gemini runtime is disabled by default. ` +
+        "Use the approved non-Gemini module/provider, or only after explicit operator approval set " +
+        `${GEMINI_RUNTIME_OPT_IN_ENV}=1 alongside GEMINI_API_KEY.`,
+    );
+    this.name = "GeminiRuntimeDisabledError";
   }
 }
 
@@ -47,11 +69,28 @@ export class GeminiSubmissionError extends GeminiError {
   }
 }
 
+export function isGeminiRuntimeEnabled(): boolean {
+  return process.env[GEMINI_RUNTIME_OPT_IN_ENV] === "1";
+}
+
+/** True only when a key exists and Gemini execution was explicitly approved. */
 export function hasGeminiKey(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return isGeminiRuntimeEnabled() && Boolean(process.env.GEMINI_API_KEY);
+}
+
+/** Reject a Gemini provider boundary before it can read, upload, or send data. */
+export function assertGeminiRuntimeAllowed(operation: string): void {
+  if (!isGeminiRuntimeEnabled()) throw new GeminiRuntimeDisabledError(operation);
+}
+
+/** Detect the two model-id forms used by raw REST and model-router clients. */
+export function isGeminiModelIdentifier(model: string | undefined): boolean {
+  const normalized = model?.trim().toLowerCase() ?? "";
+  return normalized.startsWith("gemini-") || normalized.startsWith("google/gemini-");
 }
 
 function key(): string {
+  assertGeminiRuntimeAllowed("Gemini REST provider");
   const k = process.env.GEMINI_API_KEY;
   if (!k) throw new GeminiError("GEMINI_API_KEY is not configured");
   return k;
@@ -87,6 +126,7 @@ export async function uploadGeminiVideo(
   path: string,
   mime?: string,
 ): Promise<{ fileUri: string; mimeType: string }> {
+  assertGeminiRuntimeAllowed("Gemini File API upload");
   const { readFile } = await import("node:fs/promises");
   const bytes = await readFile(path);
   const mimeType = mime ?? "video/mp4";
@@ -239,6 +279,7 @@ async function generate(
   parts: GeminiPart[],
   opts: { json?: boolean; maxTokens?: number; temperature?: number; tools?: unknown[] } = {},
 ): Promise<string> {
+  assertGeminiRuntimeAllowed("Gemini generateContent");
   const thinking = thinkingConfigFor(model);
   const body: Record<string, unknown> = {
     contents: [{ role: "user", parts }],

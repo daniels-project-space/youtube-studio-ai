@@ -6,21 +6,20 @@
  * an open comic page of empty panel boxes, and a HAND DRAWS each panel in (the
  * whiteboard scribe pixel-reveal, adapted to colour art) as a multi-voice
  * narration plays, with comic SPEECH BUBBLES popping at each spoken line, over a
- * music bed. Only spend is per-panel art (Nano Banana, image-to-image for
- * character consistency) + ElevenLabs voices + one music track; the draw + camera
- * are deterministic (zero video-model credits).
+ * music bed. Only spend is bounded per-panel attested image art + ElevenLabs
+ * voices + one music track; the draw + camera are deterministic (no video-model
+ * generation).
  *
  * Pipeline (one castMotionComic() call):
  *   1. STORYBOARD — Gemini-Pro writes a tight, coherent story as PANELS, casts a
  *                   narrator + characters to ElevenLabs voices, tags each panel's
  *                   ordered lines (narrator = VO, character = SPEECH BUBBLE).
- *   2. CHARACTERS — one reusable model-sheet per character (Nano Banana).
- *   3. PANELS     — each panel rendered image-to-image with the appearing
- *                   characters' sheets fed back in → identical characters, NO text.
- *   4. VOICES     — each line synthesised in its speaker's voice (exact per-line
+ *   2. PANELS     — each panel is rendered through the pinned image route with
+ *                   the closed character identity schema → continuity, NO text.
+ *   3. VOICES     — each line synthesised in its speaker's voice (exact per-line
  *                   timing → precise bubble cues); concatenated per panel.
- *   5. MUSIC      — one Suno bed, ducked under the narration.
- *   6. RENDER     — scripts/mc_page_render.py draws the page panel-by-panel, hand
+ *   4. MUSIC      — one Suno bed, ducked under the narration.
+ *   5. RENDER     — scripts/mc_page_render.py draws the page panel-by-panel, hand
  *                   following the ink, bubbles on cue; ffmpeg muxes voice + music.
  */
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";

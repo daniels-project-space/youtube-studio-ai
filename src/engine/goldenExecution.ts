@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CHANNEL_INCEPTION_MODULE_CONTRACTS } from "./channelInceptionContracts";
+import { LTX_25_RTX_4090_VIDEO } from "./generationProfiles";
 import { GOLDEN_MODULES, type GoldenModule } from "./golden";
 import type { ModuleManifest } from "./moduleManifest";
 
@@ -75,7 +76,7 @@ export interface CatalogExecutionStep {
  * motion does. Infrastructure must satisfy this contract before strict rollout.
  */
 export const NOVITA_GPU_VIDEO_RENDER_BINDING = {
-  id: "novita-gpu-zimage-ltx-v1",
+  id: "novita-gpu-zimage-ltx25-v2",
   catalogKey: "novita-render-farm",
   providerExecutableIds: ["novita_render_images", "novita_render_video"] as const,
   requiredChain: ["novita_render_images", "qa_assets", "novita_render_video", "qa_shots"] as const,
@@ -87,8 +88,8 @@ export const NOVITA_GPU_VIDEO_RENDER_BINDING = {
   legacyProviderExecutableIds: [] as const,
   imageModel: "Tongyi-MAI/Z-Image-Turbo",
   imageStorage: "local-persistent-disk",
-  videoModel: "Lightricks/LTX-2.3@7caa482d5cd10a2eae6b34cb48f093ebc45a263e",
-  productionPipeline: "two-stage-hq",
+  videoModel: `${LTX_25_RTX_4090_VIDEO.model}@${LTX_25_RTX_4090_VIDEO.revision}`,
+  productionPipeline: "distilled-two-stage-x2-fp8-cpu-offload",
   elasticGpuCeiling: 8,
 } as const;
 
@@ -127,6 +128,15 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     ]),
   ),
   loreshort: { kind: "pipeline-module", executableIds: ["lore_short"] },
+  "episode-graph": { kind: "pipeline-module", executableIds: ["episode_graph"] },
+  "learning-contract": { kind: "pipeline-module", executableIds: ["learning_contract"] },
+  "casefile-documentary": {
+    kind: "catalog-only",
+    executableIds: [],
+    note: "Validated source-first contract only. It intentionally has no automatic channel-family binding until an operator supplies a real rights-cleared Case Packet and an editorial review workflow.",
+  },
+  "scene-compiler": { kind: "pipeline-module", executableIds: ["scene_compiler"] },
+  "child-content-safety": { kind: "pipeline-module", executableIds: ["child_content_safety"] },
   "quiz-year": { kind: "pipeline-module", executableIds: ["quiz_year"] },
   "novita-render-farm": { kind: "pipeline-module", executableIds: ["novita_render_images", "novita_render_video"] },
   "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/imagecraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production image rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) instead — same Z-Image family, different implementation and gate set." },

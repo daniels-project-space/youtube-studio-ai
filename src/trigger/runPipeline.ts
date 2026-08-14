@@ -29,6 +29,7 @@ import {
   compilePipeline,
   completePipelineForPolicy,
   materializeRuntimePipelineParams,
+  PRIVATE_PROBE_CONTRACT_POLICY,
 } from "@/engine/pipelineCompiler";
 import { runPipeline as runEngine } from "@/engine/runner";
 import { renderBlockTask } from "@/trigger/render-block";
@@ -70,6 +71,8 @@ import {
   type ChannelInceptionProbeAttemptCheckpoint,
   type ChannelInceptionProbeInvocationContext,
 } from "@/lib/channelInceptionProbe";
+import { CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD } from "@/engine/channelInceptionContracts";
+import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
 
 export interface RunPipelineInput {
   channelId: string;
@@ -271,6 +274,13 @@ export const runPipelineTask = task({
     let probeBudgetAdmission: PipelineInvocationSnapshot["budgetAdmission"];
     if (payload.probeAdmission) {
       const maximumCostUsd = payload.probeAdmission.maximumCostUsd;
+      // The immutable child envelope is the authority here. New cinematic
+      // envelopes carry their explicitly signed $55 ceiling; a legacy envelope
+      // without that field stays at the historic $3 ceiling rather than gaining
+      // a larger authority merely because the global contract evolved.
+      const frozenProbeCeilingUsd =
+        durableProbeEnvelope?.input.invocationContext.probeMaximumCostUsd ??
+        CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD;
       if (
         !rawOverrideFingerprint ||
         !durableProbeEnvelope ||
@@ -279,10 +289,10 @@ export const runPipelineTask = task({
         rawOverrideFingerprint !== durableProbeEnvelope.input.overrideFingerprint ||
         !Number.isFinite(maximumCostUsd) ||
         maximumCostUsd <= 0 ||
-        maximumCostUsd > 3
+        maximumCostUsd > frozenProbeCeilingUsd
       ) {
         throwForTaskRetryPolicy(
-          new Error("run-pipeline probe admission requires an override and a $0-$3 ceiling"),
+          new Error("run-pipeline probe admission requires an override within its frozen signed ceiling"),
         );
       }
       const subject = pipelineProbeApprovalSubject({
@@ -541,10 +551,27 @@ export const runPipelineTask = task({
         entries = injectContentLaneIntoPipeline(entries, contentLane);
       }
 
+      // The provider/hardware contract is a pre-spend gate, not a diagnostic
+      // emitted after an image, TTS pass, or child worker has already billed.
+      // It protects persisted/custom/forged graphs as well as the creator's
+      // normal family selection; direct video helpers repeat it in depth.
+      assertPipelineVideoRuntimeReady(entries);
+
       // Compile the exact frozen entries. On a retry, a changed/revoked module
       // implementation must fail closed before any stage/provider executes.
-      const resolved = validatePipeline(entries);
-      const compilation = compilePipeline(resolved);
+      // contentLane is resolved from the persisted channel and placed in
+      // seedStore below. It is a channel-level policy input, not something a
+      // render block may synthesize or replace.
+      const resolved = validatePipeline(entries, ["contentLane"]);
+      // A signed Channel Inception probe is intentionally private: the frozen
+      // probe shape has no upload block, but retains every actual editorial
+      // and technical release requirement. Choose that narrow policy only
+      // after admission validation above; ordinary and forged invocations
+      // always keep the full publish-capable production contract.
+      const compilation = compilePipeline(
+        resolved,
+        probeBudgetAdmission ? PRIVATE_PROBE_CONTRACT_POLICY : undefined,
+      );
       if (durableInvocation) {
         assertPipelineInvocationCompilation(durableInvocation, compilation);
       }

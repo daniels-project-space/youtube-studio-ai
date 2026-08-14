@@ -7,7 +7,7 @@ import { _clear, register } from "@/engine/registry";
 import { runPipeline } from "@/engine/runner";
 import { COST_PATCH_KEY, type Block, type RunStageSink } from "@/engine/types";
 import { validatePipeline } from "@/engine/validate";
-import { GeminiSubmissionError, geminiJson } from "@/lib/gemini";
+import { GEMINI_RUNTIME_OPT_IN_ENV, GeminiSubmissionError, geminiJson } from "@/lib/gemini";
 import {
   createModelUsageScope,
   priceModelUsage,
@@ -495,14 +495,21 @@ async function failedTrackedUsageIsNotLost(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  exactPriceFromProviderTokens();
-  await geminiUsageAndMemo();
-  await exhaustedProviderRetryIsTerminal();
-  await groqVisionUsageIsCaptured();
-  await runnerAccountsAndReusesModelResponse();
-  await explicitAndFailedCostsAreAuthoritative();
-  await failedTrackedUsageIsNotLost();
-  console.log("MODEL USAGE ACCOUNTING TESTS PASSED");
+  const originalGeminiRuntime = process.env[GEMINI_RUNTIME_OPT_IN_ENV];
+  process.env[GEMINI_RUNTIME_OPT_IN_ENV] = "1";
+  try {
+    exactPriceFromProviderTokens();
+    await geminiUsageAndMemo();
+    await exhaustedProviderRetryIsTerminal();
+    await groqVisionUsageIsCaptured();
+    await runnerAccountsAndReusesModelResponse();
+    await explicitAndFailedCostsAreAuthoritative();
+    await failedTrackedUsageIsNotLost();
+    console.log("MODEL USAGE ACCOUNTING TESTS PASSED");
+  } finally {
+    if (originalGeminiRuntime === undefined) delete process.env[GEMINI_RUNTIME_OPT_IN_ENV];
+    else process.env[GEMINI_RUNTIME_OPT_IN_ENV] = originalGeminiRuntime;
+  }
 }
 
 main().catch((error) => {

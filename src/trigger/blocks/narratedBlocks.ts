@@ -22,12 +22,21 @@ import {
 } from "@/engine/renderArtifacts";
 import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
 import {
+  DATA_STORY_MIN_SOURCED_NUMERIC_SENTENCES,
+  hasNamedSourceAttribution,
+  hasSourceAttributedDataStoryParams,
+} from "@/engine/dataStory";
+import {
   channelCritiqueBrief,
   produceAndCritique,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
 import type { HealClass } from "@/engine/healer";
-import { buildQualityEvidence } from "@/engine/qualityEvidence";
+import {
+  assessProductionEditorialAcceptance,
+  buildQualityEvidence,
+  EpisodeSpecSchema,
+} from "@/engine/qualityEvidence";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
@@ -67,9 +76,11 @@ import {
   type QuoteOverlaySpec,
 } from "@/lib/ffmpeg";
 import { renderTitleCard, renderQuoteOverlay } from "@/lib/remotionRender";
-import { runValidationSpec } from "@/engine/creative/validate";
+import {
+  assessProductionValidationAcceptance,
+  runValidationSpec,
+} from "@/engine/creative/validate";
 import { getVisualBrief, getMusicBrief, getValidationSpec, getStructure, getCutSheet } from "@/engine/creative/brief";
-import { nativeWatchRender } from "@/lib/renderWatch";
 import {
   channelVisualReviewProfile,
   reviewRender,
@@ -299,6 +310,7 @@ export const scriptGen: Block = {
       // The channel has a data-viz insert layer â€” the script must speak the
       // numbers the inserts will render.
       dataRich: ctx.params["dataRich"] as boolean | undefined,
+      sourceAttributionRequired: ctx.params["sourceAttributionRequired"] === true,
       structure: getStructure(ctx.store),
       // The channel's locked narrative register (Style DNA) â€” outranks the
       // generic archetype tone in the prompt.
@@ -564,6 +576,17 @@ export const qaScript: Block = {
   produces: ["scriptApproved"],
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
+    if (hasSourceAttributedDataStoryParams(ctx.params)) {
+      const sourcedNumericSentences = splitSentences(narration)
+        .filter((sentence) => /\d/.test(sentence) && hasNamedSourceAttribution(sentence));
+      if (sourcedNumericSentences.length < DATA_STORY_MIN_SOURCED_NUMERIC_SENTENCES) {
+        throw new Error(
+          `qa_script FAILED: source-attributed data story requires at least ${DATA_STORY_MIN_SOURCED_NUMERIC_SENTENCES} ` +
+          `numeric sentences naming a concrete source; found ${sourcedNumericSentences.length}`,
+        );
+      }
+      ctx.log(`qa_script: source-attributed data-story evidence passed (${sourcedNumericSentences.length} sourced numeric sentences)`);
+    }
     if (!hasAnthropicKey()) {
       // HONEST: unverified is not the same as approved. Nothing downstream hard-
       // gates on this yet, but the flag must not lie to the run record/Doctor.
@@ -2482,7 +2505,7 @@ export const captions: Block = {
 export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
-  produces: ["qaPassed", "qaReport", "qualityEvidence", "reviewEvidence", "reviewResult", "reviewFingerprint"],
+  produces: ["qaPassed", "qaReport", "qualityEvidence", "temporalDynamism", "reviewEvidence", "reviewResult", "reviewFingerprint"],
   paid: true,
   run: async (ctx) => {
     const productionQa = ctx.params["qaProfile"] !== "draft";
@@ -2723,20 +2746,11 @@ export const qaVisual: Block = {
       throw new Error("qa_visual FAILED: required evidence-backed visual reviewer did not run");
     }
 
-    // Native Gemini video review remains an opt-in, full-audio escalation path.
-    // Its mood/pacing findings are valuable evidence but never replace the
-    // structured, repairable frame/overlay review above.
-    let nativeWatch: Awaited<ReturnType<typeof nativeWatchRender>> | null = null;
+    // The old native-video escalation uploaded the full master to Gemini. It is
+    // retired under the no-Gemini production policy; the evidence-backed frame
+    // review above remains the required, repairable quality path.
     if (ctx.params["nativeWatch"] === true) {
-      nativeWatch = await nativeWatchRender(video, p.durationSec, reviewIntent, { log: ctx.log });
-      if (nativeWatch?.moodMatch !== undefined || nativeWatch?.musicFit !== undefined) {
-        const low = [
-          (nativeWatch.moodMatch ?? 10) < 6 ? `mood coherence ${nativeWatch.moodMatch}/10` : "",
-          (nativeWatch.pacing ?? 10) < 6 ? `pacing ${nativeWatch.pacing}/10` : "",
-          (nativeWatch.musicFit ?? 10) < 6 ? `music fit ${nativeWatch.musicFit}/10` : "",
-        ].filter(Boolean);
-        if (low.length) ctx.log(`qa_visual: LOW NATIVE WATCH FEEL SCORES (advisory): ${low.join(", ")} — ${nativeWatch.summary.slice(0, 120)}`);
-      }
+      ctx.log("qa_visual: nativeWatch is retired; using the configured no-Gemini QA routes only");
     }
 
     // 4) Thumbnail (vision, separate) â€” download from R2.
@@ -2809,17 +2823,6 @@ export const qaVisual: Block = {
         summary: visualReview.summary,
         reviewFingerprint: visualReview.reviewFingerprint,
       },
-      nativeWatch: nativeWatch
-        ? {
-            ran: nativeWatch.ran,
-            verdict: nativeWatch.verdict,
-            defects: nativeWatch.defects,
-            summary: nativeWatch.summary,
-            moodMatch: nativeWatch.moodMatch,
-            pacing: nativeWatch.pacing,
-            musicFit: nativeWatch.musicFit,
-          }
-        : undefined,
     };
 
     // Hard-gate on egregious VISUAL defects (video frames + thumbnail). Footage
@@ -2861,17 +2864,22 @@ export const qaVisual: Block = {
       introSec: Number(ctx.store["introSec"] ?? 0),
       tailSec: Number(ctx.params["tailSec"] ?? 3),
       introApplied: ctx.store["introApplied"] === true,
+      outroApplied: ctx.store["outroApplied"] === true,
       // Lane-aware dead-air threshold only: this gate stays deterministic and
       // the doctrine is carried for evidence, never to flip a verdict.
       channel: {
         contentLaneKey: contentLane.key,
         blackSegmentMinSec: laneQuality.blackSegmentMinSec,
+        maxStaticHoldSec: laneQuality.maxStaticHoldSec,
         ...(criticDoctrine ? { criticDoctrine } : {}),
       },
       log: ctx.log,
     });
     if (rv.verdict === "fail") {
       critical.push(`render-validate: ${rv.defects.filter((d) => d.severity === "critical").map((d) => d.issue).join(" | ")}`);
+    }
+    if (!rv.ran) {
+      critical.push("render-validate: deterministic evidence did not complete; release is fail-closed");
     }
     if (visualReview.verdict === "fail") {
       critical.push(visualReviewFailureMessage(visualReview));
@@ -2965,7 +2973,16 @@ export const qaVisual: Block = {
         metrics.captionCoveragePct = Math.min(1, spoken / bodyWindow) * 100;
       }
       const overlapSec = Number(ctx.store["quoteOverlapSec"] ?? NaN);
-      if (Number.isFinite(overlapSec)) metrics.overlapSec = overlapSec;
+      if (Number.isFinite(overlapSec)) {
+        metrics.overlapSec = overlapSec;
+      } else if (!Array.isArray(ctx.store["quoteOverlays"]) || ctx.store["quoteOverlays"].length === 0) {
+        // No quote overlays means there is no possible quote overlap. Supplying
+        // the measured zero keeps a valid narrator-family critic assertion from
+        // degrading into an unnecessary skipped result.
+        metrics.overlapSec = 0;
+      }
+      const loopSeamDiff = Number(ctx.store["loopSeamDiff"] ?? NaN);
+      if (Number.isFinite(loopSeamDiff)) metrics.loopSeamDiff = loopSeamDiff;
 
       // BATCHED vision judging: ALL vision assertions in ONE call (the
       // per-assertion loop cost up to 12 separate multi-image vision calls).
@@ -3037,9 +3054,12 @@ export const qaVisual: Block = {
       }
     }
 
-    // A release result is evidence, not a marketing label. The ledger records
-    // the evaluators that actually ran and explicitly surfaces unmeasured
-    // dimensions; only its explicit hard blockers can fail the release.
+    const narrativeValidation = assessProductionValidationAcceptance(specOutcome);
+
+    // A release result is evidence, not a marketing label. The raw receipt
+    // records exactly what ran and leaves unmeasured axes visible; the
+    // lane-aware production editorial contract below decides whether that
+    // evidence is sufficient to upload.
     const assetQa = ctx.store["assetQaReport"] as Record<string, unknown> | undefined;
     const shotQa = ctx.store["shotQaReport"] as Record<string, unknown> | undefined;
     const storyCoverage = ctx.store["storyCoverage"] as Record<string, unknown> | undefined;
@@ -3060,18 +3080,50 @@ export const qaVisual: Block = {
       ? assetQa!["selected"].length
       : undefined;
     const storyRatio = Number(storyCoverage?.["ratio"]);
+    // A renderer-specific planning block may have already produced the durable
+    // episode receipt (for example story_spine or short_strategy). Reuse its
+    // measured provenance rather than reconstructing a weaker story claim from
+    // final QA state. A mismatched/legacy receipt is ignored and cannot leak
+    // provenance across content lanes.
+    const storedEpisode = EpisodeSpecSchema.safeParse(ctx.store["episodeSpec"]);
+    const storedStory = storedEpisode.success &&
+      storedEpisode.data.lane.key === contentLane.key &&
+      (storedEpisode.data.lane.renderer === undefined ||
+        storedEpisode.data.lane.renderer === contentLane.primaryRenderer) &&
+      storedEpisode.data.story.status === "measured"
+      ? storedEpisode.data.story
+      : undefined;
+    const temporalDynamismPassed = rv.temporalDynamism.verdict === "pass" || rv.temporalDynamism.verdict === "not_required";
+    const temporalDynamismEvidence = [
+      `source=${rv.temporalDynamism.source}`,
+      `verdict=${rv.temporalDynamism.verdict}`,
+      `thresholdSec=${rv.temporalDynamism.thresholdSec ?? "exempt"}`,
+      `maxFrozenHoldSec=${rv.temporalDynamism.maxFrozenHoldSec.toFixed(2)}`,
+      `rawFrozenIntervals=${rv.temporalDynamism.frozenIntervals.length}`,
+      `evaluatedFrozenIntervals=${rv.temporalDynamism.evaluatedIntervals.length}`,
+      ...rv.temporalDynamism.violatingIntervals.slice(0, 6).map((interval) => (
+        `repair=${interval.startSec.toFixed(2)}-${interval.endSec.toFixed(2)}s (${interval.durationSec.toFixed(2)}s frozen)`
+      )),
+    ];
     const qualityEvidence = buildQualityEvidence({
       episode: {
         lane: { key: contentLane.key, renderer: contentLane.primaryRenderer },
         topic,
         title,
         durationSec: p.durationSec,
-        story: {
-          source: Array.isArray(ctx.store["shotList"]) ? "validated-story-spine/v1" : undefined,
-          beatCount: Array.isArray(ctx.store["narrativeBeats"]) ? ctx.store["narrativeBeats"].length : undefined,
-          shotCount: Array.isArray(ctx.store["shotList"]) ? ctx.store["shotList"].length : undefined,
-          coverageRatio: Number.isFinite(storyRatio) ? storyRatio : undefined,
-        },
+        story: storedStory
+          ? {
+              source: storedStory.source,
+              beatCount: storedStory.beatCount,
+              shotCount: storedStory.shotCount,
+              coverageRatio: storedStory.coverageRatio,
+            }
+          : {
+              source: Array.isArray(ctx.store["shotList"]) ? "validated-story-spine/v1" : undefined,
+              beatCount: Array.isArray(ctx.store["narrativeBeats"]) ? ctx.store["narrativeBeats"].length : undefined,
+              shotCount: Array.isArray(ctx.store["shotList"]) ? ctx.store["shotList"].length : undefined,
+              coverageRatio: Number.isFinite(storyRatio) ? storyRatio : undefined,
+            },
         candidateSelection: Number.isFinite(candidateCount) && selectedCandidates !== undefined
           ? {
               generated: candidateCount,
@@ -3082,10 +3134,11 @@ export const qaVisual: Block = {
           : undefined,
       },
       technical: {
-        passed: rv.verdict === "pass" && p.hasVideo && p.hasAudio && lengthOk,
+        passed: rv.ran && rv.verdict === "pass" && p.hasVideo && p.hasAudio && lengthOk,
         evaluator: "ffprobe + deterministic render validation",
         evidence: [
           `render=${rv.verdict}`,
+          `renderEvidence=${rv.ran ? "complete" : "incomplete"}`,
           `resolution=${p.width}x${p.height}`,
           `duration=${p.durationSec.toFixed(2)}s`,
           ...(finalAudioMeters ? [`loudness=${finalAudioMeters.integratedLufs ?? "unmeasured"}`] : []),
@@ -3104,29 +3157,36 @@ export const qaVisual: Block = {
         : undefined,
       temporal: shotScore !== undefined && shotMinimum !== undefined
         ? {
-            passed: shotScore >= shotMinimum,
+            passed: shotScore >= shotMinimum && temporalDynamismPassed,
             score: shotScore,
             minimumScore: shotMinimum,
-            evaluator: "qualified per-shot render QA",
-            evidence: [`gradedShots=${scoredShots.length}`],
+            evaluator: "qualified per-shot render QA + deterministic temporal dynamism",
+            evidence: [`gradedShots=${scoredShots.length}`, ...temporalDynamismEvidence],
           }
         : visualReview.ran
           ? {
-              passed: visualReview.verdict === "pass",
-              evaluator: "scene/cue-aware evidence-backed visual review",
+              passed: visualReview.verdict === "pass" && temporalDynamismPassed,
+              evaluator: "scene/cue-aware visual review + deterministic temporal dynamism",
               evidence: [
                 `reviewedFrames=${visualReview.evidence.frames.length}`,
                 `maxGapSec=${visualReview.evidence.coverage.maxGapSec}`,
                 `manifest=${visualReview.evidence.manifestKey ?? "not-persisted"}`,
                 visualReview.summary,
+                ...temporalDynamismEvidence,
               ],
             }
           : undefined,
       narrative: specOutcome
         ? {
-            passed: specOutcome.passed,
+            passed: narrativeValidation.ready,
             evaluator: "critic validation specification",
-            evidence: [`assertions=${specOutcome.results.length}`],
+            evidence: [
+              `assertions=${specOutcome.results.length}`,
+              `evaluated=${narrativeValidation.evaluatedAssertionCount}`,
+              ...(narrativeValidation.blockers.length
+                ? narrativeValidation.blockers
+                : ["required critic assertions were measured and passed"]),
+            ],
           }
         : undefined,
       audio: audioAestheticScore !== undefined
@@ -3154,14 +3214,27 @@ export const qaVisual: Block = {
             score: identity.score,
             minimumScore: brandMinimum,
             evaluator: "channel identity grader",
-            evidence: identity.issues.slice(0, 3),
+            evidence: [
+              `identityScore=${identity.score.toFixed(2)}`,
+              `minimum=${brandMinimum.toFixed(2)}`,
+              ...identity.issues.slice(0, 3),
+            ],
           },
-      requiredAudio: contentLane.key === "music_loop"
+      requiredAudio: contentLane.key === "music_loop" || contentLane.key === "ambient_guided"
         ? { required: true, minimumScore: audioMinimum, label: "music-lane audio aesthetics" }
         : undefined,
     });
     if (!qualityEvidence.release.hardGateReady) {
       critical.push(`quality evidence: ${qualityEvidence.release.blockers.join("; ")}`);
+    }
+    if (productionQa && !narrativeValidation.ready) {
+      critical.push(`critic evidence: ${narrativeValidation.blockers.join("; ")}`);
+    }
+    const editorialAcceptance = assessProductionEditorialAcceptance(qualityEvidence);
+    if (productionQa && !editorialAcceptance.ready) {
+      critical.push(`editorial acceptance: ${editorialAcceptance.blockers.join("; ")}`);
+    } else if (!productionQa && !editorialAcceptance.ready) {
+      ctx.log(`qa_visual: draft editorial gaps retained for review: ${editorialAcceptance.blockers.join(" | ")}`);
     }
 
     if (critical.length > 0) {
@@ -3190,6 +3263,7 @@ export const qaVisual: Block = {
       qaPassed: true,
       qaReport: specOutcome ? { ...report, validation: specOutcome.results } : report,
       qualityEvidence,
+      temporalDynamism: rv.temporalDynamism,
       reviewEvidence: visualReview.evidence,
       reviewResult: {
         verdict: visualReview.verdict,

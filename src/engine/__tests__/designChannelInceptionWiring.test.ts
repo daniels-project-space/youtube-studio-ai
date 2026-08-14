@@ -15,11 +15,12 @@ assert.match(entrypoint, /executeDesignChannel\(payload/);
 assert.match(entrypoint, /maxAttempts:\s*3/);
 assert(!entrypoint.includes("generateChannelArt"), "the Trigger entrypoint must remain a thin retry shell");
 assert(
-  coordinator.indexOf("if (!design.available)") <
+  coordinator.indexOf("if (!design.available || !design.productionReady)") <
     coordinator.indexOf('runStage("channel-inception-research"'),
-  "unavailable families must stop before the first provider-capable stage",
+  "unavailable or runtime-blocked families must stop before the first provider-capable stage",
 );
-assert.match(newChannelUi, /disabled=\{!f\.available\}/);
+assert.match(newChannelUi, /const selectable = f\.available && productionReady/);
+assert.match(newChannelUi, /disabled=\{!selectable\}/);
 
 const wiredStages = new Set(
   [...coordinator.matchAll(/runStage\("(channel-inception-[a-z-]+)"/g)].map((match) => match[1]),
@@ -53,6 +54,10 @@ assert.match(coordinator, /positioningIdentityProjection/);
 assert.match(coordinator, /seoIdentityProjection/);
 assert.match(coordinator, /const voiceStage = channelInceptionStage\(plan, "channel-inception-voice"\)/);
 assert.match(coordinator, /tasks\.triggerAndWait\(\s*"plan-week-ahead"/);
+assert.match(coordinator, /const lengthSeconds = design\.episodeLengthSeconds/,
+  "the coordinator must preserve a niche-preset duration resolved by the designer");
+assert.doesNotMatch(coordinator, /payload\.lengthMinutes \? Math\.round\(payload\.lengthMinutes \* 60\) : 0/,
+  "an omitted duration must never disable the final length law");
 assert.match(coordinator, /requestKey:\s*thumbnailStage\.idempotencyKey/);
 assert.match(coordinator, /budgetCapUsd:\s*thumbnailStage\.maximumCostUsd/);
 assert.match(coordinator, /api\.contentPlan\.listProvenReadyPlanPage/);
@@ -77,6 +82,10 @@ assert.equal(
   "avatar and banner must execute under independent durable stage leases",
 );
 assert(!coordinator.includes("sharedArt"), "one art stage must never hide another stage's spend");
+assert.match(coordinator, /maxProviderSpendUsd:\s*avatarStage\.maximumCostUsd/);
+assert.match(coordinator, /maxProviderSpendUsd:\s*bannerStage\.maximumCostUsd/);
+assert.match(coordinator, /blockId:\s*"channel-inception-avatar"/);
+assert.match(coordinator, /blockId:\s*"channel-inception-banner"/);
 assert.match(coordinator, /idempotencyKeys\.create\(\s*`\$\{probeStage\.idempotencyKey\}:\$\{probeRunId\}`/);
 assert.match(coordinator, /api\.runs\.claimProbeDispatchEnvelope/);
 assert.match(coordinator, /api\.runs\.createProbeRun/);
@@ -86,6 +95,11 @@ assert.match(coordinator, /recover:\s*executeProbe/);
 assert.match(coordinator, /committedSpendUsd:\s*spend\.committedSpendUsd/);
 assert.match(coordinator, /channelInceptionProbeObservedSpend/);
 assert.match(coordinator, /quality = assessChannelInceptionProbeQuality/);
+assert.match(
+  coordinator,
+  /resolveChannelInceptionProbeHolisticReview\(qaReport\)/,
+  "probe artifact projection must read the current qa_visual visualReview receipt",
+);
 assert.match(coordinator, /review = reviewProbeArtifacts/);
 assert.match(coordinator, /missing explicit accepted golden QA evidence/);
 assert(!coordinator.includes("nativeWatchRender"), "probe review must stay within admitted child QA spend");

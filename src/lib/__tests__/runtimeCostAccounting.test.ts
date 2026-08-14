@@ -47,6 +47,7 @@ import {
   narrationChapterHeadingCharacterCeiling,
 } from "@/lib/narrationBounds";
 import { gateColdOpen, narrationPhysics } from "@/lib/voicecraft";
+import { GEMINI_RUNTIME_OPT_IN_ENV } from "@/lib/gemini";
 
 function providerAwarePricing(): void {
   assert.equal(
@@ -111,7 +112,8 @@ function costPatches(): void {
   assert.equal(qaVisualCost({}), PRICE.qaBaseUsd * qaEvidenceBatches);
   assert.equal(
     qaVisualCost({ nativeWatch: true, audioQa: true }),
-    PRICE.qaBaseUsd * qaEvidenceBatches + PRICE.nativeVideoQaUsd + PRICE.audioQaUsd,
+    PRICE.qaBaseUsd * qaEvidenceBatches + PRICE.audioQaUsd,
+    "retired nativeWatch must not reserve a Gemini native-video review",
   );
 }
 
@@ -396,13 +398,20 @@ async function coldOpenAccounting(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  providerAwarePricing();
-  costPatches();
-  requestBounds();
-  await cachedMusicIsFree();
-  await successfulTinyTtsIsTerminal();
-  await coldOpenAccounting();
-  console.log("RUNTIME COST ACCOUNTING PASS: provider routes, patches, cache reuse, request bounds");
+  const originalGeminiRuntime = process.env[GEMINI_RUNTIME_OPT_IN_ENV];
+  process.env[GEMINI_RUNTIME_OPT_IN_ENV] = "1";
+  try {
+    providerAwarePricing();
+    costPatches();
+    requestBounds();
+    await cachedMusicIsFree();
+    await successfulTinyTtsIsTerminal();
+    await coldOpenAccounting();
+    console.log("RUNTIME COST ACCOUNTING PASS: provider routes, patches, cache reuse, request bounds");
+  } finally {
+    if (originalGeminiRuntime === undefined) delete process.env[GEMINI_RUNTIME_OPT_IN_ENV];
+    else process.env[GEMINI_RUNTIME_OPT_IN_ENV] = originalGeminiRuntime;
+  }
 }
 
 void main();

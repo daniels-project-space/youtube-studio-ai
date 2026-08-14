@@ -39,6 +39,7 @@ const pipeline: PipelineEntry[] = [
 ];
 const context = freezeChannelInceptionProbeContext({
   ownerId,
+  family: "narrated_stock",
   channel: {
     slug: "frozen-channel",
     name: "Frozen channel",
@@ -62,6 +63,27 @@ assert.equal(
   channelInceptionProbeEffectiveBudgetUsd(context, 3),
   3,
   "a $100 channel must still freeze a child budget of exactly the admitted $3 cap",
+);
+
+const cinematicContext = freezeChannelInceptionProbeContext({
+  ownerId,
+  family: "cinematic",
+  channel: {
+    slug: "cinematic-frozen-channel",
+    name: "Cinematic frozen channel",
+    budget: 130,
+    identity: { topicPool: [], styleGrammar: "", palette: [], persona: "", niche: "" },
+    schedule: { madeForKids: false },
+  },
+});
+assert.equal(
+  channelInceptionProbeEffectiveBudgetUsd(cinematicContext, 55),
+  55,
+  "cinematic proof authority must support two bounded multi-scene attempts",
+);
+assert.throws(
+  () => channelInceptionProbeEffectiveBudgetUsd(cinematicContext, 55.01),
+  /bounded contract/,
 );
 
 const lowBudgetPlan = buildChannelInceptionPlan({
@@ -122,7 +144,12 @@ const passingQaOutput = {
     visual: { passed: true, score: 8, minimumScore: 6, evaluator: "test", evidence: ["frames"] },
     temporal: { passed: true, evaluator: "test", evidence: ["samples"] },
     narrative: { passed: true, evaluator: "test", evidence: ["spec"] },
-    audio: { passed: true, evaluator: "test", evidence: ["meters"] },
+    audio: {
+      score: 8.2,
+      minimumScore: 7,
+      evaluator: "audio-aesthetics",
+      evidence: ["final-master production quality"],
+    },
     brand: { passed: true, evaluator: "test", evidence: ["identity"] },
   }),
   qaReport: {
@@ -131,12 +158,14 @@ const passingQaOutput = {
     // Successful Verdicts omit `skipped`; only the fallback receipt sets it.
     video: { score: 8, issues: [] },
     thumbnail: { score: 7, issues: [] },
-    watch: { ran: true, verdict: "pass", defects: [], summary: "coherent" },
+    // This is the current qa_visual receipt shape. `watch` is historical only.
+    visualReview: { ran: true, verdict: "pass", defects: [], summary: "coherent" },
     validation: [{ id: "opening", severity: "block", passed: true, skipped: false }],
   },
 };
 const acceptedQuality = assessChannelInceptionProbeQuality(passingQaOutput);
 assert.equal(acceptedQuality.status, "accepted");
+assert.equal(acceptedQuality.watchVerdict, "pass");
 assert.match(acceptedQuality.qaEvidenceFingerprint, /^[a-f0-9]{64}$/);
 assert.equal(
   assessChannelInceptionProbeQuality({ qaPassed: true }).status,
@@ -154,6 +183,32 @@ assert.match(
 assert.match(
   assessChannelInceptionProbeQuality({
     ...passingQaOutput,
+    qualityEvidence: buildQualityEvidence({
+      episode: {
+        lane: { key: "narrated_documentary", renderer: "stock_footage" },
+        topic: "A superficially complete probe episode",
+        story: { source: "test", beatCount: 4, shotCount: 8, coverageRatio: 1 },
+      },
+      technical: { passed: true, evaluator: "test", evidence: ["ffprobe"] },
+      visual: { passed: true, evaluator: "test", evidence: ["frames"] },
+      temporal: { passed: true, evaluator: "test", evidence: ["samples"] },
+      // This receipt clears the old explicit hard gates but lacks a critic
+      // verdict. A channel probe must not use that loophole for promotion.
+      audio: {
+        score: 8.2,
+        minimumScore: 7,
+        evaluator: "audio-aesthetics",
+        evidence: ["amended final-master production quality"],
+      },
+      brand: { passed: true, evaluator: "test", evidence: ["identity"] },
+    }),
+  }).reasons.join(" "),
+  /production editorial acceptance/,
+  "a held-out probe needs the complete editorial receipt, not only hard gates",
+);
+assert.match(
+  assessChannelInceptionProbeQuality({
+    ...passingQaOutput,
     qaReport: {
       ...passingQaOutput.qaReport,
       thumbnail: { score: 4, issues: ["illegible"] },
@@ -166,7 +221,7 @@ assert.match(
     ...passingQaOutput,
     qaReport: {
       ...passingQaOutput.qaReport,
-      watch: {
+      visualReview: {
         ran: true,
         verdict: "pass",
         defects: [{ severity: "major", issue: "broken chapter transition" }],
@@ -175,6 +230,35 @@ assert.match(
   }).reasons.join(" "),
   /major or critical defect/,
 );
+assert.equal(
+  assessChannelInceptionProbeQuality({
+    ...passingQaOutput,
+    qaReport: {
+      ...passingQaOutput.qaReport,
+      // A present-but-malformed current receipt must fail closed rather than
+      // falling through to a legacy field a caller happened to include.
+      visualReview: { ran: true, verdict: "pass" },
+      watch: { ran: true, verdict: "pass", defects: [] },
+    },
+  }).status,
+  "rejected",
+  "current visualReview receipts require an explicit defects ledger",
+);
+assert.equal(
+  assessChannelInceptionProbeQuality({
+    ...passingQaOutput,
+    qaReport: (() => {
+      const legacyReport: Record<string, unknown> = { ...passingQaOutput.qaReport };
+      delete legacyReport.visualReview;
+      return {
+        ...legacyReport,
+        watch: { ran: true, verdict: "pass", defects: [], summary: "legacy coherent" },
+      };
+    })(),
+  }).status,
+  "accepted",
+  "historical qaReport.watch receipts remain readable",
+);
 assert.notEqual(
   acceptedQuality.qaEvidenceFingerprint,
   assessChannelInceptionProbeQuality({
@@ -182,6 +266,27 @@ assert.notEqual(
     qaReport: { ...passingQaOutput.qaReport, video: { score: 9, issues: [] } },
   }).qaEvidenceFingerprint,
   "the quality receipt must be bound to the exact QA evidence",
+);
+assert.notEqual(
+  acceptedQuality.qaEvidenceFingerprint,
+  assessChannelInceptionProbeQuality({
+    ...passingQaOutput,
+    qualityEvidence: buildQualityEvidence({
+      episode: {
+        lane: { key: "narrated_documentary", renderer: "stock_footage" },
+        topic: "A frozen probe episode with amended editorial evidence",
+        durationSec: 61,
+        story: { source: "test", beatCount: 4, shotCount: 8, coverageRatio: 1 },
+      },
+      technical: { passed: true, evaluator: "test", evidence: ["ffprobe"] },
+      visual: { passed: true, score: 8, minimumScore: 6, evaluator: "test", evidence: ["frames"] },
+      temporal: { passed: true, evaluator: "test", evidence: ["samples"] },
+      narrative: { passed: true, evaluator: "test", evidence: ["amended spec"] },
+      audio: { passed: true, evaluator: "test", evidence: ["meters"] },
+      brand: { passed: true, evaluator: "test", evidence: ["identity"] },
+    }),
+  }).qaEvidenceFingerprint,
+  "the quality fingerprint must bind editorial evidence as well as the QA report",
 );
 
 function input(moduleConfigOverride: Record<string, Record<string, unknown>>) {

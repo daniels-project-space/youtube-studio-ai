@@ -137,7 +137,6 @@ export function qaVisualCost(params: Readonly<Record<string, unknown>>): number 
   const evidenceBatches = Math.ceil(broadFrames / 12) + Math.ceil(focusFrames / 12);
   return (
     PRICE.qaBaseUsd * evidenceBatches +
-    (params["nativeWatch"] === true ? PRICE.nativeVideoQaUsd : 0) +
     (params["audioQa"] === true ? PRICE.audioQaUsd : 0)
   );
 }

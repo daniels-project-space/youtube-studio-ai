@@ -11,6 +11,8 @@
  * Dynamic import so a missing/heavy dep can never break the Trigger bundle at
  * deploy time — only a task that actually calls this pays the cost.
  */
+import { assertGeminiRuntimeAllowed } from "@/lib/gemini";
+
 export interface StagehandRunResult<T> {
   value: T;
   /** Browserbase live-view / replay session id (watch + debug the run). */
@@ -32,6 +34,7 @@ export async function withStagehand<T>(
   if (!hasBrowserbase()) {
     throw new Error("Browserbase not configured (BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID)");
   }
+  assertGeminiRuntimeAllowed("Browserbase Stagehand Gemini agent");
   const { Stagehand } = (await import("@browserbasehq/stagehand")) as unknown as {
     Stagehand: new (opts: Record<string, unknown>) => {
       init: () => Promise<unknown>;

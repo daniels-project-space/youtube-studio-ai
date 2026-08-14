@@ -7,9 +7,9 @@
  * therefore REPLACES the script→narration→footage→assemble chain and produces
  * the final `videoKey` directly (mirrors the lofi `assemble` block).
  *
- * Deterministic write-on reveal = ZERO render credits (no video model); spend is
- * per-layer Nano-Banana art (Gemini, 2K) + Fish TTS. Resolution-configurable
- * (1080p default, 2K via `width`).
+ * Deterministic write-on reveal uses no video model; its bounded paid path is
+ * per-layer attested Novita art plus TTS. Resolution-configurable (1080p
+ * default, 2K via `width`).
  *
  * RUNTIME NOTE: the renderer shells out to python3 with faster-whisper +
  * numpy/scipy/scikit-image/Pillow (scripts/wb_scribe_sync.py +
@@ -31,6 +31,7 @@ import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
 import {
   castWhiteboardSync,
   hasWhiteboardSync,
+  whiteboardImageCallCeiling,
   planWhiteboardStoryboard,
   whiteboardPanelCount,
   type WhiteboardArtRequest,
@@ -45,8 +46,33 @@ import {
 } from "@/engine/critiqueLoop";
 import { laneQualityPolicy } from "@/engine/contentLane";
 import { createAttestedNovitaImageGenerator } from "@/lib/novitaMedia";
+import { novitaCostEnvelope, type NovitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { hasNovitaRenderFarmConfig } from "@/lib/novitaRenderFarm";
 import { PRICE } from "@/engine/pricing";
+
+/**
+ * Prove the complete bounded art sequence fits the signed compiler stage
+ * reservation before a single direct worker can be provisioned. `budgetUsd`
+ * is run-wide and must never be used as a substitute for this stage envelope.
+ */
+export function whiteboardNovitaImageStageEnvelope(
+  panelCount: unknown,
+  stageBudgetUsd: number | undefined,
+): NovitaCostEnvelope {
+  if (
+    typeof stageBudgetUsd !== "number" ||
+    !Number.isFinite(stageBudgetUsd) ||
+    stageBudgetUsd <= 0
+  ) {
+    throw new Error("whiteboard_scribe requires a positive compiler-signed stage budget before Novita art can start");
+  }
+  const panels = whiteboardPanelCount(panelCount);
+  return novitaCostEnvelope({
+    label: "whiteboard_scribe",
+    imageJobs: whiteboardImageCallCeiling(panels),
+    maxCostUsd: stageBudgetUsd,
+  });
+}
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -396,6 +422,19 @@ export const whiteboardScribe: Block = {
       ctx.log(`whiteboard_scribe: sized to ~${targetSeconds}s → ${panels} panels / ~${targetWords} words`);
     }
 
+    // Prove the entire primary + recovery image envelope before planning or
+    // rendering the first layer. A custom/legacy invocation with no signed
+    // stage reservation now fails closed instead of consuming the run budget
+    // one panel at a time.
+    const novitaEnvelope = whiteboardNovitaImageStageEnvelope(
+      panels ?? whiteboardPanelCount(undefined),
+      ctx.stageBudgetUsd,
+    );
+    ctx.log(
+      `whiteboard_scribe: admitted ${novitaEnvelope.imageJobs} bounded Novita image worker(s) ` +
+      `($${novitaEnvelope.imageMaxCostUsd.toFixed(4)} within the signed stage budget)`,
+    );
+
     // DETERMINISTIC dir (scoped): whiteboardSync's per-layer art cache is
     // path-keyed — a random mkdtemp meant every Trigger retry/self-heal
     // regenerated all 18-30 paid art layers from scratch.
@@ -408,6 +447,9 @@ export const whiteboardScribe: Block = {
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/whiteboard-art`,
       id: (request) => request.id,
       profileId: "production",
+      // The aggregate admission above reserves the full sequence. Each
+      // individual worker receives only its own conservative lifecycle cap.
+      maxCostUsd: PRICE.novitaImageMaxUsd,
       lifecycle: {
         ownerId: ctx.ownerId,
         channelId: ctx.channelId,

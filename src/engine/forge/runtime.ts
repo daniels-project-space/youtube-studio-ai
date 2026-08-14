@@ -14,12 +14,17 @@ import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { geminiJson, parseJsonLoose } from "@/lib/gemini";
 import { PRICE } from "@/engine/pricing";
+import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
 import { generateI2V } from "@/lib/i2v";
 import { renderNovitaImage } from "@/lib/novitaMedia";
 import type { ForgedModuleSpec, ForgeStep } from "./spec";
 
-const STILL_COST = PRICE.novitaImageUsd;
-const CLIP_COST = PRICE.novitaVideoUsd;
+// A forged module has no trusted parent pipeline allocation. Reserve the
+// direct worker's immutable lifecycle ceiling up front, not the optimistic
+// planning estimate, so an untrusted spec cannot spend first and discover its
+// ceiling was too small only after receiving a provider bill.
+const STILL_COST = PRICE.novitaImageMaxUsd;
+const CLIP_COST = PRICE.novitaVideoMaxUsd;
 
 type Scope = {
   store: Record<string, unknown>;
@@ -27,6 +32,44 @@ type Scope = {
   steps: unknown[];
   item?: unknown;
 };
+
+/**
+ * I2V may appear inside an authored foreach (and the interpreter deliberately
+ * remains defensive if a future schema permits deeper nesting). Resolve the
+ * runtime capability before any LLM can author an image plan or any still can
+ * be provisioned for a later incompatible video step.
+ */
+export function forgedSpecUsesI2V(spec: Pick<ForgedModuleSpec, "steps">): boolean {
+  const containsI2V = (steps: readonly ForgeStep[]): boolean => steps.some((step) => {
+    if (step.op === "i2v") return true;
+    return step.op === "foreach" && containsI2V(step.steps as readonly ForgeStep[]);
+  });
+  return containsI2V(spec.steps);
+}
+
+function assertForgedStageAdmission(spec: ForgedModuleSpec, ctx: StageContext): number {
+  const admitted = ctx.stageBudgetUsd;
+  if (!Number.isFinite(admitted) || admitted === undefined || admitted <= 0) {
+    throw new Error(
+      `forged module ${spec.id} requires a positive compiler-admitted stage budget before paid execution`,
+    );
+  }
+  if (admitted + Number.EPSILON < spec.maxCostUsd) {
+    throw new Error(
+      `forged module ${spec.id} requires $${spec.maxCostUsd.toFixed(2)} but its compiler-admitted stage budget is only $${admitted.toFixed(2)}`,
+    );
+  }
+  return admitted;
+}
+
+function assertForgedRuntimeAdmissible(spec: ForgedModuleSpec): void {
+  if (!forgedSpecUsesI2V(spec)) return;
+  // The runtime helper validates the exact production profile used in runStep.
+  // It is intentionally called before even the first LLM/image primitive.
+  assertPipelineVideoRuntimeReady([
+    { block: "novita_render_video", params: { generationProfile: "production" } },
+  ]);
+}
 
 /** Resolve `$store.x` / `$params.x` / `$steps.N(.field)` / `$item(.field)` refs. */
 function resolveRef(ref: unknown, scope: Scope): unknown {
@@ -104,6 +147,7 @@ async function runStep(
       id: `forge-image-${state.n++}`,
       prompt: `${interp(step.prompt, scope)} Absolutely NO text, NO words, NO letters, NO watermark.`,
       profileId: "production",
+      maxCostUsd: STILL_COST,
       lifecycle: {
         ownerId: ctx.ownerId,
         channelId: ctx.channelId,
@@ -127,6 +171,7 @@ async function runStep(
       imageKey,
       durationSec: step.durationSec ?? 5,
       aspectRatio: "16:9",
+      maxCostUsd: CLIP_COST,
       runId: ctx.runId,
       keyPrefix: ctx.keyPrefix,
       lifecycle: {
@@ -201,6 +246,8 @@ export function makeForgedBlock(spec: ForgedModuleSpec): Block {
     produces: ["extraOverlays"],
     paid: true,
     run: async (ctx) => {
+      assertForgedRuntimeAdmissible(spec);
+      const admittedStageBudgetUsd = assertForgedStageAdmission(spec, ctx);
       const tmp = await makeRunTempDir(ctx.runId);
       const params: Record<string, unknown> = {};
       for (const p of spec.params) {
@@ -213,7 +260,7 @@ export function makeForgedBlock(spec: ForgedModuleSpec): Block {
 
       const scope: Scope = { store, params, steps: [] };
       const state = { tmp, blockId: spec.id, cost: 0, imageCost: 0, maxCost: spec.maxCostUsd, overlays: [] as { path: string; startSec: number; durSec: number; noBlur?: boolean; text?: string }[], n: 0 };
-      ctx.log(`${spec.id}: forged module starting (${spec.steps.length} steps, ceiling $${spec.maxCostUsd})`);
+      ctx.log(`${spec.id}: forged module starting (${spec.steps.length} steps, ceiling $${spec.maxCostUsd}, admitted $${admittedStageBudgetUsd.toFixed(2)})`);
       for (const step of spec.steps) {
         scope.steps.push(await runStep(step, scope, ctx, state));
       }

@@ -164,6 +164,14 @@ const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
     energy: "spectacle", font: "serif", treatment: "clean", textObject: "movie_poster",
     imageStyle: "epic painted concept-art tableau with chiaroscuro light and vast receding depth",
   },
+  illustrated_explainer: {
+    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    imageStyle: "original premium editorial vector scene with one causal visual idea and clean diagrammatic hierarchy",
+  },
+  children_learning: {
+    energy: "cozy_pop", font: "rounded", treatment: "clean", textObject: "block_plate",
+    imageStyle: "original cheerful 2D learning scene with one clear safe action, stable friendly characters, and no branded properties",
+  },
 };
 
 /**

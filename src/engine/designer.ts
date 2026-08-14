@@ -6,9 +6,25 @@
  * "architect" + clip analysis layer on top later only adjusts these inputs.)
  */
 import { ARCHETYPES } from "./archetypes";
-import { FAMILIES, FAMILY_CREW, CREW_ROLE_BLOCK, type FamilyKey } from "./families";
+import {
+  FAMILIES,
+  FAMILY_CREW,
+  CREW_ROLE_BLOCK,
+  assertFamilyAutonomousPlanningPipeline,
+  familyDurationContract,
+  resolveFamilyEpisodeLengthSeconds,
+  familyProductionReadiness,
+  type FamilyKey,
+} from "./families";
 import { subcategoryTags } from "@/lib/nicheCatalog";
 import { nichePreset } from "./golden";
+import {
+  dataStoryInsertParams,
+  dataStoryProductionReadiness,
+  isDataStoryContract,
+  supportsDataStoryFamily,
+  type DataStoryContract,
+} from "./dataStory";
 import { registerAllBlocks } from "./blocks";
 import { validatePipeline } from "./validate";
 import type { PipelineEntry } from "./types";
@@ -49,6 +65,11 @@ export interface DesignOptions {
   claimEvidence?: unknown;
   /** Advanced editor: per-block param overrides, keyed by block id. */
   paramOverrides?: Record<string, Record<string, unknown>>;
+  /**
+   * Explicit opt-in for source-attributed chart-led narration. This is a
+   * contract over the existing Data Inserts module, not a cosmetic toggle.
+   */
+  dataStory?: DataStoryContract;
   toggles?: {
     quotes?: boolean;
     captions?: boolean;
@@ -68,9 +89,15 @@ export interface DesignOptions {
 
 export interface DesignResult {
   pipeline: PipelineEntry[];
+  /** Exact resolved duration after applying the format contract and eligible niche preset. */
+  episodeLengthSeconds: number;
   /** Immutable production lane persisted with the channel at creation. */
   contentLane: ContentLane;
-  available: boolean; // false → family's visual engine not built yet (save as draft)
+  /** Whether the family template and its visual engine are implemented. */
+  available: boolean;
+  /** Whether the current provider/hardware contract can actually render it. */
+  productionReady: boolean;
+  runtimeBlockers: readonly string[];
   warnings: string[];
   compilation?: PipelineCompilation;
 }
@@ -89,6 +116,12 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   if (!fam) throw new Error(`unknown family: ${opts.family}`);
   const base = ARCHETYPES[fam.archetypeKey];
   if (!base) throw new Error(`family ${opts.family} → unknown archetype ${fam.archetypeKey}`);
+  if (opts.dataStory !== undefined && !isDataStoryContract(opts.dataStory)) {
+    throw new Error("source-attributed data story must use the current typed evidence contract");
+  }
+  if (opts.dataStory && !supportsDataStoryFamily(opts.family)) {
+    throw new Error("source-attributed data story is currently supported only by Narrated + Stock Footage");
+  }
 
   const t = opts.toggles ?? {};
   const warnings: string[] = [];
@@ -96,12 +129,36 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // inception when the operator/AI didn't specify them (so every niche launches
   // with its research-tuned defaults — covers wizard, API, and autopilot creation).
   const preset = nichePreset(opts.nicheKey);
-  const lenSec = opts.lengthMinutes ? Math.round(opts.lengthMinutes * 60) : preset?.targetSeconds;
+  const duration = familyDurationContract(opts.family);
+  let lenSec: number;
+  if (opts.lengthMinutes !== undefined) {
+    lenSec = resolveFamilyEpisodeLengthSeconds(opts.family, opts.lengthMinutes);
+  } else {
+    const presetSeconds = Number(preset?.targetSeconds);
+    if (
+      Number.isFinite(presetSeconds) &&
+      presetSeconds >= duration.minimumSeconds &&
+      presetSeconds <= duration.maximumSeconds
+    ) {
+      lenSec = Math.round(presetSeconds);
+    } else {
+      lenSec = duration.defaultSeconds;
+      // A fixed-cadence product intentionally owns its timing. A long-form
+      // niche preset is not an operator-visible conflict in that case; it is
+      // simply inapplicable metadata and must not make a clean quiz look
+      // degraded in the creator or readiness gate.
+      if (duration.inputUnit !== "fixed" && Number.isFinite(presetSeconds) && presetSeconds > 0) {
+        warnings.push(
+          `${fam.label} uses its ${duration.defaultSeconds}s authored duration because the selected niche preset's ${Math.round(presetSeconds)}s target is outside this format's ${duration.minimumSeconds}–${duration.maximumSeconds}s contract.`,
+        );
+      }
+    }
+  }
   // Documentary collage Shorts are a distinct native-vertical product, not a
   // cropped long-form output. Keep every upstream sizing knob inside the
   // renderer's validated 5-7 beat window even when a channel preset is long.
   const documentaryShortTargetSec = opts.family === "documentary_collage_short"
-    ? Math.max(35, Math.min(60, Number(lenSec ?? 52)))
+    ? lenSec
     : undefined;
   const documentaryShortSources = opts.sourceReferences
     ?? opts.paramOverrides?.["short_strategy"]?.["sourceReferences"];
@@ -194,8 +251,10 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       if (e.block === "assemble" && opts.family === "music_loop" && lenSec) {
         params.durationSec = lenSec;
       }
-      // Music channels: the audio IS the product — score it (audiobox advisory).
-      if (e.block === "qa_visual" && opts.family === "music_loop" && params.audioQa === undefined) {
+      // Audio is audience-facing in every family: voice, score, ambience, or
+      // game/quiz sound. The final-master aesthetics review is therefore part
+      // of the production compiler rather than an optional music-only extra.
+      if (e.block === "qa_visual" && params.audioQa === undefined) {
         params.audioQa = true;
       }
       if (e.block === "qa_visual" && params.qaProfile === undefined) {
@@ -219,6 +278,82 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       }
       return { block: e.block, params: Object.keys(params).length ? params : undefined };
     });
+
+  // A child-directed pipeline may render an original private review candidate,
+  // but it is never a generic publishing variant. Apply this after advanced
+  // overrides so a UI/API caller cannot bypass the safety module or change its
+  // audience/release semantics through parameter precedence.
+  if (opts.family === "children_learning") {
+    if (opts.publishMode && opts.publishMode !== "draft") {
+      warnings.push("Children-learning ignores public/scheduled publish overrides; it can create a private review draft only.");
+    }
+    pipeline = pipeline.map((entry) => {
+      const params = { ...(entry.params ?? {}) };
+      if (entry.block === "script_gen") params.style = "children_learning";
+      if (entry.block === "episode_graph") params.audience = "children";
+      if (entry.block === "scene_compiler") {
+        params.audience = "children";
+        params.aspect = "16:9";
+      }
+      if (entry.block === "upload_draft") {
+        params.publishMode = "draft";
+        params.madeForKids = true;
+      }
+      return { block: entry.block, params: Object.keys(params).length ? params : undefined };
+    });
+  }
+
+  // The quiz is the first independently production-admitted no-Gemini family.
+  // Its planning, safety classification, metadata, critic receipt and thumbnail
+  // are all deterministic modules with durable source/provenance receipts. Do
+  // this as a pipeline rewrite rather than a conditional inside Topicraft: the
+  // compiled graph itself makes the non-Gemini route inspectable and reusable.
+  if (opts.family === "quizyear") {
+    const pinnedTopic = opts.paramOverrides?.["quiz_year"]?.["topic"];
+    const safeDefaultCategories =
+      "guess_year,capital_city,country_currency,element_symbol,element_atomic_number";
+    pipeline = pipeline.flatMap((entry): PipelineEntry[] => {
+      if (entry.block === "competitor_research") return [];
+      if (entry.block === "topic_select") {
+        return [{
+          block: "quiz_topic_plan",
+          params: {
+            ...(typeof pinnedTopic === "string" && pinnedTopic.trim()
+              ? { pinnedTopic: pinnedTopic.trim() }
+              : {}),
+          },
+        }];
+      }
+      if (entry.block === "compliance_check") return [{ block: "quiz_topic_safety" }];
+      if (entry.block === "quiz_year") {
+        const params = { ...(entry.params ?? {}) };
+        // The archetype's former static topic is superseded by the planner's
+        // topic-memory-backed selection. An explicit editor pin travels to the
+        // planner above, never around it directly into the renderer.
+        delete params.topic;
+        if (params.categories === undefined) params.categories = safeDefaultCategories;
+        params.noGemini = true;
+        return [
+          {
+            block: "music",
+            params: {
+              provider: "mureka",
+              trackCount: 1,
+              prompt:
+                "bright modern game-show instrumental, warm marimba and light percussion, playful but not childish, no vocals, no lyrics, clean loopable 100 BPM",
+              ...(opts.paramOverrides?.["music"] ?? {}),
+            },
+          },
+          { block: "quiz_year", params },
+        ];
+      }
+      if (entry.block === "metadata") {
+        return [{ block: "quiz_critic_spec" }, { block: "quiz_metadata" }];
+      }
+      if (entry.block === "thumbnail_gen") return [{ block: "quiz_thumbnail" }];
+      return [entry];
+    });
+  }
 
   // GENERATED-VISUALS families use the complete authored-shot chain. Each shot
   // gets a pinned keyframe render, required asset selection, pinned I2V render,
@@ -366,8 +501,12 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // VideoBrief slices the producers + QA consume. Each carries family +
   // targetSeconds so the agents size their briefs correctly.
   if (t.crew !== false) {
-    // Niche preset roster wins over the family default when present.
-    const roles = preset?.crew ?? FAMILY_CREW[opts.family] ?? [];
+    // A certified autonomous planner owns its own deterministic editorial
+    // receipt. A niche preset must not be able to reintroduce Gemini crew
+    // briefs after the family has selected that route.
+    const roles = opts.family === "quizyear"
+      ? []
+      : preset?.crew ?? FAMILY_CREW[opts.family] ?? [];
     const crewEntries: PipelineEntry[] = roles
       .map((r) => CREW_ROLE_BLOCK[r])
       .filter(Boolean)
@@ -418,29 +557,57 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     });
   }
 
-  // Script-synced DATA-VIZ inserts (visual_inserts): identity-driven module
-  // selection — niches that speak numbers (finance/health/tech/history…) get
-  // the Remotion motion-graphics layer; others skip it entirely. Placed after
-  // quote_overlays (shares its compositing pass + avoids window clashes).
-  if (fam.narrated && preset?.insertTypes?.length) {
-    const entry: PipelineEntry = {
-      block: "visual_inserts",
-      params: { insertTypes: preset.insertTypes },
-    };
-    const anchors = ["quote_overlays", "intro_card", "narration_tts"];
-    let at = -1;
-    for (const a of anchors) {
-      const i = pipeline.findIndex((e) => e.block === a);
-      if (i >= 0) { at = i + 1; break; }
+  // Script-synced DATA-VIZ inserts (visual_inserts): existing niche presets
+  // may opt into general number-driven inserts. The source-attributed data
+  // story profile is stricter and requires an explicit typed contract; loose
+  // advanced overrides cannot weaken its source or spoken-anchor safeguards.
+  const insertParams: Record<string, unknown> | undefined = opts.dataStory
+    ? dataStoryInsertParams(opts.dataStory)
+    : preset?.insertTypes?.length
+      ? { insertTypes: preset.insertTypes }
+      : undefined;
+  if (fam.narrated && insertParams && pipeline.some((entry) => entry.block === "timeline_assemble")) {
+    const visualInsertOverrides = opts.paramOverrides?.visual_inserts ?? {};
+    const maxInserts = Number(visualInsertOverrides.maxInserts);
+    const minGapSec = Number(visualInsertOverrides.minGapSec);
+    if (Number.isFinite(maxInserts) && maxInserts >= 1 && maxInserts <= 8) {
+      insertParams.maxInserts = Math.round(maxInserts);
     }
-    if (at > 0) {
-      pipeline.splice(at, 0, entry);
-      // CLOSED LOOP: the script must SPEAK the numbers the inserts render —
-      // without this, a "cinematic" script hedges qualitatively and the
-      // Insert Director has nothing legitimate to visualize.
-      const sg = pipeline.find((e) => e.block === "script_gen");
-      if (sg) sg.params = { ...(sg.params ?? {}), dataRich: true };
+    if (Number.isFinite(minGapSec) && minGapSec >= 0 && minGapSec <= 120) {
+      insertParams.minGapSec = minGapSec;
     }
+    if (!pipeline.some((entry) => entry.block === "visual_inserts")) {
+      const entry: PipelineEntry = { block: "visual_inserts", params: insertParams };
+      const anchors = ["quote_overlays", "intro_card", "narration_tts"];
+      let at = -1;
+      for (const a of anchors) {
+        const i = pipeline.findIndex((e) => e.block === a);
+        if (i >= 0) { at = i + 1; break; }
+      }
+      if (at > 0) pipeline.splice(at, 0, entry);
+    }
+    // CLOSED LOOP: the script must speak the numbers the insert layer renders.
+    const sg = pipeline.find((e) => e.block === "script_gen");
+    if (sg) {
+      sg.params = {
+        ...(sg.params ?? {}),
+        dataRich: true,
+        ...(opts.dataStory ? { sourceAttributionRequired: true } : {}),
+      };
+    }
+    if (opts.dataStory) {
+      const qa = pipeline.find((e) => e.block === "qa_script");
+      if (qa) {
+        qa.params = {
+          ...(qa.params ?? {}),
+          dataStoryContract: opts.dataStory.version,
+          requireNamedSource: true,
+          requireSpokenNumericAnchor: true,
+        };
+      }
+    }
+  } else if (opts.dataStory) {
+    throw new Error("source-attributed data story requires a narrated timeline assembly pipeline");
   }
 
   // crosspost is opt-in — append before notify/cleanup if requested.
@@ -491,10 +658,24 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     }
   }
 
+  const runtimeReadiness = familyProductionReadiness(opts.family);
+  const dataStoryReadiness = opts.dataStory ? dataStoryProductionReadiness() : undefined;
   if (!fam.available) {
     warnings.push(
       `${fam.label}: the "${fam.visualEngine}" visual engine isn't built yet — channel will be created as a DRAFT and become runnable when that module ships.`,
     );
+  }
+  if (!runtimeReadiness.productionReady) {
+    warnings.push(
+      `${fam.label}: production rendering is blocked — ${runtimeReadiness.blockers.join(" ")}`,
+    );
+    if (runtimeReadiness.remediation) warnings.push(runtimeReadiness.remediation);
+  }
+  if (dataStoryReadiness && !dataStoryReadiness.autonomous) {
+    warnings.push(
+      `Source-attributed Data Story: automatic production is blocked — ${dataStoryReadiness.blockers.join(" ")}`,
+    );
+    warnings.push(dataStoryReadiness.remediation);
   }
 
   // Resolve uniquely identifiable policy/crew capability gaps from certified
@@ -509,17 +690,35 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   if (!contentLane) throw new Error(`family ${opts.family} has no content lane policy`);
   assertPipelineMatchesContentLane(contentLane, pipeline);
   pipeline = injectContentLaneIntoPipeline(pipeline, contentLane);
+  assertFamilyAutonomousPlanningPipeline(opts.family, pipeline);
 
   // Never persist an invalid graph.
   let compilation: PipelineCompilation | undefined;
   try {
-    const resolved = validatePipeline(pipeline);
+    // contentLane is immutable channel configuration injected into the runtime
+    // seed store by runPipeline.ts, not an executable block artifact. Seed it
+    // here as well so creator-time validation verifies the same graph that the
+    // runner will execute.
+    const resolved = validatePipeline(pipeline, ["contentLane"]);
     if (fam.available) compilation = compilePipeline(resolved);
   } catch (e) {
     throw new Error(`designed pipeline invalid: ${e instanceof Error ? e.message : e}`);
   }
 
-  return { pipeline, contentLane, available: fam.available, warnings, compilation };
+  const runtimeBlockers = [
+    ...runtimeReadiness.blockers,
+    ...(dataStoryReadiness?.blockers ?? []),
+  ];
+  return {
+    pipeline,
+    episodeLengthSeconds: lenSec,
+    contentLane,
+    available: fam.available,
+    productionReady: fam.available && runtimeReadiness.productionReady && dataStoryReadiness?.autonomous !== false,
+    runtimeBlockers,
+    warnings,
+    compilation,
+  };
 }
 
 /**
@@ -543,10 +742,23 @@ export function enforceLengthContract(
         p[k] = v;
       }
     };
+    if (e.block === "topic_select") pin("targetSeconds", lenSec);
+    if (
+      e.block === "director_brief" ||
+      e.block === "dp_brief" ||
+      e.block === "editor_brief" ||
+      e.block === "composer_brief" ||
+      e.block === "critic_spec"
+    ) pin("targetSeconds", lenSec);
     if (e.block === "script_gen") pin("maxSeconds", lenSec);
     if (e.block === "length_check") {
-      pin("minSeconds", Math.round(lenSec * 0.6));
-      pin("maxSeconds", Math.round(lenSec * 1.8));
+      if (family === "documentary_collage_short") {
+        pin("minSeconds", 20);
+        pin("maxSeconds", 60);
+      } else {
+        pin("minSeconds", Math.round(lenSec * 0.6));
+        pin("maxSeconds", Math.round(lenSec * 1.8));
+      }
     }
     if (e.block === "assemble" && family === "music_loop") pin("durationSec", lenSec);
     if (e.block === "music" && family === "music_loop") {
@@ -555,7 +767,16 @@ export function enforceLengthContract(
     }
     if (e.block === "whiteboard_scribe") pin("targetSeconds", lenSec);
     if (e.block === "lore_short") pin("targetSeconds", lenSec);
-    if (e.block === "motion_comic") pin("panels", Math.max(4, Math.min(12, Math.round(lenSec / 22))));
+    if (e.block === "motion_comic") {
+      pin("targetSeconds", lenSec);
+      pin("panels", Math.max(4, Math.min(12, Math.round(lenSec / 22))));
+    }
+    if (e.block === "quiz_year") pin("targetSeconds", lenSec);
+    if (family === "documentary_collage_short") {
+      if (e.block === "short_strategy" || e.block === "documotion_short") {
+        pin("targetSeconds", lenSec);
+      }
+    }
     return { block: e.block, params: Object.keys(p).length ? p : undefined };
   });
   return { pipeline: out, changed };

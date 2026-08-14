@@ -117,6 +117,8 @@ export const MODULE_CATALOG: ModuleSpec[] = [
           { value: "crime", label: "True-crime / mystery" },
           { value: "shorts", label: "Punchy short-form" },
           { value: "meditation", label: "Calm / guided" },
+          { value: "illustrated_explainer", label: "Illustrated explainer" },
+          { value: "children_learning", label: "Children’s learning" },
         ],
       },
     ],
@@ -186,7 +188,7 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   {
     block: "visual_inserts",
     label: "Data Inserts",
-    description: "Script-synced motion graphics (animated stats, charts, comparisons) rendered when the narration speaks numbers.",
+    description: "Script-synced motion graphics (animated stats, charts, comparisons) rendered when the narration speaks numbers. The explicit Source-attributed Data Story profile renders only numbers spoken in a sentence naming a concrete source.",
     optional: true,
     params: [
       { key: "maxInserts", label: "Max inserts", type: "number", min: 1, max: 8, step: 1 },
@@ -322,6 +324,34 @@ export const MODULE_CATALOG: ModuleSpec[] = [
       { key: "durationSec", label: "Runtime (sec)", type: "number", min: 30, max: 36000, step: 30, help: "Total video length the loop is extended to." },
       { key: "deblurIntro", label: "Deblur intro", type: "toggle", help: "Open on a focus-pull from blur with the title." },
     ],
+  },
+  {
+    block: "episode_graph",
+    label: "Episode Graph",
+    description: "Locks causal beats, continuity, sources, and a deterministic scene manifest before rendering.",
+    optional: false,
+    params: [],
+  },
+  {
+    block: "learning_contract",
+    label: "Learning Contract",
+    description: "Locks the learning objective, source-linked demonstration beats, retrieval prompt, and human-review checklist.",
+    optional: false,
+    params: [],
+  },
+  {
+    block: "child_content_safety",
+    label: "Children’s Safety Review",
+    description: "Requires curriculum evidence, child-safe language, and a human-reviewed private draft for children-learning channels.",
+    optional: false,
+    params: [],
+  },
+  {
+    block: "scene_compiler",
+    label: "Scene Compiler",
+    description: "Builds an original deterministic illustrated 16:9 master from the locked scene manifest.",
+    optional: false,
+    params: [],
   },
   {
     block: "upload_draft",

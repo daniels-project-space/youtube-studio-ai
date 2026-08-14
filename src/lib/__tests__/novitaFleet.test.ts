@@ -21,6 +21,8 @@ import {
   automaticRtx4090Concurrency,
   budgetBoundedWorkerLifetime,
 } from "@/lib/novitaDirectRender";
+import { generationProfile } from "@/engine/generationProfiles";
+import { toNovitaPhaseProfile } from "@/lib/novitaRenderFarm";
 
 function attestation(): NovitaFleetAttestation {
   return {
@@ -46,15 +48,12 @@ function attestation(): NovitaFleetAttestation {
       modelManifestSha256: "b".repeat(64),
     },
     models: {
-      gemma: { model: OFFICIAL_RENDER_PINS.gemma.model, revision: "c".repeat(40), localCacheVerified: true },
       zImage: { ...OFFICIAL_RENDER_PINS.zImage, localCacheVerified: true },
       ltx: {
-        model: OFFICIAL_RENDER_PINS.ltx.model,
-        revision: OFFICIAL_RENDER_PINS.ltx.revision,
-        runtimeRepository: OFFICIAL_RENDER_PINS.ltx.runtimeRepository,
-        runtimeRevision: OFFICIAL_RENDER_PINS.ltx.runtimeRevision,
+        ...OFFICIAL_RENDER_PINS.ltx,
         localCacheVerified: true,
-        twoStageHqVerified: true,
+        distilledTwoStageX2Verified: true,
+        rtx4090ProfileBenchmarked: true,
       },
     },
     controls: {
@@ -161,8 +160,8 @@ async function main() {
   assert(budgetBoundedWorkerLifetime({ maximumCostUsd: 0.1, hourlyRate: 0.17 }).maxRuntimeSeconds < 7_200);
   assert.throws(() => budgetBoundedWorkerLifetime({ maximumCostUsd: 0.001, hourlyRate: 0.17 }), NovitaAdmissionError);
   assert.throws(
-    () => assertRtx4090VideoRuntime({ model: OFFICIAL_RENDER_PINS.ltx.model }),
-    /needs at least 32 GB.*RTX 4090 has 24 GB/,
+    () => assertRtx4090VideoRuntime(toNovitaPhaseProfile(generationProfile("production"), "video")),
+    /ltx_2_5_revision_not_benchmarked_on_rtx_4090/,
   );
 
   assert.throws(

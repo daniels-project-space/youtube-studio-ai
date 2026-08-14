@@ -112,6 +112,11 @@ function everyFamilyGetsOnlyApplicableModules(): void {
     ] as const) {
       assert(channelInceptionStage(plan, required), `${request.name} must plan ${required}`);
     }
+    assert.equal(
+      channelInceptionStage(plan, "channel-inception-probe")!.maximumCostUsd,
+      request.family === "cinematic" ? 55 : 3,
+      `${request.family} must receive its truthful proof-render authority`,
+    );
 
     const voice = channelInceptionStage(plan, "channel-inception-voice");
     if (request.family === "music_loop") {

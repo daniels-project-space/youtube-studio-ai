@@ -16,6 +16,10 @@ import { loadFont as loadCaveat } from "@remotion/google-fonts/Caveat";
 import { loadFont as loadSpecialElite } from "@remotion/google-fonts/SpecialElite";
 import { type DocuTheme, type DocuShotKind, getStyle } from "./docuStyles";
 import {
+  safeFrameForDocuLayout,
+  type DocuLayout,
+} from "./docuLayout";
+import {
   VoxRevealShot,
   VoxChartShot,
   VoxCounterShot,
@@ -140,37 +144,9 @@ const DEFAULT_THEME = getStyle("archival_collage").theme;
 const ThemeCtx = createContext<DocuTheme>(DEFAULT_THEME);
 export const useTheme = () => useContext(ThemeCtx);
 
-export type DocuLayout = "long" | "short";
-
-export interface DocuSafeFrame {
-  top: number;
-  right: number;
-  bottom: number;
-  left: number;
-}
-
-/** Shared safe frame for every deterministic text layer in the composition. */
-export function safeFrameForDocuLayout(
-  width: number,
-  height: number,
-  layout: DocuLayout = "long",
-): DocuSafeFrame {
-  const portrait = layout === "short" || height > width;
-  return portrait
-    ? {
-        top: height * 0.075,
-        right: width * 0.075,
-        // Leave a real lower-third/caption-safe zone on native Shorts.
-        bottom: height * 0.18,
-        left: width * 0.075,
-      }
-    : {
-        top: height * 0.08,
-        right: width * 0.06,
-        bottom: height * 0.08,
-        left: width * 0.06,
-      };
-}
+// Keep the composition's historical public surface stable while allowing
+// server-only modules to import the pure geometry without importing React.
+export { safeFrameForDocuLayout, type DocuLayout, type DocuSafeFrame } from "./docuLayout";
 
 const DocuLayoutCtx = createContext<DocuLayout>("long");
 export const useDocuLayout = () => useContext(DocuLayoutCtx);

@@ -10,7 +10,11 @@ import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { parseJsonLoose } from "@/lib/gemini";
+import {
+  assertGeminiRuntimeAllowed,
+  isGeminiRuntimeEnabled,
+  parseJsonLoose,
+} from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
 import { PRICE } from "@/engine/pricing";
@@ -88,12 +92,12 @@ function falImageRouteActive(): boolean {
 
 export function hasBanana(): boolean {
   if (falImageRouteActive()) return !!process.env.FAL_KEY;
-  return !!process.env.GEMINI_API_KEY;
+  return isGeminiRuntimeEnabled() && !!process.env.GEMINI_API_KEY;
 }
 
 /** Thumbnail readiness ignores the generic image router by design. */
 export function hasNanoBanana(): boolean {
-  return !!process.env.GEMINI_API_KEY;
+  return isGeminiRuntimeEnabled() && !!process.env.GEMINI_API_KEY;
 }
 
 /** The proven craft contract — prepended to EVERY brief. */
@@ -347,6 +351,7 @@ async function generateGeminiImage(
     strictNanoThumbnail?: boolean;
   },
 ): Promise<GeminiImageResult> {
+  assertGeminiRuntimeAllowed("Nano Banana image generation");
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
   const prompt = args.allowText ? args.prompt : args.prompt + NO_TEXT_CLAUSE;

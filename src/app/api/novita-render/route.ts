@@ -19,6 +19,39 @@ const DIRECT_CONTROL_PLANE = {
   billingClosure: "provider deletion verification required",
 } as const;
 
+/**
+ * The Studio route deliberately has no Novita credentials, so it must never
+ * present its architectural description as a live render admission. A future
+ * Trigger-owned attestation adapter may replace this object, but only with an
+ * exact profile-bound proof from the direct controller.
+ */
+function unattestedStudioHealth() {
+  return {
+    ok: true,
+    ready: false,
+    checkedAt: new Date().toISOString(),
+    architecturalGpuCeiling: NOVITA_HARD_GPU_LIMIT,
+    verifiedGpuQuota: null,
+    effectiveGpuLimit: null,
+    activeGpuCount: null,
+    blockers: [
+      "direct_trigger_attestation_unavailable_from_studio_route",
+      "ltx_2_5_rtx_4090_x2_profile_not_benchmarked",
+    ],
+    attestation: {
+      source: "studio-static" as const,
+      profileIdentity: null,
+      exactLtx25Rtx4090X2: false,
+    },
+    contract: null,
+    models: null,
+    storage: null,
+    controls: null,
+    controlPlane: DIRECT_CONTROL_PLANE,
+    note: "Studio does not hold provider credentials. Trigger verifies the exact LTX 2.5 RTX 4090 x2 profile immediately before any paid worker is created.",
+  };
+}
+
 function disabledResponse(): NextResponse {
   return NextResponse.json({
     ok: false,
@@ -32,15 +65,7 @@ export async function GET(request: Request) {
     await requireStudioActor(request);
     const { searchParams } = new URL(request.url);
     if (searchParams.get("health") === "1") {
-      // Vercel intentionally cannot inspect provider credentials or capacity.
-      // The Trigger task/reaper performs that live check before any paid create.
-      return NextResponse.json({
-        ok: true,
-        ready: "trigger-evaluated",
-        checkedAt: new Date().toISOString(),
-        controlPlane: DIRECT_CONTROL_PLANE,
-        note: "Provider capacity, 4090 SKU, model-volume, and prewarm admission are evaluated inside Trigger immediately before worker creation.",
-      }, { headers: { "cache-control": "no-store" } });
+      return NextResponse.json(unattestedStudioHealth(), { headers: { "cache-control": "no-store" } });
     }
     return disabledResponse();
   } catch (error) {

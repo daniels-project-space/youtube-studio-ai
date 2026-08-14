@@ -22,6 +22,16 @@ export const CHANNEL_INCEPTION_MODULE_KEYS = [
 
 export type ChannelInceptionModuleKey = (typeof CHANNEL_INCEPTION_MODULE_KEYS)[number];
 
+/** Conservative default for ordinary proof renders. */
+export const CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD = 3;
+/**
+ * Two independent 60-second cinematic probes currently reserve $25.11 each
+ * (locked keyframes, asset QA, LTX shots, and shot QA). This cap preserves a
+ * bounded retry without pretending that a $3 probe can validate the Novita
+ * chain. It is still spent only after the explicit proof-render approval.
+ */
+export const CHANNEL_INCEPTION_CINEMATIC_PROBE_COST_CEILING_USD = 55;
+
 /** Hard reservation ceilings; provider implementations may spend less, never more. */
 export const CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD: Readonly<
   Record<ChannelInceptionModuleKey, number>
@@ -30,11 +40,12 @@ export const CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD: Readonly<
   "channel-inception-positioning": 0.6,
   "channel-inception-seo": 0.45,
   "channel-inception-voice": 0.75,
-  "channel-inception-avatar": 0.4,
-  "channel-inception-banner": 0.55,
+  // Three judged Novita Imagecraft candidates at the exact $0.35 worker cap.
+  "channel-inception-avatar": 1.05,
+  "channel-inception-banner": 1.05,
   "channel-inception-thumbnails": 1.4,
   "channel-inception-pipeline": 0.6,
-  "channel-inception-probe": 3,
+  "channel-inception-probe": CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD,
   "channel-inception-readiness": 0,
 };
 
@@ -62,6 +73,7 @@ export type ChannelProbeProfile =
   | "ambient-narrated"
   | "music-loop"
   | "motion-comic"
+  | "scene-compiler"
   | "whiteboard"
   | "vertical-short"
   | "cinematic-scenes";
@@ -191,7 +203,32 @@ export const CHANNEL_INCEPTION_FAMILY_POLICIES: Readonly<
     starterTopicCount: 3,
     starterPreviewCount: 3,
   },
+  illustrated_explainer: {
+    family: "illustrated_explainer",
+    voiceOwnership: "channel-cast",
+    requiresNarrativePlaybook: true,
+    probeProfile: "scene-compiler",
+    starterTopicCount: 3,
+    starterPreviewCount: 3,
+  },
+  children_learning: {
+    family: "children_learning",
+    voiceOwnership: "channel-cast",
+    requiresNarrativePlaybook: true,
+    // The creation probe is a locally rendered private candidate; release is
+    // separately constrained by child_content_safety and upload_draft.
+    probeProfile: "scene-compiler",
+    starterTopicCount: 3,
+    starterPreviewCount: 3,
+  },
 };
+
+/** Exact proof-render ceiling for the selected family, before user approval. */
+export function channelInceptionProbeCostCeilingUsd(family: FamilyKey): number {
+  return CHANNEL_INCEPTION_FAMILY_POLICIES[family].probeProfile === "cinematic-scenes"
+    ? CHANNEL_INCEPTION_CINEMATIC_PROBE_COST_CEILING_USD
+    : CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD;
+}
 
 export const CHANNEL_INCEPTION_MODULE_CONTRACTS: readonly ChannelInceptionModuleContract[] = [
   {

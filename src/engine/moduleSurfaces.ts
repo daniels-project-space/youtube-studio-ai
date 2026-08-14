@@ -91,14 +91,16 @@ const INSERTS_MODULE: ModuleCard = {
   key: "visual_inserts",
   title: "Data Inserts",
   stage: "visual",
-  does: "Renders script-synced motion graphics (stats / charts / comparisons) when the narration speaks numbers.",
+  does: "Renders script-synced motion graphics (stats / charts / comparisons) when the narration speaks numbers; its source-attributed data-story profile rejects unsourced numeric claims.",
   customization: {
-    capabilities: ["number-triggered data viz", "spacing control"],
+    capabilities: ["number-triggered data viz", "spacing control", "source-attributed data-story contract"],
     knobs: [
       { id: "maxInserts", type: "number", range: [1, 8], default: 4, describes: "max data inserts per video", servesStyles: ["finance", "explainer"] },
       { id: "minGapSec", type: "number", range: [10, 60], default: 25, describes: "minimum spacing between inserts", servesStyles: ["explainer"] },
     ],
-    presets: {},
+    presets: {
+      source_attributed_data_story: { maxInserts: 5, minGapSec: 25 },
+    },
   },
 };
 

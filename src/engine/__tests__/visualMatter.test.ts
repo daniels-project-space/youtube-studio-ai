@@ -129,7 +129,7 @@ const visualMatter = cinematic.pipeline.findIndex((entry) => entry.block === "vi
 const keyframes = cinematic.pipeline.findIndex((entry) => entry.block === "novita_render_images");
 assert(visualMatter > spine && visualMatter < keyframes, "Visual Matter must sit between story planning and paid cinematic rendering");
 
-const lofi = designPipeline({ family: "music_loop", lengthMinutes: 1 });
+const lofi = designPipeline({ family: "music_loop", lengthMinutes: 3 });
 assert.equal(lofi.pipeline.some((entry) => entry.block === "visual_matter"), false, "lo-fi must not receive Visual Matter");
 
 console.log("VISUAL MATTER TESTS PASS");

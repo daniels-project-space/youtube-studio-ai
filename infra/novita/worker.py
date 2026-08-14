@@ -31,20 +31,41 @@ from typing import Any
 CONTRACT_VERSION = "2.0.0"
 ZIMAGE_MODEL = "Tongyi-MAI/Z-Image-Turbo"
 ZIMAGE_REVISION = "f332072aa78be7aecdf3ee76d5c247082da564a6"
-GEMMA_MODEL = "google/gemma-3-12b-it-qat-q4_0-unquantized"
-LTX_MODEL = "Lightricks/LTX-2.3"
-LTX_REVISION = "7caa482d5cd10a2eae6b34cb48f093ebc45a263e"
+LTX_MODEL = "Lightricks/LTX-2.5"
+LTX_REVISION = "ce298b1259d61ce6c87e05154b9ad339b16f32a0"
 LTX_RUNTIME_REPOSITORY = "Lightricks/LTX-2"
-LTX_RUNTIME_REVISION = "4f8905737aac86a554637cac86c178877a39c744"
-LTX_DEV_CHECKPOINT = "ltx-2.3-22b-dev.safetensors"
-LTX_DISTILLED_CHECKPOINT = "ltx-2.3-22b-distilled-1.1.safetensors"
-LTX_DISTILLED_LORA_CHECKPOINT = "ltx-2.3-22b-distilled-lora-384-1.1.safetensors"
-LTX_SPATIAL_UPSCALER_CHECKPOINT = "ltx-2.3-spatial-upscaler-x2-1.1.safetensors"
+LTX_RUNTIME_REVISION = "fd4ded7f2d88d3da713abcdd4ad41ecc4a9314ca"
+LTX_TRANSFORMER_CHECKPOINT = "ltx-2.5-22b-distilled-transformer-bf16.safetensors"
+LTX_TEXT_ENCODER_CHECKPOINT = "gemma4-12b-with-proj-ltx-2.5-bf16.safetensors"
+LTX_VIDEO_VAE_CHECKPOINT = "ltx-2.5-video-vae-bf16.safetensors"
+LTX_AUDIO_VAE_CHECKPOINT = "ltx-2.5-audio-vae-bf16.safetensors"
+LTX_SPATIAL_UPSCALER_CHECKPOINT = "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors"
 LTX_FILE_CONTRACTS = {
-    "ltx-dev": (LTX_DEV_CHECKPOINT, "7ab7225325bc403448ea84b6db2269811a880e5118cd2ee2b6282a93d585016f", 46_149_344_974),
-    "ltx-distilled": (LTX_DISTILLED_CHECKPOINT, "b33b7fe4bbfe084f484be4aaf90b0f1d95dca20d403ac4c0e037eb8c4f0af7cc", 46_149_345_334),
-    "ltx-distilled-lora": (LTX_DISTILLED_LORA_CHECKPOINT, "f5d4953f3386197a4b4f5abdb17616ff256171e8075c111d6e7d2dfa6e823b3a", 7_605_507_256),
-    "ltx-spatial-upscaler": (LTX_SPATIAL_UPSCALER_CHECKPOINT, "5f416311fa8172b65af67530758964708d29a317b830d689a51143b7f91913ed", 995_743_560),
+    "ltx-transformer": (
+        f"diffusion_models/{LTX_TRANSFORMER_CHECKPOINT}",
+        "31eb3cad89b9e54e99dd3baf286f70825ac4f6c660a70d9184d895be76d7bff4",
+        42_018_190_584,
+    ),
+    "ltx-text-encoder": (
+        f"text_encoders/{LTX_TEXT_ENCODER_CHECKPOINT}",
+        "1c647a94c0e902fb87f9a403cbca36a8b6d8e5867094442df1b41ae557cfd1c6",
+        26_263_860_594,
+    ),
+    "ltx-video-vae": (
+        f"vae/{LTX_VIDEO_VAE_CHECKPOINT}",
+        "847e14ca7f3355debca0cea4eaa24ac0fbcdf0061da054ac89ca638a869ddba3",
+        1_472_223_346,
+    ),
+    "ltx-audio-vae": (
+        f"vae/{LTX_AUDIO_VAE_CHECKPOINT}",
+        "c52733d37f6a7fb7949c3dc0fb468c6cb2169e4d836983a73babb9f0d54837a5",
+        364_866_540,
+    ),
+    "ltx-spatial-upscaler": (
+        f"latent_upscale_models/{LTX_SPATIAL_UPSCALER_CHECKPOINT}",
+        "eb5a71fe4068ee87ccdb1c3aa635e547ca76bd2d30ae20ae889f2c325c0677e8",
+        995_778_752,
+    ),
 }
 STATUS_BATCH_SECONDS = 60
 MAX_HTTP_ATTEMPTS = 4
@@ -76,10 +97,14 @@ def approved_profile(profile_id: str, phase: str) -> dict[str, Any]:
         "production": (1920, 1088, 9, 0, 1),
         "hero": (2048, 1152, 9, 0, 2),
     }
+    # LTX 2.5 distilled is itself a two-stage pipeline: 640x352 stage one,
+    # followed by latent-space x2 refinement to the 1280x704 deliverable.
+    # Keep all profile IDs on this single proven hardware contract; quality
+    # differs through upstream still selection/QA, never a hidden GPU fallback.
     video_settings = {
-        "draft": (1280, 704, 8, 1, 1, "distilled"),
-        "production": (1920, 1088, 40, 4, 1, "two-stage-hq"),
-        "hero": (1920, 1088, 48, 4, 1, "two-stage-hq"),
+        "draft": (1,),
+        "production": (1,),
+        "hero": (1,),
     }
     if phase == "image" and profile_id in image_settings:
         width, height, steps, guidance, candidates = image_settings[profile_id]
@@ -92,21 +117,23 @@ def approved_profile(profile_id: str, phase: str) -> dict[str, Any]:
             "allowFallback": False,
         }
     if phase == "video" and profile_id in video_settings:
-        width, height, steps, guidance, candidates, pipeline = video_settings[profile_id]
-        profile: dict[str, Any] = {
+        (candidates,) = video_settings[profile_id]
+        return {
             "contractVersion": "1.0.0", "id": profile_id, "phase": phase,
             "model": LTX_MODEL, "revision": LTX_REVISION,
-            "checkpoint": LTX_DISTILLED_CHECKPOINT if pipeline == "distilled" else LTX_DEV_CHECKPOINT,
-            "width": width, "height": height, "steps": steps,
-            "guidanceScale": guidance, "precision": "bf16", "candidates": candidates,
-            "infrastructure": APPROVED_INFRASTRUCTURE, "fps": 25, "pipeline": pipeline,
-            "twoStageRefine": pipeline == "two-stage-hq",
+            "checkpoint": LTX_TRANSFORMER_CHECKPOINT,
+            "width": 1280, "height": 704, "steps": 8,
+            "guidanceScale": 1, "precision": "bf16", "candidates": candidates,
+            "infrastructure": APPROVED_INFRASTRUCTURE, "fps": 25,
+            "pipeline": "distilled", "twoStageRefine": True,
+            "textEncoderCheckpoint": LTX_TEXT_ENCODER_CHECKPOINT,
+            "videoVaeCheckpoint": LTX_VIDEO_VAE_CHECKPOINT,
+            "audioVaeCheckpoint": LTX_AUDIO_VAE_CHECKPOINT,
             "spatialUpscalerCheckpoint": LTX_SPATIAL_UPSCALER_CHECKPOINT,
+            "quantization": "fp8-cast", "offload": "cpu", "spatialUpscaleFactor": 2,
+            "stageOneWidth": 640, "stageOneHeight": 352,
             "allowFallback": False,
         }
-        if pipeline == "two-stage-hq":
-            profile["distilledLoraCheckpoint"] = LTX_DISTILLED_LORA_CHECKPOINT
-        return profile
     raise ValueError(f"unsupported approved render profile: {profile_id}/{phase}")
 
 
@@ -116,12 +143,9 @@ def validate_model_specs(model_specs: Any, phase: str, pipeline: str | None) -> 
     model_ids = [str(spec.get("id") or "") for spec in model_specs]
     if len(model_ids) != len(set(model_ids)):
         raise ValueError("manifest model cache identities must be unique")
-    required = {"z-image-turbo"} if phase == "image" else {
-        "gemma-3-12b", "ltx-spatial-upscaler",
-        "ltx-distilled" if pipeline == "distilled" else "ltx-dev",
-    }
-    if phase == "video" and pipeline == "two-stage-hq":
-        required.add("ltx-distilled-lora")
+    if phase == "video" and pipeline != "distilled":
+        raise ValueError("manifest video profile must use the approved LTX 2.5 distilled x2 pipeline")
+    required = {"z-image-turbo"} if phase == "image" else set(LTX_FILE_CONTRACTS)
     if set(model_ids) != required:
         raise ValueError(f"manifest models must exactly match required cache identities: {sorted(required)}")
     for spec in model_specs:
@@ -131,22 +155,20 @@ def validate_model_specs(model_specs: Any, phase: str, pipeline: str | None) -> 
             or spec.get("revision") != ZIMAGE_REVISION
         ):
             raise ValueError("manifest Z-Image tree does not match the official pinned repository revision")
-        if spec["id"] == "gemma-3-12b" and (
-            spec.get("kind") != "tree"
-            or spec.get("repository") != GEMMA_MODEL
-            or not re.fullmatch(r"[a-f0-9]{40}", str(spec.get("revision") or ""))
-        ):
-            raise ValueError("manifest Gemma tree does not match the official LTX text encoder repository")
         contract = LTX_FILE_CONTRACTS.get(str(spec["id"]))
         if contract is None:
             continue
-        filename, expected_sha256, expected_size = contract
+        relative_path, expected_sha256, expected_size = contract
+        source_path = Path(str(spec.get("sourcePath") or "")).as_posix()
+        local_path = Path(str(spec.get("localPath") or "")).as_posix()
         if (
             spec.get("kind") != "file"
+            or spec.get("repository") != LTX_MODEL
+            or spec.get("revision") != LTX_REVISION
             or spec.get("manifestSha256") != expected_sha256
             or spec.get("sizeBytes") != expected_size
-            or Path(str(spec.get("sourcePath") or "")).name != filename
-            or Path(str(spec.get("localPath") or "")).name != filename
+            or not source_path.endswith(relative_path)
+            or not local_path.endswith(relative_path)
         ):
             raise ValueError(f"manifest model {spec['id']} does not match the official pinned LTX file")
     return model_specs
@@ -443,8 +465,8 @@ def validate_manifest(manifest: Any, expected_sha256: str) -> dict[str, Any]:
         or manifest.get("runtimeRevision") != LTX_RUNTIME_REVISION
     ):
         raise ValueError("render manifest does not pin the approved official LTX runtime")
-    if manifest["phase"] == "video" and profile.get("pipeline") not in ("distilled", "two-stage-hq"):
-        raise ValueError("render profile does not use an approved official LTX pipeline")
+    if manifest["phase"] == "video" and profile.get("pipeline") != "distilled":
+        raise ValueError("render profile does not use the approved official LTX 2.5 distilled x2 pipeline")
     _validate_delivery_target(manifest.get("checkpoint"), "checkpoint", require_get=True)
     _validate_delivery_target(manifest.get("heartbeat"), "heartbeat")
     _validate_delivery_target(manifest.get("completion"), "completion")
@@ -482,8 +504,8 @@ def validate_manifest(manifest: Any, expected_sha256: str) -> dict[str, Any]:
             if isinstance(timeout, bool) or not isinstance(timeout, int) or timeout < 60 or timeout > 7_200:
                 raise ValueError(f"render job {job['id']} has invalid bounded timeout")
             negative_prompt = job.get("negativePrompt")
-            if negative_prompt is not None and (not isinstance(negative_prompt, str) or len(negative_prompt) > 20_000):
-                raise ValueError(f"render job {job['id']} has invalid negative prompt")
+            if negative_prompt is not None:
+                raise ValueError(f"render job {job['id']} cannot use a negative prompt with LTX 2.5 distilled")
             source = job.get("input")
             if source is not None:
                 if not isinstance(source, dict) or not SHA256_RE.fullmatch(str(source.get("sha256") or "")):
@@ -620,12 +642,18 @@ def build_video_command(
     image_path: Path | None,
 ) -> list[str]:
     pipeline = str(profile["pipeline"])
+    if pipeline != "distilled":
+        raise ValueError("unsupported LTX pipeline")
     command = [
         sys.executable,
         "-m",
-        "ltx_pipelines.distilled" if pipeline == "distilled" else "ltx_pipelines.ti2vid_two_stages_hq",
-        "--gemma-root", str(models["gemma-3-12b"]),
+        "ltx_pipelines.distilled",
+        "--transformer-path", str(models["ltx-transformer"]),
+        "--text-encoder-path", str(models["ltx-text-encoder"]),
+        "--video-vae-path", str(models["ltx-video-vae"]),
+        "--audio-vae-path", str(models["ltx-audio-vae"]),
         "--spatial-upsampler-path", str(models["ltx-spatial-upscaler"]),
+        "--quantization", str(profile["quantization"]),
         "--prompt", str(job["prompt"]),
         "--output-path", str(output),
         "--seed", str(int(job["seed"])),
@@ -633,22 +661,37 @@ def build_video_command(
         "--width", str(int(job["width"])),
         "--num-frames", str(int(job["frames"])),
         "--frame-rate", str(float(job["fps"])),
-        "--offload", "cpu",
+        "--offload", str(profile["offload"]),
     ]
     if image_path:
         command.extend(["--image", str(image_path), "0", "1.0"])
-    if pipeline == "distilled":
-        command.extend(["--distilled-checkpoint-path", str(models["ltx-distilled"])])
-    else:
-        command.extend([
-            "--checkpoint-path", str(models["ltx-dev"]),
-            "--distilled-lora", str(models["ltx-distilled-lora"]), "0.8",
-            "--num-inference-steps", str(int(job["steps"])),
-            "--video-cfg-guidance-scale", str(float(profile["guidanceScale"])),
-        ])
-        if str(job.get("negativePrompt") or "").strip():
-            command.extend(["--negative-prompt", str(job["negativePrompt"])])
     return command
+
+
+def probe_video_output(output: Path, width: int, height: int) -> dict[str, int]:
+    """Require the actual encoded MP4 to match the sealed LTX stage-two target."""
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_type,width,height", "-of", "json", str(output),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("ffprobe could not inspect rendered LTX video")
+    try:
+        streams = json.loads(result.stdout).get("streams")
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise RuntimeError("ffprobe returned malformed rendered LTX video metadata") from error
+    if not isinstance(streams, list) or len(streams) != 1 or not isinstance(streams[0], dict):
+        raise RuntimeError("rendered LTX output must contain exactly one usable video stream")
+    stream = streams[0]
+    if stream.get("codec_type") != "video" or stream.get("width") != width or stream.get("height") != height:
+        raise RuntimeError(f"rendered LTX output geometry must be {width}x{height}")
+    return {"outputWidth": width, "outputHeight": height}
 
 
 def render_video(
@@ -658,14 +701,20 @@ def render_video(
     output: Path,
     workdir: Path,
     deadline_monotonic: float | None = None,
-) -> None:
+) -> dict[str, Any]:
     _check_deadline(deadline_monotonic)
     pipeline = profile.get("pipeline")
-    if pipeline not in ("distilled", "two-stage-hq"):
+    if pipeline != "distilled":
         raise ValueError("unsupported LTX pipeline")
     frames = int(job["frames"])
     width, height = int(job["width"]), int(job["height"])
-    if frames < 9 or (frames - 1) % 8 or width % 64 or height % 64:
+    if (
+        frames < 9 or (frames - 1) % 8 or width % 64 or height % 64
+        or width != 1280 or height != 704
+        or profile.get("stageOneWidth") != width // 2
+        or profile.get("stageOneHeight") != height // 2
+        or profile.get("spatialUpscaleFactor") != 2
+    ):
         raise ValueError("LTX frame count and two-stage dimensions are invalid")
     image_path: Path | None = None
     if job.get("input"):
@@ -682,6 +731,16 @@ def render_video(
             raise InterruptedError("render exceeded sealed lifetime")
         timeout_seconds = min(timeout_seconds, remaining_seconds)
     _run_bounded(command, timeout_seconds, deadline_monotonic)
+    output_proof = probe_video_output(output, width, height)
+    return {
+        **output_proof,
+        "stageOneWidth": width // 2,
+        "stageOneHeight": height // 2,
+        "spatialUpscaleFactor": 2,
+        "pipeline": "distilled",
+        "quantization": "fp8-cast",
+        "offload": "cpu",
+    }
 
 
 def _put_file(url: str, output: Path, headers: dict[str, str]) -> None:
@@ -742,14 +801,18 @@ def upload_artifact(job: dict[str, Any], output: Path, manifest: dict[str, Any])
     _put_file(str(artifact["putUrl"]), output, headers)
 
 
-def _load_checkpoint(target: dict[str, Any] | None, manifest_id: str, expected_job_ids: set[str]) -> set[str]:
+def _load_checkpoint(
+    target: dict[str, Any] | None,
+    manifest_id: str,
+    expected_job_ids: set[str],
+) -> tuple[set[str], dict[str, dict[str, Any]]]:
     if not target or not target.get("getUrl"):
-        return set()
+        return set(), {}
     try:
         data = json.loads(_request(str(target["getUrl"]), timeout=30))
     except urllib.error.HTTPError as error:
         if error.code == 404:
-            return set()
+            return set(), {}
         raise
     if not isinstance(data, dict) or data.get("manifestId") != manifest_id or not isinstance(data.get("completedJobIds"), list):
         raise ValueError("checkpoint identity mismatch")
@@ -759,7 +822,50 @@ def _load_checkpoint(target: dict[str, Any] | None, manifest_id: str, expected_j
     completed = set(values)
     if not completed.issubset(expected_job_ids):
         raise ValueError("checkpoint contains jobs outside its render manifest")
-    return completed
+    raw_outputs = data.get("videoOutputs", {})
+    if not isinstance(raw_outputs, dict) or not all(isinstance(key, str) and isinstance(value, dict) for key, value in raw_outputs.items()):
+        raise ValueError("checkpoint video output evidence is invalid")
+    if not set(raw_outputs).issubset(completed):
+        raise ValueError("checkpoint video output evidence is outside completed jobs")
+    return completed, {str(key): dict(value) for key, value in raw_outputs.items()}
+
+
+def video_render_contract(profile: dict[str, Any]) -> dict[str, Any]:
+    """Return the exact runtime/geometry values the controller must see again."""
+    return {
+        "model": profile["model"],
+        "revision": profile["revision"],
+        "checkpoint": profile["checkpoint"],
+        "precision": profile["precision"],
+        "pipeline": profile["pipeline"],
+        "twoStageRefine": profile["twoStageRefine"],
+        "textEncoderCheckpoint": profile["textEncoderCheckpoint"],
+        "videoVaeCheckpoint": profile["videoVaeCheckpoint"],
+        "audioVaeCheckpoint": profile["audioVaeCheckpoint"],
+        "spatialUpscalerCheckpoint": profile["spatialUpscalerCheckpoint"],
+        "quantization": profile["quantization"],
+        "offload": profile["offload"],
+        "spatialUpscaleFactor": profile["spatialUpscaleFactor"],
+        "stageOneWidth": profile["stageOneWidth"],
+        "stageOneHeight": profile["stageOneHeight"],
+        "outputWidth": profile["width"],
+        "outputHeight": profile["height"],
+    }
+
+
+def assert_video_output_proof(proof: dict[str, Any], profile: dict[str, Any]) -> None:
+    expected = {
+        "outputWidth": profile["width"],
+        "outputHeight": profile["height"],
+        "stageOneWidth": profile["stageOneWidth"],
+        "stageOneHeight": profile["stageOneHeight"],
+        "spatialUpscaleFactor": profile["spatialUpscaleFactor"],
+        "pipeline": profile["pipeline"],
+        "quantization": profile["quantization"],
+        "offload": profile["offload"],
+    }
+    if any(proof.get(key) != value for key, value in expected.items()):
+        raise ValueError("video output evidence drifts from the sealed LTX 2.5 x2 profile")
 
 
 def _heartbeat_loop(
@@ -808,6 +914,8 @@ def main() -> int:
         "manifestId": manifest["manifestId"],
         "completedJobIds": [],
         "deadlineAt": deadline_at,
+        **({"renderContract": video_render_contract(manifest["profile"]), "videoOutputs": {}}
+           if manifest["phase"] == "video" else {}),
     }
     heartbeat = threading.Thread(
         target=_heartbeat_loop,
@@ -819,8 +927,14 @@ def main() -> int:
     done = False
     completion_reported = False
     try:
-        completed = _load_checkpoint(checkpoint, manifest["manifestId"], expected_job_ids)
+        completed, checkpoint_video_outputs = _load_checkpoint(checkpoint, manifest["manifestId"], expected_job_ids)
         state["completedJobIds"] = sorted(completed)
+        if manifest["phase"] == "video":
+            for proof in checkpoint_video_outputs.values():
+                assert_video_output_proof(proof, manifest["profile"])
+            if set(checkpoint_video_outputs) != completed:
+                raise ValueError("checkpoint LTX video evidence must cover every completed job")
+            state["videoOutputs"] = checkpoint_video_outputs
         # The cloud control plane performs a catalog check before creation, but
         # the data plane independently verifies the physical device before any
         # model cache or inference work begins. This makes a SKU mismatch
@@ -853,12 +967,16 @@ def main() -> int:
                 if manifest["phase"] == "image":
                     render_image(job, models, output, deadline_monotonic)
                 else:
-                    render_video(job, manifest["profile"], models, output, workdir, deadline_monotonic)
+                    proof = render_video(job, manifest["profile"], models, output, workdir, deadline_monotonic)
+                    assert_video_output_proof(proof, manifest["profile"])
+                    state["videoOutputs"][str(job["id"])] = proof
                 upload_artifact(job, output, manifest)
                 completed.add(job["id"])
                 state["completedJobIds"] = sorted(completed)
                 put_json(checkpoint, {**state, "updatedAt": int(time.time()), "status": "running"})
         done = completed == expected_job_ids
+        if manifest["phase"] == "video":
+            done = done and set(state["videoOutputs"]) == expected_job_ids
     except BaseException as error:
         failure = f"{type(error).__name__}: {error}"[:500]
         _report_json(

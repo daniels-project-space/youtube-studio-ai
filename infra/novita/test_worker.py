@@ -186,64 +186,79 @@ class WorkerContractTests(unittest.TestCase):
         finally:
             worker.STOP.clear()
 
-    def test_ltx_cli_contract_matches_distilled_and_hq_modules(self):
+    def test_ltx_25_cli_contract_uses_split_components_and_rtx_4090_execution_mode(self):
         models = {
-            "gemma-3-12b": Path("/models/gemma"),
+            "ltx-transformer": Path("/models/transformer.safetensors"),
+            "ltx-text-encoder": Path("/models/text-encoder.safetensors"),
+            "ltx-video-vae": Path("/models/video-vae.safetensors"),
+            "ltx-audio-vae": Path("/models/audio-vae.safetensors"),
             "ltx-spatial-upscaler": Path("/models/upscaler.safetensors"),
-            "ltx-distilled": Path("/models/distilled.safetensors"),
-            "ltx-dev": Path("/models/dev.safetensors"),
-            "ltx-distilled-lora": Path("/models/lora.safetensors"),
         }
         job = {
             "prompt": "A slow dolly push",
-            "negativePrompt": "flicker",
             "seed": 42,
-            "height": 1088,
-            "width": 1920,
+            "height": 704,
+            "width": 1280,
             "frames": 121,
             "fps": 25,
-            "steps": 40,
+            "steps": 8,
         }
-        distilled = worker.build_video_command(
+        command = worker.build_video_command(
             job,
-            {"pipeline": "distilled", "guidanceScale": 1},
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
             models,
-            Path("/output/draft.mp4"),
+            Path("/output/clip.mp4"),
             Path("/input/still.png"),
         )
-        self.assertEqual(distilled[2], "ltx_pipelines.distilled")
-        self.assertIn("--distilled-checkpoint-path", distilled)
-        self.assertNotIn("--checkpoint-path", distilled)
-        self.assertNotIn("--num-inference-steps", distilled)
+        self.assertEqual(command[2], "ltx_pipelines.distilled")
+        self.assertEqual(command[command.index("--transformer-path") + 1], "/models/transformer.safetensors")
+        self.assertEqual(command[command.index("--text-encoder-path") + 1], "/models/text-encoder.safetensors")
+        self.assertEqual(command[command.index("--video-vae-path") + 1], "/models/video-vae.safetensors")
+        self.assertEqual(command[command.index("--audio-vae-path") + 1], "/models/audio-vae.safetensors")
+        self.assertEqual(command[command.index("--quantization") + 1], "fp8-cast")
+        self.assertEqual(command[command.index("--offload") + 1], "cpu")
+        self.assertIn("--image", command)
+        for legacy in ("--gemma-root", "--distilled-checkpoint-path", "--checkpoint-path", "--distilled-lora", "--negative-prompt"):
+            self.assertNotIn(legacy, command)
 
-        hq = worker.build_video_command(
-            job,
-            {"pipeline": "two-stage-hq", "guidanceScale": 4},
-            models,
-            Path("/output/production.mp4"),
-            None,
-        )
-        self.assertEqual(hq[2], "ltx_pipelines.ti2vid_two_stages_hq")
-        self.assertEqual(hq[hq.index("--video-cfg-guidance-scale") + 1], "4.0")
-        self.assertEqual(hq[hq.index("--distilled-lora") + 2], "0.8")
-        self.assertEqual(hq[hq.index("--num-inference-steps") + 1], "40")
-        self.assertEqual(hq[hq.index("--negative-prompt") + 1], "flicker")
+        with self.assertRaisesRegex(ValueError, "unsupported LTX pipeline"):
+            worker.build_video_command(job, {"pipeline": "two-stage-hq"}, models, Path("/output/nope.mp4"), None)
 
     def test_ltx_model_specs_require_official_file_hashes_and_sizes(self):
-        specs = [{
-            "id": "gemma-3-12b", "kind": "tree", "sourcePath": "gemma", "localPath": "gemma",
-            "manifestSha256": "a" * 64, "repository": worker.GEMMA_MODEL, "revision": "c" * 40,
-        }]
-        for model_id in ("ltx-dev", "ltx-distilled-lora", "ltx-spatial-upscaler"):
-            filename, digest, size = worker.LTX_FILE_CONTRACTS[model_id]
+        specs = []
+        for model_id, (relative_path, digest, size) in worker.LTX_FILE_CONTRACTS.items():
             specs.append({
-                "id": model_id, "kind": "file", "sourcePath": f"ltx/{filename}",
-                "localPath": f"ltx/{filename}", "manifestSha256": digest, "sizeBytes": size,
+                "id": model_id, "kind": "file", "sourcePath": f"models/LTX-2.5/{relative_path}",
+                "localPath": f"ltx-2.5/{relative_path}", "manifestSha256": digest, "sizeBytes": size,
+                "repository": worker.LTX_MODEL, "revision": worker.LTX_REVISION,
             })
-        self.assertEqual(worker.validate_model_specs(specs, "video", "two-stage-hq"), specs)
-        specs[1] = {**specs[1], "manifestSha256": "f" * 64}
+        self.assertEqual(worker.validate_model_specs(specs, "video", "distilled"), specs)
+        specs[0] = {**specs[0], "manifestSha256": "f" * 64}
         with self.assertRaisesRegex(ValueError, "official pinned LTX file"):
-            worker.validate_model_specs(specs, "video", "two-stage-hq")
+            worker.validate_model_specs(specs, "video", "distilled")
+
+    def test_ltx_25_profile_and_ffprobe_gate_require_the_sealed_x2_target(self):
+        profile = worker.approved_profile("production", "video")
+        self.assertEqual(profile["model"], "Lightricks/LTX-2.5")
+        self.assertEqual((profile["width"], profile["height"]), (1280, 704))
+        self.assertEqual((profile["stageOneWidth"], profile["stageOneHeight"]), (640, 352))
+        self.assertEqual(profile["spatialUpscaleFactor"], 2)
+        self.assertEqual(profile["quantization"], "fp8-cast")
+        self.assertEqual(profile["offload"], "cpu")
+
+        original_run = worker.subprocess.run
+        try:
+            worker.subprocess.run = lambda *_args, **_kwargs: worker.subprocess.CompletedProcess(
+                ["ffprobe"], 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}]}), "",
+            )
+            self.assertEqual(worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704), {"outputWidth": 1280, "outputHeight": 704})
+            worker.subprocess.run = lambda *_args, **_kwargs: worker.subprocess.CompletedProcess(
+                ["ffprobe"], 0, json.dumps({"streams": [{"codec_type": "video", "width": 640, "height": 352}]}), "",
+            )
+            with self.assertRaisesRegex(RuntimeError, "geometry"):
+                worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704)
+        finally:
+            worker.subprocess.run = original_run
 
     def test_artifact_upload_streams_file_and_binds_length(self):
         captured = {}

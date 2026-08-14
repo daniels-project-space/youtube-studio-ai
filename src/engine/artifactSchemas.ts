@@ -24,6 +24,8 @@ import {
 } from "./shortStrategyManifest";
 import { ShortRetentionManifestSchema, ShortSceneQaSchema } from "./documentaryCollageShort";
 import { VisualMatterManifestSchema } from "./visualMatter";
+import { EpisodeGraphSchema, SceneManifestSchema } from "./episodeGraph";
+import { LearningContractSchema } from "./learningContract";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -165,6 +167,38 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   dpVisualSpecs: { type: "DPVisualSpec[]", schema: z.array(DPVisualSpecSchema).min(1) },
   editorEdl: { type: "EditorEDL", schema: StorySpineSchema.shape.editorEdl.passthrough() },
   storyCoverage: { type: "StoryCoverage", schema: StorySpineSchema.shape.coverage },
+  episodeGraph: { type: "EpisodeGraph", schema: EpisodeGraphSchema, persist: "reference" },
+  sceneManifest: { type: "SceneManifest", schema: SceneManifestSchema, persist: "reference" },
+  lessonContract: { type: "LearningContract", schema: LearningContractSchema, persist: "reference" },
+  childContentSafety: {
+    type: "ChildContentSafetyReceipt",
+    schema: z.object({
+      version: z.literal("child-content-safety/v1"),
+      pass: z.literal(true),
+      madeForKids: z.literal(true),
+      audience: z.literal("children"),
+      release: z.literal("human-editorial-approval-required"),
+      allowedPublishMode: z.literal("draft"),
+      reviewReasons: z.array(z.string().min(1)).min(1),
+      episodeGraphFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      sceneManifestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      lessonContractFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    }).strict(),
+  },
+  sceneCompilerReceipt: {
+    type: "SceneCompilerReceipt",
+    schema: z.object({
+      version: z.literal("scene-compiler-render/v1"),
+      renderer: z.literal("deterministic-scene/v1"),
+      manifestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      externalProviderCalls: z.literal(0),
+      sceneCount: z.number().int().positive(),
+      width: z.literal(1920),
+      height: z.literal(1080),
+      durationSec: z.number().finite().positive(),
+      hasAudio: z.literal(true),
+    }).strict(),
+  },
   visualMatterManifest: {
     type: "VisualMatterManifest",
     schema: VisualMatterManifestSchema,

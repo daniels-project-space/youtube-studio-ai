@@ -680,6 +680,7 @@ export async function runPipeline(
       store: declaredArtifactStore(manifest, store, optionalFallbacks, log),
       artifactRefs: inputRefs,
       budgetUsd: opts.budgetUsd,
+      ...(configuredEnvelope === undefined ? {} : { stageBudgetUsd: configuredEnvelope }),
       modelUsageCostUsd: (kinds) => {
         const summary = usageScope.snapshot();
         return kinds === undefined

@@ -9,6 +9,17 @@ import {
   NARRATION_COLD_OPEN_MAX_CHARS,
   narrationChapterHeadingCharacterCeiling,
 } from "../lib/narrationBounds";
+import {
+  motionComicImageCallCeiling,
+  motionComicPanelCount,
+  motionComicTtsBillableCharacterCeiling,
+  motionComicVisionCallCeiling,
+} from "../lib/motionComic";
+import {
+  whiteboardImageCallCeiling,
+  whiteboardNarrationCharacterCeiling,
+  whiteboardPanelCount,
+} from "../lib/whiteboardSync";
 import type {
   ModuleContractOverride,
   ModuleCostContext,
@@ -98,17 +109,22 @@ function whiteboardCostCeiling(
   context: Readonly<ModuleCostContext> | undefined,
 ): number {
   const seconds = targetSeconds(params, context, 132);
-  const panels = Math.max(4, Math.min(16, Math.round(seconds / 22)));
-  const requestedWords = Math.ceil(Math.round(seconds * 3.1));
-  const words = Math.max(panels * 8, Math.min(panels * 120, requestedWords));
-  const characters = words * 12;
+  // Keep this contract on the same bounded worker and narration helpers as
+  // whiteboardScribe. The live art route is direct Novita, not Nano Banana:
+  // charging it at a cheap planning rate lets the compiler admit runs that
+  // cannot fund their actual teardown-verified workers.
+  const panels = whiteboardPanelCount(Math.max(4, Math.round(seconds / 22)));
+  const characters = whiteboardNarrationCharacterCeiling(
+    panels,
+    Math.round(seconds * 3.1),
+  );
   const usesEleven =
     String(params["ttsProvider"] ?? "fish").toLowerCase() === "elevenlabs" &&
     typeof params["elevenVoiceId"] === "string" &&
     params["elevenVoiceId"].trim().length > 0;
   const ttsRate = usesEleven ? PRICE.ttsElevenPerKCharUsd : PRICE.ttsPerKCharUsd;
   return (
-    panels * 5 * bananaImageUnitCeiling("flash") +
+    whiteboardImageCallCeiling(panels) * PRICE.novitaImageMaxUsd +
     (characters / 1_000) * ttsRate
   );
 }
@@ -146,8 +162,9 @@ function loreShortCostCeiling(
  * quiz_year cold-run bound. This is the CHEAPEST engine in the catalog and the
  * ceiling reflects a genuinely different cost shape rather than a discounted
  * version of the others: facts come from Wikidata (free, CC0, unauthenticated)
- * and the video is rendered locally by Remotion, so there is NO image, video,
- * TTS, music or upscale provider anywhere on the path.
+ * and the video is rendered locally by Remotion. The certified no-Gemini route
+ * has no text-model spend; its upstream original music and downstream visual
+ * QA have their own independently reserved module envelopes.
  *
  * The only spend is bounded text: at most `maxCritiqueIters` passes over
  * `rounds` phrasing calls, plus one critic call per pass. Kept in lockstep with
@@ -157,6 +174,9 @@ function quizYearCostCeiling(
   params: Readonly<Record<string, unknown>>,
   context: Readonly<ModuleCostContext> | undefined,
 ): number {
+  // The certified QuizYear route locks deterministic templates and explicitly
+  // forbids the legacy question-wording/critique model calls.
+  if (params["noGemini"] === true) return 0;
   const countdown = boundedNumber(params["countdownSeconds"], 6, 3, 15);
   const reveal = boundedNumber(params["revealSeconds"], 4, 2, 10);
   const seconds = targetSeconds(params, context, 80);
@@ -178,21 +198,16 @@ function quizYearCostCeiling(
 }
 
 function motionComicCostCeiling(params: Readonly<Record<string, unknown>>): number {
-  const panels = Math.floor(boundedNumber(params["panels"], 8, 4, 12));
-  const parsedSeconds = finiteNumber(params["targetSeconds"]);
-  const requestedCharacters =
-    parsedSeconds !== undefined && parsedSeconds > 0
-      ? Math.ceil(parsedSeconds * 16)
-      : panels * 22 * 16;
-  const characters = Math.max(
-    panels * 160,
-    Math.min(panels * 3 * 320, requestedCharacters),
+  const panels = motionComicPanelCount(params["panels"]);
+  const characters = motionComicTtsBillableCharacterCeiling(
+    panels,
+    params["targetSeconds"],
   );
   return (
-    (2 * panels + 8) * bananaImageUnitCeiling("flash") +
+    motionComicImageCallCeiling(panels) * PRICE.novitaImageMaxUsd +
     (characters / 1_000) * PRICE.ttsElevenPerKCharUsd +
     PRICE.musicTrackUsd +
-    2 * panels * PRICE.visionGraderUsd
+    motionComicVisionCallCeiling(panels) * PRICE.visionGraderUsd
   );
 }
 
@@ -230,6 +245,34 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: ["plannedTopic", "reuseTopic", "channelName", "persona", "niche", "styleGrammar", "topicPool"],
     optionalProduces: ["topicBet"],
   }),
+  // The certified QuizYear planner is intentionally independent of Topicraft:
+  // its source-reviewed topic registry and stable topic-memory receipt are a
+  // reusable non-Gemini planning capability, not a degraded generic fallback.
+  quiz_topic_plan: contract(["topic.selected", "quiz.plan_provenanced"], {
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+  quiz_topic_safety: contract(["final.compliance_passed"], {
+    requiredConsumes: ["topic", "quizPlan"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+  quiz_critic_spec: contract(["crew.critic_validation_spec"], {
+    requiredConsumes: ["quizPlan"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+  quiz_metadata: contract(["package.metadata"], {
+    requiredConsumes: ["topic", "quizPlan"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+  quiz_thumbnail: contract(["package.thumbnail"], {
+    requiredConsumes: ["quizRounds", "title"],
+    optionalConsumes: ["palette"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
   competitor_research: contract(["topic.researched"], { optionalConsumes: ["niche"] }),
   scene_planner: contract(["visuals.planned"], {
     optionalConsumes: ["styleGrammar", "visualStyle", "visualBrief", "niche", "styleDNA", "sceneLibrary"],
@@ -243,7 +286,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   loop_clips: contract(["visuals.motion_generated", "render.profile_pinned", "render.spot_only"], {
     optionalConsumes: ["scenes", "motionPrompt", "styleGrammar", "visualStyle"],
-    providerProfiles: [{ id: "novita-ltx23-hq-production", provider: "novita", quality: "production", allowFallback: false }],
+    providerProfiles: [{ id: "novita-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 5,
     maxCostUsdFor: () => PRICE.novitaVideoMaxUsd,
   }),
@@ -272,7 +315,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   upload_draft: contract(
     ["publish.connector_bound", "publish.resumable", "publish.synthetic_disclosed", "publish.private_first"],
-    { optionalConsumes: ["chapterPlan", "scheduledPublishAt", "contentLane"], sideEffects: ["publish_media"], qualityRequired: true },
+    {
+      optionalConsumes: ["chapterPlan", "scheduledPublishAt", "contentLane", "childContentSafety", "sceneCompilerReceipt"],
+      sideEffects: ["publish_media"],
+      qualityRequired: true,
+    },
   ),
   notify: contract(["notify.operator"], { sideEffects: ["external_message"] }),
   cleanup: contract(["storage.scoped_cleanup"], { sideEffects: ["delete_scoped_artifacts"] }),
@@ -408,11 +455,14 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: [
       "narrationDurationSec", "script", "sentenceTimings", "styleDNA", "introApplied", "healHints", "palette",
       "tags", "strategy", "thumbnailer", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
-      "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec",
+      "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec", "loopSeamDiff",
       "overlaysDropped", "qualityBar", "description", "musicKey", "channelName", "niche", "persona", "styleGrammar", "topic",
       // Grounds the mandatory holistic visual gate in this channel's doctrine.
       "criticDoctrine", "contentLane",
       "narrativeBeats", "shotList", "storyCoverage", "assetQaReport", "shotQaReport", "healAttempt",
+      // Durable provenance from story_spine / short_strategy is reused when it
+      // matches the active lane; final QA must declare that cross-block input.
+      "episodeSpec",
       "motionComicTimeline", "visualRepair", "visualMatterManifest",
       "shortStrategyBrief", "beatManifest", "shortRetentionManifest", "shortSceneQa", "documotionVerdict", "documotionRender",
     ],
@@ -435,6 +485,34 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
 
+  episode_graph: contract(["story.episode_graph_locked", "visuals.scene_manifest"], {
+    requiredConsumes: [
+      "topic", "timedScript", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs", "editorEdl", "storyCoverage",
+    ],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+
+  learning_contract: contract(["learning.contract_locked", "learning.retrieval_practice_locked"], {
+    requiredConsumes: ["episodeGraph", "contentLane"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+
+  child_content_safety: contract(["safety.child_content_review_required", "publish.private_only"], {
+    requiredConsumes: ["episodeGraph", "sceneManifest", "lessonContract", "contentLane"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+
+  scene_compiler: contract(["visuals.scene_compiled", "master.assembled"], {
+    requiredConsumes: ["sceneManifest", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
+    optionalConsumes: ["musicKey", "episodeGraph", "contentLane"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
+
   visual_matter: contract(["visuals.visual_matter_planned", "visuals.visual_lock"], {
     requiredConsumes: ["topic", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs"],
     optionalConsumes: ["channelName", "styleDNA", "visualBrief"],
@@ -449,19 +527,28 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
 
   gen_footage: contract(["visuals.generated", "render.profile_pinned", "render.spot_only"], {
-    // channelName/persona/styleGrammar/criticDoctrine/contentLane ground the
-    // pre-spend shot-plan critique loop; all are frozen into the run seed store.
+    // The renderer accepts one of two reusable, validated scene-plan handoffs:
+    // Story Spine's shot/DP artifacts or Episode Graph's sceneManifest. The
+    // legacy free-form planning path is intentionally unavailable at runtime.
     optionalConsumes: [
       "styleDNA",
       "visualBrief",
       "narrationDurationSec",
+      "timedScript",
+      "narrativeBeats",
+      "continuityLedger",
+      "shotList",
+      "dpVisualSpecs",
+      "editorEdl",
+      "storyCoverage",
+      "sceneManifest",
       "channelName",
       "persona",
       "styleGrammar",
       "criticDoctrine",
       "contentLane",
     ],
-    providerProfiles: [{ id: "novita-zimage-ltx23-production", provider: "novita", quality: "production", allowFallback: false }],
+    providerProfiles: [{ id: "novita-zimage-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 132,
     maxCostUsdFor: (params, context) => {
       const seconds = targetSeconds(params, context, 300);
@@ -472,17 +559,26 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     },
   }),
   signature_clips: contract(["visuals.signature_generated", "render.profile_pinned", "render.spot_only"], {
-    // See gen_footage: the same pre-spend shot-plan critique loop runs here.
+    // See gen_footage: signature rendering consumes the same durable plan
+    // rather than asking a second model to invent a disconnected scene list.
     optionalConsumes: [
       "styleDNA",
       "visualBrief",
+      "timedScript",
+      "narrativeBeats",
+      "continuityLedger",
+      "shotList",
+      "dpVisualSpecs",
+      "editorEdl",
+      "storyCoverage",
+      "sceneManifest",
       "channelName",
       "persona",
       "styleGrammar",
       "criticDoctrine",
       "contentLane",
     ],
-    providerProfiles: [{ id: "novita-zimage-ltx23-production", provider: "novita", quality: "production", allowFallback: false }],
+    providerProfiles: [{ id: "novita-zimage-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 33,
     maxCostUsdFor: (params) => {
       const count = Math.ceil(
@@ -577,9 +673,13 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     {
       optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "voiceId", "ttsProvider", "palette", "musicKey", "musicUrl"],
       providerProfiles: [managed, local],
-      maxCostUsd: 30,
-      // Cold-run bound mirrors the engine's 5 art layers per panel and bounded
-      // narration character budget. Upstream music is charged by its own block.
+      // 16 panels × five teardown-verified Novita image workers ($28), plus
+      // the full premium TTS ceiling. Upstream music is charged by its own
+      // block. This must stay above the actual maximum, not an optimistic
+      // image planning rate.
+      maxCostUsd: 31,
+      // Cold-run bound mirrors the engine's exact art-worker and narration
+      // ceilings. Upstream music is charged by its own block.
       maxCostUsdFor: (params, context) => whiteboardCostCeiling(params, context),
       qualityRequired: true,
     },
@@ -596,7 +696,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   ),
   quiz_year: contract(
     // NO script.* and NO narration.* capabilities, deliberately. This format is
-    // silent on-screen typography — there is no spoken script to time, and the
+    // non-narrated on-screen typography — there is no spoken script to time, and the
     // production policy correctly rejects a pipeline that claims
     // "script.generated" without ever producing "narration.timed". Declaring a
     // script here to look complete would be exactly the kind of overclaim the
@@ -607,7 +707,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // only); omitted, the block draws from every category. Declared here
       // because the contract test enforces that a module cannot read a store key
       // it never announced.
-      optionalConsumes: ["channelName", "palette", "criticDoctrine", "styleGrammar", "contentLane", "quizTopic", "quizCategories"],
+      // Legacy direct quiz graphs can still be diagnosed as silent/non-admitted;
+      // the certified family registry separately requires an upstream `music`
+      // entry and the block hard-fails noGemini execution without this key.
+      optionalConsumes: ["musicKey", "channelName", "palette", "criticDoctrine", "styleGrammar", "contentLane", "quizTopic", "quizCategories"],
       providerProfiles: [managed, local],
       // Deliberately tiny. A quiz run that somehow costs a dollar has a bug
       // (a runaway critique loop or a paid provider that must not be there),
@@ -623,8 +726,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       optionalConsumes: ["researchNotes", "factSheet", "visualBrief", "visualRepair", "healHints", "healAttempt"],
       providerProfiles: [managed, local],
       maxCostUsd: 40,
-      // Cold-run bound includes character sheets/panels, bounded ElevenLabs
-      // dialogue, one music job, and two vision-letterer calls per panel.
+      // Cold-run bound includes the live direct-Novita primary/recovery panel
+      // workers, bounded ElevenLabs dialogue, one music job, and two
+      // vision-letterer calls per panel.
       maxCostUsdFor: (params) => motionComicCostCeiling(params),
       qualityRequired: true,
     },

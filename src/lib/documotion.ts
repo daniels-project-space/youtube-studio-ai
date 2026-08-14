@@ -58,7 +58,7 @@ import {
   type DocuStyleDef,
 } from "@/remotion/docuStyles";
 import type { DocuCamera, DocuLabel, DocuLabelPos, DocuShotSpec, DocuThread } from "@/remotion/DocuMotion";
-import type { DocuLayout } from "@/remotion/DocuMotion";
+import type { DocuLayout } from "@/remotion/docuLayout";
 
 type Logger = (msg: string) => void;
 

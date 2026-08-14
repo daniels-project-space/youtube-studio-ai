@@ -139,9 +139,11 @@ export interface ScriptRequest {
   narrative?: { scriptStyle?: string; hookStyle?: string; pacing?: string; delivery?: string };
   /**
    * The channel renders spoken numbers as on-screen motion graphics
-   * (visual_inserts) — the script must SPEAK concrete, attributable figures.
-   */
+  * (visual_inserts) — the script must SPEAK concrete, attributable figures.
+  */
   dataRich?: boolean;
+  /** Strict source requirement for the explicit source-attributed data-story profile. */
+  sourceAttributionRequired?: boolean;
   /**
    * Script Lab playbook (hook rules + opening devices distilled from WATCHING
    * the niche's top-view videos). One opening device is assigned per video.
@@ -321,13 +323,16 @@ function styleGuidance(req: ScriptRequest): string {
  * Channels with a data-viz layer must SPEAK numbers — vague "studies show"
  * hedging gives the on-screen charts nothing to render (and reads as filler).
  */
-export function dataDiscipline(dataRich?: boolean): string {
+export function dataDiscipline(dataRich?: boolean, sourceAttributionRequired?: boolean): string {
   return dataRich
     ? "DATA DISCIPLINE: this channel renders spoken numbers as on-screen motion graphics. Work 3-6 CONCRETE, " +
       "well-established figures into the narration at key moments — dollar amounts, percentages, year ranges, " +
       "before/after comparisons — each spoken plainly in its own sentence with its source named in the narration " +
       "(e.g. \"according to Vanguard's 2024 study…\"). Use widely-documented real figures only; NEVER invent " +
-      "statistics, and never hedge with vague phrases like \"studies consistently show\". "
+      "statistics, and never hedge with vague phrases like \"studies consistently show\". " +
+      (sourceAttributionRequired
+        ? "SOURCE-ATTRIBUTED DATA-STORY CONTRACT: every figure eligible for an insert must be in a sentence that names a concrete source via ‘according to X’ or ‘data from X’. Do not cite a vague ‘study’ and do not invent an attribution. Write at least 3 such source-attributed numeric sentences; un-attributed number sentences will not render. "
+        : "")
     : "";
 }
 
@@ -388,7 +393,7 @@ async function synthFullScriptOneShot(
         req.niche ? `Niche: ${req.niche}.` : "",
         hookMandate(crafted),
         seriesClause(req.series),
-        styleGuidance(req) + dataDiscipline(req.dataRich),
+        styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
         playbookFull(req),
         voiceTagClause(req),
         CRAFT_RULES,
@@ -421,7 +426,7 @@ async function synthFullScriptOneShot(
           temperature: 0.8,
           prompt: [
             `You are CONTINUING a long-form YouTube narration script about "${req.topic}".`,
-            styleGuidance(req) + dataDiscipline(req.dataRich),
+            styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
             voiceTagClause(req),
             CRAFT_RULES,
             `Sections already written (do NOT repeat any of them): ${sections.map((s) => s.heading).filter(Boolean).join("; ")}.`,
@@ -499,7 +504,7 @@ async function synthLongScript(
           req.persona ? `Persona: ${req.persona}` : "",
           req.niche ? `Niche: ${req.niche}` : "",
           seriesClause(req.series),
-          styleGuidance(req) + dataDiscipline(req.dataRich),
+          styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
           exclude.length
             ? `Already covered (do NOT repeat): ${exclude.join("; ")}`
             : `The FIRST planned section is the INTRO (orients the viewer and lays out the map after the ` +
@@ -568,7 +573,7 @@ async function synthLongScript(
     // sent 10-75x per chunked long-form run.
     const sectionPrompt = [
       `You are writing ONE section of a long narrated video about "${req.topic}".`,
-      styleGuidance(req) + dataDiscipline(req.dataRich),
+      styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
       playbookSlim(req),
       voiceTagClause(req),
       CRAFT_RULES,
@@ -613,7 +618,7 @@ async function synthLongScript(
       prompt: [
         `Write the CLOSING CONCLUSION (about 180-260 words, 2-3 short paragraphs) for a long narrated video about "${req.topic}".`,
         seriesClause(req.series),
-        styleGuidance(req) + dataDiscipline(req.dataRich),
+        styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
         `This is the emotional landing of the whole video — it must feel deliberate, rounded, and SATISFYING, never like it just stops. Build it as a clear arc:`,
         `1) A soft signal that we are arriving at the end (a reflective turn, NOT the words "in conclusion" / "to sum up" / "in summary").`,
         covered
@@ -809,7 +814,7 @@ export async function synthScript(
     req.niche ? `Niche: ${req.niche}.` : "",
     hookMandate(crafted),
     seriesClause(req.series),
-    styleGuidance(req) + dataDiscipline(req.dataRich),
+    styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
     playbookFull(req),
     voiceTagClause(req),
     ARC_RULES,
@@ -888,7 +893,7 @@ export async function synthScript(
         temperature: 0.8,
         prompt: [
           `You are CONTINUING a YouTube narration script about "${req.topic}".`,
-          styleGuidance(req) + dataDiscipline(req.dataRich),
+          styleGuidance(req) + dataDiscipline(req.dataRich, req.sourceAttributionRequired),
           voiceTagClause(req),
           CRAFT_RULES,
           `Sections already written (do NOT repeat any of them): ${sections.map((s) => s.heading).filter(Boolean).join("; ")}.`,

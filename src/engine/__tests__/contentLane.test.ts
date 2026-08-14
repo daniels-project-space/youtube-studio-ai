@@ -95,6 +95,11 @@ const injected = injectContentLaneIntoPipeline(whiteboardPipeline, whiteboard);
 const injectedQa = injected.find((entry) => entry.block === "qa_visual");
 assert.deepEqual(injectedQa?.params?.contentLane, whiteboard);
 assert.equal(injectedQa?.params?.contentLaneFingerprint, firstFingerprint);
+assert.equal(
+  injectedQa?.params?.audioQa,
+  true,
+  "every classified production lane must score the final audience-facing audio",
+);
 assert.equal(whiteboardPipeline.find((entry) => entry.block === "qa_visual")?.params?.contentLane, undefined);
 
 // Regression: every real family design must satisfy the same lane contract
@@ -104,19 +109,48 @@ for (const family of Object.keys(FAMILIES) as Array<keyof typeof FAMILIES>) {
   const design = designPipeline({ family });
   assert.equal(design.contentLane.family, family);
   assert.doesNotThrow(() => assertPipelineMatchesContentLane(design.contentLane, design.pipeline));
+  assert.equal(
+    design.pipeline.find((entry) => entry.block === "qa_visual")?.params?.audioQa,
+    true,
+    `${family} must carry aesthetic-audio QA in its production compiler output`,
+  );
 }
 
-// A long-form channel preset must not reopen the topic scope after the native
-// documentary Short lane has clamped every production stage to 60 seconds.
-const documentaryShortWithLongPreset = designPipeline({
+// Children’s learning is a supervised system profile, not a generic narrated
+// channel with a colourful skin. A caller cannot use creator overrides to
+// bypass the causal scene plan, deterministic renderer, or draft-only release.
+const childrenLearning = designPipeline({ family: "children_learning", publishMode: "public" });
+const childrenBlocks = childrenLearning.pipeline.map((entry) => entry.block);
+for (const block of ["episode_graph", "learning_contract", "child_content_safety", "scene_compiler"]) {
+  assert(childrenBlocks.includes(block), `children-learning must include ${block}`);
+}
+assert(
+  childrenBlocks.indexOf("episode_graph") < childrenBlocks.indexOf("learning_contract") &&
+    childrenBlocks.indexOf("learning_contract") < childrenBlocks.indexOf("child_content_safety") &&
+    childrenBlocks.indexOf("child_content_safety") < childrenBlocks.indexOf("scene_compiler"),
+  "children-learning must review the locked scene plan before rendering",
+);
+const childrenUpload = childrenLearning.pipeline.find((entry) => entry.block === "upload_draft");
+assert.equal(childrenUpload?.params?.publishMode, "draft");
+assert.equal(childrenUpload?.params?.madeForKids, true);
+
+// A long-form request must be rejected instead of being silently converted
+// into a one-minute Short. The valid upper-bound request then has to reach
+// every duration-sensitive stage unchanged.
+assert.throws(
+  () => designPipeline({ family: "documentary_collage_short", lengthMinutes: 5 }),
+  /supports 35 sec–60 sec/,
+  "a documentary Short must not silently clamp an incompatible long-form request",
+);
+const documentaryShortAtMaximum = designPipeline({
   family: "documentary_collage_short",
-  lengthMinutes: 5,
+  lengthMinutes: 1,
 });
 for (const block of ["topic_select", "script_gen", "short_strategy", "documotion_short"]) {
-  const entry = documentaryShortWithLongPreset.pipeline.find((candidate) => candidate.block === block);
+  const entry = documentaryShortAtMaximum.pipeline.find((candidate) => candidate.block === block);
   assert(entry, `documentary Short pipeline must contain ${block}`);
   const seconds = Number(entry.params?.[block === "script_gen" ? "maxSeconds" : "targetSeconds"]);
-  assert.equal(seconds, 60, `${block} must retain the native-Short duration clamp`);
+  assert.equal(seconds, 60, `${block} must preserve the selected native-Short duration`);
 }
 
 const documentarySources = [
@@ -191,12 +225,24 @@ assert.throws(
 const musicInjected = injectContentLaneIntoPipeline([
   { block: "loop_clips" },
   { block: "assemble" },
-  { block: "qa_visual" },
+  { block: "qa_visual", params: { audioQa: false } },
 ], music);
 assert.equal(
   musicInjected.find((entry) => entry.block === "qa_visual")?.params?.audioQa,
   true,
-  "music-lane QA must score audio even for a legacy pipeline without the parameter",
+  "music-lane QA must score audio even when an old pipeline disabled it",
+);
+const ambient = contentLaneForFamily("sleep");
+assert(ambient, "ambient guided must have a canonical lane");
+const ambientInjected = injectContentLaneIntoPipeline([
+  { block: "stock_footage" },
+  { block: "timeline_assemble" },
+  { block: "qa_visual" },
+], ambient);
+assert.equal(
+  ambientInjected.find((entry) => entry.block === "qa_visual")?.params?.audioQa,
+  true,
+  "guided ambient QA must score the audio-first experience",
 );
 
 console.log("CONTENT LANE TESTS PASS");

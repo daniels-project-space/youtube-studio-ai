@@ -92,6 +92,74 @@ const NARRATED: PipelineEntry[] = [
   { block: "cleanup" }, // keep only the finished video + thumbnail; drop all intermediates
 ];
 
+// Deterministic scene-compiler base. It intentionally keeps the established
+// text, narration, music, metadata, quality and upload rails, but replaces
+// stock/generative footage and the legacy timeline assembler with a single
+// locally-rendered scene grammar. `episode_graph` turns the timed Story Spine
+// into causal, sourced scene nodes; `scene_compiler` is the only pixel producer.
+const ILLUSTRATED_EXPLAINER: PipelineEntry[] = [
+  { block: "competitor_research" },
+  { block: "topic_select", params: { policy: "no_repeat" } },
+  { block: "script_gen", params: { style: "illustrated_explainer", maxSeconds: 300 } },
+  { block: "qa_script" },
+  { block: "originality_gate" },
+  { block: "compliance_check" },
+  { block: "narration_tts", params: { sentenceGapSec: 0.8, sentenceGapJitter: 0.15 } },
+  { block: "story_spine", params: { targetShotSec: 6 } },
+  { block: "episode_graph" },
+  {
+    block: "music",
+    params: {
+      provider: "mureka",
+      prompt: "original light instrumental underscore, clear and unobtrusive, no vocals, no sudden impacts",
+    },
+  },
+  { block: "scene_compiler", params: { aspect: "16:9" } },
+  { block: "length_check", params: { minSeconds: 60, maxSeconds: 900 } },
+  { block: "captions" },
+  { block: "metadata" },
+  { block: "thumbnail_gen" },
+  { block: "qa_visual" },
+  { block: "upload_draft" },
+  { block: "notify" },
+  { block: "cleanup" },
+];
+
+// A deliberately separate product lane. The renderer is shared with the
+// illustrated explainer, but the contract requires a declared age band,
+// original canon, one learning objective, child-safety evidence, and human
+// editorial approval. The upload block independently refuses public/scheduled
+// release for this family.
+const CHILDREN_LEARNING: PipelineEntry[] = [
+  { block: "competitor_research" },
+  { block: "topic_select", params: { policy: "no_repeat", targetSeconds: 180 } },
+  { block: "script_gen", params: { style: "children_learning", maxSeconds: 180 } },
+  { block: "qa_script" },
+  { block: "originality_gate" },
+  { block: "compliance_check" },
+  { block: "narration_tts", params: { sentenceGapSec: 0.9, sentenceGapJitter: 0.1 } },
+  { block: "story_spine", params: { targetShotSec: 6 } },
+  { block: "episode_graph", params: { audience: "children" } },
+  { block: "learning_contract" },
+  { block: "child_content_safety" },
+  {
+    block: "music",
+    params: {
+      provider: "mureka",
+      prompt: "original gentle playful instrumental underscore, no lyrics, no sudden impacts, narration-first mix",
+    },
+  },
+  { block: "scene_compiler", params: { aspect: "16:9", audience: "children" } },
+  { block: "length_check", params: { minSeconds: 60, maxSeconds: 360 } },
+  { block: "captions" },
+  { block: "metadata" },
+  { block: "thumbnail_gen" },
+  { block: "qa_visual" },
+  { block: "upload_draft", params: { publishMode: "draft", madeForKids: true } },
+  { block: "notify" },
+  { block: "cleanup" },
+];
+
 export const ARCHETYPES: Record<string, Archetype> = {
   "lofi-ambient": {
     key: "lofi-ambient",
@@ -111,6 +179,26 @@ export const ARCHETYPES: Record<string, Archetype> = {
     defaultVoiceId: "sleepless_historian",
     thumbnailTemplate: "banana",
     pipeline: NARRATED,
+  },
+  "illustrated-explainer": {
+    key: "illustrated-explainer",
+    label: "Illustrated causal explainer",
+    description:
+      "Timed story spine → Episode Graph → deterministic maps, diagrams, panels and original vector characters; no image/video generation provider.",
+    template: "A",
+    defaultVoiceId: "narrator_teacher",
+    thumbnailTemplate: "banana",
+    pipeline: ILLUSTRATED_EXPLAINER,
+  },
+  "children-learning": {
+    key: "children-learning",
+    label: "Original supervised children’s learning show",
+    description:
+      "Age-banded original learning story rendered through a deterministic scene grammar; private draft only pending child-content editorial approval.",
+    template: "A",
+    defaultVoiceId: "gentle_guide",
+    thumbnailTemplate: "banana",
+    pipeline: CHILDREN_LEARNING,
   },
   "crime-narrative": {
     key: "crime-narrative",

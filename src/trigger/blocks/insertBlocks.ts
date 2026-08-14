@@ -15,6 +15,10 @@
  * gets none). Empty/missing types → block no-ops.
  */
 import type { Block } from "@/engine/types";
+import {
+  hasNamedSourceAttribution,
+  hasSourceAttributedDataStoryParams,
+} from "@/engine/dataStory";
 import { join } from "node:path";
 import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
@@ -94,17 +98,30 @@ export const visualInserts: Block = {
       ctx.log("visual_inserts: no insertTypes enabled for this channel — skipping");
       return { insertOverlays: [] };
     }
-    if (!hasGeminiKey() || timings.length === 0) {
-      ctx.log("visual_inserts: no Gemini key or no timings — skipping");
+    if (timings.length === 0) {
+      ctx.log("visual_inserts: no timings — skipping");
       return { insertOverlays: [] };
     }
 
     // Candidate sentences = the ones that actually SPEAK numbers.
-    const candidates = timings
+    const strictDataStory = hasSourceAttributedDataStoryParams(ctx.params);
+    const numericCandidates = timings
       .map((t, i) => ({ i, text: t.text }))
       .filter((c) => /\d/.test(c.text));
+    const candidates = strictDataStory
+      ? numericCandidates.filter((candidate) => hasNamedSourceAttribution(candidate.text))
+      : numericCandidates;
     if (candidates.length === 0) {
-      ctx.log("visual_inserts: narration speaks no numbers — nothing to visualize");
+      ctx.log(strictDataStory
+        ? "visual_inserts: source-attributed data story has no eligible named-source numeric sentence — nothing to visualize"
+        : "visual_inserts: narration speaks no numbers — nothing to visualize");
+      return { insertOverlays: [] };
+    }
+    // Keep evidence eligibility ahead of the planner/provider boundary. A
+    // strict data-story narration that lacks usable source-attributed claims is
+    // a deterministic no-op, not a request for a model to invent them.
+    if (!hasGeminiKey()) {
+      ctx.log("visual_inserts: no planner provider key — skipping");
       return { insertOverlays: [] };
     }
 
@@ -178,6 +195,10 @@ export const visualInserts: Block = {
       const t = timings[it.sentenceIdx];
       if (!t) continue;
       if (!enabled.includes(it.kind)) continue;
+      if (strictDataStory && !hasNamedSourceAttribution(t.text)) {
+        ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — strict data-story source missing ("${t.text.slice(0, 60)}…")`);
+        continue;
+      }
       // lower_third has its own integrity gate (the SOURCE must be named in
       // the sentence); everything else fact-checks the anchor NUMBERS.
       if (it.kind === "lower_third") {

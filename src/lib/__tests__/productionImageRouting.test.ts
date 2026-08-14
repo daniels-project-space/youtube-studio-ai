@@ -119,6 +119,7 @@ async function rejectedAttestationStillAccounts(): Promise<void> {
       prefix: "owners/o/channels/c/runs/run-2/comic",
       id: "panel-0",
       prompt: "panel art",
+      maxCostUsd: 0.35,
     }, {
       renderImage: async () => {
         const rendered = renderedImage({
@@ -154,6 +155,7 @@ async function providerReceiptSurvivesDeliveryCrash(): Promise<void> {
       prefix: "owners/o/channels/c/runs/run-crash/thumbnail",
       id: "candidate-crash",
       prompt: "text-free crash-boundary scene",
+      maxCostUsd: 0.35,
       onProviderReceipt: (receipt) => {
         durableRequestHash = receipt.requestSha256;
         order.push("durable-receipt");

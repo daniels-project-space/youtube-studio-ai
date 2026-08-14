@@ -11,6 +11,12 @@ import { api } from "../../convex/_generated/api";
 import { StudioConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import {
+  assertNovitaVideoPhaseProfileRuntime,
+  assessNovitaVideoProfileRuntime,
+  type NovitaVideoRuntimeTarget,
+} from "@/engine/runtimeCapability";
+import { generationProfile } from "@/engine/generationProfiles";
+import {
   getObjectBytes,
   headObjectMetadata,
   presignDownload,
@@ -36,11 +42,14 @@ import {
   type NovitaVolumeSummary,
 } from "@/lib/novitaFleet";
 import { waitForNovitaRenderPoll } from "@/lib/novitaPollWait";
+import { assertLtxWorkerCompletionEvidence } from "@/lib/ltxVideoProof";
 import type {
   NovitaBillingReceipt,
   NovitaBridgeStatus,
+  NovitaPhaseProfile,
   NovitaRenderCfg,
   NovitaRenderResult,
+  NovitaVideoOutputProof,
   RenderedCandidate,
   Shot,
 } from "@/lib/novitaRenderFarm";
@@ -106,6 +115,8 @@ interface PreparedWorker {
   expiresAt: number;
   maximumCostUsd: number;
   manifest: Record<string, unknown>;
+  /** Set only after a worker's ffprobe-backed completion receipt validates. */
+  videoOutputProof?: NovitaVideoOutputProof;
 }
 
 interface ReservedLease {
@@ -132,6 +143,8 @@ interface CompletionReport {
   error?: unknown;
   gpuSku?: unknown;
   gpuCount?: unknown;
+  renderContract?: unknown;
+  videoOutputs?: unknown;
 }
 
 interface DirectControlPlane {
@@ -143,25 +156,45 @@ interface DirectControlPlane {
   activeInstanceCount: number;
 }
 
-const RTX_4090_VRAM_GB = 24;
-const LTX_23_MINIMUM_VRAM_GB = 32;
-
 /**
- * The currently pinned worker is LTX-2.3 22B. Official LTX requirements put
- * that runtime above a 24 GB RTX 4090, so permitting it here would turn the
- * user’s single-SKU rule into an OOM/retry bill. A future legacy LTX worker
- * may be admitted only after its own digest-pinned image, model manifest, and
- * cloud visual/VRAM benchmark replace this deliberate gate.
+ * A direct worker has a second, pure pre-spend gate in addition to pipeline
+ * admission. It accepts only the exact LTX 2.5 FP8/CPU-offloaded x2 profile,
+ * and only after that exact profile has a deliberate RTX 4090 benchmark pin.
  */
-export function assertRtx4090VideoRuntime(profile: Pick<NovitaRenderCfg["profile"], "model">): void {
-  if (profile.model === OFFICIAL_RENDER_PINS.ltx.model) {
-    throw new NovitaAdmissionError(
-      `${OFFICIAL_RENDER_PINS.ltx.model} needs at least ${LTX_23_MINIMUM_VRAM_GB} GB but the locked ${NOVITA_REQUIRED_GPU_SKU} has ${RTX_4090_VRAM_GB} GB; no GPU was created`,
-    );
+export function assertRtx4090VideoRuntime(
+  profile: NovitaPhaseProfile,
+  runtime?: NovitaVideoRuntimeTarget,
+): void {
+  if (profile.phase !== "video" || !profile.fps || !profile.pipeline || profile.twoStageRefine === undefined) {
+    throw new NovitaAdmissionError("direct Novita video profile is missing its sealed LTX runtime fields");
   }
-  throw new NovitaAdmissionError(
-    `no independently benchmarked ${NOVITA_REQUIRED_GPU_SKU}-compatible LTX runtime is pinned for ${String(profile.model)}`,
-  );
+  try {
+    assertNovitaVideoPhaseProfileRuntime({
+      id: profile.id,
+      model: profile.model,
+      revision: profile.revision,
+      checkpoint: profile.checkpoint,
+      width: profile.width,
+      height: profile.height,
+      fps: profile.fps,
+      steps: profile.steps,
+      guidanceScale: profile.guidanceScale,
+      precision: profile.precision,
+      pipeline: profile.pipeline,
+      twoStageRefine: profile.twoStageRefine,
+      textEncoderCheckpoint: profile.textEncoderCheckpoint,
+      videoVaeCheckpoint: profile.videoVaeCheckpoint,
+      audioVaeCheckpoint: profile.audioVaeCheckpoint,
+      spatialUpscalerCheckpoint: profile.spatialUpscalerCheckpoint,
+      quantization: profile.quantization,
+      offload: profile.offload,
+      spatialUpscaleFactor: profile.spatialUpscaleFactor,
+      stageOneWidth: profile.stageOneWidth,
+      stageOneHeight: profile.stageOneHeight,
+    }, runtime);
+  } catch (error) {
+    throw new NovitaAdmissionError(error instanceof Error ? error.message : "Novita video runtime is not admissible");
+  }
 }
 
 export interface DirectNovitaFleetHealth {
@@ -301,6 +334,12 @@ function makeRenderJobs(cfg: NovitaRenderCfg, phase: Phase): DirectRenderJob[] {
   if (!fps) throw new NovitaAdmissionError("direct LTX render profile is missing FPS");
   return cfg.shots.map((shot) => {
     if (!shot.stillKey) throw new NovitaAdmissionError(`direct LTX render is missing stillKey for ${shot.id}`);
+    const sealedNegativePrompt = negativePrompt(cfg, shot);
+    // Official LTX 2.5 distilled does not expose a negative-prompt argument.
+    // Reject it instead of silently dropping a creator's safety/quality cue.
+    if (sealedNegativePrompt) {
+      throw new NovitaAdmissionError(`LTX-2.5 distilled does not support a negative prompt for ${shot.id}`);
+    }
     return {
       id: shot.id,
       shotId: shot.id,
@@ -315,7 +354,6 @@ function makeRenderJobs(cfg: NovitaRenderCfg, phase: Phase): DirectRenderJob[] {
         steps: profile.steps,
         frames: secondsToLtxFrames(shot.seconds, fps),
         fps,
-        negativePrompt: negativePrompt(cfg, shot),
         // Leave room for the 20-minute boot/deletion windows under the hard
         // two-hour worker lease. One worker has one bounded LTX clip.
         timeoutSeconds: 5_400,
@@ -391,15 +429,13 @@ export async function directNovitaFleetHealth(): Promise<DirectNovitaFleetHealth
   try {
     await bootstrapSecrets();
     const control = await prepareControlPlane();
-    // The direct image pipeline can be structurally ready, but the cinematic
-    // module includes LTX video and must not advertise readiness while its
-    // only pinned runtime is known to exceed the required 4090 VRAM.
+    const videoRuntime = assessNovitaVideoProfileRuntime(generationProfile("production"));
+    // Control-plane readiness is not video admission. In particular the
+    // exact model/runtime profile stays fail-closed until an operator records
+    // the real 4090 benchmark; a model label alone cannot activate spending.
     return {
-      ready: false,
-      blockers: [
-        `ltx_2_3_requires_${LTX_23_MINIMUM_VRAM_GB}gb_but_rtx_4090_has_${RTX_4090_VRAM_GB}gb`,
-        "benchmark_and_pin_a_4090_compatible_ltx_worker_before_enabling_video",
-      ],
+      ready: videoRuntime.ready,
+      blockers: videoRuntime.ready ? [] : [...videoRuntime.blockers, "benchmark_and_pin_the_exact_ltx_2_5_4090_worker_before_enabling_video"],
       gpuSku: NOVITA_REQUIRED_GPU_SKU,
       verifiedGpuQuota: control.config.verifiedGpuQuota,
       productId: control.product.id,
@@ -624,8 +660,8 @@ async function prepareWorkerManifest(args: {
     profileSha256: identity.profileSha256,
     ...(args.phase === "video"
       ? {
-          runtimeRepository: "Lightricks/LTX-2",
-          runtimeRevision: "4f8905737aac86a554637cac86c178877a39c744",
+          runtimeRepository: OFFICIAL_RENDER_PINS.ltx.runtimeRepository,
+          runtimeRevision: OFFICIAL_RENDER_PINS.ltx.runtimeRevision,
         }
       : {}),
     models: args.control.models,
@@ -751,6 +787,27 @@ async function reserveLease(
   return await leaseMutation<ReservedLease>(convex, "reserve", args);
 }
 
+function acceptWorkerVideoCompletionEvidence(worker: PreparedWorker, completion: CompletionReport): void {
+  try {
+    worker.videoOutputProof = assertLtxWorkerCompletionEvidence({
+      profile: worker.manifest.profile as NovitaPhaseProfile,
+      jobId: worker.job.id,
+      completion,
+    });
+  } catch (error) {
+    const message = error instanceof Error ? error.message : "returned invalid LTX x2 output evidence";
+    throw new NovitaAdmissionError(`worker ${worker.workerName} ${message}`);
+  }
+}
+
+async function restoreWorkerVideoCompletionEvidence(worker: PreparedWorker): Promise<void> {
+  const completion = await readJsonIfPresent(worker.completionKey) as CompletionReport | undefined;
+  if (completion?.status !== "done" || completion.manifestId !== worker.manifestId) {
+    throw new NovitaAdmissionError(`worker ${worker.workerName} has an artifact without a matching LTX completion receipt`);
+  }
+  acceptWorkerVideoCompletionEvidence(worker, completion);
+}
+
 async function observeWorker(
   worker: PreparedWorker,
   convex: StudioConvexHttpClient,
@@ -770,6 +827,9 @@ async function observeWorker(
         || completion.gpuCount !== NOVITA_REQUIRED_GPU_COUNT
       ) {
         throw new NovitaAdmissionError(`worker ${worker.workerName} returned an invalid completion attestation`);
+      }
+      if (worker.phase === "video") {
+        acceptWorkerVideoCompletionEvidence(worker, completion);
       }
       await leaseMutation<void>(convex, "heartbeat", {
         secret,
@@ -1125,6 +1185,16 @@ function directStatus(args: {
   workers: PreparedWorker[];
   receipt: NovitaBillingReceipt;
 }): NovitaBridgeStatus {
+  const videoProof = args.phase === "video" ? args.workers[0]?.videoOutputProof : undefined;
+  if (args.phase === "video" && (!videoProof || args.workers.some((worker) =>
+    !worker.videoOutputProof
+    || worker.videoOutputProof.outputWidth !== videoProof.outputWidth
+    || worker.videoOutputProof.outputHeight !== videoProof.outputHeight
+    || worker.videoOutputProof.stageOneWidth !== videoProof.stageOneWidth
+    || worker.videoOutputProof.stageOneHeight !== videoProof.stageOneHeight
+  ))) {
+    throw new NovitaAdmissionError("direct LTX render is missing consistent worker-observed x2 output proofs");
+  }
   const expectedKeys = args.workers.map((worker) => worker.job.key);
   const profileSha256 = hash(canonicalJson(args.cfg.profile));
   const requestCanonicalJson = canonicalJson({
@@ -1163,13 +1233,42 @@ function directStatus(args: {
       model: args.cfg.profile.model,
       revision: args.cfg.profile.revision,
       checkpoint: args.cfg.profile.checkpoint,
+      ...(args.phase === "video" ? { precision: args.cfg.profile.precision } : {}),
       ...(args.phase === "video" && args.cfg.profile.pipeline ? { pipeline: args.cfg.profile.pipeline } : {}),
+      ...(args.phase === "video" && args.cfg.profile.twoStageRefine !== undefined
+        ? { twoStageRefine: args.cfg.profile.twoStageRefine }
+        : {}),
       ...(args.phase === "video" && args.cfg.profile.distilledLoraCheckpoint
         ? { distilledLoraCheckpoint: args.cfg.profile.distilledLoraCheckpoint }
+        : {}),
+      ...(args.phase === "video" && args.cfg.profile.textEncoderCheckpoint
+        ? { textEncoderCheckpoint: args.cfg.profile.textEncoderCheckpoint }
+        : {}),
+      ...(args.phase === "video" && args.cfg.profile.videoVaeCheckpoint
+        ? { videoVaeCheckpoint: args.cfg.profile.videoVaeCheckpoint }
+        : {}),
+      ...(args.phase === "video" && args.cfg.profile.audioVaeCheckpoint
+        ? { audioVaeCheckpoint: args.cfg.profile.audioVaeCheckpoint }
         : {}),
       ...(args.phase === "video" && args.cfg.profile.spatialUpscalerCheckpoint
         ? { spatialUpscalerCheckpoint: args.cfg.profile.spatialUpscalerCheckpoint }
         : {}),
+      ...(args.phase === "video" && args.cfg.profile.quantization
+        ? { quantization: args.cfg.profile.quantization }
+        : {}),
+      ...(args.phase === "video" && args.cfg.profile.offload
+        ? { offload: args.cfg.profile.offload }
+        : {}),
+      ...(args.phase === "video" && args.cfg.profile.spatialUpscaleFactor
+        ? { spatialUpscaleFactor: args.cfg.profile.spatialUpscaleFactor }
+        : {}),
+      ...(args.phase === "video" && args.cfg.profile.stageOneWidth
+        ? { stageOneWidth: args.cfg.profile.stageOneWidth }
+        : {}),
+      ...(args.phase === "video" && args.cfg.profile.stageOneHeight
+        ? { stageOneHeight: args.cfg.profile.stageOneHeight }
+        : {}),
+      ...(videoProof ? { outputWidth: videoProof.outputWidth, outputHeight: videoProof.outputHeight } : {}),
     },
     billingReceipt: args.receipt,
     billingReceiptSha256: hash(canonicalJson(args.receipt)),
@@ -1185,6 +1284,14 @@ function directStatus(args: {
 export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Promise<NovitaRenderResult> {
   const lifecycle = ensureLifecycle(cfg);
   if (phase === "video") assertRtx4090VideoRuntime(cfg.profile);
+  // A provider-facing caller must carry its own conservative worker envelope.
+  // Falling back to the fleet-wide account cap converts a missing module
+  // reservation into permission to consume unrelated stages' budget.
+  if (!Number.isFinite(cfg.maxCostUsd) || !cfg.maxCostUsd || cfg.maxCostUsd <= 0) {
+    throw new NovitaAdmissionError(
+      "direct Novita render requires an explicit positive maxCostUsd before control-plane admission",
+    );
+  }
   await bootstrapSecrets();
   const control = await prepareControlPlane();
   if (control.activeInstanceCount >= control.config.verifiedGpuQuota) {
@@ -1193,7 +1300,7 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
   const jobs = makeRenderJobs(cfg, phase);
   if (!jobs.length) throw new NovitaAdmissionError("direct Novita render has no jobs");
   const requestedWorkers = automaticRtx4090Concurrency(cfg.shots);
-  const totalMaximumCost = Math.min(cfg.maxCostUsd ?? control.config.maximumFleetUsd, control.config.maximumFleetUsd);
+  const totalMaximumCost = Math.min(cfg.maxCostUsd, control.config.maximumFleetUsd);
   if (!Number.isFinite(totalMaximumCost) || totalMaximumCost <= 0) {
     throw new NovitaAdmissionError("direct Novita render has no positive fleet budget");
   }
@@ -1246,7 +1353,14 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
         maximumCostUsd: perWorkerMaximumCost,
       });
       prepared.push(worker);
-      if (!await artifactIsComplete(worker)) wave.push(worker);
+      if (!await artifactIsComplete(worker)) {
+        wave.push(worker);
+      } else if (phase === "video") {
+        // A pre-existing R2 artifact is not enough to reuse a video result:
+        // restore the worker's immutable ffprobe proof before it can bypass
+        // a paid execution.
+        await restoreWorkerVideoCompletionEvidence(worker);
+      }
     }
     if (wave.length && !spendAuthorized && cfg.beforeProviderSpend) {
       await cfg.beforeProviderSpend();
@@ -1265,6 +1379,11 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
     endedAt: Date.now(),
     hourlyRate: control.product.spotPriceUsdPerHour,
   }));
+  if (phase === "video") {
+    await Promise.all(prepared.map(async (worker) => {
+      if (!worker.videoOutputProof) await restoreWorkerVideoCompletionEvidence(worker);
+    }));
+  }
   const status = directStatus({ phase, cfg, workers: prepared, receipt: aggregateReceipt(allReceipts, hash(canonicalJson(plan))) });
   const candidates: RenderedCandidate[] = prepared.map((worker) => ({
     shotId: worker.job.shotId,
@@ -1277,6 +1396,9 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
     phase,
     ...(phase === "image" ? { stillKeys: candidates.map((candidate) => candidate.key) } : { footageKeys: candidates.map((candidate) => candidate.key), footageClips: [] }),
     candidates,
+    ...(phase === "video" ? {
+      videoOutputProofs: Object.fromEntries(prepared.map((worker) => [worker.job.shotId, worker.videoOutputProof!])),
+    } : {}),
     outputs: candidates.length,
     durationSec: 0,
     costUsd: status.billingReceipt.costUsd,

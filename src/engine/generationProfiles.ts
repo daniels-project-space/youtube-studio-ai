@@ -38,7 +38,17 @@ const ProfileSchema = z.object({
     pipeline: z.enum(["distilled", "two-stage-hq"]),
     twoStageRefine: z.boolean(),
     distilledLoraCheckpoint: z.string().min(1).optional(),
+    textEncoderCheckpoint: z.string().min(1),
+    videoVaeCheckpoint: z.string().min(1),
+    audioVaeCheckpoint: z.string().min(1),
     spatialUpscalerCheckpoint: z.string().min(1).optional(),
+    /** Exact low-VRAM execution mode; never let the runtime choose a fallback. */
+    quantization: z.literal("fp8-cast"),
+    offload: z.literal("cpu"),
+    /** The official distilled pipeline creates stage one at half target size. */
+    spatialUpscaleFactor: z.literal(2),
+    stageOneWidth: z.number().int().positive(),
+    stageOneHeight: z.number().int().positive(),
     candidates: z.number().int().min(1).max(3),
   }),
   qa: z.object({
@@ -52,7 +62,39 @@ const ProfileSchema = z.object({
 
 export type GenerationProfile = z.infer<typeof ProfileSchema>;
 
-export const LTX_23_MODEL_REVISION = "7caa482d5cd10a2eae6b34cb48f093ebc45a263e" as const;
+/**
+ * One source of truth for the video renderer. LTX 2.5's distilled pipeline
+ * genuinely performs a second, latent-space x2 refinement pass: 640x352 in
+ * stage one becomes the deliverable 1280x704 frame. 1280x704 is divisible by
+ * 64 as required by the official two-stage pipeline and is intentionally near
+ * 720p; this does not pretend an unverified 1440p render fits a 24 GB 4090.
+ */
+export const LTX_25_RTX_4090_VIDEO = Object.freeze({
+  model: "Lightricks/LTX-2.5",
+  revision: "ce298b1259d61ce6c87e05154b9ad339b16f32a0",
+  checkpoint: "ltx-2.5-22b-distilled-transformer-bf16.safetensors",
+  textEncoderCheckpoint: "gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
+  videoVaeCheckpoint: "ltx-2.5-video-vae-bf16.safetensors",
+  audioVaeCheckpoint: "ltx-2.5-audio-vae-bf16.safetensors",
+  spatialUpscalerCheckpoint: "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
+  runtimeRepository: "Lightricks/LTX-2",
+  runtimeRevision: "fd4ded7f2d88d3da713abcdd4ad41ecc4a9314ca",
+  width: 1280,
+  height: 704,
+  fps: 25,
+  steps: 8,
+  guidanceScale: 1,
+  precision: "bf16",
+  pipeline: "distilled",
+  twoStageRefine: true,
+  quantization: "fp8-cast",
+  offload: "cpu",
+  spatialUpscaleFactor: 2,
+  stageOneWidth: 640,
+  stageOneHeight: 352,
+} as const);
+
+export const LTX_25_MODEL_REVISION = LTX_25_RTX_4090_VIDEO.revision;
 export const NOVITA_ELASTIC_GPU_CEILING = 8 as const;
 
 const NOVITA_LOCAL_SPOT_INFRA = {
@@ -84,18 +126,7 @@ export const GENERATION_PROFILES: Readonly<Record<GenerationProfile["id"], Gener
     },
     video: {
       provider: "novita",
-      model: "Lightricks/LTX-2.3",
-      revision: LTX_23_MODEL_REVISION,
-      checkpoint: "ltx-2.3-22b-distilled-1.1.safetensors",
-      width: 1280,
-      height: 704,
-      fps: 25,
-      steps: 8,
-      guidanceScale: 1,
-      precision: "bf16",
-      pipeline: "distilled",
-      twoStageRefine: false,
-      spatialUpscalerCheckpoint: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+      ...LTX_25_RTX_4090_VIDEO,
       candidates: 1,
     },
     qa: { imageMinScore: 0.72, shotMinScore: 0.72, maxFreezeFraction: 0.08, required: true },
@@ -119,19 +150,7 @@ export const GENERATION_PROFILES: Readonly<Record<GenerationProfile["id"], Gener
     },
     video: {
       provider: "novita",
-      model: "Lightricks/LTX-2.3",
-      revision: LTX_23_MODEL_REVISION,
-      checkpoint: "ltx-2.3-22b-dev.safetensors",
-      width: 1920,
-      height: 1088,
-      fps: 25,
-      steps: 40,
-      guidanceScale: 4,
-      precision: "bf16",
-      pipeline: "two-stage-hq",
-      twoStageRefine: true,
-      distilledLoraCheckpoint: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
-      spatialUpscalerCheckpoint: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+      ...LTX_25_RTX_4090_VIDEO,
       candidates: 1,
     },
     qa: { imageMinScore: 0.8, shotMinScore: 0.8, maxFreezeFraction: 0.04, required: true },
@@ -155,19 +174,7 @@ export const GENERATION_PROFILES: Readonly<Record<GenerationProfile["id"], Gener
     },
     video: {
       provider: "novita",
-      model: "Lightricks/LTX-2.3",
-      revision: LTX_23_MODEL_REVISION,
-      checkpoint: "ltx-2.3-22b-dev.safetensors",
-      width: 1920,
-      height: 1088,
-      fps: 25,
-      steps: 48,
-      guidanceScale: 4,
-      precision: "bf16",
-      pipeline: "two-stage-hq",
-      twoStageRefine: true,
-      distilledLoraCheckpoint: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
-      spatialUpscalerCheckpoint: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+      ...LTX_25_RTX_4090_VIDEO,
       candidates: 1,
     },
     qa: { imageMinScore: 0.86, shotMinScore: 0.84, maxFreezeFraction: 0.025, required: true },

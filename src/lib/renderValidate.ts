@@ -1,17 +1,23 @@
 /**
- * DETERMINISTIC render gate — no LLM, never flaky. The holistic Gemini watch is
- * great for subjective issues but its 503s make it an unreliable GATE, so the hard
- * pass/fail is decided here from signals + plan facts the pipeline already knows:
+ * DETERMINISTIC render gate — no LLM, never flaky. The evidence-backed visual
+ * reviewer handles subjective issues separately; the hard pass/fail is decided
+ * here from signals + plan facts the pipeline already knows:
  *
  *   - DEAD AIR / dropped segment / empty insert  = a long (>=2.5s) BLACK segment
  *     anywhere except the very end (the outro legitimately fades to black). Tuned
  *     long enough that legit chapter/quote fades (~0.3-0.8s) are NOT flagged.
  *   - intro/title card present (plan fact).
+ *   - accidental frozen / near-identical programme holds, with exact FFmpeg
+ *     intervals returned for the owning renderer to repair.
  *
- * Reliable + instant; the LLM watch stays ADVISORY on top. (Detecting "card present
- * but text missing" is left to the advisory LLM / optional OCR — signal stats can't.)
+ * Reliable + instant. Detecting "card present but text missing" is left to the
+ * evidence-backed visual review / optional OCR — signal stats cannot establish it.
  */
 import { spawnSync } from "node:child_process";
+import {
+  measureTemporalDynamism,
+  type TemporalDynamismEvidence,
+} from "./temporalDynamism";
 
 const FFMPEG = process.env.FFMPEG_BIN ?? "ffmpeg";
 
@@ -24,6 +30,7 @@ export interface RenderValidateResult {
   ran: boolean;
   verdict: "pass" | "fail";
   defects: RVDefect[];
+  temporalDynamism: TemporalDynamismEvidence;
 }
 
 /**
@@ -43,6 +50,8 @@ export interface RenderValidateChannelContext {
   criticDoctrine?: string;
   /** Explicit override; wins over the lane default when finite and > 0. */
   blackSegmentMinSec?: number;
+  /** `null` disables static-hold enforcement for intentional ambient formats. */
+  maxStaticHoldSec?: number | null;
 }
 
 /** Lane-dependent dead-air threshold. Unknown lanes keep the historic 2.5s. */
@@ -60,6 +69,7 @@ export async function validateRender(opts: {
   introSec?: number;
   tailSec?: number;
   introApplied?: boolean;
+  outroApplied?: boolean;
   channel?: RenderValidateChannelContext;
   log?: (m: string) => void;
 }): Promise<RenderValidateResult> {
@@ -71,6 +81,7 @@ export async function validateRender(opts: {
     ? override
     : LANE_BLACK_MIN_SEC[opts.channel?.contentLaneKey ?? ""] ?? DEFAULT_BLACK_MIN_SEC;
 
+  let blackCheckRan = true;
   try {
     // Decode at 4fps for speed; only segments >= blackMinSec of black count as
     // dead air (2.5s generic; see LANE_BLACK_MIN_SEC for the lane overrides).
@@ -82,6 +93,9 @@ export async function validateRender(opts: {
       ["-i", opts.videoPath, "-vf", `fps=4,blackdetect=d=${blackMinSec}:pix_th=0.04`, "-an", "-f", "null", "-"],
       { encoding: "utf8", maxBuffer: 1 << 27 },
     );
+    if (bd.error || bd.status !== 0) {
+      throw new Error(bd.error?.message ?? `ffmpeg exited ${String(bd.status)}`);
+    }
     for (const m of (bd.stderr || "").matchAll(/black_start:([\d.]+) black_end:([\d.]+) black_duration:([\d.]+)/g)) {
       const start = +m[1];
       const end = +m[2];
@@ -92,9 +106,51 @@ export async function validateRender(opts: {
       }
     }
   } catch (e) {
-    // Tooling failure must not block a finished render — degrade to advisory pass.
-    log(`validateRender: signal check failed (advisory): ${e instanceof Error ? e.message : e}`);
-    return { ran: false, verdict: "pass", defects };
+    blackCheckRan = false;
+    const detail = e instanceof Error ? e.message : String(e);
+    // `ran: false` is useful receipt metadata, but callers must not need to
+    // remember to interpret it before using the verdict as a release decision.
+    // Treat a missing black/dead-air measurement as a deterministic-gate
+    // failure here so every consumer gets the same fail-closed answer.
+    defects.push({
+      severity: "critical",
+      issue: `black/dead-air evidence unavailable: ${detail}`,
+    });
+    log(`validateRender: black-segment measurement unavailable: ${detail}`);
+  }
+
+  // Only explicit, successfully-applied planned cards are excluded. A generic
+  // start/end margin would make an accidental frozen title or outro invisible.
+  const plannedCardWindows = [
+    ...(opts.introApplied === true && Number(opts.introSec) > 0
+      ? [{ startSec: 0, endSec: Number(opts.introSec), reason: "planned intro/title card" }]
+      : []),
+    ...(opts.outroApplied === true && Number(opts.tailSec) > 0
+      ? [{
+          startSec: Math.max(0, opts.durationSec - Number(opts.tailSec)),
+          endSec: opts.durationSec,
+          reason: "planned outro card",
+        }]
+      : []),
+  ];
+  const temporalDynamism = measureTemporalDynamism({
+    videoPath: opts.videoPath,
+    durationSec: opts.durationSec,
+    maxStaticHoldSec: opts.channel?.maxStaticHoldSec,
+    excludedWindows: plannedCardWindows,
+  });
+  if (temporalDynamism.verdict === "unavailable") {
+    defects.push({
+      severity: "critical",
+      issue: `temporal dynamism evidence unavailable (${temporalDynamism.source}): ${temporalDynamism.detail ?? "unknown ffmpeg failure"}`,
+    });
+  }
+  for (const frozen of temporalDynamism.violatingIntervals) {
+    defects.push({
+      severity: "critical",
+      tSec: frozen.startSec,
+      issue: `static visual hold: ${frozen.durationSec.toFixed(1)}s at ${frozen.startSec.toFixed(1)}–${frozen.endSec.toFixed(1)}s exceeds ${temporalDynamism.thresholdSec?.toFixed(1)}s lane maximum (${temporalDynamism.source}; repair this interval)`,
+    });
   }
 
   if (opts.introApplied === false) {
@@ -104,8 +160,13 @@ export async function validateRender(opts: {
   const crit = defects.filter((d) => d.severity === "critical").length;
   const verdict: "pass" | "fail" = crit >= 1 ? "fail" : "pass";
   const laneNote = opts.channel?.contentLaneKey
-    ? ` [lane ${opts.channel.contentLaneKey}, dead-air >=${blackMinSec}s${opts.channel.criticDoctrine ? ", doctrine in scope (advisory only — this gate is deterministic)" : ""}]`
+    ? ` [lane ${opts.channel.contentLaneKey}, dead-air >=${blackMinSec}s, static-hold ${temporalDynamism.thresholdSec === null ? "exempt" : `<=${temporalDynamism.thresholdSec}s / observed ${temporalDynamism.maxFrozenHoldSec.toFixed(1)}s`}${opts.channel.criticDoctrine ? ", doctrine in scope (advisory only — this gate is deterministic)" : ""}]`
     : "";
   log(`validateRender: ${defects.length} defect(s) (critical ${crit})${laneNote} → ${verdict.toUpperCase()}`);
-  return { ran: true, verdict, defects };
+  return {
+    ran: blackCheckRan && (!temporalDynamism.enforced || temporalDynamism.ran),
+    verdict,
+    defects,
+    temporalDynamism,
+  };
 }

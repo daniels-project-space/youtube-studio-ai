@@ -131,6 +131,104 @@ export type QualityAxisEvidence = z.infer<typeof QualityAxisEvidenceSchema>;
 export type EpisodeSpec = z.infer<typeof EpisodeSpecSchema>;
 export type QualityEvidence = z.infer<typeof QualityEvidenceSchema>;
 
+/**
+ * The publish-time decision for a complete editorial review. This is kept
+ * separate from `release.hardGateReady`: raw receipts and inception probes may
+ * truthfully be partial, while a production upload may not pretend a partial
+ * receipt is a fully reviewed episode.
+ */
+export interface EditorialAcceptance {
+  lane: string;
+  requiredAxes: readonly QualityAxisName[];
+  ready: boolean;
+  blockers: string[];
+}
+
+interface EditorialLanePolicy {
+  requiredAxes: readonly QualityAxisName[];
+  /** The lane has an authored/source-backed story artifact that must survive to final QA. */
+  requiresMeasuredStory?: boolean;
+  /** Audio is the primary experience, so a loudness meter alone is insufficient. */
+  requiresAestheticAudioScore?: boolean;
+}
+
+const NARRATIVE_EDITORIAL_AXES = [
+  "technical",
+  "visual",
+  "temporal",
+  "narrative",
+  "audio",
+  "brand",
+] as const satisfies readonly QualityAxisName[];
+
+const AMBIENT_EDITORIAL_AXES = [
+  "technical",
+  "visual",
+  "temporal",
+  "audio",
+  "brand",
+] as const satisfies readonly QualityAxisName[];
+
+/**
+ * A lane's production release contract. `legacy_unclassified` is deliberately
+ * omitted: it has no known editorial grammar and therefore fails closed at
+ * upload until it is migrated to a supported content lane.
+ */
+const EDITORIAL_PRODUCTION_POLICIES: Record<string, EditorialLanePolicy> = {
+  narrated_documentary: {
+    requiredAxes: NARRATIVE_EDITORIAL_AXES,
+    requiresMeasuredStory: true,
+    requiresAestheticAudioScore: true,
+  },
+  cinematic_ai: {
+    requiredAxes: NARRATIVE_EDITORIAL_AXES,
+    requiresMeasuredStory: true,
+    requiresAestheticAudioScore: true,
+  },
+  short_form: {
+    requiredAxes: NARRATIVE_EDITORIAL_AXES,
+    requiresMeasuredStory: true,
+    requiresAestheticAudioScore: true,
+  },
+  documentary_collage_short: {
+    requiredAxes: NARRATIVE_EDITORIAL_AXES,
+    requiresMeasuredStory: true,
+    requiresAestheticAudioScore: true,
+  },
+  // These engines hold their beat/panel plans internally rather than emitting
+  // the shared EpisodeSpec story artifact. Their critic validation result is
+  // therefore the real narrative evidence available to final QA; requiring a
+  // nonexistent shared story receipt here would permanently deadlock them.
+  whiteboard_explainer: {
+    requiredAxes: NARRATIVE_EDITORIAL_AXES,
+    requiresAestheticAudioScore: true,
+  },
+  motion_comic: {
+    requiredAxes: NARRATIVE_EDITORIAL_AXES,
+    requiresAestheticAudioScore: true,
+  },
+  lore_micro_doc: {
+    requiredAxes: NARRATIVE_EDITORIAL_AXES,
+    requiresAestheticAudioScore: true,
+  },
+  quiz_year: {
+    requiredAxes: NARRATIVE_EDITORIAL_AXES,
+    requiresAestheticAudioScore: true,
+  },
+  ambient_guided: {
+    // Ambient can be a narration-led meditation or an intentionally wordless
+    // soundscape. Do not manufacture a narrative/story requirement for the
+    // latter; audio, timing, visuals, and channel identity are its measurable
+    // editorial grammar.
+    requiredAxes: AMBIENT_EDITORIAL_AXES,
+    requiresAestheticAudioScore: true,
+  },
+  music_loop: {
+    requiredAxes: AMBIENT_EDITORIAL_AXES,
+    requiresAestheticAudioScore: true,
+  },
+};
+
 export interface QualityAxisInput {
   /** A direct evaluator verdict. It is not inferred from pipeline completion. */
   passed?: boolean;
@@ -236,6 +334,86 @@ function positive(value: unknown): number | undefined {
 
 function formatScore(value: number): string {
   return value.toFixed(2);
+}
+
+function hasMeaningfulPassingEvidence(axis: QualityAxisName, evidence: QualityAxisEvidence): boolean {
+  if (evidence.status !== "pass") return false;
+  if (evidence.evaluator === "not-measured" || evidence.evaluator === "unspecified-evaluator") return false;
+  return evidence.evidence.some((detail) => {
+    const normalized = detail.trim();
+    return normalized !== `No ${axis} evaluator evidence was supplied.` &&
+      normalized !== "Evaluator result was supplied without supporting detail.";
+  });
+}
+
+/**
+ * Decide whether a receipt is adequate for a production upload.
+ *
+ * This intentionally does not alter `buildQualityEvidence()` or
+ * `hardGateReady`: callers that create a probe or partial receipt can continue
+ * to describe it honestly. Only the production QA and publishing boundary use
+ * this stricter, lane-aware contract.
+ */
+export function assessProductionEditorialAcceptance(evidence: QualityEvidence): EditorialAcceptance {
+  const lane = evidence.episode.lane.key;
+  const policy = EDITORIAL_PRODUCTION_POLICIES[lane];
+  if (!policy) {
+    return {
+      lane,
+      requiredAxes: [],
+      ready: false,
+      blockers: [
+        `content lane ${lane} has no production editorial acceptance policy; migrate legacy or unknown receipts before upload`,
+      ],
+    };
+  }
+
+  const blockers: string[] = [];
+  if (!evidence.release.hardGateReady) {
+    blockers.push(
+      ...evidence.release.blockers.map((blocker) => `hard gate: ${blocker}`),
+    );
+  }
+  for (const axis of policy.requiredAxes) {
+    const axisEvidence = evidence.axes[axis];
+    if (!hasMeaningfulPassingEvidence(axis, axisEvidence)) {
+      blockers.push(
+        `editorial ${axis} evidence must be a passing evaluator result with supporting detail (received ${axisEvidence.status})`,
+      );
+    }
+  }
+
+  if (policy.requiresAestheticAudioScore) {
+    const audio = evidence.axes.audio;
+    if (audio.score === undefined || audio.minimumScore === undefined) {
+      blockers.push("audio-first lane requires a scored audio-aesthetics result with an acceptance threshold");
+    }
+  }
+
+  if (policy.requiresMeasuredStory) {
+    const story = evidence.episode.story;
+    if (story.status !== "measured") {
+      blockers.push("editorial story evidence was not measured");
+    } else {
+      if (!story.source) blockers.push("editorial story evidence is missing its source artifact");
+      if (!story.beatCount || story.beatCount < 2) {
+        blockers.push("editorial story evidence requires at least two measured beats");
+      }
+      if (!story.shotCount || story.shotCount < 1) {
+        blockers.push("editorial story evidence requires at least one measured shot");
+      }
+      if (story.coverageRatio === undefined || story.coverageRatio < 0.95) {
+        blockers.push("editorial story evidence requires at least 95% measured coverage");
+      }
+    }
+  }
+
+  return {
+    lane,
+    requiredAxes: policy.requiredAxes,
+    ready: blockers.length === 0,
+    blockers,
+  };
 }
 
 function normalizeAxis(

@@ -7,7 +7,12 @@ import { synthChannelConcept } from "@/lib/conceptSynth";
 import { generateChannelArtAsset } from "@/lib/channelArt";
 import { designPipeline, enforceLengthContract, type DesignOptions } from "@/engine/designer";
 import type { PipelineEntry } from "@/engine/types";
-import { FAMILIES, type FamilyKey } from "@/engine/families";
+import {
+  FAMILIES,
+  familyProductionReadiness,
+  productionReadyFamilyFallback,
+  type FamilyKey,
+} from "@/engine/families";
 import { getArchetype } from "@/engine/archetypes";
 import { getNiche } from "@/lib/nicheCatalog";
 import { refreshNicheResearchCore } from "@/lib/nicheResearch";
@@ -30,7 +35,10 @@ import {
   ESTABLISHED_CONFIDENCE,
 } from "@/engine/creative/styleDNA";
 import { architectPipeline } from "@/engine/creative/architect";
-import { CHANNEL_INCEPTION_SETUP_COST_CEILING_USD } from "@/engine/channelInceptionContracts";
+import {
+  CHANNEL_INCEPTION_SETUP_COST_CEILING_USD,
+  channelInceptionProbeCostCeilingUsd,
+} from "@/engine/channelInceptionContracts";
 import { channelInceptionSlug } from "@/lib/channelInceptionIdentity";
 import {
   channelPublishConfiguration,
@@ -56,6 +64,7 @@ import {
   MAX_CHANNEL_INCEPTION_PROBE_ATTEMPTS,
   MAX_CHANNEL_INCEPTION_PROBE_COST_USD,
   assessChannelInceptionProbeQuality,
+  resolveChannelInceptionProbeHolisticReview,
   freezeChannelInceptionProbeContext,
   freezeChannelInceptionProbeInput,
   prepareChannelInceptionProbeAttempt,
@@ -774,19 +783,17 @@ function reviewProbeArtifacts(stages: readonly ProbeRunStage[]): ProbeArtifactRe
   const qaReport = qaOutput.qaReport && typeof qaOutput.qaReport === "object"
     ? qaOutput.qaReport as Record<string, unknown>
     : {};
-  const watch = qaReport.watch && typeof qaReport.watch === "object"
-    ? qaReport.watch as Record<string, unknown>
-    : {};
+  const holisticReview = resolveChannelInceptionProbeHolisticReview(qaReport) ?? {};
   const thumbnail = qaReport.thumbnail && typeof qaReport.thumbnail === "object"
     ? qaReport.thumbnail as Record<string, unknown>
     : {};
   const review: ProbeArtifactReview = {
     source: "qa_visual",
     quality,
-    ...(typeof watch.summary === "string" ? { feel: { summary: watch.summary } } : {}),
-    ...(Array.isArray(watch.defects)
+    ...(typeof holisticReview.summary === "string" ? { feel: { summary: holisticReview.summary } } : {}),
+    ...(Array.isArray(holisticReview.defects)
       ? {
-        defects: watch.defects.map((candidate) => {
+        defects: holisticReview.defects.map((candidate) => {
           if (!candidate || typeof candidate !== "object") return String(candidate);
           const defect = candidate as Record<string, unknown>;
           return `[${String(defect.severity ?? "unknown")}] ${String(defect.issue ?? "")}`;
@@ -822,7 +829,22 @@ export async function executeDesignChannel(
 ) {
   const log = (message: string, extra?: Record<string, unknown>) =>
     console.log(`[design-channel] ${message}`, extra ?? "");
-  await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
+  const family = FAMILIES[payload.family];
+  if (!family) throw new Error(`unknown family: ${payload.family}`);
+  const runtimeReadiness = familyProductionReadiness(payload.family);
+  if (!runtimeReadiness.productionReady) {
+    const fallback = productionReadyFamilyFallback(payload.family);
+    throw new Error(
+      `${family.label} cannot start channel inception because its production path is unavailable: ` +
+      `${runtimeReadiness.blockers.join(" ")}` +
+      (fallback
+        ? ` Choose ${FAMILIES[fallback].label} after its own admission check.`
+        : " No no-Gemini production-family fallback is registered."),
+    );
+  }
+  // No creator-time Gemini prerequisite: admission above rejects any family
+  // whose autonomous planning path still depends on it.
+  await bootstrapSecrets(log);
 
   const ownerId = admitProviderTaskOwner({
     requestedOwnerId: payload.ownerId,
@@ -833,8 +855,6 @@ export async function executeDesignChannel(
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = new ConvexHttpClient(url);
-  const family = FAMILIES[payload.family];
-  if (!family) throw new Error(`unknown family: ${payload.family}`);
   const niche = getNiche(payload.nicheKey ?? "");
   const requestKey = payload.requestKey?.trim() || runtime.runId;
   const requestedYoutubeName = normalizeYoutubeChannelName(
@@ -865,7 +885,7 @@ export async function executeDesignChannel(
     payload.inceptionApproval.maxCostUsd === CHANNEL_INCEPTION_SETUP_COST_CEILING_USD;
   const requestedProbeCapUsd = Math.min(
     Math.max(payload.budget ?? family.defaultRunBudgetUsd ?? 5, 0),
-    MAX_CHANNEL_INCEPTION_PROBE_COST_USD,
+    channelInceptionProbeCostCeilingUsd(payload.family),
   );
   const probeApproved = payload.runProbe === true && verifyStudioActionApproval(payload.probeApproval, {
     action: "channel-inception-probe",
@@ -917,9 +937,10 @@ export async function executeDesignChannel(
     toggles: payload.toggles,
     paramOverrides: payload.paramOverrides,
   });
-  const lengthSeconds = payload.lengthMinutes ? Math.round(payload.lengthMinutes * 60) : 0;
+  // Preserve the exact design resolution: an omitted operator duration may
+  // intentionally use a valid niche preset rather than the generic family default.
+  const lengthSeconds = design.episodeLengthSeconds;
   const withLengthLaw = (pipeline: PipelineEntry[]): PipelineEntry[] => {
-    if (!lengthSeconds) return pipeline;
     const result = enforceLengthContract(pipeline, lengthSeconds, payload.family);
     if (result.changed.length) log(`length law re-pinned: ${result.changed.join(", ")}`);
     return result.pipeline;
@@ -1003,18 +1024,21 @@ export async function executeDesignChannel(
     });
   }
 
-  // An unavailable family cannot pass an end-to-end proof. Persist only the
-  // deterministic shell and stop before research/model/art/thumbnail spend.
-  if (!design.available) {
+  // A missing template or unavailable runtime cannot pass an end-to-end proof.
+  // Persist only the deterministic shell and stop before research/model/art/
+  // thumbnail spend. The entrypoint above rejects known blocked families;
+  // retain this guard for resumed or future dynamic capability changes.
+  if (!design.available || !design.productionReady) {
     const blockers = [
-      `${family.label} production engine is not available`,
+      `${family.label} production engine or runtime is not available`,
+      ...design.runtimeBlockers,
       ...design.warnings,
     ];
     await convex.mutation(api.channels.updateChannel, {
       channelId,
       status: "draft",
       architectReport: {
-        summary: "zero-spend draft: family engine unavailable",
+        summary: "zero-spend draft: family engine or runtime unavailable",
         applied: [],
         rejected: [],
         missingCapabilities: [],
@@ -1030,7 +1054,7 @@ export async function executeDesignChannel(
       name: baseName,
       family: payload.family,
       status: "draft" as const,
-      probe: { ok: false, attempts: 0, error: "family engine unavailable" },
+      probe: { ok: false, attempts: 0, error: "family engine or runtime unavailable" },
       zeroSpendDraft: true,
       blockers,
       warnings: design.warnings,
@@ -1632,7 +1656,16 @@ export async function executeDesignChannel(
         "avatar",
         artIdentity,
         log,
-        { version: { avatar: avatarStage.inputFingerprint.slice(0, 20) } },
+        {
+          version: { avatar: avatarStage.inputFingerprint.slice(0, 20) },
+          maxProviderSpendUsd: avatarStage.maximumCostUsd,
+          providerLifecycle: {
+            ownerId,
+            channelId,
+            runId: runtime.runId,
+            blockId: "channel-inception-avatar",
+          },
+        },
       );
       await mergeIdentity(convex, channelId, { imageKey });
       return { value: imageKey, evidence: { imageKey } };
@@ -1653,7 +1686,16 @@ export async function executeDesignChannel(
         "banner",
         artIdentity,
         log,
-        { version: { banner: bannerStage.inputFingerprint.slice(0, 20) } },
+        {
+          version: { banner: bannerStage.inputFingerprint.slice(0, 20) },
+          maxProviderSpendUsd: bannerStage.maximumCostUsd,
+          providerLifecycle: {
+            ownerId,
+            channelId,
+            runId: runtime.runId,
+            blockId: "channel-inception-banner",
+          },
+        },
       );
       await mergeIdentity(convex, channelId, { bannerKey });
       return { value: bannerKey, evidence: { bannerKey } };
@@ -2145,6 +2187,7 @@ export async function executeDesignChannel(
               moduleConfigOverride,
               invocationContext: freezeChannelInceptionProbeContext({
                 ownerId,
+                family: payload.family,
                 channel: channelSnapshot,
               }),
               productionFingerprint: effectivePipelineFingerprint(channelSnapshot),

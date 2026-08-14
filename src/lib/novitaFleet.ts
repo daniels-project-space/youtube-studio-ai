@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { LTX_25_RTX_4090_VIDEO } from "@/engine/generationProfiles";
 
 export const NOVITA_FLEET_CONTRACT_VERSION = "2.0.0" as const;
 export const NOVITA_HARD_GPU_LIMIT = 8 as const;
@@ -14,22 +15,12 @@ export const NOVITA_REQUIRED_GPU_SKU = "RTX 4090" as const;
 export const NOVITA_REQUIRED_GPU_COUNT = 1 as const;
 
 export const OFFICIAL_RENDER_PINS = Object.freeze({
-  gemma: {
-    model: "google/gemma-3-12b-it-qat-q4_0-unquantized",
-  },
   zImage: {
     model: "Tongyi-MAI/Z-Image-Turbo",
     revision: "f332072aa78be7aecdf3ee76d5c247082da564a6",
   },
   ltx: {
-    model: "Lightricks/LTX-2.3",
-    revision: "7caa482d5cd10a2eae6b34cb48f093ebc45a263e",
-    runtimeRepository: "Lightricks/LTX-2",
-    runtimeRevision: "4f8905737aac86a554637cac86c178877a39c744",
-    devCheckpoint: "ltx-2.3-22b-dev.safetensors",
-    distilledCheckpoint: "ltx-2.3-22b-distilled-1.1.safetensors",
-    distilledLoraCheckpoint: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
-    spatialUpscalerCheckpoint: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+    ...LTX_25_RTX_4090_VIDEO,
   },
 });
 
@@ -91,15 +82,24 @@ export interface NovitaFleetAttestation {
     modelManifestSha256: string;
   };
   models: {
-    gemma: { model: string; revision: string; localCacheVerified: boolean };
     zImage: { model: string; revision: string; localCacheVerified: boolean };
     ltx: {
       model: string;
       revision: string;
       runtimeRepository: string;
       runtimeRevision: string;
+      checkpoint: string;
+      textEncoderCheckpoint: string;
+      videoVaeCheckpoint: string;
+      audioVaeCheckpoint: string;
+      spatialUpscalerCheckpoint: string;
+      quantization: "fp8-cast";
+      offload: "cpu";
+      spatialUpscaleFactor: 2;
       localCacheVerified: boolean;
-      twoStageHqVerified: boolean;
+      distilledTwoStageX2Verified: boolean;
+      /** Set only after a real, digest-pinned RTX 4090 benchmark. */
+      rtx4090ProfileBenchmarked: boolean;
     };
   };
   controls: {
@@ -259,20 +259,23 @@ export function assessNovitaFleetReadiness(raw: unknown): NovitaFleetReadiness {
       || zImage.localCacheVerified !== true) {
     blockers.push("z_image_cache_or_revision_unverified");
   }
-  const gemma = a.models?.gemma;
-  if (gemma?.model !== OFFICIAL_RENDER_PINS.gemma.model
-      || !/^[a-f0-9]{40}$/.test(gemma.revision ?? "")
-      || gemma.localCacheVerified !== true) {
-    blockers.push("gemma_cache_or_revision_unverified");
-  }
   const ltx = a.models?.ltx;
   if (ltx?.model !== OFFICIAL_RENDER_PINS.ltx.model
       || ltx.revision !== OFFICIAL_RENDER_PINS.ltx.revision
       || ltx.runtimeRepository !== OFFICIAL_RENDER_PINS.ltx.runtimeRepository
       || ltx.runtimeRevision !== OFFICIAL_RENDER_PINS.ltx.runtimeRevision
+      || ltx.checkpoint !== OFFICIAL_RENDER_PINS.ltx.checkpoint
+      || ltx.textEncoderCheckpoint !== OFFICIAL_RENDER_PINS.ltx.textEncoderCheckpoint
+      || ltx.videoVaeCheckpoint !== OFFICIAL_RENDER_PINS.ltx.videoVaeCheckpoint
+      || ltx.audioVaeCheckpoint !== OFFICIAL_RENDER_PINS.ltx.audioVaeCheckpoint
+      || ltx.spatialUpscalerCheckpoint !== OFFICIAL_RENDER_PINS.ltx.spatialUpscalerCheckpoint
+      || ltx.quantization !== OFFICIAL_RENDER_PINS.ltx.quantization
+      || ltx.offload !== OFFICIAL_RENDER_PINS.ltx.offload
+      || ltx.spatialUpscaleFactor !== OFFICIAL_RENDER_PINS.ltx.spatialUpscaleFactor
       || ltx.localCacheVerified !== true
-      || ltx.twoStageHqVerified !== true) {
-    blockers.push("ltx_runtime_cache_or_hq_pipeline_unverified");
+      || ltx.distilledTwoStageX2Verified !== true
+      || ltx.rtx4090ProfileBenchmarked !== true) {
+    blockers.push("ltx_2_5_runtime_cache_or_rtx_4090_x2_pipeline_unverified");
   }
 
   const controls = a.controls;

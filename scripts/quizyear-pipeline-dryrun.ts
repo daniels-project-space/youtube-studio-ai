@@ -46,7 +46,6 @@ function main(): void {
   const design = designPipeline({
     family: FAMILY,
     nicheKey: "history",
-    lengthMinutes: 3,
     publishMode: "draft",
     toggles: { shorts: false, crosspost: false },
   });
@@ -124,7 +123,6 @@ function main(): void {
   const again = designPipeline({
     family: FAMILY,
     nicheKey: "history",
-    lengthMinutes: 3,
     publishMode: "draft",
     toggles: { shorts: false, crosspost: false },
   });

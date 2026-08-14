@@ -457,14 +457,39 @@ export const ESTABLISHED_CONFIDENCE = 0.7;
 
 /* --------------------------- Quality Bar ------------------------------ */
 
-/** Which quality dimensions matter for each family (the critic's scorecard). */
-const FAMILY_DIMENSIONS: Record<string, string[]> = {
+/**
+ * Which quality dimensions matter for each family (the critic's scorecard).
+ *
+ * Keep this exhaustive: a newly available family must deliberately declare
+ * what its reviewer can inspect rather than silently inheriting the generic
+ * identity/thumbnail fallback. The IDs below are intentionally limited to the
+ * shared evaluator vocabulary: they are passed through to the final visual
+ * reviewer, and visual IDs (identity/footage/motion) also reach the cinematic
+ * asset and shot graders.
+ */
+const FAMILY_DIMENSIONS: Record<FamilyKey, readonly string[]> = {
   music_loop: ["identity", "loop_seam", "music", "thumbnail"],
   narrated_stock: ["identity", "script", "footage", "voice", "thumbnail"],
   cinematic: ["identity", "script", "footage", "voice", "thumbnail"],
   sleep: ["identity", "music", "voice", "thumbnail"],
   whiteboard: ["identity", "script", "footage", "thumbnail"],
   shorts: ["hook", "captions", "pacing", "thumbnail"],
+  // The page renderer is self-contained, but its story, narration, visual
+  // grammar, and constrained page/camera motion remain independently
+  // inspectable in the render review.
+  comic: ["identity", "script", "voice", "footage", "motion", "thumbnail"],
+  // A documentary Short succeeds only when sourced story beats, portrait-safe
+  // collage visuals, spoken words, captions, and rhythm agree with one another.
+  documentary_collage_short: ["identity", "script", "voice", "footage", "captions", "pacing", "thumbnail"],
+  // The Lore lane is a Novita shot chain, so make both visual continuity and
+  // purposeful camera/scene motion visible to its asset and final reviewers.
+  loreshort: ["identity", "script", "voice", "footage", "motion", "pacing", "thumbnail"],
+  // Quiz videos have no narration or stock-footage contract. Their quality is
+  // the branded question UI: immediate promise, readable timed copy, and an
+  // answer/reveal cadence that is fair rather than merely fast.
+  quizyear: ["identity", "hook", "captions", "pacing", "thumbnail"],
+  illustrated_explainer: ["identity", "script", "voice", "footage", "motion", "pacing", "thumbnail"],
+  children_learning: ["identity", "script", "voice", "footage", "motion", "pacing", "thumbnail"],
 };
 
 /**
@@ -484,8 +509,9 @@ export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): 
     voice: dna.narrative ? `${dna.narrative.voiceProfile}; delivery: ${dna.narrative.delivery}; sits cleanly over the bed.` : "Human, on-tone narration mixed over the bed.",
     footage: `On-theme visuals that match the narration; ${dna.composition || "strong composition"}; grade: ${dna.colorGrade || "on-brand"}; avoid: ${dna.visualAvoid.join(", ") || "off-brand shots"}.`,
     hook: "Scroll-stopping in the first 1-2s; clear payoff promise.",
-    captions: "Readable karaoke captions with keyword emphasis, correctly timed.",
+    captions: "Time-critical on-screen copy is mobile-legible and correctly timed: karaoke captions where narrated; otherwise prompts, options, timer, and reveal text stay readable without covering the answer or subject.",
     pacing: "Tight, pattern-interrupted pacing with no dead air.",
+    motion: `Purposeful, continuous motion only: ${dna.motionVocabulary.join(", ") || "the approved visual actions"}; ${dna.motionDiscipline || "no unplanned camera or character motion"}.`,
   };
   // Deterministic floors the iteration loop cannot game.
   const floors: Record<string, Pick<QualityDimension, "metric" | "op" | "threshold">> = {

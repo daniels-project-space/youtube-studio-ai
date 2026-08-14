@@ -4,9 +4,9 @@
  * a topic in → a finished whiteboard explainer where a hand DRAWS each beat in
  * time with the narration, out. VISUAL+VOICE CRAFT for explainer content.
  *
- * The deterministic "write-on" reveal costs ZERO render credits (no video model):
- * it traces the real ink of each layer and reveals it under a moving hand. The
- * only spend is the per-layer Nano-Banana art (Gemini) + Fish TTS.
+ * The deterministic "write-on" reveal uses no video model: it traces the real
+ * ink of each layer and reveals it under a moving hand. The bounded paid path
+ * is caller-injected, attested Novita layer art plus TTS.
  *
  * Pipeline (one castWhiteboardSync() call):
  *   1. STORYBOARD — Gemini-Pro designs the topic as PANELS, each a STACK OF
@@ -21,7 +21,8 @@
  *      before each panel cuts; a persistent frame + topic header are drawn once;
  *      ffmpeg muxes the narration.
  *
- * Deps: GEMINI_API_KEY (storyboard + art), FISH_AUDIO_API_KEY (TTS), and python3
+ * Deps: GEMINI_API_KEY (storyboard), NOVITA render admission (art),
+ * FISH_AUDIO_API_KEY (TTS), and python3
  * with faster-whisper + numpy/scipy/scikit-image/Pillow (the renderer + aligner).
  * A $0-spend preflight (src/lib/pydeps.ts) verifies python3 + the scripts +
  * pip deps BEFORE any paid generation, so a broken worker fails immediately.
@@ -196,7 +197,7 @@ interface NPanel { idx: number; narration: string; layers: NLayer[] }
  * THE PLAN/RENDER SEAM (pattern: documotion's `CraftDocuArgs.plan`).
  *
  * Everything in this storyboard section is CHEAP and text-only. Everything the
- * orchestrator does with the result below — per-layer Nano-Banana art, TTS,
+ * orchestrator does with the result below — per-layer attested image art, TTS,
  * the python scribe render — is PAID and irreversible.
  *
  * Exporting the storyboard as a first-class value is what lets a caller run a

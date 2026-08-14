@@ -45,16 +45,16 @@ export interface GoldenStage {
 
 export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "intel", blocks: ["competitor_research", "topic_select"], note: "Pick topics from real outliers + competitor signal, learning-weighted." },
-  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine", "short_strategy"], note: "Show Bible crew and timed story spine; collage Shorts lock claim/source/beat/motion evidence before render." },
+  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine", "episode_graph", "learning_contract", "short_strategy"], note: "Show Bible crew and timed story spine; episode_graph locks causal beat-to-scene continuity before render; learning_contract turns an approved objective into source-linked demonstrations and retrieval practice; collage Shorts lock claim/source/beat/motion evidence before render." },
   { stage: "write", blocks: ["script_gen", "hook_craft"], note: "Hook-first, CRAFT_RULES applied." },
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check"], note: "Quality + originality + compliance floor." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
   { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
-  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "scene_compiler", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, the deterministic Scene Compiler turns a reviewed scene manifest into a local 16:9 master, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
   { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz." },
   { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
   { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + text-free Flash scene, deterministic Style-DNA typography, and one publishing gate." },
-  { stage: "verify", blocks: ["qa_assets", "qa_shots", "short_scene_qa", "length_check", "qa_visual"], note: "Required asset/shot checks, portrait scene-safe-area proof, and deterministic final quality gate." },
+  { stage: "verify", blocks: ["qa_assets", "qa_shots", "short_scene_qa", "length_check", "qa_visual", "child_content_safety"], note: "Required asset/shot checks, portrait scene-safe-area proof, deterministic final quality gate, and an additional children-learning human-review admission gate where applicable." },
   { stage: "ship", blocks: ["upload_draft", "emit_bundle", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + multilang reuse + optional distribution + scoped cleanup. NOTE (P2-9): planning-only Short window selection (shorts_spinoff / documentary_short_candidates) is NOT owned by ship — goldenExecution.ts's CATALOG_EXECUTION_BINDINGS assigns those two executables to the `shorts` catalog module (stage: visual); they were moved to the visual stage row to match." },
 ];
 
@@ -520,6 +520,100 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   // receipts exist; catalog presence must not be confused with qualification.
   ...CHANNEL_INCEPTION_CATALOG_MODULES,
   {
+    key: "episode-graph",
+    stage: "brief",
+    title: "Episode Graph — Causal Scene Plan",
+    engine: "Typed Story Spine bridge → provider-free Episode Graph + deterministic Scene Manifest",
+    how:
+      "Turns an approved timed story spine into a stable causal graph: every beat is timed, source-linked, attached to a " +
+      "character and setting catalog, and given a visual purpose before any renderer runs. The module is deliberately a planner, " +
+      "not a script or media generator. It emits a content-addressed Scene Manifest that downstream renderers must honor. " +
+      "Implemented by src/engine/episodeGraph.ts and src/trigger/blocks/episodeGraphBlocks.ts.",
+    gates: [
+      "full narration-to-beat coverage",
+      "causal edge between every adjacent beat",
+      "canonical character and setting continuity",
+      "source references on every factual beat",
+      "children-learning graphs require curriculum evidence and an explicit resolution",
+    ],
+    status: "reference",
+  },
+  {
+    key: "casefile-documentary",
+    stage: "brief",
+    title: "Casefile Documentary — Source-First Evidence Grammar",
+    engine: "Provider-independent Case Packet → rights-aware, cited evidence grammar",
+    how:
+      "A reusable true-crime / investigation foundation rather than an automatic crime-channel switch. It requires a sourced claim " +
+      "ledger, claim state, visual rights, sensitivity classification, reconstruction disclosure, and an on-screen citation for every " +
+      "evidence scene. Active allegations, graphic details, doxxing, and actionable wrongdoing fail closed. The contract is validated " +
+      "in src/engine/casefile.ts before any future Casefile writer or renderer may consume it.",
+    gates: [
+      "source ledger and claim-state completeness",
+      "rights provenance before source media is shown",
+      "active allegations, graphic detail, doxxing, and actionable wrongdoing blocked",
+      "reconstructions require a visible disclosure",
+      "every evidence scene carries an on-screen citation",
+    ],
+    status: "reference",
+  },
+  {
+    key: "learning-contract",
+    stage: "brief",
+    title: "Learning Contract — Objective to Retrieval Practice",
+    engine: "Episode Graph → typed objective, source-linked demonstration, recap, retrieval-practice, and human-review handoff",
+    how:
+      "Extracts the learning objective already present in an approved Episode Graph and locks which source-backed beats demonstrate it, " +
+      "how the final beat recaps it, and what a learner should be asked afterward. It does not claim subject-matter accreditation or " +
+      "invent a curriculum; the receipt binds a human review checklist to the exact graph fingerprint. This one contract is reusable by " +
+      "supervised children’s learning now and future language / visual-STEM renderers. Implemented by src/engine/learningContract.ts.",
+    gates: [
+      "objective must be present in one or more Episode Graph beats",
+      "demonstration and recap beats must belong to the active causal graph",
+      "source references must resolve to the active graph source ledger",
+      "children contracts require curriculum or primary evidence and child-safe retrieval wording",
+      "stale receipt / graph fingerprint mismatch fails closed",
+    ],
+    status: "reference",
+  },
+  {
+    key: "scene-compiler",
+    stage: "visual",
+    title: "Scene Compiler — Deterministic Illustration",
+    engine: "Episode Graph Scene Manifest → local Remotion + FFmpeg master (zero remote media calls)",
+    how:
+      "Renders original maps, diagrams, panels, simple character puppets, screen cards, and transitions from the locked Scene Manifest, " +
+      "then uses the standard audio assembly path for narration and score. It is intentionally separate from cinematic Novita: the " +
+      "compiler is the reusable, deterministic visual lane for explainers and supervised learning content; cinematic retains its attested " +
+      "Novita render-farm chain. Implemented by src/remotion/sceneCompiler and src/trigger/blocks/sceneCompilerBlocks.ts.",
+    gates: [
+      "manifest fingerprint and causal coverage match the story spine",
+      "audited 16:9 master profile only",
+      "narration/video duration agreement",
+      "final master must contain audio and video streams",
+      "manifest declares zero external provider calls",
+    ],
+    status: "reference",
+  },
+  {
+    key: "child-content-safety",
+    stage: "verify",
+    title: "Children’s Learning Safety — Human Review Receipt",
+    engine: "Deterministic audience, language, curriculum, and release-mode admission gate",
+    how:
+      "Admits only the supervised children-learning lane after the Episode Graph and deterministic Scene Manifest agree on a child-directed " +
+      "learning objective. It emits a typed receipt that permits a private draft for human editorial approval—never an automated public or " +
+      "scheduled release. Implemented by src/trigger/blocks/childrenSafetyBlocks.ts and enforced again at upload_draft.",
+    gates: [
+      "children audience declared across graph and scene manifest",
+      "curriculum source plus explicit learning objective",
+      "age-language and commercial-pressure checks",
+      "only the audited zero-provider scene renderer admitted",
+      "private draft and human editorial approval required",
+    ],
+    status: "reference",
+  },
+  {
     key: "loreshort",
     stage: "visual",
     title: "Lore Short — Loreshort Engine",
@@ -604,11 +698,11 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   {
     key: "videocraft-novita",
     stage: "visual",
-    title: "Videocraft (Novita LTX-2.3)",
+    title: "Videocraft (Novita LTX-2.5 x2)",
     engine:
-      "Videocraft — LTX-2.3 22B int8 image-to-video via Wan2GP at 1920×1088 / 40 steps / guidance 4.0 on Novita RTX 4090 spot pods, driving the 10-move camera grammar over Imagecraft's R2 stills (slot-aware 3-pod queue, verified autoclose, R2-idempotent resume)",
+      "Videocraft — LTX-2.5 distilled image-to-video on an exact RTX 4090 spot profile: 640×352 stage one → native latent-space x2 refinement → 1280×704 final output, FP8-cast + CPU offload, with no model or hardware fallback.",
     how:
-      "Each shot's rendered still + camera move + motion cue + seconds (rounded to 8n+1 frames) is POSTed to the live nginx bridge and polled to done; a freeze-detection QA gate rejects still-frame clips (the frozen-frame fix). Emits gen_footage-compatible footageClips/footageKeys, so timeline_assemble works unmodified. Self-describing (VIDEOCRAFT_NOVITA_MODULE contract), as originally designed in the now-deleted src/lib/videocraft-novita.ts. " +
+      "Each shot's rendered still + camera move + motion cue + seconds (rounded to 8n+1 frames) is sealed into a one-shot worker manifest. The worker verifies split-model hashes, probes the encoded MP4 at 1280×704, and returns x2 evidence before it can be assembled. Emits gen_footage-compatible footageClips/footageKeys, so timeline_assemble works unmodified. " +
       "DELETED, NOT PENDING (P1-6 resolved by P2-7): src/lib/videocraft-novita.ts had no import chain from the executed pipeline and was " +
       "removed outright as confirmed-dead in commit 183ee6a. This was never a capability gap -- production video rendering for " +
       "Novita-based channels runs, and always ran, through the separate, wired novita-render-farm module (src/lib/novitaRenderFarm.ts, called " +
@@ -1080,7 +1174,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "whiteboard",
     stage: "visual",
     title: "Whiteboard — Drawn Cinema (synced scribe)",
-    engine: "whiteboardSync — narration-synced deterministic write-on: Gemini layered storyboard + 2K Nano-Banana scenes + Fish narration, Whisper-aligned, drawn by a real hand in time with the voice. ZERO render credits.",
+    engine: "whiteboardSync — narration-synced deterministic write-on: Gemini layered storyboard + bounded attested 2K image scenes + Fish narration, Whisper-aligned, drawn by a real hand in time with the voice.",
     how:
       "The whiteboard family's self-contained visual engine (src/lib/whiteboardSync.ts, block whiteboard_scribe). Gemini-Pro " +
       "designs each panel as a STACK OF LAYERS — composed line-art SCENES (no baked text) + marker-font LABELS — each carrying " +

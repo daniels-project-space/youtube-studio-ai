@@ -23,6 +23,8 @@ export const ContentLaneKeySchema = z.enum([
   "motion_comic",
   "lore_micro_doc",
   "quiz_year",
+  "illustrated_explainer",
+  "children_learning_supervised",
   "legacy_unclassified",
 ]);
 
@@ -223,6 +225,44 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     ],
     forbiddenBlocks: ["timeline_assemble", "assemble"],
   },
+  illustrated_explainer: {
+    key: "illustrated_explainer",
+    family: "illustrated_explainer",
+    primaryRenderer: "scene_compiler",
+    requiredBlocks: ["story_spine", "episode_graph", "scene_compiler", "qa_visual"],
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
+      "lore_short",
+      "documotion_short",
+      "quiz_year",
+    ],
+    forbiddenBlocks: ["timeline_assemble", "assemble"],
+  },
+  children_learning_supervised: {
+    key: "children_learning_supervised",
+    family: "children_learning",
+    primaryRenderer: "scene_compiler",
+    requiredBlocks: ["story_spine", "episode_graph", "learning_contract", "child_content_safety", "scene_compiler", "qa_visual"],
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
+      "lore_short",
+      "documotion_short",
+      "quiz_year",
+    ],
+    forbiddenBlocks: ["timeline_assemble", "assemble"],
+  },
   legacy_unclassified: {
     key: "legacy_unclassified",
     primaryRenderer: "unclassified",
@@ -243,9 +283,9 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
  *   - Only MODEL-GRADED checks read this. Deterministic ffmpeg/file/probe rails
  *     (resolution, audio presence, structural integrity) stay lane-agnostic —
  *     a broken file is broken in every lane. The single exception is
- *     `blackSegmentMinSec`, which is a genuinely lane-dependent DETERMINISTIC
- *     fact (a night-time ambient loop legitimately holds near-black far longer
- *     than a 45s Short does), not a taste judgement.
+ *     `blackSegmentMinSec` and `maxStaticHoldSec`, which are genuinely
+ *     lane-dependent DETERMINISTIC facts (a night-time ambient loop can hold a
+ *     frame far longer than a 45s Short), not taste judgements.
  *   - `legacy_unclassified` reproduces the historic generic defaults EXACTLY,
  *     so an unclassified channel sees zero behaviour change from this map.
  */
@@ -263,6 +303,12 @@ export interface LaneQualityPolicy {
    * lanes whose visual language legitimately includes long dark holds.
    */
   blackSegmentMinSec: number;
+  /**
+   * Maximum contiguous near-identical programme hold permitted by deterministic
+   * temporal QA. `null` is reserved for genuinely static visual products such
+   * as an ambient sound bed; planned title/outro cards are excluded separately.
+   */
+  maxStaticHoldSec: number | null;
   /** Lane-specific things the critic must actively scrutinise (prompt input). */
   emphasis: readonly string[];
 }
@@ -273,6 +319,7 @@ const GENERIC_LANE_QUALITY: LaneQualityPolicy = {
   visualScoreFloor: 6,
   thumbnailScoreFloor: 5,
   blackSegmentMinSec: 2.5,
+  maxStaticHoldSec: 4.5,
   emphasis: [],
 };
 
@@ -300,6 +347,7 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     maxCritiqueIters: 2,
     visualScoreFloor: 5,
     blackSegmentMinSec: 6,
+    maxStaticHoldSec: null,
     emphasis: [
       "The loop seam must be invisible: no jump, flash, or frozen hold where the clip wraps.",
       "Slow, uneventful, low-contrast night imagery is the INTENT of this lane, not a defect.",
@@ -311,6 +359,7 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     maxCritiqueIters: 2,
     visualScoreFloor: 5,
     blackSegmentMinSec: 6,
+    maxStaticHoldSec: null,
     emphasis: [
       "Deliberately slow pacing and long, near-static holds are the intent of this lane, not a defect.",
     ],
@@ -323,6 +372,7 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     visualScoreFloor: 7,
     thumbnailScoreFloor: 6,
     blackSegmentMinSec: 1.2,
+    maxStaticHoldSec: 1.5,
     emphasis: [
       "Judge at phone size: anything unreadable on a 6-inch screen is unreadable.",
       "Every element must sit inside the vertical safe areas, clear of the UI chrome.",
@@ -334,6 +384,7 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     visualScoreFloor: 7,
     thumbnailScoreFloor: 6,
     blackSegmentMinSec: 1.2,
+    maxStaticHoldSec: 1.5,
     emphasis: [
       "Judge at phone size; source/evidence cards must stay legible and inside the vertical safe areas.",
     ],
@@ -360,6 +411,9 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     maxCritiqueIters: 2,
     // Long, dark, near-static painterly holds are the LOOK of this lane.
     blackSegmentMinSec: 5,
+    // Calm painterly beats are intentional, but a whole factual beat frozen
+    // beyond this is almost certainly a dropped motion layer.
+    maxStaticHoldSec: 12,
     emphasis: [
       "The camera must travel through real depth — foreground, midground and background sliding at different rates. A flat pan or zoom on a single plane is the defining defect of this lane.",
       "Painted concept-art stillness is the intent: a calm beat that only breathes is correct, and forced motion on a still subject (warping, melting, drifting statues) is the defect.",
@@ -373,11 +427,39 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
     // is why the bar sits at the generic level rather than higher.
     critiqueThreshold: 0.8,
     maxCritiqueIters: 2,
+    // Question cards need a readable thinking window; title/outro cards are
+    // excluded independently, so this only covers programme content.
+    maxStaticHoldSec: 8,
     emphasis: [
       "The question must never contain its own answer, in any form — a year, a city, a currency, a symbol. That either spoils the round or contradicts the cited source.",
       "Every question must be readable at a glance; the viewer has seconds, not paragraphs.",
       "All four options must look equally plausible, so the answer cannot be found by elimination: period-plausible years, same-region capitals, real currencies, real chemical symbols.",
       "The video mixes categories on purpose. Each question must stand alone and read clearly without the one before it.",
+    ],
+  },
+  illustrated_explainer: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.84,
+    visualScoreFloor: 7,
+    maxStaticHoldSec: 4,
+    emphasis: [
+      "Every scene must make a causal claim, state transition, or learning step visible; decorative motion is a defect.",
+      "Maps, charts, diagrams, labels, and captions must be readable at normal viewing size and change only when the narrated idea changes.",
+      "The same character and setting IDs must retain their visual identity throughout the episode.",
+    ],
+  },
+  children_learning_supervised: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.86,
+    visualScoreFloor: 7,
+    thumbnailScoreFloor: 6,
+    // Calm does not mean stalled: an educational story still needs visible
+    // progression after its planned title card.
+    maxStaticHoldSec: 4,
+    emphasis: [
+      "One clear age-appropriate learning or life-skill objective must be resolved in a coherent beginning, middle, and safe prosocial ending.",
+      "Dialogue, labels, and transitions must be calm, intelligible, and understandable without rapid attention bait or unexplained visual changes.",
+      "Only original, stable characters and settings may appear; resemblance to recognizable children’s properties is a release defect.",
     ],
   },
   legacy_unclassified: { ...GENERIC_LANE_QUALITY },
@@ -407,6 +489,8 @@ export const CONTENT_LANE_BY_FAMILY: Record<FamilyKey, ContentLaneKey> = {
   comic: "motion_comic",
   loreshort: "lore_micro_doc",
   quizyear: "quiz_year",
+  illustrated_explainer: "illustrated_explainer",
+  children_learning: "children_learning_supervised",
 };
 
 export const ContentLaneSchema = z.object({
@@ -615,10 +699,13 @@ export function injectContentLaneIntoPipeline(
       ...entry,
       params: {
         ...(entry.params ?? {}),
-        // For a music channel, audio is not a supporting asset: it is the
-        // product. Make the existing aesthetics evaluator mandatory at the
-        // runtime boundary even for old persisted pipelines.
-        ...(parsed.key === "music_loop" && entry.params?.["audioQa"] === undefined
+        // Every final master has an audience-facing audio experience: spoken
+        // narration, score, ambience, or quiz/game sound. Make the existing
+        // aesthetics evaluator mandatory at the runtime boundary even for old
+        // persisted pipelines, so a release never relies on loudness alone.
+        // Legacy/unclassified lanes remain untouched because they have no
+        // approved editorial grammar and already fail closed at upload.
+        ...(parsed.key !== "legacy_unclassified" && entry.params?.["audioQa"] !== true
           ? { audioQa: true }
           : {}),
         contentLane: { ...parsed },

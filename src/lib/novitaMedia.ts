@@ -13,6 +13,8 @@ import {
 import { recordImageUsage } from "@/lib/imageUsage";
 import { getObjectBytes, presignDownload, putObject } from "@/lib/storage";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { assertNovitaVideoProfileRuntime } from "@/engine/runtimeCapability";
+import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 
 export type NovitaProfileId = GenerationProfile["id"];
 /**
@@ -69,7 +71,8 @@ export interface NovitaImageByteRequest {
   negativePrompt?: string;
   seed?: number;
   profileId?: NovitaProfileId;
-  maxCostUsd?: number;
+  /** Signed ceiling for this direct image worker. */
+  maxCostUsd: number;
   lifecycle?: NovitaRenderLifecycle;
   /** Runs after all local work but immediately before the paid bridge launch. */
   beforeProviderSpend?: () => void | Promise<void>;
@@ -93,7 +96,7 @@ type RenderNovitaImageFn = (args: {
   negativePrompt?: string;
   seed?: number;
   profileId?: NovitaProfileId;
-  maxCostUsd?: number;
+  maxCostUsd: number;
   lifecycle?: NovitaRenderLifecycle;
   beforeProviderSpend?: () => void | Promise<void>;
   onProviderReceipt?: NovitaImageProviderReceiptObserver;
@@ -133,6 +136,24 @@ function asShot(scene: NovitaGeneratedScene, profileId: NovitaProfileId, stillKe
   };
 }
 
+/**
+ * LTX 2.5 distilled has no negative-prompt switch. Keep the director's
+ * exclusions by expressing them as an explicit positive-language constraint,
+ * instead of silently dropping them or sending an unsupported CLI flag.
+ */
+function asLtxDistilledVideoShot(scene: NovitaGeneratedScene, profileId: NovitaProfileId, stillKey: string): Shot {
+  const shot = asShot(scene, profileId, stillKey);
+  const exclusion = scene.negativePrompt?.trim();
+  if (!exclusion) return { ...shot, negative: undefined };
+  const constraint = `Avoid all of the following: ${exclusion}.`;
+  return {
+    ...shot,
+    prompt: `${shot.prompt}\n\n${constraint}`,
+    motion: `${shot.motion}\n\n${constraint}`,
+    negative: undefined,
+  };
+}
+
 function exactCandidateByShot(result: NovitaRenderResult, ids: readonly string[]): Map<string, string> {
   const candidates = (result.candidates ?? []).filter((candidate) => candidate.candidateIndex === 0);
   const byShot = new Map(candidates.map((candidate) => [candidate.shotId, candidate.key]));
@@ -146,6 +167,8 @@ export async function renderNovitaGeneratedScenes(args: {
   prefix: string;
   scenes: readonly NovitaGeneratedScene[];
   profileId?: NovitaProfileId;
+  /** Complete signed caller-owned envelope for both phases. */
+  maxCostUsd: number;
   maxConcurrent?: number;
   lifecycle?: NovitaRenderLifecycle;
 }): Promise<{
@@ -158,8 +181,22 @@ export async function renderNovitaGeneratedScenes(args: {
     throw new Error("novita media sequence must contain between 1 and 24 scenes");
   }
   const profile = generationProfile(args.profileId ?? "production");
+  // This must stay before the image phase. A known-incompatible video model
+  // must never buy keyframes and then fail only when it reaches image-to-video.
+  assertNovitaVideoProfileRuntime(profile);
+  if (profile.video.candidates !== 1) {
+    throw new Error(
+      `novita media sequence cannot attest ${profile.video.candidates} video candidates per scene; explicit multi-candidate manifests are required`,
+    );
+  }
   const prefix = cleanPrefix(args.prefix);
   const imageShots = args.scenes.map((scene) => asShot(scene, profile.id));
+  const envelope = novitaCostEnvelope({
+    label: "novita media sequence",
+    imageJobs: imageShots.length * profile.image.candidates,
+    videoJobs: imageShots.length,
+    maxCostUsd: args.maxCostUsd,
+  });
   const imageResult = await renderImages({
     prefix: `${prefix}/images`,
     shots: imageShots,
@@ -167,13 +204,14 @@ export async function renderNovitaGeneratedScenes(args: {
     nshard: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
     maxConcurrent: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
     jobs: "full",
+    maxCostUsd: envelope.imageMaxCostUsd,
     lifecycle: args.lifecycle,
   });
   const ids = imageShots.map((shot) => shot.id);
   const stillByShot = exactCandidateByShot(imageResult, ids);
   const videoShots = args.scenes.map((scene) => {
     const id = safeId(scene.id);
-    return asShot(scene, profile.id, stillByShot.get(id));
+    return asLtxDistilledVideoShot(scene, profile.id, stillByShot.get(id)!);
   });
   let videoResult: NovitaRenderResult;
   try {
@@ -184,6 +222,7 @@ export async function renderNovitaGeneratedScenes(args: {
       nshard: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
       maxConcurrent: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
       jobs: "full",
+      maxCostUsd: envelope.videoMaxCostUsd,
       lifecycle: args.lifecycle,
     });
   } catch (error) {
@@ -224,13 +263,21 @@ export async function renderNovitaImage(args: {
   negativePrompt?: string;
   seed?: number;
   profileId?: NovitaProfileId;
-  maxCostUsd?: number;
+  maxCostUsd: number;
   lifecycle?: NovitaRenderLifecycle;
   beforeProviderSpend?: () => void | Promise<void>;
   onProviderReceipt?: NovitaImageProviderReceiptObserver;
 }): Promise<NovitaRenderedImage> {
   const profile = generationProfile(args.profileId ?? "production");
+  const envelope = novitaCostEnvelope({
+    label: "novita image",
+    imageJobs: profile.image.candidates,
+    maxCostUsd: args.maxCostUsd,
+  });
   const id = safeId(args.id);
+  // Image generation still supports the regular negative field. Only the
+  // distilled LTX video leg needs its exclusions rewritten into the positive
+  // prompt because that official CLI exposes no negative-prompt argument.
   const shot = asShot({
     id,
     imagePrompt: args.prompt,
@@ -246,7 +293,7 @@ export async function renderNovitaImage(args: {
     nshard: 1,
     maxConcurrent: 1,
     jobs: "full",
-    maxCostUsd: args.maxCostUsd,
+    maxCostUsd: envelope.imageMaxCostUsd,
     lifecycle: args.lifecycle,
     beforeProviderSpend: args.beforeProviderSpend,
   });
@@ -444,7 +491,7 @@ export function createAttestedNovitaImageGenerator<T extends NovitaPromptImageRe
   prefix: string;
   id: (request: T) => string;
   profileId?: NovitaProfileId;
-  maxCostUsd?: number;
+  maxCostUsd: number;
   lifecycle?: NovitaRenderLifecycle;
   beforeProviderSpend?: () => void | Promise<void>;
   onProviderReceipt?: NovitaImageProviderReceiptObserver;
@@ -497,12 +544,27 @@ export async function renderNovitaI2V(args: {
   negativePrompt?: string;
   seed?: number;
   profileId?: NovitaProfileId;
+  /** Signed envelope for this one direct video worker. */
+  maxCostUsd: number;
   lifecycle?: NovitaRenderLifecycle;
 }): Promise<{ url: string; key: string; jobId: string; model: string; costUsd: number; billingReceipt: NovitaBillingReceipt }> {
   if (Boolean(args.imageKey) === Boolean(args.imageUrl)) {
     throw new Error("novita i2v requires exactly one of imageKey or imageUrl");
   }
   const profile = generationProfile(args.profileId ?? "production");
+  // Do not persist/download a still or create any direct worker while the
+  // exact pinned video profile lacks a benchmarked hardware admission.
+  assertNovitaVideoProfileRuntime(profile);
+  if (profile.video.candidates !== 1) {
+    throw new Error(
+      `novita i2v cannot attest ${profile.video.candidates} video candidates; explicit multi-candidate manifests are required`,
+    );
+  }
+  const envelope = novitaCostEnvelope({
+    label: "novita i2v",
+    videoJobs: 1,
+    maxCostUsd: args.maxCostUsd,
+  });
   const prefix = cleanPrefix(args.prefix);
   const id = safeId(args.id);
   const stillKey = args.imageKey ?? await persistRemoteStill({ imageUrl: args.imageUrl!, prefix, id });
@@ -521,6 +583,7 @@ export async function renderNovitaI2V(args: {
     nshard: 1,
     maxConcurrent: 1,
     jobs: "full",
+    maxCostUsd: envelope.videoMaxCostUsd,
     lifecycle: args.lifecycle,
   });
   const key = exactCandidateByShot(result, [id]).get(id)!;

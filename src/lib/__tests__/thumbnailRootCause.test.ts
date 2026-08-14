@@ -13,6 +13,7 @@ import {
   generateNanoBananaImageWithReceipt,
   NANO_BANANA_THUMBNAIL_PROFILE,
 } from "@/lib/banana";
+import { GEMINI_RUNTIME_OPT_IN_ENV } from "@/lib/gemini";
 import { createImageUsageScope } from "@/lib/imageUsage";
 import {
   buildThumbnailTextFilterGraph,
@@ -528,15 +529,22 @@ async function assertStrictNanoBananaRoute(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  assertFamilyPolicy();
-  assertSceneTypographySplit();
-  assertMotifImplementations();
-  assertSafePlans();
-  await assertRealCallPaths();
-  await assertRenderedLayout();
-  await assertRetryBoundarySignal();
-  await assertStrictNanoBananaRoute();
-  console.log("THUMBNAIL ROOT-CAUSE PASS");
+  const originalGeminiRuntime = process.env[GEMINI_RUNTIME_OPT_IN_ENV];
+  process.env[GEMINI_RUNTIME_OPT_IN_ENV] = "1";
+  try {
+    assertFamilyPolicy();
+    assertSceneTypographySplit();
+    assertMotifImplementations();
+    assertSafePlans();
+    await assertRealCallPaths();
+    await assertRenderedLayout();
+    await assertRetryBoundarySignal();
+    await assertStrictNanoBananaRoute();
+    console.log("THUMBNAIL ROOT-CAUSE PASS");
+  } finally {
+    if (originalGeminiRuntime === undefined) delete process.env[GEMINI_RUNTIME_OPT_IN_ENV];
+    else process.env[GEMINI_RUNTIME_OPT_IN_ENV] = originalGeminiRuntime;
+  }
 }
 
 void main();

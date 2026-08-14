@@ -1114,39 +1114,19 @@ const FLAGS: Record<string, string> = { en: "🇬🇧", de: "🇩🇪", es: "�
 function MultiLanguageCard({ channel }: { channel: ChannelDoc }) {
   const groupId = channel.groupId ?? channel._id;
   const group = useQuery(api.channels.listGroup, { groupId }) as ChannelDoc[] | undefined;
-  const [busy, setBusy] = useState(false);
-  const [msg, setMsg] = useState<string | null>(null);
 
   const siblings = (group ?? []).filter((c) => c._id !== channel._id);
   const haveLangs = new Set([channel.language ?? "en", ...siblings.map((c) => c.language ?? "")]);
   const targets = ["de", "es"].filter((l) => !haveLangs.has(l));
-
-  const make = async () => {
-    setBusy(true);
-    setMsg(null);
-    try {
-      const r = await fetch("/api/make-multilingual", {
-        method: "POST",
-        headers: { "content-type": "application/json" },
-        body: JSON.stringify({ channelId: channel._id, languages: targets }),
-      });
-      const d = await r.json();
-      setMsg(r.ok ? "Creating siblings — they appear here in ~1 min (refresh)." : d.error || "Failed to start.");
-    } catch {
-      setMsg("Network error.");
-    } finally {
-      setBusy(false);
-    }
-  };
 
   return (
     <section>
       <SectionTitle>Multi-language group</SectionTitle>
       <div className="glass" style={{ padding: "1.2rem", display: "grid", gap: "1rem" }}>
         <div style={{ fontSize: "0.84rem", color: "var(--color-muted)", lineHeight: 1.5 }}>
-          Clone this channel into language siblings — identical pipeline, shared profile image, a flag
-          banner per country. Each renders in its own language; the expensive visuals are reused (the
-          render-group engine finishes only narration, captions, text + metadata per language).
+          Existing language siblings share this group. New language channels are deliberately created through
+          a separately admitted inception plan: independent identity, localisation review, budget reservation,
+          and lifecycle—not a cosmetic clone of the source channel.
         </div>
         <div style={{ display: "flex", flexWrap: "wrap", gap: "0.5rem", alignItems: "center" }}>
           <span style={{ fontSize: "0.8rem", fontWeight: 600 }}>
@@ -1164,16 +1144,18 @@ function MultiLanguageCard({ channel }: { channel: ChannelDoc }) {
         </div>
         {targets.length > 0 ? (
           <div style={{ display: "flex", gap: "0.6rem", alignItems: "center", flexWrap: "wrap" }}>
-            <button onClick={make} disabled={busy} style={{
+            <button disabled title="Requires admitted per-language channel inception" style={{
               background: "var(--color-accent)", color: "#0a0a0b", border: "none", borderRadius: 10,
-              padding: "0.6rem 1.2rem", fontSize: "0.88rem", fontWeight: 600, cursor: busy ? "default" : "pointer", opacity: busy ? 0.6 : 1,
+              padding: "0.6rem 1.2rem", fontSize: "0.88rem", fontWeight: 600, cursor: "not-allowed", opacity: 0.55,
             }}>
-              {busy ? "Creating…" : `+ Make multi-language (${targets.map((l) => FLAGS[l]).join(" ")})`}
+              {`+ Make multi-language (${targets.map((l) => FLAGS[l]).join(" ")}) — admission required`}
             </button>
-            {msg && <span style={{ fontSize: "0.8rem", color: "var(--color-muted)" }}>{msg}</span>}
+            <span style={{ fontSize: "0.8rem", color: "var(--color-muted)" }}>
+              Automatic sibling creation is paused until the per-language inception flow is available.
+            </span>
           </div>
         ) : (
-          <div style={{ fontSize: "0.82rem", color: "var(--color-ok)" }}>✓ DE + ES siblings exist for this group.{msg ? ` ${msg}` : ""}</div>
+          <div style={{ fontSize: "0.82rem", color: "var(--color-ok)" }}>✓ DE + ES siblings exist for this group.</div>
         )}
       </div>
     </section>

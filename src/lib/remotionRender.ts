@@ -16,7 +16,7 @@ import type {
   SpeechWord,
 } from "../remotion/speech/types";
 import type { CinematicTheme } from "../remotion/speech/CinematicFrame";
-import type { DocuLayout } from "../remotion/DocuMotion";
+import type { DocuLayout } from "../remotion/docuLayout";
 
 let serveUrlCache: string | null = null;
 
