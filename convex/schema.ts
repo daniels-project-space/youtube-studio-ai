@@ -159,6 +159,39 @@ export default defineSchema({
   ),
       // Persona reference material for tone-matched generation (competitor-
       // intelligence port). All optional → back-compat with existing channels.
+      // CHANNEL VOICE LOCK — an explicit declaration that this channel's
+      // narrator identity is FIXED (see src/lib/voiceLock.ts). Persona formats
+      // ("I am an AI…") need the same speaker every episode, and this turns the
+      // TTS resolver's forgiving niche fallback into a hard failure for the
+      // channels that opt in. Optional → zero effect on existing channels.
+      voiceLock: v.optional(
+        v.object({
+          version: v.literal("voice-lock/v1"),
+          provider: v.union(v.literal("fish"), v.literal("elevenlabs")),
+          voiceId: v.string(),
+          persona: v.optional(v.string()),
+          reason: v.string(),
+          lockedAt: v.number(),
+        }),
+      ),
+      // CHARACTER LoRA — the recurring on-screen character this channel owns
+      // (see src/lib/characterLora.ts). Stored beside the rest of the channel's
+      // identity rather than in a parallel table, because that is exactly what
+      // it is: identity. Optional → zero effect on existing channels.
+      characterLora: v.optional(
+        v.object({
+          version: v.literal("character-lora/v1"),
+          novitaLoraPath: v.string(),
+          scale: v.number(),
+          triggerWords: v.optional(v.array(v.string())),
+          source: v.union(v.literal("trained"), v.literal("imported")),
+          /** Novita training task id, when this LoRA was trained here. */
+          trainingTaskId: v.optional(v.string()),
+          /** Short description of who the character is. */
+          character: v.optional(v.string()),
+          createdAt: v.number(),
+        }),
+      ),
       voiceRef: v.optional(v.string()),
       toneRefs: v.optional(v.array(v.string())),
       bannedWords: v.array(v.string()),

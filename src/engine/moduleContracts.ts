@@ -347,6 +347,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "styleDNA", "musicBrief", "script", "voiceId", "reuseLanguage", "niche",
       // Grounds the cold-open take judge in this channel's own voice standard.
       "channelName", "persona", "styleGrammar", "criticDoctrine", "contentLane",
+      // Channel-level narrator pin (src/lib/voiceLock.ts). Declared so a persona
+      // channel's voice cannot silently fall back to the niche default.
+      "voiceLock",
     ],
     providerProfiles: [managed],
     maxCostUsd: 10,

@@ -251,6 +251,31 @@ const identityValidator = v.object({
     }),
   ),
   voiceId: v.optional(v.string()),
+  // Mirrors convex/schema.ts's channels.identity — this validator is what
+  // createChannel/updateChannel accept, so a field missing here is silently
+  // discarded on write no matter what the table allows.
+  voiceLock: v.optional(
+    v.object({
+      version: v.literal("voice-lock/v1"),
+      provider: v.union(v.literal("fish"), v.literal("elevenlabs")),
+      voiceId: v.string(),
+      persona: v.optional(v.string()),
+      reason: v.string(),
+      lockedAt: v.number(),
+    }),
+  ),
+  characterLora: v.optional(
+    v.object({
+      version: v.literal("character-lora/v1"),
+      novitaLoraPath: v.string(),
+      scale: v.number(),
+      triggerWords: v.optional(v.array(v.string())),
+      source: v.union(v.literal("trained"), v.literal("imported")),
+      trainingTaskId: v.optional(v.string()),
+      character: v.optional(v.string()),
+      createdAt: v.number(),
+    }),
+  ),
   voiceRef: v.optional(v.string()),
   toneRefs: v.optional(v.array(v.string())),
   bannedWords: v.array(v.string()),

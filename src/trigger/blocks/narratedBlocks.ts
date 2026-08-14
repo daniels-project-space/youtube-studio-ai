@@ -35,7 +35,8 @@ import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { existsSync } from "node:fs";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
-import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
+import { synthNarration, hasFishKey, stripAudioTags, resolveVoiceId } from "@/lib/tts";
+import { assertVoiceLockSatisfied, parseVoiceLock } from "@/lib/voiceLock";
 import { narrationPhysics, gateColdOpen, judgeNarrationTake } from "@/lib/voicecraft";
 import {
   boundNarrationChapterHeadings,
@@ -670,8 +671,21 @@ export const narrationTts: Block = {
     } else if (!hasFishKey()) {
       throw new Error("narration_tts: FISH_AUDIO_API_KEY missing (vault service 'fish-audio')");
     }
+    // CHANNEL VOICE LOCK (persona channels). A locked channel declares WHO
+    // narrates it; the lock outranks the params and, more importantly, turns
+    // resolveVoiceId()'s deliberate niche/sleepless_historian fallback into a
+    // hard failure. Without it a dropped or mistyped voice id ships an episode
+    // in a stranger's voice and nothing in the pipeline notices — which is
+    // exactly the defect a first-person "I am an AI" channel cannot survive.
+    const voiceLock = parseVoiceLock(ctx.store["voiceLock"]);
     const voiceId =
-      opt(ctx, "voiceId") ?? (ctx.params["voiceId"] as string | undefined);
+      voiceLock?.voiceId ?? opt(ctx, "voiceId") ?? (ctx.params["voiceId"] as string | undefined);
+    if (voiceLock) {
+      ctx.log(
+        `narration_tts: channel voice LOCKED to "${voiceLock.voiceId}" (${voiceLock.provider})` +
+          `${voiceLock.persona ? ` — ${voiceLock.persona}` : ""}`,
+      );
+    }
     const niche = opt(ctx, "niche");
     // NARRATION PHYSICS — the archetype's delivery doctrine (voicecraft):
     // per-channel-kind speed, v3 stability/style, sentence air. Explicit
@@ -706,6 +720,17 @@ export const narrationTts: Block = {
     const gateEnabled = ctx.params["voiceGate"] !== false;
     const castScore = Number(ctx.params["voiceCastScore"] ?? Number.NaN);
     const selectedVoiceId = ttsProvider === "elevenlabs" ? (elevenVoiceId ?? voiceId) : voiceId;
+    // The lock is enforced HERE, against the id the provider will actually be
+    // sent, rather than against the configured key — Fish maps friendly keys to
+    // hex reference ids, so comparing the raw strings would pass a lock that had
+    // already silently fallen back.
+    assertVoiceLockSatisfied({
+      lock: voiceLock,
+      resolvedReferenceId:
+        ttsProvider === "elevenlabs" ? String(selectedVoiceId ?? "") : resolveVoiceId(selectedVoiceId, niche),
+      resolveExpected: (pinned) =>
+        ttsProvider === "elevenlabs" ? pinned : resolveVoiceId(pinned, niche),
+    });
     assertVoiceGatePreconditions({
       profile: quality,
       gateEnabled,

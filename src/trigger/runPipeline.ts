@@ -574,6 +574,11 @@ export const runPipelineTask = task({
             ? { criticDoctrine: channel.identity.creativeBrief.criticDoctrine }
             : {}),
           ...(channel.identity?.voiceId ? { voiceId: channel.identity.voiceId } : {}),
+          // The channel's pinned narrator, when it declared one. Frozen into the
+          // seed store alongside the rest of the identity so narration_tts can
+          // fail closed on voice drift instead of falling back to the niche
+          // default (src/lib/voiceLock.ts).
+          ...(channel.identity?.voiceLock ? { voiceLock: channel.identity.voiceLock } : {}),
           bannedWords: channel.identity?.bannedWords ?? [],
           ...(channel.identity?.imageKey ? { channelAvatarKey: channel.identity.imageKey } : {}),
           ...((channel as { scriptPlaybook?: unknown }).scriptPlaybook

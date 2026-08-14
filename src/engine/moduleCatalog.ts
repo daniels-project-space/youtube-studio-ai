@@ -87,7 +87,7 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   {
     block: "topic_select",
     label: "Topic Select",
-    description: "Chooses each video's topic (no-repeat memory, optional ordered series).",
+    description: "Chooses each video's topic (no-repeat memory, optional ordered series, optional speculative-hypothetical genre seeds).",
     optional: false,
     params: [
       {
@@ -100,6 +100,15 @@ export const MODULE_CATALOG: ModuleSpec[] = [
       },
       { key: "seriesTitle", label: "Series title", type: "text", help: "Set to run an ordered, numbered series (e.g. \"7 Days of Stoic Calm\"). Leave blank for standalone videos." },
       { key: "seriesCount", label: "Series length", type: "number", min: 0, max: 100, step: 1, help: "Episodes in the series. 0 = open-ended. After the last episode the channel resumes normal topics." },
+      {
+        key: "genre", label: "Speculative genre", type: "select",
+        options: [
+          { value: "", label: "None (subject-driven topics)" },
+          { value: "ai_hypothetical", label: "What would AI do? (hypothetical)" },
+          { value: "ai_pov", label: "AI POV (first person)" },
+        ],
+        help: "Appends genre seed phrasings to this channel's topic pool. Pair with the matching script tone. The no-repeat check still applies to seeded topics.",
+      },
     ],
   },
   {
@@ -117,6 +126,12 @@ export const MODULE_CATALOG: ModuleSpec[] = [
           { value: "crime", label: "True-crime / mystery" },
           { value: "shorts", label: "Punchy short-form" },
           { value: "meditation", label: "Calm / guided" },
+          { value: "ranking_countdown", label: "Ranking countdown" },
+          // Speculative-hypothetical genres (src/lib/aiPersona.ts). Both carry
+          // a hard frame: state the premise as a hypothetical and never
+          // fabricate a study, dataset or expert to support it.
+          { value: "ai_hypothetical", label: "What would AI do? (hypothetical)" },
+          { value: "ai_pov", label: "AI POV (first person)" },
         ],
       },
     ],

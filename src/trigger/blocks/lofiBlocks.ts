@@ -103,6 +103,7 @@ import {
   resolveScheduledPublishAtMs,
 } from "@/lib/scheduledPlanRuntime";
 import { uploadDurableVideo } from "@/lib/youtubeDurableUpload";
+import { aiPersonaTopicSeeds } from "@/lib/aiPersona";
 import {
   evaluateChannelPublishAction,
   requireChannelPublishAction,
@@ -265,7 +266,19 @@ export const topicSelect: Block = {
     const persona = opt(ctx, "persona") ?? id.persona ?? "";
     const niche = opt(ctx, "niche") ?? id.niche ?? "";
     const style = (ctx.store["styleGrammar"] as string | undefined) ?? id.styleGrammar ?? "";
-    const pool = (ctx.store["topicPool"] as string[] | undefined) ?? id.topicPool ?? [];
+    // A speculative-hypothetical channel ("what would AI do…", first-person AI
+    // POV) has a genre-shaped topic space rather than a subject-shaped one, so
+    // the genre contributes SEED phrasings to the pool. Seeds are appended, not
+    // substituted — the channel's own pool always comes first, and the hard
+    // no-repeat check below still applies to everything here.
+    const genreSeeds = aiPersonaTopicSeeds(ctx.params["genre"]);
+    const pool = [
+      ...((ctx.store["topicPool"] as string[] | undefined) ?? id.topicPool ?? []),
+      ...genreSeeds,
+    ];
+    if (genreSeeds.length) {
+      ctx.log(`topic_select: +${genreSeeds.length} "${String(ctx.params["genre"])}" genre seeds`);
+    }
     const bannedWords = (id.bannedWords ?? []).filter(Boolean);
 
     // Used-topic history — FATAL if unreadable: selecting blind against an
