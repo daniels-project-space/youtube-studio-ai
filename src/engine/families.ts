@@ -239,25 +239,22 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // with no template fallback.
     requiresKeys: ["fish-audio", "mureka", "novita", "gemini"],
     defaultThumbnailStyle: "banana",
-    // HONEST ARITHMETIC, not a round number. An 8-minute episode at 10s per
-    // shot is 48 authored shots. At this repo's own pinned per-unit ceilings
-    // (novitaImageMaxUsd 0.35, novitaVideoMaxUsd 0.35):
-    //   images   48 shots x 1-2 candidates x $0.35   = $16.80 - $33.60
-    //   video    48 clips x $0.35                    = $16.80
-    //   QA       96 vision grades x $0.003           =  $0.29
-    //   text     script + 2 dialogue + gates + meta  =  $0.05
-    //   narration ~7,700 chars x $0.006/1k           =  $0.05
-    //   music    one Mureka track                    =  $0.05
-    //   fact check (Wikidata, CC0, unauthenticated)  =  $0.00
-    //   assembly/captions/length (local ffmpeg)      =  $0.00
-    //                                          total  $34 - $51
-    // 45 is the envelope, not a prediction. The three text blocks this lane
-    // ADDS over the cinematic family come to about five cents combined — the
-    // format is expensive because it is generated video, not because it is a
-    // character with a script. `povvlog-pipeline-dryrun.ts` asserts the
-    // compiled worst-case reservation stays at or under the cinematic family's
-    // rather than trusting this comment.
-    defaultRunBudgetUsd: 45,
+    // COMPILER-VERIFIED, not hand-derived. An earlier version of this comment
+    // hand-computed $34-$51 by pricing only the image+video generation calls
+    // (48 shots x $0.35 x2) and left out what `qa_assets`/`qa_shots` actually
+    // reserve: NOT just a $0.003 vision-grader call, but a real per-shot
+    // Novita repair-purchase allowance (NOVITA_CINEMATIC_QA_REPAIR_CAP = 2
+    // candidates worth of image/video regeneration budget, on top of the
+    // grading call itself — see moduleContracts.ts `qa_assets`/`qa_shots`).
+    // That is the same repair-budget line that makes cinematic's own 50-shot
+    // worst case $123.86 rather than the naive ~$35, and this family reuses
+    // cinematic's exact renderer chain, so it inherits the exact same per-shot
+    // shape. `scripts/povvlog-pipeline-dryrun.ts` compiles the real pipeline
+    // and asserts against the actual reservation rather than trusting a
+    // comment — at this format's own fixed 480s/48-shot design point (see the
+    // `pov-vlog` archetype), the compiled worst case is ~$118.95. 125 is a
+    // buffer over that, not a fresh guess.
+    defaultRunBudgetUsd: 125,
   },
   cinematic: {
     key: "cinematic",

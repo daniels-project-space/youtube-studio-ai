@@ -36,6 +36,11 @@ const extraTests = [
   // a renderer (distinct pipelines, one chart_render) and the two lane-forbidden
   // auto-inserts that the designer and the compiler must both keep out.
   join(root, "scripts", "chartlane-pipeline-dryrun.ts"),
+  // Same class of check for the POV-vlog lane: design -> validate -> compile
+  // at the format's own fixed 480s/48-shot design point, plus a verified (not
+  // trusted) cost reservation and a same-length cost comparison against
+  // cinematic, whose exact renderer chain this lane reuses.
+  join(root, "scripts", "povvlog-pipeline-dryrun.ts"),
 ];
 
 const tests = [...directTests(sourceRoot).sort(), ...extraTests];
