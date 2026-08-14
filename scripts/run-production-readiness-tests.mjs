@@ -31,6 +31,11 @@ function directTests(directory) {
 const extraTests = [
   join(root, "scripts", "assembly-parity.ts"),
   join(root, "scripts", "quizyear-pipeline-dryrun.ts"),
+  // Same class of check for the chart lane: design → validate → compile for
+  // BOTH chart families, plus the two locks that only exist because they share
+  // a renderer (distinct pipelines, one chart_render) and the two lane-forbidden
+  // auto-inserts that the designer and the compiler must both keep out.
+  join(root, "scripts", "chartlane-pipeline-dryrun.ts"),
 ];
 
 const tests = [...directTests(sourceRoot).sort(), ...extraTests];
