@@ -25,6 +25,7 @@ export const ContentLaneKeySchema = z.enum([
   "quiz_year",
   "data_chart",
   "sim_story",
+  "pov_character_vlog",
   "legacy_unclassified",
 ]);
 
@@ -277,6 +278,47 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     // illustrative scenario is exactly the confusion this format must not create.
     forbiddenBlocks: ["timeline_assemble", "assemble", "story_spine", "visual_inserts", "rank_data"],
   },
+  pov_character_vlog: {
+    key: "pov_character_vlog",
+    family: "povvlog",
+    // SAME renderer as `cinematic_ai`. The lane exists to add the three text
+    // requirements below, not to introduce a picture pipeline — and a lane is
+    // allowed to share a renderer for the same reason `sim_story` shares
+    // `chart_render` with `data_chart`.
+    primaryRenderer: "novita_render_video",
+    requiredBlocks: [
+      // The three that make it THIS format rather than a first-person
+      // cinematic channel. Dropping `pov_vlog_script` loses the register;
+      // dropping `dialogue_scene` loses the encounters AND the narration (it is
+      // the sole producer of narrationText on this lane); dropping `fact_check`
+      // ships unverified assertions from an Education-category channel.
+      "pov_vlog_script",
+      "fact_check",
+      "dialogue_scene",
+      "novita_render_images",
+      "qa_assets",
+      "novita_render_video",
+      "qa_shots",
+      "timeline_assemble",
+      "qa_visual",
+    ],
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      "loop_clips",
+      "lore_short",
+      "whiteboard_scribe",
+      "motion_comic",
+      "chart_render",
+      "quiz_year",
+    ],
+    // `script_gen` is forbidden rather than merely unused: it is the generic
+    // narrated-essay writer, and if it ever reappeared on this lane the episode
+    // would be written twice, in two different voices, and the second one would
+    // win. `hook_craft` is forbidden for the same reason at smaller scale — the
+    // cold open IS the hook, and rewriting it is rewriting the format.
+    forbiddenBlocks: ["script_gen", "hook_craft"],
+  },
   legacy_unclassified: {
     key: "legacy_unclassified",
     primaryRenderer: "unclassified",
@@ -459,6 +501,18 @@ export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = 
       "The narration must never present the run as a real experiment, a real dataset or a cited study.",
     ],
   },
+  pov_character_vlog: {
+    ...GENERIC_LANE_QUALITY,
+    // Inherits the generated-video bar from cinematic_ai — same renderer, same
+    // artefact failure modes — and adds the two defects unique to this format.
+    critiqueThreshold: 0.82,
+    emphasis: [
+      "The host is the SAME PERSON in every shot and every episode: face, hair, build and signature wardrobe may not drift. A shot where the host is recognisably someone else is a hard failure, not a continuity note.",
+      "The framing must read as a person holding the camera themselves — slightly off-centre, imperfect horizon, their own arm at the edge of frame. A shot that reads as observed third-person coverage is off-format.",
+      "Generated shots must hold ONE consistent world; anatomy, hands and text-like artefacts are the known failure modes of generated video and must be inspected explicitly.",
+      "The narration must stay in first person throughout. A sentence in documentary-narrator register is the single defect this format cannot survive.",
+    ],
+  },
   legacy_unclassified: { ...GENERIC_LANE_QUALITY },
 };
 
@@ -488,6 +542,7 @@ export const CONTENT_LANE_BY_FAMILY: Record<FamilyKey, ContentLaneKey> = {
   quizyear: "quiz_year",
   datachart: "data_chart",
   simstory: "sim_story",
+  povvlog: "pov_character_vlog",
 };
 
 export const ContentLaneSchema = z.object({

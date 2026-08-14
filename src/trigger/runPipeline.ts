@@ -579,6 +579,17 @@ export const runPipelineTask = task({
           // fail closed on voice drift instead of falling back to the niche
           // default (src/lib/voiceLock.ts).
           ...(channel.identity?.voiceLock ? { voiceLock: channel.identity.voiceLock } : {}),
+          // The channel's LOCKED recurring character — name, frozen appearance
+          // and (separately) its LoRA weights reference. Frozen into the seed
+          // store so every block that renders a frame reads the SAME identity,
+          // from storage, on every episode and on every checkpoint replay
+          // (src/lib/channelCharacter.ts).
+          ...(channel.identity?.channelCharacter
+            ? { channelCharacter: channel.identity.channelCharacter }
+            : {}),
+          ...(channel.identity?.characterLora
+            ? { characterLora: channel.identity.characterLora }
+            : {}),
           bannedWords: channel.identity?.bannedWords ?? [],
           ...(channel.identity?.imageKey ? { channelAvatarKey: channel.identity.imageKey } : {}),
           ...((channel as { scriptPlaybook?: unknown }).scriptPlaybook

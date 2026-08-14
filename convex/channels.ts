@@ -276,6 +276,20 @@ const identityValidator = v.object({
       createdAt: v.number(),
     }),
   ),
+  // Mirrors convex/schema.ts's channels.identity.channelCharacter — a field
+  // missing from this validator is silently discarded on write no matter what
+  // the table allows.
+  channelCharacter: v.optional(
+    v.object({
+      version: v.literal("channel-character/v1"),
+      name: v.string(),
+      appearance: v.string(),
+      signatureItems: v.optional(v.array(v.string())),
+      referenceImageKey: v.optional(v.string()),
+      reason: v.string(),
+      lockedAt: v.number(),
+    }),
+  ),
   voiceRef: v.optional(v.string()),
   toneRefs: v.optional(v.array(v.string())),
   bannedWords: v.array(v.string()),

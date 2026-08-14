@@ -178,6 +178,20 @@ export const CHANNEL_INCEPTION_FAMILY_POLICIES: Readonly<
     starterTopicCount: 3,
     starterPreviewCount: 3,
   },
+  povvlog: {
+    family: "povvlog",
+    // ONE host speaks the whole episode, including their own side of every
+    // conversation, so the channel's cast voice is exactly the right owner —
+    // unlike the comic engine, which owns a multi-character cast of its own.
+    // (Counterpart voices are a later multi-voice concern; the format survives
+    // a single narrator performing the scene, which is how the real one reads.)
+    voiceOwnership: "channel-cast",
+    requiresNarrativePlaybook: true,
+    // Same generated-scene 16:9 probe as `cinematic` — same renderer.
+    probeProfile: "cinematic-scenes",
+    starterTopicCount: 3,
+    starterPreviewCount: 3,
+  },
   datachart: {
     family: "datachart",
     // ONE narrator reads the countdown for the whole channel, so the channel's

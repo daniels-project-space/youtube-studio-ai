@@ -132,6 +132,16 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   // duplicate each other: `chart_render` is owned once, by the ranking entry
   // that introduced it, and the simulation entry owns only its authoring block.
   // Claiming the renderer twice would let one entry's promotion imply the other's.
+  // The POV-vlog entry owns its THREE TEXT blocks and nothing else. It
+  // deliberately does not claim novita_render_images/novita_render_video: those
+  // belong to the `novita-render-farm` entry, and claiming a renderer this lane
+  // merely reuses would let one entry's promotion imply another's — the exact
+  // rule the two chart entries already follow.
+  "pov-character-vlog": {
+    kind: "pipeline-module",
+    executableIds: ["pov_vlog_script", "dialogue_scene", "fact_check"],
+    note: "Renders through the `novita-render-farm` module's existing Z-Image→LTX executables; it ships no renderer of its own.",
+  },
   "data-chart": { kind: "pipeline-module", executableIds: ["rank_data", "chart_render"] },
   "sim-story": {
     kind: "pipeline-module",

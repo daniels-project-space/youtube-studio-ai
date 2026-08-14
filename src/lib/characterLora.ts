@@ -128,7 +128,41 @@ export const LORA_SURFACES: Readonly<Record<string, LoraSurface>> = {
     note:
       "Self-hosted LTX on Novita GPU instances via the private render bridge. The bridge video job schema " +
       "(novitaRenderFarm.videoJobs) has no LoRA field, so a character LoRA cannot be injected here today. " +
-      "See this entry's source comment for the two ways to add it.",
+      "See this entry's source comment for the two ways to add it. NOTE: for a character channel this is " +
+      "NOT the blocker it looks like — see novita_bridge_image below.",
+  },
+  /**
+   * THE KEYFRAME SURFACE THE CINEMATIC CHAIN ACTUALLY USES, recorded because
+   * its absence from this table was itself misleading.
+   *
+   * `novita_render_images` does NOT call Novita's hosted Z-Image Turbo LoRA
+   * endpoint. Like the video step, it posts to the private nginx bridge on
+   * Novita GPU instances (novitaRenderFarm.imageJobs), whose job payload is
+   * `{id, prompt, negative, width, height, steps, cfg, seed}` — no `loras`
+   * field. So the LoRA-capable surface (`z_image_turbo_lora`) and the surface
+   * this repository's cinematic chain currently renders on are two DIFFERENT
+   * endpoints, and only the first accepts an adapter.
+   *
+   * WHY THIS MATTERS MORE THAN THE VIDEO GAP
+   * Identity in this chain is established at the STILL and then carried, not
+   * re-generated: `novita_render_video` consumes `selectedStillManifest` and
+   * sets each shot's `stillKey`, and `src/lib/i2v.ts` refuses to run at all
+   * without an input image. The video step animates a frame that is already
+   * correct. Therefore a character LoRA is only ever needed on the KEYFRAME
+   * surface — and the fix is to render a character channel's keyframes on
+   * `z_image_turbo_lora` (which documents `loras`), feeding the unchanged
+   * qa_assets → novita_render_video → qa_shots chain. No video-side LoRA
+   * support is required for cross-episode consistency.
+   */
+  novita_bridge_image: {
+    id: "novita_bridge_image",
+    supportsLoras: false,
+    verified: "unsupported",
+    note:
+      "Self-hosted Z-Image on Novita GPU instances via the private render bridge. novitaRenderFarm.imageJobs " +
+      "emits no `loras` field, so an adapter cannot be injected here. A character channel must render its " +
+      "keyframes on the hosted `z_image_turbo_lora` surface instead; the downstream i2v chain needs no change " +
+      "because it is conditioned on the selected still, not on a text prompt.",
   },
 };
 

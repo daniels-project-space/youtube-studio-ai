@@ -20,6 +20,7 @@ import { loreShortBlocks } from "@/trigger/blocks/loreShortBlocks";
 import { quizYearBlocks } from "@/trigger/blocks/quizYearBlocks";
 import { rankChartBlocks } from "@/trigger/blocks/rankChartBlocks";
 import { simNarrativeBlocks } from "@/trigger/blocks/simNarrativeBlocks";
+import { povVlogBlocks } from "@/trigger/blocks/povVlogBlocks";
 import { documentaryCollageShortBlocks } from "@/trigger/blocks/documentaryCollageShortBlocks";
 import { VISUAL_MATTER_BLOCKS } from "@/trigger/blocks/visualMatterBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
@@ -83,6 +84,15 @@ export function registerAllBlocks(): void {
   // illustrative "simulation run" whose beats key the same chart_render curve.
   // It adds no renderer of its own — that is the point.
   for (const b of simNarrativeBlocks) register(b);
+  // POV CHARACTER VLOG lane — three single-purpose TEXT blocks and no renderer
+  // of its own: pov_vlog_script writes the episode (src/lib/povVlogScript.ts),
+  // dialogue_scene writes the encounters (src/lib/dialogueScene.ts) and
+  // fact_check proves the fun facts against Wikidata
+  // (src/lib/historicalFactCheck.ts). The picture is the SAME Z-Image -> LTX
+  // chain the cinematic family already runs, framed by a composition profile
+  // (src/lib/shotComposition.ts) and starring a locked character
+  // (src/lib/channelCharacter.ts).
+  for (const b of povVlogBlocks) register(b);
   // Native documentary-collage Shorts: source/claim/beat manifest → portrait
   // DocuMotion master → scene-level safe-area and provenance gate.
   for (const b of documentaryCollageShortBlocks) register(b);

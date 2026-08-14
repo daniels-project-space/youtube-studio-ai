@@ -1,5 +1,10 @@
 import { z } from "zod";
 import { generationProfile } from "./generationProfiles";
+import {
+  compositionNegative,
+  compositionPromptParts,
+  shotCompositionProfile,
+} from "@/lib/shotComposition";
 
 const EPSILON = 0.02;
 
@@ -119,6 +124,26 @@ export interface PlanStorySpineInput {
   styleDNA?: Record<string, unknown> | null;
   generationProfile?: unknown;
   targetShotSec?: number;
+  /**
+   * WHICH CAMERA GRAMMAR to plan in — see src/lib/shotComposition.ts.
+   *
+   * Omitted (or unrecognised) resolves to `cinematic_third_person`, whose move
+   * vocabulary, scale vocabulary, lens rule and prompt layout are byte-for-byte
+   * what this planner hardcoded before the profile existed. The POV variant
+   * swaps the vocabulary for one a person physically holding the camera can
+   * perform; it does NOT change the renderer, the provider or the timing maths.
+   */
+  shotComposition?: unknown;
+  /**
+   * The channel's locked recurring character, pre-composed into a prompt block
+   * by src/lib/channelCharacter.ts `characterPromptBlock()`.
+   *
+   * Passed in ALREADY RENDERED rather than as an identity object on purpose:
+   * the planner must not be able to re-author a character, only to splice the
+   * one frozen line it was handed. "" for every channel without a character,
+   * which is every pre-existing one.
+   */
+  characterPromptBlock?: string;
 }
 
 function strings(value: unknown): string[] {
@@ -238,8 +263,17 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
   const shotList: StorySpine["shotList"] = [];
   const dpVisualSpecs: StorySpine["dpVisualSpecs"] = [];
   let shotNo = 0;
-  const moves = ["dolly_push", "truck_left", "static", "dolly_pull", "handheld_drift"] as const;
-  const scales = ["establishing", "medium", "close", "wide", "extreme_close"] as const;
+  // Camera grammar comes from the composition profile, not from this file.
+  // `cinematic_third_person` supplies exactly the two arrays that used to be
+  // literals here, in the same order — the planner indexes them by
+  // `shotNo % length`, so a reorder would silently re-cut existing channels.
+  const composition = shotCompositionProfile(input.shotComposition);
+  const moves = composition.cameraMoves;
+  const scales = composition.shotScales;
+  // Same reason as the framing clause: the planner joins with ". ", so a block
+  // that ends in its own full stop would produce ".. ".
+  const identityBlock = (input.characterPromptBlock ?? "").trim().replace(/\.\s*$/, "");
+  const compositionNegatives = compositionNegative(composition, negativeConstraints);
   for (const beat of narrativeBeats) {
     const source = intervals.find((sentence) => sentence.id === beat.sourceSentenceIds[0]);
     if (!source) throw new Error(`missing source for ${beat.id}`);
@@ -257,15 +291,23 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
         .filter(Boolean)
         .join(". ");
       const literalContent = source.text;
+      const framing = compositionPromptParts(composition, shotScale);
       const prompt = [
+        // Identity first, then framing, then content: both are constants for
+        // the channel and a constant that moves position between renders is a
+        // different prompt. Both are "" for every pre-existing family, which is
+        // why this join reproduces the previous string exactly.
+        identityBlock,
+        framing.framing,
         `Literal story moment: ${literalContent}`,
         styleLock ? `Locked channel world: ${styleLock}` : "",
-        `Shot scale: ${shotScale}; lens: ${shotScale === "close" ? "85mm portrait" : "35mm natural"}`,
+        framing.lens,
         "No text, letters, captions, logos, or watermarks in the image.",
       ].filter(Boolean).join(". ");
       const motion =
         `Continue the literal action implied by: ${literalContent}. ` +
-        `Camera performs a restrained ${cameraMove.replaceAll("_", " ")}; preserve identity, setting, wardrobe, props, and lighting through the final frame.`;
+        `Camera performs a restrained ${cameraMove.replaceAll("_", " ")}; preserve identity, setting, wardrobe, props, and lighting through the final frame.` +
+        (composition.motionClause ? ` ${composition.motionClause}` : "");
       const continuityState = `entity-primary/location-primary/shot-${shotNo}; no unmotivated identity, era, wardrobe, prop, palette, or lighting change`;
       const highRisk = shotNo === 1 || /\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(literalContent);
       const candidateCount = Math.max(profile.image.candidates, highRisk ? 2 : 1);
@@ -285,10 +327,10 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
         continuityState,
         cameraMove,
         shotScale,
-        lens: shotScale === "close" || shotScale === "extreme_close" ? "85mm portrait" : "35mm natural",
+        lens: composition.planLensFor(shotScale),
         lighting: typeof dna.lighting === "string" ? dna.lighting : "consistent motivated natural lighting",
         motion,
-        negative: negativeConstraints.join(", "),
+        negative: compositionNegatives,
         generationProfile: profile.id,
         candidateCount,
         imageMinScore: profile.qa.imageMinScore,
@@ -303,7 +345,7 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
         shotId: id,
         keyframePrompt: prompt,
         motionPrompt: motion,
-        negativePrompt: negativeConstraints.join(", "),
+        negativePrompt: compositionNegatives,
         styleLock,
         firstFrameConstraint: `depict the exact story state at ${t0.toFixed(2)}s`,
         lastFrameConstraint: `end in the same identity/setting state at ${t1.toFixed(2)}s with only motivated action advanced`,

@@ -136,6 +136,15 @@ const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
     energy: "spectacle", font: "bebas", treatment: "clean", textObject: "movie_poster",
     imageStyle: "blockbuster cinematic still with deep atmosphere and dimensional light",
   },
+  // NOT `cinematic`'s movie-poster grammar, despite sharing its renderer. This
+  // format's thumbnail is a vlog thumbnail: the host's face, reacting, in the
+  // place — the same visual promise the video makes. A film-poster treatment
+  // would advertise a different video than the one behind it.
+  povvlog: {
+    energy: "bold", font: "impact", treatment: "sticker", textObject: "grunge_sticker",
+    imageStyle:
+      "candid handheld travel-vlog frame: one expressive person filling the near half of frame reacting to a vivid historical location behind them, natural available light, no film-poster polish",
+  },
   music_loop: {
     energy: "cozy_pop", font: "rounded", treatment: "neon", textObject: "neon_sign",
     imageStyle: "saturated atmospheric illustration with luminous environmental storytelling",

@@ -17,7 +17,8 @@ export type FamilyKey =
   | "loreshort"
   | "quizyear"
   | "datachart"
-  | "simstory";
+  | "simstory"
+  | "povvlog";
 
 export interface Family {
   key: FamilyKey;
@@ -215,6 +216,49 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // ranking family; still above zero because narration is real TTS spend.
     defaultRunBudgetUsd: 0.5,
   },
+  povvlog: {
+    key: "povvlog",
+    label: "POV character vlog (history / travel)",
+    description:
+      "A persistent AI character time-travels and VLOGS it: handheld selfie framing, casual first-person " +
+      "register, an itinerary announced up front, fun facts dropped mid-scene in character, scripted " +
+      "conversations with named historical figures, and a deadpan sign-off recap. The same host, locked by " +
+      "LoRA and a frozen appearance, in every episode.",
+    // SAME visual engine as `cinematic`, on purpose. This family differs in WHO
+    // is in the shot, HOW it is framed and WHAT the script is — never in how a
+    // frame is produced. It is the exact relationship `simstory` has to
+    // `datachart`: one renderer, two authors. Building a parallel render stack
+    // for "the camera is held by the subject" would have been a second copy of
+    // the Z-Image -> LTX chain to maintain, for a prompt difference.
+    visualEngine: "ai_scenes",
+    archetypeKey: "pov-vlog",
+    available: true,
+    narrated: true,
+    // Same providers as cinematic — gemini is additionally required because the
+    // episode script, the dialogue and nothing else on this lane are text calls
+    // with no template fallback.
+    requiresKeys: ["fish-audio", "mureka", "novita", "gemini"],
+    defaultThumbnailStyle: "banana",
+    // HONEST ARITHMETIC, not a round number. An 8-minute episode at 10s per
+    // shot is 48 authored shots. At this repo's own pinned per-unit ceilings
+    // (novitaImageMaxUsd 0.35, novitaVideoMaxUsd 0.35):
+    //   images   48 shots x 1-2 candidates x $0.35   = $16.80 - $33.60
+    //   video    48 clips x $0.35                    = $16.80
+    //   QA       96 vision grades x $0.003           =  $0.29
+    //   text     script + 2 dialogue + gates + meta  =  $0.05
+    //   narration ~7,700 chars x $0.006/1k           =  $0.05
+    //   music    one Mureka track                    =  $0.05
+    //   fact check (Wikidata, CC0, unauthenticated)  =  $0.00
+    //   assembly/captions/length (local ffmpeg)      =  $0.00
+    //                                          total  $34 - $51
+    // 45 is the envelope, not a prediction. The three text blocks this lane
+    // ADDS over the cinematic family come to about five cents combined — the
+    // format is expensive because it is generated video, not because it is a
+    // character with a script. `povvlog-pipeline-dryrun.ts` asserts the
+    // compiled worst-case reservation stays at or under the cinematic family's
+    // rather than trusting this comment.
+    defaultRunBudgetUsd: 45,
+  },
   cinematic: {
     key: "cinematic",
     label: "Cinematic AI scenes",
@@ -267,6 +311,12 @@ export const FAMILY_CREW: Record<FamilyKey, string[]> = {
   // which exists in these lanes.
   datachart: ["director", "composer", "critic"],
   simstory: ["director", "composer", "critic"],
+  // Same crew as `cinematic` — it is the same generated-scene chain, and the
+  // cinematographer's spec is what the POV composition profile decorates rather
+  // than replaces. The critic matters here for the same reason it does on the
+  // quiz lane: REGISTER is the creative surface, and a documentary-voiced
+  // sentence is the format's only fatal defect.
+  povvlog: ["director", "cinematographer", "editor", "composer", "critic"],
 };
 
 /** Crew role → the brief block id that role contributes. */

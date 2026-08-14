@@ -3,6 +3,7 @@ import { getCutSheet, getStructure, getVisualBrief } from "@/engine/creative/bri
 import { planStorySpine } from "@/engine/storySpine";
 import { resolveContentLane } from "@/engine/contentLane";
 import { buildEpisodeSpec } from "@/engine/qualityEvidence";
+import { characterPromptBlock, resolveChannelCharacter } from "@/lib/channelCharacter";
 
 export const storySpine: Block = {
   id: "story_spine",
@@ -31,6 +32,14 @@ export const storySpine: Block = {
       throw new Error("story_spine: sentenceTimings are required; timing unavailable cannot pass");
     }
     const duration = Number(ctx.store["narrationDurationSec"]);
+    // The channel's LOCKED recurring character, read from storage and rendered
+    // into its frozen prompt block ONCE per run. Empty string for every channel
+    // without one, which is every channel except a character-vlog channel — so
+    // the planned prompts are byte-identical to what they were before.
+    const character = resolveChannelCharacter({
+      channelCharacter: ctx.store["channelCharacter"],
+      characterLora: ctx.store["characterLora"],
+    });
     const spine = planStorySpine({
       topic: String(ctx.store["topic"]),
       narrationDurationSec: duration,
@@ -40,6 +49,8 @@ export const storySpine: Block = {
       styleDNA: (ctx.store["styleDNA"] as Record<string, unknown> | null | undefined) ?? null,
       generationProfile: ctx.params["generationProfile"] ?? "production",
       targetShotSec: Number(ctx.params["targetShotSec"] ?? 6),
+      shotComposition: ctx.params["shotComposition"],
+      characterPromptBlock: characterPromptBlock(character),
     });
     // Touch the Editor artifact as an explicit dependency and record its exact
     // versioned handoff even though the deterministic EDL owns hard timing.

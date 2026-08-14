@@ -241,6 +241,63 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     ],
   },
   {
+    block: "story_spine",
+    label: "Story spine (timed shots)",
+    description:
+      "Turns timed narration into beats, a shot list and per-shot DP specs. The camera GRAMMAR is a composition profile (src/lib/shotComposition.ts): third-person cinematic coverage by default, or handheld first-person selfie framing for character-vlog channels. Same renderer either way — only the prompt and the move vocabulary change.",
+    optional: false,
+    params: [
+      { key: "targetShotSec", label: "Seconds per shot", type: "number", min: 2, max: 30, step: 1 },
+      {
+        key: "shotComposition",
+        label: "Camera grammar",
+        type: "select",
+        options: [
+          { value: "cinematic_third_person", label: "Cinematic (third person)" },
+          { value: "pov_handheld_vlog", label: "First-person POV vlog (handheld selfie)" },
+        ],
+        help: "How the camera relates to the subject. POV framing puts the camera in the host's own hand.",
+      },
+    ],
+  },
+  {
+    block: "pov_vlog_script",
+    label: "POV vlog episode script",
+    description:
+      "Writes one episode of a first-person character vlog in the format's real structure: direct-address cold open naming the host, an immediate sensory reaction to the period, a stated itinerary, fact-drops delivered mid-scene IN CHARACTER, setups for scripted encounters with named historical figures, an in-character line to the audience, and a deadpan sign-off recap. The host is READ from the channel's character lock and never re-authored. Every fun fact must be emitted as a structured, checkable claim — the writer cannot assert a number it has not said how to verify.",
+    optional: false,
+    params: [
+      { key: "targetSeconds", label: "Episode length (sec)", type: "number", min: 120, max: 1800, step: 30, help: "The real format runs 13-14 minutes (~800s)." },
+      { key: "dialogueBeats", label: "Conversations", type: "number", min: 1, max: 3, step: 1, help: "How many scripted encounters with historical figures this episode calls for." },
+    ],
+  },
+  {
+    block: "dialogue_scene",
+    label: "Scripted encounter (dialogue)",
+    description:
+      "Turns each conversation the episode called for into speaker-tagged turns between the host and named historical figures, then splices them into the finished narration. It synthesizes NO speech and renders NO picture — it produces dialogue text and nothing else. Rejects the four ways a scripted historical conversation actually fails: too few turns, the counterpart used as a lectern, stacked turns with no real exchange, and paragraph-length exposition dumps.",
+    optional: false,
+    params: [],
+  },
+  {
+    block: "fact_check",
+    label: "Historical fact check (Wikidata)",
+    description:
+      "Verifies every claim the episode makes against Wikidata date and quantity statements over the same free, unauthenticated CC0 endpoint the quiz and ranking lanes use. A subject that resolves ambiguously, or an entity carrying conflicting values, is refused rather than arbitrated. A claim the record CONTRADICTS fails the episode outright; claims with no structured statement are reported as unverifiable rather than passed off as correct, and capped by ratio. Costs nothing.",
+    optional: false,
+    params: [
+      {
+        key: "maxUnsupportedRatio",
+        label: "Max unverifiable share",
+        type: "number",
+        min: 0,
+        max: 1,
+        step: 0.1,
+        help: "Fraction of claims allowed to have no structured source. Contradicted claims always fail regardless of this.",
+      },
+    ],
+  },
+  {
     block: "rank_data",
     label: "Ranking data (cited)",
     description:

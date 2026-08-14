@@ -296,6 +296,71 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "cleanup" },
     ],
   },
+  "pov-vlog": {
+    key: "pov-vlog",
+    label: "POV character vlog",
+    description:
+      "A locked recurring character time-travels and vlogs it: itinerary, in-character fact drops, scripted encounters.",
+    template: "B",
+    defaultVoiceId: "psychological",
+    thumbnailTemplate: "banana",
+    // THE ORDER IS THE ARGUMENT.
+    //
+    // `pov_vlog_script` REPLACES script_gen and hook_craft: the cold open IS
+    // the hook, and a separate hook pass would rewrite the one line whose
+    // register the whole format depends on.
+    //
+    // `fact_check` runs BEFORE `dialogue_scene` deliberately. It is the only
+    // FREE block of the three (Wikidata is CC0 and unauthenticated), and a
+    // contradicted date fails the episode outright — so checking first means a
+    // wrong fact costs one script call instead of one script call plus two or
+    // three dialogue calls plus narration.
+    //
+    // `stock_footage` is present only so the designer's `ai_scenes` swap can
+    // replace it with the four-block Novita chain, exactly as it does for the
+    // `crime-narrative` archetype under the `cinematic` family. Nothing on this
+    // lane ever touches a stock library.
+    pipeline: [
+      { block: "competitor_research" },
+      // 480s (8 min), not the 13-14 the reference format runs. That is a
+      // deliberate, stated trade rather than an oversight: every second of this
+      // lane is an AUTHORED GENERATED SHOT, and at 10s per shot 480s is 48
+      // shots — just inside the same 50-shot-times-two-candidates envelope the
+      // cinematic family's per-block ceilings are built around. A longer
+      // episode is not forbidden, it just has to come with an explicitly raised
+      // operator budget rather than silently blowing a production rail.
+      { block: "topic_select", params: { policy: "no_repeat", targetSeconds: 480 } },
+      { block: "compliance_check" },
+      { block: "pov_vlog_script", params: { targetSeconds: 480, dialogueBeats: 2 } },
+      { block: "fact_check" },
+      { block: "dialogue_scene" },
+      { block: "qa_script" },
+      { block: "originality_gate" },
+      // Conversational pacing: this is a person talking, not a chaptered essay,
+      // so there are no chapter cards and the sentence gap is short.
+      { block: "narration_tts", params: { sentenceGapSec: 0.45, sentenceGapJitter: 0.15 } },
+      { block: "stock_footage" },
+      {
+        block: "music",
+        params: {
+          provider: "mureka",
+          prompt:
+            "light, curious travel-vlog underscore — plucked strings and soft percussion, warm and unhurried, " +
+            "sits far under speech, no vocals, no dramatic swells",
+        },
+      },
+      { block: "intro_card", params: { introSec: 4 } },
+      { block: "timeline_assemble", params: { tailSec: 8, fadeOutSec: 1.5, audioFadeOutSec: 8, burnCaptions: true } },
+      { block: "length_check", params: { minSeconds: 300, maxSeconds: 1500 } },
+      { block: "captions" },
+      { block: "metadata" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+      { block: "notify" },
+      { block: "cleanup" },
+    ],
+  },
   "sim-story": {
     key: "sim-story",
     label: "Dramatized simulation story",

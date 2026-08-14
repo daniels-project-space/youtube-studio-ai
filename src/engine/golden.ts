@@ -46,8 +46,8 @@ export interface GoldenStage {
 export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "intel", blocks: ["competitor_research", "topic_select"], note: "Pick topics from real outliers + competitor signal, learning-weighted." },
   { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine", "short_strategy"], note: "Show Bible crew and timed story spine; collage Shorts lock claim/source/beat/motion evidence before render." },
-  { stage: "write", blocks: ["script_gen", "hook_craft"], note: "Hook-first, CRAFT_RULES applied." },
-  { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check"], note: "Quality + originality + compliance floor." },
+  { stage: "write", blocks: ["script_gen", "hook_craft", "pov_vlog_script", "dialogue_scene"], note: "Hook-first, CRAFT_RULES applied. The POV-vlog lane replaces script_gen/hook_craft with its own two writers (episode structure, then the scripted encounters that complete the narration)." },
+  { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check", "fact_check"], note: "Quality + originality + compliance floor, plus source verification for lanes that assert checkable facts." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
   { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
   { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "rank_data", "sim_narrative", "chart_render", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
@@ -777,6 +777,49 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     // WIRED, not Golden-certified: no signed promotion receipt from a real
     // end-to-end run exists. Sourcing and integrity are covered by deterministic
     // tests; a full pipeline run against the live endpoint has not been performed.
+    status: "active",
+  },
+  {
+    key: "pov-character-vlog",
+    stage: "write",
+    title: "POV character vlog — persistent host, scripted encounters, checked facts",
+    engine:
+      "pov_vlog_script + dialogue_scene + fact_check, over the EXISTING cinematic Z-Image→LTX chain " +
+      "(src/lib/povVlogScript.ts, src/lib/dialogueScene.ts, src/lib/historicalFactCheck.ts, " +
+      "src/lib/channelCharacter.ts, src/lib/shotComposition.ts, src/trigger/blocks/povVlogBlocks.ts)",
+    how:
+      "The first-person time-travel history/travel vlog format: one recurring AI character arrives somewhere " +
+      "in the past, announces an itinerary, drops facts mid-scene in their own voice, has actual scripted " +
+      "conversations with named historical figures, thanks the audience in character, and signs off with a " +
+      "deadpan recap. " +
+      "IT ADDS NO RENDERER. The picture is the same authored-shot chain the `cinematic` family already " +
+      "runs — visual_matter, novita_render_images, qa_assets, novita_render_video, qa_shots — and the only " +
+      "visual difference is a COMPOSITION PROFILE that swaps the third-person camera grammar for handheld " +
+      "selfie framing inside the same closed cameraMove/shotScale vocabulary the render bridge accepts. " +
+      "CROSS-EPISODE IDENTITY is held at the KEYFRAME, not in video diffusion: the character LoRA and a " +
+      "frozen appearance line lock the still, qa_assets gates that still against the channel identity floor, " +
+      "and novita_render_video consumes `selectedStillManifest` — it animates an already-correct, " +
+      "already-QA-passed frame rather than generating identity from scratch, so no LoRA parameter is needed " +
+      "on the video surface at all. " +
+      "THE FACTS ARE CHECKED, NOT TRUSTED. The writer must express every fun fact as a structured claim " +
+      "(subject, Wikidata property, value); fact_check resolves each against Wikidata quantity/date " +
+      "statements over the same free CC0 endpoint the quiz and ranking lanes use, drops ambiguous subjects " +
+      "and multi-valued entities rather than arbitrating them, and HARD-FAILS the episode on any claim the " +
+      "record contradicts. Unverifiable claims are capped by ratio and reported rather than silently passed " +
+      "as correct — the limits of the check are visible on purpose.",
+    gates: [
+      "the channel's recurring host is READ from storage every episode (name + frozen appearance + LoRA ref); a channel without one cannot author an episode at all",
+      "the frozen appearance must appear verbatim in the keyframe prompt, and every LoRA trigger word must reach it, or the render is refused",
+      "structural gate on the format: direct-address cold open naming the host, a stated itinerary, in-character fact delivery, an anchored dialogue beat, an engagement line and a sign-off recap",
+      "register gate: documentary-narrator phrasing anywhere in the body fails the episode",
+      "dialogue gate: real alternation, counterparts hold at least a third of the turns, no turn is an exposition dump",
+      "every fun fact is expressed as a checkable structured claim, or it is not made",
+      "any claim contradicted by a Wikidata statement fails the run outright; unverifiable claims are ratio-capped and reported",
+      "fact_check runs BEFORE the dialogue calls, so a wrong fact costs one text pass rather than four",
+    ],
+    // WIRED, not Golden-certified: no signed promotion receipt from a real
+    // end-to-end run exists. The structural, register, dialogue and fact gates
+    // are covered by deterministic tests; no episode has been rendered.
     status: "active",
   },
   {

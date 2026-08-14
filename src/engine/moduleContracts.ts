@@ -453,7 +453,13 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   critic_spec: contract(["crew.critic_validation_spec"], { optionalConsumes: ["styleDNA", "niche", "channelName"] }),
 
   story_spine: contract(["story.timed", "visuals.story_planned"], {
-    optionalConsumes: ["structure", "visualBrief", "cutSheet", "styleDNA", "contentLane"],
+    optionalConsumes: [
+      "structure", "visualBrief", "cutSheet", "styleDNA", "contentLane",
+      // The channel's locked recurring character, spliced verbatim into every
+      // planned keyframe prompt (src/lib/channelCharacter.ts). Absent on every
+      // channel without one, which leaves the planned prompt unchanged.
+      "channelCharacter", "characterLora",
+    ],
     qualityRequired: true,
   }),
 
@@ -667,6 +673,58 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // exists to avoid.
       maxCostUsd: 0.05,
       maxCostUsdFor: () => simNarrativeCostCeiling(),
+    },
+  ),
+  pov_vlog_script: contract(
+    // It writes the episode and NOTHING else. No narration.* (dialogue_scene
+    // assembles the final narration once the conversations exist), no visuals.*
+    // and no master.* — the picture is the shared Novita chain.
+    ["script.generated"],
+    {
+      optionalConsumes: [
+        "persona", "channelName", "styleGrammar", "criticDoctrine", "contentLane", "niche",
+        // The channel's locked host. Declared OPTIONAL at the contract layer
+        // and REQUIRED at the block layer on purpose: the runner denies any
+        // undeclared read, but "this channel has no character" must produce the
+        // block's own legible refusal rather than a generic missing-artifact
+        // error from the store.
+        "channelCharacter", "characterLora",
+      ],
+      providerProfiles: [managed],
+      // One bounded text pass. There is no per-segment call and no repair loop:
+      // a rejected episode fails, it does not iterate, because iterating on
+      // register is how a format drifts into the average of its attempts.
+      maxCostUsd: 0.05,
+      maxCostUsdFor: () => PRICE.boundedTextPassUsd,
+    },
+  ),
+  dialogue_scene: contract(
+    // Dialogue TEXT plus the deterministic narration projection it completes.
+    // Explicitly NOT narration.timed — it synthesizes nothing.
+    ["script.generated"],
+    {
+      optionalConsumes: ["persona", "channelName", "styleGrammar", "criticDoctrine", "contentLane"],
+      providerProfiles: [managed],
+      maxCostUsd: 0.1,
+      // One call per beat plus one documented retry each. The beat count is
+      // bounded by POV_MAX_DIALOGUE_BEATS (3) in src/lib/povVlogScript.ts, so
+      // this ceiling cannot be reached by a runaway loop.
+      maxCostUsdFor: (params) =>
+        2 * Math.ceil(boundedNumber(params["dialogueBeats"], 3, 1, 3)) * PRICE.boundedTextPassUsd,
+    },
+  ),
+  fact_check: contract(
+    // A GATE over claims. It produces no script, no data and no picture — the
+    // only thing it adds to the run is a verdict and its provenance.
+    ["script.qa_passed"],
+    {
+      optionalConsumes: ["povEpisode", "topic", "channelName", "contentLane"],
+      // Wikidata's public SPARQL endpoint: free, unauthenticated, CC0. The
+      // module is UNPAID and reserves nothing — if it ever needs a budget line,
+      // that is the signal a paid provider crept onto the fact path, which is
+      // exactly the thing this lane must not do.
+      providerProfiles: [local],
+      qualityRequired: true,
     },
   ),
   chart_render: contract(

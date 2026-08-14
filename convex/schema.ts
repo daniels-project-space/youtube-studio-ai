@@ -192,6 +192,24 @@ export default defineSchema({
           createdAt: v.number(),
         }),
       ),
+      // CHANNEL CHARACTER — the READ side of a recurring on-screen host (see
+      // src/lib/channelCharacter.ts). `characterLora` above holds the weights;
+      // this holds the name and the FROZEN appearance line that goes into every
+      // keyframe prompt for the life of the channel. Both halves have to be
+      // stable or the host keeps their face and changes their coat, which reads
+      // as a continuity error. Optional → zero effect on existing channels.
+      channelCharacter: v.optional(
+        v.object({
+          version: v.literal("channel-character/v1"),
+          name: v.string(),
+          appearance: v.string(),
+          signatureItems: v.optional(v.array(v.string())),
+          /** R2 key or https URL of the canonical reference still. */
+          referenceImageKey: v.optional(v.string()),
+          reason: v.string(),
+          lockedAt: v.number(),
+        }),
+      ),
       voiceRef: v.optional(v.string()),
       toneRefs: v.optional(v.array(v.string())),
       bannedWords: v.array(v.string()),

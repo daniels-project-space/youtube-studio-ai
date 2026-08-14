@@ -408,7 +408,24 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     const narrationIndex = pipeline.findIndex((entry) => entry.block === "narration_tts");
     pipeline.splice(narrationIndex + 1, 0, {
       block: "story_spine",
-      params: { generationProfile: "production", targetShotSec: opts.family === "shorts" ? 4 : 6 },
+      params: {
+        generationProfile: "production",
+        // 10s for the POV vlog, not 6. This is a format fact before it is a
+        // cost fact: a person talking to a camera they are holding is a
+        // CONTINUOUS TAKE, and cutting them every six seconds is what makes an
+        // AI vlog read as an AI vlog. It also halves the shot count, which is
+        // what keeps an 8-minute episode inside the same per-block spend
+        // ceilings the cinematic family already lives under.
+        targetShotSec: opts.family === "shorts" ? 4 : opts.family === "povvlog" ? 10 : 6,
+        // WHICH CAMERA GRAMMAR the shots are planned in (src/lib/shotComposition.ts).
+        // Only the POV family departs from the third-person cinematic default,
+        // and the default is the planner's pre-existing behaviour byte-for-byte,
+        // so this changes nothing for any other family. It is a param rather
+        // than a family lookup inside the planner because an operator may
+        // legitimately want handheld framing on a channel that is not this
+        // family, and a hardcoded family check would forbid that.
+        ...(opts.family === "povvlog" ? { shotComposition: "pov_handheld_vlog" } : {}),
+      },
     });
   }
 
@@ -417,9 +434,16 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // into mood, cast, setting, and per-shot storyboard locks before any paid
   // keyframe/video render. A disabled setting still emits a typed no-op
   // handoff, keeping downstream contracts deterministic.
-  if (opts.family === "cinematic" && !pipeline.some((entry) => entry.block === "visual_matter")) {
+  // `povvlog` is the second consumer for the same structural reason: it runs
+  // the identical Novita chain, and every block in that chain HARD-requires
+  // `visualMatterManifest` (requireVisualMatter throws without it). Omitting it
+  // here would design a pipeline that cannot execute.
+  if (
+    (opts.family === "cinematic" || opts.family === "povvlog") &&
+    !pipeline.some((entry) => entry.block === "visual_matter")
+  ) {
     const storyIndex = pipeline.findIndex((entry) => entry.block === "story_spine");
-    if (storyIndex < 0) throw new Error("cinematic Visual Matter requires the timed story spine");
+    if (storyIndex < 0) throw new Error("generated-scene Visual Matter requires the timed story spine");
     pipeline.splice(storyIndex + 1, 0, {
       block: "visual_matter",
       params: {
