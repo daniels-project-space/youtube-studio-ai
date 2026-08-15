@@ -34,6 +34,10 @@ RUN git clone --filter=blob:none https://github.com/Lightricks/LTX-2.git /opt/LT
     && git -C /opt/LTX-2 checkout --detach "${LTX_RUNTIME_REVISION}" \
     && test "$(git -C /opt/LTX-2 rev-parse HEAD)" = "${LTX_RUNTIME_REVISION}" \
     && cd /opt/LTX-2 \
+    # LTX's pinned runtime commit does not publish a repository uv.lock. Generate
+    # one inside this immutable image, then retain it in the image layer; the
+    # resolved dependency graph is therefore sealed by the pushed image digest.
+    && uv lock \
     && uv sync --frozen --no-dev --package ltx-pipelines --python "${UV_PYTHON}" \
     && uv pip install --python /opt/LTX-2/.venv/bin/python \
        "git+https://github.com/huggingface/diffusers.git@${DIFFUSERS_REVISION}" \
