@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { applyLtxI2vPromptContract, LTX_I2V_PROMPT_CONTRACT_VERSION } from "@/lib/ltxI2vPrompt";
+import {
+  applyLtxI2vPromptContract,
+  hasCompleteLtxI2vPromptContract,
+  LTX_I2V_PROMPT_CONTRACT_VERSION,
+} from "@/lib/ltxI2vPrompt";
 
 const source = {
   id: "cinematic-shot-a",
@@ -23,7 +27,18 @@ assert.match(directed.motion, /Diegetic soundscape: distant train brakes/);
 assert.match(directed.motion, /Do not generate narration, dialogue, score, lyrics, or musical cues/);
 assert.match(directed.prompt, /rust wool coat/);
 assert.match(directed.motion, /no jump cut, subject replacement, wardrobe\/prop swap/);
+assert.equal(hasCompleteLtxI2vPromptContract(directed), true);
 assert.deepEqual(applyLtxI2vPromptContract(directed), directed, "recovery retries must not duplicate the shared prompt contract");
+
+assert.throws(
+  () => applyLtxI2vPromptContract({
+    ...source,
+    id: "cinematic-shot-partial-contract",
+    motion: `[${LTX_I2V_PROMPT_CONTRACT_VERSION}] preserve the source frame`,
+  }),
+  /marker is present but its required continuity and audio clauses are incomplete/,
+  "a partial marker must not bypass the shared final LTX directing contract",
+);
 
 const defaultSoundscape = applyLtxI2vPromptContract({ ...source, id: "cinematic-shot-b", diegeticSoundscape: undefined });
 assert.match(defaultSoundscape.motion, /restrained location tone and physical sound motivated only by the visible action/);

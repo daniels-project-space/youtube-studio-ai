@@ -11,10 +11,30 @@ import type { Shot } from "@/lib/novitaRenderFarm";
 export const LTX_I2V_PROMPT_CONTRACT_VERSION = "ltx-i2v-directing/v2" as const;
 
 const MARKER = `[${LTX_I2V_PROMPT_CONTRACT_VERSION}]`;
+const REQUIRED_CONTRACT_CLAUSES = [
+  MARKER,
+  "Source-frame anchor:",
+  "Action onset:",
+  "Continuous development:",
+  "End beat:",
+  "Diegetic soundscape:",
+  "Do not generate narration, dialogue, score, lyrics, or musical cues;",
+  "Keep the take cinematic and physically plausible.",
+] as const;
 
 function clean(value: string | undefined, fallback: string): string {
   const normalized = value?.replace(/\s+/g, " ").trim();
   return normalized || fallback;
+}
+
+/**
+ * A version marker alone is never evidence that an I2V take received the
+ * continuity contract. Keep this deliberately text-level: the shared render
+ * boundary needs an inexpensive, provider-free proof before any LTX spend.
+ */
+export function hasCompleteLtxI2vPromptContract(shot: Pick<Shot, "prompt" | "motion">): boolean {
+  return REQUIRED_CONTRACT_CLAUSES.every((clause) => shot.motion.includes(clause)) &&
+    shot.prompt.includes(MARKER);
 }
 
 /**
@@ -23,7 +43,14 @@ function clean(value: string | undefined, fallback: string): string {
  * It is idempotent because controlled recovery paths re-submit a Shot.
  */
 export function applyLtxI2vPromptContract(shot: Shot): Shot {
-  if (shot.motion.includes(MARKER)) return shot;
+  if (shot.motion.includes(MARKER)) {
+    if (!hasCompleteLtxI2vPromptContract(shot)) {
+      throw new Error(
+        "LTX I2V prompt contract marker is present but its required continuity and audio clauses are incomplete",
+      );
+    }
+    return shot;
+  }
   const visual = clean(shot.prompt, "the supplied source frame");
   const action = clean(shot.motion, "subtle natural motion appropriate to the shot");
   const camera = clean(shot.cameraMove, "the planned camera position");
