@@ -14,6 +14,10 @@ export interface I2VRequest {
   prompt: string;
   imageUrl?: string;
   imageKey?: string;
+  /** Exact first/last-frame conditioning now supported by the sealed LTX worker. */
+  endImageUrl?: string;
+  endImageKey?: string;
+  /** @deprecated Use endImageUrl; retained as an input alias for older callers. */
   tailImageUrl?: string;
   durationSec?: number;
   aspectRatio?: string;
@@ -42,8 +46,12 @@ export async function generateI2V(req: I2VRequest): Promise<I2VResult> {
   if (req.provider && req.provider !== "novita" && req.provider !== "novita-ltx") {
     throw new Error(`i2v: provider ${JSON.stringify(req.provider)} is retired; Novita LTX is mandatory`);
   }
-  if (req.tailImageUrl) {
-    throw new Error("i2v: first/last-frame provider fallback is retired; use the Novita clip plus deterministic loop assembly");
+  if (req.endImageUrl && req.tailImageUrl) {
+    throw new Error("i2v: supply only one of endImageUrl or the legacy tailImageUrl alias");
+  }
+  const endImageUrl = req.endImageUrl ?? req.tailImageUrl;
+  if (req.endImageKey && endImageUrl) {
+    throw new Error("i2v: supply only one of endImageKey or endImageUrl");
   }
   if (req.aspectRatio && req.aspectRatio !== "16:9") {
     throw new Error(`i2v: aspect ratio ${JSON.stringify(req.aspectRatio)} is not covered by the pinned Novita production profile`);
@@ -57,6 +65,8 @@ export async function generateI2V(req: I2VRequest): Promise<I2VResult> {
     .update(req.prompt)
     .update("\0")
     .update(imageIdentity)
+    .update("\0")
+    .update(req.endImageKey ?? endImageUrl ?? "")
     .digest("hex")
     .slice(0, 20);
   const result = await renderNovitaI2V({
@@ -65,6 +75,8 @@ export async function generateI2V(req: I2VRequest): Promise<I2VResult> {
     prompt: req.prompt,
     imageKey: req.imageKey,
     imageUrl: req.imageKey ? undefined : req.imageUrl,
+    endImageKey: req.endImageKey,
+    endImageUrl,
     durationSec: req.durationSec,
     negativePrompt: req.negativePrompt,
     profileId: "production",

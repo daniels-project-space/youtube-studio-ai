@@ -168,7 +168,12 @@ function cleanPrefix(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
 }
 
-function asShot(scene: NovitaGeneratedScene, profileId: NovitaProfileId, stillKey?: string): Shot {
+function asShot(
+  scene: NovitaGeneratedScene,
+  profileId: NovitaProfileId,
+  stillKey?: string,
+  endStillKey?: string,
+): Shot {
   return {
     id: safeId(scene.id),
     prompt: scene.imagePrompt,
@@ -182,6 +187,7 @@ function asShot(scene: NovitaGeneratedScene, profileId: NovitaProfileId, stillKe
     generationProfile: profileId,
     ...(scene.creativeAdapter ? { creativeAdapter: scene.creativeAdapter } : {}),
     ...(stillKey ? { stillKey } : {}),
+    ...(endStillKey ? { endStillKey } : {}),
   };
 }
 
@@ -961,6 +967,9 @@ export async function renderNovitaI2V(args: {
   prompt: string;
   imageKey?: string;
   imageUrl?: string;
+  /** Optional reviewed/intentional LTX final-frame image. */
+  endImageKey?: string;
+  endImageUrl?: string;
   durationSec?: number;
   negativePrompt?: string;
   seed?: number;
@@ -973,6 +982,9 @@ export async function renderNovitaI2V(args: {
 }): Promise<{ url: string; key: string; jobId: string; model: string; costUsd: number; billingReceipt: NovitaBillingReceipt }> {
   if (Boolean(args.imageKey) === Boolean(args.imageUrl)) {
     throw new Error("novita i2v requires exactly one of imageKey or imageUrl");
+  }
+  if (args.endImageKey && args.endImageUrl) {
+    throw new Error("novita i2v accepts at most one of endImageKey or endImageUrl");
   }
   const profile = generationProfile(args.profileId ?? "production");
   // Do not persist/download a still or create any direct worker while the
@@ -991,6 +1003,10 @@ export async function renderNovitaI2V(args: {
   const prefix = cleanPrefix(args.prefix);
   const id = safeId(args.id);
   const stillKey = args.imageKey ?? await persistRemoteStill({ imageUrl: args.imageUrl!, prefix, id });
+  const endStillKey = args.endImageKey
+    ?? (args.endImageUrl
+      ? await persistRemoteStill({ imageUrl: args.endImageUrl, prefix, id: `${id}-terminal` })
+      : undefined);
   const shot = asShot({
     id,
     imagePrompt: args.prompt,
@@ -999,7 +1015,7 @@ export async function renderNovitaI2V(args: {
     negativePrompt: args.negativePrompt,
     seed: args.seed,
     creativeAdapter: args.creativeAdapter,
-  }, profile.id, stillKey);
+  }, profile.id, stillKey, endStillKey);
   const result = await renderVideo({
     prefix: `${prefix}/video`,
     shots: [shot],

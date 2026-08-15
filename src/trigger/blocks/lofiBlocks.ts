@@ -693,6 +693,10 @@ export const loopClips: Block = {
       prompt: fwd.prompt,
       negativePrompt: fwd.negativePrompt,
       imageKey: f1Key,
+      // The actual worker receives the first still again at the final frame.
+      // This makes FLF2V a real image-conditioned loop closure, rather than a
+      // prompt-only request followed by a crossfade that hides a seam.
+      ...(flf ? { endImageKey: f1Key } : {}),
       durationSec: dur,
       profileId: "production",
       creativeAdapter,
