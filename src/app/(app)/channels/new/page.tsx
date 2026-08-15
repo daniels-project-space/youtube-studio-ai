@@ -404,7 +404,7 @@ export default function NewChannelWizard() {
         }
       }
       const design: Record<string, unknown> = {
-        nicheKey, subcategory, family, name: requestedYoutubeName || undefined,
+        nicheKey, subcategory, family, concept: concept.trim() || undefined, name: requestedYoutubeName || undefined,
         // Every variable-duration family receives its own authored unit. Fixed
         // engines own their timing and never receive a misleading generic value.
         lengthMinutes: fam && duration?.inputUnit !== "fixed" ? lengthMinutes : undefined,

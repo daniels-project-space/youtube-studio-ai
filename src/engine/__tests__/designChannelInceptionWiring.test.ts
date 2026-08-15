@@ -113,6 +113,14 @@ assert(!coordinator.includes("payload.autoYoutube !== false"));
 assert.match(route, /approvedForYoutubeCreation = design\.autoYoutube === true/);
 assert.match(route, /youtubeCreationApproval: approvedForYoutubeCreation/);
 assert.match(route, /publishingApproval: approvedForPublish/);
+assert.match(route, /formatPreflight\(family\.key/,
+  "the server must re-run creator preflight rather than trusting a client-side format suggestion");
+assert.match(route, /cinematic channel creation requires a specific concept/,
+  "factual and fictional cinematic requests must be distinguished before any inception provider work");
+assert.match(route, /factual cinematic Casefile concepts are private supervised episode workflows/,
+  "a Fern-style factual concept must never be silently admitted as a generic automatic cinematic channel");
+assert.match(newChannelUi, /concept:\s*concept\.trim\(\) \|\| undefined/,
+  "the server-side preflight must receive the exact concept the creator advised on");
 
 for (const operation of ["claim", "complete", "checkpoint", "heartbeat", "fail"] as const) {
   assert(adapter.includes(`${operation}: async`), `Convex ledger adapter must implement ${operation}`);

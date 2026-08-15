@@ -27,6 +27,7 @@ import {
   normalizeYoutubeHandle,
   suggestYoutubeHandle,
 } from "@/lib/youtubeChannelCreationClaim";
+import { formatPreflight } from "@/engine/creative/selectFormat";
 
 /**
  * POST /api/build-channel  { design, requestKey } → { id, requestKey, slug }
@@ -112,6 +113,47 @@ export async function POST(request: Request) {
       if (lengthError) {
         return NextResponse.json({ error: lengthError }, { status: 400 });
       }
+      const nicheKey = typeof design.nicheKey === "string" ? design.nicheKey.trim() : "";
+      if (!nicheKey) {
+        return NextResponse.json({ error: "missing channel niche" }, { status: 400 });
+      }
+      const concept = typeof design.concept === "string" ? design.concept.trim() : "";
+      // Cinematic is the only family where a one-line label can mean either an
+      // original mini-film or a factual reconstruction. Require the explicit
+      // concept that the creator advised on, then re-run that same deterministic
+      // admission server-side before any provider-capable inception work.
+      if (family.key === "cinematic" && concept.length < 12) {
+        return NextResponse.json({
+          error: "cinematic channel creation requires a specific concept so factual Casefile work can be admitted safely",
+        }, { status: 400 });
+      }
+      const requestedLengthMinutes = Number(design.lengthMinutes);
+      const requestedBudgetUsd = Number(design.budget);
+      const creatorPreflight = formatPreflight(family.key, {
+        concept,
+        niche: getNiche(nicheKey)?.label,
+        nicheKey,
+        ...(Number.isFinite(requestedLengthMinutes) && requestedLengthMinutes > 0
+          ? { targetDurationSeconds: Math.round(requestedLengthMinutes * 60) }
+          : {}),
+        ...(Number.isFinite(requestedBudgetUsd) && requestedBudgetUsd > 0
+          ? { maxPerVideoBudgetUsd: requestedBudgetUsd }
+          : {}),
+      });
+      const casefileModules = creatorPreflight.moduleAdmissions.filter(
+        (module) => module.profile === "source_first_casefile/v1" ||
+          module.profile === "claim_to_source_to_shot_map/v1" ||
+          module.profile === "faceless_source_bound_cinematic_sequence/v1",
+      );
+      if (casefileModules.length) {
+        return NextResponse.json({
+          error: "factual cinematic Casefile concepts are private supervised episode workflows, not automatic channel creation",
+          runtimeBlockers: creatorPreflight.runtimeBlockers,
+          sourceRequirements: creatorPreflight.sourceRequirements,
+          recommendedModules: casefileModules.map((module) => module.block),
+          remediation: casefileModules.map((module) => module.remediation),
+        }, { status: 409 });
+      }
       const runtimeReadiness = familyProductionReadiness(family.key);
       if (!runtimeReadiness.productionReady) {
         const fallbackFamily = productionReadyFamilyFallback(family.key);
@@ -120,10 +162,6 @@ export async function POST(request: Request) {
           runtimeBlockers: runtimeReadiness.blockers,
           ...(fallbackFamily ? { fallbackFamily } : {}),
         }, { status: 409 });
-      }
-      const nicheKey = typeof design.nicheKey === "string" ? design.nicheKey.trim() : "";
-      if (!nicheKey) {
-        return NextResponse.json({ error: "missing channel niche" }, { status: 400 });
       }
       // This authenticated route is the only place the wizard's explicit
       // confirmations become their separate external-action authorities.
