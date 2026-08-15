@@ -19,7 +19,10 @@ const REVISION = "ce298b1259d61ce6c87e05154b9ad339b16f32a0";
 const PRODUCT_ID = "4090.16c96g.v2";
 const CLUSTER_ID = "us-ca-nas-2";
 const STORAGE_ID = "384d629d-839f-4224-abef-64dfc2d751bf";
-const IMAGE = "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
+// This is a staging-only control image. LTX rendering continues to use the
+// separately sealed PyTorch runtime bundle; Ubuntu avoids its image-entrypoint
+// rewriting the bootstrap command into a Python invocation.
+const IMAGE = "ubuntu@sha256:019e8eb29a85e74d64925745884f2ec79aa27e3feab36353d24656f4d6b89467";
 const BUCKET = process.env.R2_BUCKET || "youtube-studio-ai";
 const RATE_USD_PER_HOUR = 0.17;
 const MAX_STAGE_SECONDS = 4 * 60 * 60;
@@ -84,7 +87,7 @@ try:
             raise RuntimeError('existing LTX target is incomplete; refusing to overwrite it')
         stage.mkdir(parents=True, exist_ok=False)
         subprocess_check = __import__('subprocess').check_call
-        subprocess_check([sys.executable, '-m', 'pip', 'install', '--disable-pip-version-check', '--no-input', 'huggingface_hub==0.36.0'])
+        subprocess_check([sys.executable, '-m', 'pip', 'install', '--break-system-packages', '--disable-pip-version-check', '--no-input', 'huggingface_hub==0.36.0'])
         from huggingface_hub import hf_hub_download
         for _, relative, expected, expected_size in files:
             path = pathlib.Path(hf_hub_download(repo_id=model, filename=relative, revision=revision, token=os.environ['HF_TOKEN'], local_dir=str(stage)))
@@ -112,7 +115,21 @@ await s3.send(new PutObjectCommand({
 const scriptUrl = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: scriptKey }), {
   expiresIn: MAX_STAGE_SECONDS + 900,
 });
-const command = "python3 -c \"import os,urllib.request; urllib.request.urlretrieve(os.environ['LTX_STAGE_SCRIPT_URL'], '/tmp/ltx-stage.sh')\" && bash /tmp/ltx-stage.sh";
+const bootstrap = String.raw`import json,os,traceback,urllib.request
+receipt=os.environ.get('LTX_STAGE_RECEIPT_URL','')
+try:
+ p='/tmp/ltx-stage.sh'
+ with urllib.request.urlopen(os.environ['LTX_STAGE_SCRIPT_URL'],timeout=60) as r: open(p,'wb').write(r.read())
+ os.execv('/bin/bash',['bash',p])
+except Exception as e:
+ try:
+  b=json.dumps({'contract':'ltx-2.5-volume-stage/v1','ok':False,'errorType':'bootstrap-'+type(e).__name__,'message':'signed bootstrap could not start'}).encode()
+  q=urllib.request.Request(receipt,data=b,method='PUT',headers={'Content-Type':'application/json','Content-Length':str(len(b))})
+  urllib.request.urlopen(q,timeout=60).read()
+ except Exception: pass
+ raise`;
+const bootstrapB64 = Buffer.from(bootstrap, "utf8").toString("base64");
+const command = `bash -lc 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-pip && python3 -c "import base64;exec(compile(base64.b64decode(\"${bootstrapB64}\"),\"<ltx-bootstrap>\",\"exec\"))"'`;
 const apiBase = "https://api.novita.ai/gpu-instance/openapi/v1";
 const headers = { authorization: `Bearer ${process.env.NOVITA_API_KEY}`, "content-type": "application/json", "user-agent": "youtube-studio-ai/ltx25-stage-v2" };
 async function api(path, init = {}) {
