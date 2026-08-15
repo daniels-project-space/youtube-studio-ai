@@ -136,6 +136,17 @@ export const QUIZ_ROUND_CATEGORIES: readonly QuizRoundCategory[] = [
   "general_knowledge",
 ];
 
+/**
+ * The certified autonomous route has no model-backed general-knowledge
+ * candidate step. Keep its default set explicit rather than starting from the
+ * legacy full set and discovering the unsupported category only at render
+ * time.
+ */
+export const QUIZ_CERTIFIED_NO_GEMINI_CATEGORIES: readonly Exclude<QuizRoundCategory, "general_knowledge">[] = [
+  "guess_year",
+  ...QUIZ_CATEGORY_KEYS,
+];
+
 /** On-screen eyebrow per category, so a mixed video signals the switch. */
 export const CATEGORY_PROMPTS: Readonly<Record<QuizRoundCategory, string>> = {
   guess_year: "WHAT YEAR?",
@@ -190,6 +201,25 @@ export function resolveCategories(raw: unknown): QuizRoundCategory[] {
     (QUIZ_ROUND_CATEGORIES as readonly string[]).includes(p),
   );
   return picked.length ? [...new Set(picked)] : [...QUIZ_ROUND_CATEGORIES];
+}
+
+/**
+ * The automatic QuizYear planner intentionally emits no category parameter.
+ * Its safe default therefore lives here, beside the legacy parser, rather
+ * than relying on a renderer-time rejection of general_knowledge.
+ */
+export function resolveCertifiedNoGeminiCategories(raw: unknown): QuizRoundCategory[] {
+  const absent = raw === undefined || raw === null ||
+    (typeof raw === "string" && !raw.trim()) ||
+    (Array.isArray(raw) && raw.length === 0);
+  if (absent) return [...QUIZ_CERTIFIED_NO_GEMINI_CATEGORIES];
+  const categories = resolveCategories(raw);
+  if (categories.includes("general_knowledge")) {
+    throw new Error(
+      "quiz: certified no-Gemini mode does not allow general_knowledge; choose only the deterministic Wikidata-backed category set",
+    );
+  }
+  return categories;
 }
 
 /**
@@ -676,12 +706,9 @@ export const quizYear: Block = {
     // pinned curated topic inside the provenance flow rather than allowing a
     // raw renderer override to bypass it.
     const topic = resolveTopic(ctx.store["quizTopic"] ?? ctx.params["topic"]);
-    const categories = resolveCategories(ctx.params["categories"] ?? ctx.store["quizCategories"]);
-    if (noGemini && categories.includes("general_knowledge")) {
-      throw new Error(
-        "quiz: certified no-Gemini mode does not allow general_knowledge; use the deterministic Wikidata-backed category set",
-      );
-    }
+    const categories = resolveCertifiedNoGeminiCategories(
+      ctx.params["categories"] ?? ctx.store["quizCategories"],
+    );
     const allowSensitiveTopics = false;
     const minNotability = Math.max(0, Number(ctx.params["minNotability"] ?? 40));
     const musicKey = String(ctx.store["musicKey"] ?? "").trim();
@@ -804,7 +831,7 @@ export const quizYear: Block = {
         answer: r.answerLabel,
         url: r.sourceUrl,
       })),
-      license: "CC0-1.0 (Wikidata); general-knowledge rounds cite Wikipedia for verification only",
+      license: "CC0-1.0 (Wikidata)",
     });
 
     // This module itself makes no provider call; original music cost is owned

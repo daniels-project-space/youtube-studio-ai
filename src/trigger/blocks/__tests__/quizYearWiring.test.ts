@@ -26,7 +26,9 @@ import { CATALOG_EXECUTION_BINDINGS } from "@/engine/goldenExecution";
 import {
   CATEGORY_PROMPTS,
   planRoundCategories,
+  QUIZ_CERTIFIED_NO_GEMINI_CATEGORIES,
   QUIZ_ROUND_CATEGORIES,
+  resolveCertifiedNoGeminiCategories,
   resolveCategories,
   type PlannedRound,
   type QuizRoundCategory,
@@ -340,6 +342,20 @@ async function main(): Promise<void> {
       resolveCategories("nonsense"),
       [...QUIZ_ROUND_CATEGORIES],
       "an unparseable category list falls back to the full mix rather than failing",
+    );
+    assert.deepEqual(
+      resolveCertifiedNoGeminiCategories(undefined),
+      [...QUIZ_CERTIFIED_NO_GEMINI_CATEGORIES],
+      "the automatic planner omits categories, so its default must be the certified no-Gemini mix",
+    );
+    assert.deepEqual(
+      resolveCertifiedNoGeminiCategories("capital_city, guess_year"),
+      ["capital_city", "guess_year"],
+    );
+    assert.throws(
+      () => resolveCertifiedNoGeminiCategories("general_knowledge"),
+      /does not allow general_knowledge/,
+      "the legacy model-backed category cannot leak through an explicit renderer parameter",
     );
     for (const c of QUIZ_ROUND_CATEGORIES) {
       assert.ok(CATEGORY_PROMPTS[c], `every category needs an on-screen prompt (${c})`);

@@ -179,7 +179,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     label: "Mixed trivia quiz",
     description:
       "Multiple-choice trivia quiz that mixes categories inside one video — guess-the-year, capital cities, " +
-      "currencies, chemical symbols and citation-verified general knowledge — with four options, a depleting " +
+      "currencies, chemical symbols and atomic numbers — with four options, a depleting " +
       "timer and a lock-in reveal. Self-contained: sources its own facts, writes its own questions and renders itself.",
     visualEngine: "quiz_year",
     archetypeKey: "quiz-year",
