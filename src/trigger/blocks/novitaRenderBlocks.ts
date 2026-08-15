@@ -31,6 +31,7 @@ import { visualMatterDirectiveForShot, visualMatterFromUnknown, visualMatterRefe
 import { makeRunTempDir, writeBytes } from "@/lib/files";
 import { grabFrame, probe } from "@/lib/ffmpeg";
 import { parseJsonLoose } from "@/lib/gemini";
+import { LtxCreativeAdapterSelectionSchema } from "@/lib/ltxCreativeAdapter";
 import { assertLtxVideoOutputProofSet } from "@/lib/ltxVideoProof";
 import {
   renderImages,
@@ -1013,6 +1014,10 @@ export const novitaRenderVideo: Block = {
     }
     const selectedByShot = new Map(selected.items.map((item) => [item.shotId, item]));
     const terminalAnchors = deriveTerminalStillAnchors(shots, selected);
+    // Same sealed, benchmark-gated adapter contract used by the Casefile and
+    // loop routes. The worker resolves the exact pinned file and injects its
+    // required trigger tokens; an unbenchmarked adapter cannot reach spend.
+    const creativeAdapter = LtxCreativeAdapterSelectionSchema.optional().parse(ctx.params["creativeAdapter"]);
     const globalNegative = ctx.params["negative"] as string | undefined;
     const shotsWithStills: Shot[] = shots.map((shot) => {
       const selectedStill = selectedByShot.get(shot.id);
@@ -1023,6 +1028,7 @@ export const novitaRenderVideo: Block = {
       return ltxDistilledShot({
         ...shot,
         stillKey: selectedStill.stillKey,
+        ...(creativeAdapter ? { creativeAdapter } : {}),
         ...(terminalAnchor ? { endStillKey: terminalAnchor.terminalStillKey } : {}),
         prompt: [spec.motionPrompt, directive?.motionPrompt].filter(Boolean).join("\n\n"),
         motion: [

@@ -69,12 +69,14 @@ assert.deepEqual(resolveLtxCreativeAdapters({
 async function main(): Promise<void> {
   // The adapter contract is only useful if every direct I2V caller can carry
   // the exact typed selection to the sealed worker. This locks the shared
-  // Novita media seam, generic I2V wrapper, and ambient LTX loop together.
+  // Novita media seam, generic I2V wrapper, Story Spine renderer, and ambient
+  // LTX loop together.
   const root = process.cwd();
-  const [media, i2v, lofi] = await Promise.all([
+  const [media, i2v, lofi, storySpineRenderer] = await Promise.all([
     readFile(join(root, "src/lib/novitaMedia.ts"), "utf8"),
     readFile(join(root, "src/lib/i2v.ts"), "utf8"),
     readFile(join(root, "src/trigger/blocks/lofiBlocks.ts"), "utf8"),
+    readFile(join(root, "src/trigger/blocks/novitaRenderBlocks.ts"), "utf8"),
   ]);
   assert.match(media, /creativeAdapter\?: LtxCreativeAdapterSelection/);
   assert.match(media, /creativeAdapter: args\.creativeAdapter/);
@@ -82,6 +84,8 @@ async function main(): Promise<void> {
   assert.match(i2v, /creativeAdapter: req\.creativeAdapter/);
   assert.match(lofi, /LtxCreativeAdapterSelectionSchema\.optional\(\)\.parse/);
   assert.match(lofi, /creativeAdapter,/);
+  assert.match(storySpineRenderer, /LtxCreativeAdapterSelectionSchema\.optional\(\)\.parse\(ctx\.params\["creativeAdapter"\]\)/);
+  assert.match(storySpineRenderer, /\.\.\.\(creativeAdapter \? \{ creativeAdapter \} : \{\}\)/);
   console.log("LTX creative adapter tests passed");
 }
 
