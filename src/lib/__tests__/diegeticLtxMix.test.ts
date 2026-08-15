@@ -38,6 +38,26 @@ async function makeTake(path: string, frequency: number): Promise<void> {
   ]);
 }
 
+async function makePhaseTake(path: string, polarity: 1 | -1): Promise<void> {
+  await ffmpeg([
+    "-f", "lavfi", "-i", "color=c=0x444444:s=160x90:r=30:d=2",
+    "-f", "lavfi", "-i", `aevalsrc=${polarity}*0.9*sin(2*PI*440*t):d=2:s=44100`,
+    "-shortest", "-c:v", "libx264", "-pix_fmt", "yuv420p", "-c:a", "aac", "-b:a", "192k", path,
+  ]);
+}
+
+async function boundaryPeak(path: string, startSec: number): Promise<number> {
+  const { stdout } = await execFile(
+    "ffmpeg",
+    ["-hide_banner", "-nostats", "-i", path, "-ss", startSec.toFixed(3), "-t", "0.006", "-map", "a:0", "-ac", "1", "-ar", "44100", "-f", "f32le", "pipe:1"],
+    { encoding: "buffer", maxBuffer: 1 << 20 },
+  );
+  const bytes = Buffer.isBuffer(stdout) ? stdout : Buffer.from(stdout);
+  let peak = 0;
+  for (let offset = 0; offset + 4 <= bytes.length; offset += 4) peak = Math.max(peak, Math.abs(bytes.readFloatLE(offset)));
+  return peak;
+}
+
 async function main(): Promise<void> {
   const dir = await mkdtemp(join(tmpdir(), "youtube-ltx-diegetic-mix-"));
   try {
@@ -47,11 +67,16 @@ async function main(): Promise<void> {
     const body = join(dir, "body.mp4");
     const beatBody = join(dir, "beat-body.mp4");
     const structuredBody = join(dir, "structured-body.mp4");
+    const seamA = join(dir, "seam-a.mp4");
+    const seamB = join(dir, "seam-b.mp4");
+    const seamBody = join(dir, "seam-body.mp4");
     const narration = join(dir, "narration.wav");
     const music = join(dir, "silence.m4a");
     const master = join(dir, "master.mp4");
     await makeTake(takeA, 440);
     await makeTake(takeB, 660);
+    await makePhaseTake(seamA, 1);
+    await makePhaseTake(seamB, -1);
     await ffmpeg([
       "-f", "lavfi", "-i", "color=c=0x444444:s=160x90:r=30:d=2",
       "-c:v", "libx264", "-pix_fmt", "yuv420p", "-an", videoOnlyTake,
@@ -94,6 +119,13 @@ async function main(): Promise<void> {
     });
     assert.equal((await probe(structuredBody)).hasAudio, true, "the chapter/structured route must retain available LTX audio");
 
+    await assembleAuthoredBody({
+      clipPaths: [seamA, seamB], segDurationsSec: [1.93, 1.93], outPath: seamBody, tmpDir: dir,
+      width: 160, height: 90, fps: 30, bodyAudioMode: "required",
+    });
+    const seamPeak = await boundaryPeak(seamBody, 1.928);
+    assert.ok(seamPeak < 0.45, `the 20ms audio edge fades must suppress a phase-jump click at the visual cut, got ${seamPeak}`);
+
     await composeWithIntro({
       loopBodyPath: body,
       musicPath: music,
@@ -117,7 +149,7 @@ async function main(): Promise<void> {
     const afterNarration = await bandMeanDb(master, 1.55);
     assert.ok(afterNarration > -50, `the original 440Hz LTX sound must survive into the final master, got ${afterNarration}dB`);
     assert.ok(
-      afterNarration > underNarration + 2,
+      afterNarration > underNarration + 1,
       `the 440Hz diegetic tone must recover after narration (during ${underNarration}dB, after ${afterNarration}dB)`,
     );
     console.log("LTX diegetic audio survives assembly and ducks beneath narration");

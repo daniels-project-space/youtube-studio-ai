@@ -447,7 +447,10 @@ export async function assembleBeatBody(args: {
         }
       }
     }
-    const sf = join(tmpDir, `beatseg_${i}.mp4`);
+    // AAC carries encoder delay. Keep intermediate in-world audio lossless so
+    // every later concat boundary remains exactly on the planned visual cut;
+    // the finished body is encoded to AAC once below.
+    const sf = join(tmpDir, `beatseg_${i}${bodyAudioMode === "off" ? ".mp4" : ".mkv"}`);
     const sourceHasAudio = bodyAudioMode === "off" ? false : await hasSourceAudio(clipPaths[i]);
     if (bodyAudioMode === "required" && !sourceHasAudio) {
       throw new FfmpegError(`assembleBeatBody: required diegetic audio missing from segment ${i}`);
@@ -455,11 +458,16 @@ export async function assembleBeatBody(args: {
     const sourceAudio = sourceHasAudio
       ? "[0:a]"
       : "anullsrc=channel_layout=stereo:sample_rate=44100";
+    // Preserve the cut timing while avoiding a discontinuity click when LTX
+    // changes physical sound sources between adjacent visual shots.
+    const audioEdgeFadeSec = Math.min(0.02, segLen / 4);
+    const audioEdgeFades = `afade=t=in:st=0:d=${audioEdgeFadeSec.toFixed(3)},` +
+      `afade=t=out:st=${Math.max(0, segLen - audioEdgeFadeSec).toFixed(3)}:d=${audioEdgeFadeSec.toFixed(3)}`;
     const av = bodyAudioMode === "off"
       ? ["-vf", `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps}`, "-an"]
       : [
           "-filter_complex",
-          `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps},setpts=PTS-STARTPTS[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,atrim=duration=${segLen.toFixed(3)},asetpts=PTS-STARTPTS[a]`,
+          `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps},setpts=PTS-STARTPTS[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,atrim=duration=${segLen.toFixed(3)},asetpts=PTS-STARTPTS,${audioEdgeFades}[a]`,
           "-map", "[v]", "-map", "[a]",
         ];
     await run(FFMPEG, [
@@ -479,7 +487,7 @@ export async function assembleBeatBody(args: {
       "20",
       "-pix_fmt",
       "yuv420p",
-      ...(bodyAudioMode === "off" ? [] : ["-c:a", "aac", "-b:a", "192k"]),
+      ...(bodyAudioMode === "off" ? [] : ["-c:a", "pcm_s16le"]),
       sf,
     ]);
     // BLACK-SEGMENT GUARD: sample two frames; a (near-)black segment is dropped
@@ -512,7 +520,11 @@ export async function assembleBeatBody(args: {
     listFile,
     segFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"),
   );
-  await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  await run(FFMPEG, [
+    "-y", "-f", "concat", "-safe", "0", "-i", listFile,
+    ...(bodyAudioMode === "off" ? ["-c", "copy"] : ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]),
+    args.outPath,
+  ]);
   return args.outPath;
 }
 
@@ -573,15 +585,25 @@ export async function assembleAuthoredBody(args: {
       `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps},` +
       `tpad=stop_mode=clone:stop_duration=${pad.toFixed(3)},` +
       `trim=duration=${outputDur.toFixed(3)},setpts=PTS-STARTPTS`;
-    const segmentPath = join(args.tmpDir, `authored_${String(index).padStart(4, "0")}.mp4`);
+    // See beat assembly: lossless intermediates prevent AAC priming samples
+    // from accumulating between narrated LTX cuts.
+    const segmentPath = join(
+      args.tmpDir,
+      `authored_${String(index).padStart(4, "0")}${bodyAudioMode === "off" ? ".mp4" : ".mkv"}`,
+    );
     const sourceAudio = media.hasAudio
       ? "[0:a]"
       : "anullsrc=channel_layout=stereo:sample_rate=44100";
+    // A 20ms boundary fade is short enough not to move a causal cut, but
+    // prevents a phase/amplitude jump from producing a click in the master.
+    const audioEdgeFadeSec = Math.min(0.02, outputDur / 4);
+    const audioEdgeFades = `afade=t=in:st=0:d=${audioEdgeFadeSec.toFixed(3)},` +
+      `afade=t=out:st=${Math.max(0, outputDur - audioEdgeFadeSec).toFixed(3)}:d=${audioEdgeFadeSec.toFixed(3)}`;
     const av = bodyAudioMode === "off"
       ? ["-vf", vf, "-an"]
       : [
           "-filter_complex",
-          `[0:v]${vf}[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,apad=pad_dur=${pad.toFixed(3)},atrim=duration=${outputDur.toFixed(3)},asetpts=PTS-STARTPTS[a]`,
+          `[0:v]${vf}[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,apad=pad_dur=${pad.toFixed(3)},atrim=duration=${outputDur.toFixed(3)},asetpts=PTS-STARTPTS,${audioEdgeFades}[a]`,
           "-map", "[v]", "-map", "[a]",
         ];
     await run(FFMPEG, [
@@ -597,7 +619,7 @@ export async function assembleAuthoredBody(args: {
       "20",
       "-pix_fmt",
       "yuv420p",
-      ...(bodyAudioMode === "off" ? [] : ["-c:a", "aac", "-b:a", "192k"]),
+      ...(bodyAudioMode === "off" ? [] : ["-c:a", "pcm_s16le"]),
       segmentPath,
     ]);
 
@@ -620,7 +642,11 @@ export async function assembleAuthoredBody(args: {
     listFile,
     segFiles.map((file) => `file '${file.replace(/'/g, "'\\\\''")}'`).join("\n"),
   );
-  await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  await run(FFMPEG, [
+    "-y", "-f", "concat", "-safe", "0", "-i", listFile,
+    ...(bodyAudioMode === "off" ? ["-c", "copy"] : ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]),
+    args.outPath,
+  ]);
   const assembled = await probe(args.outPath);
   if (Math.abs(assembled.durationSec - expectedTotal) > Math.max(0.2, 3 / fps)) {
     throw new FfmpegError(
@@ -679,25 +705,28 @@ export async function assembleStructuredBody(args: {
   // duplicate segments — the defect the beat body already guards against).
   const useCount = new Map<number, number>();
   const cut = async (input: string, dur: number, ssSec = 0, sourceHasAudio = false) => {
-    const sf = join(args.tmpDir, `sbody_${sj++}.mp4`);
+    const sf = join(args.tmpDir, `sbody_${sj++}${bodyAudioMode === "off" ? ".mp4" : ".mkv"}`);
     if (bodyAudioMode === "required" && !sourceHasAudio) {
       throw new FfmpegError("assembleStructuredBody: required diegetic audio missing from a source segment");
     }
     const sourceAudio = sourceHasAudio
       ? "[0:a]"
       : "anullsrc=channel_layout=stereo:sample_rate=44100";
+    const audioEdgeFadeSec = Math.min(0.02, dur / 4);
+    const audioEdgeFades = `afade=t=in:st=0:d=${audioEdgeFadeSec.toFixed(3)},` +
+      `afade=t=out:st=${Math.max(0, dur - audioEdgeFadeSec).toFixed(3)}:d=${audioEdgeFadeSec.toFixed(3)}`;
     const av = bodyAudioMode === "off"
       ? ["-vf", scalePad, "-an"]
       : [
           "-filter_complex",
-          `[0:v]${scalePad},setpts=PTS-STARTPTS[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,atrim=duration=${dur.toFixed(3)},asetpts=PTS-STARTPTS[a]`,
+          `[0:v]${scalePad},setpts=PTS-STARTPTS[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,atrim=duration=${dur.toFixed(3)},asetpts=PTS-STARTPTS,${audioEdgeFades}[a]`,
           "-map", "[v]", "-map", "[a]",
         ];
     await run(FFMPEG, [
       "-y", ...(ssSec > 0.01 ? ["-ss", ssSec.toFixed(3)] : []), "-i", input,
       "-t", dur.toFixed(3), ...av,
       "-c:v", "libx264", "-preset", args.preset ?? "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
-      ...(bodyAudioMode === "off" ? [] : ["-c:a", "aac", "-b:a", "192k"]), sf,
+      ...(bodyAudioMode === "off" ? [] : ["-c:a", "pcm_s16le"]), sf,
     ]);
     segFiles.push(sf);
   };
@@ -731,7 +760,11 @@ export async function assembleStructuredBody(args: {
   if (segFiles.length === 0) throw new FfmpegError("assembleStructuredBody: no segments");
   const listFile = join(args.tmpDir, "sbody_list.txt");
   await writeFile(listFile, segFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
-  await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  await run(FFMPEG, [
+    "-y", "-f", "concat", "-safe", "0", "-i", listFile,
+    ...(bodyAudioMode === "off" ? ["-c", "copy"] : ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]),
+    args.outPath,
+  ]);
   return args.outPath;
 }
 
