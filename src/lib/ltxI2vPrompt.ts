@@ -8,7 +8,7 @@ import type { Shot } from "@/lib/novitaRenderFarm";
  * It follows the transferable first-frame I2V pattern: source-frame anchors,
  * action onset, continuous development, then a readable result or reaction.
  */
-export const LTX_I2V_PROMPT_CONTRACT_VERSION = "ltx-i2v-directing/v2" as const;
+export const LTX_I2V_PROMPT_CONTRACT_VERSION = "ltx-i2v-directing/v3" as const;
 
 const MARKER = `[${LTX_I2V_PROMPT_CONTRACT_VERSION}]`;
 const REQUIRED_CONTRACT_CLAUSES = [
@@ -21,6 +21,7 @@ const REQUIRED_CONTRACT_CLAUSES = [
   "Do not generate narration, dialogue, score, lyrics, or musical cues;",
   "Keep the take cinematic and physically plausible.",
 ] as const;
+const TERMINAL_FRAME_CLAUSE = "Terminal-frame anchor:";
 
 function clean(value: string | undefined, fallback: string): string {
   const normalized = value?.replace(/\s+/g, " ").trim();
@@ -32,9 +33,10 @@ function clean(value: string | undefined, fallback: string): string {
  * continuity contract. Keep this deliberately text-level: the shared render
  * boundary needs an inexpensive, provider-free proof before any LTX spend.
  */
-export function hasCompleteLtxI2vPromptContract(shot: Pick<Shot, "prompt" | "motion">): boolean {
+export function hasCompleteLtxI2vPromptContract(shot: Pick<Shot, "prompt" | "motion" | "endStillKey">): boolean {
   return REQUIRED_CONTRACT_CLAUSES.every((clause) => shot.motion.includes(clause)) &&
-    shot.prompt.includes(MARKER);
+    shot.prompt.includes(MARKER) &&
+    (!shot.endStillKey || shot.motion.includes(TERMINAL_FRAME_CLAUSE));
 }
 
 /**
@@ -66,6 +68,9 @@ export function applyLtxI2vPromptContract(shot: Shot): Shot {
     `Action onset: ${action}`,
     `Continuous development: perform one coherent physical action in the same place and time while the camera executes ${camera}; no jump cut, subject replacement, wardrobe/prop swap, time skip, or invented event.`,
     "End beat: settle into a readable result or reaction that follows from the action while preserving the source-frame continuity locks.",
+    ...(shot.endStillKey
+      ? ["Terminal-frame anchor: land exactly on the supplied terminal conditioning image at the final frame; preserve the same subject, faceless identity treatment, wardrobe, props, environment, lighting, and physical consequence across the whole take."]
+      : []),
     `Diegetic soundscape: ${soundscape}. Do not generate narration, dialogue, score, lyrics, or musical cues; final editorial audio is mixed separately.`,
     "Keep the take cinematic and physically plausible. Do not add text, subtitles, logos, or watermarks.",
   ].join("\n");

@@ -30,6 +30,24 @@ assert.match(directed.motion, /no jump cut, subject replacement, wardrobe\/prop 
 assert.equal(hasCompleteLtxI2vPromptContract(directed), true);
 assert.deepEqual(applyLtxI2vPromptContract(directed), directed, "recovery retries must not duplicate the shared prompt contract");
 
+const terminalDirected = applyLtxI2vPromptContract({
+  ...source,
+  id: "cinematic-shot-terminal",
+  endStillKey: "stills/a-terminal.png",
+});
+assert.match(terminalDirected.motion, /Terminal-frame anchor: land exactly on the supplied terminal conditioning image/);
+assert.equal(hasCompleteLtxI2vPromptContract(terminalDirected), true);
+assert.deepEqual(
+  applyLtxI2vPromptContract(terminalDirected),
+  terminalDirected,
+  "a terminal-frame contract must remain intact on a recovery retry",
+);
+assert.throws(
+  () => applyLtxI2vPromptContract({ ...directed, endStillKey: "stills/a-terminal.png" }),
+  /marker is present but its required continuity and audio clauses are incomplete/,
+  "an older marked prompt must not silently skip a newly supplied final-frame condition",
+);
+
 assert.throws(
   () => applyLtxI2vPromptContract({
     ...source,
