@@ -56,6 +56,23 @@ export function optionText(option: QuizYearOptionView): string {
 }
 
 /**
+ * The complete primary-source URL remains in the verified round artifact. On a
+ * 720p video frame, its host is the legible provenance cue; a raw long URL is
+ * too small to read and otherwise gets ellipsized into meaningless text.
+ */
+export function sourceCitationLabel(sourceUrl: string): string {
+  const raw = sourceUrl.trim();
+  try {
+    const host = new URL(raw).hostname.replace(/^www\./i, "");
+    if (host) return host;
+  } catch {
+    // Preserve a useful label for a legacy/non-URL source without inventing one.
+  }
+  const fallback = raw.replace(/^https?:\/\//i, "").split(/[/?#]/)[0]?.trim();
+  return fallback || "verified source";
+}
+
+/**
  * Option tiles are sized to their content. A year is 4 glyphs; "Central African
  * CFA franc" is 25 and would overflow the tile at the year build's fixed 62px.
  */
@@ -316,10 +333,11 @@ const RoundView: React.FC<{
             style={{
               width: 132,
               textAlign: "center",
-              fontSize: 26,
+              fontSize: 22,
               fontWeight: 900,
               color: CORRECT_GREEN,
               fontFamily: "Inter, Helvetica, Arial, sans-serif",
+              whiteSpace: "nowrap",
               opacity: interpolate(revealLocal, [0, 8], [0, 1], { extrapolateRight: "clamp" }),
             }}
           >
@@ -435,7 +453,8 @@ export const QuizYear: React.FC<QuizYearProps> = ({ rounds, palette, title }) =>
         countdownFrames={countdownFrames}
         palette={pal}
       />
-      {/* Citation for the CORRECT option, shown once it is locked in. The three
+      {/* A legible provenance label for the CORRECT option, shown once locked in.
+          The exact primary URL stays bound to the round artifact; the three
           decoys are generated and deliberately carry no source. */}
       {revealed ? (
         <div
@@ -445,15 +464,15 @@ export const QuizYear: React.FC<QuizYearProps> = ({ rounds, palette, title }) =>
             left: 110,
             right: 110,
             textAlign: "center",
-            fontSize: 16,
-            color: `${ink}77`,
+            fontSize: 20,
+            color: `${ink}bb`,
             fontFamily: "Inter, Helvetica, Arial, sans-serif",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",
           }}
         >
-          source: {active.round.sourceUrl}
+          source: {sourceCitationLabel(active.round.sourceUrl)}
         </div>
       ) : null}
     </AbsoluteFill>

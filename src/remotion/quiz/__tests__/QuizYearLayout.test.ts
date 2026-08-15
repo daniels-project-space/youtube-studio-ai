@@ -1,5 +1,5 @@
 import assert from "node:assert/strict";
-import { optionFontSize, questionFontSize } from "../QuizYear";
+import { optionFontSize, questionFontSize, sourceCitationLabel } from "../QuizYear";
 
 function main(): void {
   assert.equal(questionFontSize("In which year did the first human land on the Moon?"), 56);
@@ -7,6 +7,10 @@ function main(): void {
   assert.equal(questionFontSize("What is the exact name of the historical agreement that established the administrative arrangement between these states after the conflict ended?"), 38);
   assert.equal(optionFontSize("1969"), 62);
   assert.equal(optionFontSize("Long answer label"), 34);
+  assert.equal(optionFontSize("Central African CFA franc"), 26);
+  assert.equal(sourceCitationLabel("https://www.nasa.gov/history/apollo-11/"), "nasa.gov");
+  assert.equal(sourceCitationLabel("https://www.rsc.org/periodic-table/element/79/gold"), "rsc.org");
+  assert.equal(sourceCitationLabel("archive.example/source"), "archive.example");
   console.log("QuizYear responsive card typography checks passed");
 }
 
