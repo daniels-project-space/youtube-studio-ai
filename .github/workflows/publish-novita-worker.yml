@@ -2,6 +2,13 @@ name: Publish Novita worker
 
 on:
   workflow_dispatch:
+  push:
+    branches:
+      - agent/studio-quality-release
+    paths:
+      - infra/novita/Dockerfile
+      - infra/novita/worker.py
+      - .github/workflows/publish-novita-worker.yml
 
 permissions:
   contents: read
