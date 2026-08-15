@@ -217,13 +217,20 @@ async function probeZImageVolume() {
   const receiptKey = `${root}/zimage-volume-receipt.json`;
   const scriptKey = `${root}/zimage-volume-probe.py`;
   const script = String.raw`import hashlib,json,os,pathlib,urllib.request
-source=pathlib.Path('/network/models/z-image').resolve()
-manifest=json.loads((source/'.model-manifest.json').read_text())
-canonical=json.dumps(manifest,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
-files=manifest.get('files') if isinstance(manifest,dict) else None
-if not isinstance(files,list) or not files: raise RuntimeError('Z-Image volume manifest has no files')
-payload=json.dumps({'contract':'zimage-volume-probe/v1','ok':True,'sourcePath':'models/z-image','manifestSha256':hashlib.sha256(canonical).hexdigest(),'fileCount':len(files)},separators=(',',':')).encode()
-request=urllib.request.Request(os.environ['PROBE_RECEIPT_URL'],data=payload,method='PUT',headers={'Content-Type':'application/json','Content-Length':str(len(payload))})
+payload={'contract':'zimage-volume-probe/v1','ok':False}
+try:
+  candidates=[pathlib.Path('/network/models/z-image'),pathlib.Path('/network/z-image'),pathlib.Path('/network/models/Z-Image-Turbo')]
+  source=next((item.resolve() for item in candidates if (item/'.model-manifest.json').is_file()),None)
+  if source is None: raise RuntimeError('no approved Z-Image volume manifest found')
+  manifest=json.loads((source/'.model-manifest.json').read_text())
+  canonical=json.dumps(manifest,sort_keys=True,separators=(',',':'),ensure_ascii=False).encode()
+  files=manifest.get('files') if isinstance(manifest,dict) else None
+  if not isinstance(files,list) or not files: raise RuntimeError('Z-Image volume manifest has no files')
+  payload.update({'ok':True,'sourcePath':str(source.relative_to('/network')),'manifestSha256':hashlib.sha256(canonical).hexdigest(),'fileCount':len(files)})
+except Exception as error:
+  payload['error']=f'{type(error).__name__}: {error}'[:240]
+body=json.dumps(payload,separators=(',',':')).encode()
+request=urllib.request.Request(os.environ['PROBE_RECEIPT_URL'],data=body,method='PUT',headers={'Content-Type':'application/json','Content-Length':str(len(body))})
 urllib.request.urlopen(request,timeout=120).read()`;
   await s3.send(new PutObjectCommand({ Bucket: bucket, Key: scriptKey, Body: script, ContentType: "text/x-python" }));
   const [scriptUrl, receiptUrl] = await Promise.all([
@@ -253,7 +260,10 @@ urllib.request.urlopen(request,timeout=120).read()`;
     const deadline = Date.now() + PROBE_MAX_SECONDS * 1_000;
     while (Date.now() < deadline) {
       const receipt = await jsonIfPresent(receiptKey);
-      if (receipt?.ok === true) return receipt;
+      if (receipt) {
+        if (receipt.ok === true) return receipt;
+        throw new Error(`Z-Image volume probe failed: ${String(receipt.error || "unknown")}`);
+      }
       await sleep(5_000);
     }
     throw new Error("Z-Image volume probe did not return before its hard deadline");
