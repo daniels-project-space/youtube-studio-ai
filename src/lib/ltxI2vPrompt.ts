@@ -8,7 +8,7 @@ import type { Shot } from "@/lib/novitaRenderFarm";
  * It follows the transferable first-frame I2V pattern: source-frame anchors,
  * action onset, continuous development, then a readable result or reaction.
  */
-export const LTX_I2V_PROMPT_CONTRACT_VERSION = "ltx-i2v-directing/v1" as const;
+export const LTX_I2V_PROMPT_CONTRACT_VERSION = "ltx-i2v-directing/v2" as const;
 
 const MARKER = `[${LTX_I2V_PROMPT_CONTRACT_VERSION}]`;
 
@@ -29,13 +29,18 @@ export function applyLtxI2vPromptContract(shot: Shot): Shot {
   const camera = clean(shot.cameraMove, "the planned camera position");
   const scale = clean(shot.shotScale, "the planned composition");
   const lens = clean(shot.lens, "the planned lens");
+  const soundscape = clean(
+    shot.diegeticSoundscape,
+    "restrained location tone and physical sound motivated only by the visible action",
+  );
   const contract = [
     MARKER,
     `Source-frame anchor: begin exactly from the supplied image; preserve the visible subject, faceless identity treatment, wardrobe, palette, props, environment, lighting, ${scale} framing, and ${lens}.`,
     `Action onset: ${action}`,
     `Continuous development: perform one coherent physical action in the same place and time while the camera executes ${camera}; no jump cut, subject replacement, wardrobe/prop swap, time skip, or invented event.`,
     "End beat: settle into a readable result or reaction that follows from the action while preserving the source-frame continuity locks.",
-    "Keep the take cinematic and physically plausible. Do not add text, subtitles, logos, watermarks, dialogue, or lyrics.",
+    `Diegetic soundscape: ${soundscape}. Do not generate narration, dialogue, score, lyrics, or musical cues; final editorial audio is mixed separately.`,
+    "Keep the take cinematic and physically plausible. Do not add text, subtitles, logos, or watermarks.",
   ].join("\n");
   return {
     ...shot,

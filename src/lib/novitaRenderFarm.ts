@@ -50,6 +50,12 @@ export interface Shot {
   seconds: number;
   /** Motion cue — what actually moves in-frame (subject/particles), independent of camera. */
   motion: string;
+  /**
+   * Optional in-world sound direction for LTX's audio-aware video pass. This
+   * must describe only ambience or physical action: narration, dialogue, and
+   * score remain the responsibility of the separately attested final mix.
+   */
+  diegeticSoundscape?: string;
   /** Per-shot negative prompt, appended to the global negative. */
   negative?: string;
   seed?: number;

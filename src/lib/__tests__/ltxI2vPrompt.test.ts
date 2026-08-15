@@ -9,6 +9,7 @@ const source = {
   cameraMove: "dolly_push" as const,
   shotScale: "medium" as const,
   lens: "50mm",
+  diegeticSoundscape: "distant train brakes, a paper timetable softly folding, and the station's low electrical hum",
   stillKey: "stills/a.png",
 };
 
@@ -18,6 +19,11 @@ assert.match(directed.motion, /Source-frame anchor/);
 assert.match(directed.motion, /Action onset/);
 assert.match(directed.motion, /Continuous development/);
 assert.match(directed.motion, /End beat/);
+assert.match(directed.motion, /Diegetic soundscape: distant train brakes/);
+assert.match(directed.motion, /Do not generate narration, dialogue, score, lyrics, or musical cues/);
 assert.match(directed.prompt, /rust wool coat/);
 assert.match(directed.motion, /no jump cut, subject replacement, wardrobe\/prop swap/);
 assert.deepEqual(applyLtxI2vPromptContract(directed), directed, "recovery retries must not duplicate the shared prompt contract");
+
+const defaultSoundscape = applyLtxI2vPromptContract({ ...source, id: "cinematic-shot-b", diegeticSoundscape: undefined });
+assert.match(defaultSoundscape.motion, /restrained location tone and physical sound motivated only by the visible action/);
