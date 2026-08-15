@@ -31,7 +31,16 @@ assert.deepEqual(
   [[5, 8], [8, 11], [11, 14]],
   "all source-bound locks must shift with a prepended intro",
 );
-assert.equal(evidence.focusWindows.length, 3, "one reveal window plus every actual cinematic join must be inspected");
+assert.equal(
+  evidence.focusWindows.length,
+  12,
+  "every lock needs start/middle/end evidence in addition to the reveal and every actual cinematic join",
+);
+assert.deepEqual(
+  evidence.focusWindows.slice(0, 3).map((window) => [window.startSec, window.endSec]),
+  [[5.15, 5.35], [6.4, 6.6], [7.65, 7.85]],
+  "the first lock must prove initial state, interior continuity, and final state after its intro offset",
+);
 assert.deepEqual(
   evidence.focusWindows.slice(-2).map((window) => [window.startSec, window.endSec]),
   [[7.65, 8.45], [10.65, 11.45]],

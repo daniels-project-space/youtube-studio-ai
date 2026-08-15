@@ -47,6 +47,25 @@ export function cinematicFinalMasterQaEvidence(args: {
       endSec: edit.t1 + offset,
       reason: "reviewer" as const,
     }));
+  // A single broad midpoint can prove that a shot existed, but cannot prove
+  // that the faceless mannequin, wardrobe, prop, lighting, and evidence state
+  // survived the shot. Require small start/middle/end inspection windows for
+  // every approved lock. `qa_visual` turns these into complete 2fps evidence
+  // when the cinematic route is present, independently of its normal cap.
+  const lockStateWindows = creativeLocks.flatMap((lock) => {
+    const span = Math.max(0, lock.endSec - lock.startSec);
+    const inset = Math.min(0.25, span / 4);
+    const moments = [
+      lock.startSec + inset,
+      (lock.startSec + lock.endSec) / 2,
+      lock.endSec - inset,
+    ];
+    return moments.map((moment) => ({
+      startSec: Math.max(lock.startSec, moment - 0.1),
+      endSec: Math.min(lock.endSec, moment + 0.1),
+      reason: "reviewer" as const,
+    }));
+  });
   // A Fern-like sequence succeeds because the cuts cause turns in information
   // and tension. Sample every actual join densely, not merely the occasional
   // reveal, so the final reviewer can see a dropped, mistimed, or visually
@@ -56,5 +75,5 @@ export function cinematicFinalMasterQaEvidence(args: {
     endSec: edit.t0 + offset + 0.45,
     reason: "reviewer" as const,
   }));
-  return { creativeLocks, focusWindows: [...revealWindows, ...cutWindows] };
+  return { creativeLocks, focusWindows: [...lockStateWindows, ...revealWindows, ...cutWindows] };
 }
