@@ -1,52 +1,39 @@
 /**
  * VOICECRAFT — the narration voice engine (golden candidate #5, banana-shaped):
- * channel identity in → profiled, judged, physics-tuned voice out.
+ * channel identity in → provider-metadata candidate and physics-tuned voice out.
  *
  * Doctrine: voice is the #1 retention factor, so it gets the same golden
- * treatment as words and pixels — REAL evidence (the operator's actual
- * ElevenLabs voice bank, heard and profiled), deterministic matching, an
- * audio judge gate, and per-archetype delivery physics:
+ * treatment as words and pixels. This module intentionally does not use a
+ * remote audio judge: Google/Gemini is thumbnail-only. Production proof is a
+ * persisted human audition plus local FFmpeg evidence on the actual take.
  *
- *   1. PROFILE — profileVoiceBank(): every saved ElevenLabs voice is LISTENED
- *      to (its preview mp3 — free) by Gemini audio and distilled into a
- *      structured Voice Card (gender / age-feel / register / pace / energy /
- *      texture / character / best-fit archetypes), persisted in Convex
- *      (voiceProfiles). Casting matches on what voices SOUND like, not labels.
- *   2. CAST — castVoice(): the niche's NARRATION_PHYSICS casting spec
- *      (operator's voice law: stoic = deep dark male slow; finance =
- *      energetic-or-smooth male faster; social chaos = younger female fast;
- *      meditation = calm professional mature female slow; …) deterministically
- *      prefilters the bank, then Gemini AUDITIONS the top cards on their real
- *      preview audio and gates the winner ≥7. No fit → voice-library search
- *      suggestions in the loud failure.
+ *   1. PROFILE — profileVoiceBank() records provider-declared labels as
+ *      transparent discovery metadata; it never claims those labels are a
+ *      substitute for hearing the voice.
+ *   2. CAST — automatic audio casting/recruitment is deliberately unavailable.
+ *      Use deterministicVoiceCast for candidate discovery, then persist a
+ *      human-reviewed audition before production narration.
  *   3. PHYSICS — narrationPhysics(): speed (VERIFIED LIVE: v3 accepts
  *      voice_settings.speed 0.7–1.2 — also Fish prosody), v3 stability
  *      (0/0.5/1), style, tag density, sentence air — per archetype.
- *   4. GATE — gateColdOpen(): before a paid full-script render, the first
- *      lines are rendered once and JUDGED (register / pace / tag performance /
- *      clean ≥7); one seed-bumped retry, then loud failure.
- *
- *   5. RECRUIT — recruitVoice(): quality-gated library expansion (reviewed
- *      professional clones, ≥100 saves or ≥2M chars/yr, preview judged on fit
- *      AND production quality ≥8, then VALIDATED on our own render post-add —
- *      a failure removes the voice and tries the next candidate).
- *   6. AUDITIONS — auditionBank(): every banked voice renders the ONE
+ *   4. GATE — narration_tts performs FFmpeg duration/loudness evidence on its
+ *      paid cold-open and final mix before either can reach the timeline.
+ *   5. AUDITIONS — auditionBank(): every banked voice renders the ONE
  *      standard ~10s line (AUDITION_LINE) to R2; the channel-settings picker
  *      streams the clips so the operator hears identical text per voice and
  *      recasts a channel in one click (pipeline narration_tts params).
  *
- * FULLY STANDALONE — one import surface, same shape as banana / scriptcraft /
- * metacraft / topicraft. Deps: ELEVENLABS_API_KEY + GEMINI_API_KEY (vault);
+ * FULLY STANDALONE — one import surface. Deps: ELEVENLABS_API_KEY (vault);
  * R2 storage only for audition clips. Convex is an injected client (bank
  * persistence) — never required by the render path. The only engine import
  * is pure-data golden.ts doctrine.
  *
- *   import { castVoice, profileVoiceBank, auditionBank, recruitVoice,
- *            narrationPhysics, renderNarration, gateColdOpen,
- *            judgeNarrationTake, hasVoicecraft } from "@/lib/voicecraft";
- *   const cast = await castVoice({ convex, ownerId, channelName, niche, log });
- *   const bytes = await renderNarration({ text, elevenVoiceId: cast.voiceId,
- *     physics: cast.physics });
+ *   import { selectDeterministicElevenVoice } from "@/lib/deterministicVoiceCast";
+ *   import { renderNarration } from "@/lib/voicecraft";
+ *   const candidate = await selectDeterministicElevenVoice({ niche });
+ *   // Persist a human audition before any production use of candidate.voiceId.
+ *   const bytes = await renderNarration({ text, elevenVoiceId: candidate.voiceId,
+ *     physics: candidate.physics });
  *
  * Consumers: design-channel casting · narration_tts physics + cold-open gate ·
  * channel-settings narrator picker (voiceBank rows + audition clips).
@@ -54,19 +41,12 @@
 import type { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import { synthNarration, stripAudioTags, type ElevenSettings, type TtsStitch } from "@/lib/tts";
-import { geminiAudioJson, hasGeminiKey } from "@/lib/gemini";
 import {
   narrationPhysicsFor,
   NARRATION_PHYSICS,
   V3_TAG_PALETTES,
   type NarrationPhysics,
 } from "@/engine/golden";
-import { boundNarrationColdOpen } from "@/lib/narrationBounds";
-import {
-  channelCritiqueBrief,
-  produceAndCritique,
-  type ChannelCritiqueContext,
-} from "@/engine/critiqueLoop";
 
 export { narrationPhysicsFor as narrationPhysics, NARRATION_PHYSICS, V3_TAG_PALETTES, type NarrationPhysics } from "@/engine/golden";
 export { stripAudioTags } from "@/lib/tts";
@@ -74,7 +54,7 @@ export { stripAudioTags } from "@/lib/tts";
 const ELEVEN = "https://api.elevenlabs.io/v1";
 
 export function hasVoicecraft(): boolean {
-  return Boolean(process.env.ELEVENLABS_API_KEY) && hasGeminiKey();
+  return Boolean(process.env.ELEVENLABS_API_KEY);
 }
 
 function elevenKey(): string {
@@ -125,62 +105,41 @@ export async function listAccountVoices(): Promise<AccountVoice[]> {
   }));
 }
 
-const ARCHETYPE_KEYS = Object.keys(NARRATION_PHYSICS);
-
-async function audioOf(v: AccountVoice, log: (m: string) => void): Promise<string | null> {
-  if (v.previewUrl) {
-    try {
-      const res = await fetch(v.previewUrl, { signal: AbortSignal.timeout(20000) });
-      if (res.ok) return Buffer.from(await res.arrayBuffer()).toString("base64");
-    } catch {
-      /* fall through to a tiny sample */
-    }
-  }
-  // No preview (e.g. a cloned voice) — render one short calibration line.
-  try {
-    const bytes = await synthNarration({
-      text: "This is a short calibration take for the voice bank. Listen to the register, the pace, the texture.",
-      provider: "elevenlabs",
-      elevenVoiceId: v.voiceId,
-    });
-    return Buffer.from(bytes).toString("base64");
-  } catch (e) {
-    log(`voicecraft: no audio obtainable for "${v.name}" (${e instanceof Error ? e.message.slice(0, 80) : e})`);
-    return null;
-  }
+function providerLabel(labels: Record<string, string>, key: string): string {
+  return String(labels[key] ?? labels[key.replace(/_/g, " ")] ?? "").trim().toLowerCase();
 }
 
-/** Gemini LISTENS to one voice and writes its structured card. */
-export async function profileVoice(v: AccountVoice, log: (m: string) => void = () => {}): Promise<VoiceProfile | null> {
-  const b64 = await audioOf(v, log);
-  if (!b64) return null;
-  const p = await geminiAudioJson<Partial<VoiceProfile>>({
-    audios: [b64],
-    maxTokens: 900,
-    prompt:
-      `You will hear a short sample of a narration voice named "${v.name}"` +
-      `${v.labels && Object.keys(v.labels).length ? ` (vendor labels: ${JSON.stringify(v.labels)})` : ""}. ` +
-      `Profile what it ACTUALLY sounds like (trust your ears over the labels):\n` +
-      `- gender: male|female|neutral\n- ageFeel: young|middle_aged|old\n- register: deep|low|mid|high\n` +
-      `- pace: slow|measured|brisk|fast (its NATIVE pace)\n- energy: calm|controlled|warm|bright|intense\n` +
-      `- texture: <=6 words (e.g. "dry gravel, close-mic intimacy")\n` +
-      `- character: <=30 words a casting director would write\n` +
-      `- bestFor: 2-4 keys it could credibly narrate, ranked, from: ${ARCHETYPE_KEYS.join(", ")}\n` +
-      `- confidence: 1-10 (sample quality / how sure you are)\n` +
-      `Return STRICT JSON {"gender":..,"ageFeel":..,"register":..,"pace":..,"energy":..,"texture":..,"character":..,"bestFor":[..],"confidence":n}.`,
-  });
-  if (!p?.gender || !p.character) return null;
+function metadataVoiceProfile(v: AccountVoice): VoiceProfile | null {
+  const gender = providerLabel(v.labels, "gender") || "neutral";
+  const rawAge = providerLabel(v.labels, "age");
+  const ageFeel = /young|teen|child/.test(rawAge) ? "young"
+    : /old|senior|mature/.test(rawAge) ? "old"
+      : "middle_aged";
+  const useCase = providerLabel(v.labels, "use_case");
+  const bestFor = USE_CASE_ARCHETYPES[useCase] ?? [];
+  const description = String(v.description ?? "").replace(/\s+/g, " ").trim();
+  const usableLabels = [providerLabel(v.labels, "gender"), rawAge, useCase].filter(Boolean).length;
+  if (!usableLabels && !description) return null;
   return {
-    gender: String(p.gender),
-    ageFeel: String(p.ageFeel ?? "middle_aged"),
-    register: String(p.register ?? "mid"),
-    pace: String(p.pace ?? "measured"),
-    energy: String(p.energy ?? "warm"),
-    texture: String(p.texture ?? ""),
-    character: String(p.character),
-    bestFor: Array.isArray(p.bestFor) ? p.bestFor.map(String).filter((k) => ARCHETYPE_KEYS.includes(k)) : [],
-    confidence: Number(p.confidence ?? 5),
+    gender,
+    ageFeel,
+    register: "mid",
+    pace: "measured",
+    energy: "controlled",
+    texture: "provider metadata only",
+    character: description.slice(0, 120) || `${ageFeel.replace(/_/g, " ")} ${gender} narrator`,
+    bestFor,
+    // This is deliberately below a human audition. It supports deterministic
+    // discovery only; production still requires the existing signed audition.
+    confidence: usableLabels >= 2 ? 6 : 5,
   };
+}
+
+/** Build a transparent provider-metadata card; human audition owns how it sounds. */
+export async function profileVoice(v: AccountVoice, log: (m: string) => void = () => {}): Promise<VoiceProfile | null> {
+  const profile = metadataVoiceProfile(v);
+  if (profile) log(`voicecraft: profiled "${v.name}" from provider metadata; human audition remains required`);
+  return profile;
 }
 
 /**
@@ -382,92 +341,10 @@ export async function recruitVoice(o: {
   useCase?: string;
   log?: (m: string) => void;
 }): Promise<VoiceCard> {
-  const log = o.log ?? (() => {});
-  const spec = o.physics.cast;
-  const useCase = o.useCase ?? "narrative_story";
-  const searches = await Promise.all([
-    searchVoiceLibrary({ gender: spec.gender, accent: spec.accent, useCase, pageSize: 12 }),
-    ...(o.searchTerms ?? []).map((s) => searchVoiceLibrary({ gender: spec.gender, accent: spec.accent, useCase, search: s, pageSize: 10 })),
-  ]);
-  const seen = new Set<string>();
-  const candidates = searches
-    .flat()
-    .filter((v) => {
-      if (seen.has(v.voiceId)) return false;
-      seen.add(v.voiceId);
-      return Boolean(v.previewUrl) && v.category === "professional" && ((v.clonedByCount ?? 0) >= 100 || (v.usage1y ?? 0) >= 2_000_000);
-    })
-    .sort((a, b) => (b.clonedByCount ?? 0) - (a.clonedByCount ?? 0))
-    .slice(0, 6);
-  log(`voicecraft: recruit — ${candidates.length} metric-gated candidates: ${candidates.map((c) => `${c.name} (${c.clonedByCount} saves)`).join(", ") || "none"}`);
-  if (candidates.length === 0) throw new Error("voicecraft: recruit found no metric-gated library candidates — widen the search");
-
-  const audios: string[] = [];
-  const heard: LibraryVoice[] = [];
-  for (const c of candidates) {
-    try {
-      const res = await fetch(c.previewUrl!, { signal: AbortSignal.timeout(20000) });
-      if (!res.ok) continue;
-      audios.push(Buffer.from(await res.arrayBuffer()).toString("base64"));
-      heard.push(c);
-    } catch {
-      /* skip */
-    }
-  }
-  if (heard.length === 0) throw new Error("voicecraft: recruit — no candidate previews reachable");
-  const verdict = await geminiAudioJson<{ takes?: { idx?: number; fit?: number; quality?: number; note?: string }[] }>({
-    audios,
-    maxTokens: 900,
-    prompt:
-      `You are recruiting a narrator. REQUIRED SOUND: ${spec.character}.\n` +
-      `You will hear ${heard.length} samples, in order: ` +
-      `${heard.map((c, i) => `${i + 1}=${c.name} [${[c.gender, c.age, c.accent].filter(Boolean).join(", ")}]`).join("; ")}.\n` +
-      `Vendor labels are FACTS — trust them for accent and age. Score each 1-10 on BOTH: fit (the required sound; a ` +
-      `spec'd accent mismatch caps fit at 4) AND quality (recording/production quality: clean studio capture, no ` +
-      `muddiness, hiss, room echo, clipping or low-bitrate artifacts — be HARSH, this voice must carry whole videos).\n` +
-      `Return STRICT JSON {"takes":[{"idx":1-based,"fit":n,"quality":n,"note":"<=12 words"}]}.`,
-  });
-  const ranked = (verdict.takes ?? [])
-    .filter((t) => typeof t.idx === "number" && (t.fit ?? 0) >= 8 && (t.quality ?? 0) >= 8)
-    .sort((x, y) => (y.fit ?? 0) + (y.quality ?? 0) - ((x.fit ?? 0) + (x.quality ?? 0)));
-  log(`voicecraft: recruit auditions — ${heard.map((c, i) => { const t = (verdict.takes ?? []).find((x) => x.idx === i + 1); return `${c.name}: fit ${t?.fit ?? "?"} q ${t?.quality ?? "?"}`; }).join(" · ")}`);
-  if (ranked.length === 0) throw new Error("voicecraft: recruit — no candidate gated fit+quality ≥8 on preview");
-
-  for (const r of ranked) {
-    const cand = heard[r.idx! - 1];
-    const newId = await addLibraryVoice(cand);
-    log(`voicecraft: recruit — added "${cand.name}" as ${newId}, validating on our own render…`);
-    try {
-      const take = await synthNarration({ text: AUDITION_LINE, provider: "elevenlabs", elevenVoiceId: newId, speed: o.physics.speed, eleven: { stability: o.physics.stability } });
-      const v = await judgeNarrationTake({ mp3: take, physics: o.physics, text: AUDITION_LINE, log });
-      if (!v.pass || v.clean < 8) throw new Error(`validation take failed (clean ${v.clean}, ${v.why})`);
-      const accountVoice: AccountVoice = {
-        voiceId: newId,
-        name: cand.name,
-        category: "professional",
-        labels: { gender: cand.gender ?? "", age: cand.age ?? "", accent: cand.accent ?? "", use_case: cand.useCase ?? useCase },
-        previewUrl: cand.previewUrl,
-      };
-      const profile = await profileVoice(accountVoice, log);
-      if (!profile) throw new Error("profiling failed");
-      await o.convex.mutation(api.voiceBank.upsertProfile, {
-        ownerId: o.ownerId,
-        voiceId: newId,
-        name: cand.name,
-        provider: "elevenlabs",
-        category: "professional",
-        labels: accountVoice.labels,
-        previewUrl: cand.previewUrl,
-        profile,
-      });
-      log(`voicecraft: RECRUITED "${cand.name}" (${cand.clonedByCount} saves) — validated and banked`);
-      return { ...accountVoice, profile };
-    } catch (e) {
-      log(`voicecraft: recruit — "${cand.name}" FAILED validation (${e instanceof Error ? e.message.slice(0, 100) : e}) — removing and trying next`);
-      await removeAccountVoice(newId).catch(() => {});
-    }
-  }
-  throw new Error("voicecraft: recruit — every preview-gated candidate failed post-add validation");
+  void o;
+  throw new Error(
+    "voicecraft: automatic voice-library recruitment is disabled because the former remote audio judge is not thumbnail-safe; add a voice only after a human audition and persisted production evidence.",
+  );
 }
 
 /* -------------------------------- casting ------------------------------- */
@@ -517,102 +394,10 @@ export async function castVoice(o: {
   register?: string;
   log?: (m: string) => void;
 }): Promise<CastResult> {
-  const log = o.log ?? (() => {});
-  if (!hasVoicecraft()) throw new Error("voicecraft: ELEVENLABS_API_KEY + GEMINI_API_KEY required");
-  const physics = narrationPhysicsFor(o.niche);
-  const spec = physics.cast;
-
-  // Bank (profile on first use).
-  const cards = await profileVoiceBank({ convex: o.convex, ownerId: o.ownerId, log });
-  if (cards.length === 0) throw new Error("voicecraft: voice bank is empty — no ElevenLabs voices reachable");
-
-  // Deterministic prefilter (profile first, vendor labels as tiebreak data).
-  // Accent is LAW when the spec sets one: a labeled mismatch is out before
-  // the audition — audio judges hallucinate accents under multi-take load.
-  const fits = cards.filter(
-    (c) =>
-      (spec.gender === "any" || c.profile.gender === spec.gender || c.profile.gender === "neutral") &&
-      ageCompatible(spec.age, c.profile.ageFeel) &&
-      (!spec.accent || !c.labels["accent"] || c.labels["accent"].toLowerCase().includes(spec.accent.toLowerCase())),
+  void o;
+  throw new Error(
+    "voicecraft: automatic audio casting is disabled because the former remote audio judge is not thumbnail-safe; use deterministicVoiceCast for provider-metadata discovery, then save a human-reviewed production cast.",
   );
-  const pool = (fits.length >= 2 ? fits : cards)
-    .map((c) => ({
-      c,
-      rank:
-        (c.profile.bestFor[0] === physics.archetype ? 3 : c.profile.bestFor.includes(physics.archetype) ? 2 : 0) +
-        // Vendor labels carry real casting signal the heard profile can miss
-        // (a sassy social_media young female IS the chaos-commentator spec).
-        ((USE_CASE_ARCHETYPES[c.labels["use_case"] ?? ""] ?? []).includes(physics.archetype) ? 1.5 : 0) +
-        (spec.gender !== "any" && c.labels["gender"] === spec.gender ? 0.5 : 0) +
-        (spec.age !== "any" && c.labels["age"] === spec.age ? 0.5 : 0) +
-        (c.category === "professional" || c.category === "cloned" ? 1 : 0) +
-        c.profile.confidence / 10,
-    }))
-    .sort((a, b) => b.rank - a.rank)
-    .map((x) => x.c);
-  // Six auditions (the audio judge's input ceiling) — wide enough that a
-  // label-mismatch in one ranking term can't exclude the obvious candidate.
-  const shortlist = pool.filter((c) => c.previewUrl).slice(0, 6);
-  if (shortlist.length === 0) throw new Error("voicecraft: no auditionable voices (no previews) for this spec");
-  log(`voicecraft: shortlist for ${physics.archetype || "default"} — ${shortlist.map((c) => c.name.split(" - ")[0]).join(", ")}`);
-
-  // AUDITION on real preview audio (free) — Gemini hears all takes together.
-  const audios: string[] = [];
-  const heard: VoiceCard[] = [];
-  for (const c of shortlist) {
-    try {
-      const res = await fetch(c.previewUrl!, { signal: AbortSignal.timeout(20000) });
-      if (!res.ok) continue;
-      audios.push(Buffer.from(await res.arrayBuffer()).toString("base64"));
-      heard.push(c);
-    } catch {
-      /* one bad preview is fine */
-    }
-  }
-  if (heard.length === 0) throw new Error("voicecraft: no preview audio reachable for the shortlist");
-
-  const verdict = await geminiAudioJson<{ takes?: { idx?: number; score?: number; note?: string }[]; winner?: number; why?: string }>({
-    audios,
-    maxTokens: 900,
-    prompt:
-      `You are casting THE NARRATOR for the YouTube channel "${o.channelName}"${o.niche ? ` (${o.niche})` : ""}.\n` +
-      `REQUIRED SOUND (the operator's casting law for this archetype "${physics.archetype}"): ${spec.character}. ` +
-      `Target delivery: ~${physics.speed}x pace feel, ${physics.tagDensity} expressiveness.\n` +
-      (o.register ? `CHANNEL REGISTER (outranks the baseline): ${o.register}\n` : "") +
-      (o.persona ? `PERSONA: ${o.persona}\n` : "") +
-      `You will hear ${heard.length} voice samples, in order: ` +
-      `${heard.map((c, i) => `${i + 1}=${c.name} [${[c.labels["gender"], c.labels["age"], c.labels["accent"]].filter(Boolean).join(", ") || "no labels"}]`).join("; ")}.\n` +
-      `Vendor labels are FACTS — trust them for accent and age over your own impression. ` +
-      `Judge each 1-10 on fit to the REQUIRED SOUND (gender/age/accent/register/darkness/energy as specified — a ` +
-      `bright voice cannot win a "deep dark" spec, and a spec'd accent mismatch caps the score at 4). ` +
-      `Return STRICT JSON {"takes":[{"idx":1-based,"score":n,"note":"<=12 words"}],"winner":1-based,"why":"<=35 words"}.`,
-  });
-  const takes = (verdict.takes ?? []).filter((t) => typeof t.idx === "number");
-  const wIdx = Math.min(heard.length - 1, Math.max(0, (verdict.winner ?? 1) - 1));
-  const winScore = takes.find((t) => t.idx === wIdx + 1)?.score ?? 0;
-  const auditioned = heard.map((c, i) => {
-    const t = takes.find((x) => (x.idx ?? 0) - 1 === i);
-    return { name: c.name, score: t?.score ?? 0, note: t?.note ?? "" };
-  });
-
-  if (winScore < 7) {
-    const suggestions = await searchVoiceLibrary({ gender: spec.gender, age: spec.age, useCase: "narrative_story" }).catch(() => []);
-    throw new Error(
-      `voicecraft: no bank voice gated ≥7 for "${spec.character.slice(0, 60)}…" (best ${winScore}). ` +
-        `Library candidates to add: ${suggestions.slice(0, 5).map((s) => `${s.name} (${s.gender}/${s.age})`).join(", ") || "none found"}`,
-    );
-  }
-  const winner = heard[wIdx];
-  log(`voicecraft: CAST ${winner.name} (${winScore}/10) — ${verdict.why ?? ""} [${auditioned.map((a) => `${a.name.split(" - ")[0]}:${a.score}`).join(", ")}]`);
-  return {
-    voiceId: winner.voiceId,
-    name: winner.name,
-    character: winner.profile.character,
-    score: winScore,
-    why: verdict.why ?? "",
-    auditioned,
-    physics,
-  };
 }
 
 /* ------------------------------- rendering ------------------------------ */
@@ -666,59 +451,26 @@ export async function judgeNarrationTake(o: {
   text: string;
   durationSec?: number;
   /**
-   * P1-1: the channel's critic doctrine/persona, folded into the `register`
-   * judgement ("does the VOICE match the required sound"). The deterministic
-   * duration-blowout gate above runs BEFORE this and is untouched by it.
+   * Kept for source compatibility. Production narration uses the local FFmpeg
+   * evidence block; this legacy byte-only helper cannot assess delivery safely.
    */
-  channel?: ChannelCritiqueContext;
+  channel?: unknown;
   log?: (m: string) => void;
-  /** Counts logical Gemini audio-grader invocations. The adapter only retries
-   * non-billable transport/provider failures internally. */
+  /** Retained for source compatibility; no remote audio judge is invoked. */
   onAudioJudgeCall?: () => void;
 }): Promise<TakeVerdict> {
-  // Duration gate runs ALWAYS: when no measured duration is given, estimate
-  // from the byte length (our renders are CBR mp3_44100_128 ≈ 16 KB/s).
-  const durationSec = o.durationSec ?? o.mp3.length / 16000;
-  {
-    const words = stripAudioTags(o.text).split(/\s+/).filter(Boolean).length;
-    // Use the calibrated TTS word-rate (scriptGen's NARRATION_WPS, default 3.1) so the
-    // runaway-take gate matches reality — 2.5 over-estimated `expected` and loosened the gate.
-    const expected = words / (Number(process.env.NARRATION_WPS) || 3.1) / Math.max(0.7, o.physics.speed) + (o.text.match(/\[(long )?pause\]/g)?.length ?? 0) * 1.5;
-    if (durationSec > expected * 2.5 + 12 || durationSec < expected * 0.3) {
-      const why = `duration blowout: ${durationSec.toFixed(0)}s rendered vs ~${expected.toFixed(0)}s expected (${words} words) — runaway take`;
-      o.log?.(`voicecraft: take judged — ${why}`);
-      return { register: 0, pace: 0, performance: 0, clean: 0, why, pass: false };
-    }
-  }
-  const paceWord = o.physics.speed <= 0.85 ? "slow and spacious" : o.physics.speed <= 0.95 ? "measured, unhurried" : o.physics.speed <= 1.02 ? "natural" : "brisk and energetic";
-  o.onAudioJudgeCall?.();
-  const v = await geminiAudioJson<Partial<TakeVerdict> & { scores?: Partial<TakeVerdict> }>({
-    audios: [Buffer.from(o.mp3).toString("base64")],
-    maxTokens: 700,
-    prompt:
-      `You hear ONE narration take. REQUIRED: ${o.physics.cast.character}. Target pace: ${paceWord} (~${o.physics.speed}x). ` +
-      `The script may contain performed audio tags (pauses, sighs, whispers) — they must be PERFORMED, never read aloud.\n` +
-      `SCRIPT (for fidelity reference): "${stripAudioTags(o.text).slice(0, 500)}"\n` +
-      channelCritiqueBrief(o.channel) +
-      `Score 1-10: register (does the VOICE match the required sound), pace (does the delivery match the target pace), ` +
-      `performance (natural delivery, tags performed not spoken, no robotic joins), clean (no artifacts, garbles, ` +
-      `skipped or repeated words). Be harsh — 7 means genuinely right.\n` +
-      `Return STRICT JSON {"register":n,"pace":n,"performance":n,"clean":n,"why":"<=30 words"}.`,
-  });
-  const g = (k: keyof TakeVerdict) => Number((v as Record<string, unknown>)[k] ?? (v.scores as Record<string, unknown> | undefined)?.[k] ?? 0);
-  const verdict: TakeVerdict = {
-    register: g("register"),
-    pace: g("pace"),
-    performance: g("performance"),
-    clean: g("clean"),
-    why: String(v.why ?? ""),
-    pass: false,
-  };
-  verdict.pass = verdict.register >= 7 && verdict.pace >= 7 && verdict.performance >= 7 && verdict.clean >= 7;
-  o.log?.(
-    `voicecraft: take judged — register ${verdict.register} · pace ${verdict.pace} · performance ${verdict.performance} · clean ${verdict.clean}${verdict.pass ? "" : ` — ${verdict.why}`}`,
-  );
-  return verdict;
+  void o.channel;
+  void o.onAudioJudgeCall;
+  const durationSec = o.durationSec ?? o.mp3.length / 16_000;
+  const words = stripAudioTags(o.text).split(/\s+/).filter(Boolean).length;
+  const expected = words / (Number(process.env.NARRATION_WPS) || 3.1) / Math.max(0.7, o.physics.speed)
+    + (o.text.match(/\[(long )?pause\]/g)?.length ?? 0) * 1.5;
+  const durationPlausible = durationSec >= expected * 0.3 && durationSec <= expected * 2.5 + 12;
+  const why = durationPlausible
+    ? "remote audio judging is disabled; use the persisted human audition plus local FFmpeg narration evidence"
+    : `duration blowout: ${durationSec.toFixed(0)}s rendered vs ~${expected.toFixed(0)}s expected (${words} words)`;
+  o.log?.(`voicecraft: legacy take judge unavailable — ${why}`);
+  return { register: 0, pace: 0, performance: 0, clean: 0, why, pass: false };
 }
 
 /**
@@ -734,74 +486,11 @@ export async function gateColdOpen(o: {
   log?: (m: string) => void;
   onBillableCharacters?: (characters: number) => void;
   onAudioJudgeCall?: () => void;
-  /**
-   * P1-1: per-channel critique grounding. Only used for logging/observability
-   * here — the take verdict itself stays the four DETERMINISTIC-ish audio
-   * dimensions scored by the audio judge, because a channel's prose doctrine
-   * must not be able to talk a garbled or runaway take past the gate.
-   */
-  channel?: ChannelCritiqueContext;
+  /** Retained for source compatibility; no remote audio judge is invoked. */
+  channel?: unknown;
 }): Promise<{ verdict: TakeVerdict; seed: number }> {
-  if (!hasGeminiKey()) {
-    throw new Error(
-      "voicecraft: Gemini audio judging is retired; use narration_tts local FFmpeg performance evidence instead",
-    );
-  }
-  const log = o.log ?? (() => {});
-  const text = boundNarrationColdOpen(o.text);
-  const baseSeed = o.seed ?? 4242;
-  // P1-15: the bespoke two-attempt loop now runs on the shared
-  // produceAndCritique primitive. Behaviour is preserved exactly — 2 attempts
-  // max, seed bumped by one per retry, a passing take returns immediately, and
-  // two failures still throw LOUD rather than shipping a bad cold open.
-  let attempt = 0;
-  const loop = await produceAndCritique<{ seed: number; verdict: TakeVerdict }>({
-    label: "voicecraft/cold-open",
-    // The judge's own `pass` is the bar; a numeric threshold would be a second,
-    // weaker gate. 1.0 + pass means "accept only a genuine pass".
-    threshold: 1,
-    maxIters: 2,
-    log: (message) => log(message),
-    ...(o.channel ? { channel: o.channel } : {}),
-    produce: async () => {
-      // Seed bumped by one per attempt, exactly as the legacy loop did. The
-      // retry is a re-roll of the SAME text, so there are no prior issues to
-      // fold into a prompt — only a different seed.
-      const seed = baseSeed + attempt;
-      attempt += 1;
-      const bytes = await renderNarration({
-        text,
-        elevenVoiceId: o.elevenVoiceId,
-        physics: o.physics,
-        seed,
-        onBillableCharacters: o.onBillableCharacters,
-      });
-      const verdict = await judgeNarrationTake({
-        mp3: bytes,
-        physics: o.physics,
-        text,
-        ...(o.channel ? { channel: o.channel } : {}),
-        log,
-        onAudioJudgeCall: o.onAudioJudgeCall,
-      });
-      return { seed, verdict };
-    },
-    critique: async (candidate, iter) => {
-      const { verdict } = candidate;
-      if (!verdict.pass) {
-        log(`voicecraft: cold-open gate attempt ${iter} FAILED (${verdict.why}) -> ${iter === 1 ? "seed-bumped retry" : "FAILING LOUD"}`);
-      }
-      return {
-        score: verdict.pass ? 1 : 0,
-        pass: verdict.pass,
-        // The judge's reason is the only actionable signal; the retry is a seed
-        // bump, so this feeds observability rather than a reworded prompt.
-        issues: verdict.pass ? [] : [verdict.why].filter(Boolean),
-      };
-    },
-  });
-  if (!loop.accepted) {
-    throw new Error(`voicecraft: cold-open failed the gate twice for voice ${o.elevenVoiceId} — wrong cast or physics for this channel`);
-  }
-  return { verdict: loop.value.verdict, seed: loop.value.seed };
+  void o;
+  throw new Error(
+    "voicecraft: legacy cold-open audio judging is disabled; production narration uses the persisted human audition and local FFmpeg performance evidence before upload.",
+  );
 }
