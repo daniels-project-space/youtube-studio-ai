@@ -78,6 +78,58 @@ assert.throws(
   /requires stock_footage; forbids gen_footage/,
 );
 
+// A Casefile sequence uses the same pinned Novita visual stack as the direct
+// cinematic renderer, but its reviewed LTX handoff is encapsulated by
+// gen_footage. It must be a complete alternative chain, never a way to add
+// stock footage or skip final assembly/QA.
+const cinematic = contentLaneForFamily("cinematic");
+assert(cinematic, "cinematic must have a canonical content lane");
+assert.doesNotThrow(() => assertPipelineMatchesContentLane(cinematic, [
+  { block: "novita_render_images" },
+  { block: "qa_assets" },
+  { block: "novita_render_video" },
+  { block: "qa_shots" },
+  { block: "timeline_assemble" },
+  { block: "qa_visual" },
+]));
+assert.doesNotThrow(() => assertPipelineMatchesContentLane(cinematic, [
+  { block: "cinematic_case_sequence" },
+  { block: "gen_footage" },
+  { block: "timeline_assemble" },
+  { block: "qa_visual" },
+]), "the source-admitted Casefile handoff must be a valid cinematic Novita chain");
+assert.throws(
+  () => assertPipelineMatchesContentLane(cinematic, [
+    { block: "gen_footage" },
+    { block: "timeline_assemble" },
+    { block: "qa_visual" },
+  ]),
+  /gen_footage requires cinematic_case_sequence/,
+  "the shared LTX renderer must not bypass the source-admitted cinematic sequence",
+);
+assert.throws(
+  () => assertPipelineMatchesContentLane(cinematic, [
+    { block: "novita_render_images" },
+    { block: "novita_render_video" },
+    { block: "timeline_assemble" },
+    { block: "qa_visual" },
+  ]),
+  /requires one renderer chain: novita_render_images \+ qa_assets \+ novita_render_video \+ qa_shots OR gen_footage/,
+  "a partial direct Novita chain must remain rejected",
+);
+const designedCinematicBlocks = designPipeline({ family: "cinematic" }).pipeline.map((entry) => entry.block);
+for (const block of ["novita_render_images", "qa_assets", "novita_render_video", "qa_shots"]) {
+  assert(
+    designedCinematicBlocks.includes(block),
+    `the standard cinematic template must compile its complete pinned Novita chain, including ${block}`,
+  );
+}
+assert.equal(
+  designedCinematicBlocks.includes("stock_footage"),
+  false,
+  "the cinematic template must not retain the narrated-stock producer beside its Novita chain",
+);
+
 const inferredWhiteboard = inferContentLane(whiteboardPipeline);
 assert.equal(inferredWhiteboard.key, "whiteboard_explainer");
 assert.equal(resolveContentLane({ family: "whiteboard", pipeline: narratedPipeline }).key, "whiteboard_explainer");

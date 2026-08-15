@@ -368,10 +368,27 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // and required shot QA before timeline assembly. Entity photos are excluded:
   // they would bypass the continuity ledger and exact editor timecodes.
   if (fam.visualEngine === "gen_footage" || fam.visualEngine === "ai_scenes") {
+    const directCinematicChain = [
+      "novita_render_images",
+      "qa_assets",
+      "novita_render_video",
+      "qa_shots",
+    ];
+    const hasCompleteDirectCinematicChain = directCinematicChain
+      .every((block) => pipeline.some((entry) => entry.block === block));
     pipeline = pipeline
-      .filter((e) => e.block !== "entity_imagery")
+      // A legacy cinematic template once contained only novita_render_video.
+      // Treat that as an incomplete shorthand, never as a complete direct
+      // renderer: replace it below with the full keyframe → asset QA → I2V →
+      // shot QA chain. A supplied complete chain is preserved verbatim.
+      .filter((e) => e.block !== "entity_imagery" && (
+        hasCompleteDirectCinematicChain ||
+        !["novita_render_images", "qa_assets", "qa_shots"].includes(e.block)
+      ))
       .flatMap((e) => (
-        e.block === "stock_footage" || e.block === "gen_footage"
+        e.block === "stock_footage" ||
+        e.block === "gen_footage" ||
+        (fam.visualEngine === "ai_scenes" && !hasCompleteDirectCinematicChain && e.block === "novita_render_video")
           ? [
               { block: "novita_render_images", params: { generationProfile: "production" } },
               { block: "qa_assets" },

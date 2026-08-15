@@ -39,6 +39,23 @@ export interface ContentLaneDefinition {
   primaryRenderer: string;
   /** Required end-to-end visual chain blocks (not merely optional creative blocks). */
   requiredBlocks: readonly string[];
+  /**
+   * Complete interchangeable renderer chains for this lane. Every chain is
+   * independently sufficient, but a pipeline must contain one of them in
+   * full. This is deliberately a chain rather than an individual optional
+   * block: it keeps an alternate Novita handoff from becoming a renderer
+   * bypass.
+   */
+  requiredRendererChains?: readonly (readonly string[])[];
+  /**
+   * Additional production evidence required when an alternate renderer chain
+   * is selected. This keeps a shared renderer from bypassing the module that
+   * gives that route its visual/safety semantics.
+   */
+  rendererChainGuards?: readonly {
+    whenPresent: readonly string[];
+    requires: readonly string[];
+  }[];
   /** Known renderers that would change this channel's visual language. */
   forbiddenRendererBlocks: readonly string[];
   /** Non-renderer blocks that would bypass a self-contained visual engine. */
@@ -71,16 +88,24 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     family: "cinematic",
     primaryRenderer: "novita_render_video",
     requiredBlocks: [
-      "novita_render_images",
-      "qa_assets",
-      "novita_render_video",
-      "qa_shots",
       "timeline_assemble",
       "qa_visual",
     ],
+    // Standard cinematic channels use the direct image → I2V chain. A
+    // source-admitted Casefile may instead use gen_footage, which is not
+    // generic stock footage: it runs the same Novita Z-Image/LTX route with
+    // mandatory keyframe, clip, and transition review against the approved
+    // cinematic sequence. Requiring the whole chain prevents partial mixing.
+    requiredRendererChains: [
+      ["novita_render_images", "qa_assets", "novita_render_video", "qa_shots"],
+      ["gen_footage"],
+    ],
+    rendererChainGuards: [{
+      whenPresent: ["gen_footage"],
+      requires: ["cinematic_case_sequence"],
+    }],
     forbiddenRendererBlocks: [
       "stock_footage",
-      "gen_footage",
       "loop_clips",
       "lore_short",
       "whiteboard_scribe",
@@ -725,11 +750,25 @@ export function assertPipelineMatchesContentLane(
       .filter((block): block is string => typeof block === "string"),
   );
   const missing = definition.requiredBlocks.filter((block) => !blocks.has(block));
+  const rendererChains = definition.requiredRendererChains ?? [];
+  const hasRequiredRendererChain = rendererChains.length === 0 || rendererChains
+    .some((chain) => chain.every((block) => blocks.has(block)));
+  const missingRendererChainGuards = (definition.rendererChainGuards ?? [])
+    .filter((guard) => guard.whenPresent.every((block) => blocks.has(block)))
+    .filter((guard) => !guard.requires.every((block) => blocks.has(block)));
   const forbidden = [...definition.forbiddenRendererBlocks, ...(definition.forbiddenBlocks ?? [])]
     .filter((block) => blocks.has(block));
-  if (missing.length || forbidden.length) {
+  if (missing.length || !hasRequiredRendererChain || missingRendererChainGuards.length || forbidden.length) {
     const issues = [
       ...(missing.length ? [`requires ${missing.join(", ")}`] : []),
+      ...(!hasRequiredRendererChain
+        ? [`requires one renderer chain: ${rendererChains
+            .map((chain) => chain.join(" + "))
+            .join(" OR ")}`]
+        : []),
+      ...missingRendererChainGuards.map((guard) =>
+        `${guard.whenPresent.join(" + ")} requires ${guard.requires.join(" + ")}`,
+      ),
       ...(forbidden.length ? [`forbids ${forbidden.join(", ")}`] : []),
     ];
     throw new Error(`Pipeline violates content lane ${parsed.key}: ${issues.join("; ")}`);
