@@ -332,19 +332,40 @@ class WorkerContractTests(unittest.TestCase):
 
         original_run = worker.subprocess.run
         try:
-            worker.subprocess.run = lambda *_args, **_kwargs: worker.subprocess.CompletedProcess(
-                ["ffprobe"], 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}, {"codec_type": "audio"}]}), "",
-            )
+            def audible_output(command, *_args, **_kwargs):
+                if command[0] == "ffprobe":
+                    return worker.subprocess.CompletedProcess(
+                        command, 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}, {"codec_type": "audio"}]}), "",
+                    )
+                return worker.subprocess.CompletedProcess(command, 0, "", "mean_volume: -32.0 dB")
+
+            worker.subprocess.run = audible_output
             self.assertEqual(worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704), {"outputWidth": 1280, "outputHeight": 704, "hasAudio": True})
-            worker.subprocess.run = lambda *_args, **_kwargs: worker.subprocess.CompletedProcess(
-                ["ffprobe"], 0, json.dumps({"streams": [{"codec_type": "video", "width": 640, "height": 352}, {"codec_type": "audio"}]}), "",
-            )
+            def wrong_geometry(command, *_args, **_kwargs):
+                return worker.subprocess.CompletedProcess(
+                    command, 0, json.dumps({"streams": [{"codec_type": "video", "width": 640, "height": 352}, {"codec_type": "audio"}]}), "",
+                )
+
+            worker.subprocess.run = wrong_geometry
             with self.assertRaisesRegex(RuntimeError, "geometry"):
                 worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704)
-            worker.subprocess.run = lambda *_args, **_kwargs: worker.subprocess.CompletedProcess(
-                ["ffprobe"], 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}]}), "",
-            )
+            def video_only(command, *_args, **_kwargs):
+                return worker.subprocess.CompletedProcess(
+                    command, 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}]}), "",
+                )
+
+            worker.subprocess.run = video_only
             with self.assertRaisesRegex(RuntimeError, "generated audio"):
+                worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704)
+            def digital_silence(command, *_args, **_kwargs):
+                if command[0] == "ffprobe":
+                    return worker.subprocess.CompletedProcess(
+                        command, 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}, {"codec_type": "audio"}]}), "",
+                    )
+                return worker.subprocess.CompletedProcess(command, 0, "", "mean_volume: -91.0 dB")
+
+            worker.subprocess.run = digital_silence
+            with self.assertRaisesRegex(RuntimeError, "no usable generated audio"):
                 worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704)
         finally:
             worker.subprocess.run = original_run

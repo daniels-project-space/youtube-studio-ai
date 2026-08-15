@@ -744,7 +744,7 @@ def build_video_command(
 
 
 def probe_video_output(output: Path, width: int, height: int) -> dict[str, int | bool]:
-    """Require the actual encoded MP4 to match the sealed LTX stage-two target and carry LTX audio."""
+    """Require the actual encoded MP4 to match the sealed LTX stage-two target and carry audible LTX audio."""
     result = subprocess.run(
         [
             "ffprobe", "-v", "error",
@@ -772,6 +772,26 @@ def probe_video_output(output: Path, width: int, height: int) -> dict[str, int |
         raise RuntimeError(f"rendered LTX output geometry must be {width}x{height}")
     if len(audio_streams) != 1:
         raise RuntimeError("rendered LTX output must contain exactly one generated audio stream")
+    # A container-level audio stream is not enough evidence: a silent AAC track
+    # would survive assembly but contributes nothing to the intended physical
+    # scene. Keep the threshold conservative so quiet room tone remains valid;
+    # FFmpeg reports digital silence around -91 dBFS.
+    audio_result = subprocess.run(
+        [
+            "ffmpeg", "-hide_banner", "-nostats", "-i", str(output),
+            "-map", "0:a:0", "-af", "volumedetect", "-f", "null", "-",
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=60,
+    )
+    if audio_result.returncode != 0:
+        raise RuntimeError("ffmpeg could not measure rendered LTX audio")
+    mean_match = re.search(r"mean_volume:\s*(-?\d+(?:\.\d+)?)\s*dB", audio_result.stderr)
+    mean_db = float(mean_match.group(1)) if mean_match else None
+    if mean_db is None or mean_db <= -65.0:
+        raise RuntimeError("rendered LTX output contains no usable generated audio")
     return {"outputWidth": width, "outputHeight": height, "hasAudio": True}
 
 
