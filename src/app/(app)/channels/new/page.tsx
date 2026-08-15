@@ -297,6 +297,8 @@ export default function NewChannelWizard() {
           missingRequirements?: string[];
           providerRequirements?: string[];
           requiredPipelineModules?: string[];
+          requiredRendererChains?: string[][];
+          rendererChainGuards?: Array<{ whenPresent?: string[]; requires?: string[] }>;
           qualityFocus?: string[];
           recommendedModules?: Array<{
             block?: string;
@@ -333,8 +335,15 @@ export default function NewChannelWizard() {
             : " This template is not available for runtime design.";
         const quality = preflight?.qualityFocus?.length ? ` Quality focus: ${preflight.qualityFocus.slice(0, 3).join(", ")}.` : "";
         const providers = preflight?.providerRequirements?.length ? ` Required capabilities: ${preflight.providerRequirements.join(", ")}.` : "";
-        const chain = preflight?.requiredPipelineModules?.length
-          ? ` Required visual chain: ${preflight.requiredPipelineModules.join(" → ")}.`
+        const chain = preflight?.requiredRendererChains?.length
+          ? ` Required visual renderer path: ${preflight.requiredRendererChains.map((path) => path.join(" → ")).join(" OR ")}.`
+          : preflight?.requiredPipelineModules?.length
+            ? ` Required visual chain: ${preflight.requiredPipelineModules.join(" → ")}.`
+          : "";
+        const rendererGuards = preflight?.rendererChainGuards?.length
+          ? ` Renderer guard: ${preflight.rendererChainGuards.map((guard) =>
+            `when ${guard.whenPresent?.join(" + ") ?? "this renderer"} is selected, require ${guard.requires?.join(" + ") ?? "its required direction"}`,
+          ).join("; ")}.`
           : "";
         const renderer = preflight?.primaryRenderer ? ` Renderer: ${preflight.primaryRenderer}.` : "";
         const budgetFloor = typeof preflight?.minimumPerVideoBudgetUsd === "number"
@@ -351,7 +360,7 @@ export default function NewChannelWizard() {
         const casefileNote = casefileCinematicRecommendation
           ? " This factual cinematic route requires a source-first Case Packet, evidence-to-shot map, and reviewer-signed faceless mannequin sequence before it can enter rendering."
           : "";
-        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (renderer unavailable)"} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${duration}${budgetFloor}${providers}${requirements}${quality}${runtime}${validation}${dataStoryNote}${casefileNote}`);
+        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (renderer unavailable)"} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${requirements}${quality}${runtime}${validation}${dataStoryNote}${casefileNote}`);
       } catch {
         setClipNote("Suggestion failed — pick a format manually below.");
       } finally {

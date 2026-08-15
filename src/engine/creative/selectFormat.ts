@@ -177,6 +177,14 @@ export interface FormatPreflight {
   };
   /** Required end-to-end visual chain, not a synthetic full runtime pipeline. */
   requiredPipelineModules: string[];
+  /**
+   * One or more complete, interchangeable renderer chains. A creator must
+   * never read the shared assembly/QA blocks as proof that an actual visual
+   * renderer is present.
+   */
+  requiredRendererChains: string[][];
+  /** Non-negotiable companions for a renderer path, such as source-bound cinematic direction. */
+  rendererChainGuards: Array<{ whenPresent: string[]; requires: string[] }>;
   qualityFocus: string[];
   warnings: string[];
   /** Never inferred from a showcase sample: every new channel needs this proof. */
@@ -572,6 +580,15 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
       withinFamilyContract: durationWithinFamilyContract,
     },
     requiredPipelineModules: laneDefinition ? [...laneDefinition.requiredBlocks] : [],
+    requiredRendererChains: laneDefinition
+      ? (laneDefinition.requiredRendererChains ?? []).map((chain) => [...chain])
+      : [],
+    rendererChainGuards: laneDefinition
+      ? (laneDefinition.rendererChainGuards ?? []).map((guard) => ({
+          whenPresent: [...guard.whenPresent],
+          requires: [...guard.requires],
+        }))
+      : [],
     qualityFocus: uniqueStrings([
       ...FORMAT_RECIPES[family].qualityFocus,
       ...recommendedModules.flatMap((module) => module.qualityFocus),

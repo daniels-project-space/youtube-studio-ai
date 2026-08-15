@@ -105,9 +105,19 @@ assert(
   "the current Novita/LTX preflight must be reported from the real runtime assessment",
 );
 assert.equal(cinematic.contentLane, "cinematic_ai");
-assert(cinematic.requiredPipelineModules.includes("novita_render_images"));
-assert(cinematic.requiredPipelineModules.includes("novita_render_video"));
-assert(cinematic.requiredPipelineModules.includes("qa_shots"));
+assert.deepEqual(
+  cinematic.requiredRendererChains,
+  [
+    ["novita_render_images", "qa_assets", "novita_render_video", "qa_shots"],
+    ["gen_footage"],
+  ],
+  "the advisor must show every complete actual cinematic renderer path, not only shared assembly/QA modules",
+);
+assert.deepEqual(
+  cinematic.rendererChainGuards,
+  [{ whenPresent: ["gen_footage"], requires: ["cinematic_case_sequence"] }],
+  "the creator must see that the Casefile renderer cannot be selected without its source-bound sequence admission",
+);
 assert.equal(cinematic.validationRenderRequired, true);
 
 const casefileCinematic = recommendFormatDeterministically({
