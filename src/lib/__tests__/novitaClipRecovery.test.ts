@@ -31,23 +31,26 @@ const receipt = {} as NovitaBillingReceipt;
 
 async function main(): Promise<void> {
   let reviews = 0;
-  let replacementInput: { repairId: string; attempt: number; motionPrompt: string; remainingCostUsd: number } | undefined;
+  let replacementInput: { repairId: string; attempt: number; motionPrompt: string; terminalStillKey?: string; remainingCostUsd: number } | undefined;
   const recovered = await reviewClipsBeforeAssembly({
     scenes: [scene],
     stillByShot: new Map([[scene.id, "accepted.png"]]),
+    terminalStillByShot: new Map([[scene.id, "accepted-terminal.png"]]),
     clipByShot: new Map([[scene.id, "initial.mp4"]]),
     maxVideoAttempts: 2,
     videoCostUsd: 0.4,
     videoMaxCostUsd: 1.2,
     videoReceipts: [receipt],
-    review: async ({ clipKey }) => {
+    review: async ({ clipKey, terminalStillKey }) => {
       reviews += 1;
+      assert.equal(terminalStillKey, "accepted-terminal.png");
       if (reviews === 1) throw new Error("candidate freezes after the first frame and loses the key");
       assert.equal(clipKey, "replacement.mp4");
       return review;
     },
     renderReplacement: async (input) => {
       replacementInput = input;
+      assert.equal(input.terminalStillKey, "accepted-terminal.png");
       return { clipKey: "replacement.mp4", costUsd: 0.4, billingReceipt: receipt };
     },
   });

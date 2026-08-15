@@ -20,6 +20,9 @@ export const CinematicClipReviewSchema = z.object({
   continuity: score,
   endBeat: score,
   artifactFree: score,
+  /** Present only when LTX was conditioned against a reviewed terminal still. */
+  terminalStillKey: z.string().trim().min(1).optional(),
+  terminalFrameAlignment: score.optional(),
   textWatermarkFree: z.literal(true),
   pass: z.literal(true),
   notes: z.array(z.string().trim().min(1).max(280)).max(8),
@@ -30,6 +33,7 @@ export type CinematicClipReview = z.infer<typeof CinematicClipReviewSchema>;
 export function assertCinematicClipReview(value: unknown, expected: {
   sceneId: string;
   sampleOffsetsSec: readonly number[];
+  terminalStillKey?: string;
 }): CinematicClipReview {
   const review = CinematicClipReviewSchema.parse(value);
   if (review.sceneId !== expected.sceneId) {
@@ -38,12 +42,25 @@ export function assertCinematicClipReview(value: unknown, expected: {
   if (JSON.stringify(review.sampleOffsetsSec) !== JSON.stringify([...expected.sampleOffsetsSec])) {
     throw new Error(`cinematic clip review sample lineage does not match ${expected.sceneId}`);
   }
+  if (expected.terminalStillKey) {
+    if (review.terminalStillKey !== expected.terminalStillKey) {
+      throw new Error(`cinematic clip review terminal reference does not match ${expected.sceneId}`);
+    }
+    if (review.terminalFrameAlignment === undefined) {
+      throw new Error(`cinematic clip review is missing terminal-frame evidence for ${expected.sceneId}`);
+    }
+  } else if (review.terminalStillKey !== undefined || review.terminalFrameAlignment !== undefined) {
+    throw new Error(`cinematic clip review has an unexpected terminal-frame reference for ${expected.sceneId}`);
+  }
   const failing = ([
     ["semantic alignment", review.semanticAlignment],
     ["motion integrity", review.motionIntegrity],
     ["continuity", review.continuity],
     ["end beat", review.endBeat],
     ["artifact freedom", review.artifactFree],
+    ...(expected.terminalStillKey
+      ? [["terminal-frame alignment", review.terminalFrameAlignment!] as const]
+      : []),
   ] as const).filter(([, value]) => value < CINEMATIC_CLIP_MIN_SCORE);
   if (failing.length) {
     throw new Error(

@@ -15,6 +15,7 @@ const ReviewerVerdictSchema = z.object({
   continuity: z.number().finite().min(0).max(1),
   endBeat: z.number().finite().min(0).max(1),
   artifactFree: z.number().finite().min(0).max(1),
+  terminalFrameAlignment: z.number().finite().min(0).max(1).optional(),
   textWatermarkFree: z.boolean(),
   pass: z.boolean(),
   notes: z.array(z.string().trim().min(1).max(280)).max(8).default([]),
@@ -56,9 +57,14 @@ function sampleOffsets(durationSec: number): [number, number, number] {
 export async function reviewCinematicClip(args: {
   scene: CinematicClipGateScene;
   stillPath: string;
+  terminalStillPath?: string;
+  terminalStillKey?: string;
   clipPath: string;
   workDir: string;
 }): Promise<CinematicClipReview> {
+  if ((args.terminalStillPath === undefined) !== (args.terminalStillKey === undefined)) {
+    throw new Error(`cinematic clip gate terminal reference is incomplete for ${args.scene.id}`);
+  }
   const actualDurationSec = await ffprobeDuration(args.clipPath);
   const offsets = sampleOffsets(actualDurationSec);
   const framePaths = await Promise.all(offsets.map((offset, index) =>
@@ -67,7 +73,9 @@ export async function reviewCinematicClip(args: {
   const raw = await visionLocal({
     prompt: [
       "You are the independent final motion gate for a source-bound cinematic documentary. Inspect pixels, never assume a prompt was followed.",
-      "The first supplied image is the accepted LTX source still. The next three are the actual LTX clip at start, middle, and end. Score only the moving take against that still and the requirements.",
+      args.terminalStillPath
+        ? "The first supplied image is the accepted LTX source still; the second is the independently reviewed terminal still that conditioned LTX's final frame. The next three are the actual LTX clip at start, middle, and end. Score the moving take against both anchors and the requirements."
+        : "The first supplied image is the accepted LTX source still. The next three are the actual LTX clip at start, middle, and end. Score only the moving take against that still and the requirements.",
       `Required source image: ${args.scene.imagePrompt}`,
       `Required action and camera: ${args.scene.motionPrompt}`,
       args.scene.continuityIds?.length
@@ -76,10 +84,17 @@ export async function reviewCinematicClip(args: {
       args.scene.keyframeRequirements?.length
         ? `Specific shot obligations: ${args.scene.keyframeRequirements.join(" | ")}`
         : "Specific shot obligations: a causal, cinematic action with a clear ending beat.",
+      args.terminalStillPath
+        ? "The final actual clip frame must visibly match the reviewed terminal image's result/reveal, while preserving mannequin identity treatment, wardrobe, key props, era, evidence treatment, and location."
+        : "No independently reviewed terminal frame was supplied.",
       "Reject frozen or near-static action when movement is required, camera motion that contradicts the instruction, broken anatomy/geometry, morphing/replaced subjects, changed wardrobe/props/location, jump cuts, impossible physical motion, real-person likeness, visible mannequin faces, gore, text/letters/logos/watermarks, or an ending that does not resolve the planned action.",
-      `Return STRICT JSON only: {"semanticAlignment":0..1,"motionIntegrity":0..1,"continuity":0..1,"endBeat":0..1,"artifactFree":0..1,"textWatermarkFree":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set pass true only when every score is at least ${CINEMATIC_CLIP_MIN_SCORE}, textWatermarkFree is true, and the actual moving clip is safe to edit.`,
+      args.terminalStillPath
+        ? `Return STRICT JSON only: {"semanticAlignment":0..1,"motionIntegrity":0..1,"continuity":0..1,"endBeat":0..1,"artifactFree":0..1,"terminalFrameAlignment":0..1,"textWatermarkFree":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set pass true only when every score is at least ${CINEMATIC_CLIP_MIN_SCORE}, textWatermarkFree is true, the actual final frame matches the reviewed terminal image, and the take is safe to edit.`
+        : `Return STRICT JSON only: {"semanticAlignment":0..1,"motionIntegrity":0..1,"continuity":0..1,"endBeat":0..1,"artifactFree":0..1,"textWatermarkFree":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set pass true only when every score is at least ${CINEMATIC_CLIP_MIN_SCORE}, textWatermarkFree is true, and the actual moving clip is safe to edit.`,
     ].join("\n"),
-    imagePaths: [args.stillPath, ...framePaths],
+    imagePaths: args.terminalStillPath
+      ? [args.stillPath, args.terminalStillPath, ...framePaths]
+      : [args.stillPath, ...framePaths],
     json: true,
     maxTokens: VISION_GATE_MAX_TOKENS,
     noCache: true,
@@ -87,7 +102,8 @@ export async function reviewCinematicClip(args: {
     providers: ["groq", "fal"],
   });
   const verdict = parseVerdict(raw);
-  if (!verdict.pass || !verdict.textWatermarkFree) {
+  if (!verdict.pass || !verdict.textWatermarkFree ||
+    (args.terminalStillPath && (verdict.terminalFrameAlignment === undefined || verdict.terminalFrameAlignment < CINEMATIC_CLIP_MIN_SCORE))) {
     throw new Error(`cinematic clip gate failed ${args.scene.id}: ${verdict.notes.join("; ") || "reviewer rejected the moving take"}`);
   }
   return assertCinematicClipReview({
@@ -100,8 +116,15 @@ export async function reviewCinematicClip(args: {
     continuity: verdict.continuity,
     endBeat: verdict.endBeat,
     artifactFree: verdict.artifactFree,
+    ...(args.terminalStillKey
+      ? { terminalStillKey: args.terminalStillKey, terminalFrameAlignment: verdict.terminalFrameAlignment! }
+      : {}),
     textWatermarkFree: verdict.textWatermarkFree,
     pass: true,
     notes: verdict.notes,
-  }, { sceneId: args.scene.id, sampleOffsetsSec: offsets });
+  }, {
+    sceneId: args.scene.id,
+    sampleOffsetsSec: offsets,
+    ...(args.terminalStillKey ? { terminalStillKey: args.terminalStillKey } : {}),
+  });
 }

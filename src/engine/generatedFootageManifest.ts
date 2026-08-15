@@ -131,6 +131,7 @@ export const GeneratedFootageSceneManifestSchema = z
             assertCinematicClipReview(item.clipReview, {
               sceneId: item.sceneId,
               sampleOffsetsSec: item.clipReview.sampleOffsetsSec,
+              ...(item.terminalStillKey ? { terminalStillKey: item.terminalStillKey } : {}),
             });
           } catch (error) {
             ctx.addIssue({

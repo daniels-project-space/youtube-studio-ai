@@ -590,13 +590,17 @@ export const genFootage: Block = {
           // One replacement take is the only automatic motion recovery. It
           // preserves the accepted keyframe; a bad second take stays blocked.
           maxVideoAttempts: 2 as const,
-          review: async ({ scene, stillUrl, clipUrl }: Parameters<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["clipGate"]>["review"]>[0]) => {
+          review: async ({ scene, stillUrl, terminalStillKey, terminalStillUrl, clipUrl }: Parameters<NonNullable<Parameters<typeof renderNovitaGeneratedScenes>[0]["clipGate"]>["review"]>[0]) => {
             const safeSceneId = scene.id.replace(/[^a-z0-9_-]/gi, "_");
             const stillPath = await downloadTo(stillUrl, join(cinematicClipTmp!, `${safeSceneId}-source.png`));
+            const terminalStillPath = terminalStillUrl
+              ? await downloadTo(terminalStillUrl, join(cinematicClipTmp!, `${safeSceneId}-terminal.png`))
+              : undefined;
             const clipPath = await downloadTo(clipUrl, join(cinematicClipTmp!, `${safeSceneId}-candidate.mp4`));
             return await reviewCinematicClip({
               scene,
               stillPath,
+              ...(terminalStillPath && terminalStillKey ? { terminalStillPath, terminalStillKey } : {}),
               clipPath,
               workDir: cinematicClipTmp!,
             });

@@ -80,6 +80,8 @@ export interface NovitaClipGate {
     scene: NovitaGeneratedScene;
     stillKey: string;
     stillUrl: string;
+    terminalStillKey?: string;
+    terminalStillUrl?: string;
     clipKey: string;
     clipUrl: string;
   }): Promise<CinematicClipReview>;
@@ -306,15 +308,17 @@ export async function reviewKeyframesBeforeVideo(args: {
 export async function reviewClipsBeforeAssembly(args: {
   scenes: readonly NovitaGeneratedScene[];
   stillByShot: ReadonlyMap<string, string>;
+  terminalStillByShot?: ReadonlyMap<string, string>;
   clipByShot: ReadonlyMap<string, string>;
   maxVideoAttempts: number;
   videoCostUsd: number;
   videoMaxCostUsd: number;
   videoReceipts: readonly NovitaBillingReceipt[];
-  review: (input: { scene: NovitaGeneratedScene; stillKey: string; clipKey: string }) => Promise<CinematicClipReview>;
+  review: (input: { scene: NovitaGeneratedScene; stillKey: string; terminalStillKey?: string; clipKey: string }) => Promise<CinematicClipReview>;
   renderReplacement: (input: {
     scene: NovitaGeneratedScene;
     stillKey: string;
+    terminalStillKey?: string;
     repairId: string;
     attempt: number;
     motionPrompt: string;
@@ -335,12 +339,13 @@ export async function reviewClipsBeforeAssembly(args: {
     const id = safeId(scene.id);
     const stillKey = args.stillByShot.get(id);
     if (!stillKey) throw new Error(`novita clip gate is missing the accepted still for ${id}`);
+    const terminalStillKey = args.terminalStillByShot?.get(id);
     let attempt = 1;
     for (;;) {
       const clipKey = clipByShot.get(id);
       if (!clipKey) throw new Error(`novita clip gate is missing the initial LTX clip for ${id}`);
       try {
-        const review = await args.review({ scene, stillKey, clipKey });
+        const review = await args.review({ scene, stillKey, terminalStillKey, clipKey });
         clipReviewByShot.set(id, review);
         break;
       } catch (reviewError) {
@@ -354,6 +359,7 @@ export async function reviewClipsBeforeAssembly(args: {
         const replacement = await args.renderReplacement({
           scene,
           stillKey,
+          ...(terminalStillKey ? { terminalStillKey } : {}),
           repairId,
           attempt: attempt + 1,
           motionPrompt: `${scene.motionPrompt}\n\nIndependent motion correction ${attempt + 1}/${args.maxVideoAttempts}: preserve the accepted first frame, mannequin identity treatment, wardrobe, props, setting, camera, and causal purpose. Execute one continuous readable action and finish its planned result. Resolve this reviewer finding: ${reason}`,
@@ -597,22 +603,26 @@ export async function renderNovitaGeneratedScenes(args: {
       const recovery = await reviewClipsBeforeAssembly({
         scenes: args.scenes,
         stillByShot,
+        terminalStillByShot,
         clipByShot,
         maxVideoAttempts,
         videoCostUsd: observedVideoCostUsd,
         videoMaxCostUsd: envelope.videoMaxCostUsd,
         videoReceipts,
-        review: async ({ scene, stillKey, clipKey }) => args.clipGate!.review({
+        review: async ({ scene, stillKey, terminalStillKey, clipKey }) => args.clipGate!.review({
           scene,
           stillKey,
           stillUrl: await presignDownload(stillKey),
+          ...(terminalStillKey
+            ? { terminalStillKey, terminalStillUrl: await presignDownload(terminalStillKey) }
+            : {}),
           clipKey,
           clipUrl: await presignDownload(clipKey),
         }),
-        renderReplacement: async ({ scene, stillKey, repairId, motionPrompt, seed, remainingCostUsd }) => {
+        renderReplacement: async ({ scene, stillKey, terminalStillKey, repairId, motionPrompt, seed, remainingCostUsd }) => {
           const repairResult = await renderVideo({
             prefix: `${prefix}/video-motion-retry-${repairId}`,
-            shots: [asLtxDistilledVideoShot({ ...scene, id: repairId, motionPrompt, seed }, profile.id, stillKey)],
+            shots: [asLtxDistilledVideoShot({ ...scene, id: repairId, motionPrompt, seed }, profile.id, stillKey, terminalStillKey)],
             profile: toNovitaPhaseProfile(profile, "video"),
             nshard: 1,
             maxConcurrent: 1,
