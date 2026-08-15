@@ -30,6 +30,8 @@ export type NovitaRenderLifecycle = NonNullable<NovitaRenderCfg["lifecycle"]>;
 export interface NovitaGeneratedScene {
   id: string;
   imagePrompt: string;
+  /** Optional reviewed target image prompt for LTX's final conditioned frame. */
+  terminalImagePrompt?: string;
   motionPrompt: string;
   durationSec: number;
   negativePrompt?: string;
@@ -41,6 +43,8 @@ export interface NovitaGeneratedScene {
   continuityIds?: string[];
   /** Reviewer-facing source/camera/cut obligations for this exact first frame. */
   keyframeRequirements?: string[];
+  /** Reviewer-facing endpoint obligations for a terminal conditioned frame. */
+  terminalKeyframeRequirements?: string[];
   /** Applied only to the LTX phase after exact worker-manifest admission. */
   creativeAdapter?: LtxCreativeAdapterSelection;
 }
@@ -48,9 +52,13 @@ export interface NovitaGeneratedScene {
 export interface NovitaRenderedScene extends NovitaGeneratedScene {
   stillKey: string;
   stillUrl: string;
+  /** Present only when the scene was admitted with a terminal LTX keyframe. */
+  terminalStillKey?: string;
+  terminalStillUrl?: string;
   clipKey: string;
   clipUrl: string;
   keyframeReview?: CinematicKeyframeReview;
+  terminalKeyframeReview?: CinematicKeyframeReview;
   /** Independent review of the actual LTX moving take before assembly. */
   clipReview?: CinematicClipReview;
 }
@@ -150,6 +158,10 @@ function safeId(value: string): string {
   return normalized;
 }
 
+function terminalKeyframeId(sceneId: string): string {
+  return `${safeId(sceneId)}-terminal`;
+}
+
 function cleanPrefix(value: string): string {
   return value.replace(/^\/+|\/+$/g, "");
 }
@@ -176,16 +188,22 @@ function asShot(scene: NovitaGeneratedScene, profileId: NovitaProfileId, stillKe
  * exclusions by expressing them as an explicit positive-language constraint,
  * instead of silently dropping them or sending an unsupported CLI flag.
  */
-function asLtxDistilledVideoShot(scene: NovitaGeneratedScene, profileId: NovitaProfileId, stillKey: string): Shot {
+function asLtxDistilledVideoShot(
+  scene: NovitaGeneratedScene,
+  profileId: NovitaProfileId,
+  stillKey: string,
+  endStillKey?: string,
+): Shot {
   const shot = asShot(scene, profileId, stillKey);
   const exclusion = scene.negativePrompt?.trim();
-  if (!exclusion) return { ...shot, negative: undefined };
+  if (!exclusion) return { ...shot, negative: undefined, ...(endStillKey ? { endStillKey } : {}) };
   const constraint = `Avoid all of the following: ${exclusion}.`;
   return {
     ...shot,
     prompt: `${shot.prompt}\n\n${constraint}`,
     motion: `${shot.motion}\n\n${constraint}`,
     negative: undefined,
+    ...(endStillKey ? { endStillKey } : {}),
   };
 }
 
@@ -397,18 +415,36 @@ export async function renderNovitaGeneratedScenes(args: {
   }
   const prefix = cleanPrefix(args.prefix);
   const imageShots = args.scenes.map((scene) => asShot(scene, profile.id));
+  const terminalScenes = args.scenes.flatMap((scene) => {
+    if (!scene.terminalImagePrompt?.trim()) return [];
+    return [{
+      ...scene,
+      id: terminalKeyframeId(scene.id),
+      imagePrompt: scene.terminalImagePrompt,
+      keyframeRequirements: scene.terminalKeyframeRequirements ?? scene.keyframeRequirements,
+      terminalImagePrompt: undefined,
+      terminalKeyframeRequirements: undefined,
+    }];
+  });
+  const terminalImageShots = terminalScenes.map((scene) => asShot(scene, profile.id));
   const maxImageAttempts = args.keyframeGate
     ? Math.max(1, Math.min(2, args.keyframeGate.maxImageAttempts ?? 1))
     : 1;
   const maxVideoAttempts = args.clipGate
     ? Math.max(1, Math.min(2, args.clipGate.maxVideoAttempts ?? 1))
     : 1;
+  const openingImageJobs = imageShots.length * profile.image.candidates * maxImageAttempts;
+  const terminalImageJobs = terminalImageShots.length * profile.image.candidates * maxImageAttempts;
   const envelope = novitaCostEnvelope({
     label: "novita media sequence",
-    imageJobs: imageShots.length * profile.image.candidates * maxImageAttempts,
+    imageJobs: openingImageJobs + terminalImageJobs,
     videoJobs: imageShots.length * maxVideoAttempts,
     maxCostUsd: args.maxCostUsd,
   });
+  const openingImageBudgetUsd = terminalImageJobs
+    ? envelope.imageMaxCostUsd * (openingImageJobs / (openingImageJobs + terminalImageJobs))
+    : envelope.imageMaxCostUsd;
+  const terminalImageBudgetUsd = envelope.imageMaxCostUsd - openingImageBudgetUsd;
   const imageResult = await renderImages({
     prefix: `${prefix}/images`,
     shots: imageShots,
@@ -416,7 +452,7 @@ export async function renderNovitaGeneratedScenes(args: {
     nshard: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
     maxConcurrent: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
     jobs: "full",
-    maxCostUsd: envelope.imageMaxCostUsd,
+    maxCostUsd: openingImageBudgetUsd,
     lifecycle: args.lifecycle,
   });
   const ids = imageShots.map((shot) => shot.id);
@@ -431,7 +467,7 @@ export async function renderNovitaGeneratedScenes(args: {
         stillByShot,
         maxImageAttempts,
         imageCostUsd: observedImageCostUsd,
-        imageMaxCostUsd: envelope.imageMaxCostUsd,
+        imageMaxCostUsd: openingImageBudgetUsd,
         imageReceipts,
         review: async ({ scene, stillKey }) => args.keyframeGate!.review({
           scene,
@@ -462,9 +498,80 @@ export async function renderNovitaGeneratedScenes(args: {
       throw imageSpendError(error, observedImageCostUsd);
     }
   }
+  let terminalStillByShot = new Map<string, string>();
+  let terminalKeyframeReviewByShot = new Map<string, CinematicKeyframeReview>();
+  if (terminalImageShots.length) {
+    let terminalImageResult: NovitaRenderResult;
+    try {
+      terminalImageResult = await renderImages({
+        prefix: `${prefix}/images-terminal`,
+        shots: terminalImageShots,
+        profile: toNovitaPhaseProfile(profile, "image"),
+        nshard: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
+        maxConcurrent: Math.min(args.maxConcurrent ?? 1, profile.infrastructure.elasticGpuCeiling),
+        jobs: "full",
+        maxCostUsd: terminalImageBudgetUsd,
+        lifecycle: args.lifecycle,
+      });
+    } catch (error) {
+      throw imageSpendError(error, observedImageCostUsd);
+    }
+    const terminalIds = terminalImageShots.map((shot) => shot.id);
+    let terminalStillByTerminalId = exactCandidateByShot(terminalImageResult, terminalIds);
+    let terminalReviewsByTerminalId = new Map<string, CinematicKeyframeReview>();
+    imageReceipts = [...imageReceipts, terminalImageResult.billingReceipt];
+    observedImageCostUsd += terminalImageResult.costUsd;
+    if (args.keyframeGate) {
+      try {
+        const recovery = await reviewKeyframesBeforeVideo({
+          scenes: terminalScenes,
+          stillByShot: terminalStillByTerminalId,
+          maxImageAttempts,
+          imageCostUsd: terminalImageResult.costUsd,
+          imageMaxCostUsd: terminalImageBudgetUsd,
+          imageReceipts: [terminalImageResult.billingReceipt],
+          review: async ({ scene, stillKey }) => args.keyframeGate!.review({
+            scene,
+            stillKey,
+            stillUrl: await presignDownload(stillKey),
+          }),
+          renderReplacement: async ({ scene, repairId, prompt, seed, remainingCostUsd }) => {
+            const repairResult = await renderImages({
+              prefix: `${prefix}/images-terminal-keyframe-retry-${repairId}`,
+              shots: [asShot({ ...scene, id: repairId, imagePrompt: prompt, seed }, profile.id)],
+              profile: toNovitaPhaseProfile(profile, "image"),
+              nshard: 1,
+              maxConcurrent: 1,
+              jobs: "full",
+              maxCostUsd: remainingCostUsd,
+              lifecycle: args.lifecycle,
+            });
+            const stillKey = exactCandidateByShot(repairResult, [repairId]).get(repairId);
+            if (!stillKey) throw new Error(`novita terminal keyframe retry did not return ${repairId}`);
+            return { stillKey, costUsd: repairResult.costUsd, billingReceipt: repairResult.billingReceipt };
+          },
+        });
+        terminalStillByTerminalId = recovery.stillByShot;
+        terminalReviewsByTerminalId = recovery.keyframeReviewByShot;
+        observedImageCostUsd += recovery.imageCostUsd - terminalImageResult.costUsd;
+        imageReceipts = [...imageReceipts, ...recovery.imageReceipts.slice(1)];
+      } catch (error) {
+        throw imageSpendError(error, observedImageCostUsd);
+      }
+    }
+    for (const scene of args.scenes) {
+      const terminalId = terminalKeyframeId(scene.id);
+      const stillKey = terminalStillByTerminalId.get(terminalId);
+      if (!stillKey) continue;
+      const sceneId = safeId(scene.id);
+      terminalStillByShot.set(sceneId, stillKey);
+      const review = terminalReviewsByTerminalId.get(terminalId);
+      if (review) terminalKeyframeReviewByShot.set(sceneId, review);
+    }
+  }
   const videoShots = args.scenes.map((scene) => {
     const id = safeId(scene.id);
-    return asLtxDistilledVideoShot(scene, profile.id, stillByShot.get(id)!);
+    return asLtxDistilledVideoShot(scene, profile.id, stillByShot.get(id)!, terminalStillByShot.get(id));
   });
   let videoResult: NovitaRenderResult;
   try {
@@ -537,7 +644,16 @@ export async function renderNovitaGeneratedScenes(args: {
       clipKey,
       stillUrl: await presignDownload(stillKey),
       clipUrl: await presignDownload(clipKey),
+      ...(terminalStillByShot.has(id)
+        ? {
+            terminalStillKey: terminalStillByShot.get(id)!,
+            terminalStillUrl: await presignDownload(terminalStillByShot.get(id)!),
+          }
+        : {}),
       ...(keyframeReviewByShot.has(id) ? { keyframeReview: keyframeReviewByShot.get(id)! } : {}),
+      ...(terminalKeyframeReviewByShot.has(id)
+        ? { terminalKeyframeReview: terminalKeyframeReviewByShot.get(id)! }
+        : {}),
       ...(clipReviewByShot.has(id) ? { clipReview: clipReviewByShot.get(id)! } : {}),
     };
   }));

@@ -40,6 +40,9 @@ export const GeneratedFootageSceneManifestSchema = z
       continuitySeed: z.number().int().min(1).max(2_147_483_647).optional(),
       /** Required before LTX for every source-bound cinematic shot. */
       keyframeReview: CinematicKeyframeReviewSchema.optional(),
+      /** Reviewed endpoint image that conditioned LTX's final frame, when used. */
+      terminalStillKey: z.string().trim().min(1).optional(),
+      terminalKeyframeReview: CinematicKeyframeReviewSchema.optional(),
       /** Required after LTX before a source-bound cinematic clip can be cut. */
       clipReview: CinematicClipReviewSchema.optional(),
       /** Required for each outgoing source-bound cinematic cut before assembly. */
@@ -88,6 +91,35 @@ export const GeneratedFootageSceneManifestSchema = z
               path: ["items", index, "keyframeReview"],
               message: error instanceof Error ? error.message : "cinematic keyframe review did not pass its quality floor",
             });
+          }
+        }
+        if ((item.terminalStillKey === undefined) !== (item.terminalKeyframeReview === undefined)) {
+          ctx.addIssue({
+            code: z.ZodIssueCode.custom,
+            path: ["items", index],
+            message: "terminal LTX conditioning requires both its reviewed still and review receipt",
+          });
+        } else if (item.terminalKeyframeReview) {
+          const terminalSceneId = `${item.sceneId}-terminal`;
+          if (item.terminalKeyframeReview.sceneId !== terminalSceneId) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["items", index, "terminalKeyframeReview"],
+              message: "terminal keyframe review must bind this exact cinematic endpoint",
+            });
+          } else {
+            try {
+              assertCinematicKeyframeReview(item.terminalKeyframeReview, {
+                sceneId: terminalSceneId,
+                reviewedAgainstSceneIds: item.terminalKeyframeReview.reviewedAgainstSceneIds,
+              });
+            } catch (error) {
+              ctx.addIssue({
+                code: z.ZodIssueCode.custom,
+                path: ["items", index, "terminalKeyframeReview"],
+                message: error instanceof Error ? error.message : "terminal keyframe review did not pass its quality floor",
+              });
+            }
           }
         }
         if (!item.clipReview) {

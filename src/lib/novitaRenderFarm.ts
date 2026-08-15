@@ -61,6 +61,8 @@ export interface Shot {
   seed?: number;
   /** R2 key of the rendered still once the image phase has produced it. */
   stillKey?: string;
+  /** Optional R2 key of a reviewed target for LTX's final conditioned frame. */
+  endStillKey?: string;
   section?: string;
   storyFunction?: string;
   /** Authored story timecodes and lineage; preserved into render manifests. */

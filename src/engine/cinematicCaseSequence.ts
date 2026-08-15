@@ -197,6 +197,8 @@ export const CinematicGeneratedSceneSchema = z
     t0: z.number().finite().nonnegative(),
     t1: z.number().finite().positive(),
     still: text(1_800),
+    /** A separately generated target for LTX's final conditioned frame. */
+    terminalStill: text(1_800).optional(),
     motion: text(1_200),
     durationSec: z.number().finite().positive().max(10),
     cameraMove: CameraMoveSchema,
@@ -721,6 +723,21 @@ export function assertCinematicCaseSequence(
       .join(" ")
       .slice(0, 1_200)
       .trim();
+    // LTX supports a second, exact image conditioning input at the final
+    // frame. Unlike the motion prompt, this target gives a reviewed cinematic
+    // sequence a physical endpoint for a reveal or consequence beat.
+    const terminalStill = [
+      `Terminal visual: ${shot.lastFrameConstraint}`,
+      `Primary scene: ${shot.still}`,
+      narrativeLock,
+      castLock,
+      parentLock,
+      `Coverage ${shot.coveragePurpose}; visual mode ${shot.visualMode}; ${shot.cameraMove} ${shot.shotScale} ${shot.lens}.`,
+    ]
+      .filter(Boolean)
+      .join(" ")
+      .slice(0, 1_800)
+      .trim();
     return CinematicGeneratedSceneSchema.parse({
     id: shot.id,
     sequenceBeatId: beat.id,
@@ -730,6 +747,7 @@ export function assertCinematicCaseSequence(
     t0: shot.t0,
     t1: shot.t1,
     still,
+    terminalStill,
     motion,
     durationSec: shot.t1 - shot.t0,
     cameraMove: shot.cameraMove,

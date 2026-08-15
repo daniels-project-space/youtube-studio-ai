@@ -221,6 +221,25 @@ class WorkerContractTests(unittest.TestCase):
         for legacy in ("--gemma-root", "--distilled-checkpoint-path", "--checkpoint-path", "--distilled-lora", "--negative-prompt"):
             self.assertNotIn(legacy, command)
 
+        endpoint_command = worker.build_video_command(
+            job,
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
+            models,
+            Path("/output/endpoint.mp4"),
+            Path("/input/start.png"),
+            Path("/input/end.png"),
+        )
+        image_indices = [index for index, value in enumerate(endpoint_command) if value == "--image"]
+        self.assertEqual(len(image_indices), 2)
+        self.assertEqual(
+            endpoint_command[image_indices[0]:image_indices[0] + 4],
+            ["--image", "/input/start.png", "0", "1.0"],
+        )
+        self.assertEqual(
+            endpoint_command[image_indices[1]:image_indices[1] + 4],
+            ["--image", "/input/end.png", str(job["frames"] - 1), "1.0"],
+        )
+
         with self.assertRaisesRegex(ValueError, "unsupported LTX pipeline"):
             worker.build_video_command(job, {"pipeline": "two-stage-hq"}, models, Path("/output/nope.mp4"), None)
 

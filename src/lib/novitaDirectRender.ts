@@ -373,6 +373,7 @@ function makeRenderJobs(
         // two-hour worker lease. One worker has one bounded LTX clip.
         timeoutSeconds: 5_400,
         stillKey: shot.stillKey,
+        ...(shot.endStillKey ? { endStillKey: shot.endStillKey } : {}),
         ...(creativeAdapter ? { creativeAdapter } : {}),
       },
     };
@@ -662,6 +663,15 @@ async function prepareWorkerManifest(args: {
     const stillBytes = await getObjectBytes(stillKey);
     delete payload.stillKey;
     payload.input = { getUrl: await presignDownload(stillKey, { expiresIn: MANIFEST_URL_TTL_SECONDS }), sha256: hash(stillBytes) };
+    const endStillKey = String(payload.endStillKey ?? "").trim();
+    if (endStillKey) {
+      const endStillBytes = await getObjectBytes(endStillKey);
+      delete payload.endStillKey;
+      payload.endInput = {
+        getUrl: await presignDownload(endStillKey, { expiresIn: MANIFEST_URL_TTL_SECONDS }),
+        sha256: hash(endStillBytes),
+      };
+    }
   }
   const unsigned = {
     contractVersion: "2.0.0" as const,

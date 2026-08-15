@@ -105,6 +105,7 @@ const cinematicStore = {
       t1: (index + 1) * 3,
       durationSec: 3,
       still: `Cited archival evidence frame ${index + 1} in an anonymous documentary reconstruction.`,
+      terminalStill: `Cited consequence frame ${index + 1} preserves the anonymous role and evidence setting.`,
       motion: "Restrained camera motion preserves the cited evidence and the faceless role continuity.",
       negative: "no text, no likeness, no gore",
       cameraMove: index % 2 === 0 ? "dolly_push" : "truck_left",
@@ -145,6 +146,11 @@ assert.equal(
   "cinematic movement and first/last-frame constraints must survive the shared-plan adapter unchanged",
 );
 assert.equal(
+  cinematicPlan.scenes[0]!.terminalStill,
+  cinematicStore.cinematicGeneratedScenePlan.scenes[0]!.terminalStill,
+  "the reviewed terminal keyframe target must survive to the LTX handoff",
+);
+assert.equal(
   cinematicPlan.scenes[0]!.continuitySeed,
   cinematicStore.cinematicGeneratedScenePlan.scenes[0]!.continuitySeed,
   "the reviewed cinematic continuity seed must reach Novita still generation unchanged",
@@ -176,6 +182,7 @@ assert.match(
 );
 assert.doesNotMatch(source, /Lightricks\/LTX-2\.5/);
 assert.match(source, /imagePrompt: `\$\{scene\.still\}\. Absolutely NO text/);
+assert.match(source, /terminalImagePrompt/);
 assert.match(source, /motionPrompt: scene\.motion/);
 assert.match(source, /seed: scene\.continuitySeed/);
 assert.match(source, /LtxCreativeAdapterSelectionSchema\.optional\(\)\.parse/);

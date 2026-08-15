@@ -570,11 +570,12 @@ def validate_manifest(manifest: Any, expected_sha256: str) -> dict[str, Any]:
             negative_prompt = job.get("negativePrompt")
             if negative_prompt is not None:
                 raise ValueError(f"render job {job['id']} cannot use a negative prompt with LTX 2.5 distilled")
-            source = job.get("input")
-            if source is not None:
-                if not isinstance(source, dict) or not SHA256_RE.fullmatch(str(source.get("sha256") or "")):
-                    raise ValueError(f"render job {job['id']} has invalid input contract")
-                _parse_https_url(str(source.get("getUrl") or ""))
+            for field in ("input", "endInput"):
+                source = job.get(field)
+                if source is not None:
+                    if not isinstance(source, dict) or not SHA256_RE.fullmatch(str(source.get("sha256") or "")):
+                        raise ValueError(f"render job {job['id']} has invalid {field} contract")
+                    _parse_https_url(str(source.get("getUrl") or ""))
         artifact = _validate_delivery_target(job.get("artifact"), f"render job {job['id']} artifact")
         normalized_headers = {key.lower(): value for key, value in artifact.get("headers", {}).items()}
         expected_metadata = {
@@ -704,6 +705,7 @@ def build_video_command(
     models: dict[str, Path],
     output: Path,
     image_path: Path | None,
+    end_image_path: Path | None = None,
 ) -> list[str]:
     pipeline = str(profile["pipeline"])
     if pipeline != "distilled":
@@ -729,6 +731,8 @@ def build_video_command(
     ]
     if image_path:
         command.extend(["--image", str(image_path), "0", "1.0"])
+    if end_image_path:
+        command.extend(["--image", str(end_image_path), str(int(job["frames"]) - 1), "1.0"])
     adapter = job.get("creativeAdapter")
     if adapter is not None:
         adapter_id = str(adapter["id"])
@@ -793,7 +797,13 @@ def render_video(
         image_path = workdir / f"{job['id']}-input.png"
         download(str(source["getUrl"]), image_path, source.get("sha256"))
         _check_deadline(deadline_monotonic)
-    command = build_video_command(job, profile, models, output, image_path)
+    end_image_path: Path | None = None
+    if job.get("endInput"):
+        source = job["endInput"]
+        end_image_path = workdir / f"{job['id']}-end-input.png"
+        download(str(source["getUrl"]), end_image_path, source.get("sha256"))
+        _check_deadline(deadline_monotonic)
+    command = build_video_command(job, profile, models, output, image_path, end_image_path)
     timeout_seconds = int(job.get("timeoutSeconds", 7_200))
     if deadline_monotonic is not None:
         remaining_seconds = math.floor(deadline_monotonic - time.monotonic())

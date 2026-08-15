@@ -79,6 +79,8 @@ function withAdditionalObservedCost(error: unknown, costUsd: number): Error {
 export interface PlannedScene {
   id: string;
   still: string;
+  /** Optional reviewed target for LTX's final conditioned frame. */
+  terminalStill?: string;
   motion: string;
   durationSec: number;
   cameraMove: ShotPlan["cameraMove"];
@@ -242,6 +244,7 @@ function scenePlanFromCinematicCaseSequence(
     scenes: plan.scenes.map((scene) => ({
       id: scene.id,
       still: withoutTextSafetyInstruction(scene.still),
+      ...(scene.terminalStill ? { terminalStill: withoutTextSafetyInstruction(scene.terminalStill) } : {}),
       motion: scene.motion,
       durationSec: scene.durationSec,
       cameraMove: scene.cameraMove,
@@ -617,6 +620,16 @@ export const genFootage: Block = {
         // R2 clip order still matches this exact cinematic cut plan.
         id: scene.id,
         imagePrompt: `${scene.still}. Absolutely NO text, NO words, NO letters, NO watermark.`,
+        ...(scene.terminalStill
+          ? {
+              terminalImagePrompt:
+                `${scene.terminalStill}. Absolutely NO text, NO words, NO letters, NO watermark.`,
+              terminalKeyframeRequirements: [
+                ...(scene.keyframeRequirements ?? []),
+                "terminal frame must fulfill the reviewed reveal/consequence endpoint without changing mannequin identity, wardrobe, props, era, or evidence treatment",
+              ],
+            }
+          : {}),
         motionPrompt: scene.motion,
         ...(scene.negative ? { negativePrompt: scene.negative } : {}),
         durationSec: scene.durationSec,
@@ -685,6 +698,10 @@ export const genFootage: Block = {
           sceneId: scenes[index]!.id,
           clipKey: renderedScene.clipKey,
           ...(renderedScene.keyframeReview ? { keyframeReview: renderedScene.keyframeReview } : {}),
+          ...(renderedScene.terminalStillKey ? { terminalStillKey: renderedScene.terminalStillKey } : {}),
+          ...(renderedScene.terminalKeyframeReview
+            ? { terminalKeyframeReview: renderedScene.terminalKeyframeReview }
+            : {}),
           ...(renderedScene.clipReview ? { clipReview: renderedScene.clipReview } : {}),
           ...(transitionToNextReviewByIndex.has(index)
             ? { transitionToNextReview: transitionToNextReviewByIndex.get(index)! }
