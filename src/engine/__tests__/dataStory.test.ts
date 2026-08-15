@@ -25,8 +25,8 @@ assert.equal(hasNamedSourceAttribution("Data from NASA shows 42 launches in 2025
 assert.equal(hasNamedSourceAttribution("According to a study, the rate rose 42%."), false);
 assert.equal(hasNamedSourceAttribution("The rate rose 42% in 2024."), false);
 const moduleAdmission = dataStoryProductionReadiness();
-assert.equal(moduleAdmission.autonomous, false, "the current provider-backed insert planner must not be admitted as no-Gemini automation");
-assert.match(moduleAdmission.remediation, /non-Gemini visual-insert planner/);
+assert.equal(moduleAdmission.autonomous, false, "the source-first Narrated + Stock foundation is not yet admitted as autonomous automation");
+assert.match(moduleAdmission.remediation, /fingerprint-bound reviewed data-story source ledger/);
 
 const designed = designPipeline({
   family: "narrated_stock",
@@ -47,10 +47,10 @@ assert.deepEqual(inserts.insertTypes, ["big_stat", "line_chart", "bar_compare", 
 assert.equal(params(designed.pipeline, "script_gen").sourceAttributionRequired, true);
 assert.equal(params(designed.pipeline, "script_gen").dataRich, true);
 assert.equal(params(designed.pipeline, "qa_script").dataStoryContract, DATA_STORY_CONTRACT_VERSION);
-assert.equal(designed.productionReady, false, "the strict profile must carry its own module-level no-Gemini admission blocker");
+assert.equal(designed.productionReady, false, "the strict profile must carry its own source-first admission blocker");
 assert(
-  designed.runtimeBlockers.some((blocker) => blocker.includes("no-Gemini visual-insert planner")),
-  "the designer must surface the visual-insert planner admission gap distinctly from family readiness",
+  designed.runtimeBlockers.some((blocker) => blocker.includes("editor-reviewed source ledger")),
+  "the designer must surface the source-ledger admission gap distinctly from family readiness",
 );
 
 assert.throws(
@@ -64,7 +64,7 @@ assert.match(creatorSource, /previewBlocks\(family, toggles, nicheKey, dataStory
 assert.match(creatorSource, /const needsDataInserts = \(dataStory && supportsDataStoryFamily\(familyKey\)\)/);
 assert.match(creatorSource, /\{ dataStory: SOURCE_ATTRIBUTED_DATA_STORY \}/);
 assert.match(creatorSource, /At least 3 named-source numeric sentences are required/);
-assert.match(creatorSource, /Automatic production remains blocked until a non-Gemini visual-insert planner is registered/);
+assert.match(creatorSource, /Automatic production remains blocked until a source-first Narrated \+ Stock foundation is registered/);
 
 const routeSource = readFileSync(join(process.cwd(), "src/app/api/build-channel/route.ts"), "utf8");
 assert.match(routeSource, /dataStoryProductionReadiness\(\)/);

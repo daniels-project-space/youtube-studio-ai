@@ -14,7 +14,7 @@ import { visualInserts } from "@/trigger/blocks/insertBlocks";
 // directly — catalog evidence is `insertBlocks.ts:22,72,107` (the
 // verbatim-number integrity gate: sourceSpoken/digitGroups/anchorsSpoken).
 // Those three functions are module-private (not exported) and sit between
-// two live Gemini calls inside visualInserts.run(), so they cannot be
+// live planner calls inside visualInserts.run(), so they cannot be
 // imported directly nor exercised end-to-end without network. This test
 // extracts their bodies verbatim from the real source file and runs them in
 // isolation with realistic sentences — the actual "an insert may only
@@ -144,7 +144,7 @@ async function runBlockSkipPaths(): Promise<void> {
     "a vague unnamed study must not qualify a numeric claim for rendering",
   );
 
-  // No insertTypes enabled at all -> must no-op without touching Gemini.
+  // No insertTypes enabled at all -> must no-op without touching a planner.
   const noTypes = await visualInserts.run(baseCtx({
     params: {},
     store: { sentenceTimings: [{ text: "Revenue hit 534,000.", start: 0, end: 2 }] },
@@ -164,7 +164,7 @@ async function runBlockSkipPaths(): Promise<void> {
   assert.deepEqual(noTimings, { insertOverlays: [] }, "with insertTypes enabled but no timings, visual_inserts must no-op, never fabricate an overlay");
 
   // Narration speaks no numbers at all -> nothing to visualize, must no-op
-  // even with a Gemini key set (guarded here to avoid any accidental network
+  // even with a Google key set (guarded here to avoid any accidental network
   // call if a key happens to be present in this environment).
   const savedKey = process.env.GEMINI_API_KEY;
   try {
@@ -188,6 +188,26 @@ async function runBlockSkipPaths(): Promise<void> {
       unsourcedDataStory,
       { insertOverlays: [] },
       "a strict data-story sentence without a named source must no-op before any provider can invent an attribution",
+    );
+
+    await assert.rejects(
+      () => visualInserts.run(baseCtx({
+        params: {
+          insertTypes: ["big_stat"],
+          dataStoryContract: DATA_STORY_CONTRACT_VERSION,
+          requireNamedSource: true,
+          requireSpokenNumericAnchor: true,
+        },
+        store: {
+          sentenceTimings: [{
+            text: "According to the World Bank, inflation reached 3.2% in 2024.",
+            start: 0,
+            end: 2,
+          }],
+        },
+      })),
+      /data-story source ledger rejected/,
+      "a source-named sentence must still reject before planning when its reviewed ledger is absent",
     );
   } finally {
     if (savedKey === undefined) delete process.env.GEMINI_API_KEY;

@@ -19,10 +19,11 @@ import {
   hasNamedSourceAttribution,
   hasSourceAttributedDataStoryParams,
 } from "@/engine/dataStory";
+import { assertDataStorySourceLedger } from "@/engine/dataStorySourceLedger";
 import { join } from "node:path";
+import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
-import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { renderDataInsert } from "@/lib/remotionRender";
 
 const KINDS = ["big_stat", "line_chart", "bar_compare", "annotated_line", "lower_third"] as const;
@@ -117,11 +118,20 @@ export const visualInserts: Block = {
         : "visual_inserts: narration speaks no numbers — nothing to visualize");
       return { insertOverlays: [] };
     }
+    // A named source in the prose is not enough. Before Claude can select a
+    // chart, prove every source/number pairing against the reviewed ledger.
+    // This is intentionally fail-closed: a source-attributed data story must
+    // never silently degrade into an unreviewed data visual.
+    if (strictDataStory) {
+      assertDataStorySourceLedger(
+        ctx.store["dataStorySourceLedger"],
+        timings.map((timing) => timing.text).join(" "),
+      );
+    }
     // Keep evidence eligibility ahead of the planner/provider boundary. A
-    // strict data-story narration that lacks usable source-attributed claims is
-    // a deterministic no-op, not a request for a model to invent them.
-    if (!hasGeminiKey()) {
-      ctx.log("visual_inserts: no planner provider key — skipping");
+    // missing permitted planner is a no-op, never a fallback to Gemini.
+    if (!hasAnthropicKey()) {
+      ctx.log("visual_inserts: no permitted planner key — skipping");
       return { insertOverlays: [] };
     }
 
@@ -159,7 +169,7 @@ export const visualInserts: Block = {
 
     let plan: InsertPlanItem[] = [];
     try {
-      const raw = await geminiJson<{ inserts?: InsertPlanItem[] }>({
+      const raw = await claudeJson<{ inserts?: InsertPlanItem[] }>({
         prompt:
           `You are the channel's MOTION-GRAPHICS DIRECTOR for a ${niche || "YouTube"} video: "${topic}".\n` +
           `These narration sentences speak numbers (sentenceIdx: text):\n` +
@@ -182,6 +192,7 @@ export const visualInserts: Block = {
           `"anchorValues":number[]|string[]}]}.`,
         maxTokens: 1800,
         temperature: 0.4,
+        log: ctx.log,
       });
       plan = Array.isArray(raw.inserts) ? raw.inserts : [];
     } catch (e) {

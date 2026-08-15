@@ -10,6 +10,7 @@ const topicSelect = source("src/trigger/blocks/lofiBlocks.ts");
 const metadata = source("src/trigger/blocks/intelligenceBlocks.ts");
 const weekAhead = source("src/trigger/planWeekAhead.ts");
 const narrated = source("src/trigger/blocks/narratedBlocks.ts");
+const inserts = source("src/trigger/blocks/insertBlocks.ts");
 const compliance = source("src/trigger/blocks/complianceBlocks.ts");
 const metacraft = source("src/lib/metacraft.ts");
 
@@ -18,6 +19,7 @@ for (const [name, implementation] of [
   ["metadata", metadata],
   ["plan-week-ahead", weekAhead],
   ["narrated text enhancements", narrated],
+  ["visual inserts", inserts],
   ["compliance", compliance],
   ["metadata package", metacraft],
 ] as const) {
@@ -30,6 +32,8 @@ for (const [name, implementation] of [
 
 assert.match(topicSelect, /hasAnthropicKey/, "topic_select must require the permitted text planner");
 assert.match(metadata, /hasAnthropicKey/, "metadata must use the permitted text planner");
+assert.match(inserts, /hasAnthropicKey/, "visual inserts must use the permitted text planner");
+assert.match(inserts, /assertDataStorySourceLedger/, "strict data stories must bind visual inserts to the reviewed source ledger");
 assert.match(weekAhead, /hasAnthropicKey/, "week-ahead planning must use the permitted text planner");
 assert.match(narrated, /claudeJson/, "narrated quality enhancements must use the permitted text planner");
 assert.match(compliance, /claudeJson/, "compliance review must use the permitted text planner");

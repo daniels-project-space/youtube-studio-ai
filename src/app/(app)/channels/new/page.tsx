@@ -852,7 +852,7 @@ export default function NewChannelWizard() {
                   <input type="checkbox" checked={dataStory} onChange={(event) => setDataStory(event.target.checked)} />
                   <span>
                     {dataStorySuggested ? "Advisor recommended this for the described channel. " : ""}
-                    Enable chart-led statistics and comparisons only when every rendered number is spoken in a sentence naming a concrete source. At least 3 named-source numeric sentences are required; un-attributed figures do not render. Automatic production remains blocked until a non-Gemini visual-insert planner is registered.
+                    Enable chart-led statistics and comparisons only when every rendered number is spoken in a sentence naming a concrete source. At least 3 named-source numeric sentences are required; un-attributed figures do not render. Automatic production remains blocked until a source-first Narrated + Stock foundation is registered.
                   </span>
                 </label>
               </Row>

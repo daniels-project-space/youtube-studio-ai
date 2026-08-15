@@ -41,9 +41,10 @@ export interface DataStoryAutomationAdmission {
 export const DATA_STORY_AUTOMATION_ADMISSION: DataStoryAutomationAdmission = Object.freeze({
   autonomous: false,
   blockers: [
-    "Source-attributed Data Story: no-Gemini visual-insert planner is not registered; visual_inserts still uses provider-backed insert planning.",
+    "Source-attributed Data Story requires a current editor-reviewed source ledger bound to the exact narration before source-backed charts can be planned.",
+    "Narrated + Stock Footage has not yet registered a complete source-first planner and channel-inception foundation for autonomous admission.",
   ],
-  remediation: "Register a non-Gemini visual-insert planner that preserves the named-source and spoken-anchor contract before admitting automatic production.",
+  remediation: "Provide a fingerprint-bound reviewed data-story source ledger, then register the complete Narrated + Stock Footage source-first planner and inception foundation before admitting automatic production.",
 });
 
 /**
