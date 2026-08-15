@@ -32,7 +32,10 @@ const NAV_GROUPS = [
   },
   {
     label: "Production",
-    items: [{ href: "/golden", label: "Golden modules", icon: <IconGolden /> }],
+    items: [
+      { href: "/golden", label: "Golden modules", icon: <IconGolden /> },
+      { href: "/casefile", label: "Casefile desk", icon: <IconSpark /> },
+    ],
   },
   {
     label: "System",

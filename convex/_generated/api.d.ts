@@ -15,6 +15,7 @@ import type * as channelArchives from "../channelArchives.js";
 import type * as channelLock from "../channelLock.js";
 import type * as channelPublishPolicies from "../channelPublishPolicies.js";
 import type * as channels from "../channels.js";
+import type * as casefileEpisodes from "../casefileEpisodes.js";
 import type * as competitors from "../competitors.js";
 import type * as contentPlan from "../contentPlan.js";
 import type * as crons from "../crons.js";
@@ -54,6 +55,7 @@ declare const fullApi: ApiFromModules<{
   channelLock: typeof channelLock;
   channelPublishPolicies: typeof channelPublishPolicies;
   channels: typeof channels;
+  casefileEpisodes: typeof casefileEpisodes;
   competitors: typeof competitors;
   contentPlan: typeof contentPlan;
   crons: typeof crons;

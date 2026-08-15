@@ -1263,6 +1263,27 @@ export default defineSchema({
     .index("by_owner_status", ["ownerId", "status"])
     .index("by_channel_created", ["channelId", "createdAt"]),
 
+  // A factual cinematic episode is deliberately separate from a normal
+  // channel run. It stores only immutable review handoffs and can never
+  // authorize a provider call or public/scheduled upload by itself.
+  casefileEpisodes: defineTable({
+    ownerId: v.string(),
+    caseId: v.string(),
+    status: v.union(
+      v.literal("source_admitted"),
+      v.literal("awaiting_evidence_review"),
+      v.literal("awaiting_cinematic_direction"),
+      v.literal("awaiting_cinematic_review"),
+      v.literal("render_admitted"),
+    ),
+    workflow: v.any(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_case", ["ownerId", "caseId"])
+    .index("by_owner_status", ["ownerId", "status"])
+    .index("by_owner_updated", ["ownerId", "updatedAt"]),
+
   // Single project-wide "what are we working toward right now" record, so
   // both automation and Daniel can query current intent/priorities. Not
   // per-owner scoped (one project, one active goal) — history is simply the

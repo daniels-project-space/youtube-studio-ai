@@ -344,6 +344,22 @@ export function planCinematicCaseSequenceDraft(args: {
     // in the scene; otherwise we stay with the first cited documentary/map
     // treatment instead of inventing a dramatic reenactment.
     const binding = related.find(({ binding }) => binding.treatment === "neutral_reenactment")?.binding ?? related[0]!.binding;
+    // A mannequin reconstruction is never its own evidence. Every causal beat
+    // that earns one must also retain an independently admitted document, map,
+    // or timeline treatment for the source-proof cut. Without this companion
+    // binding the generated four-shot grammar would only discover the problem
+    // at final admission, after an editor had reviewed an unusable draft.
+    const hasSourceProofTreatment = related.some(({ binding: candidate }) =>
+      candidate.treatment === "document_abstraction" ||
+      candidate.treatment === "map" ||
+      candidate.treatment === "timeline",
+    );
+    if (!hasSourceProofTreatment) {
+      throw new Error(
+        `cinematic draft: Story Spine beat ${parents.map((parent) => parent.id).join(", ")} has a reconstruction treatment but no admitted document/map/timeline source-proof binding; ` +
+          "add an evidence treatment to casefile_evidence_shot_map before drafting coverage",
+      );
+    }
     const t0 = parents[0]!.t0;
     const t1 = parents.at(-1)!.t1;
     const duration = t1 - t0;
