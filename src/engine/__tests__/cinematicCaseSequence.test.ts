@@ -516,6 +516,11 @@ async function main() {
     "private_human_editorial_review_only",
   );
   assert.equal((patch.cinematicGeneratedScenePlan as { scenes: unknown[] }).scenes.length, 8);
+  assert.match(
+    (patch.cinematicGeneratedScenePlan as { scenes: { diegeticSoundscape?: string }[] }).scenes[0]!.diegeticSoundscape ?? "",
+    /Diegetic only:/,
+    "each generated cinematic take must carry its own physical sound direction into LTX",
+  );
   assert.match(logs.join("\n"), /awaiting human editorial signature/);
   assert.match(logs.join("\n"), /reviewer signature bound to exact draft/);
   assert.match(logs.join("\n"), /provider calls: 0/);

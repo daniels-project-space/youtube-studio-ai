@@ -107,6 +107,7 @@ const cinematicStore = {
       still: `Cited archival evidence frame ${index + 1} in an anonymous documentary reconstruction.`,
       terminalStill: `Cited consequence frame ${index + 1} preserves the anonymous role and evidence setting.`,
       motion: "Restrained camera motion preserves the cited evidence and the faceless role continuity.",
+      diegeticSoundscape: "Paper handling and restrained archive room tone only; no dialogue or score.",
       negative: "no text, no likeness, no gore",
       cameraMove: index % 2 === 0 ? "dolly_push" : "truck_left",
       shotScale: index % 2 === 0 ? "close" : "wide",
@@ -144,6 +145,11 @@ assert.equal(
   cinematicPlan.scenes[0]!.motion,
   cinematicStore.cinematicGeneratedScenePlan.scenes[0]!.motion,
   "cinematic movement and first/last-frame constraints must survive the shared-plan adapter unchanged",
+);
+assert.equal(
+  cinematicPlan.scenes[0]!.diegeticSoundscape,
+  cinematicStore.cinematicGeneratedScenePlan.scenes[0]!.diegeticSoundscape,
+  "shot-specific diegetic sound direction must survive the shared-plan adapter unchanged",
 );
 assert.equal(
   cinematicPlan.scenes[0]!.terminalStill,

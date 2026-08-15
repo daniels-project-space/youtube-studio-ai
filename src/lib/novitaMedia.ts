@@ -33,6 +33,8 @@ export interface NovitaGeneratedScene {
   /** Optional reviewed target image prompt for LTX's final conditioned frame. */
   terminalImagePrompt?: string;
   motionPrompt: string;
+  /** Diegetic-only sound direction passed to the shared LTX I2V contract. */
+  diegeticSoundscape?: string;
   durationSec: number;
   negativePrompt?: string;
   seed?: number;
@@ -178,6 +180,7 @@ function asShot(
     id: safeId(scene.id),
     prompt: scene.imagePrompt,
     motion: scene.motionPrompt,
+    diegeticSoundscape: scene.diegeticSoundscape,
     seconds: scene.durationSec,
     cameraMove: scene.cameraMove ?? "static",
     shotScale: scene.shotScale ?? "medium",
@@ -965,6 +968,8 @@ export async function renderNovitaI2V(args: {
   prefix: string;
   id: string;
   prompt: string;
+  /** Diegetic-only sound direction for this direct I2V take. */
+  diegeticSoundscape?: string;
   imageKey?: string;
   imageUrl?: string;
   /** Optional reviewed/intentional LTX final-frame image. */
@@ -1011,6 +1016,7 @@ export async function renderNovitaI2V(args: {
     id,
     imagePrompt: args.prompt,
     motionPrompt: args.prompt,
+    diegeticSoundscape: args.diegeticSoundscape,
     durationSec: args.durationSec ?? 5,
     negativePrompt: args.negativePrompt,
     seed: args.seed,

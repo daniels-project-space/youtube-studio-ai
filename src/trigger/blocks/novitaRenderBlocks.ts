@@ -1030,6 +1030,11 @@ export const novitaRenderVideo: Block = {
         stillKey: selectedStill.stillKey,
         ...(creativeAdapter ? { creativeAdapter } : {}),
         ...(terminalAnchor ? { endStillKey: terminalAnchor.terminalStillKey } : {}),
+        diegeticSoundscape: [
+          `Only location tone and physical sounds motivated by the visible shot action: ${spec.motionPrompt}`,
+          directive?.motionPrompt,
+          "No dialogue, narration, score, lyrics, or invented off-screen event.",
+        ].filter(Boolean).join(" ").slice(0, 900),
         prompt: [spec.motionPrompt, directive?.motionPrompt].filter(Boolean).join("\n\n"),
         motion: [
           spec.motionPrompt,

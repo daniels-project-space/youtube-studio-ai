@@ -203,6 +203,8 @@ export const CinematicGeneratedSceneSchema = z
     /** A separately generated target for LTX's final conditioned frame. */
     terminalStill: text(1_800).optional(),
     motion: text(1_200),
+    /** Shot-specific physical sound direction; final narration is mixed separately. */
+    diegeticSoundscape: text(900),
     durationSec: z.number().finite().min(3).max(10),
     cameraMove: CameraMoveSchema,
     shotScale: ShotScaleSchema,
@@ -744,6 +746,21 @@ export function assertCinematicCaseSequence(
       .join(" ")
       .slice(0, 1_800)
       .trim();
+    const soundRole = {
+      spatial_anchor: "the location tone and only environmental movement visible in the frame",
+      mannequin_action: "footsteps, fabric movement, and contact with only the visible key prop",
+      relationship: "the shared location tone and only physical interaction between the visible figures",
+      evidence_insert: "paper, film, map, or archival-object movement only when that evidence is visible",
+      contradiction: "restrained location tone and the exact physical moment that makes the contradiction legible",
+      consequence: "the visible physical consequence and the surrounding location tone",
+      reaction: "held location tone, subtle clothing movement, and any visible object settling",
+      aftermath: "residual location tone and the physical aftermath visible in the frame",
+    } as const;
+    const diegeticSoundscape = [
+      `Diegetic only: ${soundRole[shot.coveragePurpose]}.`,
+      `Motivate sound solely from this visible action: ${shot.motion}`,
+      "No dialogue, narration, score, lyrics, or invented off-screen event.",
+    ].join(" ").slice(0, 900).trim();
     return CinematicGeneratedSceneSchema.parse({
     id: shot.id,
     sequenceBeatId: beat.id,
@@ -755,6 +772,7 @@ export function assertCinematicCaseSequence(
     still,
     terminalStill,
     motion,
+    diegeticSoundscape,
     durationSec: shot.t1 - shot.t0,
     cameraMove: shot.cameraMove,
     shotScale: shot.shotScale,

@@ -82,6 +82,8 @@ export interface PlannedScene {
   /** Optional reviewed target for LTX's final conditioned frame. */
   terminalStill?: string;
   motion: string;
+  /** Physical sound that belongs in this take; narration is mixed separately. */
+  diegeticSoundscape?: string;
   durationSec: number;
   cameraMove: ShotPlan["cameraMove"];
   shotScale: ShotPlan["shotScale"];
@@ -170,6 +172,10 @@ function scenePlanFromStorySpine(
       id: shot.id,
       still: withoutTextSafetyInstruction(spec?.keyframePrompt ?? shot.prompt),
       motion: spec?.motionPrompt ?? shot.motion,
+      diegeticSoundscape: [
+        `Only location tone and physical sounds motivated by the visible action: ${spec?.motionPrompt ?? shot.motion}.`,
+        "No dialogue, narration, score, lyrics, or invented off-screen event.",
+      ].join(" ").slice(0, 900),
       durationSec: boundedSceneDuration(shot.seconds, defaultDurationSec),
       cameraMove: shot.cameraMove,
       shotScale: shot.shotScale,
@@ -205,6 +211,11 @@ function scenePlanFromManifest(
       `${scene.visualState.mood} mood`,
     ].filter(Boolean).join(". "),
     motion: `${MANIFEST_CAMERA_MOVE[scene.camera.move].replaceAll("_", " ")} while ${scene.visualState.action}. Preserve the same setting, characters, props, and mood.`,
+    diegeticSoundscape: [
+      `Only location tone and physical sounds motivated by ${scene.visualState.action}`,
+      scene.visualState.props.length ? `and the visible props ${scene.visualState.props.join(", ")}` : "",
+      ". No dialogue, narration, score, lyrics, or invented off-screen event.",
+    ].filter(Boolean).join(" ").slice(0, 900),
     durationSec: boundedSceneDuration(scene.t1 - scene.t0, defaultDurationSec),
     cameraMove: MANIFEST_CAMERA_MOVE[scene.camera.move],
     shotScale: scene.camera.framing,
@@ -246,6 +257,7 @@ function scenePlanFromCinematicCaseSequence(
       still: withoutTextSafetyInstruction(scene.still),
       ...(scene.terminalStill ? { terminalStill: withoutTextSafetyInstruction(scene.terminalStill) } : {}),
       motion: scene.motion,
+      diegeticSoundscape: scene.diegeticSoundscape,
       durationSec: scene.durationSec,
       cameraMove: scene.cameraMove,
       shotScale: scene.shotScale,
@@ -635,6 +647,7 @@ export const genFootage: Block = {
             }
           : {}),
         motionPrompt: scene.motion,
+        ...(scene.diegeticSoundscape ? { diegeticSoundscape: scene.diegeticSoundscape } : {}),
         ...(scene.negative ? { negativePrompt: scene.negative } : {}),
         durationSec: scene.durationSec,
         cameraMove: scene.cameraMove,
