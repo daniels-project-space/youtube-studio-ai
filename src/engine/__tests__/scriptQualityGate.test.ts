@@ -30,6 +30,9 @@ assert.match(narratedBlocks, /script_gen FAILED: independent narrative critic un
 assert.match(narratedBlocks, /qa_script FAILED: independent narrative critic unavailable/);
 assert.match(narratedBlocks, /hook_craft FAILED: independent hook critic unavailable/);
 assert.match(narratedBlocks, /stage: "hook_craft"/);
+assert.match(narratedBlocks, /if \(critiqueEnabled && !loop\.accepted\) \{/);
+assert.match(narratedBlocks, /falling back to primary footage rather than materializing unreviewed imagery/);
+assert.match(narratedBlocks, /could not be independently verified.*skipping/);
 assert.doesNotMatch(narratedBlocks, /return \{ scriptApproved: false \}/);
 
 console.log("script quality admission gate tests passed");

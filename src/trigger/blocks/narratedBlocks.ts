@@ -1420,8 +1420,11 @@ export const entityImagery: Block = {
                 ctx.log(`entity_imagery: image for "${e}" did NOT verify (${v.reason ?? ""}) â€” skipping`);
                 continue;
               }
-            } catch {
-              /* verification failed â†’ keep the image rather than drop the entity */
+            } catch (error) {
+              ctx.log(
+                `entity_imagery: image for "${e}" could not be independently verified (${error instanceof Error ? error.message : error}) — skipping`,
+              );
+              continue;
             }
             resolved.push({ entity: e, url: wi.url, ...(wi.attribution ? { attribution: wi.attribution } : {}) });
           } catch (err) {
@@ -1476,7 +1479,10 @@ export const entityImagery: Block = {
           });
           observedCostUsd += PRICE.boundedTextPassUsd;
           const issues = (Array.isArray(verdict.issues) ? verdict.issues : []).filter(Boolean).slice(0, 4);
-          const rejected = verdict.pass === false && issues.length > 0;
+          const rejected = verdict.pass === false;
+          const rejectionIssues = issues.length
+            ? issues
+            : ["independent entity-imagery critic rejected the set without usable remediation"];
           const score = Number.isFinite(verdict.score)
             ? Math.max(0, Math.min(1, Number(verdict.score)))
             : rejected ? 0.4 : 1;
@@ -1484,21 +1490,39 @@ export const entityImagery: Block = {
             ctx.log(
               `entity_imagery: selection ${iter} rejected by the critic` +
               (iter < 2 ? " — re-selecting with the defects fed back" : " — iteration cap reached"),
-              { issues },
+              { issues: rejectionIssues },
             );
           }
           return rejected
-            ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues }
+            ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues: rejectionIssues }
             : { score, pass: true, issues: [] };
         } catch (e) {
-          ctx.log(`entity_imagery: critic unavailable (kept selection): ${e instanceof Error ? e.message : e}`);
-          return { score: iter === 1 ? 1 : 0, pass: true, issues: [] };
+          return {
+            score: 0,
+            pass: false,
+            issues: [
+              `independent entity-imagery critic unavailable (${e instanceof Error ? e.message : e})`,
+            ],
+          };
         }
       },
     });
 
-    // Materialize ONLY the winning set. Ken Burns encoding is local compute, so
+    // Materialize ONLY an independently accepted set. Ken Burns encoding is local compute, so
     // deferring it out of `produce` means a rejected candidate never pays for it.
+    if (critiqueEnabled && !loop.accepted) {
+      ctx.log(
+        `entity_imagery: no accepted entity set after ${loop.iterations} attempt(s); ` +
+          "falling back to primary footage rather than materializing unreviewed imagery",
+        { issues: loop.critique.issues.slice(0, 4) },
+      );
+      return {
+        entityClips: [],
+        entityKeys: [],
+        attributions: [],
+        [COST_PATCH_KEY]: observedCostUsd,
+      };
+    }
     const tmp = await makeRunTempDir(ctx.runId);
     let i = 0;
     for (const r of loop.value.resolved) {
