@@ -32,6 +32,7 @@ import {
   assertDataStorySourceLedger,
   dataStorySourceLedgerPrompt,
 } from "@/engine/dataStorySourceLedger";
+import { casefileNarrativeGroundingPrompt } from "@/engine/casefileNarrativeGrounding";
 import {
   channelCritiqueBrief,
   produceAndCritique,
@@ -321,9 +322,14 @@ export const scriptGen: Block = {
   produces: ["script", "narrationText"],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
-    const sourceGrounding = hasSourceAttributedDataStoryParams(ctx.params)
-      ? dataStorySourceLedgerPrompt(assertDataStorySourceLedger(ctx.store["dataStorySourceLedger"]))
-      : undefined;
+    const sourceGrounding = [
+      hasSourceAttributedDataStoryParams(ctx.params)
+        ? dataStorySourceLedgerPrompt(assertDataStorySourceLedger(ctx.store["dataStorySourceLedger"]))
+        : undefined,
+      ctx.store["casefileSourcePacket"] !== undefined
+        ? casefileNarrativeGroundingPrompt(ctx.store["casefileSourcePacket"])
+        : undefined,
+    ].filter((value): value is string => Boolean(value)).join("\n\n") || undefined;
     // RENDER-GROUP REUSE: a language sibling translates the base script instead of
     // regenerating it (reuses the base's structure + research; only words change).
     const reuseScript = ctx.store["reuseScript"] as Script | undefined;

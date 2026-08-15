@@ -227,6 +227,8 @@ export interface HookCraftArgs {
   /** Channel voice is ElevenLabs v3 — the cold open may carry 1-2 performed
    * audio tags from the archetype's palette (otherwise brackets are banned). */
   voiceTags?: boolean;
+  /** Immutable source constraints supplied by an admitted evidence module. */
+  sourceGrounding?: string;
   log?: (msg: string) => void;
 }
 
@@ -343,6 +345,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
           `"loop":string (ONE sentence: the exact promise this cold open makes — what the video must pay off)}]}.`,
         `VIDEO TOPIC — the open must be SPECIFICALLY about this; a line that could open any video is a failure:`,
         `"${a.topic}"`,
+        a.sourceGrounding?.trim() ?? "",
         a.title ? `VIDEO TITLE (the promise the viewer clicked): "${a.title}"` : "",
         registerClause(a),
         a.playbookDigest ?? "",
@@ -389,6 +392,7 @@ export async function craftHook(a: HookCraftArgs): Promise<CraftedHook> {
         const j = await claudeJson<{ verdicts?: HookVerdict[]; best?: number }>({
           prompt: [
             `You are a brutal YouTube retention judge. Topic: "${a.topic}".`,
+            a.sourceGrounding?.trim() ?? "",
             a.title ? `Video title (the clicked promise): "${a.title}".` : "",
             registerClause(a),
             `Score EACH candidate cold open 1-10 per dimension:`,

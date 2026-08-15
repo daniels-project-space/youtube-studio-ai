@@ -792,6 +792,7 @@ export async function synthScript(
       : undefined,
     language: req.language,
     voiceTags: req.voiceTags,
+    sourceGrounding: req.sourceGrounding,
     log: (m) => log(m),
   });
 
