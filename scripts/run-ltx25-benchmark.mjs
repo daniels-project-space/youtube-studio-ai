@@ -414,9 +414,17 @@ async function main() {
     throw new Error("admitted LTX model manifest is not the exact official LTX 2.5 file set");
   }
   const productCatalog = await novita(`/products?productName=4090&billingMethod=spot&gpuNum=1&clusterId=${encodeURIComponent(CLUSTER_ID)}`);
-  const products = Array.isArray(productCatalog.products) ? productCatalog.products : Array.isArray(productCatalog.data) ? productCatalog.data : [];
+  const products = Array.isArray(productCatalog.products)
+    ? productCatalog.products
+    : Array.isArray(productCatalog.data)
+      ? productCatalog.data
+      : Array.isArray(productCatalog.data?.list) ? productCatalog.data.list : [];
   const product = products.find((item) => item?.id === PRODUCT_ID);
-  const spotRate = Number(product?.spotPriceUsdPerHour ?? product?.spotPrice ?? 0.17);
+  const rawSpotRate = Number(product?.spotPriceUsdPerHour ?? product?.spotPrice ?? 0.17);
+  // Novita's OpenAPI serializes spotPrice as USD × 100,000, while a future
+  // normalized client may supply USD directly.  Accept either representation
+  // but always budget in USD/hour.
+  const spotRate = rawSpotRate > 10 ? rawSpotRate / 100_000 : rawSpotRate;
   if (!Number.isFinite(spotRate) || spotRate <= 0) throw new Error("Novita did not provide a usable RTX 4090 spot rate");
   const remainingSeconds = Math.floor(((TOTAL_MAX_USD - STAGE_MAX_USD) / spotRate) * 3_600) - PROBE_MAX_SECONDS;
   const phaseMaxSeconds = Math.min(DEFAULT_PHASE_MAX_SECONDS, Math.floor(remainingSeconds / 2));
