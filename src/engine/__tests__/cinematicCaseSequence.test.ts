@@ -318,8 +318,13 @@ async function main() {
     draft.content.beats.flatMap((beat) => beat.shots).every((shot) => shot.t1 - shot.t0 >= 3),
     "every generated Casefile coverage shot must retain LTX's minimum renderable duration rather than relying on post-render trimming",
   );
-  assert.match(draft.content.beats[0]?.shots[2]?.still ?? "", /charcoal wool coat/i);
-  assert.match(draft.content.beats[0]?.shots[2]?.motion ?? "", /without revealing a face/i);
+  assert.equal(draft.content.beats[0]?.shots.length, 4, "a 12s causal beat earns four purposeful renderable coverage shots");
+  assert.equal(draft.content.beats[0]?.shots[1]?.coveragePurpose, "mannequin_action");
+  assert.equal(draft.content.beats[0]?.shots[1]?.visualMode, "abstract_reenactment");
+  assert.match(draft.content.beats[0]?.shots[1]?.still ?? "", /charcoal wool coat/i);
+  assert.match(draft.content.beats[0]?.shots[1]?.motion ?? "", /without revealing a face/i);
+  assert.equal(draft.content.beats[0]?.shots[2]?.coveragePurpose, "evidence_insert");
+  assert.equal(draft.content.beats[0]?.shots[3]?.coveragePurpose, "reaction");
   const draftReview = {
     id: "cinematic-sequence-review-vault-closure-draft",
     decision: "approved" as const,
@@ -510,7 +515,7 @@ async function main() {
     (patch.cinematicCaseSequenceAdmission as { release: string }).release,
     "private_human_editorial_review_only",
   );
-  assert.equal((patch.cinematicGeneratedScenePlan as { scenes: unknown[] }).scenes.length, 6);
+  assert.equal((patch.cinematicGeneratedScenePlan as { scenes: unknown[] }).scenes.length, 8);
   assert.match(logs.join("\n"), /awaiting human editorial signature/);
   assert.match(logs.join("\n"), /reviewer signature bound to exact draft/);
   assert.match(logs.join("\n"), /provider calls: 0/);

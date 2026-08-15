@@ -66,10 +66,12 @@ type EvidenceBinding = CasefileEvidenceShotMap["claimMappings"][number]["binding
 
 // The locked LTX profile renders 3–10 second source clips. A Fern-style
 // coverage beat therefore needs enough narrated runway for three purposeful
-// shots; generating three 1–2 second clips and trimming them in assembly is
-// neither cinematic nor a truthful use of the approved cut plan.
+// shots; beats with twelve or more seconds earn a fourth consequence/reaction
+// cut. Generating 1–2 second clips and trimming them in assembly is neither
+// cinematic nor a truthful use of the approved cut plan.
 const MIN_LTX_SHOT_SEC = 3;
 const MIN_CINEMATIC_BEAT_SEC = MIN_LTX_SHOT_SEC * 3;
+const FOUR_SHOT_CINEMATIC_BEAT_SEC = MIN_LTX_SHOT_SEC * 4;
 const TARGET_CINEMATIC_BEAT_SEC = 12;
 
 function hash(value: unknown): string {
@@ -94,16 +96,18 @@ function roleFor(index: number, total: number): DraftBeat["narrativeRole"] {
   return "investigation";
 }
 
-function modePlan(binding: EvidenceBinding): {
+function modePlan(binding: EvidenceBinding, coverageCount: 3 | 4): {
   readonly modes: readonly DraftCoverageShot["visualMode"][];
   readonly abstractDisclosure?: string;
 } {
+  const withAftermath = (modes: readonly DraftCoverageShot["visualMode"][]) =>
+    coverageCount === 4 ? [...modes, "atmosphere"] as const : modes;
   switch (binding.treatment) {
     case "map":
     case "timeline":
-      return { modes: ["spatial_reconstruction", "atmosphere", "source_proof"] };
+      return { modes: withAftermath(["spatial_reconstruction", "atmosphere", "source_proof"]) };
     case "document_abstraction":
-      return { modes: ["atmosphere", "atmosphere", "source_proof"] };
+      return { modes: withAftermath(["atmosphere", "atmosphere", "source_proof"]) };
     case "neutral_reenactment":
       if (!binding.reconstructionDisclosure) {
         throw new Error(
@@ -112,7 +116,10 @@ function modePlan(binding: EvidenceBinding): {
         );
       }
       return {
-        modes: ["spatial_reconstruction", "atmosphere", "abstract_reenactment"],
+        // The second visual is the explicitly declared mannequin action.
+        // Keeping it beside the matching coverage purpose makes wardrobe and
+        // movement locks part of the action, rather than a decorative insert.
+        modes: withAftermath(["spatial_reconstruction", "abstract_reenactment", "source_proof"]),
         abstractDisclosure: binding.reconstructionDisclosure,
       };
   }
@@ -128,7 +135,12 @@ function motivatedMove(
     ? parent.cameraMove
     : slot === 1
       ? treatment === "timeline" || treatment === "map" ? "truck_right" : treatment === "neutral_reenactment" ? "dolly_push" : "dolly_pull"
-      : "static";
+      : slot === 2
+        // The evidence insert is held long enough to be understood, not swept
+        // past as B-roll. The fourth cut, when the narration has earned it,
+        // deliberately restores spatial consequence or emotional residue.
+        ? "static"
+        : treatment === "timeline" || treatment === "map" ? "truck_left" : "dolly_pull";
   const twoBefore = prior.at(-2)?.cameraMove;
   const oneBefore = prior.at(-1)?.cameraMove;
   if (twoBefore === base && oneBefore === base) {
@@ -142,17 +154,92 @@ function motivatedMove(
 function beatTension(
   role: DraftBeat["narrativeRole"],
   isFinalBeat: boolean,
+  coverageCount: 3 | 4,
 ): readonly DraftCoverageShot["tensionState"][] {
-  if (role === "cold_open") return ["question", "pressure", isFinalBeat ? "residue" : "uncertainty"];
-  if (role === "reveal") return ["reversal", "release", "release"];
-  if (role === "closing_residue") return ["release", "residue", "residue"];
-  return ["orientation", "pressure", "uncertainty"];
+  if (role === "cold_open") {
+    return coverageCount === 4
+      ? ["question", "pressure", "uncertainty", isFinalBeat ? "residue" : "pressure"]
+      : ["question", "pressure", isFinalBeat ? "residue" : "uncertainty"];
+  }
+  if (role === "reveal") {
+    return coverageCount === 4
+      ? ["uncertainty", "pressure", "reversal", "release"]
+      : ["reversal", "release", "release"];
+  }
+  if (role === "closing_residue") {
+    return coverageCount === 4
+      ? ["release", "uncertainty", "release", "residue"]
+      : ["release", "residue", "residue"];
+  }
+  return coverageCount === 4
+    ? ["orientation", "pressure", "uncertainty", "pressure"]
+    : ["orientation", "pressure", "uncertainty"];
 }
 
-function beatCuts(role: DraftBeat["narrativeRole"]): readonly DraftCoverageShot["cutReason"][] {
-  if (role === "reveal") return ["new_relationship", "reveal", "reveal"];
-  if (role === "closing_residue") return ["new_fact", "breath", "breath"];
-  return ["new_location", "physical_action", "new_fact"];
+function beatCuts(
+  role: DraftBeat["narrativeRole"],
+  coverageCount: 3 | 4,
+): readonly DraftCoverageShot["cutReason"][] {
+  if (role === "reveal") {
+    return coverageCount === 4
+      ? ["new_relationship", "physical_action", "reveal", "breath"]
+      : ["new_relationship", "reveal", "reveal"];
+  }
+  if (role === "closing_residue") {
+    return coverageCount === 4
+      ? ["new_fact", "new_relationship", "breath", "breath"]
+      : ["new_fact", "breath", "breath"];
+  }
+  return coverageCount === 4
+    ? ["new_location", "physical_action", "new_fact", "contradiction"]
+    : ["new_location", "physical_action", "new_fact"];
+}
+
+function coveragePlan(
+  role: DraftBeat["narrativeRole"],
+  duration: number,
+): {
+  coverageCount: 3 | 4;
+  purposes: readonly DraftCoverageShot["coveragePurpose"][];
+  scales: readonly DraftCoverageShot["shotScale"][];
+} {
+  const coverageCount: 3 | 4 = duration >= FOUR_SHOT_CINEMATIC_BEAT_SEC ? 4 : 3;
+  const finalPurpose: DraftCoverageShot["coveragePurpose"] = role === "reveal"
+    ? "consequence"
+    : role === "closing_residue"
+      ? "aftermath"
+      : "reaction";
+  return {
+    coverageCount,
+    purposes: coverageCount === 4
+      ? ["spatial_anchor", "mannequin_action", "evidence_insert", finalPurpose]
+      : ["spatial_anchor", "mannequin_action", "evidence_insert"],
+    scales: coverageCount === 4
+      ? ["establishing", "medium", "close", "wide"]
+      : ["establishing", "medium", "close"],
+  };
+}
+
+/**
+ * Divide a narration window into renderable takes without a blind equal split.
+ * The evidence insert gets a controlled readable hold; the consequence cut
+ * receives the remaining visual breath. At exactly twelve seconds every take
+ * remains the locked three-second LTX minimum.
+ */
+function coverageBoundaries(t0: number, t1: number, coverageCount: 3 | 4): number[] {
+  const duration = t1 - t0;
+  const flexibleDuration = duration - MIN_LTX_SHOT_SEC * coverageCount;
+  const weights = coverageCount === 4
+    ? [0.22, 0.31, 0.21, 0.26]
+    : [0.29, 0.38, 0.33];
+  const boundaries = [t0];
+  let cursor = t0;
+  for (let slot = 0; slot < coverageCount - 1; slot++) {
+    cursor += MIN_LTX_SHOT_SEC + flexibleDuration * weights[slot]!;
+    boundaries.push(Number(cursor.toFixed(3)));
+  }
+  boundaries.push(t1);
+  return boundaries;
 }
 
 function causalQuestion(
@@ -215,7 +302,7 @@ function causalBeatWindows(orderedShots: readonly ShotPlan[]): ShotPlan[][] {
 
 /**
  * Deterministically converts the admitted factual map + Story Spine into an
- * editor-ready, three-shot-per-beat Fern-style coverage draft. It never writes
+ * editor-ready, three-or-four-shot-per-beat Fern-style coverage draft. It never writes
  * an editorial approval and it fails if upstream proof cannot support every
  * narrated story shot, which prevents a generic prompt fallback from inventing
  * a crime reconstruction.
@@ -257,34 +344,28 @@ export function planCinematicCaseSequenceDraft(args: {
     // in the scene; otherwise we stay with the first cited documentary/map
     // treatment instead of inventing a dramatic reenactment.
     const binding = related.find(({ binding }) => binding.treatment === "neutral_reenactment")?.binding ?? related[0]!.binding;
-    const modes = modePlan(binding);
     const t0 = parents[0]!.t0;
     const t1 = parents.at(-1)!.t1;
     const duration = t1 - t0;
     if (!Number.isFinite(duration) || duration < MIN_CINEMATIC_BEAT_SEC) {
       throw new Error(`cinematic draft: source beat ${parents.map((parent) => parent.id).join(", ")} has no usable renderable narration duration`);
     }
-    const boundaries = [t0, t0 + duration / 3, t0 + (duration * 2) / 3, t1]
-      .map((value) => Number(value.toFixed(3)));
-    const tension = beatTension(role, index === causalWindows.length - 1);
-    const cuts = beatCuts(role);
+    const coverage = coveragePlan(role, duration);
+    const modes = modePlan(binding, coverage.coverageCount);
+    const boundaries = coverageBoundaries(t0, t1, coverage.coverageCount);
+    const tension = beatTension(role, index === causalWindows.length - 1, coverage.coverageCount);
+    const cuts = beatCuts(role, coverage.coverageCount);
     const beatQuestion = causalQuestion(direction, parents, role);
-    const coveragePurpose: readonly DraftCoverageShot["coveragePurpose"][] = [
-      "spatial_anchor",
-      modes.modes[1] === "abstract_reenactment" ? "mannequin_action" : "relationship",
-      "evidence_insert",
-    ];
     const primaryParent = parents[0]!;
     const sourceMoments = parents
       .map((parent) => `Narrated source moment: ${parent.literalContent}`)
       .join(" ")
       .slice(0, 900);
-    const coverage = modes.modes.map((visualMode, slot): DraftCoverageShot => {
+    const coverageShots = modes.modes.map((visualMode, slot): DraftCoverageShot => {
       const usesCast = visualMode === "abstract_reenactment";
       const castIds = usesCast ? [direction.cast[0]!.id] : [];
       const cameraMove = motivatedMove(primaryParent, slot, binding.treatment, cinematicShots);
-      const scale: DraftCoverageShot["shotScale"][] = ["establishing", "medium", "close"];
-      const label = coveragePurpose[slot]!;
+      const label = coverage.purposes[slot]!;
       const movement = visualMode === "abstract_reenactment"
         ? `${direction.cast[0]!.movementProfile}; complete one restrained, source-bound action without revealing a face`
         : visualMode === "source_proof"
@@ -298,8 +379,8 @@ export function planCinematicCaseSequenceDraft(args: {
         visualMode,
         castIds,
         cameraMove,
-        shotScale: scale[slot]!,
-        lens: slot === 0 ? "28mm" : slot === 1 ? "50mm" : "85mm",
+        shotScale: coverage.scales[slot]!,
+        lens: slot === 0 ? "28mm" : slot === 1 ? "50mm" : slot === 2 ? "85mm" : "35mm",
         cutReason: cuts[slot]!,
         tensionState: tension[slot]!,
         cameraRationale: `${label.replace(/_/g, " ")} changes the audience's information: ${parents.map((parent) => parent.coveragePurpose).join("; ")}`.slice(0, 360),
@@ -343,7 +424,7 @@ export function planCinematicCaseSequenceDraft(args: {
       claimIds: union(related.map((entry) => entry.claimId)),
       sourceIds: union(related.flatMap((entry) => entry.binding.sourceIds)),
       causalQuestion: beatQuestion,
-      shots: coverage,
+      shots: coverageShots,
     };
   });
   const content: CinematicCaseSequenceContent = {
