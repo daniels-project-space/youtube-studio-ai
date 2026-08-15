@@ -64,6 +64,14 @@ type DraftCoverageShot = CinematicCaseSequenceContent["beats"][number]["shots"][
 type DraftBeat = CinematicCaseSequenceContent["beats"][number];
 type EvidenceBinding = CasefileEvidenceShotMap["claimMappings"][number]["bindings"][number];
 
+// The locked LTX profile renders 3–10 second source clips. A Fern-style
+// coverage beat therefore needs enough narrated runway for three purposeful
+// shots; generating three 1–2 second clips and trimming them in assembly is
+// neither cinematic nor a truthful use of the approved cut plan.
+const MIN_LTX_SHOT_SEC = 3;
+const MIN_CINEMATIC_BEAT_SEC = MIN_LTX_SHOT_SEC * 3;
+const TARGET_CINEMATIC_BEAT_SEC = 12;
+
 function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
 }
@@ -147,8 +155,16 @@ function beatCuts(role: DraftBeat["narrativeRole"]): readonly DraftCoverageShot[
   return ["new_location", "physical_action", "new_fact"];
 }
 
-function causalQuestion(direction: CinematicCaseDirection, shot: ShotPlan, role: DraftBeat["narrativeRole"]): string {
-  const evidence = shot.coveragePurpose.replace(/\s+/g, " ").trim().slice(0, 220);
+function causalQuestion(
+  direction: CinematicCaseDirection,
+  shots: readonly ShotPlan[],
+  role: DraftBeat["narrativeRole"],
+): string {
+  const evidence = shots
+    .map((shot) => shot.coveragePurpose.replace(/\s+/g, " ").trim())
+    .filter(Boolean)
+    .join("; ")
+    .slice(0, 220);
   if (role === "cold_open") return direction.causalQuestion;
   if (role === "reveal") {
     return `What changes in the answer to "${direction.causalQuestion}" when this cited evidence is understood: ${evidence}?`;
@@ -158,6 +174,43 @@ function causalQuestion(direction: CinematicCaseDirection, shot: ShotPlan, role:
 
 function union<T>(items: readonly T[]): T[] {
   return [...new Set(items)];
+}
+
+/**
+ * Story Spine is sentence-aligned and can therefore contain very short
+ * windows. LTX is not. Form a causal beat from contiguous source shots before
+ * assigning the spatial/action/evidence coverage grammar, then merge a short
+ * tail back into its predecessor. This preserves exact narration boundaries
+ * without manufacturing sub-three-second LTX clips.
+ */
+function causalBeatWindows(orderedShots: readonly ShotPlan[]): ShotPlan[][] {
+  const windows: ShotPlan[][] = [];
+  let current: ShotPlan[] = [];
+  let currentDuration = 0;
+
+  for (const shot of orderedShots) {
+    current.push(shot);
+    currentDuration += shot.t1 - shot.t0;
+    if (currentDuration >= TARGET_CINEMATIC_BEAT_SEC) {
+      windows.push(current);
+      current = [];
+      currentDuration = 0;
+    }
+  }
+  if (current.length) windows.push(current);
+
+  const durationOf = (shots: readonly ShotPlan[]) =>
+    shots.reduce((total, shot) => total + (shot.t1 - shot.t0), 0);
+  if (windows.length >= 2 && durationOf(windows.at(-1)!) < MIN_CINEMATIC_BEAT_SEC) {
+    windows[windows.length - 2]!.push(...windows.pop()!);
+  }
+  if (windows.some((window) => durationOf(window) < MIN_CINEMATIC_BEAT_SEC)) {
+    throw new Error(
+      `cinematic draft: each causal beat needs at least ${MIN_CINEMATIC_BEAT_SEC}s of contiguous narration ` +
+        `for three ${MIN_LTX_SHOT_SEC}s LTX coverage shots; merge or extend the source Story Spine before cinematic planning`,
+    );
+  }
+  return windows;
 }
 
 /**
@@ -185,16 +238,17 @@ export function planCinematicCaseSequenceDraft(args: {
   }
   const orderedShots = [...shots].sort((left, right) => left.t0 - right.t0 || left.id.localeCompare(right.id));
   const cinematicShots: DraftCoverageShot[] = [];
-  const beats: DraftBeat[] = orderedShots.map((parent, index) => {
-    const role = roleFor(index, orderedShots.length);
+  const causalWindows = causalBeatWindows(orderedShots);
+  const beats: DraftBeat[] = causalWindows.map((parents, index) => {
+    const role = roleFor(index, causalWindows.length);
     const related = map.claimMappings.flatMap((mapping) =>
       mapping.bindings
-        .filter((binding) => binding.shotIds.includes(parent.id))
+        .filter((binding) => binding.shotIds.some((shotId) => parents.some((parent) => parent.id === shotId)))
         .map((binding) => ({ claimId: mapping.claimId, binding })),
     );
     if (!related.length) {
       throw new Error(
-        `cinematic draft: Story Spine shot ${parent.id} has no admitted factual claim binding; ` +
+        `cinematic draft: Story Spine beat ${parents.map((parent) => parent.id).join(", ")} has no admitted factual claim binding; ` +
           "repair casefile_evidence_shot_map rather than inventing a visual",
       );
     }
@@ -204,24 +258,31 @@ export function planCinematicCaseSequenceDraft(args: {
     // treatment instead of inventing a dramatic reenactment.
     const binding = related.find(({ binding }) => binding.treatment === "neutral_reenactment")?.binding ?? related[0]!.binding;
     const modes = modePlan(binding);
-    const duration = parent.t1 - parent.t0;
-    if (!Number.isFinite(duration) || duration < 0.3) {
-      throw new Error(`cinematic draft: Story Spine shot ${parent.id} has no usable narrated duration`);
+    const t0 = parents[0]!.t0;
+    const t1 = parents.at(-1)!.t1;
+    const duration = t1 - t0;
+    if (!Number.isFinite(duration) || duration < MIN_CINEMATIC_BEAT_SEC) {
+      throw new Error(`cinematic draft: source beat ${parents.map((parent) => parent.id).join(", ")} has no usable renderable narration duration`);
     }
-    const boundaries = [parent.t0, parent.t0 + duration / 3, parent.t0 + (duration * 2) / 3, parent.t1]
+    const boundaries = [t0, t0 + duration / 3, t0 + (duration * 2) / 3, t1]
       .map((value) => Number(value.toFixed(3)));
-    const tension = beatTension(role, index === orderedShots.length - 1);
+    const tension = beatTension(role, index === causalWindows.length - 1);
     const cuts = beatCuts(role);
-    const beatQuestion = causalQuestion(direction, parent, role);
+    const beatQuestion = causalQuestion(direction, parents, role);
     const coveragePurpose: readonly DraftCoverageShot["coveragePurpose"][] = [
       "spatial_anchor",
       modes.modes[1] === "abstract_reenactment" ? "mannequin_action" : "relationship",
       "evidence_insert",
     ];
+    const primaryParent = parents[0]!;
+    const sourceMoments = parents
+      .map((parent) => `Narrated source moment: ${parent.literalContent}`)
+      .join(" ")
+      .slice(0, 900);
     const coverage = modes.modes.map((visualMode, slot): DraftCoverageShot => {
       const usesCast = visualMode === "abstract_reenactment";
       const castIds = usesCast ? [direction.cast[0]!.id] : [];
-      const cameraMove = motivatedMove(parent, slot, binding.treatment, cinematicShots);
+      const cameraMove = motivatedMove(primaryParent, slot, binding.treatment, cinematicShots);
       const scale: DraftCoverageShot["shotScale"][] = ["establishing", "medium", "close"];
       const label = coveragePurpose[slot]!;
       const movement = visualMode === "abstract_reenactment"
@@ -230,7 +291,7 @@ export function planCinematicCaseSequenceDraft(args: {
           ? "hold the cited factual artifact long enough to read its relationship to the narration; no invented event"
           : "move only through the already-cited space, relationship, or atmosphere; no new factual event";
       const shot: DraftCoverageShot = {
-        id: `cinematic-shot-${parent.id.replace(/^shot-/, "")}-${slot + 1}`,
+        id: `cinematic-shot-${primaryParent.id.replace(/^shot-/, "")}-${slot + 1}`,
         t0: boundaries[slot]!,
         t1: boundaries[slot + 1]!,
         coveragePurpose: label,
@@ -241,11 +302,11 @@ export function planCinematicCaseSequenceDraft(args: {
         lens: slot === 0 ? "28mm" : slot === 1 ? "50mm" : "85mm",
         cutReason: cuts[slot]!,
         tensionState: tension[slot]!,
-        cameraRationale: `${label.replace(/_/g, " ")} changes the audience's information: ${parent.coveragePurpose}`.slice(0, 360),
-        narrationPurpose: `${role.replace(/_/g, " ")}: ${beatQuestion}`.slice(0, 360),
+        cameraRationale: `${label.replace(/_/g, " ")} changes the audience's information: ${parents.map((parent) => parent.coveragePurpose).join("; ")}`.slice(0, 360),
+        narrationPurpose: `${role.replace(/_/g, " ")}: ${beatQuestion} Source window: ${sourceMoments}`.slice(0, 720),
         still: [
           direction.visualWorld,
-          parent.prompt,
+          sourceMoments,
           `Causal question: ${beatQuestion}`,
           `Coverage purpose: ${label.replace(/_/g, " ")}; treatment: ${binding.treatment}.`,
           usesCast
@@ -253,12 +314,12 @@ export function planCinematicCaseSequenceDraft(args: {
             : "No real-person likeness; show only the admitted evidence treatment and a visible citation overlay area.",
         ].join(" ").slice(0, 1_800),
         motion: [
-          parent.motion,
+          parents.map((parent) => parent.motion).join(" ").slice(0, 800),
           movement,
           `Motivated ${cameraMove.replace(/_/g, " ")} for ${label.replace(/_/g, " ")}; do not add a new factual claim.`,
         ].join(" ").slice(0, 1_200),
         negative: union([
-          ...parent.negative.split(/,\s*/).filter(Boolean),
+          ...parents.flatMap((parent) => parent.negative.split(/,\s*/).filter(Boolean)),
           "real-person likeness",
           "visible mannequin face",
           "gore",
@@ -274,11 +335,11 @@ export function planCinematicCaseSequenceDraft(args: {
       return shot;
     });
     return {
-      id: `cinematic-beat-${parent.id.replace(/^shot-/, "")}`,
+      id: `cinematic-beat-${primaryParent.id.replace(/^shot-/, "")}`,
       narrativeRole: role,
-      t0: parent.t0,
-      t1: parent.t1,
-      parentShotIds: [parent.id],
+      t0,
+      t1,
+      parentShotIds: parents.map((parent) => parent.id),
       claimIds: union(related.map((entry) => entry.claimId)),
       sourceIds: union(related.flatMap((entry) => entry.binding.sourceIds)),
       causalQuestion: beatQuestion,

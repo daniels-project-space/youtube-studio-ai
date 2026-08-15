@@ -134,7 +134,10 @@ const CinematicCoverageShotSchema = z
     reconstructionDisclosure: text(220).optional(),
   })
   .strict()
-  .refine((value) => value.t1 > value.t0, "cinematic coverage shot must have positive duration");
+  .refine(
+    (value) => value.t1 - value.t0 >= 3,
+    "cinematic coverage shot must be at least 3 seconds for the locked LTX render profile",
+  );
 export type CinematicCoverageShot = z.infer<typeof CinematicCoverageShotSchema>;
 
 const CinematicSequenceBeatSchema = z
@@ -200,7 +203,7 @@ export const CinematicGeneratedSceneSchema = z
     /** A separately generated target for LTX's final conditioned frame. */
     terminalStill: text(1_800).optional(),
     motion: text(1_200),
-    durationSec: z.number().finite().positive().max(10),
+    durationSec: z.number().finite().min(3).max(10),
     cameraMove: CameraMoveSchema,
     shotScale: ShotScaleSchema,
     lens: text(120),
@@ -214,7 +217,10 @@ export const CinematicGeneratedSceneSchema = z
     continuitySeed: z.number().int().min(1).max(2_147_483_647),
   })
   .strict()
-  .refine((value) => value.t1 > value.t0, "generated cinematic scene must have positive duration");
+  .refine(
+    (value) => value.t1 - value.t0 >= 3,
+    "generated cinematic scene must be at least 3 seconds for the locked LTX render profile",
+  );
 export type CinematicGeneratedScene = z.infer<typeof CinematicGeneratedSceneSchema>;
 
 export const CinematicGeneratedScenePlanSchema = z

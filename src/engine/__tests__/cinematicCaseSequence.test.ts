@@ -314,6 +314,10 @@ async function main() {
   assert.equal(draft.content.beats.length, shotList.length);
   assert.equal(draft.content.beats[0]?.narrativeRole, "cold_open");
   assert.equal(draft.content.beats.at(-1)?.narrativeRole, "closing_residue");
+  assert(
+    draft.content.beats.flatMap((beat) => beat.shots).every((shot) => shot.t1 - shot.t0 >= 3),
+    "every generated Casefile coverage shot must retain LTX's minimum renderable duration rather than relying on post-render trimming",
+  );
   assert.match(draft.content.beats[0]?.shots[2]?.still ?? "", /charcoal wool coat/i);
   assert.match(draft.content.beats[0]?.shots[2]?.motion ?? "", /without revealing a face/i);
   const draftReview = {
@@ -331,6 +335,29 @@ async function main() {
   assert.throws(
     () => finalizeCinematicCaseSequenceDraft({ draft, editorialReview: { ...draftReview, reviewedSequenceFingerprint: "0".repeat(64) } }),
     /not bound to this exact source packet/i,
+  );
+  const tooShortSourceWindows = shotList.map((shot, index) => ({
+    ...shot,
+    t0: index * 4,
+    t1: (index + 1) * 4,
+    seconds: 4,
+  }));
+  assert.throws(
+    () => planCinematicCaseSequenceDraft({
+      direction: {
+        version: CINEMATIC_CASE_DIRECTION_VERSION,
+        sequenceId: "cinematic-sequence-vault-closure-short-window",
+        caseId: sourcePacket.caseId,
+        causalQuestion: "Why did a single court order close the vault?",
+        visualWorld: "restrained nocturnal archival documentary, rain-softened stone, muted charcoal and amber practical light",
+        cast: input.cast,
+      },
+      evidenceShotMap: map.map,
+      sceneManifest,
+      shotList: tooShortSourceWindows,
+    }),
+    /at least 9s of contiguous narration/i,
+    "a Casefile plan may not create three sub-three-second LTX clips from a short narrated window",
   );
 
   const report = evaluateCinematicCaseSequence(args, { now: NOW });
@@ -380,6 +407,14 @@ async function main() {
   const wardrobeChange = structuredClone(input);
   wardrobeChange.cast[0].wardrobeSignature = "blue rain jacket, white trainers, canvas satchel";
   assert.throws(() => assertCinematicCaseSequence({ ...args, input: wardrobeChange }, { now: NOW }), /editorial_review_mismatch:.*Remediation:/);
+
+  const subThreeSecondTake = structuredClone(input);
+  subThreeSecondTake.beats[0].shots[0].t1 = 2.5;
+  assert.throws(
+    () => assertCinematicCaseSequence({ ...args, input: subThreeSecondTake }, { now: NOW }),
+    /sequence_input_invalid:.*Remediation:/,
+    "even a reviewer-signed manual Casefile sequence may not send an unrenderable sub-three-second take to LTX",
+  );
 
   const flatCoverage = structuredClone(input);
   flatCoverage.beats[1].shots.forEach((shot) => { shot.shotScale = "wide"; });
