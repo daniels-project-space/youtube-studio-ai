@@ -321,6 +321,8 @@ async function assertDefaultProviderHasNoFallback(): Promise<void> {
   assert.doesNotMatch(source, /falImage|generateFal|replicate|generateFluxImage/);
   assert.match(source, /profileId: "production"/);
   assert.match(source, /ifNoneMatch: "\*"/);
+  assert.match(source, /hasJudge: hasVisionKey/);
+  assert.doesNotMatch(source, /hasJudge: hasGeminiKey/);
 
   const refreshSource = await readFile(
     new URL("../../trigger/refreshShowBible.ts", import.meta.url),

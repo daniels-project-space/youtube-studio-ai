@@ -14,11 +14,11 @@ import { produceAndCritique } from "@/engine/critiqueLoop";
 import { PRICE } from "@/engine/pricing";
 import { downloadTo, makeRunTempDir } from "@/lib/files";
 import { imageToJpeg } from "@/lib/ffmpeg";
-import { hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
+import { parseJsonLoose } from "@/lib/gemini";
 import { renderNovitaImage, type NovitaRenderLifecycle } from "@/lib/novitaMedia";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { channelKey, putObject } from "@/lib/storage";
-import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
+import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 export interface ArtIdentity {
   name: string;
@@ -119,7 +119,10 @@ const NEGATIVE_PROMPT: Record<ArtKind, string> = {
 };
 
 const DEFAULT_RUNTIME: ChannelArtRuntime = {
-  hasJudge: hasGeminiKey,
+  // Channel art is rendered on Novita and independently graded by the
+  // configured non-Google vision provider. Requiring a Gemini key here made a
+  // fully non-Google route impossible despite having a real grader.
+  hasJudge: hasVisionKey,
   renderImage: async (request) => {
     const rendered = await renderNovitaImage(request);
     return { url: rendered.url, key: rendered.key };
