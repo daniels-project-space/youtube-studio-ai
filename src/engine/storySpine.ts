@@ -283,7 +283,11 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
       const motion =
         `Continue the literal action implied by: ${literalContent}. ${shotLanguage.motionDirection} ` +
         `Camera performs a restrained ${cameraMove.replaceAll("_", " ")}; preserve identity, setting, wardrobe, props, and lighting through the final frame.`;
-      const continuityState = `entity-primary/location-primary/shot-${shotNo}; no unmotivated identity, era, wardrobe, prop, palette, or lighting change`;
+      // A continuity state describes a *continuous dramatic unit*, not an
+      // individual shot.  Chunks within one narrated beat may therefore share
+      // an endpoint-conditioned LTX handoff; a new beat remains a deliberate
+      // editorial cut even when it happens in the same world.
+      const continuityState = `entity-primary/location-primary/${beat.id}; no unmotivated identity, era, wardrobe, prop, palette, or lighting change`;
       const highRisk = shotNo === 1 || /\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(literalContent);
       const candidateCount = Math.max(profile.image.candidates, highRisk ? 2 : 1);
       shotList.push({

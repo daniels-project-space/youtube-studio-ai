@@ -167,8 +167,14 @@ const videoRepair = planCinematicQualityRepair({
   notes: ["The middle frame freezes and the camera move reverses."],
   attempt: 1,
   stillKey: "owner/demo/runs/run/novita/image/selected.png",
+  endStillKey: "owner/demo/runs/run/novita/image/selected-next.png",
 });
 assert.equal(videoRepair.shot.stillKey, "owner/demo/runs/run/novita/image/selected.png");
+assert.equal(
+  videoRepair.shot.endStillKey,
+  "owner/demo/runs/run/novita/image/selected-next.png",
+  "a repaired continuous shot must retain its reviewed LTX endpoint rather than silently dropping the handoff",
+);
 assert.match(videoRepair.shot.prompt, /First-frame constraint/);
 assert.match(videoRepair.shot.prompt, /middle frame freezes/);
 assert.throws(

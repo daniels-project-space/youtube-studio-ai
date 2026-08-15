@@ -82,7 +82,16 @@ export const ShotRenderManifestSchema = z.object({
     t1: z.number().finite().positive(),
     sourceSentenceIds: z.array(z.string()).min(1),
     continuityState: z.string().min(1),
-  }).refine((item) => item.t1 > item.t0, "rendered shot t1 must follow t0")).min(1),
+    /**
+     * Present only when this clip is LTX-conditioned to arrive at the
+     * already-selected first frame of the following continuous shot.
+     */
+    terminalAnchorShotId: z.string().min(1).optional(),
+    terminalStillKey: z.string().min(1).optional(),
+  }).refine((item) => item.t1 > item.t0, "rendered shot t1 must follow t0").refine(
+    (item) => Boolean(item.terminalAnchorShotId) === Boolean(item.terminalStillKey),
+    "rendered terminal anchor id and still key must be supplied together",
+  )).min(1),
 });
 
 export const ShotQaReportSchema = z.object({
@@ -98,6 +107,8 @@ export const ShotQaReportSchema = z.object({
     continuity: z.number().min(0).max(1),
     motionIntegrity: z.number().min(0).max(1),
     artifactFree: z.number().min(0).max(1),
+    /** Required whenever the rendered shot had a terminalStillKey. */
+    terminalFrameAlignment: z.number().min(0).max(1).optional(),
     notes: z.array(z.string()),
   })).min(1),
 });
