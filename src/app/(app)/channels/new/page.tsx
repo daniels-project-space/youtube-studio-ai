@@ -322,6 +322,10 @@ export default function NewChannelWizard() {
           (module) => module.block === "cinematic_case_sequence"
             && module.profile === "faceless_source_bound_cinematic_sequence/v1",
         );
+        const childrenShowBibleRecommendation = preflight?.recommendedModules?.find(
+          (module) => module.block === "children_show_bible"
+            && module.profile === "original_child_show_bible/v1",
+        );
         setDataStorySuggested(recommendedDataStory);
         if (preflight?.productionReady && isFamilyProductionReady(d.family as FamilyKey)) {
           selectFamily(d.family as FamilyKey);
@@ -360,7 +364,10 @@ export default function NewChannelWizard() {
         const casefileNote = casefileCinematicRecommendation
           ? " This factual cinematic route requires a source-first Case Packet, evidence-to-shot map, and reviewer-signed faceless mannequin sequence before it can enter rendering."
           : "";
-        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (renderer unavailable)"} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${requirements}${quality}${runtime}${validation}${dataStoryNote}${casefileNote}`);
+        const childrenNote = childrenShowBibleRecommendation
+          ? " This children’s format is a supervised show-production lane: it needs an age-banded original Show Bible, one measurable learning objective, and a fresh child-editor approval before it can produce review candidates."
+          : "";
+        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (renderer unavailable)"} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${requirements}${quality}${runtime}${validation}${dataStoryNote}${casefileNote}${childrenNote}`);
       } catch {
         setClipNote("Suggestion failed — pick a format manually below.");
       } finally {

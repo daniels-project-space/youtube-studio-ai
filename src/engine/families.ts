@@ -107,7 +107,10 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "narrated-essay",
     available: true,
     narrated: true,
-    requiresKeys: ["gemini", "elevenlabs", "novita"],
+    // Legacy Gemini helpers are deliberately not a runtime capability. This
+    // family stays unadmitted until its planner/renderer route is fully
+    // non-Google; its thumbnail is the sole sealed exception elsewhere.
+    requiresKeys: ["elevenlabs", "novita"],
     defaultThumbnailStyle: "banana",
     // The standard eight-panel comic now reserves $6.36 once every direct
     // Novita panel worker is costed at its real teardown-verified ceiling.
@@ -134,7 +137,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "documentary-collage-short",
     available: true,
     narrated: true,
-    requiresKeys: ["gemini", "fal", "fish-audio"],
+    requiresKeys: ["fish-audio", "novita"],
     defaultThumbnailStyle: "banana",
     // Seven gated Nano Banana plates, portrait verification, and a high-memory
     // native master have a truthful $25.29 reserved envelope. Keep a modest
@@ -145,12 +148,12 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     key: "whiteboard",
     label: "Whiteboard explainer (drawn cinema)",
     description:
-      "Narration-synced hand-drawn whiteboard explainer (history, finance, explainers). DRAWN-CINEMA engine: Gemini storyboards layered scenes, Fish narrates, Whisper aligns, and a deterministic hand draws each beat in time with the voice using bounded attested image workers. 1080p / 2K.",
+      "Narration-synced hand-drawn whiteboard explainer (history, finance, explainers). DRAWN-CINEMA engine: non-Google storyboards layered scenes, Fish narrates, Whisper aligns, and a deterministic hand draws each beat in time with the voice using bounded attested image workers. 1080p / 2K.",
     visualEngine: "whiteboard_scribe",
     archetypeKey: "narrated-essay",
     available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "gemini", "novita"],
+    requiresKeys: ["fish-audio", "novita"],
     defaultThumbnailStyle: "banana",
     // The authored five-minute board reserves $24.99 once every direct
     // Novita drawing layer is admitted; this is intentionally below the $31
@@ -167,7 +170,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "lore-short",
     available: true,
     narrated: true,
-    requiresKeys: ["gemini", "novita", "fish-audio"],
+    requiresKeys: ["novita", "fish-audio"],
     defaultThumbnailStyle: "banana",
     // Nine beats, each an attested Novita still plus one attested LTX-class i2v
     // clip, finished with the FREE ffmpeg 2K lane (no paid upscale). Budget is
@@ -189,8 +192,8 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // The certified autonomous route is deliberately Gemini-free: it selects
     // from a curated, safety-screened topic registry, sources only CC0
     // Wikidata facts, renders locally, and uses an original non-vocal music
-    // bed plus a non-Gemini vision QA provider. Gemini may still enhance legacy
-    // quiz runs, but it is not a production dependency for this family.
+    // bed plus a non-Gemini vision QA provider. Legacy Google helpers are
+    // unavailable to this production family.
     requiresKeys: ["mureka", "groq-or-fal-vision"],
     // The QuizYear Remotion composition emits its own deterministic still;
     // routing this family through the generic Banana thumbnailer would make

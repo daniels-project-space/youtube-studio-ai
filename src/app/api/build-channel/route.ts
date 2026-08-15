@@ -154,6 +154,18 @@ export async function POST(request: Request) {
           remediation: casefileModules.map((module) => module.remediation),
         }, { status: 409 });
       }
+      const supervisedModules = creatorPreflight.moduleAdmissions.filter(
+        (module) => module.requiredForConcept && !module.autonomous,
+      );
+      if (supervisedModules.length) {
+        return NextResponse.json({
+          error: `${family.label} requires a supervised episode admission before automatic channel creation`,
+          runtimeBlockers: creatorPreflight.runtimeBlockers,
+          sourceRequirements: creatorPreflight.sourceRequirements,
+          recommendedModules: supervisedModules.map((module) => module.block),
+          remediation: supervisedModules.map((module) => module.remediation),
+        }, { status: 409 });
+      }
       const runtimeReadiness = familyProductionReadiness(family.key);
       if (!runtimeReadiness.productionReady) {
         const fallbackFamily = productionReadyFamilyFallback(family.key);

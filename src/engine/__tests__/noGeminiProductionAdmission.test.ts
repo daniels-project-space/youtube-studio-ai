@@ -23,6 +23,13 @@ assert.equal(
   "title_card",
   "QuizYear must advertise its renderer-native deterministic thumbnail rather than generic Banana generation",
 );
+for (const family of FAMILY_KEYS) {
+  assert.equal(
+    FAMILIES[family].requiresKeys.some((capability) => /gemini|google/i.test(capability)),
+    false,
+    `${family} must not advertise a general Google/Gemini dependency; the sealed thumbnail boundary is not a family runtime requirement`,
+  );
+}
 
 const narratedReadiness = familyProductionReadiness("narrated_stock");
 assert.equal(

@@ -119,6 +119,8 @@ assert.match(route, /cinematic channel creation requires a specific concept/,
   "factual and fictional cinematic requests must be distinguished before any inception provider work");
 assert.match(route, /factual cinematic Casefile concepts are private supervised episode workflows/,
   "a Fern-style factual concept must never be silently admitted as a generic automatic cinematic channel");
+assert.match(route, /requires a supervised episode admission before automatic channel creation/,
+  "future child-show readiness cannot bypass a required private child-editor admission");
 assert.match(newChannelUi, /concept:\s*concept\.trim\(\) \|\| undefined/,
   "the server-side preflight must receive the exact concept the creator advised on");
 

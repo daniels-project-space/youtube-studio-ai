@@ -155,6 +155,22 @@ assert.deepEqual(
   "fictional mini-films must not be misclassified as factual Casefile work",
 );
 
+const childrenShow = recommendFormatDeterministically({
+  concept: "An original animated preschool kids show with gentle participation and a bedtime story rhythm",
+});
+assert.equal(childrenShow.family, "children_learning", "children’s-show language must discover the supervised show lane rather than generic narration");
+assert.equal(childrenShow.available, false, "a children’s show must never be advertised as autonomous production");
+assert.deepEqual(
+  childrenShow.preflight.recommendedModules.map((module) => module.block),
+  ["children_show_bible"],
+  "the creator must surface the actual original-world/curriculum admission module for children’s content",
+);
+assert.equal(childrenShow.preflight.moduleAdmissions[0]?.autonomous, false);
+assert(
+  childrenShow.preflight.missingRequirements.some((requirement) => requirement.includes("age-banded original Children’s Show Bible")),
+  "children’s format advice must name its age/curriculum/editorial evidence before any automation claim",
+);
+
 const blockedLofi = recommendFormatDeterministically({ concept: "Lo-fi study beats over a seamless animated loop" });
 assert.equal(blockedLofi.family, "music_loop", "the advisor must preserve the actual requested format");
 assert.equal(blockedLofi.available, false, "a blocked renderer must not become a fake production recommendation");

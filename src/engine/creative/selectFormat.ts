@@ -286,7 +286,7 @@ export const FORMAT_RECIPES: Record<FamilyKey, FormatRecipe> = {
   children_learning: {
     family: "children_learning",
     channelTypes: ["original early-learning stories", "life-skills mini shows", "preschool observation lessons", "gentle language learning"],
-    signals: ["kids learning", "children learning", "preschool", "toddler learning", "life skills for kids", "early learning", "children story", "kids animation"],
+    signals: ["kids learning", "children learning", "preschool", "toddler learning", "life skills for kids", "early learning", "children story", "kids animation", "kids show", "children show", "animated kids", "animated children", "bedtime story for kids", "nursery rhyme"],
     qualityFocus: ["age-banded learning objective", "original character continuity", "clear safe resolution", "human child-content approval"],
     tradeoff: "This is a supervised product lane, not an autonomous nursery-rhyme generator: it produces review candidates only and cannot be public or scheduled automatically.",
   },
@@ -408,6 +408,26 @@ function casefileCinematicRecommendations(
   ];
 }
 
+function childrenShowBibleRecommendations(family: FamilyKey): FormatModuleRecommendation[] {
+  if (family !== "children_learning") return [];
+  return [{
+    block: "children_show_bible",
+    profile: "original_child_show_bible/v1",
+    automationAdmission: {
+      autonomous: false,
+      blockers: ["Children’s show admission is private child-editorial review only."],
+      remediation: "Supply an age-banded original Show Bible with one observable objective, five-stage participation pattern, and a current graph-and-lesson-bound child-editor approval.",
+    },
+    requirements: [
+      "declared age band and one measurable learning objective with an observable assessment",
+      "original recurring-character and world continuity locks with no IP-adjacent identity",
+      "five-stage familiar-problem → guided-attempt → participation → resolution-recall → varied-repetition pattern",
+      "fresh child-editor approval bound to the Show Bible, Episode Graph, and lesson contract",
+    ],
+    qualityFocus: ["age-appropriate causal learning", "original character/world continuity", "participation-and-recall rhythm"],
+  }];
+}
+
 function sourceRequirements(family: FamilyKey, input: FormatSelectionInput): string[] {
   if (family === "documentary_collage_short") {
     return ["structured sourceReferences", "per-claim claimEvidence"];
@@ -417,6 +437,13 @@ function sourceRequirements(family: FamilyKey, input: FormatSelectionInput): str
       "source-first Case Packet",
       "claim-to-source-to-shot evidence map",
       "current human editorial approval for the factual cinematic sequence",
+    ];
+  }
+  if (family === "children_learning") {
+    return [
+      "age-banded original Children’s Show Bible",
+      "one observable learning objective and assessment",
+      "current child-editor approval bound to the show, lesson, and Episode Graph",
     ];
   }
   return [];
@@ -497,6 +524,7 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
   const recommendedModules: FormatModuleRecommendation[] = [
     ...dataStoryRecommendationForIntent(input, family),
     ...casefileCinematicRecommendations(input, family),
+    ...childrenShowBibleRecommendations(family),
   ];
   const admittedModules = moduleAdmissions(recommendedModules);
   const requiredSources = sourceRequirements(family, input);
