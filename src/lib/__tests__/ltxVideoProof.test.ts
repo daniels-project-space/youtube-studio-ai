@@ -45,6 +45,7 @@ function proofFor(value: NovitaPhaseProfile = profile): Record<string, unknown> 
   return {
     outputWidth: value.width,
     outputHeight: value.height,
+    hasAudio: true,
     stageOneWidth: value.stageOneWidth,
     stageOneHeight: value.stageOneHeight,
     spatialUpscaleFactor: 2,
@@ -153,6 +154,20 @@ async function main(): Promise<void> {
     }),
     /omitted its ffprobe video output evidence/,
     "a completed worker cannot turn an MP4 into an accepted artifact without ffprobe evidence",
+  );
+  assert.throws(
+    () => assertLtxWorkerCompletionEvidence({
+      profile,
+      jobId,
+      completion: {
+        gpuSku: "RTX 4090",
+        gpuCount: 1,
+        renderContract: contractFor(),
+        videoOutputs: { [jobId]: { ...proofFor(), hasAudio: false } },
+      },
+    }),
+    /invalid LTX x2 output evidence/,
+    "a video-only LTX output cannot enter the diegetic cinematic assembly path",
   );
   assert.throws(
     () => assertLtxWorkerCompletionEvidence({

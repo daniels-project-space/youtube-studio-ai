@@ -191,6 +191,8 @@ export interface RenderedCandidate {
 export interface NovitaVideoOutputProof {
   outputWidth: number;
   outputHeight: number;
+  /** Worker-observed LTX audio stream; required for diegetic scene assembly. */
+  hasAudio: true;
   stageOneWidth: number;
   stageOneHeight: number;
   spatialUpscaleFactor: 2;

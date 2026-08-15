@@ -39,6 +39,7 @@ function outputProof(value: unknown, profile: NovitaPhaseProfile): NovitaVideoOu
   if (
     proof.outputWidth !== profile.width
     || proof.outputHeight !== profile.height
+    || proof.hasAudio !== true
     || proof.stageOneWidth !== profile.stageOneWidth
     || proof.stageOneHeight !== profile.stageOneHeight
     || proof.spatialUpscaleFactor !== 2
@@ -49,6 +50,7 @@ function outputProof(value: unknown, profile: NovitaPhaseProfile): NovitaVideoOu
   return {
     outputWidth: profile.width,
     outputHeight: profile.height,
+    hasAudio: true,
     stageOneWidth: profile.stageOneWidth!,
     stageOneHeight: profile.stageOneHeight!,
     spatialUpscaleFactor: 2,

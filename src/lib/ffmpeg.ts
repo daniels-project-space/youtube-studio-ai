@@ -342,6 +342,8 @@ export async function assembleBeatBody(args: {
   width?: number;
   height?: number;
   fps?: number;
+  /** Preserve in-world source audio. `required` rejects any silent source take. */
+  bodyAudioMode?: "off" | "available" | "required";
   preset?: string;
 }): Promise<string> {
   const { clipPaths, targetSec, tmpDir } = args;
@@ -350,6 +352,7 @@ export async function assembleBeatBody(args: {
   const H = args.height ?? 1080;
   const fps = args.fps ?? 30;
   const maxSeg = args.maxSegSec ?? 10;
+  const bodyAudioMode = args.bodyAudioMode ?? "off";
 
   // MEMOIZE probe + scene-detect per PATH: an EDL plan cycles its pool, so the
   // same file can appear many times — re-probing and re-scene-scanning each
@@ -368,6 +371,15 @@ export async function assembleBeatBody(args: {
     return d;
   };
   const sceneCache = new Map<string, number[]>();
+  const audioCache = new Map<string, boolean>();
+  const hasSourceAudio = async (path: string): Promise<boolean> => {
+    const hit = audioCache.get(path);
+    if (hit !== undefined) return hit;
+    let hasAudio = false;
+    try { hasAudio = (await probe(path)).hasAudio; } catch { /* handled below for required takes */ }
+    audioCache.set(path, hasAudio);
+    return hasAudio;
+  };
   const scenesOf = async (p: string): Promise<number[]> => {
     const hit = sceneCache.get(p);
     if (hit) return hit;
@@ -436,6 +448,20 @@ export async function assembleBeatBody(args: {
       }
     }
     const sf = join(tmpDir, `beatseg_${i}.mp4`);
+    const sourceHasAudio = bodyAudioMode === "off" ? false : await hasSourceAudio(clipPaths[i]);
+    if (bodyAudioMode === "required" && !sourceHasAudio) {
+      throw new FfmpegError(`assembleBeatBody: required diegetic audio missing from segment ${i}`);
+    }
+    const sourceAudio = sourceHasAudio
+      ? "[0:a]"
+      : "anullsrc=channel_layout=stereo:sample_rate=44100";
+    const av = bodyAudioMode === "off"
+      ? ["-vf", `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps}`, "-an"]
+      : [
+          "-filter_complex",
+          `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps},setpts=PTS-STARTPTS[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,atrim=duration=${segLen.toFixed(3)},asetpts=PTS-STARTPTS[a]`,
+          "-map", "[v]", "-map", "[a]",
+        ];
     await run(FFMPEG, [
       "-y",
       "-ss",
@@ -444,9 +470,7 @@ export async function assembleBeatBody(args: {
       clipPaths[i],
       "-t",
       segLen.toFixed(3),
-      "-vf",
-      `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps}`,
-      "-an",
+      ...av,
       "-c:v",
       "libx264",
       "-preset",
@@ -455,6 +479,7 @@ export async function assembleBeatBody(args: {
       "20",
       "-pix_fmt",
       "yuv420p",
+      ...(bodyAudioMode === "off" ? [] : ["-c:a", "aac", "-b:a", "192k"]),
       sf,
     ]);
     // BLACK-SEGMENT GUARD: sample two frames; a (near-)black segment is dropped
@@ -506,6 +531,8 @@ export async function assembleAuthoredBody(args: {
   width?: number;
   height?: number;
   fps?: number;
+  /** Preserve LTX's in-world audio; `required` rejects a video-only take. */
+  bodyAudioMode?: "off" | "available" | "required";
   preset?: string;
 }): Promise<string> {
   if (args.clipPaths.length === 0 || args.clipPaths.length !== args.segDurationsSec.length) {
@@ -515,6 +542,7 @@ export async function assembleAuthoredBody(args: {
   const H = args.height ?? 1080;
   const fps = args.fps ?? 30;
   const tailHold = Math.max(0, args.tailHoldSec ?? 0);
+  const bodyAudioMode = args.bodyAudioMode ?? "off";
   const segFiles: string[] = [];
   let expectedTotal = 0;
 
@@ -526,6 +554,9 @@ export async function assembleAuthoredBody(args: {
     const media = await probe(args.clipPaths[index]);
     if (!media.hasVideo || !Number.isFinite(media.durationSec) || media.durationSec <= 0) {
       throw new FfmpegError(`assembleAuthoredBody: segment ${index} is not a valid video`);
+    }
+    if (bodyAudioMode === "required" && !media.hasAudio) {
+      throw new FfmpegError(`assembleAuthoredBody: required diegetic audio missing from segment ${index}`);
     }
     // LTX clips are quantized to 8n+1 frames, so their container duration can
     // differ from the authored window by a few frames. Larger deficits are a
@@ -543,13 +574,21 @@ export async function assembleAuthoredBody(args: {
       `tpad=stop_mode=clone:stop_duration=${pad.toFixed(3)},` +
       `trim=duration=${outputDur.toFixed(3)},setpts=PTS-STARTPTS`;
     const segmentPath = join(args.tmpDir, `authored_${String(index).padStart(4, "0")}.mp4`);
+    const sourceAudio = media.hasAudio
+      ? "[0:a]"
+      : "anullsrc=channel_layout=stereo:sample_rate=44100";
+    const av = bodyAudioMode === "off"
+      ? ["-vf", vf, "-an"]
+      : [
+          "-filter_complex",
+          `[0:v]${vf}[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,apad=pad_dur=${pad.toFixed(3)},atrim=duration=${outputDur.toFixed(3)},asetpts=PTS-STARTPTS[a]`,
+          "-map", "[v]", "-map", "[a]",
+        ];
     await run(FFMPEG, [
       "-y",
       "-i",
       args.clipPaths[index],
-      "-vf",
-      vf,
-      "-an",
+      ...av,
       "-c:v",
       "libx264",
       "-preset",
@@ -558,6 +597,7 @@ export async function assembleAuthoredBody(args: {
       "20",
       "-pix_fmt",
       "yuv420p",
+      ...(bodyAudioMode === "off" ? [] : ["-c:a", "aac", "-b:a", "192k"]),
       segmentPath,
     ]);
 
@@ -607,6 +647,8 @@ export async function assembleStructuredBody(args: {
   width?: number;
   height?: number;
   fps?: number;
+  /** Preserve in-world source audio; silent cards/inserts receive a silent track. */
+  bodyAudioMode?: "off" | "available" | "required";
   maxSegSec?: number;
   preset?: string;
 }): Promise<string> {
@@ -614,11 +656,20 @@ export async function assembleStructuredBody(args: {
   const H = args.height ?? 1080;
   const fps = args.fps ?? 30;
   const maxSeg = args.maxSegSec ?? 25;
+  const bodyAudioMode = args.bodyAudioMode ?? "off";
   const scalePad =
     `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps}`;
   const clipDur: number[] = [];
+  const clipHasAudio: boolean[] = [];
   for (const c of args.clipPaths) {
-    try { clipDur.push((await probe(c)).durationSec || maxSeg); } catch { clipDur.push(maxSeg); }
+    try {
+      const media = await probe(c);
+      clipDur.push(media.durationSec || maxSeg);
+      clipHasAudio.push(media.hasAudio);
+    } catch {
+      clipDur.push(maxSeg);
+      clipHasAudio.push(false);
+    }
   }
   const segFiles: string[] = [];
   let sj = 0;
@@ -627,12 +678,26 @@ export async function assembleStructuredBody(args: {
   // window of the clip instead of re-cutting the identical opening (visible
   // duplicate segments — the defect the beat body already guards against).
   const useCount = new Map<number, number>();
-  const cut = async (input: string, dur: number, ssSec = 0) => {
+  const cut = async (input: string, dur: number, ssSec = 0, sourceHasAudio = false) => {
     const sf = join(args.tmpDir, `sbody_${sj++}.mp4`);
+    if (bodyAudioMode === "required" && !sourceHasAudio) {
+      throw new FfmpegError("assembleStructuredBody: required diegetic audio missing from a source segment");
+    }
+    const sourceAudio = sourceHasAudio
+      ? "[0:a]"
+      : "anullsrc=channel_layout=stereo:sample_rate=44100";
+    const av = bodyAudioMode === "off"
+      ? ["-vf", scalePad, "-an"]
+      : [
+          "-filter_complex",
+          `[0:v]${scalePad},setpts=PTS-STARTPTS[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,atrim=duration=${dur.toFixed(3)},asetpts=PTS-STARTPTS[a]`,
+          "-map", "[v]", "-map", "[a]",
+        ];
     await run(FFMPEG, [
       "-y", ...(ssSec > 0.01 ? ["-ss", ssSec.toFixed(3)] : []), "-i", input,
-      "-t", dur.toFixed(3), "-vf", scalePad, "-an",
-      "-c:v", "libx264", "-preset", args.preset ?? "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", sf,
+      "-t", dur.toFixed(3), ...av,
+      "-c:v", "libx264", "-preset", args.preset ?? "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+      ...(bodyAudioMode === "off" ? [] : ["-c:a", "aac", "-b:a", "192k"]), sf,
     ]);
     segFiles.push(sf);
   };
@@ -657,7 +722,7 @@ export async function assembleStructuredBody(args: {
         // golden-ratio hop: k=0 ⇒ center; each reuse lands on a well-spread,
         // deterministic, non-repeating offset within the clip.
         const ss = head * ((0.5 + k * 0.381966) % 1);
-        await cut(clip, seg, Math.min(ss, head));
+        await cut(clip, seg, Math.min(ss, head), clipHasAudio[idx] ?? false);
         need -= seg;
         ci++;
       }
@@ -909,6 +974,10 @@ export async function composeWithIntro(args: {
   /** Seconds over which the music GRADUALLY ducks from intro→body level once the
    * narration starts (instead of an instant drop). Default 3s. */
   musicDuckRampSec?: number;
+  /** Mix the body track's admitted in-world audio beneath narration. */
+  bodyAudioMode?: "off" | "available" | "required";
+  /** Linear gain before sidechain ducking; deliberately below narration. */
+  diegeticBodyAudioVol?: number;
   /**
    * Outro card FOLDED into this same encode: the tail dissolves into this card
    * via xfade so the video ends on a deliberate beat. Previously the outro was
@@ -937,6 +1006,9 @@ export async function composeWithIntro(args: {
   const introVol = args.introMusicVol ?? 0.6;
   const bodyVol = args.narrationPath ? (args.bodyMusicVol ?? 0.12) : introVol;
   const duckRamp = Math.max(0.05, args.musicDuckRampSec ?? 3);
+  const bodyAudioMode = args.bodyAudioMode ?? "off";
+  const includeBodyAudio = bodyAudioMode !== "off";
+  const diegeticVol = Math.min(0.35, Math.max(0.03, args.diegeticBodyAudioVol ?? 0.18));
 
   const scalePad =
     `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
@@ -1022,13 +1094,36 @@ export async function composeWithIntro(args: {
   aparts.push(
     `[${musicIdx}:a]aresample=44100,atrim=0:${total.toFixed(3)},volume='${volExpr}':eval=frame[mbed]`,
   );
+  if (includeBodyAudio) {
+    // LTX's audio VAE creates in-world sound for the take. It begins with the
+    // body (never under the title card), then gets aggressively ducked by the
+    // spoken track below. This is a distinct narration-safe layer, not score.
+    aparts.push(
+      `[${bodyIdx}:a]aresample=44100,aformat=channel_layouts=stereo,adelay=${introMs}:all=1,` +
+        `atrim=0:${total.toFixed(3)},volume=${diegeticVol.toFixed(3)}[diegeticbase]`,
+    );
+  }
   let amixOut: string;
   if (narrIdx >= 0) {
     aparts.push(
       `[${narrIdx}:a]aresample=44100,adelay=${introMs}:all=1,` +
-        `atrim=0:${total.toFixed(3)}[narr]`,
+        // Keep the sidechain alive through the body. Without this padded silent
+        // tail, FFmpeg ends sidechaincompress when narration ends and erases
+        // every later LTX sound instead of letting it recover naturally.
+        `atrim=0:${total.toFixed(3)},apad=whole_dur=${total.toFixed(3)}[narr]`,
     );
-    aparts.push(`[narr][mbed]amix=inputs=2:duration=longest:normalize=0[amixraw]`);
+    if (includeBodyAudio) {
+      aparts.push(`[narr]asplit=2[narrmix][narrkey]`);
+      aparts.push(
+        `[diegeticbase][narrkey]sidechaincompress=threshold=0.015:ratio=20:attack=20:release=400:detection=rms[diegeticduck]`,
+      );
+      aparts.push(`[narrmix][mbed][diegeticduck]amix=inputs=3:duration=longest:normalize=0[amixraw]`);
+    } else {
+      aparts.push(`[narr][mbed]amix=inputs=2:duration=longest:normalize=0[amixraw]`);
+    }
+    amixOut = "[amixraw]";
+  } else if (includeBodyAudio) {
+    aparts.push(`[mbed][diegeticbase]amix=inputs=2:duration=longest:normalize=0[amixraw]`);
     amixOut = "[amixraw]";
   } else {
     amixOut = "[mbed]";

@@ -2013,6 +2013,20 @@ export const timelineAssemble: Block = {
       : undefined;
     const cinematicPlan = cinematicBinding?.scenePlan;
     const cinematicFootageManifest = cinematicBinding?.footageManifest;
+    // The generated-footage manifest is the only reliable signal that this
+    // body came from LTX rather than ordinary stock/entity sources. Preserve
+    // its in-world audio when available; cinematic Casefile is stricter and
+    // requires every admitted LTX take to carry the worker-attested stream.
+    const generatedLtxBodyAudio = Boolean(
+      generatedFootageRaw &&
+      typeof generatedFootageRaw === "object" &&
+      typeof (generatedFootageRaw as Record<string, unknown>)["source"] === "string",
+    );
+    const bodyAudioMode: "off" | "available" | "required" = cinematicFootageManifest
+      ? "required"
+      : generatedLtxBodyAudio
+        ? "available"
+        : "off";
     const authoredManifest = ctx.store["shotRenderManifest"]
       ? validateQualifiedShotRender({
           manifest: ctx.store["shotRenderManifest"],
@@ -2222,6 +2236,7 @@ export const timelineAssemble: Block = {
         tailHoldSec: tailSec,
         width: W,
         height: H,
+        bodyAudioMode,
       });
     } else if (authoredManifest) {
       const authoredPaths: string[] = [];
@@ -2277,6 +2292,7 @@ export const timelineAssemble: Block = {
         tmpDir: tmp,
         width: W,
         height: H,
+        bodyAudioMode,
         maxSegSec: bodyMaxSeg,
       });
     } else {
@@ -2289,6 +2305,7 @@ export const timelineAssemble: Block = {
         beats,
         width: W,
         height: H,
+        bodyAudioMode,
         // per-clip screen time matches stock_footage's coverage credit (PER_CLIP=25)
         // so the gathered footage fills the full length without the body looping.
         maxSegSec: bodyMaxSeg,
@@ -2362,6 +2379,7 @@ export const timelineAssemble: Block = {
       bodyMusicVol: Number(ctx.params["bodyMusicVol"] ?? 0.1026),
       // slower, gentler duck into/out of the narration bed
       musicDuckRampSec: Number(ctx.params["musicDuckRampSec"] ?? 4),
+      bodyAudioMode,
       outroCardPath,
       outroFadeInSec: 1.2,
     });

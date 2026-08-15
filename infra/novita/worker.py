@@ -743,11 +743,11 @@ def build_video_command(
     return command
 
 
-def probe_video_output(output: Path, width: int, height: int) -> dict[str, int]:
-    """Require the actual encoded MP4 to match the sealed LTX stage-two target."""
+def probe_video_output(output: Path, width: int, height: int) -> dict[str, int | bool]:
+    """Require the actual encoded MP4 to match the sealed LTX stage-two target and carry LTX audio."""
     result = subprocess.run(
         [
-            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "ffprobe", "-v", "error",
             "-show_entries", "stream=codec_type,width,height", "-of", "json", str(output),
         ],
         check=False,
@@ -761,12 +761,18 @@ def probe_video_output(output: Path, width: int, height: int) -> dict[str, int]:
         streams = json.loads(result.stdout).get("streams")
     except (TypeError, ValueError, json.JSONDecodeError) as error:
         raise RuntimeError("ffprobe returned malformed rendered LTX video metadata") from error
-    if not isinstance(streams, list) or len(streams) != 1 or not isinstance(streams[0], dict):
+    if not isinstance(streams, list) or not all(isinstance(stream, dict) for stream in streams):
+        raise RuntimeError("ffprobe returned malformed rendered LTX stream metadata")
+    video_streams = [stream for stream in streams if stream.get("codec_type") == "video"]
+    audio_streams = [stream for stream in streams if stream.get("codec_type") == "audio"]
+    if len(video_streams) != 1:
         raise RuntimeError("rendered LTX output must contain exactly one usable video stream")
-    stream = streams[0]
-    if stream.get("codec_type") != "video" or stream.get("width") != width or stream.get("height") != height:
+    stream = video_streams[0]
+    if stream.get("width") != width or stream.get("height") != height:
         raise RuntimeError(f"rendered LTX output geometry must be {width}x{height}")
-    return {"outputWidth": width, "outputHeight": height}
+    if len(audio_streams) != 1:
+        raise RuntimeError("rendered LTX output must contain exactly one generated audio stream")
+    return {"outputWidth": width, "outputHeight": height, "hasAudio": True}
 
 
 def render_video(

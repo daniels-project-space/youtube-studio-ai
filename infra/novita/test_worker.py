@@ -333,13 +333,18 @@ class WorkerContractTests(unittest.TestCase):
         original_run = worker.subprocess.run
         try:
             worker.subprocess.run = lambda *_args, **_kwargs: worker.subprocess.CompletedProcess(
-                ["ffprobe"], 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}]}), "",
+                ["ffprobe"], 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}, {"codec_type": "audio"}]}), "",
             )
-            self.assertEqual(worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704), {"outputWidth": 1280, "outputHeight": 704})
+            self.assertEqual(worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704), {"outputWidth": 1280, "outputHeight": 704, "hasAudio": True})
             worker.subprocess.run = lambda *_args, **_kwargs: worker.subprocess.CompletedProcess(
-                ["ffprobe"], 0, json.dumps({"streams": [{"codec_type": "video", "width": 640, "height": 352}]}), "",
+                ["ffprobe"], 0, json.dumps({"streams": [{"codec_type": "video", "width": 640, "height": 352}, {"codec_type": "audio"}]}), "",
             )
             with self.assertRaisesRegex(RuntimeError, "geometry"):
+                worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704)
+            worker.subprocess.run = lambda *_args, **_kwargs: worker.subprocess.CompletedProcess(
+                ["ffprobe"], 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}]}), "",
+            )
+            with self.assertRaisesRegex(RuntimeError, "generated audio"):
                 worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704)
         finally:
             worker.subprocess.run = original_run
