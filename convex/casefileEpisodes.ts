@@ -34,7 +34,7 @@ async function ownedEpisode(
   return episode;
 }
 
-/** Creates one immutable source-admitted episode revision per case/owner. */
+/** Creates one immutable source-admitted episode revision per source packet. */
 export const admitSource = mutation({
   args: { ownerId: v.string(), sourcePacket: v.any(), now: v.optional(v.number()) },
   handler: async (ctx, args) => {
@@ -43,19 +43,15 @@ export const admitSource = mutation({
     });
     const existing = await ctx.db
       .query("casefileEpisodes")
-      .withIndex("by_owner_case", (q) => q.eq("ownerId", args.ownerId).eq("caseId", admitted.caseId))
+      .withIndex("by_owner_source_packet", (q) =>
+        q.eq("ownerId", args.ownerId).eq("sourcePacketFingerprint", admitted.sourceAdmission.sourcePacketFingerprint))
       .unique();
-    if (existing) {
-      const prior = workflow(existing);
-      if (prior.sourceAdmission.sourcePacketFingerprint !== admitted.sourceAdmission.sourcePacketFingerprint) {
-        throw new Error("casefile episode source revision already exists for this caseId; use a new caseId for changed evidence");
-      }
-      return existing;
-    }
+    if (existing) return existing;
     const now = args.now ?? Date.now();
     const id = await ctx.db.insert("casefileEpisodes", {
       ownerId: args.ownerId,
       caseId: admitted.caseId,
+      sourcePacketFingerprint: admitted.sourceAdmission.sourcePacketFingerprint,
       status: admitted.status,
       workflow: admitted,
       createdAt: now,

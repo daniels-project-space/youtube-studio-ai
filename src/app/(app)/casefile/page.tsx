@@ -5,6 +5,7 @@ import { useCallback, useEffect, useMemo, useState } from "react";
 type Episode = {
   _id: string;
   caseId: string;
+  sourcePacketFingerprint?: string;
   status: string;
   updatedAt: number;
   workflow?: {
@@ -130,6 +131,7 @@ export default function CasefilePage() {
             <button key={episode._id} type="button" onClick={() => setSelectedId(episode._id)} style={{ textAlign: "left", border: "1px solid #293448", borderRadius: 9, padding: 10, cursor: "pointer", color: "#e7edf8", background: selected?._id === episode._id ? "#182d4d" : "#101722" }}>
               <strong style={{ display: "block", fontSize: 13 }}>{episode.caseId}</strong>
               <small style={{ color: "#9eadc1" }}>{episode.status.replaceAll("_", " ")}</small>
+              {episode.sourcePacketFingerprint && <small style={{ display: "block", color: "#71819a", marginTop: 3 }}>{episode.sourcePacketFingerprint.slice(0, 12)}…</small>}
             </button>
           ))}
         </aside>

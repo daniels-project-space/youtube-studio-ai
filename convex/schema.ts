@@ -1269,6 +1269,8 @@ export default defineSchema({
   casefileEpisodes: defineTable({
     ownerId: v.string(),
     caseId: v.string(),
+    /** Content identity of this immutable source-evidence revision. */
+    sourcePacketFingerprint: v.string(),
     status: v.union(
       v.literal("source_admitted"),
       v.literal("awaiting_evidence_review"),
@@ -1280,8 +1282,9 @@ export default defineSchema({
     createdAt: v.number(),
     updatedAt: v.number(),
   })
-    .index("by_owner_case", ["ownerId", "caseId"])
+    .index("by_owner_source_packet", ["ownerId", "sourcePacketFingerprint"])
     .index("by_owner_status", ["ownerId", "status"])
+    .index("by_owner_case_updated", ["ownerId", "caseId", "updatedAt"])
     .index("by_owner_updated", ["ownerId", "updatedAt"]),
 
   // Single project-wide "what are we working toward right now" record, so
