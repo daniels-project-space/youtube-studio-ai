@@ -37,8 +37,8 @@ for (const executor of [
   "synthStyleDNA",
   "synthShowBible",
   "optimizeTopics",
-  "castVoice",
-  "gateColdOpen",
+  "selectDeterministicElevenVoice",
+  "preflightNarrationPerformance",
   "generateChannelArt",
   "architectPipeline",
   "completePipelineForPolicy",
@@ -46,10 +46,13 @@ for (const executor of [
   assert(coordinator.includes(executor), `real executor ${executor} must remain wired`);
 }
 assert.match(coordinator, /familyPolicy\.voiceOwnership === "family-engine"/);
-assert.match(coordinator, /makeVoiceColdOpenReceipt/);
+assert.match(coordinator, /makeVoiceProviderSelectionReceipt/);
+assert.match(coordinator, /makeVoiceLocalColdOpenReceipt/);
 assert.match(coordinator, /validateVoiceCastingReadinessReceipt/);
 assert.match(coordinator, /validatePipelineVoiceWiring/);
 assert.match(coordinator, /voiceColdOpenEvidence/);
+assert.doesNotMatch(coordinator, /\{ castVoice, gateColdOpen \}/,
+  "channel inception must not route voice casting through the retired Gemini audio judge");
 assert.match(coordinator, /positioningIdentityProjection/);
 assert.match(coordinator, /seoIdentityProjection/);
 assert.match(coordinator, /const voiceStage = channelInceptionStage\(plan, "channel-inception-voice"\)/);

@@ -1,7 +1,7 @@
 /**
  * Style-DNA distiller — Inception's grounding step.
  *
- * Turns AUTO-DISCOVERED research (top competitors + the Gemini thumbnail-vision
+ * Turns AUTO-DISCOVERED research (top competitors + the metadata-backed thumbnail
  * style guide + the SEO databank) into a single FROZEN, machine-readable
  * `StyleDNA`: the channel's recurring subject, setting, palette, motion/audio/
  * narrative vocabulary, and SEO formulas. Every downstream block generates
@@ -15,7 +15,6 @@
  */
 import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
-import { hasGeminiKey } from "@/lib/gemini";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import type { FamilyKey } from "@/engine/families";
@@ -54,11 +53,11 @@ export interface StyleDNAInput {
   competitorTitles?: string[];
   /** Power words mined from the niche. */
   powerWords?: string[];
-  /** Gemini-vision analysis of the niche's top thumbnails. */
+  /** Metadata-backed analysis of the niche's top thumbnails. */
   thumbnailStyleGuide?: ThumbnailStyleGuide;
   /** SEO databank signals. */
   databank?: DatabankSignals;
-  /** Gemini analysis of the operator's example clip ("make it like this"). */
+  /** Operator-provided example-clip notes ("make it like this"). */
   exampleClipNotes?: string;
   now: number;
   log?: Logger;
@@ -266,8 +265,8 @@ function groundingContext(input: StyleDNAInput): { text: string; gaps: string[];
  */
 export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
   const log = input.log ?? (() => {});
-  if (!hasAnthropicKey() && !hasGeminiKey()) {
-    log("styleDNA: no LLM key — ungrounded skeleton (Doctor must heal before established)");
+  if (!hasAnthropicKey()) {
+    log("styleDNA: no non-Google creative-model key — ungrounded skeleton (Doctor must heal before established)");
     return ungroundedDNA(input);
   }
 
@@ -316,8 +315,8 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
     .filter(Boolean)
     .join("\n");
 
-  // ITERATIVE distillation (Reflexion): the Showrunner (Claude) drafts the DNA;
-  // a DIFFERENT-model critic (Gemini) scores it for genuine specificity +
+  // ITERATIVE distillation (Reflexion): the Showrunner drafts the DNA;
+  // the non-Google critic scores it for genuine specificity +
   // fidelity to the research, with deterministic anti-generic guards folded in;
   // the draft is regenerated carrying the critique forward. No fallback — if the
   // generator throws outright we return an ungrounded skeleton for the Doctor.

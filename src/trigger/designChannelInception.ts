@@ -1,3 +1,5 @@
+import { createHash } from "node:crypto";
+
 import { admitProviderTaskOwner } from "@/lib/providerTaskOwnerAdmission";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
@@ -24,6 +26,10 @@ import {
 } from "@/lib/channelResearchEvidence";
 import { optimizeTopics } from "@/lib/topicOptimizer";
 import { channelPrefix, headObjectMetadata, putObject } from "@/lib/storage";
+import { makeRunTempDir, writeBytes } from "@/lib/files";
+import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
+import { selectDeterministicElevenVoice } from "@/lib/deterministicVoiceCast";
+import { renderNarration } from "@/lib/voicecraft";
 import {
   buildAndPersistQuizYearFoundation,
   buildQuizYearFoundation,
@@ -86,15 +92,18 @@ import {
 } from "@/lib/channelInceptionProbe";
 import {
   makeVoicecraftAuditionEvidence,
+  makeProviderMetadataSelectionEvidence,
   validateVoiceQualityEvidence,
 } from "@/lib/voiceReadiness";
 import {
-  makeVoiceCastingAuditionReceipt,
-  makeVoiceColdOpenReceipt,
+  makeVoiceLocalColdOpenReceipt,
+  makeVoiceProviderSelectionReceipt,
   validateVoiceCastingReadinessReceipt,
   voiceCastingOutputFingerprint,
   type VoiceCastingAuditionReceipt,
   type VoiceColdOpenReceipt,
+  type VoiceLocalColdOpenReceipt,
+  type VoiceProviderSelectionReceipt,
 } from "@/lib/voiceCastingReceipt";
 import {
   positioningIdentityProjection,
@@ -159,6 +168,8 @@ interface VoiceCastingSlim {
   at: number;
   auditionReceipt?: VoiceCastingAuditionReceipt;
   coldOpenReceipt?: VoiceColdOpenReceipt;
+  providerSelectionReceipt?: VoiceProviderSelectionReceipt;
+  localColdOpenReceipt?: VoiceLocalColdOpenReceipt;
 }
 
 interface ChannelIdentityState {
@@ -684,13 +695,22 @@ function wireVoiceReadiness(
   if (!validateVoiceCastingReadinessReceipt(voiceCastingValidation)) return { pipeline, wired: [] };
   const qualifiedCast = voiceCastingValidation.cast;
   const wired: string[] = [];
-  const voiceCastEvidence = makeVoicecraftAuditionEvidence({
-    channelId: String(channelId),
-    provider: "elevenlabs",
-    voiceId: qualifiedCast.voiceId,
-    castScore: qualifiedCast.score,
-    castJudgedAt: qualifiedCast.at,
-  });
+  const voiceCastEvidence = qualifiedCast.providerSelectionReceipt
+    ? makeProviderMetadataSelectionEvidence({
+        channelId: String(channelId),
+        provider: "elevenlabs",
+        voiceId: qualifiedCast.voiceId,
+        castScore: qualifiedCast.score,
+        castJudgedAt: qualifiedCast.at,
+        selectionFingerprint: qualifiedCast.providerSelectionReceipt.selectionFingerprint,
+      })
+    : makeVoicecraftAuditionEvidence({
+        channelId: String(channelId),
+        provider: "elevenlabs",
+        voiceId: qualifiedCast.voiceId,
+        castScore: qualifiedCast.score,
+        castJudgedAt: qualifiedCast.at,
+      });
   const narration = pipeline.find((entry) => entry.block === "narration_tts");
   if (narration) {
     const params = (narration.params ?? {}) as Record<string, unknown>;
@@ -1694,8 +1714,12 @@ export async function executeDesignChannel(
           ? {
               value: validation.cast,
               evidence: {
-                auditionReceipt: validation.cast.auditionReceipt,
-                coldOpenReceipt: validation.cast.coldOpenReceipt,
+                ...(validation.cast.providerSelectionReceipt
+                  ? { providerSelectionReceipt: validation.cast.providerSelectionReceipt }
+                  : { auditionReceipt: validation.cast.auditionReceipt }),
+                ...(validation.cast.localColdOpenReceipt
+                  ? { localColdOpenReceipt: validation.cast.localColdOpenReceipt }
+                  : { coldOpenReceipt: validation.cast.coldOpenReceipt }),
               },
               outputFingerprint: voiceCastingOutputFingerprint(validation.cast),
             }
@@ -1706,28 +1730,23 @@ export async function executeDesignChannel(
         loadCompleted: loadVoice,
         adoptExisting: loadVoice,
         execute: async () => {
-          const { castVoice, gateColdOpen } = await import("@/lib/voicecraft");
-          const cast = await castVoice({
-            convex,
-            ownerId,
-            channelName: positioning.name,
-            niche: seoIdentity.niche,
-            persona: seoIdentity.persona,
-            register: JSON.stringify(positioning.styleDNA.narrative ?? {}),
-            log,
-          });
-          if (!cast || cast.score < 7) throw new Error("voice audition did not produce a qualified winner");
+          // Provider labels make an explicit, repeatable pre-cast. They do not
+          // masquerade as a listened Gemini audition: an actual provider take
+          // is immediately measured below, and production narration still runs
+          // its own local performance + final transcript evidence gates.
+          const cast = await selectDeterministicElevenVoice({ niche: seoIdentity.niche });
           const judgedAt = Date.now();
-          const auditionReceipt = makeVoiceCastingAuditionReceipt({
+          const providerSelectionReceipt = makeVoiceProviderSelectionReceipt({
             ownerId,
             channelId: String(channelId),
             voiceId: cast.voiceId,
-            score: cast.score,
-            judgedAt,
-            auditioned: cast.auditioned,
-            verdict: {
-              winner: cast.voiceId,
-              score: cast.score,
+            score: cast.selectionScore,
+            selectedAt: judgedAt,
+            shortlisted: cast.shortlisted,
+            selection: {
+              voiceId: cast.voiceId,
+              name: cast.name,
+              character: cast.character,
               why: cast.why,
               physics: cast.physics,
             },
@@ -1736,38 +1755,52 @@ export async function executeDesignChannel(
           const coldOpenText =
             `${sampleTopic} looks simple until one overlooked detail changes the whole picture. ` +
             `Follow that detail carefully, because it reveals what most explanations leave out.`;
-          const coldOpen = await gateColdOpen({
+          const coldOpenBytes = await renderNarration({
             text: coldOpenText,
             elevenVoiceId: cast.voiceId,
             physics: cast.physics,
             seed: 4242,
-            log,
           });
+          const coldOpenDir = await makeRunTempDir(`${runtime.runId}_voice_inception`);
+          const coldOpenPath = `${coldOpenDir}/cold_open.mp3`;
+          await writeBytes(coldOpenPath, coldOpenBytes);
+          const coldOpenEvidence = await preflightNarrationPerformance({
+            audioPath: coldOpenPath,
+            text: coldOpenText,
+            speed: cast.physics.speed,
+          });
+          const localColdOpenReceipt = makeVoiceLocalColdOpenReceipt({
+            ownerId,
+            channelId: String(channelId),
+            voiceId: cast.voiceId,
+            measuredAt: Date.now(),
+            text: coldOpenText,
+            physics: cast.physics,
+            audioFingerprint: createHash("sha256").update(coldOpenBytes).digest("hex"),
+            durationSec: coldOpenEvidence.durationSec,
+            wordsPerSec: coldOpenEvidence.wordsPerSec,
+            integratedLufs: coldOpenEvidence.integratedLufs,
+          });
+          log(
+            `voice inception: selected ${cast.name} from provider metadata and measured a real local cold-open ` +
+            `(${coldOpenEvidence.durationSec.toFixed(1)}s, ${coldOpenEvidence.wordsPerSec.toFixed(2)} words/s, ${coldOpenEvidence.integratedLufs.toFixed(1)} LUFS)`,
+          );
           const slim: VoiceCastingSlim = {
             voiceId: cast.voiceId,
             name: cast.name,
             character: cast.character.slice(0, 300),
-            score: cast.score,
+            score: cast.selectionScore,
             why: cast.why.slice(0, 300),
             at: judgedAt,
-            auditionReceipt,
-            coldOpenReceipt: makeVoiceColdOpenReceipt({
-              ownerId,
-              channelId: String(channelId),
-              voiceId: cast.voiceId,
-              judgedAt: Date.now(),
-              seed: coldOpen.seed,
-              text: coldOpenText,
-              physics: cast.physics,
-              verdict: coldOpen.verdict,
-            }),
+            providerSelectionReceipt,
+            localColdOpenReceipt,
           };
           await mergeIdentity(convex, channelId, { voiceCasting: slim });
           return {
             value: slim,
             evidence: {
-              auditionReceipt: slim.auditionReceipt,
-              coldOpenReceipt: slim.coldOpenReceipt,
+              providerSelectionReceipt: slim.providerSelectionReceipt,
+              localColdOpenReceipt: slim.localColdOpenReceipt,
             },
             outputFingerprint: voiceCastingOutputFingerprint(slim),
           };
