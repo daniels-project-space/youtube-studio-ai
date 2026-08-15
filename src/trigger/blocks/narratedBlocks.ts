@@ -28,6 +28,10 @@ import {
   hasSourceAttributedDataStoryParams,
 } from "@/engine/dataStory";
 import {
+  assertDataStorySourceLedger,
+  dataStorySourceLedgerPrompt,
+} from "@/engine/dataStorySourceLedger";
+import {
   channelCritiqueBrief,
   produceAndCritique,
   type ChannelCritiqueContext,
@@ -311,6 +315,9 @@ export const scriptGen: Block = {
   produces: ["script", "narrationText"],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
+    const sourceGrounding = hasSourceAttributedDataStoryParams(ctx.params)
+      ? dataStorySourceLedgerPrompt(assertDataStorySourceLedger(ctx.store["dataStorySourceLedger"]))
+      : undefined;
     // RENDER-GROUP REUSE: a language sibling translates the base script instead of
     // regenerating it (reuses the base's structure + research; only words change).
     const reuseScript = ctx.store["reuseScript"] as Script | undefined;
@@ -342,6 +349,7 @@ export const scriptGen: Block = {
       // numbers the inserts will render.
       dataRich: ctx.params["dataRich"] as boolean | undefined,
       sourceAttributionRequired: ctx.params["sourceAttributionRequired"] === true,
+      sourceGrounding,
       structure: getStructure(ctx.store),
       // The channel's locked narrative register (Style DNA) â€” outranks the
       // generic archetype tone in the prompt.
@@ -608,6 +616,7 @@ export const qaScript: Block = {
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
     if (hasSourceAttributedDataStoryParams(ctx.params)) {
+      assertDataStorySourceLedger(ctx.store["dataStorySourceLedger"], narration);
       const sourcedNumericSentences = splitSentences(narration)
         .filter((sentence) => /\d/.test(sentence) && hasNamedSourceAttribution(sentence));
       if (sourcedNumericSentences.length < DATA_STORY_MIN_SOURCED_NUMERIC_SENTENCES) {

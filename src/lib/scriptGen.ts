@@ -144,6 +144,8 @@ export interface ScriptRequest {
   dataRich?: boolean;
   /** Strict source requirement for the explicit source-attributed data-story profile. */
   sourceAttributionRequired?: boolean;
+  /** Reviewed source/numeric-claim ledger injected by the data-story admission path. */
+  sourceGrounding?: string;
   /**
    * Script Lab playbook (hook rules + opening devices distilled from WATCHING
    * the niche's top-view videos). One opening device is assigned per video.
@@ -316,7 +318,10 @@ function styleGuidance(req: ScriptRequest): string {
   const doctrineClause = doctrine
     ? `VOICE ARCHETYPE "${doctrine.voice}" — the whole narration must sound like this: ${doctrine.tone} `
     : "";
-  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language);
+  const sourceGrounding = req.sourceGrounding?.trim()
+    ? `\n\n${req.sourceGrounding.trim()}`
+    : "";
+  return dnaClause + doctrineClause + styleGuidanceBase(style) + langDirective(language) + sourceGrounding;
 }
 
 /**

@@ -81,8 +81,22 @@ function normalized(value: string): string {
   return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
 }
 
+function compact(value: string): string {
+  return value.toLocaleLowerCase().replace(/[^a-z0-9]+/g, "");
+}
+
 function sentenceList(narration: string): string[] {
-  return narration.replace(/\s+/g, " ").match(/[^.!?]+[.!?]+|[^.!?]+$/g)?.map((item) => item.trim()).filter(Boolean) ?? [];
+  // A decimal point is not a sentence boundary: splitting `4.1%` into two
+  // fragments would make an approved factual anchor look invented.
+  const abbreviations: string[] = [];
+  const protectedText = narration.replace(/\b(?:[A-Za-z]\.){2,}/g, (abbreviation) => {
+    const index = abbreviations.push(abbreviation) - 1;
+    return `__ABBREVIATION_${index}__`;
+  });
+  return protectedText.replace(/\s+/g, " ")
+    .split(/(?<=[!?])\s+|\.(?!\d)(?=\s|$)/)
+    .map((item) => item.replace(/__ABBREVIATION_(\d+)__/g, (_, index) => abbreviations[Number(index)] ?? "").trim())
+    .filter(Boolean);
 }
 
 export function evaluateDataStorySourceLedger(
@@ -125,12 +139,12 @@ export function evaluateDataStorySourceLedger(
 
   if (narration !== undefined) {
     const sentences = sentenceList(narration).filter((sentence) => /\d/.test(sentence));
-    const approvedSources = ledger.sources.map((source) => ({ source, normalizedName: normalized(source.name) }));
+    const approvedSources = ledger.sources.map((source) => ({ source, compactName: compact(source.name) }));
     const approvedClaims = ledger.claims.map((claim) => ({ claim, normalizedAnchor: normalized(claim.numericAnchor) }));
     let approvedSentences = 0;
     for (const sentence of sentences) {
       const normalizedSentence = normalized(sentence);
-      const namedSource = approvedSources.find(({ normalizedName }) => normalizedName && normalizedSentence.includes(normalizedName));
+      const namedSource = approvedSources.find(({ compactName }) => compactName && compact(sentence).includes(compactName));
       if (!namedSource) {
         if (/\b(?:according to|data from|figures from)\b/i.test(sentence)) {
           issues.push({ code: "unknown_spoken_source", message: `narration names a source not present in the reviewed ledger: ${sentence.slice(0, 180)}` });
