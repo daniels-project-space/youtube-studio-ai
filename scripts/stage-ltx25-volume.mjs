@@ -115,21 +115,10 @@ await s3.send(new PutObjectCommand({
 const scriptUrl = await getSignedUrl(s3, new GetObjectCommand({ Bucket: BUCKET, Key: scriptKey }), {
   expiresIn: MAX_STAGE_SECONDS + 900,
 });
-const bootstrap = String.raw`import json,os,traceback,urllib.request
-receipt=os.environ.get('LTX_STAGE_RECEIPT_URL','')
-try:
- p='/tmp/ltx-stage.sh'
- with urllib.request.urlopen(os.environ['LTX_STAGE_SCRIPT_URL'],timeout=60) as r: open(p,'wb').write(r.read())
- os.execv('/bin/bash',['bash',p])
-except Exception as e:
- try:
-  b=json.dumps({'contract':'ltx-2.5-volume-stage/v1','ok':False,'errorType':'bootstrap-'+type(e).__name__,'message':'signed bootstrap could not start'}).encode()
-  q=urllib.request.Request(receipt,data=b,method='PUT',headers={'Content-Type':'application/json','Content-Length':str(len(b))})
-  urllib.request.urlopen(q,timeout=60).read()
- except Exception: pass
- raise`;
-const bootstrapB64 = Buffer.from(bootstrap, "utf8").toString("base64");
-const command = `bash -lc 'apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq python3 python3-pip && python3 -c "import base64;exec(compile(base64.b64decode(\"${bootstrapB64}\"),\"<ltx-bootstrap>\",\"exec\"))"'`;
+// Keep this below Novita's command-field boundary. The full, fixed program is
+// still fetched only through the expiring signed URL; this tiny apt/curl shim
+// proved executable on the exact image in the command probe above.
+const command = "bash -c 'apt-get update -qq;apt-get install -y -qq curl python3 python3-pip;curl -fsSL \"$LTX_STAGE_SCRIPT_URL\"|bash'";
 const apiBase = "https://api.novita.ai/gpu-instance/openapi/v1";
 const headers = { authorization: `Bearer ${process.env.NOVITA_API_KEY}`, "content-type": "application/json", "user-agent": "youtube-studio-ai/ltx25-stage-v2" };
 async function api(path, init = {}) {
