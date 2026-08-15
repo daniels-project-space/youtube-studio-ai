@@ -12,5 +12,9 @@ assert.match(narrationSource, /planNarrationCadence\(/, "narration_tts must plan
 assert.match(narrationSource, /evaluateNarrationCadence\(/, "narration_tts must bind actual sentence timing to the planned delivery beats");
 assert.doesNotMatch(narrationSource, /Math\.random\(/, "narration timing must be repeatable across retries and cannot use random pauses");
 assert.match(narrationSource, /chapterCadencePlan/, "chapter narration must use the same shared cadence planner");
+assert.match(narrationSource, /judgeAvailable:\s*false/, "narration_tts must never borrow Gemini availability from thumbnail work");
+assert.match(narrationSource, /localEvidenceGateAvailable:\s*true/, "production narration must use the local FFmpeg evidence gate");
+assert.match(narrationSource, /preflightNarrationPerformance\(/, "the actual cold open and final narration must be measured");
+assert.doesNotMatch(narrationSource, /hasGeminiKey|gateColdOpen|judgeNarrationTake/, "Gemini audio judging is forbidden outside thumbnails");
 
 console.log("narration cadence wiring test passed");

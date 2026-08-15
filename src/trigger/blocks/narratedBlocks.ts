@@ -65,12 +65,12 @@ import {
   TimedOnScreenTextCueSchema,
 } from "@/lib/onScreenTextProof";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
-import { parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
+import { parseJsonLoose } from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { existsSync } from "node:fs";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
-import { narrationPhysics, gateColdOpen, judgeNarrationTake } from "@/lib/voicecraft";
+import { narrationPhysics } from "@/lib/voicecraft";
 import {
   assertNarrationPerformanceEvidence,
   evaluateNarrationCadence,
@@ -714,16 +714,12 @@ export const narrationTts: Block = {
     // sanitizeSpoken strips any markdown/slashes/stage-directions that slipped
     // through script_gen so the voice never reads a symbol aloud.
     const text = sanitizeSpoken(str(ctx, "narrationText"), { keepAudioTags: ttsProvider === "elevenlabs" });
-    // Count provider-accepted responses rather than estimating from the final
-    // script. This includes cold-open auditions, a verdict-driven second take,
-    // and spoken chapter headings; 429/5xx/network retries do not increment.
+    // Count provider-accepted TTS responses rather than estimating from the
+    // final script. The local cold-open evidence is deliberately not a second
+    // remote model call, so thumbnail-only Google permission cannot leak here.
     let billableTtsCharacters = 0;
-    let audioJudgeCalls = 0;
     const onBillableCharacters = (characters: number) => {
       billableTtsCharacters += characters;
-    };
-    const onAudioJudgeCall = () => {
-      audioJudgeCalls += 1;
     };
     try {
     if (ttsProvider === "elevenlabs") {
@@ -762,16 +758,16 @@ export const narrationTts: Block = {
       : undefined;
 
     // COLD-OPEN GATE — production requires a persisted >=7 human audition, an
-    // explicit voice, and either an admitted audio judge or local physical
-    // evidence from the real take. Draft is the only profile that may opt out.
+    // explicit voice, and physical evidence from the real take. Draft is the
+    // only profile that may opt out. Google/Gemini is thumbnail-only.
     const gateEnabled = ctx.params["voiceGate"] !== false;
     const castScore = Number(ctx.params["voiceCastScore"] ?? Number.NaN);
     const selectedVoiceId = ttsProvider === "elevenlabs" ? (elevenVoiceId ?? voiceId) : voiceId;
     assertVoiceGatePreconditions({
       profile: quality,
       gateEnabled,
-      judgeAvailable: hasGeminiKey(),
-      localEvidenceGateAvailable: !hasGeminiKey(),
+      judgeAvailable: false,
+      localEvidenceGateAvailable: true,
       channelId: ctx.channelId,
       provider: ttsProvider,
       voiceId: selectedVoiceId,
@@ -781,63 +777,8 @@ export const narrationTts: Block = {
       readinessReason: ctx.params["voiceReadinessReason"],
     });
     const tmp = await makeRunTempDir(ctx.runId);
-    if (gateEnabled && hasGeminiKey()) {
-      const probe = boundNarrationColdOpen(splitSentences(text).slice(0, 2).join(" "));
-      if (!probe.trim() && quality === "production") {
-        throw new Error("narration_tts: production cold-open probe is empty");
-      }
-      if (probe.trim() && ttsProvider === "elevenlabs") {
-        const gate = await gateColdOpen({
-          text: probe,
-          elevenVoiceId: selectedVoiceId ?? "JBFqnCBsd6RMkjVDRZzb",
-          physics,
-          // P1-1: the channel's own persona + critic doctrine ground the
-          // `register` judgement instead of a generic "does it sound fine".
-          channel: channelCritiqueContext(ctx),
-          log: (m) => ctx.log(m),
-          onBillableCharacters,
-          onAudioJudgeCall,
-        });
-        elevenSeed = gate.seed;
-        ctx.log(
-          `narration_tts: cold-open gate PASSED (register ${gate.verdict.register} | pace ${gate.verdict.pace} | performance ${gate.verdict.performance} | clean ${gate.verdict.clean}, seed ${gate.seed})`,
-        );
-      } else if (probe.trim()) {
-        let passed = false;
-        let lastWhy = "judge returned no verdict";
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const bytes = await synthNarration({
-            text: probe,
-            voiceId: selectedVoiceId,
-            niche,
-            speed,
-            provider: ttsProvider,
-            onBillableCharacters,
-          });
-          const verdict = await judgeNarrationTake({
-            mp3: bytes,
-            physics,
-            text: probe,
-            log: (message) => ctx.log(message),
-            onAudioJudgeCall,
-          });
-          if (verdict.pass) {
-            passed = true;
-            ctx.log(
-              `narration_tts: cold-open gate PASSED (register ${verdict.register} | pace ${verdict.pace} | performance ${verdict.performance} | clean ${verdict.clean})`,
-            );
-            break;
-          }
-          lastWhy = verdict.why;
-          ctx.log(`narration_tts: cold-open attempt ${attempt + 1} failed — ${lastWhy}`);
-        }
-        if (!passed) {
-          throw new Error(`narration_tts: cold-open failed the gate twice — ${lastWhy}`);
-        }
-      }
-    } else if (quality === "production" && gateEnabled) {
-      // Gemini is deliberately unavailable in autonomous production. Keep the
-      // human casting decision, then prove this *actual* cold-open take has a
+    if (quality === "production" && gateEnabled) {
+      // Keep the casting decision, then prove this *actual* cold-open take has a
       // real audio stream, audible loudness, and plausible spoken timing.
       const coldOpenText = boundNarrationColdOpen(splitSentences(text).slice(0, 2).join(" "));
       if (!coldOpenText.trim()) {
@@ -1016,7 +957,7 @@ export const narrationTts: Block = {
         narrationPerformanceEvidence,
         sentenceTimings,
         chapterPlan,
-        [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, audioJudgeCalls),
+        [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0),
       };
     }
 
@@ -1125,13 +1066,13 @@ export const narrationTts: Block = {
       // means "no chapter cards". (chapterCards:false channels hit the engine's
       // undefined-produce guard here on their very first render.)
       chapterPlan: [],
-      [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, audioJudgeCalls),
+      [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0),
     };
     } catch (error) {
       const observedCostUsd = narrationTtsCost(
         ttsProvider,
         billableTtsCharacters,
-        audioJudgeCalls,
+        0,
       );
       if (observedCostUsd <= 0) throw error;
       // The provider work has already happened. Make the failure terminal so an
