@@ -144,13 +144,13 @@ export const runPipelineTask = task({
     } catch (error) {
       throwForTaskRetryPolicy(error);
     }
-    // CRITICAL-KEY GATE: without the core model keys every creative block falls
-    // back to generic output (the "basic and stale" failure mode). Fail the run
-    // at minute 0 instead of silently producing a degraded video.
+    // Hydrate the scoped provider credentials used by this run. Gemini is not a
+    // production-run dependency: the only admitted Gemini surface is the
+    // receipt-bound thumbnail module, while creative text routes through the
+    // declared non-Google provider or deterministic modules.
     try {
       await bootstrapSecrets(
         (m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""),
-        { required: ["GEMINI_API_KEY"] },
       );
     } catch (error) {
       throwForTaskRetryPolicy(error);

@@ -73,13 +73,10 @@ export async function bootstrapSecrets(
   if (!process.env.TELEGRAM_CHAT_ID && process.env.TELEGRAM_ADMIN_CHAT_ID) {
     process.env.TELEGRAM_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
   }
-  // Mastra producer (Gemini): the model router reads GOOGLE_API_KEY; the raw
-  // @ai-sdk/google provider reads GOOGLE_GENERATIVE_AI_API_KEY. Set both.
-  if (process.env.GEMINI_API_KEY) {
-    if (!process.env.GOOGLE_API_KEY) process.env.GOOGLE_API_KEY = process.env.GEMINI_API_KEY;
-    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY)
-      process.env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GEMINI_API_KEY;
-  }
+  // Never promote the thumbnail-only Gemini credential to general Google SDK
+  // variables. Non-thumbnail model routes must declare and use their own
+  // provider credentials; otherwise a future SDK import could silently bypass
+  // the sealed-thumbnail admission boundary.
   done = true;
   log(`bootstrap: hydrated ${loaded.length} keys`, { keys: loaded });
   if (opts?.required) requireKeys(opts.required);

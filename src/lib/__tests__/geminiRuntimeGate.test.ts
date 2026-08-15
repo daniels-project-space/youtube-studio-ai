@@ -1,4 +1,5 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import { z } from "zod";
 
 import {
@@ -130,9 +131,34 @@ async function explicitOptInAdmitsOnlyTheSealedThumbnailPurpose(): Promise<void>
   }
 }
 
+function productionRunnersDoNotRequireThumbnailCredentials(): void {
+  const nonThumbnailWorkers = [
+    "../../trigger/runPipeline.ts",
+    "../../trigger/architectPipelineTask.ts",
+    "../../trigger/retentionAnalyst.ts",
+    "../../trigger/verifyMastra.ts",
+  ];
+  for (const worker of nonThumbnailWorkers) {
+    const source = readFileSync(new URL(worker, import.meta.url), "utf8");
+    assert.doesNotMatch(
+      source,
+      /required:\s*\[\s*["']GEMINI_API_KEY["']\s*\]/,
+      `${worker} must not make thumbnail-only Gemini credentials a production dependency`,
+    );
+  }
+
+  const bootstrap = readFileSync(new URL("../bootstrap.ts", import.meta.url), "utf8");
+  assert.doesNotMatch(
+    bootstrap,
+    /GOOGLE(?:_GENERATIVE_AI)?_API_KEY\s*=\s*process\.env\.GEMINI_API_KEY/,
+    "bootstrap must not promote thumbnail-only Gemini credentials to global Google SDK keys",
+  );
+}
+
 async function main(): Promise<void> {
   await defaultDenyStopsEveryGeminiBoundaryBeforeNetwork();
   await explicitOptInAdmitsOnlyTheSealedThumbnailPurpose();
+  productionRunnersDoNotRequireThumbnailCredentials();
   console.log("GEMINI RUNTIME GATE TESTS PASSED");
 }
 
