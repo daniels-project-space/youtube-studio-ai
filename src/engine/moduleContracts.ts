@@ -347,7 +347,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "reuseScript", "structure", "styleDNA", "scriptPlaybook", "topicBet",
       "channelName", "niche", "persona", "styleGrammar",
       // Per-channel critique grounding for the shared script critique loop.
-      "criticDoctrine", "contentLane",
+      "criticDoctrine", "contentLane", "dataStorySourceLedger",
     ],
   }),
   hook_craft: contract(["script.hook_refined"], {
@@ -358,7 +358,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     ],
   }),
   qa_script: contract(["script.qa_passed"], {
-    optionalConsumes: ["script", "styleDNA", "persona"],
+    optionalConsumes: ["script", "styleDNA", "persona", "dataStorySourceLedger"],
     qualityRequired: true,
   }),
   narration_tts: contract(["narration.timed"], {
@@ -426,7 +426,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   intro_card: contract(["graphics.intro"], { optionalConsumes: ["palette", "channelAvatarKey", "channelName"] }),
   quote_overlays: contract(["graphics.quotes"], { optionalConsumes: ["introSec", "chapterPlan"] }),
   visual_inserts: contract(["graphics.data"], {
-    optionalConsumes: ["topic", "niche", "styleDNA", "palette", "introSec", "quoteOverlays", "chapterPlan"],
+    optionalConsumes: ["topic", "niche", "styleDNA", "palette", "introSec", "quoteOverlays", "chapterPlan", "dataStorySourceLedger"],
   }),
   timeline_assemble: contract(["master.assembled"], {
     requiredConsumes: ["footageClips", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
@@ -445,7 +445,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
   qa_visual: contract(["master.quality_passed"], {
     optionalConsumes: [
-      "narrationDurationSec", "script", "sentenceTimings", "styleDNA", "introApplied", "healHints", "palette",
+      "narrationDurationSec", "narrationPerformanceEvidence", "script", "sentenceTimings", "styleDNA", "introApplied", "healHints", "palette",
       "tags", "strategy", "thumbnailer", "introSec", "quoteOverlays", "quotesApplied", "insertOverlays",
       "insertsApplied", "captionCues", "captionsApplied", "outroApplied", "validationSpec", "quoteOverlapSec", "loopSeamDiff",
       "overlaysDropped", "qualityBar", "description", "musicKey", "channelName", "niche", "persona", "styleGrammar", "topic",

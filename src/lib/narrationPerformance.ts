@@ -12,6 +12,37 @@ export interface NarrationPerformanceEvidence {
   windowMeanDb: number;
 }
 
+/**
+ * The TTS worker emits this receipt and final QA consumes it on a different
+ * worker. Keep that boundary strict so a log line, stale shape, or substituted
+ * audio path cannot masquerade as measured narration evidence.
+ */
+export function assertNarrationPerformanceEvidence(value: unknown): NarrationPerformanceEvidence {
+  if (!value || typeof value !== "object" || Array.isArray(value)) {
+    throw new Error("narration performance evidence is missing or malformed");
+  }
+  const raw = value as Record<string, unknown>;
+  const number = (key: string, min: number, max: number): number => {
+    const candidate = raw[key];
+    if (typeof candidate !== "number" || !Number.isFinite(candidate) || candidate < min || candidate > max) {
+      throw new Error(`narration performance evidence has invalid ${key}`);
+    }
+    return candidate;
+  };
+  if (raw.version !== NARRATION_PERFORMANCE_EVIDENCE_VERSION || raw.source !== "local_ffmpeg") {
+    throw new Error("narration performance evidence must be a current local_ffmpeg receipt");
+  }
+  return {
+    version: NARRATION_PERFORMANCE_EVIDENCE_VERSION,
+    source: "local_ffmpeg",
+    durationSec: number("durationSec", 1.5, 86_400),
+    wordCount: number("wordCount", 3, 1_000_000),
+    wordsPerSec: number("wordsPerSec", 0.05, 20),
+    integratedLufs: number("integratedLufs", -36, -6),
+    windowMeanDb: number("windowMeanDb", -48, -3),
+  };
+}
+
 export const NARRATION_CADENCE_EVIDENCE_VERSION = "narration-cadence-evidence/v1" as const;
 
 export type NarrationPausePurpose = "turn" | "reveal" | "question" | "release" | "continuation";

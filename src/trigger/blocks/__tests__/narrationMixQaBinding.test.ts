@@ -29,7 +29,7 @@ assert.match(
 );
 assert.match(
   source,
-  /narrationTranscriptText: items\.map\(speakOf\)\.join\(" "\)/,
+  /const narrationTranscriptText = items\.map\(speakOf\)\.join\(" "\)/,
   "chapter-mode narration proof must bind to the actual spoken headings and body, not display text",
 );
 assert.match(
@@ -51,6 +51,16 @@ assert.match(
   source,
   /narrationMix: finalNarrationMix/,
   "the operator-facing QA report must preserve the final narration-mix receipt",
+);
+assert.match(
+  source,
+  /narrationPerformanceEvidence/,
+  "final QA must retain the measured narration performance receipt, not only log it during TTS",
+);
+assert.match(
+  source,
+  /assertNarrationPerformanceEvidence\(ctx\.store\["narrationPerformanceEvidence"\]\)/,
+  "production QA must reject a missing or malformed narration-performance receipt",
 );
 
 console.log("narration mix final-QA binding test passed");

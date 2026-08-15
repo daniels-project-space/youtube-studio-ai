@@ -126,6 +126,18 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   narrationText: { type: "NarrationText", schema: nonEmpty },
   sentenceTimings: { type: "TimedSentence[]", schema: z.array(timedSentence) },
   narrationDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
+  narrationPerformanceEvidence: {
+    type: "NarrationPerformanceEvidence",
+    schema: z.object({
+      version: z.literal("narration-performance-evidence/v1"),
+      source: z.literal("local_ffmpeg"),
+      durationSec: z.number().finite().min(1.5),
+      wordCount: z.number().finite().int().min(3),
+      wordsPerSec: z.number().finite().positive(),
+      integratedLufs: z.number().finite().min(-36).max(-6),
+      windowMeanDb: z.number().finite().min(-48).max(-3),
+    }),
+  },
   videoDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
   contentLane: { type: "ContentLane", schema: ContentLaneSchema },
   qaPassed: { type: "QualityGateDecision", schema: z.boolean() },

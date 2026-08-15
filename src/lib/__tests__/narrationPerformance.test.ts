@@ -4,6 +4,7 @@ import { mkdtempSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
+  assertNarrationPerformanceEvidence,
   evaluateNarrationCadence,
   planNarrationCadence,
   preflightNarrationPerformance,
@@ -25,6 +26,11 @@ async function main(): Promise<void> {
   assert.equal(evidence.wordCount, 12);
   assert.ok(evidence.durationSec >= 3.9);
   assert.ok(evidence.integratedLufs >= -36 && evidence.integratedLufs <= -6);
+  assert.deepEqual(assertNarrationPerformanceEvidence(evidence), evidence);
+  assert.throws(
+    () => assertNarrationPerformanceEvidence({ ...evidence, source: "untrusted" }),
+    /current local_ffmpeg receipt/,
+  );
 
   await assert.rejects(
     preflightNarrationPerformance({ audioPath, text: "word ".repeat(180), speed: 1 }),

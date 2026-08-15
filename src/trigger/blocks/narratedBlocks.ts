@@ -72,6 +72,7 @@ import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
 import { narrationPhysics, gateColdOpen, judgeNarrationTake } from "@/lib/voicecraft";
 import {
+  assertNarrationPerformanceEvidence,
   evaluateNarrationCadence,
   planNarrationCadence,
   preflightNarrationPerformance,
@@ -698,6 +699,7 @@ export const narrationTts: Block = {
     "narrationDurationSec",
     "narrationLocalPath",
     "narrationTranscriptText",
+    "narrationPerformanceEvidence",
     "sentenceTimings",
     "chapterPlan",
   ],
@@ -990,12 +992,15 @@ export const narrationTts: Block = {
       local = await applyVoiceFx(local, voiceFx, join(tmp, "narration_fx.mp3"));
       let durationSec = 0;
       try { durationSec = (await probe(local)).durationSec; } catch { durationSec = cursor; }
-      if (quality === "production" && gateEnabled && !hasGeminiKey()) {
-        const evidence = await preflightNarrationPerformance({ audioPath: local, text, speed });
-        ctx.log(
-          `narration_tts: local final evidence PASSED (${evidence.durationSec.toFixed(1)}s | ${evidence.wordsPerSec.toFixed(2)} words/s | ${evidence.integratedLufs.toFixed(1)} LUFS)`,
-        );
-      }
+      const narrationTranscriptText = items.map(speakOf).join(" ");
+      const narrationPerformanceEvidence = await preflightNarrationPerformance({
+        audioPath: local,
+        text: narrationTranscriptText,
+        speed,
+      });
+      ctx.log(
+        `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,
+      );
       const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
       await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
       await recordAsset(ctx, "narration", narrationKey, { durationSec, chapters: chap, mode: "chapter" });
@@ -1007,7 +1012,8 @@ export const narrationTts: Block = {
         // The actually spoken sequence includes bounded chapter headings, which
         // are deliberately absent from the display-only narrationText.  Final
         // QA must compare against this exact source, not a nearby script.
-        narrationTranscriptText: items.map(speakOf).join(" "),
+        narrationTranscriptText,
+        narrationPerformanceEvidence,
         sentenceTimings,
         chapterPlan,
         [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, audioJudgeCalls),
@@ -1095,12 +1101,10 @@ export const narrationTts: Block = {
       }
       ctx.log(`narration_tts: ${probeFailures} probe failure(s) — sentence timings rescaled ×${k.toFixed(4)} to the measured ${durationSec.toFixed(1)}s`);
     }
-    if (quality === "production" && gateEnabled && !hasGeminiKey()) {
-      const evidence = await preflightNarrationPerformance({ audioPath: local, text, speed });
-      ctx.log(
-        `narration_tts: local final evidence PASSED (${evidence.durationSec.toFixed(1)}s | ${evidence.wordsPerSec.toFixed(2)} words/s | ${evidence.integratedLufs.toFixed(1)} LUFS)`,
-      );
-    }
+    const narrationPerformanceEvidence = await preflightNarrationPerformance({ audioPath: local, text, speed });
+    ctx.log(
+      `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,
+    );
 
     const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
     await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
@@ -1115,6 +1119,7 @@ export const narrationTts: Block = {
       narrationDurationSec: durationSec,
       narrationLocalPath: local,
       narrationTranscriptText: text,
+      narrationPerformanceEvidence,
       sentenceTimings,
       // Declared in `produces`, so it must ALWAYS be returned â€” an empty plan
       // means "no chapter cards". (chapterCards:false channels hit the engine's
@@ -3366,7 +3371,26 @@ export const qaVisual: Block = {
     const expectsNarrationMixEvidence = narrationDuration >= 1.5 && Boolean(storedNarrationPath || narrationKey);
     let finalNarrationMix: { correlation: number | null; narrationStartSec: number } | undefined;
     let finalNarrationTranscript: { wordErrorRate: number; lexicalRecall: number; passed: boolean } | undefined;
+    let narrationPerformance: ReturnType<typeof assertNarrationPerformanceEvidence> | undefined;
+    const narrationPerformanceEvidence: string[] = [];
     if (expectsNarrationMixEvidence) {
+      try {
+        narrationPerformance = assertNarrationPerformanceEvidence(ctx.store["narrationPerformanceEvidence"]);
+        if (Math.abs(narrationPerformance.durationSec - narrationDuration) > 0.75) {
+          critical.push(
+            `narration performance evidence duration ${narrationPerformance.durationSec.toFixed(2)}s does not bind the authored narration ${narrationDuration.toFixed(2)}s`,
+          );
+        }
+        narrationPerformanceEvidence.push(
+          `narrationPerformance=local_ffmpeg`,
+          `narrationWps=${narrationPerformance.wordsPerSec.toFixed(2)}`,
+          `narrationLufs=${narrationPerformance.integratedLufs.toFixed(1)}`,
+        );
+      } catch (error) {
+        if (productionQa) {
+          critical.push(`narration performance evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
       try {
         let narrationPath = storedNarrationPath && existsSync(storedNarrationPath)
           ? storedNarrationPath
@@ -3662,6 +3686,7 @@ export const qaVisual: Block = {
           ...(finalAudioMeters ? [`loudness=${finalAudioMeters.integratedLufs ?? "unmeasured"}`] : []),
           ...narrationMixEvidence,
           ...narrationTranscriptEvidence,
+          ...narrationPerformanceEvidence,
           ...onScreenTextEvidence,
         ],
       },
@@ -3732,7 +3757,7 @@ export const qaVisual: Block = {
             score: audioAestheticScore,
             minimumScore: audioMinimum,
             evaluator: "audio aesthetics grader",
-            evidence: ["audiobox production quality", ...narrationMixEvidence, ...narrationTranscriptEvidence],
+            evidence: ["audiobox production quality", ...narrationMixEvidence, ...narrationTranscriptEvidence, ...narrationPerformanceEvidence],
           }
         : finalAudioMeters
           ? {
@@ -3745,6 +3770,7 @@ export const qaVisual: Block = {
                 `introWindowDb=${finalAudioMeters.windowMeanDb ?? "unmeasured"}`,
                 ...narrationMixEvidence,
                 ...narrationTranscriptEvidence,
+                ...narrationPerformanceEvidence,
               ],
             }
           : undefined,
