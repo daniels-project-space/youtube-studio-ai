@@ -228,7 +228,18 @@ try:
   if not isinstance(files,list) or not files: raise RuntimeError('Z-Image volume manifest has no files')
   payload.update({'ok':True,'sourcePath':str(source.relative_to('/network')),'manifestSha256':hashlib.sha256(canonical).hexdigest(),'fileCount':len(files)})
 except Exception as error:
+  root=pathlib.Path('/network')
+  candidates=[]
+  for directory,names,files in os.walk(root):
+    relative=pathlib.Path(directory).relative_to(root)
+    if len(relative.parts)>4:
+      names[:]=[]
+      continue
+    if '.model-manifest.json' in files or 'z' in pathlib.Path(directory).name.lower():
+      candidates.append(str(relative))
+      if len(candidates)>=16: break
   payload['error']=f'{type(error).__name__}: {error}'[:240]
+  payload['candidates']=candidates
 body=json.dumps(payload,separators=(',',':')).encode()
 request=urllib.request.Request(os.environ['PROBE_RECEIPT_URL'],data=body,method='PUT',headers={'Content-Type':'application/json','Content-Length':str(len(body))})
 urllib.request.urlopen(request,timeout=120).read()`;
@@ -262,7 +273,7 @@ urllib.request.urlopen(request,timeout=120).read()`;
       const receipt = await jsonIfPresent(receiptKey);
       if (receipt) {
         if (receipt.ok === true) return receipt;
-        throw new Error(`Z-Image volume probe failed: ${String(receipt.error || "unknown")}`);
+        throw new Error(`Z-Image volume probe failed: ${String(receipt.error || "unknown")}; candidates=${JSON.stringify(receipt.candidates || [])}`);
       }
       await sleep(5_000);
     }
