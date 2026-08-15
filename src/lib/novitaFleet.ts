@@ -21,6 +21,9 @@ export const NOVITA_REQUIRED_GPU_COUNT = 1 as const;
  */
 export const NOVITA_PUBLIC_WORKER_REPOSITORY =
   "ghcr.io/daniels-project-space/youtube-render-worker" as const;
+/** Public, digest-pinned base used only with the sealed runtime-bundle mode. */
+export const NOVITA_PUBLIC_RUNTIME_BASE_IMAGE =
+  "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385" as const;
 
 export const OFFICIAL_RENDER_PINS = Object.freeze({
   zImage: {
@@ -163,6 +166,10 @@ export function isPinnedImage(value: unknown): value is string {
 export function isApprovedPublicWorkerImage(value: unknown): value is string {
   return isPinnedImage(value)
     && value.toLowerCase().startsWith(`${NOVITA_PUBLIC_WORKER_REPOSITORY}@sha256:`);
+}
+
+export function isApprovedPublicRuntimeBaseImage(value: unknown): value is string {
+  return value === NOVITA_PUBLIC_RUNTIME_BASE_IMAGE;
 }
 
 export function canonicalJson(value: unknown): string {
@@ -490,9 +497,57 @@ export interface NovitaCreateWorkerRequestArgs {
   imageAuthId?: string;
   /** Opt-in only; prevents an unauthenticated arbitrary registry pull. */
   publicImage?: boolean;
+  /** Exact R2 runtime bundle used only with the approved public PyTorch base. */
+  runtimeBundle?: {
+    downloadUrl: string;
+    sha256: string;
+  };
   manifestUrl: string;
   manifestSha256: string;
   approval: NovitaCapacityPlan;
+}
+
+function shellQuote(value: string): string {
+  return `'${value.replaceAll("'", "'\\\"'\\\"'")}'`;
+}
+
+/**
+ * Public registries do not need a permanent credential, but they must never
+ * be allowed to substitute an arbitrary image. This bootstrap uses the exact
+ * public PyTorch base plus a short-lived, SHA-bound R2 bundle and persists the
+ * verified runtime on the mounted volume for subsequent short-lived workers.
+ */
+function runtimeBundleBootstrapCommand(sha256: string): string {
+  const runtimeRoot = `/network/runtime/ltx-2.5-${sha256}`;
+  const hydrate = [
+    "set -euo pipefail",
+    `root=${shellQuote(runtimeRoot)}`,
+    'if [ -f "$root/.ready" ]; then',
+    '  test "$(cat \"$root/.ready\")" = "$NOVITA_RUNTIME_BUNDLE_SHA256"',
+    "  exit 0",
+    "fi",
+    'test ! -e "$root"',
+    'stage="$(mktemp -d /network/runtime/.ltx-runtime-stage.XXXXXX)"',
+    'trap \'rm -rf "$stage"\' EXIT',
+    'bundle="$stage/runtime.tar.zst"',
+    'export bundle',
+    "python -c 'import os, urllib.request; urllib.request.urlretrieve(os.environ[\"NOVITA_RUNTIME_BUNDLE_URL\"], os.environ[\"bundle\"])'",
+    'printf "%s  %s\\n" "$NOVITA_RUNTIME_BUNDLE_SHA256" "$bundle" | sha256sum -c -',
+    'tar --use-compress-program=zstd -xf "$bundle" -C "$stage"',
+    'test -x "$stage/opt/LTX-2/.venv/bin/python"',
+    'test -f "$stage/opt/novita-worker/worker.py"',
+    'printf "%s\\n" "$NOVITA_RUNTIME_BUNDLE_SHA256" > "$stage/.ready"',
+    'mv "$stage" "$root"',
+    "trap - EXIT",
+  ].join("\n");
+  const command = [
+    "set -euo pipefail",
+    `root=${shellQuote(runtimeRoot)}`,
+    'mkdir -p /network/runtime',
+    `flock "${runtimeRoot}.lock" /bin/bash -ceu ${shellQuote(hydrate)}`,
+    'exec "$root/opt/LTX-2/.venv/bin/python" "$root/opt/novita-worker/worker.py"',
+  ].join("\n");
+  return `/bin/bash -ceu ${shellQuote(command)}`;
 }
 
 /** A cache-only provider operation; it does not allocate or bill a GPU. */
@@ -509,11 +564,24 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
   if (args.approval.admitted !== true || args.approval.workerCount > NOVITA_HARD_GPU_LIMIT) {
     throw new NovitaAdmissionError("an admitted bounded capacity plan is required");
   }
-  const approvedPublicImage = args.publicImage === true && isApprovedPublicWorkerImage(args.image);
+  const approvedPublicImage = args.publicImage === true
+    && (isApprovedPublicWorkerImage(args.image) || isApprovedPublicRuntimeBaseImage(args.image));
   if (!isPinnedImage(args.image) || (!args.imageAuthId && !approvedPublicImage)) {
     throw new NovitaAdmissionError(
       "worker image must be digest-pinned and have registry authentication, or be the approved public GHCR worker",
     );
+  }
+  if (args.runtimeBundle && !isApprovedPublicRuntimeBaseImage(args.image)) {
+    throw new NovitaAdmissionError("runtime bundle mode requires the approved public PyTorch base image");
+  }
+  if (isApprovedPublicRuntimeBaseImage(args.image) && !args.runtimeBundle) {
+    throw new NovitaAdmissionError("approved public PyTorch base image requires a sealed runtime bundle");
+  }
+  if (args.runtimeBundle && (
+    !isSha256(args.runtimeBundle.sha256)
+    || !/^https:\/\//.test(args.runtimeBundle.downloadUrl)
+  )) {
+    throw new NovitaAdmissionError("runtime bundle must use a signed HTTPS URL and SHA-256 identity");
   }
   if (!isSha256(args.manifestSha256) || !/^https:\/\//.test(args.manifestUrl)) {
     throw new NovitaAdmissionError("worker manifest must use a signed HTTPS URL and SHA-256 identity");
@@ -536,6 +604,7 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
     billingMode: "spot",
     imageUrl: args.image,
     ...(args.imageAuthId ? { imageAuthId: args.imageAuthId } : {}),
+    ...(args.runtimeBundle ? { command: runtimeBundleBootstrapCommand(args.runtimeBundle.sha256) } : {}),
     rootfsSize: 120,
     networkStorages: [{ Id: args.storageId, mountPoint: "/network" }],
     envs: [
@@ -543,6 +612,10 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
       { key: "NOVITA_MANIFEST_SHA256", value: args.manifestSha256 },
       { key: "NOVITA_MODEL_VOLUME", value: "/network" },
       { key: "NOVITA_LOCAL_MODEL_CACHE", value: "/workspace/model-cache" },
+      ...(args.runtimeBundle ? [
+        { key: "NOVITA_RUNTIME_BUNDLE_URL", value: args.runtimeBundle.downloadUrl },
+        { key: "NOVITA_RUNTIME_BUNDLE_SHA256", value: args.runtimeBundle.sha256 },
+      ] : []),
     ],
   };
 }

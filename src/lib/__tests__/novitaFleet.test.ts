@@ -226,6 +226,23 @@ async function main() {
     () => buildNovitaCreateWorkerRequest({ ...requestArgs, imageAuthId: undefined }),
     /registry authentication, or be the approved public GHCR worker/,
   );
+  const runtimeBaseImage = "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
+  const runtimeBundleRequest = buildNovitaCreateWorkerRequest({
+    ...requestArgs,
+    image: runtimeBaseImage,
+    imageAuthId: undefined,
+    publicImage: true,
+    runtimeBundle: {
+      downloadUrl: "https://signed.example/ltx-runtime.tar.zst?signature=redacted",
+      sha256: "f".repeat(64),
+    },
+  });
+  assert.match(String(runtimeBundleRequest.command), /NOVITA_RUNTIME_BUNDLE_SHA256/);
+  assert(runtimeBundleRequest.envs.some((item) => item.key === "NOVITA_RUNTIME_BUNDLE_URL"));
+  assert.throws(
+    () => buildNovitaCreateWorkerRequest({ ...requestArgs, image: runtimeBaseImage, imageAuthId: undefined, publicImage: true }),
+    /requires a sealed runtime bundle/,
+  );
   assert.throws(
     () => buildNovitaCreateWorkerRequest({
       ...requestArgs,

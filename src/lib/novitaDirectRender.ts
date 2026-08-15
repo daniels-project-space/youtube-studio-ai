@@ -31,6 +31,7 @@ import {
   NovitaAdmissionError,
   NovitaGpuApiClient,
   canonicalJson,
+  isApprovedPublicRuntimeBaseImage,
   isApprovedPublicWorkerImage,
   isPinnedImage,
   isSha256,
@@ -88,7 +89,8 @@ interface DirectNovitaConfig {
   apiKey: string;
   workerImage: string;
   imageAuthId?: string;
-  imageAccess: "private-registry" | "public-ghcr";
+  imageAccess: "private-registry" | "public-ghcr" | "public-runtime-base";
+  runtimeBundle?: { key: string; sha256: string };
   productId: string;
   verifiedGpuQuota: number;
   modelManifestKey: string;
@@ -232,13 +234,25 @@ function directConfig(): DirectNovitaConfig {
   if (!isPinnedImage(workerImage)) {
     throw new NovitaAdmissionError("NOVITA_RENDER_WORKER_IMAGE must be digest pinned");
   }
-  const imageAccess = process.env.NOVITA_RENDER_PUBLIC_WORKER_IMAGE === "1"
-    ? "public-ghcr" as const
-    : "private-registry" as const;
+  const publicWorker = process.env.NOVITA_RENDER_PUBLIC_WORKER_IMAGE === "1";
+  const imageAccess = isApprovedPublicRuntimeBaseImage(workerImage)
+    ? "public-runtime-base" as const
+    : publicWorker ? "public-ghcr" as const : "private-registry" as const;
   if (imageAccess === "public-ghcr" && !isApprovedPublicWorkerImage(workerImage)) {
     throw new NovitaAdmissionError(
       "public worker access is restricted to the sealed YouTube Studio GHCR repository",
     );
+  }
+  const runtimeBundle = imageAccess === "public-runtime-base" ? {
+    key: requiredEnv("NOVITA_RUNTIME_BUNDLE_KEY"),
+    sha256: requiredEnv("NOVITA_RUNTIME_BUNDLE_SHA256").toLowerCase(),
+  } : undefined;
+  if (runtimeBundle && (
+    !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,767}$/.test(runtimeBundle.key)
+    || runtimeBundle.key.includes("..")
+    || !isSha256(runtimeBundle.sha256)
+  )) {
+    throw new NovitaAdmissionError("sealed public runtime bundle must use a safe R2 key and SHA-256 identity");
   }
   const modelManifestSha256 = requiredEnv("NOVITA_MODEL_MANIFEST_SHA256").toLowerCase();
   if (!isSha256(modelManifestSha256)) {
@@ -259,6 +273,7 @@ function directConfig(): DirectNovitaConfig {
       ? { imageAuthId: requiredEnv("NOVITA_RENDER_IMAGE_AUTH_ID") }
       : {}),
     imageAccess,
+    ...(runtimeBundle ? { runtimeBundle } : {}),
     productId: requiredEnv("NOVITA_RENDER_4090_PRODUCT_ID"),
     verifiedGpuQuota: quota,
     modelManifestKey,
@@ -1039,7 +1054,15 @@ async function recoverOrCreateInstance(args: {
         storageId: args.control.volume.storageId,
         image: args.control.config.workerImage,
         ...(args.control.config.imageAuthId ? { imageAuthId: args.control.config.imageAuthId } : {}),
-        publicImage: args.control.config.imageAccess === "public-ghcr",
+        publicImage: args.control.config.imageAccess !== "private-registry",
+        ...(args.control.config.runtimeBundle ? {
+          runtimeBundle: {
+            downloadUrl: await presignDownload(args.control.config.runtimeBundle.key, {
+              expiresIn: MANIFEST_URL_TTL_SECONDS,
+            }),
+            sha256: args.control.config.runtimeBundle.sha256,
+          },
+        } : {}),
         manifestUrl: await presignDownload(args.worker.manifestKey, { expiresIn: MANIFEST_URL_TTL_SECONDS }),
         manifestSha256: args.worker.manifestSha256,
         approval: {

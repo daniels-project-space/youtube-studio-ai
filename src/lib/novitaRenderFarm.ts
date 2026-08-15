@@ -452,7 +452,11 @@ export function hasNovitaRenderFarmConfig(): boolean {
       "NOVITA_RENDER_MAX_FLEET_USD",
       "INTERNAL_QUERY_SECRET",
     ];
-    if (process.env.NOVITA_RENDER_PUBLIC_WORKER_IMAGE !== "1") {
+    const usesPublicRuntimeBase = process.env.NOVITA_RENDER_WORKER_IMAGE
+      === "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
+    if (usesPublicRuntimeBase) {
+      required.push("NOVITA_RUNTIME_BUNDLE_KEY", "NOVITA_RUNTIME_BUNDLE_SHA256");
+    } else if (process.env.NOVITA_RENDER_PUBLIC_WORKER_IMAGE !== "1") {
       required.push("NOVITA_RENDER_IMAGE_AUTH_ID");
     }
     return required.every((name) => Boolean(process.env[name]?.trim()));
