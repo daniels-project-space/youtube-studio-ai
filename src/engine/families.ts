@@ -59,7 +59,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "narrated-essay",
     available: true,
     narrated: true,
-    requiresKeys: ["fish-audio", "pexels", "mureka", "fal"],
+    requiresKeys: ["fish-audio", "pexels", "mureka"],
     defaultThumbnailStyle: "banana",
     // Current standard-episode compiler reservation: $0.64. This rounded
     // floor keeps creator advice and server admission above the real pipeline.
@@ -74,7 +74,7 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     archetypeKey: "lofi-ambient",
     available: true,
     narrated: false,
-    requiresKeys: ["fal", "suno", "replicate", "novita"],
+    requiresKeys: ["suno", "replicate", "novita"],
     // Any non-title_card engine unlocks the real-scene thumbnail path (the
     // run's own keyframe + styled title) — title_card is a plain drawtext card.
     defaultThumbnailStyle: "banana",

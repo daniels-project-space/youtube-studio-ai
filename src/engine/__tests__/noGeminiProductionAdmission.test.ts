@@ -29,6 +29,11 @@ for (const family of FAMILY_KEYS) {
     false,
     `${family} must not advertise a general Google/Gemini dependency; the sealed thumbnail boundary is not a family runtime requirement`,
   );
+  assert.equal(
+    FAMILIES[family].requiresKeys.includes("fal"),
+    false,
+    `${family} must not advertise FAL as a production-visual requirement; it is thumbnail-only and cannot be a content renderer fallback`,
+  );
 }
 
 const narratedReadiness = familyProductionReadiness("narrated_stock");
