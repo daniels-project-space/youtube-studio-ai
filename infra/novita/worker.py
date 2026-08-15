@@ -184,16 +184,24 @@ def validate_model_specs(
     supplied = set(model_ids)
     if not required.issubset(supplied):
         raise ValueError(f"manifest models are missing required cache identities: {sorted(required - supplied)}")
-    optional_adapter_ids = supplied - required
+    # The shared renderer admits a single provenance-pinned model manifest
+    # containing both Z-Image and LTX.  The inactive base model is permitted
+    # but never hydrated for this phase; only explicitly selected LoRAs are
+    # otherwise allowed as optional entries.
+    inactive_base_model_ids = set(LTX_FILE_CONTRACTS) if phase == "image" else {"z-image-turbo"}
+    optional_adapter_ids = supplied - required - inactive_base_model_ids
     if any(not adapter_id.startswith("ltx-creative-") for adapter_id in optional_adapter_ids):
         raise ValueError(f"manifest models contain unexpected cache identities: {sorted(optional_adapter_ids)}")
     for spec in model_specs:
-        if spec["id"] == "z-image-turbo" and (
-            spec.get("kind") != "tree"
-            or spec.get("repository") != ZIMAGE_MODEL
-            or spec.get("revision") != ZIMAGE_REVISION
-        ):
-            raise ValueError("manifest Z-Image tree does not match the official pinned repository revision")
+        if spec["id"] == "z-image-turbo":
+            if (
+                spec.get("kind") != "tree"
+                or spec.get("repository") != ZIMAGE_MODEL
+                or spec.get("revision") != ZIMAGE_REVISION
+                or not SHA256_RE.fullmatch(str(spec.get("manifestSha256") or ""))
+            ):
+                raise ValueError("manifest Z-Image tree does not match the official pinned repository revision")
+            continue
         contract = LTX_FILE_CONTRACTS.get(str(spec["id"]))
         if contract is None:
             adapter = spec.get("creativeAdapter")

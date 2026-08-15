@@ -277,6 +277,28 @@ class WorkerContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "official pinned LTX file"):
             worker.validate_model_specs(specs, "video", "distilled")
 
+    def test_shared_zimage_and_ltx_manifest_hydrates_only_the_active_phase(self):
+        ltx_specs = []
+        for model_id, (relative_path, digest, size) in worker.LTX_FILE_CONTRACTS.items():
+            ltx_specs.append({
+                "id": model_id, "kind": "file", "sourcePath": f"models/LTX-2.5/{relative_path}",
+                "localPath": f"ltx-2.5/{relative_path}", "manifestSha256": digest, "sizeBytes": size,
+                "repository": worker.LTX_MODEL, "revision": worker.LTX_REVISION,
+            })
+        zimage = {
+            "id": "z-image-turbo", "kind": "tree", "sourcePath": "models/z-image",
+            "localPath": "z-image", "manifestSha256": "a" * 64,
+            "repository": worker.ZIMAGE_MODEL, "revision": worker.ZIMAGE_REVISION,
+        }
+        self.assertEqual(
+            worker.validate_model_specs([zimage, *ltx_specs], "image", None),
+            [zimage],
+        )
+        self.assertEqual(
+            worker.validate_model_specs([zimage, *ltx_specs], "video", "distilled"),
+            ltx_specs,
+        )
+
     def test_ltx_creative_adapter_requires_exact_runtime_and_benchmark(self):
         specs = []
         for model_id, (relative_path, digest, size) in worker.LTX_FILE_CONTRACTS.items():
