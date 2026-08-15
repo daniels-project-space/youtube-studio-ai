@@ -31,6 +31,7 @@ import {
   NovitaAdmissionError,
   NovitaGpuApiClient,
   canonicalJson,
+  isApprovedPublicWorkerImage,
   isPinnedImage,
   isSha256,
   planNovitaCapacityWaves,
@@ -86,7 +87,8 @@ type LeaseStatus =
 interface DirectNovitaConfig {
   apiKey: string;
   workerImage: string;
-  imageAuthId: string;
+  imageAuthId?: string;
+  imageAccess: "private-registry" | "public-ghcr";
   productId: string;
   verifiedGpuQuota: number;
   modelManifestKey: string;
@@ -230,6 +232,14 @@ function directConfig(): DirectNovitaConfig {
   if (!isPinnedImage(workerImage)) {
     throw new NovitaAdmissionError("NOVITA_RENDER_WORKER_IMAGE must be digest pinned");
   }
+  const imageAccess = process.env.NOVITA_RENDER_PUBLIC_WORKER_IMAGE === "1"
+    ? "public-ghcr" as const
+    : "private-registry" as const;
+  if (imageAccess === "public-ghcr" && !isApprovedPublicWorkerImage(workerImage)) {
+    throw new NovitaAdmissionError(
+      "public worker access is restricted to the sealed YouTube Studio GHCR repository",
+    );
+  }
   const modelManifestSha256 = requiredEnv("NOVITA_MODEL_MANIFEST_SHA256").toLowerCase();
   if (!isSha256(modelManifestSha256)) {
     throw new NovitaAdmissionError("NOVITA_MODEL_MANIFEST_SHA256 must be a SHA-256 digest");
@@ -245,7 +255,10 @@ function directConfig(): DirectNovitaConfig {
   return {
     apiKey: requiredEnv("NOVITA_API_KEY"),
     workerImage,
-    imageAuthId: requiredEnv("NOVITA_RENDER_IMAGE_AUTH_ID"),
+    ...(imageAccess === "private-registry"
+      ? { imageAuthId: requiredEnv("NOVITA_RENDER_IMAGE_AUTH_ID") }
+      : {}),
+    imageAccess,
     productId: requiredEnv("NOVITA_RENDER_4090_PRODUCT_ID"),
     verifiedGpuQuota: quota,
     modelManifestKey,
@@ -423,7 +436,7 @@ async function prepareControlPlane(): Promise<DirectControlPlane> {
   if (!volume) throw new NovitaAdmissionError("Novita persistent ai-infra-models volume is unavailable");
   const scoped = await provider.accountSnapshot({ clusterId: volume.clusterId });
   const product = selectRtx4090SpotProduct(scoped.products, config.productId);
-  if (account.registryAuthCount < 1) {
+  if (config.imageAccess === "private-registry" && account.registryAuthCount < 1) {
     throw new NovitaAdmissionError("Novita registry authentication is required for the immutable worker image");
   }
   const imageDigest = config.workerImage.slice(config.workerImage.indexOf("@") + 1).toLowerCase();
@@ -1025,7 +1038,8 @@ async function recoverOrCreateInstance(args: {
         clusterId: args.control.volume.clusterId,
         storageId: args.control.volume.storageId,
         image: args.control.config.workerImage,
-        imageAuthId: args.control.config.imageAuthId,
+        ...(args.control.config.imageAuthId ? { imageAuthId: args.control.config.imageAuthId } : {}),
+        publicImage: args.control.config.imageAccess === "public-ghcr",
         manifestUrl: await presignDownload(args.worker.manifestKey, { expiresIn: MANIFEST_URL_TTL_SECONDS }),
         manifestSha256: args.worker.manifestSha256,
         approval: {

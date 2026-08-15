@@ -13,6 +13,14 @@ export const NOVITA_IDLE_SHUTDOWN_SECONDS = 300 as const;
  */
 export const NOVITA_REQUIRED_GPU_SKU = "RTX 4090" as const;
 export const NOVITA_REQUIRED_GPU_COUNT = 1 as const;
+/**
+ * Public images are normally forbidden: a digest alone is not a publisher
+ * identity. This one repository is published by our sealed CI workflow and
+ * remains an immutable, source-linked exception so Novita does not need a
+ * long-lived registry credential to pull it.
+ */
+export const NOVITA_PUBLIC_WORKER_REPOSITORY =
+  "ghcr.io/daniels-project-space/youtube-render-worker" as const;
 
 export const OFFICIAL_RENDER_PINS = Object.freeze({
   zImage: {
@@ -150,6 +158,11 @@ export function isSha256(value: unknown): value is string {
 
 export function isPinnedImage(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$/i.test(value);
+}
+
+export function isApprovedPublicWorkerImage(value: unknown): value is string {
+  return isPinnedImage(value)
+    && value.toLowerCase().startsWith(`${NOVITA_PUBLIC_WORKER_REPOSITORY}@sha256:`);
 }
 
 export function canonicalJson(value: unknown): string {
@@ -473,7 +486,10 @@ export interface NovitaCreateWorkerRequestArgs {
   clusterId: string;
   storageId: string;
   image: string;
-  imageAuthId: string;
+  /** Required unless the one allowed source-linked public GHCR image is used. */
+  imageAuthId?: string;
+  /** Opt-in only; prevents an unauthenticated arbitrary registry pull. */
+  publicImage?: boolean;
   manifestUrl: string;
   manifestSha256: string;
   approval: NovitaCapacityPlan;
@@ -483,8 +499,11 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
   if (args.approval.admitted !== true || args.approval.workerCount > NOVITA_HARD_GPU_LIMIT) {
     throw new NovitaAdmissionError("an admitted bounded capacity plan is required");
   }
-  if (!isPinnedImage(args.image) || !args.imageAuthId) {
-    throw new NovitaAdmissionError("worker image must be digest-pinned and have registry authentication");
+  const approvedPublicImage = args.publicImage === true && isApprovedPublicWorkerImage(args.image);
+  if (!isPinnedImage(args.image) || (!args.imageAuthId && !approvedPublicImage)) {
+    throw new NovitaAdmissionError(
+      "worker image must be digest-pinned and have registry authentication, or be the approved public GHCR worker",
+    );
   }
   if (!isSha256(args.manifestSha256) || !/^https:\/\//.test(args.manifestUrl)) {
     throw new NovitaAdmissionError("worker manifest must use a signed HTTPS URL and SHA-256 identity");
@@ -506,7 +525,7 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
     kind: "gpu",
     billingMode: "spot",
     imageUrl: args.image,
-    imageAuthId: args.imageAuthId,
+    ...(args.imageAuthId ? { imageAuthId: args.imageAuthId } : {}),
     rootfsSize: 120,
     networkStorages: [{ Id: args.storageId, mountPoint: "/network" }],
     envs: [

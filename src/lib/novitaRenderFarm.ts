@@ -441,10 +441,9 @@ export function hasNovitaRenderFarmConfig(): boolean {
   try {
     // `require` would break the ESM/Next boundary; this fast path deliberately
     // mirrors the direct config's required names without loading provider code.
-    return [
+    const required = [
       "NOVITA_API_KEY",
       "NOVITA_RENDER_WORKER_IMAGE",
-      "NOVITA_RENDER_IMAGE_AUTH_ID",
       "NOVITA_RENDER_4090_PRODUCT_ID",
       "NOVITA_VERIFIED_4090_GPU_QUOTA",
       "NOVITA_MODEL_MANIFEST_KEY",
@@ -452,7 +451,11 @@ export function hasNovitaRenderFarmConfig(): boolean {
       "NOVITA_RENDER_MAX_JOB_USD",
       "NOVITA_RENDER_MAX_FLEET_USD",
       "INTERNAL_QUERY_SECRET",
-    ].every((name) => Boolean(process.env[name]?.trim()));
+    ];
+    if (process.env.NOVITA_RENDER_PUBLIC_WORKER_IMAGE !== "1") {
+      required.push("NOVITA_RENDER_IMAGE_AUTH_ID");
+    }
+    return required.every((name) => Boolean(process.env[name]?.trim()));
   } catch {
     return false;
   }

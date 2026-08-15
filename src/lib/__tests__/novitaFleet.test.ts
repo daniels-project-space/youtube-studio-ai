@@ -216,6 +216,25 @@ async function main() {
   assert.equal(request.billingMode, "spot");
   assert.deepEqual(request.networkStorages, [{ Id: "storage-id", mountPoint: "/network" }]);
   assert(!request.envs.some((item) => /SECRET|ACCESS_KEY|API_KEY|TOKEN/.test(item.key)));
+  const publicRequest = buildNovitaCreateWorkerRequest({
+    ...requestArgs,
+    imageAuthId: undefined,
+    publicImage: true,
+  });
+  assert.equal("imageAuthId" in publicRequest, false);
+  assert.throws(
+    () => buildNovitaCreateWorkerRequest({ ...requestArgs, imageAuthId: undefined }),
+    /registry authentication, or be the approved public GHCR worker/,
+  );
+  assert.throws(
+    () => buildNovitaCreateWorkerRequest({
+      ...requestArgs,
+      image: `ghcr.io/example/untrusted-worker@sha256:${"e".repeat(64)}`,
+      imageAuthId: undefined,
+      publicImage: true,
+    }),
+    /registry authentication, or be the approved public GHCR worker/,
+  );
 
   assert.equal(isRtx4090Sku("RTX 4090"), true);
   assert.equal(isRtx4090Sku("NVIDIA GeForce RTX 4090 24GB"), true);
