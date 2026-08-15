@@ -1,11 +1,12 @@
 ﻿/**
  * Narrated-archetype text blocks (Stage 3a) â€” the "brain" shared by essay /
  * crime / shorts / meditation:
- *   script_gen  â†’ script + narrationText   (Gemini)
- *   hook_craft  â†’ hook + narrationText'     (Gemini; prepends a punchy opener)
- *   qa_script   â†’ scriptApproved            (Claude critique; HARD gate -- see PARALLEL_GROUPS in runner.ts)
+ *   script_gen  â†’ script + narrationText   (non-Google creative model)
+ *   hook_craft  â†’ hook + narrationText'     (non-Google creative model; prepends a punchy opener)
+ *   qa_script   â†’ scriptApproved            (independent critique; hard-gates paid narration)
  *
- * All degrade gracefully on a missing key so the pipeline never hard-fails.
+ * An unavailable or rejected narrative critic fails before any paid voice/video
+ * work. Quality cannot quietly degrade into a polished-looking release.
  */
 import { join } from "node:path";
 import { createHash } from "node:crypto";
@@ -42,6 +43,10 @@ import {
   buildQualityEvidence,
   EpisodeSpecSchema,
 } from "@/engine/qualityEvidence";
+import {
+  assertScriptApprovedForNarration,
+  assertScriptCritiqueAccepted,
+} from "@/engine/scriptQualityGate";
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
 import {
@@ -363,19 +368,11 @@ export const scriptGen: Block = {
       playbook: ctx.store["scriptPlaybook"] as import("@/lib/scriptLab").ScriptPlaybook | undefined,
       openingDeviceIdx: [...ctx.runId].reduce((s, c) => s + c.charCodeAt(0), 0),
     };
-    // EVALUATOR-OPTIMIZER (short-form only â€” regenerating a 30-min chunked
-    // script doubles cost): Claude critiques the draft; a rejected draft is
-    // regenerated ONCE with the issues injected, reusing the judge-gated hook.
-    //
-    // P1-15: this now runs on the SHARED produceAndCritique primitive instead of
-    // a bespoke copy, so improvements to the loop reach the highest-volume
-    // producer. The trigger condition is byte-for-byte the old one (regenerate
-    // only when the critic returns pass:false WITH issues), the iteration cap is
-    // the same 2 (one informed retry), and a critic outage still keeps the draft.
-    // What is genuinely new: the retry is itself critiqued rather than shipped
-    // unverified, and the accept bar + doctrine now come from the channel.
-    const maxSec = Number(req.maxSeconds ?? 240);
-    const critiqueEnabled = hasAnthropicKey() && maxSec <= 420;
+    // EVALUATOR-OPTIMIZER: an independent non-Google critic reviews every
+    // duration. A rejected draft gets one informed retry; exhaustion or a
+    // reviewer outage is an admission failure, never permission to synthesize
+    // an unreviewed script.
+    const critiqueEnabled = hasAnthropicKey();
     const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
     const scriptChannel: ChannelCritiqueContext = channelCritiqueContext(ctx);
 
@@ -438,12 +435,20 @@ export const scriptGen: Block = {
             ? { score: Math.max(0, 0.5 - 0.05 * issues.length) + 0.01 * iter, pass: false, issues }
             : { score: 1, pass: true, issues: [] };
         } catch (e) {
-          // A critic outage must never cost the run its script.
-          ctx.log(`script_gen: critic unavailable (kept draft): ${e instanceof Error ? e.message : e}`);
-          return { score: 1, pass: true, issues: [] };
+          // An independent critic outage cannot be treated as a quality pass.
+          throw new Error(
+            `script_gen FAILED: independent narrative critic unavailable — refusing an unreviewed script (${e instanceof Error ? e.message : e})`,
+          );
         }
       },
     });
+    if (critiqueEnabled) {
+      assertScriptCritiqueAccepted({
+        accepted: loop.accepted,
+        issues: loop.critique.issues,
+        stage: "script_gen",
+      });
+    }
     const script = loop.value;
     ctx.log(
       `script_gen: ${script.sections.length} sections, ~${script.estDurationSec}s ` +
@@ -629,10 +634,9 @@ export const qaScript: Block = {
       ctx.log(`qa_script: source-attributed data-story evidence passed (${sourcedNumericSentences.length} sourced numeric sentences)`);
     }
     if (!hasAnthropicKey()) {
-      // HONEST: unverified is not the same as approved. Nothing downstream hard-
-      // gates on this yet, but the flag must not lie to the run record/Doctor.
-      ctx.log("qa_script: no Anthropic key â€” script UNVERIFIED (scriptApproved=false)");
-      return { scriptApproved: false };
+      throw new Error(
+        "qa_script FAILED: independent narrative critic unavailable — refusing to synthesize an unreviewed script",
+      );
     }
     try {
       const persona = opt(ctx, "persona") ?? "";
@@ -682,18 +686,19 @@ export const qaScript: Block = {
       }
       return { scriptApproved: true };
     } catch (e) {
-      // A confirmed qa_script FAILED must propagate; a model/parse/network
-      // error must not (mirrors originality_gate's scanSpokenLines re-throw).
+      // A confirmed quality failure must propagate. A model/parse/network
+      // error is also fail-closed: unverified is not approved for paid media.
       if (e instanceof Error && e.message.startsWith("qa_script FAILED")) throw e;
-      ctx.log(`qa_script: critique failed (non-fatal, UNVERIFIED): ${e instanceof Error ? e.message : e}`);
-      return { scriptApproved: false };
+      throw new Error(
+        `qa_script FAILED: independent narrative critic unavailable — refusing paid narration (${e instanceof Error ? e.message : e})`,
+      );
     }
   },
 };
 
 export const narrationTts: Block = {
   id: "narration_tts",
-  consumes: ["narrationText"],
+  consumes: ["narrationText", "scriptApproved"],
   produces: [
     "narrationKey",
     "narrationDurationSec",
@@ -705,6 +710,7 @@ export const narrationTts: Block = {
   ],
   paid: true,
   run: async (ctx) => {
+    assertScriptApprovedForNarration(ctx.store["scriptApproved"]);
     const quality = qualityProfile(ctx.params["qualityProfile"]);
     // TTS engine: fish (default) or elevenlabs (v3 expressive â€” PERFORMS inline
     // [audio tags] the script writer placed; tags survive sanitization here but
