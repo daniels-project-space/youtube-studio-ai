@@ -691,6 +691,38 @@ function imageScore(grade: z.infer<typeof AssetCandidateGradeSchema>): number {
   return Number((grade.semanticAlignment * 0.45 + grade.continuity * 0.3 + grade.artifactFree * 0.25).toFixed(4));
 }
 
+/**
+ * Each keyframe candidate must meet every locked reference, not merely the
+ * most forgiving reference batch. Merge per-candidate grades conservatively.
+ */
+export function combineAssetCandidateGrades(
+  batches: readonly z.infer<typeof AssetCandidateSetGradeSchema>[],
+): z.infer<typeof AssetCandidateSetGradeSchema> {
+  if (!batches.length) throw new Error("asset QA requires at least one complete reference batch");
+  const expected = [...batches[0]!.candidates].sort((left, right) => left.candidateIndex - right.candidateIndex);
+  for (const batch of batches) {
+    const actual = [...batch.candidates].sort((left, right) => left.candidateIndex - right.candidateIndex);
+    if (
+      actual.length !== expected.length ||
+      actual.some((candidate, index) => candidate.candidateIndex !== expected[index]!.candidateIndex)
+    ) {
+      throw new Error("qa_assets grader did not return the same exact candidate set for every reference batch");
+    }
+  }
+  return {
+    candidates: expected.map((candidate) => {
+      const grades = batches.map((batch) => batch.candidates.find((entry) => entry.candidateIndex === candidate.candidateIndex)!);
+      return {
+        candidateIndex: candidate.candidateIndex,
+        semanticAlignment: Math.min(...grades.map((grade) => grade.semanticAlignment)),
+        continuity: Math.min(...grades.map((grade) => grade.continuity)),
+        artifactFree: Math.min(...grades.map((grade) => grade.artifactFree)),
+        notes: [...new Set(grades.flatMap((grade) => grade.notes))].slice(0, 8),
+      };
+    }),
+  };
+}
+
 function videoScore(grade: z.infer<typeof ShotGradeSchema>): number {
   return Number((grade.semanticAlignment * 0.35 + grade.continuity * 0.25 + grade.motionIntegrity * 0.25 + grade.artifactFree * 0.15).toFixed(4));
 }
@@ -783,7 +815,7 @@ export const qaAssets: Block = {
         const thresholds = imageQualityThresholds(shot, channelQuality);
         const spec = specsByShot.get(shot.id)!;
         const visualDirective = visualMatterDirectiveForShot(visualMatter, shot.id);
-        const referenceAssets = visualMatterReferenceAssetsForShot(visualMatter, shot.id).slice(0, 4);
+        const referenceAssets = visualMatterReferenceAssetsForShot(visualMatter, shot.id);
         const referencePaths: string[] = [];
         for (const [referenceIndex, reference] of referenceAssets.entries()) {
           const path = join(tmp, `reference_${shot.id}_${referenceIndex}_${reference.id.replace(/[^a-z0-9_-]/gi, "_")}.png`);
@@ -802,33 +834,44 @@ export const qaAssets: Block = {
             await writeBytes(path, await getObjectBytes(candidate.stillKey));
             candidatePaths.push(path);
           }
-          const paths = [...referencePaths, ...candidatePaths];
-          graderCalls++;
-          const raw = await visionLocal({
-            prompt:
-              `You are the REQUIRED keyframe grader for one authored documentary shot. ` +
-              (referencePaths.length
-                ? `The first ${referencePaths.length} image(s) are locked Visual Matter reference anchors. Do NOT score them; use them to judge continuity, mood, character, setting, and composition. `
-                : "") +
-              `The remaining images are candidateIndex ${candidates.map((candidate) => candidate.candidateIndex).join(", ")} in that exact order.\n` +
-              `Literal story content: ${shot.literalContent}\nStory purpose: ${shot.coveragePurpose}\n` +
-              `Required keyframe: ${spec.keyframePrompt}\nContinuity lock: ${spec.continuityState}\n` +
-              `First-frame constraint: ${spec.firstFrameConstraint}\nNegative constraints: ${spec.negativePrompt}\n` +
-              (visualDirective ? `Visual Matter acceptance lock (MANDATORY): ${visualDirective.qaCriteria}\n` : "") +
-              `Channel-adaptive visual identity policy (MANDATORY):\n${channelQuality.brief}\n` +
-              channelQuality.critiqueBrief +
-              `Required pass thresholds: overall >= ${thresholds.score.toFixed(3)}, semantic >= ${thresholds.semanticAlignment.toFixed(3)}, ` +
-              `continuity >= ${thresholds.continuity.toFixed(3)}, artifact-free >= ${thresholds.artifactFree.toFixed(3)}.\n` +
-              `Score EACH image independently from 0 to 1. semanticAlignment means literal subject/action/location match, ` +
-              `continuity means identity/era/wardrobe/props/lighting/style consistency, artifactFree means anatomy, text, ` +
-              `watermark, geometry, framing and image integrity. Do not reward generic beauty over literal accuracy. ` +
-              `Return STRICT JSON only: {"candidates":[{"candidateIndex":0,"semanticAlignment":0.0,"continuity":0.0,` +
-              `"artifactFree":0.0,"notes":["concrete observations"]}]}. Include every candidate exactly once.`,
-            imagePaths: paths,
-            json: true,
-            maxTokens: 1200,
-          });
-          const graded = AssetCandidateSetGradeSchema.parse(parseJsonLoose(raw));
+          if (candidatePaths.length >= 5) {
+            throw new Error(`qa_assets cannot review ${candidatePaths.length} candidates without dropping required evidence for ${shot.id}`);
+          }
+          const referenceBatchSize = 5 - candidatePaths.length;
+          const referenceBatches = referencePaths.length
+            ? Array.from({ length: Math.ceil(referencePaths.length / referenceBatchSize) }, (_, batchIndex) =>
+                referencePaths.slice(batchIndex * referenceBatchSize, (batchIndex + 1) * referenceBatchSize))
+            : [[]];
+          const batchGrades: Array<z.infer<typeof AssetCandidateSetGradeSchema>> = [];
+          for (const referenceBatch of referenceBatches) {
+            graderCalls++;
+            const raw = await visionLocal({
+              prompt:
+                `You are the REQUIRED keyframe grader for one authored documentary shot. ` +
+                (referenceBatch.length
+                  ? `The first ${referenceBatch.length} image(s) are locked Visual Matter reference anchors. Do NOT score them; use them to judge continuity, mood, character, setting, and composition. `
+                  : "") +
+                `The remaining images are candidateIndex ${candidates.map((candidate) => candidate.candidateIndex).join(", ")} in that exact order.\n` +
+                `Literal story content: ${shot.literalContent}\nStory purpose: ${shot.coveragePurpose}\n` +
+                `Required keyframe: ${spec.keyframePrompt}\nContinuity lock: ${spec.continuityState}\n` +
+                `First-frame constraint: ${spec.firstFrameConstraint}\nNegative constraints: ${spec.negativePrompt}\n` +
+                (visualDirective ? `Visual Matter acceptance lock (MANDATORY): ${visualDirective.qaCriteria}\n` : "") +
+                `Channel-adaptive visual identity policy (MANDATORY):\n${channelQuality.brief}\n` +
+                channelQuality.critiqueBrief +
+                `Required pass thresholds: overall >= ${thresholds.score.toFixed(3)}, semantic >= ${thresholds.semanticAlignment.toFixed(3)}, ` +
+                `continuity >= ${thresholds.continuity.toFixed(3)}, artifact-free >= ${thresholds.artifactFree.toFixed(3)}.\n` +
+                `Score EACH image independently from 0 to 1. semanticAlignment means literal subject/action/location match, ` +
+                `continuity means identity/era/wardrobe/props/lighting/style consistency, artifactFree means anatomy, text, ` +
+                `watermark, geometry, framing and image integrity. Do not reward generic beauty over literal accuracy. ` +
+                `Return STRICT JSON only: {"candidates":[{"candidateIndex":0,"semanticAlignment":0.0,"continuity":0.0,` +
+                `"artifactFree":0.0,"notes":["concrete observations"]}]}. Include every candidate exactly once.`,
+              imagePaths: [...referenceBatch, ...candidatePaths],
+              json: true,
+              maxTokens: 1200,
+            });
+            batchGrades.push(AssetCandidateSetGradeSchema.parse(parseJsonLoose(raw)));
+          }
+          const graded = combineAssetCandidateGrades(batchGrades);
           const byIndex = new Map(graded.candidates.map((grade) => [grade.candidateIndex, grade]));
           if (byIndex.size !== candidates.length || candidates.some((candidate) => !byIndex.has(candidate.candidateIndex))) {
             throw new Error(`qa_assets grader did not return an exact candidate set for ${shot.id}`);
