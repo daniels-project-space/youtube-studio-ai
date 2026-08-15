@@ -89,6 +89,11 @@ try:
     manifest=json.loads(manifest_path.read_text())
     if manifest.get('model')!=model or manifest.get('revision')!=revision: raise RuntimeError('managed Z-Image target pin differs')
   else:
+    # A prior controller interruption can leave only its own nonce-scoped
+    # download cache behind.  It is never a managed model target; clear those
+    # exact stale folders before calculating free space for this new stage.
+    for stale in (root/'.staging').glob('z-image-'+revision+'-*'):
+      if stale != stage and stale.parent == root/'.staging': shutil.rmtree(stale)
     stat=os.statvfs(root)
     if stat.f_bavail*stat.f_frsize < 35*1024**3: raise RuntimeError('managed volume has less than 35 GiB free for the pinned Z-Image tree')
     stage.mkdir(parents=True,exist_ok=True)
