@@ -42,6 +42,20 @@ const DEFAULT_UNREGISTERED: ChannelInceptionCapability = Object.freeze({
 const EXPLICIT_CHANNEL_INCEPTION_CAPABILITIES: Readonly<
   Partial<Record<FamilyKey, ChannelInceptionCapability>>
 > = Object.freeze({
+  narrated_stock: Object.freeze({
+    mode: "registered_non_gemini" as const,
+    id: "narrated-stock-claude-novita-inception/v1",
+    provenance:
+      "metadata-only YouTube research, Claude positioning/Style DNA/Show Bible, deterministic ElevenLabs voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed thumbnail-only Gemini exception",
+    coveredStages: Object.freeze([
+      "metadata-only-niche-research",
+      "claude-positioning-style-dna-show-bible",
+      "provider-metadata-voice-selection-and-local-cold-open",
+      "novita-channel-art-and-non-google-vision-qa",
+      "non-google-starter-topics-and-sealed-thumbnail-slate",
+      "draft-only-publication-state",
+    ]),
+  }),
   quizyear: Object.freeze({
     mode: "registered_non_gemini" as const,
     id: "quizyear-deterministic-channel-foundation/v1",

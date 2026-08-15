@@ -507,7 +507,31 @@ export type AutonomousPlanningCapability =
 export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
   Record<FamilyKey, AutonomousPlanningCapability>
 > = {
-  narrated_stock: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "script_gen"] },
+  narrated_stock: {
+    mode: "registered_non_gemini",
+    id: "narrated-stock-claude-story-spine/v1",
+    plannerBlock: "topic_select",
+    provenance:
+      "non-Google topic research, Claude crew/script planning, local narration evidence, Story Spine assembly, and independent non-Google visual review; Gemini is sealed to thumbnail_gen only",
+    requiredEntries: [
+      { block: "competitor_research" },
+      { block: "topic_select" },
+      { block: "director_brief" },
+      { block: "dp_brief" },
+      { block: "editor_brief" },
+      { block: "composer_brief" },
+      { block: "critic_spec" },
+      { block: "script_gen" },
+      { block: "qa_script" },
+      { block: "narration_tts" },
+      { block: "story_spine" },
+      { block: "timeline_assemble" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+    ],
+    forbiddenGeminiBlocks: ["motion_comic", "documotion_short", "whiteboard_scribe", "lore_short"],
+  },
   music_loop: { mode: "unregistered", geminiBackedBlocks: ["topic_select"] },
   sleep: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "script_gen"] },
   comic: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "motion_comic"] },

@@ -161,8 +161,8 @@ const explicitHybrid = recommendFormatDeterministically({
 assert.equal(explicitHybrid.family, "cinematic", "a stronger cinematic intent must not be silently replaced by a quiz");
 assert.deepEqual(
   explicitHybrid.alternates.map((alternate) => alternate.family),
-  ["quizyear"],
-  "a fully admitted QuizYear foundation may appear only when the request explicitly includes quiz intent",
+  ["quizyear", "narrated_stock"],
+  "an explicit quiz request may surface QuizYear, while an independently admitted narrated route may surface only when the concept also has real narrated-story intent",
 );
 assert(
   explicitHybrid.alternates.every((alternate) => formatPreflight(alternate.family, { concept: "Cinematic reconstruction mini film with an interactive quiz challenge" }).productionReady),

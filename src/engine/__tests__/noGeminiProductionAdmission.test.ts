@@ -24,7 +24,16 @@ assert.equal(
   "QuizYear must advertise its renderer-native deterministic thumbnail rather than generic Banana generation",
 );
 
-for (const family of FAMILY_KEYS.filter((candidate) => candidate !== "quizyear")) {
+const narratedReadiness = familyProductionReadiness("narrated_stock");
+assert.equal(
+  narratedReadiness.productionReady,
+  true,
+  "Narrated Stock is admitted only after its Claude/Story-Spine route, local voice evidence, non-Google art QA, and sealed thumbnail exception are registered",
+);
+assert.deepEqual(narratedReadiness.blockers, []);
+assert.equal(familyChannelInceptionCapability("narrated_stock").mode, "registered_non_gemini");
+
+for (const family of FAMILY_KEYS.filter((candidate) => candidate !== "quizyear" && candidate !== "narrated_stock")) {
   const readiness = familyProductionReadiness(family);
   assert.equal(
     readiness.productionReady,
@@ -48,6 +57,11 @@ assert.equal(
   productionReadyFamilyFallback("quizyear"),
   "quizyear",
   "the fully registered deterministic channel creator remains selectable only when QuizYear was requested",
+);
+assert.equal(
+  productionReadyFamilyFallback("narrated_stock"),
+  "narrated_stock",
+  "the admitted reusable narrated route remains selectable only when it was requested",
 );
 
 const inceptionSource = readFileSync(new URL("../../trigger/designChannelInception.ts", import.meta.url), "utf8");

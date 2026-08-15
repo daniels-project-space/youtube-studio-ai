@@ -18,6 +18,23 @@ if (quizyear.mode === "registered_non_gemini") {
   assert.match(quizyear.provenance, /CC0 Wikidata/);
 }
 
+const narrated = familyChannelInceptionCapability("narrated_stock");
+assert.equal(narrated.mode, "registered_non_gemini");
+if (narrated.mode === "registered_non_gemini") {
+  assert.deepEqual(
+    narrated.coveredStages,
+    [
+      "metadata-only-niche-research",
+      "claude-positioning-style-dna-show-bible",
+      "provider-metadata-voice-selection-and-local-cold-open",
+      "novita-channel-art-and-non-google-vision-qa",
+      "non-google-starter-topics-and-sealed-thumbnail-slate",
+      "draft-only-publication-state",
+    ],
+  );
+  assert.match(narrated.provenance, /sealed thumbnail-only Gemini exception/);
+}
+
 const unregisteredFutureFamily = familyChannelInceptionCapability("cinematic");
 assert.equal(
   unregisteredFutureFamily.mode,
