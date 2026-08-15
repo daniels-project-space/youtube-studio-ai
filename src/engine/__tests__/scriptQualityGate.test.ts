@@ -28,6 +28,8 @@ assert.match(narratedBlocks, /assertScriptApprovedForNarration\(ctx\.store\["scr
 assert.match(narratedBlocks, /assertScriptCritiqueAccepted\(\{/);
 assert.match(narratedBlocks, /script_gen FAILED: independent narrative critic unavailable/);
 assert.match(narratedBlocks, /qa_script FAILED: independent narrative critic unavailable/);
+assert.match(narratedBlocks, /hook_craft FAILED: independent hook critic unavailable/);
+assert.match(narratedBlocks, /stage: "hook_craft"/);
 assert.doesNotMatch(narratedBlocks, /return \{ scriptApproved: false \}/);
 
 console.log("script quality admission gate tests passed");

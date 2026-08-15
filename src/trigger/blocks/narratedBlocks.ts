@@ -422,17 +422,17 @@ export const scriptGen: Block = {
             temperature: 0.3,
           });
           const issues = (Array.isArray(crit.issues) ? crit.issues : []).filter(Boolean).slice(0, 6);
-          // EXACT legacy trigger: only `pass:false` WITH concrete issues earns a
-          // regenerate. `pass:false` and no issues is not actionable, so — as
-          // before — the draft stands rather than burning a blind retry.
-          const rejected = crit.pass === false && issues.length > 0;
-          if (rejected) ctx.log(`script_gen: draft rejected by critic â€” regenerating once`, { issues });
+          const rejected = crit.pass === false;
+          const rejectionIssues = issues.length
+            ? issues
+            : ["independent narrative critic rejected the draft without usable remediation"];
+          if (rejected) ctx.log(`script_gen: draft rejected by critic â€” regenerating once`, { issues: rejectionIssues });
           // The `0.01 * iter` term preserves the legacy "keep the informed
           // second attempt" rule: produceAndCritique returns the best candidate
           // by STRICT score comparison, so without it an equally-rated retry
           // would lose the tie to the uninformed first draft.
           return rejected
-            ? { score: Math.max(0, 0.5 - 0.05 * issues.length) + 0.01 * iter, pass: false, issues }
+            ? { score: Math.max(0, 0.5 - 0.05 * rejectionIssues.length) + 0.01 * iter, pass: false, issues: rejectionIssues }
             : { score: 1, pass: true, issues: [] };
         } catch (e) {
           // An independent critic outage cannot be treated as a quality pass.
@@ -578,10 +578,10 @@ export const hookCraft: Block = {
           });
           observedCostUsd += PRICE.boundedTextPassUsd;
           const issues = (Array.isArray(verdict.issues) ? verdict.issues : []).filter(Boolean).slice(0, 4);
-          // Same actionability rule as script_gen: `pass:false` with no concrete
-          // issue is not something a regenerate can act on, so the draft stands
-          // rather than buying a blind retry.
-          const rejected = verdict.pass === false && issues.length > 0;
+          const rejected = verdict.pass === false;
+          const rejectionIssues = issues.length
+            ? issues
+            : ["independent hook critic rejected the line without usable remediation"];
           const score = Number.isFinite(verdict.score)
             ? Math.max(0, Math.min(1, Number(verdict.score)))
             : rejected ? 0.4 : 1;
@@ -589,23 +589,29 @@ export const hookCraft: Block = {
             ctx.log(
               `hook_craft: candidate ${iter} rejected by the critic` +
               (iter < 2 ? " — regenerating with the defects fed back" : " — iteration cap reached"),
-              { issues },
+              { issues: rejectionIssues },
             );
           }
           // The +0.01*iter tiebreak keeps the INFORMED retry when it merely ties
           // the first draft (produceAndCritique picks the best by strict >).
           return rejected
-            ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues }
+            ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues: rejectionIssues }
             : { score, pass: true, issues: [] };
         } catch (e) {
-          // Critic outage: regenerating cannot help (the next draft would be
-          // ungraded too) and costs another paid call. Keep this one.
-          ctx.log(`hook_craft: critic unavailable (kept draft): ${e instanceof Error ? e.message : e}`);
-          return { score: iter === 1 ? 1 : 0, pass: true, issues: [] };
+          throw new Error(
+            `hook_craft FAILED: independent hook critic unavailable — refusing an unreviewed promise (${e instanceof Error ? e.message : e})`,
+          );
         }
       },
     });
 
+    if (critiqueEnabled) {
+      assertScriptCritiqueAccepted({
+        accepted: loop.accepted,
+        issues: loop.critique.issues,
+        stage: "hook_craft",
+      });
+    }
     const hook = loop.value || firstLine();
     ctx.log(
       `hook_craft: "${hook.slice(0, 60)}â€¦" (${loop.iterations} iter, ` +
