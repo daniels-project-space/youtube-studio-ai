@@ -1,0 +1,26 @@
+name: Publish Novita worker registry access
+
+on:
+  workflow_dispatch:
+  push:
+    branches:
+      - agent/studio-quality-release
+    paths:
+      - .github/workflows/ensure-public-novita-worker.yml
+
+permissions:
+  contents: read
+  packages: write
+
+jobs:
+  publish-access:
+    name: Make the sealed worker pullable without a registry secret
+    runs-on: ubuntu-latest
+    steps:
+      - name: Set the source-linked package visibility to public
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: >-
+          gh api --method PATCH
+          "/orgs/${{ github.repository_owner }}/packages/container/youtube-render-worker"
+          -f visibility=public
