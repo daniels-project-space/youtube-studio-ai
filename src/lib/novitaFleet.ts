@@ -495,6 +495,16 @@ export interface NovitaCreateWorkerRequestArgs {
   approval: NovitaCapacityPlan;
 }
 
+/** A cache-only provider operation; it does not allocate or bill a GPU. */
+export interface NovitaImagePrewarmRequest {
+  image: string;
+  clusterId: string;
+  productIds: string[];
+  /** Required only for a private image; public worker image uses no credential. */
+  repositoryAuthId?: string;
+  note: string;
+}
+
 export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestArgs) {
   if (args.approval.admitted !== true || args.approval.workerCount > NOVITA_HARD_GPU_LIMIT) {
     throw new NovitaAdmissionError("an admitted bounded capacity plan is required");
@@ -695,6 +705,36 @@ export class NovitaGpuApiClient {
     }) as Record<string, unknown>;
     const id = String(response.id ?? "");
     if (!id) throw new Error("Novita create did not return an instance identity");
+    return id;
+  }
+
+  /**
+   * Prime Novita's cluster-local image cache before a billable worker exists.
+   * The API accepts public images without an auth ID; retain that omission so
+   * a public pull cannot accidentally inherit an unrelated registry secret.
+   */
+  async createImagePrewarm(request: NovitaImagePrewarmRequest): Promise<string> {
+    if (
+      !isPinnedImage(request.image)
+      || !request.clusterId.trim()
+      || !request.productIds.length
+      || !request.productIds.every((id) => id.trim())
+      || !request.note.trim()
+    ) {
+      throw new NovitaAdmissionError("image prewarm requires a digest-pinned image, cluster, product, and note");
+    }
+    const response = await this.request("/image/prewarm", {
+      method: "POST",
+      body: JSON.stringify({
+        imageUrl: request.image,
+        ...(request.repositoryAuthId ? { repositoryAuth: request.repositoryAuthId } : {}),
+        clusterId: request.clusterId,
+        productIds: request.productIds,
+        note: request.note,
+      }),
+    }) as Record<string, unknown>;
+    const id = String(response.id ?? "");
+    if (!id) throw new Error("Novita image prewarm did not return a task identity");
     return id;
   }
 

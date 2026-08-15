@@ -302,6 +302,13 @@ async function main() {
     if (url.endsWith("/repository/auths")) return Response.json({ data: [{
       id: "registry-id", name: "ghcr", username: "must-not-leak", password: "must-not-leak",
     }] });
+    if (url.endsWith("/image/prewarm") && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      assert.equal(body.imageUrl, requestArgs.image);
+      assert.equal("repositoryAuth" in body, false);
+      assert.deepEqual(body.productIds, ["4090.16c96g.v2"]);
+      return Response.json({ id: "prewarm-123" });
+    }
     if (url.includes("/image/prewarm")) {
       assert.equal(parsedUrl.searchParams.get("page"), "1");
       assert.equal(parsedUrl.searchParams.get("pageSize"), "100");
@@ -325,6 +332,12 @@ async function main() {
   assert.equal(snapshot.registryAuthCount, 1);
   assert.deepEqual(snapshot.prewarmedImageDigests, [`sha256:${"a".repeat(64)}`]);
   assert.equal(JSON.stringify(snapshot).includes("must-not-leak"), false);
+  assert.equal(await provider.createImagePrewarm({
+    image: requestArgs.image,
+    clusterId: "us-ca-nas-2",
+    productIds: ["4090.16c96g.v2"],
+    note: "sealed LTX worker prewarm",
+  }), "prewarm-123");
   assert.equal(await provider.createSpotWorker(request), "instance-123");
   const waits: number[] = [];
   await provider.deleteAndVerify("instance-123", async (milliseconds) => { waits.push(milliseconds); });
