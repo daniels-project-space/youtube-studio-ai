@@ -25,7 +25,7 @@ import { StatsCharts } from "@/components/StatsCharts";
 import { fmtUsd } from "@/lib/format";
 import { VOICES } from "@/lib/voices";
 import { useAssetUrl, useAssetUrlState } from "@/lib/asset-url";
-import { NICHES, subcategoryTags } from "@/lib/nicheCatalog";
+import { NICHE_CATALOG_EVIDENCE, NICHES, subcategoryTags } from "@/lib/nicheCatalog";
 import {
   formatZonedScheduleTimestamp,
   nextProjectedPlanItem,
@@ -1326,7 +1326,7 @@ function AdvancedControls({ channel }: { channel: ChannelDoc }) {
               <select value={subcat} disabled={busy} onChange={(e) => applyCatalog(e.target.value)} style={sel}>
                 <option value="">Sub-category…</option>
                 {catalogNiche.subcategories.map((s) => (
-                  <option key={s.id} value={s.name}>{s.name} — ~{s.searchVolume}K · ${(s.rpm ?? catalogNiche.rpm).toFixed(1)} RPM</option>
+                  <option key={s.id} value={s.name}>{s.name} — {NICHE_CATALOG_EVIDENCE.label}</option>
                 ))}
               </select>
             )}

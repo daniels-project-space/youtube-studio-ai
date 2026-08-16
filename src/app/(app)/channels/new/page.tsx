@@ -4,7 +4,7 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
-import { NICHES, getNiche } from "@/lib/nicheCatalog";
+import { NICHE_CATALOG_EVIDENCE, NICHES, getNiche } from "@/lib/nicheCatalog";
 import { nichePreset } from "@/engine/golden";
 import {
   FAMILIES,
@@ -863,7 +863,7 @@ export default function NewChannelWizard() {
                 <div style={{ fontSize: "1.5rem" }}>{n.icon}</div>
                 <div style={{ fontWeight: 600, marginTop: "0.4rem" }}>{n.label}</div>
                 <div style={{ display: "flex", gap: "0.4rem", margin: "0.4rem 0", fontSize: "0.72rem" }}>
-                  <span style={{ color: "var(--color-ok)" }}>${n.rpm} RPM</span>
+                  <span style={{ color: "var(--color-faint)" }}>Planning seed</span>
                   <span style={{ color: n.difficulty === "Easy" ? "var(--color-ok)" : n.difficulty === "Hard" ? "var(--color-failed)" : "var(--color-accent)" }}>{n.difficulty}</span>
                 </div>
                 <div style={{ fontSize: "0.76rem", color: "var(--color-muted)" }}>{n.blurb}</div>
@@ -872,9 +872,9 @@ export default function NewChannelWizard() {
           })}
           {niche && (
             <div className="glass" style={{ gridColumn: "1 / -1", padding: "1rem", display: "grid", gap: "0.5rem" }}>
-              <span style={{ fontSize: "0.78rem", color: "var(--color-muted)" }}>Subcategory (est. monthly searches)</span>
+              <span style={{ fontSize: "0.78rem", color: "var(--color-muted)" }}>{NICHE_CATALOG_EVIDENCE.label}</span>
               <select value={subcategory} onChange={(e) => setSubcategory(e.target.value)} style={selStyle}>
-                {niche.subcategories.map((s) => <option key={s.id} value={s.name}>{s.name} — ~{s.searchVolume}K · ${(s.rpm ?? niche.rpm).toFixed(1)} RPM</option>)}
+                {niche.subcategories.map((s) => <option key={s.id} value={s.name}>{s.name} — planning seed</option>)}
               </select>
             </div>
           )}
