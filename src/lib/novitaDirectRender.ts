@@ -663,6 +663,16 @@ with lock.open('a+b') as handle:
         if target!=stage and stage not in target.parents: raise RuntimeError('runtime archive path escapes staging root')
         if not (member.isdir() or member.isfile() or member.issym() or member.islnk()): raise RuntimeError('runtime archive has unsupported member type')
       for member in archive.getmembers(): archive.extract(member,stage)
+    # The sealed image has an absolute /opt/uv Python target. Relocate only
+    # in-archive /opt links so the runtime remains self-contained on /network.
+    for link in stage.rglob('*'):
+      if not link.is_symlink(): continue
+      destination=os.readlink(link)
+      if not destination.startswith('/opt/'): continue
+      relocated=stage/destination.lstrip('/')
+      if not relocated.exists(): raise RuntimeError('runtime archive has unresolved /opt symlink')
+      link.unlink()
+      link.symlink_to(os.path.relpath(relocated,link.parent))
     if not (stage/'opt/LTX-2/.venv/bin/python').is_file() or not (stage/'opt/novita-worker/worker.py').is_file(): raise RuntimeError('runtime archive is incomplete')
     (stage/'.ready').write_text(sha+'\n')
     if bundle.parent!=stage: shutil.rmtree(bundle.parent,ignore_errors=True)
