@@ -45,7 +45,7 @@ export interface GoldenStage {
 
 export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "intel", blocks: ["competitor_research", "topic_select", "quiz_topic_plan"], note: "Pick topics from real outliers + competitor signal, learning-weighted; QuizYear alternatively rotates a curated CC0 Wikidata topic registry with a durable provenance receipt." },
-  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "casefile_source_packet", "casefile_evidence_shot_map", "cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence", "synthetic_scenario", "short_strategy"], note: "Show Bible crew and timed story spine; episode_graph locks causal beat-to-scene continuity before render; learning_contract turns an approved objective into source-linked demonstrations and retrieval practice; children_show_bible admits an operator-authored age-band, measurable objective, original recurring world/character, and five-stage participation format only with a fresh graph- and lesson-bound child-editor approval, and can emit only a private review receipt; casefile_source_packet admits only an operator-supplied, primary-source- and rights-bound Case Packet with fresh Case Packet and source-use-ledger-bound editorial approval, and can emit only a private human-review draft; casefile_evidence_shot_map additionally binds every factual claim to reviewed current Scene Manifest / ShotPlan targets under an explicit no-gore/no-unsupported-recreation policy, and can emit only a private human-review receipt; cinematic_case_sequence_draft converts that evidence into source-bound, faceless mannequin multi-shot coverage; cinematic_case_sequence_finalize accepts only a real editor’s matching signature before strict cinematic admission and Novita generation; synthetic_scenario locks an explicitly fictional, assumption-led scenario before writing; collage Shorts lock claim/source/beat/motion evidence before render." },
+  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "casefile_source_packet", "casefile_evidence_shot_map", "source_bound_story_spine", "cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence", "synthetic_scenario", "short_strategy"], note: "Show Bible crew and timed story spine; episode_graph locks causal beat-to-scene continuity before render; learning_contract turns an approved objective into source-linked demonstrations and retrieval practice; children_show_bible admits an operator-authored age-band, measurable objective, original recurring world/character, and five-stage participation format only with a fresh graph- and lesson-bound child-editor approval, and can emit only a private review receipt; casefile_source_packet admits only an operator-supplied, primary-source- and rights-bound Case Packet with fresh Case Packet and source-use-ledger-bound editorial approval, and can emit only a private human-review draft; casefile_evidence_shot_map additionally binds every factual claim to reviewed current Scene Manifest / ShotPlan targets under an explicit no-gore/no-unsupported-recreation policy; source_bound_story_spine carries those exact reviewed claim/source/citation/treatment bindings into every timed Story Spine shot without generating facts or admitting a family; cinematic_case_sequence_draft converts that evidence into source-bound, faceless mannequin multi-shot coverage; cinematic_case_sequence_finalize accepts only a real editor’s matching signature before strict cinematic admission and Novita generation; synthetic_scenario locks an explicitly fictional, assumption-led scenario before writing; collage Shorts lock claim/source/beat/motion evidence before render." },
   { stage: "write", blocks: ["script_gen", "hook_craft"], note: "Hook-first, CRAFT_RULES applied." },
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check", "quiz_topic_safety", "quiz_critic_spec", "scenario_disclosure_gate"], note: "Quality + originality + compliance floor; QuizYear contributes deterministic topic-safety and game-format critic receipts; synthetic scenarios must disclose their illustrative assumptions before narration." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
@@ -589,6 +589,27 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     status: "reference",
   },
   {
+    key: "source-bound-story-spine",
+    stage: "brief",
+    title: "Source-Bound Story Spine — Timed Evidence Handoff",
+    engine:
+      "Provider-free admitted Casefile source packet + reviewed evidence-shot map + current timed Story Spine → exact claim/source/citation/treatment handoff",
+    how:
+      "This reusable boundary does not write a fact, create a prompt, render media, or admit a channel. It verifies that every " +
+      "timed Story Spine shot remains covered by a current reviewer-signed Casefile binding, then carries the exact claim ids, admitted " +
+      "primary-source ids, on-screen citations, treatments, scenes, beats, sentences, and shot ids into a content-addressed private " +
+      "handoff. Downstream cinematic direction can use it to preserve evidence while changing visual grammar rather than silently " +
+      "turning a researched narrative into generic b-roll.",
+    gates: [
+      "source packet, source-admission, evidence map, and map-admission fingerprints must all be current and matching",
+      "the reviewed ShotPlan fingerprint must equal the timed Story Spine shot list",
+      "every claim binding retains an admitted primary-source id, visible citation, approved treatment, and real timed shot coverage",
+      "unknown, orphaned, or stale Story Spine shot ids fail closed",
+      "private human-editorial-review-only handoff; no automatic family, render, spend, or publication authority",
+    ],
+    status: "reference",
+  },
+  {
     key: "cinematic-case-sequence",
     stage: "brief",
     title: "Cinematic Case Sequence — Evidence-Led Multi-Shot Direction",
@@ -731,25 +752,24 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     stage: "visual",
     title: "Novita Render Farm",
     engine:
-      "Novita 8×4090 spot-pod render farm — static modulo sharding, per-shot camera/director/script control, individual pod autoclose + spot-reclaim requeue, R2-backed idempotent resume (image + image-to-video)",
+      "Direct Trigger-controlled Novita RTX 4090 spot workers — Z-Image keyframes followed by sealed LTX-2.5 image-to-video, one exact shot job per worker, durable R2 manifests, and verified worker teardown",
     how:
-      "An editable shot list (script line, camera move, shot scale, lens, seconds, motion cue) is submitted straight into the " +
-      "orchestrator's job schema — no translation layer. The image phase renders every shot's still on however many 4090 pods " +
-      "are sharded (nshard, capped at 3 by the Novita account); each pod pushes its stills plus a `.done` marker to R2 and " +
-      "self-deletes on completion. The video phase pipelines off the SAME R2 stills into image-to-video camera moves once they " +
-      "land, converting seconds to the nearest valid 8n+1 frame count. A monitor loop verifies every pod's autoclose, " +
-      "force-deletes stragglers, and RELAUNCHES any shard whose pod vanished to a spot reclaim — workers skip outputs already " +
-      "in R2, so a requeue never double-renders. Output is drop-in producer-compatible with gen_footage (same footageClips / " +
-      "footageKeys contract), so timeline_assemble works unmodified. Self-describing (NOVITA_RENDER_FARM_MODULE contract). " +
-      "src/lib/novitaRenderFarm.ts; the render itself runs VPS-side (/root/ltx-build/novita/orchestrator.py), reached over " +
-      "HTTP by the module, never spawned in Vercel/Trigger.",
+      "Only after an approved script, timed shot plan, and keyframe review, the Trigger controller creates a sealed direct worker " +
+      "for each admitted image or LTX take. Z-Image Turbo supplies the reference still; LTX-2.5 then receives that exact R2 still " +
+      "and its locked camera/motion prompt. The cinematic profile is Lightricks/LTX-2.5 distilled with FP8-cast plus CPU offload, " +
+      "640×352 stage one → native latent x2 1280×704 at 25fps. Every worker writes a content-addressed R2 receipt, settles before " +
+      "the stage returns, and is deleted/verified by the lifecycle controller. The retired VPS/HTTP bridge cannot launch work. " +
+      "Video remains fail-closed until the exact LTX-2.5 RTX 4090 profile is present in the local benchmark allow-list.",
     gates: [
+      "keyframe text/logo/wardrobe/continuity review completes before any LTX spend",
+      "LTX accepts only the exact LTX-2.5 640×352 → 1280×704 x2 RTX 4090 profile and a local benchmark admission",
       "video frames always 8n+1 — rounded, never truncated silently",
       "every shot needs a motion cue — cameraMove !== 'static' or a non-empty motion field",
       "width/height must be a multiple of 32 (VAE tiling requirement)",
-      "shard count capped at 3 (Novita account pod limit) — validate() fails loud above it",
-      "no cross-engine fallback — a failed shard retries the same pod pattern, then fails loud",
-      "R2-backed idempotent resume — a spot-reclaim requeue never double-renders",
+      "an explicit signed cost envelope and live RTX 4090 capacity admission precede every worker start",
+      "no cross-engine or legacy-bridge fallback — a failed take is repaired or fails loud",
+      "all started workers settle and verify deletion before the parent stage returns",
+      "R2-backed idempotent receipts prevent a recovery from double-rendering",
     ],
     status: "active",
   },
@@ -758,21 +778,18 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     stage: "visual",
     title: "Imagecraft (Novita Z-Image)",
     engine:
-      "Imagecraft — Z-Image base bf16 stills at 2048×1152 / 40 steps on Novita RTX 4090 spot pods (NAS-staged weights, slot-aware 3-pod queue, verified autoclose, R2-idempotent resume) via the live VPS render bridge",
+      "Imagecraft — direct Novita Z-Image Turbo BF16 reference stills on RTX 4090 spot workers, with profile-bound 1280×736, 1920×1088, or 2048×1152 output, R2 provenance, and verified autoclose",
     how:
-      "A director shot list (per-shot prompt/lens/shotScale/seed + global style/negative/director/steps/cfg/width/height) is POSTed to the live nginx bridge and polled to done; inline sharpness/exposure QA re-renders weak stills pod-side. Self-describing (IMAGECRAFT_NOVITA_MODULE contract), as originally designed in the now-deleted src/lib/imagecraft-novita.ts. " +
-      "DELETED, NOT PENDING (P1-5 resolved by P2-7): src/lib/imagecraft-novita.ts had no import chain from the executed pipeline and was " +
-      "removed outright as confirmed-dead in commit 183ee6a. This was never a capability gap -- production image rendering for " +
-      "Novita-based channels runs, and always ran, through the separate, wired novita-render-farm module (src/lib/novitaRenderFarm.ts, called " +
-      "from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) -- same Z-Image family, different codebase and " +
-      "gate set. The gates below describe imagecraft-novita.ts's former design; do not assume they are enforced in production.",
+      "The director's exact prompt, lens, scale, seed, continuity locks, and signed budget enter the direct Trigger controller. " +
+      "It starts a single-purpose worker only after capacity and cost admission, persists the reference image and receipt to R2, " +
+      "runs quality/keyframe review, then deletes the worker. Those accepted stills are the only permitted reference inputs for " +
+      "the LTX-2.5 image-to-video branch; there is no live nginx/VPS bridge or retired Imagecraft implementation in this route.",
     gates: [
-      "inline sharpness + exposure QA on every still — weak frames re-render pod-side, never ship",
-      "width/height must be a multiple of 32 (VAE tiling requirement) — validate() fails loud",
-      "shard count capped at 3 (Novita account pod limit) — no silent clamp",
-      "no cross-engine fallback — a failed shard retries the same Z-Image pod pattern, then fails loud",
-      "R2-idempotent resume — a requeue never double-renders",
-      "per-pod verified autoclose — stragglers force-deleted, no ghost billing",
+      "the exact Z-Image Turbo revision, profile geometry, signed cost envelope, and live RTX 4090 capacity are admitted before start",
+      "keyframe review rejects text, logos, wardrobe, continuity, and composition defects before any LTX take can be purchased",
+      "no cross-engine or legacy-bridge fallback — a failed still is repaired or fails loud",
+      "R2 receipt fingerprints make recovery idempotent rather than double-rendering",
+      "every started worker is reaped and deletion-verified before its parent wave settles",
     ],
     status: "reference",
   },
@@ -783,19 +800,20 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     engine:
       "Videocraft — LTX-2.5 distilled image-to-video on an exact RTX 4090 spot profile: 640×352 stage one → native latent-space x2 refinement → 1280×704 final output, FP8-cast + CPU offload, with no model or hardware fallback.",
     how:
-      "Each shot's rendered still + camera move + motion cue + seconds (rounded to 8n+1 frames) is sealed into a one-shot worker manifest. The worker verifies split-model hashes, probes the encoded MP4 at 1280×704, and returns x2 evidence before it can be assembled. Emits gen_footage-compatible footageClips/footageKeys, so timeline_assemble works unmodified. " +
-      "DELETED, NOT PENDING (P1-6 resolved by P2-7): src/lib/videocraft-novita.ts had no import chain from the executed pipeline and was " +
-      "removed outright as confirmed-dead in commit 183ee6a. This was never a capability gap -- production video rendering for " +
-      "Novita-based channels runs, and always ran, through the separate, wired novita-render-farm module (src/lib/novitaRenderFarm.ts, called " +
-      "from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) -- same LTX family, different codebase and gate " +
-      "set. The gates below describe videocraft-novita.ts's former design; do not assume they are enforced in production.",
+      "Each already-reviewed Z-Image still, camera move, motion cue, continuity lock, and duration is sealed into a one-shot direct " +
+      "worker manifest. The worker verifies the digest-pinned LTX-2.5 components, probes the encoded 1280×704 MP4 at 25fps, and " +
+      "returns exact scene order, frame geometry, GPU identity, and x2 evidence before timeline assembly. Accepted footage keeps the " +
+      "same footageClips/footageKeys handoff, while the cinematic manifest preserves the source-to-shot binding. The legacy bridge " +
+      "and retired videocraft module cannot be used as an alternative path. This module is deliberately not a production admission " +
+      "until a sealed live RTX 4090 benchmark records the exact profile in the local allow-list.",
     gates: [
-      "freeze-detection QA (the still-frame fix) — a clip that doesn't move is rejected and re-rendered, never shipped",
+      "accepted Z-Image keyframes bind identity, wardrobe, props, text/logo rejection, and first/last-frame continuity before LTX starts",
+      "FFmpeg temporal-dynamism, pacing, black/dead-air, and final-master QA reject a clip that does not move or cut as planned",
       "video frames always 8n+1 — rounded, never truncated silently",
       "every shot needs a stillKey + motion cue (cameraMove !== 'static' or a non-empty motion field) — validate() fails loud",
-      "shard count capped at 3 (Novita account pod limit) — no silent clamp",
-      "no cross-engine fallback — a failed shard retries the same LTX pod pattern, then fails loud",
-      "R2-idempotent resume — a spot-reclaim requeue never double-renders",
+      "only the local benchmark allow-list can unlock the exact LTX-2.5 RTX 4090 profile",
+      "no cross-engine or old-bridge fallback — a failed take is repaired or fails loud",
+      "R2-idempotent receipts plus all-settled worker teardown prevent double-rendering and ghost billing",
     ],
     status: "reference",
   },

@@ -145,6 +145,11 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     executableIds: ["casefile_evidence_shot_map"],
     note: "Provider-free claim-to-visual review executable only. It requires the private source-admission receipt plus current Scene Manifest / ShotPlan fingerprints and a fresh human reviewer approval; it emits private-review-only evidence mapping and does not auto-admit crime, documentary, or cinematic families.",
   },
+  "source-bound-story-spine": {
+    kind: "pipeline-module",
+    executableIds: ["source_bound_story_spine"],
+    note: "Provider-free reviewed-evidence handoff only. It proves every timed Story Spine shot retains a current Casefile claim/source/citation/treatment binding; it emits private-review-only provenance and cannot generate facts, render media, or admit a family.",
+  },
   "cinematic-case-sequence": {
     kind: "pipeline-module",
     executableIds: ["cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence"],
