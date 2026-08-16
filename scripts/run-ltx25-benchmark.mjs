@@ -123,7 +123,7 @@ const ltxManifestKey = process.argv[2];
 if (!/^novita\/model-manifests\/ltx-2\.5-[a-f0-9-]+\.json$/.test(ltxManifestKey || "")) {
   throw new Error("pass the admitted LTX 2.5 model manifest key");
 }
-if (!/^novita\/runtime\/ltx-2\.5\/[a-f0-9]{64}\.tar\.zst$/.test(RUNTIME_BUNDLE_KEY)
+if (!/^novita\/runtime\/ltx-2\.5\/[a-f0-9]{64}\.tar\.(?:zst|gz)$/.test(RUNTIME_BUNDLE_KEY)
   || !/^[a-f0-9]{64}$/.test(RUNTIME_BUNDLE_SHA256)) {
   throw new Error("runtime bundle must have an immutable LTX 2.5 R2 key and SHA-256 identity");
 }
