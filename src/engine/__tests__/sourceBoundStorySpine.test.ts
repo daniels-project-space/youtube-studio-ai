@@ -234,6 +234,25 @@ async function main(): Promise<void> {
     /timing does not match the reviewed timed Story Spine/,
     "a retimed narration must regenerate the causal-cut plan",
   );
+  assert.throws(
+    () => assertSourceBoundNarrationAlignment({
+      sourceBoundStorySpine: handoff,
+      narrationDurationSec: 12,
+      sentenceTimings: [{
+        text: "The court finding ordered the ledger room closed.",
+        start: 0,
+        end: 12,
+      }],
+      expectedCinematicBinding: {
+        caseId: sourcePacket.caseId,
+        sourcePacketFingerprint: "f".repeat(64),
+        evidenceShotMapFingerprint: evidence.map.contentFingerprint,
+        shotPlanFingerprint: casefileShotPlanFingerprint(storySpine.shotList),
+      },
+    }),
+    /no longer matches the Casefile\/ShotPlan admitted into this cinematic sequence/,
+    "a separately valid Story Spine may not be swapped into a cinematic final-master QA run",
+  );
   const artifact = artifactContract("sourceBoundStorySpine");
   assert.equal(artifact.opaque, false, "the handoff must cross the store through a typed contract");
   assert.equal((validateArtifact(artifact, handoff) as { caseId: string }).caseId, sourcePacket.caseId);

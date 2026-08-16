@@ -47,6 +47,11 @@ assert.match(
 );
 assert.match(
   qaSource,
+  /expectedCinematicBinding:[\s\S]*caseId: cinematicSequenceInput!\.caseId[\s\S]*shotPlanFingerprint: cinematicSequenceInput!\.shotPlanFingerprint/,
+  "final-master narration proof must bind the retained Story Spine to the exact Casefile and ShotPlan that admitted the cinematic sequence",
+);
+assert.match(
+  qaSource,
   /cinematicFinalMasterQaEvidence\(/,
   "QA must translate cinematic EDL locks into final-master time before reviewing them",
 );

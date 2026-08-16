@@ -12,6 +12,7 @@ import { SceneManifestSchema } from "./episodeGraph";
 import {
   assertCurrentReferenceMechanicsPacket,
   referenceMechanicsPromptGuidance,
+  ReferenceMechanicsPacketSchema,
   type ReferenceMechanicsPacket,
 } from "./referenceMechanicsPacket";
 import { CasefileSourceAdmissionReceiptSchema } from "./sourceFirstAdmission";
@@ -202,6 +203,12 @@ export const CinematicCaseSequenceInputSchema = z
     shotPlanFingerprint: fingerprint,
     cast: z.array(CinematicMannequinSchema).min(1).max(8),
     beats: z.array(CinematicSequenceBeatSchema).min(1).max(500),
+    /**
+     * Optional human-reviewed craft mechanics. When present, it is part of
+     * the signed sequence content and is propagated into the actual LTX
+     * still/motion prompts and final-master QA provenance.
+     */
+    referenceMechanicsPacket: ReferenceMechanicsPacketSchema.optional(),
     editorialReview: CinematicSequenceEditorialReviewSchema,
   })
   .strict();
@@ -514,8 +521,26 @@ export function evaluateCinematicCaseSequence(
   }
   const input = parsedInput.data;
   const issues: CinematicCaseSequenceIssue[] = [];
-  if (args.referenceMechanicsPacket !== undefined || args.referenceQuality !== undefined) {
-    if (args.referenceMechanicsPacket === undefined || !args.referenceQuality) {
+  const inputReferenceMechanicsPacket = input.referenceMechanicsPacket;
+  const suppliedReferenceMechanicsPacket = inputReferenceMechanicsPacket ?? args.referenceMechanicsPacket;
+  if (
+    inputReferenceMechanicsPacket !== undefined &&
+    args.referenceMechanicsPacket !== undefined
+  ) {
+    const externalPacket = ReferenceMechanicsPacketSchema.safeParse(args.referenceMechanicsPacket);
+    if (
+      !externalPacket.success ||
+      externalPacket.data.contentFingerprint !== inputReferenceMechanicsPacket.contentFingerprint
+    ) {
+      issues.push(issue(
+        "reference_mechanics_invalid",
+        "The input-bound Reference Mechanics packet conflicts with the separately supplied packet.",
+        "Keep one reviewed mechanics packet on the signed cinematic sequence, or supply the exact same packet through both compatibility paths.",
+      ));
+    }
+  }
+  if (suppliedReferenceMechanicsPacket !== undefined || args.referenceQuality !== undefined) {
+    if (suppliedReferenceMechanicsPacket === undefined || !args.referenceQuality) {
       issues.push(issue(
         "reference_mechanics_invalid",
         "Reference mechanics require both the reviewed packet and its current attributed ReferenceQuality contract.",
@@ -524,7 +549,7 @@ export function evaluateCinematicCaseSequence(
     } else {
       try {
         assertCurrentReferenceMechanicsPacket({
-          packet: args.referenceMechanicsPacket,
+          packet: suppliedReferenceMechanicsPacket,
           referenceQuality: args.referenceQuality,
           shotList: args.shotList,
           now: options.now,
@@ -794,9 +819,9 @@ export function assertCinematicCaseSequence(
   }
   const input = CinematicCaseSequenceInputSchema.parse(args.input);
   const referenceMechanics: ReferenceMechanicsPacket | undefined =
-    args.referenceMechanicsPacket !== undefined && args.referenceQuality
+    (input.referenceMechanicsPacket ?? args.referenceMechanicsPacket) !== undefined && args.referenceQuality
       ? assertCurrentReferenceMechanicsPacket({
-          packet: args.referenceMechanicsPacket,
+          packet: input.referenceMechanicsPacket ?? args.referenceMechanicsPacket,
           referenceQuality: args.referenceQuality,
           shotList: args.shotList,
           now: options.now,
@@ -957,6 +982,12 @@ export function assertCinematicCaseSequence(
         `The frame fulfills the narrated purpose: ${shot.narrationPurpose}`,
         `The viewer can understand the beat's causal question without on-screen prose: ${beat.causalQuestion}`,
         `The cut communicates ${shot.cutReason}; tension state is ${shot.tensionState}`,
+        ...(mechanicsGuidance
+          ? [
+              "The frame preserves the approved original editorial mechanics without imitating a named reference: " +
+                mechanicsGuidance.slice(0, 220),
+            ]
+          : []),
         "Faceless mannequin identity, wardrobe silhouette, palette, key prop, and movement profile remain locked across the scene",
         "No real-person likeness, gore, unsupported act depiction, accidental text, logo, watermark, broken anatomy, or geometry",
         "The visible citation and evidence treatment match the approved factual claim",

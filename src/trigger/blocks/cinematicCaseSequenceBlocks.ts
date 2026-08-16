@@ -15,6 +15,7 @@ import {
 } from "@/engine/casefileEvidenceShotMap";
 import { validateSourceBoundStorySpineHandoff } from "@/engine/sourceBoundStorySpine";
 import { ShotPlanSchema } from "@/engine/storySpine";
+import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 
 /**
  * The source-bound Story Spine is a private proof artifact, but merely
@@ -145,6 +146,14 @@ const cinematicCaseSequence: Block = {
   ],
   run: async (ctx) => {
     const input = CinematicCaseSequenceInputSchema.parse(ctx.store["cinematicCaseSequenceInput"]);
+    // A mechanics packet is optional so normal Casefile review work remains
+    // runnable. Once a human attaches one to the signed sequence, however,
+    // this live LTX path resolves the fixed Casefile quality contract and
+    // carries it through prompt construction and final-master QA.
+    const referenceMechanicsPacket = input.referenceMechanicsPacket;
+    const referenceQuality = referenceMechanicsPacket
+      ? referenceQualityContractFor("documentary_collage_short")
+      : undefined;
     assertCurrentSourceBoundStorySpine({
       sourceBoundStorySpine: ctx.store["sourceBoundStorySpine"],
       caseId: input.caseId,
@@ -162,6 +171,9 @@ const cinematicCaseSequence: Block = {
       evidenceShotMapAdmission: ctx.store["casefileEvidenceShotMapAdmission"],
       sceneManifest: ctx.store["sceneManifest"],
       shotList: ctx.store["shotList"],
+      ...(referenceMechanicsPacket && referenceQuality
+        ? { referenceMechanicsPacket, referenceQuality }
+        : {}),
     });
     const cinematicFinalMasterQaAdmission = admitCinematicFinalMasterQa({
       creativeLocks: admitted.creativeLocks,

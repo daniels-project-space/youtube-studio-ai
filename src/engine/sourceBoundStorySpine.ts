@@ -199,9 +199,36 @@ export function assertSourceBoundNarrationAlignment(args: {
   sourceBoundStorySpine: unknown;
   sentenceTimings: unknown;
   narrationDurationSec: unknown;
+  /**
+   * When a final master belongs to a cinematic Casefile sequence, prove that
+   * the retained Story Spine is the very same reviewed Casefile/ShotPlan
+   * handoff that admitted that sequence.  Without this, a resumed store could
+   * supply a separately valid spine whose narration happens to match while
+   * its sources or claim-to-shot map belong to another case.
+   */
+  expectedCinematicBinding?: {
+    caseId: string;
+    sourcePacketFingerprint: string;
+    evidenceShotMapFingerprint: string;
+    shotPlanFingerprint: string;
+  };
   timingToleranceSec?: number;
 }): SourceBoundStorySpineHandoff {
   const handoff = validateSourceBoundStorySpineHandoff(args.sourceBoundStorySpine);
+  const expectedBinding = args.expectedCinematicBinding;
+  if (
+    expectedBinding &&
+    (
+      handoff.caseId !== expectedBinding.caseId ||
+      handoff.sourcePacketFingerprint !== expectedBinding.sourcePacketFingerprint ||
+      handoff.evidenceShotMapFingerprint !== expectedBinding.evidenceShotMapFingerprint ||
+      handoff.storySpineShotPlanFingerprint !== expectedBinding.shotPlanFingerprint
+    )
+  ) {
+    throw new Error(
+      "source-bound narration handoff no longer matches the Casefile/ShotPlan admitted into this cinematic sequence; regenerate the sequence from the current reviewed Story Spine",
+    );
+  }
   const sentenceTimings = z.array(z.object({
     text: z.string().trim().min(1).max(4_000),
     start: z.number().finite().min(0),

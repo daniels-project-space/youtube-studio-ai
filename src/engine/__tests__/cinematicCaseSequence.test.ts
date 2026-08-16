@@ -32,7 +32,7 @@ import {
   createReferenceMechanicsPacket,
   referenceMechanicsPacketContentFingerprint,
 } from "@/engine/referenceMechanicsPacket";
-import type { ReferenceQualityContract } from "@/engine/creative/types";
+import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 import { admitCinematicFinalMasterQa } from "@/engine/cinematicFinalMasterQaAdmission";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 
@@ -485,25 +485,10 @@ async function main() {
   // attributed, reviewed source contract and the exact current ShotPlan. It
   // must alter the cinematic handoff while never making the normal path wait
   // for an unrelated reference study.
-  const referenceQuality: ReferenceQualityContract = {
-    version: "1.0.0",
-    family: "casefile_documentary",
-    calibration: "calibrated",
-    comparisonPolicy: "mechanics-only-no-automatic-comparison",
-    sourceDocument: "Reviewed documentary craft notes, retained by the editorial desk.",
-    sources: [{
-      id: "reference-documentary-craft",
-      label: "Documentary craft reference",
-      url: "https://example.com/documentary-craft-reference",
-      transferableMechanic: "Use a factual opening question, evidence-led scene changes, and a later cited reframe.",
-      prohibitedImitation: "Do not copy names, visual signatures, wording, music, footage, or a specific edit sequence.",
-    }],
-    requirements: [],
-    unresolvedAreas: [],
-  };
+  const referenceQuality = referenceQualityContractFor("documentary_collage_short");
   const mechanics = (guidance: string) => ({
     guidance,
-    sourceIds: ["reference-documentary-craft"],
+    sourceIds: [referenceQuality.sources[0]!.id],
   });
   const referenceMechanicsPacket = createReferenceMechanicsPacket({
     referenceQuality,
@@ -567,6 +552,11 @@ async function main() {
     withMechanics.generatedScenePlan.scenes[0]!.diegeticSoundscape,
     /original audio relationship/i,
     "the approved audio relationship must reach the individual take's sound plan",
+  );
+  assert.match(
+    withMechanics.creativeLocks.locks[0]!.acceptanceCriteria.join(" "),
+    /approved original editorial mechanics/i,
+    "final-master visual QA must receive the approved mechanics as reviewer-facing criteria, not only an opaque fingerprint",
   );
   const staleMechanics = structuredClone(referenceMechanicsPacket);
   staleMechanics.openingPromisePayoff.guidance = "A changed opening must force fresh editorial review.";
@@ -773,7 +763,19 @@ async function main() {
       casefileEvidenceShotMap: map.map,
       casefileEvidenceShotMapAdmission: map.receipt,
       sourceBoundStorySpine,
-      cinematicCaseSequenceInput: finalizePatch.cinematicCaseSequenceInput,
+      cinematicCaseSequenceInput: (() => {
+        const reviewedInput = structuredClone(
+          finalizePatch.cinematicCaseSequenceInput,
+        ) as CinematicCaseSequenceInput;
+        // This models a human attaching the independently reviewed mechanics
+        // packet before signing the final cinematic sequence. The packet now
+        // has a real typed path into prompt construction and QA rather than
+        // existing only as an external engine-test argument.
+        reviewedInput.referenceMechanicsPacket = referenceMechanicsPacket;
+        reviewedInput.editorialReview.reviewedSequenceFingerprint =
+          cinematicCaseSequenceContentFingerprint(reviewedInput);
+        return reviewedInput;
+      })(),
       sceneManifest,
       shotList,
     },
@@ -785,10 +787,21 @@ async function main() {
     "private_human_editorial_review_only",
   );
   assert.equal((patch.cinematicGeneratedScenePlan as { scenes: unknown[] }).scenes.length, 8);
+  assert.equal(
+    (patch.cinematicGeneratedScenePlan as { referenceMechanicsPacketFingerprint?: string })
+      .referenceMechanicsPacketFingerprint,
+    referenceMechanicsPacket.contentFingerprint,
+    "the live cinematic block must retain signed mechanics provenance into its LTX scene handoff",
+  );
   assert.match(
     (patch.cinematicGeneratedScenePlan as { scenes: { diegeticSoundscape?: string }[] }).scenes[0]!.diegeticSoundscape ?? "",
     /Diegetic only:/,
     "each generated cinematic take must carry its own physical sound direction into LTX",
+  );
+  assert.match(
+    (patch.cinematicGeneratedScenePlan as { scenes: { still?: string }[] }).scenes[0]!.still ?? "",
+    /Mechanics-only original expression/i,
+    "the optional signed mechanics packet must reach live still/I2V prompts through the cinematic block",
   );
   assert.match(logs.join("\n"), /awaiting human editorial signature/);
   assert.match(logs.join("\n"), /reviewer signature bound to exact draft/);

@@ -3119,6 +3119,12 @@ export const qaVisual: Block = {
           sourceBoundStorySpine: ctx.store["sourceBoundStorySpine"],
           sentenceTimings: ctx.store["sentenceTimings"],
           narrationDurationSec: target,
+          expectedCinematicBinding: {
+            caseId: cinematicSequenceInput!.caseId,
+            sourcePacketFingerprint: cinematicSequenceInput!.sourcePacketFingerprint,
+            evidenceShotMapFingerprint: cinematicSequenceInput!.evidenceShotMapFingerprint,
+            shotPlanFingerprint: cinematicSequenceInput!.shotPlanFingerprint,
+          },
         });
         cinematicFinalMasterSha256 = await sha256ShotAnalysisSource(video);
         const cinematicQaPlan = cinematicFinalMasterQaPlan({
