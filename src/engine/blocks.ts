@@ -27,6 +27,7 @@ import { childrenShowBibleBlocks } from "@/trigger/blocks/childrenShowBibleBlock
 import { childContentSafetyBlocks } from "@/trigger/blocks/childrenSafetyBlocks";
 import { casefileSourcePacketBlocks } from "@/trigger/blocks/casefileSourcePacketBlocks";
 import { casefileEvidenceShotMapBlocks } from "@/trigger/blocks/casefileEvidenceShotMapBlocks";
+import { sourceBoundStorySpineBlocks } from "@/trigger/blocks/sourceBoundStorySpineBlocks";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 import { sceneCompilerBlocks } from "@/trigger/blocks/sceneCompilerBlocks";
 import { syntheticScenarioBlocks } from "@/trigger/blocks/syntheticScenarioBlocks";
@@ -70,6 +71,10 @@ export function registerAllBlocks(): void {
   // Provider-free factual-claim → reviewed scene/shot mapping. It remains a
   // private human-review handoff and does not admit any documentary family.
   for (const b of casefileEvidenceShotMapBlocks) register(b);
+  // Reviewed Casefile evidence → the generic timed Story Spine. This carries
+  // claims, citations, treatments, and exact cut IDs forward without planning
+  // or admitting any source-led family.
+  for (const b of sourceBoundStorySpineBlocks) register(b);
   // Evidence-led cinematic coverage comes after the claim map. It creates the
   // exact multi-shot/mannequin/cut handoff used by generated footage, but is
   // still private-review-only and cannot self-admit a crime channel.

@@ -26,6 +26,11 @@ import {
 } from "@/engine/dataStory";
 import { nichePreset } from "@/engine/golden";
 import { assessPipelineVideoRuntimeReadiness } from "@/engine/runtimeCapability";
+import {
+  familyChannelInceptionCapability,
+  familySupervisedChannelInceptionCapability,
+  type CreatorAdmissionCapability,
+} from "@/engine/channelInceptionCapability";
 
 const KNOWN_ROLES = ["director", "cinematographer", "editor", "composer", "critic"] as const;
 export type FormatCrewRole = (typeof KNOWN_ROLES)[number];
@@ -68,6 +73,25 @@ export interface FormatPlanningPreflight {
   capabilityId?: string;
   plannerBlock?: string;
   provenance?: string;
+  blockers: string[];
+  remediation?: string;
+}
+
+/**
+ * Creator-facing admission is deliberately broader than automatic planning.
+ * `registered_supervised_non_gemini` exposes a real private-review intake,
+ * never a production-ready or public-output claim.
+ */
+export interface FormatCreatorAdmission {
+  mode: CreatorAdmissionCapability["mode"];
+  selectable: boolean;
+  autonomous: boolean;
+  privateReviewOnly: boolean;
+  capabilityId?: string;
+  provenance?: string;
+  coveredStages: string[];
+  requiredArtifacts: string[];
+  reviewHref?: string;
   blockers: string[];
   remediation?: string;
 }
@@ -129,6 +153,11 @@ export interface FormatPreflight {
   runtimeBlockers: string[];
   /** Actual no-Gemini planning admission for this family. */
   planning: FormatPlanningPreflight;
+  /**
+   * Channel/episode intake route visible to the creator. This intentionally
+   * remains separate from `productionReady`.
+   */
+  creatorAdmission: FormatCreatorAdmission;
   /** Actual pinned video-runtime assessment for this family. */
   runtime: FormatRuntimePreflight;
   /** A possible substitute for explicit operator consideration; never silently selected. */
@@ -481,6 +510,59 @@ function planningPreflight(family: FamilyKey): FormatPlanningPreflight {
   };
 }
 
+function creatorAdmissionPreflight(
+  family: FamilyKey,
+  input: FormatSelectionInput,
+): FormatCreatorAdmission {
+  const supervised = familySupervisedChannelInceptionCapability(family, {
+    casefileCinematic: isCasefileCinematicIntent(input, family),
+  });
+  const capability = supervised ?? familyChannelInceptionCapability(family);
+
+  if (capability.mode === "registered_non_gemini") {
+    return {
+      mode: capability.mode,
+      selectable: true,
+      autonomous: true,
+      privateReviewOnly: false,
+      capabilityId: capability.id,
+      provenance: capability.provenance,
+      coveredStages: [...capability.coveredStages],
+      requiredArtifacts: [],
+      blockers: [],
+    };
+  }
+
+  if (capability.mode === "registered_supervised_non_gemini") {
+    return {
+      mode: capability.mode,
+      selectable: true,
+      autonomous: false,
+      privateReviewOnly: true,
+      capabilityId: capability.id,
+      provenance: capability.provenance,
+      coveredStages: [...capability.coveredStages],
+      requiredArtifacts: [...capability.requiredArtifacts],
+      ...(capability.reviewHref ? { reviewHref: capability.reviewHref } : {}),
+      blockers: [
+        "This route is registered for private human review only; it does not authorize automatic production, rendering, spend, or publishing.",
+      ],
+      remediation: "Complete the named private-review artifacts before requesting a separately authorized render or publication action.",
+    };
+  }
+
+  return {
+    mode: capability.mode,
+    selectable: false,
+    autonomous: false,
+    privateReviewOnly: false,
+    coveredStages: [],
+    requiredArtifacts: [],
+    blockers: [...capability.blockers],
+    remediation: capability.remediation,
+  };
+}
+
 function runtimePreflight(family: FamilyKey): FormatRuntimePreflight {
   const assessment = assessPipelineVideoRuntimeReadiness(FAMILY_RUNTIME_PIPELINE[family]);
   return {
@@ -520,6 +602,7 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
   const lane = contentLaneForFamily(family);
   const laneDefinition = lane ? CONTENT_LANE_POLICIES[lane.key] : undefined;
   const planning = planningPreflight(family);
+  const creatorAdmission = creatorAdmissionPreflight(family, input);
   const runtime = runtimePreflight(family);
   const recommendedModules: FormatModuleRecommendation[] = [
     ...dataStoryRecommendationForIntent(input, family),
@@ -579,6 +662,7 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
     productionReady,
     runtimeBlockers,
     planning,
+    creatorAdmission,
     runtime,
     runtimeCompilationRequired: true,
     ...(lane ? { contentLane: lane.key, primaryRenderer: lane.primaryRenderer } : {}),

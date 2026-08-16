@@ -41,6 +41,11 @@ import {
   CasefileEvidenceShotMapSchema,
 } from "./casefileEvidenceShotMap";
 import {
+  CasefileSourceAdmissionReceiptSchema,
+  CasefileSourcePacketSchema,
+} from "./sourceFirstAdmission";
+import { SourceBoundStorySpineHandoffSchema } from "./sourceBoundStorySpine";
+import {
   CinematicCaseSequenceAdmissionReceiptSchema,
   CinematicCaseSequenceInputSchema,
   CinematicCaseSequencePlanSchema,
@@ -238,6 +243,21 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
     schema: ChildrenShowBibleApprovalReceiptSchema,
     persist: "reference",
   },
+  casefileSourcePacketInput: {
+    type: "CasefileSourcePacketInput",
+    schema: CasefileSourcePacketSchema,
+    persist: "reference",
+  },
+  casefileSourcePacket: {
+    type: "CasefileSourcePacket",
+    schema: CasefileSourcePacketSchema,
+    persist: "reference",
+  },
+  casefileSourceAdmission: {
+    type: "CasefileSourceAdmissionReceipt",
+    schema: CasefileSourceAdmissionReceiptSchema,
+    persist: "reference",
+  },
   casefileEvidenceShotMapInput: {
     type: "CasefileEvidenceShotMapInput",
     schema: CasefileEvidenceShotMapInputSchema,
@@ -251,6 +271,11 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   casefileEvidenceShotMapAdmission: {
     type: "CasefileEvidenceShotMapAdmissionReceipt",
     schema: CasefileEvidenceShotMapAdmissionReceiptSchema,
+    persist: "reference",
+  },
+  sourceBoundStorySpine: {
+    type: "SourceBoundStorySpineHandoff",
+    schema: SourceBoundStorySpineHandoffSchema,
     persist: "reference",
   },
   cinematicCaseSequenceInput: {

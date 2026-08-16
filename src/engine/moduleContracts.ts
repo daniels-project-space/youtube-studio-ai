@@ -573,6 +573,30 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
 
+  // A reusable post-review bridge: it carries the exact, already-admitted
+  // Casefile claim/source/citation map into a timed Story Spine. It creates no
+  // facts, render plan, family admission, or publication authority.
+  source_bound_story_spine: contract([
+    "documentary.source_bound_story_spine_locked",
+    "publish.private_only",
+  ], {
+    requiredConsumes: [
+      "casefileSourcePacket",
+      "casefileSourceAdmission",
+      "casefileEvidenceShotMap",
+      "casefileEvidenceShotMapAdmission",
+      "timedScript",
+      "narrativeBeats",
+      "continuityLedger",
+      "shotList",
+      "dpVisualSpecs",
+      "editorEdl",
+      "storyCoverage",
+    ],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+
   // The actual cinematic documentary handoff is intentionally three stages:
   // deterministic source-bound draft, real human signature, then strict
   // admission. It is a private human-review artifact, not a generic prompt

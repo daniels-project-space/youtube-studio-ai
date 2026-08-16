@@ -1,6 +1,9 @@
 import assert from "node:assert/strict";
 
-import { familyChannelInceptionCapability } from "@/engine/channelInceptionCapability";
+import {
+  familyChannelInceptionCapability,
+  familySupervisedChannelInceptionCapability,
+} from "@/engine/channelInceptionCapability";
 
 const quizyear = familyChannelInceptionCapability("quizyear");
 assert.equal(quizyear.mode, "registered_non_gemini");
@@ -77,6 +80,25 @@ assert.equal(
   unregisteredFutureFamily.mode,
   "unregistered",
   "future non-Gemini episode planners must opt into creator capability independently",
+);
+
+const children = familySupervisedChannelInceptionCapability("children_learning");
+assert.equal(children?.mode, "registered_supervised_non_gemini");
+assert.equal(children?.reviewScope, "private_human_child_editor_review_only");
+assert.equal(children?.reviewHref, undefined, "the creator must not invent a children review desk that does not exist");
+assert.ok(
+  children?.requiredArtifacts.some((artifact) => artifact.includes("Show Bible")),
+  "the selectable children route must name its real private-review intake material",
+);
+
+const casefile = familySupervisedChannelInceptionCapability("cinematic", { casefileCinematic: true });
+assert.equal(casefile?.mode, "registered_supervised_non_gemini");
+assert.equal(casefile?.reviewScope, "private_human_review_only");
+assert.equal(casefile?.reviewHref, "/casefile");
+assert.equal(
+  familySupervisedChannelInceptionCapability("cinematic"),
+  undefined,
+  "a generic cinematic or fictional channel must not inherit Casefile private-review admission",
 );
 
 console.log("Channel inception capability admission tests passed");

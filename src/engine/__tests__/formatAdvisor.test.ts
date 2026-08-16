@@ -137,6 +137,20 @@ assert.equal(
   true,
   "the creator must see the private-review status before any design/provider work starts",
 );
+assert.equal(
+  casefileCinematic.preflight.creatorAdmission.mode,
+  "registered_supervised_non_gemini",
+  "a factual Casefile recommendation must expose its real private-review admission instead of a fake automatic route",
+);
+assert.equal(casefileCinematic.preflight.creatorAdmission.selectable, true);
+assert.equal(casefileCinematic.preflight.creatorAdmission.autonomous, false);
+assert.equal(casefileCinematic.preflight.creatorAdmission.privateReviewOnly, true);
+assert.equal(casefileCinematic.preflight.creatorAdmission.reviewHref, "/casefile");
+assert.equal(
+  casefileCinematic.preflight.productionReady,
+  false,
+  "a selectable supervised intake must never promote the Casefile family to automatic production",
+);
 assert(
   casefileCinematic.preflight.sourceRequirements.includes("source-first Case Packet"),
   "the creator must surface the Casefile evidence package before it offers cinematic reconstruction",
@@ -154,6 +168,11 @@ assert.deepEqual(
   [],
   "fictional mini-films must not be misclassified as factual Casefile work",
 );
+assert.equal(
+  fictionalCinematic.creatorAdmission.mode,
+  "unregistered",
+  "the Casefile registration must not leak onto unrelated fictional cinematic concepts",
+);
 
 const childrenShow = recommendFormatDeterministically({
   concept: "An original animated preschool kids show with gentle participation and a bedtime story rhythm",
@@ -166,6 +185,15 @@ assert.deepEqual(
   "the creator must surface the actual original-world/curriculum admission module for children’s content",
 );
 assert.equal(childrenShow.preflight.moduleAdmissions[0]?.autonomous, false);
+assert.equal(childrenShow.preflight.creatorAdmission.mode, "registered_supervised_non_gemini");
+assert.equal(childrenShow.preflight.creatorAdmission.selectable, true);
+assert.equal(childrenShow.preflight.creatorAdmission.autonomous, false);
+assert.equal(childrenShow.preflight.creatorAdmission.privateReviewOnly, true);
+assert.equal(
+  childrenShow.preflight.productionReady,
+  false,
+  "a selectable children Show Bible intake must never change automatic production readiness",
+);
 assert(
   childrenShow.preflight.missingRequirements.some((requirement) => requirement.includes("age-banded original Children’s Show Bible")),
   "children’s format advice must name its age/curriculum/editorial evidence before any automation claim",
@@ -231,6 +259,16 @@ assert(!advisorSource.includes("@/engine/blocks"), "format advisor must not impo
 assert(!advisorSource.includes("@/lib/gemini"), "the creator advisor must not import the Gemini runtime boundary");
 assert(!/\bgeminiJson\s*(?:<|\()/.test(advisorSource), "the creator advisor must not retain a hidden Gemini selection call");
 assert(!advisorSource.includes("catalogForPrompt"), "the Gemini prompt/catalog route must be removed rather than left dormant");
+
+const creatorSource = readFileSync(join(process.cwd(), "src/app/(app)/channels/new/page.tsx"), "utf8");
+assert(
+  creatorSource.includes("registered_supervised_non_gemini"),
+  "the creator must receive the explicit supervised admission state rather than treating every blocked route alike",
+);
+assert(
+  creatorSource.includes("Private review package required") && creatorSource.includes("Open private review desk"),
+  "a selectable supervised route must lead to its real review intake or remain blocked; it must not dispatch the automatic builder",
+);
 
 async function verifyPublicAsyncSelection(): Promise<void> {
   const logs: string[] = [];

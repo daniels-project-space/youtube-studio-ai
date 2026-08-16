@@ -44,6 +44,7 @@ import {
   normalizeYoutubeChannelName,
   suggestYoutubeHandle,
 } from "@/lib/youtubeChannelCreationClaim";
+import { familySupervisedChannelInceptionCapability } from "@/engine/channelInceptionCapability";
 
 type Phase = "form" | "building" | "error";
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -94,6 +95,13 @@ interface Toggles {
   documentaryCandidates: boolean;
   visualMatter: boolean;
 }
+
+type SupervisedCreatorSelection = {
+  capabilityId: string;
+  provenance?: string;
+  requiredArtifacts: string[];
+  reviewHref?: string;
+};
 const DEFAULT_TOGGLES: Toggles = {
   quotes: true,
   captions: true,
@@ -242,6 +250,7 @@ export default function NewChannelWizard() {
   const [clipNote, setClipNote] = useState<string | null>(null);
   const [concept, setConcept] = useState("");
   const [suggesting, setSuggesting] = useState(false);
+  const [supervisedAdmission, setSupervisedAdmission] = useState<SupervisedCreatorSelection | null>(null);
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;
@@ -253,13 +262,18 @@ export default function NewChannelWizard() {
     family: family || undefined,
   });
 
-  const selectFamily = (next: FamilyKey, requestedSeconds?: number) => {
-    if (!isFamilyProductionReady(next)) {
+  const selectFamily = (
+    next: FamilyKey,
+    requestedSeconds?: number,
+    supervised?: SupervisedCreatorSelection,
+  ) => {
+    if (!isFamilyProductionReady(next) && !supervised) {
       const readiness = familyProductionReadiness(next);
       setClipNote(`${FAMILIES[next].label} is registered but cannot start production today: ${readiness.blockers.join(" ")}`);
       return;
     }
     setFamily(next);
+    setSupervisedAdmission(supervised ?? null);
     if (!supportsDataStoryFamily(next)) setDataStory(false);
     if (next !== "illustrated_explainer") setSyntheticScenarioProfile("");
     setBudget((current) => Math.max(current, FAMILIES[next].defaultRunBudgetUsd ?? 0.5));
@@ -283,6 +297,7 @@ export default function NewChannelWizard() {
         // cinematic channel into an unrelated format. Leave the format
         // unselected until an operator deliberately chooses an available lane.
         setFamily("");
+        setSupervisedAdmission(null);
         const readiness = familyProductionReadiness(n.defaultFamily);
         setClipNote(`${FAMILIES[n.defaultFamily].label} is currently blocked by its production contract: ${readiness.blockers.join(" ")}. No unlike fallback was selected automatically.`);
       }
@@ -318,6 +333,15 @@ export default function NewChannelWizard() {
             capabilityId?: string;
             plannerBlock?: string;
             provenance?: string;
+          };
+          creatorAdmission?: {
+            mode?: "registered_non_gemini" | "registered_supervised_non_gemini" | "unregistered";
+            selectable?: boolean;
+            privateReviewOnly?: boolean;
+            capabilityId?: string;
+            provenance?: string;
+            requiredArtifacts?: string[];
+            reviewHref?: string;
           };
           fallbackFamily?: FamilyKey;
           runtimeCompilationRequired?: boolean;
@@ -355,11 +379,26 @@ export default function NewChannelWizard() {
           (module) => module.block === "children_show_bible"
             && module.profile === "original_child_show_bible/v1",
         );
+        const supervised = preflight?.creatorAdmission?.mode === "registered_supervised_non_gemini"
+          && preflight.creatorAdmission.selectable
+          && preflight.creatorAdmission.capabilityId
+          ? {
+              capabilityId: preflight.creatorAdmission.capabilityId,
+              provenance: preflight.creatorAdmission.provenance,
+              requiredArtifacts: [...(preflight.creatorAdmission.requiredArtifacts ?? [])],
+              ...(preflight.creatorAdmission.reviewHref
+                ? { reviewHref: preflight.creatorAdmission.reviewHref }
+                : {}),
+            }
+          : undefined;
         setDataStorySuggested(recommendedDataStory);
         if (preflight?.productionReady && isFamilyProductionReady(d.family as FamilyKey)) {
           selectFamily(d.family as FamilyKey);
+        } else if (supervised) {
+          selectFamily(d.family as FamilyKey, undefined, supervised);
         } else if (preflight?.productionReady === false) {
           setFamily("");
+          setSupervisedAdmission(null);
         }
         const requirements = preflight?.missingRequirements?.length
           ? ` Before design can compile: ${preflight.missingRequirements.join(", ")}.`
@@ -399,7 +438,13 @@ export default function NewChannelWizard() {
         const childrenNote = childrenShowBibleRecommendation
           ? " This children’s format is a supervised show-production lane: it needs an age-banded original Show Bible, one measurable learning objective, and a fresh child-editor approval before it can produce review candidates."
           : "";
-        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (renderer unavailable)"} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${planningFoundation}${requirements}${quality}${runtime}${validation}${dataStoryNote}${casefileNote}${childrenNote}`);
+        const supervisedNote = supervised
+          ? " Private-review intake selected — it cannot start an automatic build, render, spend, or publish action."
+          : "";
+        const availability = supervised
+          ? " (private review available; automatic renderer unavailable)"
+          : d.available ? "" : " (renderer unavailable)";
+        setClipNote(`Suggested format: ${fam}${availability} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${planningFoundation}${requirements}${quality}${runtime}${validation}${dataStoryNote}${casefileNote}${childrenNote}${supervisedNote}`);
       } catch {
         setClipNote("Suggestion failed — pick a format manually below.");
       } finally {
@@ -757,7 +802,7 @@ export default function NewChannelWizard() {
   const canNext = step === 0
     ? !!nicheKey
     : step === 1
-      ? Boolean(family && fam?.available && isFamilyProductionReady(family))
+      ? Boolean(family && fam?.available && (isFamilyProductionReady(family) || supervisedAdmission))
       : true;
   const stepNames = ["Niche", "Format", "Details", "Review"];
 
@@ -833,13 +878,24 @@ export default function NewChannelWizard() {
               const f = FAMILIES[k]; const on = k === family;
               const productionReady = isFamilyProductionReady(k);
               const readiness = familyProductionReadiness(k);
-              const selectable = f.available && productionReady;
+              const supervisedCapability = familySupervisedChannelInceptionCapability(k);
+              const supervised = supervisedCapability
+                ? {
+                    capabilityId: supervisedCapability.id,
+                    provenance: supervisedCapability.provenance,
+                    requiredArtifacts: [...supervisedCapability.requiredArtifacts],
+                    ...(supervisedCapability.reviewHref ? { reviewHref: supervisedCapability.reviewHref } : {}),
+                  }
+                : undefined;
+              const selectable = f.available && (productionReady || Boolean(supervised));
               return (
-                <button key={k} disabled={!selectable} onClick={() => selectable && selectFamily(k)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: selectable ? "pointer" : "not-allowed", opacity: selectable ? 1 : 0.55,
+                <button key={k} disabled={!selectable} onClick={() => selectable && selectFamily(k, undefined, supervised)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: selectable ? "pointer" : "not-allowed", opacity: selectable ? 1 : 0.55,
                   border: on ? "1px solid var(--color-accent)" : "1px solid var(--color-border)", background: on ? "rgba(124,124,255,0.08)" : undefined }}>
-                  <div style={{ fontWeight: 600 }}>{f.label}{!selectable && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· renderer blocked — no spend</span>}</div>
+                  <div style={{ fontWeight: 600 }}>{f.label}{supervised ? <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· private review only</span> : !selectable && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· renderer blocked — no spend</span>}</div>
                   <div style={{ fontSize: "0.78rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{f.description}</div>
-                  {!selectable && readiness.blockers[0] && <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{readiness.blockers[0]}</div>}
+                  {supervised
+                    ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>Select to see the private-review requirements; no automatic build, render, spend, or publish can start here.</div>
+                    : !selectable && readiness.blockers[0] && <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{readiness.blockers[0]}</div>}
                 </button>
               );
             })}
@@ -1047,6 +1103,15 @@ export default function NewChannelWizard() {
         <div style={{ display: "grid", gap: "1rem", maxWidth: 760 }}>
           {!fam.available && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {fam.label}: visual engine “{fam.visualEngine}” not built yet — channel will be created as a DRAFT until it ships.</div>}
           {!isFamilyProductionReady(fam.key) && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {familyProductionReadiness(fam.key).blockers.join(" ")}</div>}
+          {supervisedAdmission && (
+            <div className="glass" style={{ padding: "0.9rem 1rem", border: "1px solid rgba(124,124,255,0.55)", color: "#d7d9ff", display: "grid", gap: "0.45rem", fontSize: "0.84rem" }}>
+              <strong>Private-review intake selected</strong>
+              <span>This registered route is not automatic production and cannot render, spend, create a YouTube channel, or publish.</span>
+              {supervisedAdmission.requiredArtifacts.length > 0 && <span>Required before a separately authorized next stage: {supervisedAdmission.requiredArtifacts.join(" · ")}.</span>}
+              {supervisedAdmission.provenance && <span style={{ color: "var(--color-muted)", fontSize: "0.76rem" }}>{supervisedAdmission.provenance}</span>}
+              {supervisedAdmission.reviewHref && <Link href={supervisedAdmission.reviewHref} style={{ ...btnGhost, justifySelf: "start" }}>Open private review desk</Link>}
+            </div>
+          )}
           <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.5rem", fontSize: "0.86rem" }}>
             <SummaryRow k="Niche" v={`${niche?.label}${subcategory ? " · " + subcategory : ""}`} />
             <SummaryRow k="Format" v={fam.label} />
@@ -1136,7 +1201,11 @@ export default function NewChannelWizard() {
         <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} style={{ ...btnGhost, opacity: step === 0 ? 0.4 : 1 }}>Back</button>
         {step < 3
           ? <button onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext} style={{ ...btnPrimary, opacity: canNext ? 1 : 0.5 }}>Next</button>
-          : <button onClick={() => void create(Date.now())} disabled={(publishMode !== "draft" || toggles.crosspost) && !approvedForPublish} style={{ ...btnPrimary, opacity: (publishMode !== "draft" || toggles.crosspost) && !approvedForPublish ? 0.5 : 1 }}>{approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
+          : supervisedAdmission
+            ? supervisedAdmission.reviewHref
+              ? <Link href={supervisedAdmission.reviewHref} style={btnPrimary}>Open private review desk</Link>
+              : <button disabled style={{ ...btnPrimary, opacity: 0.5 }}>Private review package required</button>
+            : <button onClick={() => void create(Date.now())} disabled={(publishMode !== "draft" || toggles.crosspost) && !approvedForPublish} style={{ ...btnPrimary, opacity: (publishMode !== "draft" || toggles.crosspost) && !approvedForPublish ? 0.5 : 1 }}>{approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
       </div>
     </>
   );
