@@ -60,7 +60,7 @@ assert.throws(
 );
 
 const creatorSource = readFileSync(join(process.cwd(), "src/app/(app)/channels/new/page.tsx"), "utf8");
-assert.match(creatorSource, /previewBlocks\(family, toggles, nicheKey, dataStory\)/);
+assert.match(creatorSource, /previewBlocks\(family, toggles, nicheKey, dataStory, syntheticScenarioProfile/);
 assert.match(creatorSource, /const needsDataInserts = \(dataStory && supportsDataStoryFamily\(familyKey\)\)/);
 assert.match(creatorSource, /\{ dataStory: SOURCE_ATTRIBUTED_DATA_STORY \}/);
 assert.match(creatorSource, /At least 3 named-source numeric sentences are required/);

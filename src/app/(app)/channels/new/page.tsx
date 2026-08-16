@@ -24,6 +24,10 @@ import {
   SOURCE_ATTRIBUTED_DATA_STORY,
   supportsDataStoryFamily,
 } from "@/engine/dataStory";
+import {
+  syntheticScenarioContract,
+  type SyntheticScenarioProfile,
+} from "@/engine/syntheticScenario";
 import { MODULE_CATALOG, type ParamField } from "@/engine/moduleCatalog";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -107,7 +111,13 @@ async function browserSha256(value: string): Promise<string> {
 }
 
 // Client preview of the designed block list (mirrors src/engine/designer filter).
-function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string, dataStory = false): string[] {
+function previewBlocks(
+  familyKey: FamilyKey,
+  t: Toggles,
+  nicheKey?: string,
+  dataStory = false,
+  syntheticScenarioProfile?: SyntheticScenarioProfile,
+): string[] {
   const fam = FAMILIES[familyKey];
   const base = ARCHETYPES[fam.archetypeKey]?.pipeline ?? [];
   let blocks = base
@@ -124,6 +134,14 @@ function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string, data
     const at = blocks.indexOf("topic_select");
     const i = at >= 0 ? at + 1 : 0;
     blocks = [...blocks.slice(0, i), ...crew, ...blocks.slice(i)];
+  }
+  if (syntheticScenarioProfile) {
+    const script = blocks.indexOf("script_gen");
+    if (script >= 0) {
+      blocks = [...blocks.slice(0, script), "synthetic_scenario", ...blocks.slice(script)];
+      const resolvedScript = blocks.indexOf("script_gen");
+      blocks = [...blocks.slice(0, resolvedScript + 1), "scenario_disclosure_gate", ...blocks.slice(resolvedScript + 1)];
+    }
   }
   // The designer inserts a durable story spine for externally narrated lanes.
   // Cinematic then inserts Visual Matter immediately after it; mirror that in
@@ -212,6 +230,9 @@ export default function NewChannelWizard() {
   // evidence contract is an explicit creator decision.
   const [dataStory, setDataStory] = useState(false);
   const [dataStorySuggested, setDataStorySuggested] = useState(false);
+  // Explicitly opt into a thought-experiment profile; no scenario is inferred
+  // from a topic or advisor suggestion.
+  const [syntheticScenarioProfile, setSyntheticScenarioProfile] = useState<SyntheticScenarioProfile | "">("");
   // Advanced per-module param editor: paramOverrides[blockId][key] = value.
   const [paramOverrides, setParamOverrides] = useState<Record<string, Record<string, unknown>>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -240,6 +261,7 @@ export default function NewChannelWizard() {
     }
     setFamily(next);
     if (!supportsDataStoryFamily(next)) setDataStory(false);
+    if (next !== "illustrated_explainer") setSyntheticScenarioProfile("");
     setBudget((current) => Math.max(current, FAMILIES[next].defaultRunBudgetUsd ?? 0.5));
     const authoredMinutes = requestedSeconds === undefined
       ? familyDurationContract(next).defaultSeconds / 60
@@ -268,8 +290,8 @@ export default function NewChannelWizard() {
   };
 
   const preview = useMemo(
-    () => (family ? previewBlocks(family, toggles, nicheKey, dataStory) : []),
-    [family, toggles, nicheKey, dataStory],
+    () => (family ? previewBlocks(family, toggles, nicheKey, dataStory, syntheticScenarioProfile || undefined) : []),
+    [family, toggles, nicheKey, dataStory, syntheticScenarioProfile],
   );
 
   // Describe the channel in words → suggest a format + crew (operator confirms).
@@ -422,6 +444,9 @@ export default function NewChannelWizard() {
         cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube, runProbe,
         ...(family === "documentary_collage_short" ? { sourceReferences, claimEvidence } : {}),
         ...(dataStory && supportsDataStoryFamily(family) ? { dataStory: SOURCE_ATTRIBUTED_DATA_STORY } : {}),
+        ...(family === "illustrated_explainer" && syntheticScenarioProfile
+          ? { syntheticScenario: syntheticScenarioContract(syntheticScenarioProfile) }
+          : {}),
         ...(autoYoutube ? { requestedYoutubeName, requestedYoutubeHandle } : {}),
         approveSetupSpend,
         setupBudgetUsd: costAuthority.setupCapUsd,
@@ -873,6 +898,25 @@ export default function NewChannelWizard() {
                 </label>
               </Row>
             )}
+            {family === "illustrated_explainer" && (
+              <Row label="Fictional AI format">
+                <select
+                  value={syntheticScenarioProfile}
+                  onChange={(event) => setSyntheticScenarioProfile(event.target.value as SyntheticScenarioProfile | "")}
+                  style={selStyle}
+                >
+                  <option value="">Standard illustrated explainer</option>
+                  <option value="ai_town">AI runs a fictional town</option>
+                  <option value="ai_decision">What would AI do?</option>
+                  <option value="ai_pov">AI POV story</option>
+                </select>
+                {syntheticScenarioProfile && (
+                  <div style={{ ...muted, marginTop: "0.4rem" }}>
+                    Adds a mandatory “Fictional AI Scenario” opening, an assumptions gate, local scenario-board visuals, and a local renderer thumbnail. It does not simulate or claim real AI results; no Google creative service is used.
+                  </div>
+                )}
+              </Row>
+            )}
             {family === "documentary_collage_short" && (
               <>
                 <label style={lblStyle}>
@@ -1005,6 +1049,7 @@ export default function NewChannelWizard() {
             {fam.narrated && <SummaryRow k="Language" v={locale.toUpperCase()} />}
             {fam.narrated && voiceFx !== "none" && <SummaryRow k="Voice effect" v={voiceFx === "radio" ? "Old radio" : voiceFx} />}
             {dataStory && <SummaryRow k="Data story" v="Source-attributed charts only · 3+ named-source numeric sentences required" />}
+            {syntheticScenarioProfile && <SummaryRow k="Fictional AI format" v={`${syntheticScenarioProfile === "ai_town" ? "AI runs a fictional town" : syntheticScenarioProfile === "ai_decision" ? "What would AI do?" : "AI POV story"} · disclosure gate + local scenario visuals`} />}
             {seriesTitle.trim() && <SummaryRow k="Series" v={`${seriesTitle.trim()}${seriesCount > 0 ? ` · ${seriesCount} parts` : " · open-ended"}`} />}
             <SummaryRow k="Cadence" v={`${cadence}${(cadence === "weekly" || cadence === "biweekly") && days.length ? " · " + days.map((d) => DOW[d]).join(",") : ""} · ${publishMode}`} />
             <SummaryRow k="Setup" v={approveSetupSpend ? `Approved · capped at $${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)}` : "Plan only · $0 provider spend"} />

@@ -22,6 +22,7 @@ import {
   isDataStoryContract,
   supportsDataStoryFamily,
 } from "@/engine/dataStory";
+import { isSyntheticScenarioContract } from "@/engine/syntheticScenario";
 import {
   normalizeYoutubeChannelName,
   normalizeYoutubeHandle,
@@ -107,6 +108,16 @@ export async function POST(request: Request) {
             runtimeBlockers: dataStoryReadiness.blockers,
             remediation: dataStoryReadiness.remediation,
           }, { status: 409 });
+        }
+      }
+      if (design.syntheticScenario !== undefined) {
+        if (!isSyntheticScenarioContract(design.syntheticScenario)) {
+          return NextResponse.json({ error: "invalid fictional AI scenario contract" }, { status: 400 });
+        }
+        if (family.key !== "illustrated_explainer") {
+          return NextResponse.json({
+            error: "fictional AI scenarios are currently supported only by Illustrated Explainer",
+          }, { status: 400 });
         }
       }
       const lengthError = familyEpisodeLengthError(family.key, design.lengthMinutes);
