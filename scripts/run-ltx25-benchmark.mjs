@@ -139,15 +139,20 @@ def ensure_cuda_compatibility():
 def ensure_triton_toolchain():
   cc=shutil.which('gcc') or shutil.which('cc')
   cxx=shutil.which('g++') or shutil.which('c++')
-  if not cc or not cxx:
+  ffmpeg=shutil.which('ffmpeg')
+  ffprobe=shutil.which('ffprobe')
+  if not cc or not cxx or not ffmpeg or not ffprobe:
     import subprocess
-    if os.geteuid()!=0: raise RuntimeError('Triton requires gcc/g++ but worker cannot install the verified toolchain')
+    if os.geteuid()!=0: raise RuntimeError('LTX runtime dependencies are unavailable and worker cannot install them')
     environment=dict(os.environ,DEBIAN_FRONTEND='noninteractive')
     subprocess.run(['apt-get','update','-qq'],check=True,env=environment,stdout=subprocess.DEVNULL)
-    subprocess.run(['apt-get','install','-y','--no-install-recommends','build-essential'],check=True,env=environment,stdout=subprocess.DEVNULL)
+    subprocess.run(['apt-get','install','-y','--no-install-recommends','build-essential','ffmpeg'],check=True,env=environment,stdout=subprocess.DEVNULL)
     cc=shutil.which('gcc') or shutil.which('cc')
     cxx=shutil.which('g++') or shutil.which('c++')
+    ffmpeg=shutil.which('ffmpeg')
+    ffprobe=shutil.which('ffprobe')
   if not cc or not cxx: raise RuntimeError('Triton compiler toolchain is unavailable after verified install')
+  if not ffmpeg or not ffprobe: raise RuntimeError('FFmpeg/FFprobe are unavailable after verified install')
   os.environ['CC']=cc
   os.environ['CXX']=cxx
 def exec_worker():
