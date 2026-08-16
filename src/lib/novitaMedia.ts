@@ -17,6 +17,7 @@ import { assertNovitaVideoProfileRuntime } from "@/engine/runtimeCapability";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import type { CinematicKeyframeReview } from "@/engine/cinematicKeyframeReview";
 import type { CinematicClipReview } from "@/engine/cinematicClipReview";
+import { CinematicKeyframeRejectedError } from "@/lib/cinematicKeyframeGate";
 import type { LtxCreativeAdapterSelection } from "@/lib/ltxCreativeAdapter";
 
 export type NovitaProfileId = GenerationProfile["id"];
@@ -284,6 +285,13 @@ export async function reviewKeyframesBeforeVideo(args: {
         keyframeReviewByShot.set(id, review);
         break;
       } catch (reviewError) {
+        // A replacement image is an evidence-led repair, not a fallback for a
+        // reviewer outage, a malformed receipt, or another infrastructure
+        // fault. Only the typed pixel-review rejection from the independent
+        // keyframe gate is allowed to consume the one repair attempt.
+        if (!(reviewError instanceof CinematicKeyframeRejectedError)) {
+          throw reviewError;
+        }
         if (attempt >= args.maxImageAttempts) throw reviewError;
         const remainingCostUsd = args.imageMaxCostUsd - observedImageCostUsd;
         if (remainingCostUsd <= 0) {

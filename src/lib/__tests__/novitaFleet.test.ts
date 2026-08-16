@@ -21,6 +21,7 @@ import {
   automaticRtx4090Concurrency,
   budgetBoundedWorkerLifetime,
   runtimeBootstrapSource,
+  settleNovitaWorkerWave,
 } from "@/lib/novitaDirectRender";
 import { generationProfile } from "@/engine/generationProfiles";
 import { toNovitaPhaseProfile } from "@/lib/novitaRenderFarm";
@@ -156,6 +157,31 @@ async function main() {
   assert.equal(automaticRtx4090Concurrency(Array.from({ length: 7 }, () => ({ seconds: 5 }))), 1);
   assert.equal(automaticRtx4090Concurrency(Array.from({ length: 8 }, () => ({ seconds: 5 }))), 8);
   assert.equal(automaticRtx4090Concurrency(Array.from({ length: 5 }, () => ({ seconds: 12 }))), 8);
+
+  // A renderer failure must not release the parent stage while another worker
+  // is still live. The wave fence waits for the second worker's terminal
+  // teardown outcome before it surfaces the first worker's failure.
+  const waveEvents: string[] = [];
+  let releaseSecondWorker!: () => void;
+  const secondWorkerTerminal = new Promise<void>((resolve) => { releaseSecondWorker = resolve; });
+  const failingWave = settleNovitaWorkerWave(["first", "second"], async (worker) => {
+    waveEvents.push(`${worker}:started`);
+    if (worker === "first") throw new Error("first worker failed");
+    await secondWorkerTerminal;
+    waveEvents.push("second:teardown-complete");
+    return worker;
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  let waveFailureObserved = false;
+  void failingWave.catch(() => { waveFailureObserved = true; });
+  await Promise.resolve();
+  assert.equal(waveFailureObserved, false, "wave must remain open until the sibling reaches terminal teardown");
+  assert.deepEqual(waveEvents, ["first:started", "second:started"]);
+  releaseSecondWorker();
+  await assert.rejects(failingWave, /2 terminal outcome\(s\) with 1 failure\(s\): first worker failed/);
+  assert.deepEqual(waveEvents, ["first:started", "second:started", "second:teardown-complete"]);
+
   assert.equal(budgetBoundedWorkerLifetime({ maximumCostUsd: 0.4, hourlyRate: 0.17 }).maxRuntimeSeconds, 7_200);
   assert(budgetBoundedWorkerLifetime({ maximumCostUsd: 0.35, hourlyRate: 0.17 }).maxRuntimeSeconds < 7_200);
   assert(budgetBoundedWorkerLifetime({ maximumCostUsd: 0.1, hourlyRate: 0.17 }).maxRuntimeSeconds < 7_200);

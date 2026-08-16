@@ -3,6 +3,7 @@ import {
   reviewKeyframesBeforeVideo,
   type NovitaGeneratedScene,
 } from "@/lib/novitaMedia";
+import { CinematicKeyframeRejectedError } from "@/lib/cinematicKeyframeGate";
 import type { CinematicKeyframeReview } from "@/engine/cinematicKeyframeReview";
 import type { NovitaBillingReceipt } from "@/lib/novitaRenderFarm";
 
@@ -41,7 +42,7 @@ const recovered = await reviewKeyframesBeforeVideo({
   imageReceipts: [receipt],
   review: async ({ stillKey }) => {
     reviews += 1;
-    if (reviews === 1) throw new Error("candidate has a visible face and no brass key");
+    if (reviews === 1) throw new CinematicKeyframeRejectedError(scene.id, ["candidate has a visible face and no brass key"]);
     assert.equal(stillKey, "replacement.png");
     return review;
   },
@@ -71,13 +72,38 @@ await assert.rejects(
     imageReceipts: [receipt],
     review: async () => {
       failedReviews += 1;
-      throw new Error("persistent broken anatomy");
+      throw new CinematicKeyframeRejectedError(scene.id, ["persistent broken anatomy"]);
     },
     renderReplacement: async () => ({ stillKey: "replacement.png", costUsd: 0.1, billingReceipt: receipt }),
   }),
   /persistent broken anatomy/,
 );
 assert.equal(failedReviews, 2, "the recovery budget may not buy an unbounded third still");
+
+let replacementCalls = 0;
+let unavailableReviews = 0;
+await assert.rejects(
+  reviewKeyframesBeforeVideo({
+    scenes: [scene],
+    stillByShot: new Map([[scene.id, "initial.png"]]),
+    maxImageAttempts: 2,
+    imageCostUsd: 0.1,
+    imageMaxCostUsd: 0.7,
+    imageReceipts: [receipt],
+    review: async () => {
+      unavailableReviews += 1;
+      throw new Error("cinematic keyframe gate: malformed reviewer verdict");
+    },
+    renderReplacement: async () => {
+      replacementCalls += 1;
+      return { stillKey: "replacement.png", costUsd: 0.1, billingReceipt: receipt };
+    },
+  }),
+  /malformed reviewer verdict/,
+  "a reviewer outage or malformed receipt must fail before buying another Z-Image still",
+);
+assert.equal(unavailableReviews, 1, "unavailable review evidence must not be retried as a visual repair");
+assert.equal(replacementCalls, 0, "only a typed pixel-review rejection may buy the bounded repair still");
 }
 
 void main();

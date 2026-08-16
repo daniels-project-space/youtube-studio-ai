@@ -11,6 +11,7 @@ import { generateChannelArtAsset } from "@/lib/channelArt";
 import { designPipeline, enforceLengthContract, type DesignOptions } from "@/engine/designer";
 import type { PipelineEntry } from "@/engine/types";
 import {
+  assertFamilyAutonomousPlanningPipeline,
   FAMILIES,
   familyProductionReadiness,
   productionReadyFamilyFallback,
@@ -956,6 +957,12 @@ function certifyChannelPipeline(args: {
   if (args.pipeline.some((entry) => args.disabledBlocks.includes(entry.block))) {
     throw new Error("pipeline contains an operator-disabled module");
   }
+  // The designer certifies the initial family spine, but positioning/architect
+  // stages may subsequently revise the graph. Re-assert the same registered
+  // autonomous-planning contract against the exact graph we are about to seal;
+  // a structurally valid graph must not silently lose Story Spine, the local
+  // quiz route, or another family-owned non-Gemini admission requirement.
+  assertFamilyAutonomousPlanningPipeline(args.family, args.pipeline);
   const compilation = compilePipeline(validatePipeline(args.pipeline));
   const claims = {
     version: "channel-inception-pipeline-certification/v1" as const,

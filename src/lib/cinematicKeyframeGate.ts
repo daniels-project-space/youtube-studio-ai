@@ -25,6 +25,21 @@ export interface CinematicKeyframeGateScene {
   keyframeRequirements?: readonly string[];
 }
 
+/**
+ * The only reviewer failure that may spend the one admitted replacement still.
+ * Transport, provider, and malformed-response failures must remain terminal:
+ * they do not establish that a visual repair would fix the candidate.
+ */
+export class CinematicKeyframeRejectedError extends Error {
+  constructor(sceneId: string, notes: readonly string[]) {
+    super(
+      `cinematic keyframe gate failed ${sceneId}: ` +
+        (notes.join("; ") || "reviewer rejected the candidate"),
+    );
+    this.name = "CinematicKeyframeRejectedError";
+  }
+}
+
 function parseVerdict(raw: string): z.infer<typeof ReviewerVerdictSchema> {
   const start = raw.indexOf("{");
   const end = raw.lastIndexOf("}");
@@ -76,8 +91,14 @@ export async function reviewCinematicKeyframe(args: {
     providers: ["groq", "fal"],
   });
   const verdict = parseVerdict(raw);
-  if (!verdict.pass || !verdict.textWatermarkFree) {
-    throw new Error(`cinematic keyframe gate failed ${args.scene.id}: ${verdict.notes.join("; ") || "reviewer rejected the candidate"}`);
+  const failingScores = [
+    verdict.semanticAlignment,
+    verdict.composition,
+    verdict.continuity,
+    verdict.artifactFree,
+  ].some((score) => score < CINEMATIC_KEYFRAME_MIN_SCORE);
+  if (!verdict.pass || !verdict.textWatermarkFree || failingScores) {
+    throw new CinematicKeyframeRejectedError(args.scene.id, verdict.notes);
   }
   const review = assertCinematicKeyframeReview({
     version: CINEMATIC_KEYFRAME_REVIEW_VERSION,

@@ -21,6 +21,11 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline, preflight } from "@/engine/validate";
 import {
+  assertFamilyAutonomousPlanningPipeline,
+  FAMILY_KEYS,
+  type FamilyKey,
+} from "@/engine/families";
+import {
   assertPipelineMatchesContentLane,
   injectContentLaneIntoPipeline,
   resolveContentLane,
@@ -549,6 +554,15 @@ export const runPipelineTask = task({
       assertPipelineMatchesContentLane(contentLane, entries);
       if (!durableInvocation) {
         entries = injectContentLaneIntoPipeline(entries, contentLane);
+      }
+      // A content lane proves the visual grammar, but it deliberately does
+      // not own the complete non-Gemini planning spine. Enforce the family's
+      // registered admission on the exact frozen graph before any provider
+      // preflight or execution. Unknown legacy lanes retain their existing
+      // legacy handling; canonical lanes always carry a known family.
+      const laneFamily = contentLane.family;
+      if (laneFamily && (FAMILY_KEYS as readonly string[]).includes(laneFamily)) {
+        assertFamilyAutonomousPlanningPipeline(laneFamily as FamilyKey, entries);
       }
 
       // The provider/hardware contract is a pre-spend gate, not a diagnostic

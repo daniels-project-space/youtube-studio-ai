@@ -1412,6 +1412,43 @@ async function renderWorker(args: {
   return receipt;
 }
 
+/**
+ * Wait for every worker that a wave has started to reach its terminal
+ * renderer/teardown outcome before letting the owning Trigger stage fail.
+ *
+ * `Promise.all` is unsafe here: its first rejection releases the parent
+ * render stage while sibling workers may still be booting or rendering.  The
+ * sibling `renderWorker` calls own their normal delete-and-verify path, but
+ * the parent must keep observing them long enough for that path to finish
+ * rather than depending on the minute reaper after a process abort.  This is
+ * deliberately generic so image, LTX video, and future Novita phases share
+ * the same terminal-wave fence.
+ */
+export async function settleNovitaWorkerWave<T, TResult>(
+  workers: readonly T[],
+  render: (worker: T) => Promise<TResult>,
+): Promise<TResult[]> {
+  const settled = await Promise.allSettled(workers.map((worker) => render(worker)));
+  const rejected = settled.filter(
+    (result): result is PromiseRejectedResult => result.status === "rejected",
+  );
+  if (rejected.length) {
+    const first = rejected[0]!.reason;
+    throw new Error(
+      `Novita worker wave reached ${settled.length} terminal outcome(s) with ${rejected.length} failure(s): ${safeError(first)}`,
+    );
+  }
+  return settled.map((result) => {
+    if (result.status !== "fulfilled") {
+      // The rejected branch above proves this unreachable; retain a narrow
+      // guard so a future type/control-flow change cannot turn an unsettled
+      // worker into a false success.
+      throw new Error("Novita worker wave did not reach a fulfilled terminal outcome");
+    }
+    return result.value;
+  });
+}
+
 function aggregateReceipt(receipts: NovitaBillingReceipt[], requestSha256: string): NovitaBillingReceipt {
   const gpuSeconds = receipts.reduce((sum, receipt) => sum + receipt.gpuSeconds, 0);
   const costUsd = receipts.reduce((sum, receipt) => sum + receipt.costUsd, 0);
@@ -1627,10 +1664,10 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
       await cfg.beforeProviderSpend();
       spendAuthorized = true;
     }
-    const receipts = await Promise.all(wave.map(async (worker) => ({
+    const receipts = await settleNovitaWorkerWave(wave, async (worker) => ({
       manifestId: worker.manifestId,
       receipt: await renderWorker({ worker, lifecycle, control, convex }),
-    })));
+    }));
     receipts.forEach(({ manifestId, receipt }) => receiptByManifest.set(manifestId, receipt));
   }
   const allReceipts = prepared.map((worker) => receiptByManifest.get(worker.manifestId) ?? lifecycleReceipt({
