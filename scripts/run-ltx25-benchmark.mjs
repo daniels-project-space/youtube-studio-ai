@@ -239,17 +239,27 @@ async function sendR2(operation, label) {
 }
 
 async function novita(path, init = {}) {
+  const controller = new AbortController();
+  const timeout = setTimeout(() => controller.abort(), 30_000);
+  timeout.unref?.();
+  try {
   const response = await fetch(`${API}${path}`, {
     ...init,
     headers: { ...headers, ...(init.headers || {}) },
-    signal: AbortSignal.timeout(30_000),
+    signal: controller.signal,
   });
-  const body = await response.text();
+  const body = await Promise.race([
+    response.text(),
+    new Promise((_, reject) => controller.signal.addEventListener("abort", () => reject(new Error(`Novita ${path.split("?")[0]} exceeded 30s response deadline`)), { once: true })),
+  ]);
   if (!response.ok) {
     const detail = body.replace(/https?:\/\/[^\s"<>]+/g, "[url]").replace(/[A-Za-z0-9_-]{40,}/g, "[redacted]").slice(0, 500);
     throw new Error(`Novita ${path.split("?")[0]} failed with HTTP ${response.status}: ${detail || "no detail"}`);
   }
   return body ? JSON.parse(body) : {};
+  } finally {
+    clearTimeout(timeout);
+  }
 }
 
 async function objectBytes(key) {
