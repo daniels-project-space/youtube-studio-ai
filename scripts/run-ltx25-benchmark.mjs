@@ -9,6 +9,8 @@
  *   node scripts/run-ltx25-benchmark.mjs <admitted-ltx-model-manifest-key>
  */
 import crypto from "node:crypto";
+import { readFile } from "node:fs/promises";
+import { fileURLToPath } from "node:url";
 import {
   GetObjectCommand,
   HeadObjectCommand,
@@ -36,6 +38,10 @@ const TOTAL_MAX_USD = 3;
 const PROBE_MAX_SECONDS = 300;
 const DEFAULT_PHASE_MAX_SECONDS = 6_600;
 const URL_TTL_SECONDS = 10_800;
+const workerOverlayPath = fileURLToPath(new URL("../infra/novita/worker.py", import.meta.url));
+const WORKER_OVERLAY_BYTES = await readFile(workerOverlayPath);
+const WORKER_OVERLAY_SHA256 = crypto.createHash("sha256").update(WORKER_OVERLAY_BYTES).digest("hex");
+const WORKER_OVERLAY_KEY = `novita/runtime/ltx-2.5/worker-overlays/${WORKER_OVERLAY_SHA256}.py`;
 
 function canonicalJson(value) {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -77,6 +83,8 @@ function buildWorkerRequest({ name, manifestUrl, manifestSha256, jobIds }) {
       { key: "NOVITA_RUNTIME_BUNDLE_URL", value: null },
       { key: "NOVITA_RUNTIME_BUNDLE_SHA256", value: RUNTIME_BUNDLE_SHA256 },
       { key: "NOVITA_RUNTIME_BOOTSTRAP_URL", value: null },
+      { key: "NOVITA_WORKER_OVERLAY_URL", value: null },
+      { key: "NOVITA_WORKER_OVERLAY_SHA256", value: WORKER_OVERLAY_SHA256 },
     ],
     __jobIds: jobIds,
   };
@@ -87,6 +95,17 @@ function runtimeBootstrapSource() {
 sha=os.environ['NOVITA_RUNTIME_BUNDLE_SHA256']
 root=pathlib.Path('/network/runtime/ltx-2.5-'+sha)
 compatibility=root/'.torch-cu118-2.7.1'
+overlay_url=os.environ.get('NOVITA_WORKER_OVERLAY_URL','')
+overlay_sha=os.environ.get('NOVITA_WORKER_OVERLAY_SHA256','')
+def apply_worker_overlay():
+  if not overlay_url or len(overlay_sha)!=64: raise RuntimeError('verified worker overlay is required')
+  target=root/'opt/novita-worker/worker.py'
+  if not target.is_file(): raise RuntimeError('runtime worker is missing before overlay')
+  with urllib.request.urlopen(overlay_url,timeout=120) as response: overlay=response.read()
+  if hashlib.sha256(overlay).hexdigest()!=overlay_sha: raise RuntimeError('worker overlay SHA-256 mismatch')
+  pending=target.with_name('.worker-overlay.pending')
+  pending.write_bytes(overlay)
+  os.replace(pending,target)
 def torch_cuda_ready():
   python=root/'opt/LTX-2/.venv/bin/python'
   if not python.is_file(): return False
@@ -124,6 +143,7 @@ def exec_worker():
   python=str(root/'opt/LTX-2/.venv/bin/python')
   os.execv(python,[python,str(root/'opt/novita-worker/worker.py')])
 if runtime_ready():
+  apply_worker_overlay()
   repair_python_paths(root)
   exec_worker()
 lock=root.with_name(root.name+'.lock')
@@ -131,11 +151,13 @@ lock.parent.mkdir(parents=True,exist_ok=True)
 with lock.open('a+b') as handle:
   fcntl.flock(handle,fcntl.LOCK_EX)
   if runtime_ready():
+    apply_worker_overlay()
     repair_python_paths(root)
     exec_worker()
   if (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha:
     repair_python_paths(root)
     ensure_cuda_compatibility()
+    apply_worker_overlay()
     exec_worker()
   if root.exists(): raise RuntimeError('runtime root exists without matching ready receipt')
   stage=pathlib.Path(tempfile.mkdtemp(prefix='.ltx-runtime-stage.',dir='/network/runtime'))
@@ -188,6 +210,7 @@ with lock.open('a+b') as handle:
     if bundle.parent!=stage: shutil.rmtree(bundle.parent,ignore_errors=True)
     os.replace(stage,root)
     ensure_cuda_compatibility()
+    apply_worker_overlay()
   except BaseException:
     shutil.rmtree(stage,ignore_errors=True)
     raise
@@ -293,6 +316,25 @@ async function putJson(key, value) {
     Body: JSON.stringify(value),
     ContentType: "application/json",
   }), `put:${key}`);
+}
+
+async function ensureWorkerOverlay() {
+  try {
+    const existing = await sendR2(() => new HeadObjectCommand({ Bucket: bucket, Key: WORKER_OVERLAY_KEY }), "head:worker-overlay");
+    if (existing.ContentLength !== WORKER_OVERLAY_BYTES.byteLength || existing.Metadata?.["worker-sha256"] !== WORKER_OVERLAY_SHA256) {
+      throw new Error("existing worker overlay does not match its content-addressed identity");
+    }
+  } catch (error) {
+    if (error?.$metadata?.httpStatusCode !== 404 && error?.name !== "NotFound" && error?.name !== "NoSuchKey") throw error;
+    await sendR2(() => new PutObjectCommand({
+      Bucket: bucket,
+      Key: WORKER_OVERLAY_KEY,
+      Body: WORKER_OVERLAY_BYTES,
+      ContentType: "text/x-python",
+      Metadata: { "worker-sha256": WORKER_OVERLAY_SHA256 },
+    }), "put:worker-overlay");
+  }
+  return { key: WORKER_OVERLAY_KEY, sha256: WORKER_OVERLAY_SHA256 };
 }
 
 async function signedGet(key, expiresIn = URL_TTL_SECONDS) {
@@ -489,9 +531,12 @@ async function buildPhaseManifest({ phase, profile, models, jobs, maxRuntimeSeco
   return { manifest, manifestKey, completionKey };
 }
 
-async function executePhase({ phase, manifest, manifestKey, completionKey, maxRuntimeSeconds }) {
-  const manifestUrl = await signedGet(manifestKey);
-  const runtimeUrl = await signedGet(RUNTIME_BUNDLE_KEY);
+async function executePhase({ phase, manifest, manifestKey, completionKey, maxRuntimeSeconds, workerOverlay }) {
+  const [manifestUrl, runtimeUrl, overlayUrl] = await Promise.all([
+    signedGet(manifestKey),
+    signedGet(RUNTIME_BUNDLE_KEY),
+    signedGet(workerOverlay.key),
+  ]);
   const bootstrapKey = `${root}/${phase}/control/runtime-bootstrap.py`;
   console.error(JSON.stringify({ event: "benchmark_stage", stage: `upload_${phase}_bootstrap` }));
   await sendR2(() => new PutObjectCommand({ Bucket: bucket, Key: bootstrapKey, Body: runtimeBootstrapSource(), ContentType: "text/x-python" }), `put:${phase}-bootstrap`);
@@ -502,6 +547,7 @@ async function executePhase({ phase, manifest, manifestKey, completionKey, maxRu
   });
   request.envs.find((item) => item.key === "NOVITA_RUNTIME_BUNDLE_URL").value = runtimeUrl;
   request.envs.find((item) => item.key === "NOVITA_RUNTIME_BOOTSTRAP_URL").value = bootstrapUrl;
+  request.envs.find((item) => item.key === "NOVITA_WORKER_OVERLAY_URL").value = overlayUrl;
   delete request.__jobIds;
   console.error(JSON.stringify({ event: "benchmark_stage", stage: `request_${phase}_worker` }));
   const created = await novita("/gpu/instance/create", { method: "POST", body: JSON.stringify(request) });
@@ -583,10 +629,11 @@ async function main() {
     id: "z-image-turbo", kind: "tree", repository: ZIMAGE_MODEL, revision: ZIMAGE_REVISION,
     manifestSha256: zProbe.manifestSha256, sourcePath: zProbe.sourcePath, localPath: "z-image",
   }];
+  const workerOverlay = await ensureWorkerOverlay();
   const imageJobs = testScenes.map((scene, index) => ({ id: scene.id, prompt: scene.still, seed: 903_000 + index * 31, width: 1280, height: 736, steps: 9, guidanceScale: 0 }));
   const image = await buildPhaseManifest({ phase: "image", profile: imageProfile(), models: zModels, jobs: imageJobs, maxRuntimeSeconds: phaseMaxSeconds });
   console.error(JSON.stringify({ event: "benchmark_stage", stage: "render_reference_images" }));
-  await executePhase({ phase: "image", ...image, maxRuntimeSeconds: phaseMaxSeconds });
+  await executePhase({ phase: "image", ...image, maxRuntimeSeconds: phaseMaxSeconds, workerOverlay });
   await assertArtifacts(image.manifest);
 
   const videoJobs = await Promise.all(image.manifest.jobs.map(async (imageJob, index) => ({
@@ -598,7 +645,7 @@ async function main() {
   })));
   const video = await buildPhaseManifest({ phase: "video", profile: videoProfile(), models: ltxModels, jobs: videoJobs, maxRuntimeSeconds: phaseMaxSeconds });
   console.error(JSON.stringify({ event: "benchmark_stage", stage: "render_ltx25_videos" }));
-  const completion = await executePhase({ phase: "video", ...video, maxRuntimeSeconds: phaseMaxSeconds });
+  const completion = await executePhase({ phase: "video", ...video, maxRuntimeSeconds: phaseMaxSeconds, workerOverlay });
   await assertArtifacts(video.manifest);
   const videoOutputs = completion.videoOutputs || {};
   const outputRows = await Promise.all(video.manifest.jobs.map(async (job) => {
@@ -612,7 +659,7 @@ async function main() {
     contract: "ltx-2.5-rtx4090-benchmark/v1", ok: true, nonce, ltxModelManifestKey,
     stageMaxUsd: STAGE_MAX_USD, spotRateUsdPerHour: spotRate, phaseMaxSeconds,
     zImage: { model: ZIMAGE_MODEL, revision: ZIMAGE_REVISION, volumeReceipt: zProbe },
-    ltx: { model: LTX_MODEL, revision: LTX_REVISION, pipeline: "distilled", stageOne: "640x352", output: "1280x704@25", quantization: "fp8-cast", offload: "cpu" },
+    ltx: { model: LTX_MODEL, revision: LTX_REVISION, pipeline: "distilled", stageOne: "640x352", output: "1280x704@25", quantization: "fp8-cast", offload: "cpu", workerOverlaySha256: workerOverlay.sha256 },
     outputs: outputRows.map(({ id, key, proof }) => ({ id, key, proof })),
   };
   await putJson(`${root}/report.json`, report);
