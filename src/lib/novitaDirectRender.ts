@@ -645,7 +645,11 @@ def ensure_cuda_compatibility():
   if evidence!='2.7.1+cu118|11.8|True': raise RuntimeError('CUDA-compatible Torch verification failed: '+evidence)
   compatibility.write_text('torch==2.7.1+cu118\\n')
 def exec_worker():
-  os.execv(str(root/'opt/LTX-2/.venv/bin/python'),[str(root/'opt/LTX-2/.venv/bin/python'),str(root/'opt/novita-worker/worker.py')])
+  project=str(root/'opt/LTX-2')
+  previous=os.environ.get('PYTHONPATH','')
+  os.environ['PYTHONPATH']=project if not previous else project+os.pathsep+previous
+  python=str(root/'opt/LTX-2/.venv/bin/python')
+  os.execv(python,[python,str(root/'opt/novita-worker/worker.py')])
 if runtime_ready():
   repair_python_paths(root)
   exec_worker()
