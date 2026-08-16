@@ -1031,6 +1031,17 @@ def _report_json(target: dict[str, Any] | None, value: dict[str, Any], label: st
         return False
 
 
+def _bounded_error_message(error: BaseException, limit: int = 1_200) -> str:
+    """Keep failure receipts small without discarding the renderer's root-cause tail."""
+    message = f"{type(error).__name__}: {error}".strip()
+    if len(message) <= limit:
+        return message
+    marker = " … [diagnostic tail] … "
+    head = min(240, max(80, limit // 4))
+    tail = max(1, limit - head - len(marker))
+    return f"{message[:head]}{marker}{message[-tail:]}"
+
+
 def main() -> int:
     manifest_url = os.environ.get("NOVITA_JOB_MANIFEST_URL", "")
     manifest_hash = os.environ.get("NOVITA_MANIFEST_SHA256", "")
@@ -1111,7 +1122,7 @@ def main() -> int:
         if manifest["phase"] == "video":
             done = done and set(state["videoOutputs"]) == expected_job_ids
     except BaseException as error:
-        failure = f"{type(error).__name__}: {error}"[:500]
+        failure = _bounded_error_message(error)
         _report_json(
             checkpoint,
             {**state, "updatedAt": int(time.time()), "status": "interrupted" if STOP.is_set() else "failed", "error": failure},

@@ -521,6 +521,12 @@ class WorkerContractTests(unittest.TestCase):
         with self.assertRaisesRegex(ValueError, "HTTPS"):
             worker._request("http://example.invalid/object")
 
+    def test_failure_receipt_preserves_renderer_root_cause_tail(self):
+        message = worker._bounded_error_message(RuntimeError("trace-start " + "x" * 2_000 + " ROOT_CAUSE"))
+        self.assertLessEqual(len(message), 1_200)
+        self.assertIn("diagnostic tail", message)
+        self.assertTrue(message.endswith("ROOT_CAUSE"))
+
 
 if __name__ == "__main__":
     unittest.main()
