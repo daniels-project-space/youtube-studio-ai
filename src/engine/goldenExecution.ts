@@ -132,8 +132,8 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   "learning-contract": { kind: "pipeline-module", executableIds: ["learning_contract"] },
   "children-show-bible": {
     kind: "pipeline-module",
-    executableIds: ["children_show_bible"],
-    note: "Provider-free, operator-supplied children-show admission only. It requires a fresh child-editor receipt bound to the exact age band, objective, original identity, Episode Graph, and Learning Contract; it emits a private-review-only receipt and does not auto-admit children_learning.",
+    executableIds: ["curriculum_episode_seed", "children_show_bible"],
+    note: "Provider-free, operator-supplied children-show admission only. A child-editor-signed CurriculumEpisodeSeed locks the exact age band, objective, vocabulary/actions, assessment, and original identity before Story Spine planning; the later Show Bible binds that same seed to the Episode Graph and Learning Contract. Both emit private-review-only receipts and do not auto-admit children_learning.",
   },
   "casefile-documentary": {
     kind: "pipeline-module",

@@ -422,7 +422,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   intro_card: contract(["graphics.intro"], { optionalConsumes: ["palette", "channelAvatarKey", "channelName"] }),
   quote_overlays: contract(["graphics.quotes"], { optionalConsumes: ["introSec", "chapterPlan"] }),
   visual_inserts: contract(["graphics.data"], {
-    optionalConsumes: ["topic", "niche", "styleDNA", "palette", "introSec", "quoteOverlays", "chapterPlan", "dataStorySourceLedger"],
+    optionalConsumes: ["topic", "niche", "styleDNA", "palette", "introSec", "quoteOverlays", "chapterPlan", "dataStorySourceLedger", "evidenceVisualManifests"],
   }),
   timeline_assemble: contract(["master.assembled"], {
     requiredConsumes: ["footageClips", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
@@ -486,7 +486,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   critic_spec: contract(["crew.critic_validation_spec"], { optionalConsumes: ["styleDNA", "niche", "channelName"] }),
 
   story_spine: contract(["story.timed", "visuals.story_planned"], {
-    optionalConsumes: ["structure", "visualBrief", "cutSheet", "styleDNA", "contentLane"],
+    optionalConsumes: [
+      "structure", "visualBrief", "cutSheet", "styleDNA", "contentLane",
+      "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval",
+    ],
     qualityRequired: true,
   }),
 
@@ -507,13 +510,27 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     requiredConsumes: [
       "topic", "timedScript", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs", "editorEdl", "storyCoverage",
     ],
-    optionalConsumes: ["syntheticScenario"],
+    optionalConsumes: [
+      "syntheticScenario", "contentLane", "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval",
+    ],
     providerProfiles: [local],
     qualityRequired: true,
   }),
 
   learning_contract: contract(["learning.contract_locked", "learning.retrieval_practice_locked"], {
     requiredConsumes: ["episodeGraph", "contentLane"],
+    providerProfiles: [local],
+    qualityRequired: true,
+  }),
+
+  // An operator-supplied, child-editor-signed episode intent. This happens
+  // before generic story planning, but emits only a private-review handoff.
+  curriculum_episode_seed: contract([
+    "children.curriculum_episode_seed_admitted",
+    "children.curriculum_intent_locked",
+    "publish.private_only",
+  ], {
+    requiredConsumes: ["curriculumEpisodeSeedInput", "contentLane"],
     providerProfiles: [local],
     qualityRequired: true,
   }),
@@ -526,7 +543,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     "children.curriculum_continuity_locked",
     "publish.private_only",
   ], {
-    requiredConsumes: ["childrenShowBibleInput", "episodeGraph", "lessonContract", "contentLane"],
+    requiredConsumes: [
+      "childrenShowBibleInput", "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval",
+      "episodeGraph", "lessonContract", "contentLane",
+    ],
     providerProfiles: [local],
     qualityRequired: true,
   }),
@@ -535,6 +555,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     requiredConsumes: [
       "episodeGraph", "sceneManifest", "lessonContract", "contentLane",
       "childrenShowBible", "childrenShowBibleApproval",
+      "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval",
     ],
     providerProfiles: [local],
     qualityRequired: true,
@@ -606,7 +627,13 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     "documentary.non_likeness_cast_locked",
     "publish.private_only",
   ], {
-    requiredConsumes: ["cinematicCaseDirection", "casefileEvidenceShotMap", "sceneManifest", "shotList"],
+    requiredConsumes: [
+      "cinematicCaseDirection",
+      "casefileEvidenceShotMap",
+      "sourceBoundStorySpine",
+      "sceneManifest",
+      "shotList",
+    ],
     providerProfiles: [local],
     qualityRequired: true,
   }),
@@ -628,6 +655,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "casefileSourceAdmission",
       "casefileEvidenceShotMap",
       "casefileEvidenceShotMapAdmission",
+      "sourceBoundStorySpine",
       "cinematicCaseSequenceInput",
       "sceneManifest",
       "shotList",

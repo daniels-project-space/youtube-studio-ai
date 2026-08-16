@@ -11,6 +11,14 @@ import type {
   SyntheticScenarioProfile,
   SyntheticScenarioVisualKind,
 } from "@/engine/syntheticScenario";
+import {
+  EvidenceVisualIntentSchema,
+  EvidenceVisualManifestSchema,
+  evaluateEvidenceVisualManifest,
+  factualVisualKindForIntent,
+  type EvidenceVisualIntent,
+  type EvidenceVisualManifest,
+} from "@/engine/evidenceVisualManifest";
 
 export const SCENE_COMPILER_FPS = 30;
 export const SCENE_COMPILER_COMPOSITION_ID = "SceneManifest";
@@ -49,6 +57,8 @@ interface NormalizedScene {
   props: string[];
   syntheticScenarioProfile?: SyntheticScenarioProfile;
   syntheticScenarioVisualKind?: SyntheticScenarioVisualKind;
+  evidenceVisualIntent?: EvidenceVisualIntent;
+  evidenceVisualManifest?: EvidenceVisualManifest;
   audience: "general" | "children";
 }
 
@@ -158,6 +168,9 @@ function sceneRecord(scene: SceneManifest["scenes"][number]): Record<string, unk
 
 export function sceneKindFor(scene: SceneManifest["scenes"][number]): SceneCompilerKind {
   const raw = sceneRecord(scene);
+  const visualState = asRecord(raw.visualState);
+  const factualIntent = EvidenceVisualIntentSchema.safeParse(visualState.evidenceVisualIntent);
+  if (factualIntent.success) return factualIntent.data === "factual_chart" ? "chart" : "map";
   const explicit = asText(raw.kind)?.toLowerCase();
   const known = SCENE_KINDS.find((kind) => kind === explicit);
   if (known) return known;
@@ -201,9 +214,15 @@ function normalizeScene(
 ): NormalizedScene {
   const raw = sceneRecord(source);
   const visualState = asRecord(raw.visualState);
+  const factualIntent = EvidenceVisualIntentSchema.safeParse(visualState.evidenceVisualIntent);
+  const factualManifest = EvidenceVisualManifestSchema.safeParse(visualState.evidenceVisualManifest);
   // Keep the complete manifest ID in the seed. A display-safe truncation here would
   // make two long IDs share colors and geometry, breaking deterministic continuity.
   const id = (asText(raw.id) ?? asText(raw.nodeId) ?? asText(raw.beatId) ?? "scene").trim();
+  const narrationSentenceIds = asStringArray(raw.narrationSentenceIds);
+  const factualManifestReport = factualManifest.success
+    ? evaluateEvidenceVisualManifest(factualManifest.data, { sceneId: id, narrationSentenceIds })
+    : undefined;
   const t0 = Math.max(0, asFinite(raw.t0, 0));
   const t1 = Math.max(t0 + 1 / SCENE_COMPILER_FPS, asFinite(raw.t1, t0 + 1));
   const transitionValue = asText(raw.transition);
@@ -240,6 +259,8 @@ function normalizeScene(
     props: asStringArray(visualState.props),
     syntheticScenarioProfile: asText(visualState.syntheticScenarioProfile) as SyntheticScenarioProfile | undefined,
     syntheticScenarioVisualKind: asText(visualState.syntheticScenarioVisualKind) as SyntheticScenarioVisualKind | undefined,
+    evidenceVisualIntent: factualIntent.success ? factualIntent.data : undefined,
+    evidenceVisualManifest: factualManifestReport?.safe ? factualManifestReport.manifest : undefined,
     audience,
   };
 }
@@ -323,6 +344,79 @@ function ChartVisual({ seed, palette }: { seed: string; palette: Palette }) {
         return <circle key={index} cx={cx} cy={cy} r="8" fill={palette.accent} />;
       })}
     </svg>
+  );
+}
+
+/**
+ * Factual charts derive their shape only from reviewed manifest values. This
+ * intentionally stays separate from ChartVisual: the latter is an illustrative
+ * seeded grammar and must never be mistaken for a source-backed graphic.
+ */
+function EvidenceChartVisual({ manifest, palette }: { manifest: EvidenceVisualManifest; palette: Palette }) {
+  const values = manifest.values.filter((item) => item.role === "series" || item.role === "y" || item.role === "metric");
+  const numeric = values.map((item) => item.value);
+  const min = Math.min(...numeric);
+  const max = Math.max(...numeric);
+  const range = Math.max(1e-9, max - min);
+  const points = numeric.map((value, index) => {
+    const x = 106 + (index * 788) / Math.max(1, numeric.length - 1);
+    const y = 548 - ((value - min) / range) * 332;
+    return `${x},${y}`;
+  }).join(" ");
+  return (
+    <svg viewBox="0 0 1000 720" style={{ width: "100%", height: "100%" }} aria-label="Reviewed factual chart">
+      {[0, 1, 2, 3].map((index) => <line key={index} x1="82" x2="926" y1={174 + index * 124} y2={174 + index * 124} stroke={`${palette.muted}55`} strokeWidth="2" />)}
+      <polyline points={points} fill="none" stroke={palette.accent} strokeWidth="10" strokeLinecap="round" strokeLinejoin="round" />
+      {points.split(" ").map((point, index) => {
+        const [cx, cy] = point.split(",");
+        return <g key={values[index]!.id}>
+          <circle cx={cx} cy={cy} r="10" fill={palette.accent} />
+          <text x={cx} y={Number(cy) - 22} textAnchor="middle" fill={palette.text} fontFamily="Arial" fontSize="21" fontWeight="800">{values[index]!.display}</text>
+        </g>;
+      })}
+      <rect x="76" y="620" width="848" height="56" rx="14" fill={`${palette.ink}DD`} />
+      <text x="100" y="655" fill={palette.text} fontFamily="Arial" fontSize="18" fontWeight="700">SOURCE · {manifest.attribution.visibleText}</text>
+    </svg>
+  );
+}
+
+/** Same rule as EvidenceChartVisual: geometry comes from reviewed coordinates, never a seed. */
+function EvidenceGeoMapVisual({ manifest, palette }: { manifest: EvidenceVisualManifest; palette: Palette }) {
+  const latitude = manifest.values.filter((item) => item.role === "latitude");
+  const longitude = manifest.values.filter((item) => item.role === "longitude");
+  const pairs = latitude.map((lat, index) => ({ lat, lon: longitude[index]! }));
+  const minLat = Math.min(...pairs.map((pair) => pair.lat.value));
+  const maxLat = Math.max(...pairs.map((pair) => pair.lat.value));
+  const minLon = Math.min(...pairs.map((pair) => pair.lon.value));
+  const maxLon = Math.max(...pairs.map((pair) => pair.lon.value));
+  const latRange = Math.max(1e-9, maxLat - minLat);
+  const lonRange = Math.max(1e-9, maxLon - minLon);
+  const points = pairs.map((pair) => ({
+    x: 126 + ((pair.lon.value - minLon) / lonRange) * 748,
+    y: 548 - ((pair.lat.value - minLat) / latRange) * 372,
+    label: `${pair.lat.display}, ${pair.lon.display}`,
+  }));
+  return (
+    <svg viewBox="0 0 1000 720" style={{ width: "100%", height: "100%" }} aria-label="Reviewed factual geo map">
+      <path d="M84 572 C248 202 602 704 920 158" stroke={`${palette.muted}44`} strokeWidth="92" fill="none" strokeLinecap="round" />
+      {points.length > 1 ? <polyline points={points.map((point) => `${point.x},${point.y}`).join(" ")} fill="none" stroke={palette.accent} strokeWidth="8" strokeLinecap="round" strokeLinejoin="round" /> : null}
+      {points.map((point, index) => <g key={`${manifest.id}-${index}`}>
+        <circle cx={point.x} cy={point.y} r="23" fill={`${palette.primary}33`} />
+        <circle cx={point.x} cy={point.y} r="10" fill={palette.accent} />
+        <text x={point.x} y={point.y - 30} textAnchor="middle" fill={palette.text} fontFamily="Arial" fontSize="19" fontWeight="800">{point.label}</text>
+      </g>)}
+      <rect x="76" y="620" width="848" height="56" rx="14" fill={`${palette.ink}DD`} />
+      <text x="100" y="655" fill={palette.text} fontFamily="Arial" fontSize="18" fontWeight="700">SOURCE · {manifest.attribution.visibleText}</text>
+    </svg>
+  );
+}
+
+function WithheldEvidenceVisual({ palette }: { palette: Palette }) {
+  return (
+    <div style={{ position: "absolute", inset: 0, display: "flex", alignItems: "center", justifyContent: "center", flexDirection: "column", gap: 18, background: `${palette.ink}E8`, color: palette.text, fontFamily: "Arial, Helvetica, sans-serif", textAlign: "center", padding: 64 }}>
+      <div style={{ color: palette.accent, fontSize: 26, fontWeight: 900, letterSpacing: "0.12em" }}>FACTUAL VISUAL WITHHELD</div>
+      <div style={{ maxWidth: 620, fontSize: 33, fontWeight: 800, lineHeight: 1.15 }}>A reviewed evidence manifest is required before data or geography is rendered as proof.</div>
+    </div>
   );
 }
 
@@ -556,6 +650,19 @@ function PovVisual({ seed, palette }: { seed: string; palette: Palette }) {
 }
 
 function VisualByKind({ scene, palette }: { scene: NormalizedScene; palette: Palette }) {
+  // Factual intent has priority even for an unvalidated direct Remotion prop:
+  // never let a seeded/synthetic branch make an undeclared data claim look
+  // sourced. Valid fictional scenarios carry no factual intent and continue
+  // through their existing grammar below.
+  if (scene.evidenceVisualIntent) {
+    const expectedKind = factualVisualKindForIntent(scene.evidenceVisualIntent);
+    if (!scene.evidenceVisualManifest || scene.evidenceVisualManifest.visualKind !== expectedKind) {
+      return <WithheldEvidenceVisual palette={palette} />;
+    }
+    return expectedKind === "chart"
+      ? <EvidenceChartVisual manifest={scene.evidenceVisualManifest} palette={palette} />
+      : <EvidenceGeoMapVisual manifest={scene.evidenceVisualManifest} palette={palette} />;
+  }
   switch (scene.syntheticScenarioVisualKind) {
     case "town_overview":
       return <TownVisual seed={scene.id} palette={palette} overview />;

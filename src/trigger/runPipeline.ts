@@ -120,6 +120,11 @@ export interface RunPipelineInput {
    */
   childrenShowBibleInput?: unknown;
   /**
+   * Fresh, child-editor-approved episode intent that must run before Story
+   * Spine / Episode Graph planning in the supervised children lane.
+   */
+  curriculumEpisodeSeedInput?: unknown;
+  /**
    * Render-group reuse: when a language sibling is fanned out by the base run's
    * emit_bundle, the base assets are passed here and seeded into the store so the
    * expensive blocks (topic_select / script_gen / stock_footage / music) reuse
@@ -412,16 +417,18 @@ export const runPipelineTask = task({
       pipeline: (channel.pipeline ?? []) as PipelineEntry[],
     });
     if (
-      payload.childrenShowBibleInput !== undefined &&
+      (payload.childrenShowBibleInput !== undefined || payload.curriculumEpisodeSeedInput !== undefined) &&
       contentLane.key !== "children_learning_supervised"
     ) {
       throwForTaskRetryPolicy(
-        new Error("childrenShowBibleInput is only accepted by the supervised children-learning lane"),
+        new Error("children editorial inputs are only accepted by the supervised children-learning lane"),
       );
     }
-    if (durableInvocation && payload.childrenShowBibleInput !== undefined) {
+    if (durableInvocation && (
+      payload.childrenShowBibleInput !== undefined || payload.curriculumEpisodeSeedInput !== undefined
+    )) {
       throwForTaskRetryPolicy(
-        new Error("childrenShowBibleInput cannot replace the frozen editorial packet on a resumed run"),
+        new Error("children editorial inputs cannot replace frozen packets on a resumed run"),
       );
     }
     if (!durableInvocation && payload.pipelineOverride) {
@@ -648,6 +655,9 @@ export const runPipelineTask = task({
           contentLane,
           ...(payload.childrenShowBibleInput !== undefined
             ? { childrenShowBibleInput: structuredClone(payload.childrenShowBibleInput) }
+            : {}),
+          ...(payload.curriculumEpisodeSeedInput !== undefined
+            ? { curriculumEpisodeSeedInput: structuredClone(payload.curriculumEpisodeSeedInput) }
             : {}),
           ...(scheduledPlan ? scheduledPlanSeed(scheduledPlan) : {}),
         };

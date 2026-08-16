@@ -9,6 +9,11 @@ import {
 } from "./episodeGraph";
 import { assertLearningContract, type LearningContract } from "./learningContract";
 import { ContentLaneSchema } from "./contentLane";
+import {
+  assertCurriculumEpisodeSeedMatchesShowBible,
+  assertCurriculumEpisodeSeeded,
+  curriculumEpisodeSeedKeys,
+} from "./curriculumEpisodeSeed";
 
 /**
  * Provider-free admission for an original, supervised children’s show.
@@ -212,7 +217,7 @@ export type ChildrenStoryPatternKind = z.infer<typeof ChildrenStoryPatternKindSc
 export function childrenShowBibleSeedKeys(contentLane: unknown): string[] {
   const lane = ContentLaneSchema.safeParse(contentLane);
   return lane.success && lane.data.key === "children_learning_supervised"
-    ? [CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY]
+    ? [...curriculumEpisodeSeedKeys(contentLane), CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY]
     : [];
 }
 
@@ -225,6 +230,7 @@ export function assertChildrenShowBibleSeeded(
   contentLane: unknown,
   store: Record<string, unknown>,
 ): void {
+  assertCurriculumEpisodeSeeded(contentLane, store);
   if (
     childrenShowBibleSeedKeys(contentLane).length > 0 &&
     !Object.prototype.hasOwnProperty.call(store, CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY)
@@ -242,6 +248,7 @@ const ChildrenShowBibleIssueCodeSchema = z.enum([
   "identity_missing",
   "story_pattern_invalid",
   "editorial_review_missing",
+  "curriculum_episode_seed_invalid",
   "episode_graph_invalid",
   "learning_contract_invalid",
   "children_lane_required",
@@ -473,6 +480,8 @@ function identityTerms(packet: ChildrenShowBibleInput): string[] {
 export function evaluateChildrenShowBible(
   args: {
     input: unknown;
+    curriculumEpisodeSeed: unknown;
+    curriculumEpisodeSeedApproval: unknown;
     episodeGraph: unknown;
     lessonContract: unknown;
     contentLane: unknown;
@@ -483,6 +492,23 @@ export function evaluateChildrenShowBible(
   if (!parsed.success) return { safe: false, issues: schemaIssues(args.input) };
   const packet = parsed.data;
   const issues: ChildrenShowBibleIssue[] = [];
+
+  // The Show Bible is the later graph/lesson proof. It may never silently
+  // substitute a curriculum, identity, or assessment approved before Story
+  // Spine planning began.
+  try {
+    assertCurriculumEpisodeSeedMatchesShowBible({
+      curriculumEpisodeSeed: args.curriculumEpisodeSeed,
+      curriculumEpisodeSeedApproval: args.curriculumEpisodeSeedApproval,
+      showBibleInput: packet,
+    });
+  } catch (error) {
+    issues.push(issue(
+      "curriculum_episode_seed_invalid",
+      error instanceof Error ? error.message : "The curriculum episode seed is missing or invalid.",
+      "Supply the current child-editor-approved CurriculumEpisodeSeed and keep its age band, objective, assessment, original world, and recurring cast identical in the Show Bible.",
+    ));
+  }
 
   let graph: EpisodeGraph | undefined;
   try {
@@ -797,6 +823,8 @@ export function evaluateChildrenShowBible(
 export function assertChildrenShowBible(
   args: {
     input: unknown;
+    curriculumEpisodeSeed: unknown;
+    curriculumEpisodeSeedApproval: unknown;
     episodeGraph: unknown;
     lessonContract: unknown;
     contentLane: unknown;

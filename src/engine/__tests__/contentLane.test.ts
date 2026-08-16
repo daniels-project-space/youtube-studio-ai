@@ -190,11 +190,13 @@ for (const family of Object.keys(FAMILIES) as Array<keyof typeof FAMILIES>) {
 // bypass the causal scene plan, deterministic renderer, or draft-only release.
 const childrenLearning = designPipeline({ family: "children_learning", publishMode: "public" });
 const childrenBlocks = childrenLearning.pipeline.map((entry) => entry.block);
-for (const block of ["episode_graph", "learning_contract", "children_show_bible", "child_content_safety", "scene_compiler"]) {
+for (const block of ["curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "child_content_safety", "scene_compiler"]) {
   assert(childrenBlocks.includes(block), `children-learning must include ${block}`);
 }
 assert(
-  childrenBlocks.indexOf("episode_graph") < childrenBlocks.indexOf("learning_contract") &&
+  childrenBlocks.indexOf("curriculum_episode_seed") < childrenBlocks.indexOf("story_spine") &&
+    childrenBlocks.indexOf("story_spine") < childrenBlocks.indexOf("episode_graph") &&
+    childrenBlocks.indexOf("episode_graph") < childrenBlocks.indexOf("learning_contract") &&
     childrenBlocks.indexOf("learning_contract") < childrenBlocks.indexOf("children_show_bible") &&
     childrenBlocks.indexOf("children_show_bible") < childrenBlocks.indexOf("child_content_safety") &&
     childrenBlocks.indexOf("child_content_safety") < childrenBlocks.indexOf("scene_compiler"),
@@ -202,11 +204,11 @@ assert(
 );
 assert.throws(
   () => validatePipeline(childrenLearning.pipeline, ["contentLane"]),
-  /children_show_bible.*childrenShowBibleInput/,
+  /curriculum_episode_seed.*curriculumEpisodeSeedInput/,
   "a supervised children pipeline must declare the external human-editor packet rather than silently fabricate one",
 );
 assert.doesNotThrow(
-  () => validatePipeline(childrenLearning.pipeline, ["contentLane", "childrenShowBibleInput"]),
+  () => validatePipeline(childrenLearning.pipeline, ["contentLane", "curriculumEpisodeSeedInput", "childrenShowBibleInput"]),
   "the approved packet is a deliberate per-run seed, not a missing automatic planner output",
 );
 assert.throws(

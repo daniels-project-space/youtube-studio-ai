@@ -8,11 +8,16 @@ import type { Block } from "@/engine/types";
  */
 const childrenShowBible: Block = {
   id: "children_show_bible",
-  consumes: ["childrenShowBibleInput", "episodeGraph", "lessonContract", "contentLane"],
+  consumes: [
+    "childrenShowBibleInput", "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval",
+    "episodeGraph", "lessonContract", "contentLane",
+  ],
   produces: ["childrenShowBible", "childrenShowBibleApproval"],
   run: async (ctx) => {
     const admitted = assertChildrenShowBible({
       input: ctx.store["childrenShowBibleInput"],
+      curriculumEpisodeSeed: ctx.store["curriculumEpisodeSeed"],
+      curriculumEpisodeSeedApproval: ctx.store["curriculumEpisodeSeedApproval"],
       episodeGraph: ctx.store["episodeGraph"],
       lessonContract: ctx.store["lessonContract"],
       contentLane: ctx.store["contentLane"],

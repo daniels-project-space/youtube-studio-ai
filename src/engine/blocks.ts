@@ -23,6 +23,7 @@ import { documentaryCollageShortBlocks } from "@/trigger/blocks/documentaryColla
 import { VISUAL_MATTER_BLOCKS } from "@/trigger/blocks/visualMatterBlocks";
 import { episodeGraphBlocks } from "@/trigger/blocks/episodeGraphBlocks";
 import { learningContractBlocks } from "@/trigger/blocks/learningContractBlocks";
+import { curriculumEpisodeSeedBlocks } from "@/trigger/blocks/curriculumEpisodeSeedBlocks";
 import { childrenShowBibleBlocks } from "@/trigger/blocks/childrenShowBibleBlocks";
 import { childContentSafetyBlocks } from "@/trigger/blocks/childrenSafetyBlocks";
 import { casefileSourcePacketBlocks } from "@/trigger/blocks/casefileSourcePacketBlocks";
@@ -59,6 +60,9 @@ export function registerAllBlocks(): void {
   for (const b of episodeGraphBlocks) register(b);
   // Renderer-neutral learning objective / retrieval-practice handoff.
   for (const b of learningContractBlocks) register(b);
+  // Pre-Story-Spine, operator-authored curriculum intent for supervised
+  // children episodes. It emits a private child-editor receipt only.
+  for (const b of curriculumEpisodeSeedBlocks) register(b);
   // Operator-authored children show/curriculum/identity admission. It has no
   // provider path and remains a private child-editor-review receipt, not a
   // switch that admits the children family to autonomous publishing.

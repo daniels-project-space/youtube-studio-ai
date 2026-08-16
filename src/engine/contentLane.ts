@@ -274,7 +274,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     key: "children_learning_supervised",
     family: "children_learning",
     primaryRenderer: "scene_compiler",
-    requiredBlocks: ["story_spine", "episode_graph", "learning_contract", "children_show_bible", "child_content_safety", "scene_compiler", "qa_visual"],
+    requiredBlocks: ["curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "child_content_safety", "scene_compiler", "qa_visual"],
     forbiddenRendererBlocks: [
       "stock_footage",
       "gen_footage",
@@ -772,6 +772,24 @@ export function assertPipelineMatchesContentLane(
       ...(forbidden.length ? [`forbids ${forbidden.join(", ")}`] : []),
     ];
     throw new Error(`Pipeline violates content lane ${parsed.key}: ${issues.join("; ")}`);
+  }
+  // The children curriculum seed is an actual planning boundary, not a badge
+  // that can be appended after a generated story. Preserve its order here so a
+  // persisted or one-off pipeline cannot place the review after Story Spine.
+  if (parsed.key === "children_learning_supervised") {
+    const positions = new Map<string, number>();
+    pipeline.forEach((entry, index) => {
+      if (typeof entry?.block === "string" && !positions.has(entry.block)) positions.set(entry.block, index);
+    });
+    const prerequisiteOrder = ["curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "child_content_safety"];
+    const outOfOrder = prerequisiteOrder.some((block, index) =>
+      index > 0 && (positions.get(prerequisiteOrder[index - 1]) ?? -1) >= (positions.get(block) ?? Number.MAX_SAFE_INTEGER),
+    );
+    if (outOfOrder) {
+      throw new Error(
+        "Pipeline violates content lane children_learning_supervised: curriculum_episode_seed must precede Story Spine, Episode Graph, Show Bible, and child safety review",
+      );
+    }
   }
 }
 

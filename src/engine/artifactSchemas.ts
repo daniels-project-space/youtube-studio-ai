@@ -36,6 +36,11 @@ import {
   ChildrenShowBibleSchema,
 } from "./childrenShowBible";
 import {
+  CurriculumEpisodeSeedApprovalReceiptSchema,
+  CurriculumEpisodeSeedInputSchema,
+  CurriculumEpisodeSeedSchema,
+} from "./curriculumEpisodeSeed";
+import {
   CasefileEvidenceShotMapAdmissionReceiptSchema,
   CasefileEvidenceShotMapInputSchema,
   CasefileEvidenceShotMapSchema,
@@ -45,6 +50,7 @@ import {
   CasefileSourcePacketSchema,
 } from "./sourceFirstAdmission";
 import { SourceBoundStorySpineHandoffSchema } from "./sourceBoundStorySpine";
+import { EvidenceVisualManifestSchema } from "./evidenceVisualManifest";
 import {
   CinematicCaseSequenceAdmissionReceiptSchema,
   CinematicCaseSequenceInputSchema,
@@ -228,6 +234,21 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   episodeGraph: { type: "EpisodeGraph", schema: EpisodeGraphSchema, persist: "reference" },
   sceneManifest: { type: "SceneManifest", schema: SceneManifestSchema, persist: "reference" },
   lessonContract: { type: "LearningContract", schema: LearningContractSchema, persist: "reference" },
+  curriculumEpisodeSeedInput: {
+    type: "CurriculumEpisodeSeedInput",
+    schema: CurriculumEpisodeSeedInputSchema,
+    persist: "reference",
+  },
+  curriculumEpisodeSeed: {
+    type: "CurriculumEpisodeSeed",
+    schema: CurriculumEpisodeSeedSchema,
+    persist: "reference",
+  },
+  curriculumEpisodeSeedApproval: {
+    type: "CurriculumEpisodeSeedApprovalReceipt",
+    schema: CurriculumEpisodeSeedApprovalReceiptSchema,
+    persist: "reference",
+  },
   childrenShowBibleInput: {
     type: "ChildrenShowBibleInput",
     schema: ChildrenShowBibleInputSchema,
@@ -276,6 +297,11 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   sourceBoundStorySpine: {
     type: "SourceBoundStorySpineHandoff",
     schema: SourceBoundStorySpineHandoffSchema,
+    persist: "reference",
+  },
+  evidenceVisualManifests: {
+    type: "EvidenceVisualManifest[]",
+    schema: z.array(EvidenceVisualManifestSchema).max(48),
     persist: "reference",
   },
   cinematicCaseSequenceInput: {
@@ -347,6 +373,7 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
       sceneManifestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
       lessonContractFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
       childrenShowBibleFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      curriculumEpisodeSeedFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     }).strict(),
   },
   sceneCompilerReceipt: {

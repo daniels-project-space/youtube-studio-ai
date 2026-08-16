@@ -8,6 +8,12 @@ import {
   evaluateChildrenShowBible,
   type ChildrenShowBibleInput,
 } from "@/engine/childrenShowBible";
+import {
+  CURRICULUM_EPISODE_SEED_VERSION,
+  assertCurriculumEpisodeSeed,
+  curriculumEpisodeSeedContentFingerprint,
+  type CurriculumEpisodeSeedInput,
+} from "@/engine/curriculumEpisodeSeed";
 import { buildEpisodeGraph, compileSceneManifest, episodeGraphFingerprint } from "@/engine/episodeGraph";
 import { contentLaneForFamily } from "@/engine/contentLane";
 import { buildLearningContract } from "@/engine/learningContract";
@@ -270,21 +276,59 @@ const sourcePacket: ChildrenShowBibleInput = {
 
 sourcePacket.editorialReview.reviewedShowBibleFingerprint = childrenShowBibleContentFingerprint(sourcePacket);
 
-async function main(): Promise<void> {
-  const report = evaluateChildrenShowBible({
-    input: sourcePacket,
-    episodeGraph: graph,
-    lessonContract,
+const curriculumEpisodeSeedInput: CurriculumEpisodeSeedInput = {
+  version: CURRICULUM_EPISODE_SEED_VERSION,
+  seriesId: graph.seriesId,
+  episodeId: graph.episodeId,
+  episodeTopic: graph.topic,
+  ageBand: sourcePacket.ageBand,
+  measurableObjective: {
+    id: sourcePacket.learningObjective.id,
+    statement: sourcePacket.learningObjective.statement,
+    observableAction: sourcePacket.learningObjective.observableAction,
+  },
+  vocabularyAndActions: [
+    { term: "sort", childFriendlyMeaning: "Put things that belong together in the same gentle group.", requiredAction: "Move each block to its matching color home." },
+    { term: "match", childFriendlyMeaning: "Find the color that is the same.", requiredAction: "Point to or place a block by its same-color felt circle." },
+  ],
+  assessment: sourcePacket.learningObjective.assessment,
+  identity: sourcePacket.identity,
+  editorialReview: {
+    id: "child-editor-review-curriculum-color-sort-001",
+    decision: "approved",
+    reviewerId: "child-editor-curriculum-desk",
+    reviewedAt: new Date(NOW.getTime() - 24 * 60 * 60 * 1_000).toISOString(),
+    reviewedCurriculumEpisodeSeedFingerprint: "0".repeat(64),
+    ageBandConfirmed: true,
+    measurableObjectiveConfirmed: true,
+    vocabularyAndActionsConfirmed: true,
+    assessmentConfirmed: true,
+    originalIdentityConfirmed: true,
+  },
+};
+curriculumEpisodeSeedInput.editorialReview.reviewedCurriculumEpisodeSeedFingerprint =
+  curriculumEpisodeSeedContentFingerprint(curriculumEpisodeSeedInput);
+const admittedCurriculumEpisodeSeed = assertCurriculumEpisodeSeed({
+  input: curriculumEpisodeSeedInput,
+  contentLane: lane,
+}, { now: NOW });
+
+function showBibleArgs(input: unknown, episodeGraph = graph, currentLessonContract = lessonContract) {
+  return {
+    input,
+    curriculumEpisodeSeed: admittedCurriculumEpisodeSeed.seed,
+    curriculumEpisodeSeedApproval: admittedCurriculumEpisodeSeed.receipt,
+    episodeGraph,
+    lessonContract: currentLessonContract,
     contentLane: lane,
-  }, { now: NOW });
+  };
+}
+
+async function main(): Promise<void> {
+  const report = evaluateChildrenShowBible(showBibleArgs(sourcePacket), { now: NOW });
   assert.equal(report.safe, true, JSON.stringify(report.issues));
 
-  const admitted = assertChildrenShowBible({
-    input: sourcePacket,
-    episodeGraph: graph,
-    lessonContract,
-    contentLane: lane,
-  }, { now: NOW });
+  const admitted = assertChildrenShowBible(showBibleArgs(sourcePacket), { now: NOW });
   assert.equal(admitted.bible.contentFingerprint, childrenShowBibleContentFingerprint(sourcePacket));
   assert.equal(admitted.receipt.showBibleFingerprint, childrenShowBibleContentFingerprint(sourcePacket));
   assert.equal(admitted.receipt.episodeGraphFingerprint, episodeGraphFingerprint(graph));
@@ -298,6 +342,8 @@ async function main(): Promise<void> {
     contentLane: lane,
     childrenShowBible: admitted.bible,
     childrenShowBibleApproval: admitted.receipt,
+    curriculumEpisodeSeed: admittedCurriculumEpisodeSeed.seed,
+    curriculumEpisodeSeedApproval: admittedCurriculumEpisodeSeed.receipt,
   });
   assert.equal(childSafety.allowedPublishMode, "draft");
   assert.equal(childSafety.childrenShowBibleFingerprint, admitted.bible.contentFingerprint);
@@ -311,6 +357,8 @@ async function main(): Promise<void> {
     params: {},
     store: {
       childrenShowBibleInput: sourcePacket,
+      curriculumEpisodeSeed: admittedCurriculumEpisodeSeed.seed,
+      curriculumEpisodeSeedApproval: admittedCurriculumEpisodeSeed.receipt,
       episodeGraph: graph,
       lessonContract,
       contentLane: lane,
@@ -327,35 +375,35 @@ async function main(): Promise<void> {
   const missingAgeBand = structuredClone(sourcePacket) as Record<string, unknown>;
   delete missingAgeBand.ageBand;
   assert.throws(
-    () => assertChildrenShowBible({ input: missingAgeBand, episodeGraph: graph, lessonContract, contentLane: lane }, { now: NOW }),
+    () => assertChildrenShowBible(showBibleArgs(missingAgeBand), { now: NOW }),
     /age_band_missing:.*Remediation:/,
   );
 
   const borrowedIdentity = structuredClone(sourcePacket);
   borrowedIdentity.identity.originalityDeclaration.differentiation = "A Pokémon-inspired color town.";
   assert.throws(
-    () => assertChildrenShowBible({ input: borrowedIdentity, episodeGraph: graph, lessonContract, contentLane: lane }, { now: NOW }),
+    () => assertChildrenShowBible(showBibleArgs(borrowedIdentity), { now: NOW }),
     /identity_ip_adjacent:.*Remediation:/,
   );
 
   const missingVariation = structuredClone(sourcePacket);
   delete missingVariation.storyPattern[2].variationDimensions;
   assert.throws(
-    () => assertChildrenShowBible({ input: missingVariation, episodeGraph: graph, lessonContract, contentLane: lane }, { now: NOW }),
+    () => assertChildrenShowBible(showBibleArgs(missingVariation), { now: NOW }),
     /story_pattern_semantics_invalid:.*Varied repetition/,
   );
 
   const changedBible = structuredClone(sourcePacket);
   changedBible.storyPattern[0].kind = "guided_attempt";
   assert.throws(
-    () => assertChildrenShowBible({ input: changedBible, episodeGraph: graph, lessonContract, contentLane: lane }, { now: NOW }),
+    () => assertChildrenShowBible(showBibleArgs(changedBible), { now: NOW }),
     /story_pattern_invalid:.*Remediation:/,
   );
 
   const mismatchedApproval = structuredClone(sourcePacket);
   mismatchedApproval.editorialReview.reviewedShowBibleFingerprint = "f".repeat(64);
   assert.throws(
-    () => assertChildrenShowBible({ input: mismatchedApproval, episodeGraph: graph, lessonContract, contentLane: lane }, { now: NOW }),
+    () => assertChildrenShowBible(showBibleArgs(mismatchedApproval), { now: NOW }),
     /editorial_review_bible_mismatch:.*Remediation:/,
   );
 
@@ -363,12 +411,7 @@ async function main(): Promise<void> {
   changedGraph.beats[0].text = "Tavi finds the red, blue, and yellow blocks mixed on the mat.";
   const changedLessonContract = buildLearningContract(changedGraph, lane);
   assert.throws(
-    () => assertChildrenShowBible({
-      input: sourcePacket,
-      episodeGraph: changedGraph,
-      lessonContract: changedLessonContract,
-      contentLane: lane,
-    }, { now: NOW }),
+    () => assertChildrenShowBible(showBibleArgs(sourcePacket, changedGraph, changedLessonContract), { now: NOW }),
     /editorial_review_graph_mismatch:.*Remediation:/,
   );
 
@@ -377,7 +420,7 @@ async function main(): Promise<void> {
     NOW.getTime() - (CHILD_EDITORIAL_REVIEW_MAX_AGE_DAYS + 1) * 24 * 60 * 60 * 1_000,
   ).toISOString();
   assert.throws(
-    () => assertChildrenShowBible({ input: staleApproval, episodeGraph: graph, lessonContract, contentLane: lane }, { now: NOW }),
+    () => assertChildrenShowBible(showBibleArgs(staleApproval), { now: NOW }),
     /editorial_review_stale:.*Remediation:/,
   );
 

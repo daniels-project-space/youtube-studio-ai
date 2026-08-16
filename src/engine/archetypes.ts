@@ -133,6 +133,9 @@ const ILLUSTRATED_EXPLAINER: PipelineEntry[] = [
 const CHILDREN_LEARNING: PipelineEntry[] = [
   { block: "competitor_research" },
   { block: "topic_select", params: { policy: "no_repeat", targetSeconds: 180 } },
+  // A fresh, child-editor-signed intent constrains every later story/graph
+  // artifact. It is an invocation seed, never a channel-level auto-create key.
+  { block: "curriculum_episode_seed" },
   { block: "script_gen", params: { style: "children_learning", maxSeconds: 180 } },
   { block: "qa_script" },
   { block: "originality_gate" },

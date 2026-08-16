@@ -20,6 +20,8 @@ import {
   syntheticScenarioVisualKindFor,
   type SyntheticScenarioContract,
 } from "@/engine/syntheticScenario";
+import { resolveContentLane } from "@/engine/contentLane";
+import { assertCurriculumEpisodeSeedForStoryInput } from "@/engine/curriculumEpisodeSeed";
 import { StorySpineSchema, type StorySpine } from "@/engine/storySpine";
 import type { Block } from "@/engine/types";
 
@@ -220,15 +222,27 @@ const episodeGraph: Block = {
   ],
   produces: ["episodeGraph", "sceneManifest"],
   run: async (ctx) => {
-    const audience = ctx.params["audience"] === "children" ? "children" : "general";
+    const lane = resolveContentLane({ stored: ctx.store["contentLane"], pipeline: [] });
+    const childrenSeed = lane.key === "children_learning_supervised"
+      ? assertCurriculumEpisodeSeedForStoryInput({
+        curriculumEpisodeSeed: ctx.store["curriculumEpisodeSeed"],
+        curriculumEpisodeSeedApproval: ctx.store["curriculumEpisodeSeedApproval"],
+        contentLane: lane,
+        topic: ctx.store["topic"],
+      })
+      : undefined;
+    const audience = childrenSeed ? "children" : ctx.params["audience"] === "children" ? "children" : "general";
     const { episodeGraph, sceneManifest } = buildEpisodeGraphFromStorySpine({
       storySpine: storySpineFromStore(ctx.store),
       topic: String(ctx.store["topic"] ?? "").trim(),
       audience,
-      seriesId: `series-${stableFragment(ctx.channelId, "channel")}`,
-      episodeId: `episode-${stableFragment(ctx.runId, "run")}`,
-      curriculumLabel: typeof ctx.params["curriculumLabel"] === "string" ? ctx.params["curriculumLabel"] : undefined,
-      curriculumLocator: typeof ctx.params["curriculumLocator"] === "string" ? ctx.params["curriculumLocator"] : undefined,
+      seriesId: childrenSeed?.seriesId ?? `series-${stableFragment(ctx.channelId, "channel")}`,
+      episodeId: childrenSeed?.episodeId ?? `episode-${stableFragment(ctx.runId, "run")}`,
+      curriculumLabel: childrenSeed?.measurableObjective.statement ??
+        (typeof ctx.params["curriculumLabel"] === "string" ? ctx.params["curriculumLabel"] : undefined),
+      curriculumLocator: childrenSeed
+        ? `curriculum://reviewed/${childrenSeed.seriesId}/${childrenSeed.episodeId}`
+        : typeof ctx.params["curriculumLocator"] === "string" ? ctx.params["curriculumLocator"] : undefined,
       syntheticScenario: ctx.store["syntheticScenario"] !== undefined
         ? assertSyntheticScenarioContract(ctx.store["syntheticScenario"])
         : undefined,

@@ -1,10 +1,70 @@
 import type { Block } from "@/engine/types";
-import { assertCinematicCaseSequence } from "@/engine/cinematicCaseSequence";
+import {
+  CinematicCaseSequenceInputSchema,
+  assertCinematicCaseSequence,
+} from "@/engine/cinematicCaseSequence";
 import { admitCinematicFinalMasterQa } from "@/engine/cinematicFinalMasterQaAdmission";
 import {
+  CinematicCaseDirectionSchema,
   finalizeCinematicCaseSequenceDraft,
   planCinematicCaseSequenceDraft,
 } from "@/engine/cinematicCaseSequenceDraft";
+import {
+  CasefileEvidenceShotMapSchema,
+  casefileShotPlanFingerprint,
+} from "@/engine/casefileEvidenceShotMap";
+import { validateSourceBoundStorySpineHandoff } from "@/engine/sourceBoundStorySpine";
+import { ShotPlanSchema } from "@/engine/storySpine";
+
+/**
+ * The source-bound Story Spine is a private proof artifact, but merely
+ * registering it is not sufficient: the cinematic route must prove that the
+ * exact direction/input still refers to the same reviewed Casefile map and
+ * timed ShotPlan before it can create a sequence or a render handoff.
+ */
+function assertCurrentSourceBoundStorySpine(args: {
+  sourceBoundStorySpine: unknown;
+  caseId: string;
+  sourcePacketFingerprint: string;
+  evidenceShotMapFingerprint: string;
+  shotPlanFingerprint: string;
+  evidenceShotMap: unknown;
+  shotList: unknown;
+  stage: "draft" | "sequence";
+}): void {
+  let handoff: ReturnType<typeof validateSourceBoundStorySpineHandoff>;
+  try {
+    handoff = validateSourceBoundStorySpineHandoff(args.sourceBoundStorySpine);
+  } catch (error) {
+    throw new Error(
+      `cinematic ${args.stage}: source-bound Story Spine handoff is missing or invalid; ` +
+        "run source_bound_story_spine from the current reviewed Casefile artifacts before cinematic planning",
+      { cause: error },
+    );
+  }
+
+  const evidenceShotMap = CasefileEvidenceShotMapSchema.parse(args.evidenceShotMap);
+  const shotList = ShotPlanSchema.array().min(1).max(2_000).parse(args.shotList);
+  const currentShotPlanFingerprint = casefileShotPlanFingerprint(shotList);
+  const sourceFieldsMatch =
+    handoff.caseId === args.caseId &&
+    handoff.sourcePacketFingerprint === args.sourcePacketFingerprint &&
+    handoff.evidenceShotMapFingerprint === args.evidenceShotMapFingerprint &&
+    handoff.storySpineShotPlanFingerprint === args.shotPlanFingerprint;
+  const currentArtifactsMatch =
+    evidenceShotMap.caseId === args.caseId &&
+    evidenceShotMap.sourcePacketFingerprint === args.sourcePacketFingerprint &&
+    evidenceShotMap.contentFingerprint === args.evidenceShotMapFingerprint &&
+    evidenceShotMap.shotPlanFingerprint === args.shotPlanFingerprint &&
+    currentShotPlanFingerprint === args.shotPlanFingerprint;
+
+  if (!sourceFieldsMatch || !currentArtifactsMatch) {
+    throw new Error(
+      `cinematic ${args.stage}: source-bound Story Spine handoff is stale or mismatched for the current ` +
+        "Casefile direction/evidence/ShotPlan; regenerate it and obtain a fresh private editorial review",
+    );
+  }
+}
 
 /**
  * Produces the editor-ready creative draft from verified facts. It contains no
@@ -12,12 +72,27 @@ import {
  */
 const cinematicCaseSequenceDraft: Block = {
   id: "cinematic_case_sequence_draft",
-  consumes: ["cinematicCaseDirection", "casefileEvidenceShotMap", "sceneManifest", "shotList"],
+  consumes: ["cinematicCaseDirection", "casefileEvidenceShotMap", "sourceBoundStorySpine", "sceneManifest", "shotList"],
   produces: ["cinematicCaseSequenceDraft"],
   run: async (ctx) => {
+    const direction = CinematicCaseDirectionSchema.parse(ctx.store["cinematicCaseDirection"]);
+    const evidenceShotMap = CasefileEvidenceShotMapSchema.parse(ctx.store["casefileEvidenceShotMap"]);
+    const shotPlanFingerprint = casefileShotPlanFingerprint(
+      ShotPlanSchema.array().min(1).max(2_000).parse(ctx.store["shotList"]),
+    );
+    assertCurrentSourceBoundStorySpine({
+      sourceBoundStorySpine: ctx.store["sourceBoundStorySpine"],
+      caseId: direction.caseId,
+      sourcePacketFingerprint: evidenceShotMap.sourcePacketFingerprint,
+      evidenceShotMapFingerprint: evidenceShotMap.contentFingerprint,
+      shotPlanFingerprint,
+      evidenceShotMap,
+      shotList: ctx.store["shotList"],
+      stage: "draft",
+    });
     const draft = planCinematicCaseSequenceDraft({
-      direction: ctx.store["cinematicCaseDirection"],
-      evidenceShotMap: ctx.store["casefileEvidenceShotMap"],
+      direction,
+      evidenceShotMap,
       sceneManifest: ctx.store["sceneManifest"],
       shotList: ctx.store["shotList"],
     });
@@ -55,6 +130,7 @@ const cinematicCaseSequence: Block = {
     "casefileSourceAdmission",
     "casefileEvidenceShotMap",
     "casefileEvidenceShotMapAdmission",
+    "sourceBoundStorySpine",
     "cinematicCaseSequenceInput",
     "sceneManifest",
     "shotList",
@@ -68,8 +144,19 @@ const cinematicCaseSequence: Block = {
     "cinematicFinalMasterQaAdmission",
   ],
   run: async (ctx) => {
+    const input = CinematicCaseSequenceInputSchema.parse(ctx.store["cinematicCaseSequenceInput"]);
+    assertCurrentSourceBoundStorySpine({
+      sourceBoundStorySpine: ctx.store["sourceBoundStorySpine"],
+      caseId: input.caseId,
+      sourcePacketFingerprint: input.sourcePacketFingerprint,
+      evidenceShotMapFingerprint: input.evidenceShotMapFingerprint,
+      shotPlanFingerprint: input.shotPlanFingerprint,
+      evidenceShotMap: ctx.store["casefileEvidenceShotMap"],
+      shotList: ctx.store["shotList"],
+      stage: "sequence",
+    });
     const admitted = assertCinematicCaseSequence({
-      input: ctx.store["cinematicCaseSequenceInput"],
+      input,
       sourceAdmission: ctx.store["casefileSourceAdmission"],
       evidenceShotMap: ctx.store["casefileEvidenceShotMap"],
       evidenceShotMapAdmission: ctx.store["casefileEvidenceShotMapAdmission"],

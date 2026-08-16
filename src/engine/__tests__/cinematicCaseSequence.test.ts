@@ -27,6 +27,7 @@ import {
   casefileSourcePacketContentFingerprint,
   type CasefileSourcePacket,
 } from "@/engine/sourceFirstAdmission";
+import { createSourceBoundStorySpineHandoff } from "@/engine/sourceBoundStorySpine";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
@@ -222,6 +223,97 @@ function admittedMap() {
   return assertCasefileEvidenceShotMap({ input, sourcePacket, sourceAdmission: admittedSource.receipt, sceneManifest, shotList }, { now: NOW });
 }
 
+/** Builds the exact provider-free source-bound bridge that the cinematic block
+ * must now consume. The normal cinematic fixtures deliberately use authored
+ * ShotPlan identifiers, so the Story Spine here mirrors those reviewed timing
+ * boundaries rather than creating a second planner's interpretation. */
+function sourceBoundStorySpineFor(map: ReturnType<typeof admittedMap>) {
+  const storySpine = {
+    version: "1.0.0" as const,
+    timedScript: {
+      version: "1.0.0" as const,
+      narrationDurationSec: 24,
+      sentences: [
+        {
+          id: "sentence-closure-order",
+          text: "The court finding ordered the vault's closure.",
+          t0: 0,
+          t1: 12,
+          sectionId: "section-closure",
+          evidenceRefs: ["source-court-archive"],
+        },
+        {
+          id: "sentence-public-response",
+          text: "The documented closure prompted public response.",
+          t0: 12,
+          t1: 24,
+          sectionId: "section-response",
+          evidenceRefs: ["source-court-archive"],
+        },
+      ],
+    },
+    narrativeBeats: [
+      {
+        id: "beat-closure-order",
+        sourceSentenceIds: ["sentence-closure-order"],
+        t0: 0,
+        t1: 12,
+        purpose: "Establish the cited closure order.",
+        evidenceRefs: ["source-court-archive"],
+      },
+      {
+        id: "beat-public-response",
+        sourceSentenceIds: ["sentence-public-response"],
+        t0: 12,
+        t1: 24,
+        purpose: "Show the documented public response.",
+        evidenceRefs: ["source-court-archive"],
+      },
+    ],
+    continuityLedger: {
+      version: "1.0.0" as const,
+      entities: [],
+      locations: [],
+      era: "historical",
+      wardrobe: [],
+      props: ["court document", "timeline"],
+      palette: ["charcoal", "ash"],
+      cameraGrammar: ["restrained"],
+      negativeConstraints: ["no likeness", "no gore"],
+    },
+    shotList,
+    dpVisualSpecs: shotList.map((shot) => ({
+      shotId: shot.id,
+      keyframePrompt: shot.prompt,
+      motionPrompt: shot.motion,
+      negativePrompt: shot.negative,
+      styleLock: "case-file-neutral",
+      firstFrameConstraint: `Start at ${shot.t0}s.`,
+      lastFrameConstraint: `End at ${shot.t1}s.`,
+      continuityState: shot.continuityState,
+    })),
+    editorEdl: {
+      version: "1.0.0" as const,
+      durationSec: 24,
+      shots: shotList.map((shot) => ({
+        shotId: shot.id,
+        sourceSentenceIds: shot.sourceSentenceIds,
+        t0: shot.t0,
+        t1: shot.t1,
+      })),
+    },
+    coverage: { mappedSec: 24, totalSec: 24, ratio: 1, gaps: [] },
+  };
+  return createSourceBoundStorySpineHandoff({
+    sourcePacket,
+    sourceAdmission: admittedSource.receipt,
+    evidenceShotMap: map.map,
+    evidenceShotMapAdmission: map.receipt,
+    storySpine,
+    now: NOW,
+  });
+}
+
 function coverageShot(args: {
   id: string; t0: number; t1: number; purpose: "spatial_anchor" | "mannequin_action" | "relationship" | "evidence_insert" | "contradiction" | "consequence" | "reaction" | "aftermath";
   mode: "source_proof" | "spatial_reconstruction" | "abstract_reenactment" | "atmosphere";
@@ -297,6 +389,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
 
 async function main() {
   const map = admittedMap();
+  const sourceBoundStorySpine = sourceBoundStorySpineFor(map);
   const input = approvedSequence(map);
   const args = { input, sourceAdmission: admittedSource.receipt, evidenceShotMap: map.map, evidenceShotMapAdmission: map.receipt, sceneManifest, shotList };
 
@@ -481,6 +574,51 @@ async function main() {
   const finalizeBlock = cinematicCaseSequenceBlocks.find((block) => block.id === "cinematic_case_sequence_finalize");
   const admissionBlock = cinematicCaseSequenceBlocks.find((block) => block.id === "cinematic_case_sequence");
   assert.ok(draftBlock && finalizeBlock && admissionBlock, "cinematic route must expose draft, human-signature, and admission stages");
+  const cinematicDirection = {
+    version: CINEMATIC_CASE_DIRECTION_VERSION,
+    sequenceId: "cinematic-sequence-vault-closure-draft-block",
+    caseId: sourcePacket.caseId,
+    causalQuestion: "Why did a single court order close the vault?",
+    visualWorld: "restrained nocturnal archival documentary, rain-softened stone, muted charcoal and amber practical light",
+    cast: input.cast,
+  };
+  const draftBlockContext = (handoff: unknown) => ({
+    ownerId: "owner-test",
+    runId: "run-cinematic-case-sequence-draft",
+    channelId: "channel-test",
+    keyPrefix: "owner/owner-test/channel/channel-test/",
+    params: {},
+    store: {
+      cinematicCaseDirection: cinematicDirection,
+      casefileEvidenceShotMap: map.map,
+      ...(handoff === undefined ? {} : { sourceBoundStorySpine: handoff }),
+      sceneManifest,
+      shotList,
+    },
+    budgetUsd: 0,
+    log: (message: string) => logs.push(message),
+  });
+  await assert.rejects(
+    () => draftBlock.run(draftBlockContext(undefined)),
+    /source-bound Story Spine handoff is missing or invalid/i,
+    "the cinematic direction stage must not create a draft without the private source-bound Story Spine",
+  );
+  await assert.rejects(
+    () => draftBlock.run(draftBlockContext({
+      ...sourceBoundStorySpine,
+      evidenceShotMapFingerprint: "0".repeat(64),
+    })),
+    /source-bound Story Spine handoff is stale or mismatched/i,
+    "a handoff from an older evidence-map revision must fail before cinematic sequence creation",
+  );
+  await assert.rejects(
+    () => draftBlock.run(draftBlockContext({
+      ...sourceBoundStorySpine,
+      caseId: "case-unrelated-record",
+    })),
+    /source-bound Story Spine handoff is stale or mismatched/i,
+    "a valid-looking handoff for a different Casefile must fail before cinematic sequence creation",
+  );
   const draftPatch = await draftBlock.run({
     ownerId: "owner-test",
     runId: "run-cinematic-case-sequence-draft",
@@ -488,15 +626,9 @@ async function main() {
     keyPrefix: "owner/owner-test/channel/channel-test/",
     params: {},
     store: {
-      cinematicCaseDirection: {
-        version: CINEMATIC_CASE_DIRECTION_VERSION,
-        sequenceId: "cinematic-sequence-vault-closure-draft-block",
-        caseId: sourcePacket.caseId,
-        causalQuestion: "Why did a single court order close the vault?",
-        visualWorld: "restrained nocturnal archival documentary, rain-softened stone, muted charcoal and amber practical light",
-        cast: input.cast,
-      },
+      cinematicCaseDirection: cinematicDirection,
       casefileEvidenceShotMap: map.map,
+      sourceBoundStorySpine,
       sceneManifest,
       shotList,
     },
@@ -531,6 +663,7 @@ async function main() {
       casefileSourceAdmission: admittedSource.receipt,
       casefileEvidenceShotMap: map.map,
       casefileEvidenceShotMapAdmission: map.receipt,
+      sourceBoundStorySpine,
       cinematicCaseSequenceInput: finalizePatch.cinematicCaseSequenceInput,
       sceneManifest,
       shotList,

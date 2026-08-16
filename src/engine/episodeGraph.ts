@@ -11,6 +11,12 @@ import {
   SyntheticScenarioProfileSchema,
   SyntheticScenarioVisualKindSchema,
 } from "./syntheticScenario";
+import {
+  EvidenceVisualIntentSchema,
+  EvidenceVisualManifestSchema,
+  assertEvidenceVisualManifest,
+  factualVisualKindForIntent,
+} from "./evidenceVisualManifest";
 
 const EPSILON = 1e-6;
 
@@ -83,6 +89,28 @@ export const EpisodeVisualStateSchema = z.object({
   /** Explicit fictional-scenario visual grammar. Omitted for factual/general episodes. */
   syntheticScenarioProfile: SyntheticScenarioProfileSchema.optional(),
   syntheticScenarioVisualKind: SyntheticScenarioVisualKindSchema.optional(),
+  /** Explicit declaration; generic seeded charts/maps stay illustrative by default. */
+  evidenceVisualIntent: EvidenceVisualIntentSchema.optional(),
+  /** Required review-bound data when the declared intent is factual. */
+  evidenceVisualManifest: EvidenceVisualManifestSchema.optional(),
+}).superRefine((visualState, ctx) => {
+  if (!visualState.evidenceVisualIntent) {
+    if (visualState.evidenceVisualManifest) {
+      ctx.addIssue({ code: z.ZodIssueCode.custom, message: "evidence visual manifest requires an explicit factual visual intent" });
+    }
+    return;
+  }
+  if (visualState.syntheticScenarioProfile || visualState.syntheticScenarioVisualKind) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "a factual visual intent cannot be combined with a fictional synthetic scenario" });
+  }
+  if (!visualState.evidenceVisualManifest) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: "factual chart or geo visual requires an evidence visual manifest" });
+    return;
+  }
+  const expectedKind = factualVisualKindForIntent(visualState.evidenceVisualIntent);
+  if (visualState.evidenceVisualManifest.visualKind !== expectedKind) {
+    ctx.addIssue({ code: z.ZodIssueCode.custom, message: `factual visual intent requires a ${expectedKind} manifest` });
+  }
 });
 export type EpisodeVisualState = z.infer<typeof EpisodeVisualStateSchema>;
 
@@ -169,6 +197,8 @@ export const DeterministicSceneSchema = z.object({
   sourceRefs: z.array(stableId("source")).min(1),
   learningObjective: nonEmptyText(240).optional(),
   transition: z.enum(["cut", "match_cut", "dissolve", "wipe"]),
+  /** Optional for legacy handoffs; factual evidence visuals require it. */
+  narrationSentenceIds: z.array(stableId("sentence")).min(1).optional(),
 }).refine((scene) => scene.t1 > scene.t0, "scene t1 must follow t0");
 export type DeterministicScene = z.infer<typeof DeterministicSceneSchema>;
 
@@ -482,6 +512,13 @@ export function assertSceneManifest(value: unknown): SceneManifest {
       if (defects.length) throw new Error(defects.join("; "));
     }
   }
+  for (const scene of manifest.scenes) {
+    if (!scene.visualState.evidenceVisualIntent) continue;
+    assertEvidenceVisualManifest(scene.visualState.evidenceVisualManifest, {
+      sceneId: scene.id,
+      narrationSentenceIds: scene.narrationSentenceIds,
+    });
+  }
   return manifest;
 }
 
@@ -514,6 +551,7 @@ export function compileSceneManifest(value: unknown, storySpine?: StorySpine): S
     camera: beat.camera,
     visualState: { ...beat.visualState, props: [...beat.visualState.props].sort() },
     text: beat.text,
+    narrationSentenceIds: [...beat.storySpineSentenceIds].sort(),
     causalInputBeatIds: graph.causalEdges
       .filter((edge) => edge.toBeatId === beat.id)
       .map((edge) => edge.fromBeatId)

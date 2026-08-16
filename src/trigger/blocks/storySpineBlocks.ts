@@ -2,6 +2,7 @@ import type { Block } from "@/engine/types";
 import { getCutSheet, getStructure, getVisualBrief } from "@/engine/creative/brief";
 import { planStorySpine } from "@/engine/storySpine";
 import { resolveContentLane } from "@/engine/contentLane";
+import { assertCurriculumEpisodeSeedForStoryInput } from "@/engine/curriculumEpisodeSeed";
 import { buildEpisodeSpec } from "@/engine/qualityEvidence";
 
 export const storySpine: Block = {
@@ -30,6 +31,18 @@ export const storySpine: Block = {
     if (!timings?.length) {
       throw new Error("story_spine: sentenceTimings are required; timing unavailable cannot pass");
     }
+    const lane = resolveContentLane({
+      stored: ctx.store["contentLane"],
+      pipeline: [],
+    });
+    if (lane.key === "children_learning_supervised") {
+      assertCurriculumEpisodeSeedForStoryInput({
+        curriculumEpisodeSeed: ctx.store["curriculumEpisodeSeed"],
+        curriculumEpisodeSeedApproval: ctx.store["curriculumEpisodeSeedApproval"],
+        contentLane: lane,
+        topic: ctx.store["topic"],
+      });
+    }
     const duration = Number(ctx.store["narrationDurationSec"]);
     const spine = planStorySpine({
       topic: String(ctx.store["topic"]),
@@ -48,10 +61,6 @@ export const storySpine: Block = {
       ...spine.editorEdl,
       editorBrief: cutSheet ?? null,
     };
-    const lane = resolveContentLane({
-      stored: ctx.store["contentLane"],
-      pipeline: [],
-    });
     const episodeSpec = buildEpisodeSpec({
       lane: { key: lane.key, renderer: lane.primaryRenderer },
       topic: String(ctx.store["topic"]),
