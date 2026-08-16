@@ -218,6 +218,7 @@ async function sendR2(operation, label) {
     try {
       return await s3.send(operation(), { abortSignal: AbortSignal.timeout(45_000) });
     } catch (error) {
+      if (error?.name === "NoSuchKey" || error?.$metadata?.httpStatusCode === 404) throw error;
       lastError = error;
       if (attempt === 2) break;
       console.error(JSON.stringify({ event: "benchmark_r2_retry", label, attempt }));
