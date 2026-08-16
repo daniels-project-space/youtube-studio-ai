@@ -661,28 +661,36 @@ def ensure_cuda_compatibility():
   evidence=subprocess.check_output([str(python),'-c',"import torch,torch.sparse;print(torch.__version__+'|'+str(torch.version.cuda)+'|'+str(torch.cuda.is_available()))"],text=True).strip()
   if evidence!='2.8.0+cu128|12.8|True': raise RuntimeError('CUDA-compatible Torch verification failed: '+evidence)
   compatibility.write_text('torch==2.8.0+cu128'+chr(10))
-def compiler_ready(command):
+def command_ready(command,version_argument):
   if not command: return False
   import subprocess
   try:
-    subprocess.run([command,'--version'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
+    subprocess.run([command,version_argument],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
     return True
   except (OSError,subprocess.SubprocessError): return False
+def compiler_ready(command): return command_ready(command,'--version')
+def media_tool_ready(command): return command_ready(command,'-version')
 def ensure_triton_toolchain():
   # Torch 2.8 may JIT Triton kernels on the first LTX inference. The public
-  # PyTorch runtime image intentionally omits build tools, so install and
-  # validate the minimal Debian toolchain before the worker touches the model.
+  # PyTorch runtime image intentionally omits build and media-probe tools, so
+  # install and validate them before the worker touches the model. ffprobe is
+  # a required completion gate, not an optional post-processing dependency.
   cc=shutil.which('gcc')
   cxx=shutil.which('g++')
-  if not compiler_ready(cc) or not compiler_ready(cxx):
+  ffmpeg=shutil.which('ffmpeg')
+  ffprobe=shutil.which('ffprobe')
+  if not compiler_ready(cc) or not compiler_ready(cxx) or not media_tool_ready(ffmpeg) or not media_tool_ready(ffprobe):
     import subprocess
-    if os.geteuid()!=0: raise RuntimeError('Triton requires gcc/g++ but worker cannot install the verified toolchain')
+    if os.geteuid()!=0: raise RuntimeError('LTX requires gcc/g++ and ffmpeg/ffprobe but worker cannot install the verified dependencies')
     environment=dict(os.environ,DEBIAN_FRONTEND='noninteractive')
     subprocess.run(['apt-get','update','-qq'],check=True,env=environment,stdout=subprocess.DEVNULL)
-    subprocess.run(['apt-get','install','-y','--no-install-recommends','build-essential'],check=True,env=environment,stdout=subprocess.DEVNULL)
+    subprocess.run(['apt-get','install','-y','--no-install-recommends','build-essential','ffmpeg'],check=True,env=environment,stdout=subprocess.DEVNULL)
     cc=shutil.which('gcc')
     cxx=shutil.which('g++')
+    ffmpeg=shutil.which('ffmpeg')
+    ffprobe=shutil.which('ffprobe')
   if not compiler_ready(cc) or not compiler_ready(cxx): raise RuntimeError('Triton compiler toolchain is unavailable after verified install')
+  if not media_tool_ready(ffmpeg) or not media_tool_ready(ffprobe): raise RuntimeError('LTX ffmpeg/ffprobe completion tools are unavailable after verified install')
   os.environ['CC']=cc
   os.environ['CXX']=cxx
 def exec_worker():

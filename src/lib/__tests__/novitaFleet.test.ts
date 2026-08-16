@@ -174,6 +174,10 @@ async function main() {
   assert.doesNotMatch(publicLtxBootstrap, /cu118|torch==2\.7\.1/);
   assert.match(publicLtxBootstrap, /ensure_triton_toolchain\(\)/);
   assert.match(publicLtxBootstrap, /build-essential/);
+  assert.match(publicLtxBootstrap, /'build-essential','ffmpeg'/);
+  assert.match(publicLtxBootstrap, /ffmpeg=shutil\.which\('ffmpeg'\)/);
+  assert.match(publicLtxBootstrap, /ffprobe=shutil\.which\('ffprobe'\)/);
+  assert.match(publicLtxBootstrap, /media_tool_ready\(ffmpeg\).*media_tool_ready\(ffprobe\)/);
   assert.match(publicLtxBootstrap, /compiler_ready\(cc\)[\s\S]*compiler_ready\(cxx\)/);
   assert.match(publicLtxBootstrap, /packages\/ltx-core\/src/);
   assert.match(publicLtxBootstrap, /packages\/ltx-pipelines\/src/);
