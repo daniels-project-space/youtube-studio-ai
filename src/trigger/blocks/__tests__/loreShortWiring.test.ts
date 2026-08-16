@@ -188,10 +188,12 @@ async function blockUsesAttestedProvidersAndR2(): Promise<void> {
     "the engine's budget lane must still be the free ffmpeg path the block pins");
 
   // Critique-loop cost safety: text-only production, capped iterations, frozen
-  // checkpoint, and an outage fallback that accepts rather than re-spending.
+  // checkpoint, and a fail-closed outage gate before any paid rendering.
   assert.match(block, /produceAndCritique<LorePlan>/, "the story must be settled under the shared critique loop");
   assert.match(block, /Math\.min\(2, laneQuality\.maxCritiqueIters\)/, "iterations must be hard-capped");
-  assert.match(block, /grader unavailable/, "a critic outage must accept, never loop or fail the run");
+  assert.match(block, /Claude story critic unavailable/, "a critic outage must be explicit");
+  assert.match(block, /unavailableStoryboardCriticVerdict\(/, "a critic outage must deny approval");
+  assert.match(block, /assertStoryboardCritiqueApproved\(/, "paid rendering must be blocked without approval");
   assert.match(block, /loadStoryCheckpoint|putObject\(\s*checkpointKey/,
     "the accepted story must be frozen to a content-addressed checkpoint");
 }

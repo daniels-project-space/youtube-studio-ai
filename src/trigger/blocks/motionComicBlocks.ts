@@ -36,9 +36,12 @@ import {
   type MotionComicImageRequest,
   type MotionComicStoryboard,
 } from "@/lib/motionComic";
-import { geminiJson } from "@/lib/gemini";
 import {
-  channelCritiqueBrief,
+  assertStoryboardCritiqueApproved,
+  critiqueStoryboardText,
+  unavailableStoryboardCriticVerdict,
+} from "@/lib/storyboardCritic";
+import {
   produceAndCritique,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
@@ -123,10 +126,10 @@ const NO_TEXT_GUARD =
  *     re-derives byte-identical art prompts, whose content-hash cache then
  *     returns the already-paid-for panels instead of buying them again.
  *   - Hard cap of 2 iterations (one informed retry), lane-tunable downward.
- *   - Grader outage accepts the current storyboard rather than looping or
- *     failing the run; the deterministic checks below still run unconditionally.
+ *   - Critic outage gets only the bounded text retry, then blocks before paid
+ *     rendering; deterministic checks still run unconditionally.
  */
-const COMIC_STORYBOARD_CHECKPOINT_VERSION = "motion-comic-storyboard/v1";
+const COMIC_STORYBOARD_CHECKPOINT_VERSION = "motion-comic-storyboard/v2";
 
 /** Channel doctrine + lane grounding for this block's critique (P1-1/P1-17). */
 function comicCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
@@ -223,51 +226,36 @@ export function motionComicStoryboardDefects(
 
 /**
  * Subjective grade from the Director, grounded in this channel's doctrine.
- * Returns null when the grader is unavailable so the caller can accept rather
- * than blind-spend another iteration.
+ * Returns null when the critic is unavailable; the caller then retries only
+ * text planning and blocks paid rendering unless an approval is obtained.
  */
 async function gradeStoryboard(args: {
   plan: MotionComicStoryboard;
   topic: string;
   channel: ChannelCritiqueContext;
 }): Promise<{ score: number; pass: boolean; issues: string[] } | null> {
-  try {
-    const verdict = await geminiJson<{ score?: unknown; pass?: unknown; issues?: unknown }>({
-      prompt:
-        `You are the DIRECTOR reviewing a comic-book storyboard for "${args.topic}" BEFORE any paid art, voice or music is bought. ` +
-        `Producing this storyboard is expensive and irreversible — reject a story that would waste it.\n` +
-        channelCritiqueBrief(args.channel) +
-        `\nTITLE: ${args.plan.title}\nLOGLINE: ${args.plan.logline}\n` +
-        `CAST: ${args.plan.characters.map((character) => `${character.id} (${character.name})`).join(", ") || "none"}\n` +
-        `\nTHE STORYBOARD (${args.plan.panels.length} panels):\n` +
-        args.plan.panels
-          .map((panel, index) =>
-            `${index + 1}. [${panel.shot}] ${panel.visual.environment}/${panel.visual.action}/${panel.visual.mood}\n` +
-            panel.lines.map((line) => `   ${line.speaker}: ${line.text}`).join("\n"),
-          )
-          .join("\n") +
-        `\n\nJudge ONLY these: (a) a real dramatic arc — strong hook, rising tension, a turn, a resonant ending; ` +
-        `(b) every panel ADVANCES the story rather than restating the previous one; ` +
-        `(c) the narrator carries a coherent through-line in vivid prose, and character bubbles sound like people, not exposition; ` +
-        `(d) each panel's visual is a CONCRETE drawable moment that matches what its lines say; ` +
-        `(e) the story is accurate to the topic and would hold a viewer to the last panel.\n` +
-        `Return STRICT JSON {"score":0.0,"pass":true,"issues":["..."]}. Each issue must name the panel number and give ` +
-        `a concrete instruction the writer can act on. Use [] when the storyboard passes.`,
-      maxTokens: 1200,
-      temperature: 0.2,
-    });
-    const score = Number(verdict.score);
-    const issues = Array.isArray(verdict.issues)
-      ? verdict.issues.map((issue) => String(issue ?? "").trim()).filter(Boolean).slice(0, 6)
-      : [];
-    return {
-      score: Number.isFinite(score) ? Math.min(1, Math.max(0, score)) : 0.5,
-      pass: verdict.pass === true,
-      issues,
-    };
-  } catch {
-    return null;
-  }
+  return critiqueStoryboardText({
+    label: "comic-book storyboard",
+    topic: args.topic,
+    channel: args.channel,
+    costWarning: "Producing this storyboard is expensive and irreversible — reject a story that would waste it.",
+    candidate:
+      `TITLE: ${args.plan.title}\nLOGLINE: ${args.plan.logline}\n` +
+      `CAST: ${args.plan.characters.map((character) => `${character.id} (${character.name})`).join(", ") || "none"}\n` +
+      `THE STORYBOARD (${args.plan.panels.length} panels):\n` +
+      args.plan.panels
+        .map((panel, index) =>
+          `${index + 1}. [${panel.shot}] ${panel.visual.environment}/${panel.visual.action}/${panel.visual.mood}\n` +
+          panel.lines.map((line) => `   ${line.speaker}: ${line.text}`).join("\n"),
+        )
+        .join("\n"),
+    rubric:
+      "Judge only: (a) a real dramatic arc with a strong hook, rising tension, a turn, and a resonant ending; " +
+      "(b) every panel advances the story rather than restating the previous one; " +
+      "(c) narrator prose carries a coherent through-line and character bubbles sound like people, not exposition; " +
+      "(d) every visual is a concrete drawable moment matching its lines; and " +
+      "(e) the story is accurate to the topic and would hold a viewer to the last panel.",
+  });
 }
 
 function storyboardCheckpointKey(ctx: StageContext, inputs: unknown): string {
@@ -336,8 +324,8 @@ async function planComicWithCritique(
       const hard = motionComicStoryboardDefects(plan, wantPanels, targetSeconds);
       const graded = await gradeStoryboard({ plan, topic: brief.topic, channel });
       if (!graded) {
-        ctx.log(`motion_comic: storyboard grader unavailable — accepting candidate ${iter} on deterministic checks alone`);
-        return { score: iter === 1 ? 1 : 0, pass: true, issues: hard };
+        ctx.log(`motion_comic: Claude storyboard critic unavailable — candidate ${iter} remains blocked before paid rendering`);
+        return unavailableStoryboardCriticVerdict(hard);
       }
       const issues = [...hard, ...graded.issues].slice(0, 8);
       const pass = graded.pass && hard.length === 0;
@@ -352,6 +340,12 @@ async function planComicWithCritique(
     },
   });
 
+  assertStoryboardCritiqueApproved({
+    label: "motion_comic",
+    accepted: loop.accepted,
+    score: loop.critique.score,
+    issues: loop.critique.issues,
+  });
   const plan = loop.value;
   if (!plan.panels.length) throw new Error("motion_comic: storyboard writer returned no panels");
   ctx.log(

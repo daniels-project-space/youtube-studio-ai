@@ -44,10 +44,13 @@ import {
   type LoreClipRequest,
   type LorePlan,
 } from "@/lib/loreshort";
-import { geminiJson } from "@/lib/gemini";
+import {
+  assertStoryboardCritiqueApproved,
+  critiqueStoryboardText,
+  unavailableStoryboardCriticVerdict,
+} from "@/lib/storyboardCritic";
 import { synthNarration } from "@/lib/tts";
 import {
-  channelCritiqueBrief,
   produceAndCritique,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
@@ -79,7 +82,7 @@ async function recordAsset(ctx: StageContext, kind: string, r2Key: string, meta?
   }
 }
 
-const LORE_STORY_CHECKPOINT_VERSION = "lore-short-story/v1";
+const LORE_STORY_CHECKPOINT_VERSION = "lore-short-story/v2";
 
 /** ~6s of screen time per beat is the engine's own pacing (145 LTX frames @ 24fps). */
 export const LORE_SECONDS_PER_BEAT = 6;
@@ -114,8 +117,8 @@ function loreCritiqueChannel(ctx: StageContext): ChannelCritiqueContext {
 
 /**
  * Subjective grade from the Director. Returns null when the grader is
- * unavailable so the caller accepts rather than blind-spending another
- * iteration or failing the run on a transient LLM outage.
+ * unavailable so the caller retries only text planning and fails closed before
+ * any paid render is authorized.
  */
 async function gradeLoreStory(args: {
   plan: LorePlan;
@@ -124,45 +127,26 @@ async function gradeLoreStory(args: {
   channel: ChannelCritiqueContext;
 }): Promise<{ score: number; pass: boolean; issues: string[] } | null> {
   const scenes = args.plan.scenes ?? [];
-  try {
-    const verdict = await geminiJson<{ score?: unknown; pass?: unknown; issues?: unknown }>({
-      prompt:
-        `You are the DIRECTOR reviewing a first-person lore micro-documentary beat sheet for "${args.topic}" BEFORE any ` +
-        `paid art, narration or video clip is bought. Every beat costs a painting AND an AI camera move — reject a ` +
-        `beat sheet that would waste them.\n` +
-        channelCritiqueBrief(args.channel) +
-        `\nNARRATOR: ${args.narrator}\n` +
-        `\nTHE BEAT SHEET (${scenes.length} beats):\n` +
-        scenes
-          .map((scene, index) =>
-            `${index + 1}. SAYS: ${scene.line}\n   SHOT: ${scene.shot ?? "(unset)"}\n   PAINTS: ${scene.visual}\n   CAMERA: ${scene.camera}`,
-          )
-          .join("\n") +
-        `\n\nJudge ONLY these: (a) the beats form ONE arc that BUILDS — calm opening, rising tension, a climax, a cold ` +
-        `resolution — rather than a list of facts; (b) the narration is genuinely in FIRST PERSON and in the named ` +
-        `narrator's voice throughout, never slipping into a neutral documentary register; (c) each "PAINTS" describes a ` +
-        `concrete, drawable moment in THREE separated depth planes (a close foreground occluder, a midground subject, a ` +
-        `deep background), because a camera move with no depth to travel through renders as a dead pan; (d) each ` +
-        `"CAMERA" move genuinely travels through that depth and the moves VARY across beats; (e) the wording stays ` +
-        `generic and non-trademarked — a named franchise, brand or character will be refused by the image model and ` +
-        `waste the beat.\n` +
-        `Return STRICT JSON {"score":0.0,"pass":true,"issues":["..."]}. Each issue must name the beat number and give a ` +
-        `concrete instruction the writer can act on. Use [] when the beat sheet passes.`,
-      maxTokens: 1200,
-      temperature: 0.2,
-    });
-    const score = Number(verdict.score);
-    const issues = Array.isArray(verdict.issues)
-      ? verdict.issues.map((issue) => String(issue ?? "").trim()).filter(Boolean).slice(0, 6)
-      : [];
-    return {
-      score: Number.isFinite(score) ? Math.min(1, Math.max(0, score)) : 0.5,
-      pass: verdict.pass === true,
-      issues,
-    };
-  } catch {
-    return null;
-  }
+  return critiqueStoryboardText({
+    label: "first-person lore micro-documentary beat sheet",
+    topic: args.topic,
+    channel: args.channel,
+    costWarning: "Every beat costs a painting and an AI camera move — reject a beat sheet that would waste them.",
+    candidate:
+      `NARRATOR: ${args.narrator}\n` +
+      `THE BEAT SHEET (${scenes.length} beats):\n` +
+      scenes
+        .map((scene, index) =>
+          `${index + 1}. SAYS: ${scene.line}\n   SHOT: ${scene.shot ?? "(unset)"}\n   PAINTS: ${scene.visual}\n   CAMERA: ${scene.camera}`,
+        )
+        .join("\n"),
+    rubric:
+      "Judge only: (a) the beats form one arc that builds through opening, rising tension, climax, and cold resolution rather than a list of facts; " +
+      "(b) narration remains genuinely first person in the named narrator's voice; " +
+      "(c) every PAINTS field describes a concrete drawable moment in three separated depth planes so the camera has depth to travel through; " +
+      "(d) CAMERA moves genuinely travel through that depth and vary across beats; and " +
+      "(e) wording stays generic and non-trademarked so it will not waste an image render.",
+  });
 }
 
 function storyCheckpointKey(ctx: StageContext, inputs: unknown): string {
@@ -226,8 +210,8 @@ async function planLoreWithCritique(
       const hard = loreStoryDefects(plan, brief.nScenes);
       const graded = await gradeLoreStory({ plan, topic: brief.topic, narrator: brief.narrator, channel });
       if (!graded) {
-        ctx.log(`lore_short: story grader unavailable — accepting candidate ${iter} on deterministic checks alone`);
-        return { score: iter === 1 ? 1 : 0, pass: true, issues: hard };
+        ctx.log(`lore_short: Claude story critic unavailable — candidate ${iter} remains blocked before paid rendering`);
+        return unavailableStoryboardCriticVerdict(hard);
       }
       const issues = [...hard, ...graded.issues].slice(0, 8);
       const pass = graded.pass && hard.length === 0;
@@ -242,6 +226,12 @@ async function planLoreWithCritique(
     },
   });
 
+  assertStoryboardCritiqueApproved({
+    label: "lore_short",
+    accepted: loop.accepted,
+    score: loop.critique.score,
+    issues: loop.critique.issues,
+  });
   const plan = loop.value;
   if (!plan.scenes?.length) throw new Error("lore_short: story writer returned no beats");
   ctx.log(
@@ -264,7 +254,7 @@ export const loreShort: Block = {
   paid: true,
   run: async (ctx) => {
     if (!hasLoreShort() || !hasNovitaRenderFarmConfig()) {
-      throw new Error("lore_short: Gemini plus the attested Novita render farm are required (no fallback)");
+      throw new Error("lore_short: the configured lore planner plus the attested Novita render farm are required (no fallback)");
     }
     const topic = String(ctx.store["topic"] ?? "");
     if (!topic) throw new Error("lore_short: no topic in store");

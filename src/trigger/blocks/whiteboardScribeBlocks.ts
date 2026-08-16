@@ -38,9 +38,12 @@ import {
   type WhiteboardStoryboard,
   type WhiteboardSyncBrief,
 } from "@/lib/whiteboardSync";
-import { geminiJson } from "@/lib/gemini";
 import {
-  channelCritiqueBrief,
+  assertStoryboardCritiqueApproved,
+  critiqueStoryboardText,
+  unavailableStoryboardCriticVerdict,
+} from "@/lib/storyboardCritic";
+import {
   produceAndCritique,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
@@ -127,9 +130,9 @@ function run(cmd: string, args: string[], log: (msg: string) => void): Promise<v
  *     Trigger retry reloads that exact board, runs ZERO critique calls, and
  *     re-uses the runDir's index-keyed art instead of buying it again.
  *   - Hard cap of 2 iterations (one informed retry), lane-tunable downward.
- *   - Grader outage accepts the current board rather than looping or failing.
+ *   - Critic outage gets only the bounded text retry, then blocks before paid rendering.
  */
-const SCRIBE_STORYBOARD_CHECKPOINT_VERSION = "whiteboard-scribe-storyboard/v1";
+const SCRIBE_STORYBOARD_CHECKPOINT_VERSION = "whiteboard-scribe-storyboard/v2";
 
 /** The whiteboard renderer hand-letters every word; art asking for text fights it. */
 const TEXT_IN_ART = /\b(text|caption|subtitle|title|lettering|letters|word|words|label|logo|watermark|signage|handwriting|number|numbers)\b/i;
@@ -222,56 +225,41 @@ export function whiteboardStoryboardDefects(
 
 /**
  * Subjective grade from the Director, grounded in this channel's doctrine.
- * Returns null when the grader is unavailable so the caller can accept rather
- * than blind-spend another iteration.
+ * Returns null when the critic is unavailable; the caller then retries only
+ * text planning and blocks paid rendering unless an approval is obtained.
  */
 async function gradeStoryboard(args: {
   plan: WhiteboardStoryboard;
   topic: string;
   channel: ChannelCritiqueContext;
 }): Promise<{ score: number; pass: boolean; issues: string[] } | null> {
-  try {
-    const verdict = await geminiJson<{ score?: unknown; pass?: unknown; issues?: unknown }>({
-      prompt:
-        `You are the DIRECTOR reviewing a whiteboard-explainer storyboard for "${args.topic}" BEFORE any paid art or narration is bought. ` +
-        `Drawing this board is expensive and irreversible — reject a board that would waste it.\n` +
-        channelCritiqueBrief(args.channel) +
-        `\nTITLE: ${args.plan.title}\n` +
-        `\nTHE STORYBOARD (${args.plan.panels.length} panels):\n` +
-        args.plan.panels
-          .map((panel, index) =>
-            `${index + 1}. NARRATION: ${panel.narration}\n` +
-            panel.layers
-              .map((layer) =>
-                layer.kind === "art"
-                  ? `   DRAW "${layer.draw}" @ cue "${layer.cue}"`
-                  : `   LETTER "${layer.text}" @ cue "${layer.cue}"`,
-              )
-              .join("\n"),
-          )
-          .join("\n") +
-        `\n\nJudge ONLY these: (a) the panels build ONE coherent argument in order, each advancing it rather than restating; ` +
-        `(b) the narration is genuinely INFORMATIVE and accurate, not filler; ` +
-        `(c) each drawn layer illustrates the exact thing its cue names — a viewer would understand the point from the board alone; ` +
-        `(d) each panel's hero scene is a concrete, drawable composition, not an abstract idea; ` +
-        `(e) the labels letter the numbers/dates/terms that actually matter.\n` +
-        `Return STRICT JSON {"score":0.0,"pass":true,"issues":["..."]}. Each issue must name the panel number and give ` +
-        `a concrete instruction the writer can act on. Use [] when the storyboard passes.`,
-      maxTokens: 1200,
-      temperature: 0.2,
-    });
-    const score = Number(verdict.score);
-    const issues = Array.isArray(verdict.issues)
-      ? verdict.issues.map((issue) => String(issue ?? "").trim()).filter(Boolean).slice(0, 6)
-      : [];
-    return {
-      score: Number.isFinite(score) ? Math.min(1, Math.max(0, score)) : 0.5,
-      pass: verdict.pass === true,
-      issues,
-    };
-  } catch {
-    return null;
-  }
+  return critiqueStoryboardText({
+    label: "whiteboard-explainer storyboard",
+    topic: args.topic,
+    channel: args.channel,
+    costWarning: "Drawing this board is expensive and irreversible — reject a board that would waste it.",
+    candidate:
+      `TITLE: ${args.plan.title}\n` +
+      `THE STORYBOARD (${args.plan.panels.length} panels):\n` +
+      args.plan.panels
+        .map((panel, index) =>
+          `${index + 1}. NARRATION: ${panel.narration}\n` +
+          panel.layers
+            .map((layer) =>
+              layer.kind === "art"
+                ? `   DRAW "${layer.draw}" @ cue "${layer.cue}"`
+                : `   LETTER "${layer.text}" @ cue "${layer.cue}"`,
+            )
+            .join("\n"),
+        )
+        .join("\n"),
+    rubric:
+      "Judge only: (a) the panels build one coherent argument in order, each advancing it rather than restating; " +
+      "(b) the narration is genuinely informative and accurate, not filler; " +
+      "(c) each drawn layer illustrates the exact thing its cue names so the board stands on its own; " +
+      "(d) each panel's hero scene is a concrete drawable composition, not an abstract idea; and " +
+      "(e) labels letter the numbers, dates, and terms that actually matter.",
+  });
 }
 
 function storyboardCheckpointKey(ctx: StageContext, inputs: unknown): string {
@@ -342,8 +330,8 @@ async function planScribeWithCritique(
       const hard = whiteboardStoryboardDefects(plan, wantPanels, targetWords);
       const graded = await gradeStoryboard({ plan, topic: brief.topic, channel });
       if (!graded) {
-        ctx.log(`whiteboard_scribe: storyboard grader unavailable — accepting candidate ${iter} on deterministic checks alone`);
-        return { score: iter === 1 ? 1 : 0, pass: true, issues: hard };
+        ctx.log(`whiteboard_scribe: Claude storyboard critic unavailable — candidate ${iter} remains blocked before paid rendering`);
+        return unavailableStoryboardCriticVerdict(hard);
       }
       const issues = [...hard, ...graded.issues].slice(0, 8);
       const pass = graded.pass && hard.length === 0;
@@ -358,6 +346,12 @@ async function planScribeWithCritique(
     },
   });
 
+  assertStoryboardCritiqueApproved({
+    label: "whiteboard_scribe",
+    accepted: loop.accepted,
+    score: loop.critique.score,
+    issues: loop.critique.issues,
+  });
   const plan = loop.value;
   if (!plan.panels.length) throw new Error("whiteboard_scribe: storyboard writer returned no panels");
   ctx.log(
