@@ -13,6 +13,9 @@ for (const key of ["NOVITA_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
 const unexpectedArgs = process.argv.slice(2).filter((arg) => arg !== "--apply");
 if (unexpectedArgs.length) throw new Error("usage: node scripts/cleanup-ltx-volume.mjs [--apply]");
 const apply = process.argv.includes("--apply");
+const CURRENT_LTX_RUNTIME_SHA256 = process.env.NOVITA_CURRENT_LTX_RUNTIME_SHA256
+  || "ff616214c4a8901f003a1ef0815220d596f709eeb5027fb575b643a97e11c579";
+if (!/^[a-f0-9]{64}$/.test(CURRENT_LTX_RUNTIME_SHA256)) throw new Error("current LTX runtime SHA-256 is invalid");
 const nonce = crypto.randomBytes(12).toString("hex");
 const bucket = process.env.R2_BUCKET || "youtube-studio-ai";
 const receiptKey = `novita/cleanup/ltx-volume-${nonce}.json`;
@@ -25,6 +28,7 @@ const s3 = new S3Client({
 const script = String.raw`import json,os,pathlib,shutil,subprocess,urllib.request
 root=pathlib.Path('/network').resolve()
 apply=${apply ? "True" : "False"}
+current_runtime='ltx-2.5-${CURRENT_LTX_RUNTIME_SHA256}'
 def disk_rows():
   output=subprocess.run(['du','-x','-B1','-d','2',str(root)],check=True,text=True,capture_output=True).stdout
   rows=[]
@@ -44,6 +48,7 @@ def candidate_rows(rows):
     reason=None
     if any('ltx-2.3' in part or 'ltx23' in part for part in pieces): reason='obsolete_ltx_2_3'
     if len(pieces)==2 and pieces[0]=='.staging' and pieces[1].startswith('ltx-2.5-'): reason='abandoned_ltx_2_5_stage'
+    if len(pieces)==2 and pieces[0]=='runtime' and pieces[1].startswith('ltx-2.5-') and pieces[1]!=current_runtime: reason='superseded_ltx_2_5_runtime'
     if reason: candidates.append({**row,'reason':reason})
   return candidates
 usage=shutil.disk_usage(root)
@@ -63,7 +68,7 @@ payload=json.dumps({
   'contract':'ltx-volume-inventory/v2','ok':True,'apply':apply,
   'disk':{'total':usage.total,'used':usage.used,'free':usage.free},
   'largest':rows,'candidates':candidates,'removed':removed,
-  'preserved':['/network/loras','/network/models/z-image','/network/runtime/ltx-2.5-*'],
+  'preserved':['/network/loras','/network/models/z-image','/network/runtime/'+current_runtime],
 },separators=(',',':')).encode()
 request=urllib.request.Request(os.environ['VOLUME_RECEIPT_URL'],data=payload,method='PUT',headers={'Content-Type':'application/json','Content-Length':str(len(payload))})
 urllib.request.urlopen(request,timeout=120).read()`;
