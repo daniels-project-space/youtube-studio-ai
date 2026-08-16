@@ -212,6 +212,21 @@ const headers = {
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 
+async function sendR2(operation, label) {
+  let lastError;
+  for (let attempt = 1; attempt <= 2; attempt += 1) {
+    try {
+      return await s3.send(operation(), { abortSignal: AbortSignal.timeout(45_000) });
+    } catch (error) {
+      lastError = error;
+      if (attempt === 2) break;
+      console.error(JSON.stringify({ event: "benchmark_r2_retry", label, attempt }));
+      await sleep(1_000);
+    }
+  }
+  throw new Error(`R2 ${label} failed after bounded retry: ${String(lastError?.message || lastError)}`);
+}
+
 async function novita(path, init = {}) {
   const response = await fetch(`${API}${path}`, {
     ...init,
@@ -224,7 +239,7 @@ async function novita(path, init = {}) {
 }
 
 async function objectBytes(key) {
-  const item = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: key }));
+  const item = await sendR2(() => new GetObjectCommand({ Bucket: bucket, Key: key }), `get:${key}`);
   return Buffer.from(await item.Body.transformToByteArray());
 }
 
@@ -238,12 +253,12 @@ async function jsonIfPresent(key) {
 }
 
 async function putJson(key, value) {
-  await s3.send(new PutObjectCommand({
+  await sendR2(() => new PutObjectCommand({
     Bucket: bucket,
     Key: key,
     Body: JSON.stringify(value),
     ContentType: "application/json",
-  }));
+  }), `put:${key}`);
 }
 
 async function signedGet(key, expiresIn = URL_TTL_SECONDS) {
@@ -274,7 +289,7 @@ async function deleteAndVerify(instanceId) {
 }
 
 async function ensureBundlePresent() {
-  const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: RUNTIME_BUNDLE_KEY }));
+  const head = await sendR2(() => new HeadObjectCommand({ Bucket: bucket, Key: RUNTIME_BUNDLE_KEY }), "head:runtime-bundle");
   if (!head.ContentLength || head.ContentLength < 1) throw new Error("sealed LTX runtime bundle is unavailable");
 }
 
@@ -308,7 +323,7 @@ except Exception as error:
 body=json.dumps(payload,separators=(',',':')).encode()
 request=urllib.request.Request(os.environ['PROBE_RECEIPT_URL'],data=body,method='PUT',headers={'Content-Type':'application/json','Content-Length':str(len(body))})
 urllib.request.urlopen(request,timeout=120).read()`;
-  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: scriptKey, Body: script, ContentType: "text/x-python" }));
+  await sendR2(() => new PutObjectCommand({ Bucket: bucket, Key: scriptKey, Body: script, ContentType: "text/x-python" }), "put:zimage-probe");
   const [scriptUrl, receiptUrl] = await Promise.all([
     signedGet(scriptKey),
     signedPut(receiptKey, "application/json"),
@@ -444,7 +459,8 @@ async function executePhase({ phase, manifest, manifestKey, completionKey, maxRu
   const manifestUrl = await signedGet(manifestKey);
   const runtimeUrl = await signedGet(RUNTIME_BUNDLE_KEY);
   const bootstrapKey = `${root}/${phase}/control/runtime-bootstrap.py`;
-  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: bootstrapKey, Body: runtimeBootstrapSource(), ContentType: "text/x-python" }));
+  console.error(JSON.stringify({ event: "benchmark_stage", stage: `upload_${phase}_bootstrap` }));
+  await sendR2(() => new PutObjectCommand({ Bucket: bucket, Key: bootstrapKey, Body: runtimeBootstrapSource(), ContentType: "text/x-python" }), `put:${phase}-bootstrap`);
   const bootstrapUrl = await signedGet(bootstrapKey);
   const request = buildWorkerRequest({
     name: `yt-render-ltx25-benchmark-${phase}-${nonce.slice(0, 10)}`,
@@ -489,7 +505,7 @@ async function outputSha256(key) {
 
 async function assertArtifacts(manifest) {
   for (const job of manifest.jobs) {
-    const head = await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: job.artifact.key }));
+    const head = await sendR2(() => new HeadObjectCommand({ Bucket: bucket, Key: job.artifact.key }), `head:${job.id}`);
     const metadata = head.Metadata || {};
     if (!head.ContentLength || metadata["manifest-id"] !== manifest.manifestId || metadata["profile-sha256"] !== manifest.profileSha256 || metadata["job-id"] !== job.id) {
       throw new Error(`artifact metadata is incomplete for ${job.id}`);
