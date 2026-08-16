@@ -32,12 +32,19 @@ export function assertNarrationPerformanceEvidence(value: unknown): NarrationPer
   if (raw.version !== NARRATION_PERFORMANCE_EVIDENCE_VERSION || raw.source !== "local_ffmpeg") {
     throw new Error("narration performance evidence must be a current local_ffmpeg receipt");
   }
+  const durationSec = number("durationSec", 1.5, 86_400);
+  const wordCount = number("wordCount", 3, 1_000_000);
+  const wordsPerSec = number("wordsPerSec", 0.05, 20);
+  const expectedWordsPerSec = wordCount / durationSec;
+  if (Math.abs(wordsPerSec - expectedWordsPerSec) > Math.max(0.02, expectedWordsPerSec * 0.02)) {
+    throw new Error("narration performance evidence wordsPerSec does not bind its wordCount and durationSec");
+  }
   return {
     version: NARRATION_PERFORMANCE_EVIDENCE_VERSION,
     source: "local_ffmpeg",
-    durationSec: number("durationSec", 1.5, 86_400),
-    wordCount: number("wordCount", 3, 1_000_000),
-    wordsPerSec: number("wordsPerSec", 0.05, 20),
+    durationSec,
+    wordCount,
+    wordsPerSec,
     integratedLufs: number("integratedLufs", -36, -6),
     windowMeanDb: number("windowMeanDb", -48, -3),
   };

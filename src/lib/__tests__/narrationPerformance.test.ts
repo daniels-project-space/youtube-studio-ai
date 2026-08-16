@@ -31,10 +31,26 @@ async function main(): Promise<void> {
     () => assertNarrationPerformanceEvidence({ ...evidence, source: "untrusted" }),
     /current local_ffmpeg receipt/,
   );
+  assert.throws(
+    () => assertNarrationPerformanceEvidence({ ...evidence, wordsPerSec: evidence.wordsPerSec + 1 }),
+    /does not bind its wordCount and durationSec/,
+    "a stale or substituted rate may not masquerade as final-audio evidence",
+  );
 
   await assert.rejects(
     preflightNarrationPerformance({ audioPath, text: "word ".repeat(180), speed: 1 }),
     /implausible delivery duration/,
+  );
+
+  const silentAudioPath = join(directory, "silent-take.wav");
+  execFileSync("ffmpeg", [
+    "-y", "-f", "lavfi", "-i", "anullsrc=channel_layout=mono:sample_rate=44100",
+    "-t", "4", silentAudioPath,
+  ], { stdio: "ignore" });
+  await assert.rejects(
+    preflightNarrationPerformance({ audioPath: silentAudioPath, text, speed: 1 }),
+    /integrated loudness|speech-window mean/,
+    "a final narration with an audio stream but no audible content must fail closed",
   );
 
   const sentences = [
