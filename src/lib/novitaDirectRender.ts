@@ -663,13 +663,19 @@ with lock.open('a+b') as handle:
         if target!=stage and stage not in target.parents: raise RuntimeError('runtime archive path escapes staging root')
         if not (member.isdir() or member.isfile() or member.issym() or member.islnk()): raise RuntimeError('runtime archive has unsupported member type')
       for member in archive.getmembers(): archive.extract(member,stage)
-    # The sealed image has an absolute /opt/uv Python target. Relocate only
-    # in-archive /opt links so the runtime remains self-contained on /network.
+    # The old sealed archive omitted uv's CPython installation although its
+    # virtual environment points at it. Recreate only that pinned interpreter
+    # inside this immutable runtime root, then relocate in-archive /opt links.
     for link in stage.rglob('*'):
       if not link.is_symlink(): continue
       destination=os.readlink(link)
       if not destination.startswith('/opt/'): continue
       relocated=stage/destination.lstrip('/')
+      if not relocated.exists() and destination.startswith('/opt/uv/python/'):
+        import subprocess,sys
+        environment=dict(os.environ,UV_PYTHON_INSTALL_DIR=str(stage/'opt/uv/python'),UV_NO_CACHE='1')
+        subprocess.run([sys.executable,'-m','pip','install','--no-cache-dir','uv==0.10.6'],check=True,stdout=subprocess.DEVNULL)
+        subprocess.run(['uv','python','install','3.12.12'],check=True,env=environment,stdout=subprocess.DEVNULL)
       if not relocated.exists(): raise RuntimeError('runtime archive has unresolved /opt symlink')
       link.unlink()
       link.symlink_to(os.path.relpath(relocated,link.parent))
