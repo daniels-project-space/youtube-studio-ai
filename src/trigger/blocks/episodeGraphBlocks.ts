@@ -22,6 +22,11 @@ import {
 } from "@/engine/syntheticScenario";
 import { resolveContentLane } from "@/engine/contentLane";
 import { assertCurriculumEpisodeSeedForStoryInput } from "@/engine/curriculumEpisodeSeed";
+import {
+  assertEvidenceVisualManifest,
+  assertEvidenceVisualManifestCollection,
+  type EvidenceVisualManifest,
+} from "@/engine/evidenceVisualManifest";
 import { StorySpineSchema, type StorySpine } from "@/engine/storySpine";
 import type { Block } from "@/engine/types";
 
@@ -85,6 +90,44 @@ function storySpineFromStore(store: Record<string, unknown>): StorySpine {
   });
 }
 
+/**
+ * A reviewed factual visual is an editorial input, never something the graph
+ * planner invents. Bind it to its exact deterministic scene and the timed
+ * sentences that scene already owns before it enters the renderer ABI.
+ */
+function sceneEvidenceVisualsForStorySpine(
+  value: unknown,
+  storySpine: StorySpine,
+): Map<string, EvidenceVisualManifest> {
+  if (value === undefined) return new Map();
+  const manifests = assertEvidenceVisualManifestCollection(value);
+  const sentencesBySceneId = new Map(
+    storySpine.narrativeBeats.map((beat) => [
+      `scene-${beat.id.slice("beat-".length)}`,
+      beat.sourceSentenceIds,
+    ]),
+  );
+  const bySceneId = new Map<string, EvidenceVisualManifest>();
+
+  for (const manifest of manifests) {
+    // A shared reviewed collection may also contain timeline data inserts. The
+    // Episode Graph owns only Scene Compiler manifests; insertBlocks retains
+    // ownership of the other surface.
+    if (manifest.surface !== "scene_compiler") continue;
+    const sceneId = manifest.targetSceneId;
+    const narrationSentenceIds = sceneId ? sentencesBySceneId.get(sceneId) : undefined;
+    if (!sceneId || !narrationSentenceIds) {
+      throw new Error(`episode_graph: evidence visual ${manifest.id} targets a scene outside this Story Spine`);
+    }
+    if (bySceneId.has(sceneId)) {
+      throw new Error(`episode_graph: multiple evidence visuals target ${sceneId}`);
+    }
+    assertEvidenceVisualManifest(manifest, { sceneId, narrationSentenceIds });
+    bySceneId.set(sceneId, manifest);
+  }
+  return bySceneId;
+}
+
 /** Pure bridge used by the runtime and test suite. */
 export function buildEpisodeGraphFromStorySpine(args: {
   storySpine: StorySpine;
@@ -95,6 +138,8 @@ export function buildEpisodeGraphFromStorySpine(args: {
   curriculumLabel?: string;
   curriculumLocator?: string;
   syntheticScenario?: SyntheticScenarioContract;
+  /** Fresh reviewed factual visuals for this supervised episode only. */
+  evidenceVisualManifests?: unknown;
 }): { episodeGraph: EpisodeGraph; sceneManifest: SceneManifest } {
   const storySpine = StorySpineSchema.parse(args.storySpine);
   const audience = args.audience ?? "general";
@@ -134,6 +179,10 @@ export function buildEpisodeGraphFromStorySpine(args: {
   const syntheticScenario = args.syntheticScenario
     ? assertSyntheticScenarioContract(args.syntheticScenario)
     : undefined;
+  const sceneEvidenceVisuals = sceneEvidenceVisualsForStorySpine(args.evidenceVisualManifests, storySpine);
+  if (syntheticScenario && sceneEvidenceVisuals.size > 0) {
+    throw new Error("episode_graph: reviewed factual visuals cannot be combined with a fictional synthetic scenario");
+  }
   const beats = storySpine.narrativeBeats.map((beat, index) => {
     const shots = shotsByBeat.get(beat.id) ?? [];
     const leadShot = shots[0];
@@ -145,6 +194,7 @@ export function buildEpisodeGraphFromStorySpine(args: {
     const learningObjective = audience === "children"
       ? `Practice one clear, kind idea about ${args.topic.trim()}.`
       : undefined;
+    const evidenceVisualManifest = sceneEvidenceVisuals.get(`scene-${beat.id.slice("beat-".length)}`);
     return {
       id: beat.id,
       kind: kindForPurpose(beat.purpose, index, storySpine.narrativeBeats.length, audience),
@@ -173,6 +223,12 @@ export function buildEpisodeGraphFromStorySpine(args: {
                 storySpine.narrativeBeats.length,
                 beat.purpose,
               ),
+            }
+          : {}),
+        ...(evidenceVisualManifest
+          ? {
+              evidenceVisualIntent: evidenceVisualManifest.visualKind === "chart" ? "factual_chart" as const : "factual_geo" as const,
+              evidenceVisualManifest,
             }
           : {}),
       },
@@ -246,6 +302,7 @@ const episodeGraph: Block = {
       syntheticScenario: ctx.store["syntheticScenario"] !== undefined
         ? assertSyntheticScenarioContract(ctx.store["syntheticScenario"])
         : undefined,
+      evidenceVisualManifests: ctx.store["evidenceVisualManifests"],
     });
     ctx.log(
       `episode_graph: ${episodeGraph.beats.length} source-grounded beats → ${sceneManifest.scenes.length} deterministic scenes (provider calls: 0)`,

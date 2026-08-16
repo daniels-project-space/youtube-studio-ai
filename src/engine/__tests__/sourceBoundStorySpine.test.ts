@@ -12,6 +12,7 @@ import { artifactContract, validateArtifact } from "@/engine/artifactSchemas";
 import { _resetBlocks, registerAllBlocks } from "@/engine/blocks";
 import { get } from "@/engine/registry";
 import {
+  assertSourceBoundNarrationAlignment,
   createSourceBoundStorySpineHandoff,
   validateSourceBoundStorySpineHandoff,
 } from "@/engine/sourceBoundStorySpine";
@@ -198,6 +199,41 @@ async function main(): Promise<void> {
   assert.deepEqual(handoff.claimBindings[0]?.storySpineShotIds, storySpine.shotList.map((shot) => shot.id));
   assert.deepEqual(handoff.claimBindings[0]?.storySpineSentenceIds, ["sentence-0001"]);
   assert.equal(validateSourceBoundStorySpineHandoff(handoff).storySpineFingerprint, handoff.storySpineFingerprint);
+  assert.equal(
+    assertSourceBoundNarrationAlignment({
+      sourceBoundStorySpine: handoff,
+      narrationDurationSec: 12,
+      sentenceTimings: [{
+        text: "The court finding ordered the ledger room closed.",
+        start: 0,
+        end: 12,
+      }],
+    }).caseId,
+    sourcePacket.caseId,
+    "the final narration must retain the exact reviewed Story Spine",
+  );
+  assert.throws(
+    () => assertSourceBoundNarrationAlignment({
+      sourceBoundStorySpine: handoff,
+      narrationDurationSec: 12,
+      sentenceTimings: [{ text: "A substituted narration changes the case.", start: 0, end: 12 }],
+    }),
+    /text does not match the reviewed timed Story Spine/,
+    "a different narration must not inherit reviewed cinematic coverage",
+  );
+  assert.throws(
+    () => assertSourceBoundNarrationAlignment({
+      sourceBoundStorySpine: handoff,
+      narrationDurationSec: 12,
+      sentenceTimings: [{
+        text: "The court finding ordered the ledger room closed.",
+        start: 0,
+        end: 10,
+      }],
+    }),
+    /timing does not match the reviewed timed Story Spine/,
+    "a retimed narration must regenerate the causal-cut plan",
+  );
   const artifact = artifactContract("sourceBoundStorySpine");
   assert.equal(artifact.opaque, false, "the handoff must cross the store through a typed contract");
   assert.equal((validateArtifact(artifact, handoff) as { caseId: string }).caseId, sourcePacket.caseId);

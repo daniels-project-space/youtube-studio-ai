@@ -574,5 +574,25 @@ export function compileSceneManifest(value: unknown, storySpine?: StorySpine): S
   });
 }
 
+/**
+ * Proves that a renderer handoff is the exact deterministic compilation of the
+ * reviewed Episode Graph. A manifest fingerprint is intentionally the graph
+ * fingerprint for idempotency, so checking the fingerprint alone cannot catch
+ * a post-review scene edit that leaves that field unchanged.
+ */
+export function assertSceneManifestMatchesEpisodeGraph(
+  sceneManifest: unknown,
+  episodeGraph: unknown,
+): SceneManifest {
+  const actual = assertSceneManifest(sceneManifest);
+  const expected = compileSceneManifest(episodeGraph);
+  if (canonicalJson(actual) !== canonicalJson(expected)) {
+    throw new Error(
+      "scene manifest does not exactly match the reviewed Episode Graph; recompile it before rendering or review",
+    );
+  }
+  return actual;
+}
+
 /** Compatibility alias for early callers; new code should use compileSceneManifest. */
 export const compileEpisodeGraph = compileSceneManifest;

@@ -13,6 +13,11 @@ import { assertChildContentSafety } from "@/trigger/blocks/childrenSafetyBlocks"
 import { assertSceneCompilerAdmission } from "@/trigger/blocks/sceneCompilerBlocks";
 import { assertLearningContract, buildLearningContract } from "@/engine/learningContract";
 import { contentLaneForFamily } from "@/engine/contentLane";
+import { sceneKindFor } from "@/remotion/sceneCompiler/SceneCompiler";
+import {
+  evidenceVisualManifestFingerprint,
+  type EvidenceVisualManifest,
+} from "@/engine/evidenceVisualManifest";
 
 const graphInput = {
   seriesId: "series-curious-lantern",
@@ -215,6 +220,81 @@ const bridgedChildren = buildEpisodeGraphFromStorySpine({
 });
 assert.equal(bridgedChildren.episodeGraph.audience, "children");
 assert.equal(bridgedChildren.sceneManifest.externalProviderCalls, 0);
+
+// A reviewed factual visual must travel through the real Episode Graph bridge,
+// not remain a valid-but-orphaned artifact. The Scene Compiler consumes the
+// resulting graph-owned manifest and still validates the exact scene/sentence
+// attachment on its own boundary.
+const factualStorySpine = structuredClone(storySpine);
+factualStorySpine.timedScript.sentences[0].text = "According to Seed Atlas, 20 seeds sprouted in week one and 35 in week two.";
+const factualVisualBase = {
+  version: "evidence-visual-manifest/v1" as const,
+  id: "visual-seed-sprout-trend",
+  visualKind: "chart" as const,
+  surface: "scene_compiler" as const,
+  targetSceneId: "scene-opening",
+  sources: [{
+    id: "source-seed-atlas",
+    name: "Seed Atlas",
+    url: "https://example.org/seed-atlas",
+    snapshotSha256: "b".repeat(64),
+  }],
+  narrationAnchors: [{
+    id: "anchor-seed-sprout-trend",
+    sentenceId: "sentence-opening",
+    startSec: 0,
+    endSec: 6,
+    spokenText: factualStorySpine.timedScript.sentences[0].text,
+    requiredAttribution: "Seed Atlas",
+    sourceIds: ["source-seed-atlas"],
+  }],
+  values: [
+    { id: "value-seeds-week-one", sourceId: "source-seed-atlas", narrationAnchorId: "anchor-seed-sprout-trend", role: "series" as const, value: 20, unit: "seeds", display: "20" },
+    { id: "value-seeds-week-two", sourceId: "source-seed-atlas", narrationAnchorId: "anchor-seed-sprout-trend", role: "series" as const, value: 35, unit: "seeds", display: "35" },
+  ],
+  attribution: { visibleText: "Seed Atlas", sourceIds: ["source-seed-atlas"] },
+};
+const factualVisual: EvidenceVisualManifest = {
+  ...factualVisualBase,
+  review: {
+    decision: "approved",
+    reviewerId: "editorial-data-desk",
+    reviewId: "review-seed-sprout-trend",
+    reviewedAt: new Date().toISOString(),
+    reviewedManifestFingerprint: evidenceVisualManifestFingerprint(factualVisualBase),
+  },
+};
+const bridgedFactual = buildEpisodeGraphFromStorySpine({
+  storySpine: factualStorySpine,
+  topic: "How seeds grow",
+  seriesId: "series-curious-lantern",
+  episodeId: "episode-how-seeds-grow-data",
+  evidenceVisualManifests: [factualVisual],
+});
+assert.equal(bridgedFactual.episodeGraph.beats[0].visualState.evidenceVisualIntent, "factual_chart");
+assert.equal(bridgedFactual.sceneManifest.scenes[0].visualState.evidenceVisualManifest?.id, factualVisual.id);
+assert.equal(sceneKindFor(bridgedFactual.sceneManifest.scenes[0]), "chart");
+assert.equal(
+  assertSceneCompilerAdmission({
+    manifest: bridgedFactual.sceneManifest,
+    narrationDurationSec: 12,
+    aspect: "16:9",
+  }).fingerprint,
+  bridgedFactual.sceneManifest.fingerprint,
+);
+const wrongSceneEvidence = structuredClone(factualVisual);
+wrongSceneEvidence.targetSceneId = "scene-missing";
+wrongSceneEvidence.review.reviewedManifestFingerprint = evidenceVisualManifestFingerprint(wrongSceneEvidence);
+assert.throws(
+  () => buildEpisodeGraphFromStorySpine({
+    storySpine: factualStorySpine,
+    topic: "How seeds grow",
+    seriesId: "series-curious-lantern",
+    episodeId: "episode-how-seeds-grow-data",
+    evidenceVisualManifests: [wrongSceneEvidence],
+  }),
+  /targets a scene outside this Story Spine/,
+);
 const childrenLearningLane = contentLaneForFamily("children_learning");
 assert(childrenLearningLane);
 const childrenLessonContract = buildLearningContract(bridgedChildren.episodeGraph, childrenLearningLane);

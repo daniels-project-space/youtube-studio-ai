@@ -348,6 +348,26 @@ async function main(): Promise<void> {
   assert.equal(childSafety.allowedPublishMode, "draft");
   assert.equal(childSafety.childrenShowBibleFingerprint, admitted.bible.contentFingerprint);
 
+  // The manifest fingerprint deliberately equals the graph fingerprint for
+  // idempotency. It must not be treated as proof that scene content was not
+  // changed after child-editor review.
+  const postReviewEditedManifest = structuredClone(compileSceneManifest(graph));
+  postReviewEditedManifest.scenes[0].text =
+    "Tavi quietly arranges the blocks in a row without explaining the color-sorting problem.";
+  assert.throws(
+    () => assertChildContentSafety({
+      episodeGraph: graph,
+      sceneManifest: postReviewEditedManifest,
+      lessonContract,
+      contentLane: lane,
+      childrenShowBible: admitted.bible,
+      childrenShowBibleApproval: admitted.receipt,
+      curriculumEpisodeSeed: admittedCurriculumEpisodeSeed.seed,
+      curriculumEpisodeSeedApproval: admittedCurriculumEpisodeSeed.receipt,
+    }),
+    /does not exactly match the reviewed Episode Graph/,
+  );
+
   const logs: string[] = [];
   const patch = await childrenShowBibleBlocks[0].run({
     ownerId: "owner-test",

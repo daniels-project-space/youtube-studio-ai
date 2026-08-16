@@ -61,6 +61,7 @@ import {
   CinematicEditDecisionListSchema,
   cinematicCaseSequenceContentFingerprint,
 } from "@/engine/cinematicCaseSequence";
+import { assertSourceBoundNarrationAlignment } from "@/engine/sourceBoundStorySpine";
 import {
   assertCinematicAssemblyRoute,
   assertCinematicSequenceRenderBinding,
@@ -3101,6 +3102,14 @@ export const qaVisual: Block = {
         );
       }
       try {
+        // The visual plan can only earn its causal cuts if the master still
+        // speaks the exact reviewed Story Spine. Generic narration QA verifies
+        // audio against its own transcript; this closes the source-bound gap.
+        assertSourceBoundNarrationAlignment({
+          sourceBoundStorySpine: ctx.store["sourceBoundStorySpine"],
+          sentenceTimings: ctx.store["sentenceTimings"],
+          narrationDurationSec: target,
+        });
         cinematicFinalMasterSha256 = await sha256ShotAnalysisSource(video);
         const cinematicQaPlan = cinematicFinalMasterQaPlan({
           sequence: cinematicSequenceInput!,

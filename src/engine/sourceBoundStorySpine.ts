@@ -190,6 +190,59 @@ export function validateSourceBoundStorySpineHandoff(value: unknown): SourceBoun
 }
 
 /**
+ * Final narration must remain the exact timed argument the reviewed Casefile
+ * coverage was designed around.  Generic transcript QA can prove that a TTS
+ * take matches its own stored transcript; it cannot prove that a substituted
+ * transcript still matches this source-bound Story Spine.
+ */
+export function assertSourceBoundNarrationAlignment(args: {
+  sourceBoundStorySpine: unknown;
+  sentenceTimings: unknown;
+  narrationDurationSec: unknown;
+  timingToleranceSec?: number;
+}): SourceBoundStorySpineHandoff {
+  const handoff = validateSourceBoundStorySpineHandoff(args.sourceBoundStorySpine);
+  const sentenceTimings = z.array(z.object({
+    text: z.string().trim().min(1).max(4_000),
+    start: z.number().finite().min(0),
+    end: z.number().finite().positive(),
+  }).strict().refine((timing) => timing.end > timing.start, "narration sentence must end after it starts"))
+    .min(1)
+    .max(2_000)
+    .parse(args.sentenceTimings);
+  const narrationDurationSec = z.number().finite().positive().max(86_400).parse(args.narrationDurationSec);
+  const tolerance = Number.isFinite(args.timingToleranceSec)
+    ? Math.max(0.01, Math.min(0.75, Number(args.timingToleranceSec)))
+    : 0.12;
+  const expected = handoff.storySpine.timedScript;
+  if (Math.abs(expected.narrationDurationSec - narrationDurationSec) > tolerance) {
+    throw new Error(
+      "source-bound narration duration does not match the reviewed timed Story Spine; regenerate the cinematic sequence from the current narration",
+    );
+  }
+  if (expected.sentences.length !== sentenceTimings.length) {
+    throw new Error(
+      "source-bound narration sentence count does not match the reviewed timed Story Spine; do not substitute a new narration after cinematic approval",
+    );
+  }
+  for (let index = 0; index < expected.sentences.length; index++) {
+    const planned = expected.sentences[index]!;
+    const actual = sentenceTimings[index]!;
+    if (planned.text.trim() !== actual.text.trim()) {
+      throw new Error(
+        `source-bound narration sentence ${index + 1} text does not match the reviewed timed Story Spine`,
+      );
+    }
+    if (Math.abs(planned.t0 - actual.start) > tolerance || Math.abs(planned.t1 - actual.end) > tolerance) {
+      throw new Error(
+        `source-bound narration sentence ${index + 1} timing does not match the reviewed timed Story Spine`,
+      );
+    }
+  }
+  return handoff;
+}
+
+/**
  * Derives a private, source-bound handoff from already-admitted artifacts. No
  * new facts, prompts, or render decisions are generated. Every claim mapping
  * must project to one or more exact Story Spine shots, so a stale or

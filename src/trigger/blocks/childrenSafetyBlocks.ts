@@ -7,6 +7,7 @@
 import {
   assertEpisodeGraph,
   assertSceneManifest,
+  assertSceneManifestMatchesEpisodeGraph,
   childSafeTextDefects,
   episodeGraphFingerprint,
   type EpisodeGraph,
@@ -108,6 +109,7 @@ export function assertChildContentSafety(args: {
 }): ChildContentSafetyReceipt {
   const graph = assertEpisodeGraph(args.episodeGraph) as EpisodeGraph;
   const manifest = assertSceneManifest(args.sceneManifest) as SceneManifest;
+  assertSceneManifestMatchesEpisodeGraph(manifest, graph);
   if (graph.audience !== "children" || manifest.audience !== "children") {
     throw new Error("child_content_safety: graph and scene manifest must both declare children audience");
   }

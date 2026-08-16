@@ -461,7 +461,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // Casefile provenance, and now verifies renderer-declared readable text.
       // These remain optional because each is specific to a different lane.
       "narrationKey", "narrationLocalPath", "narrationTranscriptText", "onScreenTextCues",
-      "casefileEvidenceShotMapAdmission", "casefileSourceAdmission",
+      "casefileEvidenceShotMapAdmission", "casefileSourceAdmission", "sourceBoundStorySpine",
     ],
     providerProfiles: [managed, local],
     // The exact receipt narrows this before Novita starts. Preserve the normal
@@ -511,7 +511,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "topic", "timedScript", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs", "editorEdl", "storyCoverage",
     ],
     optionalConsumes: [
-      "syntheticScenario", "contentLane", "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval",
+      "syntheticScenario", "contentLane", "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval", "evidenceVisualManifests",
     ],
     providerProfiles: [local],
     qualityRequired: true,
