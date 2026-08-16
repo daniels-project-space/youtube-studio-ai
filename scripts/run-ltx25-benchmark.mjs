@@ -241,7 +241,6 @@ async function sendR2(operation, label) {
 async function novita(path, init = {}) {
   const controller = new AbortController();
   const timeout = setTimeout(() => controller.abort(), 30_000);
-  timeout.unref?.();
   try {
   const response = await fetch(`${API}${path}`, {
     ...init,
@@ -493,6 +492,7 @@ async function executePhase({ phase, manifest, manifestKey, completionKey, maxRu
   request.envs.find((item) => item.key === "NOVITA_RUNTIME_BUNDLE_URL").value = runtimeUrl;
   request.envs.find((item) => item.key === "NOVITA_RUNTIME_BOOTSTRAP_URL").value = bootstrapUrl;
   delete request.__jobIds;
+  console.error(JSON.stringify({ event: "benchmark_stage", stage: `request_${phase}_worker` }));
   const created = await novita("/gpu/instance/create", { method: "POST", body: JSON.stringify(request) });
   const instanceId = String(created.id || "");
   if (!instanceId) throw new Error(`Novita did not return ${phase} benchmark worker identity`);
