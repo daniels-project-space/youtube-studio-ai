@@ -240,7 +240,10 @@ async function signedGet(key, expiresIn = URL_TTL_SECONDS) {
 
 async function signedPut(key, contentType, metadata = {}) {
   const command = new PutObjectCommand({ Bucket: bucket, Key: key, ContentType: contentType, Metadata: metadata });
-  return await getSignedUrl(s3, command, { expiresIn: URL_TTL_SECONDS });
+  return await getSignedUrl(s3, command, {
+    expiresIn: URL_TTL_SECONDS,
+    unhoistableHeaders: new Set(Object.keys(metadata).map((name) => `x-amz-meta-${name}`)),
+  });
 }
 
 async function deleteAndVerify(instanceId) {
