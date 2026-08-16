@@ -24,6 +24,10 @@ const ZIMAGE_MODEL = "Tongyi-MAI/Z-Image-Turbo";
 const ZIMAGE_REVISION = "f332072aa78be7aecdf3ee76d5c247082da564a6";
 const PRODUCT_ID = "4090.16c96g.v2";
 const CLUSTER_ID = "us-ca-nas-2";
+// Novita currently rejects this account's one-GPU instance creation despite
+// sufficient metered credit. This operator-only benchmark uses the provider's
+// admitted three-RTX-4090 minimum; the production renderer remains one GPU.
+const BENCHMARK_GPU_COUNT = 3;
 const VOLUME_ID = "384d629d-839f-4224-abef-64dfc2d751bf";
 const BASE_IMAGE = "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
 const RUNTIME_BUNDLE_KEY = process.env.NOVITA_RUNTIME_BUNDLE_KEY
@@ -62,7 +66,7 @@ function buildWorkerRequest({ name, manifestUrl, manifestSha256, jobIds }) {
     name,
     productId: PRODUCT_ID,
     clusterId: CLUSTER_ID,
-    gpuNum: 1,
+    gpuNum: BENCHMARK_GPU_COUNT,
     kind: "gpu",
     billingMode: "spot",
     imageUrl: BASE_IMAGE,
@@ -341,7 +345,7 @@ urllib.request.urlopen(request,timeout=120).read()`;
       name: `yt-render-ltx25-zprobe-${nonce.slice(0, 12)}`,
       productId: PRODUCT_ID,
       clusterId: CLUSTER_ID,
-      gpuNum: 1,
+      gpuNum: BENCHMARK_GPU_COUNT,
       kind: "gpu",
       billingMode: "spot",
       imageUrl: BASE_IMAGE,
@@ -485,7 +489,7 @@ async function executePhase({ phase, manifest, manifestKey, completionKey, maxRu
     while (Date.now() < deadline) {
       const completion = await jsonIfPresent(completionKey);
       if (completion?.status === "done") {
-        if (completion.manifestId !== manifest.manifestId || completion.gpuSku !== "RTX 4090" || completion.gpuCount !== 1) {
+        if (completion.manifestId !== manifest.manifestId || completion.gpuSku !== "RTX 4090" || completion.gpuCount !== BENCHMARK_GPU_COUNT) {
           throw new Error(`${phase} benchmark returned invalid GPU/manifest evidence`);
         }
         const expected = manifest.jobs.map((job) => job.id).sort();
@@ -542,7 +546,8 @@ async function main() {
   // but always budget in USD/hour.
   const spotRate = rawSpotRate > 10 ? rawSpotRate / 100_000 : rawSpotRate;
   if (!Number.isFinite(spotRate) || spotRate <= 0) throw new Error("Novita did not provide a usable RTX 4090 spot rate");
-  const remainingSeconds = Math.floor(((TOTAL_MAX_USD - STAGE_MAX_USD) / spotRate) * 3_600) - PROBE_MAX_SECONDS;
+  const effectiveSpotRate = spotRate * BENCHMARK_GPU_COUNT;
+  const remainingSeconds = Math.floor(((TOTAL_MAX_USD - STAGE_MAX_USD) / effectiveSpotRate) * 3_600) - PROBE_MAX_SECONDS;
   const phaseMaxSeconds = Math.min(DEFAULT_PHASE_MAX_SECONDS, Math.floor(remainingSeconds / 2));
   if (phaseMaxSeconds < 1_800) throw new Error("the $3 aggregate cap cannot fund the minimum bounded LTX benchmark window at the current spot rate");
 
@@ -582,7 +587,7 @@ async function main() {
   }));
   const report = {
     contract: "ltx-2.5-rtx4090-benchmark/v1", ok: true, nonce, ltxModelManifestKey,
-    stageMaxUsd: STAGE_MAX_USD, spotRateUsdPerHour: spotRate, phaseMaxSeconds,
+    stageMaxUsd: STAGE_MAX_USD, spotRateUsdPerHour: spotRate, benchmarkGpuCount: BENCHMARK_GPU_COUNT, phaseMaxSeconds,
     zImage: { model: ZIMAGE_MODEL, revision: ZIMAGE_REVISION, volumeReceipt: zProbe },
     ltx: { model: LTX_MODEL, revision: LTX_REVISION, pipeline: "distilled", stageOne: "640x352", output: "1280x704@25", quantization: "fp8-cast", offload: "cpu" },
     outputs: outputRows.map(({ id, key, proof }) => ({ id, key, proof })),
