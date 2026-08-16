@@ -136,7 +136,22 @@ def ensure_cuda_compatibility():
   evidence=subprocess.check_output([str(python),'-c',"import torch,torch.sparse;print(torch.__version__+'|'+str(torch.version.cuda)+'|'+str(torch.cuda.is_available()))"],text=True).strip()
   if evidence!='2.8.0+cu128|12.8|True': raise RuntimeError('CUDA-compatible Torch verification failed: '+evidence)
   compatibility.write_text('torch==2.8.0+cu128'+chr(10))
+def ensure_triton_toolchain():
+  cc=shutil.which('gcc') or shutil.which('cc')
+  cxx=shutil.which('g++') or shutil.which('c++')
+  if not cc or not cxx:
+    import subprocess
+    if os.geteuid()!=0: raise RuntimeError('Triton requires gcc/g++ but worker cannot install the verified toolchain')
+    environment=dict(os.environ,DEBIAN_FRONTEND='noninteractive')
+    subprocess.run(['apt-get','update','-qq'],check=True,env=environment,stdout=subprocess.DEVNULL)
+    subprocess.run(['apt-get','install','-y','--no-install-recommends','build-essential'],check=True,env=environment,stdout=subprocess.DEVNULL)
+    cc=shutil.which('gcc') or shutil.which('cc')
+    cxx=shutil.which('g++') or shutil.which('c++')
+  if not cc or not cxx: raise RuntimeError('Triton compiler toolchain is unavailable after verified install')
+  os.environ['CC']=cc
+  os.environ['CXX']=cxx
 def exec_worker():
+  ensure_triton_toolchain()
   project=str(root/'opt/LTX-2')
   package_paths=[
     project,
