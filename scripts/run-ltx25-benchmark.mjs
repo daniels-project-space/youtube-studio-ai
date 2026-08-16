@@ -221,6 +221,9 @@ const headers = {
 
 const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
+const responseData = (value) => value?.data && typeof value.data === "object" && !Array.isArray(value.data)
+  ? value.data : value;
+const responseId = (value) => String(value?.id ?? responseData(value)?.id ?? "");
 
 async function sendR2(operation, label) {
   let lastError;
@@ -367,7 +370,7 @@ urllib.request.urlopen(request,timeout=120).read()`;
       envs: [{ key: "PROBE_SCRIPT_URL", value: scriptUrl }, { key: "PROBE_RECEIPT_URL", value: receiptUrl }],
     }),
   });
-  const instanceId = String(created.id || "");
+  const instanceId = responseId(created);
   if (!instanceId) throw new Error("Novita did not return a Z-Image volume probe identity");
   activeWorkers.add(instanceId);
   try {
@@ -494,7 +497,7 @@ async function executePhase({ phase, manifest, manifestKey, completionKey, maxRu
   delete request.__jobIds;
   console.error(JSON.stringify({ event: "benchmark_stage", stage: `request_${phase}_worker` }));
   const created = await novita("/gpu/instance/create", { method: "POST", body: JSON.stringify(request) });
-  const instanceId = String(created.id || "");
+  const instanceId = responseId(created);
   if (!instanceId) throw new Error(`Novita did not return ${phase} benchmark worker identity`);
   activeWorkers.add(instanceId);
   try {

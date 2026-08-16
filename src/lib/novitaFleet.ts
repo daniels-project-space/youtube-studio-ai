@@ -652,13 +652,17 @@ export class NovitaGpuApiClient {
     for (let pageNum = 0; pageNum < 20; pageNum += 1) {
       const raw = await this.request(`/gpu/instances?pageSize=${pageSize}&pageNum=${pageNum}`);
       const envelope = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+      const data = envelope.data && typeof envelope.data === "object" && !Array.isArray(envelope.data)
+        ? envelope.data as Record<string, unknown>
+        : undefined;
       const page = Array.isArray(envelope.instances)
         ? envelope.instances
+        : Array.isArray(data?.instances) ? data.instances
         : Array.isArray(envelope.data) ? envelope.data : [];
       rows.push(...page.flatMap((value) => value && typeof value === "object"
         ? [value as Record<string, unknown>]
         : []));
-      const declaredTotal = Number(envelope.total ?? envelope.totalCount ?? NaN);
+      const declaredTotal = Number(envelope.total ?? envelope.totalCount ?? data?.total ?? data?.totalCount ?? NaN);
       if (page.length < pageSize || (Number.isFinite(declaredTotal) && (pageNum + 1) * pageSize >= declaredTotal)) {
         return rows;
       }
@@ -750,7 +754,10 @@ export class NovitaGpuApiClient {
       method: "POST",
       body: JSON.stringify(request),
     }) as Record<string, unknown>;
-    const id = String(response.id ?? "");
+    const data = response.data && typeof response.data === "object" && !Array.isArray(response.data)
+      ? response.data as Record<string, unknown>
+      : undefined;
+    const id = String(response.id ?? data?.id ?? "");
     if (!id) throw new Error("Novita create did not return an instance identity");
     return id;
   }
@@ -780,7 +787,10 @@ export class NovitaGpuApiClient {
         note: request.note,
       }),
     }) as Record<string, unknown>;
-    const id = String(response.id ?? "");
+    const data = response.data && typeof response.data === "object" && !Array.isArray(response.data)
+      ? response.data as Record<string, unknown>
+      : undefined;
+    const id = String(response.id ?? data?.id ?? "");
     if (!id) throw new Error("Novita image prewarm did not return a task identity");
     return id;
   }

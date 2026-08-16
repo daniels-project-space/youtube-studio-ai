@@ -314,7 +314,7 @@ async function main() {
       inventoryState: "high", spotPrice: "17000", regions: ["US-CA-NAS-02 (California)"],
       }] });
     }
-    if (url.includes("/gpu/instances?")) return Response.json({ instances: [] });
+    if (url.includes("/gpu/instances?")) return Response.json({ data: { instances: [] } });
     if (url.includes("/networkstorages/list")) return Response.json({ data: [{
       storageId: "volume-id", storageName: "ai-infra-models", storageSize: 200,
       clusterId: "us-ca-nas-2", clusterName: "US-CA-NAS-02 (California)",
@@ -327,7 +327,7 @@ async function main() {
       assert.equal(body.imageUrl, requestArgs.image);
       assert.equal("repositoryAuth" in body, false);
       assert.deepEqual(body.productIds, ["4090.16c96g.v2"]);
-      return Response.json({ id: "prewarm-123" });
+      return Response.json({ data: { id: "prewarm-123" } });
     }
     if (url.includes("/image/prewarm")) {
       assert.equal(parsedUrl.searchParams.get("page"), "1");
@@ -337,7 +337,7 @@ async function main() {
         imageUrl: `ghcr.io/daniels-project-space/youtube-render-worker@sha256:${"a".repeat(64)}`,
       }] });
     }
-    if (url.endsWith("/gpu/instance/create")) return Response.json({ id: "instance-123" });
+    if (url.endsWith("/gpu/instance/create")) return Response.json({ data: { id: "instance-123" } });
     if (url.endsWith("/gpu/instance/stop") || url.endsWith("/gpu/instance/delete")) return Response.json({});
     if (url.includes("/gpu/instance?instanceId=")) {
       instanceReads += 1;
@@ -373,20 +373,20 @@ async function main() {
     const url = new URL(String(input));
     const page = Number(url.searchParams.get("pageNum"));
     if (url.pathname.endsWith("/gpu/instances") && page === 0) {
-      return Response.json({
+      return Response.json({ data: {
         total: 101,
         instances: Array.from({ length: 100 }, (_, index) => ({
           id: `foreign-${index}`,
           name: `other-service-${index}`,
           status: "running",
         })),
-      });
+      } });
     }
     if (url.pathname.endsWith("/gpu/instances") && page === 1) {
-      return Response.json({
+      return Response.json({ data: {
         total: 101,
         instances: [{ id: "late-worker", name: "yt-render-4090-late-page", status: "running" }],
-      });
+      } });
     }
     return Response.json({}, { status: 404 });
   });
