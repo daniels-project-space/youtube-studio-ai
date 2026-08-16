@@ -456,7 +456,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // matches the active lane; final QA must declare that cross-block input.
       "episodeSpec",
       "motionComicTimeline", "visualRepair", "visualMatterManifest",
-      "cinematicGeneratedScenePlan", "cinematicCreativeLocks", "cinematicEditDecisionList", "generatedFootageSceneManifest",
+      "cinematicCaseSequenceInput", "cinematicCaseSequenceAdmission", "cinematicGeneratedScenePlan", "cinematicCreativeLocks", "cinematicEditDecisionList", "generatedFootageSceneManifest",
       // Standard Novita Story-Spine renders use this exact LTX cut plan; it is
       // optional because non-LTX lanes do not produce a shot-render manifest.
       "shotRenderManifest",

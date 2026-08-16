@@ -51,8 +51,11 @@ import {
 import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
 import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
 import {
+  CinematicCaseSequenceAdmissionReceiptSchema,
+  CinematicCaseSequenceInputSchema,
   CinematicCreativeLocksSchema,
   CinematicEditDecisionListSchema,
+  cinematicCaseSequenceContentFingerprint,
 } from "@/engine/cinematicCaseSequence";
 import {
   assertCinematicAssemblyRoute,
@@ -64,6 +67,11 @@ import {
   evaluateAuthoredShotEditIntegrity,
   evaluateCinematicEditIntegrity,
 } from "@/engine/cinematicEditIntegrity";
+import {
+  cinematicFinalMasterQaPlan,
+  reviewCinematicFinalMasterQaEvidence,
+  type CinematicFinalMasterQaEvidenceReceipt,
+} from "@/lib/cinematicQaEvidenceContract";
 import { analyzeShotBoundaries, sha256ShotAnalysisSource } from "@/lib/shotAnalysis";
 import {
   proveOnScreenText,
@@ -2892,6 +2900,20 @@ export const qaVisual: Block = {
           narrationDurationSec: target,
         })
       : undefined;
+    const cinematicSequenceInput = cinematicBinding
+      ? CinematicCaseSequenceInputSchema.parse(ctx.store["cinematicCaseSequenceInput"])
+      : undefined;
+    const cinematicSequenceAdmission = cinematicBinding
+      ? CinematicCaseSequenceAdmissionReceiptSchema.parse(ctx.store["cinematicCaseSequenceAdmission"])
+      : undefined;
+    if (cinematicBinding && (
+      cinematicCaseSequenceContentFingerprint(cinematicSequenceInput!) !== cinematicBinding.scenePlan.sequenceFingerprint ||
+      cinematicSequenceAdmission!.sequenceFingerprint !== cinematicBinding.scenePlan.sequenceFingerprint
+    )) {
+      throw new Error(
+        "qa_visual FAILED: cinematic source sequence/admission do not bind the generated scenes retained in the final master",
+      );
+    }
     const authoredShotManifest = !cinematicBinding && ctx.store["shotRenderManifest"] !== undefined
       ? ShotRenderManifestSchema.parse(ctx.store["shotRenderManifest"])
       : undefined;
@@ -3015,6 +3037,46 @@ export const qaVisual: Block = {
     });
     if (productionQa && !visualReview.ran) {
       throw new Error("qa_visual FAILED: required evidence-backed visual reviewer did not run");
+    }
+    // Generic evidence review catches defects across the whole master. A
+    // source-bound cinematic sequence also needs a second, strict semantic
+    // receipt for every identity/wardrobe lock, factual claim, causal cut, and
+    // tension transition. It receives only the exact evidence frames already
+    // selected by reviewRender, never a new or partial frame sample.
+    let cinematicFinalMasterQaReceipt: CinematicFinalMasterQaEvidenceReceipt | undefined;
+    let cinematicFinalMasterSha256: string | undefined;
+    if (cinematicBinding && productionQa) {
+      if (visualReview.verdict !== "pass") {
+        throw new Error(
+          `qa_visual FAILED: cinematic final-master evidence requires a passing general visual review (got ${visualReview.verdict})`,
+        );
+      }
+      try {
+        cinematicFinalMasterSha256 = await sha256ShotAnalysisSource(video);
+        const cinematicQaPlan = cinematicFinalMasterQaPlan({
+          sequence: cinematicSequenceInput!,
+          creativeLocks: cinematicCreativeLocks!,
+          editDecisionList: cinematicEdl!,
+          bodyOffsetSec: cinematicBodyOffsetSec,
+        });
+        cinematicFinalMasterQaReceipt = await reviewCinematicFinalMasterQaEvidence({
+          plan: cinematicQaPlan,
+          evidence: visualReview.evidence,
+          framePaths: visualReview.framePaths,
+          visualReviewFingerprint: visualReview.reviewFingerprint,
+          finalMasterSha256: cinematicFinalMasterSha256,
+        });
+        ctx.log(
+          `qa_visual: cinematic final-master evidence PASS (${cinematicFinalMasterQaReceipt.locks.length} locks, ` +
+            `${cinematicFinalMasterQaReceipt.claims.length} claim views, ${cinematicFinalMasterQaReceipt.cuts.length} causal cuts)`,
+        );
+      } catch (error) {
+        throw new Error(
+          `qa_visual FAILED: cinematic final-master continuity/cut/claim evidence was not accepted: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
     }
 
     // The old native-video escalation uploaded the full master to Gemini. It is
@@ -3158,7 +3220,7 @@ export const qaVisual: Block = {
     const requiresAdaptiveShotAnalysis = productionQa && rv.visualPacing.policy.mode !== "exempt";
     if (requiresAdaptiveShotAnalysis || cinematicBinding || authoredShotManifest) {
       try {
-        const finalMasterSha256 = await sha256ShotAnalysisSource(video);
+        const finalMasterSha256 = cinematicFinalMasterSha256 ?? await sha256ShotAnalysisSource(video);
         finalShotAnalysis = analyzeShotBoundaries({ videoPath: video, sourceSha256: finalMasterSha256 });
         if (cinematicBinding) {
           cinematicEditIntegrity = evaluateCinematicEditIntegrity({
@@ -3837,6 +3899,7 @@ export const qaVisual: Block = {
           ran: rv.ran,
           temporalDynamism: rv.temporalDynamism,
           visualPacing: rv.visualPacing,
+          cinematicFinalMasterQaEvidence: cinematicFinalMasterQaReceipt,
           adaptiveShotAnalysis: finalShotAnalysis
             ? {
                 provider: finalShotAnalysis.provider,

@@ -22,6 +22,7 @@ const scenes = [0, 1].map((index) => ({
   durationSec: 3,
   still: `Evidence-led anonymous reconstruction shot ${index + 1} with cited archival object.`,
   motion: "A restrained motivated camera move holds anonymous mannequin continuity and the evidence object.",
+  diegeticSoundscape: "Restrained archive room tone and paper movement motivated only by the visible evidence object; no dialogue, narration, or score.",
   negative: "no text, no real-person likeness, no gore",
   cameraMove: index === 0 ? "dolly_push" as const : "truck_left" as const,
   shotScale: index === 0 ? "close" as const : "wide" as const,

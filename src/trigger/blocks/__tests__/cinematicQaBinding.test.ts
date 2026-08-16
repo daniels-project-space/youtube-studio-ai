@@ -33,6 +33,16 @@ assert.match(
 );
 assert.match(
   qaSource,
+  /reviewCinematicFinalMasterQaEvidence\(/,
+  "a cinematic final master must retain a strict per-lock, claim, and cut evidence receipt after the general review",
+);
+assert.match(
+  qaSource,
+  /cinematicCaseSequenceContentFingerprint\(/,
+  "the final-master receipt must be tied back to the originally admitted mannequin/cast sequence, not just generated clip ids",
+);
+assert.match(
+  qaSource,
   /cinematicBodyOffsetSec/,
   "a prepended intro must offset cinematic lock and cut-review windows",
 );
