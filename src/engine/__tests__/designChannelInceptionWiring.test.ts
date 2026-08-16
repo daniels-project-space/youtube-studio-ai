@@ -19,7 +19,11 @@ assert(
     coordinator.indexOf('runStage("channel-inception-research"'),
   "unavailable or runtime-blocked families must stop before the first provider-capable stage",
 );
-assert.match(newChannelUi, /const selectable = f\.available && productionReady/);
+assert.match(
+  newChannelUi,
+  /const selectable = f\.available && \(productionReady \|\| Boolean\(supervised\)\)/,
+  "a production-blocked family may be selectable only for its explicitly supervised private-review intake",
+);
 assert.match(newChannelUi, /disabled=\{!selectable\}/);
 
 const wiredStages = new Set(

@@ -27,6 +27,12 @@ import {
   type DataStoryContract,
 } from "./dataStory";
 import {
+  assertCreativeCapabilityPipelineObligations,
+  selectedDataStoryContract,
+  validateCreativeCapabilitySelections,
+  type CreativeCapabilitySelection,
+} from "./creative/creativeCapabilityCatalog";
+import {
   isSyntheticScenarioContract,
   syntheticScenarioContract,
   type SyntheticScenarioContract,
@@ -77,6 +83,12 @@ export interface DesignOptions {
    * contract over the existing Data Inserts module, not a cosmetic toggle.
    */
   dataStory?: DataStoryContract;
+  /**
+   * Fingerprint-bound creator opt-ins resolved from the declarative capability
+   * catalog. This is the preferred path; `dataStory` remains a legacy bridge
+   * for existing stored channel drafts.
+   */
+  capabilitySelections?: readonly CreativeCapabilitySelection[];
   /**
    * Explicit fictional AI thought-experiment profile for the deterministic
    * illustrated renderer. It adds a visible disclosure and the matching town,
@@ -154,10 +166,20 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   if (!fam) throw new Error(`unknown family: ${opts.family}`);
   const base = ARCHETYPES[fam.archetypeKey];
   if (!base) throw new Error(`family ${opts.family} → unknown archetype ${fam.archetypeKey}`);
+  const resolvedCapabilitySelections = validateCreativeCapabilitySelections({
+    family: opts.family,
+    selections: opts.capabilitySelections,
+  });
+  const selectedCapabilities = resolvedCapabilitySelections.map(({ selection }) => selection);
+  const selectedDataStory = selectedDataStoryContract(selectedCapabilities);
   if (opts.dataStory !== undefined && !isDataStoryContract(opts.dataStory)) {
     throw new Error("source-attributed data story must use the current typed evidence contract");
   }
-  if (opts.dataStory && !supportsDataStoryFamily(opts.family)) {
+  if (opts.dataStory && selectedDataStory && opts.dataStory.version !== selectedDataStory.version) {
+    throw new Error("legacy data-story contract does not match the selected creative capability");
+  }
+  const effectiveDataStory = selectedDataStory ?? opts.dataStory;
+  if (effectiveDataStory && !supportsDataStoryFamily(opts.family)) {
     throw new Error("source-attributed data story is currently supported only by Narrated + Stock Footage");
   }
   if (opts.syntheticScenario !== undefined && !isSyntheticScenarioContract(opts.syntheticScenario)) {
@@ -650,8 +672,8 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // may opt into general number-driven inserts. The source-attributed data
   // story profile is stricter and requires an explicit typed contract; loose
   // advanced overrides cannot weaken its source or spoken-anchor safeguards.
-  const insertParams: Record<string, unknown> | undefined = opts.dataStory
-    ? dataStoryInsertParams(opts.dataStory)
+  const insertParams: Record<string, unknown> | undefined = effectiveDataStory
+    ? dataStoryInsertParams(effectiveDataStory)
     : preset?.insertTypes?.length
       ? { insertTypes: preset.insertTypes }
       : undefined;
@@ -681,21 +703,21 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       sg.params = {
         ...(sg.params ?? {}),
         dataRich: true,
-        ...(opts.dataStory ? { sourceAttributionRequired: true } : {}),
+        ...(effectiveDataStory ? { sourceAttributionRequired: true } : {}),
       };
     }
-    if (opts.dataStory) {
+    if (effectiveDataStory) {
       const qa = pipeline.find((e) => e.block === "qa_script");
       if (qa) {
         qa.params = {
           ...(qa.params ?? {}),
-          dataStoryContract: opts.dataStory.version,
+          dataStoryContract: effectiveDataStory.version,
           requireNamedSource: true,
           requireSpokenNumericAnchor: true,
         };
       }
     }
-  } else if (opts.dataStory) {
+  } else if (effectiveDataStory) {
     throw new Error("source-attributed data story requires a narrated timeline assembly pipeline");
   }
 
@@ -748,7 +770,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   }
 
   const runtimeReadiness = familyProductionReadiness(opts.family);
-  const dataStoryReadiness = opts.dataStory ? dataStoryProductionReadiness() : undefined;
+  const dataStoryReadiness = effectiveDataStory ? dataStoryProductionReadiness() : undefined;
   if (!fam.available) {
     warnings.push(
       `${fam.label}: the "${fam.visualEngine}" visual engine isn't built yet — channel will be created as a DRAFT and become runnable when that module ships.`,
@@ -791,6 +813,10 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   assertPipelineMatchesContentLane(contentLane, pipeline);
   pipeline = injectContentLaneIntoPipeline(pipeline, contentLane);
   assertFamilyAutonomousPlanningPipeline(opts.family, pipeline);
+  // A selected creative capability must leave exact, inspectable evidence in
+  // the effective graph. This is deliberately after every family rewrite and
+  // policy completion so a UI recommendation can never survive as a no-op.
+  assertCreativeCapabilityPipelineObligations(opts.family, selectedCapabilities, pipeline);
 
   // Never persist an invalid graph.
   let compilation: PipelineCompilation | undefined;

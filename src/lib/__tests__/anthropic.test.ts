@@ -5,10 +5,12 @@ import { claudeJson, claudeJsonPro, hasAnthropicKey, scriptProModel } from "@/li
 async function main(): Promise<void> {
   const previousKey = process.env.ANTHROPIC_API_KEY;
   const previousModel = process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
+  const previousOpenRouterKey = process.env.OPENROUTER_API_KEY;
   const originalFetch = global.fetch;
   const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
   try {
     process.env.ANTHROPIC_API_KEY = "test-key";
+    delete process.env.OPENROUTER_API_KEY;
     process.env.ANTHROPIC_CREATIVE_PRO_MODEL = "claude-test-pro";
     global.fetch = async (input, init) => {
       requests.push({ input, init });
@@ -35,7 +37,7 @@ async function main(): Promise<void> {
     assert.equal(secondPayload.model, "claude-test-pro");
 
     delete process.env.ANTHROPIC_API_KEY;
-    await assert.rejects(() => claudeJson({ prompt: "no call" }), /ANTHROPIC_API_KEY is required/);
+    await assert.rejects(() => claudeJson({ prompt: "no call" }), /OPENROUTER_API_KEY or ANTHROPIC_API_KEY is required/);
     assert.equal(requests.length, 2, "missing key must fail before network");
   } finally {
     global.fetch = originalFetch;
@@ -43,6 +45,8 @@ async function main(): Promise<void> {
     else process.env.ANTHROPIC_API_KEY = previousKey;
     if (previousModel === undefined) delete process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
     else process.env.ANTHROPIC_CREATIVE_PRO_MODEL = previousModel;
+    if (previousOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = previousOpenRouterKey;
   }
   console.log("Anthropic JSON boundary tests passed");
 }

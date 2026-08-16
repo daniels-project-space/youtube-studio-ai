@@ -26,7 +26,7 @@ assert.match(
 );
 assert.match(
   reviewSource,
-  /providers: \["groq", "fal"\]/,
+  /providers: \["openrouter"\]/,
   "the default final-master reviewer must scope its evidence calls to non-Google providers",
 );
 assert.match(

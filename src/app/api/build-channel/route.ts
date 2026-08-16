@@ -29,6 +29,7 @@ import {
   suggestYoutubeHandle,
 } from "@/lib/youtubeChannelCreationClaim";
 import { formatPreflight } from "@/engine/creative/selectFormat";
+import { validateCreativeCapabilitySelections } from "@/engine/creative/creativeCapabilityCatalog";
 
 /**
  * POST /api/build-channel  { design, requestKey } → { id, requestKey, slug }
@@ -151,6 +152,26 @@ export async function POST(request: Request) {
           ? { maxPerVideoBudgetUsd: requestedBudgetUsd }
           : {}),
       });
+      // Capability selections are never trusted as a browser-side toggle. The
+      // server re-resolves family compatibility, current catalog identity, and
+      // intent eligibility before this payload can reach the designer.
+      let selectedCapabilitySelections: Array<{ capability: string; catalogFingerprint: string }>;
+      try {
+        selectedCapabilitySelections = validateCreativeCapabilitySelections({
+          family: family.key,
+          selections: design.capabilitySelections,
+          intent: { concept, niche: getNiche(nicheKey)?.label, nicheKey },
+        }).map(({ selection }) => ({ ...selection }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "invalid creative capability selection";
+        return NextResponse.json(
+          { error: message },
+          { status: message.includes("private review only") ? 409 : 400 },
+        );
+      }
+      if (selectedCapabilitySelections.length) {
+        design = { ...design, capabilitySelections: selectedCapabilitySelections };
+      }
       const casefileModules = creatorPreflight.moduleAdmissions.filter(
         (module) => module.profile === "source_first_casefile/v1" ||
           module.profile === "claim_to_source_to_shot_map/v1" ||

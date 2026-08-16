@@ -1,21 +1,23 @@
 /**
  * Claude JSON completion seam.
  *
- * This is deliberately independent of Gemini: automatic channel planning may
- * use it only when an operator configures ANTHROPIC_API_KEY. Thumbnail-only
- * Gemini policy therefore remains enforceable even when a creative-text model
- * is enabled for scripts, topic selection, and structured critique.
+ * The historical Claude seam now prefers the pinned, non-Google OpenRouter
+ * fleet when it is configured. Keeping the public function names avoids a
+ * risky caller-by-caller migration while moving ordinary channel intelligence
+ * to GPT-OSS 20B and creative work to Ministral 3 8B.
  */
 import { recordModelUsage } from "@/lib/modelUsage";
+import { hasOpenRouterKey, openRouterJson, openRouterModel } from "@/lib/openRouter";
 
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
 const ANTHROPIC_VERSION = "2023-06-01";
 
 export function hasAnthropicKey(): boolean {
-  return Boolean(process.env.ANTHROPIC_API_KEY?.trim());
+  return hasOpenRouterKey() || Boolean(process.env.ANTHROPIC_API_KEY?.trim());
 }
 
 function configuredModel(tier: "flash" | "pro", explicit?: string): string {
+  if (hasOpenRouterKey()) return explicit?.trim() || openRouterModel(tier === "pro" ? "creative" : "intelligence");
   if (explicit?.trim()) return explicit.trim();
   if (tier === "pro") {
     return process.env.ANTHROPIC_CREATIVE_PRO_MODEL?.trim()
@@ -63,11 +65,22 @@ export async function claudeJson<T = unknown>(args: {
   temperature?: number;
   log?: (message: string) => void;
 }): Promise<T> {
-  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
-  if (!apiKey) throw new Error("claudeJson: ANTHROPIC_API_KEY is required; no Gemini fallback is permitted");
   const tier = args.tier ?? "flash";
-  const model = configuredModel(tier, args.model);
   const maxTokens = Math.max(128, Math.min(tier === "pro" ? 16_000 : 8_000, Math.floor(args.maxTokens ?? 1_200)));
+  if (hasOpenRouterKey()) {
+    return openRouterJson<T>({
+      tier,
+      prompt: args.prompt,
+      system: args.system,
+      model: args.model,
+      maxTokens,
+      temperature: args.temperature,
+      log: args.log,
+    });
+  }
+  const apiKey = process.env.ANTHROPIC_API_KEY?.trim();
+  if (!apiKey) throw new Error("claudeJson: OPENROUTER_API_KEY or ANTHROPIC_API_KEY is required; no Gemini fallback is permitted");
+  const model = configuredModel(tier, args.model);
   const response = await fetch(ANTHROPIC_MESSAGES_URL, {
     method: "POST",
     headers: {

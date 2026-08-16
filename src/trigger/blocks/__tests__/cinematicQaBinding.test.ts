@@ -11,6 +11,8 @@ const binding = qaSource.indexOf("assertCinematicSequenceRenderBinding({");
 const profileGate = qaSource.indexOf("assertCinematicFinalMasterQaProfile(ctx.params[\"qaProfile\"])");
 const overviewVision = qaSource.indexOf("const video_ = await evaluateVisualFrames(");
 const reviewer = qaSource.indexOf("const visualReview = await reviewRender(");
+const sourceHashBeforeReview = qaSource.indexOf("const finalMasterSha256BeforeVisualReview");
+const sourceHashAfterReview = qaSource.indexOf("const finalMasterSha256AfterVisualReview");
 
 assert(qaStart >= 0, "qa_visual must remain the final production review block");
 assert(timelineStart >= 0, "timeline_assemble must remain the final-master assembly block");
@@ -19,6 +21,20 @@ assert(reviewer >= 0 && binding < reviewer, "cinematic clip receipts must be val
 assert(
   profileGate >= 0 && profileGate < overviewVision && profileGate < reviewer,
   "a source-bound cinematic master must reject qaProfile=draft before overview or final-master review can spend without the required evidence receipt",
+);
+assert(
+  sourceHashBeforeReview >= 0 && sourceHashBeforeReview < reviewer && reviewer < sourceHashAfterReview,
+  "the cinematic master must be hashed before final-review frame extraction and rehashed immediately after review",
+);
+assert.match(
+  qaSource,
+  /sourceSha256: finalMasterSha256BeforeVisualReview/,
+  "final visual-review evidence must receive the exact pre-review master SHA-256",
+);
+assert.match(
+  qaSource,
+  /visualReview\.evidence\.source\.sha256 !== finalMasterSha256BeforeVisualReview[\s\S]*finalMasterSha256AfterVisualReview !== finalMasterSha256BeforeVisualReview/,
+  "a changed or unbound cinematic master must fail closed after visual review",
 );
 assert.match(
   source,
@@ -59,6 +75,11 @@ assert.match(
   qaSource,
   /reviewCinematicFinalMasterQaEvidence\(/,
   "a cinematic final master must retain a strict per-lock, claim, and cut evidence receipt after the general review",
+);
+assert.match(
+  qaSource,
+  /cinematicFinalMasterQaReceipt\.finalMasterSha256 !== visualReview\.evidence\.source\.sha256/,
+  "the strict cinematic receipt must be rejected unless it attests the same master SHA-256 as visual-review evidence",
 );
 assert.match(
   qaSource,

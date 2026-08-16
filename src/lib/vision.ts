@@ -14,7 +14,7 @@
  *      gate call while producing measurably WORSE and less repeatable verdicts.
  *      See VISION_REASONING_EFFORT for the A/B numbers.
  *   4. ROUTES to the cheapest available provider, in VISION_PROVIDERS order
- *      (default "groq,fal"):
+ *      (default "openrouter"):
  *        groq   → Qwen 3.6 27B (current production multimodal model)
  *        fal    → any-llm/vision (provider-routed; exact usage not exposed)
  *
@@ -32,6 +32,7 @@ import { mkdir, readFile, writeFile } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { recordModelUsage } from "@/lib/modelUsage";
+import { hasOpenRouterKey, openRouterChat, openRouterModel } from "@/lib/openRouter";
 
 export class VisionError extends Error {
   constructor(message: string) {
@@ -62,6 +63,8 @@ export interface VisionLocalArgs {
   reasoningEffort?: VisionReasoningEffort;
   /** Restrict this review to specific providers. Use this for certified no-Google gates. */
   providers?: readonly VisionProvider[];
+  /** Cost/quality lane: cheap triage, normal analysis, or a final admission. */
+  tier?: VisionTier;
   /**
    * Bound retries for each provider without changing the provider chain. A
    * final-master budget receipt uses one Groq attempt then one fal fallback.
@@ -70,7 +73,8 @@ export interface VisionLocalArgs {
 }
 
 /** Gemini is intentionally not a vision provider; it is sealed to Nano Banana thumbnail pixels. */
-export type VisionProvider = "groq" | "fal";
+export type VisionProvider = "openrouter";
+export type VisionTier = "bulk" | "standard" | "final";
 
 /** Is an approved non-Google vision provider available? */
 export function hasVisionKey(): boolean {
@@ -79,27 +83,24 @@ export function hasVisionKey(): boolean {
 
 /** True only when an independent non-Google reviewer is available. */
 export function hasNonGoogleVisionKey(): boolean {
-  return providerChain(["groq", "fal"]).length > 0;
+  return providerChain(["openrouter"]).length > 0;
 }
 
 /** Once-per-process loud warning: an empty chain silently skips EVERY QA gate. */
 let warnedNoVisionProviders = false;
 
 function providerChain(allowed?: readonly VisionProvider[]): VisionProvider[] {
-  const order = (process.env.VISION_PROVIDERS || "groq,fal").split(",").map((s) => s.trim());
+  const order = (process.env.VISION_PROVIDERS || "openrouter").split(",").map((s) => s.trim());
   const chain = order.filter(
     (p): p is VisionProvider =>
-      (p === "groq" || p === "fal") &&
+      p === "openrouter" &&
       (!allowed || allowed.includes(p)) &&
-      (
-        (p === "groq" && !!process.env.GROQ_API_KEY) ||
-        (p === "fal" && !!process.env.FAL_KEY)
-      ),
+      hasOpenRouterKey(),
   );
   if (chain.length === 0 && !warnedNoVisionProviders) {
     warnedNoVisionProviders = true;
     console.warn(
-      "[vision] !!! vision QA DISABLED (no providers) — set GROQ_API_KEY or FAL_KEY; " +
+      "[vision] !!! vision QA DISABLED (no providers) — set OPENROUTER_API_KEY; " +
         "Gemini is reserved for sealed Nano Banana thumbnail generation",
     );
   }
@@ -416,6 +417,30 @@ async function falVision(
   throw new VisionError(`fal vision exhausted retries (${lastErr})`);
 }
 
+async function openRouterVision(
+  prompt: string,
+  images: Buffer[],
+  opts: { json?: boolean; maxTokens?: number; tier?: VisionTier },
+): Promise<string> {
+  const key = opts.tier === "bulk" ? "visionBulk" : opts.tier === "final" ? "visionFinal" : "visionStandard";
+  const model = openRouterModel(key);
+  const picked = sampleEvenly(images, 8);
+  return openRouterChat({
+    model,
+    messages: [{
+      role: "user",
+      content: [
+        { type: "text", text: picked.length < images.length ? `${prompt}\n(Note: ${picked.length} representative frames sampled of ${images.length}.)` : prompt },
+        ...picked.map((b) => ({ type: "image_url", image_url: { url: `data:image/jpeg;base64,${b.toString("base64")}` } })),
+      ],
+    }],
+    maxTokens: opts.maxTokens ?? VISION_GATE_MAX_TOKENS,
+    temperature: 0.2,
+    json: opts.json,
+    kind: "vision",
+  });
+}
+
 function sampleEvenly<T>(items: T[], max: number): T[] {
   if (items.length <= max) return items;
   const out: T[] = [];
@@ -436,6 +461,7 @@ async function visionBuffers(
     noCache?: boolean;
     reasoningEffort?: VisionReasoningEffort;
     providers?: readonly VisionProvider[];
+    tier?: VisionTier;
     maxAttemptsPerProvider?: number;
   },
 ): Promise<string> {
@@ -461,21 +487,18 @@ async function visionBuffers(
     // re-judge rather than replay the other mode's cached answer.
     .update(effective.reasoningEffort)
     .update(chain.join(","))
-    .update(GROQ_VISION_MODEL)
+    .update(args.tier ?? "standard")
     .update(buffers.map((b) => createHash("sha1").update(b).digest("hex")).join(","))
     .digest("hex");
   if (!args.noCache) {
     const hit = await cacheGet(cacheKey);
     if (hit) return hit;
   }
-  if (chain.length === 0) throw new VisionError("no vision provider keyed (GROQ_API_KEY / FAL_KEY / GEMINI_API_KEY)");
+  if (chain.length === 0) throw new VisionError("no vision provider keyed (OPENROUTER_API_KEY)");
   const errors: string[] = [];
   for (const provider of chain) {
     try {
-      const text =
-        provider === "groq"
-          ? await groqVision(prompt, buffers, effective)
-          : await falVision(prompt, buffers, effective);
+      const text = await openRouterVision(prompt, buffers, effective);
       await cachePut(cacheKey, text);
       return text;
     } catch (e) {
@@ -506,6 +529,10 @@ export async function visionUrls(args: {
   noCache?: boolean;
   /** See VISION_REASONING_EFFORT — defaults to "none". */
   reasoningEffort?: VisionReasoningEffort;
+  /** Cost/quality lane: cheap triage, normal analysis, or a final admission. */
+  tier?: VisionTier;
+  /** Restrict this request to a declared vision provider. */
+  providers?: readonly VisionProvider[];
   /** See `VisionLocalArgs.maxAttemptsPerProvider`. */
   maxAttemptsPerProvider?: number;
 }): Promise<string> {

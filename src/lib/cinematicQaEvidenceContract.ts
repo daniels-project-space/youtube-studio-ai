@@ -378,7 +378,7 @@ export async function defaultCinematicFinalMasterQaReviewer(
     maxTokens: VISION_GATE_MAX_TOKENS,
     reasoningEffort: "none",
     noCache: true,
-    providers: ["groq", "fal"],
+    providers: ["openrouter"], tier: "final",
     maxAttemptsPerProvider: 1,
   });
 }

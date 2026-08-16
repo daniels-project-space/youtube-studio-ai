@@ -21,7 +21,8 @@ const SERVICES = [
   "videvo", // VIDEVO_API_KEY (federated stock — partner; VIDEVO_API_BASE overridable)
   "replicate", // REPLICATE_API_TOKEN
   "fal", // FAL_KEY (FLUX1.1 [pro] thumbnail base via fal.ai)
-  "groq", // GROQ_API_KEY (llama-4-scout vision — the FREE first hop of the vision router chain)
+  "groq", // Legacy only; YouTube intelligence and vision are pinned through OpenRouter.
+  "openrouter", // OPENROUTER_API_KEY (non-Google pinned text + vision fleet)
   "telegram", // TELEGRAM_BOT_TOKEN (+ admin chat id)
   "browserbase", // BROWSERBASE_API_KEY/PROJECT_ID (+ optional CONTEXT_ID) — headless YouTube channel creation
   // Gemini is deliberately absent. Its credential is hydrated only by the

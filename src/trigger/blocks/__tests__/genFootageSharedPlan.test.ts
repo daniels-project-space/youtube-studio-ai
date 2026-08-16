@@ -203,8 +203,8 @@ for (const gate of ["cinematicKeyframeGate.ts", "cinematicClipGate.ts", "cinemat
   const gateSource = readFileSync(new URL(`../../../lib/${gate}`, import.meta.url), "utf8");
   assert.match(
     gateSource,
-    /providers: \["groq", "fal"\]/,
-    `${gate} must scope its purported non-Google evidence to Groq/FAL rather than accepting a Gemini fallback`,
+    /providers: \["openrouter"\]/,
+    `${gate} must scope its purported non-Google evidence to the pinned OpenRouter route rather than accepting a Gemini fallback`,
   );
 }
 

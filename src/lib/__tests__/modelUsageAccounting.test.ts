@@ -205,13 +205,13 @@ async function exhaustedProviderRetryIsTerminal(): Promise<void> {
   }
 }
 
-async function groqVisionUsageIsCaptured(): Promise<void> {
+async function openRouterVisionUsageIsCaptured(): Promise<void> {
   const originalFetch = globalThis.fetch;
-  const originalGroqKey = process.env.GROQ_API_KEY;
+  const originalOpenRouterKey = process.env.OPENROUTER_API_KEY;
   const originalProviders = process.env.VISION_PROVIDERS;
-  process.env.GROQ_API_KEY = "hermetic-groq-key";
-  process.env.VISION_PROVIDERS = "groq";
-  let groqFetches = 0;
+  process.env.OPENROUTER_API_KEY = "hermetic-openrouter-key";
+  process.env.VISION_PROVIDERS = "openrouter";
+  let openRouterFetches = 0;
   globalThis.fetch = async (input) => {
     const url = String(input);
     if (url === "https://images.test/accounting.jpg") {
@@ -220,17 +220,16 @@ async function groqVisionUsageIsCaptured(): Promise<void> {
         headers: { "content-type": "image/jpeg" },
       });
     }
-    assert.match(url, /api\.groq\.com\/openai\/v1\/chat\/completions/);
-    groqFetches++;
+    assert.equal(url, "https://openrouter.ai/api/v1/chat/completions");
+    openRouterFetches++;
     return Response.json({
-      id: "groq-response-test",
-      model: "qwen/qwen3.6-27b",
+      id: "openrouter-response-test",
+      model: "mistralai/ministral-8b-2512",
       choices: [{ message: { content: '{"ok":true}' } }],
       usage: {
         prompt_tokens: 100,
         completion_tokens: 25,
         total_tokens: 125,
-        completion_tokens_details: { reasoning_tokens: 5 },
       },
     });
   };
@@ -239,22 +238,22 @@ async function groqVisionUsageIsCaptured(): Promise<void> {
     const scope = createModelUsageScope();
     const response = await scope.run(() =>
       visionUrls({
-        prompt: "model-usage-accounting-groq-unique-v1",
+        prompt: "model-usage-accounting-openrouter-unique-v1",
         imageUrls: ["https://images.test/accounting.jpg"],
         json: true,
         noCache: true,
       }),
     );
     assert.equal(response, '{"ok":true}');
-    assert.equal(groqFetches, 1);
+    assert.equal(openRouterFetches, 1);
     const usage = scope.snapshot();
     assert.equal(usage.calls, 1);
-    close(usage.costUsd, 0.000135, "Groq vision provider usage price");
-    assert.equal(usage.groups[0]?.model, "qwen/qwen3.6-27b");
+    close(usage.costUsd, 0.00001875, "OpenRouter vision provider usage price");
+    assert.equal(usage.groups[0]?.model, "mistralai/ministral-8b-2512");
   } finally {
     globalThis.fetch = originalFetch;
-    if (originalGroqKey === undefined) delete process.env.GROQ_API_KEY;
-    else process.env.GROQ_API_KEY = originalGroqKey;
+    if (originalOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
+    else process.env.OPENROUTER_API_KEY = originalOpenRouterKey;
     if (originalProviders === undefined) delete process.env.VISION_PROVIDERS;
     else process.env.VISION_PROVIDERS = originalProviders;
   }
@@ -512,10 +511,10 @@ async function main(): Promise<void> {
     // Generic Gemini transport is intentionally unavailable at runtime. Its
     // historical token-rate table remains for immutable old receipts, while
     // live accounting coverage below exercises the admitted non-Google routes.
-    await groqVisionUsageIsCaptured();
+    await openRouterVisionUsageIsCaptured();
     // The old runner-retry fixture intentionally exercised generic Gemini.
     // It is now unavailable by policy; equivalent live accounting coverage
-    // above uses Groq, while historical Gemini receipts retain exact pricing.
+    // above uses OpenRouter, while historical Gemini receipts retain exact pricing.
     await explicitAndFailedCostsAreAuthoritative();
     await failedTrackedUsageIsNotLost();
     console.log("MODEL USAGE ACCOUNTING TESTS PASSED");

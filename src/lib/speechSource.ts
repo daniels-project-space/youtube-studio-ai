@@ -355,13 +355,13 @@ export async function visionCheckRaw(framePaths: string[], speaker = ""): Promis
   if (!framePaths.length)
     return { clean: false, hasCaptions: false, hasOverlays: false, hasWatermark: false, isTalkingHead: false, isSpeaker: false, reason: "no frames" };
   // Provider-routed vision: any keyed provider (groq/fal/gemini) can run this gate.
-  if (!hasVisionKey()) throw new Error("no vision provider keyed (GROQ_API_KEY / FAL_KEY / GEMINI_API_KEY) — vision frame-check requires one");
+  if (!hasVisionKey()) throw new Error("no vision provider keyed (OPENROUTER_API_KEY) — vision frame-check requires one");
   // Identity check: confirm the named (vetted) personality is the one on camera.
   // Lenient — only reject on a CLEAR mismatch, so lesser-known faces aren't dropped.
   const idClause = speaker
     ? `\n\nIDENTITY: the target speaker is ${speaker}, a well-known public figure. Also return "isSpeaker" — set it FALSE only if you can clearly see the main person speaking is NOT ${speaker} (a recognizably different person, or an interviewer/host doing the talking, or you only see the audience/back of an unknown person). If you are unsure who it is, set isSpeaker TRUE. Include "isSpeaker":bool in the JSON.`
     : "";
-  const raw = await visionLocal({ prompt: VISION_PROMPT + idClause, imagePaths: framePaths, json: true, maxTokens: VISION_GATE_MAX_TOKENS });
+  const raw = await visionLocal({ prompt: VISION_PROMPT + idClause, imagePaths: framePaths, json: true, maxTokens: VISION_GATE_MAX_TOKENS, tier: "bulk" });
   const v = parseJsonLoose<Partial<RawVerdict>>(raw);
   return {
     clean: !!v.clean,

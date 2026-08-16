@@ -88,7 +88,7 @@ export async function reviewCinematicKeyframe(args: {
     noCache: true,
     // This receipt is labelled non-Google and is an admission prerequisite for
     // paid LTX work. Scope the provider chain rather than merely naming it.
-    providers: ["groq", "fal"],
+    providers: ["openrouter"], tier: "final",
   });
   const verdict = parseVerdict(raw);
   const failingScores = [

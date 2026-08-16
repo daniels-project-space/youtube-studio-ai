@@ -82,7 +82,7 @@ export async function reviewCinematicTransition(args: {
     maxTokens: VISION_GATE_MAX_TOKENS,
     noCache: true,
     // Do not allow a Gemini fallback to mint a non-Google cut receipt.
-    providers: ["groq", "fal"],
+    providers: ["openrouter"], tier: "final",
   });
   const verdict = parseVerdict(raw);
   if (!verdict.pass || !verdict.textWatermarkFree) {

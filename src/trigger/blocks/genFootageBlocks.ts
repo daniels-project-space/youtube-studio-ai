@@ -528,7 +528,7 @@ export const genFootage: Block = {
     // when no eligible non-Google reviewer can attest the sequence.
     if (hasCinematicSequence && !hasNonGoogleVisionKey()) {
       throw new Error(
-        "gen_footage: admitted cinematic_case_sequence requires GROQ_API_KEY or FAL_KEY for independent visual gates before Novita rendering",
+        "gen_footage: admitted cinematic_case_sequence requires OPENROUTER_API_KEY for independent non-Google visual gates before Novita rendering",
       );
     }
     const maxClips = hasCinematicSequence

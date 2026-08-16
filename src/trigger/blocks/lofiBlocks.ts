@@ -501,7 +501,7 @@ export const keyframes: Block = {
       throw new Error("keyframes: production loop requires a grounded Style DNA subject and setting before image generation");
     }
     if (productionVisualQa && !hasNonGoogleVisionKey()) {
-      throw new Error("keyframes: production loop requires a configured non-Google vision reviewer (GROQ_API_KEY or FAL_KEY)");
+      throw new Error("keyframes: production loop requires a configured non-Google OpenRouter vision reviewer (OPENROUTER_API_KEY)");
     }
     const canCritique = hasNonGoogleVisionKey() && hasGroundedIdentity;
     const maximumImageAttempts = canCritique ? 2 : 1;
@@ -565,7 +565,7 @@ export const keyframes: Block = {
             imagePaths: [cand.local],
             json: true,
             maxTokens: VISION_GATE_MAX_TOKENS,
-            providers: ["groq", "fal"],
+            providers: ["openrouter"], tier: "final",
           });
           const v = parseJsonLoose<{ score?: number; issues?: string[] }>(raw);
           const score = Math.max(0, Math.min(1, Number(v.score) || 0));
@@ -609,7 +609,7 @@ export const keyframes: Block = {
           imagePaths: [f1Local],
           json: true,
           maxTokens: VISION_GATE_MAX_TOKENS,
-          providers: ["groq", "fal"],
+          providers: ["openrouter"], tier: "final",
         });
         const m = parseJsonLoose<{ motion?: string }>(raw).motion;
         if (m && m.length > 12) { motionPrompt = m; ctx.log(`keyframes: scene-director motion → "${m.slice(0, 90)}"`); }

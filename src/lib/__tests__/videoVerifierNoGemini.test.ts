@@ -11,7 +11,7 @@ async function main(): Promise<void> {
   );
   assert.match(
     verifierSource,
-    /providers:\s*\["groq", "fal"\]/,
+    /providers:\s*\["openrouter"\]/,
     "frame grading must pin the independent Groq/FAL provider scope",
   );
 

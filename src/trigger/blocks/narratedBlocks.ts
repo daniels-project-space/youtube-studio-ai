@@ -3083,9 +3083,16 @@ export const qaVisual: Block = {
     // This is the visual release gate. It persists timestamped scene/cue/overlay
     // evidence, reviews <=12-image chronological batches, then creates a dense
     // 2-fps focus pass for suspect or previously repaired intervals.
+    // A cinematic master is a file, not just a logical scene plan. Hash its
+    // exact bytes before extracting any final-review evidence so the persisted
+    // frames and their fingerprint cannot later be paired with a replacement.
+    const finalMasterSha256BeforeVisualReview = cinematicBinding && productionQa
+      ? await sha256ShotAnalysisSource(video)
+      : undefined;
     const visualReview = await reviewRender(video, p.durationSec, reviewIntent, {
       runId: ctx.runId,
       keyPrefix: ctx.keyPrefix,
+      sourceSha256: finalMasterSha256BeforeVisualReview,
       required: productionQa,
       maxFrames: Number(ctx.params["visualReviewFrames"] ?? 48),
       maxFocusFrames: Number(ctx.params["visualReviewFocusFrames"] ?? 24),
@@ -3095,6 +3102,18 @@ export const qaVisual: Block = {
       requireCompleteFocusCoverage: cinematicSequencePresent,
       log: (message) => ctx.log(message),
     });
+    // Close the final-master TOCTOU window opened by frame extraction and the
+    // independent visual reviewer. A changed master cannot retain this review.
+    const finalMasterSha256AfterVisualReview = cinematicBinding && productionQa
+      ? await sha256ShotAnalysisSource(video)
+      : undefined;
+    if (cinematicBinding && productionQa && (
+      !finalMasterSha256BeforeVisualReview ||
+      visualReview.evidence.source.sha256 !== finalMasterSha256BeforeVisualReview ||
+      finalMasterSha256AfterVisualReview !== finalMasterSha256BeforeVisualReview
+    )) {
+      throw new Error("qa_visual FAILED: cinematic final master changed during evidence-backed visual review");
+    }
     if (productionQa && !visualReview.ran) {
       throw new Error("qa_visual FAILED: required evidence-backed visual reviewer did not run");
     }
@@ -3104,7 +3123,7 @@ export const qaVisual: Block = {
     // tension transition. It receives only the exact evidence frames already
     // selected by reviewRender, never a new or partial frame sample.
     let cinematicFinalMasterQaReceipt: CinematicFinalMasterQaEvidenceReceipt | undefined;
-    let cinematicFinalMasterSha256: string | undefined;
+    const cinematicFinalMasterSha256: string | undefined = finalMasterSha256AfterVisualReview;
     if (cinematicBinding && productionQa) {
       if (visualReview.verdict !== "pass") {
         throw new Error(
@@ -3126,7 +3145,9 @@ export const qaVisual: Block = {
             shotPlanFingerprint: cinematicSequenceInput!.shotPlanFingerprint,
           },
         });
-        cinematicFinalMasterSha256 = await sha256ShotAnalysisSource(video);
+        if (!cinematicFinalMasterSha256 || !visualReview.evidence.source.sha256) {
+          throw new Error("cinematic final-master evidence is missing its mandatory source SHA-256");
+        }
         const cinematicQaPlan = cinematicFinalMasterQaPlan({
           sequence: cinematicSequenceInput!,
           creativeLocks: cinematicCreativeLocks!,
@@ -3140,6 +3161,16 @@ export const qaVisual: Block = {
           visualReviewFingerprint: visualReview.reviewFingerprint,
           finalMasterSha256: cinematicFinalMasterSha256,
         });
+        if (cinematicFinalMasterQaReceipt.finalMasterSha256 !== visualReview.evidence.source.sha256) {
+          throw new Error("cinematic final-master receipt SHA-256 does not match the visual-review evidence source");
+        }
+        // The strict cinematic receipt itself can take time to collect. Hash
+        // once more before admitting it so both review layers attest the exact
+        // file that will move into the remaining release checks.
+        const finalMasterSha256AfterCinematicReceipt = await sha256ShotAnalysisSource(video);
+        if (finalMasterSha256AfterCinematicReceipt !== cinematicFinalMasterSha256) {
+          throw new Error("cinematic final master changed while its strict evidence receipt was being collected");
+        }
         ctx.log(
           `qa_visual: cinematic final-master evidence PASS (${cinematicFinalMasterQaReceipt.locks.length} locks, ` +
             `${cinematicFinalMasterQaReceipt.claims.length} claim views, ${cinematicFinalMasterQaReceipt.cuts.length} causal cuts)`,

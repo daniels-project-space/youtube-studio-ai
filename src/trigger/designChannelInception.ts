@@ -1173,6 +1173,7 @@ export async function executeDesignChannel(
     sourceReferences: payload.sourceReferences,
     claimEvidence: payload.claimEvidence,
     dataStory: payload.dataStory,
+    capabilitySelections: payload.capabilitySelections,
     syntheticScenario: payload.syntheticScenario,
     toggles: payload.toggles,
     paramOverrides: payload.paramOverrides,

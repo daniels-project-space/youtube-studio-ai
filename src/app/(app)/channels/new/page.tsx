@@ -21,7 +21,6 @@ import {
 } from "@/engine/families";
 import { ARCHETYPES } from "@/engine/archetypes";
 import {
-  SOURCE_ATTRIBUTED_DATA_STORY,
   supportsDataStoryFamily,
 } from "@/engine/dataStory";
 import {
@@ -101,6 +100,21 @@ type SupervisedCreatorSelection = {
   provenance?: string;
   requiredArtifacts: string[];
   reviewHref?: string;
+};
+
+type CreativeCapabilityUiOffer = {
+  capability: string;
+  title: string;
+  description: string;
+  selectionMode: "explicit_opt_in" | "private_review_only";
+  reviewHref?: string;
+  requirements?: string[];
+  qualityFocus?: string[];
+  automationAdmission?: {
+    autonomous?: boolean;
+    blockers?: string[];
+    remediation?: string;
+  };
 };
 const DEFAULT_TOGGLES: Toggles = {
   quotes: true,
@@ -234,10 +248,16 @@ export default function NewChannelWizard() {
   const [runProbe, setRunProbe] = useState(false);
   const createRequestKeyRef = useRef<{ intent: string; key: string } | null>(null);
   const [toggles, setToggles] = useState<Toggles>(DEFAULT_TOGGLES);
-  // This never turns on from a suggestion alone: accepting the named-source
-  // evidence contract is an explicit creator decision.
-  const [dataStory, setDataStory] = useState(false);
-  const [dataStorySuggested, setDataStorySuggested] = useState(false);
+  // Capability acceptance never turns on from a suggestion alone. Each entry
+  // stores the server-issued catalog fingerprint so stale UI advice cannot
+  // mutate a pipeline after a catalog upgrade.
+  const [creativeCapabilityOffers, setCreativeCapabilityOffers] = useState<CreativeCapabilityUiOffer[]>([]);
+  const [capabilitySelections, setCapabilitySelections] = useState<Record<string, string>>({});
+  const [capabilityCatalogFingerprint, setCapabilityCatalogFingerprint] = useState("");
+  const dataStory = Boolean(capabilitySelections.source_attributed_data_story);
+  const dataStorySuggested = creativeCapabilityOffers.some(
+    (capability) => capability.capability === "source_attributed_data_story",
+  );
   // Explicitly opt into a thought-experiment profile; no scenario is inferred
   // from a topic or advisor suggestion.
   const [syntheticScenarioProfile, setSyntheticScenarioProfile] = useState<SyntheticScenarioProfile | "">("");
@@ -274,6 +294,9 @@ export default function NewChannelWizard() {
     }
     setFamily(next);
     setSupervisedAdmission(supervised ?? null);
+    setCreativeCapabilityOffers([]);
+    setCapabilitySelections({});
+    setCapabilityCatalogFingerprint("");
     // A supervised family intake is deliberately not a channel-build
     // authorization. Clear any authority retained from an earlier autonomous
     // selection before the UI can show the review-only package.
@@ -285,7 +308,6 @@ export default function NewChannelWizard() {
       setApprovedForPublish(false);
       setToggles((current) => ({ ...current, crosspost: false }));
     }
-    if (!supportsDataStoryFamily(next)) setDataStory(false);
     if (next !== "illustrated_explainer") setSyntheticScenarioProfile("");
     setBudget((current) => Math.max(current, FAMILIES[next].defaultRunBudgetUsd ?? 0.5));
     const authoredMinutes = requestedSeconds === undefined
@@ -374,22 +396,14 @@ export default function NewChannelWizard() {
               remediation?: string;
             };
           }>;
+          creativeCapabilities?: CreativeCapabilityUiOffer[];
+          capabilityCatalogFingerprint?: string;
           duration?: { label?: string; rationale?: string };
           validationRenderRequired?: boolean;
         } | undefined;
-        const dataStoryRecommendation = preflight?.recommendedModules?.find(
-          (module) => module.block === "visual_inserts" && module.profile === "source_attributed_data_story",
-        );
-        const dataStoryAdmission = dataStoryRecommendation?.automationAdmission;
-        const recommendedDataStory = Boolean(dataStoryRecommendation);
-        const casefileCinematicRecommendation = preflight?.recommendedModules?.find(
-          (module) => module.block === "cinematic_case_sequence"
-            && module.profile === "faceless_source_bound_cinematic_sequence/v1",
-        );
-        const childrenShowBibleRecommendation = preflight?.recommendedModules?.find(
-          (module) => module.block === "children_show_bible"
-            && module.profile === "original_child_show_bible/v1",
-        );
+        const creativeCapabilities = Array.isArray(preflight?.creativeCapabilities)
+          ? preflight.creativeCapabilities
+          : [];
         const supervised = preflight?.creatorAdmission?.mode === "registered_supervised_non_gemini"
           && preflight.creatorAdmission.selectable
           && preflight.creatorAdmission.capabilityId
@@ -402,14 +416,20 @@ export default function NewChannelWizard() {
                 : {}),
             }
           : undefined;
-        setDataStorySuggested(recommendedDataStory);
         if (preflight?.productionReady && isFamilyProductionReady(d.family as FamilyKey)) {
           selectFamily(d.family as FamilyKey);
+          setCreativeCapabilityOffers(creativeCapabilities);
+          setCapabilityCatalogFingerprint(preflight?.capabilityCatalogFingerprint ?? "");
         } else if (supervised) {
           selectFamily(d.family as FamilyKey, undefined, supervised);
+          setCreativeCapabilityOffers(creativeCapabilities);
+          setCapabilityCatalogFingerprint(preflight?.capabilityCatalogFingerprint ?? "");
         } else if (preflight?.productionReady === false) {
           setFamily("");
           setSupervisedAdmission(null);
+          setCreativeCapabilityOffers([]);
+          setCapabilitySelections({});
+          setCapabilityCatalogFingerprint("");
         }
         const requirements = preflight?.missingRequirements?.length
           ? ` Before design can compile: ${preflight.missingRequirements.join(", ")}.`
@@ -440,22 +460,24 @@ export default function NewChannelWizard() {
           ? ` Renderer blocked: ${(preflight.runtimeBlockers ?? []).join(" ")}${preflight.fallbackFamily ? ` Operator-visible alternative: ${FAMILIES[preflight.fallbackFamily].label}.` : ""}`
           : "";
         const validation = preflight?.validationRenderRequired ? " A held-out validation render is required before promotion." : "";
-        const dataStoryNote = recommendedDataStory
-          ? ` Source-attributed Data Story is recommended; enable it in Details to explicitly accept its named-source evidence contract.${dataStoryAdmission?.autonomous === false ? ` Automatic production remains blocked: ${dataStoryAdmission.remediation ?? "register a non-Gemini visual-insert planner."}` : ""}`
-          : "";
-        const casefileNote = casefileCinematicRecommendation
-          ? " This factual cinematic route requires a source-first Case Packet, evidence-to-shot map, and reviewer-signed faceless mannequin sequence before it can enter rendering."
-          : "";
-        const childrenNote = childrenShowBibleRecommendation
-          ? " This children’s format is a supervised show-production lane: it needs an age-banded original Show Bible, one measurable learning objective, and a fresh child-editor approval before it can produce review candidates."
-          : "";
+        const capabilityNotes = creativeCapabilities.map((capability) => {
+          const requirements = capability.requirements?.length
+            ? ` Requirements: ${capability.requirements.join(", ")}.`
+            : "";
+          const admission = capability.automationAdmission?.autonomous === false
+            ? ` Automatic production remains blocked: ${capability.automationAdmission.remediation ?? "complete its stated admission."}`
+            : "";
+          return capability.selectionMode === "explicit_opt_in"
+            ? ` ${capability.title} is available as an explicit opt-in in Details.${requirements}${admission}`
+            : ` ${capability.title} is private-review only and cannot authorize automatic build, render, spend, or publication.${requirements}`;
+        }).join("");
         const supervisedNote = supervised
           ? " Private-review intake selected — it cannot start an automatic build, render, spend, or publish action."
           : "";
         const availability = supervised
           ? " (private review available; automatic renderer unavailable)"
           : d.available ? "" : " (renderer unavailable)";
-        setClipNote(`Suggested format: ${fam}${availability} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${planningFoundation}${requirements}${quality}${runtime}${validation}${dataStoryNote}${casefileNote}${childrenNote}${supervisedNote}`);
+        setClipNote(`Suggested format: ${fam}${availability} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${planningFoundation}${requirements}${quality}${runtime}${validation}${capabilityNotes}${supervisedNote}`);
       } catch {
         setClipNote("Suggestion failed — pick a format manually below.");
       } finally {
@@ -498,6 +520,9 @@ export default function NewChannelWizard() {
           return;
         }
       }
+      const selectedCapabilitySelections = Object.entries(capabilitySelections)
+        .filter(([, catalogFingerprint]) => Boolean(catalogFingerprint))
+        .map(([capability, catalogFingerprint]) => ({ capability, catalogFingerprint }));
       const design: Record<string, unknown> = {
         nicheKey, subcategory, family, concept: concept.trim() || undefined, name: requestedYoutubeName || undefined,
         // Every variable-duration family receives its own authored unit. Fixed
@@ -509,7 +534,7 @@ export default function NewChannelWizard() {
         seriesCount: seriesTitle.trim() && seriesCount > 0 ? seriesCount : undefined,
         cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube, runProbe,
         ...(family === "documentary_collage_short" ? { sourceReferences, claimEvidence } : {}),
-        ...(dataStory && supportsDataStoryFamily(family) ? { dataStory: SOURCE_ATTRIBUTED_DATA_STORY } : {}),
+        ...(selectedCapabilitySelections.length ? { capabilitySelections: selectedCapabilitySelections } : {}),
         ...(family === "illustrated_explainer" && syntheticScenarioProfile
           ? { syntheticScenario: syntheticScenarioContract(syntheticScenarioProfile) }
           : {}),
@@ -964,17 +989,39 @@ export default function NewChannelWizard() {
             {fam?.narrated && (
               <Row label="Voice effect"><select value={voiceFx} onChange={(e) => setVoiceFx(e.target.value)} style={selStyle}><option value="none">None (clean)</option><option value="radio">Old radio (vintage AM)</option></select></Row>
             )}
-            {family && supportsDataStoryFamily(family) && (
-              <Row label="Source-attributed data story">
-                <label style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", cursor: "pointer", fontSize: "0.8rem", color: "var(--color-muted)" }}>
-                  <input type="checkbox" checked={dataStory} onChange={(event) => setDataStory(event.target.checked)} />
-                  <span>
-                    {dataStorySuggested ? "Advisor recommended this for the described channel. " : ""}
-                    Enable chart-led statistics and comparisons only when every rendered number is spoken in a sentence naming a concrete source. At least 3 named-source numeric sentences are required; un-attributed figures do not render. Automatic production remains blocked until a source-first Narrated + Stock foundation is registered.
-                  </span>
-                </label>
-              </Row>
-            )}
+            {creativeCapabilityOffers
+              .filter((capability) => capability.selectionMode === "explicit_opt_in")
+              .map((capability) => {
+                const selected = Boolean(capabilitySelections[capability.capability]);
+                return (
+                  <Row key={capability.capability} label={capability.title}>
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", cursor: "pointer", fontSize: "0.8rem", color: "var(--color-muted)" }}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setCapabilitySelections((current) => {
+                            const next = { ...current };
+                            if (checked) next[capability.capability] = capabilityCatalogFingerprint;
+                            else delete next[capability.capability];
+                            return next;
+                          });
+                        }}
+                      />
+                      <span>
+                        {dataStorySuggested && capability.capability === "source_attributed_data_story"
+                          ? "Advisor recommended this for the described channel. "
+                          : ""}
+                        {capability.description} {capability.requirements?.join(" ")}
+                        {capability.automationAdmission?.autonomous === false
+                          ? ` Automatic production remains blocked: ${capability.automationAdmission.remediation ?? "complete its stated admission."}`
+                          : ""}
+                      </span>
+                    </label>
+                  </Row>
+                );
+              })}
             {family === "illustrated_explainer" && (
               <Row label="Fictional AI format">
                 <select

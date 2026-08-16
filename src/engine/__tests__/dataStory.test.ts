@@ -62,13 +62,22 @@ assert.throws(
 const creatorSource = readFileSync(join(process.cwd(), "src/app/(app)/channels/new/page.tsx"), "utf8");
 assert.match(creatorSource, /previewBlocks\(family, toggles, nicheKey, dataStory, syntheticScenarioProfile/);
 assert.match(creatorSource, /const needsDataInserts = \(dataStory && supportsDataStoryFamily\(familyKey\)\)/);
-assert.match(creatorSource, /\{ dataStory: SOURCE_ATTRIBUTED_DATA_STORY \}/);
-assert.match(creatorSource, /At least 3 named-source numeric sentences are required/);
-assert.match(creatorSource, /Automatic production remains blocked until a source-first Narrated \+ Stock foundation is registered/);
+assert.match(creatorSource, /creativeCapabilityOffers/);
+assert.match(creatorSource, /capabilitySelections/);
+assert.match(creatorSource, /capabilityCatalogFingerprint/);
+assert.match(creatorSource, /source_attributed_data_story/);
 
 const routeSource = readFileSync(join(process.cwd(), "src/app/api/build-channel/route.ts"), "utf8");
 assert.match(routeSource, /dataStoryProductionReadiness\(\)/);
 assert.match(routeSource, /dataStoryReadiness\.remediation/);
+assert.match(routeSource, /validateCreativeCapabilitySelections/);
+
+const capabilityCatalogSource = readFileSync(
+  join(process.cwd(), "src/engine/creative/creativeCapabilityCatalog.ts"),
+  "utf8",
+);
+assert.match(capabilityCatalogSource, /dataStoryRecommendationForIntent/);
+assert.match(capabilityCatalogSource, /pipelineObligations/);
 
 const catalogSource = readFileSync(join(process.cwd(), "src/engine/moduleCatalog.ts"), "utf8");
 const surfacesSource = readFileSync(join(process.cwd(), "src/engine/moduleSurfaces.ts"), "utf8");

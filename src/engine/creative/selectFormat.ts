@@ -20,10 +20,13 @@ import {
   type FamilyKey,
 } from "@/engine/families";
 import { CONTENT_LANE_POLICIES, contentLaneForFamily } from "@/engine/contentLane";
+import type { DataStoryContract } from "@/engine/dataStory";
 import {
-  dataStoryRecommendationForIntent,
-  type DataStoryContract,
-} from "@/engine/dataStory";
+  CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
+  isCasefileCinematicIntent,
+  resolveCreativeCapabilities,
+  type CreativeCapabilityOffer,
+} from "@/engine/creative/creativeCapabilityCatalog";
 import { nichePreset } from "@/engine/golden";
 import { assessPipelineVideoRuntimeReadiness } from "@/engine/runtimeCapability";
 import {
@@ -174,6 +177,10 @@ export interface FormatPreflight {
   sourceRequirementsReady: boolean;
   /** Certified modules implied by the concept, including private-review-only routes. */
   recommendedModules: FormatModuleRecommendation[];
+  /** Reusable intent-matched capability offers; only explicit opt-ins may be submitted. */
+  creativeCapabilities: CreativeCapabilityOffer[];
+  /** Current declarative catalog identity; stale browser selections are rejected server-side. */
+  capabilityCatalogFingerprint: string;
   /**
    * The automation status of modules implied by the creator's stated concept.
    * A module with `requiredForConcept: true` blocks automatic production when
@@ -359,104 +366,6 @@ function canonicalCrew(family: FamilyKey, input: FormatSelectionInput): FormatCr
   return KNOWN_ROLES.filter((role) => known.has(role));
 }
 
-const CASEFILE_CINEMATIC_SIGNALS = [
-  "true crime",
-  "casefile",
-  "cold case",
-  "missing person",
-  "missing people",
-  "murder",
-  "homicide",
-  "criminal investigation",
-  "crime investigation",
-  "real crime",
-  "historical crime",
-  "factual reconstruction",
-  "documentary reconstruction",
-] as const;
-
-function isCasefileCinematicIntent(input: FormatSelectionInput, family: FamilyKey): boolean {
-  if (family !== "cinematic") return false;
-  const intent = normalizedIntent(input);
-  // Preserve the fiction lane. A fictional crime/thriller is not a reason to
-  // demand real-world primary-source evidence or to mislabel it as Casefile.
-  if (/\b(fictional|fiction|screenplay|original story)\b/.test(intent)) return false;
-  return CASEFILE_CINEMATIC_SIGNALS.some((signal) => intent.includes(signal));
-}
-
-function casefileCinematicRecommendations(
-  input: FormatSelectionInput,
-  family: FamilyKey,
-): FormatModuleRecommendation[] {
-  if (!isCasefileCinematicIntent(input, family)) return [];
-
-  return [
-    {
-      block: "casefile_source_packet",
-      profile: "source_first_casefile/v1",
-      automationAdmission: {
-        autonomous: false,
-        blockers: ["Casefile source admission is private human-editorial review only."],
-        remediation: "Supply the source-first packet and a current fingerprint-bound editorial approval.",
-      },
-      requirements: [
-        "reviewed Case Packet with one allowed primary-source URL and provenance record per factual claim",
-        "exhaustive source-asset usage and rights-basis ledger",
-        "fresh fingerprint-bound human editorial approval",
-      ],
-      qualityFocus: ["primary-source claim integrity", "rights-aware visual provenance"],
-    },
-    {
-      block: "casefile_evidence_shot_map",
-      profile: "claim_to_source_to_shot_map/v1",
-      automationAdmission: {
-        autonomous: false,
-        blockers: ["Casefile evidence-to-shot mapping is private human-editorial review only."],
-        remediation: "Bind every factual claim to admitted source, scene, and coverage shots, then obtain current map approval.",
-      },
-      requirements: [
-        "admitted Casefile source packet",
-        "claim-to-source-to-scene-to-shot coverage map with a fresh reviewer signature",
-      ],
-      qualityFocus: ["no unsupported visual reconstruction", "claim-to-shot traceability"],
-    },
-    {
-      block: "cinematic_case_sequence",
-      profile: "faceless_source_bound_cinematic_sequence/v1",
-      automationAdmission: {
-        autonomous: false,
-        blockers: ["Cinematic Casefile sequences remain private human-review candidates, not automatic channel output."],
-        remediation: "Approve a fingerprint-bound sequence with faceless cast, wardrobe, prop, era, and cut-continuity locks.",
-      },
-      requirements: [
-        "admitted evidence-shot map",
-        "reviewer-signed causal multi-shot sequence with faceless mannequin wardrobe, prop, era, and location continuity locks",
-      ],
-      qualityFocus: ["causal tension-and-reveal edit", "faceless wardrobe continuity", "source-bound multi-shot coverage"],
-    },
-  ];
-}
-
-function childrenShowBibleRecommendations(family: FamilyKey): FormatModuleRecommendation[] {
-  if (family !== "children_learning") return [];
-  return [{
-    block: "children_show_bible",
-    profile: "original_child_show_bible/v1",
-    automationAdmission: {
-      autonomous: false,
-      blockers: ["Children’s show admission is private child-editorial review only."],
-      remediation: "Supply an age-banded original Show Bible with one observable objective, five-stage participation pattern, and a current graph-and-lesson-bound child-editor approval.",
-    },
-    requirements: [
-      "declared age band and one measurable learning objective with an observable assessment",
-      "original recurring-character and world continuity locks with no IP-adjacent identity",
-      "five-stage familiar-problem → guided-attempt → participation → resolution-recall → varied-repetition pattern",
-      "fresh child-editor approval bound to the Show Bible, Episode Graph, and lesson contract",
-    ],
-    qualityFocus: ["age-appropriate causal learning", "original character/world continuity", "participation-and-recall rhythm"],
-  }];
-}
-
 function sourceRequirements(family: FamilyKey, input: FormatSelectionInput): string[] {
   if (family === "documentary_collage_short") {
     return ["structured sourceReferences", "per-claim claimEvidence"];
@@ -604,11 +513,17 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
   const planning = planningPreflight(family);
   const creatorAdmission = creatorAdmissionPreflight(family, input);
   const runtime = runtimePreflight(family);
-  const recommendedModules: FormatModuleRecommendation[] = [
-    ...dataStoryRecommendationForIntent(input, family),
-    ...casefileCinematicRecommendations(input, family),
-    ...childrenShowBibleRecommendations(family),
-  ];
+  const creativeCapabilities = resolveCreativeCapabilities(input, family);
+  const recommendedModules: FormatModuleRecommendation[] = creativeCapabilities.flatMap((capability) =>
+    capability.modules.map((module) => ({
+      block: module.block,
+      profile: module.profile,
+      ...(module.contract ? { contract: module.contract } : {}),
+      automationAdmission: module.automationAdmission ?? capability.automationAdmission,
+      requirements: module.requirements,
+      qualityFocus: module.qualityFocus,
+    })),
+  );
   const admittedModules = moduleAdmissions(recommendedModules);
   const requiredSources = sourceRequirements(family, input);
   const missingRequirements = uniqueStrings([
@@ -670,6 +585,8 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
     sourceRequirements: requiredSources,
     sourceRequirementsReady,
     recommendedModules,
+    creativeCapabilities,
+    capabilityCatalogFingerprint: CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
     moduleAdmissions: admittedModules,
     missingRequirements,
     minimumPerVideoBudgetUsd,

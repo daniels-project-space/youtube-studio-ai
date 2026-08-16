@@ -99,7 +99,7 @@ export async function reviewCinematicClip(args: {
     maxTokens: VISION_GATE_MAX_TOKENS,
     noCache: true,
     // Do not allow a Gemini fallback to mint a non-Google moving-take receipt.
-    providers: ["groq", "fal"],
+    providers: ["openrouter"], tier: "final",
   });
   const verdict = parseVerdict(raw);
   if (!verdict.pass || !verdict.textWatermarkFree ||

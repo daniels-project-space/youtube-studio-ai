@@ -247,7 +247,7 @@ async function engineDefaultsSurviveForTheCli(): Promise<void> {
   assert.match(engine, /claudeJsonPro/, "the lore story planner must use Claude, never Google text planning");
   assert.doesNotMatch(engineCode, /gemini|google|generateBananaImage/i,
     "LoreCraft itself must contain no Google planning, scene-art, or utility path");
-  assert.match(engine, /providers:\s*\["groq", "fal"\]/,
+  assert.match(engine, /providers:\s*\["openrouter"\]/,
     "LoreCraft motion analysis must explicitly restrict itself to non-Google vision providers");
 }
 

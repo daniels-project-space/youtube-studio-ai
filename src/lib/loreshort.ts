@@ -483,7 +483,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
     if (existsSync(out)) { motion[i] = JSON.parse(await readFile(out, "utf8")); return; }
     deps.onVisionCall?.(i);
     const raw = await visionLocal({
-      imagePaths: [rd(`scene_${i}.png`)], json: true, maxTokens: VISION_GATE_MAX_TOKENS, providers: ["groq", "fal"],
+      imagePaths: [rd(`scene_${i}.png`)], json: true, maxTokens: VISION_GATE_MAX_TOKENS, providers: ["openrouter"], tier: "standard",
       prompt:
         `You are the SHOT DIRECTOR for an image-to-video clip (~6s). Look CAREFULLY at this ${String(cfg.subStyle).replace(/_/g, " ")} illustration ` +
         `and decide what should MOVE, grounded ONLY in what is ACTUALLY visible. The CAMERA move is the heart of the shot; subject and particle motion are added ONLY when they genuinely belong. Do NOT invent motion. ` +

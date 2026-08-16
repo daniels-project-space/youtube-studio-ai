@@ -125,7 +125,7 @@ async function gradeImage(
       imagePaths,
       json: true,
       maxTokens,
-      providers: ["groq", "fal"],
+      providers: ["openrouter"], tier: "final",
     })));
   } catch {
     return SKIP;
