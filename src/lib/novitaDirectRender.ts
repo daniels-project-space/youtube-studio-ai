@@ -636,8 +636,25 @@ with lock.open('a+b') as handle:
   if root.exists(): raise RuntimeError('runtime root exists without its matching ready receipt')
   stage=pathlib.Path(tempfile.mkdtemp(prefix='.ltx-runtime-stage.',dir='/network/runtime'))
   try:
-    bundle=stage/'runtime.tar.gz'
-    urllib.request.urlretrieve(os.environ['NOVITA_RUNTIME_BUNDLE_URL'],bundle)
+    archives=[item for item in pathlib.Path('/network/runtime').glob('.ltx-runtime-stage.*/runtime.tar.gz') if item.is_file()]
+    bundle=max(archives,key=lambda item:item.stat().st_size,default=stage/'runtime.tar.gz')
+    request=urllib.request.Request(os.environ['NOVITA_RUNTIME_BUNDLE_URL'],headers={'Range':'bytes=0-0'})
+    with urllib.request.urlopen(request) as response:
+      content_range=str(response.headers.get('Content-Range') or '')
+    if '/' not in content_range: raise RuntimeError('runtime server does not support verified byte ranges')
+    total=int(content_range.rsplit('/',1)[1])
+    descriptor=os.open(bundle,os.O_RDWR|os.O_CREAT,0o600)
+    try:
+      os.ftruncate(descriptor,total)
+      from concurrent.futures import ThreadPoolExecutor
+      def fetch_range(start):
+        end=min(total-1,start+32*1024*1024-1)
+        request=urllib.request.Request(os.environ['NOVITA_RUNTIME_BUNDLE_URL'],headers={'Range':f'bytes={start}-{end}'})
+        with urllib.request.urlopen(request) as response: payload=response.read()
+        if len(payload)!=end-start+1: raise RuntimeError('runtime range length mismatch')
+        os.pwrite(descriptor,payload,start)
+      with ThreadPoolExecutor(max_workers=8) as pool: list(pool.map(fetch_range,range(0,total,32*1024*1024)))
+    finally: os.close(descriptor)
     digest=hashlib.sha256(bundle.read_bytes()).hexdigest()
     if digest!=sha: raise RuntimeError('runtime bundle SHA-256 mismatch')
     with tarfile.open(bundle,'r:gz') as archive:
@@ -648,6 +665,7 @@ with lock.open('a+b') as handle:
       for member in archive.getmembers(): archive.extract(member,stage)
     if not (stage/'opt/LTX-2/.venv/bin/python').is_file() or not (stage/'opt/novita-worker/worker.py').is_file(): raise RuntimeError('runtime archive is incomplete')
     (stage/'.ready').write_text(sha+'\n')
+    if bundle.parent!=stage: shutil.rmtree(bundle.parent,ignore_errors=True)
     os.replace(stage,root)
   except BaseException:
     shutil.rmtree(stage,ignore_errors=True)
