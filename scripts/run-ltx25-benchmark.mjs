@@ -344,6 +344,32 @@ async function putJson(key, value) {
   }), `put:${key}`);
 }
 
+let incompletePromise;
+function incompleteReason(error) {
+  return String(error?.message || error || "unknown failure")
+    .replace(/https?:\/\/[^\s"<>]+/g, "[url]")
+    .replace(/[A-Za-z0-9_-]{40,}/g, "[redacted]")
+    .slice(0, 500);
+}
+
+async function markIncomplete({ error, signal } = {}) {
+  if (!incompletePromise) {
+    const incompleteKey = `${root}/incomplete.json`;
+    incompletePromise = putJson(incompleteKey, {
+      contract: "ltx-2.5-rtx4090-benchmark/v1",
+      ok: false,
+      status: "incomplete",
+      nonce,
+      ltxModelManifestKey,
+      ...(signal ? { signal } : {}),
+      reason: incompleteReason(error || `received ${signal || "unknown signal"}`),
+    }).then(() => {
+      console.error(JSON.stringify({ event: "benchmark_incomplete", incompleteKey }));
+    });
+  }
+  return incompletePromise;
+}
+
 async function ensureWorkerOverlay() {
   try {
     const existing = await sendR2(() => new HeadObjectCommand({ Bucket: bucket, Key: WORKER_OVERLAY_KEY }), "head:worker-overlay");
@@ -704,7 +730,13 @@ async function cleanupActiveWorkers() {
 
 function cleanupOnSignal(signal) {
   console.error(JSON.stringify({ event: "benchmark_interrupted", signal, workers: activeWorkers.size }));
-  void cleanupActiveWorkers().finally(() => process.exit(128 + (signal === "SIGINT" ? 2 : 15)));
+  void Promise.allSettled([markIncomplete({ signal }), cleanupActiveWorkers()])
+    .then(([marker]) => {
+      if (marker.status === "rejected") {
+        console.error(JSON.stringify({ event: "benchmark_incomplete_unmarked", signal, reason: incompleteReason(marker.reason) }));
+      }
+    })
+    .finally(() => process.exit(128 + (signal === "SIGINT" ? 2 : 15)));
 }
 
 process.once("SIGINT", () => cleanupOnSignal("SIGINT"));
@@ -712,6 +744,14 @@ process.once("SIGTERM", () => cleanupOnSignal("SIGTERM"));
 
 try {
   await main();
+} catch (error) {
+  try {
+    await markIncomplete({ error });
+  } catch (markerError) {
+    console.error(JSON.stringify({ event: "benchmark_incomplete_unmarked", reason: incompleteReason(markerError) }));
+    throw new AggregateError([error, markerError], "benchmark failed and could not be marked incomplete");
+  }
+  throw error;
 } finally {
   await cleanupActiveWorkers();
 }
