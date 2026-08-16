@@ -17,6 +17,7 @@ import {
 import { generateBananaImage, generateNanoBananaImageWithReceipt, hasNanoBanana } from "@/lib/banana";
 import { embedText, hasEmbedKey } from "@/lib/embeddings";
 import { browserbaseStagehandModel, withStagehand } from "@/lib/browserbase";
+import { hydrateEnv } from "@/lib/vault";
 
 const GATE_ENV = [
   "GEMINI_API_KEY",
@@ -132,6 +133,11 @@ async function explicitOptInAdmitsOnlyTheSealedThumbnailPurpose(): Promise<void>
     await assert.rejects(geminiJson({ prompt: "still-blocked generic request" }), isDisabled);
     await assert.rejects(embedText("still-blocked embedding"), isDisabled);
     await assert.rejects(
+      hydrateEnv("gemini"),
+      isDisabled,
+      "legacy scripts must not hydrate a Gemini key without the opaque thumbnail capability",
+    );
+    await assert.rejects(
       generateBananaImage({ prompt: "still-blocked generic image" }),
       /generic image generation requires FAL_KEY/,
     );
@@ -161,6 +167,11 @@ function productionRunnersDoNotRequireThumbnailCredentials(): void {
   const bootstrap = readFileSync(new URL("../bootstrap.ts", import.meta.url), "utf8");
   assert.doesNotMatch(
     bootstrap,
+    /^\s*["']gemini["']\s*,/m,
+    "generic worker bootstrap must never hydrate the thumbnail-only Gemini credential",
+  );
+  assert.doesNotMatch(
+    bootstrap,
     /GOOGLE(?:_GENERATIVE_AI)?_API_KEY\s*=\s*process\.env\.GEMINI_API_KEY/,
     "bootstrap must not promote thumbnail-only Gemini credentials to global Google SDK keys",
   );
@@ -173,7 +184,7 @@ function walkProductionSource(dir: string): string[] {
       if (entry.name === "__tests__") return [];
       return walkProductionSource(path);
     }
-    return entry.isFile() && /\.(?:ts|tsx)$/.test(entry.name) ? [path] : [];
+    return entry.isFile() && /\.(?:ts|tsx|[cm]?js)$/.test(entry.name) ? [path] : [];
   });
 }
 
@@ -181,7 +192,6 @@ function directGoogleRuntimeOwnersStaySealed(): void {
   const root = process.cwd();
   const allowedRestOwners = new Set([
     "src/lib/banana.ts",
-    "src/lib/embeddings.ts",
     "src/lib/gemini.ts",
   ]);
   const sourceFiles = walkProductionSource(join(root, "src"));
@@ -197,6 +207,8 @@ function directGoogleRuntimeOwnersStaySealed(): void {
   const banana = readFileSync(join(root, "src/lib/banana.ts"), "utf8");
   assert.match(banana, /sealedNanoBananaThumbnailPurpose\(\)/,
     "the only admitted Google image boundary must present the opaque thumbnail capability");
+  assert.match(banana, /hydrateEnv\(["']gemini["']\s*,\s*\{/,
+    "the sealed thumbnail adapter, not generic bootstrap, must hydrate its own credential");
   assert.doesNotMatch(banana, /["']sealed_thumbnail["']/,
     "a string literal must never forge the sealed thumbnail capability");
 
@@ -210,6 +222,20 @@ function directGoogleRuntimeOwnersStaySealed(): void {
   ]) {
     assert.doesNotMatch(readFileSync(join(root, relativePath), "utf8"), /google\/gemini/i,
       `${relativePath} must inherit the non-Google Browserbase policy rather than pin Gemini`);
+  }
+}
+
+function legacyOperatorScriptsCannotCreateRawGoogleRuntime(): void {
+  const root = process.cwd();
+  const rawGoogleModelBoundary = /(?:generativelanguage|aiplatform|vertexai)\.googleapis\.com|@google\/generative-ai|google\.genai/;
+  const scripts = walkProductionSource(join(root, "scripts"));
+  for (const file of scripts) {
+    const source = readFileSync(file, "utf8");
+    assert.doesNotMatch(
+      source,
+      rawGoogleModelBoundary,
+      `${relative(root, file)} must not create a raw Google model boundary; use the sealed thumbnail module instead`,
+    );
   }
 }
 
@@ -233,6 +259,7 @@ async function main(): Promise<void> {
   await explicitOptInAdmitsOnlyTheSealedThumbnailPurpose();
   productionRunnersDoNotRequireThumbnailCredentials();
   directGoogleRuntimeOwnersStaySealed();
+  legacyOperatorScriptsCannotCreateRawGoogleRuntime();
   browserAutomationGoogleModelIsRejectedBeforeImport();
   console.log("GEMINI RUNTIME GATE TESTS PASSED");
 }

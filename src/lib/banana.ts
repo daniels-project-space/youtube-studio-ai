@@ -18,6 +18,7 @@ import {
 } from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
+import { hydrateEnv } from "@/lib/vault";
 import { PRICE } from "@/engine/pricing";
 import { recordImageUsage } from "@/lib/imageUsage";
 import { rasterImageDimensions } from "@/lib/imageDimensions";
@@ -92,7 +93,31 @@ export function hasBanana(): boolean {
 
 /** Thumbnail readiness ignores the generic image router by design. */
 export function hasNanoBanana(): boolean {
-  return isGeminiRuntimeEnabled() && !!process.env.GEMINI_API_KEY;
+  // Normal worker bootstrap intentionally does not load the thumbnail-only
+  // credential. A vault-authenticated worker is therefore *eligible* here;
+  // the actual sealed route hydrates and verifies the key immediately before
+  // its provider boundary below.
+  return isGeminiRuntimeEnabled() && Boolean(process.env.GEMINI_API_KEY || process.env.VAULT_ACCESS_TOKEN);
+}
+
+/**
+ * Keep the Gemini credential inside the only admitted caller. Generic worker
+ * bootstrap must never make this credential available to scripts, planners,
+ * reviewers, or any future Google SDK import.
+ */
+async function hydrateSealedNanoBananaThumbnailCredential(): Promise<void> {
+  assertGeminiRuntimeAllowed(
+    "Nano Banana thumbnail credential",
+    sealedNanoBananaThumbnailPurpose(),
+  );
+  if (!process.env.GEMINI_API_KEY) {
+    await hydrateEnv("gemini", {
+      geminiPurpose: sealedNanoBananaThumbnailPurpose(),
+    });
+  }
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("nano banana thumbnail: GEMINI_API_KEY is not configured in the sealed thumbnail vault service");
+  }
 }
 
 /** The proven craft contract — prepended to EVERY brief. */
@@ -557,6 +582,7 @@ export async function generateNanoBananaImageWithReceipt(
     idempotencyContext?: string;
   },
 ): Promise<NanoBananaImageResult> {
+  await hydrateSealedNanoBananaThumbnailCredential();
   const profile = NANO_BANANA_THUMBNAIL_PROFILE;
   const generated = await generateGeminiImage({
     prompt: args.prompt,

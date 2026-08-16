@@ -24,9 +24,10 @@ const SERVICES = [
   "groq", // GROQ_API_KEY (llama-4-scout vision — the FREE first hop of the vision router chain)
   "telegram", // TELEGRAM_BOT_TOKEN (+ admin chat id)
   "browserbase", // BROWSERBASE_API_KEY/PROJECT_ID (+ optional CONTEXT_ID) — headless YouTube channel creation
-  // Competitor-intelligence engine. hydrateEnv tolerates a missing service
-  // (logs + continues), so these are safe even before the vault entries exist.
-  "gemini", // GEMINI_API_KEY (Gemini 2.5 Flash + Vision) — script_gen, research, metadata
+  // Gemini is deliberately absent. Its credential is hydrated only by the
+  // sealed Nano Banana thumbnail adapter after it presents its opaque runtime
+  // capability. Loading it into every worker would let legacy/operator code
+  // make direct Google calls outside that one admitted module.
   "google", // GOOGLE_* (places / app credentials)
   "langfuse", // LANGFUSE_PUBLIC_KEY/SECRET_KEY (Mastra agent tracing; optional)
   "assemblyai", // ASSEMBLYAI_API_KEY (captions SRT; optional — chapters work without)
