@@ -92,8 +92,9 @@ def ensure_cuda_compatibility():
   if compatibility.is_file() and compatibility.read_text().strip()=='torch==2.7.1+cu118': return
   python=root/'opt/LTX-2/.venv/bin/python'
   if not python.is_file(): raise RuntimeError('portable Python is missing before CUDA compatibility install')
-  import subprocess
-  subprocess.run([str(python),'-m','pip','install','--no-cache-dir','--force-reinstall','torch==2.7.1','torchvision==0.22.1','torchaudio==2.7.1','--index-url','https://download.pytorch.org/whl/cu118'],check=True,stdout=subprocess.DEVNULL)
+  import subprocess,sys
+  subprocess.run([sys.executable,'-m','pip','install','--no-cache-dir','uv==0.10.6'],check=True,stdout=subprocess.DEVNULL)
+  subprocess.run(['uv','pip','install','--python',str(python),'--reinstall','torch==2.7.1','torchvision==0.22.1','torchaudio==2.7.1','--index-url','https://download.pytorch.org/whl/cu118'],check=True,stdout=subprocess.DEVNULL)
   evidence=subprocess.check_output([str(python),'-c',"import torch;print(torch.__version__+'|'+str(torch.version.cuda)+'|'+str(torch.cuda.is_available()))"],text=True).strip()
   if evidence!='2.7.1+cu118|11.8|True': raise RuntimeError('CUDA-compatible Torch verification failed: '+evidence)
   compatibility.write_text('torch==2.7.1+cu118\\n')
