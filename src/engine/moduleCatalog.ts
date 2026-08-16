@@ -51,13 +51,6 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     params: [],
   },
   {
-    block: "scene_compiler_thumbnail",
-    label: "Renderer-native thumbnail",
-    description: "Uses the local Scene Compiler master plus FFmpeg typography; no image-generation provider is involved.",
-    optional: false,
-    params: [],
-  },
-  {
     block: "director_brief",
     label: "Crew · Director",
     description: "Designs each video's structure: hook + beat map + pacing, from the Show Bible.",

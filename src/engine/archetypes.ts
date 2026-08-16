@@ -118,7 +118,7 @@ const ILLUSTRATED_EXPLAINER: PipelineEntry[] = [
   { block: "length_check", params: { minSeconds: 60, maxSeconds: 900 } },
   { block: "captions" },
   { block: "metadata" },
-  { block: "scene_compiler_thumbnail" },
+  { block: "thumbnail_gen" },
   { block: "qa_visual" },
   { block: "upload_draft" },
   { block: "notify" },

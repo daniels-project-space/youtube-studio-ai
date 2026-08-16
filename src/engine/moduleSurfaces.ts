@@ -309,18 +309,6 @@ const SCENARIO_DISCLOSURE_GATE_MODULE: ModuleCard = {
   },
 };
 
-const SCENE_COMPILER_THUMBNAIL_MODULE: ModuleCard = {
-  key: "scene_compiler_thumbnail",
-  title: "Renderer-native Thumbnail",
-  stage: "thumbnail",
-  does: "Extracts the local Scene Compiler master and adds local FFmpeg typography, without an image-generation provider.",
-  customization: {
-    capabilities: ["master-frame extraction", "local FFmpeg typography", "fictional-scenario disclosure label when applicable"],
-    knobs: [],
-    presets: {},
-  },
-};
-
 /** Core pipeline surfaces — registered into MODULE_REGISTRY. */
 export const CORE_MODULE_SURFACES: ModuleCard[] = [
   TOPIC_MODULE,
@@ -340,6 +328,5 @@ export const CORE_MODULE_SURFACES: ModuleCard[] = [
   VISUAL_MATTER_MODULE,
   SYNTHETIC_SCENARIO_MODULE,
   SCENARIO_DISCLOSURE_GATE_MODULE,
-  SCENE_COMPILER_THUMBNAIL_MODULE,
   UPLOAD_MODULE,
 ];

@@ -153,27 +153,27 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   "scene-compiler": {
     kind: "pipeline-module",
     // One deterministic local renderer lane owns its admitted scenario
-    // contract/disclosure, causal graph pixels, and renderer-native thumbnail.
+    // contract/disclosure and causal graph pixels; the shared thumbnail module
+    // supplies the required Nano Banana cover image for every family.
     executableIds: [
       "synthetic_scenario",
       "scenario_disclosure_gate",
       "scene_compiler",
-      "scene_compiler_thumbnail",
     ],
   },
   "child-content-safety": { kind: "pipeline-module", executableIds: ["child_content_safety"] },
   "quiz-year": {
     kind: "pipeline-module",
     // The autonomous QuizYear route owns its deterministic topic/safety/cue,
-    // critic, metadata and renderer-native thumbnail receipts as one Golden
-    // module. Binding only the final renderer left its actual production
+    // critic and metadata receipts as one Golden module. Its final thumbnail
+    // is intentionally owned by the shared Nano Banana module. Binding only
+    // the final renderer left its actual production
     // planner outside the catalog proof graph.
     executableIds: [
       "quiz_topic_plan",
       "quiz_topic_safety",
       "quiz_critic_spec",
       "quiz_metadata",
-      "quiz_thumbnail",
       "quiz_year",
     ],
   },

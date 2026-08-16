@@ -154,7 +154,6 @@ async function main(): Promise<void> {
     "quiz_topic_safety",
     "quiz_critic_spec",
     "quiz_metadata",
-    "quiz_thumbnail",
     "quiz_year",
   ]);
   assert.ok(

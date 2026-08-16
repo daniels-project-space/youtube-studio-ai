@@ -20,14 +20,14 @@ assert.deepEqual(quizyearReadiness.blockers, []);
 assert.equal(familyChannelInceptionCapability("quizyear").mode, "registered_non_gemini");
 assert.equal(
   FAMILIES.quizyear.defaultThumbnailStyle,
-  "title_card",
-  "QuizYear must advertise its renderer-native deterministic thumbnail rather than generic Banana generation",
+  "banana",
+  "QuizYear must use the universal Nano Banana thumbnail route",
 );
 for (const family of FAMILY_KEYS) {
   assert.equal(
     FAMILIES[family].requiresKeys.some((capability) => /gemini|google/i.test(capability)),
     false,
-    `${family} must not advertise a general Google/Gemini dependency; the sealed thumbnail boundary is not a family runtime requirement`,
+    `${family} must not advertise a general Google/Gemini video dependency; the universal thumbnail boundary is owned by thumbnail_gen rather than the family media profile`,
   );
   assert.equal(
     FAMILIES[family].requiresKeys.includes("fal"),
@@ -60,11 +60,11 @@ const illustratedReadiness = familyProductionReadiness("illustrated_explainer");
 assert.equal(
   illustratedReadiness.productionReady,
   true,
-  "Illustrated Explainer is admitted only after its local deterministic foundation and renderer-native thumbnail route are wired",
+  "Illustrated Explainer is admitted only after its local deterministic foundation and sealed Nano Banana thumbnail route are wired",
 );
 assert.deepEqual(illustratedReadiness.blockers, []);
 assert.equal(familyChannelInceptionCapability("illustrated_explainer").mode, "registered_non_gemini");
-assert.equal(FAMILIES.illustrated_explainer.defaultThumbnailStyle, "renderer_native");
+assert.equal(FAMILIES.illustrated_explainer.defaultThumbnailStyle, "banana");
 
 for (const family of FAMILY_KEYS.filter(
   (candidate) => !["quizyear", "narrated_stock", "sleep", "shorts", "illustrated_explainer"].includes(candidate),

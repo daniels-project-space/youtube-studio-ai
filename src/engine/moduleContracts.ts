@@ -259,12 +259,6 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     providerProfiles: [local],
     qualityRequired: true,
   }),
-  quiz_thumbnail: contract(["package.thumbnail"], {
-    requiredConsumes: ["quizRounds", "title"],
-    optionalConsumes: ["palette"],
-    providerProfiles: [local],
-    qualityRequired: true,
-  }),
   competitor_research: contract(["topic.researched"], { optionalConsumes: ["niche"] }),
   scene_planner: contract(["visuals.planned"], {
     optionalConsumes: ["styleGrammar", "visualStyle", "visualBrief", "niche", "styleDNA", "sceneLibrary"],
@@ -327,9 +321,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     ],
   }),
   thumbnail_gen: contract(["package.thumbnail"], {
+    requiredConsumes: ["title", "thumbnailDescription"],
     optionalConsumes: [
       "channelName", "topic", "f1Url", "f1Key", "f1ThumbnailBaseProvenance", "styleGrammar", "styleDNA", "family", "persona",
-      "thumbnailIdentity", "nicheIntel", "thumbnailer", "niche", "seoDatabank", "competitors", "healHints", "plannedThumbnailKey",
+      "thumbnailIdentity", "nicheIntel", "niche", "seoDatabank", "competitors", "healHints", "plannedThumbnailKey",
       "narrationText",
       // Per-channel critique grounding for the produce→critique→regenerate loop.
       "criticDoctrine", "contentLane",
@@ -624,14 +619,6 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     maxCostUsd: 0,
     qualityRequired: true,
   }),
-  scene_compiler_thumbnail: contract(["package.thumbnail", "visuals.renderer_native_thumbnail"], {
-    requiredConsumes: ["videoLocalPath", "title"],
-    optionalConsumes: ["syntheticScenario"],
-    providerProfiles: [local],
-    maxCostUsd: 0,
-    qualityRequired: true,
-  }),
-
   visual_matter: contract(["visuals.visual_matter_planned", "visuals.visual_lock"], {
     requiredConsumes: ["topic", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs"],
     optionalConsumes: ["channelName", "styleDNA", "visualBrief"],

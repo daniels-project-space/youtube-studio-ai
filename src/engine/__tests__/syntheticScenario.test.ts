@@ -58,11 +58,12 @@ const script = blocks.indexOf("script_gen");
 const disclosure = blocks.indexOf("scenario_disclosure_gate");
 const graph = blocks.indexOf("episode_graph");
 const renderer = blocks.indexOf("scene_compiler");
-const thumbnail = blocks.indexOf("scene_compiler_thumbnail");
+const thumbnail = blocks.indexOf("thumbnail_gen");
 assert(scenario >= 0 && scenario < script);
 assert(disclosure === script + 1);
 assert(graph > disclosure && renderer > graph && thumbnail > renderer);
-assert.equal(blocks.includes("thumbnail_gen"), false, "the scenario lane must never restore the generic Gemini thumbnail block");
+assert.equal(blocks.filter((block) => block === "thumbnail_gen").length, 1,
+  "the scenario lane must use the universal Nano Banana thumbnail block exactly once");
 
 assert.throws(
   () => designPipeline({ family: "narrated_stock", syntheticScenario: syntheticScenarioContract("ai_pov") }),

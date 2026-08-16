@@ -2,8 +2,9 @@
  * Deterministic quiz planning spine.
  *
  * This is intentionally separate from `quiz_year`: planning a channel episode,
- * validating its safe topic, packaging it for discovery, and rendering a
- * publisher-safe thumbnail are reusable concerns. The first consumer is the
+ * validating its safe topic and packaging it for discovery are reusable
+ * concerns. Its universal publisher-safe Nano Banana thumbnail is produced by
+ * the shared `thumbnail_gen` block. The first consumer is the
  * mixed trivia family, but the provenance contract is designed so other
  * curated-source families can add a planner without depending on Topicraft.
  *
@@ -12,20 +13,20 @@
  * by `quiz_year` from CC0 Wikidata and re-validated before pixels render.
  */
 import { createHash } from "node:crypto";
-import { join } from "node:path";
-
-import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
-import { makeRunTempDir } from "@/lib/files";
-import { renderQuizYearStills, type QuizYearRound } from "@/lib/quizYearRender";
+import { type Block, type StageContext } from "@/engine/types";
 import { QUIZ_YEAR_TOPIC_KEYS, type QuizYearTopicKey } from "@/lib/quizYearFacts";
-import { putObjectFromFile } from "@/lib/storage";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 
 const QUIZ_PLANNER_VERSION = "quiz-curated-wikidata-planner/v1" as const;
 const QUIZ_TOPIC_MEMORY_PREFIX = "quiz-topic/v1";
-const QUIZ_THUMBNAIL_FRAME = 42;
+
+function convex(): ConvexHttpClient {
+  const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
+  if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
+  return new ConvexHttpClient(url);
+}
 
 interface QuizTopicPresentation {
   label: string;
@@ -99,12 +100,6 @@ export interface QuizTopicPlan {
   };
 }
 
-function convex(): ConvexHttpClient {
-  const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
-  if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
-  return new ConvexHttpClient(url);
-}
-
 function topicKeyFromUnknown(value: unknown): QuizYearTopicKey | undefined {
   const candidate = typeof value === "string" ? value.trim() : "";
   return (QUIZ_YEAR_TOPIC_KEYS as readonly string[]).includes(candidate)
@@ -169,40 +164,6 @@ function readQuizPlan(value: unknown): QuizTopicPlan {
     throw new Error("quiz plan is malformed or is not from the certified curated planner");
   }
   return candidate as QuizTopicPlan;
-}
-
-function readQuizRounds(value: unknown): QuizYearRound[] {
-  if (!Array.isArray(value) || value.length === 0) {
-    throw new Error("quiz thumbnail requires at least one rendered, integrity-checked quiz round");
-  }
-  const valid = value.every((round) =>
-    round && typeof round === "object" &&
-    typeof (round as QuizYearRound).questionText === "string" &&
-    Array.isArray((round as QuizYearRound).options) &&
-    (round as QuizYearRound).options.length === 4,
-  );
-  if (!valid) throw new Error("quiz thumbnail received malformed round props");
-  return value as QuizYearRound[];
-}
-
-async function recordAsset(
-  ctx: StageContext,
-  kind: string,
-  r2Key: string,
-  meta?: Record<string, unknown>,
-): Promise<void> {
-  try {
-    await convex().mutation(api.assets.recordAsset, {
-      ownerId: ctx.ownerId,
-      channelId: ctx.channelId as Id<"channels">,
-      runId: ctx.runId as Id<"runs">,
-      kind,
-      r2Key,
-      meta,
-    });
-  } catch (error) {
-    ctx.log(`recordAsset(${kind}) failed (non-fatal): ${error instanceof Error ? error.message : error}`);
-  }
 }
 
 function musicBriefFor(plan: QuizTopicPlan): Record<string, unknown> {
@@ -329,6 +290,7 @@ const quizMetadata: Block = {
   produces: [
     "title",
     "description",
+    "thumbnailDescription",
     "tags",
     "estimatedViews",
     "estimatedViewsSource",
@@ -354,59 +316,20 @@ const quizMetadata: Block = {
       "general knowledge",
       "guess the answer",
     ].map((tag) => tag.toLowerCase()))];
+    const thumbnailDescription = [
+      `A high-energy ${presentation.label.toLowerCase()} trivia challenge for the promise "${title}".`,
+      "Show one oversized, instantly recognisable subject from this category in a dramatic game-show moment, with a single clear choice or reveal consequence.",
+      "Leave clean negative space for the local headline overlay; do not place words, letters, UI, answer labels, or watermarks inside the generated scene.",
+    ].join(" ");
     return {
       title,
       description,
+      thumbnailDescription,
       tags,
       estimatedViews: 0,
       estimatedViewsSource: "deterministic-curated-quiz-metadata",
       pinnedComment: "How many did you get before the reveal?",
       titleAlternate: `${presentation.label}: 8 Question Trivia Challenge`,
-    };
-  },
-};
-
-/**
- * A renderer-native thumbnail, not a generic title-card fallback. Rendering the
- * actual first quiz question preserves typography, game grammar and palette;
- * downstream no-Gemini visual QA still decides whether it is publishable.
- */
-const quizThumbnail: Block = {
-  id: "quiz_thumbnail",
-  consumes: ["quizRounds", "title"],
-  produces: ["thumbnailKey", "strategy", "thumbnailPublishable"],
-  run: async (ctx) => {
-    const rounds = readQuizRounds(ctx.store["quizRounds"]);
-    const title = String(ctx.store["title"] ?? "").trim();
-    if (!title) throw new Error("quiz_thumbnail: a deterministic metadata title is required");
-    const palette = Array.isArray(ctx.store["palette"])
-      ? ctx.store["palette"].filter((value): value is string => typeof value === "string")
-      : [];
-    const tmp = await makeRunTempDir(ctx.runId, "quiz-thumbnail");
-    const outPath = join(tmp, "thumbnail.jpg");
-    await renderQuizYearStills({
-      rounds,
-      palette,
-      title,
-      frames: [QUIZ_THUMBNAIL_FRAME],
-      outPaths: [outPath],
-      width: 1_280,
-      height: 720,
-    });
-    const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-    await putObjectFromFile(thumbnailKey, outPath, { contentType: "image/jpeg" });
-    await recordAsset(ctx, "thumbnail", thumbnailKey, {
-      strategy: "quiz_renderer_native_still",
-      publishable: true,
-      source: "QuizYear Remotion composition",
-      frame: QUIZ_THUMBNAIL_FRAME,
-      title,
-    });
-    return {
-      thumbnailKey,
-      strategy: "quiz_renderer_native_still",
-      thumbnailPublishable: true,
-      [COST_PATCH_KEY]: 0,
     };
   },
 };
@@ -455,5 +378,4 @@ export const quizPlanningBlocks: Block[] = [
   quizTopicSafety,
   quizCriticSpec,
   quizMetadata,
-  quizThumbnail,
 ];

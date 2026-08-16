@@ -384,9 +384,9 @@ async function completeDeterministicQuizYearInception(args: {
     thumbnailer: args.family.defaultThumbnailStyle,
     status: "draft",
     architectReport: {
-      summary: "deterministic no-Gemini QuizYear foundation completed; draft-only until its independently admitted episode pipeline is run",
+      summary: "deterministic QuizYear foundation completed; draft-only until its independently admitted episode pipeline is run (every episode cover uses the sealed Nano Banana thumbnail module)",
       applied: ["deterministic-positioning", "local-brand-assets", "source-first-starter-slate"],
-      rejected: ["Gemini Style DNA/Showrunner", "Gemini visual judge", "Topicraft/Nano Banana starter slate", "automatic publishing"],
+      rejected: ["Gemini Style DNA/Showrunner", "Gemini visual judge", "automatic publishing"],
       missingCapabilities: [],
       groundingActions: ["CC0 Wikidata starter slate persisted with immutable hashes"],
       deterministicFoundation: {
@@ -464,9 +464,9 @@ async function completeDeterministicIllustratedInception(args: {
     thumbnailer: args.family.defaultThumbnailStyle,
     status: "draft",
     architectReport: {
-      summary: "deterministic non-Google Illustrated Explainer foundation completed; draft-only until its independently admitted episode pipeline is run",
+      summary: "deterministic Illustrated Explainer foundation completed; draft-only until its independently admitted episode pipeline is run (every episode cover uses the sealed Nano Banana thumbnail module)",
       applied: ["deterministic-positioning", "local-brand-assets", "fictional-no-external-claims-starter-slate"],
-      rejected: ["Google/Gemini creative services", "Nano Banana starter slate", "real-simulation claims", "automatic publishing"],
+      rejected: ["Google/Gemini creative services outside the required Nano Banana thumbnail module", "real-simulation claims", "automatic publishing"],
       missingCapabilities: [],
       groundingActions: ["fictional no-external-claims starter slate persisted with immutable hashes"],
       deterministicFoundation: {
@@ -1292,8 +1292,9 @@ export async function executeDesignChannel(
   }
 
   // Illustrated Explainer is its own local creative lane. It exits before the
-  // generic Channel Inception stages, whose starter-thumbnail lab may use a
-  // sealed Google/Nano Banana path that this family expressly cannot use.
+  // generic Channel Inception stages because its foundation is deterministic;
+  // its episode pipeline still uses the required sealed Nano Banana thumbnail
+  // module after the local scene compiler has rendered the video.
   if (payload.family === "illustrated_explainer") {
     const foundation = await completeDeterministicIllustratedInception({
       convex,

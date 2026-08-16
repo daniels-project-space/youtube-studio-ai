@@ -10,15 +10,14 @@
  *                         overlap-weighted view estimate. Replaces `metadata`.
  *   thumbnail_gen       → one Style-DNA/playbook route: text-free flash base →
  *                         deterministic local typography → one production QA
- *                         alarm. Generic cards are explicit nonpublishable
- *                         draft previews only; failures never swap renderers.
+ *                         alarm. Every execution is pinned to Nano Banana;
+ *                         failures never swap renderers or emit a card fallback.
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
 import { accountedModelUsageCost } from "@/engine/modelUsageCost";
 import {
   assertThumbnailGate,
-  assertThumbnailStrategy,
   qualityProfile,
   thumbnailGatePassed,
   type ThumbnailGateVerdict,
@@ -37,7 +36,6 @@ import {
   thumbnailRequestHash,
   type ThumbnailNanoBananaEvidence,
 } from "@/lib/thumbnailCheckpoint";
-import { titleCard, solidImage } from "@/lib/ffmpeg";
 import {
   generateNanoBananaImageWithReceipt,
   hasNanoBanana,
@@ -284,12 +282,33 @@ function finishMetadata(
   return { title, description, tags };
 }
 
+/**
+ * The image provider must receive an actual visual story, not an SEO title
+ * alone. This stays deterministic so every metadata outcome (including the
+ * non-provider fallback) supplies the same required thumbnail handoff.
+ */
+function buildThumbnailDescription(args: {
+  title: string;
+  topic: string;
+  scriptExcerpt: string;
+}): string {
+  const episodeContext = args.scriptExcerpt.replace(/\s+/g, " ").trim().slice(0, 420);
+  return [
+    `Thumbnail promise: ${args.title.trim()}.`,
+    `Visually enact the topic "${args.topic.trim()}" through one dominant subject, a concrete physical action, and a clear consequence; the image must communicate the promise without decorative filler or written words.`,
+    episodeContext
+      ? `Ground the scene in this actual episode context: ${episodeContext}`
+      : "Keep the scene specific to this episode's topic and honest promise.",
+  ].join(" ");
+}
+
 export const metadataOptimized: Block = {
   id: "metadata",
   consumes: ["topic"],
   produces: [
     "title",
     "description",
+    "thumbnailDescription",
     "tags",
     "estimatedViews",
     "estimatedViewsSource",
@@ -384,7 +403,19 @@ export const metadataOptimized: Block = {
       const tags = [topic.toLowerCase(), niche].filter(Boolean) as string[];
       const ve = await viewEstimate(tags);
       ctx.log(`metadata (degraded, no permitted text provider): "${title}"`);
-      return { title: plannedTitle || title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
+      return {
+        title: plannedTitle || title,
+        description,
+        thumbnailDescription: buildThumbnailDescription({
+          title: plannedTitle || title,
+          topic,
+          scriptExcerpt,
+        }),
+        tags,
+        pinnedComment: "",
+        titleAlternate: "",
+        ...ve,
+      };
     }
 
     // Phase 7: bias titles toward past high-CTR/retention winners ("" until data).
@@ -430,6 +461,11 @@ export const metadataOptimized: Block = {
       return {
         title: plannedTitle || title,
         description,
+        thumbnailDescription: buildThumbnailDescription({
+          title: plannedTitle || title,
+          topic,
+          scriptExcerpt,
+        }),
         tags,
         pinnedComment: m.pinnedComment,
         titleAlternate: m.titleAlternate,
@@ -652,43 +688,27 @@ export const metadataOptimized: Block = {
     ctx.log(
       `metadata: title="${title.slice(0, 60)}…" (${tournament ? `tournament ${(tournament.score * 10).toFixed(0)}/10` : `score=${loop!.critique.score.toFixed(2)}, accepted=${loop!.accepted}`}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
     );
-    return { title: plannedTitle || title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
+    return {
+      title: plannedTitle || title,
+      description,
+      thumbnailDescription: buildThumbnailDescription({
+        title: plannedTitle || title,
+        topic,
+        scriptExcerpt,
+      }),
+      tags,
+      pinnedComment: "",
+      titleAlternate: "",
+      ...ve,
+    };
   },
 };
 
 /* -------------------------- 3. thumbnail_gen ---------------------------- */
 
-/**
- * Explicit draft preview only. This is deliberately free, visibly labelled,
- * and marked nonpublishable; it is never an automatic recovery path.
- */
-async function draftTitleCardPreview(ctx: StageContext): Promise<{ thumbnailKey: string; costUsd: 0 }> {
-  const channelName = (ctx.store["channelName"] as string | undefined) ?? "Lofi";
-  const topic = (ctx.store["topic"] as string | undefined) ?? "";
-  const tmp = await makeRunTempDir(ctx.runId);
-  const outJpg = join(tmp, "thumbnail.jpg");
-  const base = await solidImage(join(tmp, "thumb_base.jpg"), 1_280, 720, "#172033");
-  const seoTitle = ((ctx.store["title"] as string | undefined) ?? topic ?? channelName).split(/[:|]/)[0].trim();
-  const cardTitle = seoTitle.length > 34 ? seoTitle.slice(0, 34).replace(/\s+\S*$/, "") : seoTitle;
-  await titleCard({
-    basePath: base,
-    outJpg,
-    title: cardTitle || channelName,
-    subtitle: `DRAFT PREVIEW — ${channelName}`,
-  });
-  const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-  await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
-  await recordAsset(ctx, "thumbnail", thumbnailKey, {
-    strategy: "draft_preview_placeholder",
-    publishable: false,
-    thumbnailTitle: channelName,
-  });
-  return { thumbnailKey, costUsd: 0 };
-}
-
 export const thumbnailGen: Block = {
   id: "thumbnail_gen",
-  consumes: ["title"],
+  consumes: ["title", "thumbnailDescription"],
   // `strategy` feeds the thumbnail learning loop (which path produced the
   // shipped thumbnail); every return path below must include it.
   produces: ["thumbnailKey", "strategy", "thumbnailPublishable"],
@@ -696,10 +716,10 @@ export const thumbnailGen: Block = {
   run: async (ctx) => {
     const quality = qualityProfile(ctx.params["qualityProfile"]);
     const title = str(ctx, "title");
-    const thumbnailer =
-      (ctx.store["thumbnailer"] as string | undefined) ??
-      (ctx.params["thumbnailer"] as string | undefined) ??
-      "banana";
+    const thumbnailDescription = str(ctx, "thumbnailDescription").replace(/\s+/g, " ").trim();
+    if (thumbnailDescription.length < 80) {
+      throw new Error("thumbnail_gen: thumbnailDescription must contain a concrete visual brief of at least 80 characters");
+    }
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
     // P1-17: the channel's durable lane calibrates how hard the critique loop
     // pushes (iteration cap + what the critic is told to scrutinise).
@@ -764,19 +784,6 @@ export const thumbnailGen: Block = {
       : null;
 
     const channelDoc = await loadChannel(ctx);
-    // The generic card is an explicit UI preview, never a provider/gate
-    // fallback. Production stops before creating or uploading it.
-    if (thumbnailer === "title_card") {
-      assertThumbnailStrategy(quality, "draft_preview_placeholder");
-      const preview = await draftTitleCardPreview(ctx);
-      return {
-        thumbnailKey: preview.thumbnailKey,
-        strategy: "draft_preview_placeholder",
-        thumbnailPublishable: false,
-        [COST_PATCH_KEY]: thumbnailCost(preview.costUsd),
-      };
-    }
-
     const fullDna = (
       (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null | undefined) ??
       (channelDoc as { styleDNA?: import("@/engine/creative/types").StyleDNA } | null)?.styleDNA ??
@@ -853,6 +860,7 @@ export const thumbnailGen: Block = {
         const requestHash = thumbnailRequestHash({
           contract: "thumbnail-gen-checkpoint-v4-nano-banana-only",
           title,
+          thumbnailDescription,
           scriptHint,
           sceneMandate: dnaThumb?.subject,
           pattern,
@@ -923,6 +931,7 @@ export const thumbnailGen: Block = {
             pattern,
             title,
             scriptHint,
+            sceneSeed: thumbnailDescription,
             playbook: effectivePlaybook,
             outJpg,
             tmpDir: tmp,
@@ -1083,6 +1092,7 @@ export const thumbnailGen: Block = {
       pattern: pattern.name,
       publishable,
       thumbnailTitle: title,
+      thumbnailDescription,
       providerRoute: providerEvidence?.receipt.route ?? "verified-video-still",
       providerRequestSha256: providerEvidence?.receipt.providerRequestSha256,
       providerResponseSha256: providerEvidence?.receipt.responseSha256,

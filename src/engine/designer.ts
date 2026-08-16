@@ -349,9 +349,10 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   }
 
   // The quiz is the first independently production-admitted no-Gemini family.
-  // Its planning, safety classification, metadata, critic receipt and thumbnail
-  // are all deterministic modules with durable source/provenance receipts. Do
-  // this as a pipeline rewrite rather than a conditional inside Topicraft: the
+  // Its planning, safety classification, metadata and critic receipt are
+  // deterministic modules with durable source/provenance receipts. The final
+  // thumbnail intentionally remains on the universal sealed Nano Banana path.
+  // Keep this as a pipeline rewrite rather than a conditional inside Topicraft: the
   // compiled graph itself makes the non-Gemini route inspectable and reusable.
   if (opts.family === "quizyear") {
     const pinnedTopic = opts.paramOverrides?.["quiz_year"]?.["topic"];
@@ -398,7 +399,6 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       if (entry.block === "metadata") {
         return [{ block: "quiz_critic_spec" }, { block: "quiz_metadata" }];
       }
-      if (entry.block === "thumbnail_gen") return [{ block: "quiz_thumbnail" }];
       // Every legacy crew/research entry has a Gemini-backed planner. Keep the
       // authoritative list on the family capability, so later crew changes
       // cannot silently reintroduce a provider call into this certified route.

@@ -44,12 +44,8 @@ export interface Family {
   /** Whether this family narrates (drives wizard voice questions). */
   narrated: boolean;
   requiresKeys: string[];
-  /**
-   * The channel-level thumbnail provenance. Most families use the Style-DNA
-   * image engine; the deterministic QuizYear renderer owns its local stills.
-   * A plain title card is never a default for a provider-backed family.
-   */
-  defaultThumbnailStyle: "banana" | "title_card" | "renderer_native";
+  /** Every production channel delegates its final thumbnail to Nano Banana. */
+  defaultThumbnailStyle: "banana";
   /** Default per-video spend envelope when the operator did not set one. */
   defaultRunBudgetUsd?: number;
 }
@@ -80,8 +76,8 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     available: true,
     narrated: false,
     requiresKeys: ["suno", "replicate", "novita"],
-    // Any non-title_card engine unlocks the real-scene thumbnail path (the
-    // run's own keyframe + styled title) — title_card is a plain drawtext card.
+    // The final cover always uses the universal Nano Banana scene path with
+    // deterministic local typography.
     defaultThumbnailStyle: "banana",
     // Standard production loop + aesthetic-audio review reserves $1.47.
     defaultRunBudgetUsd: 2,
@@ -200,14 +196,11 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // bed plus a non-Gemini vision QA provider. Legacy Google helpers are
     // unavailable to this production family.
     requiresKeys: ["mureka", "groq-or-fal-vision"],
-    // The QuizYear Remotion composition emits its own deterministic still;
-    // routing this family through the generic Banana thumbnailer would make
-    // the creator advertise a provider it never needs and break the visual
-    // language between the video and its thumbnail.
-    defaultThumbnailStyle: "title_card",
-    // Facts, planning, metadata, thumbnail and pixels are local/CC0. Reserve
-    // an original music bed and the mandatory production QA rather than
-    // pretending a silent game-show master is release-ready.
+    // The video remains local/CC0, but every final thumbnail is intentionally
+    // routed through the universal Nano Banana thumbnail module.
+    defaultThumbnailStyle: "banana",
+    // Facts, planning and pixels are local/CC0. Reserve an original music bed,
+    // the mandatory production QA, and the sealed thumbnail request.
     defaultRunBudgetUsd: 3,
   },
   illustrated_explainer: {
@@ -220,9 +213,9 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     available: true,
     narrated: true,
     requiresKeys: ["fish-audio", "mureka"],
-    // The actual Scene Manifest master supplies a local FFmpeg-composited
-    // thumbnail. This keeps the entire family free of Gemini/Nano Banana.
-    defaultThumbnailStyle: "renderer_native",
+    // The video stays deterministic/local; its final thumbnail uses the shared
+    // Nano Banana module so every channel follows one image-quality path.
+    defaultThumbnailStyle: "banana",
     // Local vector rendering adds no provider-media line item; the envelope is
     // narration, original music, and final quality evidence.
     defaultRunBudgetUsd: 2,
@@ -556,13 +549,12 @@ export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
       { block: "quiz_year", params: { noGemini: true } },
       { block: "quiz_critic_spec" },
       { block: "quiz_metadata" },
-      { block: "quiz_thumbnail" },
+      { block: "thumbnail_gen" },
     ],
     forbiddenGeminiBlocks: [
       "competitor_research",
       "topic_select",
       "metadata",
-      "thumbnail_gen",
       "director_brief",
       "dp_brief",
       "editor_brief",
@@ -575,7 +567,7 @@ export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
     id: "illustrated-explainer-claude-local-scenario/v1",
     plannerBlock: "topic_select",
     provenance:
-      "metadata-only topic research, Claude crew/script planning, Fish Audio narration, Mureka music, local Episode Graph + Remotion/FFmpeg scene and thumbnail rendering, and non-Google visual review; fictional scenario profiles add a mandatory disclosure gate rather than a real-simulation claim",
+      "metadata-only topic research, Claude crew/script planning, Fish Audio narration, Mureka music, local Episode Graph + Remotion/FFmpeg scene rendering, a sealed Nano Banana thumbnail, and non-Google visual review; fictional scenario profiles add a mandatory disclosure gate rather than a real-simulation claim",
     requiredEntries: [
       { block: "competitor_research" },
       { block: "topic_select" },
@@ -591,12 +583,11 @@ export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
       { block: "episode_graph" },
       { block: "music" },
       { block: "scene_compiler" },
-      { block: "scene_compiler_thumbnail" },
+      { block: "thumbnail_gen" },
       { block: "qa_visual" },
       { block: "upload_draft" },
     ],
     forbiddenGeminiBlocks: [
-      "thumbnail_gen",
       "motion_comic",
       "documotion_short",
       "whiteboard_scribe",
