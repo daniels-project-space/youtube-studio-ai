@@ -644,7 +644,7 @@ with lock.open('a+b') as handle:
       for member in archive.getmembers():
         target=(stage/member.name).resolve()
         if target!=stage and stage not in target.parents: raise RuntimeError('runtime archive path escapes staging root')
-        if not (member.isdir() or member.isfile()): raise RuntimeError('runtime archive has unsupported member type')
+        if not (member.isdir() or member.isfile() or member.issym() or member.islnk()): raise RuntimeError('runtime archive has unsupported member type')
       for member in archive.getmembers(): archive.extract(member,stage)
     if not (stage/'opt/LTX-2/.venv/bin/python').is_file() or not (stage/'opt/novita-worker/worker.py').is_file(): raise RuntimeError('runtime archive is incomplete')
     (stage/'.ready').write_text(sha+'\n')
