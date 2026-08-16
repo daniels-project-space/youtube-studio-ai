@@ -29,12 +29,24 @@ const sequence = {
   }],
   beats: [{
     id: "cinematic-beat-opening",
+    narrativeRole: "cold_open",
+    causalQuestion: "Why was the case file sealed?",
     claimIds: ["claim-motive"],
-    shots: [{ id: "cinematic-shot-opening", castIds: ["mannequin-detective"] }],
+    sourceIds: ["source-court-archive"],
+    shots: [{ id: "cinematic-shot-opening", t0: 0, castIds: ["mannequin-detective"], coveragePurpose: "evidence_insert", visualMode: "source_proof" }],
   }, {
     id: "cinematic-beat-reveal",
+    narrativeRole: "reveal",
+    causalQuestion: "What does the cited timeline change about the sealed file?",
     claimIds: ["claim-timeline"],
-    shots: [{ id: "cinematic-shot-reveal", castIds: ["mannequin-detective"] }],
+    sourceIds: ["source-court-archive"],
+    storyPayoff: {
+      coldOpenBeatId: "cinematic-beat-opening",
+      answerOrReframe: "The cited timeline shows the seal followed a documented chronology, not an unexplained disappearance.",
+      citedClaimIds: ["claim-timeline"],
+      citedSourceIds: ["source-court-archive"],
+    },
+    shots: [{ id: "cinematic-shot-reveal", t0: 3, castIds: ["mannequin-detective"], coveragePurpose: "evidence_insert", visualMode: "source_proof" }],
   }],
 } as unknown as Pick<CinematicCaseSequenceInput, "cast" | "beats">;
 
@@ -80,6 +92,7 @@ const evidence: Pick<VisualReviewEvidence, "frames" | "coverage"> = {
 const plan = cinematicFinalMasterQaPlan({ sequence, creativeLocks, editDecisionList: edl });
 assert.equal(plan.locks.length, 2, "approved locks must become receipt requirements");
 assert.equal(plan.cuts[0]?.atSec, 3, "EDL joins must use final-master timing");
+assert.equal(plan.payoffs[0]?.shotId, "cinematic-shot-reveal", "the cited reveal's source-proof lock must carry the opening-question payoff");
 
 const receipt = {
   version: CINEMATIC_FINAL_MASTER_QA_EVIDENCE_VERSION,
@@ -111,6 +124,18 @@ const receipt = {
     { claimId: "claim-motive", shotId: "cinematic-shot-opening", evidenceFrameIds: ["f2"], onScreenCitationVisible: true, visualSupportVisible: true, pass: true },
     { claimId: "claim-timeline", shotId: "cinematic-shot-reveal", evidenceFrameIds: ["f7"], onScreenCitationVisible: true, visualSupportVisible: true, pass: true },
   ],
+  payoffs: [{
+    coldOpenBeatId: "cinematic-beat-opening",
+    revealBeatId: "cinematic-beat-reveal",
+    shotId: "cinematic-shot-reveal",
+    citedClaimIds: ["claim-timeline"],
+    citedSourceIds: ["source-court-archive"],
+    evidenceFrameIds: ["f7"],
+    causalQuestionAnsweredOrReframed: true,
+    onScreenCitationVisible: true,
+    visualSupportVisible: true,
+    pass: true,
+  }],
   cuts: [{ shotId: "cinematic-shot-reveal", cutReason: "contradiction", tensionState: "reversal", beforeFrameId: "f4", afterFrameId: "f5", causalTurnVisible: true, tensionTransitionVisible: true, pass: true }],
   pass: true,
 };
@@ -143,6 +168,18 @@ assert.throws(
   }),
   /missing approved claim coverage/,
   "every approved claim must be tied to final-master frames",
+);
+
+assert.throws(
+  () => assertCinematicFinalMasterQaEvidence({
+    receipt: { ...receipt, payoffs: [] },
+    plan,
+    evidence,
+    visualReviewFingerprint: review,
+    finalMasterSha256: master,
+  }),
+  /at least 1|story payoff receipt/i,
+  "a final master cannot pass from attractive locks and cuts alone when its opening question has no cited payoff evidence",
 );
 
 assert.throws(
@@ -200,6 +237,14 @@ function approvedLockJudgement(firstFrameSec: number): string {
     continuity: [continuity],
     claims: [{
       claimId: opening ? "claim-motive" : "claim-timeline",
+      onScreenCitationVisible: true,
+      visualSupportVisible: true,
+      pass: true,
+    }],
+    storyPayoffs: opening ? [] : [{
+      coldOpenBeatId: "cinematic-beat-opening",
+      revealBeatId: "cinematic-beat-reveal",
+      causalQuestionAnsweredOrReframed: true,
       onScreenCitationVisible: true,
       visualSupportVisible: true,
       pass: true,
@@ -269,8 +314,34 @@ async function main(): Promise<void> {
       finalMasterSha256: master,
       reviewer: incompleteReviewer,
     }),
-    /claims/,
+    /claims|storyPayoffs/,
     "an incomplete lock judgement must fail closed before a receipt is created",
+  );
+
+  const payoffOmittingReviewer: CinematicFinalMasterQaReviewer = async ({ kind, frames }) => {
+    if (kind === "cut") {
+      return JSON.stringify({
+        pass: true,
+        cutReason: "contradiction",
+        tensionState: "reversal",
+        causalTurnVisible: true,
+        tensionTransitionVisible: true,
+      });
+    }
+    const judgement = JSON.parse(approvedLockJudgement(frames[0]?.tSec ?? Number.NaN));
+    return JSON.stringify({ ...judgement, storyPayoffs: [] });
+  };
+  await assert.rejects(
+    reviewCinematicFinalMasterQaEvidence({
+      plan,
+      evidence,
+      framePaths: evidence.frames.map((frame) => `/tmp/cinematic-qa/${frame.id}.jpg`),
+      visualReviewFingerprint: review,
+      finalMasterSha256: master,
+      reviewer: payoffOmittingReviewer,
+    }),
+    /payoffs|story payoff receipt/,
+    "the final-master reviewer cannot silently omit the cited payoff for the opening question",
   );
 
   const malformedReviewer: CinematicFinalMasterQaReviewer = async () => "{not-json";

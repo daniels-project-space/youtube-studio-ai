@@ -29,6 +29,9 @@ assert.doesNotMatch(wizard, /\/api\/analyze-clip/);
 assert.doesNotMatch(wizard, /Gemini analyzes|Gemini suggests/);
 assert.match(wizard, /no automatic copying or clip analysis/);
 assert.match(wizard, /deterministic advisor/);
+assert.match(wizard, /Creator foundation: verified no-Gemini planning/);
+assert.match(wizard, /preflight\.planning\.plannerBlock/);
+assert.match(wizard, /preflight\.planning\.provenance/);
 
 assert.doesNotMatch(sidebar, /health-dot-ready/);
 assert.doesNotMatch(sidebar, /Live production workspace/);

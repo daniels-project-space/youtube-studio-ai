@@ -312,6 +312,13 @@ export default function NewChannelWizard() {
           templateAvailable?: boolean;
           productionReady?: boolean;
           runtimeBlockers?: string[];
+          planning?: {
+            ready?: boolean;
+            mode?: "registered_non_gemini" | "unregistered";
+            capabilityId?: string;
+            plannerBlock?: string;
+            provenance?: string;
+          };
           fallbackFamily?: FamilyKey;
           runtimeCompilationRequired?: boolean;
           primaryRenderer?: string;
@@ -361,6 +368,9 @@ export default function NewChannelWizard() {
             : " This template is not available for runtime design.";
         const quality = preflight?.qualityFocus?.length ? ` Quality focus: ${preflight.qualityFocus.slice(0, 3).join(", ")}.` : "";
         const providers = preflight?.providerRequirements?.length ? ` Required capabilities: ${preflight.providerRequirements.join(", ")}.` : "";
+        const planningFoundation = preflight?.planning?.ready
+          ? ` Creator foundation: verified no-Gemini planning${preflight.planning.plannerBlock ? ` via ${preflight.planning.plannerBlock}` : ""}${preflight.planning.capabilityId ? ` (${preflight.planning.capabilityId})` : ""}.${preflight.planning.provenance ? ` ${preflight.planning.provenance}` : ""}`
+          : "";
         const chain = preflight?.requiredRendererChains?.length
           ? ` Required visual renderer path: ${preflight.requiredRendererChains.map((path) => path.join(" → ")).join(" OR ")}.`
           : preflight?.requiredPipelineModules?.length
@@ -389,7 +399,7 @@ export default function NewChannelWizard() {
         const childrenNote = childrenShowBibleRecommendation
           ? " This children’s format is a supervised show-production lane: it needs an age-banded original Show Bible, one measurable learning objective, and a fresh child-editor approval before it can produce review candidates."
           : "";
-        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (renderer unavailable)"} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${requirements}${quality}${runtime}${validation}${dataStoryNote}${casefileNote}${childrenNote}`);
+        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (renderer unavailable)"} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${planningFoundation}${requirements}${quality}${runtime}${validation}${dataStoryNote}${casefileNote}${childrenNote}`);
       } catch {
         setClipNote("Suggestion failed — pick a format manually below.");
       } finally {
@@ -912,7 +922,7 @@ export default function NewChannelWizard() {
                 </select>
                 {syntheticScenarioProfile && (
                   <div style={{ ...muted, marginTop: "0.4rem" }}>
-                    Adds a mandatory “Fictional AI Scenario” opening, an assumptions gate, local scenario-board visuals, and a local renderer thumbnail. It does not simulate or claim real AI results; no Google creative service is used.
+                    Adds a mandatory “Fictional AI Scenario” opening, an assumptions gate, local scenario-board visuals, and a required Nano Banana thumbnail. It does not simulate or claim real AI results; Google is used only for the final thumbnail image.
                   </div>
                 )}
               </Row>

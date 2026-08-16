@@ -209,6 +209,18 @@ assert.match(constrainedQuiz.runtimeBlockers.join(" "), /requested 600s/);
 assert.match(constrainedQuiz.runtimeBlockers.join(" "), /budget cap \$1\.00/);
 assert.doesNotMatch(constrainedQuiz.runtimeBlockers.join(" "), /no-Gemini channel inception is not registered/);
 
+// The creator UI receives an evidence-bearing planning contract, not merely a
+// green availability bit. Every admitted reusable foundation must identify the
+// no-Gemini planner that makes its automatic creation claim possible.
+for (const family of ["narrated_stock", "sleep", "shorts", "quizyear", "illustrated_explainer"] as const) {
+  const preflight = formatPreflight(family, { concept: "" });
+  assert.equal(preflight.productionReady, true, `${family} must remain truthfully admitted before the creator advertises it`);
+  assert.equal(preflight.planning.mode, "registered_non_gemini");
+  assert.ok(preflight.planning.capabilityId, `${family} must name its planning capability`);
+  assert.ok(preflight.planning.plannerBlock, `${family} must name its planner block`);
+  assert.ok(preflight.planning.provenance, `${family} must carry creator-visible planning provenance`);
+}
+
 // The creator route is a lightweight server request. It must describe the lane
 // without importing the executable renderer registry (which contains browser
 // compositions and native render dependencies); runtime compilation remains in

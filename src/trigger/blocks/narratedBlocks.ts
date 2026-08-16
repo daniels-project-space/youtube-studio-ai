@@ -102,6 +102,10 @@ import {
   sha256NarrationTranscriptSource,
 } from "@/lib/narrationTranscriptProof";
 import {
+  assertNarrationCueTimingEvidence,
+  type NarrationCueTimingEvidence,
+} from "@/lib/narrationCueTiming";
+import {
   boundNarrationChapterHeadings,
   boundNarrationColdOpen,
 } from "@/lib/narrationBounds";
@@ -3188,28 +3192,16 @@ export const qaVisual: Block = {
     // fallback), so here it's ADVISORY â€” a single borderline clip must not nuke a
     // fully-rendered, paid video. SEO/identity are advisory too (logged).
     const critical: string[] = [];
-    // TITLE-CARD TRUCE: when the shipped thumbnail is the DELIBERATE
-    // deterministic title card (operator choice or the fal-route degrade), the
-    // vision judge's clickbait rubric must not gate it — it scored a clean,
-    // correctly-spelled card 2/10 and the heal loop then regenerated the SAME
-    // card to exhaustion (observed live: a finished $1.2 run died healing a
-    // cosmetic verdict about a card that was working as designed).
-    const thumbStrategy = String(ctx.store["strategy"] ?? "");
-    const thumbIsDeliberateCard =
-      thumbStrategy === "title_card_fallback" ||
-      thumbStrategy === "draft_preview_placeholder" ||
-      String(ctx.store["thumbnailer"] ?? "") === "title_card";
+    // There is no title-card exemption: every executable thumbnail is a
+    // Nano Banana scene plus deterministic typography, so the same visual bar
+    // applies to every channel and every retry.
     if (!video_.skipped && video_.score < videoMinimum) {
       // Three overview frames are retained as a cheap health signal, but they
       // cannot overrule the evidence-backed chronological reviewer.
       ctx.log(`qa_visual: LOW overview score ${video_.score}/10 (advisory; visual review is authoritative): ${video_.issues.slice(0, 2).join("; ")}`);
     }
     if (!thumbnail.skipped && thumbnail.score < thumbnailMinimum) {
-      if (thumbIsDeliberateCard) {
-        ctx.log(`qa_visual: thumbnail ${thumbnail.score}/10 on a deliberate title card (ADVISORY, not gating): ${thumbnail.issues.slice(0, 2).join("; ")}`);
-      } else {
-        critical.push(`thumbnail score ${thumbnail.score} below ${thumbnailMinimum}: ${thumbnail.issues.slice(0, 2).join("; ")}`);
-      }
+      critical.push(`thumbnail score ${thumbnail.score} below ${thumbnailMinimum}: ${thumbnail.issues.slice(0, 2).join("; ")}`);
     }
     if (!footage.skipped && footage.score < 5) {
       ctx.log(`qa_visual: LOW FOOTAGE score ${footage.score} (advisory): ${footage.issues.slice(0, 2).join("; ")}`);
@@ -3459,8 +3451,10 @@ export const qaVisual: Block = {
     const expectsNarrationMixEvidence = narrationDuration >= 1.5 && Boolean(storedNarrationPath || narrationKey);
     let finalNarrationMix: { correlation: number | null; narrationStartSec: number } | undefined;
     let finalNarrationTranscript: { wordErrorRate: number; lexicalRecall: number; passed: boolean } | undefined;
+    let narrationCueTiming: NarrationCueTimingEvidence | undefined;
     let narrationPerformance: ReturnType<typeof assertNarrationPerformanceEvidence> | undefined;
     const narrationPerformanceEvidence: string[] = [];
+    const narrationCueTimingEvidence: string[] = [];
     if (expectsNarrationMixEvidence) {
       try {
         narrationPerformance = assertNarrationPerformanceEvidence(ctx.store["narrationPerformanceEvidence"]);
@@ -3519,6 +3513,30 @@ export const qaVisual: Block = {
               `qa_visual: narration transcript WER ${proof.assessment.wordErrorRate.toFixed(3)}, recall ${proof.assessment.lexicalRecall.toFixed(3)} ` +
               `(${proof.assessment.passed ? "passed" : "failed"})`,
             );
+            try {
+              narrationCueTiming = assertNarrationCueTimingEvidence({
+                sentenceTimings: ctx.store["sentenceTimings"],
+                transcriptProof: proof,
+                narrationDurationSec: narrationPerformance?.durationSec ?? narrationDuration,
+              });
+              narrationCueTimingEvidence.push(
+                `narrationCueTiming=${narrationCueTiming.timingAlignedTokenCount}/${narrationCueTiming.matchedTokenCount}`,
+                `narrationCueMatch=${narrationCueTiming.matchedTokenRatio.toFixed(3)}`,
+                `narrationCueAlignment=${narrationCueTiming.timingAlignedTokenRatio.toFixed(3)}`,
+                `narrationCueMaxDriftSec=${narrationCueTiming.maxTimingDriftSec.toFixed(3)}`,
+                "narrationCueEvaluator=faster-whisper-small.en/timestamped-source",
+              );
+              ctx.log(
+                `qa_visual: narration cue timing ${narrationCueTiming.timingAlignedTokenCount}/${narrationCueTiming.matchedTokenCount} ` +
+                `source words aligned (max drift ${narrationCueTiming.maxTimingDriftSec.toFixed(2)}s)`,
+              );
+            } catch (error) {
+              if (productionQa) {
+                critical.push(`narration cue timing evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+              } else {
+                ctx.log(`qa_visual: narration cue timing evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
+              }
+            }
           } catch (error) {
             if (productionQa) {
               critical.push(`narration transcript evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
@@ -3775,6 +3793,7 @@ export const qaVisual: Block = {
           ...narrationMixEvidence,
           ...narrationTranscriptEvidence,
           ...narrationPerformanceEvidence,
+          ...narrationCueTimingEvidence,
           ...onScreenTextEvidence,
         ],
       },
@@ -3845,7 +3864,7 @@ export const qaVisual: Block = {
             score: audioAestheticScore,
             minimumScore: audioMinimum,
             evaluator: "audio aesthetics grader",
-            evidence: ["audiobox production quality", ...narrationMixEvidence, ...narrationTranscriptEvidence, ...narrationPerformanceEvidence],
+            evidence: ["audiobox production quality", ...narrationMixEvidence, ...narrationTranscriptEvidence, ...narrationPerformanceEvidence, ...narrationCueTimingEvidence],
           }
         : finalAudioMeters
           ? {
@@ -3859,6 +3878,7 @@ export const qaVisual: Block = {
                 ...narrationMixEvidence,
                 ...narrationTranscriptEvidence,
                 ...narrationPerformanceEvidence,
+                ...narrationCueTimingEvidence,
               ],
             }
           : undefined,
@@ -3934,6 +3954,7 @@ export const qaVisual: Block = {
               }
             : undefined,
           narrationMix: finalNarrationMix ?? undefined,
+          narrationCueTiming,
         },
       },
       qualityEvidence,

@@ -49,6 +49,16 @@ assert.match(
 );
 assert.match(
   source,
+  /assertNarrationCueTimingEvidence\(/,
+  "final QA must bind caption and story cue timecodes to the independently timestamped narration source",
+);
+assert.match(
+  source,
+  /narrationCueEvaluator=faster-whisper-small\.en\/timestamped-source/,
+  "quality evidence must retain the scope of the source-backed cue-timing proof",
+);
+assert.match(
+  source,
   /narrationMix: finalNarrationMix/,
   "the operator-facing QA report must preserve the final narration-mix receipt",
 );

@@ -140,6 +140,21 @@ const CinematicCoverageShotSchema = z
   );
 export type CinematicCoverageShot = z.infer<typeof CinematicCoverageShotSchema>;
 
+/**
+ * The source-bound answer or reframe that earns the cold open.  It is kept on
+ * the later reveal rather than inferred from prompt prose so the story turn
+ * survives planning, human review, rendering, and final-master QA.
+ */
+export const CinematicStoryPayoffSchema = z
+  .object({
+    coldOpenBeatId: identifier("cinematic-beat"),
+    answerOrReframe: text(400),
+    citedClaimIds: z.array(identifier("claim")).min(1).max(24),
+    citedSourceIds: z.array(identifier("source")).min(1).max(24),
+  })
+  .strict();
+export type CinematicStoryPayoff = z.infer<typeof CinematicStoryPayoffSchema>;
+
 const CinematicSequenceBeatSchema = z
   .object({
     id: identifier("cinematic-beat"),
@@ -150,6 +165,8 @@ const CinematicSequenceBeatSchema = z
     claimIds: z.array(identifier("claim")).min(1).max(24),
     sourceIds: z.array(identifier("source")).min(1).max(24),
     causalQuestion: text(400),
+    /** Present only when this reveal explicitly pays off the opening question. */
+    storyPayoff: CinematicStoryPayoffSchema.optional(),
     shots: z.array(CinematicCoverageShotSchema).min(2).max(4),
   })
   .strict()
@@ -307,6 +324,7 @@ export const CinematicCaseSequenceIssueCodeSchema = z.enum([
   "visual_mode_invalid",
   "coverage_grammar_invalid",
   "tension_grammar_invalid",
+  "story_payoff_invalid",
   "camera_repetition_invalid",
   "editorial_review_mismatch",
   "editorial_review_stale",
@@ -451,6 +469,15 @@ function strictCoverage(
   return Math.abs(cursor - t1) <= 0.03;
 }
 
+function isSubset(values: readonly string[], allowed: readonly string[]): boolean {
+  const allowedIds = new Set(allowed);
+  return values.every((value) => allowedIds.has(value));
+}
+
+function normalizedStoryText(value: string): string {
+  return value.toLowerCase().replace(/[^a-z0-9]+/g, " ").trim();
+}
+
 function requiredScales(role: CinematicNarrativeRole): number {
   return role === "cold_open" || role === "investigation" || role === "contradiction" || role === "reveal" ? 3 : 2;
 }
@@ -556,8 +583,44 @@ export function evaluateCinematicCaseSequence(
       issues.push(issue("tension_grammar_invalid", `Cinematic beat ${beat.id} restarts the cold open after the story has begun.`, "Keep a single opening question; use investigation, contradiction, reveal, aftermath, or closing residue for later turns."));
     }
   }
-  if (orderedBeats.length >= 3 && !orderedBeats.some((beat) => beat.narrativeRole === "reveal")) {
-    issues.push(issue("tension_grammar_invalid", "The multi-beat cinematic sequence has no source-bound reveal or reframing turn.", "Add a supported reveal beat that changes the audience's understanding through admitted evidence."));
+  const revealBeats = orderedBeats.filter((beat) => beat.narrativeRole === "reveal");
+  for (const beat of orderedBeats) {
+    if (beat.narrativeRole !== "reveal" && beat.storyPayoff) {
+      issues.push(issue("story_payoff_invalid", `Cinematic beat ${beat.id} declares a storyPayoff without being a reveal.`, "Keep storyPayoff only on the later reveal that visibly answers or reframes the cold-open question."));
+    }
+  }
+  if (!revealBeats.length) {
+    issues.push(issue("story_payoff_invalid", "The cinematic sequence has no later cited reveal that can answer or reframe its cold-open question.", "Add a later reveal beat with a source-proof evidence insert and an explicit storyPayoff bound to the cold open."));
+  }
+  if (coldOpen?.narrativeRole === "cold_open") {
+    const payoffs = revealBeats
+      .filter((beat) => Boolean(beat.storyPayoff))
+      .map((beat) => ({ beat, payoff: beat.storyPayoff! }));
+    if (!payoffs.length) {
+      issues.push(issue("story_payoff_invalid", "No later reveal explicitly answers or reframes the cold-open causal question.", "Declare storyPayoff on a later reveal with the cold-open beat id, a concrete answer/reframe, and its admitted claim/source ids."));
+    }
+    for (const { beat, payoff } of payoffs) {
+      if (payoff.coldOpenBeatId !== coldOpen.id) {
+        issues.push(issue("story_payoff_invalid", `Reveal ${beat.id} pays off ${payoff.coldOpenBeatId}, not the opening beat ${coldOpen.id}.`, "Bind every declared storyPayoff to the sequence's first cold-open beat."));
+      }
+      if (beat.t0 < coldOpen.t1 - 0.03) {
+        issues.push(issue("story_payoff_invalid", `Reveal ${beat.id} attempts to pay off the cold open before that opening beat has completed.`, "Place the cited reveal after the cold-open narration window rather than overlapping the question."));
+      }
+      if (normalizedStoryText(payoff.answerOrReframe) === normalizedStoryText(coldOpen.causalQuestion)) {
+        issues.push(issue("story_payoff_invalid", `Reveal ${beat.id} repeats the cold-open question instead of answering or reframing it.`, "Write a concrete source-bound answer or reframe; do not restate the opening question."));
+      }
+      if (!isSubset(payoff.citedClaimIds, beat.claimIds) || !isSubset(payoff.citedSourceIds, beat.sourceIds)) {
+        issues.push(issue("story_payoff_invalid", `Reveal ${beat.id}'s storyPayoff cites claim/source ids outside its admitted beat binding.`, "Use only claim and source ids already bound to that reveal beat by the Casefile evidence map."));
+      }
+      for (const claimId of payoff.citedClaimIds) {
+        if (!compatibleMapBindingsFor(map, claimId, beat.parentShotIds, payoff.citedSourceIds).length) {
+          issues.push(issue("story_payoff_invalid", `Reveal ${beat.id}'s payoff claim ${claimId} is not source-bound to its declared payoff sources.`, "Bind the payoff claim to the exact cited source ids through casefile_evidence_shot_map before review."));
+        }
+      }
+      if (!beat.shots.some((shot) => shot.coveragePurpose === "evidence_insert" && shot.visualMode === "source_proof")) {
+        issues.push(issue("story_payoff_invalid", `Reveal ${beat.id}'s storyPayoff has no cited source-proof evidence insert.`, "Include a source_proof evidence_insert in the payoff reveal so final-master QA can see the cited answer or reframe."));
+      }
+    }
   }
   const finalPlannedShot = orderedBeats.at(-1)?.shots.at(-1);
   if (finalPlannedShot && !["release", "residue"].includes(finalPlannedShot.tensionState)) {

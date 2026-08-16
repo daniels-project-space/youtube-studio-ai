@@ -270,6 +270,12 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
       {
         id: "cinematic-beat-public-response", narrativeRole: "reveal", t0: 12, t1: 24, parentShotIds: ["shot-public-response"],
         claimIds: ["claim-public-response"], sourceIds: ["source-court-archive"], causalQuestion: "What did the documented response reveal about the closure?",
+        storyPayoff: {
+          coldOpenBeatId: "cinematic-beat-closure-order",
+          answerOrReframe: "The cited public response reframes the closure as a documented consequence rather than an unexplained disappearance.",
+          citedClaimIds: ["claim-public-response"],
+          citedSourceIds: ["source-court-archive"],
+        },
         shots: [
           coverageShot({ id: "cinematic-shot-response-proof", t0: 12, t1: 16, purpose: "evidence_insert", mode: "source_proof", scale: "close", move: "truck_right", cut: "reveal", tension: "reversal" }),
           coverageShot({ id: "cinematic-shot-response-map", t0: 16, t1: 20, purpose: "spatial_anchor", mode: "spatial_reconstruction", scale: "wide", move: "orbit_left", cut: "new_relationship", tension: "release" }),
@@ -313,7 +319,10 @@ async function main() {
   assert.equal(draft.release, "private_human_editorial_review_required");
   assert.equal(draft.content.beats.length, shotList.length);
   assert.equal(draft.content.beats[0]?.narrativeRole, "cold_open");
-  assert.equal(draft.content.beats.at(-1)?.narrativeRole, "closing_residue");
+  assert.equal(draft.content.beats.at(-1)?.narrativeRole, "reveal", "a two-window source spine must earn its cold open with a cited reveal");
+  const draftedPayoff = draft.content.beats.find((beat) => beat.storyPayoff)?.storyPayoff;
+  assert.ok(draftedPayoff, "the deterministic cinematic draft must bind its later reveal to the cold-open question");
+  assert.equal(draftedPayoff.coldOpenBeatId, draft.content.beats[0]?.id);
   assert(
     draft.content.beats.flatMap((beat) => beat.shots).every((shot) => shot.t1 - shot.t0 >= 3),
     "every generated Casefile coverage shot must retain LTX's minimum renderable duration rather than relying on post-render trimming",
@@ -372,6 +381,15 @@ async function main() {
   assert.equal(admitted.editDecisionList.edits.length, 6);
   assert.equal(admitted.creativeLocks.locks.length, 6);
   assert.equal(admitted.receipt.release, "private_human_editorial_review_only");
+
+  const missingStoryPayoff = structuredClone(input);
+  delete missingStoryPayoff.beats[1]!.storyPayoff;
+  missingStoryPayoff.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(missingStoryPayoff);
+  assert.throws(
+    () => assertCinematicCaseSequence({ ...args, input: missingStoryPayoff }, { now: NOW }),
+    /story_payoff_invalid:.*explicitly answers or reframes.*Remediation:/,
+    "a generic reveal cannot stand in for a source-bound payoff to the opening question",
+  );
   const mannequinScene = admitted.generatedScenePlan.scenes[1]!;
   assert.equal(mannequinScene.id, "cinematic-shot-closure-figure");
   assert.match(mannequinScene.still, /tall square-shouldered faceless silhouette/i);

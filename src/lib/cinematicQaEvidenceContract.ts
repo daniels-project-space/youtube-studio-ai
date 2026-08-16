@@ -21,13 +21,15 @@ import type { VisualReviewEvidence, VisualReviewFrame } from "@/lib/visualReview
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
 export const CINEMATIC_FINAL_MASTER_QA_EVIDENCE_VERSION =
-  "cinematic-final-master-qa-evidence/v1" as const;
+  "cinematic-final-master-qa-evidence/v2" as const;
 
 const fingerprint = z.string().regex(/^[a-f0-9]{64}$/, "expected sha256 fingerprint");
 const reviewFingerprint = z.string().regex(/^[a-f0-9]{16,128}$/, "expected visual-review fingerprint");
 const shotId = z.string().regex(/^cinematic-shot-[a-z0-9][a-z0-9-]{1,119}$/);
+const beatId = z.string().regex(/^cinematic-beat-[a-z0-9][a-z0-9-]{1,119}$/);
 const mannequinId = z.string().regex(/^mannequin-[a-z0-9][a-z0-9-]{1,119}$/);
 const claimId = z.string().regex(/^claim-[a-z0-9][a-z0-9-]{1,119}$/);
+const sourceId = z.string().regex(/^source-[a-z0-9][a-z0-9-]{1,119}$/);
 const frameId = z.string().trim().min(1).max(160);
 
 const ContinuitySchema = z.object({
@@ -63,6 +65,20 @@ const ClaimReceiptSchema = z.object({
   pass: z.literal(true),
 }).strict();
 
+const StoryPayoffReceiptSchema = z.object({
+  coldOpenBeatId: beatId,
+  revealBeatId: beatId,
+  /** The cited source-proof shot that visibly carries the later answer/reframe. */
+  shotId,
+  citedClaimIds: z.array(claimId).min(1).max(24),
+  citedSourceIds: z.array(sourceId).min(1).max(24),
+  evidenceFrameIds: z.array(frameId).min(1).max(12),
+  causalQuestionAnsweredOrReframed: z.literal(true),
+  onScreenCitationVisible: z.literal(true),
+  visualSupportVisible: z.literal(true),
+  pass: z.literal(true),
+}).strict();
+
 const CutReceiptSchema = z.object({
   /** The EDL edit which begins this shot; the opening shot has no cut receipt. */
   shotId,
@@ -84,6 +100,7 @@ export const CinematicFinalMasterQaEvidenceReceiptSchema = z.object({
   reviewer: z.literal("non_google_vision"),
   locks: z.array(LockReceiptSchema).min(2).max(2_000),
   claims: z.array(ClaimReceiptSchema).min(1).max(20_000),
+  payoffs: z.array(StoryPayoffReceiptSchema).min(1).max(500),
   cuts: z.array(CutReceiptSchema).max(2_000),
   pass: z.literal(true),
 }).strict();
@@ -97,6 +114,7 @@ export interface CinematicQaExpectedLock {
   acceptanceCriteria: readonly string[];
   cast: readonly CinematicMannequin[];
   claimIds: readonly string[];
+  storyPayoffs: readonly CinematicQaExpectedStoryPayoff[];
 }
 
 export interface CinematicQaExpectedCut {
@@ -104,6 +122,17 @@ export interface CinematicQaExpectedCut {
   atSec: number;
   cutReason: string;
   tensionState: string;
+}
+
+/** A source-proof reveal which explicitly earns the opening causal question. */
+export interface CinematicQaExpectedStoryPayoff {
+  coldOpenBeatId: string;
+  revealBeatId: string;
+  shotId: string;
+  coldOpenCausalQuestion: string;
+  answerOrReframe: string;
+  citedClaimIds: readonly string[];
+  citedSourceIds: readonly string[];
 }
 
 /**
@@ -115,6 +144,7 @@ export interface CinematicFinalMasterQaPlan {
   sequenceFingerprint: string;
   bodyOffsetSec: number;
   locks: CinematicQaExpectedLock[];
+  payoffs: CinematicQaExpectedStoryPayoff[];
   cuts: CinematicQaExpectedCut[];
 }
 
@@ -147,6 +177,14 @@ const LockJudgementSchema = z.object({
     visualSupportVisible: z.literal(true),
     pass: z.literal(true),
   }).strict()).max(200),
+  storyPayoffs: z.array(z.object({
+    coldOpenBeatId: beatId,
+    revealBeatId: beatId,
+    causalQuestionAnsweredOrReframed: z.literal(true),
+    onScreenCitationVisible: z.literal(true),
+    visualSupportVisible: z.literal(true),
+    pass: z.literal(true),
+  }).strict()).max(24),
 }).strict();
 
 const CutJudgementSchema = z.object({
@@ -277,6 +315,14 @@ function lockReviewerPrompt(lock: CinematicQaExpectedLock, frames: readonly Cine
     keyProp: mannequin.keyProp,
     movementProfile: mannequin.movementProfile,
   }));
+  const payoffs = lock.storyPayoffs.map((payoff) => ({
+    coldOpenBeatId: payoff.coldOpenBeatId,
+    revealBeatId: payoff.revealBeatId,
+    coldOpenCausalQuestion: payoff.coldOpenCausalQuestion,
+    answerOrReframe: payoff.answerOrReframe,
+    citedClaimIds: payoff.citedClaimIds,
+    citedSourceIds: payoff.citedSourceIds,
+  }));
   return [
     "You are the independent final-master cinematic QA reviewer. This is a factual, faceless-mannequin reconstruction.",
     `Review the START, MIDDLE, and END frames for approved shot ${lock.shotId}. Never infer a real-person likeness or a fact not shown in the frames.`,
@@ -284,7 +330,10 @@ function lockReviewerPrompt(lock: CinematicQaExpectedLock, frames: readonly Cine
     `Required acceptance criteria (repeat ALL exactly only if all are visibly satisfied): ${JSON.stringify(lock.acceptanceCriteria)}`,
     `Required mannequin continuity (every listed flag must be true only if visibly supported): ${JSON.stringify(cast)}`,
     `Approved claim ids for this shot: ${JSON.stringify(lock.claimIds)}. Only attest a claim when both a visible visual support and its on-screen citation/disclosure are visible.`,
-    "Return JSON only: {\"pass\":true,\"acceptedCriteria\":[...],\"continuity\":[{\"castId\":\"...\",\"faceless\":true,\"noLikeness\":true,\"silhouetteContinuous\":true,\"wardrobeContinuous\":true,\"paletteContinuous\":true,\"keyPropContinuous\":true,\"movementProfileContinuous\":true}],\"claims\":[{\"claimId\":\"...\",\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}]}. If any condition fails or cannot be seen, return {\"pass\":false}.",
+    payoffs.length
+      ? `Required story payoff(s): ${JSON.stringify(payoffs)}. For every listed payoff, certify it only when this cited source-proof reveal visibly answers or reframes that exact cold-open question without relying on unsupported prose.`
+      : "No story payoff is assigned to this lock; return an empty storyPayoffs array.",
+    "Return JSON only: {\"pass\":true,\"acceptedCriteria\":[...],\"continuity\":[{\"castId\":\"...\",\"faceless\":true,\"noLikeness\":true,\"silhouetteContinuous\":true,\"wardrobeContinuous\":true,\"paletteContinuous\":true,\"keyPropContinuous\":true,\"movementProfileContinuous\":true}],\"claims\":[{\"claimId\":\"...\",\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"storyPayoffs\":[{\"coldOpenBeatId\":\"...\",\"revealBeatId\":\"...\",\"causalQuestionAnsweredOrReframed\":true,\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}]}. If any condition fails or cannot be seen, return {\"pass\":false}.",
   ].join("\n");
 }
 
@@ -351,6 +400,7 @@ export async function reviewCinematicFinalMasterQaEvidence(args: {
   const frames = selectedEvidenceFrames({ evidence: args.evidence, framePaths: args.framePaths });
   const locks: CinematicFinalMasterQaEvidenceReceipt["locks"] = [];
   const claims: CinematicFinalMasterQaEvidenceReceipt["claims"] = [];
+  const payoffs: CinematicFinalMasterQaEvidenceReceipt["payoffs"] = [];
   const cuts: CinematicFinalMasterQaEvidenceReceipt["cuts"] = [];
   for (const lock of args.plan.locks) {
     const selected = lockEvidenceFrames(lock, frames);
@@ -372,6 +422,27 @@ export async function reviewCinematicFinalMasterQaEvidence(args: {
         claimId: claim.claimId,
         shotId: lock.shotId,
         evidenceFrameIds: selected.map((frame) => frame.id),
+        onScreenCitationVisible: true,
+        visualSupportVisible: true,
+        pass: true,
+      });
+    }
+    for (const payoff of judgement.storyPayoffs) {
+      const expected = lock.storyPayoffs.find((candidate) =>
+        candidate.coldOpenBeatId === payoff.coldOpenBeatId &&
+        candidate.revealBeatId === payoff.revealBeatId,
+      );
+      if (!expected) {
+        throw new Error(`cinematic QA lock ${lock.shotId} reviewer attested an unplanned story payoff`);
+      }
+      payoffs.push({
+        coldOpenBeatId: expected.coldOpenBeatId,
+        revealBeatId: expected.revealBeatId,
+        shotId: expected.shotId,
+        citedClaimIds: [...expected.citedClaimIds],
+        citedSourceIds: [...expected.citedSourceIds],
+        evidenceFrameIds: selected.map((frame) => frame.id),
+        causalQuestionAnsweredOrReframed: true,
         onScreenCitationVisible: true,
         visualSupportVisible: true,
         pass: true,
@@ -404,6 +475,7 @@ export async function reviewCinematicFinalMasterQaEvidence(args: {
       reviewer: "non_google_vision",
       locks,
       claims,
+      payoffs,
       cuts,
       pass: true,
     },
@@ -433,6 +505,50 @@ export function cinematicFinalMasterQaPlan(args: {
       shotPlan.set(shot.id, { castIds: [...shot.castIds], claimIds: [...beat.claimIds] });
     }
   }
+  const coldOpen = args.sequence.beats.find((beat) => beat.narrativeRole === "cold_open");
+  if (!coldOpen) throw new Error("cinematic QA plan requires a cold-open beat");
+  const payoffs: CinematicQaExpectedStoryPayoff[] = [];
+  for (const beat of args.sequence.beats) {
+    const payoff = beat.storyPayoff;
+    if (!payoff) continue;
+    if (beat.narrativeRole !== "reveal") {
+      throw new Error(`cinematic QA plan found storyPayoff on non-reveal beat ${beat.id}`);
+    }
+    if (payoff.coldOpenBeatId !== coldOpen.id) {
+      throw new Error(`cinematic QA storyPayoff ${beat.id} is not bound to cold-open beat ${coldOpen.id}`);
+    }
+    if (
+      !payoff.citedClaimIds.every((id) => beat.claimIds.includes(id)) ||
+      !payoff.citedSourceIds.every((id) => beat.sourceIds.includes(id))
+    ) {
+      throw new Error(`cinematic QA storyPayoff ${beat.id} cites ids outside its approved reveal binding`);
+    }
+    const sourceProofShot = [...beat.shots]
+      .sort((left, right) => left.t0 - right.t0 || left.id.localeCompare(right.id))
+      .find((shot) => shot.coveragePurpose === "evidence_insert" && shot.visualMode === "source_proof");
+    if (!sourceProofShot) {
+      throw new Error(`cinematic QA storyPayoff ${beat.id} lacks a cited source-proof evidence insert`);
+    }
+    payoffs.push({
+      coldOpenBeatId: coldOpen.id,
+      revealBeatId: beat.id,
+      shotId: sourceProofShot.id,
+      coldOpenCausalQuestion: coldOpen.causalQuestion,
+      answerOrReframe: payoff.answerOrReframe,
+      citedClaimIds: sorted(payoff.citedClaimIds),
+      citedSourceIds: sorted(payoff.citedSourceIds),
+    });
+  }
+  if (!payoffs.length) {
+    throw new Error("cinematic QA plan requires a later source-bound storyPayoff before final-master review");
+  }
+  assertUnique(payoffs.map((payoff) => `${payoff.coldOpenBeatId}/${payoff.revealBeatId}`), "story payoff");
+  const payoffByShot = new Map<string, CinematicQaExpectedStoryPayoff[]>();
+  for (const payoff of payoffs) {
+    const forShot = payoffByShot.get(payoff.shotId) ?? [];
+    forShot.push(payoff);
+    payoffByShot.set(payoff.shotId, forShot);
+  }
   const locks = args.creativeLocks.locks.map((lock) => {
     const planned = shotPlan.get(lock.id);
     if (!planned) throw new Error(`cinematic QA creative lock ${lock.id} has no approved shot plan`);
@@ -448,10 +564,16 @@ export function cinematicFinalMasterQaPlan(args: {
       acceptanceCriteria: [...lock.acceptanceCriteria],
       cast,
       claimIds: sorted(planned.claimIds),
+      storyPayoffs: payoffByShot.get(lock.id) ?? [],
     };
   });
   assertUnique(locks.map((lock) => lock.shotId), "creative-lock shot id");
   const lockIds = new Set(locks.map((lock) => lock.shotId));
+  for (const payoff of payoffs) {
+    if (!lockIds.has(payoff.shotId)) {
+      throw new Error(`cinematic QA storyPayoff ${payoff.revealBeatId} has no final-master creative lock`);
+    }
+  }
   const editByShot = new Map(args.editDecisionList.edits.map((edit) => [edit.shotId, edit]));
   if (!exactSet(sorted([...lockIds]), sorted(args.editDecisionList.edits.map((edit) => edit.shotId)))) {
     throw new Error("cinematic QA plan requires one creative lock for every planned EDL shot");
@@ -478,6 +600,7 @@ export function cinematicFinalMasterQaPlan(args: {
     sequenceFingerprint: args.creativeLocks.sequenceFingerprint,
     bodyOffsetSec: offset,
     locks,
+    payoffs,
     cuts,
   };
 }
@@ -574,6 +697,52 @@ function assertClaimCoverage(
   if (missing.length) throw new Error(`cinematic QA evidence is missing approved claim coverage: ${missing.join(", ")}`);
 }
 
+function storyPayoffKey(coldOpenBeatId: string, revealBeatId: string): string {
+  return `${coldOpenBeatId}/${revealBeatId}`;
+}
+
+function assertStoryPayoffCoverage(
+  receipt: CinematicFinalMasterQaEvidenceReceipt,
+  plan: CinematicFinalMasterQaPlan,
+  frames: ReadonlyMap<string, VisualReviewFrame>,
+): void {
+  if (receipt.payoffs.length !== plan.payoffs.length) {
+    throw new Error(`cinematic QA evidence has ${receipt.payoffs.length}/${plan.payoffs.length} source-bound story payoff receipt(s)`);
+  }
+  const expected = new Map(plan.payoffs.map((payoff) => [
+    storyPayoffKey(payoff.coldOpenBeatId, payoff.revealBeatId),
+    payoff,
+  ]));
+  assertUnique(receipt.payoffs.map((payoff) => storyPayoffKey(payoff.coldOpenBeatId, payoff.revealBeatId)), "story payoff receipt");
+  const lockByShot = new Map(plan.locks.map((lock) => [lock.shotId, lock]));
+  for (const payoff of receipt.payoffs) {
+    const planned = expected.get(storyPayoffKey(payoff.coldOpenBeatId, payoff.revealBeatId));
+    if (!planned) {
+      throw new Error(`cinematic QA evidence contains foreign story payoff ${payoff.revealBeatId}`);
+    }
+    if (payoff.shotId !== planned.shotId) {
+      throw new Error(`cinematic QA story payoff ${payoff.revealBeatId} is not attached to its approved source-proof shot`);
+    }
+    if (
+      !exactSet(sorted(payoff.citedClaimIds), sorted(planned.citedClaimIds)) ||
+      !exactSet(sorted(payoff.citedSourceIds), sorted(planned.citedSourceIds))
+    ) {
+      throw new Error(`cinematic QA story payoff ${payoff.revealBeatId} does not preserve its approved cited claim/source binding`);
+    }
+    const lock = lockByShot.get(payoff.shotId);
+    if (!lock) throw new Error(`cinematic QA story payoff ${payoff.revealBeatId} has no approved creative lock`);
+    for (const id of payoff.evidenceFrameIds) {
+      const frame = frameAt(frames, id, `story payoff ${payoff.revealBeatId}`);
+      assertTimeWithin(frame.tSec, lock.startSec, lock.endSec, `story payoff ${payoff.revealBeatId}`);
+    }
+    for (const claimId of planned.citedClaimIds) {
+      if (!receipt.claims.some((claim) => claim.claimId === claimId && claim.shotId === payoff.shotId)) {
+        throw new Error(`cinematic QA story payoff ${payoff.revealBeatId} lacks cited claim ${claimId} on its source-proof shot`);
+      }
+    }
+  }
+}
+
 function assertCuts(
   receipt: CinematicFinalMasterQaEvidenceReceipt,
   plan: CinematicFinalMasterQaPlan,
@@ -652,6 +821,7 @@ export function assertCinematicFinalMasterQaEvidence(args: {
     assertContinuity(lock, planned);
   }
   assertClaimCoverage(receipt, args.plan, frames);
+  assertStoryPayoffCoverage(receipt, args.plan, frames);
   const tolerance = Number.isFinite(args.cutToleranceSec)
     ? Math.max(0.1, Math.min(1, Number(args.cutToleranceSec)))
     : 0.55;

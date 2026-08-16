@@ -91,6 +91,9 @@ function directionFingerprint(direction: CinematicCaseDirection): string {
 
 function roleFor(index: number, total: number): DraftBeat["narrativeRole"] {
   if (index === 0) return "cold_open";
+  // A two-window source spine still needs to earn its hook.  The second beat
+  // is the cited reveal rather than an unearned closing-residue hold.
+  if (total === 2) return "reveal";
   if (index === total - 1) return "closing_residue";
   if (total >= 3 && index === Math.floor(total / 2)) return "reveal";
   return "investigation";
@@ -326,6 +329,13 @@ export function planCinematicCaseSequenceDraft(args: {
   const orderedShots = [...shots].sort((left, right) => left.t0 - right.t0 || left.id.localeCompare(right.id));
   const cinematicShots: DraftCoverageShot[] = [];
   const causalWindows = causalBeatWindows(orderedShots);
+  if (causalWindows.length < 2) {
+    throw new Error(
+      "cinematic draft: the Story Spine has no later source window to earn the cold-open question; " +
+        "supply at least two admitted causal windows before planning a cinematic sequence",
+    );
+  }
+  const coldOpenBeatId = `cinematic-beat-${causalWindows[0]![0]!.id.replace(/^shot-/, "")}`;
   const beats: DraftBeat[] = causalWindows.map((parents, index) => {
     const role = roleFor(index, causalWindows.length);
     const related = map.claimMappings.flatMap((mapping) =>
@@ -377,6 +387,15 @@ export function planCinematicCaseSequenceDraft(args: {
       .map((parent) => `Narrated source moment: ${parent.literalContent}`)
       .join(" ")
       .slice(0, 900);
+    const storyPayoff = role === "reveal" ? {
+      coldOpenBeatId,
+      answerOrReframe: [
+        `This cited reveal answers or reframes the opening question: ${direction.causalQuestion}`,
+        sourceMoments,
+      ].join(" ").slice(0, 400),
+      citedClaimIds: union(related.map((entry) => entry.claimId)),
+      citedSourceIds: union(related.flatMap((entry) => entry.binding.sourceIds)),
+    } : undefined;
     const coverageShots = modes.modes.map((visualMode, slot): DraftCoverageShot => {
       const usesCast = visualMode === "abstract_reenactment";
       const castIds = usesCast ? [direction.cast[0]!.id] : [];
@@ -440,6 +459,7 @@ export function planCinematicCaseSequenceDraft(args: {
       claimIds: union(related.map((entry) => entry.claimId)),
       sourceIds: union(related.flatMap((entry) => entry.binding.sourceIds)),
       causalQuestion: beatQuestion,
+      ...(storyPayoff ? { storyPayoff } : {}),
       shots: coverageShots,
     };
   });
