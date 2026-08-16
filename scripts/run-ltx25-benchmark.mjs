@@ -87,6 +87,10 @@ function runtimeBootstrapSource() {
 sha=os.environ['NOVITA_RUNTIME_BUNDLE_SHA256']
 root=pathlib.Path('/network/runtime/ltx-2.5-'+sha)
 compatibility=root/'.torch-cu118-2.7.1'
+def compatibility_ready():
+  # A historical bootstrap wrote a literal backslash-n. It was written only
+  # after the CUDA probe below succeeded, so normalize that valid receipt.
+  return compatibility.is_file() and compatibility.read_text().strip().replace(chr(92)+'n','')=='torch==2.7.1+cu118'
 def repair_python_paths(runtime_root):
   original='/opt/LTX-2'
   relocated=str(runtime_root/'opt/LTX-2')
@@ -94,9 +98,9 @@ def repair_python_paths(runtime_root):
     content=receipt.read_text('utf-8')
     if original in content: receipt.write_text(content.replace(original,relocated),'utf-8')
 def runtime_ready():
-  return (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha and compatibility.is_file() and compatibility.read_text().strip()=='torch==2.7.1+cu118'
+  return (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha and compatibility_ready()
 def ensure_cuda_compatibility():
-  if compatibility.is_file() and compatibility.read_text().strip()=='torch==2.7.1+cu118': return
+  if compatibility_ready(): return
   python=root/'opt/LTX-2/.venv/bin/python'
   if not python.is_file(): raise RuntimeError('portable Python is missing before CUDA compatibility install')
   import subprocess,sys
@@ -104,7 +108,7 @@ def ensure_cuda_compatibility():
   subprocess.run(['uv','pip','install','--python',str(python),'--reinstall','torch==2.7.1','torchvision==0.22.1','torchaudio==2.7.1','--index-url','https://download.pytorch.org/whl/cu118'],check=True,stdout=subprocess.DEVNULL)
   evidence=subprocess.check_output([str(python),'-c',"import torch;print(torch.__version__+'|'+str(torch.version.cuda)+'|'+str(torch.cuda.is_available()))"],text=True).strip()
   if evidence!='2.7.1+cu118|11.8|True': raise RuntimeError('CUDA-compatible Torch verification failed: '+evidence)
-  compatibility.write_text('torch==2.7.1+cu118\\n')
+  compatibility.write_text('torch==2.7.1+cu118'+chr(10))
 def exec_worker():
   project=str(root/'opt/LTX-2')
   previous=os.environ.get('PYTHONPATH','')
