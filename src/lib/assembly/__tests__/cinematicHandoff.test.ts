@@ -157,4 +157,24 @@ assert.throws(
   "assembly cannot begin when one approved shot lacks an actual rendered clip binding",
 );
 
+// A resume/store corruption can shift every representation of the second cut
+// together. The ordinary receipt equality checks still agree, but exact
+// assembly must never turn that missing half-second into a repeated shot.
+const gappedTimeline = validArgs();
+const secondScene = gappedTimeline.scenePlan.scenes[1]!;
+const secondEdit = gappedTimeline.editDecisionList.edits[1]!;
+const secondClip = gappedTimeline.footageManifest.items[1]!;
+gappedTimeline.scenePlan.scenes[1] = { ...secondScene, t0: 3.5, t1: 6.5 };
+gappedTimeline.editDecisionList.edits[1] = { ...secondEdit, t0: 3.5, t1: 6.5 };
+gappedTimeline.footageManifest.items[1] = { ...secondClip, t0: 3.5, t1: 6.5 };
+gappedTimeline.scenePlan.durationSec = 6.5;
+gappedTimeline.editDecisionList.durationSec = 6.5;
+gappedTimeline.footageManifest.durationSec = 6.5;
+gappedTimeline.narrationDurationSec = 6.5;
+assert.throws(
+  () => createCinematicAssemblyHandoff(gappedTimeline),
+  /contiguous/i,
+  "exact cinematic assembly must reject jointly shifted receipt timings before they can create a repeated final-master shot",
+);
+
 console.log("Cinematic assembly handoff tests passed");

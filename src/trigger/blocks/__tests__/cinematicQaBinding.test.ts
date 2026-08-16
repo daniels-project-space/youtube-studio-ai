@@ -4,17 +4,30 @@ import { join } from "node:path";
 
 const source = readFileSync(join(process.cwd(), "src/trigger/blocks/narratedBlocks.ts"), "utf8");
 const qaStart = source.indexOf("export const qaVisual: Block");
+const timelineStart = source.indexOf("export const timelineAssemble: Block");
 const qaSource = source.slice(qaStart);
+const timelineSource = source.slice(timelineStart, qaStart);
 const binding = qaSource.indexOf("assertCinematicSequenceRenderBinding({");
 const reviewer = qaSource.indexOf("const visualReview = await reviewRender(");
 
 assert(qaStart >= 0, "qa_visual must remain the final production review block");
+assert(timelineStart >= 0, "timeline_assemble must remain the final-master assembly block");
 assert(binding >= 0, "qa_visual must re-assert exact cinematic scene/edit/render binding");
 assert(reviewer >= 0 && binding < reviewer, "cinematic clip receipts must be validated before final-master visual review");
 assert.match(
   source,
   /assertCinematicAssemblyRoute\([\s\S]*useAssemblyEdl:/,
   "the unproven Assembly EDL route must be rejected before it can assemble a source-bound cinematic master",
+);
+assert.match(
+  timelineSource,
+  /createCinematicAssemblyHandoff\([\s\S]*narrationDurationSec:[\s\S]*cinematicFootageManifest = cinematicAssemblyHandoff\?\.manifest/,
+  "timeline assembly must consume the validated, contiguous cinematic handoff instead of raw generated-footage metadata",
+);
+assert.match(
+  timelineSource,
+  /cinematicFootageManifest\.items\.entries\(\)[\s\S]*assembleAuthoredBody\([\s\S]*segDurationsSec: cinematicFootageManifest\.items\.map\(\(item\) => item\.t1 - item\.t0\)/,
+  "the exact final-master concat must consume the reviewed clip order and timing windows",
 );
 assert.match(
   qaSource,

@@ -531,6 +531,26 @@ export function evaluateCinematicCaseSequence(
   if (orderedBeats[0]?.narrativeRole !== "cold_open") {
     issues.push(issue("tension_grammar_invalid", "The cinematic sequence does not start with a cold-open causal question.", "Begin with one concrete unresolved fact, threat, or contradiction before orientation or explanation."));
   }
+  const coldOpen = orderedBeats[0];
+  if (coldOpen?.narrativeRole === "cold_open") {
+    // The Casefile reference standard is an evidence-led hook, not an
+    // unsupported drama montage. Every coverage shot already carries a
+    // citation; require a real source-object insert early enough for that
+    // citation to earn the opening question before reconstruction takes over.
+    const sourceObjectDeadlineSec = Math.min(coldOpen.t1, coldOpen.t0 + 8);
+    const hasEarlySourceObject = coldOpen.shots.some((shot) =>
+      shot.t0 < sourceObjectDeadlineSec &&
+      shot.coveragePurpose === "evidence_insert" &&
+      shot.visualMode === "source_proof",
+    );
+    if (!hasEarlySourceObject) {
+      issues.push(issue(
+        "coverage_grammar_invalid",
+        "The cold open lacks a cited source-proof evidence insert in its first eight seconds.",
+        "Show a source document, object, map, or timeline that establishes the opening question before relying on reconstruction or atmosphere.",
+      ));
+    }
+  }
   for (const beat of orderedBeats.slice(1)) {
     if (beat.narrativeRole === "cold_open") {
       issues.push(issue("tension_grammar_invalid", `Cinematic beat ${beat.id} restarts the cold open after the story has begun.`, "Keep a single opening question; use investigation, contradiction, reveal, aftermath, or closing residue for later turns."));

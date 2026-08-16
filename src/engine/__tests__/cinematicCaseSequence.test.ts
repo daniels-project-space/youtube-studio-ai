@@ -426,6 +426,15 @@ async function main() {
   flatCoverage.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(flatCoverage);
   assert.throws(() => assertCinematicCaseSequence({ ...args, input: flatCoverage }, { now: NOW }), /coverage_grammar_invalid:.*Remediation:/);
 
+  const unsupportedColdOpen = structuredClone(input);
+  unsupportedColdOpen.beats[0].shots[0].coveragePurpose = "spatial_anchor";
+  unsupportedColdOpen.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(unsupportedColdOpen);
+  assert.throws(
+    () => assertCinematicCaseSequence({ ...args, input: unsupportedColdOpen }, { now: NOW }),
+    /coverage_grammar_invalid:.*cited source-proof evidence insert.*Remediation:/,
+    "a cinematic Casefile hook cannot spend its opening beat on unsupported reconstruction or atmosphere before showing a source object",
+  );
+
   const flatTension = structuredClone(input);
   flatTension.beats.forEach((beat) => beat.shots.forEach((shot) => { shot.tensionState = "pressure"; }));
   flatTension.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(flatTension);

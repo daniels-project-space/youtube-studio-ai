@@ -65,6 +65,7 @@ import {
   assertCinematicAssemblyRoute,
   assertCinematicSequenceRenderBinding,
 } from "@/engine/cinematicSequenceRenderBinding";
+import { createCinematicAssemblyHandoff } from "@/lib/assembly/cinematicHandoff";
 import { cinematicFinalMasterQaEvidence } from "@/engine/cinematicQaEvidence";
 import { assertCinematicFinalMasterQaAdmission } from "@/engine/cinematicFinalMasterQaAdmission";
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
@@ -2019,16 +2020,21 @@ export const timelineAssemble: Block = {
       (generatedFootageRaw as Record<string, unknown>)["source"] === "cinematic_case_sequence",
     );
     const cinematicArtifactsPresent = cinematicPlanRaw !== undefined || cinematicEditRaw !== undefined || cinematicManifestSignaled;
-    const cinematicBinding = cinematicArtifactsPresent
-      ? assertCinematicSequenceRenderBinding({
+    // This is the final pre-spend boundary for a source-bound cinematic body.
+    // The regular binding proves the three upstream receipts agree; the durable
+    // handoff additionally proves their timelines are contiguous, ordered, and
+    // safe for the exact concat renderer. Do not use raw generated-footage
+    // items here: matching-but-gapped timestamps would otherwise pass the
+    // receipt comparison and make composeWithIntro loop a previous shot.
+    const cinematicAssemblyHandoff = cinematicArtifactsPresent
+      ? createCinematicAssemblyHandoff({
           scenePlan: cinematicPlanRaw,
           editDecisionList: cinematicEditRaw,
           footageManifest: generatedFootageRaw,
           narrationDurationSec: narrationSec,
         })
       : undefined;
-    const cinematicPlan = cinematicBinding?.scenePlan;
-    const cinematicFootageManifest = cinematicBinding?.footageManifest;
+    const cinematicFootageManifest = cinematicAssemblyHandoff?.manifest;
     // The generated-footage manifest is the only reliable signal that this
     // body came from LTX rather than ordinary stock/entity sources. Preserve
     // its in-world audio when available; cinematic Casefile is stricter and
@@ -2233,7 +2239,7 @@ export const timelineAssemble: Block = {
       } catch { /* default bust */ }
     }
 
-    if (cinematicFootageManifest && cinematicPlan) {
+    if (cinematicFootageManifest) {
       const cinematicPaths: string[] = [];
       for (const [index, item] of cinematicFootageManifest.items.entries()) {
         const local = join(tmp, `cinematic_source_${String(index).padStart(4, "0")}.mp4`);
@@ -2242,11 +2248,11 @@ export const timelineAssemble: Block = {
       }
       ctx.log(
         `timeline_assemble: exact cinematic body from ${cinematicPaths.length} source-bound multi-shot clip(s); ` +
-          `sequence ${cinematicPlan.sequenceFingerprint.slice(0, 12)}`,
+          `sequence ${cinematicFootageManifest.sequenceFingerprint.slice(0, 12)}`,
       );
       concat = await assembleAuthoredBody({
         clipPaths: cinematicPaths,
-        segDurationsSec: cinematicFootageManifest.items.map((item) => item.t1! - item.t0!),
+        segDurationsSec: cinematicFootageManifest.items.map((item) => item.t1 - item.t0),
         outPath: join(tmp, "body.mp4"),
         tmpDir: tmp,
         tailHoldSec: tailSec,
