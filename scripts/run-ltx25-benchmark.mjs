@@ -57,7 +57,7 @@ function shellQuote(value) {
   return `'${value.replaceAll("'", "'\\\"'\\\"'")}'`;
 }
 
-function runtimeBootstrapCommand(runtimeSha256) {
+function runtimeBootstrapCommand(runtimeSha256, archive) {
   const root = `/network/runtime/ltx-2.5-${runtimeSha256}`;
   const hydrate = [
     "set -euo pipefail",
@@ -69,11 +69,13 @@ function runtimeBootstrapCommand(runtimeSha256) {
     'test ! -e "$root"',
     'stage="$(mktemp -d /network/runtime/.ltx-runtime-stage.XXXXXX)"',
     "trap 'rm -rf \"$stage\"' EXIT",
-    'bundle="$stage/runtime.tar.zst"',
+    `bundle="$stage/runtime.${archive === "gzip" ? "tar.gz" : "tar.zst"}"`,
     'export bundle',
     "python -c 'import os, urllib.request; urllib.request.urlretrieve(os.environ[\"NOVITA_RUNTIME_BUNDLE_URL\"], os.environ[\"bundle\"])'",
     'printf "%s  %s\\n" "$NOVITA_RUNTIME_BUNDLE_SHA256" "$bundle" | sha256sum -c -',
-    'tar --use-compress-program=zstd -xf "$bundle" -C "$stage"',
+    archive === "gzip"
+      ? 'tar -xzf "$bundle" -C "$stage"'
+      : 'tar --use-compress-program=zstd -xf "$bundle" -C "$stage"',
     'test -x "$stage/opt/LTX-2/.venv/bin/python"',
     'test -f "$stage/opt/novita-worker/worker.py"',
     'printf "%s\\n" "$NOVITA_RUNTIME_BUNDLE_SHA256" > "$stage/.ready"',
@@ -102,7 +104,7 @@ function buildWorkerRequest({ name, manifestUrl, manifestSha256, jobIds }) {
     kind: "gpu",
     billingMode: "spot",
     imageUrl: BASE_IMAGE,
-    command: runtimeBootstrapCommand(RUNTIME_BUNDLE_SHA256),
+    command: runtimeBootstrapCommand(RUNTIME_BUNDLE_SHA256, RUNTIME_BUNDLE_KEY.endsWith(".tar.gz") ? "gzip" : "zstd"),
     rootfsSize: 120,
     networkStorages: [{ Id: VOLUME_ID, mountPoint: "/network" }],
     envs: [

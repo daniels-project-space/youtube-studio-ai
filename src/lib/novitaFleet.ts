@@ -501,6 +501,8 @@ export interface NovitaCreateWorkerRequestArgs {
   runtimeBundle?: {
     downloadUrl: string;
     sha256: string;
+    /** The public PyTorch base has gzip but not a guaranteed zstd binary. */
+    archive?: "zstd" | "gzip";
   };
   manifestUrl: string;
   manifestSha256: string;
@@ -517,7 +519,7 @@ function shellQuote(value: string): string {
  * public PyTorch base plus a short-lived, SHA-bound R2 bundle and persists the
  * verified runtime on the mounted volume for subsequent short-lived workers.
  */
-function runtimeBundleBootstrapCommand(sha256: string): string {
+function runtimeBundleBootstrapCommand(sha256: string, archive: "zstd" | "gzip" = "zstd"): string {
   const runtimeRoot = `/network/runtime/ltx-2.5-${sha256}`;
   const hydrate = [
     "set -euo pipefail",
@@ -529,11 +531,13 @@ function runtimeBundleBootstrapCommand(sha256: string): string {
     'test ! -e "$root"',
     'stage="$(mktemp -d /network/runtime/.ltx-runtime-stage.XXXXXX)"',
     'trap \'rm -rf "$stage"\' EXIT',
-    'bundle="$stage/runtime.tar.zst"',
+    `bundle="$stage/runtime.${archive === "gzip" ? "tar.gz" : "tar.zst"}"`,
     'export bundle',
     "python -c 'import os, urllib.request; urllib.request.urlretrieve(os.environ[\"NOVITA_RUNTIME_BUNDLE_URL\"], os.environ[\"bundle\"])'",
     'printf "%s  %s\\n" "$NOVITA_RUNTIME_BUNDLE_SHA256" "$bundle" | sha256sum -c -',
-    'tar --use-compress-program=zstd -xf "$bundle" -C "$stage"',
+    archive === "gzip"
+      ? 'tar -xzf "$bundle" -C "$stage"'
+      : 'tar --use-compress-program=zstd -xf "$bundle" -C "$stage"',
     'test -x "$stage/opt/LTX-2/.venv/bin/python"',
     'test -f "$stage/opt/novita-worker/worker.py"',
     'printf "%s\\n" "$NOVITA_RUNTIME_BUNDLE_SHA256" > "$stage/.ready"',
@@ -580,6 +584,7 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
   if (args.runtimeBundle && (
     !isSha256(args.runtimeBundle.sha256)
     || !/^https:\/\//.test(args.runtimeBundle.downloadUrl)
+    || (args.runtimeBundle.archive !== undefined && !["zstd", "gzip"].includes(args.runtimeBundle.archive))
   )) {
     throw new NovitaAdmissionError("runtime bundle must use a signed HTTPS URL and SHA-256 identity");
   }
@@ -604,7 +609,7 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
     billingMode: "spot",
     imageUrl: args.image,
     ...(args.imageAuthId ? { imageAuthId: args.imageAuthId } : {}),
-    ...(args.runtimeBundle ? { command: runtimeBundleBootstrapCommand(args.runtimeBundle.sha256) } : {}),
+    ...(args.runtimeBundle ? { command: runtimeBundleBootstrapCommand(args.runtimeBundle.sha256, args.runtimeBundle.archive) } : {}),
     rootfsSize: 120,
     networkStorages: [{ Id: args.storageId, mountPoint: "/network" }],
     envs: [

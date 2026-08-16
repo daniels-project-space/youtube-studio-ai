@@ -90,7 +90,7 @@ interface DirectNovitaConfig {
   workerImage: string;
   imageAuthId?: string;
   imageAccess: "private-registry" | "public-ghcr" | "public-runtime-base";
-  runtimeBundle?: { key: string; sha256: string };
+  runtimeBundle?: { key: string; sha256: string; archive: "zstd" | "gzip" };
   productId: string;
   verifiedGpuQuota: number;
   modelManifestKey: string;
@@ -246,11 +246,13 @@ function directConfig(): DirectNovitaConfig {
   const runtimeBundle = imageAccess === "public-runtime-base" ? {
     key: requiredEnv("NOVITA_RUNTIME_BUNDLE_KEY"),
     sha256: requiredEnv("NOVITA_RUNTIME_BUNDLE_SHA256").toLowerCase(),
+    archive: requiredEnv("NOVITA_RUNTIME_BUNDLE_KEY").endsWith(".tar.gz") ? "gzip" as const : "zstd" as const,
   } : undefined;
   if (runtimeBundle && (
     !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,767}$/.test(runtimeBundle.key)
     || runtimeBundle.key.includes("..")
     || !isSha256(runtimeBundle.sha256)
+    || !/\.tar\.(?:zst|gz)$/.test(runtimeBundle.key)
   )) {
     throw new NovitaAdmissionError("sealed public runtime bundle must use a safe R2 key and SHA-256 identity");
   }
@@ -1061,6 +1063,7 @@ async function recoverOrCreateInstance(args: {
               expiresIn: MANIFEST_URL_TTL_SECONDS,
             }),
             sha256: args.control.config.runtimeBundle.sha256,
+            archive: args.control.config.runtimeBundle.archive,
           },
         } : {}),
         manifestUrl: await presignDownload(args.worker.manifestKey, { expiresIn: MANIFEST_URL_TTL_SECONDS }),

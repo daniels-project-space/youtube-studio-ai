@@ -50,7 +50,7 @@ function run(command, args) {
 const workspace = await mkdtemp(path.join(os.tmpdir(), "youtube-studio-ltx-runtime-"));
 try {
   const sourceArchive = path.join(workspace, "source.tar.zst");
-  const outputArchive = path.join(workspace, "runtime.tar.zst");
+  const outputArchive = path.join(workspace, "runtime.tar.gz");
   const sourceObject = await s3.send(new GetObjectCommand({ Bucket: bucket, Key: SOURCE_KEY }));
   await pipeline(sourceObject.Body, createWriteStream(sourceArchive));
   if (await sha256File(sourceArchive) !== SOURCE_SHA256) throw new Error("source runtime bundle SHA-256 mismatch");
@@ -58,15 +58,15 @@ try {
   const workerTarget = path.join(workspace, "opt", "novita-worker", "worker.py");
   await stat(workerTarget);
   await copyFile(sourceWorker, workerTarget);
-  await run("tar", ["--use-compress-program=zstd", "-cf", outputArchive, "-C", workspace, "opt"]);
+  await run("tar", ["-czf", outputArchive, "-C", workspace, "opt"]);
   const sha256 = await sha256File(outputArchive);
-  const key = `novita/runtime/ltx-2.5/${sha256}.tar.zst`;
+  const key = `novita/runtime/ltx-2.5/${sha256}.tar.gz`;
   try {
     await s3.send(new HeadObjectCommand({ Bucket: bucket, Key: key }));
   } catch (error) {
     if (error?.$metadata?.httpStatusCode !== 404 && error?.name !== "NotFound") throw error;
     await s3.send(new PutObjectCommand({
-      Bucket: bucket, Key: key, Body: createReadStream(outputArchive), ContentType: "application/zstd",
+      Bucket: bucket, Key: key, Body: createReadStream(outputArchive), ContentType: "application/gzip",
       Metadata: { "source-runtime-sha256": SOURCE_SHA256, "worker-sha256": crypto.createHash("sha256").update(await readFile(sourceWorker)).digest("hex") },
     }));
   }
