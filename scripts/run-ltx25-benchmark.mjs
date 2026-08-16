@@ -27,9 +27,9 @@ const CLUSTER_ID = "us-ca-nas-2";
 const VOLUME_ID = "384d629d-839f-4224-abef-64dfc2d751bf";
 const BASE_IMAGE = "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
 const RUNTIME_BUNDLE_KEY = process.env.NOVITA_RUNTIME_BUNDLE_KEY
-  || "novita/runtime/ltx-2.5/e2ffc92c14097acb14a28ba679ea6106d372259288e6ee16fa6490ea5933a377.tar.gz";
+  || "novita/runtime/ltx-2.5/ff616214c4a8901f003a1ef0815220d596f709eeb5027fb575b643a97e11c579.tar.gz";
 const RUNTIME_BUNDLE_SHA256 = process.env.NOVITA_RUNTIME_BUNDLE_SHA256
-  || "e2ffc92c14097acb14a28ba679ea6106d372259288e6ee16fa6490ea5933a377";
+  || "ff616214c4a8901f003a1ef0815220d596f709eeb5027fb575b643a97e11c579";
 const API = "https://api.novita.ai/gpu-instance/openapi/v1";
 const STAGE_MAX_USD = 0.68;
 const TOTAL_MAX_USD = 3;
