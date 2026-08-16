@@ -34,6 +34,11 @@ import {
   type QuizRoundCategory,
 } from "@/trigger/blocks/quizYearBlocks";
 import { quizRoundCount, quizSetDefects, resolveTopic, quizYearBlocks } from "../quizYearBlocks";
+import {
+  assertCertifiedQuizTopicPlan,
+  assertCertifiedQuizTopicSafety,
+  quizTopicPlanFingerprint,
+} from "../quizPlanningBlocks";
 import { wikidataSourceUrl, type QuizYearQuestion } from "@/lib/quizYearFacts";
 
 const ROOT = join(__dirname, "../../../..");
@@ -49,6 +54,11 @@ async function main(): Promise<void> {
   assert.ok(
     block.produces.includes("onScreenTextCues"),
     "the final quiz master must carry an explicit readable-text contract into QA",
+  );
+  assert.deepEqual(
+    block.consumes,
+    ["quizPlan", "quizSafety"],
+    "the renderer must consume the planner and matching safety receipt rather than trust pipeline order",
   );
 
   /* 2 — family / lane / archetype plumbing */
@@ -142,6 +152,41 @@ async function main(): Promise<void> {
       `a silent format must not claim ${String(cap)}`,
     );
   }
+  assert.deepEqual(
+    contract.requiredConsumes,
+    ["quizPlan", "quizSafety"],
+    "the artifact contract must preserve the certified planner-to-renderer safety edge",
+  );
+
+  // A valid-looking receipt cannot be replayed across topics. This pure guard
+  // is repeated by `quiz_year` just before it sources facts for pixels.
+  const plan = assertCertifiedQuizTopicPlan({
+    version: "quiz-curated-wikidata-planner/v1",
+    topicKey: "science_discovery",
+    topic: "Science Discoveries Trivia Challenge #1",
+    episodeOrdinal: 1,
+    memoryKey: "quiz-topic/v1/run-test/science_discovery/1",
+    provenance: {
+      registry: "quiz-year-topics/v1",
+      sourceLicense: "Wikidata CC0-1.0",
+      selection: "least-used curated topic with deterministic tie-break",
+      previousEpisodesForTopic: 0,
+    },
+  });
+  const safety = {
+    version: "quiz-topic-safety/v1" as const,
+    planFingerprint: quizTopicPlanFingerprint(plan),
+    topicKey: plan.topicKey,
+    topic: plan.topic,
+    sensitiveTopic: false as const,
+    disclosureRequired: false as const,
+  };
+  assert.doesNotThrow(() => assertCertifiedQuizTopicSafety(safety, plan));
+  assert.throws(
+    () => assertCertifiedQuizTopicSafety({ ...safety, topicKey: "space_exploration" }, plan),
+    /does not bind/,
+    "a safety receipt cannot be replayed across quiz topics",
+  );
 
   /* 5 — the catalog claims exactly what is wired */
   const entry = GOLDEN_MODULES.find((m) => m.key === "quiz-year");

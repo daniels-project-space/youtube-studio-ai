@@ -21,6 +21,7 @@ import type { Id } from "../../../convex/_generated/dataModel";
 
 const QUIZ_PLANNER_VERSION = "quiz-curated-wikidata-planner/v1" as const;
 const QUIZ_TOPIC_MEMORY_PREFIX = "quiz-topic/v1";
+const QUIZ_TOPIC_SAFETY_RECEIPT_VERSION = "quiz-topic-safety/v1" as const;
 
 function convex(): ConvexHttpClient {
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
@@ -100,6 +101,16 @@ export interface QuizTopicPlan {
   };
 }
 
+/** A receipt that binds the safety decision to exactly one planner result. */
+export interface QuizTopicSafetyReceipt {
+  readonly version: typeof QUIZ_TOPIC_SAFETY_RECEIPT_VERSION;
+  readonly planFingerprint: string;
+  readonly topicKey: QuizYearTopicKey;
+  readonly topic: string;
+  readonly sensitiveTopic: false;
+  readonly disclosureRequired: false;
+}
+
 function topicKeyFromUnknown(value: unknown): QuizYearTopicKey | undefined {
   const candidate = typeof value === "string" ? value.trim() : "";
   return (QUIZ_YEAR_TOPIC_KEYS as readonly string[]).includes(candidate)
@@ -146,11 +157,15 @@ function planFor(args: {
   };
 }
 
-function readQuizPlan(value: unknown): QuizTopicPlan {
+export function assertCertifiedQuizTopicPlan(value: unknown): QuizTopicPlan {
   if (!value || typeof value !== "object") throw new Error("quiz plan is missing");
   const candidate = value as Partial<QuizTopicPlan>;
   const topicKey = topicKeyFromUnknown(candidate.topicKey);
   const ordinal = Number(candidate.episodeOrdinal);
+  const parsedMemory = typeof candidate.memoryKey === "string"
+    ? memoryParts(candidate.memoryKey)
+    : undefined;
+  const presentation = topicKey ? QUIZ_TOPIC_PRESENTATIONS[topicKey] : undefined;
   if (
     candidate.version !== QUIZ_PLANNER_VERSION ||
     !topicKey ||
@@ -159,11 +174,59 @@ function readQuizPlan(value: unknown): QuizTopicPlan {
     !Number.isInteger(ordinal) ||
     ordinal < 1 ||
     typeof candidate.memoryKey !== "string" ||
-    !candidate.memoryKey.startsWith(`${QUIZ_TOPIC_MEMORY_PREFIX}/`)
+    !parsedMemory ||
+    parsedMemory.topicKey !== topicKey ||
+    parsedMemory.ordinal !== ordinal ||
+    candidate.topic !== `${presentation?.label} Trivia Challenge #${ordinal}`
   ) {
     throw new Error("quiz plan is malformed or is not from the certified curated planner");
   }
   return candidate as QuizTopicPlan;
+}
+
+/** Fingerprint only the stable planner fields consumed by the safety gate. */
+export function quizTopicPlanFingerprint(value: QuizTopicPlan): string {
+  const plan = assertCertifiedQuizTopicPlan(value);
+  return createHash("sha256").update(JSON.stringify({
+    version: plan.version,
+    topicKey: plan.topicKey,
+    topic: plan.topic,
+    episodeOrdinal: plan.episodeOrdinal,
+    memoryKey: plan.memoryKey,
+    provenance: plan.provenance,
+  })).digest("hex");
+}
+
+function safetyReceiptFor(plan: QuizTopicPlan): QuizTopicSafetyReceipt {
+  return Object.freeze({
+    version: QUIZ_TOPIC_SAFETY_RECEIPT_VERSION,
+    planFingerprint: quizTopicPlanFingerprint(plan),
+    topicKey: plan.topicKey,
+    topic: plan.topic,
+    sensitiveTopic: false,
+    disclosureRequired: false,
+  });
+}
+
+/** Reject a stale, forged, or cross-topic safety result at the renderer boundary. */
+export function assertCertifiedQuizTopicSafety(
+  value: unknown,
+  planValue: QuizTopicPlan,
+): QuizTopicSafetyReceipt {
+  const plan = assertCertifiedQuizTopicPlan(planValue);
+  if (!value || typeof value !== "object") throw new Error("quiz safety receipt is missing");
+  const receipt = value as Partial<QuizTopicSafetyReceipt>;
+  if (
+    receipt.version !== QUIZ_TOPIC_SAFETY_RECEIPT_VERSION ||
+    receipt.planFingerprint !== quizTopicPlanFingerprint(plan) ||
+    receipt.topicKey !== plan.topicKey ||
+    receipt.topic !== plan.topic ||
+    receipt.sensitiveTopic !== false ||
+    receipt.disclosureRequired !== false
+  ) {
+    throw new Error("quiz safety receipt is stale, malformed, or does not bind the certified planner result");
+  }
+  return receipt as QuizTopicSafetyReceipt;
 }
 
 function musicBriefFor(plan: QuizTopicPlan): Record<string, unknown> {
@@ -266,9 +329,9 @@ const quizTopicPlan: Block = {
 const quizTopicSafety: Block = {
   id: "quiz_topic_safety",
   consumes: ["topic", "quizPlan"],
-  produces: ["disclosureRequired", "sensitiveTopic", "complianceNote"],
+  produces: ["disclosureRequired", "sensitiveTopic", "complianceNote", "quizSafety"],
   run: async (ctx) => {
-    const plan = readQuizPlan(ctx.store["quizPlan"]);
+    const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"]);
     const topic = String(ctx.store["topic"] ?? "").trim();
     if (topic !== plan.topic) throw new Error("quiz_topic_safety: topic does not match its curated planner receipt");
     if (!QUIZ_TOPIC_PRESENTATIONS[plan.topicKey]) {
@@ -279,6 +342,7 @@ const quizTopicSafety: Block = {
       sensitiveTopic: false,
       complianceNote:
         "Curated evergreen quiz topic; all displayed answers require CC0 Wikidata provenance and deterministic integrity checks.",
+      quizSafety: safetyReceiptFor(plan),
     };
   },
 };
@@ -298,7 +362,7 @@ const quizMetadata: Block = {
     "titleAlternate",
   ],
   run: async (ctx) => {
-    const plan = readQuizPlan(ctx.store["quizPlan"]);
+    const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"]);
     const presentation = QUIZ_TOPIC_PRESENTATIONS[plan.topicKey];
     const title = `${presentation.titleStem} #${plan.episodeOrdinal} | Can You Get 8/8?`;
     if (title.length > 100) throw new Error("quiz_metadata: deterministic title unexpectedly exceeds YouTube's 100-character limit");
@@ -345,7 +409,7 @@ const quizCriticSpec: Block = {
   consumes: ["quizPlan"],
   produces: ["validationSpec"],
   run: async (ctx) => {
-    const plan = readQuizPlan(ctx.store["quizPlan"]);
+    const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"]);
     return {
       validationSpec: {
         assertions: [

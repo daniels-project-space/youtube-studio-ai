@@ -67,7 +67,10 @@ import {
 } from "@/engine/cinematicSequenceRenderBinding";
 import { createCinematicAssemblyHandoff } from "@/lib/assembly/cinematicHandoff";
 import { cinematicFinalMasterQaEvidence } from "@/engine/cinematicQaEvidence";
-import { assertCinematicFinalMasterQaAdmission } from "@/engine/cinematicFinalMasterQaAdmission";
+import {
+  assertCinematicFinalMasterQaAdmission,
+  assertCinematicFinalMasterQaProfile,
+} from "@/engine/cinematicFinalMasterQaAdmission";
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 import {
   evaluateAuthoredShotEditIntegrity,
@@ -2762,6 +2765,18 @@ export const qaVisual: Block = {
     const lengthOk = ratio >= 0.5 && ratio <= 2.0;
     if (!lengthOk) {
       throw new Error(`qa_visual FAILED (length): video ${p.durationSec}s vs target ${target}s`);
+    }
+
+    // Detect the cinematic route before the overview vision call. A partial
+    // cinematic handoff must not be able to hide behind qaProfile=draft and
+    // spend on an advisory review before the stricter final-master contract
+    // rejects it later in this block.
+    const cinematicQaArtifactsPresent =
+      ctx.store["cinematicGeneratedScenePlan"] !== undefined ||
+      ctx.store["cinematicEditDecisionList"] !== undefined ||
+      ctx.store["generatedFootageSceneManifest"] !== undefined;
+    if (cinematicQaArtifactsPresent) {
+      assertCinematicFinalMasterQaProfile(ctx.params["qaProfile"]);
     }
 
     // 3) Video frames (vision, separate).

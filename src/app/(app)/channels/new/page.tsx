@@ -274,6 +274,17 @@ export default function NewChannelWizard() {
     }
     setFamily(next);
     setSupervisedAdmission(supervised ?? null);
+    // A supervised family intake is deliberately not a channel-build
+    // authorization. Clear any authority retained from an earlier autonomous
+    // selection before the UI can show the review-only package.
+    if (supervised) {
+      setApproveSetupSpend(false);
+      setRunProbe(false);
+      setAutoYoutube(false);
+      setPublishMode("draft");
+      setApprovedForPublish(false);
+      setToggles((current) => ({ ...current, crosspost: false }));
+    }
     if (!supportsDataStoryFamily(next)) setDataStory(false);
     if (next !== "illustrated_explainer") setSyntheticScenarioProfile("");
     setBudget((current) => Math.max(current, FAMILIES[next].defaultRunBudgetUsd ?? 0.5));
@@ -1028,46 +1039,54 @@ export default function NewChannelWizard() {
                 </div>
               </Row>
             )}
-            <Row label="Auto-publish"><select value={publishMode} onChange={(e) => { setPublishMode(e.target.value); setApprovedForPublish(false); }} style={selStyle}><option value="draft">Private draft</option><option value="scheduled">Scheduled</option><option value="public">Public</option></select></Row>
-            <Row label="One-time setup">
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={approveSetupSpend}
-                  onChange={(e) => {
-                    setApproveSetupSpend(e.target.checked);
-                    if (!e.target.checked) { setRunProbe(false); setAutoYoutube(false); }
-                  }}
-                />
-                <span style={muted}>authorize up to ${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)} for research, identity, art and starter thumbnails</span>
-              </label>
-            </Row>
-            <Row label="Auto-create YouTube channel">
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  disabled={!approveSetupSpend || !normalizeYoutubeChannelName(name)}
-                  checked={autoYoutube}
-                  onChange={(e) => setAutoYoutube(e.target.checked)}
-                />
-                <span style={muted}>
-                  {normalizeYoutubeChannelName(name)
-                    ? `create exactly “${normalizeYoutubeChannelName(name)}” as @${suggestYoutubeHandle(name)} (explicit opt-in)`
-                    : "enter a channel name first so the exact external identity can be approved"}
-                </span>
-              </label>
-            </Row>
-            <Row label="Paid validation render">
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                <input type="checkbox" disabled={!approveSetupSpend} checked={runProbe} onChange={(e) => setRunProbe(e.target.checked)} />
-                <span style={muted}>run one bounded private proof · up to ${costAuthority.validationCapUsd.toFixed(2)} extra</span>
-              </label>
-            </Row>
-            <Row label="Production budget / video"><input type="number" min={fam?.defaultRunBudgetUsd ?? 0.5} max={Math.max(100, fam?.defaultRunBudgetUsd ?? 0.5)} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD{family === "documentary_collage_short" ? " · native master requires at least $30" : family === "cinematic" ? " · locked Novita chain requires at least $130" : ""}</span></Row>
+            {supervisedAdmission ? (
+              <div className="glass" style={{ padding: "0.75rem 0.85rem", fontSize: "0.8rem", color: "var(--color-muted)", border: "1px solid rgba(124,124,255,0.45)" }}>
+                Private-review intake only: no setup spend, validation render, YouTube creation, publishing, cross-posting, or production budget can be authorized here.
+              </div>
+            ) : (
+              <>
+                <Row label="Auto-publish"><select value={publishMode} onChange={(e) => { setPublishMode(e.target.value); setApprovedForPublish(false); }} style={selStyle}><option value="draft">Private draft</option><option value="scheduled">Scheduled</option><option value="public">Public</option></select></Row>
+                <Row label="One-time setup">
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={approveSetupSpend}
+                      onChange={(e) => {
+                        setApproveSetupSpend(e.target.checked);
+                        if (!e.target.checked) { setRunProbe(false); setAutoYoutube(false); }
+                      }}
+                    />
+                    <span style={muted}>authorize up to ${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)} for research, identity, art and starter thumbnails</span>
+                  </label>
+                </Row>
+                <Row label="Auto-create YouTube channel">
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      disabled={!approveSetupSpend || !normalizeYoutubeChannelName(name)}
+                      checked={autoYoutube}
+                      onChange={(e) => setAutoYoutube(e.target.checked)}
+                    />
+                    <span style={muted}>
+                      {normalizeYoutubeChannelName(name)
+                        ? `create exactly “${normalizeYoutubeChannelName(name)}” as @${suggestYoutubeHandle(name)} (explicit opt-in)`
+                        : "enter a channel name first so the exact external identity can be approved"}
+                    </span>
+                  </label>
+                </Row>
+                <Row label="Paid validation render">
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                    <input type="checkbox" disabled={!approveSetupSpend} checked={runProbe} onChange={(e) => setRunProbe(e.target.checked)} />
+                    <span style={muted}>run one bounded private proof · up to ${costAuthority.validationCapUsd.toFixed(2)} extra</span>
+                  </label>
+                </Row>
+                <Row label="Production budget / video"><input type="number" min={fam?.defaultRunBudgetUsd ?? 0.5} max={Math.max(100, fam?.defaultRunBudgetUsd ?? 0.5)} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD{family === "documentary_collage_short" ? " · native master requires at least $30" : family === "cinematic" ? " · locked Novita chain requires at least $130" : ""}</span></Row>
+              </>
+            )}
           </div>
           <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.6rem" }}>
             <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Advanced — optional modules</div>
-            {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
+            {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).filter(([key]) => !supervisedAdmission || key !== "crosspost").map(([k, lbl]) => (
               <label key={k} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
                 <input type="checkbox" checked={toggles[k]} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}
               </label>
@@ -1127,19 +1146,25 @@ export default function NewChannelWizard() {
             {syntheticScenarioProfile && <SummaryRow k="Fictional AI format" v={`${syntheticScenarioProfile === "ai_town" ? "AI runs a fictional town" : syntheticScenarioProfile === "ai_decision" ? "What would AI do?" : "AI POV story"} · disclosure gate + local scenario visuals`} />}
             {seriesTitle.trim() && <SummaryRow k="Series" v={`${seriesTitle.trim()}${seriesCount > 0 ? ` · ${seriesCount} parts` : " · open-ended"}`} />}
             <SummaryRow k="Cadence" v={`${cadence}${(cadence === "weekly" || cadence === "biweekly") && days.length ? " · " + days.map((d) => DOW[d]).join(",") : ""} · ${publishMode}`} />
-            <SummaryRow k="Setup" v={approveSetupSpend ? `Approved · capped at $${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)}` : "Plan only · $0 provider spend"} />
-            {runProbe && <SummaryRow k="Private validation" v={`Approved separately · capped at $${costAuthority.validationCapUsd.toFixed(2)}`} />}
-            <SummaryRow k="Maximum setup + validation" v={`$${costAuthority.combinedSetupAndValidationCapUsd.toFixed(2)}`} />
-            <SummaryRow k="Future production videos" v={`$${costAuthority.perVideoProductionBudgetUsd.toFixed(2)} maximum each`} />
+            {supervisedAdmission ? (
+              <SummaryRow k="Authority" v="Private review only · $0 provider spend · no render, YouTube creation, or publishing" />
+            ) : (
+              <>
+                <SummaryRow k="Setup" v={approveSetupSpend ? `Approved · capped at $${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)}` : "Plan only · $0 provider spend"} />
+                {runProbe && <SummaryRow k="Private validation" v={`Approved separately · capped at $${costAuthority.validationCapUsd.toFixed(2)}`} />}
+                <SummaryRow k="Maximum setup + validation" v={`$${costAuthority.combinedSetupAndValidationCapUsd.toFixed(2)}`} />
+                <SummaryRow k="Future production videos" v={`$${costAuthority.perVideoProductionBudgetUsd.toFixed(2)} maximum each`} />
+              </>
+            )}
           </div>
-          {(publishMode !== "draft" || toggles.crosspost) && (
+          {!supervisedAdmission && (publishMode !== "draft" || toggles.crosspost) && (
             <label className="glass" style={{ padding: "0.9rem 1rem", display: "flex", alignItems: "flex-start", gap: "0.65rem", fontSize: "0.82rem", cursor: "pointer", border: "1px solid rgba(245,158,11,0.45)" }}>
               <input type="checkbox" checked={approvedForPublish} onChange={(e) => setApprovedForPublish(e.target.checked)} />
               <span>I explicitly approve automatic external publishing for this channel. This includes scheduled/public YouTube uploads and any enabled cross-posting.</span>
             </label>
           )}
           <div className="glass" style={{ padding: "1.1rem 1.2rem" }}>
-            <div style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.6rem" }}>Designed pipeline ({preview.length} modules)</div>
+            <div style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.6rem" }}>{supervisedAdmission ? "Proposed family modules (not an executable build)" : `Designed pipeline (${preview.length} modules)`}</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
               {preview.map((b, i) => (
                 <span key={b + i} style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem", borderRadius: 6, background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}>{b}</span>

@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   admitCinematicFinalMasterQa,
   assertCinematicFinalMasterQaAdmission,
+  assertCinematicFinalMasterQaProfile,
 } from "@/engine/cinematicFinalMasterQaAdmission";
 import {
   CinematicCreativeLocksSchema,
@@ -84,6 +85,14 @@ assert.throws(
       editDecisionList,
     }),
   /no longer matches the admitted sequence/,
+);
+
+assert.doesNotThrow(() => assertCinematicFinalMasterQaProfile(undefined));
+assert.doesNotThrow(() => assertCinematicFinalMasterQaProfile("production"));
+assert.throws(
+  () => assertCinematicFinalMasterQaProfile("draft"),
+  /cannot use qaProfile=draft/,
+  "a source-bound cinematic master must never report qaPassed without the independent final-master evidence receipt",
 );
 
 // A twelve-shot final master has 12 lock judgements and 11 cut judgements.

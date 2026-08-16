@@ -269,6 +269,21 @@ assert(
   creatorSource.includes("Private review package required") && creatorSource.includes("Open private review desk"),
   "a selectable supervised route must lead to its real review intake or remain blocked; it must not dispatch the automatic builder",
 );
+assert(
+  creatorSource.includes("Private-review intake only: no setup spend, validation render, YouTube creation, publishing, cross-posting, or production budget can be authorized here.") &&
+    creatorSource.includes("setApproveSetupSpend(false)") &&
+    creatorSource.includes("setRunProbe(false)") &&
+    creatorSource.includes("setAutoYoutube(false)") &&
+    creatorSource.includes('setPublishMode("draft")') &&
+    creatorSource.includes("setApprovedForPublish(false)") &&
+    creatorSource.includes("crosspost: false"),
+  "switching from an autonomous build to a supervised intake must clear retained spend, render, YouTube, publication, and cross-post authorities",
+);
+assert(
+  creatorSource.includes("Proposed family modules (not an executable build)") &&
+    creatorSource.includes('!supervisedAdmission && (publishMode !== "draft" || toggles.crosspost)'),
+  "a private-review family must not present its blocked pipeline or publishing approval as an executable channel build",
+);
 
 async function verifyPublicAsyncSelection(): Promise<void> {
   const logs: string[] = [];

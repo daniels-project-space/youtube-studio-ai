@@ -100,6 +100,22 @@ export function assertCinematicFinalMasterQaAdmission(args: {
   return admission;
 }
 
+/**
+ * A source-bound cinematic master cannot truthfully receive `qaPassed` from
+ * the lightweight draft path: its contract requires the independently
+ * reviewed final-master lock, claim, and cut receipt.  Reject before any
+ * reviewer/provider work rather than returning a green QA result without
+ * that evidence.
+ */
+export function assertCinematicFinalMasterQaProfile(qaProfile: unknown): void {
+  if (qaProfile === "draft") {
+    throw new Error(
+      "cinematic final-master QA cannot use qaProfile=draft; " +
+        "run the evidence-backed production QA profile to obtain the required lock, claim, and causal-cut receipt",
+    );
+  }
+}
+
 /** `undefined` means this is not a cinematic final-master route. */
 export function cinematicFinalMasterQaAdmissionCost(value: unknown): number {
   if (value === undefined) return 0;

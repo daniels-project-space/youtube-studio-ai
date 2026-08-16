@@ -523,6 +523,41 @@ function requireStoryInputs(store: Readonly<Record<string, unknown>>): {
   return { shots, specs, specsByShot };
 }
 
+/**
+ * A structurally valid still manifest is not itself permission to start a
+ * paid LTX worker. Bind it to the required non-Google keyframe QA receipt so
+ * an interrupted/manual invocation cannot skip the accepted-still gate.
+ */
+export function assertAcceptedKeyframeSelection(args: {
+  shotIds: readonly string[];
+  selected: unknown;
+  assetQaReport: unknown;
+}): SelectedStillManifest {
+  const selected = SelectedStillManifestSchema.parse(args.selected);
+  const report = AssetQaReportSchema.parse(args.assetQaReport);
+  if (selected.items.length !== args.shotIds.length || report.shotCount !== args.shotIds.length) {
+    throw new Error("novita_render_video keyframe QA count does not match the planned shot list");
+  }
+  if (report.selected.length !== selected.items.length) {
+    throw new Error("novita_render_video keyframe QA selection count does not match selected stills");
+  }
+
+  for (const [index, shotId] of args.shotIds.entries()) {
+    const still = selected.items[index];
+    const qa = report.selected[index];
+    if (!still || !qa || still.shotId !== shotId || qa.shotId !== shotId) {
+      throw new Error(`novita_render_video keyframe QA identity/order mismatch at ${index}`);
+    }
+    if (qa.candidateIndex !== still.candidateIndex || Math.abs(qa.score - still.score) > 0.000001) {
+      throw new Error(`novita_render_video keyframe QA selection mismatch for ${shotId}`);
+    }
+    if (qa.score + 0.000001 < qa.threshold) {
+      throw new Error(`novita_render_video keyframe QA score for ${shotId} does not meet its accepted QA threshold`);
+    }
+  }
+  return selected;
+}
+
 function requireVisualMatter(store: Readonly<Record<string, unknown>>): VisualMatterManifest {
   const manifest = visualMatterFromUnknown(store["visualMatterManifest"]);
   if (!manifest) throw new Error("cinematic render requires a valid Visual Matter manifest");
@@ -1000,13 +1035,17 @@ export const qaAssets: Block = {
 
 export const novitaRenderVideo: Block = {
   id: "novita_render_video",
-  consumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "visualMatterManifest"],
+  consumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "assetQaReport", "visualMatterManifest"],
   produces: ["shotRenderManifest"],
   paid: true,
   run: async (ctx) => {
     const { shots, specsByShot } = requireStoryInputs(ctx.store);
     const visualMatter = requireVisualMatter(ctx.store);
-    const selected = SelectedStillManifestSchema.parse(ctx.store["selectedStillManifest"]);
+    const selected = assertAcceptedKeyframeSelection({
+      shotIds: shots.map((shot) => shot.id),
+      selected: ctx.store["selectedStillManifest"],
+      assetQaReport: ctx.store["assetQaReport"],
+    });
     const profile = profileForShots(shots, ctx.params["generationProfile"] ?? selected.generation.profileId);
     if (selected.generation.profileId !== profile.id) throw new Error("selected still profile does not match video profile");
     if (selected.items.length !== shots.length || new Set(selected.items.map((item) => item.shotId)).size !== shots.length) {

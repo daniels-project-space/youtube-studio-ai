@@ -8,12 +8,18 @@ const timelineStart = source.indexOf("export const timelineAssemble: Block");
 const qaSource = source.slice(qaStart);
 const timelineSource = source.slice(timelineStart, qaStart);
 const binding = qaSource.indexOf("assertCinematicSequenceRenderBinding({");
+const profileGate = qaSource.indexOf("assertCinematicFinalMasterQaProfile(ctx.params[\"qaProfile\"])");
+const overviewVision = qaSource.indexOf("const video_ = await evaluateVisualFrames(");
 const reviewer = qaSource.indexOf("const visualReview = await reviewRender(");
 
 assert(qaStart >= 0, "qa_visual must remain the final production review block");
 assert(timelineStart >= 0, "timeline_assemble must remain the final-master assembly block");
 assert(binding >= 0, "qa_visual must re-assert exact cinematic scene/edit/render binding");
 assert(reviewer >= 0 && binding < reviewer, "cinematic clip receipts must be validated before final-master visual review");
+assert(
+  profileGate >= 0 && profileGate < overviewVision && profileGate < reviewer,
+  "a source-bound cinematic master must reject qaProfile=draft before overview or final-master review can spend without the required evidence receipt",
+);
 assert.match(
   source,
   /assertCinematicAssemblyRoute\([\s\S]*useAssemblyEdl:/,

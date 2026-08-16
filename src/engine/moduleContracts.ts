@@ -806,7 +806,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
   novita_render_video: contract(["visuals.shots_rendered", "render.profile_pinned", "render.spot_only"], {
-    requiredConsumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "visualMatterManifest"],
+    requiredConsumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "assetQaReport", "visualMatterManifest"],
     optionalConsumes: ["visualBrief"],
     providerProfiles: [{ id: "novita-ltx-production", provider: "novita", quality: "production", allowFallback: false }],
     maxCostUsd: 35,
@@ -876,13 +876,17 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     // contract system exists to catch.
     ["visuals.generated", "visuals.story_aligned", "master.assembled"],
     {
+      // `quizPlan` + `quizSafety` are the receipt-bound planner handoff. The
+      // renderer repeats the topic comparison before sourcing any fact, so a
+      // sequential pipeline position cannot masquerade as a safety boundary.
       // `quizCategories` lets a channel pin the mix (e.g. capitals + currencies
       // only); omitted, the block draws from every category. Declared here
       // because the contract test enforces that a module cannot read a store key
       // it never announced.
       // The certified family registry requires an upstream `music` entry and
       // the block rejects an invocation that is not explicitly noGemini.
-      optionalConsumes: ["musicKey", "channelName", "palette", "criticDoctrine", "styleGrammar", "contentLane", "quizTopic", "quizCategories"],
+      requiredConsumes: ["quizPlan", "quizSafety"],
+      optionalConsumes: ["musicKey", "channelName", "palette", "criticDoctrine", "styleGrammar", "contentLane", "quizTopic", "topic", "quizCategories"],
       providerProfiles: [local],
       maxCostUsd: 0,
       maxCostUsdFor: (params, context) => quizYearCostCeiling(params, context),

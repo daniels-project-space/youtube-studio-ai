@@ -85,6 +85,10 @@ import {
   type QuizCategoryKey,
   type QuizDecoyCandidate,
 } from "@/lib/quizFacts";
+import {
+  assertCertifiedQuizTopicPlan,
+  assertCertifiedQuizTopicSafety,
+} from "@/trigger/blocks/quizPlanningBlocks";
 import { renderQuizYear, type QuizYearRound } from "@/lib/quizYearRender";
 import { muxLoopedMusicBed } from "@/lib/ffmpeg";
 import type { TimedOnScreenTextCue } from "@/lib/onScreenTextProof";
@@ -679,7 +683,9 @@ async function authorRounds(args: {
 
 export const quizYear: Block = {
   id: "quiz_year",
-  consumes: [],
+  // A certified run receives the matching planner and safety receipt here;
+  // pipeline order alone is not a safety boundary.
+  consumes: ["quizPlan", "quizSafety"],
   produces: ["videoKey", "videoLocalPath", "videoDurationSec", "quizRounds", "onScreenTextCues"],
   paid: true,
   run: async (ctx) => {
@@ -702,10 +708,17 @@ export const quizYear: Block = {
     );
     const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
     const rounds = quizRoundCount(targetSeconds, countdown, reveal);
-    // A planner receipt wins over a legacy static renderer param. That keeps a
-    // pinned curated topic inside the provenance flow rather than allowing a
-    // raw renderer override to bypass it.
-    const topic = resolveTopic(ctx.store["quizTopic"] ?? ctx.params["topic"]);
+    // Re-check the exact planner → safety handoff immediately before sourcing
+    // facts. This keeps retries and rehydration from marrying an older receipt
+    // to a new renderer invocation.
+    const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"]);
+    assertCertifiedQuizTopicSafety(ctx.store["quizSafety"], plan);
+    const storedTopicKey = String(ctx.store["quizTopic"] ?? "").trim();
+    const storedTopic = String(ctx.store["topic"] ?? "").trim();
+    if (storedTopicKey !== plan.topicKey || storedTopic !== plan.topic) {
+      throw new Error("quiz: planner topic fields do not match the certified safety receipt");
+    }
+    const topic = plan.topicKey;
     const categories = resolveCertifiedNoGeminiCategories(
       ctx.params["categories"] ?? ctx.store["quizCategories"],
     );
