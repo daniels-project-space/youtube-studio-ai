@@ -16,6 +16,7 @@ import {
   S3Client,
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
+import { NodeHttpHandler } from "@smithy/node-http-handler";
 
 const LTX_MODEL = "Lightricks/LTX-2.5";
 const LTX_REVISION = "ce298b1259d61ce6c87e05154b9ad339b16f32a0";
@@ -198,6 +199,8 @@ const activeWorkers = new Set();
 const s3 = new S3Client({
   region: "auto",
   endpoint: process.env.R2_ENDPOINT,
+  requestHandler: new NodeHttpHandler({ connectionTimeout: 10_000, socketTimeout: 45_000 }),
+  maxAttempts: 1,
   credentials: {
     accessKeyId: process.env.R2_ACCESS_KEY_ID,
     secretAccessKey: process.env.R2_SECRET_ACCESS_KEY,
