@@ -498,11 +498,14 @@ async function assertArtifacts(manifest) {
 }
 
 async function main() {
+  console.error(JSON.stringify({ event: "benchmark_stage", stage: "verify_runtime_bundle" }));
   await ensureBundlePresent();
+  console.error(JSON.stringify({ event: "benchmark_stage", stage: "read_model_manifest" }));
   const ltxModels = JSON.parse((await objectBytes(ltxManifestKey)).toString("utf8"));
   if (!Array.isArray(ltxModels) || ltxModels.length !== 5 || !ltxModels.every((model) => model?.repository === LTX_MODEL && model?.revision === LTX_REVISION)) {
     throw new Error("admitted LTX model manifest is not the exact official LTX 2.5 file set");
   }
+  console.error(JSON.stringify({ event: "benchmark_stage", stage: "confirm_spot_budget" }));
   const productCatalog = await novita(`/products?productName=4090&billingMethod=spot&gpuNum=1&clusterId=${encodeURIComponent(CLUSTER_ID)}`);
   const products = Array.isArray(productCatalog.products)
     ? productCatalog.products
@@ -520,6 +523,7 @@ async function main() {
   const phaseMaxSeconds = Math.min(DEFAULT_PHASE_MAX_SECONDS, Math.floor(remainingSeconds / 2));
   if (phaseMaxSeconds < 1_800) throw new Error("the $3 aggregate cap cannot fund the minimum bounded LTX benchmark window at the current spot rate");
 
+  console.error(JSON.stringify({ event: "benchmark_stage", stage: "probe_zimage_volume" }));
   const zProbe = await probeZImageVolume();
   if (zProbe.contract !== "zimage-volume-probe/v1" || zProbe.sourcePath !== "models/z-image" || !/^[a-f0-9]{64}$/.test(zProbe.manifestSha256 || "")) {
     throw new Error("Z-Image volume did not provide a valid provenance receipt");
@@ -530,6 +534,7 @@ async function main() {
   }];
   const imageJobs = testScenes.map((scene, index) => ({ id: scene.id, prompt: scene.still, seed: 903_000 + index * 31, width: 1280, height: 736, steps: 9, guidanceScale: 0 }));
   const image = await buildPhaseManifest({ phase: "image", profile: imageProfile(), models: zModels, jobs: imageJobs, maxRuntimeSeconds: phaseMaxSeconds });
+  console.error(JSON.stringify({ event: "benchmark_stage", stage: "render_reference_images" }));
   await executePhase({ phase: "image", ...image, maxRuntimeSeconds: phaseMaxSeconds });
   await assertArtifacts(image.manifest);
 
@@ -541,6 +546,7 @@ async function main() {
     input: { getUrl: await signedGet(imageJob.artifact.key), sha256: await outputSha256(imageJob.artifact.key) },
   })));
   const video = await buildPhaseManifest({ phase: "video", profile: videoProfile(), models: ltxModels, jobs: videoJobs, maxRuntimeSeconds: phaseMaxSeconds });
+  console.error(JSON.stringify({ event: "benchmark_stage", stage: "render_ltx25_videos" }));
   const completion = await executePhase({ phase: "video", ...video, maxRuntimeSeconds: phaseMaxSeconds });
   await assertArtifacts(video.manifest);
   const videoOutputs = completion.videoOutputs || {};
