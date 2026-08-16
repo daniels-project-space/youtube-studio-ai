@@ -26,7 +26,7 @@ ENV DEBIAN_FRONTEND=noninteractive \
     UV_PYTHON_INSTALL_DIR=/opt/uv/python
 
 RUN apt-get update \
-    && apt-get install -y --no-install-recommends ca-certificates ffmpeg git libgl1 libglib2.0-0 \
+    && apt-get install -y --no-install-recommends build-essential ca-certificates ffmpeg git libgl1 libglib2.0-0 \
     && rm -rf /var/lib/apt/lists/* \
     && python -m pip install --no-cache-dir uv==0.10.6
 

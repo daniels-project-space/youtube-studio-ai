@@ -20,6 +20,7 @@ import {
   assertRtx4090VideoRuntime,
   automaticRtx4090Concurrency,
   budgetBoundedWorkerLifetime,
+  runtimeBootstrapSource,
 } from "@/lib/novitaDirectRender";
 import { generationProfile } from "@/engine/generationProfiles";
 import { toNovitaPhaseProfile } from "@/lib/novitaRenderFarm";
@@ -163,6 +164,19 @@ async function main() {
     () => assertRtx4090VideoRuntime(toNovitaPhaseProfile(generationProfile("production"), "video")),
     /ltx_2_5_revision_not_benchmarked_on_rtx_4090/,
   );
+
+  const publicLtxBootstrap = runtimeBootstrapSource("a".repeat(64));
+  assert.match(publicLtxBootstrap, /\.torch-cu128-2\.8\.0/);
+  assert.match(publicLtxBootstrap, /torch==2\.8\.0/);
+  assert.match(publicLtxBootstrap, /torchvision==0\.23\.0/);
+  assert.match(publicLtxBootstrap, /torchaudio==2\.8\.0/);
+  assert.match(publicLtxBootstrap, /download\.pytorch\.org\/whl\/cu128/);
+  assert.doesNotMatch(publicLtxBootstrap, /cu118|torch==2\.7\.1/);
+  assert.match(publicLtxBootstrap, /ensure_triton_toolchain\(\)/);
+  assert.match(publicLtxBootstrap, /build-essential/);
+  assert.match(publicLtxBootstrap, /compiler_ready\(cc\)[\s\S]*compiler_ready\(cxx\)/);
+  assert.match(publicLtxBootstrap, /packages\/ltx-core\/src/);
+  assert.match(publicLtxBootstrap, /packages\/ltx-pipelines\/src/);
 
   assert.throws(
     () => planNovitaCapacityWaves({

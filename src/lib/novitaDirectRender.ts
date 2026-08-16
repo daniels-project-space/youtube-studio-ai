@@ -621,11 +621,16 @@ async function readJsonIfPresent(key: string): Promise<Record<string, unknown> |
  * a tiny Python URL loader; this source is a SHA-bound R2 object fetched by
  * that loader and verifies/extracts only the sealed gzip runtime bundle.
  */
-function runtimeBootstrapSource(runtimeSha256: string): string {
+/**
+ * Content-addressed bootstrap used by every public-base LTX worker.  Keep the
+ * compatibility receipt deliberately inside the sealed runtime root: a
+ * worker may only reuse it after re-proving the exact CUDA/Torch runtime.
+ */
+export function runtimeBootstrapSource(runtimeSha256: string): string {
   return String.raw`import fcntl,hashlib,os,pathlib,shutil,tarfile,tempfile,urllib.request
 sha=${JSON.stringify(runtimeSha256)}
 root=pathlib.Path('/network/runtime/ltx-2.5-'+sha)
-compatibility=root/'.torch-cu118-2.7.1'
+compatibility=root/'.torch-cu128-2.8.0'
 def torch_cuda_ready():
   python=root/'opt/LTX-2/.venv/bin/python'
   if not python.is_file(): return False
@@ -633,11 +638,11 @@ def torch_cuda_ready():
   try:
     evidence=subprocess.check_output([str(python),'-c',"import torch,torch.sparse;print(torch.__version__+'|'+str(torch.version.cuda)+'|'+str(torch.cuda.is_available()))"],text=True,stderr=subprocess.DEVNULL,timeout=45).strip()
   except (OSError,subprocess.SubprocessError): return False
-  return evidence=='2.7.1+cu118|11.8|True'
+  return evidence=='2.8.0+cu128|12.8|True'
 def compatibility_ready():
   # A historical bootstrap wrote a literal backslash-n. It was written only
   # after the CUDA probe below succeeded, so normalize that valid receipt.
-  return compatibility.is_file() and compatibility.read_text().strip().replace(chr(92)+'n','')=='torch==2.7.1+cu118' and torch_cuda_ready()
+  return compatibility.is_file() and compatibility.read_text().strip().replace(chr(92)+'n','')=='torch==2.8.0+cu128' and torch_cuda_ready()
 def repair_python_paths(runtime_root):
   original='/opt/LTX-2'
   relocated=str(runtime_root/'opt/LTX-2')
@@ -652,14 +657,45 @@ def ensure_cuda_compatibility():
   if not python.is_file(): raise RuntimeError('portable Python is missing before CUDA compatibility install')
   import subprocess,sys
   subprocess.run([sys.executable,'-m','pip','install','--no-cache-dir','uv==0.10.6'],check=True,stdout=subprocess.DEVNULL)
-  subprocess.run(['uv','pip','install','--python',str(python),'--reinstall','torch==2.7.1','torchvision==0.22.1','torchaudio==2.7.1','--index-url','https://download.pytorch.org/whl/cu118'],check=True,stdout=subprocess.DEVNULL)
+  subprocess.run(['uv','pip','install','--python',str(python),'--reinstall','torch==2.8.0','torchvision==0.23.0','torchaudio==2.8.0','--index-url','https://download.pytorch.org/whl/cu128'],check=True,stdout=subprocess.DEVNULL)
   evidence=subprocess.check_output([str(python),'-c',"import torch,torch.sparse;print(torch.__version__+'|'+str(torch.version.cuda)+'|'+str(torch.cuda.is_available()))"],text=True).strip()
-  if evidence!='2.7.1+cu118|11.8|True': raise RuntimeError('CUDA-compatible Torch verification failed: '+evidence)
-  compatibility.write_text('torch==2.7.1+cu118'+chr(10))
+  if evidence!='2.8.0+cu128|12.8|True': raise RuntimeError('CUDA-compatible Torch verification failed: '+evidence)
+  compatibility.write_text('torch==2.8.0+cu128'+chr(10))
+def compiler_ready(command):
+  if not command: return False
+  import subprocess
+  try:
+    subprocess.run([command,'--version'],check=True,stdout=subprocess.DEVNULL,stderr=subprocess.DEVNULL,timeout=15)
+    return True
+  except (OSError,subprocess.SubprocessError): return False
+def ensure_triton_toolchain():
+  # Torch 2.8 may JIT Triton kernels on the first LTX inference. The public
+  # PyTorch runtime image intentionally omits build tools, so install and
+  # validate the minimal Debian toolchain before the worker touches the model.
+  cc=shutil.which('gcc')
+  cxx=shutil.which('g++')
+  if not compiler_ready(cc) or not compiler_ready(cxx):
+    import subprocess
+    if os.geteuid()!=0: raise RuntimeError('Triton requires gcc/g++ but worker cannot install the verified toolchain')
+    environment=dict(os.environ,DEBIAN_FRONTEND='noninteractive')
+    subprocess.run(['apt-get','update','-qq'],check=True,env=environment,stdout=subprocess.DEVNULL)
+    subprocess.run(['apt-get','install','-y','--no-install-recommends','build-essential'],check=True,env=environment,stdout=subprocess.DEVNULL)
+    cc=shutil.which('gcc')
+    cxx=shutil.which('g++')
+  if not compiler_ready(cc) or not compiler_ready(cxx): raise RuntimeError('Triton compiler toolchain is unavailable after verified install')
+  os.environ['CC']=cc
+  os.environ['CXX']=cxx
 def exec_worker():
+  ensure_triton_toolchain()
   project=str(root/'opt/LTX-2')
+  package_paths=[
+    project,
+    str(root/'opt/LTX-2/packages/ltx-core/src'),
+    str(root/'opt/LTX-2/packages/ltx-pipelines/src'),
+  ]
+  if not all(pathlib.Path(item).is_dir() for item in package_paths): raise RuntimeError('official LTX runtime package sources are incomplete')
   previous=os.environ.get('PYTHONPATH','')
-  os.environ['PYTHONPATH']=project if not previous else project+os.pathsep+previous
+  os.environ['PYTHONPATH']=os.pathsep.join(package_paths+([previous] if previous else []))
   python=str(root/'opt/LTX-2/.venv/bin/python')
   os.execv(python,[python,str(root/'opt/novita-worker/worker.py')])
 if runtime_ready():
