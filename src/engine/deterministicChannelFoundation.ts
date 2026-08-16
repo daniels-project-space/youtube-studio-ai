@@ -9,16 +9,21 @@ import { canonicalJson } from "@/lib/canonicalJson";
  * the caller must durably persist every returned immutable object and prove the
  * zero-cost, draft-only boundary with `verifyDeterministicFoundationPersistence`.
  *
- * The first profile is QuizYear.  The builder itself is profile driven so a
- * future registered non-Gemini family adds a profile and source policy rather
- * than a new one-off creator flow.
+ * Profiles stay explicit about whether a starter slate makes factual claims.
+ * Source-required formats retain their citations; fictional thought-experiment
+ * formats instead record that they make no external claims at all.  Both use
+ * local artwork and the same immutable, draft-only persistence proof.
  */
 export const DETERMINISTIC_CHANNEL_FOUNDATION_VERSION = "deterministic-channel-foundation/v1" as const;
 
-type LocalBrandRenderer = "quiz-tile";
+type LocalBrandRenderer = "quiz-tile" | "scenario-board";
+
+export type FoundationClaimMode = "source_required" | "fictional_no_external_claims";
 
 export interface FoundationSourcePolicy {
   readonly id: string;
+  /** Prevent a fictional format from carrying invented source citations. */
+  readonly claimMode: FoundationClaimMode;
   readonly requiredLicense: string;
   readonly allowedHosts: readonly string[];
   readonly minimumSourcesPerStarter: number;
@@ -51,6 +56,7 @@ export const QUIZYEAR_DETERMINISTIC_FOUNDATION_PROFILE: DeterministicFoundationP
   family: "quizyear",
   sourcePolicy: Object.freeze({
     id: "wikidata-cc0-starter-slate-v1",
+    claimMode: "source_required",
     requiredLicense: "CC0-1.0",
     allowedHosts: Object.freeze(["www.wikidata.org"]),
     minimumSourcesPerStarter: 1,
@@ -64,6 +70,34 @@ export const QUIZYEAR_DETERMINISTIC_FOUNDATION_PROFILE: DeterministicFoundationP
     bannedWords: Object.freeze(["shocking", "secret", "you won't believe"]),
   }),
   brandRenderer: "quiz-tile",
+  minimumStarterEntries: 3,
+});
+
+/**
+ * Local-only channel foundation for assumption-led stories. This intentionally
+ * has no sources: its starter prompts are fictional formats, not factual
+ * claims, simulations, research results, or forecasts.
+ */
+export const ILLUSTRATED_EXPLAINER_DETERMINISTIC_FOUNDATION_PROFILE: DeterministicFoundationProfile = Object.freeze({
+  id: "illustrated-fictional-scenario-foundation",
+  revision: "1",
+  family: "illustrated_explainer",
+  sourcePolicy: Object.freeze({
+    id: "fictional-assumptions-no-external-claims-v1",
+    claimMode: "fictional_no_external_claims",
+    requiredLicense: "not-applicable",
+    allowedHosts: Object.freeze([]),
+    minimumSourcesPerStarter: 0,
+  }),
+  positioning: Object.freeze({
+    audience: "viewers who enjoy clear, visual thought experiments about systems and choices",
+    promise: "original illustrated AI stories that state their assumptions instead of pretending to be real simulations",
+    persona: "A precise visual storyteller who makes complex choices easy to follow.",
+    styleGrammar: "clean navy scenario board, cyan data paths, coral decision signals, high-contrast local typography",
+    palette: ["#071525", "#65D9FF", "#FF756B"] as const,
+    bannedWords: Object.freeze(["proven", "predicted", "real simulation", "actual result", "you won't believe"]),
+  }),
+  brandRenderer: "scenario-board",
   minimumStarterEntries: 3,
 });
 
@@ -288,6 +322,39 @@ function renderQuizTileBanner(
   ].join("");
 }
 
+function renderScenarioBoardAvatar(palette: readonly [string, string, string]): string {
+  const [ink, cyan, coral] = palette;
+  return [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="1024" height="1024" viewBox="0 0 1024 1024" role="img" aria-label="fictional AI scenario board">',
+    `<rect width="1024" height="1024" fill="${ink}"/>`,
+    `<circle cx="512" cy="512" r="432" fill="${cyan}" opacity=".14"/>`,
+    `<rect x="164" y="164" width="696" height="696" rx="112" fill="${ink}" stroke="${cyan}" stroke-width="28"/>`,
+    `<path d="M292 410h220v-104l220 206-220 206V614H292z" fill="${cyan}"/>`,
+    `<circle cx="741" cy="512" r="54" fill="${coral}"/>`,
+    `<circle cx="314" cy="512" r="30" fill="${coral}"/>`,
+    '</svg>',
+  ].join("");
+}
+
+function renderScenarioBoardBanner(
+  channelName: string,
+  palette: readonly [string, string, string],
+): string {
+  const [ink, cyan, coral] = palette;
+  const fontSize = channelName.length > 28 ? 84 : 112;
+  return [
+    '<svg xmlns="http://www.w3.org/2000/svg" width="2560" height="1440" viewBox="0 0 2560 1440" role="img" aria-label="fictional AI scenario channel banner">',
+    `<rect width="2560" height="1440" fill="${ink}"/>`,
+    `<path d="M0 1030 430 620l390 240 440-430 350 270 500-430 450 330v840H0z" fill="${cyan}" opacity=".13"/>`,
+    `<rect x="430" y="440" width="1700" height="560" rx="88" fill="${ink}" stroke="${cyan}" stroke-width="12"/>`,
+    `<path d="M630 680h250V550l250 170-250 170V760H630z" fill="${cyan}"/>`,
+    `<circle cx="1140" cy="720" r="64" fill="${coral}"/>`,
+    `<text x="1260" y="704" fill="#FFFFFF" font-family="Arial, Helvetica, sans-serif" font-size="${fontSize}" font-weight="800">${xml(channelName)}</text>`,
+    `<text x="1265" y="800" fill="${cyan}" font-family="Arial, Helvetica, sans-serif" font-size="34" font-weight="700" letter-spacing="3">FICTIONAL AI STORIES • CLEAR ASSUMPTIONS</text>`,
+    '</svg>',
+  ].join("");
+}
+
 function structuralBrandQa(slot: "avatar" | "banner", svg: string, channelName: string): readonly string[] {
   if (!svg.startsWith('<svg xmlns="http://www.w3.org/2000/svg"')) fail(`${slot} SVG namespace is missing`);
   if (/<(?:image|script|foreignObject)\b/i.test(svg) || /\bhref\s*=/i.test(svg)) {
@@ -335,11 +402,28 @@ function normalizeProfile(
   const revision = id(profile.revision, "profile.revision");
   const sourcePolicyId = id(profile.sourcePolicy.id, "profile.sourcePolicy.id");
   const requiredLicense = text(profile.sourcePolicy.requiredLicense, "profile.sourcePolicy.requiredLicense", 120);
-  if (!Number.isInteger(profile.sourcePolicy.minimumSourcesPerStarter) || profile.sourcePolicy.minimumSourcesPerStarter < 1) {
-    fail("profile.sourcePolicy.minimumSourcesPerStarter must be a positive integer");
+  const claimMode = profile.sourcePolicy.claimMode;
+  if (claimMode !== "source_required" && claimMode !== "fictional_no_external_claims") {
+    fail("profile.sourcePolicy.claimMode is unsupported");
   }
-  if (!profile.sourcePolicy.allowedHosts.length || profile.sourcePolicy.allowedHosts.some((host) => !/^[a-z0-9.-]+$/i.test(host))) {
+  const minimumSourcesPerStarter = profile.sourcePolicy.minimumSourcesPerStarter;
+  if (!Number.isInteger(minimumSourcesPerStarter) || minimumSourcesPerStarter < 0) {
+    fail("profile.sourcePolicy.minimumSourcesPerStarter must be a non-negative integer");
+  }
+  if (claimMode === "source_required" && minimumSourcesPerStarter < 1) {
+    fail("source-required profiles need at least one source per starter");
+  }
+  if (claimMode === "fictional_no_external_claims" && minimumSourcesPerStarter !== 0) {
+    fail("fictional profiles cannot require external sources");
+  }
+  if (profile.sourcePolicy.allowedHosts.some((host) => !/^[a-z0-9.-]+$/i.test(host))) {
     fail("profile.sourcePolicy.allowedHosts must contain valid hosts");
+  }
+  if (claimMode === "source_required" && !profile.sourcePolicy.allowedHosts.length) {
+    fail("source-required profiles need at least one allowed host");
+  }
+  if (claimMode === "fictional_no_external_claims" && profile.sourcePolicy.allowedHosts.length) {
+    fail("fictional profiles must not declare external source hosts");
   }
   const allowedHosts = [...new Set(profile.sourcePolicy.allowedHosts.map((host) => host.toLowerCase()))].sort();
   const palette = [...profile.positioning.palette] as [string, string, string];
@@ -358,9 +442,10 @@ function normalizeProfile(
     family,
     sourcePolicy: Object.freeze({
       id: sourcePolicyId,
+      claimMode,
       requiredLicense,
       allowedHosts: Object.freeze(allowedHosts),
-      minimumSourcesPerStarter: profile.sourcePolicy.minimumSourcesPerStarter,
+      minimumSourcesPerStarter,
     }),
     positioning: Object.freeze({
       audience: text(profile.positioning.audience, "profile.positioning.audience"),
@@ -380,6 +465,9 @@ function validateSourceFirstSlate(input: DeterministicChannelFoundationInput): {
   entries: readonly SourceFirstStarterEntry[];
 } {
   const { sourcePolicy } = input.profile;
+  if (sourcePolicy.claimMode === "fictional_no_external_claims" && input.sources.length) {
+    fail("fictional starter slate must not carry external source citations");
+  }
   const sourceIds = new Set<string>();
   const sources = input.sources.map((source) => {
     const sourceId = id(source.id, "source.id");
@@ -403,7 +491,9 @@ function validateSourceFirstSlate(input: DeterministicChannelFoundationInput): {
       claim: text(source.claim, `source ${sourceId}.claim`),
     });
   }).sort((a, b) => a.id.localeCompare(b.id));
-  if (!sources.length) fail("at least one cited source is required");
+  if (sourcePolicy.claimMode === "source_required" && !sources.length) {
+    fail("at least one cited source is required");
+  }
 
   const entryIds = new Set<string>();
   const ordinals = new Set<number>();
@@ -504,17 +594,23 @@ export function buildDeterministicChannelFoundation(
     starterSlateFingerprint,
   }));
   const root = `${prefix}/deterministic-foundations/${DETERMINISTIC_CHANNEL_FOUNDATION_VERSION}/${foundationFingerprint}`;
-  if (profile.brandRenderer !== "quiz-tile") fail(`unsupported local brand renderer ${profile.brandRenderer}`);
+  if (profile.brandRenderer !== "quiz-tile" && profile.brandRenderer !== "scenario-board") {
+    fail(`unsupported local brand renderer ${profile.brandRenderer}`);
+  }
   const avatar = asset(
     "avatar",
     `${root}/brand/avatar.svg`,
-    renderQuizTileAvatar(profile.positioning.palette),
+    profile.brandRenderer === "quiz-tile"
+      ? renderQuizTileAvatar(profile.positioning.palette)
+      : renderScenarioBoardAvatar(profile.positioning.palette),
     channelName,
   );
   const banner = asset(
     "banner",
     `${root}/brand/banner.svg`,
-    renderQuizTileBanner(channelName, profile.positioning.palette),
+    profile.brandRenderer === "quiz-tile"
+      ? renderQuizTileBanner(channelName, profile.positioning.palette)
+      : renderScenarioBoardBanner(channelName, profile.positioning.palette),
     channelName,
   );
   const manifestBytes = bytes(canonicalJson({

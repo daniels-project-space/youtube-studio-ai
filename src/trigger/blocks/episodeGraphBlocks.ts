@@ -15,6 +15,11 @@ import {
   type EpisodeSource,
   type SceneManifest,
 } from "@/engine/episodeGraph";
+import {
+  assertSyntheticScenarioContract,
+  syntheticScenarioVisualKindFor,
+  type SyntheticScenarioContract,
+} from "@/engine/syntheticScenario";
 import { StorySpineSchema, type StorySpine } from "@/engine/storySpine";
 import type { Block } from "@/engine/types";
 
@@ -87,6 +92,7 @@ export function buildEpisodeGraphFromStorySpine(args: {
   episodeId: string;
   curriculumLabel?: string;
   curriculumLocator?: string;
+  syntheticScenario?: SyntheticScenarioContract;
 }): { episodeGraph: EpisodeGraph; sceneManifest: SceneManifest } {
   const storySpine = StorySpineSchema.parse(args.storySpine);
   const audience = args.audience ?? "general";
@@ -123,6 +129,9 @@ export function buildEpisodeGraphFromStorySpine(args: {
     continuityLock: location.look,
   }));
 
+  const syntheticScenario = args.syntheticScenario
+    ? assertSyntheticScenarioContract(args.syntheticScenario)
+    : undefined;
   const beats = storySpine.narrativeBeats.map((beat, index) => {
     const shots = shotsByBeat.get(beat.id) ?? [];
     const leadShot = shots[0];
@@ -153,6 +162,17 @@ export function buildEpisodeGraphFromStorySpine(args: {
         action: leadShot?.literalContent || beat.purpose,
         mood: leadShot?.lighting,
         props: [...new Set(shots.flatMap((shot) => shot.props))].slice(0, 12),
+        ...(syntheticScenario
+          ? {
+              syntheticScenarioProfile: syntheticScenario.profile,
+              syntheticScenarioVisualKind: syntheticScenarioVisualKindFor(
+                syntheticScenario.profile,
+                index,
+                storySpine.narrativeBeats.length,
+                beat.purpose,
+              ),
+            }
+          : {}),
       },
       transition: index === 0 ? "cut" as const : "match_cut" as const,
       storySpineBeatIds: [beat.id],
@@ -209,6 +229,9 @@ const episodeGraph: Block = {
       episodeId: `episode-${stableFragment(ctx.runId, "run")}`,
       curriculumLabel: typeof ctx.params["curriculumLabel"] === "string" ? ctx.params["curriculumLabel"] : undefined,
       curriculumLocator: typeof ctx.params["curriculumLocator"] === "string" ? ctx.params["curriculumLocator"] : undefined,
+      syntheticScenario: ctx.store["syntheticScenario"] !== undefined
+        ? assertSyntheticScenarioContract(ctx.store["syntheticScenario"])
+        : undefined,
     });
     ctx.log(
       `episode_graph: ${episodeGraph.beats.length} source-grounded beats → ${sceneManifest.scenes.length} deterministic scenes (provider calls: 0)`,

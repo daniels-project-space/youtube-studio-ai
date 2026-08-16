@@ -7,8 +7,9 @@ import { writeFile } from "node:fs/promises";
 import { join } from "node:path";
 
 import { assertSceneManifest, type SceneManifest } from "@/engine/episodeGraph";
+import { assertSyntheticScenarioContract } from "@/engine/syntheticScenario";
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
-import { composeWithIntro, probe } from "@/lib/ffmpeg";
+import { composeWithIntro, probe, thumbnailText } from "@/lib/ffmpeg";
 import { downloadTo, makeRunTempDir } from "@/lib/files";
 import { renderSceneManifest } from "@/lib/sceneCompilerRender";
 import { getObjectBytes, putObjectFromFile } from "@/lib/storage";
@@ -26,13 +27,14 @@ async function recordAsset(
   ctx: StageContext,
   r2Key: string,
   meta: Record<string, unknown>,
+  kind = "video",
 ): Promise<void> {
   try {
     await convex().mutation(api.assets.recordAsset, {
       ownerId: ctx.ownerId,
       channelId: ctx.channelId as Id<"channels">,
       runId: ctx.runId as Id<"runs">,
-      kind: "video",
+      kind,
       r2Key,
       meta,
     });
@@ -173,4 +175,52 @@ const sceneCompiler: Block = {
   },
 };
 
-export const sceneCompilerBlocks: Block[] = [sceneCompiler];
+/**
+ * Renderer-native thumbnail for the local scene compiler. It uses the rendered
+ * master as its real scene base and FFmpeg typography—no image-generation
+ * provider, no Nano Banana, and no title-card placeholder.
+ */
+const sceneCompilerThumbnail: Block = {
+  id: "scene_compiler_thumbnail",
+  consumes: ["videoLocalPath", "title"],
+  produces: ["thumbnailKey", "strategy", "thumbnailPublishable"],
+  run: async (ctx) => {
+    const videoLocalPath = requiredString(ctx.store["videoLocalPath"], "videoLocalPath");
+    const title = requiredString(ctx.store["title"], "title");
+    const scenario = ctx.store["syntheticScenario"] !== undefined
+      ? assertSyntheticScenarioContract(ctx.store["syntheticScenario"])
+      : undefined;
+    const runDir = await makeRunTempDir(ctx.runId, "scene-compiler-thumbnail");
+    const outPath = join(runDir, "thumbnail.jpg");
+    await thumbnailText({
+      basePath: videoLocalPath,
+      outJpg: outPath,
+      title,
+      subtitle: scenario ? "FICTIONAL AI SCENARIO" : "ILLUSTRATED EXPLAINER",
+      footerLabel: scenario ? "ILLUSTRATIVE ASSUMPTIONS" : "ORIGINAL VISUAL STORY",
+      badgePlacement: "topRight",
+      accentColor: "65D9FF",
+      baseColor: "081526",
+      treatment: "clean",
+    });
+    const thumbnailKey = `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/scene-compiler/thumbnail.jpg`;
+    await putObjectFromFile(thumbnailKey, outPath, { contentType: "image/jpeg" });
+    await recordAsset(ctx, thumbnailKey, {
+      engine: "scene_compiler_thumbnail",
+      strategy: "scene_compiler_renderer_native_still",
+      publishable: true,
+      source: "local scene compiler master + FFmpeg typography",
+      title,
+      ...(scenario ? { fictionalScenarioProfile: scenario.profile } : {}),
+    }, "thumbnail");
+    ctx.log(`scene_compiler_thumbnail: local renderer-native thumbnail → ${thumbnailKey}`);
+    return {
+      thumbnailKey,
+      strategy: "scene_compiler_renderer_native_still",
+      thumbnailPublishable: true,
+      [COST_PATCH_KEY]: 0,
+    };
+  },
+};
+
+export const sceneCompilerBlocks: Block[] = [sceneCompiler, sceneCompilerThumbnail];

@@ -280,6 +280,47 @@ const VISUAL_MATTER_MODULE: ModuleCard = {
   },
 };
 
+const SYNTHETIC_SCENARIO_MODULE: ModuleCard = {
+  key: "synthetic_scenario",
+  title: "Fictional AI Scenario",
+  stage: "story safety",
+  does: "Locks an explicit fictional AI town, decision, or POV contract before writing. It never represents a real simulation, prediction, or model result.",
+  customization: {
+    capabilities: [
+      "explicit town / decision / POV profile",
+      "opening disclosure requirement",
+      "assumption-led writing directive",
+      "local scenario-board visual grammar",
+    ],
+    knobs: [],
+    presets: {},
+  },
+};
+
+const SCENARIO_DISCLOSURE_GATE_MODULE: ModuleCard = {
+  key: "scenario_disclosure_gate",
+  title: "Scenario Disclosure Gate",
+  stage: "story safety",
+  does: "Rejects a script unless its opening plainly identifies the story as a fictional AI scenario with illustrative assumptions.",
+  customization: {
+    capabilities: ["opening-disclosure verification", "assumption-language verification", "hard fail before narration"],
+    knobs: [],
+    presets: {},
+  },
+};
+
+const SCENE_COMPILER_THUMBNAIL_MODULE: ModuleCard = {
+  key: "scene_compiler_thumbnail",
+  title: "Renderer-native Thumbnail",
+  stage: "thumbnail",
+  does: "Extracts the local Scene Compiler master and adds local FFmpeg typography, without an image-generation provider.",
+  customization: {
+    capabilities: ["master-frame extraction", "local FFmpeg typography", "fictional-scenario disclosure label when applicable"],
+    knobs: [],
+    presets: {},
+  },
+};
+
 /** Core pipeline surfaces — registered into MODULE_REGISTRY. */
 export const CORE_MODULE_SURFACES: ModuleCard[] = [
   TOPIC_MODULE,
@@ -297,5 +338,8 @@ export const CORE_MODULE_SURFACES: ModuleCard[] = [
   UPSCALE_MODULE,
   LOOP_ASSEMBLE_MODULE,
   VISUAL_MATTER_MODULE,
+  SYNTHETIC_SCENARIO_MODULE,
+  SCENARIO_DISCLOSURE_GATE_MODULE,
+  SCENE_COMPILER_THUMBNAIL_MODULE,
   UPLOAD_MODULE,
 ];

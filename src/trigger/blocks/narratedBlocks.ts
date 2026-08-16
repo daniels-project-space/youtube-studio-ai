@@ -29,6 +29,10 @@ import {
   hasSourceAttributedDataStoryParams,
 } from "@/engine/dataStory";
 import {
+  assertSyntheticScenarioContract,
+  syntheticScenarioWritingDirective,
+} from "@/engine/syntheticScenario";
+import {
   assertDataStorySourceLedger,
   dataStorySourceLedgerPrompt,
 } from "@/engine/dataStorySourceLedger";
@@ -337,6 +341,9 @@ export const scriptGen: Block = {
         : undefined,
       ctx.store["casefileSourcePacket"] !== undefined
         ? casefileNarrativeGroundingPrompt(ctx.store["casefileSourcePacket"])
+        : undefined,
+      ctx.store["syntheticScenario"] !== undefined
+        ? syntheticScenarioWritingDirective(assertSyntheticScenarioContract(ctx.store["syntheticScenario"]))
         : undefined,
     ].filter((value): value is string => Boolean(value)).join("\n\n") || undefined;
     // RENDER-GROUP REUSE: a language sibling translates the base script instead of

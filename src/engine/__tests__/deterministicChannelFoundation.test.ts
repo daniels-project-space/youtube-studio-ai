@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 
 import {
+  ILLUSTRATED_EXPLAINER_DETERMINISTIC_FOUNDATION_PROFILE,
   QUIZYEAR_DETERMINISTIC_FOUNDATION_PROFILE,
   buildDeterministicChannelFoundation,
   verifyDeterministicFoundationPersistence,
@@ -125,6 +126,52 @@ assert.throws(
     sources: [{ ...input.sources[0], sourceUrl: "https://example.invalid/source" }, ...input.sources.slice(1)],
   }),
   /not allowed/,
+);
+
+const fictionalInput = {
+  profile: ILLUSTRATED_EXPLAINER_DETERMINISTIC_FOUNDATION_PROFILE,
+  family: "illustrated_explainer" as const,
+  channelName: "The Scenario Desk",
+  storagePrefix: "channels/owner_test/scenario-desk",
+  sources: [],
+  starterSlate: [
+    {
+      id: "fictional-town",
+      ordinal: 1,
+      title: "AI Runs a Fictional Town",
+      premise: "An assumptions-led story, not a real simulation.",
+      keywords: ["fictional ai town"],
+      sourceIds: [],
+    },
+    {
+      id: "fictional-decision",
+      ordinal: 2,
+      title: "What Would AI Do?",
+      premise: "An illustrative decision board, not a model result.",
+      keywords: ["fictional ai decision"],
+      sourceIds: [],
+    },
+    {
+      id: "fictional-pov",
+      ordinal: 3,
+      title: "AI POV Story",
+      premise: "A fictional first-person story with visible assumptions.",
+      keywords: ["fictional ai pov"],
+      sourceIds: [],
+    },
+  ],
+};
+const fictionalFoundation = buildDeterministicChannelFoundation(fictionalInput);
+assert.equal(fictionalFoundation.family, "illustrated_explainer");
+assert.equal(fictionalFoundation.starterSlate.sourcePolicy.claimMode, "fictional_no_external_claims");
+assert.deepEqual(fictionalFoundation.starterSlate.sources, []);
+assert.match(new TextDecoder().decode(fictionalFoundation.brandAssets[1].bytes), /FICTIONAL AI STORIES/);
+assert.throws(
+  () => buildDeterministicChannelFoundation({
+    ...fictionalInput,
+    sources: [input.sources[0]],
+  }),
+  /must not carry external source citations/,
 );
 
 console.log("Deterministic channel foundation tests passed");

@@ -35,6 +35,23 @@ if (narrated.mode === "registered_non_gemini") {
   assert.match(narrated.provenance, /sealed thumbnail-only Gemini exception/);
 }
 
+const illustrated = familyChannelInceptionCapability("illustrated_explainer");
+assert.equal(illustrated.mode, "registered_non_gemini");
+if (illustrated.mode === "registered_non_gemini") {
+  assert.deepEqual(
+    illustrated.coveredStages,
+    [
+      "deterministic-positioning",
+      "local-avatar-and-banner",
+      "fictional-no-external-claims-starter-slate",
+      "immutable-artifact-persistence",
+      "draft-only-publication-state",
+    ],
+  );
+  assert.match(illustrated.provenance, /local SVG scenario-board/);
+  assert.doesNotMatch(illustrated.provenance, /Gemini|Google|Nano Banana/i);
+}
+
 const unregisteredFutureFamily = familyChannelInceptionCapability("cinematic");
 assert.equal(
   unregisteredFutureFamily.mode,

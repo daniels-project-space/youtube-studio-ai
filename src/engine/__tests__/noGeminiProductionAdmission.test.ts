@@ -45,7 +45,19 @@ assert.equal(
 assert.deepEqual(narratedReadiness.blockers, []);
 assert.equal(familyChannelInceptionCapability("narrated_stock").mode, "registered_non_gemini");
 
-for (const family of FAMILY_KEYS.filter((candidate) => candidate !== "quizyear" && candidate !== "narrated_stock")) {
+const illustratedReadiness = familyProductionReadiness("illustrated_explainer");
+assert.equal(
+  illustratedReadiness.productionReady,
+  true,
+  "Illustrated Explainer is admitted only after its local deterministic foundation and renderer-native thumbnail route are wired",
+);
+assert.deepEqual(illustratedReadiness.blockers, []);
+assert.equal(familyChannelInceptionCapability("illustrated_explainer").mode, "registered_non_gemini");
+assert.equal(FAMILIES.illustrated_explainer.defaultThumbnailStyle, "renderer_native");
+
+for (const family of FAMILY_KEYS.filter(
+  (candidate) => candidate !== "quizyear" && candidate !== "narrated_stock" && candidate !== "illustrated_explainer",
+)) {
   const readiness = familyProductionReadiness(family);
   assert.equal(
     readiness.productionReady,
@@ -75,6 +87,11 @@ assert.equal(
   "narrated_stock",
   "the admitted reusable narrated route remains selectable only when it was requested",
 );
+assert.equal(
+  productionReadyFamilyFallback("illustrated_explainer"),
+  "illustrated_explainer",
+  "the local illustrated creator remains selectable only when Illustrated Explainer was requested",
+);
 
 const inceptionSource = readFileSync(new URL("../../trigger/designChannelInception.ts", import.meta.url), "utf8");
 const readinessGate = inceptionSource.indexOf("const runtimeReadiness = familyProductionReadiness(payload.family);");
@@ -83,6 +100,9 @@ assert.ok(readinessGate >= 0 && bootstrap >= 0 && readinessGate < bootstrap);
 const quizyearBranch = inceptionSource.indexOf('if (payload.family === "quizyear")');
 assert.ok(quizyearBranch >= 0 && quizyearBranch < bootstrap);
 assert.match(inceptionSource, /buildAndPersistQuizYearFoundation/);
+const illustratedBranch = inceptionSource.indexOf('if (payload.family === "illustrated_explainer")');
+assert.ok(illustratedBranch >= 0 && illustratedBranch < bootstrap);
+assert.match(inceptionSource, /buildAndPersistIllustratedFoundation/);
 assert.match(inceptionSource, /zeroSpendDraft: true/);
 
 assert.equal(

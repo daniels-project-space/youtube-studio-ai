@@ -36,6 +36,10 @@ import {
   type DeterministicFoundationObjectWriter,
 } from "@/trigger/deterministicQuizYearFoundation";
 import {
+  buildAndPersistIllustratedFoundation,
+  buildIllustratedFoundation,
+} from "@/trigger/deterministicIllustratedFoundation";
+import {
   planWeekArtifactHeadMatches,
   type PlanWeekArtifactReceipt,
   type PlanWeekProviderRenderReceipt,
@@ -282,7 +286,7 @@ function asIdentity(value: unknown): ChannelIdentityState {
   return value as ChannelIdentityState;
 }
 
-async function writeImmutableQuizYearFoundationObject(
+async function writeImmutableDeterministicFoundationObject(
   artifact: Parameters<DeterministicFoundationObjectWriter["writeImmutable"]>[0],
 ) {
   let persisted = await headObjectMetadata(artifact.key);
@@ -308,7 +312,7 @@ async function writeImmutableQuizYearFoundationObject(
     persisted.metadata.sha256 !== artifact.sha256
   ) {
     throw new Error(
-      `QuizYear deterministic foundation object failed immutable verification: ${artifact.key}`,
+      `deterministic channel foundation object failed immutable verification: ${artifact.key}`,
     );
   }
   return {
@@ -350,7 +354,7 @@ async function completeDeterministicQuizYearInception(args: {
   const persisted = await buildAndPersistQuizYearFoundation({
     channelName: args.channelName,
     storagePrefix: channelPrefix(args.ownerId, args.slug),
-    writer: { writeImmutable: writeImmutableQuizYearFoundationObject },
+    writer: { writeImmutable: writeImmutableDeterministicFoundationObject },
   });
   const foundationIdentity: ChannelIdentityState = {
     ...identity,
@@ -382,6 +386,86 @@ async function completeDeterministicQuizYearInception(args: {
       rejected: ["Gemini Style DNA/Showrunner", "Gemini visual judge", "Topicraft/Nano Banana starter slate", "automatic publishing"],
       missingCapabilities: [],
       groundingActions: ["CC0 Wikidata starter slate persisted with immutable hashes"],
+      deterministicFoundation: {
+        foundationFingerprint: persisted.foundation.foundationFingerprint,
+        receipt: persisted.receipt,
+        artifacts: {
+          avatarKey: persisted.foundation.brandAssets[0].key,
+          bannerKey: persisted.foundation.brandAssets[1].key,
+          starterSlateKey: persisted.foundation.manifestArtifact.key,
+        },
+      },
+    },
+  });
+  return {
+    foundationFingerprint: persisted.foundation.foundationFingerprint,
+    receiptFingerprint: persisted.receipt.fingerprint,
+  };
+}
+
+async function completeDeterministicIllustratedInception(args: {
+  readonly convex: ConvexHttpClient;
+  readonly channelId: Id<"channels">;
+  readonly ownerId: string;
+  readonly slug: string;
+  readonly channelName: string;
+  readonly family: (typeof FAMILIES)["illustrated_explainer"];
+}): Promise<{
+  readonly foundationFingerprint: string;
+  readonly receiptFingerprint: string;
+}> {
+  const expected = buildIllustratedFoundation({
+    channelName: args.channelName,
+    storagePrefix: channelPrefix(args.ownerId, args.slug),
+  });
+  const current = await currentChannel(args.convex, args.channelId);
+  const identity = asIdentity(current.identity);
+  for (const [slot, actual, intended] of [
+    ["avatar", identity.imageKey, expected.brandAssets[0].key],
+    ["banner", identity.bannerKey, expected.brandAssets[1].key],
+  ] as const) {
+    if (actual && actual !== intended) {
+      throw new Error(
+        `Illustrated Explainer deterministic inception will not replace an existing ${slot}. ` +
+          "Use a new channel identity or retain the existing draft outside the deterministic route.",
+      );
+    }
+  }
+  const persisted = await buildAndPersistIllustratedFoundation({
+    channelName: args.channelName,
+    storagePrefix: channelPrefix(args.ownerId, args.slug),
+    writer: { writeImmutable: writeImmutableDeterministicFoundationObject },
+  });
+  const foundationIdentity: ChannelIdentityState = {
+    ...identity,
+    persona: persisted.foundation.positioning.persona,
+    styleGrammar: persisted.foundation.positioning.styleGrammar,
+    palette: [...persisted.foundation.positioning.palette],
+    topicPool: [...persisted.foundation.positioning.topicPool],
+    bannedWords: [...persisted.foundation.positioning.bannedWords],
+    thumbnailTemplate: args.family.defaultThumbnailStyle,
+    niche: persisted.foundation.positioning.audience,
+    imageKey: persisted.foundation.brandAssets[0].key,
+    bannerKey: persisted.foundation.brandAssets[1].key,
+    thumbnailIdentity: {
+      colorPalette: [...persisted.foundation.positioning.palette],
+      visualStyle: "local fictional AI scenario-board vectors",
+      textPosition: "center",
+      avoid: [...persisted.foundation.positioning.bannedWords],
+    },
+  };
+  await args.convex.mutation(api.channels.updateChannel, {
+    channelId: args.channelId,
+    name: persisted.foundation.positioning.channelName,
+    identity: foundationIdentity,
+    thumbnailer: args.family.defaultThumbnailStyle,
+    status: "draft",
+    architectReport: {
+      summary: "deterministic non-Google Illustrated Explainer foundation completed; draft-only until its independently admitted episode pipeline is run",
+      applied: ["deterministic-positioning", "local-brand-assets", "fictional-no-external-claims-starter-slate"],
+      rejected: ["Google/Gemini creative services", "Nano Banana starter slate", "real-simulation claims", "automatic publishing"],
+      missingCapabilities: [],
+      groundingActions: ["fictional no-external-claims starter slate persisted with immutable hashes"],
       deterministicFoundation: {
         foundationFingerprint: persisted.foundation.foundationFingerprint,
         receipt: persisted.receipt,
@@ -1076,6 +1160,8 @@ export async function executeDesignChannel(
     seriesCount: payload.seriesCount,
     sourceReferences: payload.sourceReferences,
     claimEvidence: payload.claimEvidence,
+    dataStory: payload.dataStory,
+    syntheticScenario: payload.syntheticScenario,
     toggles: payload.toggles,
     paramOverrides: payload.paramOverrides,
   });
@@ -1187,6 +1273,33 @@ export async function executeDesignChannel(
       family: payload.family,
       status: "draft" as const,
       probe: { ok: false, attempts: 0, error: "QuizYear foundation is intentionally draft-only" },
+      zeroSpendDraft: true,
+      deterministicFoundation: foundation,
+      warnings: design.warnings,
+    };
+  }
+
+  // Illustrated Explainer is its own local creative lane. It exits before the
+  // generic Channel Inception stages, whose starter-thumbnail lab may use a
+  // sealed Google/Nano Banana path that this family expressly cannot use.
+  if (payload.family === "illustrated_explainer") {
+    const foundation = await completeDeterministicIllustratedInception({
+      convex,
+      channelId,
+      ownerId,
+      slug,
+      channelName: baseName,
+      family: FAMILIES.illustrated_explainer,
+    });
+    log("Illustrated Explainer deterministic foundation persisted", foundation);
+    return {
+      ok: true,
+      channelId,
+      slug,
+      name: baseName,
+      family: payload.family,
+      status: "draft" as const,
+      probe: { ok: false, attempts: 0, error: "Illustrated Explainer foundation is intentionally draft-only" },
       zeroSpendDraft: true,
       deterministicFoundation: foundation,
       warnings: design.warnings,

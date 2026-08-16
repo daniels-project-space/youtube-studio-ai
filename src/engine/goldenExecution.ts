@@ -150,7 +150,17 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     executableIds: ["cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence"],
     note: "Provider-free cinematic direction draft → human signature → strict admission. It converts the admitted Casefile map and Story Spine into a source-bound multi-shot/EDL handoff for the existing Novita renderer, but cannot mint its own crime-editor approval or auto-admit a crime family.",
   },
-  "scene-compiler": { kind: "pipeline-module", executableIds: ["scene_compiler"] },
+  "scene-compiler": {
+    kind: "pipeline-module",
+    // One deterministic local renderer lane owns its admitted scenario
+    // contract/disclosure, causal graph pixels, and renderer-native thumbnail.
+    executableIds: [
+      "synthetic_scenario",
+      "scenario_disclosure_gate",
+      "scene_compiler",
+      "scene_compiler_thumbnail",
+    ],
+  },
   "child-content-safety": { kind: "pipeline-module", executableIds: ["child_content_safety"] },
   "quiz-year": {
     kind: "pipeline-module",

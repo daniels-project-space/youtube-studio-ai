@@ -316,10 +316,12 @@ const identityValidator = v.object({
 });
 
 // "banana" = the engine (src/lib/banana.ts); "title_card" = explicit operator
-// choice. claude_flux/ideogram are retired engines kept for existing rows.
+// choice; "renderer_native" = a local media-renderer still. claude_flux/
+// ideogram are retired engines kept for existing rows.
 const thumbnailerValidator = v.union(
   v.literal("banana"),
   v.literal("title_card"),
+  v.literal("renderer_native"),
   v.literal("claude_flux"),
   v.literal("ideogram"),
 );

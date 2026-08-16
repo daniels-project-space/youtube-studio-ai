@@ -27,6 +27,10 @@ import { VisualMatterManifestSchema } from "./visualMatter";
 import { EpisodeGraphSchema, SceneManifestSchema } from "./episodeGraph";
 import { LearningContractSchema } from "./learningContract";
 import {
+  SyntheticScenarioContractSchema,
+  SyntheticScenarioDisclosureSchema,
+} from "./syntheticScenario";
+import {
   ChildrenShowBibleApprovalReceiptSchema,
   ChildrenShowBibleInputSchema,
   ChildrenShowBibleSchema,
@@ -141,6 +145,16 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   },
   videoDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
   contentLane: { type: "ContentLane", schema: ContentLaneSchema },
+  syntheticScenario: {
+    type: "SyntheticScenarioContract",
+    schema: SyntheticScenarioContractSchema,
+    persist: "reference",
+  },
+  syntheticScenarioDisclosure: {
+    type: "SyntheticScenarioDisclosure",
+    schema: SyntheticScenarioDisclosureSchema,
+    persist: "reference",
+  },
   qaPassed: { type: "QualityGateDecision", schema: z.boolean() },
   qaReport: { type: "FinalQaReport", schema: qaReport },
   episodeSpec: { type: "EpisodeSpec", schema: EpisodeSpecSchema },

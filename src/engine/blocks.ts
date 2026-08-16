@@ -29,6 +29,7 @@ import { casefileSourcePacketBlocks } from "@/trigger/blocks/casefileSourcePacke
 import { casefileEvidenceShotMapBlocks } from "@/trigger/blocks/casefileEvidenceShotMapBlocks";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 import { sceneCompilerBlocks } from "@/trigger/blocks/sceneCompilerBlocks";
+import { syntheticScenarioBlocks } from "@/trigger/blocks/syntheticScenarioBlocks";
 import { emitBundle } from "@/trigger/blocks/bundleBlocks";
 
 let registered = false;
@@ -75,6 +76,10 @@ export function registerAllBlocks(): void {
   for (const b of cinematicCaseSequenceBlocks) register(b);
   // Local Scene Manifest → 16:9 master renderer; owns pixels, never story.
   for (const b of sceneCompilerBlocks) register(b);
+  // Explicitly fictional scenario admission + opening disclosure. The scene
+  // compiler consumes the resulting profile to render town, decision, and POV
+  // grammars without representing them as a real simulation.
+  for (const b of syntheticScenarioBlocks) register(b);
   // Reusable visual-development contract: mood, character, setting and
   // storyboard locks. Cinematic is its first integrated consumer; the block
   // remains renderer-neutral for future generated-visual lanes.

@@ -26,6 +26,11 @@ import {
   supportsDataStoryFamily,
   type DataStoryContract,
 } from "./dataStory";
+import {
+  isSyntheticScenarioContract,
+  syntheticScenarioContract,
+  type SyntheticScenarioContract,
+} from "./syntheticScenario";
 import { registerAllBlocks } from "./blocks";
 import { validatePipeline } from "./validate";
 import type { PipelineEntry } from "./types";
@@ -71,6 +76,12 @@ export interface DesignOptions {
    * contract over the existing Data Inserts module, not a cosmetic toggle.
    */
   dataStory?: DataStoryContract;
+  /**
+   * Explicit fictional AI thought-experiment profile for the deterministic
+   * illustrated renderer. It adds a visible disclosure and the matching town,
+   * decision, or POV visual grammar; it never claims a real simulation ran.
+   */
+  syntheticScenario?: SyntheticScenarioContract;
   toggles?: {
     quotes?: boolean;
     captions?: boolean;
@@ -122,6 +133,12 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   }
   if (opts.dataStory && !supportsDataStoryFamily(opts.family)) {
     throw new Error("source-attributed data story is currently supported only by Narrated + Stock Footage");
+  }
+  if (opts.syntheticScenario !== undefined && !isSyntheticScenarioContract(opts.syntheticScenario)) {
+    throw new Error("synthetic scenario must use the current typed fictional-scenario contract");
+  }
+  if (opts.syntheticScenario && opts.family !== "illustrated_explainer") {
+    throw new Error("synthetic AI scenario stories are currently supported only by Illustrated Explainer");
   }
 
   const t = opts.toggles ?? {};
@@ -560,6 +577,26 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       block: "story_spine",
       params: { generationProfile: "production", targetShotSec: opts.family === "shorts" ? 4 : 6 },
     });
+  }
+
+  // Fictional AI scenario stories reuse the zero-provider illustrated lane,
+  // but their disclosure must be a real pipeline artifact rather than a title
+  // convention. The first module gives script/hook generation the contract;
+  // the second rejects the script if it does not say it in the opening.
+  if (opts.syntheticScenario) {
+    const contract = syntheticScenarioContract(opts.syntheticScenario.profile);
+    const scriptIndex = pipeline.findIndex((entry) => entry.block === "script_gen");
+    if (scriptIndex < 0) throw new Error("synthetic AI scenario requires a script_gen block");
+    if (!pipeline.some((entry) => entry.block === "synthetic_scenario")) {
+      pipeline.splice(scriptIndex, 0, {
+        block: "synthetic_scenario",
+        params: contract,
+      });
+    }
+    const resolvedScriptIndex = pipeline.findIndex((entry) => entry.block === "script_gen");
+    if (!pipeline.some((entry) => entry.block === "scenario_disclosure_gate")) {
+      pipeline.splice(resolvedScriptIndex + 1, 0, { block: "scenario_disclosure_gate" });
+    }
   }
 
   // Visual Matter is a portable creative-development module, not a music-video

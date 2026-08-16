@@ -37,6 +37,27 @@ export interface ModuleSpec {
 /** Ordered, de-duplicated set of every module the builder can place + tune. */
 export const MODULE_CATALOG: ModuleSpec[] = [
   {
+    block: "synthetic_scenario",
+    label: "Fictional AI Scenario",
+    description: "Locks an explicit fictional town, decision, or AI POV contract before writing; the profile is selected in the channel form rather than via free-form overrides.",
+    optional: true,
+    params: [],
+  },
+  {
+    block: "scenario_disclosure_gate",
+    label: "Scenario Disclosure Gate",
+    description: "Rejects a fictional AI scenario script unless the opening explicitly discloses illustrative assumptions.",
+    optional: true,
+    params: [],
+  },
+  {
+    block: "scene_compiler_thumbnail",
+    label: "Renderer-native thumbnail",
+    description: "Uses the local Scene Compiler master plus FFmpeg typography; no image-generation provider is involved.",
+    optional: false,
+    params: [],
+  },
+  {
     block: "director_brief",
     label: "Crew · Director",
     description: "Designs each video's structure: hook + beat map + pacing, from the Show Bible.",

@@ -69,6 +69,19 @@ const EXPLICIT_CHANNEL_INCEPTION_CAPABILITIES: Readonly<
       "draft-only-publication-state",
     ]),
   }),
+  illustrated_explainer: Object.freeze({
+    mode: "registered_non_gemini" as const,
+    id: "illustrated-explainer-deterministic-channel-foundation/v1",
+    provenance:
+      "profile-bound local SVG scenario-board brand assets plus an explicit fictional/no-external-claims starter slate; every artifact is content-addressed and verified before the channel remains draft-only",
+    coveredStages: Object.freeze([
+      "deterministic-positioning",
+      "local-avatar-and-banner",
+      "fictional-no-external-claims-starter-slate",
+      "immutable-artifact-persistence",
+      "draft-only-publication-state",
+    ]),
+  }),
 });
 
 /**

@@ -7,6 +7,10 @@ import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import { StorySpineSchema, type StorySpine } from "./storySpine";
+import {
+  SyntheticScenarioProfileSchema,
+  SyntheticScenarioVisualKindSchema,
+} from "./syntheticScenario";
 
 const EPSILON = 1e-6;
 
@@ -76,6 +80,9 @@ export const EpisodeVisualStateSchema = z.object({
   action: nonEmptyText(600),
   mood: nonEmptyText(180).optional(),
   props: z.array(nonEmptyText(100)).max(12).default([]),
+  /** Explicit fictional-scenario visual grammar. Omitted for factual/general episodes. */
+  syntheticScenarioProfile: SyntheticScenarioProfileSchema.optional(),
+  syntheticScenarioVisualKind: SyntheticScenarioVisualKindSchema.optional(),
 });
 export type EpisodeVisualState = z.infer<typeof EpisodeVisualStateSchema>;
 

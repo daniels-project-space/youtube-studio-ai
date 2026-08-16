@@ -348,7 +348,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "reuseScript", "structure", "styleDNA", "scriptPlaybook", "topicBet",
       "channelName", "niche", "persona", "styleGrammar",
       // Per-channel critique grounding for the shared script critique loop.
-      "criticDoctrine", "contentLane", "dataStorySourceLedger", "casefileSourcePacket",
+      "criticDoctrine", "contentLane", "dataStorySourceLedger", "casefileSourcePacket", "syntheticScenario",
     ],
   }),
   hook_craft: contract(["script.hook_refined"], {
@@ -495,10 +495,24 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     qualityRequired: true,
   }),
 
+  synthetic_scenario: contract(["story.synthetic_scenario_contract"], {
+    requiredConsumes: ["topic"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
+  scenario_disclosure_gate: contract(["story.synthetic_scenario_disclosed"], {
+    requiredConsumes: ["syntheticScenario", "narrationText"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
+
   episode_graph: contract(["story.episode_graph_locked", "visuals.scene_manifest"], {
     requiredConsumes: [
       "topic", "timedScript", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs", "editorEdl", "storyCoverage",
     ],
+    optionalConsumes: ["syntheticScenario"],
     providerProfiles: [local],
     qualityRequired: true,
   }),
@@ -603,6 +617,13 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   scene_compiler: contract(["visuals.scene_compiled", "master.assembled"], {
     requiredConsumes: ["sceneManifest", "narrationLocalPath", "narrationDurationSec", "musicUrl"],
     optionalConsumes: ["musicKey", "episodeGraph", "contentLane"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
+    qualityRequired: true,
+  }),
+  scene_compiler_thumbnail: contract(["package.thumbnail", "visuals.renderer_native_thumbnail"], {
+    requiredConsumes: ["videoLocalPath", "title"],
+    optionalConsumes: ["syntheticScenario"],
     providerProfiles: [local],
     maxCostUsd: 0,
     qualityRequired: true,

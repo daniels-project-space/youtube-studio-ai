@@ -44,7 +44,7 @@ export interface Family {
    * image engine; the deterministic QuizYear renderer owns its local stills.
    * A plain title card is never a default for a provider-backed family.
    */
-  defaultThumbnailStyle: "banana" | "title_card";
+  defaultThumbnailStyle: "banana" | "title_card" | "renderer_native";
   /** Default per-video spend envelope when the operator did not set one. */
   defaultRunBudgetUsd?: number;
 }
@@ -215,7 +215,9 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     available: true,
     narrated: true,
     requiresKeys: ["fish-audio", "mureka"],
-    defaultThumbnailStyle: "banana",
+    // The actual Scene Manifest master supplies a local FFmpeg-composited
+    // thumbnail. This keeps the entire family free of Gemini/Nano Banana.
+    defaultThumbnailStyle: "renderer_native",
     // Local vector rendering adds no provider-media line item; the envelope is
     // narration, original music, and final quality evidence.
     defaultRunBudgetUsd: 2,
@@ -572,7 +574,39 @@ export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
       "critic_spec",
     ],
   },
-  illustrated_explainer: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "script_gen"] },
+  illustrated_explainer: {
+    mode: "registered_non_gemini",
+    id: "illustrated-explainer-claude-local-scenario/v1",
+    plannerBlock: "topic_select",
+    provenance:
+      "metadata-only topic research, Claude crew/script planning, Fish Audio narration, Mureka music, local Episode Graph + Remotion/FFmpeg scene and thumbnail rendering, and non-Google visual review; fictional scenario profiles add a mandatory disclosure gate rather than a real-simulation claim",
+    requiredEntries: [
+      { block: "competitor_research" },
+      { block: "topic_select" },
+      { block: "director_brief" },
+      { block: "dp_brief" },
+      { block: "editor_brief" },
+      { block: "composer_brief" },
+      { block: "critic_spec" },
+      { block: "script_gen" },
+      { block: "qa_script" },
+      { block: "narration_tts" },
+      { block: "story_spine" },
+      { block: "episode_graph" },
+      { block: "music" },
+      { block: "scene_compiler" },
+      { block: "scene_compiler_thumbnail" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+    ],
+    forbiddenGeminiBlocks: [
+      "thumbnail_gen",
+      "motion_comic",
+      "documotion_short",
+      "whiteboard_scribe",
+      "lore_short",
+    ],
+  },
   children_learning: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "script_gen"] },
   cinematic: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "script_gen"] },
 };

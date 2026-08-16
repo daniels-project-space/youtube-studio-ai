@@ -7,6 +7,10 @@ import {
   useVideoConfig,
 } from "remotion";
 import type { SceneManifest } from "@/engine/episodeGraph";
+import type {
+  SyntheticScenarioProfile,
+  SyntheticScenarioVisualKind,
+} from "@/engine/syntheticScenario";
 
 export const SCENE_COMPILER_FPS = 30;
 export const SCENE_COMPILER_COMPOSITION_ID = "SceneManifest";
@@ -43,6 +47,8 @@ interface NormalizedScene {
   settingId?: string;
   action: string;
   props: string[];
+  syntheticScenarioProfile?: SyntheticScenarioProfile;
+  syntheticScenarioVisualKind?: SyntheticScenarioVisualKind;
   audience: "general" | "children";
 }
 
@@ -232,6 +238,8 @@ function normalizeScene(
     settingId: asText(raw.settingId) ?? asText(visualState.settingId),
     action: asText(visualState.action) ?? "",
     props: asStringArray(visualState.props),
+    syntheticScenarioProfile: asText(visualState.syntheticScenarioProfile) as SyntheticScenarioProfile | undefined,
+    syntheticScenarioVisualKind: asText(visualState.syntheticScenarioVisualKind) as SyntheticScenarioVisualKind | undefined,
     audience,
   };
 }
@@ -472,7 +480,94 @@ function ScreenVisual({ seed, palette }: { seed: string; palette: Palette }) {
   );
 }
 
+function TownVisual({ seed, palette, overview }: { seed: string; palette: Palette; overview: boolean }) {
+  const blocks = Array.from({ length: 30 }, (_, index) => ({
+    x: 92 + (index % 6) * 145 + unit(seed, index) * 18,
+    y: 90 + Math.floor(index / 6) * 108 + unit(seed, index + 90) * 16,
+    w: 75 + unit(seed, index + 150) * 46,
+    h: 48 + unit(seed, index + 210) * 34,
+    occupied: unit(seed, index + 330) > (overview ? 0.26 : 0.42),
+  }));
+  const agents = Array.from({ length: overview ? 42 : 26 }, (_, index) => ({
+    x: 100 + unit(seed, index + 480) * 800,
+    y: 108 + unit(seed, index + 620) * 470,
+  }));
+  return (
+    <svg viewBox="0 0 1000 720" style={{ width: "100%", height: "100%" }} aria-hidden>
+      <rect x="54" y="54" width="892" height="612" rx="34" fill={`${palette.ink}77`} stroke={`${palette.primary}55`} strokeWidth="4" />
+      {[0, 1, 2, 3, 4].map((row) => <line key={`r-${row}`} x1="82" x2="918" y1={142 + row * 102} y2={142 + row * 102} stroke={`${palette.muted}33`} strokeWidth="3" />)}
+      {[0, 1, 2, 3, 4, 5].map((column) => <line key={`c-${column}`} y1="82" y2="638" x1={142 + column * 142} x2={142 + column * 142} stroke={`${palette.muted}22`} strokeWidth="3" />)}
+      {blocks.map((block, index) => (
+        <rect key={index} x={block.x} y={block.y} width={block.w} height={block.h} rx="10" fill={block.occupied ? `${palette.primary}A8` : `${palette.surface}BB`} stroke={block.occupied ? palette.accent : `${palette.muted}55`} strokeWidth="3" />
+      ))}
+      {agents.map((agent, index) => <circle key={index} cx={agent.x} cy={agent.y} r="7" fill={index % 5 === 0 ? palette.accent : palette.text} opacity="0.9" />)}
+      <rect x="88" y="88" width="192" height="52" rx="16" fill={`${palette.ink}CC`} />
+      <text x="112" y="122" fill={palette.text} fontFamily="Arial" fontSize="23" fontWeight="700">{overview ? "WORLD STATE" : "NEXT TURN"}</text>
+      <path d="M694 584 C744 522 812 560 868 486" fill="none" stroke={palette.accent} strokeWidth="9" strokeLinecap="round" />
+      <circle cx="868" cy="486" r="13" fill={palette.accent} />
+    </svg>
+  );
+}
+
+function DecisionVisual({ seed, palette, outcome }: { seed: string; palette: Palette; outcome: boolean }) {
+  const options = ["A", "B", "C"];
+  return (
+    <svg viewBox="0 0 1000 720" style={{ width: "100%", height: "100%" }} aria-hidden>
+      <path d="M500 108 V210 M500 210 L244 350 M500 210 L500 350 M500 210 L756 350" fill="none" stroke={`${palette.muted}AA`} strokeWidth="8" strokeLinecap="round" />
+      <circle cx="500" cy="108" r="52" fill={palette.accent} />
+      <text x="500" y="118" textAnchor="middle" fill={palette.ink} fontFamily="Arial" fontSize="30" fontWeight="900">AI</text>
+      {options.map((option, index) => {
+        const x = 124 + index * 252;
+        const selected = outcome && index === hash(seed) % options.length;
+        return (
+          <g key={option}>
+            <rect x={x} y="350" width="240" height="210" rx="28" fill={selected ? `${palette.accent}CC` : `${palette.surface}EE`} stroke={selected ? palette.text : `${palette.primary}88`} strokeWidth="5" />
+            <text x={x + 36} y="408" fill={selected ? palette.ink : palette.primary} fontFamily="Arial" fontSize="30" fontWeight="900">OPTION {option}</text>
+            <rect x={x + 36} y="444" width="156" height="16" rx="8" fill={selected ? `${palette.ink}66` : `${palette.text}55`} />
+            <rect x={x + 36} y="486" width={80 + unit(seed, index) * 90} height="14" rx="7" fill={selected ? `${palette.ink}55` : `${palette.primary}77`} />
+            {selected ? <text x={x + 36} y="538" fill={palette.ink} fontFamily="Arial" fontSize="22" fontWeight="800">CHOSEN PATH</text> : null}
+          </g>
+        );
+      })}
+      <text x="500" y="640" textAnchor="middle" fill={palette.muted} fontFamily="Arial" fontSize="24" fontWeight="700">{outcome ? "TRADE-OFF REVEAL" : "CONSTRAINTS → CHOICE"}</text>
+    </svg>
+  );
+}
+
+function PovVisual({ seed, palette }: { seed: string; palette: Palette }) {
+  const skyline = Array.from({ length: 10 }, (_, index) => ({
+    x: index * 112,
+    h: 110 + unit(seed, index + 780) * 250,
+  }));
+  return (
+    <svg viewBox="0 0 1000 720" style={{ width: "100%", height: "100%" }} aria-hidden>
+      <rect width="1000" height="720" fill={palette.ink} />
+      <rect width="1000" height="420" fill={palette.primary} opacity="0.34" />
+      <circle cx="770" cy="160" r="92" fill={`${palette.accent}88`} />
+      {skyline.map((building, index) => <rect key={index} x={building.x} y={590 - building.h} width="92" height={building.h} fill={`${palette.surface}EE`} stroke={`${palette.primary}77`} strokeWidth="3" />)}
+      <path d="M350 720 C374 590 452 548 500 612 C548 548 626 590 650 720" fill={`${palette.primary}AA`} />
+      <path d="M82 670 L310 528 L420 606" fill="none" stroke={`${palette.text}D8`} strokeWidth="34" strokeLinecap="round" />
+      <path d="M918 670 L690 528 L580 606" fill="none" stroke={`${palette.text}D8`} strokeWidth="34" strokeLinecap="round" />
+      <rect x="62" y="58" width="230" height="58" rx="16" fill={`${palette.ink}C8`} stroke={`${palette.primary}AA`} strokeWidth="3" />
+      <text x="88" y="95" fill={palette.text} fontFamily="Arial" fontSize="24" fontWeight="800">POV // SIGNAL LIVE</text>
+      <path d="M756 616 H918" stroke={palette.accent} strokeWidth="8" strokeDasharray="16 12" />
+    </svg>
+  );
+}
+
 function VisualByKind({ scene, palette }: { scene: NormalizedScene; palette: Palette }) {
+  switch (scene.syntheticScenarioVisualKind) {
+    case "town_overview":
+      return <TownVisual seed={scene.id} palette={palette} overview />;
+    case "town_turn":
+      return <TownVisual seed={scene.id} palette={palette} overview={false} />;
+    case "decision_options":
+      return <DecisionVisual seed={scene.id} palette={palette} outcome={false} />;
+    case "decision_outcome":
+      return <DecisionVisual seed={scene.id} palette={palette} outcome />;
+    case "pov_hud":
+      return <PovVisual seed={scene.id} palette={palette} />;
+  }
   switch (scene.kind) {
     case "map":
       return <MapVisual seed={scene.id} palette={palette} />;
@@ -539,6 +634,11 @@ function SceneLayer({
           {scene.label}
         </div>
       </div>
+      {scene.syntheticScenarioProfile ? (
+        <div style={{ position: "absolute", top: "5%", right: "7%", borderRadius: 999, padding: "10px 18px", background: "#071525D9", border: `2px solid ${palette.accent}`, color: palette.text, fontFamily: "Arial, Helvetica, sans-serif", fontWeight: 800, fontSize: 20, letterSpacing: "0.08em" }}>
+          FICTIONAL AI SCENARIO · ILLUSTRATIVE ASSUMPTIONS
+        </div>
+      ) : null}
     </AbsoluteFill>
   );
 }
