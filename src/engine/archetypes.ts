@@ -141,6 +141,9 @@ const CHILDREN_LEARNING: PipelineEntry[] = [
   { block: "story_spine", params: { targetShotSec: 6 } },
   { block: "episode_graph", params: { audience: "children" } },
   { block: "learning_contract" },
+  // This is an operator-supplied, fingerprint-bound child-editor admission.
+  // It is a per-episode seed, never an automatic channel-creation shortcut.
+  { block: "children_show_bible" },
   { block: "child_content_safety" },
   {
     block: "music",

@@ -13,6 +13,10 @@ import {
   type SceneManifest,
 } from "@/engine/episodeGraph";
 import { assertLearningContract } from "@/engine/learningContract";
+import {
+  ChildrenShowBibleApprovalReceiptSchema,
+  ChildrenShowBibleSchema,
+} from "@/engine/childrenShowBible";
 import type { Block } from "@/engine/types";
 
 export const CHILD_CONTENT_SAFETY_VERSION = "child-content-safety/v1" as const;
@@ -29,6 +33,8 @@ export interface ChildContentSafetyReceipt {
   /** Binds the human-review receipt to the exact deterministic visual plan. */
   sceneManifestFingerprint: string;
   lessonContractFingerprint: string;
+  /** The exact child-editor-approved original identity/curriculum packet. */
+  childrenShowBibleFingerprint: string;
 }
 
 /**
@@ -51,7 +57,9 @@ export function assertChildContentRenderEvidence(args: {
     childSafety.release !== "human-editorial-approval-required" ||
     childSafety.allowedPublishMode !== "draft" ||
     typeof childSafety.sceneManifestFingerprint !== "string" ||
-    !/^[a-f0-9]{64}$/i.test(childSafety.sceneManifestFingerprint)
+    !/^[a-f0-9]{64}$/i.test(childSafety.sceneManifestFingerprint) ||
+    typeof childSafety.childrenShowBibleFingerprint !== "string" ||
+    !/^[a-f0-9]{64}$/i.test(childSafety.childrenShowBibleFingerprint)
   ) {
     throw new Error("child_content_safety: invalid or unbound children safety receipt");
   }
@@ -84,6 +92,8 @@ export function assertChildContentSafety(args: {
   sceneManifest: unknown;
   lessonContract: unknown;
   contentLane?: unknown;
+  childrenShowBible?: unknown;
+  childrenShowBibleApproval?: unknown;
 }): ChildContentSafetyReceipt {
   const graph = assertEpisodeGraph(args.episodeGraph) as EpisodeGraph;
   const manifest = assertSceneManifest(args.sceneManifest) as SceneManifest;
@@ -101,6 +111,24 @@ export function assertChildContentSafety(args: {
     throw new Error("child_content_safety: scene manifest fingerprint is invalid");
   }
   const lessonContract = assertLearningContract(args.lessonContract, graph);
+  if (args.childrenShowBible === undefined || args.childrenShowBibleApproval === undefined) {
+    throw new Error("child_content_safety: a current child-editor-approved show bible is required");
+  }
+  const showBible = ChildrenShowBibleSchema.parse(args.childrenShowBible);
+  const approval = ChildrenShowBibleApprovalReceiptSchema.parse(args.childrenShowBibleApproval);
+  const graphFingerprint = episodeGraphFingerprint(graph);
+  if (
+    showBible.episodeGraphFingerprint !== graphFingerprint ||
+    showBible.lessonContractFingerprint !== lessonContract.fingerprint ||
+    approval.showBibleFingerprint !== showBible.contentFingerprint ||
+    approval.episodeGraphFingerprint !== graphFingerprint ||
+    approval.lessonContractFingerprint !== lessonContract.fingerprint ||
+    approval.release !== "private_human_child_editor_review_only" ||
+    approval.allowedPublishMode !== "draft" ||
+    approval.requiresHumanChildEditor !== true
+  ) {
+    throw new Error("child_content_safety: child-editor approval is not bound to this exact graph and lesson contract");
+  }
   const defects = [
     ...childSafeTextDefects(graph.topic, "children episode topic"),
     ...manifest.scenes.flatMap((scene) => [
@@ -120,9 +148,10 @@ export function assertChildContentSafety(args: {
     release: "human-editorial-approval-required",
     allowedPublishMode: "draft",
     audience: "children",
-    episodeGraphFingerprint: episodeGraphFingerprint(graph),
+    episodeGraphFingerprint: graphFingerprint,
     sceneManifestFingerprint: manifest.fingerprint,
     lessonContractFingerprint: lessonContract.fingerprint,
+    childrenShowBibleFingerprint: showBible.contentFingerprint,
     reviewReasons: [
       "Child-directed content requires a human editorial check before release.",
       "This artifact may create a private draft only; public and scheduled publishing are blocked.",
@@ -133,7 +162,10 @@ export function assertChildContentSafety(args: {
 
 const childContentSafety: Block = {
   id: "child_content_safety",
-  consumes: ["episodeGraph", "sceneManifest", "lessonContract", "contentLane"],
+  consumes: [
+    "episodeGraph", "sceneManifest", "lessonContract", "contentLane",
+    "childrenShowBible", "childrenShowBibleApproval",
+  ],
   produces: ["childContentSafety"],
   run: async (ctx) => {
     const receipt = assertChildContentSafety({
@@ -141,6 +173,8 @@ const childContentSafety: Block = {
       sceneManifest: ctx.store["sceneManifest"],
       lessonContract: ctx.store["lessonContract"],
       contentLane: ctx.store["contentLane"],
+      childrenShowBible: ctx.store["childrenShowBible"],
+      childrenShowBibleApproval: ctx.store["childrenShowBibleApproval"],
     });
     ctx.log("child_content_safety: passed deterministic safety checks; private human-review draft only");
     return { childContentSafety: receipt };

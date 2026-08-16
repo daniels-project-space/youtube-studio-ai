@@ -226,13 +226,14 @@ assert.equal(
   assertLearningContract(childrenLessonContract, bridgedChildren.episodeGraph).audience,
   "children",
 );
-assert.equal(
-  assertChildContentSafety({
+assert.throws(
+  () => assertChildContentSafety({
     ...bridgedChildren,
     lessonContract: childrenLessonContract,
     contentLane: { key: "children_learning_supervised" },
-  }).allowedPublishMode,
-  "draft",
+  }),
+  /child-editor-approved show bible is required/,
+  "a children graph and lesson alone cannot enter the supervised render lane",
 );
 assert.equal(
   assertSceneCompilerAdmission({

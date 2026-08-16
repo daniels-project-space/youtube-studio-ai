@@ -21,6 +21,12 @@ import { ContentLaneSchema } from "./contentLane";
  */
 export const CHILDREN_SHOW_BIBLE_VERSION = "children-show-bible/v1" as const;
 export const CHILDREN_SHOW_BIBLE_ADMISSION_VERSION = "children-show-bible-admission/v1" as const;
+/**
+ * Per-episode editorial material is deliberately an invocation seed, not a
+ * channel-default parameter. It must be supplied anew and is frozen into the
+ * durable run before the supervised lane can do any paid work.
+ */
+export const CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY = "childrenShowBibleInput" as const;
 export const CHILD_EDITORIAL_REVIEW_MAX_AGE_DAYS = 30;
 const CHILD_EDITORIAL_REVIEW_MAX_AGE_MS =
   CHILD_EDITORIAL_REVIEW_MAX_AGE_DAYS * 24 * 60 * 60 * 1_000;
@@ -201,6 +207,33 @@ export type ChildrenShowBibleInput = z.infer<typeof ChildrenShowBibleInputSchema
 export type ChildrenShowBible = z.infer<typeof ChildrenShowBibleSchema>;
 export type ChildrenShowBibleApprovalReceipt = z.infer<typeof ChildrenShowBibleApprovalReceiptSchema>;
 export type ChildrenStoryPatternKind = z.infer<typeof ChildrenStoryPatternKindSchema>;
+
+/** External seed keys required by a content lane before pipeline execution. */
+export function childrenShowBibleSeedKeys(contentLane: unknown): string[] {
+  const lane = ContentLaneSchema.safeParse(contentLane);
+  return lane.success && lane.data.key === "children_learning_supervised"
+    ? [CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY]
+    : [];
+}
+
+/**
+ * Keep a missing child-editor packet from becoming a late, ambiguous block
+ * failure. Schema/approval integrity remains the responsibility of the
+ * children_show_bible block itself.
+ */
+export function assertChildrenShowBibleSeeded(
+  contentLane: unknown,
+  store: Record<string, unknown>,
+): void {
+  if (
+    childrenShowBibleSeedKeys(contentLane).length > 0 &&
+    !Object.prototype.hasOwnProperty.call(store, CHILDREN_SHOW_BIBLE_INPUT_SEED_KEY)
+  ) {
+    throw new Error(
+      "children_learning_supervised requires an operator-supplied approved childrenShowBibleInput before a review candidate can run",
+    );
+  }
+}
 
 const ChildrenShowBibleIssueCodeSchema = z.enum([
   "show_bible_schema_invalid",

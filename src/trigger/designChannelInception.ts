@@ -128,6 +128,8 @@ import {
 import { compilePipeline, completePipelineForPolicy } from "@/engine/pipelineCompiler";
 import { validatePipeline } from "@/engine/validate";
 import { registerAllBlocks } from "@/engine/blocks";
+import { childrenShowBibleSeedKeys } from "@/engine/childrenShowBible";
+import { contentLaneForFamily } from "@/engine/contentLane";
 import {
   convexChannelInceptionLedger,
   initializeChannelInceptionLedger,
@@ -963,7 +965,10 @@ function certifyChannelPipeline(args: {
   // a structurally valid graph must not silently lose Story Spine, the local
   // quiz route, or another family-owned non-Gemini admission requirement.
   assertFamilyAutonomousPlanningPipeline(args.family, args.pipeline);
-  const compilation = compilePipeline(validatePipeline(args.pipeline));
+  const lane = contentLaneForFamily(args.family);
+  const compilation = compilePipeline(
+    validatePipeline(args.pipeline, ["contentLane", ...childrenShowBibleSeedKeys(lane)]),
+  );
   const claims = {
     version: "channel-inception-pipeline-certification/v1" as const,
     family: args.family,

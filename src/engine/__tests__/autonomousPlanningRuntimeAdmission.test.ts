@@ -38,7 +38,7 @@ const certificationAdmission = inceptionSource.indexOf(
   "assertFamilyAutonomousPlanningPipeline(args.family, args.pipeline);",
 );
 const certificationCompile = inceptionSource.indexOf(
-  "const compilation = compilePipeline(validatePipeline(args.pipeline));",
+  "const compilation = compilePipeline(",
 );
 assert.ok(
   certificationStart >= 0 &&

@@ -11,7 +11,7 @@
  * Dynamic import so a missing/heavy dep can never break the Trigger bundle at
  * deploy time — only a task that actually calls this pays the cost.
  */
-import { assertGeminiRuntimeAllowed } from "@/lib/gemini";
+import { assertNonGeminiModelIdentifier } from "@/lib/gemini";
 
 export interface StagehandRunResult<T> {
   value: T;
@@ -21,6 +21,24 @@ export interface StagehandRunResult<T> {
 
 export function hasBrowserbase(): boolean {
   return !!process.env.BROWSERBASE_API_KEY && !!process.env.BROWSERBASE_PROJECT_ID;
+}
+
+/**
+ * Browser automation is deliberately independent from the sealed thumbnail
+ * credential. There is no implicit provider default: an operator must supply
+ * a reviewed, non-Google Stagehand model and its own credential.
+ */
+export function browserbaseStagehandModel(): { model: string; apiKey: string } {
+  const model = process.env.BROWSERBASE_STAGEHAND_MODEL?.trim();
+  const apiKey = process.env.BROWSERBASE_STAGEHAND_MODEL_API_KEY?.trim();
+  if (!model || !apiKey) {
+    throw new Error(
+      "Browserbase Stagehand requires BROWSERBASE_STAGEHAND_MODEL and " +
+        "BROWSERBASE_STAGEHAND_MODEL_API_KEY; Gemini is not permitted outside sealed thumbnails",
+    );
+  }
+  assertNonGeminiModelIdentifier(model, "Browserbase Stagehand model");
+  return { model, apiKey };
 }
 
 /**
@@ -34,7 +52,7 @@ export async function withStagehand<T>(
   if (!hasBrowserbase()) {
     throw new Error("Browserbase not configured (BROWSERBASE_API_KEY + BROWSERBASE_PROJECT_ID)");
   }
-  assertGeminiRuntimeAllowed("Browserbase Stagehand Gemini agent");
+  const model = browserbaseStagehandModel();
   const { Stagehand } = (await import("@browserbasehq/stagehand")) as unknown as {
     Stagehand: new (opts: Record<string, unknown>) => {
       init: () => Promise<unknown>;
@@ -48,9 +66,9 @@ export async function withStagehand<T>(
     env: "BROWSERBASE",
     apiKey: process.env.BROWSERBASE_API_KEY,
     projectId: process.env.BROWSERBASE_PROJECT_ID,
-    // Stagehand's LLM for act/extract — Gemini (Anthropic removed for cost).
-    modelName: "google/gemini-2.5-flash",
-    modelClientOptions: { apiKey: process.env.GEMINI_API_KEY },
+    // A separately configured non-Google model; never reuse the thumbnail key.
+    modelName: model.model,
+    modelClientOptions: { apiKey: model.apiKey },
     // Route Stagehand logs through OUR logger so it never spins up pino-pretty
     // (that transport isn't in the Trigger image → "unable to determine transport").
     verbose: 0,

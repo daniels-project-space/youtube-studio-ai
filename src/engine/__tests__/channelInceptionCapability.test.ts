@@ -35,6 +35,26 @@ if (narrated.mode === "registered_non_gemini") {
   assert.match(narrated.provenance, /sealed thumbnail-only Gemini exception/);
 }
 
+for (const family of ["sleep", "shorts"] as const) {
+  const capability = familyChannelInceptionCapability(family);
+  assert.equal(capability.mode, "registered_non_gemini");
+  if (capability.mode === "registered_non_gemini") {
+    assert.deepEqual(
+      capability.coveredStages,
+      [
+        "metadata-only-niche-research",
+        "claude-positioning-style-dna-show-bible",
+        "provider-metadata-voice-selection-and-local-cold-open",
+        "novita-channel-art-and-non-google-vision-qa",
+        "non-google-starter-topics-and-sealed-thumbnail-slate",
+        "draft-only-publication-state",
+      ],
+      `${family} must opt into every creator stage, not only the episode planner`,
+    );
+    assert.match(capability.provenance, /sealed thumbnail-only Gemini exception/);
+  }
+}
+
 const illustrated = familyChannelInceptionCapability("illustrated_explainer");
 assert.equal(illustrated.mode, "registered_non_gemini");
 if (illustrated.mode === "registered_non_gemini") {

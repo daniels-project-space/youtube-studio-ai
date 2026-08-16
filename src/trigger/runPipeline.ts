@@ -78,6 +78,10 @@ import {
 } from "@/lib/channelInceptionProbe";
 import { CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD } from "@/engine/channelInceptionContracts";
 import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
+import {
+  assertChildrenShowBibleSeeded,
+  childrenShowBibleSeedKeys,
+} from "@/engine/childrenShowBible";
 
 export interface RunPipelineInput {
   channelId: string;
@@ -109,6 +113,12 @@ export interface RunPipelineInput {
     approval: StudioActionApprovalReceipt;
     dispatchEnvelopeFingerprint: string;
   };
+  /**
+   * Fresh, child-editor-approved per-episode packet for the supervised
+   * children lane. It is frozen into the invocation snapshot before any
+   * provider work and is never a channel-level automatic-production setting.
+   */
+  childrenShowBibleInput?: unknown;
   /**
    * Render-group reuse: when a language sibling is fanned out by the base run's
    * emit_bundle, the base assets are passed here and seeded into the store so the
@@ -401,6 +411,19 @@ export const runPipelineTask = task({
       family: (channel as { family?: unknown }).family,
       pipeline: (channel.pipeline ?? []) as PipelineEntry[],
     });
+    if (
+      payload.childrenShowBibleInput !== undefined &&
+      contentLane.key !== "children_learning_supervised"
+    ) {
+      throwForTaskRetryPolicy(
+        new Error("childrenShowBibleInput is only accepted by the supervised children-learning lane"),
+      );
+    }
+    if (durableInvocation && payload.childrenShowBibleInput !== undefined) {
+      throwForTaskRetryPolicy(
+        new Error("childrenShowBibleInput cannot replace the frozen editorial packet on a resumed run"),
+      );
+    }
     if (!durableInvocation && payload.pipelineOverride) {
       console.log(`[run-pipeline] using one-off pipelineOverride (${entries.length} blocks) — channel config untouched`);
     }
@@ -576,7 +599,7 @@ export const runPipelineTask = task({
       // contentLane is resolved from the persisted channel and placed in
       // seedStore below. It is a channel-level policy input, not something a
       // render block may synthesize or replace.
-      const resolved = validatePipeline(entries, ["contentLane"]);
+      const resolved = validatePipeline(entries, ["contentLane", ...childrenShowBibleSeedKeys(contentLane)]);
       // A signed Channel Inception probe is intentionally private: the frozen
       // probe shape has no upload block, but retains every actual editorial
       // and technical release requirement. Choose that narrow policy only
@@ -623,6 +646,9 @@ export const runPipelineTask = task({
           styleDNA: (channel as { styleDNA?: unknown }).styleDNA ?? null,
           qualityBar: (channel as { qaRubric?: unknown }).qaRubric ?? null,
           contentLane,
+          ...(payload.childrenShowBibleInput !== undefined
+            ? { childrenShowBibleInput: structuredClone(payload.childrenShowBibleInput) }
+            : {}),
           ...(scheduledPlan ? scheduledPlanSeed(scheduledPlan) : {}),
         };
         if (payload.reuse) {
@@ -634,6 +660,11 @@ export const runPipelineTask = task({
           log(`run-pipeline: render-group REUSE active (lang=${payload.reuse.language}, ${payload.reuse.footageKeys?.length ?? 0} clips)`);
         }
       }
+
+      // A children lane is intentionally executable only with a fresh,
+      // operator-supplied editorial packet. This happens before preflight and
+      // snapshotting, so a missing packet cannot reach a paid provider stage.
+      assertChildrenShowBibleSeeded(contentLane, seedStore);
 
       const invocationCandidate = durableInvocation ?? normalizePipelineInvocationSnapshot({
         version: 1,

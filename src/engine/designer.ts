@@ -33,6 +33,7 @@ import {
 } from "./syntheticScenario";
 import { registerAllBlocks } from "./blocks";
 import { validatePipeline } from "./validate";
+import { childrenShowBibleSeedKeys } from "./childrenShowBible";
 import type { PipelineEntry } from "./types";
 import {
   assertPipelineMatchesContentLane,
@@ -121,6 +122,31 @@ const OPTIONAL_BLOCKS = new Set([
   "crosspost",
 ]);
 
+/**
+ * A render may tolerate a little natural timing variance, but that variance
+ * may never cross the family capability boundary advertised by the creator.
+ * Keep this in one helper because the initial design and the post-architect
+ * repair pass must enforce exactly the same duration law.
+ */
+function lengthCheckEnvelope(
+  family: FamilyKey,
+  targetSeconds: number,
+): Readonly<{ minSeconds: number; maxSeconds: number }> {
+  if (family === "documentary_collage_short") {
+    // The renderer's native five-to-seven-beat QA envelope is deliberately a
+    // little wider than the channel's preferred 35–60s editorial target.
+    return { minSeconds: 20, maxSeconds: 60 };
+  }
+  const contract = familyDurationContract(family);
+  if (contract.inputUnit === "fixed") {
+    return { minSeconds: contract.defaultSeconds, maxSeconds: contract.defaultSeconds };
+  }
+  return {
+    minSeconds: Math.max(contract.minimumSeconds, Math.round(targetSeconds * 0.6)),
+    maxSeconds: Math.min(contract.maximumSeconds, Math.round(targetSeconds * 1.8)),
+  };
+}
+
 /** Build a validated pipeline for a channel from the wizard's choices. */
 export function designPipeline(opts: DesignOptions): DesignResult {
   registerAllBlocks();
@@ -206,8 +232,9 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       // Niche preset sets the script tone unless the archetype already pinned one.
       if (e.block === "script_gen" && preset?.scriptStyle && params.style === undefined) params.style = preset.scriptStyle;
       if (e.block === "length_check" && lenSec) {
-        params.minSeconds = Math.round(lenSec * 0.6);
-        params.maxSeconds = Math.round(lenSec * 1.8);
+        const envelope = lengthCheckEnvelope(opts.family, lenSec);
+        params.minSeconds = envelope.minSeconds;
+        params.maxSeconds = envelope.maxSeconds;
       }
       if (documentaryShortTargetSec !== undefined) {
         if (e.block === "topic_select" || e.block === "short_strategy" || e.block === "documotion_short") {
@@ -772,7 +799,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     // seed store by runPipeline.ts, not an executable block artifact. Seed it
     // here as well so creator-time validation verifies the same graph that the
     // runner will execute.
-    const resolved = validatePipeline(pipeline, ["contentLane"]);
+    const resolved = validatePipeline(pipeline, ["contentLane", ...childrenShowBibleSeedKeys(contentLane)]);
     if (fam.available) compilation = compilePipeline(resolved);
   } catch (e) {
     throw new Error(`designed pipeline invalid: ${e instanceof Error ? e.message : e}`);
@@ -825,13 +852,9 @@ export function enforceLengthContract(
     ) pin("targetSeconds", lenSec);
     if (e.block === "script_gen") pin("maxSeconds", lenSec);
     if (e.block === "length_check") {
-      if (family === "documentary_collage_short") {
-        pin("minSeconds", 20);
-        pin("maxSeconds", 60);
-      } else {
-        pin("minSeconds", Math.round(lenSec * 0.6));
-        pin("maxSeconds", Math.round(lenSec * 1.8));
-      }
+      const envelope = lengthCheckEnvelope(family, lenSec);
+      pin("minSeconds", envelope.minSeconds);
+      pin("maxSeconds", envelope.maxSeconds);
     }
     if (e.block === "assemble" && family === "music_loop") pin("durationSec", lenSec);
     if (e.block === "music" && family === "music_loop") {

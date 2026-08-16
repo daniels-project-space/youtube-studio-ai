@@ -537,7 +537,10 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
   }),
 
   child_content_safety: contract(["safety.child_content_review_required", "publish.private_only"], {
-    requiredConsumes: ["episodeGraph", "sceneManifest", "lessonContract", "contentLane"],
+    requiredConsumes: [
+      "episodeGraph", "sceneManifest", "lessonContract", "contentLane",
+      "childrenShowBible", "childrenShowBibleApproval",
+    ],
     providerProfiles: [local],
     qualityRequired: true,
   }),

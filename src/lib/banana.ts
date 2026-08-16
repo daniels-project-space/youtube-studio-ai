@@ -14,6 +14,7 @@ import {
   assertGeminiRuntimeAllowed,
   isGeminiRuntimeEnabled,
   parseJsonLoose,
+  sealedNanoBananaThumbnailPurpose,
 } from "@/lib/gemini";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
@@ -351,7 +352,7 @@ async function generateGeminiImage(
     options.strictNanoThumbnail
       ? "sealed Nano Banana thumbnail image generation"
       : "Gemini image generation outside the sealed thumbnail module",
-    options.strictNanoThumbnail ? "sealed_thumbnail" : undefined,
+    options.strictNanoThumbnail ? sealedNanoBananaThumbnailPurpose() : undefined,
   );
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");

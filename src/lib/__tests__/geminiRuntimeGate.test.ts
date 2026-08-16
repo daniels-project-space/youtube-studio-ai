@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
-import { readFileSync } from "node:fs";
+import { readFileSync, readdirSync } from "node:fs";
+import { join, relative } from "node:path";
 import { z } from "zod";
 
 import {
@@ -10,17 +11,20 @@ import {
   hasGeminiKey,
   isGeminiModelIdentifier,
   parseJsonLoose,
+  sealedNanoBananaThumbnailPurpose,
   uploadGeminiVideo,
 } from "@/lib/gemini";
 import { generateBananaImage, generateNanoBananaImageWithReceipt, hasNanoBanana } from "@/lib/banana";
 import { embedText, hasEmbedKey } from "@/lib/embeddings";
-import { withStagehand } from "@/lib/browserbase";
+import { browserbaseStagehandModel, withStagehand } from "@/lib/browserbase";
 
 const GATE_ENV = [
   "GEMINI_API_KEY",
   GEMINI_RUNTIME_OPT_IN_ENV,
   "BROWSERBASE_API_KEY",
   "BROWSERBASE_PROJECT_ID",
+  "BROWSERBASE_STAGEHAND_MODEL",
+  "BROWSERBASE_STAGEHAND_MODEL_API_KEY",
   "MASTRA_PRODUCER_MODEL",
   "FAL_KEY",
 ] as const;
@@ -48,6 +52,8 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
     process.env.GEMINI_API_KEY = "fixture-key";
     process.env.BROWSERBASE_API_KEY = "fixture-browserbase-key";
     process.env.BROWSERBASE_PROJECT_ID = "fixture-browserbase-project";
+    process.env.BROWSERBASE_STAGEHAND_MODEL = "google/gemini-2.5-flash";
+    process.env.BROWSERBASE_STAGEHAND_MODEL_API_KEY = "fixture-stagehand-model-key";
     process.env.MASTRA_PRODUCER_MODEL = "google/gemini-2.5-flash";
     delete process.env[GEMINI_RUNTIME_OPT_IN_ENV];
     globalThis.fetch = (async () => {
@@ -71,13 +77,10 @@ async function defaultDenyStopsEveryGeminiBoundaryBeforeNetwork(): Promise<void>
       isDisabled,
     );
     await assert.rejects(embedText("blocked embedding request"), isDisabled);
-    await assert.rejects(
-      withStagehand(async () => {
-        stagehandCallbackCalls += 1;
-        return "unreachable";
-      }),
-      isDisabled,
-    );
+    await assert.rejects(withStagehand(async () => {
+      stagehandCallbackCalls += 1;
+      return "unreachable";
+    }), isDisabled);
 
     // Import after pinning the model env so this proves creative agents do not
     // inherit the thumbnail opt-in and cannot construct a Google route.
@@ -117,7 +120,15 @@ async function explicitOptInAdmitsOnlyTheSealedThumbnailPurpose(): Promise<void>
     assert.equal(hasGeminiKey(), false, "the thumbnail latch must never masquerade as a general Gemini key");
     assert.equal(hasNanoBanana(), true, "the sealed thumbnail capability remains opt-in");
     assert.equal(hasEmbedKey(), false, "thumbnail opt-in must not admit Gemini embeddings");
-    assert.doesNotThrow(() => assertGeminiRuntimeAllowed("sealed thumbnail fixture", "sealed_thumbnail"));
+    assert.doesNotThrow(() => assertGeminiRuntimeAllowed(
+      "sealed thumbnail fixture",
+      sealedNanoBananaThumbnailPurpose(),
+    ));
+    assert.throws(
+      () => assertGeminiRuntimeAllowed("forged thumbnail fixture", "sealed_thumbnail" as never),
+      isDisabled,
+      "a legacy string must not forge the opaque thumbnail capability at runtime",
+    );
     await assert.rejects(geminiJson({ prompt: "still-blocked generic request" }), isDisabled);
     await assert.rejects(embedText("still-blocked embedding"), isDisabled);
     await assert.rejects(
@@ -155,10 +166,74 @@ function productionRunnersDoNotRequireThumbnailCredentials(): void {
   );
 }
 
+function walkProductionSource(dir: string): string[] {
+  return readdirSync(dir, { withFileTypes: true }).flatMap((entry) => {
+    const path = join(dir, entry.name);
+    if (entry.isDirectory()) {
+      if (entry.name === "__tests__") return [];
+      return walkProductionSource(path);
+    }
+    return entry.isFile() && /\.(?:ts|tsx)$/.test(entry.name) ? [path] : [];
+  });
+}
+
+function directGoogleRuntimeOwnersStaySealed(): void {
+  const root = process.cwd();
+  const allowedRestOwners = new Set([
+    "src/lib/banana.ts",
+    "src/lib/embeddings.ts",
+    "src/lib/gemini.ts",
+  ]);
+  const sourceFiles = walkProductionSource(join(root, "src"));
+  for (const file of sourceFiles) {
+    const relativePath = relative(root, file);
+    const source = readFileSync(file, "utf8");
+    if (/generativelanguage\.googleapis\.com/.test(source)) {
+      assert(allowedRestOwners.has(relativePath),
+        `${relativePath} must not create a direct Google REST boundary`);
+    }
+  }
+
+  const banana = readFileSync(join(root, "src/lib/banana.ts"), "utf8");
+  assert.match(banana, /sealedNanoBananaThumbnailPurpose\(\)/,
+    "the only admitted Google image boundary must present the opaque thumbnail capability");
+  assert.doesNotMatch(banana, /["']sealed_thumbnail["']/,
+    "a string literal must never forge the sealed thumbnail capability");
+
+  const browserbase = readFileSync(join(root, "src/lib/browserbase.ts"), "utf8");
+  assert.match(browserbase, /assertNonGeminiModelIdentifier/,
+    "Browserbase must reject Google model-router selections before Stagehand is imported");
+  for (const relativePath of [
+    "src/lib/browserbase.ts",
+    "src/trigger/provisionYoutube.ts",
+    "src/trigger/youtubeCreateChannel.ts",
+  ]) {
+    assert.doesNotMatch(readFileSync(join(root, relativePath), "utf8"), /google\/gemini/i,
+      `${relativePath} must inherit the non-Google Browserbase policy rather than pin Gemini`);
+  }
+}
+
+function browserAutomationGoogleModelIsRejectedBeforeImport(): void {
+  const snapshot = Object.fromEntries(GATE_ENV.map((name) => [name, process.env[name]])) as Record<
+    (typeof GATE_ENV)[number],
+    string | undefined
+  >;
+  try {
+    process.env.BROWSERBASE_STAGEHAND_MODEL = "google/gemini-2.5-flash";
+    process.env.BROWSERBASE_STAGEHAND_MODEL_API_KEY = "fixture-stagehand-model-key";
+    assert.throws(() => browserbaseStagehandModel(), isDisabled,
+      "a browser agent must reject a Google model before its dynamic SDK import");
+  } finally {
+    restoreEnv(snapshot);
+  }
+}
+
 async function main(): Promise<void> {
   await defaultDenyStopsEveryGeminiBoundaryBeforeNetwork();
   await explicitOptInAdmitsOnlyTheSealedThumbnailPurpose();
   productionRunnersDoNotRequireThumbnailCredentials();
+  directGoogleRuntimeOwnersStaySealed();
+  browserAutomationGoogleModelIsRejectedBeforeImport();
   console.log("GEMINI RUNTIME GATE TESTS PASSED");
 }
 

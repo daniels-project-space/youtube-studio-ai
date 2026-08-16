@@ -45,6 +45,17 @@ assert.equal(
 assert.deepEqual(narratedReadiness.blockers, []);
 assert.equal(familyChannelInceptionCapability("narrated_stock").mode, "registered_non_gemini");
 
+for (const family of ["sleep", "shorts"] as const) {
+  const readiness = familyProductionReadiness(family);
+  assert.equal(
+    readiness.productionReady,
+    true,
+    `${family} is admitted only through the shared Claude/Story-Spine foundation, explicit format shape, independent visual review, and sealed thumbnail exception`,
+  );
+  assert.deepEqual(readiness.blockers, []);
+  assert.equal(familyChannelInceptionCapability(family).mode, "registered_non_gemini");
+}
+
 const illustratedReadiness = familyProductionReadiness("illustrated_explainer");
 assert.equal(
   illustratedReadiness.productionReady,
@@ -56,13 +67,13 @@ assert.equal(familyChannelInceptionCapability("illustrated_explainer").mode, "re
 assert.equal(FAMILIES.illustrated_explainer.defaultThumbnailStyle, "renderer_native");
 
 for (const family of FAMILY_KEYS.filter(
-  (candidate) => candidate !== "quizyear" && candidate !== "narrated_stock" && candidate !== "illustrated_explainer",
+  (candidate) => !["quizyear", "narrated_stock", "sleep", "shorts", "illustrated_explainer"].includes(candidate),
 )) {
   const readiness = familyProductionReadiness(family);
   assert.equal(
     readiness.productionReady,
     false,
-    `${family} must not be advertised as production-ready while its automatic planner is Gemini-only`,
+    `${family} must not be advertised as production-ready while its non-Gemini automatic planner remains unregistered`,
   );
   assert.match(
     readiness.blockers.join(" "),
@@ -87,6 +98,8 @@ assert.equal(
   "narrated_stock",
   "the admitted reusable narrated route remains selectable only when it was requested",
 );
+assert.equal(productionReadyFamilyFallback("sleep"), "sleep");
+assert.equal(productionReadyFamilyFallback("shorts"), "shorts");
 assert.equal(
   productionReadyFamilyFallback("illustrated_explainer"),
   "illustrated_explainer",

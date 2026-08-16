@@ -8,9 +8,10 @@ import {
   evaluateChildrenShowBible,
   type ChildrenShowBibleInput,
 } from "@/engine/childrenShowBible";
-import { buildEpisodeGraph, episodeGraphFingerprint } from "@/engine/episodeGraph";
+import { buildEpisodeGraph, compileSceneManifest, episodeGraphFingerprint } from "@/engine/episodeGraph";
 import { contentLaneForFamily } from "@/engine/contentLane";
 import { buildLearningContract } from "@/engine/learningContract";
+import { assertChildContentSafety } from "@/trigger/blocks/childrenSafetyBlocks";
 import { childrenShowBibleBlocks } from "../childrenShowBibleBlocks";
 
 const NOW = new Date();
@@ -290,6 +291,16 @@ async function main(): Promise<void> {
   assert.equal(admitted.receipt.release, "private_human_child_editor_review_only");
   assert.equal(admitted.receipt.allowedPublishMode, "draft");
   assert.equal(admitted.receipt.requiresHumanChildEditor, true);
+  const childSafety = assertChildContentSafety({
+    episodeGraph: graph,
+    sceneManifest: compileSceneManifest(graph),
+    lessonContract,
+    contentLane: lane,
+    childrenShowBible: admitted.bible,
+    childrenShowBibleApproval: admitted.receipt,
+  });
+  assert.equal(childSafety.allowedPublishMode, "draft");
+  assert.equal(childSafety.childrenShowBibleFingerprint, admitted.bible.contentFingerprint);
 
   const logs: string[] = [];
   const patch = await childrenShowBibleBlocks[0].run({

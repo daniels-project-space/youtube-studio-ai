@@ -18,7 +18,7 @@
  * image rather than being bundled.
  */
 import type { z } from "zod";
-import { isGeminiModelIdentifier } from "@/lib/gemini";
+import { assertNonGeminiModelIdentifier } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import {
   cacheModelResponse,
@@ -288,9 +288,7 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
   const cfg = ROLE_CONFIG[o.role];
   // A model override must never route creative text through Gemini. The only
   // admitted Google integration lives in the receipt-bound thumbnail module.
-  if (isGeminiModelIdentifier(cfg.model)) {
-    throw new Error(`agentJson(${o.role}): Gemini models are thumbnail-only; choose a non-Google model`);
-  }
+  assertNonGeminiModelIdentifier(cfg.model, `agentJson(${o.role})`);
   const requestKey = modelRequestCacheKey("mastra", cfg.model, {
     role: o.role,
     prompt: o.prompt,

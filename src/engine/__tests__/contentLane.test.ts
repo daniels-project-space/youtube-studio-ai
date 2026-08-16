@@ -12,6 +12,7 @@ import {
 import type { PipelineEntry } from "@/engine/types";
 import { designPipeline } from "@/engine/designer";
 import { FAMILIES } from "@/engine/families";
+import { validatePipeline } from "@/engine/validate";
 
 const whiteboard = contentLaneForFamily("whiteboard");
 assert(whiteboard, "whiteboard must have a canonical content lane");
@@ -189,14 +190,32 @@ for (const family of Object.keys(FAMILIES) as Array<keyof typeof FAMILIES>) {
 // bypass the causal scene plan, deterministic renderer, or draft-only release.
 const childrenLearning = designPipeline({ family: "children_learning", publishMode: "public" });
 const childrenBlocks = childrenLearning.pipeline.map((entry) => entry.block);
-for (const block of ["episode_graph", "learning_contract", "child_content_safety", "scene_compiler"]) {
+for (const block of ["episode_graph", "learning_contract", "children_show_bible", "child_content_safety", "scene_compiler"]) {
   assert(childrenBlocks.includes(block), `children-learning must include ${block}`);
 }
 assert(
   childrenBlocks.indexOf("episode_graph") < childrenBlocks.indexOf("learning_contract") &&
-    childrenBlocks.indexOf("learning_contract") < childrenBlocks.indexOf("child_content_safety") &&
+    childrenBlocks.indexOf("learning_contract") < childrenBlocks.indexOf("children_show_bible") &&
+    childrenBlocks.indexOf("children_show_bible") < childrenBlocks.indexOf("child_content_safety") &&
     childrenBlocks.indexOf("child_content_safety") < childrenBlocks.indexOf("scene_compiler"),
-  "children-learning must review the locked scene plan before rendering",
+  "children-learning must bind a current child-editor packet before safety review and rendering",
+);
+assert.throws(
+  () => validatePipeline(childrenLearning.pipeline, ["contentLane"]),
+  /children_show_bible.*childrenShowBibleInput/,
+  "a supervised children pipeline must declare the external human-editor packet rather than silently fabricate one",
+);
+assert.doesNotThrow(
+  () => validatePipeline(childrenLearning.pipeline, ["contentLane", "childrenShowBibleInput"]),
+  "the approved packet is a deliberate per-run seed, not a missing automatic planner output",
+);
+assert.throws(
+  () => assertPipelineMatchesContentLane(
+    childrenLearning.contentLane,
+    childrenLearning.pipeline.filter((entry) => entry.block !== "children_show_bible"),
+  ),
+  /requires children_show_bible/,
+  "the supervised lane cannot omit the child-editor admission block",
 );
 const childrenUpload = childrenLearning.pipeline.find((entry) => entry.block === "upload_draft");
 assert.equal(childrenUpload?.params?.publishMode, "draft");

@@ -17,6 +17,7 @@ const childSafety: ChildContentSafetyReceipt = {
   episodeGraphFingerprint: "b".repeat(64),
   sceneManifestFingerprint: reviewedManifestFingerprint,
   lessonContractFingerprint: "c".repeat(64),
+  childrenShowBibleFingerprint: "d".repeat(64),
 };
 
 const renderReceipt = {

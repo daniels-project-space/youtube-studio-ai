@@ -74,6 +74,41 @@ assert.throws(
 const boundedCinematic = designPipeline({ family: "cinematic", lengthMinutes: 5 });
 assert.equal(boundedCinematic.productionReady, false, "the unavailable Novita runtime must remain fail-closed");
 assert.ok(boundedCinematic.compilation, "the bounded cinematic contract must still compile for exact cost planning");
+assert.deepEqual(
+  {
+    minSeconds: params(boundedCinematic.pipeline, "length_check").minSeconds,
+    maxSeconds: params(boundedCinematic.pipeline, "length_check").maxSeconds,
+  },
+  { minSeconds: 180, maxSeconds: 300 },
+  "a five-minute cinematic episode must never tolerate a sixth minute through its final length gate",
+);
+
+{
+  const shorts = designPipeline({ family: "shorts", lengthMinutes: 50 / 60 });
+  assert.deepEqual(
+    {
+      minSeconds: params(shorts.pipeline, "length_check").minSeconds,
+      maxSeconds: params(shorts.pipeline, "length_check").maxSeconds,
+    },
+    { minSeconds: 30, maxSeconds: 60 },
+    "the initial Shorts design must cap its production gate at YouTube's authored 60-second contract",
+  );
+  const repaired = enforceLengthContract(
+    corrupt(shorts.pipeline, ["topic_select", "script_gen", "length_check"]),
+    shorts.episodeLengthSeconds,
+    "shorts",
+  ).pipeline;
+  assert.equal(params(repaired, "topic_select").targetSeconds, 50);
+  assert.equal(params(repaired, "script_gen").maxSeconds, 50);
+  assert.deepEqual(
+    {
+      minSeconds: params(repaired, "length_check").minSeconds,
+      maxSeconds: params(repaired, "length_check").maxSeconds,
+    },
+    { minSeconds: 30, maxSeconds: 60 },
+    "the post-architect repair pass must preserve the same 15–60 second Shorts envelope",
+  );
+}
 
 const documentary = designPipeline({
   family: "documentary_collage_short",

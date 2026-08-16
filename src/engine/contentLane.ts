@@ -274,7 +274,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     key: "children_learning_supervised",
     family: "children_learning",
     primaryRenderer: "scene_compiler",
-    requiredBlocks: ["story_spine", "episode_graph", "learning_contract", "child_content_safety", "scene_compiler", "qa_visual"],
+    requiredBlocks: ["story_spine", "episode_graph", "learning_contract", "children_show_bible", "child_content_safety", "scene_compiler", "qa_visual"],
     forbiddenRendererBlocks: [
       "stock_footage",
       "gen_footage",

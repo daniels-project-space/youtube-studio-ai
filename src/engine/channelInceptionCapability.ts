@@ -1,4 +1,8 @@
 import type { FamilyKey } from "./families";
+import {
+  narratedPlanningFoundation,
+  type NarratedFoundationFamily,
+} from "./narratedPlanningFoundation";
 
 /**
  * A channel family is not an autonomous creator merely because its episode
@@ -33,6 +37,24 @@ const DEFAULT_UNREGISTERED: ChannelInceptionCapability = Object.freeze({
 });
 
 /**
+ * The shared narrated foundation is the complete creator route, not merely a
+ * script generator.  Keeping this conversion here makes a new narrated family
+ * opt in to both the episode and channel-creation contracts independently.
+ */
+function registeredNarratedChannelInceptionCapability(
+  family: NarratedFoundationFamily,
+): ChannelInceptionCapability {
+  const foundation = narratedPlanningFoundation(family);
+  if (!foundation) throw new Error(`missing narrated channel-inception foundation for ${family}`);
+  return Object.freeze({
+    mode: "registered_non_gemini" as const,
+    id: foundation.inception.id,
+    provenance: foundation.inception.provenance,
+    coveredStages: foundation.inception.coveredStages,
+  });
+}
+
+/**
  * This is intentionally a partial map.  The default is fail-closed so adding
  * a non-Gemini episode planner cannot accidentally make channel inception
  * available. QuizYear is the first fully wired route: its source-first,
@@ -42,20 +64,9 @@ const DEFAULT_UNREGISTERED: ChannelInceptionCapability = Object.freeze({
 const EXPLICIT_CHANNEL_INCEPTION_CAPABILITIES: Readonly<
   Partial<Record<FamilyKey, ChannelInceptionCapability>>
 > = Object.freeze({
-  narrated_stock: Object.freeze({
-    mode: "registered_non_gemini" as const,
-    id: "narrated-stock-claude-novita-inception/v1",
-    provenance:
-      "metadata-only YouTube research, Claude positioning/Style DNA/Show Bible, deterministic ElevenLabs voice selection with local cold-open evidence, Novita channel art verified by non-Google vision, and a sealed thumbnail-only Gemini exception",
-    coveredStages: Object.freeze([
-      "metadata-only-niche-research",
-      "claude-positioning-style-dna-show-bible",
-      "provider-metadata-voice-selection-and-local-cold-open",
-      "novita-channel-art-and-non-google-vision-qa",
-      "non-google-starter-topics-and-sealed-thumbnail-slate",
-      "draft-only-publication-state",
-    ]),
-  }),
+  narrated_stock: registeredNarratedChannelInceptionCapability("narrated_stock"),
+  sleep: registeredNarratedChannelInceptionCapability("sleep"),
+  shorts: registeredNarratedChannelInceptionCapability("shorts"),
   quizyear: Object.freeze({
     mode: "registered_non_gemini" as const,
     id: "quizyear-deterministic-channel-foundation/v1",

@@ -321,6 +321,7 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
       episodeGraphFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
       sceneManifestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
       lessonContractFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      childrenShowBibleFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
     }).strict(),
   },
   sceneCompilerReceipt: {

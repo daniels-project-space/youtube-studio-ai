@@ -81,7 +81,22 @@ export function hasGeminiKey(): boolean {
   return false;
 }
 
-export type GeminiRuntimePurpose = "sealed_thumbnail";
+/**
+ * Opaque capability used by the receipt-bound Nano Banana adapter.  This is a
+ * runtime identity, rather than an exported string literal, so a future
+ * Google caller cannot accidentally inherit the thumbnail exception by
+ * spelling a purpose string correctly.
+ */
+const SEALED_NANO_BANANA_THUMBNAIL_PURPOSE = Symbol("sealed-nano-banana-thumbnail");
+export type GeminiRuntimePurpose = typeof SEALED_NANO_BANANA_THUMBNAIL_PURPOSE;
+
+/**
+ * The sole capability issuer. Keep the raw symbol private: callers can obtain
+ * it only by deliberately importing the sealed thumbnail capability.
+ */
+export function sealedNanoBananaThumbnailPurpose(): GeminiRuntimePurpose {
+  return SEALED_NANO_BANANA_THUMBNAIL_PURPOSE;
+}
 
 /**
  * Reject every Gemini provider boundary before it can read, upload, or send
@@ -90,7 +105,7 @@ export type GeminiRuntimePurpose = "sealed_thumbnail";
  * reviewed rather than inheriting the thumbnail exception.
  */
 export function assertGeminiRuntimeAllowed(operation: string, purpose?: GeminiRuntimePurpose): void {
-  if (purpose !== "sealed_thumbnail" || !isGeminiRuntimeEnabled()) {
+  if (purpose !== SEALED_NANO_BANANA_THUMBNAIL_PURPOSE || !isGeminiRuntimeEnabled()) {
     throw new GeminiRuntimeDisabledError(operation);
   }
 }
@@ -106,6 +121,20 @@ export function isGeminiModelIdentifier(model: string | undefined): boolean {
     normalized.startsWith("google/") ||
     normalized.startsWith("google:")
   );
+}
+
+/**
+ * Use this at model-router boundaries (Mastra, browser agents, SDK adapters).
+ * A router model is not a thumbnail image request, so it can never receive the
+ * sealed Nano Banana capability even when the thumbnail environment opt-in is
+ * present.
+ */
+export function assertNonGeminiModelIdentifier(model: string | undefined, operation: string): void {
+  if (isGeminiModelIdentifier(model)) {
+    throw new GeminiRuntimeDisabledError(
+      `${operation}: Gemini models are thumbnail-only and cannot be selected for this runtime`,
+    );
+  }
 }
 
 function key(): string {

@@ -4,6 +4,11 @@ import {
   type PipelineRuntimeBlockInput,
 } from "./runtimeCapability";
 import { familyChannelInceptionCapability } from "./channelInceptionCapability";
+import {
+  assertNarratedFoundationFormatContract,
+  narratedPlanningFoundation,
+  type NarratedFoundationFamily,
+} from "./narratedPlanningFoundation";
 
 /**
  * Engine families = curated presets that map a channel format to a base pipeline
@@ -509,38 +514,29 @@ export type AutonomousPlanningCapability =
       geminiBackedBlocks: readonly string[];
     };
 
+function registeredNarratedPlanningCapability(
+  family: NarratedFoundationFamily,
+): Extract<AutonomousPlanningCapability, { mode: "registered_non_gemini" }> {
+  const foundation = narratedPlanningFoundation(family);
+  if (!foundation) throw new Error(`missing narrated planning foundation for ${family}`);
+  return {
+    mode: "registered_non_gemini",
+    id: foundation.plannerId,
+    plannerBlock: foundation.plannerBlock,
+    provenance: foundation.provenance,
+    requiredEntries: foundation.requiredEntries,
+    forbiddenGeminiBlocks: foundation.forbiddenGeminiBlocks,
+  };
+}
+
 export const FAMILY_AUTONOMOUS_PLANNING: Readonly<
   Record<FamilyKey, AutonomousPlanningCapability>
 > = {
-  narrated_stock: {
-    mode: "registered_non_gemini",
-    id: "narrated-stock-claude-story-spine/v1",
-    plannerBlock: "topic_select",
-    provenance:
-      "non-Google topic research, Claude crew/script planning, local narration evidence, Story Spine assembly, and independent non-Google visual review; Gemini is sealed to thumbnail_gen only",
-    requiredEntries: [
-      { block: "competitor_research" },
-      { block: "topic_select" },
-      { block: "director_brief" },
-      { block: "dp_brief" },
-      { block: "editor_brief" },
-      { block: "composer_brief" },
-      { block: "critic_spec" },
-      { block: "script_gen" },
-      { block: "qa_script" },
-      { block: "narration_tts" },
-      { block: "story_spine" },
-      { block: "timeline_assemble" },
-      { block: "thumbnail_gen" },
-      { block: "qa_visual" },
-      { block: "upload_draft" },
-    ],
-    forbiddenGeminiBlocks: ["motion_comic", "documotion_short", "whiteboard_scribe", "lore_short"],
-  },
+  narrated_stock: registeredNarratedPlanningCapability("narrated_stock"),
   music_loop: { mode: "unregistered", geminiBackedBlocks: ["topic_select"] },
-  sleep: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "script_gen"] },
+  sleep: registeredNarratedPlanningCapability("sleep"),
   comic: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "motion_comic"] },
-  shorts: { mode: "unregistered", geminiBackedBlocks: ["topic_select", "script_gen"] },
+  shorts: registeredNarratedPlanningCapability("shorts"),
   documentary_collage_short: {
     mode: "unregistered",
     geminiBackedBlocks: ["topic_select", "script_gen", "documotion_short"],
@@ -649,6 +645,7 @@ export function assertFamilyAutonomousPlanningPipeline(
       `${FAMILIES[family].label}: autonomous planner ${capability.id} leaked Gemini-backed module(s): ${leaked.join(", ")}`,
     );
   }
+  assertNarratedFoundationFormatContract(family, pipeline);
 }
 
 function noGeminiPlanningBlocker(template: Family): string | undefined {
