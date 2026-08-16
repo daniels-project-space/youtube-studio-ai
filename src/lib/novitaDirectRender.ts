@@ -626,6 +626,12 @@ function runtimeBootstrapSource(runtimeSha256: string): string {
 sha=${JSON.stringify(runtimeSha256)}
 root=pathlib.Path('/network/runtime/ltx-2.5-'+sha)
 compatibility=root/'.torch-cu118-2.7.1'
+def repair_python_paths(runtime_root):
+  original='/opt/LTX-2'
+  relocated=str(runtime_root/'opt/LTX-2')
+  for receipt in (runtime_root/'opt/LTX-2/.venv').rglob('*.pth'):
+    content=receipt.read_text('utf-8')
+    if original in content: receipt.write_text(content.replace(original,relocated),'utf-8')
 def runtime_ready():
   return (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha and compatibility.is_file() and compatibility.read_text().strip()=='torch==2.7.1+cu118'
 def ensure_cuda_compatibility():
@@ -640,13 +646,18 @@ def ensure_cuda_compatibility():
   compatibility.write_text('torch==2.7.1+cu118\\n')
 def exec_worker():
   os.execv(str(root/'opt/LTX-2/.venv/bin/python'),[str(root/'opt/LTX-2/.venv/bin/python'),str(root/'opt/novita-worker/worker.py')])
-if runtime_ready(): exec_worker()
+if runtime_ready():
+  repair_python_paths(root)
+  exec_worker()
 lock=root.with_name(root.name+'.lock')
 lock.parent.mkdir(parents=True,exist_ok=True)
 with lock.open('a+b') as handle:
   fcntl.flock(handle,fcntl.LOCK_EX)
-  if runtime_ready(): exec_worker()
+  if runtime_ready():
+    repair_python_paths(root)
+    exec_worker()
   if (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha:
+    repair_python_paths(root)
     ensure_cuda_compatibility()
     exec_worker()
   if root.exists(): raise RuntimeError('runtime root exists without its matching ready receipt')
@@ -695,6 +706,7 @@ with lock.open('a+b') as handle:
       if not relocated.exists(): raise RuntimeError('runtime archive has unresolved /opt symlink')
       link.unlink()
       link.symlink_to(os.path.relpath(relocated,link.parent))
+    repair_python_paths(stage)
     if not (stage/'opt/LTX-2/.venv/bin/python').is_file() or not (stage/'opt/novita-worker/worker.py').is_file(): raise RuntimeError('runtime archive is incomplete')
     (stage/'.ready').write_text(sha+'\n')
     if bundle.parent!=stage: shutil.rmtree(bundle.parent,ignore_errors=True)
