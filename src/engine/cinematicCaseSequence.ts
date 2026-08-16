@@ -7,7 +7,13 @@ import {
   CasefileEvidenceShotMapSchema,
   type CasefileEvidenceShotMap,
 } from "./casefileEvidenceShotMap";
+import type { ReferenceQualityContract } from "./creative/types";
 import { SceneManifestSchema } from "./episodeGraph";
+import {
+  assertCurrentReferenceMechanicsPacket,
+  referenceMechanicsPromptGuidance,
+  type ReferenceMechanicsPacket,
+} from "./referenceMechanicsPacket";
 import { CasefileSourceAdmissionReceiptSchema } from "./sourceFirstAdmission";
 import { ShotPlanSchema, type ShotPlan } from "./storySpine";
 
@@ -248,6 +254,8 @@ export const CinematicGeneratedScenePlanSchema = z
     sequenceFingerprint: fingerprint,
     sourcePacketFingerprint: fingerprint,
     evidenceShotMapFingerprint: fingerprint,
+    /** Optional review-only craft packet; it never authorizes a render by itself. */
+    referenceMechanicsPacketFingerprint: fingerprint.optional(),
     durationSec: z.number().finite().positive(),
     scenes: z.array(CinematicGeneratedSceneSchema).min(2).max(2_000),
     release: z.literal("private_human_editorial_review_only"),
@@ -259,6 +267,8 @@ export const CinematicCreativeLocksSchema = z
   .object({
     version: z.literal(CINEMATIC_CASE_SEQUENCE_VERSION),
     sequenceFingerprint: fingerprint,
+    /** Preserves mechanics provenance into final-master QA without any source comparison. */
+    referenceMechanicsPacketFingerprint: fingerprint.optional(),
     locks: z.array(z.object({
       id: identifier("cinematic-shot"),
       startSec: z.number().finite().nonnegative(),
@@ -274,6 +284,7 @@ export const CinematicEditDecisionListSchema = z
   .object({
     version: z.literal(CINEMATIC_CASE_SEQUENCE_VERSION),
     sequenceFingerprint: fingerprint,
+    referenceMechanicsPacketFingerprint: fingerprint.optional(),
     durationSec: z.number().finite().positive(),
     edits: z.array(z.object({
       shotId: identifier("cinematic-shot"),
@@ -326,6 +337,7 @@ export const CinematicCaseSequenceIssueCodeSchema = z.enum([
   "tension_grammar_invalid",
   "story_payoff_invalid",
   "camera_repetition_invalid",
+  "reference_mechanics_invalid",
   "editorial_review_mismatch",
   "editorial_review_stale",
 ]);
@@ -490,6 +502,9 @@ export function evaluateCinematicCaseSequence(
     evidenceShotMapAdmission: unknown;
     sceneManifest: unknown;
     shotList: unknown;
+    /** Optional; a supplied packet must bind the current contract and ShotPlan. */
+    referenceMechanicsPacket?: unknown;
+    referenceQuality?: ReferenceQualityContract;
   },
   options: { now?: Date } = {},
 ): CinematicCaseSequenceAdmissionReport {
@@ -499,6 +514,30 @@ export function evaluateCinematicCaseSequence(
   }
   const input = parsedInput.data;
   const issues: CinematicCaseSequenceIssue[] = [];
+  if (args.referenceMechanicsPacket !== undefined || args.referenceQuality !== undefined) {
+    if (args.referenceMechanicsPacket === undefined || !args.referenceQuality) {
+      issues.push(issue(
+        "reference_mechanics_invalid",
+        "Reference mechanics require both the reviewed packet and its current attributed ReferenceQuality contract.",
+        "Supply both artifacts together, or omit both; this optional review aid must never silently fall back to an unbound style prompt.",
+      ));
+    } else {
+      try {
+        assertCurrentReferenceMechanicsPacket({
+          packet: args.referenceMechanicsPacket,
+          referenceQuality: args.referenceQuality,
+          shotList: args.shotList,
+          now: options.now,
+        });
+      } catch (error) {
+        issues.push(issue(
+          "reference_mechanics_invalid",
+          error instanceof Error ? error.message : "The reference mechanics packet is invalid.",
+          "Refresh the human-reviewed, source-attributed mechanics packet from the current ReferenceQuality contract and timed Story Spine ShotPlan.",
+        ));
+      }
+    }
+  }
   const sourceAdmission = CasefileSourceAdmissionReceiptSchema.safeParse(args.sourceAdmission);
   const evidenceMap = CasefileEvidenceShotMapSchema.safeParse(args.evidenceShotMap);
   const evidenceAdmission = CasefileEvidenceShotMapAdmissionReceiptSchema.safeParse(args.evidenceShotMapAdmission);
@@ -744,6 +783,8 @@ export function assertCinematicCaseSequence(
     evidenceShotMapAdmission: unknown;
     sceneManifest: unknown;
     shotList: unknown;
+    referenceMechanicsPacket?: unknown;
+    referenceQuality?: ReferenceQualityContract;
   },
   options: { now?: Date } = {},
 ): AdmittedCinematicCaseSequence {
@@ -752,6 +793,18 @@ export function assertCinematicCaseSequence(
     throw new Error(`cinematic case sequence admission blocked: ${report.issues.map((entry) => `${entry.code}: ${entry.message} Remediation: ${entry.remediation}`).join(" | ")}`);
   }
   const input = CinematicCaseSequenceInputSchema.parse(args.input);
+  const referenceMechanics: ReferenceMechanicsPacket | undefined =
+    args.referenceMechanicsPacket !== undefined && args.referenceQuality
+      ? assertCurrentReferenceMechanicsPacket({
+          packet: args.referenceMechanicsPacket,
+          referenceQuality: args.referenceQuality,
+          shotList: args.shotList,
+          now: options.now,
+        })
+      : undefined;
+  const mechanicsGuidance = referenceMechanics
+    ? referenceMechanicsPromptGuidance(referenceMechanics, { now: options.now })
+    : undefined;
   const sequenceFingerprint = cinematicCaseSequenceContentFingerprint(input);
   const castById = new Map(input.cast.map((mannequin) => [mannequin.id, mannequin]));
   const parentShotById = new Map(
@@ -790,6 +843,7 @@ export function assertCinematicCaseSequence(
     const narrativeLock = [
       `Narrative role ${beat.narrativeRole}; story driver (never render this as on-screen text): ${beat.causalQuestion}`,
       `This shot must make the narration purpose visually clear: ${shot.narrationPurpose}`,
+      ...(mechanicsGuidance ? [`Approved editorial mechanics: ${mechanicsGuidance}`] : []),
     ].join(" ").slice(0, 620);
     const still = [
       `Primary visual: ${shot.still}`,
@@ -842,6 +896,9 @@ export function assertCinematicCaseSequence(
     const diegeticSoundscape = [
       `Diegetic only: ${soundRole[shot.coveragePurpose]}.`,
       `Motivate sound solely from this visible action: ${shot.motion}`,
+      ...(referenceMechanics
+        ? [`Apply only this original audio relationship: ${referenceMechanics.audioRelationship.guidance}`]
+        : []),
       "No dialogue, narration, score, lyrics, or invented off-screen event.",
     ].join(" ").slice(0, 900).trim();
     return CinematicGeneratedSceneSchema.parse({
@@ -882,6 +939,7 @@ export function assertCinematicCaseSequence(
     sequenceFingerprint,
     sourcePacketFingerprint: input.sourcePacketFingerprint,
     evidenceShotMapFingerprint: input.evidenceShotMapFingerprint,
+    ...(referenceMechanics ? { referenceMechanicsPacketFingerprint: referenceMechanics.contentFingerprint } : {}),
     durationSec,
     scenes,
     release: "private_human_editorial_review_only",
@@ -889,6 +947,7 @@ export function assertCinematicCaseSequence(
   const creativeLocks = CinematicCreativeLocksSchema.parse({
     version: CINEMATIC_CASE_SEQUENCE_VERSION,
     sequenceFingerprint,
+    ...(referenceMechanics ? { referenceMechanicsPacketFingerprint: referenceMechanics.contentFingerprint } : {}),
     locks: input.beats.flatMap((beat) => beat.shots.map((shot) => ({
       id: shot.id,
       startSec: shot.t0,
@@ -907,6 +966,7 @@ export function assertCinematicCaseSequence(
   const editDecisionList = CinematicEditDecisionListSchema.parse({
     version: CINEMATIC_CASE_SEQUENCE_VERSION,
     sequenceFingerprint,
+    ...(referenceMechanics ? { referenceMechanicsPacketFingerprint: referenceMechanics.contentFingerprint } : {}),
     durationSec,
     edits: input.beats.flatMap((beat) => beat.shots.map((shot) => ({
       shotId: shot.id,

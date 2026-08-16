@@ -13,6 +13,37 @@ export interface NarrationPerformanceEvidence {
 }
 
 /**
+ * A sentence timecode drives captions, visual inserts, and the cinematic edit
+ * plan.  A small number of failed duration probes can be reconciled against
+ * the completed narration; beyond this limit the individual timing map is an
+ * estimate, not a trustworthy edit clock.
+ */
+export const MAX_ESTIMATED_NARRATION_SENTENCE_DURATIONS = 2;
+
+export function assertNarrationTimingMeasurementIntegrity(args: {
+  sentenceCount: number;
+  estimatedDurationCount: number;
+}): void {
+  const sentenceCount = Number(args.sentenceCount);
+  const estimatedDurationCount = Number(args.estimatedDurationCount);
+  if (!Number.isInteger(sentenceCount) || sentenceCount < 1) {
+    throw new Error("narration timing integrity: sentence count is invalid");
+  }
+  if (
+    !Number.isInteger(estimatedDurationCount) ||
+    estimatedDurationCount < 0 ||
+    estimatedDurationCount > sentenceCount
+  ) {
+    throw new Error("narration timing integrity: estimated-duration count is invalid");
+  }
+  if (estimatedDurationCount > MAX_ESTIMATED_NARRATION_SENTENCE_DURATIONS) {
+    throw new Error(
+      `narration timing integrity: ${estimatedDurationCount} sentence durations are estimates (maximum ${MAX_ESTIMATED_NARRATION_SENTENCE_DURATIONS}); caption and edit sync would be fiction`,
+    );
+  }
+}
+
+/**
  * The TTS worker emits this receipt and final QA consumes it on a different
  * worker. Keep that boundary strict so a log line, stale shape, or substituted
  * audio path cannot masquerade as measured narration evidence.

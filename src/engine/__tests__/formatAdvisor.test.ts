@@ -33,6 +33,25 @@ expectFamily("Guided breathwork for sleep and relaxation", "sleep");
 expectFamily("Hand-drawn whiteboard explainer for a science mechanism", "whiteboard");
 expectFamily("Vertical caption-led viral fact reels", "shorts");
 
+// `channelTypes` are capability promises, not decorative catalog copy. The
+// deterministic advisor must discover the reusable families from the natural
+// language used to describe the opportunity, without a bespoke per-channel
+// branch or a model call.
+const reusableExplainerOpportunities = [
+  ["An animated geography atlas explaining trade routes", "illustrated_explainer", "geography atlas"],
+  ["An animated science lesson showing how ecosystems work", "illustrated_explainer", "animated science"],
+  ["An economic history explainer about the rise of railroads", "narrated_stock", "economic history"],
+  ["A business history explainer about company strategy", "narrated_stock", "business history"],
+] as const;
+for (const [concept, family, expectedSignal] of reusableExplainerOpportunities) {
+  const recommendation = recommendFormatDeterministically({ concept });
+  assert.equal(recommendation.family, family, `${concept} must select its existing reusable family`);
+  assert.match(recommendation.reasoning, new RegExp(`Matched .*${expectedSignal}`));
+  // This taxonomy fix only improves discovery. It must not relax the existing
+  // production, source, provider, or validation gates for the selected family.
+  assert.equal(recommendation.preflight.validationRenderRequired, true);
+}
+
 const ranked = rankFormatCandidates({ concept: "evidence-led archival documentary short" });
 assert.equal(ranked[0]?.family, "documentary_collage_short");
 assert(ranked[0]!.matchedSignals.length > 0, "ranking must explain its deterministic match");

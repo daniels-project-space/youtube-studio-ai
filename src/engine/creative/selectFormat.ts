@@ -244,8 +244,8 @@ export interface FormatRecommendation {
 export const FORMAT_RECIPES: Record<FamilyKey, FormatRecipe> = {
   narrated_stock: {
     family: "narrated_stock",
-    channelTypes: ["narrated visual essays", "research-led history", "psychology / finance-lite explainers", "source-attributed data stories", "ranked chart-led analyses", "motivational series"],
-    signals: ["visual essay", "deep dive", "stoicism", "psychology", "finance", "history", "documentary", "explainer", "narrated", "data story", "data storytelling", "data visualization", "animated charts", "chart-led", "ranked comparison", "statistical breakdown", "market share", "economic data"],
+    channelTypes: ["narrated visual essays", "research-led history", "economic- and business-history causal explainers", "psychology / finance-lite explainers", "source-attributed data stories", "ranked chart-led analyses", "motivational series"],
+    signals: ["visual essay", "deep dive", "stoicism", "psychology", "finance", "history", "economic history", "business history", "company history", "market history", "documentary", "explainer", "narrated", "data story", "data storytelling", "data visualization", "animated charts", "chart-led", "ranked comparison", "statistical breakdown", "market share", "economic data"],
     qualityFocus: ["causal story spine", "voice performance", "evidence-matched b-roll", "retention pacing", "source-attributed numeric claims"],
     tradeoff: "Best general long-form lane; chart-led data stories are an explicit opt-in and require named sources for every visualized number.",
   },
@@ -307,8 +307,8 @@ export const FORMAT_RECIPES: Record<FamilyKey, FormatRecipe> = {
   },
   illustrated_explainer: {
     family: "illustrated_explainer",
-    channelTypes: ["animated visual explainers", "science and systems lessons", "geography / history atlases", "language micro-courses", "original illustrated serial stories"],
-    signals: ["animated explainer", "visual explainer", "science animation", "map animation", "diagram", "systems explained", "language lesson", "visual lesson", "how it works"],
+    channelTypes: ["animated visual explainers", "animated science and systems lessons", "animated geography atlases", "language micro-courses", "original illustrated serial stories"],
+    signals: ["animated explainer", "visual explainer", "science animation", "animated science", "science lesson", "map animation", "animated geography", "geography atlas", "diagram", "systems explained", "language lesson", "visual lesson", "how it works"],
     qualityFocus: ["causal Episode Graph", "diagram and label legibility", "narration-to-state timing", "original scene continuity"],
     tradeoff: "A provider-independent visual language for causal lessons and stories; every scene must communicate a real state change rather than fill time with decoration.",
   },

@@ -5,6 +5,7 @@ import { tmpdir } from "node:os";
 import { join } from "node:path";
 import {
   assertNarrationPerformanceEvidence,
+  assertNarrationTimingMeasurementIntegrity,
   evaluateNarrationCadence,
   planNarrationCadence,
   preflightNarrationPerformance,
@@ -97,6 +98,21 @@ async function main(): Promise<void> {
     }),
     /pause .* does not match its planned/,
     "a post-probe timing scale that changes semantic pause rhythm must fail instead of being silently accepted",
+  );
+
+  assert.doesNotThrow(
+    () => assertNarrationTimingMeasurementIntegrity({ sentenceCount: 12, estimatedDurationCount: 2 }),
+    "a bounded pair of probe misses can still be reconciled against the measured full narration",
+  );
+  assert.throws(
+    () => assertNarrationTimingMeasurementIntegrity({ sentenceCount: 12, estimatedDurationCount: 3 }),
+    /caption and edit sync would be fiction/,
+    "a visual/caption timeline must not be planned from several estimated sentence durations",
+  );
+  assert.throws(
+    () => assertNarrationTimingMeasurementIntegrity({ sentenceCount: 2, estimatedDurationCount: 3 }),
+    /estimated-duration count is invalid/,
+    "a malformed timing receipt cannot use a permissive threshold",
   );
 }
 

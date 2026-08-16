@@ -97,6 +97,7 @@ import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
 import { narrationPhysics } from "@/lib/voicecraft";
 import {
   assertNarrationPerformanceEvidence,
+  assertNarrationTimingMeasurementIntegrity,
   planNarrationCadence,
   preflightNarrationPerformance,
   reconcileNarrationCadenceAfterDurationMeasurement,
@@ -937,9 +938,10 @@ export const narrationTts: Block = {
         }
         return { p, dur };
       });
-      if (probeEstimates > 2) {
-        throw new Error(`narration_tts: ${probeEstimates} sentence durations are ESTIMATES (probe failures) — caption/overlay sync would be fiction; failing loud`);
-      }
+      assertNarrationTimingMeasurementIntegrity({
+        sentenceCount: items.length,
+        estimatedDurationCount: probeEstimates,
+      });
       if (probeEstimates > 0) ctx.log(`narration_tts: WARNING ${probeEstimates} sentence duration(s) estimated (probe failed) — timings may drift slightly`);
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
@@ -1044,6 +1046,14 @@ export const narrationTts: Block = {
         throw new Error(`narration_tts: runaway take (${dur.toFixed(0)}s for ${wcnt2} words) — v3 blowout`);
       }
       return { p, dur };
+    });
+    // Do not build an edit timeline around several estimated sentence lengths.
+    // The final master can only reconcile a small, bounded probe miss; beyond
+    // that captions, story beats, and Fern-style causal cuts would all be
+    // planned against fiction.
+    assertNarrationTimingMeasurementIntegrity({
+      sentenceCount: sentences.length,
+      estimatedDurationCount: probeFailures,
     });
     const partPaths: string[] = parts.map((x) => x.p);
     // Timings carry the DISPLAY text â€” audio tags are performed by the voice,

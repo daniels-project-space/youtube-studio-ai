@@ -28,6 +28,12 @@ import {
   type CasefileSourcePacket,
 } from "@/engine/sourceFirstAdmission";
 import { createSourceBoundStorySpineHandoff } from "@/engine/sourceBoundStorySpine";
+import {
+  createReferenceMechanicsPacket,
+  referenceMechanicsPacketContentFingerprint,
+} from "@/engine/referenceMechanicsPacket";
+import type { ReferenceQualityContract } from "@/engine/creative/types";
+import { admitCinematicFinalMasterQa } from "@/engine/cinematicFinalMasterQaAdmission";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
@@ -474,6 +480,109 @@ async function main() {
   assert.equal(admitted.editDecisionList.edits.length, 6);
   assert.equal(admitted.creativeLocks.locks.length, 6);
   assert.equal(admitted.receipt.release, "private_human_editorial_review_only");
+
+  // An optional mechanics packet is useful only when it is tied to an
+  // attributed, reviewed source contract and the exact current ShotPlan. It
+  // must alter the cinematic handoff while never making the normal path wait
+  // for an unrelated reference study.
+  const referenceQuality: ReferenceQualityContract = {
+    version: "1.0.0",
+    family: "casefile_documentary",
+    calibration: "calibrated",
+    comparisonPolicy: "mechanics-only-no-automatic-comparison",
+    sourceDocument: "Reviewed documentary craft notes, retained by the editorial desk.",
+    sources: [{
+      id: "reference-documentary-craft",
+      label: "Documentary craft reference",
+      url: "https://example.com/documentary-craft-reference",
+      transferableMechanic: "Use a factual opening question, evidence-led scene changes, and a later cited reframe.",
+      prohibitedImitation: "Do not copy names, visual signatures, wording, music, footage, or a specific edit sequence.",
+    }],
+    requirements: [],
+    unresolvedAreas: [],
+  };
+  const mechanics = (guidance: string) => ({
+    guidance,
+    sourceIds: ["reference-documentary-craft"],
+  });
+  const referenceMechanicsPacket = createReferenceMechanicsPacket({
+    referenceQuality,
+    shotList,
+    mechanics: {
+      openingPromisePayoff: mechanics("Open on the sourced question, then earn a cited consequence that reframes it."),
+      beatVisualRhythm: mechanics("Change visual information only when a beat earns new geography, evidence, or consequence."),
+      narrationPaceClarity: mechanics("Leave clean causal space around the key factual turn; do not overstuff the narration."),
+      cutSceneFunction: mechanics("Every cut should reveal a new fact, relationship, location, action, or controlled breath."),
+      audioRelationship: mechanics("Keep physical location tone subordinate to the narrator and motivate it from visible action only."),
+      recurringIdentity: mechanics("Retain original faceless wardrobe, silhouette, prop, and palette locks across related shots."),
+      exclusions: mechanics("No copied phrasing, branded composition, signature sound, recognizable likeness, borrowed footage, or direct source comparison."),
+    },
+    review: {
+      id: "reference-mechanics-review-vault-closure-001",
+      reviewerId: "reviewer-documentary-desk",
+      reviewedAt: new Date(NOW.getTime() - 10 * 60 * 1_000).toISOString(),
+    },
+    now: NOW,
+  });
+  const withMechanics = assertCinematicCaseSequence({
+    ...args,
+    referenceMechanicsPacket,
+    referenceQuality,
+  }, { now: NOW });
+  assert.equal(
+    withMechanics.generatedScenePlan.referenceMechanicsPacketFingerprint,
+    referenceMechanicsPacket.contentFingerprint,
+    "the cinematic render handoff must retain the exact reviewed mechanics provenance",
+  );
+  assert.equal(
+    withMechanics.creativeLocks.referenceMechanicsPacketFingerprint,
+    referenceMechanicsPacket.contentFingerprint,
+    "final-master QA receives the same mechanics provenance without a competitor comparison",
+  );
+  assert.equal(
+    admitCinematicFinalMasterQa({
+      creativeLocks: withMechanics.creativeLocks,
+      editDecisionList: withMechanics.editDecisionList,
+    }).referenceMechanicsPacketFingerprint,
+    referenceMechanicsPacket.contentFingerprint,
+    "final-master QA admission must carry the exact reviewed mechanics packet rather than losing it after render planning",
+  );
+  assert.throws(
+    () => admitCinematicFinalMasterQa({
+      creativeLocks: withMechanics.creativeLocks,
+      editDecisionList: {
+        ...withMechanics.editDecisionList,
+        referenceMechanicsPacketFingerprint: "0".repeat(64),
+      },
+    }),
+    /mechanics provenance from different review packets/i,
+    "final-master QA must reject a mechanics fingerprint swapped after cinematic admission",
+  );
+  assert.match(
+    withMechanics.generatedScenePlan.scenes[0]!.still,
+    /Mechanics-only original expression/i,
+    "reviewed original-expression mechanics must reach the actual still/I2V prompt rather than a dead reviewer note",
+  );
+  assert.match(
+    withMechanics.generatedScenePlan.scenes[0]!.diegeticSoundscape,
+    /original audio relationship/i,
+    "the approved audio relationship must reach the individual take's sound plan",
+  );
+  const staleMechanics = structuredClone(referenceMechanicsPacket);
+  staleMechanics.openingPromisePayoff.guidance = "A changed opening must force fresh editorial review.";
+  assert.throws(
+    () => assertCinematicCaseSequence({ ...args, referenceMechanicsPacket: staleMechanics, referenceQuality }, { now: NOW }),
+    /reference_mechanics_invalid:.*content fingerprint/i,
+    "a mechanics change must invalidate the editor's signed packet before it can influence a cinematic render",
+  );
+  assert.notEqual(
+    referenceMechanicsPacketContentFingerprint({
+      ...referenceMechanicsPacket,
+      openingPromisePayoff: mechanics("A different source-bound opening promise."),
+    }),
+    referenceMechanicsPacket.contentFingerprint,
+    "the mechanics fingerprint must cover every transferable instruction",
+  );
 
   const missingStoryPayoff = structuredClone(input);
   delete missingStoryPayoff.beats[1]!.storyPayoff;

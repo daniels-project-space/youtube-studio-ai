@@ -21,6 +21,8 @@ export const CINEMATIC_FINAL_MASTER_QA_ADMISSION_VERSION =
 export const CinematicFinalMasterQaAdmissionSchema = z.object({
   version: z.literal(CINEMATIC_FINAL_MASTER_QA_ADMISSION_VERSION),
   sequenceFingerprint: z.string().min(1),
+  /** Optional review-only provenance; never a similarity/comparison result. */
+  referenceMechanicsPacketFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   reviewer: z.literal("non_google_vision"),
   lockCount: z.number().int().min(1).max(240),
   cutCount: z.number().int().min(0).max(239),
@@ -46,6 +48,12 @@ function expectedAdmission(args: {
   if (args.creativeLocks.sequenceFingerprint !== args.editDecisionList.sequenceFingerprint) {
     throw new Error("cinematic final-master QA admission cannot combine locks and EDL from different sequences");
   }
+  if (
+    args.creativeLocks.referenceMechanicsPacketFingerprint !==
+    args.editDecisionList.referenceMechanicsPacketFingerprint
+  ) {
+    throw new Error("cinematic final-master QA admission cannot combine mechanics provenance from different review packets");
+  }
   const lockIds = args.creativeLocks.locks.map((lock) => lock.id);
   const editIds = args.editDecisionList.edits.map((edit) => edit.shotId);
   if (!exactIds(lockIds, editIds)) {
@@ -56,6 +64,9 @@ function expectedAdmission(args: {
   return {
     version: CINEMATIC_FINAL_MASTER_QA_ADMISSION_VERSION,
     sequenceFingerprint: args.creativeLocks.sequenceFingerprint,
+    ...(args.creativeLocks.referenceMechanicsPacketFingerprint
+      ? { referenceMechanicsPacketFingerprint: args.creativeLocks.referenceMechanicsPacketFingerprint }
+      : {}),
     reviewer: "non_google_vision",
     lockCount,
     cutCount,
@@ -90,6 +101,7 @@ export function assertCinematicFinalMasterQaAdmission(args: {
   const admission = CinematicFinalMasterQaAdmissionSchema.parse(args.admission);
   if (
     admission.sequenceFingerprint !== expected.sequenceFingerprint ||
+    admission.referenceMechanicsPacketFingerprint !== expected.referenceMechanicsPacketFingerprint ||
     admission.reviewer !== expected.reviewer ||
     admission.lockCount !== expected.lockCount ||
     admission.cutCount !== expected.cutCount ||

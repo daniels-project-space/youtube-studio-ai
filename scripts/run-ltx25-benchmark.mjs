@@ -19,6 +19,12 @@ import {
 } from "@aws-sdk/client-s3";
 import { getSignedUrl } from "@aws-sdk/s3-request-presigner";
 import { NodeHttpHandler } from "@smithy/node-http-handler";
+import {
+  canonicalJson,
+  createLtx25BenchmarkTerminal,
+  incompleteReason,
+  sha256,
+} from "./lib/ltx25BenchmarkTerminal.mjs";
 
 const LTX_MODEL = "Lightricks/LTX-2.5";
 const LTX_REVISION = "ce298b1259d61ce6c87e05154b9ad339b16f32a0";
@@ -42,16 +48,6 @@ const workerOverlayPath = fileURLToPath(new URL("../infra/novita/worker.py", imp
 const WORKER_OVERLAY_BYTES = await readFile(workerOverlayPath);
 const WORKER_OVERLAY_SHA256 = crypto.createHash("sha256").update(WORKER_OVERLAY_BYTES).digest("hex");
 const WORKER_OVERLAY_KEY = `novita/runtime/ltx-2.5/worker-overlays/${WORKER_OVERLAY_SHA256}.py`;
-
-function canonicalJson(value) {
-  if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
-  if (value && typeof value === "object") {
-    return `{${Object.keys(value).sort().map((key) => `${JSON.stringify(key)}:${canonicalJson(value[key])}`).join(",")}}`;
-  }
-  const encoded = JSON.stringify(value);
-  if (encoded === undefined) throw new Error("benchmark manifest contains an undefined value");
-  return encoded;
-}
 
 function sealManifest(unsigned) {
   if (!/^(image|video)-[a-f0-9]{32}$/.test(unsigned.manifestId || "")) {
@@ -276,7 +272,6 @@ const headers = {
   "user-agent": "youtube-studio-ai/ltx25-benchmark",
 };
 
-const sha256 = (value) => crypto.createHash("sha256").update(value).digest("hex");
 const sleep = (ms) => new Promise((resolve) => setTimeout(resolve, ms));
 const responseData = (value) => value?.data && typeof value.data === "object" && !Array.isArray(value.data)
   ? value.data : value;
@@ -335,40 +330,26 @@ async function jsonIfPresent(key) {
   }
 }
 
-async function putJson(key, value) {
+async function putJson(key, value, metadata = {}) {
   await sendR2(() => new PutObjectCommand({
     Bucket: bucket,
     Key: key,
     Body: JSON.stringify(value),
     ContentType: "application/json",
+    Metadata: metadata,
   }), `put:${key}`);
 }
 
-let incompletePromise;
-function incompleteReason(error) {
-  return String(error?.message || error || "unknown failure")
-    .replace(/https?:\/\/[^\s"<>]+/g, "[url]")
-    .replace(/[A-Za-z0-9_-]{40,}/g, "[redacted]")
-    .slice(0, 500);
-}
-
-async function markIncomplete({ error, signal } = {}) {
-  if (!incompletePromise) {
-    const incompleteKey = `${root}/incomplete.json`;
-    incompletePromise = putJson(incompleteKey, {
-      contract: "ltx-2.5-rtx4090-benchmark/v1",
-      ok: false,
-      status: "incomplete",
-      nonce,
-      ltxModelManifestKey,
-      ...(signal ? { signal } : {}),
-      reason: incompleteReason(error || `received ${signal || "unknown signal"}`),
-    }).then(() => {
-      console.error(JSON.stringify({ event: "benchmark_incomplete", incompleteKey }));
-    });
-  }
-  return incompletePromise;
-}
+const terminal = createLtx25BenchmarkTerminal({
+  contract: "ltx-2.5-rtx4090-benchmark/v1",
+  reportKey: `${root}/report.json`,
+  incompleteKey: `${root}/incomplete.json`,
+  nonce,
+  ltxModelManifestKey,
+  putJson,
+  headObject: (key) => sendR2(() => new HeadObjectCommand({ Bucket: bucket, Key: key }), `head:${key}`),
+  onIncomplete: (incompleteKey) => console.error(JSON.stringify({ event: "benchmark_incomplete", incompleteKey })),
+});
 
 async function ensureWorkerOverlay() {
   try {
@@ -707,14 +688,13 @@ async function main() {
     }
     return { id: job.id, key: job.artifact.key, url: await signedGet(job.artifact.key, 604_800), proof };
   }));
-  const report = {
+  await terminal.sealSuccess({
     contract: "ltx-2.5-rtx4090-benchmark/v1", ok: true, nonce, ltxModelManifestKey,
     stageMaxUsd: STAGE_MAX_USD, spotRateUsdPerHour: spotRate, phaseMaxSeconds,
     zImage: { model: ZIMAGE_MODEL, revision: ZIMAGE_REVISION, volumeReceipt: zProbe },
     ltx: { model: LTX_MODEL, revision: LTX_REVISION, pipeline: "distilled", stageOne: "640x352", output: "1280x704@25", quantization: "fp8-cast", offload: "cpu", workerOverlaySha256: workerOverlay.sha256 },
     outputs: outputRows.map(({ id, key, proof }) => ({ id, key, proof })),
-  };
-  await putJson(`${root}/report.json`, report);
+  });
   console.log(JSON.stringify({ event: "benchmark_complete", reportKey: `${root}/report.json`, outputs: outputRows }));
 }
 
@@ -730,7 +710,7 @@ async function cleanupActiveWorkers() {
 
 function cleanupOnSignal(signal) {
   console.error(JSON.stringify({ event: "benchmark_interrupted", signal, workers: activeWorkers.size }));
-  void Promise.allSettled([markIncomplete({ signal }), cleanupActiveWorkers()])
+  void Promise.allSettled([terminal.markIncomplete({ signal }), cleanupActiveWorkers()])
     .then(([marker]) => {
       if (marker.status === "rejected") {
         console.error(JSON.stringify({ event: "benchmark_incomplete_unmarked", signal, reason: incompleteReason(marker.reason) }));
@@ -746,7 +726,7 @@ try {
   await main();
 } catch (error) {
   try {
-    await markIncomplete({ error });
+    await terminal.markIncomplete({ error });
   } catch (markerError) {
     console.error(JSON.stringify({ event: "benchmark_incomplete_unmarked", reason: incompleteReason(markerError) }));
     throw new AggregateError([error, markerError], "benchmark failed and could not be marked incomplete");

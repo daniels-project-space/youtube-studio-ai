@@ -13,6 +13,11 @@ assert.match(narrationSource, /reconcileNarrationCadenceAfterDurationMeasurement
 assert.doesNotMatch(narrationSource, /sentence timings rescaled ×\$\{k\.toFixed\(4\)\}/, "a post-cadence timing scale must never be accepted without rechecking pause rhythm");
 assert.doesNotMatch(narrationSource, /Math\.random\(/, "narration timing must be repeatable across retries and cannot use random pauses");
 assert.match(narrationSource, /chapterCadencePlan/, "chapter narration must use the same shared cadence planner");
+assert.equal(
+  narrationSource.match(/assertNarrationTimingMeasurementIntegrity\(/g)?.length,
+  2,
+  "both chapter and ordinary narrated TTS paths must reject a timeline built from several estimated sentence durations",
+);
 assert.match(narrationSource, /judgeAvailable:\s*false/, "narration_tts must never borrow Gemini availability from thumbnail work");
 assert.match(narrationSource, /localEvidenceGateAvailable:\s*true/, "production narration must use the local FFmpeg evidence gate");
 assert.match(narrationSource, /preflightNarrationPerformance\(/, "the actual cold open and final narration must be measured");
