@@ -85,15 +85,30 @@ function runtimeBootstrapSource() {
   return String.raw`import fcntl,hashlib,os,pathlib,shutil,tarfile,tempfile,urllib.request
 sha=os.environ['NOVITA_RUNTIME_BUNDLE_SHA256']
 root=pathlib.Path('/network/runtime/ltx-2.5-'+sha)
+compatibility=root/'.torch-cu118-2.7.1'
+def runtime_ready():
+  return (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha and compatibility.is_file() and compatibility.read_text().strip()=='torch==2.7.1+cu118'
+def ensure_cuda_compatibility():
+  if compatibility.is_file() and compatibility.read_text().strip()=='torch==2.7.1+cu118': return
+  python=root/'opt/LTX-2/.venv/bin/python'
+  if not python.is_file(): raise RuntimeError('portable Python is missing before CUDA compatibility install')
+  import subprocess
+  subprocess.run([str(python),'-m','pip','install','--no-cache-dir','--force-reinstall','torch==2.7.1','torchvision==0.22.1','torchaudio==2.7.1','--index-url','https://download.pytorch.org/whl/cu118'],check=True,stdout=subprocess.DEVNULL)
+  evidence=subprocess.check_output([str(python),'-c',"import torch;print(torch.__version__+'|'+str(torch.version.cuda)+'|'+str(torch.cuda.is_available()))"],text=True).strip()
+  if evidence!='2.7.1+cu118|11.8|True': raise RuntimeError('CUDA-compatible Torch verification failed: '+evidence)
+  compatibility.write_text('torch==2.7.1+cu118\\n')
 def exec_worker():
   python=str(root/'opt/LTX-2/.venv/bin/python')
   os.execv(python,[python,str(root/'opt/novita-worker/worker.py')])
-if (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha: exec_worker()
+if runtime_ready(): exec_worker()
 lock=root.with_name(root.name+'.lock')
 lock.parent.mkdir(parents=True,exist_ok=True)
 with lock.open('a+b') as handle:
   fcntl.flock(handle,fcntl.LOCK_EX)
-  if (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha: exec_worker()
+  if runtime_ready(): exec_worker()
+  if (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha:
+    ensure_cuda_compatibility()
+    exec_worker()
   if root.exists(): raise RuntimeError('runtime root exists without matching ready receipt')
   stage=pathlib.Path(tempfile.mkdtemp(prefix='.ltx-runtime-stage.',dir='/network/runtime'))
   try:
@@ -143,6 +158,7 @@ with lock.open('a+b') as handle:
     (stage/'.ready').write_text(sha+'\n')
     if bundle.parent!=stage: shutil.rmtree(bundle.parent,ignore_errors=True)
     os.replace(stage,root)
+    ensure_cuda_compatibility()
   except BaseException:
     shutil.rmtree(stage,ignore_errors=True)
     raise
