@@ -645,7 +645,11 @@ def render_image(
     if pipe is None:
         pipe = ZImagePipeline.from_pretrained(model_path, torch_dtype=torch.bfloat16, local_files_only=True)
         _check_deadline(deadline_monotonic)
-        pipe.to("cuda")
+        # Z-Image Turbo's bf16 text encoder + transformer exceed a 24 GB
+        # card when resident together.  Keep its normal high-quality bf16
+        # execution, but hand components to the RTX 4090 one at a time.
+        # This is the upstream-recommended path for memory-constrained GPUs.
+        pipe.enable_model_cpu_offload()
         _check_deadline(deadline_monotonic)
         _IMAGE_PIPELINES[model_path] = pipe
     generator = torch.Generator(device="cuda").manual_seed(int(job["seed"]))
