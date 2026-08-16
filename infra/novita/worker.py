@@ -76,6 +76,10 @@ SHA256_RE = re.compile(r"^[a-f0-9]{64}$")
 JOB_ID_RE = re.compile(r"^[A-Za-z0-9][A-Za-z0-9_-]{0,79}$")
 REQUIRED_GPU_SKU = "RTX 4090"
 REQUIRED_GPU_COUNT = 1
+LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID = "ltx25-720p-native-x2-smoke"
+LTX_25_720P_NATIVE_X2_SMOKE_FRAMES = 17
+LTX_25_720P_NATIVE_X2_SMOKE_MAX_SAMPLED_PEAK_VRAM_MIB = 22_000
+VRAM_SAMPLE_INTERVAL_SECONDS = 1.0
 
 STOP = threading.Event()
 _IMAGE_PIPELINES: dict[str, Any] = {}
@@ -97,6 +101,17 @@ def approved_profile(profile_id: str, phase: str) -> dict[str, Any]:
         "production": (1920, 1088, 9, 0, 1),
         "hero": (2048, 1152, 9, 0, 2),
     }
+    # The native-720p smoke renders its Z-Image input at the exact stage-one
+    # geometry, avoiding an unproven crop/stretch before LTX's x2 refinement.
+    if phase == "image" and profile_id == LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID:
+        return {
+            "contractVersion": "1.0.0", "id": profile_id, "phase": phase,
+            "model": ZIMAGE_MODEL, "revision": ZIMAGE_REVISION,
+            "checkpoint": "Z-Image-Turbo", "width": 1280, "height": 704,
+            "steps": 9, "guidanceScale": 0, "precision": "bf16", "candidates": 1,
+            "infrastructure": APPROVED_INFRASTRUCTURE, "benchmarkOnly": True,
+            "allowFallback": False,
+        }
     # LTX 2.5 distilled is itself a two-stage pipeline: 640x352 stage one,
     # followed by latent-space x2 refinement to the 1280x704 deliverable.
     # Keep all profile IDs on this single proven hardware contract; quality
@@ -132,6 +147,28 @@ def approved_profile(profile_id: str, phase: str) -> dict[str, Any]:
             "spatialUpscalerCheckpoint": LTX_SPATIAL_UPSCALER_CHECKPOINT,
             "quantization": "fp8-cast", "offload": "cpu", "spatialUpscaleFactor": 2,
             "stageOneWidth": 640, "stageOneHeight": 352,
+            "allowFallback": False,
+        }
+    # This profile is intentionally absent from every app-generation profile
+    # and runtime allow-list.  It exists only for the sealed operator smoke
+    # benchmark that proves native 720p-class stage one plus x2 refinement.
+    if phase == "video" and profile_id == LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID:
+        return {
+            "contractVersion": "1.0.0", "id": profile_id, "phase": phase,
+            "model": LTX_MODEL, "revision": LTX_REVISION,
+            "checkpoint": LTX_TRANSFORMER_CHECKPOINT,
+            "width": 2560, "height": 1408, "steps": 8,
+            "guidanceScale": 1, "precision": "bf16", "candidates": 1,
+            "infrastructure": APPROVED_INFRASTRUCTURE, "fps": 25,
+            "pipeline": "distilled", "twoStageRefine": True,
+            "textEncoderCheckpoint": LTX_TEXT_ENCODER_CHECKPOINT,
+            "videoVaeCheckpoint": LTX_VIDEO_VAE_CHECKPOINT,
+            "audioVaeCheckpoint": LTX_AUDIO_VAE_CHECKPOINT,
+            "spatialUpscalerCheckpoint": LTX_SPATIAL_UPSCALER_CHECKPOINT,
+            "quantization": "fp8-cast", "offload": "cpu", "spatialUpscaleFactor": 2,
+            "stageOneWidth": 1280, "stageOneHeight": 704,
+            "benchmarkOnly": True, "maxFrames": LTX_25_720P_NATIVE_X2_SMOKE_FRAMES,
+            "maxSampledPeakVramMib": LTX_25_720P_NATIVE_X2_SMOKE_MAX_SAMPLED_PEAK_VRAM_MIB,
             "allowFallback": False,
         }
     raise ValueError(f"unsupported approved render profile: {profile_id}/{phase}")
@@ -532,6 +569,9 @@ def validate_manifest(manifest: Any, expected_sha256: str) -> dict[str, Any]:
         raise ValueError("render profile is not an approved immutable profile") from error
     if profile != expected_profile:
         raise ValueError("render profile drifts from its approved immutable model and runtime settings")
+    is_native_720p_x2_smoke = profile.get("id") == LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID
+    if is_native_720p_x2_smoke and len(manifest["jobs"]) != 1:
+        raise ValueError("native-720p x2 smoke benchmark must contain exactly one job per phase")
     if manifest["phase"] == "video" and (
         manifest.get("runtimeRepository") != LTX_RUNTIME_REPOSITORY
         or manifest.get("runtimeRevision") != LTX_RUNTIME_REVISION
@@ -568,6 +608,8 @@ def validate_manifest(manifest: Any, expected_sha256: str) -> dict[str, Any]:
             frames, fps = job.get("frames"), job.get("fps")
             if isinstance(frames, bool) or not isinstance(frames, int) or frames < 9 or (frames - 1) % 8:
                 raise ValueError(f"render job {job['id']} has invalid LTX frame count")
+            if is_native_720p_x2_smoke and frames != LTX_25_720P_NATIVE_X2_SMOKE_FRAMES:
+                raise ValueError(f"render job {job['id']} must use exactly {LTX_25_720P_NATIVE_X2_SMOKE_FRAMES} smoke frames")
             if isinstance(fps, bool) or not isinstance(fps, (int, float)) or not math.isfinite(fps) or fps <= 0:
                 raise ValueError(f"render job {job['id']} has invalid frame rate")
             if float(fps) != float(profile.get("fps")):
@@ -687,11 +729,33 @@ def _terminate_process_group(process: subprocess.Popen[Any]) -> None:
         process.wait(timeout=10)
 
 
+def _sample_vram_mib(maximum_mib: int) -> int:
+    """Return one live 4090 VRAM sample, or fail before the smoke job can continue."""
+    try:
+        result = subprocess.run(
+            ["nvidia-smi", "--query-gpu=memory.used", "--format=csv,noheader,nounits"],
+            check=True,
+            capture_output=True,
+            text=True,
+            timeout=20,
+        )
+    except (OSError, subprocess.SubprocessError) as error:
+        raise RuntimeError("native-720p x2 smoke benchmark lacks sampled VRAM evidence") from error
+    values = [line.strip() for line in result.stdout.splitlines() if line.strip()]
+    if len(values) != REQUIRED_GPU_COUNT or any(not value.isdecimal() for value in values):
+        raise RuntimeError("native-720p x2 smoke benchmark has invalid sampled VRAM evidence")
+    sampled = max(int(value) for value in values)
+    if sampled > maximum_mib:
+        raise RuntimeError(f"native-720p x2 smoke benchmark exceeded {maximum_mib} MiB VRAM: {sampled} MiB")
+    return sampled
+
+
 def _run_bounded(
     command: list[str],
     timeout_seconds: int,
     deadline_monotonic: float | None = None,
-) -> None:
+    max_sampled_peak_vram_mib: int | None = None,
+) -> int | None:
     _check_deadline(deadline_monotonic)
     # Keep renderer diagnostics bounded, durable only for this process, and
     # attach the tail to the signed checkpoint if inference fails. Without it
@@ -704,24 +768,37 @@ def _run_bounded(
             stderr=stderr_file,
         )
         started = time.monotonic()
-        while process.poll() is None:
-            if STOP.wait(2):
-                _terminate_process_group(process)
-                _check_deadline(deadline_monotonic)
-                raise InterruptedError("render interrupted")
-            if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
-                STOP.set()
-                _terminate_process_group(process)
-                raise InterruptedError("render exceeded sealed lifetime")
-            if time.monotonic() - started > timeout_seconds:
-                _terminate_process_group(process)
-                raise TimeoutError("render exceeded bounded worker timeout")
+        sampled_peak_vram_mib: int | None = None
+        try:
+            while process.poll() is None:
+                if max_sampled_peak_vram_mib is not None:
+                    sample = _sample_vram_mib(max_sampled_peak_vram_mib)
+                    sampled_peak_vram_mib = max(sampled_peak_vram_mib or 0, sample)
+                if STOP.wait(VRAM_SAMPLE_INTERVAL_SECONDS if max_sampled_peak_vram_mib is not None else 2):
+                    _terminate_process_group(process)
+                    _check_deadline(deadline_monotonic)
+                    raise InterruptedError("render interrupted")
+                if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+                    STOP.set()
+                    _terminate_process_group(process)
+                    raise InterruptedError("render exceeded sealed lifetime")
+                if time.monotonic() - started > timeout_seconds:
+                    _terminate_process_group(process)
+                    raise TimeoutError("render exceeded bounded worker timeout")
+        except BaseException:
+            _terminate_process_group(process)
+            raise
         if process.returncode != 0:
             stderr_file.seek(0, os.SEEK_END)
             size = stderr_file.tell()
             stderr_file.seek(max(0, size - 4_000))
             diagnostic = re.sub(r"\s+", " ", stderr_file.read().decode("utf-8", "replace")).strip()
             raise RuntimeError(f"renderer exited with status {process.returncode}: {diagnostic or 'no stderr'}")
+        if max_sampled_peak_vram_mib is not None:
+            if sampled_peak_vram_mib is None:
+                raise RuntimeError("native-720p x2 smoke benchmark lacks sampled VRAM evidence")
+            return sampled_peak_vram_mib
+        return None
 
 
 def build_video_command(
@@ -768,12 +845,19 @@ def build_video_command(
     return command
 
 
-def probe_video_output(output: Path, width: int, height: int) -> dict[str, int | bool]:
+def probe_video_output(
+    output: Path,
+    width: int,
+    height: int,
+    expected_frames: int | None = None,
+    expected_fps: int | None = None,
+) -> dict[str, int | bool]:
     """Require the actual encoded MP4 to match the sealed LTX stage-two target and carry audible LTX audio."""
     result = subprocess.run(
         [
             "ffprobe", "-v", "error",
-            "-show_entries", "stream=codec_type,width,height", "-of", "json", str(output),
+            *( ["-count_frames"] if expected_frames is not None else [] ),
+            "-show_entries", "stream=codec_type,width,height,avg_frame_rate,nb_read_frames", "-of", "json", str(output),
         ],
         check=False,
         capture_output=True,
@@ -797,6 +881,19 @@ def probe_video_output(output: Path, width: int, height: int) -> dict[str, int |
         raise RuntimeError(f"rendered LTX output geometry must be {width}x{height}")
     if len(audio_streams) != 1:
         raise RuntimeError("rendered LTX output must contain exactly one generated audio stream")
+    proof: dict[str, int | bool] = {"outputWidth": width, "outputHeight": height, "hasAudio": True}
+    if expected_frames is not None or expected_fps is not None:
+        if expected_frames is None or expected_fps is None:
+            raise ValueError("exact LTX output proof requires both frame count and frame rate")
+        try:
+            frame_count = int(str(stream.get("nb_read_frames") or ""))
+            rate_parts = str(stream.get("avg_frame_rate") or "").split("/", 1)
+            rate_numerator, rate_denominator = int(rate_parts[0]), int(rate_parts[1])
+        except (TypeError, ValueError, IndexError) as error:
+            raise RuntimeError("ffprobe did not provide exact LTX frame evidence") from error
+        if frame_count != expected_frames or rate_denominator <= 0 or rate_numerator != expected_fps * rate_denominator:
+            raise RuntimeError("rendered LTX output does not match its sealed frame count or frame rate")
+        proof.update({"frameCount": frame_count, "frameRate": expected_fps})
     # A container-level audio stream is not enough evidence: a silent AAC track
     # would survive assembly but contributes nothing to the intended physical
     # scene. Keep the threshold conservative so quiet room tone remains valid;
@@ -817,7 +914,7 @@ def probe_video_output(output: Path, width: int, height: int) -> dict[str, int |
     mean_db = float(mean_match.group(1)) if mean_match else None
     if mean_db is None or mean_db <= -65.0:
         raise RuntimeError("rendered LTX output contains no usable generated audio")
-    return {"outputWidth": width, "outputHeight": height, "hasAudio": True}
+    return proof
 
 
 def render_video(
@@ -834,9 +931,12 @@ def render_video(
         raise ValueError("unsupported LTX pipeline")
     frames = int(job["frames"])
     width, height = int(job["width"]), int(job["height"])
+    is_native_720p_x2_smoke = profile.get("id") == LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID
+    expected_width, expected_height = (2560, 1408) if is_native_720p_x2_smoke else (1280, 704)
     if (
         frames < 9 or (frames - 1) % 8 or width % 64 or height % 64
-        or width != 1280 or height != 704
+        or width != expected_width or height != expected_height
+        or (is_native_720p_x2_smoke and frames != LTX_25_720P_NATIVE_X2_SMOKE_FRAMES)
         or profile.get("stageOneWidth") != width // 2
         or profile.get("stageOneHeight") != height // 2
         or profile.get("spatialUpscaleFactor") != 2
@@ -862,9 +962,20 @@ def render_video(
             _check_deadline(deadline_monotonic)
             raise InterruptedError("render exceeded sealed lifetime")
         timeout_seconds = min(timeout_seconds, remaining_seconds)
-    _run_bounded(command, timeout_seconds, deadline_monotonic)
-    output_proof = probe_video_output(output, width, height)
-    return {
+    sampled_peak_vram_mib = _run_bounded(
+        command,
+        timeout_seconds,
+        deadline_monotonic,
+        LTX_25_720P_NATIVE_X2_SMOKE_MAX_SAMPLED_PEAK_VRAM_MIB if is_native_720p_x2_smoke else None,
+    )
+    output_proof = probe_video_output(
+        output,
+        width,
+        height,
+        frames if is_native_720p_x2_smoke else None,
+        int(job["fps"]) if is_native_720p_x2_smoke else None,
+    )
+    proof = {
         **output_proof,
         "stageOneWidth": width // 2,
         "stageOneHeight": height // 2,
@@ -873,6 +984,11 @@ def render_video(
         "quantization": "fp8-cast",
         "offload": "cpu",
     }
+    if is_native_720p_x2_smoke:
+        if sampled_peak_vram_mib is None:
+            raise RuntimeError("native-720p x2 smoke benchmark lacks sampled VRAM evidence")
+        proof["sampledPeakVramMib"] = sampled_peak_vram_mib
+    return proof
 
 
 def _put_file(url: str, output: Path, headers: dict[str, str]) -> None:
@@ -964,7 +1080,7 @@ def _load_checkpoint(
 
 def video_render_contract(profile: dict[str, Any]) -> dict[str, Any]:
     """Return the exact runtime/geometry values the controller must see again."""
-    return {
+    contract = {
         "model": profile["model"],
         "revision": profile["revision"],
         "checkpoint": profile["checkpoint"],
@@ -983,6 +1099,13 @@ def video_render_contract(profile: dict[str, Any]) -> dict[str, Any]:
         "outputWidth": profile["width"],
         "outputHeight": profile["height"],
     }
+    if profile.get("id") == LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID:
+        contract.update({
+            "benchmarkOnly": True,
+            "maxFrames": LTX_25_720P_NATIVE_X2_SMOKE_FRAMES,
+            "maxSampledPeakVramMib": LTX_25_720P_NATIVE_X2_SMOKE_MAX_SAMPLED_PEAK_VRAM_MIB,
+        })
+    return contract
 
 
 def assert_video_output_proof(proof: dict[str, Any], profile: dict[str, Any]) -> None:
@@ -998,6 +1121,17 @@ def assert_video_output_proof(proof: dict[str, Any], profile: dict[str, Any]) ->
     }
     if any(proof.get(key) != value for key, value in expected.items()):
         raise ValueError("video output evidence drifts from the sealed LTX 2.5 x2 profile")
+    if profile.get("id") == LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID:
+        sampled_peak = proof.get("sampledPeakVramMib")
+        if (
+            proof.get("frameCount") != LTX_25_720P_NATIVE_X2_SMOKE_FRAMES
+            or proof.get("frameRate") != 25
+            or isinstance(sampled_peak, bool)
+            or not isinstance(sampled_peak, int)
+            or sampled_peak < 0
+            or sampled_peak > LTX_25_720P_NATIVE_X2_SMOKE_MAX_SAMPLED_PEAK_VRAM_MIB
+        ):
+            raise ValueError("native-720p x2 smoke video evidence is incomplete or exceeds its VRAM gate")
 
 
 def _heartbeat_loop(

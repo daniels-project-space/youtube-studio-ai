@@ -1,7 +1,7 @@
 #!/usr/bin/env node
 /**
- * Produce three real, small LTX 2.5 I2V benchmark clips without opening the
- * channel renderer to unbenchmarked paid work.  It is intentionally an
+ * Produce one bounded, native-720p LTX 2.5 I2V smoke clip without opening the
+ * channel renderer to unbenchmarked paid work. It is intentionally an
  * operator-only proof: each worker gets a sealed manifest, starts only after
  * the preceding evidence is complete, and is deleted before the next phase.
  *
@@ -25,6 +25,13 @@ import {
   incompleteReason,
   sha256,
 } from "./lib/ltx25BenchmarkTerminal.mjs";
+import {
+  LTX25_720P_NATIVE_X2_SMOKE,
+  assertLtx25Native720X2SmokeJob,
+  assertLtx25Native720X2SmokeProof,
+  ltx25Native720X2SmokeImageProfile,
+  ltx25Native720X2SmokeProfile,
+} from "./lib/ltx25BenchmarkSmokeProfile.mjs";
 
 const LTX_MODEL = "Lightricks/LTX-2.5";
 const LTX_REVISION = "ce298b1259d61ce6c87e05154b9ad339b16f32a0";
@@ -41,6 +48,7 @@ const RUNTIME_BUNDLE_SHA256 = process.env.NOVITA_RUNTIME_BUNDLE_SHA256
 const API = "https://api.novita.ai/gpu-instance/openapi/v1";
 const STAGE_MAX_USD = 0.68;
 const TOTAL_MAX_USD = 3;
+const BENCHMARK_CONTRACT = "ltx-2.5-rtx4090-720p-native-x2-smoke/v1";
 const PROBE_MAX_SECONDS = 300;
 const DEFAULT_PHASE_MAX_SECONDS = 6_600;
 const URL_TTL_SECONDS = 10_800;
@@ -254,7 +262,7 @@ for (const key of ["NOVITA_API_KEY", "R2_ACCESS_KEY_ID", "R2_SECRET_ACCESS_KEY",
 
 const bucket = process.env.R2_BUCKET || "youtube-studio-ai";
 const nonce = crypto.randomBytes(12).toString("hex");
-const root = `novita/benchmarks/ltx-2.5/${nonce}`;
+const root = `novita/benchmarks/ltx-2.5-720p-native-x2-smoke/${nonce}`;
 const activeWorkers = new Set();
 const s3 = new S3Client({
   region: "auto",
@@ -341,7 +349,7 @@ async function putJson(key, value, metadata = {}) {
 }
 
 const terminal = createLtx25BenchmarkTerminal({
-  contract: "ltx-2.5-rtx4090-benchmark/v1",
+  contract: BENCHMARK_CONTRACT,
   reportKey: `${root}/report.json`,
   incompleteKey: `${root}/incomplete.json`,
   nonce,
@@ -474,48 +482,28 @@ urllib.request.urlopen(request,timeout=120).read()`;
 }
 
 function imageProfile() {
-  return {
-    contractVersion: "1.0.0", id: "draft", phase: "image", model: ZIMAGE_MODEL,
-    revision: ZIMAGE_REVISION, checkpoint: "Z-Image-Turbo", width: 1280, height: 736,
-    steps: 9, guidanceScale: 0, precision: "bf16", candidates: 1,
+  // Match the native LTX stage-one canvas exactly. The smoke proof must not
+  // conceal aspect-ratio drift through an implicit input crop or stretch.
+  return ltx25Native720X2SmokeImageProfile({
+    model: ZIMAGE_MODEL,
+    revision: ZIMAGE_REVISION,
     infrastructure: { provider: "novita", capacityMode: "spot", weightStorage: "local-persistent-disk", cacheMount: "/workspace/model-cache", checkpointing: true, idleShutdownSeconds: 300, elasticGpuCeiling: 8 },
-    allowFallback: false,
-  };
+  });
 }
 
 function videoProfile() {
-  return {
-    contractVersion: "1.0.0", id: "draft", phase: "video", model: LTX_MODEL,
-    revision: LTX_REVISION, checkpoint: "ltx-2.5-22b-distilled-transformer-bf16.safetensors",
-    width: 1280, height: 704, steps: 8, guidanceScale: 1, precision: "bf16", candidates: 1,
+  return ltx25Native720X2SmokeProfile({
+    model: LTX_MODEL,
+    revision: LTX_REVISION,
     infrastructure: { provider: "novita", capacityMode: "spot", weightStorage: "local-persistent-disk", cacheMount: "/workspace/model-cache", checkpointing: true, idleShutdownSeconds: 300, elasticGpuCeiling: 8 },
-    fps: 25, pipeline: "distilled", twoStageRefine: true,
-    textEncoderCheckpoint: "gemma4-12b-with-proj-ltx-2.5-bf16.safetensors",
-    videoVaeCheckpoint: "ltx-2.5-video-vae-bf16.safetensors",
-    audioVaeCheckpoint: "ltx-2.5-audio-vae-bf16.safetensors",
-    spatialUpscalerCheckpoint: "ltx-2.5-latent-spatial-upscaler-x2-bf16-1.0.safetensors",
-    quantization: "fp8-cast", offload: "cpu", spatialUpscaleFactor: 2,
-    stageOneWidth: 640, stageOneHeight: 352, allowFallback: false,
-  };
+  });
 }
 
-const testScenes = [
-  {
+const smokeScene = {
     id: "mannequin-archive",
     still: "Cinematic 16:9 evidence archive at blue hour, original faceless porcelain mannequin investigator, matte featureless head with no human likeness, charcoal herringbone overcoat, oxblood scarf, leather gloves, a sealed evidence envelope on a walnut desk, rain traced window, practical tungsten lamp, restrained 1970s editorial crime-documentary palette, volumetric atmosphere, exact wardrobe and props locked, no text, no logos, no gore.",
     motion: "Slow deliberate dolly push past the rain-streaked foreground toward the faceless mannequin as its gloved hand stops just short of the sealed envelope; subtle rain movement and lamp flicker, controlled parallax, no morphing, no new objects, preserve the exact wardrobe, mannequin silhouette, desk, envelope, lighting and room geometry from the reference frame. Native room tone only, soft rain and distant traffic, no dialogue, no narration, no music.",
-  },
-  {
-    id: "mannequin-corridor",
-    still: "Cinematic 16:9 apartment corridor before dawn, original faceless porcelain mannequin witness, matte featureless head with no human likeness, ivory wool turtleneck beneath a tailored navy 1980s trench coat, folded newspaper and brass key on a narrow table, receding hallway practical lights, humid window shadows, restrained documentary tension, exact clothing silhouette and objects locked, no text, no logos, no gore.",
-    motion: "Measured lateral truck right through the corridor foreground while the faceless mannequin turns its torso toward the brass key without revealing a face; slight curtain movement and practical-light flicker, layered depth, motivated tension, no morphing, no new people or props, preserve the exact mannequin, navy trench, ivory turtleneck, newspaper, key, hallway and lighting from the reference frame. Native building tone only, distant lift cable and floorboards, no dialogue, no narration, no music.",
-  },
-  {
-    id: "mannequin-platform",
-    still: "Cinematic 16:9 early-morning train platform in light fog, original faceless porcelain mannequin courier, matte featureless head with no human likeness, dark green raincoat, mustard knit scarf, worn brown satchel, a timetable board out of focus with no readable text, wet platform reflections, distant train lights, elegant archival thriller composition, exact wardrobe and platform props locked, no logos, no gore.",
-    motion: "Slow crane rise from wet platform reflections to the faceless mannequin holding the satchel as distant train light grows through fog; rain and scarf move naturally, restrained cinematic tension, no morphing, no new objects or people, preserve exact mannequin silhouette, green raincoat, mustard scarf, satchel, fog, platform and lighting from the reference frame. Native station ambience only, rain and distant train approach, no dialogue, no narration, no music.",
-  },
-];
+};
 
 async function buildPhaseManifest({ phase, profile, models, jobs, maxRuntimeSeconds }) {
   const phaseRoot = `${root}/${phase}`;
@@ -663,19 +651,30 @@ async function main() {
     manifestSha256: zProbe.manifestSha256, sourcePath: zProbe.sourcePath, localPath: "z-image",
   }];
   const workerOverlay = await ensureWorkerOverlay();
-  const imageJobs = testScenes.map((scene, index) => ({ id: scene.id, prompt: scene.still, seed: 903_000 + index * 31, width: 1280, height: 736, steps: 9, guidanceScale: 0 }));
+  const imageJobs = [{
+    id: smokeScene.id,
+    prompt: smokeScene.still,
+    seed: 903_000,
+    width: LTX25_720P_NATIVE_X2_SMOKE.stageOneWidth,
+    height: LTX25_720P_NATIVE_X2_SMOKE.stageOneHeight,
+    steps: 9,
+    guidanceScale: 0,
+  }];
   const image = await buildPhaseManifest({ phase: "image", profile: imageProfile(), models: zModels, jobs: imageJobs, maxRuntimeSeconds: phaseMaxSeconds });
   console.error(JSON.stringify({ event: "benchmark_stage", stage: "render_reference_images" }));
   await executePhase({ phase: "image", ...image, maxRuntimeSeconds: phaseMaxSeconds, workerOverlay });
   await assertArtifacts(image.manifest);
 
-  const videoJobs = await Promise.all(image.manifest.jobs.map(async (imageJob, index) => ({
-    id: testScenes[index].id,
-    prompt: testScenes[index].motion,
-    seed: 907_000 + index * 37,
-    width: 1280, height: 704, steps: 8, frames: 97, fps: 25, timeoutSeconds: Math.min(5_400, phaseMaxSeconds - 120),
+  const videoJobs = await Promise.all(image.manifest.jobs.map(async (imageJob) => ({
+    id: smokeScene.id,
+    prompt: smokeScene.motion,
+    seed: 907_000,
+    width: LTX25_720P_NATIVE_X2_SMOKE.outputWidth, height: LTX25_720P_NATIVE_X2_SMOKE.outputHeight,
+    steps: 8, frames: LTX25_720P_NATIVE_X2_SMOKE.frames, fps: LTX25_720P_NATIVE_X2_SMOKE.fps, timeoutSeconds: Math.min(5_400, phaseMaxSeconds - 120),
     input: { getUrl: await signedGet(imageJob.artifact.key), sha256: await outputSha256(imageJob.artifact.key) },
   })));
+  if (videoJobs.length !== 1) throw new Error("native-720p x2 smoke benchmark must launch exactly one LTX job");
+  videoJobs.forEach(assertLtx25Native720X2SmokeJob);
   const video = await buildPhaseManifest({ phase: "video", profile: videoProfile(), models: ltxModels, jobs: videoJobs, maxRuntimeSeconds: phaseMaxSeconds });
   console.error(JSON.stringify({ event: "benchmark_stage", stage: "render_ltx25_videos" }));
   const completion = await executePhase({ phase: "video", ...video, maxRuntimeSeconds: phaseMaxSeconds, workerOverlay });
@@ -683,16 +682,14 @@ async function main() {
   const videoOutputs = completion.videoOutputs || {};
   const outputRows = await Promise.all(video.manifest.jobs.map(async (job) => {
     const proof = videoOutputs[job.id];
-    if (proof?.outputWidth !== 1280 || proof?.outputHeight !== 704 || proof?.stageOneWidth !== 640 || proof?.stageOneHeight !== 352 || proof?.spatialUpscaleFactor !== 2 || proof?.hasAudio !== true) {
-      throw new Error(`LTX output proof is incomplete for ${job.id}`);
-    }
+    assertLtx25Native720X2SmokeProof(proof);
     return { id: job.id, key: job.artifact.key, url: await signedGet(job.artifact.key, 604_800), proof };
   }));
   await terminal.sealSuccess({
-    contract: "ltx-2.5-rtx4090-benchmark/v1", ok: true, nonce, ltxModelManifestKey,
+    contract: BENCHMARK_CONTRACT, ok: true, nonce, ltxModelManifestKey,
     stageMaxUsd: STAGE_MAX_USD, spotRateUsdPerHour: spotRate, phaseMaxSeconds,
     zImage: { model: ZIMAGE_MODEL, revision: ZIMAGE_REVISION, volumeReceipt: zProbe },
-    ltx: { model: LTX_MODEL, revision: LTX_REVISION, pipeline: "distilled", stageOne: "640x352", output: "1280x704@25", quantization: "fp8-cast", offload: "cpu", workerOverlaySha256: workerOverlay.sha256 },
+    ltx: { model: LTX_MODEL, revision: LTX_REVISION, pipeline: "distilled", stageOne: "1280x704", output: "2560x1408@25", frames: 17, quantization: "fp8-cast", offload: "cpu", maxSampledPeakVramMib: 22_000, workerOverlaySha256: workerOverlay.sha256 },
     outputs: outputRows.map(({ id, key, proof }) => ({ id, key, proof })),
   });
   console.log(JSON.stringify({ event: "benchmark_complete", reportKey: `${root}/report.json`, outputs: outputRows }));

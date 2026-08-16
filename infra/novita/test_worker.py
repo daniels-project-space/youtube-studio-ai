@@ -392,6 +392,75 @@ class WorkerContractTests(unittest.TestCase):
         finally:
             worker.subprocess.run = original_run
 
+    def test_native_720p_x2_smoke_profile_is_exact_and_vram_bounded(self):
+        image_profile = worker.approved_profile(worker.LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID, "image")
+        self.assertTrue(image_profile["benchmarkOnly"])
+        self.assertEqual((image_profile["width"], image_profile["height"]), (1280, 704))
+        profile = worker.approved_profile(worker.LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID, "video")
+        self.assertTrue(profile["benchmarkOnly"])
+        self.assertEqual((profile["stageOneWidth"], profile["stageOneHeight"]), (1280, 704))
+        self.assertEqual((profile["width"], profile["height"], profile["maxFrames"]), (2560, 1408, 17))
+        self.assertEqual(profile["maxSampledPeakVramMib"], 22_000)
+
+        original_run = worker.subprocess.run
+        try:
+            worker.subprocess.run = lambda argv, **_kwargs: worker.subprocess.CompletedProcess(argv, 0, "21999\n", "")
+            self.assertEqual(worker._sample_vram_mib(22_000), 21_999)
+            worker.subprocess.run = lambda argv, **_kwargs: worker.subprocess.CompletedProcess(argv, 0, "22001\n", "")
+            with self.assertRaisesRegex(RuntimeError, "exceeded 22000 MiB"):
+                worker._sample_vram_mib(22_000)
+
+            def exact_smoke_output(command, *_args, **_kwargs):
+                if command[0] == "ffprobe":
+                    return worker.subprocess.CompletedProcess(
+                        command,
+                        0,
+                        json.dumps({"streams": [
+                            {"codec_type": "video", "width": 2560, "height": 1408, "avg_frame_rate": "25/1", "nb_read_frames": "17"},
+                            {"codec_type": "audio"},
+                        ]}),
+                        "",
+                    )
+                return worker.subprocess.CompletedProcess(command, 0, "", "mean_volume: -32.0 dB")
+
+            worker.subprocess.run = exact_smoke_output
+            self.assertEqual(
+                worker.probe_video_output(Path("/tmp/smoke.mp4"), 2560, 1408, expected_frames=17, expected_fps=25),
+                {"outputWidth": 2560, "outputHeight": 1408, "hasAudio": True, "frameCount": 17, "frameRate": 25},
+            )
+        finally:
+            worker.subprocess.run = original_run
+
+    def test_native_720p_x2_smoke_manifest_allows_only_one_exact_17_frame_job(self):
+        profile = worker.approved_profile(worker.LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID, "video")
+        manifest_id = "video-" + "c" * 32
+        profile_hash = worker.sha256_bytes(worker.canonical_bytes(profile))
+        job = {
+            "id": "smoke-01", "prompt": "A small bounded smoke clip", "seed": 42,
+            "width": 2560, "height": 1408, "steps": 8, "frames": 17, "fps": 25, "timeoutSeconds": 600,
+            "artifact": {"putUrl": "https://objects.example/smoke.mp4", "headers": {
+                "x-amz-meta-manifest-id": manifest_id, "x-amz-meta-profile-sha256": profile_hash, "x-amz-meta-job-id": "smoke-01",
+            }},
+        }
+        unsigned = {
+            "contractVersion": worker.CONTRACT_VERSION, "manifestId": manifest_id, "phase": "video",
+            "gpuSku": worker.REQUIRED_GPU_SKU, "gpuCount": worker.REQUIRED_GPU_COUNT,
+            "expiresAt": int(time.time() * 1000) + 60_000, "maxCostUsd": 1.25,
+            "profile": profile, "profileSha256": profile_hash,
+            "runtimeRepository": worker.LTX_RUNTIME_REPOSITORY, "runtimeRevision": worker.LTX_RUNTIME_REVISION,
+            "checkpoint": {"getUrl": "https://objects.example/checkpoint.json", "putUrl": "https://objects.example/checkpoint.json"},
+            "heartbeat": {"putUrl": "https://objects.example/heartbeat.json"},
+            "completion": {"putUrl": "https://objects.example/completion.json"}, "jobs": [job],
+        }
+        manifest, digest = self._seal(unsigned)
+        self.assertEqual(worker.validate_manifest(manifest, digest)["profile"]["id"], profile["id"])
+        two_jobs, two_digest = self._seal({**unsigned, "jobs": [job, {**job, "id": "smoke-02", "artifact": {**job["artifact"], "headers": {**job["artifact"]["headers"], "x-amz-meta-job-id": "smoke-02"}}}]})
+        with self.assertRaisesRegex(ValueError, "exactly one job"):
+            worker.validate_manifest(two_jobs, two_digest)
+        wrong_frame, wrong_digest = self._seal({**unsigned, "jobs": [{**job, "frames": 9}]})
+        with self.assertRaisesRegex(ValueError, "exactly 17 smoke frames"):
+            worker.validate_manifest(wrong_frame, wrong_digest)
+
     def test_artifact_upload_streams_file_and_binds_length(self):
         captured = {}
 
