@@ -144,6 +144,14 @@ async function blockUsesAttestedProvidersAndR2(): Promise<void> {
   assert.match(block, /createAttestedNovitaImageGenerator/,
     "stills must come from the attested Novita generator");
   assert.match(block, /generateI2V/, "the camera move must come from the single attested i2v seam");
+  assert.match(block, /provider:\s*"novita-ltx"/,
+    "LoreCraft must explicitly select the mandatory Novita LTX route");
+  assert.match(block, /model:\s*"ltx-2\.5-distilled-x2"/,
+    "LoreCraft must pin the LTX-2.5 distilled renderer, never a generic video default");
+  assert.match(block, /aspectRatio:\s*"16:9"/,
+    "LoreCraft must render its cinematic master in the LTX production aspect ratio");
+  assert.doesNotMatch(code, /gemini|google/i,
+    "the executable LoreCraft wrapper must never call a Google model");
   assert.match(block, /hasNovitaRenderFarmConfig/, "the block must fail closed without the attested farm");
 
   // Cost must ACCUMULATE. A bare `=` would let a Trigger retry erase prior spend.
@@ -201,10 +209,13 @@ async function blockUsesAttestedProvidersAndR2(): Promise<void> {
 /* ── 4. THE ENGINE KEPT ITS STANDALONE DEFAULTS ─────────────────────────────── */
 async function engineDefaultsSurviveForTheCli(): Promise<void> {
   const engine = await source(ENGINE);
+  const engineCode = codeOnly(engine);
 
-  // The Replicate/ElevenLabs/nginx implementations must STILL be there — the
-  // point of the inversion was to make them defaults, not to delete them.
+  // The FAL/Replicate/ElevenLabs/nginx implementations must STILL be there —
+  // the point of the inversion was to make them injectable, not to delete the
+  // standalone route.
   assert.match(engine, /api\.replicate\.com/, "the standalone Replicate lane must remain as the default");
+  assert.match(engine, /generateFalImage/, "the standalone art fallback must remain non-Google");
   assert.match(engine, /copyFile\(rd\("final\.mp4"\), pub\)/, "the default publish sink must remain the nginx copy");
   assert.match(engine, /provider:\s*"elevenlabs"/, "the default TTS must remain ElevenLabs");
 
@@ -218,6 +229,8 @@ async function engineDefaultsSurviveForTheCli(): Promise<void> {
     "REPLICATE_API_TOKEN must only be demanded when a Replicate path is genuinely reachable");
   assert.match(engine, /\.\.\.\(deps\.synthLine \? \[\] : \["ELEVENLABS_API_KEY"\]\)/,
     "ELEVENLABS_API_KEY must only be demanded when the default TTS is in play");
+  assert.match(engine, /\.\.\.\(usesFalImage \? \["FAL_KEY"\] : \[\]\)/,
+    "FAL_KEY must only be demanded when the non-Google art fallback is reachable");
   assert.match(engine, /if \(!deps\.publish\) await mkdir\(WEB/,
     "a cloud worker must not mkdir the nginx docroot");
 
@@ -231,6 +244,11 @@ async function engineDefaultsSurviveForTheCli(): Promise<void> {
   // A caller-supplied plan must never be re-planned (that would discard the
   // critique loop's accepted output and pay for a second draft).
   assert.match(engine, /if \(deps\.plan\)/, "an accepted plan must short-circuit the story pass");
+  assert.match(engine, /claudeJsonPro/, "the lore story planner must use Claude, never Google text planning");
+  assert.doesNotMatch(engineCode, /gemini|google|generateBananaImage/i,
+    "LoreCraft itself must contain no Google planning, scene-art, or utility path");
+  assert.match(engine, /providers:\s*\["groq", "fal"\]/,
+    "LoreCraft motion analysis must explicitly restrict itself to non-Google vision providers");
 }
 
 /* ── 5. FAMILY / LANE / ARCHETYPE PLUMBING ──────────────────────────────────── */

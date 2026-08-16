@@ -8,8 +8,8 @@
  * chain and produces the final `videoKey` directly.
  *
  * WHAT THIS WRAPPER OWNS (the engine at src/lib/loreshort.ts owns none of it):
- *  - PROVIDERS. The engine's standalone defaults are Replicate (LTX/Seedance +
- *    Real-ESRGAN), Nano Banana and a hardcoded ElevenLabs voice — none attested,
+ *  - PROVIDERS. The engine's standalone defaults are FAL image art, Replicate
+ *    (LTX/Seedance + Real-ESRGAN) and a hardcoded ElevenLabs voice — none attested,
  *    none budgeted. This block injects the attested Novita render farm for BOTH
  *    art (createAttestedNovitaImageGenerator, per-call signed receipts) and the
  *    i2v camera move (generateI2V → renderNovitaI2V), and accumulates every
@@ -254,7 +254,7 @@ export const loreShort: Block = {
   paid: true,
   run: async (ctx) => {
     if (!hasLoreShort() || !hasNovitaRenderFarmConfig()) {
-      throw new Error("lore_short: the configured lore planner plus the attested Novita render farm are required (no fallback)");
+      throw new Error("lore_short: the configured Claude lore planner plus the attested Novita LTX render farm are required (no fallback)");
     }
     const topic = String(ctx.store["topic"] ?? "");
     if (!topic) throw new Error("lore_short: no topic in store");
@@ -364,6 +364,9 @@ export const loreShort: Block = {
             negativePrompt: request.negativePrompt,
             imageKey,
             durationSec: request.durationSec,
+            provider: "novita-ltx",
+            model: "ltx-2.5-distilled-x2",
+            aspectRatio: "16:9",
             maxCostUsd: PRICE.novitaVideoMaxUsd,
             runId: ctx.runId,
             keyPrefix: ctx.keyPrefix,
@@ -423,7 +426,7 @@ export const loreShort: Block = {
       width: result.width,
       height: result.height,
       imageProvider: "novita-z-image-turbo-local",
-      videoProvider: "novita-ltx",
+      videoProvider: "novita-ltx-2.5-distilled-x2",
     });
     ctx.log(`lore_short ✓ → ${videoKey} (${videoDurationSec}s, ${result.scenes.length} beats, ${result.width}x${result.height})`);
 

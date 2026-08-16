@@ -2,8 +2,8 @@
  * LORESHORT — standalone lore micro-doc engine (GoT "Histories & Lore" style) with
  * GENUINE AI 3D camera moves, as a reusable module.
  *
- * Gemini first-person narration + per-beat LAYERED-DEPTH scene prompts → Nano Banana
- * art → ElevenLabs PER-LINE TTS (for exact beat timing) → cheap image-to-video camera
+ * Claude first-person narration + per-beat LAYERED-DEPTH scene prompts → non-Google
+ * art → ElevenLabs PER-LINE TTS (for exact beat timing) → LTX image-to-video camera
  * moves (Replicate LTX-distilled / Wan 2.2) → optional Real-ESRGAN 2K upscale → ffmpeg
  * beat-cut edit (fit each shot to its narration line + breath, dissolve, title, grade).
  * Every stage caches to output/loreshort/<slug>/ → fully resumable.
@@ -23,10 +23,10 @@ import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { bootstrapSecrets } from "./bootstrap";
-import { geminiJsonPro, parseJsonLoose } from "./gemini";
+import { claudeJsonPro, hasAnthropicKey } from "./anthropic";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "./vision";
 import { synthNarration } from "./tts";
-import { generateBananaImage } from "./banana";
+import { generateFalImage } from "./falImage";
 import { ffprobeDuration } from "./ffmpeg";
 
 export interface LoreSubStyle {
@@ -112,17 +112,17 @@ export const LORESHORT_MODULE = {
     introSec: "title-card seconds", pause: "breath between beats", dissolve: "crossfade seconds",
   },
   needs: { // environment
-    // GEMINI is unconditional (story + motion-analysis vision are the engine).
-    // ELEVENLABS / REPLICATE are only required by the DEFAULT implementations —
+    // Claude is required for story planning. FAL / ELEVENLABS / REPLICATE are
+    // only required by the DEFAULT implementations —
     // an injected caller (LoreShortDeps) supplies its own providers and neither
     // token is demanded. See the secret computation in craftLoreShort.
-    secrets: ["GEMINI_API_KEY", "ELEVENLABS_API_KEY (default TTS only)", "REPLICATE_API_TOKEN (default i2v/upscale only)"],
+    secrets: ["ANTHROPIC_API_KEY", "FAL_KEY (default art only)", "ELEVENLABS_API_KEY (default TTS only)", "REPLICATE_API_TOKEN (default i2v/upscale only)"],
     tools: ["ffmpeg", "ffprobe"],
     note: "Render is nginx-INDEPENDENT (all Replicate inputs are base64 data URIs). The DEFAULT publish sink copies to cfg.webDir and returns cfg.host; an injected `publish` dep (the pipeline block) writes to R2 instead and needs no web host at all.",
   },
   paths: LORESHORT_PATHS,
   rules: [
-    "DE-BRAND the visuals: SCENE art prompts use only generic, non-trademarked terms (Gemini image refuses IP); narration text may be freer.",
+    "DE-BRAND the visuals: scene-art prompts use only generic, non-trademarked terms; narration text may be freer.",
     "The DEPTH camera move is the CORE and always leads; subject/particle motion is added only where a vision pass finds it, scaled to honest intensity — never forced onto still objects.",
     "A title card plays BEFORE the narration starts (rule).",
     "NO cross-engine fallback: a failed clip retries the SAME engine, then fails LOUD; fix content-policy refusals at the art source (re-gen / de-brand).",
@@ -179,12 +179,11 @@ export interface LorePlan {
 }
 
 /**
- * Is the engine's own (non-injectable) half configured? Gemini drives BOTH the
- * story pass and the motion-analysis vision pass, so without it there is no
- * lore short regardless of which render providers a caller injects.
+ * Is the engine's own (non-injectable) story planner configured? LoreCraft uses
+ * Claude for text planning; the visual analysis route is pinned to Groq/FAL.
  */
 export function hasLoreShort(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return hasAnthropicKey();
 }
 
 /** What the story writer needs. Deliberately a subset of LoreShortCfg. */
@@ -200,7 +199,7 @@ export interface LoreStoryBrief {
  * bought (mirrors planWhiteboardStoryboard). `priorIssues` feeds a rejected
  * draft's defects back into the rewrite.
  *
- * This is one Gemini text call per invocation and reaches NO image, TTS or
+ * This is one Claude text call per invocation and reaches NO image, TTS or
  * video provider — by construction an iteration here cannot spend render money.
  */
 export async function planLoreShortStory(
@@ -214,7 +213,7 @@ export async function planLoreShortStory(
     : "";
   let plan: LorePlan = {};
   for (let attempt = 0; attempt < 3; attempt++) {
-    plan = await geminiJsonPro<LorePlan>({
+    plan = await claudeJsonPro<LorePlan>({
       prompt:
         `Write a lore micro-documentary in the EXACT spirit of the Game of Thrones "Histories & Lore" featurettes: a single ` +
         `figure narrates history in FIRST PERSON — proud, intimate, epic, measured, never breathless, with DRAMATIC PACING ` +
@@ -282,6 +281,21 @@ interface MotionAnalysis {
   intensity?: "gentle" | "moderate" | "strong";
 }
 
+/**
+ * Motion analysis is advisory: recover a JSON object from a vision answer, and
+ * allow the camera-prompt fallback to take over when the answer is malformed.
+ * Keeping this local prevents LoreCraft's non-Google route from depending on a
+ * provider-specific utility module.
+ */
+function parseMotionAnalysis(raw: string): MotionAnalysis {
+  let text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+  if (!text.startsWith("{")) {
+    const object = text.match(/\{[\s\S]*\}/);
+    if (object) text = object[0];
+  }
+  return JSON.parse(text) as MotionAnalysis;
+}
+
 interface ReplicatePrediction {
   status?: string;
   output?: string | string[];
@@ -301,8 +315,8 @@ export interface LoreShortResult { videoPath: string; url: string; scenes: LoreS
 
 /* ── INJECTION SEAM ───────────────────────────────────────────────────────────
  *
- * The engine used to reach three paid providers itself (Replicate LTX/Seedance
- * for i2v, Replicate Real-ESRGAN for upscale, ElevenLabs for TTS) and to
+ * The engine used to reach four paid providers itself (FAL for art, Replicate
+ * LTX/Seedance for i2v, Replicate Real-ESRGAN for upscale, ElevenLabs for TTS) and to
  * "publish" by copying into an nginx docroot. None of that survives on a
  * Trigger.dev cloud worker, and the Replicate calls bypassed the pipeline's
  * cost-attestation rail entirely.
@@ -310,7 +324,7 @@ export interface LoreShortResult { videoPath: string; url: string; scenes: LoreS
  * Every one of those is now a caller-supplied callback with the ORIGINAL
  * implementation as its default, so:
  *   - a standalone CLI / proof-gallery run that calls craftLoreShort(cfg) with
- *     no deps behaves EXACTLY as before (same providers, same nginx publish);
+ *     no deps uses non-Google FAL art plus the remaining local defaults;
  *   - the pipeline block injects the attested Novita render farm, the
  *     pipeline's cast voice, and an R2 sink instead.
  *
@@ -343,7 +357,7 @@ export interface LoreShortDeps {
    * When present the engine does ZERO planning calls and renders exactly this.
    */
   plan?: LorePlan;
-  /** Beat art. Default: Nano Banana (generateBananaImage). */
+  /** Beat art. Default: non-Google FAL image route. */
   generateImage?: (request: LoreArtRequest) => Promise<Buffer | Uint8Array>;
   /** Image→video camera move. Default: Replicate LTX/Seedance/Wan. */
   generateClip?: (request: LoreClipRequest) => Promise<Buffer | Uint8Array>;
@@ -375,13 +389,15 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
   const style = SUB_STYLES[cfg.subStyle] ?? SUB_STYLES.cinematic;
   // Only demand the secrets the DEFAULT implementations still in play actually
   // need. An injected caller (the pipeline block) supplies its own attested
-  // providers, so requiring a Replicate/ElevenLabs token would fail a run that
-  // never touches either. Gemini is unconditional: the story pass and the
-  // motion-analysis vision pass are the engine itself, not a swappable dep.
+  // providers, so requiring a FAL/Replicate/ElevenLabs token would fail a run
+  // that never touches those fallbacks. Claude remains required for the story
+  // planner; visual analysis is explicitly limited to non-Google providers.
   const usesReplicate = !deps.generateClip || cfg.upscale === "realesrgan";
+  const usesFalImage = !deps.generateImage;
   await bootstrapSecrets(() => {}, {
     required: [
-      "GEMINI_API_KEY",
+      "ANTHROPIC_API_KEY",
+      ...(usesFalImage ? ["FAL_KEY"] : []),
       ...(deps.synthLine ? [] : ["ELEVENLABS_API_KEY"]),
       ...(usesReplicate ? ["REPLICATE_API_TOKEN"] : []),
     ],
@@ -433,7 +449,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
     try {
       const bytes = deps.generateImage
         ? await deps.generateImage({ id: `${cfg.slug}-scene-${i}`, index: i, prompt: text })
-        : await generateBananaImage({ prompt: text, aspectRatio: "16:9", imageSize: "2K" });
+        : await generateFalImage({ prompt: text, aspectRatio: "16:9", imageSize: "2K", tier: "pro" });
       await writeFile(out, Buffer.from(bytes));
       log(`art ${i} ✓`);
     } catch (e) {
@@ -467,7 +483,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
     if (existsSync(out)) { motion[i] = JSON.parse(await readFile(out, "utf8")); return; }
     deps.onVisionCall?.(i);
     const raw = await visionLocal({
-      imagePaths: [rd(`scene_${i}.png`)], json: true, maxTokens: VISION_GATE_MAX_TOKENS, model: "gemini-2.5-flash",
+      imagePaths: [rd(`scene_${i}.png`)], json: true, maxTokens: VISION_GATE_MAX_TOKENS, providers: ["groq", "fal"],
       prompt:
         `You are the SHOT DIRECTOR for an image-to-video clip (~6s). Look CAREFULLY at this ${String(cfg.subStyle).replace(/_/g, " ")} illustration ` +
         `and decide what should MOVE, grounded ONLY in what is ACTUALLY visible. The CAMERA move is the heart of the shot; subject and particle motion are added ONLY when they genuinely belong. Do NOT invent motion. ` +
@@ -480,7 +496,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps 
         `Be concrete and specific to THIS picture. Output ONLY the JSON object.`,
     }).catch(() => "");
     let analysis: MotionAnalysis = {};
-    try { analysis = (parseJsonLoose(raw) || {}) as MotionAnalysis; } catch { analysis = {}; }
+    try { analysis = parseMotionAnalysis(raw); } catch { analysis = {}; }
     motion[i] = analysis;
     await writeFile(out, JSON.stringify(analysis, null, 2));
     log(`motion ${i}: ${String(analysis.subject_action || analysis.camera || "?").slice(0, 56)}`);
