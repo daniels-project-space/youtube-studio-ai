@@ -1,7 +1,11 @@
 #!/usr/bin/env node
 /**
  * Audit the persistent Novita volume before removing only proven-obsolete LTX
- * assets.  `--apply` is deliberately separate from the default inventory run.
+ * assets. `--apply` is deliberately separate from the default inventory run.
+ *
+ * The LTX 2.3 path match below is intentionally retained as a legacy-residue
+ * cleanup detector only. It is not a model selection, runtime, or routing
+ * target: all live YouTube Studio video rendering uses LTX 2.5.
  */
 import crypto from "node:crypto";
 import { GetObjectCommand, PutObjectCommand, S3Client } from "@aws-sdk/client-s3";
@@ -46,6 +50,7 @@ def candidate_rows(rows):
     relative=pathlib.PurePosixPath(row['path']).relative_to('/network')
     pieces=[part.lower() for part in relative.parts]
     reason=None
+    # Historical LTX 2.3 residue detector only; never a live runtime route.
     if any('ltx-2.3' in part or 'ltx23' in part for part in pieces): reason='obsolete_ltx_2_3'
     if len(pieces)==2 and pieces[0]=='.staging' and pieces[1].startswith('ltx-2.5-'): reason='abandoned_ltx_2_5_stage'
     if len(pieces)==2 and pieces[0]=='runtime' and pieces[1].startswith('ltx-2.5-') and pieces[1]!=current_runtime: reason='superseded_ltx_2_5_runtime'
