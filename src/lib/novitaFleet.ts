@@ -502,56 +502,23 @@ export interface NovitaCreateWorkerRequestArgs {
     downloadUrl: string;
     sha256: string;
     /** The public PyTorch base has gzip but not a guaranteed zstd binary. */
-    archive?: "zstd" | "gzip";
+    archive: "gzip";
+    /** Short-lived, content-bound Python bootstrap source. */
+    bootstrapUrl: string;
   };
   manifestUrl: string;
   manifestSha256: string;
   approval: NovitaCapacityPlan;
 }
 
-function shellQuote(value: string): string {
-  return `'${value.replaceAll("'", "'\\\"'\\\"'")}'`;
-}
-
 /**
  * Public registries do not need a permanent credential, but they must never
- * be allowed to substitute an arbitrary image. This bootstrap uses the exact
- * public PyTorch base plus a short-lived, SHA-bound R2 bundle and persists the
- * verified runtime on the mounted volume for subsequent short-lived workers.
+ * be allowed to substitute an arbitrary image.  The full bootstrap is loaded
+ * from a signed R2 object rather than placed in Novita's command field: the
+ * provider re-wraps long shell commands and can otherwise corrupt quoting.
  */
-function runtimeBundleBootstrapCommand(sha256: string, archive: "zstd" | "gzip" = "zstd"): string {
-  const runtimeRoot = `/network/runtime/ltx-2.5-${sha256}`;
-  const hydrate = [
-    "set -euo pipefail",
-    `root=${shellQuote(runtimeRoot)}`,
-    'if [ -f "$root/.ready" ]; then',
-    '  test "$(cat \"$root/.ready\")" = "$NOVITA_RUNTIME_BUNDLE_SHA256"',
-    "  exit 0",
-    "fi",
-    'test ! -e "$root"',
-    'stage="$(mktemp -d /network/runtime/.ltx-runtime-stage.XXXXXX)"',
-    'trap \'rm -rf "$stage"\' EXIT',
-    `bundle="$stage/runtime.${archive === "gzip" ? "tar.gz" : "tar.zst"}"`,
-    'export bundle',
-    "python -c 'import os, urllib.request; urllib.request.urlretrieve(os.environ[\"NOVITA_RUNTIME_BUNDLE_URL\"], os.environ[\"bundle\"])'",
-    'printf "%s  %s\\n" "$NOVITA_RUNTIME_BUNDLE_SHA256" "$bundle" | sha256sum -c -',
-    archive === "gzip"
-      ? 'tar -xzf "$bundle" -C "$stage"'
-      : 'tar --use-compress-program=zstd -xf "$bundle" -C "$stage"',
-    'test -x "$stage/opt/LTX-2/.venv/bin/python"',
-    'test -f "$stage/opt/novita-worker/worker.py"',
-    'printf "%s\\n" "$NOVITA_RUNTIME_BUNDLE_SHA256" > "$stage/.ready"',
-    'mv "$stage" "$root"',
-    "trap - EXIT",
-  ].join("\n");
-  const command = [
-    "set -euo pipefail",
-    `root=${shellQuote(runtimeRoot)}`,
-    'mkdir -p /network/runtime',
-    `flock "${runtimeRoot}.lock" /bin/bash -ceu ${shellQuote(hydrate)}`,
-    'exec "$root/opt/LTX-2/.venv/bin/python" "$root/opt/novita-worker/worker.py"',
-  ].join("\n");
-  return `/bin/bash -ceu ${shellQuote(command)}`;
+function runtimeBundleBootstrapCommand(): string {
+  return "python -c \"import os,urllib.request;exec(urllib.request.urlopen(os.environ['NOVITA_RUNTIME_BOOTSTRAP_URL']).read())\"";
 }
 
 /** A cache-only provider operation; it does not allocate or bill a GPU. */
@@ -584,7 +551,8 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
   if (args.runtimeBundle && (
     !isSha256(args.runtimeBundle.sha256)
     || !/^https:\/\//.test(args.runtimeBundle.downloadUrl)
-    || (args.runtimeBundle.archive !== undefined && !["zstd", "gzip"].includes(args.runtimeBundle.archive))
+    || args.runtimeBundle.archive !== "gzip"
+    || !/^https:\/\//.test(args.runtimeBundle.bootstrapUrl)
   )) {
     throw new NovitaAdmissionError("runtime bundle must use a signed HTTPS URL and SHA-256 identity");
   }
@@ -609,7 +577,7 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
     billingMode: "spot",
     imageUrl: args.image,
     ...(args.imageAuthId ? { imageAuthId: args.imageAuthId } : {}),
-    ...(args.runtimeBundle ? { command: runtimeBundleBootstrapCommand(args.runtimeBundle.sha256, args.runtimeBundle.archive) } : {}),
+    ...(args.runtimeBundle ? { command: runtimeBundleBootstrapCommand() } : {}),
     rootfsSize: 120,
     networkStorages: [{ Id: args.storageId, mountPoint: "/network" }],
     envs: [
@@ -620,6 +588,7 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
       ...(args.runtimeBundle ? [
         { key: "NOVITA_RUNTIME_BUNDLE_URL", value: args.runtimeBundle.downloadUrl },
         { key: "NOVITA_RUNTIME_BUNDLE_SHA256", value: args.runtimeBundle.sha256 },
+        { key: "NOVITA_RUNTIME_BOOTSTRAP_URL", value: args.runtimeBundle.bootstrapUrl },
       ] : []),
     ],
   };

@@ -233,12 +233,15 @@ async function main() {
     imageAuthId: undefined,
     publicImage: true,
     runtimeBundle: {
-      downloadUrl: "https://signed.example/ltx-runtime.tar.zst?signature=redacted",
+      downloadUrl: "https://signed.example/ltx-runtime.tar.gz?signature=redacted",
       sha256: "f".repeat(64),
+      archive: "gzip",
+      bootstrapUrl: "https://signed.example/ltx-runtime-bootstrap.py?signature=redacted",
     },
   });
-  assert.match(String(runtimeBundleRequest.command), /NOVITA_RUNTIME_BUNDLE_SHA256/);
+  assert.match(String(runtimeBundleRequest.command), /NOVITA_RUNTIME_BOOTSTRAP_URL/);
   assert(runtimeBundleRequest.envs.some((item) => item.key === "NOVITA_RUNTIME_BUNDLE_URL"));
+  assert(runtimeBundleRequest.envs.some((item) => item.key === "NOVITA_RUNTIME_BOOTSTRAP_URL"));
   assert.throws(
     () => buildNovitaCreateWorkerRequest({ ...requestArgs, image: runtimeBaseImage, imageAuthId: undefined, publicImage: true }),
     /requires a sealed runtime bundle/,

@@ -90,7 +90,7 @@ interface DirectNovitaConfig {
   workerImage: string;
   imageAuthId?: string;
   imageAccess: "private-registry" | "public-ghcr" | "public-runtime-base";
-  runtimeBundle?: { key: string; sha256: string; archive: "zstd" | "gzip" };
+  runtimeBundle?: { key: string; sha256: string; archive: "gzip" };
   productId: string;
   verifiedGpuQuota: number;
   modelManifestKey: string;
@@ -243,16 +243,19 @@ function directConfig(): DirectNovitaConfig {
       "public worker access is restricted to the sealed YouTube Studio GHCR repository",
     );
   }
-  const runtimeBundle = imageAccess === "public-runtime-base" ? {
-    key: requiredEnv("NOVITA_RUNTIME_BUNDLE_KEY"),
+  const runtimeBundleKey = imageAccess === "public-runtime-base"
+    ? requiredEnv("NOVITA_RUNTIME_BUNDLE_KEY")
+    : undefined;
+  const runtimeBundle = runtimeBundleKey ? {
+    key: runtimeBundleKey,
     sha256: requiredEnv("NOVITA_RUNTIME_BUNDLE_SHA256").toLowerCase(),
-    archive: requiredEnv("NOVITA_RUNTIME_BUNDLE_KEY").endsWith(".tar.gz") ? "gzip" as const : "zstd" as const,
+    archive: "gzip" as const,
   } : undefined;
   if (runtimeBundle && (
     !/^[A-Za-z0-9][A-Za-z0-9._/-]{0,767}$/.test(runtimeBundle.key)
     || runtimeBundle.key.includes("..")
     || !isSha256(runtimeBundle.sha256)
-    || !/\.tar\.(?:zst|gz)$/.test(runtimeBundle.key)
+    || !/\.tar\.gz$/.test(runtimeBundle.key)
   )) {
     throw new NovitaAdmissionError("sealed public runtime bundle must use a safe R2 key and SHA-256 identity");
   }
@@ -610,6 +613,62 @@ async function readJsonIfPresent(key: string): Promise<Record<string, unknown> |
     if (status === 404 || name === "NoSuchKey" || name === "NotFound") return undefined;
     throw error;
   }
+}
+
+/**
+ * Novita re-wraps a worker command before executing it, so a multi-line shell
+ * bootstrap is not stable at the provider boundary.  The command is kept to
+ * a tiny Python URL loader; this source is a SHA-bound R2 object fetched by
+ * that loader and verifies/extracts only the sealed gzip runtime bundle.
+ */
+function runtimeBootstrapSource(runtimeSha256: string): string {
+  return String.raw`import fcntl,hashlib,os,pathlib,shutil,tarfile,tempfile,urllib.request
+sha=${JSON.stringify(runtimeSha256)}
+root=pathlib.Path('/network/runtime/ltx-2.5-'+sha)
+def exec_worker():
+  os.execv(str(root/'opt/LTX-2/.venv/bin/python'),[str(root/'opt/LTX-2/.venv/bin/python'),str(root/'opt/novita-worker/worker.py')])
+if (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha: exec_worker()
+lock=root.with_name(root.name+'.lock')
+lock.parent.mkdir(parents=True,exist_ok=True)
+with lock.open('a+b') as handle:
+  fcntl.flock(handle,fcntl.LOCK_EX)
+  if (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha: exec_worker()
+  if root.exists(): raise RuntimeError('runtime root exists without its matching ready receipt')
+  stage=pathlib.Path(tempfile.mkdtemp(prefix='.ltx-runtime-stage.',dir='/network/runtime'))
+  try:
+    bundle=stage/'runtime.tar.gz'
+    urllib.request.urlretrieve(os.environ['NOVITA_RUNTIME_BUNDLE_URL'],bundle)
+    digest=hashlib.sha256(bundle.read_bytes()).hexdigest()
+    if digest!=sha: raise RuntimeError('runtime bundle SHA-256 mismatch')
+    with tarfile.open(bundle,'r:gz') as archive:
+      for member in archive.getmembers():
+        target=(stage/member.name).resolve()
+        if target!=stage and stage not in target.parents: raise RuntimeError('runtime archive path escapes staging root')
+        if not (member.isdir() or member.isfile()): raise RuntimeError('runtime archive has unsupported member type')
+      for member in archive.getmembers(): archive.extract(member,stage)
+    if not (stage/'opt/LTX-2/.venv/bin/python').is_file() or not (stage/'opt/novita-worker/worker.py').is_file(): raise RuntimeError('runtime archive is incomplete')
+    (stage/'.ready').write_text(sha+'\n')
+    os.replace(stage,root)
+  except BaseException:
+    shutil.rmtree(stage,ignore_errors=True)
+    raise
+exec_worker()
+`;
+}
+
+async function prepareRuntimeBootstrap(runtime: NonNullable<DirectNovitaConfig["runtimeBundle"]>): Promise<string> {
+  const key = `novita/runtime/bootstraps/ltx-2.5-${runtime.sha256}.py`;
+  try {
+    await putObject(key, runtimeBootstrapSource(runtime.sha256), {
+      contentType: "text/x-python",
+      metadata: { "runtime-sha256": runtime.sha256, archive: runtime.archive },
+      ifNoneMatch: "*",
+    });
+  } catch (error) {
+    const status = (error as { $metadata?: { httpStatusCode?: number } }).$metadata?.httpStatusCode;
+    if (status !== 409 && status !== 412) throw error;
+  }
+  return await presignDownload(key, { expiresIn: MANIFEST_URL_TTL_SECONDS });
 }
 
 function metadataFor(manifestId: string, profileSha256: string, jobId: string): Record<string, string> {
@@ -1047,6 +1106,9 @@ async function recoverOrCreateInstance(args: {
       attemptToken,
       now: Date.now(),
     });
+    const runtimeBootstrapUrl = args.control.config.runtimeBundle
+      ? await prepareRuntimeBootstrap(args.control.config.runtimeBundle)
+      : undefined;
     instanceId = await args.control.provider.createSpotWorker(
       buildNovitaCreateWorkerRequest({
         name: args.worker.workerName,
@@ -1064,6 +1126,7 @@ async function recoverOrCreateInstance(args: {
             }),
             sha256: args.control.config.runtimeBundle.sha256,
             archive: args.control.config.runtimeBundle.archive,
+            bootstrapUrl: runtimeBootstrapUrl!,
           },
         } : {}),
         manifestUrl: await presignDownload(args.worker.manifestKey, { expiresIn: MANIFEST_URL_TTL_SECONDS }),

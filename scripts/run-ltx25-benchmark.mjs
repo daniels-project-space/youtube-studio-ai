@@ -26,9 +26,9 @@ const CLUSTER_ID = "us-ca-nas-2";
 const VOLUME_ID = "384d629d-839f-4224-abef-64dfc2d751bf";
 const BASE_IMAGE = "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
 const RUNTIME_BUNDLE_KEY = process.env.NOVITA_RUNTIME_BUNDLE_KEY
-  || "novita/runtime/ltx-2.5/8668b2c673e2fb17fc16c022c670a8658a423d73d427ac21d163720e3f7a9b14.tar.zst";
+  || "novita/runtime/ltx-2.5/e2ffc92c14097acb14a28ba679ea6106d372259288e6ee16fa6490ea5933a377.tar.gz";
 const RUNTIME_BUNDLE_SHA256 = process.env.NOVITA_RUNTIME_BUNDLE_SHA256
-  || "8668b2c673e2fb17fc16c022c670a8658a423d73d427ac21d163720e3f7a9b14";
+  || "e2ffc92c14097acb14a28ba679ea6106d372259288e6ee16fa6490ea5933a377";
 const API = "https://api.novita.ai/gpu-instance/openapi/v1";
 const STAGE_MAX_USD = 0.68;
 const TOTAL_MAX_USD = 3;
@@ -53,45 +53,6 @@ function sealManifest(unsigned) {
   return { ...unsigned, manifestSha256: crypto.createHash("sha256").update(canonicalJson(unsigned)).digest("hex") };
 }
 
-function shellQuote(value) {
-  return `'${value.replaceAll("'", "'\\\"'\\\"'")}'`;
-}
-
-function runtimeBootstrapCommand(runtimeSha256, archive) {
-  const root = `/network/runtime/ltx-2.5-${runtimeSha256}`;
-  const hydrate = [
-    "set -euo pipefail",
-    `root=${shellQuote(root)}`,
-    'if [ -f "$root/.ready" ]; then',
-    '  test "$(cat \"$root/.ready\")" = "$NOVITA_RUNTIME_BUNDLE_SHA256"',
-    "  exit 0",
-    "fi",
-    'test ! -e "$root"',
-    'stage="$(mktemp -d /network/runtime/.ltx-runtime-stage.XXXXXX)"',
-    "trap 'rm -rf \"$stage\"' EXIT",
-    `bundle="$stage/runtime.${archive === "gzip" ? "tar.gz" : "tar.zst"}"`,
-    'export bundle',
-    "python -c 'import os, urllib.request; urllib.request.urlretrieve(os.environ[\"NOVITA_RUNTIME_BUNDLE_URL\"], os.environ[\"bundle\"])'",
-    'printf "%s  %s\\n" "$NOVITA_RUNTIME_BUNDLE_SHA256" "$bundle" | sha256sum -c -',
-    archive === "gzip"
-      ? 'tar -xzf "$bundle" -C "$stage"'
-      : 'tar --use-compress-program=zstd -xf "$bundle" -C "$stage"',
-    'test -x "$stage/opt/LTX-2/.venv/bin/python"',
-    'test -f "$stage/opt/novita-worker/worker.py"',
-    'printf "%s\\n" "$NOVITA_RUNTIME_BUNDLE_SHA256" > "$stage/.ready"',
-    'mv "$stage" "$root"',
-    "trap - EXIT",
-  ].join("\n");
-  const command = [
-    "set -euo pipefail",
-    `root=${shellQuote(root)}`,
-    'mkdir -p /network/runtime',
-    `flock "${root}.lock" /bin/bash -ceu ${shellQuote(hydrate)}`,
-    'exec "$root/opt/LTX-2/.venv/bin/python" "$root/opt/novita-worker/worker.py"',
-  ].join("\n");
-  return `/bin/bash -ceu ${shellQuote(command)}`;
-}
-
 function buildWorkerRequest({ name, manifestUrl, manifestSha256, jobIds }) {
   if (!/^yt-render-[a-z0-9-]+$/.test(name) || !/^[a-f0-9]{64}$/.test(manifestSha256)) {
     throw new Error("benchmark worker identity is invalid");
@@ -104,7 +65,7 @@ function buildWorkerRequest({ name, manifestUrl, manifestSha256, jobIds }) {
     kind: "gpu",
     billingMode: "spot",
     imageUrl: BASE_IMAGE,
-    command: runtimeBootstrapCommand(RUNTIME_BUNDLE_SHA256, RUNTIME_BUNDLE_KEY.endsWith(".tar.gz") ? "gzip" : "zstd"),
+    command: "python -c \"import os,urllib.request;exec(urllib.request.urlopen(os.environ['NOVITA_RUNTIME_BOOTSTRAP_URL']).read())\"",
     rootfsSize: 120,
     networkStorages: [{ Id: VOLUME_ID, mountPoint: "/network" }],
     envs: [
@@ -114,9 +75,45 @@ function buildWorkerRequest({ name, manifestUrl, manifestSha256, jobIds }) {
       { key: "NOVITA_LOCAL_MODEL_CACHE", value: "/workspace/model-cache" },
       { key: "NOVITA_RUNTIME_BUNDLE_URL", value: null },
       { key: "NOVITA_RUNTIME_BUNDLE_SHA256", value: RUNTIME_BUNDLE_SHA256 },
+      { key: "NOVITA_RUNTIME_BOOTSTRAP_URL", value: null },
     ],
     __jobIds: jobIds,
   };
+}
+
+function runtimeBootstrapSource() {
+  return String.raw`import fcntl,hashlib,os,pathlib,shutil,tarfile,tempfile,urllib.request
+sha=os.environ['NOVITA_RUNTIME_BUNDLE_SHA256']
+root=pathlib.Path('/network/runtime/ltx-2.5-'+sha)
+def exec_worker():
+  python=str(root/'opt/LTX-2/.venv/bin/python')
+  os.execv(python,[python,str(root/'opt/novita-worker/worker.py')])
+if (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha: exec_worker()
+lock=root.with_name(root.name+'.lock')
+lock.parent.mkdir(parents=True,exist_ok=True)
+with lock.open('a+b') as handle:
+  fcntl.flock(handle,fcntl.LOCK_EX)
+  if (root/'.ready').is_file() and (root/'.ready').read_text().strip()==sha: exec_worker()
+  if root.exists(): raise RuntimeError('runtime root exists without matching ready receipt')
+  stage=pathlib.Path(tempfile.mkdtemp(prefix='.ltx-runtime-stage.',dir='/network/runtime'))
+  try:
+    bundle=stage/'runtime.tar.gz'
+    urllib.request.urlretrieve(os.environ['NOVITA_RUNTIME_BUNDLE_URL'],bundle)
+    if hashlib.sha256(bundle.read_bytes()).hexdigest()!=sha: raise RuntimeError('runtime bundle SHA-256 mismatch')
+    with tarfile.open(bundle,'r:gz') as archive:
+      for member in archive.getmembers():
+        target=(stage/member.name).resolve()
+        if target!=stage and stage not in target.parents: raise RuntimeError('runtime archive path escapes staging root')
+        if not (member.isdir() or member.isfile()): raise RuntimeError('runtime archive has unsupported member type')
+      for member in archive.getmembers(): archive.extract(member,stage)
+    if not (stage/'opt/LTX-2/.venv/bin/python').is_file() or not (stage/'opt/novita-worker/worker.py').is_file(): raise RuntimeError('runtime archive is incomplete')
+    (stage/'.ready').write_text(sha+'\n')
+    os.replace(stage,root)
+  except BaseException:
+    shutil.rmtree(stage,ignore_errors=True)
+    raise
+exec_worker()
+`;
 }
 
 const ltxManifestKey = process.argv[2];
@@ -380,11 +377,15 @@ async function buildPhaseManifest({ phase, profile, models, jobs, maxRuntimeSeco
 async function executePhase({ phase, manifest, manifestKey, completionKey, maxRuntimeSeconds }) {
   const manifestUrl = await signedGet(manifestKey);
   const runtimeUrl = await signedGet(RUNTIME_BUNDLE_KEY);
+  const bootstrapKey = `${root}/${phase}/control/runtime-bootstrap.py`;
+  await s3.send(new PutObjectCommand({ Bucket: bucket, Key: bootstrapKey, Body: runtimeBootstrapSource(), ContentType: "text/x-python" }));
+  const bootstrapUrl = await signedGet(bootstrapKey);
   const request = buildWorkerRequest({
     name: `yt-render-ltx25-benchmark-${phase}-${nonce.slice(0, 10)}`,
     manifestUrl, manifestSha256: manifest.manifestSha256, jobIds: manifest.jobs.map((job) => job.id),
   });
   request.envs.find((item) => item.key === "NOVITA_RUNTIME_BUNDLE_URL").value = runtimeUrl;
+  request.envs.find((item) => item.key === "NOVITA_RUNTIME_BOOTSTRAP_URL").value = bootstrapUrl;
   delete request.__jobIds;
   const created = await novita("/gpu/instance/create", { method: "POST", body: JSON.stringify(request) });
   const instanceId = String(created.id || "");
