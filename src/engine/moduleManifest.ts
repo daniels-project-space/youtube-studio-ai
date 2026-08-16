@@ -22,6 +22,11 @@ export interface ModuleCostContext {
   entries: readonly PipelineEntry[];
   /** Index of the module whose envelope is being evaluated. */
   index: number;
+  /**
+   * Present only during execution. A cost resolver may use a typed, persisted
+   * upstream admission receipt to narrow its already-declared absolute cap.
+   */
+  store?: Readonly<Record<string, unknown>>;
 }
 
 export type ModuleCostEnvelope = (

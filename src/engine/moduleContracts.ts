@@ -5,6 +5,7 @@ import {
   bananaUnitRate,
   qaVisualCost,
 } from "./pricing";
+import { cinematicFinalMasterQaAdmissionCost } from "./cinematicFinalMasterQaAdmission";
 import {
   NARRATION_COLD_OPEN_MAX_CHARS,
   narrationChapterHeadingCharacterCeiling,
@@ -456,7 +457,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       // matches the active lane; final QA must declare that cross-block input.
       "episodeSpec",
       "motionComicTimeline", "visualRepair", "visualMatterManifest",
-      "cinematicCaseSequenceInput", "cinematicCaseSequenceAdmission", "cinematicGeneratedScenePlan", "cinematicCreativeLocks", "cinematicEditDecisionList", "generatedFootageSceneManifest",
+      "cinematicCaseSequenceInput", "cinematicCaseSequenceAdmission", "cinematicGeneratedScenePlan", "cinematicCreativeLocks", "cinematicEditDecisionList", "cinematicFinalMasterQaAdmission", "generatedFootageSceneManifest",
       // Standard Novita Story-Spine renders use this exact LTX cut plan; it is
       // optional because non-LTX lanes do not produce a shot-render manifest.
       "shotRenderManifest",
@@ -468,8 +469,16 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "casefileEvidenceShotMapAdmission", "casefileSourceAdmission",
     ],
     providerProfiles: [managed, local],
+    // The exact receipt narrows this before Novita starts. Preserve the normal
+    // $5 QA ceiling: an oversized cinematic plan is rejected early rather than
+    // silently expanding the channel's established QA authority.
     maxCostUsd: 5,
-    maxCostUsdFor: (params) => qaVisualCost(params),
+    maxCostUsdFor: (params, context) => qaVisualCost(
+      params,
+      cinematicFinalMasterQaAdmissionCost(
+        context?.store?.["cinematicFinalMasterQaAdmission"],
+      ),
+    ),
     qualityRequired: true,
   }),
   originality_gate: contract(["final.originality_passed"], { optionalConsumes: ["topic"], qualityRequired: true }),
@@ -630,6 +639,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "storyCoverage",
       "sceneManifest",
       "cinematicGeneratedScenePlan",
+      "cinematicCreativeLocks",
+      "cinematicEditDecisionList",
+      "cinematicFinalMasterQaAdmission",
       "channelName",
       "persona",
       "styleGrammar",

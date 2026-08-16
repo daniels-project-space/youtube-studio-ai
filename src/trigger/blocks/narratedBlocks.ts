@@ -62,6 +62,7 @@ import {
   assertCinematicSequenceRenderBinding,
 } from "@/engine/cinematicSequenceRenderBinding";
 import { cinematicFinalMasterQaEvidence } from "@/engine/cinematicQaEvidence";
+import { assertCinematicFinalMasterQaAdmission } from "@/engine/cinematicFinalMasterQaAdmission";
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 import {
   evaluateAuthoredShotEditIntegrity,
@@ -2677,7 +2678,7 @@ export const qaVisual: Block = {
   paid: true,
   run: async (ctx) => {
     const productionQa = ctx.params["qaProfile"] !== "draft";
-    const qaCost = qaVisualCost(ctx.params);
+    let qaCost = qaVisualCost(ctx.params);
     const video = str(ctx, "videoLocalPath");
     const title = str(ctx, "title");
     const dur = Number(ctx.store["videoDurationSec"] ?? 0);
@@ -2944,6 +2945,17 @@ export const qaVisual: Block = {
     ) {
       throw new Error("qa_visual FAILED: cinematic creative locks and edit decision list do not bind the same sequence");
     }
+    const cinematicFinalMasterQaAdmission = cinematicSequencePresent
+      ? assertCinematicFinalMasterQaAdmission({
+          admission: ctx.store["cinematicFinalMasterQaAdmission"],
+          creativeLocks: cinematicCreativeLocks,
+          editDecisionList: cinematicEdl,
+        })
+      : undefined;
+    // The exact lock/cut count was admitted before Novita rendered. Charge the
+    // same durable envelope here so the runner's stage ceiling and recorded
+    // QA spend cannot silently diverge on a resumed final-master review.
+    qaCost = qaVisualCost(ctx.params, cinematicFinalMasterQaAdmission?.reviewCostUsd);
     const cinematicBodyOffsetSec = ctx.store["introApplied"] === true && Number(ctx.store["introSec"]) > 0
       ? Number(ctx.store["introSec"])
       : 0;

@@ -23,6 +23,7 @@ import { LtxCreativeAdapterSelectionSchema } from "@/lib/ltxCreativeAdapter";
 import { SceneManifestSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema, type ShotPlan, validateStorySpine } from "@/engine/storySpine";
 import { CinematicGeneratedScenePlanSchema } from "@/engine/cinematicCaseSequence";
+import { assertCinematicFinalMasterQaAdmission } from "@/engine/cinematicFinalMasterQaAdmission";
 import {
   GENERATED_FOOTAGE_SCENE_MANIFEST_VERSION,
   GeneratedFootageSceneManifestSchema,
@@ -554,6 +555,28 @@ export const genFootage: Block = {
     const requestedConcurrency = Number(ctx.params["maxConcurrent"] ?? 3);
     const maxConcurrent = Math.min(8, Math.max(1, Math.floor(requestedConcurrency)));
     const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "gen_footage");
+    if (plan.source === "cinematic_case_sequence") {
+      const finalMasterQaAdmission = assertCinematicFinalMasterQaAdmission({
+        admission: ctx.store["cinematicFinalMasterQaAdmission"],
+        creativeLocks: ctx.store["cinematicCreativeLocks"],
+        editDecisionList: ctx.store["cinematicEditDecisionList"],
+      });
+      if (!ctx.assertRemainingBudgetReservation) {
+        throw new Error(
+          "gen_footage: cinematic final-master QA requires the runner's remaining-budget reservation rail before Novita rendering",
+        );
+      }
+      const reservation = ctx.assertRemainingBudgetReservation({
+        reason:
+          `cinematic final-master QA (${finalMasterQaAdmission.reviewCallCount} non-Google lock/cut review calls, ` +
+          `$${finalMasterQaAdmission.reviewCostUsd.toFixed(2)} receipt)`,
+        requiredFuturePaidBlockIds: ["qa_visual"],
+      });
+      ctx.log(
+        `gen_footage: reserved $${reservation.reservedMaxCostUsd.toFixed(2)} for all pending paid stages ` +
+          `including final-master cinematic QA before Novita starts`,
+      );
+    }
     // Keep the first accepted still for each recurring mannequin cast as
     // independent visual evidence. It is deliberately not a hidden generation
     // input: the gate proves a candidate matches the source-bound continuity

@@ -1,5 +1,6 @@
 import type { Block } from "@/engine/types";
 import { assertCinematicCaseSequence } from "@/engine/cinematicCaseSequence";
+import { admitCinematicFinalMasterQa } from "@/engine/cinematicFinalMasterQaAdmission";
 import {
   finalizeCinematicCaseSequenceDraft,
   planCinematicCaseSequenceDraft,
@@ -64,6 +65,7 @@ const cinematicCaseSequence: Block = {
     "cinematicCreativeLocks",
     "cinematicEditDecisionList",
     "cinematicCaseSequenceAdmission",
+    "cinematicFinalMasterQaAdmission",
   ],
   run: async (ctx) => {
     const admitted = assertCinematicCaseSequence({
@@ -74,9 +76,15 @@ const cinematicCaseSequence: Block = {
       sceneManifest: ctx.store["sceneManifest"],
       shotList: ctx.store["shotList"],
     });
+    const cinematicFinalMasterQaAdmission = admitCinematicFinalMasterQa({
+      creativeLocks: admitted.creativeLocks,
+      editDecisionList: admitted.editDecisionList,
+    });
     ctx.log(
       `cinematic_case_sequence: ${admitted.generatedScenePlan.scenes.length} source-bound coverage shots; ` +
-        "provider calls: 0; faceless-cast/cut/continuity locks → private human-review only",
+        `provider calls: 0; ${cinematicFinalMasterQaAdmission.reviewCallCount} final-master non-Google review call(s) ` +
+        `reserved at $${cinematicFinalMasterQaAdmission.reviewCostUsd.toFixed(2)} before Novita; ` +
+        "faceless-cast/cut/continuity locks → private human-review only",
     );
     return {
       cinematicSequencePlan: admitted.plan,
@@ -84,6 +92,7 @@ const cinematicCaseSequence: Block = {
       cinematicCreativeLocks: admitted.creativeLocks,
       cinematicEditDecisionList: admitted.editDecisionList,
       cinematicCaseSequenceAdmission: admitted.receipt,
+      cinematicFinalMasterQaAdmission,
     };
   },
 };

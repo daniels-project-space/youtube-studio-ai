@@ -62,6 +62,11 @@ export interface VisionLocalArgs {
   reasoningEffort?: VisionReasoningEffort;
   /** Restrict this review to specific providers. Use this for certified no-Google gates. */
   providers?: readonly VisionProvider[];
+  /**
+   * Bound retries for each provider without changing the provider chain. A
+   * final-master budget receipt uses one Groq attempt then one fal fallback.
+   */
+  maxAttemptsPerProvider?: number;
 }
 
 /** Gemini is intentionally not a vision provider; it is sealed to Nano Banana thumbnail pixels. */
@@ -263,7 +268,12 @@ const VISION_REASONING_EFFORT: VisionReasoningEffort =
 async function groqVision(
   prompt: string,
   images: Buffer[],
-  opts: { json?: boolean; maxTokens?: number; reasoningEffort?: VisionReasoningEffort },
+  opts: {
+    json?: boolean;
+    maxTokens?: number;
+    reasoningEffort?: VisionReasoningEffort;
+    maxAttemptsPerProvider?: number;
+  },
 ): Promise<string> {
   const key = process.env.GROQ_API_KEY;
   if (!key) throw new VisionError("no GROQ_API_KEY");
@@ -282,7 +292,8 @@ async function groqVision(
     })),
   ];
   let lastErr = "";
-  for (let attempt = 0; attempt < 3; attempt++) {
+  const maxAttempts = Math.max(1, Math.min(3, Math.floor(opts.maxAttemptsPerProvider ?? 3)));
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await fetch("https://api.groq.com/openai/v1/chat/completions", {
       method: "POST",
       headers: { Authorization: `Bearer ${key}`, "Content-Type": "application/json" },
@@ -300,7 +311,7 @@ async function groqVision(
     });
     if (res.status === 429 || res.status >= 500) {
       lastErr = `HTTP ${res.status}`;
-      await sleep(1500 * (attempt + 1) * (attempt + 1));
+      if (attempt + 1 < maxAttempts) await sleep(1500 * (attempt + 1) * (attempt + 1));
       continue;
     }
     if (!res.ok) {
@@ -311,7 +322,12 @@ async function groqVision(
       // failed_generation. Reasoning length is stochastic (measured 1277-3928 on
       // identical inputs), so exactly one more roll of the dice is worth it.
       // Every other 400 is a real bad request and still throws immediately.
-      if (res.status === 400 && attempt === 0 && /json_validate_failed/.test(body)) {
+      if (
+        res.status === 400 &&
+        attempt === 0 &&
+        attempt + 1 < maxAttempts &&
+        /json_validate_failed/.test(body)
+      ) {
         lastErr = "HTTP 400 json_validate_failed (reasoning consumed the completion budget)";
         continue;
       }
@@ -355,7 +371,7 @@ async function groqVision(
 async function falVision(
   prompt: string,
   images: Buffer[],
-  opts: { json?: boolean; maxTokens?: number },
+  opts: { json?: boolean; maxTokens?: number; maxAttemptsPerProvider?: number },
 ): Promise<string> {
   const key = process.env.FAL_KEY;
   if (!key) throw new VisionError("no FAL_KEY");
@@ -368,10 +384,11 @@ async function falVision(
         : ""),
     image_urls: picked.map((b) => `data:image/jpeg;base64,${b.toString("base64")}`),
   });
-  // One retry on 429/5xx (groq's loop, shortened): a transient fal blip must not
-  // knock the whole approved provider chain down on a transient FAL failure.
+  // Default retries preserve the broad vision gate's resilience; a caller can
+  // pin one attempt when its admission receipt must bound one fal fallback.
   let lastErr = "";
-  for (let attempt = 0; attempt < 2; attempt++) {
+  const maxAttempts = Math.max(1, Math.min(2, Math.floor(opts.maxAttemptsPerProvider ?? 2)));
+  for (let attempt = 0; attempt < maxAttempts; attempt++) {
     const res = await fetch("https://fal.run/fal-ai/any-llm/vision", {
       method: "POST",
       headers: { Authorization: `Key ${key}`, "Content-Type": "application/json" },
@@ -380,7 +397,7 @@ async function falVision(
     });
     if (res.status === 429 || res.status >= 500) {
       lastErr = `HTTP ${res.status}`;
-      await sleep(1500 * (attempt + 1) * (attempt + 1));
+      if (attempt + 1 < maxAttempts) await sleep(1500 * (attempt + 1) * (attempt + 1));
       continue;
     }
     if (!res.ok) throw new VisionError(`fal vision HTTP ${res.status}: ${(await res.text()).slice(0, 200)}`);
@@ -413,7 +430,14 @@ function sampleEvenly<T>(items: T[], max: number): T[] {
 async function visionBuffers(
   prompt: string,
   buffers: Buffer[],
-  args: { json?: boolean; maxTokens?: number; noCache?: boolean; reasoningEffort?: VisionReasoningEffort; providers?: readonly VisionProvider[] },
+  args: {
+    json?: boolean;
+    maxTokens?: number;
+    noCache?: boolean;
+    reasoningEffort?: VisionReasoningEffort;
+    providers?: readonly VisionProvider[];
+    maxAttemptsPerProvider?: number;
+  },
 ): Promise<string> {
   if (buffers.length === 0) throw new VisionError("no readable images");
   const chain = providerChain(args.providers);
@@ -482,6 +506,8 @@ export async function visionUrls(args: {
   noCache?: boolean;
   /** See VISION_REASONING_EFFORT — defaults to "none". */
   reasoningEffort?: VisionReasoningEffort;
+  /** See `VisionLocalArgs.maxAttemptsPerProvider`. */
+  maxAttemptsPerProvider?: number;
 }): Promise<string> {
   const buffers: Buffer[] = [];
   for (const u of args.imageUrls.slice(0, 12)) {

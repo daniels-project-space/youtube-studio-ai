@@ -49,6 +49,7 @@ import {
   CinematicCaseDirectionSchema,
   CinematicCaseSequenceDraftSchema,
 } from "./cinematicCaseSequenceDraft";
+import { CinematicFinalMasterQaAdmissionSchema } from "./cinematicFinalMasterQaAdmission";
 import { GeneratedFootageSceneManifestSchema } from "./generatedFootageManifest";
 import { VisualPacingEvidenceSchema } from "@/lib/visualPacing";
 
@@ -281,6 +282,11 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   cinematicCaseSequenceAdmission: {
     type: "CinematicCaseSequenceAdmissionReceipt",
     schema: CinematicCaseSequenceAdmissionReceiptSchema,
+    persist: "reference",
+  },
+  cinematicFinalMasterQaAdmission: {
+    type: "CinematicFinalMasterQaAdmission",
+    schema: CinematicFinalMasterQaAdmissionSchema,
     persist: "reference",
   },
   generatedFootageSceneManifest: {

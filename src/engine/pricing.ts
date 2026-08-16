@@ -34,6 +34,14 @@ const falRates = falImageRates();
  */
 export const NOVITA_CINEMATIC_QA_REPAIR_CAP = 2;
 
+/**
+ * A source-bound final master reviews every lock and every actual cut. The
+ * reviewer is pinned to one Groq attempt followed by one fal fallback attempt.
+ * Keep that fixed two-provider envelope explicit so an unavailable first
+ * provider cannot erase the spend rail before LTX starts.
+ */
+export const CINEMATIC_FINAL_MASTER_QA_MAX_REVIEW_CALLS = 479;
+
 export const PRICE = {
   /** Per keyframe still (Higgsfield/Flux). keyframes renders 2. */
   fluxStillUsd: rate("PRICE_FLUX_STILL_USD", 0.01),
@@ -92,6 +100,15 @@ export const PRICE = {
   thumbnailConceptUsd: rate("PRICE_THUMBNAIL_CONCEPT_USD", 0.01),
   /** Conservative allowance for the normal frame-sampled production QA pass. */
   qaBaseUsd: rate("PRICE_QA_BASE_USD", 0.04),
+  /**
+   * Conservative non-Google spend for one final-master lock/cut verdict. This
+   * is the complete one-Groq/one-fal logical review, not a per-frame price.
+   * The normal twelve-shot sequence stays inside qa_visual's existing $5 cap.
+   */
+  cinematicFinalMasterQaReviewUsd: rate(
+    "PRICE_CINEMATIC_FINAL_MASTER_QA_REVIEW_USD",
+    0.08,
+  ),
   /** Optional two-pass native full-video review. */
   nativeVideoQaUsd: rate("PRICE_NATIVE_VIDEO_QA_USD", 0.45),
   /** Optional local audio-aesthetics pass, including its worker compute. */
@@ -123,7 +140,24 @@ export function bananaUnitRate(
   return tier === "pro" ? PRICE.bananaProUsd : PRICE.bananaFlashUsd;
 }
 
-export function qaVisualCost(params: Readonly<Record<string, unknown>>): number {
+export function cinematicFinalMasterQaReviewCost(reviewCallCount: unknown): number {
+  const calls = Number(reviewCallCount);
+  if (
+    !Number.isInteger(calls) ||
+    calls < 0 ||
+    calls > CINEMATIC_FINAL_MASTER_QA_MAX_REVIEW_CALLS
+  ) {
+    throw new Error(
+      `cinematic final-master QA review count must be an integer between 0 and ${CINEMATIC_FINAL_MASTER_QA_MAX_REVIEW_CALLS}`,
+    );
+  }
+  return calls * PRICE.cinematicFinalMasterQaReviewUsd;
+}
+
+export function qaVisualCost(
+  params: Readonly<Record<string, unknown>>,
+  cinematicFinalMasterQaCostUsd: unknown = 0,
+): number {
   const clampFrames = (value: unknown, fallback: number, max: number): number => {
     const parsed = Number(value);
     if (!Number.isFinite(parsed)) return fallback;
@@ -135,9 +169,14 @@ export function qaVisualCost(params: Readonly<Record<string, unknown>>): number 
   const broadFrames = clampFrames(params["visualReviewFrames"], 48, 72);
   const focusFrames = clampFrames(params["visualReviewFocusFrames"], 24, 36);
   const evidenceBatches = Math.ceil(broadFrames / 12) + Math.ceil(focusFrames / 12);
+  const finalMasterCost = Number(cinematicFinalMasterQaCostUsd);
+  if (!Number.isFinite(finalMasterCost) || finalMasterCost < 0) {
+    throw new Error("cinematic final-master QA cost must be a finite non-negative amount");
+  }
   return (
     PRICE.qaBaseUsd * evidenceBatches +
-    (params["audioQa"] === true ? PRICE.audioQaUsd : 0)
+    (params["audioQa"] === true ? PRICE.audioQaUsd : 0) +
+    finalMasterCost
   );
 }
 

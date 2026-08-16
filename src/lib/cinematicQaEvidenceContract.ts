@@ -330,6 +330,7 @@ export async function defaultCinematicFinalMasterQaReviewer(
     reasoningEffort: "none",
     noCache: true,
     providers: ["groq", "fal"],
+    maxAttemptsPerProvider: 1,
   });
 }
 
