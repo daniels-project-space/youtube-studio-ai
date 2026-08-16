@@ -29,7 +29,7 @@ Note: one prior agent counted 28 entries in the `GOLDEN_MODULES` array vs the 27
 | visual | `loreshort` | Lore Short — Loreshort Engine | **NOT WIRED** | `golden.ts:523-530`; `src/lib/loreshort.ts` (420 L, no pipeline importer); `goldenExecution.ts:129` `kind:"catalog-only"` |
 | visual | `novita-render-farm` | Novita Render Farm | **WORKING** | `src/lib/novitaRenderFarm.ts:398-501,480-481,502-503`; block `novitaRenderBlocks.ts:39`; binding `goldenExecution.ts:129` |
 | visual | `imagecraft-novita` | Imagecraft (Novita Z-Image) | **BROKEN** — catalog claims execution via render farm; no import chain exists | `src/lib/imagecraft-novita.ts` (101 L); false claim `goldenExecution.ts:130` |
-| visual | `videocraft-novita` | Videocraft (Novita LTX-2.3) | **BROKEN** — same false execution claim | `src/lib/videocraft-novita.ts` (107 L); false claim `goldenExecution.ts:131` |
+| visual | `videocraft-novita` | Videocraft (legacy renderer) | **RETIRED** — superseded by the direct LTX 2.5 render path | `src/lib/novitaRenderFarm.ts` |
 | visual | `lofi` | Lofi Loop — Seaside Engine | **WORKING (caveat)** — pipeline runs, but cited engine `src/lib/lofi.ts` is dead code | `src/lib/lofi.ts` (509 L, zero importers repo-wide); live logic `lofiBlocks.ts:41,53` via `ffmpeg.ts`/`novitaMedia.ts`; binding `goldenExecution.ts:132` |
 | visual | `quiz` | Quiz — Quizcraft | **BROKEN** — no engine source exists anywhere | `goldenExecution.ts:133` (`catalog-only`, empty `executableIds`); only artifacts are `public/golden/quiz/*.{jpg,mp4}` |
 | visual | `visuals` | Visuals | **WORKING** | `src/lib/footagecraft.ts:284-334` (watermark/relevance gate); imported by `narratedBlocks.ts`; binding `goldenExecution.ts:141` |
