@@ -237,8 +237,11 @@ async function novita(path, init = {}) {
     headers: { ...headers, ...(init.headers || {}) },
     signal: AbortSignal.timeout(30_000),
   });
-  if (!response.ok) throw new Error(`Novita ${path.split("?")[0]} failed with HTTP ${response.status}`);
   const body = await response.text();
+  if (!response.ok) {
+    const detail = body.replace(/https?:\/\/[^\s"<>]+/g, "[url]").replace(/[A-Za-z0-9_-]{40,}/g, "[redacted]").slice(0, 500);
+    throw new Error(`Novita ${path.split("?")[0]} failed with HTTP ${response.status}: ${detail || "no detail"}`);
+  }
   return body ? JSON.parse(body) : {};
 }
 
