@@ -689,22 +689,35 @@ def _run_bounded(
     deadline_monotonic: float | None = None,
 ) -> None:
     _check_deadline(deadline_monotonic)
-    process = subprocess.Popen(command, start_new_session=True)
-    started = time.monotonic()
-    while process.poll() is None:
-        if STOP.wait(2):
-            _terminate_process_group(process)
-            _check_deadline(deadline_monotonic)
-            raise InterruptedError("render interrupted")
-        if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
-            STOP.set()
-            _terminate_process_group(process)
-            raise InterruptedError("render exceeded sealed lifetime")
-        if time.monotonic() - started > timeout_seconds:
-            _terminate_process_group(process)
-            raise TimeoutError("render exceeded bounded worker timeout")
-    if process.returncode != 0:
-        raise RuntimeError(f"renderer exited with status {process.returncode}")
+    # Keep renderer diagnostics bounded, durable only for this process, and
+    # attach the tail to the signed checkpoint if inference fails. Without it
+    # a non-zero LTX exit gives the control plane no actionable repair signal.
+    with tempfile.TemporaryFile(mode="w+b") as stderr_file:
+        process = subprocess.Popen(
+            command,
+            start_new_session=True,
+            stdout=subprocess.DEVNULL,
+            stderr=stderr_file,
+        )
+        started = time.monotonic()
+        while process.poll() is None:
+            if STOP.wait(2):
+                _terminate_process_group(process)
+                _check_deadline(deadline_monotonic)
+                raise InterruptedError("render interrupted")
+            if deadline_monotonic is not None and time.monotonic() >= deadline_monotonic:
+                STOP.set()
+                _terminate_process_group(process)
+                raise InterruptedError("render exceeded sealed lifetime")
+            if time.monotonic() - started > timeout_seconds:
+                _terminate_process_group(process)
+                raise TimeoutError("render exceeded bounded worker timeout")
+        if process.returncode != 0:
+            stderr_file.seek(0, os.SEEK_END)
+            size = stderr_file.tell()
+            stderr_file.seek(max(0, size - 4_000))
+            diagnostic = re.sub(r"\s+", " ", stderr_file.read().decode("utf-8", "replace")).strip()
+            raise RuntimeError(f"renderer exited with status {process.returncode}: {diagnostic or 'no stderr'}")
 
 
 def build_video_command(
