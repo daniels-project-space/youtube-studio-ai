@@ -9,7 +9,8 @@ const narrationSource = source.slice(narrationStart, narrationEnd > narrationSta
 
 assert(narrationStart >= 0, "narration_tts must remain the shared spoken-audio producer");
 assert.match(narrationSource, /planNarrationCadence\(/, "narration_tts must plan semantic pauses before synthesis");
-assert.match(narrationSource, /evaluateNarrationCadence\(/, "narration_tts must bind actual sentence timing to the planned delivery beats");
+assert.match(narrationSource, /reconcileNarrationCadenceAfterDurationMeasurement\(/, "narration_tts must bind actual sentence timing to the planned delivery beats and re-certify cadence after any probe-driven cue-clock reconciliation");
+assert.doesNotMatch(narrationSource, /sentence timings rescaled ×\$\{k\.toFixed\(4\)\}/, "a post-cadence timing scale must never be accepted without rechecking pause rhythm");
 assert.doesNotMatch(narrationSource, /Math\.random\(/, "narration timing must be repeatable across retries and cannot use random pauses");
 assert.match(narrationSource, /chapterCadencePlan/, "chapter narration must use the same shared cadence planner");
 assert.match(narrationSource, /judgeAvailable:\s*false/, "narration_tts must never borrow Gemini availability from thumbnail work");

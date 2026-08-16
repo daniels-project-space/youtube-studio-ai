@@ -8,6 +8,7 @@ import {
   evaluateNarrationCadence,
   planNarrationCadence,
   preflightNarrationPerformance,
+  reconcileNarrationCadenceAfterDurationMeasurement,
 } from "@/lib/narrationPerformance";
 
 async function main(): Promise<void> {
@@ -76,6 +77,27 @@ async function main(): Promise<void> {
   const cadenceEvidence = evaluateNarrationCadence({ sentences, sentenceTimings: timings, plan: cadence });
   assert.ok(cadenceEvidence.distinctGapCount >= 1);
   assert.equal(cadenceEvidence.maxGapSec, Math.max(cadence.gapsSec[0]!, cadence.gapsSec[1]!));
+
+  const stableReconciliation = reconcileNarrationCadenceAfterDurationMeasurement({
+    sentences,
+    sentenceTimings: timings,
+    plan: cadence,
+    estimatedDurationSec: timings.at(-1)!.end,
+    measuredDurationSec: timings.at(-1)!.end + 0.4,
+  });
+  assert.equal(stableReconciliation.scale, 1, "minor encoder variance must preserve the certified cue timeline");
+  assert.throws(
+    () => reconcileNarrationCadenceAfterDurationMeasurement({
+      sentences,
+      sentenceTimings: timings,
+      plan: cadence,
+      estimatedDurationSec: timings.at(-1)!.end,
+      measuredDurationSec: timings.at(-1)!.end * 2,
+      reconcileThresholdSec: 0,
+    }),
+    /pause .* does not match its planned/,
+    "a post-probe timing scale that changes semantic pause rhythm must fail instead of being silently accepted",
+  );
 }
 
 void main();

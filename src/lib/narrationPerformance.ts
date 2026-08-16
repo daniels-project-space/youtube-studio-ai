@@ -161,6 +161,50 @@ export function evaluateNarrationCadence(args: {
   };
 }
 
+/**
+ * Reconcile timestamp estimates with the measured rendered narration only when
+ * a probe failed, then prove that the correction did not erase the semantic
+ * pause plan. A linear timing scale also scales every pause; accepting it after
+ * cadence was checked would turn a declared reveal/turn rhythm into fiction.
+ */
+export function reconcileNarrationCadenceAfterDurationMeasurement(args: {
+  sentences: readonly string[];
+  sentenceTimings: readonly { start: number; end: number }[];
+  plan: NarrationCadencePlan;
+  estimatedDurationSec: number;
+  measuredDurationSec: number;
+  reconcileThresholdSec?: number;
+}): {
+  sentenceTimings: Array<{ start: number; end: number }>;
+  scale: number;
+  cadence: NarrationCadenceEvidence;
+} {
+  const estimatedDurationSec = Number(args.estimatedDurationSec);
+  const measuredDurationSec = Number(args.measuredDurationSec);
+  if (!Number.isFinite(estimatedDurationSec) || estimatedDurationSec <= 0) {
+    throw new Error("narration cadence reconciliation: estimated narration duration is invalid");
+  }
+  if (!Number.isFinite(measuredDurationSec) || measuredDurationSec <= 0) {
+    throw new Error("narration cadence reconciliation: measured narration duration is invalid");
+  }
+  const threshold = Number.isFinite(args.reconcileThresholdSec)
+    ? Math.max(0, args.reconcileThresholdSec!)
+    : 1.5;
+  const scale = Math.abs(measuredDurationSec - estimatedDurationSec) > threshold
+    ? measuredDurationSec / estimatedDurationSec
+    : 1;
+  const sentenceTimings = args.sentenceTimings.map((timing) => ({
+    start: timing.start * scale,
+    end: timing.end * scale,
+  }));
+  const cadence = evaluateNarrationCadence({
+    sentences: args.sentences,
+    sentenceTimings,
+    plan: args.plan,
+  });
+  return { sentenceTimings, scale, cadence };
+}
+
 function spokenWords(text: string): string[] {
   return text
     .replace(/\[(?:long )?(?:pause|whisper|sigh|laugh|breath|beat)\]/gi, " ")

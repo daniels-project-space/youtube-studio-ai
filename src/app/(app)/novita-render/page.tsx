@@ -2,7 +2,10 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { GENERATION_PROFILES, type GenerationProfile } from "@/engine/generationProfiles";
-import { novitaVideoProfileIdentity } from "@/engine/runtimeCapability";
+import {
+  assessNovitaVideoProfileRuntime,
+  novitaVideoProfileIdentity,
+} from "@/engine/runtimeCapability";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
 import {
   NOVITA_RENDER_STATUS_TIMEOUT_MS,
@@ -204,6 +207,11 @@ function hasExactLtx25X2Attestation(
   health: NovitaFleetHealth | null,
   profile: GenerationProfile,
 ): boolean {
+  // The browser must not promote a remote health boolean into production
+  // admission. The same local, digest/profile allow-list used by the worker
+  // launcher has to admit this profile too; it intentionally remains false
+  // until a real benchmark seal is recorded.
+  if (!assessNovitaVideoProfileRuntime(profile).ready) return false;
   const ltx = health?.models?.ltx;
   return health?.ready === true
     && health.attestation.source === "direct-trigger"

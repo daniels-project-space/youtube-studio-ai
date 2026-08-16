@@ -93,9 +93,9 @@ import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
 import { narrationPhysics } from "@/lib/voicecraft";
 import {
   assertNarrationPerformanceEvidence,
-  evaluateNarrationCadence,
   planNarrationCadence,
   preflightNarrationPerformance,
+  reconcileNarrationCadenceAfterDurationMeasurement,
 } from "@/lib/narrationPerformance";
 import {
   proveNarrationTranscript,
@@ -1044,7 +1044,7 @@ export const narrationTts: Block = {
     const partPaths: string[] = parts.map((x) => x.p);
     // Timings carry the DISPLAY text â€” audio tags are performed by the voice,
     // never shown in captions/quote cards/insert matching.
-    const sentenceTimings: { text: string; start: number; end: number }[] = [];
+    let sentenceTimings: { text: string; start: number; end: number }[] = [];
     let cursor = 0;
     for (let i = 0; i < sentences.length; i++) {
       sentenceTimings.push({ text: stripAudioTags(sentences[i]), start: cursor, end: cursor + parts[i].dur });
@@ -1060,27 +1060,32 @@ export const narrationTts: Block = {
     } catch {
       durationSec = cursor;
     }
-    // TIMING SELF-CHECK: a failed per-sentence probe injected an ESTIMATED
-    // duration into the cumulative cursor, silently shifting every later
-    // caption/quote/insert sync point. When probes failed AND the real
-    // narration length disagrees with the cursor, rescale timings linearly to
-    // the measured truth instead of shipping drifted sync.
-    const cadence = evaluateNarrationCadence({
+    // TIMING RECONCILIATION: a failed per-sentence probe injected an ESTIMATED
+    // duration into the cumulative cursor. If the final take materially differs,
+    // reconcile its cue clock to measured truth AND re-prove the semantic pause
+    // plan on that adjusted clock; a simple post-cadence scale would make every
+    // reveal/turn pause unaccountable.
+    const reconciledTiming = reconcileNarrationCadenceAfterDurationMeasurement({
       sentences,
       sentenceTimings,
       plan: cadencePlan,
+      estimatedDurationSec: cursor,
+      measuredDurationSec: probeFailures > 0 && durationSec > 0 ? durationSec : cursor,
     });
+    if (reconciledTiming.scale !== 1) {
+      sentenceTimings = sentenceTimings.map((timing, index) => ({
+        ...timing,
+        ...reconciledTiming.sentenceTimings[index]!,
+      }));
+      ctx.log(
+        `narration_tts: ${probeFailures} probe failure(s) — sentence timings reconciled ×${reconciledTiming.scale.toFixed(4)} ` +
+        `to the measured ${durationSec.toFixed(1)}s; cadence remains certified`,
+      );
+    }
+    const cadence = reconciledTiming.cadence;
     ctx.log(
       `narration_tts: cadence evidence PASSED (${cadence.minGapSec.toFixed(2)}–${cadence.maxGapSec.toFixed(2)}s pauses; ${cadence.distinctGapCount} distinct delivery beats)`,
     );
-    if (probeFailures > 0 && durationSec > 0 && Math.abs(durationSec - cursor) > 1.5) {
-      const k = durationSec / Math.max(0.1, cursor);
-      for (const t of sentenceTimings) {
-        t.start *= k;
-        t.end *= k;
-      }
-      ctx.log(`narration_tts: ${probeFailures} probe failure(s) — sentence timings rescaled ×${k.toFixed(4)} to the measured ${durationSec.toFixed(1)}s`);
-    }
     const narrationPerformanceEvidence = await preflightNarrationPerformance({ audioPath: local, text, speed });
     ctx.log(
       `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,

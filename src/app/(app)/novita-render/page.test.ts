@@ -22,6 +22,11 @@ assert.match(page, /return \(\) => controller\.abort\(\)/);
 assert.match(page, /isFleetHealth\(payload\) \? payload : UNAVAILABLE_FLEET_HEALTH/);
 assert.match(page, /setFleetHealth\(UNAVAILABLE_FLEET_HEALTH\)/);
 assert.match(page, /hasExactLtx25X2Attestation/);
+assert.match(
+  page,
+  /assessNovitaVideoProfileRuntime\(profile\)\.ready/,
+  "the console must require the same local benchmark allow-list as the worker launcher before it presents production readiness",
+);
 assert.match(page, /source === "direct-trigger"/);
 assert.match(page, /exactLtx25Rtx4090X2 === true/);
 assert.match(page, /profileIdentity === novitaVideoProfileIdentity\(profile\)/);
