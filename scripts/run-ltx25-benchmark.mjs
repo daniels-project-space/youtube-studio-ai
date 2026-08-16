@@ -94,7 +94,7 @@ function runtimeBootstrapSource() {
   return String.raw`import fcntl,hashlib,os,pathlib,shutil,tarfile,tempfile,urllib.request
 sha=os.environ['NOVITA_RUNTIME_BUNDLE_SHA256']
 root=pathlib.Path('/network/runtime/ltx-2.5-'+sha)
-compatibility=root/'.torch-cu118-2.7.1'
+compatibility=root/'.torch-cu128-2.8.0'
 overlay_url=os.environ.get('NOVITA_WORKER_OVERLAY_URL','')
 overlay_sha=os.environ.get('NOVITA_WORKER_OVERLAY_SHA256','')
 def apply_worker_overlay():
@@ -113,11 +113,11 @@ def torch_cuda_ready():
   try:
     evidence=subprocess.check_output([str(python),'-c',"import torch,torch.sparse;print(torch.__version__+'|'+str(torch.version.cuda)+'|'+str(torch.cuda.is_available()))"],text=True,stderr=subprocess.DEVNULL,timeout=45).strip()
   except (OSError,subprocess.SubprocessError): return False
-  return evidence=='2.7.1+cu118|11.8|True'
+  return evidence=='2.8.0+cu128|12.8|True'
 def compatibility_ready():
   # A historical bootstrap wrote a literal backslash-n. It was written only
   # after the CUDA probe below succeeded, so normalize that valid receipt.
-  return compatibility.is_file() and compatibility.read_text().strip().replace(chr(92)+'n','')=='torch==2.7.1+cu118' and torch_cuda_ready()
+  return compatibility.is_file() and compatibility.read_text().strip()=='torch==2.8.0+cu128' and torch_cuda_ready()
 def repair_python_paths(runtime_root):
   original='/opt/LTX-2'
   relocated=str(runtime_root/'opt/LTX-2')
@@ -132,10 +132,10 @@ def ensure_cuda_compatibility():
   if not python.is_file(): raise RuntimeError('portable Python is missing before CUDA compatibility install')
   import subprocess,sys
   subprocess.run([sys.executable,'-m','pip','install','--no-cache-dir','uv==0.10.6'],check=True,stdout=subprocess.DEVNULL)
-  subprocess.run(['uv','pip','install','--python',str(python),'--reinstall','torch==2.7.1','torchvision==0.22.1','torchaudio==2.7.1','--index-url','https://download.pytorch.org/whl/cu118'],check=True,stdout=subprocess.DEVNULL)
+  subprocess.run(['uv','pip','install','--python',str(python),'--reinstall','torch==2.8.0','torchvision==0.23.0','torchaudio==2.8.0','--index-url','https://download.pytorch.org/whl/cu128'],check=True,stdout=subprocess.DEVNULL)
   evidence=subprocess.check_output([str(python),'-c',"import torch,torch.sparse;print(torch.__version__+'|'+str(torch.version.cuda)+'|'+str(torch.cuda.is_available()))"],text=True).strip()
-  if evidence!='2.7.1+cu118|11.8|True': raise RuntimeError('CUDA-compatible Torch verification failed: '+evidence)
-  compatibility.write_text('torch==2.7.1+cu118'+chr(10))
+  if evidence!='2.8.0+cu128|12.8|True': raise RuntimeError('CUDA-compatible Torch verification failed: '+evidence)
+  compatibility.write_text('torch==2.8.0+cu128'+chr(10))
 def exec_worker():
   project=str(root/'opt/LTX-2')
   package_paths=[
