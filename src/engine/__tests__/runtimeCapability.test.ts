@@ -63,6 +63,20 @@ function onlyTheExactLtx25X2ProfileCanUseABenchmark(): void {
   });
   assert.equal(wrongTarget.ready, false);
   assert(wrongTarget.blockers.includes("ltx_2_5_rtx_4090_contract_width_mismatch"));
+
+  // Regression guard: even a fully otherwise-valid profile cannot bypass the
+  // central LTX 2.5 admission registry by naming the retired LTX 2.3 model.
+  const legacyLtx23Override = assessNovitaVideoPhaseProfileRuntime({
+    ...video,
+    id,
+    model: "Lightricks/LTX-2.3",
+  }, {
+    gpuSku: "RTX 4090",
+    vramGb: 24,
+    benchmarkedVideoProfileRevisions: [novitaVideoProfileIdentity(production)],
+  });
+  assert.equal(legacyLtx23Override.ready, false);
+  assert(legacyLtx23Override.blockers.includes("unrecognized_novita_video_model:Lightricks/LTX-2.3"));
 }
 
 function pipelineChecksOnlyRealVideoProducers(): void {
