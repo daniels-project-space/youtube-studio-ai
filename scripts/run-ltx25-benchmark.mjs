@@ -138,8 +138,14 @@ def ensure_cuda_compatibility():
   compatibility.write_text('torch==2.7.1+cu118'+chr(10))
 def exec_worker():
   project=str(root/'opt/LTX-2')
+  package_paths=[
+    project,
+    str(root/'opt/LTX-2/packages/ltx-core/src'),
+    str(root/'opt/LTX-2/packages/ltx-pipelines/src'),
+  ]
+  if not all(pathlib.Path(item).is_dir() for item in package_paths): raise RuntimeError('official LTX runtime package sources are incomplete')
   previous=os.environ.get('PYTHONPATH','')
-  os.environ['PYTHONPATH']=project if not previous else project+os.pathsep+previous
+  os.environ['PYTHONPATH']=os.pathsep.join(package_paths+([previous] if previous else []))
   python=str(root/'opt/LTX-2/.venv/bin/python')
   os.execv(python,[python,str(root/'opt/novita-worker/worker.py')])
 if runtime_ready():
