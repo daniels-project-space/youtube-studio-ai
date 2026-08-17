@@ -1,0 +1,23 @@
+name: Weekly footage prune
+
+# Cloud-native replacement for the disabled Trigger.dev schedule task.
+# pruneFootageSchedule (src/trigger/pruneFootage.ts, task id "prune-footage")
+# is a plain on-demand task() gated behind ENABLE_FOOTAGE_PRUNE=true so that
+# disabled cleanup never spends a daily Trigger run. This workflow invokes it
+# on a weekly cadence via Trigger.dev's REST API instead of a VPS cron, since
+# the app is cloud-hosted (Vercel + Trigger.dev).
+on:
+  schedule:
+    - cron: "17 4 * * 1"  # Monday 04:17 UTC, off-peak, avoids exact-hour thundering herd
+  workflow_dispatch: {}
+
+jobs:
+  trigger-prune:
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger pruneFootage task
+        run: |
+          curl -sf -X POST "https://api.trigger.dev/api/v1/tasks/prune-footage/trigger" \
+            -H "Authorization: Bearer ${{ secrets.TRIGGER_SECRET_KEY }}" \
+            -H "Content-Type: application/json" \
+            -d '{"payload": {}}'
