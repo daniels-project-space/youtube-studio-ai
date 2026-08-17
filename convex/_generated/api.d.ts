@@ -33,6 +33,7 @@ import type * as runLogs from "../runLogs.js";
 import type * as runStages from "../runStages.js";
 import type * as runs from "../runs.js";
 import type * as seo from "../seo.js";
+import type * as seriesStoryState from "../seriesStoryState.js";
 import type * as studioFunctions from "../studioFunctions.js";
 import type * as topicMemory from "../topicMemory.js";
 import type * as videos from "../videos.js";
@@ -73,6 +74,7 @@ declare const fullApi: ApiFromModules<{
   runStages: typeof runStages;
   runs: typeof runs;
   seo: typeof seo;
+  seriesStoryState: typeof seriesStoryState;
   studioFunctions: typeof studioFunctions;
   topicMemory: typeof topicMemory;
   videos: typeof videos;

@@ -62,12 +62,30 @@ import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
 import { loadPerformanceContext } from "@/lib/performance";
+import { renderStoryStateForPrompt } from "@/lib/seriesStoryState";
 import { z } from "zod";
 
-/** Topic-chunk structured-output schemas (validated on both Mastra + REST). */
+/**
+ * Topic-chunk structured-output schema (validated on both Mastra + REST).
+ * The arcSummary/newPlotBeat/unresolvedThreads/entities fields are only
+ * populated by the SERIES MODE continuation prompt (topic_select, below);
+ * every other caller of this schema simply gets the zod defaults ("" / []).
+ */
 const producerTopicSchema = z.object({
   candidates: z
-    .array(z.object({ topic: z.string(), angle: z.string().optional().default("") }))
+    .array(
+      z.object({
+        topic: z.string(),
+        angle: z.string().optional().default(""),
+        arcSummary: z.string().optional().default(""),
+        newPlotBeat: z.string().optional().default(""),
+        unresolvedThreads: z.array(z.string()).optional().default([]),
+        entities: z
+          .array(z.object({ name: z.string(), role: z.string() }))
+          .optional()
+          .default([]),
+      }),
+    )
     .optional()
     .default([]),
 });
@@ -298,6 +316,19 @@ export const topicSelect: Block = {
     // gets a unique subtitle that continues the arc. When the series is finished
     // (epNum > seriesCount) we fall through to normal topic generation so the
     // channel keeps publishing. Episode order is encoded in the (clean) title.
+    //
+    // Phase 4 (episodic continuity): beyond avoiding title repetition, the
+    // continuation call is now grounded in REAL prior plot content — a running
+    // arc summary, unresolved narrative threads, and known entities (name +
+    // one-line ROLE, never wardrobe/appearance) — read from the Convex
+    // `seriesStoryState` table. The SAME LLM call that proposes the next
+    // subtitle also proposes the updated story state, written back immediately
+    // alongside the existing topic-memory commit — so the write never depends
+    // on a downstream "finalization" step that doesn't exist for every family
+    // sharing this block. A series with no seriesStoryState row yet (first
+    // episode, or a non-series channel) behaves exactly as before: the prompt
+    // simply omits the "story so far" section and the write below just starts
+    // one.
     const seriesTitle = (ctx.params["seriesTitle"] as string | undefined)?.trim();
     const seriesCount = Number(ctx.params["seriesCount"] ?? 0) || 0;
     if (seriesTitle) {
@@ -306,7 +337,19 @@ export const topicSelect: Block = {
       if (!(seriesCount > 0 && epNum > seriesCount)) {
         const label = seriesCount > 0 ? `Part ${epNum} of ${seriesCount}` : `Part ${epNum}`;
         const prior = recentList.filter((t) => t.includes(seriesTitle));
+        const existingStoryState = await c
+          .query(api.seriesStoryState.getForSeries, { channelId, seriesTitle })
+          .catch((e) => {
+            ctx.log(`topic_select(series): story-state read failed (continuing without it): ${e instanceof Error ? e.message : e}`);
+            return null;
+          });
+        const storyContext = renderStoryStateForPrompt(existingStoryState);
         let subtitle = "";
+        let angle = "";
+        let arcSummaryOut = "";
+        let newPlotBeatOut = "";
+        let unresolvedThreadsOut: string[] = [];
+        let entitiesOut: { name: string; role: string }[] = [];
         if (hasAnthropicKey()) {
           try {
             const out = await agentJson({
@@ -318,12 +361,27 @@ export const topicSelect: Block = {
                 (seriesCount > 0 ? ` (a ${seriesCount}-part series).` : ".") + "\n" +
                 `Channel "${channelName}" — persona: ${persona || "n/a"}; niche: ${niche || "n/a"}; style: ${style || "n/a"}.\n` +
                 `Episodes already published (CONTINUE the arc, do NOT repeat):\n${prior.join("\n") || "(none yet — this is episode 1)"}\n\n` +
+                (storyContext
+                  ? `STORY SO FAR (use this — not just the titles above — to continue REAL plot/thematic content):\n${storyContext}\n\n`
+                  : "") +
                 `Propose the SINGLE best focus for episode ${epNum}: a specific, compelling SUBTITLE (the episode's unique theme — not the series name) and a one-line angle. ` +
-                `It must build on prior episodes and fit the whole series. Return STRICT JSON {"candidates":[{"topic":string,"angle":string}]}.`,
-              maxTokens: 400,
+                `It must build on prior episodes and fit the whole series. ` +
+                `Also update the running story state: a short 2-4 sentence ARC SUMMARY covering everything through THIS episode, ` +
+                `a one-line PLOT BEAT capturing what this specific episode adds, the UPDATED list of unresolved narrative threads ` +
+                `(open questions/promises still to pay off), and any newly introduced entities (name + one-line ROLE only — never wardrobe or appearance). ` +
+                `Return STRICT JSON {"candidates":[{"topic":string,"angle":string,"arcSummary":string,"newPlotBeat":string,"unresolvedThreads":string[],"entities":[{"name":string,"role":string}]}]}.`,
+              maxTokens: 600,
               temperature: 0.8,
             });
-            subtitle = (out.candidates?.[0]?.topic ?? "").trim().replace(/^["']|["']$/g, "");
+            const cand = out.candidates?.[0];
+            subtitle = (cand?.topic ?? "").trim().replace(/^["']|["']$/g, "");
+            angle = (cand?.angle ?? "").trim();
+            arcSummaryOut = (cand?.arcSummary ?? "").trim();
+            newPlotBeatOut = (cand?.newPlotBeat ?? "").trim();
+            unresolvedThreadsOut = (cand?.unresolvedThreads ?? []).map((t) => t.trim()).filter(Boolean);
+            entitiesOut = (cand?.entities ?? [])
+              .map((e) => ({ name: (e.name ?? "").trim(), role: (e.role ?? "").trim() }))
+              .filter((e) => e.name);
           } catch (e) {
             ctx.log(`topic_select(series): subtitle gen failed (continuing): ${e instanceof Error ? e.message : e}`);
           }
@@ -331,7 +389,31 @@ export const topicSelect: Block = {
         const topic = subtitle
           ? `${seriesTitle} — ${label}: ${subtitle}`
           : `${seriesTitle} — ${label}`;
-        if (ctx.params["dryRun"] !== true) await recordTopicMemory(c, ctx, topic);
+        if (ctx.params["dryRun"] !== true) {
+          await recordTopicMemory(c, ctx, topic);
+          // Best-effort write-back: a failed story-state write must never break
+          // topic selection — the no-repeat guarantee (topicMemory, above) is
+          // the only FATAL write on this path.
+          const hasUpdate =
+            subtitle || arcSummaryOut || newPlotBeatOut || unresolvedThreadsOut.length > 0 || entitiesOut.length > 0;
+          if (hasUpdate) {
+            await c
+              .mutation(api.seriesStoryState.recordEpisodeBeat, {
+                ownerId: ctx.ownerId,
+                channelId,
+                seriesTitle,
+                episode: epNum,
+                arcSummary: arcSummaryOut || undefined,
+                newPlotBeat:
+                  newPlotBeatOut || (subtitle ? `${label}: ${subtitle}${angle ? ` — ${angle}` : ""}` : undefined),
+                unresolvedThreads: unresolvedThreadsOut.length ? unresolvedThreadsOut : undefined,
+                newEntities: entitiesOut.length ? entitiesOut : undefined,
+              })
+              .catch((e) => {
+                ctx.log(`topic_select(series): story-state write-back failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+              });
+          }
+        }
         ctx.log(`topic_select(series): "${topic}" (episode ${epNum}${seriesCount ? `/${seriesCount}` : ""})`);
         return { topic };
       }

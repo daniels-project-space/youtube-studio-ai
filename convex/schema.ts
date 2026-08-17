@@ -790,6 +790,39 @@ export default defineSchema({
     .index("by_channel", ["channelId"])
     .index("by_channel_key", ["channelId", "key"]),
 
+  // Real episodic story-state memory (Phase 4 — episodic continuity). One row
+  // per (channelId, seriesTitle): a running arc summary, prior plot beats,
+  // unresolved narrative threads, and known entities (name + one-line ROLE
+  // only — never wardrobe/appearance, which is a separate concern owned by
+  // the character/wardrobe continuity system). `topic_select`'s SERIES MODE
+  // reads this to ground its continuation LLM call in real prior plot content
+  // (not just prior titles), then writes an updated summary back in the same
+  // call. No row for a series = today's exact title-only-continuity behavior.
+  seriesStoryState: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    seriesTitle: v.string(),
+    arcSummary: v.string(),
+    plotBeats: v.array(
+      v.object({
+        episode: v.number(),
+        beat: v.string(),
+        at: v.number(),
+      }),
+    ),
+    unresolvedThreads: v.array(v.string()),
+    entities: v.array(
+      v.object({
+        name: v.string(),
+        role: v.string(),
+      }),
+    ),
+    updatedAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_channel", ["channelId"])
+    .index("by_channel_series", ["channelId", "seriesTitle"]),
+
   // -------------------- Analytics (stats-refresh sink) --------------------
   // Per-video performance snapshots, captured by the stats-refresh task from
   // the YouTube Data API v3 (videos.list?part=statistics). Each row is one
