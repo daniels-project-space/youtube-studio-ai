@@ -200,7 +200,18 @@ async function reapUnleasedProviderWorker(args: {
 
 export const novita4090Reaper = schedules.task({
   id: "novita-4090-reaper",
-  cron: "*/1 * * * *",
+  // Cost note (2026-08-17): every tick did an unconditional Convex query PLUS
+  // a live Novita listManagedInstances() provider call, even when idle. A
+  // cheap "skip the provider call if Convex has 0 candidates" pre-check was
+  // considered and rejected: the provider listing below also drives the
+  // ORPHAN sweep (an instance with NO Convex lease record at all, e.g. a
+  // Trigger process that died before persisting anything -- see file header
+  // comment). Convex has no signal for that case by definition, so gating on
+  // "candidates.length === 0" would silently disable the orphan safety net.
+  // Widened the cadence instead: 5 minutes still bounds an undetected GPU
+  // leak to well under an hour, at 1/5th the invocation (and provider-call)
+  // volume of the previous 1-minute cron.
+  cron: "*/5 * * * *",
   maxDuration: 1_800,
   retry: { maxAttempts: 2, minTimeoutInMs: 5_000, maxTimeoutInMs: 30_000, factor: 2 },
   // A provider delete can take several polls. Serializing this task prevents
