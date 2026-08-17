@@ -849,7 +849,15 @@ export const music: Block = {
           `${a.genre} instrumental to study and relax to, evoking "${topic}".`,
           a.instrumentation?.length ? `Instrumentation: ${a.instrumentation.join(", ")}.` : "",
           a.textures?.length ? `Texture: ${a.textures.join(", ")}.` : "",
-          a.moodArc ? `Mood: ${a.moodArc.split(/[.;]/)[0]}.` : "",
+          // Neither Mureka nor Suno exposes a structural/section parameter
+          // (verified against both providers' actual request shapes in
+          // src/lib/music.ts — `duration` is the only real metadata either
+          // returns; BPM only ever appears as OUTBOUND prompt text). Prose is
+          // the only lever these providers expose for mood movement across a
+          // track, so carry the DNA's full mood-arc sentence (not just its
+          // first clause) — an author who wrote "opens tense, resolves
+          // warmer" wants that shift reaching the model, not truncated away.
+          a.moodArc ? `Emotional arc across the track: ${a.moodArc.trim().slice(0, 240)}.` : "",
           `${a.bpmRange?.[0] ?? 70}-${a.bpmRange?.[1] ?? 88} BPM, ${a.loopable ? "loop-friendly, resolves back to the tonic" : "natural ending"}, purely instrumental, no vocals, no lyrics.`,
         ].filter(Boolean).join(" ")
       : "";

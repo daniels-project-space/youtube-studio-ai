@@ -23,12 +23,30 @@ export const TimedSentenceSchema = z.object({
   evidenceRefs: z.array(z.string()),
 }).refine((value) => value.t1 > value.t0, "sentence t1 must follow t0");
 
+/**
+ * Per-beat/shot MOOD TAG (music-mood threading). DATA ONLY — no
+ * mood-to-music-section selection logic is built here; that is future work
+ * for whatever consumes this field. A bounded enum (not free text) keeps it
+ * safe for any automated consumer without needing to sanitize an open
+ * string. Optional everywhere it appears, so every existing beat/shot
+ * payload that predates this field keeps validating unchanged.
+ *
+ * Defined here — not in cinematicCaseSequence.ts — because Story Spine is
+ * upstream and already the shared ShotPlan source cinematicCaseSequence.ts
+ * imports from; cinematicCaseSequence.ts imports this same schema for its
+ * own per-beat mood field rather than redeclaring the enum.
+ */
+export const BeatMoodSchema = z.enum(["tense", "somber", "triumphant", "mysterious", "neutral"]);
+export type BeatMood = z.infer<typeof BeatMoodSchema>;
+
 export const NarrativeBeatSchema = z.object({
   id: z.string().min(1),
   sourceSentenceIds: z.array(z.string()).min(1),
   t0: z.number().finite().nonnegative(),
   t1: z.number().finite().positive(),
   purpose: z.string().min(1),
+  /** Optional bounded mood tag; threaded down onto this beat's shots. */
+  mood: BeatMoodSchema.optional(),
   evidenceRefs: z.array(z.string()),
 }).refine((value) => value.t1 > value.t0, "beat t1 must follow t0");
 
@@ -74,6 +92,8 @@ export const ShotPlanSchema = z.object({
   prompt: z.string().min(1),
   seconds: z.number().positive(),
   storyFunction: z.string().min(1),
+  /** Optional bounded mood tag inherited from the parent narrative beat. */
+  mood: BeatMoodSchema.optional(),
   section: z.string().min(1),
   seed: z.number().int().nonnegative(),
 }).refine((value) => value.t1 > value.t0, "shot t1 must follow t0");
@@ -125,7 +145,7 @@ export interface PlanStorySpineInput {
   topic: string;
   narrationDurationSec: number;
   sentenceTimings: Array<{ text: string; start: number; end: number }>;
-  structure?: { beats?: Array<{ name?: string; note?: string; intentSec?: number }> };
+  structure?: { beats?: Array<{ name?: string; note?: string; intentSec?: number; mood?: string }> };
   visualBrief?: Record<string, unknown>;
   styleDNA?: Record<string, unknown> | null;
   generationProfile?: unknown;
@@ -213,17 +233,27 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
     t1: index === sentences.length - 1 ? duration : sentence.t1,
   }));
   const structureBeats = input.structure?.beats ?? [];
-  const narrativeBeats = intervals.map((sentence, index) => ({
-    id: `beat-${String(index + 1).padStart(4, "0")}`,
-    sourceSentenceIds: [sentence.id],
-    t0: sentence.t0,
-    t1: sentence.t1,
-    purpose:
-      structureBeats[Math.min(structureBeats.length - 1, Math.floor(index * structureBeats.length / intervals.length))]?.note ||
-      structureBeats[Math.min(structureBeats.length - 1, Math.floor(index * structureBeats.length / intervals.length))]?.name ||
-      "advance the narrated argument",
-    evidenceRefs: sentence.evidenceRefs,
-  }));
+  // Factored out of the duplicated modulo-index expression below so the new
+  // mood lookup does not triple it a third time.
+  const structureBeatForIndex = (index: number) =>
+    structureBeats.length
+      ? structureBeats[Math.min(structureBeats.length - 1, Math.floor((index * structureBeats.length) / intervals.length))]
+      : undefined;
+  const narrativeBeats = intervals.map((sentence, index) => {
+    const structureBeat = structureBeatForIndex(index);
+    // Unrecognized mood values are dropped, not thrown: this is optional,
+    // non-critical metadata and must never fail an otherwise-valid spine.
+    const moodParsed = structureBeat?.mood ? BeatMoodSchema.safeParse(structureBeat.mood) : undefined;
+    return {
+      id: `beat-${String(index + 1).padStart(4, "0")}`,
+      sourceSentenceIds: [sentence.id],
+      t0: sentence.t0,
+      t1: sentence.t1,
+      purpose: structureBeat?.note || structureBeat?.name || "advance the narrated argument",
+      mood: moodParsed?.success ? moodParsed.data : undefined,
+      evidenceRefs: sentence.evidenceRefs,
+    };
+  });
 
   const dna = input.styleDNA ?? {};
   const recurringSubject = typeof dna.recurringSubject === "string" ? dna.recurringSubject : "";
@@ -370,6 +400,10 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
           prompt,
           seconds: t1 - t0,
           storyFunction: `${beat.purpose}; ${shotLanguage.intent}; ${shotLanguage.cutRationale}`,
+          // Threaded straight from the parent beat — no mood-to-music-section
+          // selection logic here yet; this only makes the data available on
+          // the shot object for a future consumer.
+          mood: beat.mood,
           section: source.sectionId,
           seed: 100_000 + shotNo,
         });

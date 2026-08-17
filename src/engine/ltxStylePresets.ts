@@ -40,6 +40,19 @@ export interface LtxStyleDef {
    * empty or non-resolving list without failing a render.
    */
   candidateAdapterIds: readonly string[];
+  /**
+   * Film-grain opacity and vignette strength, 0-1 — the SAME numeric scale
+   * as DocuTheme.grain/vignette in src/remotion/docuStyles.ts, so an
+   * LTX-rendered cinematic shot reads consistently with the deterministic
+   * Remotion-rendered documentary look it may sit beside in one assembled
+   * video, rather than inventing a second unrelated scale. This is a
+   * POST-RENDER finishing pass applied at final ffmpeg assembly (see
+   * filmGrainVignetteFilter / applyFilmGrainVignette / composeWithIntro's
+   * `filmGrain` option in src/lib/ffmpeg.ts) — it is never baked into the
+   * LTX generation prompt itself.
+   */
+  grain: number;
+  vignette: number;
 }
 
 /* ----------------------------------------------------- CINEMATIC HEIST NOIR -- */
@@ -78,6 +91,10 @@ const CINEMATIC_HEIST_NOIR: LtxStyleDef = {
       "footsteps on hard flooring, and the low electrical hum of security equipment — no score, no stingers.",
   },
   candidateAdapterIds: ["ltx-creative-heist-noir-grain", "ltx-creative-teal-amber-grade"],
+  // Mirrors robbery_noir's DocuTheme (docuStyles.ts) — same heist-reconstruction
+  // world, same grade intensity.
+  grain: 0.09,
+  vignette: 0.74,
 };
 
 /* -------------------------------------------------- DOCUMENTARY MANNEQUIN -- */
@@ -117,6 +134,11 @@ const DOCUMENTARY_MANNEQUIN: LtxStyleDef = {
       "visible action — no music, no foley embellishment beyond what the scene would actually produce.",
   },
   candidateAdapterIds: ["ltx-creative-mannequin-identity-lock", "ltx-creative-evidentiary-grade"],
+  // Evidentiary case-file rigor, closer to detective_board's DocuTheme than
+  // heist_noir's — truthful reconstruction light means a lighter grain and a
+  // slightly softer vignette than the stylized heist look.
+  grain: 0.08,
+  vignette: 0.62,
 };
 
 /* ---------------------------------------------------------------- ANIME -- */
@@ -146,6 +168,10 @@ const ANIME: LtxStyleDef = {
       "visible action, with an anime-style ambient room tone underneath — no score, no dialogue.",
   },
   candidateAdapterIds: ["ltx-creative-anime-ic", "ltx-creative-cel-shading"],
+  // Flat cel-shaded color fields read as broken/dirty under photographic film
+  // grain — keep both very light, just enough vignette to frame the action.
+  grain: 0.02,
+  vignette: 0.15,
 };
 
 /* ------------------------------------------------------- PHOTOREALISTIC -- */
@@ -175,6 +201,10 @@ const PHOTOREALISTIC: LtxStyleDef = {
       "physical sound effects exactly matched to the visible action — nothing embellished or added for effect.",
   },
   candidateAdapterIds: ["ltx-creative-photoreal-skin", "ltx-creative-natural-lens"],
+  // Documentary-grade truthfulness — a real camera sensor's own noise floor,
+  // no stylized push. Subtle grain, light natural lens vignette only.
+  grain: 0.04,
+  vignette: 0.22,
 };
 
 /* ------------------------------------------------------------ WATERCOLOR -- */
@@ -204,6 +234,11 @@ const WATERCOLOR: LtxStyleDef = {
       "faint and unobtrusive to match the medium's quiet stillness — no music, no sharp foley hits.",
   },
   candidateAdapterIds: ["ltx-creative-watercolor-bleed", "ltx-creative-paper-grain"],
+  // The medium's own paper grain and soft edges already carry the texture —
+  // a photographic film-grain/vignette pass would fight the painted look, so
+  // both stay near-zero.
+  grain: 0.01,
+  vignette: 0.1,
 };
 
 /* ------------------------------------------------------ MUSIC VIDEO CINEMATIC -- */
@@ -233,6 +268,11 @@ const MUSIC_VIDEO_CINEMATIC: LtxStyleDef = {
       "surface, kept tight and rhythmic in feel — no score, no lyrics; final music is mixed separately.",
   },
   candidateAdapterIds: ["ltx-creative-anamorphic-flare", "ltx-creative-music-video-grade"],
+  // Glossy commercial production is the opposite of gritty film grain, but
+  // the high-contrast grade still wants a moderate vignette to focus the
+  // frame around the subject.
+  grain: 0.03,
+  vignette: 0.35,
 };
 
 export const LTX_STYLES: Record<string, LtxStyleDef> = {

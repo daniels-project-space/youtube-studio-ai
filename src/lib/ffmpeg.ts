@@ -981,6 +981,224 @@ export async function muxLoopedMusicBed(args: {
  * The body video is stream-looped to cover bodySec+tailSec, so short footage
  * (or a lofi loop unit) tiles to length without extra cost.
  */
+/**
+ * Build an ffmpeg video-filter fragment applying film grain (noise) and a
+ * vignette darkening, driven by 0-1 strength values on the SAME scale as
+ * DocuTheme.grain/vignette (src/remotion/docuStyles.ts) and LtxStyleDef.
+ * grain/vignette (src/engine/ltxStylePresets.ts). Pure string construction —
+ * no I/O, no ffmpeg invocation — so it is independently unit-testable.
+ * Returns "" when both values are ~0 so callers can omit the filter
+ * entirely instead of chaining a zero-strength no-op.
+ */
+export function filmGrainVignetteFilter(grain: number, vignette: number): string {
+  const g = Math.max(0, Math.min(1, Number.isFinite(grain) ? grain : 0));
+  const v = Math.max(0, Math.min(1, Number.isFinite(vignette) ? vignette : 0));
+  const parts: string[] = [];
+  if (g > 0.001) {
+    // ffmpeg `noise` filter: alls is an integer per-plane strength (0-100);
+    // allf mixes temporal ("t") + uniform ("u") noise for a photographic-
+    // grain feel rather than flat static. Real film grain reads convincingly
+    // at low strength, so 0-1 maps onto a subtle 0-40 range, not 0-100.
+    const alls = Math.round(g * 40);
+    parts.push(`noise=alls=${alls}:allf=t+u`);
+  }
+  if (v > 0.001) {
+    // ffmpeg `vignette` filter: `angle` is the radius (radians) of the
+    // UNvignetted center — smaller angle = a tighter, stronger vignette;
+    // larger angle = a weaker, barely-visible one. Map 0-1 vignette
+    // strength onto a PI/8 (strong) .. PI/2 (very weak) range.
+    const angle = Math.PI / 2 - v * (Math.PI / 2 - Math.PI / 8);
+    parts.push(`vignette=angle=${angle.toFixed(4)}:mode=forward`);
+  }
+  return parts.join(",");
+}
+
+/**
+ * Standalone grain+vignette finishing pass over an already-assembled video:
+ * re-encodes the video stream only (audio is stream-copied, untouched), so
+ * it can be applied to any finished export without re-running the full
+ * compose graph. No-ops to a straight remux when both grain and vignette
+ * are ~0 (filmGrainVignetteFilter returns "").
+ */
+export async function applyFilmGrainVignette(
+  inputPath: string,
+  outputPath: string,
+  opts: { grain: number; vignette: number; timeoutMs?: number },
+): Promise<string> {
+  const vf = filmGrainVignetteFilter(opts.grain, opts.vignette);
+  if (!vf) {
+    await run(FFMPEG, ["-y", "-i", inputPath, "-c", "copy", outputPath], opts.timeoutMs ?? 600_000);
+    return outputPath;
+  }
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-i",
+      inputPath,
+      "-vf",
+      vf,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ],
+    opts.timeoutMs ?? 900_000,
+  );
+  return outputPath;
+}
+
+/**
+ * Character-introduction NAME CARD typography — the on-screen exception
+ * carved out narrowly for `narrativeRole: "introduction"` beats in the
+ * source-bound Casefile cinematic sequence (see `nameCardText` on
+ * `CinematicCoverageShotSchema` and the `name_card_invalid` checks in
+ * `evaluateCinematicCaseSequence`, src/engine/cinematicCaseSequence.ts).
+ * Every other narrative role stays governed by that module's "never render
+ * this as on-screen text" prompt discipline; this is the one narrow,
+ * explicit carve-out, and it renders ONLY the reviewed name-card string —
+ * never a causal question or any other prose.
+ *
+ * FINDING (Phase 14): the source-bound Casefile cinematic route has no
+ * Remotion compositing pass at all today. Its LTX clips flow
+ * cinematicCaseSequence.ts → genFootageBlocks.ts (render) →
+ * cinematicSequenceRenderBinding.ts → cinematicHandoff.ts's
+ * CinematicAssemblyHandoff ("the exact clip-order assembler"), and nothing
+ * in src/lib/assembly/*.ts actually implements that assembler yet — it is
+ * re-exported from src/lib/assembly/index.ts but has no ffmpeg concat/mux
+ * call site to wire an overlay into. Remotion's CinematicFrame/
+ * CinematicSpeech (src/remotion/speech/) and DocuMotion.tsx are a DIFFERENT
+ * pipeline (raw-footage motivational-speech and parallax-cutout
+ * documentary renders), not the Casefile mannequin-reconstruction route.
+ * Rather than invent a parallel compositing mechanism (Remotion or
+ * otherwise) for an assembler that does not exist yet, this adds ONE
+ * reusable primitive to this module's existing post-render finishing-pass
+ * family — same doctrine as `filmGrainVignetteFilter`/
+ * `applyFilmGrainVignette` above: applied once to an already-rendered clip
+ * (video re-encoded, audio stream-copied), never baked into the LTX
+ * generation prompt itself — ready for the exact clip-order assembler to
+ * call on a beat's name-card shot once that assembler is built.
+ *
+ * Theme-driven (accent color from the channel's DocuTheme — see
+ * src/remotion/docuStyles.ts DETECTIVE/ROBBERY `theme.accent`) so a name
+ * card reads consistently with whatever documentary look the cinematic
+ * beat sits beside, instead of inventing new typography. NOTE: ffmpeg's
+ * drawtext filter needs a local TTF file, not the Google Fonts CSS stack
+ * (`fontCss` / `theme.fontDisplay: "Oswald, sans-serif"`) that powers the
+ * Remotion/browser rendering path — a caller with a resolved Oswald .ttf on
+ * disk may pass `fontFile`; otherwise this falls back to the same
+ * CLOUD_FONTS condensed-sans face already used for on-brand title/
+ * lower-third text elsewhere in this module.
+ *
+ * A true "typography behind/beside the mannequin figure" composite would
+ * need a subject-aware alpha mask, which an already-rendered LTX clip does
+ * not provide; this renders a themed lower-third/side name card instead —
+ * the same realistic approximation SpeakerNameTag.tsx uses for the
+ * Remotion speech pipeline, adapted to a post-render ffmpeg pass for LTX
+ * clips that never go through Remotion.
+ */
+export function nameCardOverlayFilter(opts: {
+  text: string;
+  durationSec: number;
+  accentColor?: string;
+  fontFile?: string;
+  fadeInSec?: number;
+  fadeOutSec?: number;
+  position?: "left" | "right" | "center";
+}): string {
+  const text = opts.text.trim();
+  // Degrade-safe like filmGrainVignetteFilter above: a non-finite or
+  // non-positive duration must never reach the filter graph as NaN — treat
+  // it the same as "no text" (empty filter, straight remux).
+  if (!text || !Number.isFinite(opts.durationSec) || opts.durationSec <= 0) return "";
+  const duration = Math.max(0.1, opts.durationSec);
+  const safeFadeInSec = Number.isFinite(opts.fadeInSec) ? opts.fadeInSec : undefined;
+  const safeFadeOutSec = Number.isFinite(opts.fadeOutSec) ? opts.fadeOutSec : undefined;
+  const fadeIn = Math.max(0.01, Math.min(duration / 2, safeFadeInSec ?? 0.5));
+  const fadeOut = Math.max(0.01, Math.min(duration / 2, safeFadeOutSec ?? 0.6));
+  const holdStart = fadeIn;
+  const holdEnd = Math.max(holdStart, duration - fadeOut);
+  const font = opts.fontFile ?? CLOUD_FONTS.impact;
+  const color = opts.accentColor ? thumbnailColor(opts.accentColor, "0xffd400") : "white";
+  // Unescaped commas match this file's established alpha-expression
+  // convention (see composeMusicLoopDeblur's aName/aTitle above): the value
+  // sits inside a single-quoted drawtext option, so ffmpeg's filtergraph
+  // parser treats it literally without needing `\,` escapes.
+  const alpha =
+    `if(lt(t,${holdStart.toFixed(2)}),t/${fadeIn.toFixed(2)},` +
+    `if(lt(t,${holdEnd.toFixed(2)}),1,` +
+    `max(0,1-(t-${holdEnd.toFixed(2)})/${fadeOut.toFixed(2)})))`;
+  const x = opts.position === "left" ? "w*0.08" : opts.position === "right" ? "w-text_w-w*0.08" : "(w-text_w)/2";
+  return (
+    `drawtext=fontfile=${font}:text='${escapeDrawtext(text)}':expansion=none:` +
+    `fontcolor=${color}:fontsize=h*0.055:` +
+    `box=1:boxcolor=black@0.38:boxborderw=18:` +
+    `borderw=2:bordercolor=black@0.7:` +
+    `alpha='${alpha}':x=${x}:y=h*0.74`
+  );
+}
+
+/**
+ * Standalone name-card finishing pass over one already-rendered cinematic
+ * clip: re-encodes the video stream only (audio is stream-copied,
+ * untouched), matching `applyFilmGrainVignette`'s no-op-safe shape. Empty
+ * `text` is a straight remux (no drawtext filter emitted).
+ */
+export async function applyNameCardOverlay(
+  inputPath: string,
+  outputPath: string,
+  opts: {
+    text: string;
+    durationSec: number;
+    accentColor?: string;
+    fontFile?: string;
+    fadeInSec?: number;
+    fadeOutSec?: number;
+    position?: "left" | "right" | "center";
+    timeoutMs?: number;
+  },
+): Promise<string> {
+  const vf = nameCardOverlayFilter(opts);
+  if (!vf) {
+    await run(FFMPEG, ["-y", "-i", inputPath, "-c", "copy", outputPath], opts.timeoutMs ?? 600_000);
+    return outputPath;
+  }
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-i",
+      inputPath,
+      "-vf",
+      vf,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ],
+    opts.timeoutMs ?? 900_000,
+  );
+  return outputPath;
+}
+
 export async function composeWithIntro(args: {
   introCardPath?: string;
   loopBodyPath: string;
@@ -1021,6 +1239,14 @@ export async function composeWithIntro(args: {
   outroCardPath?: string;
   /** Outro dissolve duration (seconds). Default 1.2 (the old patch fade-in). */
   outroFadeInSec?: number;
+  /**
+   * Per-style film grain + vignette (0-1 scale, see filmGrainVignetteFilter
+   * above / LtxStyleDef.grain+vignette in ltxStylePresets.ts) applied to the
+   * WHOLE composed video (intro card through outro) in this same encode —
+   * no second full-video pass. Omitted (undefined) reproduces the exact
+   * prior output for every existing caller.
+   */
+  filmGrain?: { grain: number; vignette: number };
   preset?: string;
   timeoutMs?: number;
 }): Promise<string> {
@@ -1109,10 +1335,15 @@ export async function composeWithIntro(args: {
     vparts.push(`[vpre][ocard]xfade=transition=fade:duration=${oFade.toFixed(3)}:offset=${oOffset.toFixed(3)}[vwo]`);
     vcat = "[vwo]";
   }
-  const vout =
-    fade > 0
-      ? `${vcat}fade=t=out:st=${fadeSt.toFixed(2)}:d=${fade.toFixed(2)}[vout]`
-      : `${vcat}null[vout]`;
+  // Grain/vignette (when supplied) chains onto the SAME video pad before the
+  // fade-out, one filter_complex, one encode — never a second full-video pass.
+  const grainVignette = args.filmGrain
+    ? filmGrainVignetteFilter(args.filmGrain.grain, args.filmGrain.vignette)
+    : "";
+  const preOut = [grainVignette, fade > 0 ? `fade=t=out:st=${fadeSt.toFixed(2)}:d=${fade.toFixed(2)}` : ""]
+    .filter(Boolean)
+    .join(",");
+  const vout = preOut ? `${vcat}${preOut}[vout]` : `${vcat}null[vout]`;
 
   // ----- audio -----
   const aparts: string[] = [];

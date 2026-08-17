@@ -16,7 +16,7 @@ import {
   type ReferenceMechanicsPacket,
 } from "./referenceMechanicsPacket";
 import { CasefileSourceAdmissionReceiptSchema } from "./sourceFirstAdmission";
-import { ShotPlanSchema, type ShotPlan } from "./storySpine";
+import { BeatMoodSchema, ShotPlanSchema, type ShotPlan } from "./storySpine";
 
 /**
  * A source-bound cinematic handoff for investigations, disasters, fraud, and
@@ -98,6 +98,17 @@ export const CinematicNarrativeRoleSchema = z.enum([
   "reveal",
   "aftermath",
   "closing_residue",
+  /**
+   * A distinct character name-reveal beat: typography identifying a cast
+   * member appears before that mannequin is shown in action (see the
+   * `nameCardText` field on `CinematicCoverageShotSchema` below and its
+   * narrow on-screen-text exception in the `narrativeLock` prompt builder
+   * inside `assertCinematicCaseSequence`). Source of truth for
+   * `narrativeRole` lives only here — Story Spine (`./storySpine`) has no
+   * equivalent enum; its beats/shots carry free-text `purpose`/
+   * `coveragePurpose` instead, so there is nothing to duplicate there.
+   */
+  "introduction",
 ]);
 export type CinematicNarrativeRole = z.infer<typeof CinematicNarrativeRoleSchema>;
 
@@ -139,6 +150,33 @@ const CinematicCoverageShotSchema = z
     lastFrameConstraint: text(700),
     onScreenCitation: z.literal(true),
     reconstructionDisclosure: text(220).optional(),
+    /**
+     * NARROW on-screen-typography exception. Every other narrative role is
+     * still governed by the "never render this as on-screen text" prompt
+     * discipline (see `narrativeLock` in `assertCinematicCaseSequence`
+     * below) — this field exists only so a character's introduction can
+     * carry a reviewed name-card string, and `evaluateCinematicCaseSequence`
+     * rejects it (`name_card_invalid`) on any shot whose parent beat is not
+     * `narrativeRole: "introduction"`. Optional so every sequence input
+     * authored before this field existed keeps validating unchanged.
+     */
+    nameCardText: text(120).optional(),
+    /**
+     * A REAL photorealistic document/photo insert — an extreme-close-up
+     * evidentiary beat resolved from an actual photograph (see
+     * `searchWikimediaImage` in `src/lib/wikimedia.ts`), distinct from
+     * every other coverage shot's LTX mannequin-generated `still`/`motion`
+     * prompts. This field only records the reviewed search query used to
+     * resolve that photograph; actual image resolution belongs to the
+     * render pipeline that consumes the generated scene (see the
+     * passthrough field of the same name on `CinematicGeneratedSceneSchema`
+     * below). Optional so every sequence input authored before this field
+     * existed keeps validating unchanged. `evaluateCinematicCaseSequence`
+     * gates it (`real_image_insert_invalid`) to the narrow evidentiary
+     * shape this exception is meant for: a source-proof, evidence-insert,
+     * extreme-close-up shot carrying no mannequin cast.
+     */
+    realImageInsertQuery: text(200).optional(),
   })
   .strict()
   .refine(
@@ -172,6 +210,15 @@ const CinematicSequenceBeatSchema = z
     claimIds: z.array(identifier("claim")).min(1).max(24),
     sourceIds: z.array(identifier("source")).min(1).max(24),
     causalQuestion: text(400),
+    /**
+     * Optional bounded per-beat mood tag (same enum as Story Spine's beat/
+     * shot mood — see `BeatMoodSchema` in `./storySpine`, the single source
+     * of truth for this value set). DATA ONLY: no mood-to-music-section
+     * selection logic consumes it yet; that is future work. Optional so
+     * every existing sequence input that predates this field keeps
+     * validating unchanged.
+     */
+    mood: BeatMoodSchema.optional(),
     /** Present only when this reveal explicitly pays off the opening question. */
     storyPayoff: CinematicStoryPayoffSchema.optional(),
     shots: z.array(CinematicCoverageShotSchema).min(2).max(4),
@@ -232,6 +279,15 @@ export const CinematicGeneratedSceneSchema = z
     still: text(1_800),
     /** A separately generated target for LTX's final conditioned frame. */
     terminalStill: text(1_800).optional(),
+    /**
+     * Passthrough of the reviewed real-image search query from
+     * `CinematicCoverageShotSchema.realImageInsertQuery` (see that field's
+     * doc comment). Present only on the narrow real-photograph evidentiary
+     * exception; a render pipeline that sees this set should resolve and
+     * insert the actual photograph instead of driving `still`/`motion`
+     * through LTX for this scene.
+     */
+    realImageInsertQuery: text(200).optional(),
     motion: text(1_200),
     /** Shot-specific physical sound direction; final narration is mixed separately. */
     diegeticSoundscape: text(900),
@@ -347,6 +403,8 @@ export const CinematicCaseSequenceIssueCodeSchema = z.enum([
   "reference_mechanics_invalid",
   "editorial_review_mismatch",
   "editorial_review_stale",
+  "name_card_invalid",
+  "real_image_insert_invalid",
 ]);
 export type CinematicCaseSequenceIssueCode = z.infer<typeof CinematicCaseSequenceIssueCodeSchema>;
 
@@ -716,6 +774,16 @@ export function evaluateCinematicCaseSequence(
     if ((beat.narrativeRole === "investigation" || beat.narrativeRole === "reveal") && !purposeSet.has("evidence_insert")) {
       issues.push(issue("coverage_grammar_invalid", `Cinematic ${beat.narrativeRole} beat ${beat.id} has no evidence insert.`, "Include a cited document/object/map/timeline visual so the turn is proven rather than merely dramatized."));
     }
+    // The introduction role exists solely to carry the name-card exception;
+    // an introduction beat that declares no on-screen text has no reason to
+    // use this role instead of an ordinary orientation/investigation beat.
+    if (beat.narrativeRole === "introduction" && !beat.shots.some((shot) => Boolean(shot.nameCardText))) {
+      issues.push(issue(
+        "name_card_invalid",
+        `Introduction beat ${beat.id} declares no on-screen name-card text.`,
+        "Give at least one shot in the introduction beat a nameCardText value, or use a non-introduction narrative role when no name reveal is needed.",
+      ));
+    }
     const tensionStates = new Set(beat.shots.map((shot) => shot.tensionState));
     const cutReasons = new Set(beat.shots.map((shot) => shot.cutReason));
     if (
@@ -758,6 +826,63 @@ export function evaluateCinematicCaseSequence(
       }
       if (shot.visualMode === "abstract_reenactment" && shot.castIds.length === 0) {
         issues.push(issue("cast_invalid", `Abstract reenactment shot ${shot.id} has no locked anonymous mannequin cast.`, "Bind abstract reenactment to a declared faceless mannequin token with wardrobe/silhouette/prop/movement locks."));
+      }
+      // The on-screen-text prohibition is content-safety/citation-integrity
+      // policy, not a per-role convenience: nameCardText is the ONE narrow,
+      // explicit carve-out (a reviewed character name, nothing else) and it
+      // is only legal inside an introduction beat, on a shot that actually
+      // introduces a locked mannequin cast member.
+      if (shot.nameCardText) {
+        if (beat.narrativeRole !== "introduction") {
+          issues.push(issue(
+            "name_card_invalid",
+            `Cinematic shot ${shot.id} carries on-screen name-card text outside an introduction beat.`,
+            "Reserve on-screen typography for the narrow character-introduction exception; every other narrative role must stay free of on-screen prose.",
+          ));
+        }
+        if (shot.castIds.length === 0) {
+          issues.push(issue(
+            "name_card_invalid",
+            `Cinematic shot ${shot.id}'s name card has no locked mannequin cast to introduce.`,
+            "Bind the introduction name card to the exact faceless mannequin token whose name is being revealed.",
+          ));
+        }
+      }
+      // A real photographic evidence insert is a distinct exception from
+      // ordinary LTX mannequin coverage: it stands in for `still`/`motion`
+      // generation with an actual sourced photograph (see
+      // `searchWikimediaImage` in src/lib/wikimedia.ts), so it is gated to
+      // the narrow evidentiary shape that exception is meant for — a cited
+      // source-proof extreme close-up with no mannequin cast attached.
+      if (shot.realImageInsertQuery) {
+        if (shot.coveragePurpose !== "evidence_insert") {
+          issues.push(issue(
+            "real_image_insert_invalid",
+            `Cinematic shot ${shot.id}'s real image insert is not an evidence_insert shot.`,
+            "Reserve real-image inserts for coveragePurpose evidence_insert; use LTX mannequin coverage for every other purpose.",
+          ));
+        }
+        if (shot.visualMode !== "source_proof") {
+          issues.push(issue(
+            "real_image_insert_invalid",
+            `Cinematic shot ${shot.id}'s real image insert does not use source_proof visual mode.`,
+            "A real photographic insert is always source_proof; use spatial_reconstruction or abstract_reenactment for LTX mannequin coverage instead.",
+          ));
+        }
+        if (shot.shotScale !== "extreme_close") {
+          issues.push(issue(
+            "real_image_insert_invalid",
+            `Cinematic shot ${shot.id}'s real image insert is not framed extreme_close.`,
+            "Real photographic evidence inserts are framed as an extreme close-up on the document or object.",
+          ));
+        }
+        if (shot.castIds.length > 0) {
+          issues.push(issue(
+            "real_image_insert_invalid",
+            `Cinematic shot ${shot.id}'s real image insert carries a mannequin cast.`,
+            "Real photographic inserts are distinct from mannequin-generated coverage; do not bind a cast token to this shot.",
+          ));
+        }
       }
     }
   }
@@ -865,8 +990,18 @@ export function assertCinematicCaseSequence(
     // must make the current question or turn legible. These instructions must
     // reach the still/I2V prompts themselves, not live only in a reviewer
     // receipt after the expensive render has already happened.
+    // Content-safety/citation-integrity default: never render the causal
+    // question (or any other narrative prose) as on-screen text. The ONE
+    // narrow, explicit exception is a reviewed introduction-beat name card —
+    // `evaluateCinematicCaseSequence`'s `name_card_invalid` checks above
+    // already guarantee nameCardText can only reach this point on an
+    // introduction-role shot, so this directive does not itself need to
+    // re-derive that gate; it only decides which prompt clause to emit.
+    const onScreenTextDirective = shot.nameCardText
+      ? `On-screen typography permitted for this shot ONLY, as the narrow character-introduction exception: render exactly this name-card text and nothing else — no causal question, no other prose: "${shot.nameCardText}"`
+      : `Narrative role ${beat.narrativeRole}; story driver (never render this as on-screen text): ${beat.causalQuestion}`;
     const narrativeLock = [
-      `Narrative role ${beat.narrativeRole}; story driver (never render this as on-screen text): ${beat.causalQuestion}`,
+      onScreenTextDirective,
       `This shot must make the narration purpose visually clear: ${shot.narrationPurpose}`,
       ...(mechanicsGuidance ? [`Approved editorial mechanics: ${mechanicsGuidance}`] : []),
     ].join(" ").slice(0, 620);
@@ -936,6 +1071,7 @@ export function assertCinematicCaseSequence(
     t1: shot.t1,
     still,
     terminalStill,
+    ...(shot.realImageInsertQuery ? { realImageInsertQuery: shot.realImageInsertQuery } : {}),
     motion,
     diegeticSoundscape,
     durationSec: shot.t1 - shot.t0,

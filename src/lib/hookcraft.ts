@@ -179,6 +179,74 @@ export function lintHook(
   return { pass: issues.length === 0, firstSentenceWords, estHookSeconds, hookSentences: hs.length, openingWords, bannedHits, issues };
 }
 
+/** First-N-real-seconds window the measured hook gate checks (see below). */
+export const MEASURED_HOOK_WINDOW_SEC = 10;
+
+export interface MeasuredHookGateResult {
+  pass: boolean;
+  windowSec: number;
+  /** Count of shot/beat boundaries that land inside (0, windowSec]. */
+  transitionsInWindow: number;
+  /** Timestamp (sec) of the earliest such boundary, or null if none. */
+  firstTransitionSec: number | null;
+  issues: string[];
+}
+
+/**
+ * The GENUINE MEASURED hook gate — additive to `lintHook` above, never a
+ * replacement for it. `lintHook`'s `estHookSeconds` is an ESTIMATE derived
+ * from word count / WPS on the written hook text, checked before a single
+ * frame has been planned. This gate instead reads the ACTUAL rendered
+ * timeline: given the real `t0`/`t1` boundaries of a video's shots or
+ * narrative beats (Story Spine — src/engine/storySpine.ts — now carries
+ * genuine narration-anchored, weighted-variable timing per shot), it
+ * verifies that at least one meaningful shot/beat transition occurs within
+ * the first ~10 REAL seconds of the audio timeline.
+ *
+ * "Meaningful" is defined concretely: a boundary strictly after t=0 (the
+ * opening frame holding is not itself a transition) at or before the window
+ * edge — i.e. the video does not simply sit on ONE static shot/beat for the
+ * entire window. This is a floor, not a style mandate: it says something
+ * must visibly CHANGE early, not that a specific device (a text card, a
+ * cut, a beat change) must be used, and it deliberately does NOT require or
+ * imply any on-screen text/rhetorical-question card in this window — that
+ * is a separate, later creative beat (an escalation device that may land
+ * well past 10s, per the reference true-crime study this gate is built
+ * from) and callers must not couple the two concepts.
+ *
+ * Run this AFTER Story Spine planning (craftHook's cold-open text exists
+ * long before any shot is timed, so this cannot live inside craftHook
+ * itself) — e.g. as a guard-stage check alongside qa_script, feeding
+ * `spine.shotList` or `spine.narrativeBeats`. Intentionally decoupled from
+ * StorySpine's concrete types: any array of `{ t0, t1 }` timed items works.
+ */
+export function measureHookWindow(
+  timedItems: ReadonlyArray<{ id?: string; t0: number; t1: number }>,
+  opts: { windowSec?: number } = {},
+): MeasuredHookGateResult {
+  const windowSec = opts.windowSec ?? MEASURED_HOOK_WINDOW_SEC;
+  const issues: string[] = [];
+  if (!timedItems.length) {
+    issues.push("no timed shots/beats supplied — cannot measure the real hook window");
+    return { pass: false, windowSec, transitionsInWindow: 0, firstTransitionSec: null, issues };
+  }
+  const sorted = [...timedItems].sort((a, b) => a.t0 - b.t0);
+  const boundariesInWindow = sorted
+    .slice(1)
+    .map((item) => item.t0)
+    .filter((t0) => t0 > 0 && t0 <= windowSec);
+  const transitionsInWindow = boundariesInWindow.length;
+  const firstTransitionSec = transitionsInWindow ? Math.min(...boundariesInWindow) : null;
+  if (!transitionsInWindow) {
+    issues.push(
+      `no shot or beat transition inside the first ${windowSec}s of real audio timeline — the opening holds on ` +
+        `a single static beat too long; something intriguing must VISIBLY change within ~${windowSec} real ` +
+        `seconds, not just be described in the spoken hook`,
+    );
+  }
+  return { pass: transitionsInWindow > 0, windowSec, transitionsInWindow, firstTransitionSec, issues };
+}
+
 export interface HookVerdict {
   punch?: number;
   specificity?: number;

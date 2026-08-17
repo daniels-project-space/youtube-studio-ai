@@ -994,7 +994,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "STORY JOURNEY (Calm-style): arrival ritual → experience-before-explanation movements carried by ONE " +
       "image → integration into the viewer's day → a landing with a quotable takeaway. Episodic programs " +
       "get formal series support (phase-aware curriculum, previous-episode thread, next-episode seed).",
-    gates: ["hook lint (≤7s, no filler, concrete)", "punch / specificity / curiosity / voiceMatch / promise-by-15s ≥ 7", "grounded fact-check (search-verified claims, false = rejected)", "loop payoff verified by qa_script", "midpoint re-hook verified"],
+    gates: ["hook lint (≤7s, no filler, concrete)", "punch / specificity / curiosity / voiceMatch / promise-by-15s ≥ 7", "grounded fact-check (search-verified claims, false = rejected)", "loop payoff verified by qa_script", "midpoint re-hook verified", "measured hook window: a real shot/beat transition inside the first ~10s of actual audio timeline (hookcraft.ts measureHookWindow, additive to the estimated-duration lint — never requires an on-screen text card that early)"],
     status: "reference",
   },
   {

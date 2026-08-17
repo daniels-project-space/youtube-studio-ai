@@ -404,6 +404,46 @@ function fillBody(clips: string[], entitySet: Set<string>, target: number, segAt
   return out;
 }
 
+/**
+ * P3 (Segment side) — adopt auto-editor's clip model (doc: "Adopt auto-editor's clip
+ * model on Segment", RESEARCH_EDITOR_ADVANCED.md "RECOMMENDED next-level Editor
+ * design"). When the body's footage pool IS the narration's own recording
+ * (talking-head / screen-capture where mic and camera are the same file — the exact
+ * shape auto-editor targets), materialize the silence-trim's KEEP ranges as REAL
+ * per-clip `offset` (position in the RAW, untrimmed source) + `durSec`, instead of
+ * cadence-cycling a generic b-roll pool that doesn't exist for this shape. Long kept
+ * stretches are still sub-split at `segAt`'s target seg length so cuts/pacing keep
+ * landing inside them; a segment NEVER straddles a removed gap. `segAt` receives the
+ * position fraction ALONG THE TRIMMED (kept) timeline — the same contract `fillBody`
+ * uses. `speed` is always 1 here: P3 only trims, it doesn't retime (P4/P6 are where a
+ * non-1 speed would come from) — the field exists on Segment now so a future backend
+ * has somewhere to read it once retime lands.
+ */
+export function segmentsFromKeepRanges(
+  src: string,
+  keep: TimeRange[],
+  totalKeptSec: number,
+  segAt: (posFrac: number) => number,
+  onBeat: boolean,
+): Segment[] {
+  const out: Segment[] = [];
+  let keptSoFar = 0; // position along the TRIMMED (kept) timeline — feeds segAt's posFrac
+  for (const range of keep) {
+    let cursor = range.startSec;
+    while (cursor + 0.001 < range.endSec) {
+      const posFrac = totalKeptSec > 0 ? keptSoFar / totalKeptSec : 0;
+      const want = segAt(posFrac);
+      const safeSeg = want > 0.05 ? want : 4; // never 0 → no infinite loop (mirrors fillBody)
+      const dur = Math.min(safeSeg, range.endSec - cursor);
+      out.push({ kind: "footage", src, offset: cursor, durSec: dur, speed: 1, onBeat });
+      cursor += dur;
+      keptSoFar += dur;
+      if (out.length > 20000) return out; // defensive cap, mirrors fillBody
+    }
+  }
+  return out;
+}
+
 /** Editor overlayDensity caps quote/insert overlay count (captions are never capped). */
 function capOverlays(overlays: Overlay[], density?: string): Overlay[] {
   const cap = density === "sparse" ? 2 : density === "standard" ? 6 : Infinity; // rich / undefined ⇒ all
@@ -540,7 +580,26 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
     const bodyTargetSec = effectiveNarrationSec + tailSec + BODY_BUFFER_SEC;
     const pacingCurve = resolvePacingCurve(input.editor, input.cutSheet?.sections, bodyTargetSec, bodyMaxSeg);
     const segAt = (f: number) => segSecondsAt(f, pacingCurve, bodyMaxSeg);
-    segments.push(...fillBody(clips, entitySet, bodyTargetSec, segAt, onBeat));
+    // P3 (Segment side): the ONE shape where auto-editor's real clip model applies —
+    // a single footage source that IS the narration's own recording (talking-head /
+    // screen-cap). Materialize the trim's keep ranges as real offset/durSec segments
+    // instead of cadence-cycling a b-roll pool (there's nothing to cycle: it's one
+    // clip). Every other shape (multi-clip pool, entity clips, trim off) falls
+    // straight through to fillBody, byte for byte — unchanged.
+    const singleSourceIsNarration =
+      keepRanges && clips.length === 1 && !!input.narrationSrc && clips[0] === input.narrationSrc;
+    if (singleSourceIsNarration && keepRanges) {
+      segments.push(...segmentsFromKeepRanges(clips[0], keepRanges, effectiveNarrationSec, segAt, onBeat));
+      // Same anti-loop guarantee fillBody gets from BODY_BUFFER_SEC: hold the
+      // source forward past the last kept range so the body can never underrun.
+      const bufferSec = tailSec + BODY_BUFFER_SEC;
+      if (bufferSec > 0.05) {
+        const lastEnd = keepRanges[keepRanges.length - 1]?.endSec ?? 0;
+        segments.push({ kind: "footage", src: clips[0], offset: lastEnd, durSec: bufferSec, speed: 1, onBeat });
+      }
+    } else {
+      segments.push(...fillBody(clips, entitySet, bodyTargetSec, segAt, onBeat));
+    }
   }
 
   if (params.outroCard && tailSec >= 2) {

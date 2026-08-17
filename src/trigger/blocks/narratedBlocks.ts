@@ -37,6 +37,7 @@ import {
   dataStorySourceLedgerPrompt,
 } from "@/engine/dataStorySourceLedger";
 import { casefileNarrativeGroundingPrompt } from "@/engine/casefileNarrativeGrounding";
+import { getLtxStyle } from "@/engine/ltxStylePresets";
 import {
   channelCritiqueBrief,
   produceAndCritique,
@@ -2405,6 +2406,18 @@ export const timelineAssemble: Block = {
     ctx.log(
       `timeline_assemble: compose intro ${introSec}s + narration ${narrationSec}s + ${tailSec}s tail â†’ ${videoSec}sâ€¦`,
     );
+    // LTX cinematic body only: source-bound Novita/LTX clips get the
+    // per-style film-grain + vignette finish so they read consistently with
+    // that style's world (docuStyles-scale doctrine lives on LtxStyleDef,
+    // see src/engine/ltxStylePresets.ts). Non-cinematic bodies (stock,
+    // entity, chapter, authored) are untouched — this never forces a look
+    // onto footage that wasn't part of the cinematic render.
+    const cinematicFilmLook = cinematicFootageManifest
+      ? (() => {
+          const ltxStyle = getLtxStyle(ctx.store["ltxStyleId"] as string | undefined);
+          return { grain: ltxStyle.grain, vignette: ltxStyle.vignette };
+        })()
+      : undefined;
     const out = join(tmp, "video.mp4");
     await composeWithIntro({
       introCardPath: introCardPath || undefined,
@@ -2419,6 +2432,7 @@ export const timelineAssemble: Block = {
       audioFadeOutSec,
       width: W,
       height: H,
+      filmGrain: cinematicFilmLook,
       // music bed a further 5% quieter (intro 0.54â†’0.513, under-voice 0.108â†’0.1026)
       introMusicVol: Number(ctx.params["introMusicVol"] ?? 0.513),
       bodyMusicVol: Number(ctx.params["bodyMusicVol"] ?? 0.1026),
