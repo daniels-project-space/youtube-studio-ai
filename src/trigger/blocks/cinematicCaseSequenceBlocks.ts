@@ -1,8 +1,10 @@
 import type { Block } from "@/engine/types";
 import {
+  CinematicCaseSequenceContentSchema,
   CinematicCaseSequenceInputSchema,
   assertCinematicCaseSequence,
 } from "@/engine/cinematicCaseSequence";
+import { autoReviewCinematicCaseSequence } from "@/engine/cinematicSequenceAutoReviewer";
 import { admitCinematicFinalMasterQa } from "@/engine/cinematicFinalMasterQaAdmission";
 import {
   CinematicCaseDirectionSchema,
@@ -145,15 +147,43 @@ const cinematicCaseSequence: Block = {
     "cinematicFinalMasterQaAdmission",
   ],
   run: async (ctx) => {
-    const input = CinematicCaseSequenceInputSchema.parse(ctx.store["cinematicCaseSequenceInput"]);
+    // A human-pasted editorialReview always wins unchanged; only when the
+    // stored candidate carries none do we auto-review it (reusing the exact
+    // same real evaluateCinematicCaseSequence structural gate plus an
+    // independent semantic screen — see cinematicSequenceAutoReviewer.ts) so
+    // the exact same assertCinematicCaseSequence gate below still runs.
+    const rawInput = ctx.store["cinematicCaseSequenceInput"];
+    const hasHumanEditorialReview =
+      Boolean(rawInput) &&
+      typeof rawInput === "object" &&
+      "editorialReview" in (rawInput as Record<string, unknown>) &&
+      (rawInput as Record<string, unknown>)["editorialReview"] !== undefined;
     // A mechanics packet is optional so normal Casefile review work remains
     // runnable. Once a human attaches one to the signed sequence, however,
     // this live LTX path resolves the fixed Casefile quality contract and
-    // carries it through prompt construction and final-master QA.
-    const referenceMechanicsPacket = input.referenceMechanicsPacket;
-    const referenceQuality = referenceMechanicsPacket
+    // carries it through prompt construction, auto-review, and final-master QA.
+    const rawReferenceMechanicsPacket = (rawInput as Record<string, unknown> | undefined)?.["referenceMechanicsPacket"];
+    const referenceQuality = rawReferenceMechanicsPacket
       ? referenceQualityContractFor("documentary_collage_short")
       : undefined;
+    const input = hasHumanEditorialReview
+      ? CinematicCaseSequenceInputSchema.parse(rawInput)
+      : CinematicCaseSequenceInputSchema.parse({
+          ...CinematicCaseSequenceContentSchema.parse(rawInput),
+          editorialReview: await autoReviewCinematicCaseSequence({
+            content: rawInput,
+            sourceAdmission: ctx.store["casefileSourceAdmission"],
+            evidenceShotMap: ctx.store["casefileEvidenceShotMap"],
+            evidenceShotMapAdmission: ctx.store["casefileEvidenceShotMapAdmission"],
+            sceneManifest: ctx.store["sceneManifest"],
+            shotList: ctx.store["shotList"],
+            ...(rawReferenceMechanicsPacket && referenceQuality
+              ? { referenceMechanicsPacket: rawReferenceMechanicsPacket, referenceQuality }
+              : {}),
+            log: ctx.log,
+          }),
+        });
+    const referenceMechanicsPacket = input.referenceMechanicsPacket;
     assertCurrentSourceBoundStorySpine({
       sourceBoundStorySpine: ctx.store["sourceBoundStorySpine"],
       caseId: input.caseId,

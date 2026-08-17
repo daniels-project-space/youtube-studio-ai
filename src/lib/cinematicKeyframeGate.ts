@@ -13,6 +13,17 @@ const ReviewerVerdictSchema = z.object({
   continuity: z.number().finite().min(0).max(1),
   artifactFree: z.number().finite().min(0).max(1),
   textWatermarkFree: z.boolean(),
+  /**
+   * Dedicated, code-enforced field for the identifiable-likeness prohibition
+   * — mirroring textWatermarkFree above. Every gate prompt already tells the
+   * reviewer to reject real-person likeness, but folded only into the single
+   * omnibus `pass` boolean that also covers dozens of unrelated criteria
+   * (frozen action, wrong lighting, broken anatomy, ...) that signal is not
+   * independently auditable in code. This gives the single most safety-
+   * critical rejection reason its own explicit, programmatically-checked
+   * verdict field, exactly like watermark/text already has.
+   */
+  noIdentifiableLikeness: z.boolean(),
   pass: z.boolean(),
   notes: z.array(z.string().trim().min(1).max(280)).max(8).default([]),
 }).strict();
@@ -80,7 +91,7 @@ export async function reviewCinematicKeyframe(args: {
         ? `Specific obligations: ${args.scene.keyframeRequirements.join(" | ")}`
         : "Specific obligations: coherent cinematic composition, correct camera scale, no unsupported factual visual claim.",
       "Reject real-person likeness, visible faces for mannequin treatments, gore, text/letters/logos/watermarks, duplicate limbs, broken anatomy/geometry, incompatible lighting, or generic imagery that misses the causal shot purpose.",
-      `Return STRICT JSON only: {"semanticAlignment":0..1,"composition":0..1,"continuity":0..1,"artifactFree":0..1,"textWatermarkFree":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set pass true only when every score is at least ${CINEMATIC_KEYFRAME_MIN_SCORE}, textWatermarkFree is true, and the image is suitable as LTX's first frame.`,
+      `Return STRICT JSON only: {"semanticAlignment":0..1,"composition":0..1,"continuity":0..1,"artifactFree":0..1,"textWatermarkFree":true|false,"noIdentifiableLikeness":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set noIdentifiableLikeness to false if the candidate shows any identifiable human face or real-person likeness rather than a strictly anonymous faceless mannequin treatment, even a partial or plausible one. Set pass true only when every score is at least ${CINEMATIC_KEYFRAME_MIN_SCORE}, textWatermarkFree is true, noIdentifiableLikeness is true, and the image is suitable as LTX's first frame.`,
     ].join("\n"),
     imagePaths: [...references, args.candidatePath],
     json: true,
@@ -97,7 +108,7 @@ export async function reviewCinematicKeyframe(args: {
     verdict.continuity,
     verdict.artifactFree,
   ].some((score) => score < CINEMATIC_KEYFRAME_MIN_SCORE);
-  if (!verdict.pass || !verdict.textWatermarkFree || failingScores) {
+  if (!verdict.pass || !verdict.textWatermarkFree || !verdict.noIdentifiableLikeness || failingScores) {
     throw new CinematicKeyframeRejectedError(args.scene.id, verdict.notes);
   }
   const review = assertCinematicKeyframeReview({
