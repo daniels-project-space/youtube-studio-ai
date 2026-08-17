@@ -20,6 +20,7 @@ import { reviewCinematicKeyframe } from "@/lib/cinematicKeyframeGate";
 import { reviewCinematicClip } from "@/lib/cinematicClipGate";
 import { reviewCinematicTransition } from "@/lib/cinematicTransitionGate";
 import { LtxCreativeAdapterSelectionSchema } from "@/lib/ltxCreativeAdapter";
+import { FAMILIES } from "@/engine/families";
 import { SceneManifestSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema, type ShotPlan, validateStorySpine } from "@/engine/storySpine";
 import { CinematicGeneratedScenePlanSchema } from "@/engine/cinematicCaseSequence";
@@ -393,6 +394,7 @@ async function renderGeneratedScenePlanInBatches(args: {
   lifecycle: NovitaRenderLifecycle;
   keyframeGate?: Parameters<typeof renderNovitaGeneratedScenes>[0]["keyframeGate"];
   clipGate?: Parameters<typeof renderNovitaGeneratedScenes>[0]["clipGate"];
+  styleId?: Parameters<typeof renderNovitaGeneratedScenes>[0]["styleId"];
 }): Promise<{ scenes: Awaited<ReturnType<typeof renderNovitaGeneratedScenes>>["scenes"]; costUsd: number }> {
   const batches: NovitaGeneratedSceneInput[][] = [];
   for (let start = 0; start < args.scenes.length; start += 24) {
@@ -410,6 +412,7 @@ async function renderGeneratedScenePlanInBatches(args: {
       const rendered = await renderNovitaGeneratedScenes({
         prefix: `${args.prefix}/batch-${String(index + 1).padStart(3, "0")}`,
         profileId: "production",
+        styleId: args.styleId,
         maxCostUsd,
         maxConcurrent: args.maxConcurrent,
         lifecycle: args.lifecycle,
@@ -472,6 +475,9 @@ export async function generateSignatureClips(
   const rendered = await renderNovitaGeneratedScenes({
     prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/signature-clips`,
     profileId: "production",
+    // Signature clips render through the same cinematic-only gen_footage
+    // path (see the styleId comment on the main render call above).
+    styleId: FAMILIES.cinematic.styleId,
     maxCostUsd: stageBudgetUsd,
     maxConcurrent: Math.min(8, Math.max(1, scenes.length)),
     lifecycle: {
@@ -654,6 +660,10 @@ export const genFootage: Block = {
       },
       keyframeGate,
       clipGate,
+      // gen_footage is reached only via the cinematic family's "ai_scenes"
+      // visual engine (see src/engine/families.ts) — no channel-level style
+      // override exists yet, so every run gets that family's default look.
+      styleId: FAMILIES.cinematic.styleId,
       scenes: scenes.map((scene) => ({
         // Preserve the admitted id: timeline_assemble later verifies that the
         // R2 clip order still matches this exact cinematic cut plan.

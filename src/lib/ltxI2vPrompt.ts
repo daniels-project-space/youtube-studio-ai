@@ -1,4 +1,5 @@
 import type { Shot } from "@/lib/novitaRenderFarm";
+import { getLtxStyle } from "@/engine/ltxStylePresets";
 
 /**
  * LTX receives a source still, not a storyboard. This compact prompt structure
@@ -7,6 +8,14 @@ import type { Shot } from "@/lib/novitaRenderFarm";
  *
  * It follows the transferable first-frame I2V pattern: source-frame anchors,
  * action onset, continuous development, then a readable result or reaction.
+ *
+ * Style-adaptive (Wave 1): the caller may pass a `styleId` (see
+ * src/engine/ltxStylePresets.ts) to merge that visual world's appearance,
+ * lighting/color, camera-move vocabulary, and default soundscape into the
+ * contract's existing clauses. Omitting `styleId` resolves to
+ * DEFAULT_LTX_STYLE_ID via getLtxStyle's own fallback — the required clause
+ * *labels* REQUIRED_CONTRACT_CLAUSES checks for never change, only the prose
+ * merged inside them.
  */
 export const LTX_I2V_PROMPT_CONTRACT_VERSION = "ltx-i2v-directing/v3" as const;
 
@@ -43,8 +52,12 @@ export function hasCompleteLtxI2vPromptContract(shot: Pick<Shot, "prompt" | "mot
  * Add the model-agnostic part of good I2V direction without discarding the
  * director's subject, camera, wardrobe, evidence, or negative constraints.
  * It is idempotent because controlled recovery paths re-submit a Shot.
+ *
+ * @param styleId Optional src/engine/ltxStylePresets.ts style id. Resolved
+ * via getLtxStyle, which already falls back to DEFAULT_LTX_STYLE_ID when
+ * omitted or unknown — callers never need to guard this themselves.
  */
-export function applyLtxI2vPromptContract(shot: Shot): Shot {
+export function applyLtxI2vPromptContract(shot: Shot, styleId?: string): Shot {
   if (shot.motion.includes(MARKER)) {
     if (!hasCompleteLtxI2vPromptContract(shot)) {
       throw new Error(
@@ -53,20 +66,18 @@ export function applyLtxI2vPromptContract(shot: Shot): Shot {
     }
     return shot;
   }
+  const style = getLtxStyle(styleId);
   const visual = clean(shot.prompt, "the supplied source frame");
   const action = clean(shot.motion, "subtle natural motion appropriate to the shot");
   const camera = clean(shot.cameraMove, "the planned camera position");
   const scale = clean(shot.shotScale, "the planned composition");
   const lens = clean(shot.lens, "the planned lens");
-  const soundscape = clean(
-    shot.diegeticSoundscape,
-    "restrained location tone and physical sound motivated only by the visible action",
-  );
+  const soundscape = clean(shot.diegeticSoundscape, style.promptGuidance.soundscapeDefault);
   const contract = [
     MARKER,
-    `Source-frame anchor: begin exactly from the supplied image; preserve the visible subject, faceless identity treatment, wardrobe, palette, props, environment, lighting, ${scale} framing, and ${lens}.`,
+    `Source-frame anchor: begin exactly from the supplied image; preserve the visible subject, faceless identity treatment, wardrobe, palette, props, environment, lighting, ${scale} framing, and ${lens}. Visual world appearance doctrine: ${style.promptGuidance.appearance}`,
     `Action onset: ${action}`,
-    `Continuous development: perform one coherent physical action in the same place and time while the camera executes ${camera}; no jump cut, subject replacement, wardrobe/prop swap, time skip, or invented event.`,
+    `Continuous development: perform one coherent physical action in the same place and time while the camera executes ${camera}; no jump cut, subject replacement, wardrobe/prop swap, time skip, or invented event. Visual world camera doctrine: ${style.promptGuidance.cameraDoctrine} Visual world lighting and color doctrine: ${style.promptGuidance.lightingColor}`,
     "End beat: settle into a readable result or reaction that follows from the action while preserving the source-frame continuity locks.",
     ...(shot.endStillKey
       ? ["Terminal-frame anchor: land exactly on the supplied terminal conditioning image at the final frame; preserve the same subject, faceless identity treatment, wardrobe, props, environment, lighting, and physical consequence across the whole take."]

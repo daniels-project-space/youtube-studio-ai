@@ -48,6 +48,15 @@ export interface Family {
   defaultThumbnailStyle: "banana";
   /** Default per-video spend envelope when the operator did not set one. */
   defaultRunBudgetUsd?: number;
+  /**
+   * Default LTX 2.5 visual-style preset id for families whose visual engine
+   * renders through the shared LTX I2V prompt contract (see
+   * src/engine/ltxStylePresets.ts, src/lib/ltxI2vPrompt.ts). Omitted for
+   * families that don't render through that contract; consumers that do
+   * should fall back to DEFAULT_LTX_STYLE_ID (mirrors the `defaultRunBudgetUsd
+   * ?? <fallback>` pattern used elsewhere against this catalog).
+   */
+  styleId?: string;
 }
 
 export const FAMILIES: Record<FamilyKey, Family> = {
@@ -251,6 +260,12 @@ export const FAMILIES: Record<FamilyKey, Family> = {
     // Z-Image → QA → LTX chain. Keep a visible buffer so the creator never
     // advertises a cinematic channel that its own runtime must reject.
     defaultRunBudgetUsd: 130,
+    // Matches DEFAULT_LTX_STYLE_ID in src/engine/ltxStylePresets.ts — the
+    // exact look this family has always rendered through. Baked in literally
+    // (rather than left unset to fall back implicitly) so the family catalog
+    // stays the single discoverable source of truth for which visual world
+    // a cinematic channel renders in today.
+    styleId: "cinematic_heist_noir",
   },
 };
 

@@ -210,6 +210,14 @@ export interface NovitaRenderCfg {
   profile: NovitaPhaseProfile;
   /** Global style string appended to every shot prompt. */
   style?: string;
+  /**
+   * Optional LTX 2.5 visual-style preset id (src/engine/ltxStylePresets.ts),
+   * merged into the video phase's I2V prompt contract via
+   * applyLtxI2vPromptContract. Distinct from `style` above, which is raw
+   * prose appended to every shot prompt in both phases. Omitted/unknown ids
+   * fall back to DEFAULT_LTX_STYLE_ID through getLtxStyle's own fallback.
+   */
+  styleId?: string;
   /** Global negative prompt, prepended to every shot's negative. */
   negative?: string;
   /** Director notes — appended to every shot prompt (global creative direction). */
@@ -966,7 +974,7 @@ async function startImageRender(userCfg: NovitaRenderCfg) {
 }
 
 async function startVideoRender(userCfg: NovitaRenderCfg) {
-  const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map(applyLtxI2vPromptContract) });
+  const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map((shot) => applyLtxI2vPromptContract(shot, userCfg.styleId)) });
   validate(cfg, "video");
   await bootstrapSecrets(() => {}, { required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
   const jobs = videoJobs(cfg);
@@ -1025,7 +1033,7 @@ export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRend
  * `timeline_assemble` (and any other downstream block) consumes it unmodified.
  */
 export async function renderVideo(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
-  const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map(applyLtxI2vPromptContract) });
+  const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map((shot) => applyLtxI2vPromptContract(shot, userCfg.styleId)) });
   validate(cfg, "video");
   if (cfg.maxCostUsd === undefined) {
     throw new NovitaAdmissionError("novita video render requires an explicit signed worker cost ceiling");

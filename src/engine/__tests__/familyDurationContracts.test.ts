@@ -9,6 +9,7 @@ import {
 } from "@/engine/families";
 import { designPipeline, enforceLengthContract } from "@/engine/designer";
 import type { PipelineEntry } from "@/engine/types";
+import { DEFAULT_LTX_STYLE_ID, getLtxStyle } from "@/engine/ltxStylePresets";
 
 function corrupt(
   pipeline: readonly PipelineEntry[],
@@ -203,5 +204,37 @@ assert.throws(
   /supports 80 sec fixed/,
   "a fixed-cadence quiz must never silently morph into a different game length",
 );
+
+// --- Wave: cinematic family LTX style-id wiring ---------------------------
+// The gen_footage render path (src/trigger/blocks/genFootageBlocks.ts) reads
+// FAMILIES.cinematic.styleId and forwards it end-to-end to
+// applyLtxI2vPromptContract. This is a hard backward-compatibility contract:
+// every existing cinematic channel must keep rendering through the exact
+// same look it always has.
+assert.equal(
+  FAMILIES.cinematic.styleId,
+  "cinematic_heist_noir",
+  "the cinematic family must default to its historical LTX visual-style preset",
+);
+assert.equal(
+  FAMILIES.cinematic.styleId,
+  DEFAULT_LTX_STYLE_ID,
+  "the cinematic family's default style must stay the LTX registry's own DEFAULT_LTX_STYLE_ID",
+);
+assert.equal(
+  getLtxStyle(FAMILIES.cinematic.styleId).id,
+  "cinematic_heist_noir",
+  "FAMILIES.cinematic.styleId must resolve through getLtxStyle to a valid, matching LtxStyleDef",
+);
+// No other family currently renders through the LTX I2V contract; each of
+// their catalog entries should simply omit styleId rather than guess a look.
+for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
+  if (family === "cinematic") continue;
+  assert.equal(
+    FAMILIES[family].styleId,
+    undefined,
+    `${family} does not render through the LTX I2V contract yet and must not carry a styleId`,
+  );
+}
 
 console.log("family duration contract test passed");

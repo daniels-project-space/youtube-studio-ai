@@ -11,6 +11,11 @@ attestation-gated rather than best-effort:
 - Upscale: LTX distilled stage one `640×352`, then its native latent x2
   spatial refinement to the final frame. This is not FFmpeg or Lanczos resize.
 
+Confirmed 2026-08-17 — this `1280×704` native / `640×352` stage-one / x2
+latent upscale configuration is the standing standard across all three
+generation profiles (draft/production/hero); no per-style resolution
+variants exist or are planned outside a new paid benchmark run.
+
 ## Required cached component manifest
 
 | ID | Relative model path | SHA-256 | Bytes |

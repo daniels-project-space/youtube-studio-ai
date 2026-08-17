@@ -406,6 +406,12 @@ export async function renderNovitaGeneratedScenes(args: {
   prefix: string;
   scenes: readonly NovitaGeneratedScene[];
   profileId?: NovitaProfileId;
+  /**
+   * Optional LTX 2.5 visual-style preset id (src/engine/ltxStylePresets.ts),
+   * forwarded to the video phase's applyLtxI2vPromptContract call. Omitted
+   * ids fall back to DEFAULT_LTX_STYLE_ID via getLtxStyle's own fallback.
+   */
+  styleId?: string;
   /** Complete signed caller-owned envelope for both phases. */
   maxCostUsd: number;
   maxConcurrent?: number;
@@ -607,6 +613,7 @@ export async function renderNovitaGeneratedScenes(args: {
       jobs: "full",
       maxCostUsd: envelope.videoMaxCostUsd,
       lifecycle: args.lifecycle,
+      styleId: args.styleId,
     });
   } catch (error) {
     throw imageSpendError(error, observedImageCostUsd);
@@ -646,6 +653,7 @@ export async function renderNovitaGeneratedScenes(args: {
             jobs: "full",
             maxCostUsd: remainingCostUsd,
             lifecycle: args.lifecycle,
+            styleId: args.styleId,
           });
           const clipKey = exactCandidateByShot(repairResult, [repairId]).get(repairId);
           if (!clipKey) throw new Error(`novita clip retry did not return ${repairId}`);
