@@ -208,4 +208,178 @@ for (const gate of ["cinematicKeyframeGate.ts", "cinematicClipGate.ts", "cinemat
   );
 }
 
+/* --------- Phase 17: nameCardText threading (story_spine → PlannedScene) -- */
+
+const introSpine = planStorySpine({
+  topic: "Detective Ayana Okafor opens the cold case",
+  narrationDurationSec: 24,
+  sentenceTimings: [
+    { text: "Detective Ayana Okafor steps into the rain-soaked alley.", start: 0, end: 12 },
+    { text: "The case would define the rest of her career.", start: 12, end: 24 },
+  ],
+  styleDNA: { recurringSubject: "Detective Ayana Okafor" },
+  structure: {
+    beats: [
+      { name: "intro", note: "introduce the detective", narrativeRole: "introduction", nameCardText: "DETECTIVE AYANA OKAFOR" },
+      { name: "stakes", note: "raise the stakes" },
+    ],
+  },
+});
+const introStore = {
+  timedScript: introSpine.timedScript,
+  narrativeBeats: introSpine.narrativeBeats,
+  continuityLedger: introSpine.continuityLedger,
+  shotList: introSpine.shotList,
+  dpVisualSpecs: introSpine.dpVisualSpecs,
+  editorEdl: introSpine.editorEdl,
+  storyCoverage: introSpine.coverage,
+};
+const introPlan = resolveGeneratedFootageScenePlan({
+  store: introStore,
+  label: "gen_footage",
+  maxScenes: 6,
+  minScenes: 2,
+  defaultDurationSec: 5,
+});
+assert.equal(introPlan.source, "story_spine");
+const introBeatId = introSpine.narrativeBeats[0]!.id;
+const introShotIndex = introSpine.shotList.findIndex((shot) => shot.beatId === introBeatId);
+assert.ok(introShotIndex >= 0, "the introduction beat must have produced at least one shot");
+assert.equal(
+  introPlan.scenes[introShotIndex]!.nameCardText,
+  "DETECTIVE AYANA OKAFOR",
+  "scenePlanFromStorySpine must thread ShotPlan.nameCardText onto the matching PlannedScene",
+);
+for (const [index, scene] of introPlan.scenes.entries()) {
+  if (index === introShotIndex) continue;
+  assert.equal(scene.nameCardText, undefined, "no other scene may inherit the introduction shot's name card");
+}
+// A cinematic_case_sequence plan never carries story_spine's nameCardText —
+// gen_footage.run gates its overlay call on plan.source === "story_spine".
+assert.equal(cinematicPlan.scenes[0]!.nameCardText, undefined);
+
+const genFootageSource = readFileSync(new URL("../genFootageBlocks.ts", import.meta.url), "utf8");
+assert.match(genFootageSource, /import \{ applyNameCardOverlay \} from "@\/lib\/ffmpeg";/);
+assert.match(
+  genFootageSource,
+  /plan\.source === "story_spine" \? scenes\[index\]\?\.nameCardText : undefined/,
+  "the name-card overlay must be gated to the automatic story_spine path, never the Casefile cinematic_case_sequence route",
+);
+assert.match(
+  genFootageSource,
+  /name-card overlay failed on scene .* using the clip without it/,
+  "an overlay failure must degrade to the clip without the card, never fail the whole render",
+);
+
+/* ------- Phase 18: realImageInsertQuery + evidenceOverlay threading ------ */
+
+const phase18Spine = planStorySpine({
+  topic: "phase 18 probe",
+  narrationDurationSec: 32,
+  targetShotSec: 6,
+  sentenceTimings: [
+    { text: "Detective Ayana Okafor opens the old case file in the archive.", start: 0, end: 8 },
+    { text: "The torn photograph revealed a second man standing in the doorway.", start: 8, end: 16 },
+    { text: "New evidence in the forensic report changed everything about the timeline.", start: 16, end: 24 },
+    { text: "By morning, the department reopened the case.", start: 24, end: 32 },
+  ],
+});
+// Ground truth for this exact fixture (verified by running planStorySpine
+// directly): shot-0001 establish, shot-0002 investigate ("evidence"),
+// shot-0003/shot-0004 reveal ("revealed"), shot-0007/shot-0008 advance.
+assert.deepEqual(
+  phase18Spine.shotList.map((shot) => shot.id),
+  ["shot-0001", "shot-0002", "shot-0003", "shot-0004", "shot-0005", "shot-0006", "shot-0007", "shot-0008"],
+);
+assert.match(phase18Spine.shotList[1]!.coveragePurpose, /evidence/, "shot-0002 must be the investigate-bucket shot");
+assert.match(phase18Spine.shotList[2]!.coveragePurpose, /contradiction/, "shot-0003 must be a reveal-bucket shot");
+assert.match(phase18Spine.shotList[3]!.coveragePurpose, /contradiction/, "shot-0004 must be a reveal-bucket shot");
+
+// realImageInsertQuery is schema-only (not threaded through planStorySpine —
+// see storySpine.ts's doc comment on the field): inject it directly onto a
+// shotList entry post-hoc, the same way the `bakedText` fixture above
+// injects a keyframePrompt directly rather than going through planStorySpine.
+const phase18Store = structuredClone({
+  timedScript: phase18Spine.timedScript,
+  narrativeBeats: phase18Spine.narrativeBeats,
+  continuityLedger: phase18Spine.continuityLedger,
+  shotList: phase18Spine.shotList,
+  dpVisualSpecs: phase18Spine.dpVisualSpecs,
+  editorEdl: phase18Spine.editorEdl,
+  storyCoverage: phase18Spine.coverage,
+});
+phase18Store.shotList[0]!.realImageInsertQuery = "Marcus Aurelius bust";
+
+const phase18Plan = resolveGeneratedFootageScenePlan({
+  store: phase18Store,
+  label: "gen_footage",
+  maxScenes: 8,
+  minScenes: 4,
+  defaultDurationSec: 5,
+});
+assert.equal(phase18Plan.source, "story_spine");
+assert.equal(
+  phase18Plan.scenes[0]!.realImageInsertQuery,
+  "Marcus Aurelius bust",
+  "resolveGeneratedFootageScenePlan must thread ShotPlan.realImageInsertQuery onto the matching PlannedScene",
+);
+for (const [index, scene] of phase18Plan.scenes.entries()) {
+  if (index === 0) continue;
+  assert.equal(scene.realImageInsertQuery, undefined, "no other scene may inherit shot-0001's real-image-insert query");
+}
+
+// Evidence overlay: budgeted to 2, earliest-t0-wins — shot-0002
+// (investigate/"contradiction" role -> evidence_tag) and shot-0003
+// (reveal/"reveal" role -> case_file_stamp) win; shot-0004 (also reveal, but
+// later) is capped out.
+assert.equal(phase18Plan.scenes[0]!.evidenceOverlay, undefined, "the establish-bucket shot must never get an evidence overlay");
+assert.deepEqual(
+  phase18Plan.scenes[1]!.evidenceOverlay,
+  { templateId: "evidence_tag", primary: "SEC. 001", secondary: undefined },
+  "the investigate-bucket shot must get the evidence_tag template with a section-derived primary label",
+);
+assert.equal(phase18Plan.scenes[2]!.evidenceOverlay?.templateId, "case_file_stamp", "the reveal-bucket shot must get the case_file_stamp template");
+assert.equal(phase18Plan.scenes[3]!.evidenceOverlay, undefined, "the third eligible shot must be capped out by the default budget of 2");
+for (const index of [4, 5, 6, 7]) {
+  assert.equal(phase18Plan.scenes[index]!.evidenceOverlay, undefined, `scene ${index} (investigate/advance beyond the budget) must not get an overlay`);
+}
+// A cinematic_case_sequence plan never carries story_spine's evidenceOverlay
+// or realImageInsertQuery — gen_footage.run gates both on plan.source.
+assert.equal(cinematicPlan.scenes[0]!.evidenceOverlay, undefined);
+assert.equal(cinematicPlan.scenes[0]!.realImageInsertQuery, undefined);
+
+const phase18Source = readFileSync(new URL("../genFootageBlocks.ts", import.meta.url), "utf8");
+assert.match(phase18Source, /import \{ kenBurns, applyHyperframesOverlayClip \} from "@\/lib\/ffmpeg";/);
+assert.match(phase18Source, /import \{ searchWikimediaImage \} from "@\/lib\/wikimedia";/);
+assert.match(
+  phase18Source,
+  /import \{ renderOverlay, selectAutomaticEvidenceOverlayShots, type OverlayTemplateId \} from "@\/lib\/hyperframesOverlay";/,
+);
+assert.match(
+  phase18Source,
+  /plan\.source === "story_spine" \? scenes\[index\]\?\.realImageInsertQuery : undefined/,
+  "the real-image insert must be gated to the automatic story_spine path",
+);
+assert.match(
+  phase18Source,
+  /plan\.source === "story_spine" \? scenes\[index\]\?\.evidenceOverlay : undefined/,
+  "the evidence overlay must be gated to the automatic story_spine path",
+);
+assert.match(
+  phase18Source,
+  /real-image insert failed on scene .* using the generated clip instead/,
+  "a real-image-insert failure must degrade to the generated clip, never fail the whole render",
+);
+assert.match(
+  phase18Source,
+  /evidence overlay failed on scene .* using the clip without it/,
+  "an evidence-overlay failure must degrade to the clip without it, never fail the whole render",
+);
+// The generated-clip download call must still be present unconditionally
+// (as the fallback / default path) even after the real-image-insert branch
+// was added.
+assert.match(phase18Source, /downloadTo\(scene\.clipUrl, join\(tmp, `gen_\$\{index\}\.mp4`\)\)/);
+
+console.log("Phase 18 (evidence overlays + real-image insert) shared-plan tests passed");
+
 console.log("Generated footage shared-plan tests passed");

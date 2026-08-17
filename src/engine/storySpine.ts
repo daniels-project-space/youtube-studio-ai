@@ -39,6 +39,21 @@ export const TimedSentenceSchema = z.object({
 export const BeatMoodSchema = z.enum(["tense", "somber", "triumphant", "mysterious", "neutral"]);
 export type BeatMood = z.infer<typeof BeatMoodSchema>;
 
+/**
+ * Lightweight AUTOMATIC-PATH character-introduction concept (Phase 17). The
+ * Casefile cinematic route has its own richer `CinematicNarrativeRoleSchema`
+ * (7 values: cold_open/orientation/investigation/contradiction/reveal/
+ * aftermath/closing_residue/introduction — see cinematicCaseSequence.ts) with
+ * strict evidence-citation/cast-lock validation. Story Spine deliberately
+ * does NOT reuse that schema or its validation: this is a narrow, single-value
+ * enum (extensible later) for the one concept the automatic path needs —
+ * "this beat introduces a character on-screen" — with the same lightweight,
+ * additive-only doctrine as `BeatMoodSchema` above: optional everywhere,
+ * unrecognized values dropped rather than thrown (see planStorySpine below).
+ */
+export const NarrativeRoleSchema = z.enum(["introduction"]);
+export type NarrativeRole = z.infer<typeof NarrativeRoleSchema>;
+
 export const NarrativeBeatSchema = z.object({
   id: z.string().min(1),
   sourceSentenceIds: z.array(z.string()).min(1),
@@ -47,6 +62,8 @@ export const NarrativeBeatSchema = z.object({
   purpose: z.string().min(1),
   /** Optional bounded mood tag; threaded down onto this beat's shots. */
   mood: BeatMoodSchema.optional(),
+  /** Optional narrow narrative-role tag; see NarrativeRoleSchema above. */
+  narrativeRole: NarrativeRoleSchema.optional(),
   evidenceRefs: z.array(z.string()),
 }).refine((value) => value.t1 > value.t0, "beat t1 must follow t0");
 
@@ -94,6 +111,41 @@ export const ShotPlanSchema = z.object({
   storyFunction: z.string().min(1),
   /** Optional bounded mood tag inherited from the parent narrative beat. */
   mood: BeatMoodSchema.optional(),
+  /** Optional narrative-role tag inherited from the parent beat (see
+   *  NarrativeRoleSchema above). */
+  narrativeRole: NarrativeRoleSchema.optional(),
+  /**
+   * Character-introduction NAME CARD text (automatic-path lightweight
+   * counterpart to the Casefile route's `nameCardText` on
+   * `CinematicCoverageShotSchema`, cinematicCaseSequence.ts). Rendered via
+   * `applyNameCardOverlay`/`nameCardOverlayFilter` (src/lib/ffmpeg.ts).
+   * Optional so every shot payload that predates this field keeps validating
+   * unchanged. Lightly validated in `validateStorySpine` below (requires a
+   * non-empty `entities` list on the same shot) — NOT the Casefile route's
+   * strict citation/locked-cast checks; see the field's own comment there.
+   */
+  nameCardText: z.string().min(1).max(120).optional(),
+  /**
+   * REAL-IMAGE INSERT query (Phase 18). When present, the automatic-path
+   * renderer substitutes a real Wikimedia Commons photograph for this
+   * shot's LTX-generated clip instead of rendering it — see the
+   * `realImageInsertQuery` handling inside `gen_footage`'s per-scene loop
+   * (src/trigger/blocks/genFootageBlocks.ts), which resolves it via
+   * `searchWikimediaImage` (src/lib/wikimedia.ts) and turns the result into
+   * a short clip via `kenBurns` (src/lib/ffmpeg.ts). Lightweight and
+   * additive-only, same doctrine as `nameCardText` above: optional
+   * everywhere, so every shot payload that predates this field keeps
+   * validating unchanged. UNLIKE `nameCardText`, this is schema-only —
+   * intentionally NOT threaded through `PlanStorySpineInput`/
+   * `planStorySpine` (no automatic-path caller sets this on a beat today)
+   * and `validateStorySpine` has no companion check for it (unlike
+   * `nameCardText`'s `entities` requirement): a real-image insert is not a
+   * Casefile-style cited claim, so there is nothing to cross-validate. Any
+   * future story-outline/entity-tagging step can set it directly on a
+   * `shotList` entry — the same "standalone primitive, no live caller yet"
+   * status `src/lib/hyperframesOverlay.ts` documents for itself.
+   */
+  realImageInsertQuery: z.string().min(1).max(200).optional(),
   section: z.string().min(1),
   seed: z.number().int().nonnegative(),
 }).refine((value) => value.t1 > value.t0, "shot t1 must follow t0");
@@ -145,7 +197,19 @@ export interface PlanStorySpineInput {
   topic: string;
   narrationDurationSec: number;
   sentenceTimings: Array<{ text: string; start: number; end: number }>;
-  structure?: { beats?: Array<{ name?: string; note?: string; intentSec?: number; mood?: string }> };
+  structure?: {
+    beats?: Array<{
+      name?: string;
+      note?: string;
+      intentSec?: number;
+      mood?: string;
+      /** See NarrativeRoleSchema; unrecognized values are dropped, not thrown. */
+      narrativeRole?: string;
+      /** See ShotPlanSchema.nameCardText; only honored on an "introduction"
+       *  narrativeRole beat, and only on that beat's first cut shot. */
+      nameCardText?: string;
+    }>;
+  };
   visualBrief?: Record<string, unknown>;
   styleDNA?: Record<string, unknown> | null;
   generationProfile?: unknown;
@@ -197,6 +261,18 @@ export function validateStorySpine(value: StorySpine): StorySpine {
   if (spine.coverage.gaps.length || spine.coverage.ratio < 0.999999) {
     throw new Error(`story coverage is not complete (${spine.coverage.ratio})`);
   }
+  // Lightweight automatic-path validation for the character-introduction
+  // name-card exception (ShotPlanSchema.nameCardText above): NOT the
+  // Casefile route's strict evidence-citation/locked-cast checks
+  // (evaluateCinematicCaseSequence in cinematicCaseSequence.ts) — this only
+  // requires that a shot carrying on-screen name-card text also identifies
+  // which entity it introduces, so the render pipeline has something
+  // concrete to key the overlay off.
+  for (const shot of spine.shotList) {
+    if (shot.nameCardText && shot.entities.length === 0) {
+      throw new Error(`shot ${shot.id} carries nameCardText but has no entities to introduce`);
+    }
+  }
   return spine;
 }
 
@@ -239,18 +315,36 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
     structureBeats.length
       ? structureBeats[Math.min(structureBeats.length - 1, Math.floor((index * structureBeats.length) / intervals.length))]
       : undefined;
+  // Beat id -> reviewed name-card text, populated below alongside
+  // narrativeBeats. Kept OUT of NarrativeBeatSchema (name-card text is a
+  // shot-level concept, applied to only the beat's first cut shot below) but
+  // needs to survive from this map into the shot-construction loop further
+  // down, which only has the built beat object (not the raw structureBeat)
+  // in scope.
+  const introNameCardByBeatId = new Map<string, string>();
   const narrativeBeats = intervals.map((sentence, index) => {
     const structureBeat = structureBeatForIndex(index);
-    // Unrecognized mood values are dropped, not thrown: this is optional,
-    // non-critical metadata and must never fail an otherwise-valid spine.
+    // Unrecognized mood/narrativeRole values are dropped, not thrown: this is
+    // optional, non-critical metadata and must never fail an otherwise-valid
+    // spine.
     const moodParsed = structureBeat?.mood ? BeatMoodSchema.safeParse(structureBeat.mood) : undefined;
+    const narrativeRoleParsed = structureBeat?.narrativeRole
+      ? NarrativeRoleSchema.safeParse(structureBeat.narrativeRole)
+      : undefined;
+    const beatId = `beat-${String(index + 1).padStart(4, "0")}`;
+    // Same drop-not-throw doctrine for an oversized/empty name-card string.
+    const nameCardParsed = structureBeat?.nameCardText?.trim()
+      ? z.string().min(1).max(120).safeParse(structureBeat.nameCardText.trim())
+      : undefined;
+    if (nameCardParsed?.success) introNameCardByBeatId.set(beatId, nameCardParsed.data);
     return {
-      id: `beat-${String(index + 1).padStart(4, "0")}`,
+      id: beatId,
       sourceSentenceIds: [sentence.id],
       t0: sentence.t0,
       t1: sentence.t1,
       purpose: structureBeat?.note || structureBeat?.name || "advance the narrated argument",
       mood: moodParsed?.success ? moodParsed.data : undefined,
+      narrativeRole: narrativeRoleParsed?.success ? narrativeRoleParsed.data : undefined,
       evidenceRefs: sentence.evidenceRefs,
     };
   });
@@ -404,6 +498,14 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
           // selection logic here yet; this only makes the data available on
           // the shot object for a future consumer.
           mood: beat.mood,
+          narrativeRole: beat.narrativeRole,
+          // The name card is placed on the beat's FIRST cut shot only (chunk
+          // === 0) — a multi-shot introduction beat should not repeat the
+          // same on-screen text on every one of its shots.
+          nameCardText:
+            chunk === 0 && beat.narrativeRole === "introduction"
+              ? introNameCardByBeatId.get(beat.id)
+              : undefined,
           section: source.sectionId,
           seed: 100_000 + shotNo,
         });

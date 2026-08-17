@@ -14,6 +14,10 @@ import { join } from "node:path";
 import { makeRunTempDir, downloadTo, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
 import { renderNovitaGeneratedScenes } from "@/lib/novitaMedia";
+import { applyNameCardOverlay } from "@/lib/ffmpeg";
+import { kenBurns, applyHyperframesOverlayClip } from "@/lib/ffmpeg";
+import { searchWikimediaImage } from "@/lib/wikimedia";
+import { renderOverlay, selectAutomaticEvidenceOverlayShots, type OverlayTemplateId } from "@/lib/hyperframesOverlay";
 import { hasNonGoogleVisionKey } from "@/lib/vision";
 import { requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { reviewCinematicKeyframe } from "@/lib/cinematicKeyframeGate";
@@ -103,6 +107,44 @@ export interface PlannedScene {
   /** Incoming editorial reason/state for an adjacent source-bound cut. */
   cutReason?: string;
   tensionState?: string;
+  /**
+   * Automatic-path character-introduction name card (Story Spine's
+   * `ShotPlanSchema.nameCardText`, src/engine/storySpine.ts). Only ever
+   * populated from `source: "story_spine"` scenes — the Casefile
+   * `cinematic_case_sequence` route carries its own name-card concept
+   * end-to-end inside cinematicCaseSequence.ts and does not pass through
+   * this field (its clip-order assembler does not exist yet; see
+   * applyNameCardOverlay's doc comment in src/lib/ffmpeg.ts). Applied
+   * directly to the rendered clip file below, once, before it ever reaches
+   * timeline_assemble — no change to that block's proven concat/compose
+   * graph is required.
+   */
+  nameCardText?: string;
+  /**
+   * REAL-IMAGE INSERT query (Phase 18 Part B; Story Spine's
+   * `ShotPlanSchema.realImageInsertQuery`, src/engine/storySpine.ts). When
+   * present, `genFootage.run`'s per-scene loop resolves a real photograph
+   * via `searchWikimediaImage` (src/lib/wikimedia.ts) and substitutes a
+   * short Ken Burns clip of it (`kenBurns`, src/lib/ffmpeg.ts) for this
+   * scene's LTX-generated clip entirely, skipping the generated-clip
+   * download for that one scene. Only ever populated from
+   * `source: "story_spine"` scenes — same convention as `nameCardText`
+   * above.
+   */
+  realImageInsertQuery?: string;
+  /**
+   * EVIDENCE OVERLAY selection (Phase 18 Part A). Computed ONCE, up front,
+   * across the whole shot list by `selectAutomaticEvidenceOverlayShots`
+   * (src/lib/hyperframesOverlay.ts) inside `scenePlanFromStorySpine` below
+   * — a budgeted, cross-shot decision (capped at 2/video by that function's
+   * own `maxPerVideo`), not a per-shot flag an author sets directly. When
+   * present, `genFootage.run` renders and composites a brief HyperFrames
+   * case-file-stamp/evidence-tag accent onto this scene's finished clip via
+   * `renderOverlay`/`applyHyperframesOverlayClip`. Only ever populated from
+   * `source: "story_spine"` scenes — same convention as `nameCardText`
+   * above.
+   */
+  evidenceOverlay?: { templateId: OverlayTemplateId; primary: string; secondary?: string };
 }
 
 export interface ResolvedGeneratedFootageScenePlan {
@@ -168,8 +210,27 @@ function scenePlanFromStorySpine(
   const spine = storySpineFromStore(store);
   if (!spine) return null;
   const visualSpecs = new Map(spine.dpVisualSpecs.map((spec) => [spec.shotId, spec]));
-  return spine.shotList.slice(0, maxScenes).map((shot) => {
+  const shots = spine.shotList.slice(0, maxScenes);
+  // EVIDENCE OVERLAY selection (Phase 18 Part A) needs the FULL candidate
+  // list at once — it is a budgeted, cross-shot decision (capped at
+  // maxPerVideo, earliest-t0-wins; see selectAutomaticEvidenceOverlayShots's
+  // own doc comment in src/lib/hyperframesOverlay.ts) — so it is computed
+  // HERE, once, ahead of the per-shot map below, rather than inside it.
+  const evidenceOverlayByShotId = new Map(
+    selectAutomaticEvidenceOverlayShots(
+      shots.map((shot) => ({ id: shot.id, coveragePurpose: shot.coveragePurpose, t0: shot.t0, t1: shot.t1 })),
+    ).map((selection) => [selection.shotId, selection]),
+  );
+  return shots.map((shot) => {
     const spec = visualSpecs.get(shot.id);
+    const overlaySelection = evidenceOverlayByShotId.get(shot.id);
+    // Grounded in real ShotPlan fields, not invented case data: `section`
+    // (e.g. "section-004") becomes a short exhibit-style tag, and `era` is
+    // included only when the channel actually set one (its unset value is
+    // the literal placeholder sentence assigned in planStorySpine above).
+    const primary = shot.section.toUpperCase().replace("SECTION-", "SEC. ");
+    const secondary =
+      shot.era && shot.era !== "unspecified; obey source sentence" ? shot.era.slice(0, 40) : undefined;
     return {
       id: shot.id,
       still: withoutTextSafetyInstruction(spec?.keyframePrompt ?? shot.prompt),
@@ -183,6 +244,11 @@ function scenePlanFromStorySpine(
       shotScale: shot.shotScale,
       lens: shot.lens,
       negative: mergedNegativePrompt(shot.negative, spec?.negativePrompt),
+      nameCardText: shot.nameCardText,
+      realImageInsertQuery: shot.realImageInsertQuery,
+      evidenceOverlay: overlaySelection
+        ? { templateId: overlaySelection.templateId, primary, secondary }
+        : undefined,
     };
   });
 }
@@ -521,6 +587,8 @@ export const genFootage: Block = {
     assertCentralNovitaSelection(ctx.params["i2vModel"], "gen_footage");
     const dna = ctx.store["styleDNA"] as {
       visualAvoid?: string[];
+      palette?: string[];
+      colorGrade?: string;
     } | null;
     const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 300;
     const clipSec = Math.min(10, Math.max(5, Number(ctx.params["clipSec"] ?? 5)));
@@ -699,11 +767,125 @@ export const genFootage: Block = {
       throw new Error("gen_footage: Novita completion no longer matches the admitted generated-scene order");
     }
     const tmp = await makeRunTempDir(ctx.runId);
+    // Theme-consistent accent color for the name-card overlay below: the
+    // channel's own locked Style DNA palette/color-grade, the same source
+    // storySpine.ts already reads for its `styleLock` prompt clause. Neither
+    // ltxStylePresets.ts's getLtxStyle nor docuStyles.ts's DocuTheme carry a
+    // live per-channel id anywhere in this pipeline today (grep-verified: no
+    // block ever writes ctx.store["ltxStyleId"] or a "docuStyleId" key), so
+    // resolving through either here would always just return their hardcoded
+    // defaults — not an actually "consistent" per-channel color. Style DNA is
+    // the real signal already available at this exact call site.
+    const nameCardAccentColor = dna?.palette?.[0] || dna?.colorGrade || undefined;
     try {
       const clips = await pool(rendered.scenes, 3, async (scene, index) => {
-        const path = await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`));
-        ctx.log(`gen_footage: scene ${index + 1}/${rendered.scenes.length} complete`);
-        return path;
+        // REAL-IMAGE INSERT (Phase 18 Part B, automatic path only). Resolved
+        // BEFORE any LTX download: when this scene carries
+        // ShotPlanSchema.realImageInsertQuery (src/engine/storySpine.ts), a
+        // real Wikimedia Commons photograph replaces the generated clip
+        // entirely for this one scene — the generated-clip download is
+        // skipped outright. Gated to plan.source === "story_spine" like the
+        // name-card/evidence-overlay passes below; every shot without this
+        // field downloads the generated clip exactly as before (default
+        // behavior unchanged).
+        const realImageInsertQuery = plan.source === "story_spine" ? scenes[index]?.realImageInsertQuery : undefined;
+        let rawPath: string;
+        if (realImageInsertQuery) {
+          try {
+            const image = await searchWikimediaImage(realImageInsertQuery);
+            if (!image) {
+              throw new Error(`no Wikimedia Commons image found for "${realImageInsertQuery}"`);
+            }
+            const stillPath = await downloadTo(image.url, join(tmp, `gen_${index}_realimage.jpg`));
+            rawPath = await kenBurns(
+              stillPath,
+              join(tmp, `gen_${index}_realimage.mp4`),
+              boundedSceneDuration(scenes[index]?.durationSec ?? clipSec, clipSec),
+            );
+            ctx.log(
+              `gen_footage: scene ${index + 1}/${rendered.scenes.length} used a real Wikimedia image for ` +
+              `"${realImageInsertQuery}" instead of the generated clip (${image.attribution})`,
+            );
+          } catch (e) {
+            ctx.log(
+              `gen_footage: real-image insert failed on scene ${index + 1} (${e instanceof Error ? e.message : e}) — using the generated clip instead`,
+            );
+            rawPath = await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`));
+          }
+        } else {
+          rawPath = await downloadTo(scene.clipUrl, join(tmp, `gen_${index}.mp4`));
+        }
+        // Character-introduction NAME CARD (automatic path only). Applied
+        // here, once, directly to the already-rendered clip file — the exact
+        // usage applyNameCardOverlay's own doc comment anticipates
+        // (src/lib/ffmpeg.ts) — so timeline_assemble's proven concat/compose
+        // graph needs no change at all: the overlay travels with the clip
+        // through whichever assembly branch downstream picks it up. Gated to
+        // plan.source === "story_spine": the Casefile cinematic_case_sequence
+        // route has its own narrativeRole/nameCardText validation
+        // (cinematicCaseSequence.ts) and is untouched here.
+        const nameCardText = plan.source === "story_spine" ? scenes[index]?.nameCardText : undefined;
+        let namedPath = rawPath;
+        if (!nameCardText) {
+          ctx.log(`gen_footage: scene ${index + 1}/${rendered.scenes.length} complete`);
+        } else {
+          try {
+            const cardPath = join(tmp, `gen_${index}_namecard.mp4`);
+            await applyNameCardOverlay(rawPath, cardPath, {
+              text: nameCardText,
+              // `scene` here is the Novita render RESPONSE (clipUrl/clipKey/
+              // reviews) — the authored duration lives on the matching
+              // PlannedScene input this response was rendered from.
+              durationSec: scenes[index]?.durationSec ?? clipSec,
+              accentColor: nameCardAccentColor,
+            });
+            namedPath = cardPath;
+            ctx.log(`gen_footage: scene ${index + 1}/${rendered.scenes.length} complete (name card applied)`);
+          } catch (e) {
+            ctx.log(
+              `gen_footage: name-card overlay failed on scene ${index + 1} (${e instanceof Error ? e.message : e}) — using the clip without it`,
+            );
+          }
+        }
+        // EVIDENCE OVERLAY (Phase 18 Part A, automatic path only). Selected
+        // once, up front, across the whole shot list by
+        // selectAutomaticEvidenceOverlayShots inside scenePlanFromStorySpine
+        // (capped at 2/video — see that function's own doc comment). An
+        // independent finishing pass from the name card above, applied
+        // after it so both can stack on the same clip. Gated the same way;
+        // graceful degrade on failure, same as the name-card pass.
+        const evidenceOverlay = plan.source === "story_spine" ? scenes[index]?.evidenceOverlay : undefined;
+        if (!evidenceOverlay) return namedPath;
+        try {
+          const overlayDurationSec = Math.max(
+            1.2,
+            Math.min(2.2, (scenes[index]?.durationSec ?? clipSec) - 0.3),
+          );
+          const overlayClipPath = await renderOverlay({
+            spec: {
+              templateId: evidenceOverlay.templateId,
+              primary: evidenceOverlay.primary,
+              secondary: evidenceOverlay.secondary,
+              accent: nameCardAccentColor,
+              durationSec: overlayDurationSec,
+            },
+            projectDir: join(tmp, `gen_${index}_overlay`),
+            log: ctx.log,
+          });
+          const overlaidPath = join(tmp, `gen_${index}_evidence.mp4`);
+          await applyHyperframesOverlayClip(namedPath, overlayClipPath, overlaidPath, {
+            durationSec: overlayDurationSec,
+          });
+          ctx.log(
+            `gen_footage: scene ${index + 1}/${rendered.scenes.length} evidence overlay applied (${evidenceOverlay.templateId})`,
+          );
+          return overlaidPath;
+        } catch (e) {
+          ctx.log(
+            `gen_footage: evidence overlay failed on scene ${index + 1} (${e instanceof Error ? e.message : e}) — using the clip without it`,
+          );
+          return namedPath;
+        }
       });
       const transitionToNextReviewByIndex = new Map<number, Awaited<ReturnType<typeof reviewCinematicTransition>>>();
       if (plan.source === "cinematic_case_sequence") {

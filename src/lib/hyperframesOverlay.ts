@@ -178,13 +178,41 @@ export async function renderOverlay(args: {
   await writeFile(join(args.projectDir, "index.html"), html, "utf8");
   await writeFile(join(args.projectDir, "hyperframes.json"), JSON.stringify({ compositions: [{ id: "main" }] }), "utf8");
 
-  const out = args.out || "overlay.mp4";
+  // Phase 18: default output is WEBM, not MP4. This composition is a
+  // graphic ACCENT meant to sit over an existing rendered shot (see this
+  // file's top-of-file doc comment) — it must survive with a real alpha
+  // channel, not the CSS `background: transparent` silently flattening to
+  // opaque on encode. The HyperFrames CLI's own `--format` flag help text
+  // confirms only `webm`/`mov` "render with transparency" (mp4 does not);
+  // `--format webm` here pairs with `applyHyperframesOverlayClip`'s
+  // `-c:v libvpx` alpha-honoring decode (src/lib/ffmpeg.ts), the same
+  // WebM-alpha convention this codebase already uses for Remotion overlay
+  // cards (see `codec: "vp8", pixelFormat: "yuva420p"` in
+  // src/lib/remotionRender.ts and the `format=yuva420p` compositing chains
+  // in applyQuoteOverlays/applyOverlaysAndCaptions, src/lib/ffmpeg.ts).
+  const out = args.out || "overlay.webm";
   args.log?.(`hyperframesOverlay: rendering ${out} (${args.spec.templateId}, ${args.quality || "standard"} ${args.fps || 30}fps) via hyperframes@${HYPERFRAMES_VERSION}…`);
   await new Promise<void>((resolve, reject) => {
-    const p = spawn("npx", [`hyperframes@${HYPERFRAMES_VERSION}`, "render", "-q", args.quality || "standard", "-f", String(args.fps || 30), "--no-browser-gpu", "-o", out], {
-      cwd: args.projectDir,
-      stdio: ["ignore", "ignore", "pipe"],
-    });
+    const p = spawn(
+      "npx",
+      [
+        `hyperframes@${HYPERFRAMES_VERSION}`,
+        "render",
+        "-q",
+        args.quality || "standard",
+        "-f",
+        String(args.fps || 30),
+        "--format",
+        "webm",
+        "--no-browser-gpu",
+        "-o",
+        out,
+      ],
+      {
+        cwd: args.projectDir,
+        stdio: ["ignore", "ignore", "pipe"],
+      },
+    );
     let e = "";
     p.stderr.on("data", (d) => (e += String(d)));
     p.on("close", (c) => (c === 0 ? resolve() : reject(new Error(`hyperframes render exited ${c}: ${e.slice(-400)}`))));
@@ -254,4 +282,86 @@ export function selectEvidenceOverlayShots(
       reason: `${shot.narrativeRole} beat's cited evidence_insert shot earns a ${templateId.replace(/_/g, " ")} accent`,
     };
   });
+}
+
+/* ----------------------------------------------------------------------- *
+ * 3. AUTOMATIC-PATH ADAPTER (Phase 18) — Story Spine never carries the
+ *    Casefile vocabulary `selectEvidenceOverlayShots` above filters on.
+ * ----------------------------------------------------------------------- */
+export interface AutomaticEvidenceOverlayShot {
+  id: string;
+  /**
+   * Story Spine's `ShotPlanSchema.coveragePurpose`
+   * (src/engine/storySpine.ts) — a FIXED sentence per narrative-intent
+   * bucket from `cinematicShotLanguage.ts`'s GRAMMAR table (never per-shot
+   * free text; see `planCinematicShotLanguage`), NOT the Casefile route's
+   * `narrativeRole`/`evidence_insert` vocabulary `OverlayCandidateShot`
+   * above expects. See `selectAutomaticEvidenceOverlayShots`'s doc comment
+   * for the mapping this adapter derives from it.
+   */
+  coveragePurpose: string;
+  t0: number;
+  t1: number;
+}
+
+/**
+ * AUTOMATIC-PATH (Story Spine) adapter for `selectEvidenceOverlayShots`.
+ *
+ * Investigated first: does Story Spine ever produce the Casefile route's
+ * `narrativeRole: "reveal" | "contradiction"` + `coveragePurpose ===
+ * "evidence_insert"` combination `selectEvidenceOverlayShots` filters on? No
+ * — Story Spine's own `NarrativeRoleSchema` (storySpine.ts) is a single-value
+ * `"introduction"` enum used only for character-intro name cards, unrelated
+ * to per-shot evidence framing, and its `coveragePurpose` is never the
+ * literal string `"evidence_insert"` — it is always one of seven fixed
+ * sentences from `cinematicShotLanguage.ts`'s GRAMMAR table (see
+ * `planCinematicShotLanguage`/`classifyCinematicNarrativeIntent`). Reusing
+ * `narrativeRole` here would therefore be reusing the field name, not the
+ * concept — it would always evaluate to `undefined`/`"introduction"` and the
+ * Casefile filter would never once fire on automatic-path shots.
+ *
+ * What automatic-path shots DO genuinely carry is that fixed
+ * `coveragePurpose` sentence, and two of the seven buckets are, in
+ * substance, the same evidentiary beats the Casefile vocabulary names:
+ *   - "investigate": "make the evidence, document, trace, or physical
+ *     detail readable before the narration draws a conclusion" — literally
+ *     contains "evidence".
+ *   - "reveal": "land the contradiction or newly understood fact with an
+ *     unmistakable visual turn" — literally contains "contradiction".
+ * This adapter keys off exactly those two literal substrings
+ * (case-insensitive) to reconstruct an equivalent `{ narrativeRole,
+ * coveragePurpose: "evidence_insert" }` candidate for each match, then hands
+ * off to `selectEvidenceOverlayShots` UNMODIFIED for the actual
+ * budgeted/ordered selection and template assignment — one selection
+ * algorithm, one Casefile-oriented test suite, shared by both routes.
+ * "investigate" shots map to the "contradiction" role (→ `evidence_tag`: a
+ * literal evidence tag fits a document/trace examination beat); "reveal"
+ * shots map to the "reveal" role (→ `case_file_stamp`: the more dramatic
+ * stamp fits a twist/contradiction landing). Every other bucket
+ * (establish/escalate/consequence/human/advance) is never eligible, same
+ * "sparing, well-placed only" brief as the function this wraps.
+ *
+ * Pure and deterministic: same input, same output, no I/O, no rendering —
+ * same guarantee as `selectEvidenceOverlayShots`.
+ */
+export function selectAutomaticEvidenceOverlayShots(
+  shots: readonly AutomaticEvidenceOverlayShot[],
+  opts: { maxPerVideo?: number } = {},
+): OverlaySelection[] {
+  const adapted: OverlayCandidateShot[] = shots.map((shot) => {
+    const text = shot.coveragePurpose.toLowerCase();
+    const narrativeRole = text.includes("contradiction")
+      ? "reveal"
+      : text.includes("evidence")
+        ? "contradiction"
+        : "";
+    return {
+      id: shot.id,
+      narrativeRole,
+      coveragePurpose: narrativeRole ? "evidence_insert" : "",
+      t0: shot.t0,
+      t1: shot.t1,
+    };
+  });
+  return selectEvidenceOverlayShots(adapted, opts);
 }

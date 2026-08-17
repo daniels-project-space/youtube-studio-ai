@@ -1199,6 +1199,99 @@ export async function applyNameCardOverlay(
   return outputPath;
 }
 
+/**
+ * Composite a rendered HyperFrames evidence-overlay clip (src/lib/
+ * hyperframesOverlay.ts `buildOverlayComposition`/`renderOverlay`) onto an
+ * already-rendered base clip — the pure filter-graph half of
+ * `applyHyperframesOverlayClip` below, split out the same way
+ * `nameCardOverlayFilter`/`applyNameCardOverlay` are, so it is unit-testable
+ * without shelling out to ffmpeg.
+ *
+ * `renderOverlay` renders its composition to WEBM with `--format webm`
+ * (Phase 18): the overlay is a brief graphic ACCENT meant to sit over
+ * existing footage, so it needs a real alpha channel, not a `background:
+ * transparent` CSS body silently flattened to opaque by a non-alpha codec.
+ * This filter decodes that WebM with `-c:v libvpx` (input codec set by the
+ * caller, see `applyHyperframesOverlayClip`) and `format=yuva420p` so the
+ * alpha channel is honored — the SAME convention already established here
+ * for Remotion-rendered alpha cards (`applyQuoteOverlays`/
+ * `applyOverlaysAndCaptions` above; `codec: "vp8", pixelFormat: "yuva420p"`
+ * in src/lib/remotionRender.ts) — then overlays it at the top-left corner
+ * for exactly `durationSec` from the start of the base clip (evidence
+ * overlays are always a brief opening accent on the shot they are placed
+ * on, never a full-clip treatment).
+ */
+export function hyperframesOverlayCompositeFilter(opts: { durationSec: number }): string {
+  const duration = Number.isFinite(opts.durationSec) ? opts.durationSec : 0;
+  // Degrade-safe like nameCardOverlayFilter/filmGrainVignetteFilter above: a
+  // non-finite or non-positive duration must never reach the filter graph —
+  // treat it the same as "no overlay", empty filter, straight remux.
+  if (duration <= 0) return "";
+  const dur = Math.max(0.1, duration).toFixed(3);
+  return (
+    `[1:v]format=yuva420p[ov];` +
+    `[0:v][ov]overlay=0:0:eof_action=pass:enable='between(t,0,${dur})'[vout]`
+  );
+}
+
+/**
+ * Standalone HyperFrames evidence-overlay finishing pass over one
+ * already-rendered clip: re-encodes the video stream only (audio is
+ * stream-copied, untouched), matching `applyNameCardOverlay`'s no-op-safe
+ * shape. `overlayWebmPath` must be the WEBM `renderOverlay` produced (its
+ * alpha channel is required for a correct composite — see
+ * `hyperframesOverlayCompositeFilter` above). A non-finite/non-positive
+ * `durationSec` is a straight remux (no overlay filter emitted).
+ */
+export async function applyHyperframesOverlayClip(
+  basePath: string,
+  overlayWebmPath: string,
+  outputPath: string,
+  opts: { durationSec: number; timeoutMs?: number },
+): Promise<string> {
+  const filter = hyperframesOverlayCompositeFilter(opts);
+  if (!filter) {
+    await run(FFMPEG, ["-y", "-i", basePath, "-c", "copy", outputPath], opts.timeoutMs ?? 600_000);
+    return outputPath;
+  }
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-i",
+      basePath,
+      // libvpx decoder for the overlay input so its WebM ALPHA channel is
+      // honored — the native vp8 decoder ignores it, making the card
+      // opaque black (same convention as applyOverlaysAndCaptions above).
+      "-c:v",
+      "libvpx",
+      "-i",
+      overlayWebmPath,
+      "-filter_complex",
+      filter,
+      "-map",
+      "[vout]",
+      "-map",
+      "0:a?",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ],
+    opts.timeoutMs ?? 900_000,
+  );
+  return outputPath;
+}
+
 export async function composeWithIntro(args: {
   introCardPath?: string;
   loopBodyPath: string;

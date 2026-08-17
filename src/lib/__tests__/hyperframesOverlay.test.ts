@@ -4,7 +4,9 @@ import {
   OVERLAY_TEMPLATE_IDS,
   buildOverlayComposition,
   selectEvidenceOverlayShots,
+  selectAutomaticEvidenceOverlayShots,
   type OverlayCandidateShot,
+  type AutomaticEvidenceOverlayShot,
 } from "@/lib/hyperframesOverlay";
 
 /* ------------------------------------------------- buildOverlayComposition -- */
@@ -109,3 +111,108 @@ assert.equal(selectEvidenceOverlayShots(manyEligible, { maxPerVideo: 0 }).length
 assert.deepEqual(selectEvidenceOverlayShots(manyEligible), selectEvidenceOverlayShots(manyEligible), "selection must be deterministic for identical input");
 
 console.log("hyperframesOverlay: selectEvidenceOverlayShots assertions passed");
+
+/* ------------------------------------- selectAutomaticEvidenceOverlayShots -- */
+
+function autoShot(id: string, coveragePurpose: string, t0: number, t1: number): AutomaticEvidenceOverlayShot {
+  return { id, coveragePurpose, t0, t1 };
+}
+
+// The seven fixed Story Spine coveragePurpose sentences, verbatim from
+// cinematicShotLanguage.ts's GRAMMAR table (kept inline here rather than
+// imported, so this test independently pins the literal text the adapter
+// depends on).
+const COVERAGE = {
+  establish: "place the viewer in the specific time, geography, and stakes before the action tightens",
+  investigate: "make the evidence, document, trace, or physical detail readable before the narration draws a conclusion",
+  reveal: "land the contradiction or newly understood fact with an unmistakable visual turn",
+  escalate: "increase urgency through motivated action, unstable space, or narrowing options without inventing facts",
+  consequence: "give the outcome emotional and spatial weight after the preceding action or discovery",
+  human: "show the human relationship, decision, or reaction that makes the causal beat matter",
+  advance: "advance the narrated cause-and-effect with a concrete changing visual state",
+};
+
+// No candidates -> no selections.
+assert.deepEqual(selectAutomaticEvidenceOverlayShots([]), [], "an empty shot list must select nothing");
+
+// The five non-evidentiary buckets are never eligible.
+const nonEvidentiary = [
+  autoShot("s-establish", COVERAGE.establish, 0, 4),
+  autoShot("s-escalate", COVERAGE.escalate, 4, 8),
+  autoShot("s-consequence", COVERAGE.consequence, 8, 12),
+  autoShot("s-human", COVERAGE.human, 12, 16),
+  autoShot("s-advance", COVERAGE.advance, 16, 20),
+];
+assert.deepEqual(
+  selectAutomaticEvidenceOverlayShots(nonEvidentiary),
+  [],
+  "establish/escalate/consequence/human/advance coveragePurpose shots must never be selected",
+);
+
+// The "investigate" bucket (contains "evidence") maps to the evidence_tag
+// template via the reconstructed "contradiction" role.
+const investigateOnly = [autoShot("s-investigate", COVERAGE.investigate, 10, 14)];
+const investigateSelection = selectAutomaticEvidenceOverlayShots(investigateOnly);
+assert.equal(investigateSelection.length, 1, "an investigate-bucket shot must be selected");
+assert.equal(investigateSelection[0]!.shotId, "s-investigate");
+assert.equal(
+  investigateSelection[0]!.templateId,
+  "evidence_tag",
+  "investigate-bucket (evidence) shots must map to the evidence_tag template",
+);
+
+// The "reveal" bucket (contains "contradiction") maps to case_file_stamp.
+const revealOnlyAuto = [autoShot("s-reveal", COVERAGE.reveal, 2, 6)];
+const revealSelectionAuto = selectAutomaticEvidenceOverlayShots(revealOnlyAuto);
+assert.equal(revealSelectionAuto.length, 1, "a reveal-bucket shot must be selected");
+assert.equal(
+  revealSelectionAuto[0]!.templateId,
+  "case_file_stamp",
+  "reveal-bucket (contradiction) shots must map to the case_file_stamp template",
+);
+
+// Mixed: only the two evidentiary buckets are chosen, ordered by t0, capped
+// at the same default budget of 2 selectEvidenceOverlayShots itself uses.
+const autoMixed = [
+  autoShot("s-late-reveal", COVERAGE.reveal, 40, 44),
+  autoShot("s-establish-ineligible", COVERAGE.establish, 5, 9),
+  autoShot("s-early-investigate", COVERAGE.investigate, 12, 16),
+  autoShot("s-human-ineligible", COVERAGE.human, 20, 24),
+];
+const autoMixedSelection = selectAutomaticEvidenceOverlayShots(autoMixed);
+assert.deepEqual(
+  autoMixedSelection.map((s) => s.shotId),
+  ["s-early-investigate", "s-late-reveal"],
+  "only investigate/reveal coveragePurpose shots are selected, ordered by t0",
+);
+
+// Case-insensitivity: the literal substring match does not depend on case.
+const upperCaseCoverage = [autoShot("s-upper", COVERAGE.investigate.toUpperCase(), 0, 4)];
+assert.equal(
+  selectAutomaticEvidenceOverlayShots(upperCaseCoverage).length,
+  1,
+  "the evidence/contradiction substring match must be case-insensitive",
+);
+
+// A custom, lower budget is honored (delegated straight through to
+// selectEvidenceOverlayShots's own budget cap).
+const manyEvidentiary = [
+  autoShot("s1", COVERAGE.reveal, 0, 4),
+  autoShot("s2", COVERAGE.investigate, 10, 14),
+  autoShot("s3", COVERAGE.reveal, 20, 24),
+];
+assert.equal(selectAutomaticEvidenceOverlayShots(manyEvidentiary).length, 2, "the default budget must cap at 2");
+assert.equal(
+  selectAutomaticEvidenceOverlayShots(manyEvidentiary, { maxPerVideo: 1 }).length,
+  1,
+  "a custom maxPerVideo must be respected",
+);
+
+// Determinism.
+assert.deepEqual(
+  selectAutomaticEvidenceOverlayShots(autoMixed),
+  selectAutomaticEvidenceOverlayShots(autoMixed),
+  "selection must be deterministic for identical input",
+);
+
+console.log("hyperframesOverlay: selectAutomaticEvidenceOverlayShots assertions passed");
