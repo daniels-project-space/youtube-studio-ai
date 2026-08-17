@@ -5,6 +5,12 @@ import {
   type CinematicCameraMove,
   type CinematicShotScale,
 } from "./cinematicShotLanguage";
+import {
+  causalBeatWindows,
+  coverageBoundaries,
+  MIN_CINEMATIC_BEAT_SEC,
+  pickCoverageCount,
+} from "./shotBoundaryTiming";
 
 const EPSILON = 0.02;
 
@@ -243,93 +249,142 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
   const shotList: StorySpine["shotList"] = [];
   const dpVisualSpecs: StorySpine["dpVisualSpecs"] = [];
   let shotNo = 0;
+
+  /**
+   * Not every rendered shot needs to be the same length. A beat with
+   * enough contiguous narration (>= MIN_CINEMATIC_BEAT_SEC) earns the
+   * same weighted, purpose-appropriate coverage split the Casefile
+   * cinematic draft uses instead of a blind equal division: this saves
+   * render time by putting duration where a cut earns it, while every
+   * shot still respects the locked LTX minimum. A beat too short to
+   * safely support that split (most single narrated sentences) keeps
+   * the original bounded equal division unchanged.
+   */
+  function boundariesForBeat(beat: { t0: number; t1: number }): number[][] {
+    const beatDuration = beat.t1 - beat.t0;
+    if (beatDuration < MIN_CINEMATIC_BEAT_SEC) {
+      const chunks = Math.max(1, Math.ceil(beatDuration / targetShotSec));
+      const boundaries = [beat.t0];
+      for (let chunk = 1; chunk < chunks; chunk++) {
+        boundaries.push(beat.t0 + (beatDuration * chunk) / chunks);
+      }
+      boundaries.push(beat.t1);
+      return [boundaries];
+    }
+    // Seed causalBeatWindows with the same bounded-length candidate
+    // pieces the equal split would have used, then let it regroup them
+    // into >= MIN_CINEMATIC_BEAT_SEC windows (merging a short tail into
+    // its predecessor). Each window then gets a weighted, non-uniform
+    // coverageBoundaries split instead of an equal one. Safe to call
+    // unconditionally here: causalBeatWindows only throws when total
+    // input duration is below MIN_CINEMATIC_BEAT_SEC, already excluded.
+    const candidateChunks = Math.max(1, Math.ceil(beatDuration / targetShotSec));
+    const candidates: { t0: number; t1: number }[] = [];
+    for (let chunk = 0; chunk < candidateChunks; chunk++) {
+      const t0 = beat.t0 + (beatDuration * chunk) / candidateChunks;
+      const t1 = chunk === candidateChunks - 1
+        ? beat.t1
+        : beat.t0 + (beatDuration * (chunk + 1)) / candidateChunks;
+      candidates.push({ t0, t1 });
+    }
+    return causalBeatWindows(candidates).map((window) => {
+      const windowT0 = window[0]!.t0;
+      const windowT1 = window.at(-1)!.t1;
+      const coverageCount = pickCoverageCount(windowT1 - windowT0);
+      return coverageBoundaries(windowT0, windowT1, coverageCount);
+    });
+  }
+
   for (const beat of narrativeBeats) {
     const source = intervals.find((sentence) => sentence.id === beat.sourceSentenceIds[0]);
     if (!source) throw new Error(`missing source for ${beat.id}`);
-    const chunks = Math.max(1, Math.ceil((beat.t1 - beat.t0) / targetShotSec));
-    for (let chunk = 0; chunk < chunks; chunk++) {
-      shotNo++;
-      const t0 = beat.t0 + ((beat.t1 - beat.t0) * chunk) / chunks;
-      const t1 = chunk === chunks - 1
-        ? beat.t1
-        : beat.t0 + ((beat.t1 - beat.t0) * (chunk + 1)) / chunks;
-      const id = `shot-${String(shotNo).padStart(4, "0")}`;
-      const shotLanguage = planCinematicShotLanguage({
-        literalContent: source.text,
-        beatPurpose: beat.purpose,
-        shotIndex: shotNo,
-        chunkIndex: chunk,
-        chunksInBeat: chunks,
-        previous: shotList.length
-          ? {
-              cameraMove: shotList[shotList.length - 1]!.cameraMove as CinematicCameraMove,
-              shotScale: shotList[shotList.length - 1]!.shotScale as CinematicShotScale,
-            }
-          : undefined,
-      });
-      const { cameraMove, shotScale, lens } = shotLanguage;
-      const styleLock = [recurringSubject, setting, String(dna.colorGrade ?? ""), palette.join(", ")]
-        .filter(Boolean)
-        .join(". ");
-      const literalContent = source.text;
-      const prompt = [
-        `Literal story moment: ${literalContent}`,
-        styleLock ? `Locked channel world: ${styleLock}` : "",
-        `Visual purpose: ${shotLanguage.coveragePurpose}`,
-        `Cut rationale: ${shotLanguage.cutRationale}`,
-        `Shot scale: ${shotScale}; lens: ${lens}; camera: ${cameraMove.replaceAll("_", " ")}`,
-        "No text, letters, captions, logos, or watermarks in the image.",
-      ].filter(Boolean).join(". ");
-      const motion =
-        `Continue the literal action implied by: ${literalContent}. ${shotLanguage.motionDirection} ` +
-        `Camera performs a restrained ${cameraMove.replaceAll("_", " ")}; preserve identity, setting, wardrobe, props, and lighting through the final frame.`;
-      // A continuity state describes a *continuous dramatic unit*, not an
-      // individual shot.  Chunks within one narrated beat may therefore share
-      // an endpoint-conditioned LTX handoff; a new beat remains a deliberate
-      // editorial cut even when it happens in the same world.
-      const continuityState = `entity-primary/location-primary/${beat.id}; no unmotivated identity, era, wardrobe, prop, palette, or lighting change`;
-      const highRisk = shotNo === 1 || /\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(literalContent);
-      const candidateCount = Math.max(profile.image.candidates, highRisk ? 2 : 1);
-      shotList.push({
-        id,
-        beatId: beat.id,
-        sourceSentenceIds: beat.sourceSentenceIds,
-        t0,
-        t1,
-        coveragePurpose: shotLanguage.coveragePurpose,
-        literalContent,
-        entities: recurringSubject ? ["entity-primary"] : [],
-        locationId: setting ? "location-primary" : undefined,
-        era: continuityLedger.era,
-        wardrobe: continuityLedger.wardrobe,
-        props: continuityLedger.props,
-        continuityState,
-        cameraMove,
-        shotScale,
-        lens,
-        lighting: typeof dna.lighting === "string" ? dna.lighting : "consistent motivated natural lighting",
-        motion,
-        negative: negativeConstraints.join(", "),
-        generationProfile: profile.id,
-        candidateCount,
-        imageMinScore: profile.qa.imageMinScore,
-        shotMinScore: profile.qa.shotMinScore,
-        prompt,
-        seconds: t1 - t0,
-        storyFunction: `${beat.purpose}; ${shotLanguage.intent}; ${shotLanguage.cutRationale}`,
-        section: source.sectionId,
-        seed: 100_000 + shotNo,
-      });
-      dpVisualSpecs.push({
-        shotId: id,
-        keyframePrompt: prompt,
-        motionPrompt: motion,
-        negativePrompt: negativeConstraints.join(", "),
-        styleLock,
-        firstFrameConstraint: `depict the exact story state at ${t0.toFixed(2)}s`,
-        lastFrameConstraint: `end in the same identity/setting state at ${t1.toFixed(2)}s with only motivated action advanced`,
-        continuityState,
-      });
+    const groupedBoundaries = boundariesForBeat(beat);
+    const totalChunks = groupedBoundaries.reduce((total, boundaries) => total + (boundaries.length - 1), 0);
+    let chunk = 0;
+    for (const boundaries of groupedBoundaries) {
+      for (let slot = 0; slot < boundaries.length - 1; slot++) {
+        shotNo++;
+        const t0 = boundaries[slot]!;
+        const t1 = boundaries[slot + 1]!;
+        const id = `shot-${String(shotNo).padStart(4, "0")}`;
+        const shotLanguage = planCinematicShotLanguage({
+          literalContent: source.text,
+          beatPurpose: beat.purpose,
+          shotIndex: shotNo,
+          chunkIndex: chunk,
+          chunksInBeat: totalChunks,
+          previous: shotList.length
+            ? {
+                cameraMove: shotList[shotList.length - 1]!.cameraMove as CinematicCameraMove,
+                shotScale: shotList[shotList.length - 1]!.shotScale as CinematicShotScale,
+              }
+            : undefined,
+        });
+        const { cameraMove, shotScale, lens } = shotLanguage;
+        const styleLock = [recurringSubject, setting, String(dna.colorGrade ?? ""), palette.join(", ")]
+          .filter(Boolean)
+          .join(". ");
+        const literalContent = source.text;
+        const prompt = [
+          `Literal story moment: ${literalContent}`,
+          styleLock ? `Locked channel world: ${styleLock}` : "",
+          `Visual purpose: ${shotLanguage.coveragePurpose}`,
+          `Cut rationale: ${shotLanguage.cutRationale}`,
+          `Shot scale: ${shotScale}; lens: ${lens}; camera: ${cameraMove.replaceAll("_", " ")}`,
+          "No text, letters, captions, logos, or watermarks in the image.",
+        ].filter(Boolean).join(". ");
+        const motion =
+          `Continue the literal action implied by: ${literalContent}. ${shotLanguage.motionDirection} ` +
+          `Camera performs a restrained ${cameraMove.replaceAll("_", " ")}; preserve identity, setting, wardrobe, props, and lighting through the final frame.`;
+        // A continuity state describes a *continuous dramatic unit*, not an
+        // individual shot. Shots within one narrated beat may therefore share
+        // an endpoint-conditioned LTX handoff; a new beat remains a deliberate
+        // editorial cut even when it happens in the same world.
+        const continuityState = `entity-primary/location-primary/${beat.id}; no unmotivated identity, era, wardrobe, prop, palette, or lighting change`;
+        const highRisk = shotNo === 1 || /\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(literalContent);
+        const candidateCount = Math.max(profile.image.candidates, highRisk ? 2 : 1);
+        shotList.push({
+          id,
+          beatId: beat.id,
+          sourceSentenceIds: beat.sourceSentenceIds,
+          t0,
+          t1,
+          coveragePurpose: shotLanguage.coveragePurpose,
+          literalContent,
+          entities: recurringSubject ? ["entity-primary"] : [],
+          locationId: setting ? "location-primary" : undefined,
+          era: continuityLedger.era,
+          wardrobe: continuityLedger.wardrobe,
+          props: continuityLedger.props,
+          continuityState,
+          cameraMove,
+          shotScale,
+          lens,
+          lighting: typeof dna.lighting === "string" ? dna.lighting : "consistent motivated natural lighting",
+          motion,
+          negative: negativeConstraints.join(", "),
+          generationProfile: profile.id,
+          candidateCount,
+          imageMinScore: profile.qa.imageMinScore,
+          shotMinScore: profile.qa.shotMinScore,
+          prompt,
+          seconds: t1 - t0,
+          storyFunction: `${beat.purpose}; ${shotLanguage.intent}; ${shotLanguage.cutRationale}`,
+          section: source.sectionId,
+          seed: 100_000 + shotNo,
+        });
+        dpVisualSpecs.push({
+          shotId: id,
+          keyframePrompt: prompt,
+          motionPrompt: motion,
+          negativePrompt: negativeConstraints.join(", "),
+          styleLock,
+          firstFrameConstraint: `depict the exact story state at ${t0.toFixed(2)}s`,
+          lastFrameConstraint: `end in the same identity/setting state at ${t1.toFixed(2)}s with only motivated action advanced`,
+          continuityState,
+        });
+        chunk++;
+      }
     }
   }
 

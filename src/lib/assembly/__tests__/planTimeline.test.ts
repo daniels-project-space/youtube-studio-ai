@@ -6,7 +6,15 @@
  * plan it emits passes the validate-before-spend gate.
  */
 import assert from "node:assert/strict";
-import { planTimeline, bodySegSeconds, resolveAssembleParams, ASSEMBLE_DEFAULTS, type PlanInput } from "../planTimeline";
+import {
+  planTimeline,
+  bodySegSeconds,
+  resolveAssembleParams,
+  ASSEMBLE_DEFAULTS,
+  cutSheetPacingCurve,
+  composeHookCurve,
+  type PlanInput,
+} from "../planTimeline";
 import { validateTimeline, projectedDurationSec } from "../timeline";
 import { buildChannelProfile } from "@/engine/channelProfile";
 
@@ -200,6 +208,134 @@ function perAccountParams(): void {
   console.log("PER-ACCOUNT PASS: resolveAssembleParams reads ChannelProfile, defaults fill gaps");
 }
 
+/** P1/P2 unit-level interpolation: cutSheetPacingCurve + composeHookCurve produce the exact
+ * cadence a step/hook curve implies at several posFrac points (before feeding cpmAtFrac). */
+function pacingCurveInterpolation(): void {
+  const curve = cutSheetPacingCurve([{ cutsPerMin: 2 }, { cutsPerMin: 8 }, { cutsPerMin: 20 }]);
+  assert.ok(curve && curve.length > 0, "varying sections produce a curve");
+  // step-shaped: flat within each third, jumps at the boundary
+  const at = (frac: number): number => {
+    const pts = [...(curve as { atFrac: number; cutsPerMin: number }[])].sort((a, b) => a.atFrac - b.atFrac);
+    if (frac <= pts[0].atFrac) return pts[0].cutsPerMin;
+    if (frac >= pts[pts.length - 1].atFrac) return pts[pts.length - 1].cutsPerMin;
+    for (let i = 1; i < pts.length; i++) {
+      if (frac <= pts[i].atFrac) {
+        const a = pts[i - 1], b = pts[i];
+        const t = (frac - a.atFrac) / Math.max(1e-6, b.atFrac - a.atFrac);
+        return a.cutsPerMin + t * (b.cutsPerMin - a.cutsPerMin);
+      }
+    }
+    return pts[pts.length - 1].cutsPerMin;
+  };
+  assert.equal(at(0), 2, "section 1 (2cpm) holds at the very start");
+  assert.equal(at(0.1), 2, "still inside section 1 at frac 0.1");
+  assert.equal(at(0.5), 8, "section 2 (8cpm) holds mid-body");
+  assert.equal(at(0.9), 20, "section 3 (20cpm) holds late-body");
+  assert.equal(at(1), 20, "final section holds through the end");
+
+  // uniform sections ⇒ no curve (nothing to gain, falls back to flat legacy math)
+  assert.equal(cutSheetPacingCurve([{ cutsPerMin: 8 }, { cutsPerMin: 8 }]), undefined, "uniform cadence ⇒ no curve");
+  assert.equal(cutSheetPacingCurve([{ cutsPerMin: 8 }]), undefined, "single section ⇒ no curve");
+  assert.equal(cutSheetPacingCurve(undefined), undefined, "no sections ⇒ no curve");
+
+  // hook composition: first hookSec/bodyTargetSec of the body pinned to hookCutsPerMin, then hands off
+  const hooked = composeHookCurve(undefined, 8, 16, 120, 6);
+  assert.ok(hooked && hooked.length > 0, "hook seeds a curve even with no base curve");
+  const hookFrac = 8 / 120;
+  const atH = (frac: number): number => {
+    const pts = [...(hooked as { atFrac: number; cutsPerMin: number }[])].sort((a, b) => a.atFrac - b.atFrac);
+    if (frac <= pts[0].atFrac) return pts[0].cutsPerMin;
+    if (frac >= pts[pts.length - 1].atFrac) return pts[pts.length - 1].cutsPerMin;
+    for (let i = 1; i < pts.length; i++) {
+      if (frac <= pts[i].atFrac) {
+        const a = pts[i - 1], b = pts[i];
+        const t = (frac - a.atFrac) / Math.max(1e-6, b.atFrac - a.atFrac);
+        return a.cutsPerMin + t * (b.cutsPerMin - a.cutsPerMin);
+      }
+    }
+    return pts[pts.length - 1].cutsPerMin;
+  };
+  assert.equal(atH(0), 16, "hook cadence at the very start");
+  assert.equal(atH(hookFrac * 0.5), 16, "still inside the hook window");
+  assert.equal(atH(hookFrac + 0.01), 6, "settles to the fallback cadence after the hook");
+  assert.equal(atH(0.9), 6, "stays settled for the rest of the body");
+  // no-op guards
+  assert.equal(composeHookCurve(undefined, undefined, undefined, 120, 6), undefined, "no hookSec/hookCutsPerMin ⇒ no-op");
+  assert.equal(composeHookCurve(undefined, 8, undefined, 120, 6), undefined, "hookCutsPerMin missing ⇒ no-op");
+  assert.equal(composeHookCurve(undefined, 8, 16, 0, 6), undefined, "zero body length ⇒ no-op");
+  console.log("INTERPOLATION PASS: cutSheetPacingCurve + composeHookCurve interpolate correctly at multiple posFrac points");
+}
+
+/** P1 end-to-end: a per-video CutSheet with DIFFERENT section cadences must no longer be
+ * averaged into one flat clip length — each section's own cadence drives its own clips. */
+function cutSheetUnaveraged(): void {
+  const t = planTimeline(
+    baseInput({
+      cutSheet: { sections: [{ name: "cold-open", cutsPerMin: 2 }, { name: "mid", cutsPerMin: 8 }, { name: "climax", cutsPerMin: 20 }] },
+    }),
+  );
+  const body = t.segments.filter((s) => s.kind !== "card").map((s) => (s as { durSec: number }).durSec);
+  // OLD behavior (averaged): bodySegSeconds(120,{sections:[2,8,20]}) === round(60/avg(10)) === 6s FLAT.
+  const legacyFlatSeg = bodySegSeconds(120, { sections: [{ cutsPerMin: 2 }, { cutsPerMin: 8 }, { cutsPerMin: 20 }] });
+  assert.equal(legacyFlatSeg, 6, "sanity: the averaged formula alone would have produced a flat 6s cadence");
+  assert.ok(!body.every((d) => d === body[0]), "NEW: body clips are NOT all the same length (un-averaged)");
+  assert.equal(body[0], 30, "first clip uses section 1's OWN cadence (2cpm → 30s, clamped)");
+  assert.ok(body.some((d) => d === 3), "a clip uses section 3's OWN cadence (20cpm → 3s) later in the body");
+  assert.equal(body.reduce((a, b) => a + b, 0), 126, "full coverage: narration(120)+tail(3)+buffer(3)");
+  console.log("CUTSHEET-UNAVERAGED PASS: varying per-section CutSheet cadence drives per-clip length (P1)");
+}
+
+/** Sections that all agree on ONE cadence carry nothing a curve could add — falls back to the
+ * exact legacy `bodySegSeconds` flat math (not just "some other flat value"). */
+function cutSheetUniformParity(): void {
+  const t = planTimeline(baseInput({ cutSheet: { sections: [{ name: "a", cutsPerMin: 8 }, { name: "b", cutsPerMin: 8 }] } }));
+  const body = t.segments.filter((s) => s.kind !== "card").map((s) => (s as { durSec: number }).durSec);
+  const legacyFlatSeg = bodySegSeconds(120, { sections: [{ cutsPerMin: 8 }, { cutsPerMin: 8 }] });
+  assert.equal(legacyFlatSeg, 8, "sanity: uniform 8cpm sections → legacy flat 8s");
+  const fullLen = body.slice(0, -1);
+  assert.ok(fullLen.every((d) => d === 8), "uniform sections ⇒ flat 8s clips, exactly the legacy bodySegSeconds path");
+  console.log("CUTSHEET-UNIFORM PASS: sections that agree on one cadence ⇒ exact legacy flat math (parity)");
+}
+
+/** P2 end-to-end: editor.hookSec/hookCutsPerMin front-load faster cuts for the opening seconds
+ * of the body, then hand off to the normal (here: legacy flat) cadence for the rest. */
+function hookFrontLoad(): void {
+  const t = planTimeline(baseInput({ editor: { hookSec: 8, hookCutsPerMin: 16 } }));
+  const body = t.segments.filter((s) => s.kind !== "card").map((s) => (s as { durSec: number }).durSec);
+  // bodyTargetSec = 126; hookFrac = 8/126 ≈ 0.0635. Hook cadence 16cpm → 3.75s clips while
+  // posFrac < hookFrac; settle cadence 6cpm (bodyMaxSeg=10 legacy fallback) → 10s clips after.
+  assert.equal(body[0], 3.75, "first clip inside the hook window (16cpm)");
+  assert.equal(body[1], 3.75, "second clip still inside the hook window");
+  assert.ok(body.slice(3, -1).every((d) => d === 10), "clips well after the hook settle to the legacy 10s cadence");
+  // "measurably shorter" check: average duration of segments that START before hookSec vs. after
+  let cursor = 0;
+  const early: number[] = [];
+  const late: number[] = [];
+  for (const d of body) {
+    if (cursor < 8) early.push(d); else late.push(d);
+    cursor += d;
+  }
+  const avg = (xs: number[]): number => xs.reduce((a, b) => a + b, 0) / xs.length;
+  assert.ok(avg(early) < avg(late), `hook segments (avg ${avg(early)}s) measurably shorter than post-hook segments (avg ${avg(late)}s)`);
+  assert.equal(body.reduce((a, b) => a + b, 0), 126, "hook composition still covers the full body target exactly");
+  console.log("HOOK PASS: hookSec/hookCutsPerMin front-load faster cuts, then settle (P2)");
+}
+
+/** CRITICAL backward-compat check: a directives object with NO pacingCurve/hookSec, and a
+ * CutSheet with no variation, must produce output IDENTICAL to the pre-P1/P2 flat behavior. */
+function noCurveNoHookParity(): void {
+  const withNoDirectives = planTimeline(baseInput());
+  const withUnrelatedEditorFields = planTimeline(baseInput({ editor: { transitions: "hardcut", captionStyle: "minimal" } }));
+  const durs = (t: ReturnType<typeof planTimeline>): number[] => t.segments.filter((s) => s.kind !== "card").map((s) => (s as { durSec: number }).durSec);
+  assert.deepEqual(durs(withUnrelatedEditorFields), durs(withNoDirectives), "editor directives with no curve/hook fields ⇒ identical body durations");
+  // exactly the pre-change fixture from bodyCoverageAndCadence(): 12×10s + 1×6s
+  const d = durs(withNoDirectives);
+  assert.equal(d.length, 13, "13 body clips (unchanged)");
+  assert.ok(d.slice(0, 12).every((x) => x === 10), "12 full 10s clips (unchanged)");
+  assert.equal(d[12], 6, "6s remainder clip (unchanged)");
+  console.log("NO-CURVE/NO-HOOK PARITY PASS: absent directives ⇒ byte-identical pre-change behavior");
+}
+
 function main(): void {
   cadenceFormula();
   lengthAndStructure();
@@ -209,6 +345,11 @@ function main(): void {
   noIntroCollapses();
   authoredShotMapping();
   perAccountParams();
+  pacingCurveInterpolation();
+  cutSheetUnaveraged();
+  cutSheetUniformParity();
+  hookFrontLoad();
+  noCurveNoHookParity();
   console.log("\nALL PLANTIMELINE TESTS PASSED");
 }
 

@@ -39,8 +39,18 @@ export interface PlanInput {
   cardBgSrc?: string;
   /** Optional precomputed overlay windows (captions/quotes/inserts). */
   overlays?: Overlay[];
-  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle + overlayDensity + a pacing CURVE + silence-trim thresholds. */
-  editor?: { transitions?: string; cutsPerMin?: number; captionStyle?: string; overlayDensity?: string; pacingCurve?: { atFrac: number; cutsPerMin: number }[]; trim?: { minSilenceSec: number; padSec: number } };
+  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle + overlayDensity + a pacing CURVE + a retention hook + silence-trim thresholds. */
+  editor?: {
+    transitions?: string;
+    cutsPerMin?: number;
+    captionStyle?: string;
+    overlayDensity?: string;
+    pacingCurve?: { atFrac: number; cutsPerMin: number }[];
+    /** Retention-hook window (P2): first `hookSec` absolute seconds of the body at `hookCutsPerMin`. */
+    hookSec?: number;
+    hookCutsPerMin?: number;
+    trim?: { minSilenceSec: number; padSec: number };
+  };
   /** Composer crew directives (the WIRE from the Composer sub-module): duck level + loudness + voiceFx. */
   composer?: { bodyMusicVol?: number; targetLufs?: number; voiceFx?: string };
   /** Measured silence intervals in the RAW narration (from the injected probe). Combined with editor.trim ⇒ the renderer carves these out. */
@@ -282,6 +292,97 @@ function segSecondsFromCpm(cpm: number): number {
 }
 
 /**
+ * P1 — un-average the per-video CutSheet: `briefEditor()` (crew.ts) already produces a
+ * per-SECTION cadence (`CutSheet.sections[].cutsPerMin`), which `bodySegSeconds` otherwise
+ * collapses into one flat average. When the sections actually carry DIFFERENT cadences,
+ * turn them into a step-shaped pacing curve instead — each section holds its own cadence
+ * flat across its slice of the body, then jumps at the boundary.
+ *
+ * Sections have no id shared with `chapterPlan` windows (separate authoring surfaces, and
+ * chapter mode is a branch of `planTimeline` mutually exclusive with the beat body this
+ * curve feeds — see the caller), so boundaries are an EVEN split across the body, per the
+ * doc's documented fallback. Returns undefined (⇒ flat parity) when there's nothing to gain:
+ * fewer than 2 usable sections, or all sections already agree on one cadence.
+ */
+export function cutSheetPacingCurve(
+  sections?: { cutsPerMin: number }[],
+): { atFrac: number; cutsPerMin: number }[] | undefined {
+  const secs = (sections ?? []).filter((s) => s.cutsPerMin > 0);
+  if (secs.length < 2) return undefined;
+  if (secs.every((s) => s.cutsPerMin === secs[0].cutsPerMin)) return undefined; // uniform ⇒ parity
+  const n = secs.length;
+  const pts: { atFrac: number; cutsPerMin: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const start = i / n;
+    const end = (i + 1) / n;
+    const preEnd = Math.max(start, end - 1e-4);
+    pts.push({ atFrac: start, cutsPerMin: secs[i].cutsPerMin });
+    if (preEnd > start) pts.push({ atFrac: preEnd, cutsPerMin: secs[i].cutsPerMin });
+  }
+  return pts;
+}
+
+/**
+ * P2 — seed/override a pacing curve with a fast-cut retention hook for the first `hookSec`
+ * ABSOLUTE seconds of the body: `posFrac < hookSec/bodyTargetSec` ⇒ `hookCutsPerMin`, then
+ * hands off to whatever curve (or flat cadence) was already driving the rest of the body.
+ * Composes INTO the curve (a single interpolation call downstream) rather than being a
+ * separate code path, per the doc. A no-op (returns `base` unchanged) when hookSec/
+ * hookCutsPerMin aren't both set to a positive value, or the body has no length yet.
+ */
+export function composeHookCurve(
+  base: { atFrac: number; cutsPerMin: number }[] | undefined,
+  hookSec: number | undefined,
+  hookCutsPerMin: number | undefined,
+  bodyTargetSec: number,
+  fallbackCpm: number,
+): { atFrac: number; cutsPerMin: number }[] | undefined {
+  if (!hookSec || hookSec <= 0 || !hookCutsPerMin || hookCutsPerMin <= 0 || !(bodyTargetSec > 0)) return base;
+  const hookFrac = Math.max(0, Math.min(1, hookSec / bodyTargetSec));
+  if (hookFrac <= 0) return base;
+  const settleCpm = base && base.length ? cpmAtFrac(base, hookFrac) : fallbackCpm;
+  const rest = (base ?? []).filter((p) => p.atFrac > hookFrac);
+  const preEnd = Math.max(0, hookFrac - 1e-4);
+  return [
+    { atFrac: 0, cutsPerMin: hookCutsPerMin },
+    ...(preEnd > 0 ? [{ atFrac: preEnd, cutsPerMin: hookCutsPerMin }] : []),
+    { atFrac: hookFrac, cutsPerMin: settleCpm },
+    ...rest,
+  ];
+}
+
+/**
+ * Resolve the ONE pacing curve driving the beat body, in priority order: an explicit
+ * editor-authored curve (channel's `pacingShape`) → a curve derived from the per-video
+ * CutSheet's per-section cadence (P1, only when it actually varies) → flat (undefined).
+ * A retention hook (P2) then seeds/overrides the start of whichever wins. Computed ONCE
+ * per plan — `segSecondsAt` below is called per-clip and must not rebuild this.
+ */
+function resolvePacingCurve(
+  editor: PlanInput["editor"],
+  cutSheetSections: { cutsPerMin: number }[] | undefined,
+  bodyTargetSec: number,
+  fallbackSec: number,
+): { atFrac: number; cutsPerMin: number }[] | undefined {
+  const baseCurve = editor?.pacingCurve && editor.pacingCurve.length ? editor.pacingCurve : cutSheetPacingCurve(cutSheetSections);
+  return composeHookCurve(baseCurve, editor?.hookSec, editor?.hookCutsPerMin, bodyTargetSec, 60 / Math.max(1, fallbackSec));
+}
+
+/**
+ * `segSecondsAt(posFrac, curve)` — the un-averaged replacement for a flat `bodySegSeconds`
+ * scalar: per-clip screen time at body position `posFrac` (0–1). Falls back to `fallbackSec`
+ * (the legacy flat `bodyMaxSeg`) verbatim when there's no curve — BACKWARD COMPATIBLE with
+ * every caller that doesn't set an editor pacing curve, a varying CutSheet, or a hook.
+ */
+function segSecondsAt(
+  posFrac: number,
+  curve: { atFrac: number; cutsPerMin: number }[] | undefined,
+  fallbackSec: number,
+): number {
+  return curve && curve.length ? segSecondsFromCpm(cpmAtFrac(curve, posFrac)) : fallbackSec;
+}
+
+/**
  * Lay clips end-to-end until `target` is covered, cycling the pool. `segAt(posFrac)`
  * gives the per-clip screen time at the current body fraction — a CONSTANT for flat
  * cadence (parity) or a varying value along the editor's pacing curve (P1/P2).
@@ -428,15 +529,18 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
       }
     }
   } else {
-    // beat body: cover narration + tail at the cut cadence. A pacing CURVE (from the
-    // editor) varies the per-clip length over the body; absent one, the constant
-    // bodyMaxSeg is used (flat cadence = parity with the old averaged behaviour).
-    const curve = input.editor?.pacingCurve;
-    const segAt = curve && curve.length ? (f: number) => segSecondsFromCpm(cpmAtFrac(curve, f)) : () => bodyMaxSeg;
+    // beat body: cover narration + tail at the cut cadence. A pacing CURVE — explicit
+    // (editor.pacingCurve), or derived from the per-video CutSheet's per-section cadence
+    // when it varies (P1), optionally seeded with a retention hook (P2) — varies the
+    // per-clip length over the body; absent all three, the constant bodyMaxSeg is used
+    // (flat cadence = parity with the old averaged behaviour).
     // +BODY_BUFFER_SEC — god-block parity (narratedBlocks.ts:2122). The extra
     // footage is never SHOWN (runtime is intro+body+tail); it exists so the body
     // track cannot underrun and make composeWithIntro loop back to clip 1.
-    segments.push(...fillBody(clips, entitySet, effectiveNarrationSec + tailSec + BODY_BUFFER_SEC, segAt, onBeat));
+    const bodyTargetSec = effectiveNarrationSec + tailSec + BODY_BUFFER_SEC;
+    const pacingCurve = resolvePacingCurve(input.editor, input.cutSheet?.sections, bodyTargetSec, bodyMaxSeg);
+    const segAt = (f: number) => segSecondsAt(f, pacingCurve, bodyMaxSeg);
+    segments.push(...fillBody(clips, entitySet, bodyTargetSec, segAt, onBeat));
   }
 
   if (params.outroCard && tailSec >= 2) {

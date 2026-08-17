@@ -17,6 +17,12 @@ import {
   type CinematicCaseSequenceInput,
 } from "./cinematicCaseSequence";
 import { SceneManifestSchema } from "./episodeGraph";
+import {
+  causalBeatWindows,
+  coverageBoundaries,
+  MIN_CINEMATIC_BEAT_SEC,
+  pickCoverageCount,
+} from "./shotBoundaryTiming";
 import { ShotPlanSchema, type ShotPlan } from "./storySpine";
 
 /**
@@ -63,16 +69,6 @@ export type CinematicCaseSequenceDraft = z.infer<typeof CinematicCaseSequenceDra
 type DraftCoverageShot = CinematicCaseSequenceContent["beats"][number]["shots"][number];
 type DraftBeat = CinematicCaseSequenceContent["beats"][number];
 type EvidenceBinding = CasefileEvidenceShotMap["claimMappings"][number]["bindings"][number];
-
-// The locked LTX profile renders 3–10 second source clips. A Fern-style
-// coverage beat therefore needs enough narrated runway for three purposeful
-// shots; beats with twelve or more seconds earn a fourth consequence/reaction
-// cut. Generating 1–2 second clips and trimming them in assembly is neither
-// cinematic nor a truthful use of the approved cut plan.
-const MIN_LTX_SHOT_SEC = 3;
-const MIN_CINEMATIC_BEAT_SEC = MIN_LTX_SHOT_SEC * 3;
-const FOUR_SHOT_CINEMATIC_BEAT_SEC = MIN_LTX_SHOT_SEC * 4;
-const TARGET_CINEMATIC_BEAT_SEC = 12;
 
 function hash(value: unknown): string {
   return createHash("sha256").update(JSON.stringify(value)).digest("hex");
@@ -206,7 +202,7 @@ function coveragePlan(
   purposes: readonly DraftCoverageShot["coveragePurpose"][];
   scales: readonly DraftCoverageShot["shotScale"][];
 } {
-  const coverageCount: 3 | 4 = duration >= FOUR_SHOT_CINEMATIC_BEAT_SEC ? 4 : 3;
+  const coverageCount: 3 | 4 = pickCoverageCount(duration);
   const finalPurpose: DraftCoverageShot["coveragePurpose"] = role === "reveal"
     ? "consequence"
     : role === "closing_residue"
@@ -221,28 +217,6 @@ function coveragePlan(
       ? ["establishing", "medium", "close", "wide"]
       : ["establishing", "medium", "close"],
   };
-}
-
-/**
- * Divide a narration window into renderable takes without a blind equal split.
- * The evidence insert gets a controlled readable hold; the consequence cut
- * receives the remaining visual breath. At exactly twelve seconds every take
- * remains the locked three-second LTX minimum.
- */
-function coverageBoundaries(t0: number, t1: number, coverageCount: 3 | 4): number[] {
-  const duration = t1 - t0;
-  const flexibleDuration = duration - MIN_LTX_SHOT_SEC * coverageCount;
-  const weights = coverageCount === 4
-    ? [0.22, 0.31, 0.21, 0.26]
-    : [0.29, 0.38, 0.33];
-  const boundaries = [t0];
-  let cursor = t0;
-  for (let slot = 0; slot < coverageCount - 1; slot++) {
-    cursor += MIN_LTX_SHOT_SEC + flexibleDuration * weights[slot]!;
-    boundaries.push(Number(cursor.toFixed(3)));
-  }
-  boundaries.push(t1);
-  return boundaries;
 }
 
 function causalQuestion(
@@ -264,43 +238,6 @@ function causalQuestion(
 
 function union<T>(items: readonly T[]): T[] {
   return [...new Set(items)];
-}
-
-/**
- * Story Spine is sentence-aligned and can therefore contain very short
- * windows. LTX is not. Form a causal beat from contiguous source shots before
- * assigning the spatial/action/evidence coverage grammar, then merge a short
- * tail back into its predecessor. This preserves exact narration boundaries
- * without manufacturing sub-three-second LTX clips.
- */
-function causalBeatWindows(orderedShots: readonly ShotPlan[]): ShotPlan[][] {
-  const windows: ShotPlan[][] = [];
-  let current: ShotPlan[] = [];
-  let currentDuration = 0;
-
-  for (const shot of orderedShots) {
-    current.push(shot);
-    currentDuration += shot.t1 - shot.t0;
-    if (currentDuration >= TARGET_CINEMATIC_BEAT_SEC) {
-      windows.push(current);
-      current = [];
-      currentDuration = 0;
-    }
-  }
-  if (current.length) windows.push(current);
-
-  const durationOf = (shots: readonly ShotPlan[]) =>
-    shots.reduce((total, shot) => total + (shot.t1 - shot.t0), 0);
-  if (windows.length >= 2 && durationOf(windows.at(-1)!) < MIN_CINEMATIC_BEAT_SEC) {
-    windows[windows.length - 2]!.push(...windows.pop()!);
-  }
-  if (windows.some((window) => durationOf(window) < MIN_CINEMATIC_BEAT_SEC)) {
-    throw new Error(
-      `cinematic draft: each causal beat needs at least ${MIN_CINEMATIC_BEAT_SEC}s of contiguous narration ` +
-        `for three ${MIN_LTX_SHOT_SEC}s LTX coverage shots; merge or extend the source Story Spine before cinematic planning`,
-    );
-  }
-  return windows;
 }
 
 /**

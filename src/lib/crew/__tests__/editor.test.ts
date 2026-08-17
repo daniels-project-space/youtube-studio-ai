@@ -100,6 +100,63 @@ function pacingCurveShapesBody(): void {
   console.log("CURVE PASS: pacingShape varies per-clip length (frontload fast→settle, accelerate build); flat = parity");
 }
 
+function hookKnobResolvesAndWires(): void {
+  // P2: shorts preset carries an explicit retention hook (8s @ 16cpm, the doc's own example).
+  const sh = resolveEditorConfig(profileWith({ preset: "shorts" }));
+  assert.equal(sh.hookSec, 8, "shorts preset hookSec = 8");
+  assert.equal(sh.hookCutsPerMin, 16, "shorts preset hookCutsPerMin = 16");
+  const shDir = editorDirectives(sh);
+  assert.equal(shDir.hookSec, 8, "hookSec reaches EditorDirectives");
+  assert.equal(shDir.hookCutsPerMin, 16, "hookCutsPerMin reaches EditorDirectives");
+
+  // presets that don't set a hook default to 0/0 ⇒ no hook directive emitted (parity)
+  const doc = resolveEditorConfig(profileWith({ preset: "documentary" }));
+  assert.equal(doc.hookSec, 0, "documentary default hookSec = 0 (off)");
+  assert.equal(doc.hookCutsPerMin, 0, "documentary default hookCutsPerMin = 0 (off)");
+  const docDir = editorDirectives(doc);
+  assert.equal(docDir.hookSec, undefined, "off ⇒ no hookSec directive");
+  assert.equal(docDir.hookCutsPerMin, undefined, "off ⇒ no hookCutsPerMin directive");
+
+  // end-to-end through Assembly: the hook produces measurably shorter early clips than later ones
+  const t = planTimeline({ ...body, editor: shDir }, ASSEMBLE_DEFAULTS);
+  const durs = bodyDurs(t);
+  assert.ok(durs.length >= 4, "hook-driven plan produced enough body clips");
+  assert.ok(durs[0] < durs[durs.length - 2], `hook: first clip (${durs[0]}s) shorter than a settled late clip (${durs[durs.length - 2]}s)`);
+  console.log("HOOK PASS: hookSec/hookCutsPerMin knob resolves, wires into EditorDirectives, and reaches Assembly (P2)");
+}
+
+/** Each preset's emitted pacingCurve is a SANE shape: hype climbs, shorts front-loads,
+ * documentary/essay/meditation/lofi stay flat (no curve = parity, matching their pacingShape default). */
+function presetsEmitSaneCurveShapes(): void {
+  const FLAT_PRESETS = ["documentary", "essay", "meditation", "lofi"];
+  for (const name of FLAT_PRESETS) {
+    const dir = editorDirectives(resolveEditorConfig(profileWith({ preset: name })));
+    assert.equal(dir.pacingCurve, undefined, `${name}: flat pacingShape ⇒ no curve`);
+  }
+
+  const hype = editorDirectives(resolveEditorConfig(profileWith({ preset: "hype" })));
+  assert.ok(hype.pacingCurve && hype.pacingCurve.length >= 2, "hype emits a curve");
+  const hypePts = [...(hype.pacingCurve ?? [])].sort((a, b) => a.atFrac - b.atFrac);
+  assert.ok(hypePts[hypePts.length - 1].cutsPerMin > hypePts[0].cutsPerMin, "hype: climbs from a slower start to a faster climax");
+
+  const shorts = editorDirectives(resolveEditorConfig(profileWith({ preset: "shorts" })));
+  assert.ok(shorts.pacingCurve && shorts.pacingCurve.length >= 2, "shorts emits a curve");
+  const shortsPts = [...(shorts.pacingCurve ?? [])].sort((a, b) => a.atFrac - b.atFrac);
+  assert.ok(shortsPts[0].cutsPerMin >= shortsPts[shortsPts.length - 1].cutsPerMin, "shorts: front-loaded (starts at/above its settled cadence)");
+  assert.equal(shorts.hookSec, 8, "shorts ALSO carries an explicit retention hook on top of its curve");
+
+  // every preset's curve (when present) is well-formed: sorted-safe, positive cadence, valid fracs
+  for (const name of Object.keys(EDITOR_SURFACE.presets)) {
+    const dir = editorDirectives(resolveEditorConfig(profileWith({ preset: name })));
+    if (!dir.pacingCurve) continue;
+    for (const p of dir.pacingCurve) {
+      assert.ok(p.atFrac >= 0 && p.atFrac <= 1, `${name}: curve point atFrac in [0,1]`);
+      assert.ok(p.cutsPerMin > 0, `${name}: curve point cutsPerMin > 0`);
+    }
+  }
+  console.log("PRESET-SHAPE PASS: hype climbs, shorts front-loads(+hook), flat presets emit no curve");
+}
+
 function silenceTrimWires(): void {
   const sh = resolveEditorConfig(profileWith({ preset: "shorts" }));
   assert.equal(sh.silenceTrim, "aggressive", "shorts trims dead air aggressively");
@@ -129,6 +186,8 @@ function main(): void {
   editorBeatsChannelDefault();
   noEditorParity();
   pacingCurveShapesBody();
+  hookKnobResolvesAndWires();
+  presetsEmitSaneCurveShapes();
   silenceTrimWires();
   surfaceAndRegistry();
   console.log("\nALL EDITOR TESTS PASSED");
