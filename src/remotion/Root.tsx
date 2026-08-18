@@ -9,6 +9,10 @@ import { DocuMotion, type DocuMotionProps } from "./DocuMotion";
 import { MotivationalSpeech } from "./speech/MotivationalSpeech";
 import type { MotivationalSpeechProps } from "./speech/types";
 import { CinematicSpeech, type CinematicSpeechProps } from "./speech/CinematicSpeech";
+import { VoyagerGoldenRecordShort } from "./VoyagerGoldenRecordShort";
+import { VoyagerGoldenRecordCollageShort } from "./VoyagerGoldenRecordCollageShort";
+import { VoyagerGoldenRecordStoryThirtySecond } from "./VoyagerGoldenRecordStoryThirtySecond";
+import { NetflixBlockbusterStoryThirtySecond } from "./NetflixBlockbusterStoryThirtySecond";
 
 /**
  * In-app Remotion root (registered by ./index.ts). Kept self-contained — only
@@ -143,6 +147,51 @@ export const RemotionRoot: React.FC = () => {
           height: (props as { height?: number }).height ?? 1080,
           props,
         })}
+      />
+      <Composition
+        id="VoyagerGoldenRecordShort"
+        component={VoyagerGoldenRecordShort}
+        durationInFrames={450}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={{}}
+      />
+      <Composition
+        id="VoyagerGoldenRecordAssetFirstV2"
+        component={VoyagerGoldenRecordCollageShort}
+        durationInFrames={450}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={{}}
+      />
+      <Composition
+        id="VoyagerGoldenRecordAssetFirstV4"
+        component={VoyagerGoldenRecordCollageShort}
+        durationInFrames={450}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={{}}
+      />
+      <Composition
+        id="VoyagerGoldenRecordStory30V5"
+        component={VoyagerGoldenRecordStoryThirtySecond}
+        durationInFrames={900}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={{}}
+      />
+      <Composition
+        id="NetflixBlockbusterStory30V5"
+        component={NetflixBlockbusterStoryThirtySecond}
+        durationInFrames={900}
+        fps={30}
+        width={1080}
+        height={1920}
+        defaultProps={{}}
       />
     </>
   );

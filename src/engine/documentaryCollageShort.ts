@@ -20,6 +20,12 @@ import {
   type ShortStrategyManifest,
 } from "./shortStrategyManifest";
 import type { DocuAssetBrief, DocuPlan, DocuShotPlan } from "@/lib/documotion";
+import {
+  assessDocumentaryVisualQuality,
+  editorialCoverageFor,
+  editorialMotionArcFor,
+  editorialTypographyFor,
+} from "@/lib/documentaryVisualQuality";
 import type { DocuCamera, DocuCameraIntensity, DocuCameraMove } from "@/remotion/DocuMotion";
 import type { DocuShotKind } from "@/remotion/docuStyles";
 
@@ -410,6 +416,7 @@ export function buildDocumentaryCollageShortStrategy(
     "asset_provenance",
     "narration_timing",
     "motion_alignment",
+    "editorial_direction",
     "audio_mix",
     "visual_legibility",
     "no_baked_text",
@@ -582,6 +589,7 @@ export function evaluateDocumentaryShortSceneQa(input: DocumentaryShortSceneQaIn
     safeFrame.bottom >= input.height * 0.18 &&
     safeFrame.left >= input.width * 0.075 &&
     expectedBeats.every((beat) => beat.scene.caption.maxLines <= 2);
+  const editorialQuality = assessDocumentaryVisualQuality(docuPlanForDocumentaryCollageShort(manifest).shots);
 
   const checks: Array<{ name: ShortQaCheckName; status: "passed" | "failed"; detail: string }> = [
     { name: "caption_safe_zone", status: captionSafeZone ? "passed" : "failed", detail: captionSafeZone ? "Native 1080x1920 renderer reserved the portrait safe frame and each beat is capped at two overlay lines." : "Short caption geometry or overlay-line constraints are outside the portrait safe frame." },
@@ -589,6 +597,7 @@ export function evaluateDocumentaryShortSceneQa(input: DocumentaryShortSceneQaIn
     { name: "asset_provenance", status: hasAssetProvenance ? "passed" : "failed", detail: hasAssetProvenance ? "Every planned asset reconciles to an actual renderer approval hash." : "One or more planned assets lack a matching renderer approval receipt." },
     { name: "narration_timing", status: sameDuration ? "passed" : "failed", detail: sameDuration ? "Rendered beat windows match the locked narration beat timing." : "Rendered beat timing drifted from the locked manifest." },
     { name: "motion_alignment", status: sameBeatOrder ? "passed" : "failed", detail: sameBeatOrder ? "Renderer preserved the ordered beat-to-motion mapping." : "Renderer beat order differs from the locked manifest." },
+    { name: "editorial_direction", status: editorialQuality.grade === "good" ? "passed" : "failed", detail: editorialQuality.grade === "good" ? `Every beat carries literal proof, layered coverage, a motivated reset, and restrained type (${editorialQuality.score}/100).` : `Editorial contract rejected the beat plan: ${(editorialQuality.blockers.length ? editorialQuality.blockers : editorialQuality.reasons).join("; ")}` },
     { name: "audio_mix", status: input.audioOk ? "passed" : "failed", detail: input.audioOk ? "Narration/mix coverage verification passed." : "Narration/mix coverage verification failed." },
     { name: "visual_legibility", status: input.visualVerifierPassed ? "passed" : "failed", detail: input.visualVerifierPassed ? "DocuMotion visual verifier passed the portrait scene set." : "DocuMotion visual verifier rejected one or more scenes." },
     { name: "no_baked_text", status: input.visualVerifierPassed ? "passed" : "failed", detail: input.visualVerifierPassed ? "Text-free asset gate and deterministic overlay renderer passed." : "Visual verifier could not confirm the text-free asset treatment." },
@@ -605,8 +614,10 @@ export function evaluateDocumentaryShortSceneQa(input: DocumentaryShortSceneQaIn
 
 function docuShotForBeat(beat: ShortBeat, index: number): DocuShotPlan {
   const kind = DOCUMENTARY_SHORT_KINDS[index] ?? "photo_slide";
-  const caption = overlayText(beat.scene.caption.text);
   const camera = cameraForMotion(beat.scene.motion.primary.family, beat.scene.motion.primary.intensity, index);
+  const title = ["hook", "conflict", "reversal", "payoff"].includes(beat.role)
+    ? overlayText(beat.scene.caption.text, 3)
+    : undefined;
   const visualCues = [beat.scene.primaryVisualEvent, ...beat.scene.layers.flatMap((layer) => layer.content ? [layer.content] : [])]
     .map((cue) => briefText(cue, 220));
   const primaryAssetId = beat.scene.layers.find((layer) => layer.role === "primary")?.assetId;
@@ -618,13 +629,15 @@ function docuShotForBeat(beat: ShortBeat, index: number): DocuShotPlan {
     beat: beat.scene.primaryVisualEvent,
     durationSec: beat.scene.durationSec,
     camera,
-    title: caption,
+    coverage: editorialCoverageFor(beat.audio.narration.text, beat.scene.primaryVisualEvent, kind),
+    motionArc: editorialMotionArcFor(beat.audio.narration.text, beat.scene.primaryVisualEvent, camera),
+    typography: editorialTypographyFor(kind, Boolean(title)),
+    title,
     kicker: beat.role,
     labels: kind === "evidence_board" ? [
-      { text: caption },
-      { text: beat.role.toUpperCase() },
-      { text: "SOURCE-TRACEABLE" },
-    ] : [{ text: beat.role.toUpperCase(), sub: caption }],
+      ...(title ? [{ text: title }] : []),
+      { text: "SOURCE" },
+    ] : [{ text: beat.role.toUpperCase(), sub: title ? undefined : overlayText(beat.scene.caption.text, 5) }],
     // Reuse the manifest asset id for the primary generated plate. The render
     // receipt can therefore prove this exact planned asset—not merely some
     // image generated in the same beat—passed the approval gate.
@@ -646,12 +659,14 @@ function assetBriefsForShot(
   primaryAssetId: string,
 ): DocuAssetBrief[] {
   const subject = cues.join("; ");
+  const storyRoles: DocuAssetBrief["storyRole"][] = ["establish", "hero", "proof", "detail"];
   const make = (role: DocuAssetBrief["role"], count: number, prefix: string) =>
     Array.from({ length: count }, (_, index) => ({
       id: `s${shotIndex + 1}-${role}-${index + 1}`,
       role,
       source: "generate" as const,
-      brief: `${prefix}: ${subject}`,
+      storyRole: storyRoles[index % storyRoles.length],
+      brief: `${prefix}; ${storyRoles[index % storyRoles.length]} coverage; asset ${index + 1} must prove a distinct literal detail: ${subject}`,
     }));
   const assets = (() => {
     switch (kind) {
@@ -678,7 +693,7 @@ function assetBriefsForShot(
       : "bg";
   const primary = assets.find((asset) => asset.role === primaryRole) ?? assets[0];
   if (!primary) throw new Error(`documentary collage Short shot ${shotIndex + 1} has no renderer asset`);
-  return assets.map((asset) => asset === primary ? { ...asset, id: primaryAssetId } : asset);
+  return assets.map((asset) => asset === primary ? { ...asset, id: primaryAssetId, storyRole: "proof" } : asset);
 }
 
 function cameraForMotion(family: ShortBeat["scene"]["motion"]["primary"]["family"], intensity: number, index: number): DocuCamera {
@@ -691,7 +706,14 @@ function cameraForMotion(family: ShortBeat["scene"]["motion"]["primary"]["family
           ? index % 2 ? "pan_left" : "pan_right"
           : "drift";
   const level: DocuCameraIntensity = intensity >= 0.72 ? "strong" : intensity >= 0.36 ? "medium" : "subtle";
-  return { move, intensity: level };
+  const revealMove: DocuCameraMove = move === "push_in"
+    ? (index % 2 ? "pan_left" : "pan_right")
+    : move === "pull_back"
+      ? "push_in"
+      : move === "pan_left" || move === "pan_right"
+        ? "push_in"
+        : index % 2 ? "pan_left" : "push_in";
+  return { move, intensity: level, revealMove, revealAtPercent: index % 2 ? 0.48 : 0.5 };
 }
 
 function motionForRole(role: typeof DOCUMENTARY_SHORT_ROLES[number], index: number) {
@@ -847,8 +869,8 @@ function requireIdentifier(value: string, label: string): string {
   return normalized;
 }
 
-function overlayText(value: string): string {
-  return shortPhrase(value, 10).toUpperCase();
+function overlayText(value: string, maxWords = 10): string {
+  return shortPhrase(value, maxWords).toUpperCase();
 }
 
 function shortPhrase(value: string, maxWords: number): string {

@@ -53,6 +53,10 @@ export type DocuCameraIntensity = "subtle" | "medium" | "strong";
 export interface DocuCamera {
   move: DocuCameraMove;
   intensity: DocuCameraIntensity;
+  /** A second, motivated move that starts at the in-shot information reveal. */
+  revealMove?: DocuCameraMove;
+  /** Fraction of the shot where the reveal/new visual information lands. */
+  revealAtPercent?: number;
 }
 
 export interface DocuLabel {
@@ -97,6 +101,8 @@ export interface DocuShotSpec {
   kind: DocuShotKind;
   durationInFrames: number;
   camera?: DocuCamera;
+  /** Renderer-visible proof that a shot is allowed to change inside its beat. */
+  visualResetAtPercent?: number;
   bg?: string;
   fg?: string;
   images?: string[];
@@ -412,29 +418,43 @@ const useCam = (camera: DocuCamera | undefined, dur: number, seed: number): CamS
     extrapolateLeft: "clamp",
     extrapolateRight: "clamp",
   });
-  let scale = 1.03;
-  let x = 0;
-  let y = 0;
-  switch (move) {
+  const positionFor = (selectedMove: DocuCameraMove, progress: number): CamState => {
+    let scale = 1.03;
+    let x = 0;
+    let y = 0;
+    switch (selectedMove) {
     case "push_in":
-      scale = 1.03 + amt * p;
+      scale = 1.03 + amt * progress;
       break;
     case "pull_back":
-      scale = 1.03 + amt * (1 - p);
+      scale = 1.03 + amt * (1 - progress);
       break;
     case "pan_left":
       scale = 1.04 + amt;
-      x = width * amt * (p - 0.5) * 0.9;
+      x = width * amt * (progress - 0.5) * 0.9;
       break;
     case "pan_right":
       scale = 1.04 + amt;
-      x = width * amt * (0.5 - p) * 0.9;
+      x = width * amt * (0.5 - progress) * 0.9;
       break;
     case "drift":
-      scale = 1.05 + amt * 0.25 * p;
+      scale = 1.05 + amt * 0.25 * progress;
       break;
-  }
-  const driftAmp = move === "drift" ? 0.006 : 0.0032;
+    }
+    return { scale, x, y };
+  };
+  const revealMove = camera?.revealMove;
+  const revealAt = Math.min(0.66, Math.max(0.28, camera?.revealAtPercent ?? 0.52));
+  const revealProgress = revealMove
+    ? Math.min(1, Math.max(0, (p - revealAt) / Math.max(0.01, 1 - revealAt)))
+    : 0;
+  const first = positionFor(move, revealMove ? Math.min(1, p / revealAt) : p);
+  const second = revealMove ? positionFor(revealMove, revealProgress) : first;
+  const blend = revealMove ? Easing.inOut(Easing.cubic)(revealProgress) : 0;
+  let scale = first.scale + (second.scale - first.scale) * blend;
+  let x = first.x + (second.x - first.x) * blend;
+  let y = first.y + (second.y - first.y) * blend;
+  const driftAmp = move === "drift" && !revealMove ? 0.006 : 0.0032;
   x += noise2D(`dx${seed}`, frame * 0.016, 0) * width * driftAmp;
   y += noise2D(`dy${seed}`, frame * 0.013, 7) * height * driftAmp;
   return { scale, x, y };
@@ -1443,11 +1463,13 @@ const ObjectDropShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, 
   const t = useTheme();
   const cutouts = shot.cutouts ?? [];
   const boost = shot.titleBoost ?? 1;
-  const slots = [
-    { left: 0.07, top: 0.03, w: 0.21, rot: -9 },
-    { left: 0.72, top: 0.01, w: 0.23, rot: 7 },
-    { left: 0.42, top: 0.0, w: 0.18, rot: -4 },
-  ];
+  const slots = cutouts.length === 1
+    ? [{ left: 0.12, top: 0.15, w: 0.76, rot: -5 }]
+    : [
+      { left: 0.07, top: 0.03, w: 0.21, rot: -9 },
+      { left: 0.72, top: 0.01, w: 0.23, rot: 7 },
+      { left: 0.42, top: 0.0, w: 0.18, rot: -4 },
+    ];
   const title = shot.title ?? "";
   const titleSize = Math.min(width * 0.105 * boost, (width * 0.9) / Math.max(6, title.length * t.displayCharW));
   return (

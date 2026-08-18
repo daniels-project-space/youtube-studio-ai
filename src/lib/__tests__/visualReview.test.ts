@@ -30,6 +30,11 @@ const phraseReviewer = async () => JSON.stringify({
   summary: "Known visual phrasing.",
 });
 
+const summaryOnlyNarrativeMismatchReviewer = async () => JSON.stringify({
+  defects: [],
+  summary: "The house image does not align with the narration about Netflix mailing red envelopes and fails to visually support the story.",
+});
+
 function makeBadComic(input: string, output: string): void {
   // The two obvious faults are deliberately present only in the 6–10s window:
   // a large bubble-shaped plate that occludes the panel subject and a second
@@ -89,6 +94,19 @@ async function main(): Promise<void> {
     phrased.defects.some((defect) => defect.category === "overlay_occlusion" && defect.source === "vision"),
     "provider wording such as covering the face must route to overlay_occlusion",
   );
+
+  const summaryMismatch = await reviewRender(fixture, 18, {
+    title: "Narrative mismatch summary fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-summary-mismatch",
+    reviewer: summaryOnlyNarrativeMismatchReviewer,
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(summaryMismatch.verdict, "fail", "a provider-reported narration mismatch cannot become a false visual pass");
+  assert(summaryMismatch.defects.some((defect) => defect.category === "wrong_footage" && defect.source === "vision"));
 
   const work = await mkdtemp(join(tmpdir(), "ysa-visual-review-"));
   try {

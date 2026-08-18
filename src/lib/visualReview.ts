@@ -476,7 +476,10 @@ function reviewerPrompt(
     (intent.expectChapters ? "- Chapter cards are expected and must be readable/in order.\n" : "") +
     `\nFRAME LEDGER\n${timeline}\n\n` +
     `Find only viewer-noticeable defects: overlays/captions clipped, off-canvas, colliding, covering a face or key subject, ` +
-    `unreadable text, wrong/repeated footage, black/frozen frames, broken transitions, or missing/broken intro/outro. ` +
+    `unreadable text, wrong/repeated footage, black/frozen frames, broken transitions, or missing/broken intro/outro. Also flag ` +
+    `a frame that does not literally support its concurrent narration (wrong_footage), a generic/reused-looking hero plate that carries a new claim (repeated_clip), ` +
+    `a static template beat with no apparent new proof/detail (general_visual), shallow flat composition where the shot asks for layered depth (general_visual), ` +
+    `or oversized decorative type competing with the frame's factual subject (caption_unreadable or general_visual). ` +
     `Never flag a short on-screen hook merely because it differs from the SEO title. Do not invent defects outside the supplied evidence.\n\n` +
     `Return STRICT JSON {"defects":[{"startSec":number,"endSec":number,"severity":"critical|major|minor",` +
     `"category":"overlay_off_canvas|overlay_occlusion|overlay_collision|caption_cutoff|caption_unreadable|wrong_footage|repeated_clip|black_frame|frozen_frame|transition_break|intro_card|outro_card|general_visual",` +
@@ -533,6 +536,7 @@ function parseModelDefects(
     defects?: Array<Record<string, unknown>>;
     summary?: unknown;
   }>(raw);
+  const summary = String(parsed?.summary ?? "").slice(0, 500);
   const known = new Set(frames.map((frame) => frame.descriptor.id));
   const defects = (parsed?.defects ?? []).flatMap((item) => {
     const observed = String(item["observed"] ?? item["issue"] ?? "").trim();
@@ -561,7 +565,27 @@ function parseModelDefects(
       source: "vision" as const,
     } satisfies VisualReviewDefect];
   });
-  return { defects, summary: String(parsed?.summary ?? "").slice(0, 500) };
+  // Vision providers occasionally describe a direct narration/visual mismatch
+  // accurately in the prose summary but omit the required defect object. That
+  // cannot be allowed to turn into a false pass simply because the schema was
+  // only half obeyed; promote the provider's own evidence-backed statement.
+  const summaryNarrativeMismatch = /(?:does not|doesn't|do not)[^.]{0,90}(?:align|support)[^.]{0,90}(?:narration|story)|(?:unrelated|not related)[^.]{0,90}(?:narration|story)|fails? to visually support/i.test(summary);
+  const summaryDefect: VisualReviewDefect[] = summaryNarrativeMismatch
+    ? [{
+      id: createHash("sha256").update(`summary|wrong_footage|${summary.slice(0, 180)}`).digest("hex").slice(0, 16),
+      startSec: frames[0]?.descriptor.tSec ?? 0,
+      endSec: frames.at(-1)?.descriptor.tSec ?? frames[0]?.descriptor.tSec ?? 0,
+      severity: "major",
+      category: "wrong_footage",
+      confidence: 0.8,
+      observed: summary,
+      expected: intent.expectedStructure ?? DEFAULT_STRUCTURE,
+      evidenceFrameIds: frames.map((frame) => frame.descriptor.id),
+      suggestedRepair: "Replace the mismatched visual beat with imagery that literally supports its concurrent narration.",
+      source: "vision",
+    }]
+    : [];
+  return { defects: [...defects, ...summaryDefect], summary };
 }
 
 function rectIntersection(a: NormalizedRect, b: NormalizedRect): number {

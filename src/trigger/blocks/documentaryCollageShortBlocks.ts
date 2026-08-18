@@ -234,7 +234,7 @@ export const documotionShort: Block = {
   paid: true,
   run: async (ctx) => {
     if (!hasDocumotion()) {
-      throw new Error("documotion_short: Gemini and Nano Banana/FAL configuration are required; no crop fallback is allowed");
+      throw new Error("documotion_short: FAL-hosted Nano Banana Flash configuration is required; no crop fallback is allowed");
     }
     const topic = textFromStore(ctx, "topic");
     const manifest = parseShortStrategyManifest(ctx.store["beatManifest"]);

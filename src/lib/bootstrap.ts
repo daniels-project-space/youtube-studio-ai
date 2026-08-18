@@ -2,9 +2,11 @@
  * Runtime secret bootstrap. Hydrates process.env from the centralized vault for
  * every service the production pipeline needs.
  *
- * Idempotent: hydrateEnv only sets keys not already present, so an explicit
- * .env.local (or Trigger-deployed env var) always wins. No secret is ever
- * logged — only the count + key NAMES that were loaded.
+ * Idempotent by default: hydrateEnv only sets keys not already present. A
+ * caller may explicitly mark keys as vault-authoritative when a deployment
+ * variable is known to be a credential reference rather than the credential
+ * itself. No secret is ever logged — only the count + key NAMES that were
+ * loaded.
  */
 import { hydrateEnv } from "@/lib/vault";
 
@@ -15,7 +17,7 @@ const SERVICES = [
   "mureka", // MUREKA_API_KEY
   "suno", // SUNO_API_KEY
   "fish-audio", // FISH_AUDIO_API_KEY (narration_tts)
-  "elevenlabs", // ELEVENLABS_API_KEY (narration_tts v3 expressive tier; Trigger env var holds the CURRENT key — vault entry may be stale, env wins)
+  "elevenlabs", // ELEVENLABS_API_KEY (narration_tts; render jobs can designate vault-authoritative credentials)
   "pexels", // PEXELS_API_KEY (stock_footage — always-on baseline)
   "pixabay", // PIXABAY_API_KEY (federated stock — free, self-serve)
   "videvo", // VIDEVO_API_KEY (federated stock — partner; VIDEVO_API_BASE overridable)
@@ -54,9 +56,15 @@ function requireKeys(keys: string[]): void {
  */
 export async function bootstrapSecrets(
   log: (msg: string, extra?: Record<string, unknown>) => void = () => {},
-  opts?: { required?: string[] },
+  opts?: { required?: string[]; vaultAuthoritativeKeys?: string[] },
 ): Promise<string[]> {
-  if (done) {
+  const vaultAuthoritativeKeys = opts?.vaultAuthoritativeKeys ?? [];
+  // A Trigger environment can contain a provider's key ID rather than the
+  // usable secret. Remove only explicit, audited overrides before hydration
+  // so the scoped central vault remains the source of truth for that key.
+  for (const key of vaultAuthoritativeKeys) delete process.env[key];
+
+  if (done && vaultAuthoritativeKeys.length === 0) {
     if (opts?.required) requireKeys(opts.required);
     return [];
   }

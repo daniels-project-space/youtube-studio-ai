@@ -18,6 +18,7 @@
 import { NO_TEXT_CLAUSE } from "@/lib/banana";
 import {
   FAL_FLUX_PRO_V11_MODEL,
+  FAL_NANO_BANANA_FLASH_MODEL,
   falDimensionsForAspect,
   falImageCostUsd,
   falImageRoute,
@@ -223,6 +224,8 @@ export async function generateFalImage(req: {
    *  assets (whiteboard line-art = 40+ images/video); "pro"/unset uses the
    *  quality model. i2i (references) always uses the kontext model. */
   tier?: "pro" | "flash";
+  /** Pin an admitted Fal model when a caller needs a specific image contract. */
+  model?: string;
   /** Maximum HTTP submissions after explicit 429 rejections. A 429 proves the
    * request was not admitted; every other response/transport failure stops
    * after one potentially-paid submission because Fal exposes no idempotency
@@ -238,7 +241,7 @@ export async function generateFalImage(req: {
   const aspect = normalizeFalAspectRatio(req.aspectRatio);
   const refs = req.images ?? [];
   const tier = req.tier ?? "pro";
-  const model = selectedFalImageModel({ tier, hasReferences: refs.length > 0 });
+  const model = req.model ?? selectedFalImageModel({ tier, hasReferences: refs.length > 0 });
   const route = falImageRoute(model);
   if (refs.length > 0 && route !== "kontext") {
     throw new Error(`Fal image-reference route requires Kontext, got "${model}"`);
@@ -260,6 +263,16 @@ export async function generateFalImage(req: {
       output_format: "jpeg",
       // Kontext uses the Pro-family safety contract; omit the optional field
       // and retain Fal's documented default rather than sending Schnell keys.
+    };
+  } else if (route === "nano-banana-flash") {
+    body = {
+      prompt,
+      aspect_ratio: aspect,
+      seed,
+      num_images: 1,
+      output_format: "jpeg",
+      safety_tolerance: "4",
+      limit_generations: true,
     };
   } else {
     body = {
@@ -326,4 +339,19 @@ export async function generateFalImage(req: {
     );
   }
   return downloadPaidFalImage(receipt);
+}
+
+/**
+ * Explicit, FAL-hosted Nano Banana Flash route for picture-only documentary
+ * fallback assets. It is hard-pinned to the Flash endpoint and cannot upgrade
+ * to Nano Banana Pro or direct Google credentials.
+ */
+export async function generateFalNanoBananaFlashImage(
+  req: Omit<Parameters<typeof generateFalImage>[0], "tier" | "model">,
+): Promise<Buffer> {
+  return generateFalImage({
+    ...req,
+    tier: "flash",
+    model: FAL_NANO_BANANA_FLASH_MODEL,
+  });
 }

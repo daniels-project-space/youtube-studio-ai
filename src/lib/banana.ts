@@ -3,8 +3,8 @@
  *
  * Real thumbnail paths use `thumbnailRenderer.ts`: this module renders their
  * text-free base art, while exact typography is composited locally. Thumbnail
- * callers use the strict Nano Banana exports below; the legacy provider router
- * remains available only to non-thumbnail still-image workloads.
+ * callers use the strict Nano Banana exports below. All non-thumbnail still
+ * workloads route to Novita Z-Image Turbo instead.
  */
 import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
@@ -13,6 +13,7 @@ import { canonicalJson } from "@/lib/canonicalJson";
 import { parseJsonLoose } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
+import { generateNovitaZImageTurbo } from "@/lib/novitaZImageTurbo";
 import { PRICE } from "@/engine/pricing";
 import { recordImageUsage } from "@/lib/imageUsage";
 import { rasterImageDimensions } from "@/lib/imageDimensions";
@@ -30,12 +31,9 @@ export {
 
 /**
  * MODEL TIERS. Pro (gemini-3-pro-image, ~$0.13/img) remains available for
- * explicitly non-thumbnail design experiments/type cards. Flash (classic Nano
- * Banana, ~$0.04/img) is the DEFAULT for
- * every picture-only render (documotion assets, whiteboard layers, comic
- * panels, lore scenes, lofi stills — ~90% of image volume): Pro-first for
- * those was a silent 3.4x on the whole image bill. Flash tier never silently
- * upgrades to Pro (a transient flash blip must not 3.4x the price).
+ * thumbnail-only design experiments/type cards. Flash (classic Nano Banana)
+ * is never the default for pipeline visuals: those route to direct Novita
+ * Z-Image Turbo. Flash tier never silently upgrades to Pro.
  * BANANA_FORCE_MODEL overrides everything (emergency pin).
  */
 const PRO_MODELS = ["gemini-3-pro-image-preview", "gemini-2.5-flash-image"];
@@ -291,6 +289,8 @@ export const NO_TEXT_CLAUSE =
 
 export interface BananaImageArgs {
   prompt: string;
+  /** FAL/Nano Banana is permitted only for an explicit thumbnail request. */
+  lane?: "thumbnail" | "pipeline_visual";
   aspectRatio?: string;
   /** "1K" | "2K" | "4K" — Pro model only; defaults to "2K". */
   imageSize?: string;
@@ -612,10 +612,25 @@ export async function generateNanoBananaImage(
 }
 
 export async function generateBananaImage(args: BananaImageArgs): Promise<Buffer> {
-  // PROVIDER ROUTER: when the operator disabled Google image gen, EVERY engine
-  // that calls generateBananaImage transparently renders on fal FLUX instead
-  // (same args, bytes out). A missing FAL_KEY throws — never silently fall back
-  // to the provider the operator explicitly turned off.
+  // Non-thumbnail callers retain the legacy helper signature but now route to
+  // the audited direct Novita Z-Image Turbo path. FAL/Nano Banana must never
+  // become an invisible bulk-asset fallback again.
+  if (args.lane !== "thumbnail") {
+    if (args.images?.length) {
+      throw new Error("banana: reference-image generation requires an explicit Novita-capable pipeline; FAL is thumbnail-only");
+    }
+    const digest = sha256(`${args.aspectRatio ?? "16:9"}|${args.prompt}`);
+    const rendered = await generateNovitaZImageTurbo({
+      prompt:
+        `${args.prompt} ` +
+        "Absolutely no readable text, letters, numbers, captions, signs, logos, watermarks, UI, borders, labels, or blur.",
+      aspectRatio: args.aspectRatio,
+      seed: Number.parseInt(digest.slice(0, 8), 16),
+    });
+    return rendered.bytes;
+  }
+  // The thumbnail lane is the sole exception. It keeps the existing Nano
+  // Banana/FAL or Google routing and its separate thumbnail quality gate.
   if (falImageRouteActive()) {
     if (!process.env.FAL_KEY) {
       throw new Error(

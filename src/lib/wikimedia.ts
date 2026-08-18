@@ -12,6 +12,7 @@ interface SearchResp {
 interface ExtMeta {
   Artist?: { value?: string };
   LicenseShortName?: { value?: string };
+  LicenseUrl?: { value?: string };
 }
 interface InfoResp {
   query?: {
@@ -33,6 +34,10 @@ export interface WikiImage {
   url: string;
   /** Attribution line for the description credits (license ledger). */
   attribution: string;
+  /** Canonical Commons item page retained beside the downloaded file. */
+  sourcePageUrl: string;
+  license?: string;
+  licenseUrl?: string;
 }
 
 function stripHtml(s: string): string {
@@ -83,7 +88,13 @@ export async function searchWikimediaImage(
           (artist ? `${artist}` : "Wikimedia Commons") +
           (license ? ` (${license})` : "") +
           (artist ? " via Wikimedia Commons" : "");
-        return { url, attribution };
+        return {
+          url,
+          attribution,
+          sourcePageUrl: `https://commons.wikimedia.org/wiki/${encodeURIComponent(title.replace(/\s+/g, "_"))}`,
+          license: license || undefined,
+          licenseUrl: ext.LicenseUrl?.value ? stripHtml(ext.LicenseUrl.value) : undefined,
+        };
       }
     } catch {
       /* try next title */

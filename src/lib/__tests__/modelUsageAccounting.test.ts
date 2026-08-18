@@ -202,7 +202,8 @@ async function groqVisionUsageIsCaptured(): Promise<void> {
   process.env.GROQ_API_KEY = "hermetic-groq-key";
   process.env.VISION_PROVIDERS = "groq";
   let groqFetches = 0;
-  globalThis.fetch = async (input) => {
+  let groqRequest: Record<string, unknown> | undefined;
+  globalThis.fetch = async (input, init) => {
     const url = String(input);
     if (url === "https://images.test/accounting.jpg") {
       return new Response(new Uint8Array([1, 2, 3]), {
@@ -212,6 +213,7 @@ async function groqVisionUsageIsCaptured(): Promise<void> {
     }
     assert.match(url, /api\.groq\.com\/openai\/v1\/chat\/completions/);
     groqFetches++;
+    groqRequest = JSON.parse(String(init?.body)) as Record<string, unknown>;
     return Response.json({
       id: "groq-response-test",
       model: "qwen/qwen3.6-27b",
@@ -237,6 +239,8 @@ async function groqVisionUsageIsCaptured(): Promise<void> {
     );
     assert.equal(response, '{"ok":true}');
     assert.equal(groqFetches, 1);
+    assert.equal(groqRequest?.reasoning_effort, "none");
+    assert.equal(groqRequest?.include_reasoning, false);
     const usage = scope.snapshot();
     assert.equal(usage.calls, 1);
     close(usage.costUsd, 0.000135, "Groq vision provider usage price");

@@ -202,7 +202,17 @@ async function groqVision(
         messages: [{ role: "user", content }],
         max_tokens: Math.min(opts.maxTokens ?? 1024, 4096),
         temperature: 0.2,
-        ...(opts.json ? { response_format: { type: "json_object" } } : {}),
+        // Asset QA is a compact classification task. Qwen 3.6 otherwise emits
+        // a long <think> trace that can exhaust the response before its verdict.
+        reasoning_effort: "none",
+        include_reasoning: false,
+        // Qwen Vision on Groq can reject JSON mode server-side even when the
+        // prompt itself requests valid JSON. Keep the strict prompt and the
+        // caller's parse gate, but leave provider JSON mode opt-in so a 400
+        // cannot disable the whole documentary QA lane.
+        ...(opts.json && process.env.GROQ_ENABLE_JSON_MODE === "1"
+          ? { response_format: { type: "json_object" } }
+          : {}),
       }),
       signal: AbortSignal.timeout(90_000),
     });

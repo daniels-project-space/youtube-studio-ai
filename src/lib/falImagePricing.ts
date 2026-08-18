@@ -3,8 +3,10 @@
 export const FAL_FLUX_PRO_V11_MODEL = "fal-ai/flux-pro/v1.1";
 export const FAL_SCHNELL_MODEL = "fal-ai/flux/schnell";
 export const FAL_KONTEXT_MODEL = "fal-ai/flux-pro/kontext";
+/** FAL-hosted Gemini 2.5 Flash Image (Nano Banana), never Nano Banana Pro. */
+export const FAL_NANO_BANANA_FLASH_MODEL = "fal-ai/nano-banana";
 
-export type FalImageRoute = "flux-pro-v1.1" | "schnell" | "kontext";
+export type FalImageRoute = "flux-pro-v1.1" | "schnell" | "kontext" | "nano-banana-flash";
 
 export interface FalImageDimensions {
   width: number;
@@ -42,6 +44,7 @@ export function falImageRoute(model: string): FalImageRoute {
   const normalized = normalizedModel(model);
   if (normalized === FAL_SCHNELL_MODEL) return "schnell";
   if (normalized === FAL_KONTEXT_MODEL) return "kontext";
+  if (normalized === FAL_NANO_BANANA_FLASH_MODEL) return "nano-banana-flash";
   if (normalized === FAL_FLUX_PRO_V11_MODEL) return "flux-pro-v1.1";
   throw new Error(
     `unsupported Fal image model "${model}"; add an authoritative request schema and price before enabling it`,
@@ -76,11 +79,13 @@ export function falImageRates(
   schnellUsdPerMegapixel: number;
   kontextUsdPerImage: number;
   fluxProV11UsdPerMegapixel: number;
+  nanoBananaFlashUsdPerImage: number;
 } {
   return {
     schnellUsdPerMegapixel: rate(env, "PRICE_FAL_SCHNELL_USD_PER_MP", 0.003),
     kontextUsdPerImage: rate(env, "PRICE_FAL_KONTEXT_USD_PER_IMAGE", 0.04),
     fluxProV11UsdPerMegapixel: rate(env, "PRICE_FAL_FLUX_PRO_USD_PER_MP", 0.04),
+    nanoBananaFlashUsdPerImage: rate(env, "PRICE_FAL_NANO_BANANA_FLASH_USD_PER_IMAGE", 0.039),
   };
 }
 
@@ -102,6 +107,7 @@ export function falImageCostUsd(
   const route = falImageRoute(args.model);
   const rates = falImageRates(env);
   if (route === "kontext") return images * rates.kontextUsdPerImage;
+  if (route === "nano-banana-flash") return images * rates.nanoBananaFlashUsdPerImage;
   const megapixels = (width * height * images) / 1_000_000;
   return megapixels * (
     route === "schnell"

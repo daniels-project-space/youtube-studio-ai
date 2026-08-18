@@ -26,7 +26,9 @@
  * Speed: assets generate+gate in a concurrency pool, verifier rounds use
  * stills (not full video), only the final pass renders the full timeline.
  *
- * Deps: GEMINI_API_KEY + FAL_KEY.
+ * Deps: direct Novita Z-Image Turbo worker configuration for generated
+ * fallback stills; GEMINI_API_KEY is required only when the
+ * optional freeform planner/cinematographer pass is used instead of a locked plan.
  *
  *   import { craftDocuMotion } from "@/lib/documotion";
  *   const { outPath, verdict } = await craftDocuMotion({ topic, style: "detective_board", runDir, log });
@@ -38,16 +40,27 @@ import { createHash } from "node:crypto";
 import { join } from "node:path";
 import { geminiJson, geminiJsonPro, parseJsonLoose } from "@/lib/gemini";
 import { visionLocal } from "@/lib/vision";
-import { generateBananaImage } from "@/lib/banana";
-import { getDepthMap } from "@/lib/depth";
+import { generateNovitaZImageTurbo, hasNovitaZImageTurbo } from "@/lib/novitaZImageTurbo";
 import { fetchCityGeo, type CityGeo } from "@/lib/geoMap";
-import { searchWikimediaImageUrl } from "@/lib/wikimedia";
+import { searchOnlineDocumentaryAssets } from "@/lib/documentaryAssetSearch";
 import { synthNarration } from "@/lib/tts";
 import { generateMusic } from "@/lib/music";
 import { createImageUsageScope, type ImageUsageSummary } from "@/lib/imageUsage";
 import { createModelUsageScope, type ModelUsageSummary } from "@/lib/modelUsage";
 import { narrationTtsCost, PRICE } from "@/engine/pricing";
 import { CINEMATOGRAPHER_DOCTRINE } from "@/lib/visualDirection";
+import {
+  assessDocumentaryVisualQuality,
+  editorialCoverageFor,
+  editorialMotionArcFor,
+  editorialTypographyFor,
+  normalizeDocumentaryVisualCues,
+  type DocumentaryEditorialCoverage,
+  type DocumentaryVisualQualityAssessment,
+  type DocumentaryMotionArc,
+  type DocumentaryTypographyPlan,
+  type DocumentaryCoverageRole,
+} from "@/lib/documentaryVisualQuality";
 import { renderDocuMotion, renderDocuStills } from "@/lib/remotionRender";
 import {
   getDocuRoleFraming,
@@ -82,11 +95,14 @@ export function docuRenderGeometry(format: DocuFormat = "long"): DocuRenderGeome
     : { format, layout: "long", width: 1920, height: 1080, verifyWidth: 960, verifyHeight: 540 };
 }
 
-/** Banana/Gemini-image concurrency — capped to stay under image rate limits. */
+/** Source and direct-worker image concurrency — capped for provider stability. */
 const ASSET_CONCURRENCY = Number(process.env.DOCU_ASSET_CONCURRENCY ?? 4);
+// Online sources are always tried first. Only a bounded number of Z-Image
+// Turbo candidates may be paid for after the source search proves inadequate.
+const MAX_NOVITA_ASSET_ATTEMPTS = 2;
 
 export function hasDocumotion(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY && process.env.FAL_KEY);
+  return hasNovitaZImageTurbo();
 }
 
 /* --------------------------------------------------------------- helpers -- */
@@ -191,6 +207,8 @@ async function synthShotVOs(
   niche: string | undefined,
   log: Logger,
   usage: DocuNarrationUsage,
+  narrationSpeed: number,
+  elevenModelId?: string,
 ): Promise<ShotVO[]> {
   const tts = pickNarrationTts();
   usage.provider = tts.provider ?? "fish";
@@ -204,9 +222,9 @@ async function synthShotVOs(
     const bytes = await synthNarration({
       text: lines[i],
       niche,
-      speed: NARR.speed,
+      speed: narrationSpeed,
       ...tts,
-      eleven: { stability: 0.45, seed: 4242 },
+      eleven: { modelId: elevenModelId, stability: 0.45, seed: 4242 },
       stitch: { previousText: lines[i - 1] || undefined, nextText: lines[i + 1] || undefined },
       onBillableCharacters: (characters) => {
         usage.billableCharacters += characters;
@@ -216,7 +234,7 @@ async function synthShotVOs(
     out.push({ idx: i, path, durSec: await audioDurationSec(path) });
   }
   const voTotal = out.reduce((a, v) => a + v.durSec, 0);
-  log(`documotion narrate: ${out.length}/${plan.shots.length} shots voiced via ${tts.provider ?? "fish"} @ speed ${NARR.speed} — ${voTotal.toFixed(1)}s VO`);
+  log(`documotion narrate: ${out.length}/${plan.shots.length} shots voiced via ${tts.provider ?? "fish"} @ speed ${narrationSpeed} — ${voTotal.toFixed(1)}s VO`);
   return out;
 }
 
@@ -260,9 +278,17 @@ async function assembleNarration(o: {
     if (m.url) {
       musPath = join(o.runDir, "music.mp3");
       await downloadTo(m.url, musPath);
-      // A provider can return multiple billable takes from one generation.
-      musicTracks = Math.max(1, m.tracks.length);
-      o.log(`documotion narrate: music bed via ${m.provider}`);
+      // A provider URL can resolve without producing a local file (expired
+      // signed URL / empty upstream response). Do not hand ffmpeg a phantom
+      // music input: keep the fully valid narration-only delivery instead.
+      if (!existsSync(musPath)) {
+        musPath = "";
+        o.log("documotion narrate: music download produced no local file — VO only");
+      } else {
+        // A provider can return multiple billable takes from one generation.
+        musicTracks = Math.max(1, m.tracks.length);
+        o.log(`documotion narrate: music bed via ${m.provider}`);
+      }
     }
   } catch (e) { o.log(`documotion narrate: music unavailable (${e instanceof Error ? e.message : e}) — VO only`); }
 
@@ -363,8 +389,12 @@ export interface DocuAssetBrief {
   role: DocuAssetRole;
   brief: string;
   /** generate (default) | archival (real Wikimedia photo of `query`). */
-  source?: "generate" | "archival";
+  source?: "generate" | "archival" | "online";
   query?: string;
+  /** Precise online-search phrase for an auditable real-world still. */
+  onlineQuery?: string;
+  /** Editorial purpose inside its beat, used by the visual coverage gate. */
+  storyRole?: DocumentaryCoverageRole;
 }
 
 export interface DocuShotPlan {
@@ -379,6 +409,12 @@ export interface DocuShotPlan {
   beat: string;
   durationSec: number;
   camera: DocuCamera;
+  /** Named proof + coverage roles. A beat cannot be one generic plate. */
+  coverage?: DocumentaryEditorialCoverage;
+  /** Establish → reveal → exit direction, including the in-shot visual reset. */
+  motionArc?: DocumentaryMotionArc;
+  /** Type may orient the viewer but may not replace the proof image. */
+  typography?: DocumentaryTypographyPlan;
   title?: string;
   kicker?: string;
   labels?: DocuLabel[];
@@ -440,6 +476,35 @@ export function normalizeQuoteEmphasis(value: unknown): string[] | undefined {
   return words.length ? words : undefined;
 }
 
+function complementaryRevealMove(move: DocuCamera["move"]): DocuCamera["move"] {
+  if (move === "push_in") return "pan_right";
+  if (move === "pull_back") return "push_in";
+  if (move === "pan_left" || move === "pan_right") return "push_in";
+  return "pan_left";
+}
+
+/** Makes the mandated in-shot information reveal executable by the renderer. */
+function normalizeCameraMotion(value: unknown, motionArc: unknown): DocuCamera | undefined {
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const raw = value as Record<string, unknown>;
+  const move = optionalText(raw.move);
+  if (!move || !CAMERA_MOVES.includes(move)) return raw as unknown as DocuCamera;
+  const arc = motionArc && typeof motionArc === "object" && !Array.isArray(motionArc)
+    ? motionArc as Record<string, unknown>
+    : undefined;
+  const explicitReset = typeof raw.revealAtPercent === "number"
+    ? raw.revealAtPercent
+    : typeof arc?.visualResetAtPercent === "number"
+      ? arc.visualResetAtPercent
+      : 0.5;
+  return {
+    ...raw,
+    move,
+    revealMove: optionalText(raw.revealMove) ?? complementaryRevealMove(move as DocuCamera["move"]),
+    revealAtPercent: explicitReset,
+  } as DocuCamera;
+}
+
 export function normalizeDocuPlan(value: unknown): DocuPlan {
   if (!value || typeof value !== "object" || Array.isArray(value)) {
     throw new Error("documotion: plan must be an object");
@@ -452,14 +517,30 @@ export function normalizeDocuPlan(value: unknown): DocuPlan {
       throw new Error(`documotion: shot ${index} must be an object`);
     }
     const shot = valueAtIndex as Record<string, unknown>;
+    const camera = normalizeCameraMotion(shot.camera, shot.motionArc);
     return {
       ...shot,
+      camera,
       narration: optionalText(shot.narration) ?? "",
       beat: optionalText(shot.beat) ?? "",
       quote: optionalText(shot.quote),
       quoteEmphasis: normalizeQuoteEmphasis(shot.quoteEmphasis),
       attribution: optionalText(shot.attribution),
       assets: Array.isArray(shot.assets) ? shot.assets : [],
+      visualCues: normalizeDocumentaryVisualCues(
+        optionalText(shot.narration) ?? "",
+        optionalText(shot.beat) ?? "",
+        Array.isArray(shot.visualCues) ? shot.visualCues.filter((cue): cue is string => typeof cue === "string") : [],
+      ),
+      coverage: shot.coverage && typeof shot.coverage === "object"
+        ? shot.coverage as DocumentaryEditorialCoverage
+        : editorialCoverageFor(optionalText(shot.narration) ?? "", optionalText(shot.beat) ?? "", optionalText(shot.kind)),
+      motionArc: shot.motionArc && typeof shot.motionArc === "object"
+        ? shot.motionArc as DocumentaryMotionArc
+        : editorialMotionArcFor(optionalText(shot.narration) ?? "", optionalText(shot.beat) ?? "", camera),
+      typography: shot.typography && typeof shot.typography === "object"
+        ? shot.typography as DocumentaryTypographyPlan
+        : editorialTypographyFor(optionalText(shot.kind), Boolean(optionalText(shot.title))),
     } as unknown as DocuShotPlan;
   });
 
@@ -523,7 +604,12 @@ const CAPABILITY_CATALOG =
 const CAMERA_MOVES = ["push_in", "pull_back", "pan_left", "pan_right", "drift"];
 const CAMERA_INTENSITIES = ["subtle", "medium", "strong"];
 
-export function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef): string[] {
+export function validatePlan(
+  plan: DocuPlan,
+  durationSec: number,
+  _style: DocuStyleDef,
+  opts?: { narrationWordsPerSec?: number },
+): string[] {
   const problems: string[] = [];
   if (!plan.shots?.length || plan.shots.length < 5) problems.push("need 6-8 shots");
   // Any KNOWN capability is allowed — a style biases selection, it does not
@@ -539,6 +625,31 @@ export function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuSt
     if (!(s.durationSec >= 3 && s.durationSec <= 10)) problems.push(`shot ${i}: durationSec must be 3-10`);
     if (!s.camera || !CAMERA_MOVES.includes(s.camera.move) || !CAMERA_INTENSITIES.includes(s.camera.intensity))
       problems.push(`shot ${i}: camera must be {move,intensity}`);
+    if (!s.camera?.revealMove || s.camera.revealAtPercent === undefined || s.camera.revealMove === s.camera.move) {
+      problems.push(`shot ${i}: camera needs a distinct revealMove and revealAtPercent for the in-shot proof reset`);
+    }
+    if (s.camera?.revealMove && !CAMERA_MOVES.includes(s.camera.revealMove)) {
+      problems.push(`shot ${i}: camera.revealMove must be a supported camera move`);
+    }
+    if (s.camera?.revealAtPercent !== undefined && (s.camera.revealAtPercent < 0.28 || s.camera.revealAtPercent > 0.66)) {
+      problems.push(`shot ${i}: camera.revealAtPercent must land the reveal between 28% and 66% of the shot`);
+    }
+    if (!s.coverage?.primarySubject?.trim() || !s.coverage.visualProof?.trim() || !s.coverage.roles.includes("proof")) {
+      problems.push(`shot ${i}: needs a named primary subject, literal visual proof, and proof coverage`);
+    }
+    if (s.kind !== "quote_card" && (s.coverage?.roles.length ?? 0) < 2) {
+      problems.push(`shot ${i}: needs at least two editorial coverage roles`);
+    }
+    if (!s.motionArc?.establish?.trim() || !s.motionArc.reveal?.trim() || !s.motionArc.exit?.trim() || !s.motionArc.purpose?.trim()) {
+      problems.push(`shot ${i}: needs an establish → reveal → exit motion arc`);
+    } else if (s.motionArc.visualResetAtPercent < 0.28 || s.motionArc.visualResetAtPercent > 0.66 || s.durationSec * s.motionArc.visualResetAtPercent > 4.1) {
+      problems.push(`shot ${i}: visual reset must land between 28%-66% and before 4.1s`);
+    }
+    if (!s.typography || s.typography.maxWords < 1 || s.typography.maxWords > 6) {
+      problems.push(`shot ${i}: typography must declare a restrained 1-6 word copy budget`);
+    }
+    if ((s.title?.trim().split(/\s+/).length ?? 0) > 3) problems.push(`shot ${i}: title must be <=3 words; use annotations for supporting context`);
+    if ((s.visualCues?.length ?? 0) < 2) problems.push(`shot ${i}: needs at least two concrete must-show visual cues`);
     const byRole: Record<string, number> = {};
     for (const a of s.assets ?? []) byRole[a.role] = (byRole[a.role] ?? 0) + 1;
     for (const [role, [min, max]] of Object.entries(KIND_ASSETS[s.kind]) as [DocuAssetRole, [number, number]][]) {
@@ -564,13 +675,13 @@ export function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuSt
   }
   const total = (plan.shots ?? []).reduce((a, s) => a + (s.durationSec || 0), 0);
   if (Math.abs(total - durationSec) > durationSec * 0.15) problems.push(`durations sum ${total}s, target ${durationSec}s (±15%)`);
-  // Narration now DRIVES the video length (each shot lasts as long as its line),
-  // so the word count must fill the target duration at real documentary pace
-  // (~2.3 wps incl. per-shot breaths). Under-writing => a short, half-empty video,
-  // so the lower bound is tight; over-writing only lengthens it gently.
+  // Narration normally drives the video length at a standard documentary pace.
+  // A locked Short may deliberately use a measured slower delivery with visual
+  // breathing room; callers then declare its tested words-per-second target.
   const words = (plan.shots ?? []).map((s) => s.narration ?? "").join(" ").split(/\s+/).filter(Boolean).length;
-  const wTarget = Math.round(durationSec * 2.3);
-  if (words < wTarget * 0.8 || words > wTarget * 1.4) problems.push(`narration ${words} words, target ~${wTarget} (≈2.3 words/sec fills ${durationSec}s; under-writing leaves the video half-silent)`);
+  const narrationWordsPerSec = Math.max(0.8, Math.min(4, opts?.narrationWordsPerSec ?? 2.3));
+  const wTarget = Math.round(durationSec * narrationWordsPerSec);
+  if (words < wTarget * 0.8 || words > wTarget * 1.4) problems.push(`narration ${words} words, target ~${wTarget} (≈${narrationWordsPerSec} words/sec fills ${durationSec}s; under-writing leaves the video half-silent)`);
   // Documentary shot grammar: SET THE SCENE first, then have scale variety.
   const scales = (plan.shots ?? []).map((s) => s.scale);
   const opensWide = scales.slice(0, 2).some((sc) => sc === "establishing" || sc === "wide");
@@ -578,6 +689,10 @@ export function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuSt
   const wideCount = scales.filter((sc) => sc === "establishing" || sc === "wide").length;
   if (wideCount < 2) problems.push(`need >=2 establishing/wide scene-setting shots (got ${wideCount})`);
   if (new Set(scales).size < 2) problems.push("vary the shot scale (don't use one scale for everything)");
+  const moveTypes = new Set((plan.shots ?? []).map((shot) => shot.camera?.move).filter((move) => move && move !== "drift"));
+  if (moveTypes.size < 3) problems.push("need at least three motivated camera move types across the Short");
+  const titleShots = (plan.shots ?? []).filter((shot) => Boolean(shot.title?.trim())).length;
+  if (titleShots / Math.max(1, plan.shots.length) > 0.65) problems.push("large title treatment appears in too many beats; let the imagery carry more of the story");
   return problems;
 }
 
@@ -593,7 +708,10 @@ function planContract(style: DocuStyleDef): string {
      "kind": one of [${Object.keys(KIND_ASSETS).join(", ")}] — LEAN ON [${style.preferredKinds.join(", ")}]; pick the one that best SHOWS this line at this scale,
      "beat": "<=8 words: the visual intent (what we literally see)",
      "durationSec": n (3-10),
-     "camera": {"move": "push_in|pull_back|pan_left|pan_right|drift", "intensity": "subtle|medium|strong"},
+     "camera": {"move": "push_in|pull_back|pan_left|pan_right|drift", "intensity": "subtle|medium|strong", "revealMove": "a distinct second motivated move", "revealAtPercent": 0.28-0.66},
+     "coverage": {"primarySubject":"the literal person/place/object the viewer sees", "visualProof":"the exact fact or object this frame proves", "roles":["establish","hero","proof","detail"]},
+     "motionArc": {"establish":"how the viewer is oriented", "reveal":"what new information appears", "exit":"how the frame hands off", "purpose":"why this movement advances the story", "visualResetAtPercent":0.28-0.66},
+     "typography": {"mode":"headline|annotation|minimal", "purpose":"orient|identify|emphasize|land", "maxWords":1-6},
      "title": "BIG headline <=3 words (parallax_portrait / object_drop / evidence_board)",
      "kicker": "tiny letterspaced line above the title (optional)",
      "labels": [{"text": "<=3 word callout / evidence tag", "sub": "optional handwritten note <=6 words"}],
@@ -606,13 +724,15 @@ function planContract(style: DocuStyleDef): string {
      "threads": [{"from": photoIndex, "to": photoIndex}]  (evidence_board only — connections between its images),
      "geoQuery": "Real place name, geo_map ONLY (e.g. \\"Antwerp, Belgium\\")",
      "rackFocus": "depth_parallax ONLY, optional: near_to_far | far_to_near (a cinematic focus pull)",
-     "assets": [{"id":"bg","role":"bg|fg|image|cutout","brief":"vivid period/world-correct description, NO text in image","source":"generate|archival","query":"<entity name if source=archival>"}]
+     "visualCues": ["2-4 specific things the finished frame MUST visibly prove from this narration; never generic style words"],
+     "assets": [{"id":"bg","role":"bg|fg|image|cutout","brief":"vivid period/world-correct description, NO text in image","source":"online|generate|archival","onlineQuery":"precise real subject/place/object for licensed online search","query":"<entity name if source=archival>"}]
    }
  ]
 }
 ASSET CONTRACT per kind (exact roles): parallax_portrait: 1 bg (wide environment plate, calm centre for big type) + 1 fg (the protagonist ALONE, head/shoulders/arms inside frame, plain backdrop). depth_parallax: exactly 1 image (a cinematic scene with a CLEAR foreground subject and a separated background — the engine derives the 2.5D depth layers). geo_map: ZERO assets — supply "geoQuery" (a real place); the map is rendered from live street data. map_zoom: 1 bg (aged map/chart of the region). photo_slide: 1 bg + 2-3 image. matte_sequence: 3-4 image (full-frame scenes). collage_pan: 1 bg + 6-8 image. evidence_board: optional 1 bg (cork/board) + 3-6 image (the pinned clues/suspects/photos). object_drop: 1 bg + 0-1 fg + 1-3 cutout (single object on white). quote_card: 0-1 PICTURE-ONLY background plate with negative space; NEVER put the quote, attribution, or any lettering in its brief/image.
-SOURCE: use "archival" with a precise "query" ONLY for a real, famous, named person/place that Wikimedia certainly has (e.g. fg of "Henry Ford"); otherwise "generate".
+SOURCE: use "online" with a precise "onlineQuery" for every real named person, place, company, document or object that can be shown factually; the renderer searches Pexels and Wikimedia Commons, records source/license/credit, and accepts it only after the visual gate. If that search has no usable match, it falls back to direct Novita Z-Image Turbo. FAL/Nano Banana is reserved for thumbnails and is never an asset fallback. Use "archival" only for a deliberately pinned Wikimedia query; otherwise use "online".
 CUE-DRIVEN ASSETS: every asset brief must depict EXACTLY what its shot's narration line says — render the concrete image the words evoke. If the line names the crew → a scene of the crew (e.g. dark-clad figures in a dim vault corridor at night); a place from above → an aerial/overhead scene of that place; a person at a location → that person in front of that location; an object → that object. Do NOT use generic filler.
+EDITORIAL RHYTHM: every beat must visibly reset before 4.1 seconds: establish the literal subject, reveal a new proof/detail through a distinct camera move, then leave the frame with a readable handoff. Do not use a generic hero plate as a substitute for factual proof. Across the film, cover the world with establishment, hero, proof, and detail frames; no same-shaped plate can carry consecutive new claims.
 ON-SCREEN TEXT TONE: titles/kickers/labels/circleLabels must be SHORT, dramatic and tonally on-point for a premium documentary — evocative, never awkward, literal, redundant or accidentally COMICAL. (Bad: an evidence shot titled "THE TRASH". Good: "THE SLIP", "ONE MISTAKE", "THE INSIDER".) When unsure, omit the title and let the imagery speak.`;
 }
 
@@ -753,13 +873,13 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
   const shotReqs = plan.shots
     .map((s, i) => {
       const roles = s.kind === "geo_map" ? "(none — geo map renders from data)" : s.assets.map((a) => `${a.id}(${a.role}${a.source === "archival" ? `, archival of "${a.query}"` : ""})`).join(", ");
-      return `SHOT ${i} [${s.kind} / ${s.scale}] line: "${s.narration}"\n  asset roles to rewrite: ${roles}`;
+      return `SHOT ${i} [${s.kind} / ${s.scale}] line: "${s.narration}"\n  MUST SHOW: ${s.visualCues?.join("; ") || s.beat}\n  asset roles to rewrite: ${roles}`;
     })
     .join("\n");
   try {
     const geoShots = plan.shots.map((s, i) => ({ s, i })).filter((x) => x.s.kind === "geo_map");
     const res = await geminiJsonPro<{
-      shots?: { i: number; assets?: { id: string; brief?: string; source?: "generate" | "archival"; query?: string }[]; title?: string; kicker?: string; circleLabel?: string; labels?: { text: string; sub?: string }[]; annotations?: string[]; cues?: string[]; geoContext?: { label: string; side: "top" | "bottom" | "left" | "right" }[] }[];
+      shots?: { i: number; assets?: { id: string; brief?: string; source?: "generate" | "archival" | "online"; query?: string; onlineQuery?: string }[]; title?: string; kicker?: string; circleLabel?: string; labels?: { text: string; sub?: string }[]; annotations?: string[]; cues?: string[]; geoContext?: { label: string; side: "top" | "bottom" | "left" | "right" }[] }[];
     }>({
       prompt:
         `${CINEMATOGRAPHER_DOCTRINE}\n\n` +
@@ -771,7 +891,7 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
           ? `GEO ORIENTATION — for the geo_map shot(s) [${geoShots.map((x) => x.i).join(", ")}], also give "geoContext": 2-4 orienting labels that place the feature so the viewer sees WHERE it is and what it connects, in relation to the line. Use REAL surrounding geography with the correct side: e.g. a N–S canal → {"label":"MEDITERRANEAN SEA","side":"top"},{"label":"RED SEA","side":"bottom"},{"label":"EGYPT","side":"left"},{"label":"SINAI","side":"right"}.\n\n`
           : "") +
         `${shotReqs}\n\n` +
-        `Return STRICT JSON {"shots":[{"i":n,"assets":[{"id":"bg","brief":"rich, specific, composed PICTURE-ONLY brief — name the real subject, show the action + key objects, set framing/lighting/era","source":"generate|archival","query":"<only if archival: a precise unambiguous subject>"}],"title":"SPECIFIC headline — a name / number / place, not an abstraction (<=4 words)","kicker":"informative qualifier <=6 words","circleLabel":"ring/geo word if any","labels":[{"text":"specific callout <=4 words","sub":"opt note"}],"annotations":["opt margin note"],"cues":["concrete thing the frame MUST show","2-4 of these"],"geoContext":[{"label":"MEDITERRANEAN SEA","side":"top"}]}]}.`,
+        `Return STRICT JSON {"shots":[{"i":n,"assets":[{"id":"bg","brief":"rich, specific, composed PICTURE-ONLY brief — name the real subject, show the action + key objects, set framing/lighting/era","source":"online|generate|archival","query":"<only if archival: a precise unambiguous subject>","onlineQuery":"<for a real factual subject: exact Wikimedia search phrase>"}],"title":"OPTIONAL specific headline — a name / number / place, not an abstraction (<=3 words; omit when the image carries the line)","kicker":"informative qualifier <=6 words","circleLabel":"ring/geo word if any","labels":[{"text":"specific callout <=4 words","sub":"opt note"}],"annotations":["opt margin note"],"cues":["concrete thing the frame MUST show","2-4 of these"],"geoContext":[{"label":"MEDITERRANEAN SEA","side":"top"}]}]}.`,
       maxTokens: 4000,
       temperature: 0.5,
     });
@@ -785,13 +905,21 @@ export async function directDocuVisuals(plan: DocuPlan, style: DocuStyleDef, top
         if (da.brief?.trim()) a.brief = da.brief.trim();
         if (da.source === "generate") { a.source = "generate"; a.query = undefined; }
         else if (da.source === "archival" && da.query?.trim()) { a.source = "archival"; a.query = da.query.trim(); }
+        else if (da.source === "online" && da.onlineQuery?.trim()) { a.source = "online"; a.onlineQuery = da.onlineQuery.trim(); }
       }
-      if (d.title?.trim()) s.title = d.title.trim();
+      if (d.title?.trim()) {
+        const title = d.title.trim();
+        s.title = title.split(/\s+/).length <= 3 ? title : undefined;
+      }
       if (d.kicker?.trim()) s.kicker = d.kicker.trim();
       if (d.circleLabel?.trim()) s.circleLabel = d.circleLabel.trim();
       if (d.labels?.length) s.labels = d.labels.filter((l) => l.text?.trim());
       if (d.annotations?.length) s.annotations = d.annotations.filter((x) => x?.trim());
-      if (d.cues?.length) s.visualCues = d.cues.filter((c) => c?.trim()).slice(0, 4);
+      s.visualCues = normalizeDocumentaryVisualCues(
+        s.narration,
+        s.beat,
+        d.cues?.length ? d.cues.filter((c) => c?.trim()).slice(0, 4) : s.visualCues,
+      );
       if (d.geoContext?.length && s.kind === "geo_map") s.geoContext = d.geoContext.filter((g) => g.label?.trim() && ["top", "bottom", "left", "right"].includes(g.side)).slice(0, 4);
       touched++;
     }
@@ -817,31 +945,14 @@ async function downloadTo(url: string, outPath: string): Promise<void> {
   await writeFile(outPath, Buffer.from(await r.arrayBuffer()));
 }
 
-/** BiRefNet background removal via fal.ai → alpha PNG. v2 first, then v1. */
-async function removeBackground(imgPath: string, outPng: string, log?: Logger): Promise<string> {
-  const key = process.env.FAL_KEY;
-  if (!key) throw new Error("documotion: FAL_KEY missing (vault service 'fal')");
-  const dataUri = `data:image/jpeg;base64,${(await readFile(imgPath)).toString("base64")}`;
-  let lastErr = "";
-  for (const ep of ["fal-ai/birefnet/v2", "fal-ai/birefnet"]) {
-    try {
-      const res = await fetch(`https://fal.run/${ep}`, {
-        method: "POST",
-        headers: { Authorization: `Key ${key}`, "content-type": "application/json" },
-        body: JSON.stringify({ image_url: dataUri }),
-        signal: AbortSignal.timeout(120_000),
-      });
-      const j = (await res.json()) as { image?: { url?: string } };
-      if (!res.ok) { lastErr = `${ep} HTTP ${res.status}`; continue; }
-      const url = j?.image?.url;
-      if (!url) { lastErr = `${ep}: no url`; continue; }
-      await downloadTo(url, outPng);
-      return outPng;
-    } catch (e) {
-      lastErr = `${ep}: ${e instanceof Error ? e.message : e}`;
-    }
-  }
-  throw new Error(`documotion: background removal failed (${lastErr})`);
+/**
+ * Documentary renderers must not invoke FAL outside the thumbnail lane.
+ * Cutout briefs therefore require a plain isolated backdrop from source or
+ * Z-Image; when it is not achievable locally, the caller composes the full
+ * approved image rather than purchasing a hidden background-removal call.
+ */
+async function removeBackground(_imgPath: string, _outPng: string, _log?: Logger): Promise<string> {
+  throw new Error("documotion: external background removal disabled by the thumbnail-only FAL policy");
 }
 
 /**
@@ -851,36 +962,10 @@ async function removeBackground(imgPath: string, outPng: string, log?: Logger): 
  * effort — returns [] on any failure so the shot degrades to a Ken Burns push.
  */
 async function deriveDepthLayers(baseImg: string, outDir: string, shotIdx: number, log?: Logger): Promise<string[]> {
-  if (!process.env.FAL_KEY) return [];
-  try {
-    const dataUri = `data:image/jpeg;base64,${(await readFile(baseImg)).toString("base64")}`;
-    const depthPath = join(outDir, `s${shotIdx}_depth.png`);
-    await getDepthMap(dataUri, depthPath, log ?? (() => {}));
-    const nearPng = join(outDir, `s${shotIdx}_near.png`);
-    // depth.ts convention: BRIGHTER = NEARER. Threshold the near band, feather,
-    // scale the mask to the base, alpha-merge onto the base.
-    await run(ffmpegBin(), [
-      "-y",
-      "-i",
-      baseImg,
-      "-i",
-      depthPath,
-      "-filter_complex",
-      // Soft, wide feather on the near/far boundary so the depth cut never
-      // reads as a hard seam; scale the mask to the base, then alpha-merge.
-      "[1:v]format=gray,lutyuv=y='if(gt(val,130),255,0)',gblur=sigma=14[mtmp];" +
-        "[mtmp][0:v]scale2ref=flags=bilinear[m][base];" +
-        "[base][m]alphamerge,format=rgba[o]",
-      "-map",
-      "[o]",
-      nearPng,
-    ]);
-    log?.(`documotion depth: near layer for shot ${shotIdx}`);
-    return [nearPng];
-  } catch (e) {
-    log?.(`documotion depth: shot ${shotIdx} fell back to Ken Burns (${e instanceof Error ? e.message : e})`);
-    return [];
-  }
+  void baseImg;
+  void outDir;
+  log?.(`documotion depth: shot ${shotIdx} uses authored source/cutout layers; external depth providers are disabled`);
+  return [];
 }
 
 export interface AssetGate {
@@ -941,6 +1026,45 @@ function rejectedAssetGate(fix: string): AssetGate {
   return { verdictValid: false, styleOk: false, briefOk: false, noText: false, framingOk: false, fix };
 }
 
+/**
+ * Qwen can explain a compact JSON verdict in prose or use loose key syntax.
+ * The fallback remains fail-closed: all four explicit boolean assignments are
+ * required before an asset can pass.
+ */
+export function parseDocuAssetGate(raw: string): AssetGate {
+  try {
+    const parsed = parseJsonLoose<unknown>(raw);
+    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+      return rejectedAssetGate("asset gate returned a malformed verdict");
+    }
+    const value = parsed as Record<string, unknown>;
+    if (![value.styleOk, value.briefOk, value.noText, value.framingOk].every((item) => typeof item === "boolean")) {
+      return rejectedAssetGate("asset gate omitted a required boolean verdict");
+    }
+    return {
+      verdictValid: true,
+      styleOk: value.styleOk as boolean,
+      briefOk: value.briefOk as boolean,
+      noText: value.noText as boolean,
+      framingOk: value.framingOk as boolean,
+      fix: optionalText(value.fix),
+    };
+  } catch {
+    const field = (name: "styleOk" | "briefOk" | "noText" | "framingOk"): boolean | undefined => {
+      const found = raw.match(new RegExp(`(?:["']?${name}["']?)\\s*[:=]\\s*(true|false)\\b`, "i"));
+      return found ? found[1].toLowerCase() === "true" : undefined;
+    };
+    const styleOk = field("styleOk");
+    const briefOk = field("briefOk");
+    const noText = field("noText");
+    const framingOk = field("framingOk");
+    if (styleOk === undefined || briefOk === undefined || noText === undefined || framingOk === undefined) {
+      return rejectedAssetGate("asset gate returned unparseable JSON");
+    }
+    return { verdictValid: true, styleOk, briefOk, noText, framingOk, fix: undefined };
+  }
+}
+
 async function assetDigest(path: string): Promise<string> {
   return createHash("sha256").update(await readFile(path)).digest("hex");
 }
@@ -965,45 +1089,38 @@ async function persistAssetApproval(path: string): Promise<string> {
 }
 
 /** Per-still vision gate — catches weird crops/text/style drift before assembly. */
-async function gateAsset(path: string, role: DocuAssetRole, brief: string, worldHint: string): Promise<AssetGate> {
+async function gateAsset(path: string, role: DocuAssetRole, brief: string, worldHint: string, log?: Logger): Promise<AssetGate> {
   const framingAsk =
     role === "fg"
       ? "framingOk: ONE subject, head/shoulders/arms inside frame (only bottom may crop), plain backdrop, not weirdly cropped?"
       : role === "cutout"
         ? "framingOk: single object fully inside frame on a plain background?"
         : "framingOk: clear focal hierarchy, no awkward crops of faces/subjects at the frame edge?";
-  const raw = await visionLocal({
-    prompt:
-      `ASSET GATE for ${worldHint}. Brief: "${brief.slice(0, 280)}". ` +
-      `Judge: 1. styleOk: matches that world's look (not generic/glossy)? 2. briefOk: depicts the brief? ` +
-      `3. noText: ZERO readable text/letters/numbers/captions/signs/logos/UI/borders/watermarks baked in, ` +
-      `including on cutout objects? 4. ${framingAsk} ` +
-      `Return STRICT JSON {"styleOk":bool,"briefOk":bool,"noText":bool,"framingOk":bool,"fix":"<=14 words"}.`,
-    imagePaths: [path],
-    json: true,
-    maxTokens: 250,
-  }).catch(() => "");
-  if (!raw) return rejectedAssetGate("asset gate unavailable; retry only after a verifiable text-free render");
+  let raw = "";
   try {
-    const parsed = parseJsonLoose<unknown>(raw);
-    if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-      return rejectedAssetGate("asset gate returned a malformed verdict");
-    }
-    const value = parsed as Record<string, unknown>;
-    if (![value.styleOk, value.briefOk, value.noText, value.framingOk].every((item) => typeof item === "boolean")) {
-      return rejectedAssetGate("asset gate omitted a required boolean verdict");
-    }
-    return {
-      verdictValid: true,
-      styleOk: value.styleOk as boolean,
-      briefOk: value.briefOk as boolean,
-      noText: value.noText as boolean,
-      framingOk: value.framingOk as boolean,
-      fix: optionalText(value.fix),
-    };
-  } catch {
-    return rejectedAssetGate("asset gate returned unparseable JSON");
+    raw = await visionLocal({
+      prompt:
+        `ASSET GATE for ${worldHint}. Brief: "${brief.slice(0, 280)}". ` +
+        `Judge: 1. styleOk: matches that world's look (not generic/glossy)? 2. briefOk: depicts the brief? ` +
+        `3. noText: ZERO readable text/letters/numbers/captions/signs/logos/UI/borders/watermarks baked in, ` +
+        `including on cutout objects? 4. ${framingAsk} ` +
+        `Return STRICT JSON {"styleOk":bool,"briefOk":bool,"noText":bool,"framingOk":bool,"fix":"<=14 words"}.`,
+      imagePaths: [path],
+      json: true,
+      maxTokens: 250,
+    });
+  } catch (error) {
+    // Keep the actual provider failure visible in the run trace. The former
+    // catch-to-empty string hid a missing/misconfigured judge and made every
+    // safe asset gate look identical.
+    log?.(`documotion asset gate unavailable: ${error instanceof Error ? error.message.slice(0, 420) : String(error).slice(0, 420)}`);
   }
+  if (!raw) return rejectedAssetGate("asset gate unavailable; retry only after a verifiable text-free render");
+  const verdict = parseDocuAssetGate(raw);
+  if (!verdict.verdictValid) {
+    log?.(`documotion asset gate malformed response: ${raw.replace(/\s+/g, " ").slice(0, 420)}`);
+  }
+  return verdict;
 }
 
 export interface DocuAssetFile {
@@ -1025,6 +1142,36 @@ export interface DocuAssetReceipt {
 interface AssetJob {
   shotIdx: number;
   brief: DocuAssetBrief;
+}
+
+interface DocuAssetSourceLedger {
+  version: "documotion-asset-source/v1";
+  acquisition: "online" | "novita-z-image-turbo";
+  acquiredAt: string;
+  query?: string;
+  provider: string;
+  model?: string;
+  sourcePageUrl?: string;
+  downloadUrl?: string;
+  attribution?: string;
+  license?: string;
+  licenseUrl?: string;
+  fallbackReason?: string;
+}
+
+function onlineQueriesForAsset(shot: DocuShotPlan, asset: DocuAssetBrief): string[] {
+  return [
+    asset.onlineQuery,
+    asset.query,
+    shot.coverage?.primarySubject,
+    shot.coverage?.visualProof,
+    shot.visualCues?.[0],
+    shot.beat,
+  ].filter((value): value is string => Boolean(value?.trim()));
+}
+
+async function persistDocuAssetSource(path: string, source: DocuAssetSourceLedger): Promise<void> {
+  await writeFile(`${path}.source.json`, `${JSON.stringify(source, null, 2)}\n`, "utf8");
 }
 
 /**
@@ -1060,7 +1207,7 @@ export async function generateDocuAssets(
       }
       // Legacy caches predate the proof sidecar. Verify once, persist the
       // content hash, then future resumes remain zero-provider and tamper-safe.
-      const cachedGate = await gateAsset(finalPath, a.role, pictureBrief, style.label);
+      const cachedGate = await gateAsset(finalPath, a.role, pictureBrief, style.label, log);
       if (!cachedGate.verdictValid) {
         throw new Error(`documotion asset s${i}/${a.id}: ${cachedGate.fix}; refusing image spend without a working gate`);
       }
@@ -1076,34 +1223,59 @@ export async function generateDocuAssets(
 
     const rawPath = join(assetsDir, `s${i}_${a.id}_raw.jpg`);
     let got = false;
+    let sourceLedger: DocuAssetSourceLedger | undefined;
+    let fallbackReason = "no usable licensed online result";
 
-    // ARCHIVAL source: a real Wikimedia photograph of a named entity.
-    if (a.source === "archival" && a.query && !externalFix) {
+    // SEARCH FIRST: Wikimedia Commons is the auditable online source. The
+    // result only survives if it passes the same literal-brief/no-text gate as
+    // generated stills; a broad or incorrect web image is not good enough.
+    if (!externalFix && shot.kind !== "quote_card") {
       try {
-        const url = await searchWikimediaImageUrl(a.query);
-        if (url) {
-          await downloadTo(url, rawPath);
-          const archivalGate = await gateAsset(rawPath, a.role, a.brief, style.label);
-          if (!archivalGate.verdictValid) {
-            throw new Error(`documotion asset s${i}/${a.id}: ${archivalGate.fix}; refusing fallback image spend`);
+        const onlineCandidates = await searchOnlineDocumentaryAssets({
+          queries: onlineQueriesForAsset(shot, a),
+          thumbWidth: format === "short" ? 1600 : 1920,
+        });
+        const rejectedOnline: string[] = [];
+        for (const online of onlineCandidates) {
+          await downloadTo(online.downloadUrl, rawPath);
+          const onlineGate = await gateAsset(rawPath, a.role, pictureBrief, style.label, log);
+          if (!onlineGate.verdictValid) {
+            throw new Error(`documotion asset s${i}/${a.id}: ${onlineGate.fix}; refusing unverified online source`);
           }
-          if (isAssetGateApproved(archivalGate)) {
+          if (isAssetGateApproved(onlineGate)) {
             got = true;
-            log?.(`documotion asset s${i}/${a.id}: archival "${a.query}" via Wikimedia (gate approved)`);
+            sourceLedger = {
+              version: "documotion-asset-source/v1",
+              acquisition: "online",
+              acquiredAt: new Date().toISOString(),
+              provider: online.provider,
+              query: online.query,
+              sourcePageUrl: online.sourcePageUrl,
+              downloadUrl: online.downloadUrl,
+              attribution: online.attribution,
+              license: online.license,
+              licenseUrl: online.licenseUrl,
+            };
+            log?.(`documotion asset s${i}/${a.id}: online ${online.provider} "${online.query}" (gate approved)`);
+            break;
           } else {
-            log?.(
-              `documotion asset s${i}/${a.id}: archival gate rejected ` +
-                `(style=${archivalGate.styleOk} brief=${archivalGate.briefOk} noText=${archivalGate.noText} framing=${archivalGate.framingOk}) — generating a clean replacement`,
-            );
+            rejectedOnline.push(`${online.query}: style=${onlineGate.styleOk} brief=${onlineGate.briefOk} noText=${onlineGate.noText} framing=${onlineGate.framingOk}`);
           }
         }
+        if (!got && rejectedOnline.length) {
+          fallbackReason = `online candidates rejected (${rejectedOnline.join(" | ")})`;
+          log?.(`documotion asset s${i}/${a.id}: ${fallbackReason} — using Novita Z-Image Turbo`);
+        }
       } catch (error) {
-        if (error instanceof Error && error.message.includes("refusing fallback image spend")) throw error;
-        /* fall through to generate */
+        if (error instanceof Error && error.message.includes("refusing unverified online source")) throw error;
+        fallbackReason = `online search unavailable (${error instanceof Error ? error.message : error})`;
+        log?.(`documotion asset s${i}/${a.id}: ${fallbackReason} — using Novita Z-Image Turbo`);
       }
     }
 
-    // GENERATE source (default + archival fallback): Banana behind the gate.
+    // Fallback only: the public Novita Z-Image Turbo API. FAL/Nano Banana
+    // is intentionally reserved for thumbnails and is never a documentary
+    // still provider.
     if (!got) {
       // Crisp by default; depth_parallax plates must be FULLY in focus so the
       // engine's 2.5D parallax supplies the depth (baked bokeh fights it +
@@ -1115,7 +1287,8 @@ export async function generateDocuAssets(
           : "";
       let fix = externalFix ?? "";
       let accepted = false;
-      for (let attempt = 0; attempt < 2; attempt++) {
+      let lastGate: AssetGate | undefined;
+      for (let attempt = 0; attempt < MAX_NOVITA_ASSET_ATTEMPTS; attempt++) {
         const prompt = buildDocuAssetPrompt({
           framingPrefix: framing.prefix,
           pictureBrief,
@@ -1125,31 +1298,41 @@ export async function generateDocuAssets(
           fix,
           forbiddenCopy: [shot.quote, shot.attribution],
         });
-        log?.(`documotion asset s${i}/${a.id} (${a.role})${fix ? ` [retry]` : ""}…`);
-        const bytes = await generateBananaImage({
-          prompt,
+        log?.(`documotion asset s${i}/${a.id} (${a.role}) Novita Z-Image Turbo${fix ? ` [retry]` : ""}…`);
+        const generated = await generateNovitaZImageTurbo({
+          prompt:
+            `${prompt} ` +
+            "Absolutely no readable text, letters, numbers, captions, signs, logos, watermarks, UI, borders, labels, stamps, postmarks, or brand marks.",
           aspectRatio: framing.ar,
-          allowText: false,
-          tier: "flash",
-          // This loop owns quality recovery. One HTTP submission per outer
-          // attempt prevents nested retries from multiplying image spend.
-          maxProviderAttempts: 1,
+          seed: (i + 1) * 1009 + (attempt + 1) * 97 + a.id.length * 13,
         });
-        await writeFile(rawPath, bytes);
-        const gate = await gateAsset(rawPath, a.role, pictureBrief, style.label);
+        await writeFile(rawPath, generated.bytes);
+        const gate = await gateAsset(rawPath, a.role, pictureBrief, style.label, log);
         if (!gate.verdictValid) {
           throw new Error(`documotion asset s${i}/${a.id}: ${gate.fix}; refusing a second image submission`);
         }
         if (isAssetGateApproved(gate)) {
           accepted = true;
+          sourceLedger = {
+            version: "documotion-asset-source/v1",
+            acquisition: "novita-z-image-turbo",
+            acquiredAt: new Date().toISOString(),
+            provider: "novita",
+            model: generated.model,
+            fallbackReason,
+          };
           break;
         }
+        lastGate = gate;
         fix = gate.fix || "cleaner framing, authentic style, absolutely no text";
         log?.(`documotion asset s${i}/${a.id} gate REJECTED (style=${gate.styleOk} brief=${gate.briefOk} noText=${gate.noText} framing=${gate.framingOk})`);
       }
       if (!accepted) {
+        const detail = lastGate
+          ? ` (style=${lastGate.styleOk} brief=${lastGate.briefOk} noText=${lastGate.noText} framing=${lastGate.framingOk}; fix=${lastGate.fix || "none"})`
+          : "";
         throw new Error(
-          `documotion asset s${i}/${a.id}: no approved picture-only asset after 2 bounded attempts; refusing to ship a rejected provider image`,
+          `documotion asset s${i}/${a.id}: no approved picture-only asset after ${MAX_NOVITA_ASSET_ATTEMPTS} bounded attempts${detail}; refusing to ship a rejected provider image`,
         );
       }
     }
@@ -1170,6 +1353,7 @@ export async function generateDocuAssets(
       await normalizeAsset(rawPath, finalPath, 1280);
     }
     const approvalSha256 = await persistAssetApproval(finalPath);
+    if (sourceLedger) await persistDocuAssetSource(finalPath, sourceLedger);
     return { shotIdx: i, id: a.id, role: a.role, path: finalPath, approvalSha256 };
   });
 
@@ -1249,7 +1433,8 @@ export async function buildShotSpecs(
     specs.push({
       kind: s.kind,
       durationInFrames: Math.max(36, Math.round(durs[i] * norm * FPS)),
-      camera: o.camera ?? s.camera,
+      camera: { ...s.camera, ...(o.camera ?? {}) },
+      visualResetAtPercent: s.motionArc?.visualResetAtPercent,
       bg: bgs[0],
       fg: fgs[0],
       images: images.length ? images : undefined,
@@ -1348,9 +1533,9 @@ export async function verifyDocu(args: {
     `You are the FILM VERIFIER for a ${args.worldHint} motion engine. One frame per shot, in order:\n` +
     `${args.labels.join("\n")}\n${VERIFIER_DOCTRINE}\n${VERIFIER_CHECKLIST}\n` +
     `CUE FIDELITY (the most important check): the frame must SHOW what its LINE says. Read each shot's "MUST SHOW" ` +
-    `cues — if a key element the line names is ABSENT or generic (e.g. the line is "stares at a map" but there is no ` +
+    `and "EDITORIAL PROOF" fields — if a key element the line names is ABSENT or generic (e.g. the line is "stares at a map" but there is no ` +
     `map; "the laborers" but no people; a named person who is the wrong person/era), that shot's COHESION is <=4 and ` +
-    `you MUST emit a regen_asset that adds the missing element. The picture has to realise the specific moment.\n` +
+    `you MUST emit a regen_asset that adds the missing element. Reject generic hero plates that fail the stated proof, flat scenes that hide the requested foreground/background separation, or decorative title treatment that competes with the proof image. The picture has to realise the specific moment.\n` +
     `Score 1-10: typeCraft, cutoutCraft, composition, legibility, styleMatch, cohesion. pass = every score >=7 ` +
     `(legibility drops below 7 whenever any two text blocks overlap or touch; cohesion drops below 7 when the frame ` +
     `does not show its line's MUST-SHOW cues).\n` +
@@ -1455,14 +1640,16 @@ async function renderVerifySet(args: {
     outPaths.push(join(framesDir, `s${i}.jpg`));
     const s = plan.shots[i];
     labels.push(
-      `[shot ${i}] ${s.kind}, ${Math.round(spec.durationInFrames / FPS)}s, camera ${spec.camera?.move}/${spec.camera?.intensity}` +
+        `[shot ${i}] ${s.kind}, ${Math.round(spec.durationInFrames / FPS)}s, camera ${spec.camera?.move}/${spec.camera?.intensity}${spec.camera?.revealMove ? ` → ${spec.camera.revealMove} @${Math.round((spec.camera.revealAtPercent ?? 0.52) * 100)}%` : ""}` +
         (s.title ? `, title "${s.title}"` : "") +
         (s.labels?.length ? `, labels ${s.labels.map((l) => `"${l.text}"`).join("+")}` : "") +
         (s.kind === "quote_card" && s.quote
           ? `\n   DETERMINISTIC OVERLAY (allowed exact copy only): "${s.quote}"${s.attribution ? ` — ${s.attribution}` : ""}`
           : "") +
         `\n   LINE: "${s.narration}"` +
-        (s.visualCues?.length ? `\n   MUST SHOW: ${s.visualCues.join("; ")}` : ""),
+        (s.visualCues?.length ? `\n   MUST SHOW: ${s.visualCues.join("; ")}` : "") +
+        (s.coverage ? `\n   EDITORIAL PROOF: ${s.coverage.visualProof}; coverage ${s.coverage.roles.join("/")}` : "") +
+        (s.motionArc ? `\n   MOTION ARC: ${s.motionArc.establish} → ${s.motionArc.reveal} → ${s.motionArc.exit}; reset ${Math.round(s.motionArc.visualResetAtPercent * 100)}%` : ""),
     );
   }
   await renderDocuStills({
@@ -1503,6 +1690,12 @@ export interface CraftDocuArgs {
   plan?: DocuPlan;
   /** Keep supplied beat windows authoritative after per-shot narration is voiced. */
   lockShotDurations?: boolean;
+  /** Optional per-render delivery pace (0.7–1.2). The George voice and timing breaths remain unchanged. */
+  narrationSpeed?: number;
+  /** Optional ElevenLabs model override for a bounded render; defaults to the provider's expressive v3 path. */
+  elevenModelId?: string;
+  /** Measured narration pace for a locked cut; defaults to the standard 2.3 words/sec documentary target. */
+  narrationWordsPerSec?: number;
   log?: Logger;
 }
 
@@ -1518,6 +1711,8 @@ export interface CraftDocuResult {
   assetReceipts: DocuAssetReceipt[];
   /** Exact provider usage observed inside the isolated DocuMotion worker. */
   usage: DocuMotionUsage;
+  /** The release-gate score for the exact accepted visual plan. */
+  quality: DocumentaryVisualQualityAssessment;
 }
 
 export interface DocuMotionUsage {
@@ -1544,6 +1739,8 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   const geometry = docuRenderGeometry(args.format ?? "long");
   const runDir = args.runDir;
   const maxRounds = args.maxRefineRounds ?? 2;
+  const narrationSpeed = Math.max(0.7, Math.min(1.2, args.narrationSpeed ?? NARR.speed));
+  const elevenModelId = args.elevenModelId;
   const style = getStyle(args.style);
   // Render children do not inherit the parent runner's async-local usage
   // scopes. Keep an explicit local scope so their real provider spend returns
@@ -1558,7 +1755,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   let plan: DocuPlan;
   if (args.plan) {
     plan = normalizeDocuPlan(args.plan);
-    const suppliedProblems = validatePlan(plan, durationSec, style);
+    const suppliedProblems = validatePlan(plan, durationSec, style, { narrationWordsPerSec: args.narrationWordsPerSec });
     if (suppliedProblems.length) {
       throw new Error(`documotion: supplied plan failed validation (${suppliedProblems.join("; ")})`);
     }
@@ -1566,7 +1763,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     log(`documotion: using supplied locked plan (${plan.shots.length} shots, style ${plan.styleId})`);
   } else if (existsSync(planPath)) {
     plan = normalizeDocuPlan(JSON.parse(await readFile(planPath, "utf8")));
-    const cachedProblems = validatePlan(plan, durationSec, style);
+    const cachedProblems = validatePlan(plan, durationSec, style, { narrationWordsPerSec: args.narrationWordsPerSec });
     if (cachedProblems.length) {
       throw new Error(
         `documotion: cached plan failed validation before provider work (${cachedProblems.join("; ")})`,
@@ -1580,10 +1777,16 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
     plan = await planDocu({ topic: args.topic, style, referenceNotes: args.referenceNotes, durationSec, log });
     await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8");
   }
-  if (plan.shots.some((s) => !s.visualCues)) {
+  let planQuality = assessDocumentaryVisualQuality(plan.shots);
+  if (planQuality.grade !== "good") {
     await directDocuVisuals(plan, style, args.topic, log);
     await writeFile(planPath, JSON.stringify(plan, null, 2), "utf8"); // persist so re-runs skip it
+    planQuality = assessDocumentaryVisualQuality(plan.shots);
   }
+  if (planQuality.grade !== "good") {
+    throw new Error(`documotion: editorial release gate rejected plan (${planQuality.blockers.join("; ") || planQuality.reasons.join("; ")})`);
+  }
+  log(`documotion visual quality: ${planQuality.grade.toUpperCase()} ${planQuality.score}/100 — semantic ${planQuality.semanticScore}/34, coverage ${planQuality.coverageScore}/20, motion ${planQuality.motionScore}/20, story ${planQuality.storyScore}/16, type ${planQuality.typographyScore}/11`);
 
   // 2. ASSETS (gated, pooled, cached) + GEO geometry for any geo_map shots
   let assets = await imageUsageScope.run(() =>
@@ -1604,7 +1807,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
   let shotVOs: ShotVO[] = [];
   let fixedDursSec: number[] | undefined;
   if (args.narrate !== false) {
-    shotVOs = await synthShotVOs(plan, runDir, style.label, log, narrationUsage);
+    shotVOs = await synthShotVOs(plan, runDir, style.label, log, narrationUsage, narrationSpeed, elevenModelId);
     if (shotVOs.length) {
       if (args.lockShotDurations) {
         fixedDursSec = plan.shots.map((shot) => shot.durationSec);
@@ -1644,7 +1847,9 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
       );
     }
   }
-  if (!verdict.pass) log(`documotion: verifier unsatisfied after ${rounds} rounds — shipping with honest verdict`);
+  if (!verdict.pass) {
+    throw new Error(`documotion: final visual verifier rejected render after ${rounds} rounds (${verdict.note ?? "no actionable repair accepted"})`);
+  }
 
   // 5. FINAL 1080p master (narration-driven durations)
   const specs = await buildShotSpecs(plan, assets, durationSec, overrides, geoByShot, fixedDursSec);
@@ -1728,6 +1933,7 @@ export async function craftDocuMotion(args: CraftDocuArgs): Promise<CraftDocuRes
       music: { generatedTracks: generatedMusicTracks, costUsd: musicCostUsd },
       totalCostUsd: modelUsage.costUsd + imageUsage.costUsd + narrationCostUsd + musicCostUsd,
     },
+    quality: planQuality,
   };
   });
 }
