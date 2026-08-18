@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "@/lib/sha256";
 
 import { z } from "zod";
 
@@ -215,7 +215,7 @@ function canonicalJson(value: unknown): string {
 }
 
 function fingerprint(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+  return sha256Hex(canonicalJson(value));
 }
 
 function parseReviewedAt(value: string): Date | undefined {

@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "@/lib/sha256";
 
 import { z } from "zod";
 
@@ -456,7 +456,7 @@ function canonicalJson(value: unknown): string {
 /** Content-addresses the normalized ledger so a later scene plan is traceable to its facts. */
 export function casefileFingerprint(value: unknown): string {
   const packet = parseCasePacket(value);
-  return createHash("sha256").update(canonicalJson(normalizedPacketForFingerprint(packet))).digest("hex");
+  return sha256Hex(canonicalJson(normalizedPacketForFingerprint(packet)));
 }
 
 function isSourceMediaTreatment(treatment: CasefileEvidenceTreatment): boolean {

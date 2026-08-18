@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "@/lib/sha256";
 
 import { z } from "zod";
 
@@ -437,7 +437,7 @@ function canonicalJson(value: unknown): string {
 }
 
 function hash(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+  return sha256Hex(canonicalJson(value));
 }
 
 export function cinematicCaseSequenceContentFingerprint(
@@ -463,9 +463,7 @@ export function cinematicContinuitySeed(
   const subject = castIds.length
     ? `cast:${[...castIds].sort().join("|")}`
     : `scene:${sceneId}`;
-  const hex = createHash("sha256")
-    .update(`cinematic-continuity-seed/v1\n${sequenceFingerprint}\n${subject}`)
-    .digest("hex")
+  const hex = sha256Hex(`cinematic-continuity-seed/v1\n${sequenceFingerprint}\n${subject}`)
     .slice(0, 8);
   return Math.max(1, parseInt(hex, 16) & 0x7fff_ffff);
 }

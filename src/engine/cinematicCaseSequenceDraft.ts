@@ -1,4 +1,4 @@
-import { createHash } from "node:crypto";
+import { sha256Hex } from "@/lib/sha256";
 
 import { z } from "zod";
 
@@ -71,7 +71,7 @@ type DraftBeat = CinematicCaseSequenceContent["beats"][number];
 type EvidenceBinding = CasefileEvidenceShotMap["claimMappings"][number]["bindings"][number];
 
 function hash(value: unknown): string {
-  return createHash("sha256").update(JSON.stringify(value)).digest("hex");
+  return sha256Hex(JSON.stringify(value));
 }
 
 function directionFingerprint(direction: CinematicCaseDirection): string {

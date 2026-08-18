@@ -3,7 +3,7 @@
  * episodes. It deliberately plans story state only: no model, media, storage,
  * or renderer is imported here.
  */
-import { createHash } from "node:crypto";
+import { sha256Hex } from "@/lib/sha256";
 import { z } from "zod";
 
 import { StorySpineSchema, type StorySpine } from "./storySpine";
@@ -487,7 +487,7 @@ function normalizedForFingerprint(graph: EpisodeGraph): EpisodeGraph {
 /** Stable content address for idempotent local scene compilation. */
 export function episodeGraphFingerprint(value: unknown): string {
   const graph = assertEpisodeGraph(value);
-  return createHash("sha256").update(canonicalJson(normalizedForFingerprint(graph))).digest("hex");
+  return sha256Hex(canonicalJson(normalizedForFingerprint(graph)));
 }
 
 /** Validates the renderer handoff independently of the graph builder. */

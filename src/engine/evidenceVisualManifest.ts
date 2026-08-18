@@ -7,7 +7,7 @@
  * factual pixels may use only its reviewed values. It deliberately contains no
  * planner, provider, renderer, or admission decision.
  */
-import { createHash } from "node:crypto";
+import { sha256Hex } from "@/lib/sha256";
 import { z } from "zod";
 
 export const EVIDENCE_VISUAL_MANIFEST_VERSION = "evidence-visual-manifest/v1" as const;
@@ -168,9 +168,7 @@ export function evidenceVisualManifestFingerprint(
   manifest: Omit<EvidenceVisualManifest, "review"> | EvidenceVisualManifest,
 ): string {
   const { version, id, visualKind, surface, targetSceneId, sources, narrationAnchors, values, attribution } = manifest;
-  return createHash("sha256")
-    .update(`evidence-visual-manifest\0${canonical({ version, id, visualKind, surface, targetSceneId, sources, narrationAnchors, values, attribution })}`)
-    .digest("hex");
+  return sha256Hex(`evidence-visual-manifest\0${canonical({ version, id, visualKind, surface, targetSceneId, sources, narrationAnchors, values, attribution })}`);
 }
 
 export function factualVisualKindForIntent(intent: EvidenceVisualIntent): EvidenceVisualKind {
