@@ -5,11 +5,10 @@ import {
   evaluateCasefileCaseResearchContent,
   researchCase,
 } from "@/engine/casefileCaseResearcher";
-import type { WebSearchResult } from "@/lib/webSearch";
+import { __setSearchWebImplementationForTests, type WebSearchResult } from "@/lib/webSearch";
 
 const NOW = new Date("2026-08-18T12:00:00.000Z");
 const ANTHROPIC_MESSAGES_URL = "https://api.anthropic.com/v1/messages";
-const SEARXNG_ENDPOINT = "http://127.0.0.1:8080";
 
 /**
  * Realistic, classifiable, unambiguous results. Every snippet plainly
@@ -60,13 +59,6 @@ const VAGUE_RESULTS: WebSearchResult[] = [
   },
 ];
 
-function searxngResponse(results: readonly WebSearchResult[]): Response {
-  return new Response(
-    JSON.stringify({ results: results.map((r) => ({ title: r.title, url: r.url, content: r.snippet })) }),
-    { status: 200, headers: { "content-type": "application/json" } },
-  );
-}
-
 function extractPairs(promptText: string): { claimId: string; sourceId: string }[] {
   const pairs: { claimId: string; sourceId: string }[] = [];
   for (const block of promptText.split(/\n---\n/)) {
@@ -101,25 +93,18 @@ function approvingAnthropicResponse(promptText: string): Response {
 }
 
 async function withStubbedEnv(fn: () => Promise<void>): Promise<void> {
-  const savedSearxngEndpoint = process.env.SEARXNG_ENDPOINT;
-  const savedSearxngToken = process.env.SEARXNG_API_TOKEN;
   const savedOpenRouterKey = process.env.OPENROUTER_API_KEY;
   const savedAnthropicKey = process.env.ANTHROPIC_API_KEY;
   const savedModel = process.env.ANTHROPIC_CREATIVE_PRO_MODEL;
   const originalFetch = global.fetch;
   try {
-    process.env.SEARXNG_ENDPOINT = SEARXNG_ENDPOINT;
-    process.env.SEARXNG_API_TOKEN = "test-searxng-token";
     delete process.env.OPENROUTER_API_KEY;
     process.env.ANTHROPIC_API_KEY = "test-anthropic-key";
     process.env.ANTHROPIC_CREATIVE_PRO_MODEL = "claude-case-researcher-test";
     await fn();
   } finally {
     global.fetch = originalFetch;
-    if (savedSearxngEndpoint === undefined) delete process.env.SEARXNG_ENDPOINT;
-    else process.env.SEARXNG_ENDPOINT = savedSearxngEndpoint;
-    if (savedSearxngToken === undefined) delete process.env.SEARXNG_API_TOKEN;
-    else process.env.SEARXNG_API_TOKEN = savedSearxngToken;
+    __setSearchWebImplementationForTests(null);
     if (savedOpenRouterKey === undefined) delete process.env.OPENROUTER_API_KEY;
     else process.env.OPENROUTER_API_KEY = savedOpenRouterKey;
     if (savedAnthropicKey === undefined) delete process.env.ANTHROPIC_API_KEY;
@@ -133,12 +118,12 @@ async function testConvergesToValidPacket(): Promise<void> {
   await withStubbedEnv(async () => {
     let searchCalls = 0;
     let anthropicCalls = 0;
+    __setSearchWebImplementationForTests(async () => {
+      searchCalls += 1;
+      return GOOD_RESULTS;
+    });
     global.fetch = (async (input: RequestInfo | URL, init?: RequestInit) => {
       const url = String(input);
-      if (url.includes("/search?q=")) {
-        searchCalls += 1;
-        return searxngResponse(GOOD_RESULTS);
-      }
       if (url === ANTHROPIC_MESSAGES_URL) {
         anthropicCalls += 1;
         const body = JSON.parse(String(init?.body)) as { messages: { content: string }[] };
@@ -189,9 +174,9 @@ async function testConvergesToValidPacket(): Promise<void> {
 
 async function testVagueResultsFailClosed(): Promise<void> {
   await withStubbedEnv(async () => {
+    __setSearchWebImplementationForTests(async () => VAGUE_RESULTS);
     global.fetch = (async (input: RequestInfo | URL) => {
       const url = String(input);
-      if (url.includes("/search?q=")) return searxngResponse(VAGUE_RESULTS);
       throw new Error(`unexpected fetch in test: ${url} (LLM should never be reached without a classifiable source)`);
     }) as typeof fetch;
 
@@ -206,14 +191,17 @@ async function testVagueResultsFailClosed(): Promise<void> {
 async function testSearchBackendFailurePropagates(): Promise<void> {
   await withStubbedEnv(async () => {
     let called = false;
-    global.fetch = (async () => {
+    __setSearchWebImplementationForTests(async () => {
       called = true;
-      throw new Error("SearXNG backend unreachable");
+      throw new Error("Browserbase backend unreachable");
+    });
+    global.fetch = (async (input: RequestInfo | URL) => {
+      throw new Error(`unexpected fetch in test: ${String(input)}`);
     }) as typeof fetch;
 
     await assert.rejects(
       () => researchCase({ niche: "any topic" }, { now: NOW }),
-      /SearXNG backend unreachable|webSearch: SearXNG request failed/,
+      /Browserbase backend unreachable/,
     );
     assert.equal(called, true);
   });

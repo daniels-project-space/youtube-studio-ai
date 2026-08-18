@@ -1,165 +1,122 @@
 import assert from "node:assert/strict";
 
-import { searchWeb } from "@/lib/webSearch";
+import { parseBingResults } from "@/lib/webSearch";
 
-async function withEnv(
-  vars: Record<string, string | undefined>,
-  fn: () => Promise<void>,
-): Promise<void> {
-  const saved: Record<string, string | undefined> = {};
-  for (const key of Object.keys(vars)) saved[key] = process.env[key];
-  try {
-    for (const [key, value] of Object.entries(vars)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-    await fn();
-  } finally {
-    for (const [key, value] of Object.entries(saved)) {
-      if (value === undefined) delete process.env[key];
-      else process.env[key] = value;
-    }
-  }
-}
+// Fixtures below mirror the real, live Bing HTML structure captured while
+// building this parser (www.bing.com/search?q=..., fetched with a desktop
+// Chrome UA): results live in <ol id="b_results">, each organic result is a
+// <li class="b_algo"> containing an <h2><a href="...ck/a?...&u=a1<base64>...">
+// title</a></h2> and a <div class="b_caption"><p>snippet</p></div>. Bing
+// wraps every result href in a base64("a1" + url) click-tracking redirect —
+// these fixtures use the exact real encoding so decodeBingRedirectUrl is
+// exercised against the true wire format, not an invented shortcut.
 
-async function testSuccessfulMapping(): Promise<void> {
-  await withEnv(
-    { SEARXNG_ENDPOINT: "http://127.0.0.1:8080", SEARXNG_API_TOKEN: "test-token" },
-    async () => {
-      const originalFetch = global.fetch;
-      const requests: Array<{ input: RequestInfo | URL; init?: RequestInit }> = [];
-      try {
-        global.fetch = async (input, init) => {
-          requests.push({ input, init });
-          return new Response(
-            JSON.stringify({
-              results: [
-                { title: "A", url: "https://a.example", content: "snippet a" },
-                { title: "B", url: "https://b.example", content: "snippet b" },
-                { title: "C", url: "https://c.example", content: "snippet c" },
-              ],
-            }),
-            { status: 200, headers: { "content-type": "application/json" } },
-          );
-        };
-        const results = await searchWeb("dahmer", { limit: 2 });
-        assert.equal(results.length, 2, "must respect opts.limit");
-        assert.deepEqual(results[0], { title: "A", url: "https://a.example", snippet: "snippet a" });
-        assert.deepEqual(results[1], { title: "B", url: "https://b.example", snippet: "snippet b" });
-        assert.equal(requests.length, 1);
-        assert.ok(String(requests[0]?.input).includes("/search?q=dahmer&format=json"));
-        const headers = requests[0]?.init?.headers as Record<string, string>;
-        assert.equal(headers.Authorization, "Bearer test-token");
-      } finally {
-        global.fetch = originalFetch;
-      }
-    },
-  );
-  console.log("webSearch: successful mapping + limit — passed");
-}
+const NORMAL_RESULTS_HTML = `
+<!DOCTYPE html><html><head><title>test query - Bing</title></head><body>
+<div id="b_content">
+<ol id="b_results" class="">
+<li class="b_algo" data-id iid=SERP.5130><h2 class=""><a target="_blank" href="https://www.bing.com/ck/a?!&amp;&amp;p=1ef12c39&amp;u=a1aHR0cHM6Ly93d3cudGVzdC5kZS8&amp;ntb=1" h="ID=SERP,5130.2">Startseite | Stiftung Warentest &amp; Ratgeber</a></h2><div class="b_caption"><p class="b_lineclamp2"><span class="news_dt">Vor einem Tag</span>&nbsp;&#0183;&#32;Stiftung Warentest: Testberichte zu Elektronik und Finanzen</p></div></li>
+<li class="b_algo" data-id iid=SERP.5140><h2 class=""><a target="_blank" href="https://www.bing.com/ck/a?!&amp;&amp;p=b4268f8a&amp;u=a1aHR0cHM6Ly93d3cuc3BlZWR0ZXN0Lm5ldC8&amp;ntb=1" h="ID=SERP,5140.2">Speedtest by Ookla - The Global Broadband Speed Test</a></h2><div class="b_caption"><p class="b_lineclamp2">Test your internet speed on any device with Speedtest by Ookla, available for free.</p></div></li>
+<li class="b_algo" data-id iid=SERP.5150><h2 class=""><a target="_blank" href="https://www.bing.com/ck/a?!&amp;&amp;p=4e021d91&amp;u=a1aHR0cHM6Ly9leGFtcGxlLm9yZy9wYWdl&amp;ntb=1" h="ID=SERP,5150.2">Example Domain Page</a></h2><div class="b_caption"><p class="b_lineclamp2">This domain is for use in illustrative examples.</p></div></li>
+</ol>
+</div>
+</body></html>
+`;
 
-async function testNon200Throws(): Promise<void> {
-  await withEnv(
-    { SEARXNG_ENDPOINT: "http://127.0.0.1:8080", SEARXNG_API_TOKEN: "test-token" },
-    async () => {
-      const originalFetch = global.fetch;
-      try {
-        global.fetch = async () => new Response("nope", { status: 500 });
-        await assert.rejects(() => searchWeb("query"), /HTTP 500/);
-      } finally {
-        global.fetch = originalFetch;
-      }
-    },
-  );
-  console.log("webSearch: non-200 response throws — passed");
-}
+// A genuine Bing "zero organic results" page: #b_results renders (the SERP
+// shell executed a normal search) but contains no <li class="b_algo"> items.
+const NO_RESULTS_HTML = `
+<!DOCTYPE html><html><head><title>no results - Bing</title></head><body>
+<div id="b_content">
+<ol id="b_results" class="">
+</ol>
+</div>
+</body></html>
+`;
 
-async function testMalformedBodyThrows(): Promise<void> {
-  await withEnv(
-    { SEARXNG_ENDPOINT: "http://127.0.0.1:8080", SEARXNG_API_TOKEN: "test-token" },
-    async () => {
-      const originalFetch = global.fetch;
-      try {
-        global.fetch = async () =>
-          new Response(JSON.stringify({ results: "not-an-array" }), {
-            status: 200,
-            headers: { "content-type": "application/json" },
-          });
-        await assert.rejects(() => searchWeb("query"), /missing a results array/);
-      } finally {
-        global.fetch = originalFetch;
-      }
-    },
-  );
-  console.log("webSearch: malformed results body throws — passed");
-}
+// A page where the results container is entirely absent — e.g. a consent
+// wall, CAPTCHA interstitial, or a markup change so large the shell itself
+// is unrecognizable. Must throw, never silently return [].
+const MISSING_CONTAINER_HTML = `
+<!DOCTYPE html><html><head><title>Bing</title></head><body>
+<div id="b_content"><div class="consent-wall">Please accept cookies to continue.</div></div>
+</body></html>
+`;
 
-async function testMissingEnvThrowsBeforeFetch(): Promise<void> {
-  await withEnv({ SEARXNG_ENDPOINT: undefined, SEARXNG_API_TOKEN: undefined }, async () => {
-    const originalFetch = global.fetch;
-    let called = false;
-    try {
-      global.fetch = async () => {
-        called = true;
-        return new Response("{}", { status: 200 });
-      };
-      await assert.rejects(() => searchWeb("query"), /SEARXNG_ENDPOINT is not set/);
-      assert.equal(called, false, "fetch must never be invoked when env is missing");
-    } finally {
-      global.fetch = originalFetch;
-    }
+// A page where #b_results renders but every item's markup has drifted (no
+// recognizable <h2><a href=...>...</a></h2> title/link). Must throw — a
+// present-but-unparseable item list is a structure change, not zero results.
+const MALFORMED_ITEMS_HTML = `
+<!DOCTYPE html><html><head><title>test query - Bing</title></head><body>
+<div id="b_content">
+<ol id="b_results" class="">
+<li class="b_algo" data-id iid=SERP.5130><div class="totally-different-layout">Bing changed its markup</div></li>
+<li class="b_algo" data-id iid=SERP.5140><div class="totally-different-layout">Another drifted item</div></li>
+</ol>
+</div>
+</body></html>
+`;
+
+function testParsesNormalResults(): void {
+  const results = parseBingResults(NORMAL_RESULTS_HTML);
+  assert.equal(results.length, 3);
+  assert.deepEqual(results[0], {
+    title: "Startseite | Stiftung Warentest & Ratgeber",
+    url: "https://www.test.de/",
+    snippet: "Vor einem Tag · Stiftung Warentest: Testberichte zu Elektronik und Finanzen",
   });
-
-  await withEnv(
-    { SEARXNG_ENDPOINT: "http://127.0.0.1:8080", SEARXNG_API_TOKEN: undefined },
-    async () => {
-      const originalFetch = global.fetch;
-      let called = false;
-      try {
-        global.fetch = async () => {
-          called = true;
-          return new Response("{}", { status: 200 });
-        };
-        await assert.rejects(() => searchWeb("query"), /SEARXNG_API_TOKEN is not set/);
-        assert.equal(called, false, "fetch must never be invoked when token is missing");
-      } finally {
-        global.fetch = originalFetch;
-      }
-    },
-  );
-  console.log("webSearch: missing env vars throw before fetch — passed");
+  assert.deepEqual(results[1], {
+    title: "Speedtest by Ookla - The Global Broadband Speed Test",
+    url: "https://www.speedtest.net/",
+    snippet: "Test your internet speed on any device with Speedtest by Ookla, available for free.",
+  });
+  assert.deepEqual(results[2], {
+    title: "Example Domain Page",
+    url: "https://example.org/page",
+    snippet: "This domain is for use in illustrative examples.",
+  });
+  console.log("webSearch: parses normal Bing results + decodes ck/a redirects — passed");
 }
 
-async function testTimeoutThrows(): Promise<void> {
-  await withEnv(
-    { SEARXNG_ENDPOINT: "http://127.0.0.1:8080", SEARXNG_API_TOKEN: "test-token" },
-    async () => {
-      const originalFetch = global.fetch;
-      try {
-        global.fetch = (_input, init) =>
-          new Promise<Response>((_resolve, reject) => {
-            init?.signal?.addEventListener("abort", () => {
-              const err = new Error("The operation was aborted");
-              err.name = "AbortError";
-              reject(err);
-            });
-          });
-        await assert.rejects(() => searchWeb("query", { timeoutMs: 30 }), /timed out after 30ms/);
-      } finally {
-        global.fetch = originalFetch;
-      }
-    },
-  );
-  console.log("webSearch: timeout throws — passed");
+function testRespectsLimit(): void {
+  const results = parseBingResults(NORMAL_RESULTS_HTML, 2);
+  assert.equal(results.length, 2, "must respect the limit parameter");
+  assert.equal(results[0].url, "https://www.test.de/");
+  assert.equal(results[1].url, "https://www.speedtest.net/");
+  console.log("webSearch: respects limit parameter — passed");
 }
 
-async function main(): Promise<void> {
-  await testSuccessfulMapping();
-  await testNon200Throws();
-  await testMalformedBodyThrows();
-  await testMissingEnvThrowsBeforeFetch();
-  await testTimeoutThrows();
+function testGenuineNoResultsReturnsEmptyArray(): void {
+  const results = parseBingResults(NO_RESULTS_HTML);
+  assert.deepEqual(results, [], "an empty, present #b_results must mean zero results");
+  console.log("webSearch: genuine no-results page returns [] — passed");
+}
+
+function testMissingContainerThrows(): void {
+  assert.throws(
+    () => parseBingResults(MISSING_CONTAINER_HTML),
+    /results container.*not found/,
+    "a missing #b_results (consent wall / CAPTCHA / unrecognized page) must throw, not return []",
+  );
+  console.log("webSearch: missing results container throws (never silently []) — passed");
+}
+
+function testMalformedItemsThrow(): void {
+  assert.throws(
+    () => parseBingResults(MALFORMED_ITEMS_HTML),
+    /none matched the expected title\/link shape/,
+    "present-but-unparseable result items must throw, not return []",
+  );
+  console.log("webSearch: malformed result items throw (never silently []) — passed");
+}
+
+function main(): void {
+  testParsesNormalResults();
+  testRespectsLimit();
+  testGenuineNoResultsReturnsEmptyArray();
+  testMissingContainerThrows();
+  testMalformedItemsThrow();
   console.log("webSearch tests passed");
 }
 
-void main();
+main();
