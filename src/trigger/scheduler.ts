@@ -22,14 +22,20 @@ import {
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import type { ChannelSchedulePolicy } from "@/lib/publishingPolicy";
 import { parsePlanGenerationLeadMs } from "@/lib/scheduledPlanRuntime";
+import { researchCase } from "@/engine/casefileCaseResearcher";
+import { dispatchCasefileAutoResearch } from "@/engine/casefileAutoResearchDispatch";
 
 interface ChannelRow {
   _id: Id<"channels">;
   name: string;
   slug: string;
   status?: string;
-  identity?: { cadence?: string };
+  identity?: { cadence?: string; niche?: string };
   schedule?: ChannelSchedulePolicy;
+  // Strictly opt-in signal for the automatic Casefile real-case research
+  // path (see casefileAutoResearchDispatch.ts). Unset/false = unchanged
+  // behavior for every existing channel, including cinematic_ai ones.
+  casefileAutoResearchEnabled?: boolean;
 }
 export const generationScheduler = schedules.task({
   id: "generation-scheduler",
@@ -93,12 +99,70 @@ export const generationScheduler = schedules.task({
           }
         : undefined;
       const idempotencyKey = await idempotencyKeys.create(`generation-scheduler:${runId}`);
-      // concurrencyKey: one render at a time PER CHANNEL; channels in parallel.
-      await tasks.trigger(
-        "run-pipeline",
-        { channelId: ch._id, runId, ...(scheduledPlan ? { scheduledPlan } : {}) },
-        { concurrencyKey: String(ch._id), idempotencyKey },
-      );
+
+      if (ch.casefileAutoResearchEnabled === true) {
+        // Strictly opt-in per channel: only channels with the flag set ever
+        // reach dispatchCasefileAutoResearch, so researchCase() is never
+        // called for an ordinary channel.
+        const dispatched = await dispatchCasefileAutoResearch(
+          {
+            channelId: String(ch._id),
+            channelName: ch.name,
+            niche: ch.identity?.niche,
+            casefileAutoResearchEnabled: true,
+          },
+          {
+            researchCase,
+            listExcludedCaseIds: async (channelId) => {
+              const rows = (await convex.query(api.topicMemory.listForChannel, {
+                channelId: channelId as Id<"channels">,
+              })) as Array<{ key: string }>;
+              return rows.map((row) => row.key);
+            },
+            recordCaseId: async (channelId, caseId) => {
+              await convex.mutation(api.topicMemory.recordTopic, {
+                ownerId: owner,
+                channelId: channelId as Id<"channels">,
+                key: caseId,
+              });
+            },
+            triggerPipeline: async ({ casefileSourcePacketInput }) => {
+              // concurrencyKey: one render at a time PER CHANNEL; channels in parallel.
+              await tasks.trigger(
+                "run-pipeline",
+                {
+                  channelId: ch._id,
+                  runId,
+                  ...(scheduledPlan ? { scheduledPlan } : {}),
+                  casefileSourcePacketInput,
+                },
+                { concurrencyKey: String(ch._id), idempotencyKey },
+              );
+            },
+            log: (message) => console.log(`[scheduler] ${message}`),
+          },
+        );
+        if (dispatched.outcome === "research_failed") {
+          // researchCase()'s own fail-closed design: no real, well-sourced
+          // case converged this cycle. Expected/normal — never alertable.
+          // The already-claimed run/plan slot is left exactly as-is; it
+          // stays "queued" and claimNextPlanRun safely reattaches to it on
+          // the NEXT due cycle (bounded by the 6h cron — no tight retry).
+          console.log(
+            `[scheduler] ${ch.name}: Casefile auto-research found no admissible case this cycle — skipped`,
+          );
+          continue;
+        }
+        // "researched_and_triggered" falls through to the shared
+        // recoveryDispatch/triggered bookkeeping below.
+      } else {
+        // concurrencyKey: one render at a time PER CHANNEL; channels in parallel.
+        await tasks.trigger(
+          "run-pipeline",
+          { channelId: ch._id, runId, ...(scheduledPlan ? { scheduledPlan } : {}) },
+          { concurrencyKey: String(ch._id), idempotencyKey },
+        );
+      }
       if ("recoveryDispatch" in admitted && admitted.recoveryDispatch === true) {
         await convex.mutation(api.runs.markLeaseRecoveryDispatched, {
           ownerId: owner,

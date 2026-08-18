@@ -125,6 +125,16 @@ export interface RunPipelineInput {
    */
   curriculumEpisodeSeedInput?: unknown;
   /**
+   * A freshly researched (or human-curated) Casefile Case Packet for the
+   * cinematic_ai lane's `casefile_source_packet` admission block. Supplied
+   * either by `generation-scheduler`'s opt-in auto-research dispatch
+   * (`@/engine/casefileAutoResearchDispatch`) or, in principle, any other
+   * caller — the manual `/api/casefile-episodes` desk workflow does not use
+   * this field today; it is a fully separate, unaffected admission chain.
+   * Same freeze-before-provider-work contract as `childrenShowBibleInput`.
+   */
+  casefileSourcePacketInput?: unknown;
+  /**
    * Render-group reuse: when a language sibling is fanned out by the base run's
    * emit_bundle, the base assets are passed here and seeded into the store so the
    * expensive blocks (topic_select / script_gen / stock_footage / music) reuse
@@ -431,6 +441,16 @@ export const runPipelineTask = task({
         new Error("children editorial inputs cannot replace frozen packets on a resumed run"),
       );
     }
+    if (payload.casefileSourcePacketInput !== undefined && contentLane.key !== "cinematic_ai") {
+      throwForTaskRetryPolicy(
+        new Error("casefileSourcePacketInput is only accepted by the cinematic_ai lane"),
+      );
+    }
+    if (durableInvocation && payload.casefileSourcePacketInput !== undefined) {
+      throwForTaskRetryPolicy(
+        new Error("casefileSourcePacketInput cannot replace a frozen packet on a resumed run"),
+      );
+    }
     if (!durableInvocation && payload.pipelineOverride) {
       console.log(`[run-pipeline] using one-off pipelineOverride (${entries.length} blocks) — channel config untouched`);
     }
@@ -658,6 +678,9 @@ export const runPipelineTask = task({
             : {}),
           ...(payload.curriculumEpisodeSeedInput !== undefined
             ? { curriculumEpisodeSeedInput: structuredClone(payload.curriculumEpisodeSeedInput) }
+            : {}),
+          ...(payload.casefileSourcePacketInput !== undefined
+            ? { casefileSourcePacketInput: structuredClone(payload.casefileSourcePacketInput) }
             : {}),
           ...(scheduledPlan ? scheduledPlanSeed(scheduledPlan) : {}),
         };

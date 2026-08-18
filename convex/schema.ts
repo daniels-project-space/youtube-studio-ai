@@ -116,6 +116,14 @@ export default defineSchema({
     })),
     // Operator hard rail: blocks the architect may never re-add.
     disabledBlocks: v.optional(v.array(v.string())),
+    // Strictly opt-in per channel. When true AND the cinematic_ai lane is
+    // active, `generation-scheduler` researches a fresh real case via
+    // `researchCase()` (fail-closed, zero-fabrication) each due cycle instead
+    // of expecting a human-curated packet from the /api/casefile-episodes
+    // desk workflow. Undefined/false = today's behavior, unchanged — this
+    // must never silently start applying to every existing cinematic_ai
+    // channel.
+    casefileAutoResearchEnabled: v.optional(v.boolean()),
     identity: v.object({
       persona: v.string(),
       voiceId: v.optional(v.string()),
