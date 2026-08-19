@@ -731,6 +731,10 @@ export const updateChannel = mutation({
     architectReport: v.optional(v.any()),
     family: v.optional(v.string()),
     disabledBlocks: v.optional(v.array(v.string())),
+    // Strictly opt-in automatic Casefile case research. Enabling it is
+    // gated on the cinematic_ai lane in the handler below — see the guard
+    // for why a non-cinematic_ai channel must be refused, not warned.
+    casefileAutoResearchEnabled: v.optional(v.boolean()),
     thumbnailPlaybook: v.optional(v.any()),
     scriptPlaybook: v.optional(v.any()),
     // Folder filing ("" = unfile).
@@ -784,6 +788,20 @@ export const updateChannel = mutation({
       );
     }
     const lane = channelContentLane(existing);
+    // SPEND GUARD (write time, not dispatch time). `run-pipeline` rejects a
+    // `casefileSourcePacketInput` on any lane other than cinematic_ai, so
+    // enabling this flag elsewhere would pay for real Browserbase search
+    // sessions + LLM calls every 6h and then throw the run away. Refuse the
+    // write outright so the operator sees the problem immediately instead of
+    // discovering it as silent recurring spend. Turning the flag OFF is
+    // always permitted, on any lane.
+    if (rest.casefileAutoResearchEnabled === true && lane.key !== "cinematic_ai") {
+      throw new Error(
+        `casefileAutoResearchEnabled requires the cinematic_ai content lane; this channel's lane is ${lane.key}. ` +
+          "run-pipeline only accepts a casefileSourcePacketInput on cinematic_ai, so enabling automatic case " +
+          "research here would spend real research budget on runs that can never succeed.",
+      );
+    }
     const nextFamily = rest.family ?? existing.family;
     assertContentLaneMatchesFamily(lane, nextFamily);
     assertPipelineMatchesContentLane(lane, rest.pipeline ?? existing.pipeline);

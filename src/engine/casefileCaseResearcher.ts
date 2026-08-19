@@ -102,7 +102,19 @@ export interface CasefileCaseResearchOptions {
   log?: (message: string) => void;
   /** Forwarded to `produceAndCritique`; default 3. */
   maxIters?: number;
+  /**
+   * SPEND LEVER. Hard cap on how many candidate cases a single iteration may
+   * attempt. Each attempted candidate costs up to 3 further `searchWeb()`
+   * calls, and every `searchWeb()` is one live Browserbase/Stagehand session
+   * (see `src/lib/webSearch.ts`) — so this directly bounds the per-iteration
+   * bill. Default `DEFAULT_MAX_CANDIDATES_PER_ITER` (3) preserves today's
+   * exact behavior for any caller that does not set it.
+   */
+  maxCandidatesPerIter?: number;
 }
+
+/** Today's hardcoded behavior, now named. Do not raise without a cost review. */
+export const DEFAULT_MAX_CANDIDATES_PER_ITER = 3;
 
 export interface CasefileCaseResearchContentReport {
   safe: boolean;
@@ -257,6 +269,7 @@ async function gatherCandidateTitles(
   seen: Map<string, WebSearchResult>,
   iter: number,
   priorIssues: readonly string[],
+  maxCandidates: number,
 ): Promise<CandidateTitle[]> {
   const variant = CANDIDATE_QUERY_VARIANTS[iter % CANDIDATE_QUERY_VARIANTS.length];
   const hint = steeringHint(priorIssues);
@@ -275,7 +288,7 @@ async function gatherCandidateTitles(
     if (triedCaseIds.has(id)) continue;
     if (out.some((candidate) => candidate.id === id)) continue;
     out.push({ id, title });
-    if (out.length >= 3) break;
+    if (out.length >= maxCandidates) break;
   }
   return out;
 }
@@ -648,12 +661,26 @@ export async function researchCase(
   const now = opts.now ?? new Date();
   const seenResults = new Map<string, WebSearchResult>();
   const triedCaseIds = new Set<string>(input.excludeCaseIds ?? []);
+  // Clamped, not trusted: a caller passing 0/NaN/negative must not silently
+  // disable candidate gathering, and must not be able to raise the cost
+  // beyond today's behavior either.
+  const maxCandidatesPerIter = Math.min(
+    DEFAULT_MAX_CANDIDATES_PER_ITER,
+    Math.max(1, Math.trunc(opts.maxCandidatesPerIter ?? DEFAULT_MAX_CANDIDATES_PER_ITER) || DEFAULT_MAX_CANDIDATES_PER_ITER),
+  );
 
   const produce = async (
     priorIssues: string[],
     iter: number,
   ): Promise<CasefileSourcePacketContentInput> => {
-    const candidates = await gatherCandidateTitles(input, triedCaseIds, seenResults, iter, priorIssues);
+    const candidates = await gatherCandidateTitles(
+      input,
+      triedCaseIds,
+      seenResults,
+      iter,
+      priorIssues,
+      maxCandidatesPerIter,
+    );
     if (!candidates.length) {
       throw new Error(
         "researchCase: candidate search returned no usable (https, titled, not-already-tried) result for any query variant",

@@ -1330,6 +1330,27 @@ export default defineSchema({
     .index("by_owner_case_updated", ["ownerId", "caseId", "updatedAt"])
     .index("by_owner_updated", ["ownerId", "updatedAt"]),
 
+  // SPEND LEDGER for the automatic Casefile case-research path
+  // (`src/engine/casefileCaseResearcher.ts`'s `researchCase()`, dispatched by
+  // `generation-scheduler`). That call spends real money — one live
+  // Browserbase/Stagehand session per `searchWeb()` plus an Anthropic
+  // semantic-verification call per critique iteration — BEFORE
+  // `run-pipeline` starts, so it is structurally outside every
+  // `invocation.budgetUsd` check the rest of the system enforces. One row is
+  // written per billable dispatch attempt (success OR fail-closed research
+  // failure; a genuinely skipped/ineligible dispatch costs nothing and is
+  // never recorded). The scheduler counts today's rows across ALL channels
+  // and refuses to research past the configured ceiling.
+  casefileResearchAttempts: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    /** UTC day bucket, "YYYY-MM-DD". Counting key — never a display value. */
+    day: v.string(),
+    attemptedAt: v.number(),
+  })
+    .index("by_owner_day", ["ownerId", "day"])
+    .index("by_channel_day", ["channelId", "day"]),
+
   // Single project-wide "what are we working toward right now" record, so
   // both automation and Daniel can query current intent/priorities. Not
   // per-owner scoped (one project, one active goal) — history is simply the
