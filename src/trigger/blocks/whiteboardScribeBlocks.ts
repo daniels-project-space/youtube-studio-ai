@@ -44,6 +44,7 @@ import {
   unavailableStoryboardCriticVerdict,
 } from "@/lib/storyboardCritic";
 import {
+  channelCritiqueBrief,
   produceAndCritique,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
@@ -236,10 +237,10 @@ async function gradeStoryboard(args: {
   return critiqueStoryboardText({
     label: "whiteboard-explainer storyboard",
     topic: args.topic,
-    channel: args.channel,
     costWarning: "Drawing this board is expensive and irreversible — reject a board that would waste it.",
     candidate:
-      `TITLE: ${args.plan.title}\n` +
+      channelCritiqueBrief(args.channel) +
+      `\nTITLE: ${args.plan.title}\n` +
       `THE STORYBOARD (${args.plan.panels.length} panels):\n` +
       args.plan.panels
         .map((panel, index) =>

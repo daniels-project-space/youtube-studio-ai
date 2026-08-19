@@ -42,6 +42,7 @@ import {
   unavailableStoryboardCriticVerdict,
 } from "@/lib/storyboardCritic";
 import {
+  channelCritiqueBrief,
   produceAndCritique,
   type ChannelCritiqueContext,
 } from "@/engine/critiqueLoop";
@@ -237,10 +238,10 @@ async function gradeStoryboard(args: {
   return critiqueStoryboardText({
     label: "comic-book storyboard",
     topic: args.topic,
-    channel: args.channel,
     costWarning: "Producing this storyboard is expensive and irreversible — reject a story that would waste it.",
     candidate:
-      `TITLE: ${args.plan.title}\nLOGLINE: ${args.plan.logline}\n` +
+      channelCritiqueBrief(args.channel) +
+      `\nTITLE: ${args.plan.title}\nLOGLINE: ${args.plan.logline}\n` +
       `CAST: ${args.plan.characters.map((character) => `${character.id} (${character.name})`).join(", ") || "none"}\n` +
       `THE STORYBOARD (${args.plan.panels.length} panels):\n` +
       args.plan.panels
