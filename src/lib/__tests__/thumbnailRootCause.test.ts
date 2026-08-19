@@ -9,10 +9,10 @@ import { classifyExecutionError } from "@/engine/executionErrors";
 import { FAMILIES, type FamilyKey } from "@/engine/families";
 import {
   BananaImageSubmissionError,
-  generateBananaImage,
   generateNanoBananaImageWithReceipt,
   NANO_BANANA_THUMBNAIL_PROFILE,
 } from "@/lib/banana";
+import { GEMINI_RUNTIME_OPT_IN_ENV } from "@/lib/gemini";
 import { createImageUsageScope } from "@/lib/imageUsage";
 import {
   buildThumbnailTextFilterGraph,
@@ -239,7 +239,10 @@ async function assertRealCallPaths(): Promise<void> {
   );
   assert.doesNotMatch(production, /titleCardFallback|fal-route judge rejection/,
     "generic cards must not be automatic recovery");
-  assert.match(production, /draft_preview_placeholder/);
+  assert.doesNotMatch(production, /draft_preview_placeholder|thumbnailer\s*===\s*["']title_card["']/,
+    "every thumbnail execution must use Nano Banana; title-card previews are not an executable route");
+  assert.match(production, /thumbnailDescription/,
+    "the image route must receive a concrete visual handoff rather than infer a scene from the title alone");
   const weekAhead = await readFile(join(process.cwd(), "src/trigger/planWeekAhead.ts"), "utf8");
   assert.doesNotMatch(weekAhead, /enacts\s+\\?"\$\{o\.title\}/,
     "the deterministic scene fallback must not inject headline/title copy into provider art");
@@ -390,7 +393,7 @@ async function assertRetryBoundarySignal(): Promise<void> {
       throw new Error("fixture transport failure");
     }) as typeof fetch;
     await assert.rejects(
-      generateBananaImage({ prompt: "fixture", allowText: false, tier: "flash" }),
+      generateNanoBananaImageWithReceipt({ prompt: "fixture" }),
       (error: unknown) =>
         error instanceof BananaImageSubmissionError &&
         error.retryable === false &&
@@ -410,11 +413,7 @@ async function assertRetryBoundarySignal(): Promise<void> {
       });
     }) as typeof fetch;
     await assert.rejects(
-      generateBananaImage({
-        prompt: "outer-recovery-fixture",
-        allowText: true,
-        tier: "pro",
-      }),
+      generateNanoBananaImageWithReceipt({ prompt: "outer-recovery-fixture" }),
       (error: unknown) =>
         error instanceof BananaImageSubmissionError &&
         error.status === 503 &&
@@ -528,15 +527,22 @@ async function assertStrictNanoBananaRoute(): Promise<void> {
 }
 
 async function main(): Promise<void> {
-  assertFamilyPolicy();
-  assertSceneTypographySplit();
-  assertMotifImplementations();
-  assertSafePlans();
-  await assertRealCallPaths();
-  await assertRenderedLayout();
-  await assertRetryBoundarySignal();
-  await assertStrictNanoBananaRoute();
-  console.log("THUMBNAIL ROOT-CAUSE PASS");
+  const originalGeminiRuntime = process.env[GEMINI_RUNTIME_OPT_IN_ENV];
+  process.env[GEMINI_RUNTIME_OPT_IN_ENV] = "1";
+  try {
+    assertFamilyPolicy();
+    assertSceneTypographySplit();
+    assertMotifImplementations();
+    assertSafePlans();
+    await assertRealCallPaths();
+    await assertRenderedLayout();
+    await assertRetryBoundarySignal();
+    await assertStrictNanoBananaRoute();
+    console.log("THUMBNAIL ROOT-CAUSE PASS");
+  } finally {
+    if (originalGeminiRuntime === undefined) delete process.env[GEMINI_RUNTIME_OPT_IN_ENV];
+    else process.env[GEMINI_RUNTIME_OPT_IN_ENV] = originalGeminiRuntime;
+  }
 }
 
 void main();

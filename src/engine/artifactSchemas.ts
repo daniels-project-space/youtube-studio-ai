@@ -23,6 +23,50 @@ import {
   ShortStrategyManifestSchema,
 } from "./shortStrategyManifest";
 import { ShortRetentionManifestSchema, ShortSceneQaSchema } from "./documentaryCollageShort";
+import { VisualMatterManifestSchema } from "./visualMatter";
+import { EpisodeGraphSchema, SceneManifestSchema } from "./episodeGraph";
+import { LearningContractSchema } from "./learningContract";
+import {
+  SyntheticScenarioContractSchema,
+  SyntheticScenarioDisclosureSchema,
+} from "./syntheticScenario";
+import {
+  ChildrenShowBibleApprovalReceiptSchema,
+  ChildrenShowBibleInputSchema,
+  ChildrenShowBibleSchema,
+} from "./childrenShowBible";
+import {
+  CurriculumEpisodeSeedApprovalReceiptSchema,
+  CurriculumEpisodeSeedInputSchema,
+  CurriculumEpisodeSeedSchema,
+} from "./curriculumEpisodeSeed";
+import {
+  CasefileEvidenceShotMapAdmissionReceiptSchema,
+  CasefileEvidenceShotMapInputSchema,
+  CasefileEvidenceShotMapSchema,
+} from "./casefileEvidenceShotMap";
+import {
+  CasefileSourceAdmissionReceiptSchema,
+  CasefileSourcePacketSchema,
+} from "./sourceFirstAdmission";
+import { SourceBoundStorySpineHandoffSchema } from "./sourceBoundStorySpine";
+import { EvidenceVisualManifestSchema } from "./evidenceVisualManifest";
+import {
+  CinematicCaseSequenceAdmissionReceiptSchema,
+  CinematicCaseSequenceInputSchema,
+  CinematicCaseSequencePlanSchema,
+  CinematicCreativeLocksSchema,
+  CinematicEditDecisionListSchema,
+  CinematicGeneratedScenePlanSchema,
+  CinematicSequenceEditorialReviewSchema,
+} from "./cinematicCaseSequence";
+import {
+  CinematicCaseDirectionSchema,
+  CinematicCaseSequenceDraftSchema,
+} from "./cinematicCaseSequenceDraft";
+import { CinematicFinalMasterQaAdmissionSchema } from "./cinematicFinalMasterQaAdmission";
+import { GeneratedFootageSceneManifestSchema } from "./generatedFootageManifest";
+import { VisualPacingEvidenceSchema } from "@/lib/visualPacing";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -98,12 +142,35 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   narrationText: { type: "NarrationText", schema: nonEmpty },
   sentenceTimings: { type: "TimedSentence[]", schema: z.array(timedSentence) },
   narrationDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
+  narrationPerformanceEvidence: {
+    type: "NarrationPerformanceEvidence",
+    schema: z.object({
+      version: z.literal("narration-performance-evidence/v1"),
+      source: z.literal("local_ffmpeg"),
+      durationSec: z.number().finite().min(1.5),
+      wordCount: z.number().finite().int().min(3),
+      wordsPerSec: z.number().finite().positive(),
+      integratedLufs: z.number().finite().min(-36).max(-6),
+      windowMeanDb: z.number().finite().min(-48).max(-3),
+    }),
+  },
   videoDurationSec: { type: "DurationSeconds", schema: z.number().finite().positive() },
   contentLane: { type: "ContentLane", schema: ContentLaneSchema },
+  syntheticScenario: {
+    type: "SyntheticScenarioContract",
+    schema: SyntheticScenarioContractSchema,
+    persist: "reference",
+  },
+  syntheticScenarioDisclosure: {
+    type: "SyntheticScenarioDisclosure",
+    schema: SyntheticScenarioDisclosureSchema,
+    persist: "reference",
+  },
   qaPassed: { type: "QualityGateDecision", schema: z.boolean() },
   qaReport: { type: "FinalQaReport", schema: qaReport },
   episodeSpec: { type: "EpisodeSpec", schema: EpisodeSpecSchema },
   qualityEvidence: { type: "EpisodeQualityEvidence", schema: QualityEvidenceSchema },
+  visualPacing: { type: "FinalMasterVisualPacingEvidence", schema: VisualPacingEvidenceSchema },
   shortStrategyBrief: { type: "ShortStrategyBrief", schema: ShortStrategyBriefSchema },
   shortCandidateSet: { type: "ShortCandidateSet", schema: ShortCandidateSetSchema },
   shortCandidateSelection: { type: "ShortCandidateSelection", schema: ShortCandidateSelectionSchema },
@@ -164,6 +231,170 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   dpVisualSpecs: { type: "DPVisualSpec[]", schema: z.array(DPVisualSpecSchema).min(1) },
   editorEdl: { type: "EditorEDL", schema: StorySpineSchema.shape.editorEdl.passthrough() },
   storyCoverage: { type: "StoryCoverage", schema: StorySpineSchema.shape.coverage },
+  episodeGraph: { type: "EpisodeGraph", schema: EpisodeGraphSchema, persist: "reference" },
+  sceneManifest: { type: "SceneManifest", schema: SceneManifestSchema, persist: "reference" },
+  lessonContract: { type: "LearningContract", schema: LearningContractSchema, persist: "reference" },
+  curriculumEpisodeSeedInput: {
+    type: "CurriculumEpisodeSeedInput",
+    schema: CurriculumEpisodeSeedInputSchema,
+    persist: "reference",
+  },
+  curriculumEpisodeSeed: {
+    type: "CurriculumEpisodeSeed",
+    schema: CurriculumEpisodeSeedSchema,
+    persist: "reference",
+  },
+  curriculumEpisodeSeedApproval: {
+    type: "CurriculumEpisodeSeedApprovalReceipt",
+    schema: CurriculumEpisodeSeedApprovalReceiptSchema,
+    persist: "reference",
+  },
+  childrenShowBibleInput: {
+    type: "ChildrenShowBibleInput",
+    schema: ChildrenShowBibleInputSchema,
+    persist: "reference",
+  },
+  childrenShowBible: {
+    type: "ChildrenShowBible",
+    schema: ChildrenShowBibleSchema,
+    persist: "reference",
+  },
+  childrenShowBibleApproval: {
+    type: "ChildrenShowBibleApprovalReceipt",
+    schema: ChildrenShowBibleApprovalReceiptSchema,
+    persist: "reference",
+  },
+  casefileSourcePacketInput: {
+    type: "CasefileSourcePacketInput",
+    schema: CasefileSourcePacketSchema,
+    persist: "reference",
+  },
+  casefileSourcePacket: {
+    type: "CasefileSourcePacket",
+    schema: CasefileSourcePacketSchema,
+    persist: "reference",
+  },
+  casefileSourceAdmission: {
+    type: "CasefileSourceAdmissionReceipt",
+    schema: CasefileSourceAdmissionReceiptSchema,
+    persist: "reference",
+  },
+  casefileEvidenceShotMapInput: {
+    type: "CasefileEvidenceShotMapInput",
+    schema: CasefileEvidenceShotMapInputSchema,
+    persist: "reference",
+  },
+  casefileEvidenceShotMap: {
+    type: "CasefileEvidenceShotMap",
+    schema: CasefileEvidenceShotMapSchema,
+    persist: "reference",
+  },
+  casefileEvidenceShotMapAdmission: {
+    type: "CasefileEvidenceShotMapAdmissionReceipt",
+    schema: CasefileEvidenceShotMapAdmissionReceiptSchema,
+    persist: "reference",
+  },
+  sourceBoundStorySpine: {
+    type: "SourceBoundStorySpineHandoff",
+    schema: SourceBoundStorySpineHandoffSchema,
+    persist: "reference",
+  },
+  evidenceVisualManifests: {
+    type: "EvidenceVisualManifest[]",
+    schema: z.array(EvidenceVisualManifestSchema).max(48),
+    persist: "reference",
+  },
+  cinematicCaseSequenceInput: {
+    type: "CinematicCaseSequenceInput",
+    schema: CinematicCaseSequenceInputSchema,
+    persist: "reference",
+  },
+  cinematicCaseDirection: {
+    type: "CinematicCaseDirection",
+    schema: CinematicCaseDirectionSchema,
+    persist: "reference",
+  },
+  cinematicCaseSequenceDraft: {
+    type: "CinematicCaseSequenceDraft",
+    schema: CinematicCaseSequenceDraftSchema,
+    persist: "reference",
+  },
+  cinematicSequenceEditorialReview: {
+    type: "CinematicSequenceEditorialReview",
+    schema: CinematicSequenceEditorialReviewSchema,
+    persist: "reference",
+  },
+  cinematicSequencePlan: {
+    type: "CinematicCaseSequencePlan",
+    schema: CinematicCaseSequencePlanSchema,
+    persist: "reference",
+  },
+  cinematicGeneratedScenePlan: {
+    type: "CinematicGeneratedScenePlan",
+    schema: CinematicGeneratedScenePlanSchema,
+    persist: "reference",
+  },
+  cinematicCreativeLocks: {
+    type: "CinematicCreativeLocks",
+    schema: CinematicCreativeLocksSchema,
+    persist: "reference",
+  },
+  cinematicEditDecisionList: {
+    type: "CinematicEditDecisionList",
+    schema: CinematicEditDecisionListSchema,
+    persist: "reference",
+  },
+  cinematicCaseSequenceAdmission: {
+    type: "CinematicCaseSequenceAdmissionReceipt",
+    schema: CinematicCaseSequenceAdmissionReceiptSchema,
+    persist: "reference",
+  },
+  cinematicFinalMasterQaAdmission: {
+    type: "CinematicFinalMasterQaAdmission",
+    schema: CinematicFinalMasterQaAdmissionSchema,
+    persist: "reference",
+  },
+  generatedFootageSceneManifest: {
+    type: "GeneratedFootageSceneManifest",
+    schema: GeneratedFootageSceneManifestSchema,
+    persist: "reference",
+  },
+  childContentSafety: {
+    type: "ChildContentSafetyReceipt",
+    schema: z.object({
+      version: z.literal("child-content-safety/v1"),
+      pass: z.literal(true),
+      madeForKids: z.literal(true),
+      audience: z.literal("children"),
+      release: z.literal("human-editorial-approval-required"),
+      allowedPublishMode: z.literal("draft"),
+      reviewReasons: z.array(z.string().min(1)).min(1),
+      episodeGraphFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      sceneManifestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      lessonContractFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      childrenShowBibleFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      curriculumEpisodeSeedFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+    }).strict(),
+  },
+  sceneCompilerReceipt: {
+    type: "SceneCompilerReceipt",
+    schema: z.object({
+      version: z.literal("scene-compiler-render/v1"),
+      renderer: z.literal("deterministic-scene/v1"),
+      manifestFingerprint: z.string().regex(/^[a-f0-9]{64}$/),
+      externalProviderCalls: z.literal(0),
+      sceneCount: z.number().int().positive(),
+      width: z.literal(1920),
+      height: z.literal(1080),
+      durationSec: z.number().finite().positive(),
+      hasAudio: z.literal(true),
+    }).strict(),
+  },
+  visualMatterManifest: {
+    type: "VisualMatterManifest",
+    schema: VisualMatterManifestSchema,
+    persist: "reference",
+  },
   shotList: {
     type: "ShotPlan[]",
     schema: z.array(ShotPlanSchema).min(1),

@@ -1,8 +1,9 @@
 /**
  * `refresh-show-bible` — backfill/refresh a channel's Show Bible + crew pipeline +
- * killer avatar. Runs in the Trigger cloud (ffmpeg + vault + LLM/fal keys present)
- * so it works without any local render. Idempotent: re-running rewrites the Bible,
- * ensures the crew brief blocks are in the pipeline, and regenerates the avatar.
+ * crew pipeline. It is deliberately a no-art maintenance task: re-running
+ * rewrites the Bible and ensures the crew brief blocks are in the pipeline.
+ * Paid identity art belongs to the admitted channel-inception stages, where its
+ * aggregate envelope and provider lifecycle are independently authenticated.
  *
  * Used to migrate existing channels (e.g. Stoic Truths) onto the film-crew layer.
  */
@@ -12,7 +13,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { synthShowBible } from "@/engine/creative/showBible";
-import { generateChannelArt, type ChannelArtOptions } from "@/lib/channelArt";
+import type { ChannelArtOptions } from "@/lib/channelArt";
 import { FAMILY_CREW, CREW_ROLE_BLOCK, type FamilyKey } from "@/engine/families";
 import type { PipelineEntry } from "@/engine/types";
 
@@ -27,7 +28,11 @@ export interface RefreshShowBibleArgs {
   motifHint?: string;
   /** Target spoken length used to size crew briefs (seconds). */
   targetSeconds?: number;
-  /** Refresh channel art from the new motif (default true). */
+  /**
+   * Legacy art flag. Omitted/false keeps this a no-art maintenance task;
+   * true is rejected because this standalone task has no signed image-stage
+   * admission.
+   */
   regenerateArt?: boolean;
   /**
    * Per-asset control. Existing avatars are preserved by default so an approved
@@ -67,6 +72,11 @@ export const refreshShowBibleTask = task({
   maxDuration: 600,
   run: async (payload: RefreshShowBibleArgs) => {
     const log = (m: string, x?: Record<string, unknown>) => console.log(`[refresh-show-bible] ${m}`, x ?? "");
+    if (payload.regenerateArt === true || payload.art?.avatar === true || payload.art?.banner === true) {
+      throw new Error(
+        "refresh-show-bible refuses standalone paid art generation: pass regenerateArt:false for a no-art Bible refresh, or use admitted channel-inception art stages.",
+      );
+    }
     await bootstrapSecrets(log);
 
     const ownerId = payload.ownerId ?? process.env.NEXT_PUBLIC_OWNER_ID ?? "owner_daniel";
@@ -122,38 +132,12 @@ export const refreshShowBibleTask = task({
     });
     log("bible ready", { motif: creativeBrief.iconicMotif, crew: creativeBrief.activeCrew });
 
-    // Refresh art from the new motif. A known-good avatar is an identity asset,
-    // not disposable Show Bible output, so preserve it unless explicitly asked
-    // to regenerate it. The banner remains independently refreshable.
-    let artFields: Partial<Awaited<ReturnType<typeof generateChannelArt>>> = {};
-    if (payload.regenerateArt !== false) {
-      try {
-        artFields = await generateChannelArt(ownerId, ch.slug, {
-          name: ch.name, persona: identity.persona, styleGrammar: identity.styleGrammar,
-          palette: identity.palette, niche: identity.niche,
-          iconicMotif: creativeBrief.iconicMotif, vibe: creativeBrief.vibe,
-        }, log, {
-          avatar: payload.art?.avatar ?? true,
-          banner: payload.art?.banner ?? true,
-          preserveExisting: payload.art?.preserveExisting ?? {
-            avatar: payload.art?.avatar === true ? false : true,
-            banner: false,
-          },
-          existing: {
-            imageKey: identity.imageKey,
-            bannerKey: identity.bannerKey,
-          },
-          version: payload.art?.version,
-        });
-      } catch (e) { log(`art failed (non-fatal): ${e instanceof Error ? e.message : e}`); }
-    }
-
     // Ensure crew blocks are in the pipeline.
     const newPipeline = withCrew(ch.pipeline ?? [], family, payload.targetSeconds);
 
     await convex.mutation(api.channels.updateChannel, {
       channelId: ch._id,
-      identity: { ...identity, ...artFields, creativeBrief },
+      identity: { ...identity, creativeBrief },
       pipeline: newPipeline,
     });
     log("channel updated", { slug: ch.slug, crewBlocks: newPipeline.filter((e) => e.block.endsWith("_brief") || e.block === "critic_spec").length });

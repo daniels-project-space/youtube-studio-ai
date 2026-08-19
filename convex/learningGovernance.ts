@@ -1,5 +1,6 @@
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
+import { patchChannelRespectingLock } from "./channelLock";
 import { stableJson } from "../src/lib/publishingPolicy";
 
 function assertInternalSecret(secret: string): void {
@@ -69,6 +70,7 @@ export const propose = mutation({
     }
     const basePolicyVersion = channel.learningPolicyVersion ?? 0;
     const { secret: _secret, ...doc } = args;
+    void _secret;
     const id = await ctx.db.insert("learningRecommendations", {
       ...doc,
       basePolicyVersion,
@@ -193,11 +195,16 @@ export const approveAndActivate = mutation({
     if (!proposal || proposal.nextValue === undefined) {
       throw new Error("learningGovernance.activate: proposal has no nextValue");
     }
+    // LOCK GUARD: an approved learning recommendation is a config change like
+    // any other, so a locked ("done") channel keeps its shipped brief/playbook
+    // and the activation lands on its v2 fork instead. This path is bounded —
+    // the recommendation flips to "activated" below and cannot re-run.
+    let channelWrite;
     if (recommendation.target === "creative_brief") {
       if (!channel.identity || typeof proposal.nextValue !== "object") {
         throw new Error("learningGovernance.activate: invalid creative brief proposal");
       }
-      await ctx.db.patch(channel._id, {
+      channelWrite = await patchChannelRespectingLock(ctx, channel._id, {
         identity: { ...channel.identity, creativeBrief: proposal.nextValue as never },
         learningPolicyVersion: recommendation.proposedPolicyVersion,
       });
@@ -205,7 +212,7 @@ export const approveAndActivate = mutation({
       if (typeof proposal.nextValue !== "object" || proposal.nextValue === null) {
         throw new Error("learningGovernance.activate: invalid script playbook proposal");
       }
-      await ctx.db.patch(channel._id, {
+      channelWrite = await patchChannelRespectingLock(ctx, channel._id, {
         scriptPlaybook: proposal.nextValue,
         learningPolicyVersion: recommendation.proposedPolicyVersion,
       });
@@ -217,7 +224,9 @@ export const approveAndActivate = mutation({
       activatedAt: args.approvedAt,
       updatedAt: args.approvedAt,
     });
-    return await ctx.db.get(recommendation._id);
+    const activated = await ctx.db.get(recommendation._id);
+    // Additive fork signal so a caller can tell the change was redirected.
+    return activated ? { ...activated, channelWrite } : activated;
   },
 });
 

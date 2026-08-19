@@ -15,11 +15,14 @@ import { detectSceneChanges, grabFrame } from "@/lib/ffmpeg";
 import { makeRunTempDir } from "@/lib/files";
 import { parseJsonLoose } from "@/lib/gemini";
 import { putObject, putObjectFromFile } from "@/lib/storage";
-import { hasVisionKey, visionLocal } from "@/lib/vision";
+import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-export const VISUAL_REVIEW_VERSION = "video-review/v1" as const;
+// v4 adds the non-Google reviewer boundary. A receipt made under v3 may have
+// used the formerly allowed Gemini fallback, so it cannot attest the current
+// independent-review guarantee even if its frame coverage is otherwise sound.
+export const VISUAL_REVIEW_VERSION = "video-review/v4" as const;
 
 export type VisualReviewSeverity = "critical" | "major" | "minor";
 export type VisualReviewVerdict = "pass" | "fail" | "needs_human";
@@ -64,6 +67,15 @@ export interface VisualReviewWindow {
   reason: "reviewer" | "repair" | "overlay";
 }
 
+/** A timed, renderer-independent creative criterion from Visual Matter. */
+export interface VisualReviewCreativeLock {
+  shotId: string;
+  startSec: number;
+  endSec: number;
+  expected: string;
+  acceptanceCriteria: string[];
+}
+
 export interface VisualReviewIntent {
   title: string;
   topic?: string;
@@ -77,8 +89,23 @@ export interface VisualReviewIntent {
   expectChapters?: boolean;
   transcriptCues?: VisualReviewTranscriptCue[];
   overlays?: VisualReviewOverlay[];
+  /** Storyboard-derived visual criteria that the reviewer must evaluate at the matching time. */
+  creativeLocks?: VisualReviewCreativeLock[];
   /** Defect windows from a prior repair pass; these get dense 2 fps coverage. */
   focusWindows?: VisualReviewWindow[];
+  /**
+   * `channels.identity.creativeBrief.criticDoctrine` — this channel's standing
+   * instruction to its critic. It grounds the reviewer in the operator's own
+   * standard instead of a uniform generic rubric (P1-1).
+   */
+  criticDoctrine?: string;
+  /** Lane-specific things this lane's critic must actively scrutinise (P1-17). */
+  criticEmphasis?: string[];
+  /**
+   * Bounded criteria from the persisted channel QualityBar. These may carry
+   * source-bound reference mechanics, never an automatic reference comparison.
+   */
+  qualityCriteria?: string[];
 }
 
 export interface ChannelVisualReviewProfileInput {
@@ -88,12 +115,24 @@ export interface ChannelVisualReviewProfileInput {
   persona?: string;
   styleGrammar?: string;
   qualityDimensions?: string[];
+  /** Full QualityBar criteria, not merely short dimension IDs. */
+  qualityCriteria?: readonly string[];
+  /** Operator-authored critic doctrine for this channel. */
+  criticDoctrine?: string;
+  /** Lane-tuned emphases (see engine/contentLane laneQualityPolicy). */
+  laneEmphasis?: readonly string[];
 }
 
 export interface ChannelVisualReviewProfile {
   channelWorld?: string;
   expectedStructure: string;
   allowedVisualConditions: string[];
+  /** Bounded per-channel critic doctrine, ready to hand to the reviewer. */
+  criticDoctrine?: string;
+  /** Bounded lane emphases, ready to hand to the reviewer. */
+  criticEmphasis: string[];
+  /** Bounded full quality-bar criteria, ready to hand to the reviewer. */
+  qualityCriteria: string[];
 }
 
 const CHANNEL_REQUIREMENTS: Readonly<Record<string, {
@@ -173,6 +212,11 @@ export function channelVisualReviewProfile(
     .map((dimension) => compactReviewContext(dimension, 60))
     .filter((dimension): dimension is string => Boolean(dimension))
     .slice(0, 8);
+  const qualityCriteria = (input.qualityCriteria ?? [])
+    .map((criterion) => compactReviewContext(criterion, 360))
+    .filter((criterion): criterion is string => Boolean(criterion))
+    .filter((criterion, index, values) => values.indexOf(criterion) === index)
+    .slice(0, 6);
   const channelWorld = [
     channelName ? `Channel: ${channelName}` : "",
     persona ? `Audience/persona: ${persona}` : "",
@@ -180,10 +224,21 @@ export function channelVisualReviewProfile(
     `Content lane: ${laneKey}${renderer ? ` via ${renderer}` : ""}`,
     qualityDimensions.length ? `Channel quality priorities: ${qualityDimensions.join(", ")}` : "",
   ].filter(Boolean).join("; ");
+  // The operator's own critic doctrine and the lane's scrutiny list are the two
+  // per-channel inputs that make this reviewer THIS channel's critic rather
+  // than a uniform one. Both are bounded before they reach the model.
+  const criticDoctrine = compactReviewContext(input.criticDoctrine, 600);
+  const criticEmphasis = (input.laneEmphasis ?? [])
+    .map((item) => compactReviewContext(item, 240))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 4);
   return {
     ...(channelWorld ? { channelWorld } : {}),
     expectedStructure: requirement.expected,
     allowedVisualConditions: [...requirement.allowed],
+    ...(criticDoctrine ? { criticDoctrine } : {}),
+    criticEmphasis,
+    qualityCriteria,
   };
 }
 
@@ -196,9 +251,25 @@ export interface VisualReviewFrame {
 
 export interface VisualReviewEvidence {
   version: typeof VISUAL_REVIEW_VERSION;
-  source: { durationSec: number };
+  source: {
+    durationSec: number;
+    /**
+     * Present when the caller is reviewing an immutable final master. It binds
+     * both the persisted evidence and its review fingerprint to those exact
+     * bytes; ordinary review callers may intentionally omit it.
+     */
+    sha256?: string;
+  };
   frames: VisualReviewFrame[];
-  coverage: { maxGapSec: number; focusedWindows: VisualReviewWindow[] };
+  coverage: {
+    maxGapSec: number;
+    maxAllowedGapSec: number;
+    focusedWindows: VisualReviewWindow[];
+    /** Present when an exact transition/repair window must be reviewed in full. */
+    requiredFocusFrameCount?: number;
+    /** Missing required focus frames make the review fail closed. */
+    missingFocusFrameCount?: number;
+  };
   manifestKey?: string;
 }
 
@@ -261,14 +332,37 @@ export type VisualReviewer = (input: VisualReviewerInput) => Promise<string>;
 export interface ReviewRenderOptions {
   runId: string;
   keyPrefix?: string;
+  /**
+   * SHA-256 of the exact master being sampled. Optional for ordinary callers,
+   * mandatory at the cinematic final-master admission boundary.
+   */
+  sourceSha256?: string;
   required?: boolean;
   /** Broad evidence cap. Each vision request is always <= 12 images. */
   maxFrames?: number;
   /** Extra evidence cap for reviewer-requested or repair-focused windows. */
   maxFocusFrames?: number;
+  /**
+   * Ignore the regular focused-frame cap and inspect every 2fps frame in every
+   * declared focus window. Use only where a source-bound edit contract makes
+   * every join material; it prevents a long cinematic sequence from claiming
+   * complete cut review while silently dropping later cuts.
+   */
+  requireCompleteFocusCoverage?: boolean;
   persistEvidence?: boolean;
   reviewer?: VisualReviewer;
   log?: (message: string) => void;
+  /**
+   * Confidence a critical/major finding must clear before it BLOCKS the render
+   * (below it the verdict degrades to needs_human, never to a silent pass).
+   *
+   * Deliberately defaulted to the historic 0.6 and left as an explicit knob
+   * rather than being derived from the lane: shifting the gate arithmetic per
+   * channel is a spend-and-ship decision, so it stays an operator choice while
+   * the per-channel tailoring happens in the PROMPT above. See the audit note
+   * on lane-tuned thresholds (P1-17).
+   */
+  minBlockingConfidence?: number;
 }
 
 const DEFAULT_STRUCTURE =
@@ -310,6 +404,23 @@ function evenlyPick<T>(values: readonly T[], count: number): T[] {
   return Array.from({ length: count }, (_, index) => values[Math.floor((index * values.length) / count)]);
 }
 
+/**
+ * A required visual review needs enough broad evidence to make claims about
+ * the entire master, not just dense title/outro or defect windows.  Ordinary
+ * videos get at least 24 temporal intervals; the absolute cap keeps a
+ * 48-frame review from silently certifying marathon footage it cannot cover.
+ */
+export function maxAllowedVisualReviewGapSec(durationSec: number): number {
+  const duration = Math.max(0, finite(durationSec, 0));
+  if (duration === 0) return 0;
+  return Number(clamp(duration / 24, 6, 90).toFixed(2));
+}
+
+function coverageFrameCount(durationSec: number, maxFrames: number): number {
+  if (durationSec <= 0) return 0;
+  return Math.min(maxFrames, Math.max(1, Math.ceil(durationSec / maxAllowedVisualReviewGapSec(durationSec))));
+}
+
 function normalizeWindow(window: Pick<VisualReviewWindow, "startSec" | "endSec">, durationSec: number): VisualReviewWindow {
   const startSec = clamp(finite(window.startSec, 0), 0, durationSec);
   const endSec = clamp(finite(window.endSec, startSec), startSec, durationSec);
@@ -343,27 +454,45 @@ export function planVisualReviewEvidence(input: {
   sceneTimes?: readonly number[];
   transcriptCues?: readonly VisualReviewTranscriptCue[];
   overlays?: readonly VisualReviewOverlay[];
+  creativeLocks?: readonly VisualReviewCreativeLock[];
   focusWindows?: readonly VisualReviewWindow[];
   maxFrames?: number;
 }): VisualReviewFrame[] {
   const durationSec = Math.max(0, finite(input.durationSec, 0));
   const maxFrames = Math.max(8, Math.floor(finite(input.maxFrames, 48)));
   const candidates = new Map<string, FrameCandidate>();
+  const coverageKeys = new Set<string>();
   const add = (raw: number, reason: EvidenceReason) => {
     if (!Number.isFinite(raw) || raw < 0 || raw > durationSec) return;
-    const tSec = roundTime(raw);
+    const tSec = clamp(roundTime(raw), 0, durationSec);
     const key = tSec.toFixed(1);
     const existing = candidates.get(key);
     if (existing) existing.reasons.add(reason);
     else candidates.set(key, { tSec, reasons: new Set([reason]) });
   };
 
+  const reserveCoverage = (raw: number) => {
+    add(raw, "uniform");
+    coverageKeys.add(clamp(roundTime(raw), 0, durationSec).toFixed(1));
+  };
+
   // Dense endpoints protect short title/outro text from being sampled around.
   for (const tSec of [0.2, 0.7, 1.5, 2.8, 4.6]) add(Math.min(tSec, durationSec), "intro");
   for (const delta of [4.6, 2.8, 1.5, 0.7, 0.2]) add(Math.max(0, durationSec - delta), "outro");
 
-  const uniformStep = clamp(durationSec / 16, 4, 14);
-  for (let tSec = uniformStep; tSec < durationSec; tSec += uniformStep) add(tSec, "uniform");
+  // Reserve evenly spaced anchors before filling the remainder with the most
+  // semantically valuable frames.  Priority-only truncation used to retain
+  // dense endings while dropping the middle of long masters.
+  const coverageFrames = coverageFrameCount(durationSec, maxFrames);
+  for (let index = 0; index < coverageFrames; index++) {
+    reserveCoverage(durationSec * ((index + 0.5) / coverageFrames));
+  }
+  // Fill any capacity left after semantic evidence with additional evenly
+  // distributed samples, rather than turning the frame cap into a quality
+  // downgrade for long renders that have few annotated scenes.
+  for (let index = 0; index < maxFrames; index++) {
+    add(durationSec * ((index + 0.5) / maxFrames), "uniform");
+  }
 
   for (const tSec of evenlyPick(
     (input.sceneTimes ?? []).filter((time) => Number.isFinite(time) && time > 0.5 && time < durationSec - 0.5),
@@ -381,15 +510,36 @@ export function planVisualReviewEvidence(input: {
     add(overlay.endSec - 0.1, "overlay");
   }
 
+  // A visual plan must influence evidence selection, otherwise it is merely a
+  // prompt artifact and can still be skipped by a broad uniform sample.
+  for (const lock of input.creativeLocks ?? []) {
+    add((lock.startSec + lock.endSec) / 2, "scene");
+  }
+
   for (const window of mergeWindows(input.focusWindows ?? [], durationSec)) {
     for (let tSec = window.startSec; tSec <= window.endSec + 0.001; tSec += 0.5) add(tSec, "focus");
     add(window.endSec, "focus");
   }
 
-  const chosen = [...candidates.values()]
-    .sort((a, b) => priority(b) - priority(a) || a.tSec - b.tSec)
-    .slice(0, maxFrames)
+  const reserved = [...candidates.entries()]
+    .filter(([key]) => coverageKeys.has(key))
+    .map(([, candidate]) => candidate)
     .sort((a, b) => a.tSec - b.tSec);
+  const remainingCapacity = Math.max(0, maxFrames - reserved.length);
+  const semantic = [...candidates.entries()]
+    .filter(([key, candidate]) => !coverageKeys.has(key) && [...candidate.reasons].some((reason) => reason !== "uniform"))
+    .map(([, candidate]) => candidate)
+    .sort((a, b) => priority(b) - priority(a) || a.tSec - b.tSec)
+    .slice(0, remainingCapacity);
+  const supplementalUniform = [...candidates.entries()]
+    .filter(([key, candidate]) => !coverageKeys.has(key) && candidate.reasons.size === 1 && candidate.reasons.has("uniform"))
+    .map(([, candidate]) => candidate)
+    .sort((a, b) => a.tSec - b.tSec);
+  const chosen = [
+    ...reserved,
+    ...semantic,
+    ...evenlyPick(supplementalUniform, Math.max(0, remainingCapacity - semantic.length)),
+  ].sort((a, b) => a.tSec - b.tSec);
   return chosen.map((candidate, index) => ({
     id: `f${String(index + 1).padStart(3, "0")}`,
     tSec: candidate.tSec,
@@ -397,13 +547,48 @@ export function planVisualReviewEvidence(input: {
   }));
 }
 
-function focusOnlyEvidence(durationSec: number, windows: readonly VisualReviewWindow[], maxFrames: number): VisualReviewFrame[] {
+/**
+ * Deterministic 2fps evidence schedule for a window that must be reviewed in
+ * full. Exported for preflight/audit tests; it performs no extraction or model
+ * call and therefore makes the exact review cost visible before a run starts.
+ */
+export function planCompleteFocusEvidence(durationSec: number, windows: readonly VisualReviewWindow[]): VisualReviewFrame[] {
+  const candidates = new Map<string, number>();
+  const add = (raw: number) => {
+    if (!Number.isFinite(raw) || raw < 0 || raw > durationSec) return;
+    const tSec = clamp(roundTime(raw), 0, durationSec);
+    candidates.set(tSec.toFixed(1), tSec);
+  };
+  for (const window of mergeWindows(windows, durationSec)) {
+    for (let tSec = window.startSec; tSec <= window.endSec + 0.001; tSec += 0.5) add(tSec);
+    add(window.endSec);
+  }
+  return [...candidates.values()]
+    .sort((a, b) => a - b)
+    .map((tSec, index) => ({
+      id: `c${String(index + 1).padStart(3, "0")}`,
+      tSec,
+      selectionReasons: ["focus"],
+    }));
+}
+
+function focusOnlyEvidence(
+  durationSec: number,
+  windows: readonly VisualReviewWindow[],
+  maxFrames: number,
+  requireCompleteCoverage = false,
+): VisualReviewFrame[] {
+  if (requireCompleteCoverage) return planCompleteFocusEvidence(durationSec, windows);
   const planned = planVisualReviewEvidence({
     durationSec,
     focusWindows: windows,
-    // The capped planner retains endpoint/uniform samples too; select only the
-    // dense focus candidates so this really is a targeted 2 fps re-watch.
-    maxFrames: Math.max(8, maxFrames * 3),
+    // Reserve enough planning capacity that broad temporal anchors cannot
+    // crowd out the separately budgeted 2 fps focus re-watch.
+    maxFrames: Math.max(
+      8,
+      maxFrames * 3,
+      coverageFrameCount(durationSec, Number.MAX_SAFE_INTEGER) + maxFrames,
+    ),
   }).filter((frame) => frame.selectionReasons.includes("focus"));
   return planned.slice(0, Math.max(0, maxFrames));
 }
@@ -447,6 +632,19 @@ function cueForFrame(cues: readonly VisualReviewTranscriptCue[], tSec: number): 
   return cue?.text?.replace(/\s+/g, " ").trim().slice(0, 180) || undefined;
 }
 
+function creativeLockForFrame(
+  locks: readonly VisualReviewCreativeLock[],
+  tSec: number,
+): VisualReviewCreativeLock | undefined {
+  return locks.find((lock) => lock.startSec <= tSec && lock.endSec >= tSec) ??
+    locks.reduce<VisualReviewCreativeLock | undefined>((nearest, lock) => {
+      if (!nearest) return lock;
+      const a = Math.abs((lock.startSec + lock.endSec) / 2 - tSec);
+      const b = Math.abs((nearest.startSec + nearest.endSec) / 2 - tSec);
+      return a < b ? lock : nearest;
+    }, undefined);
+}
+
 function reviewerPrompt(
   intent: VisualReviewIntent,
   frames: readonly ExtractedFrame[],
@@ -454,15 +652,44 @@ function reviewerPrompt(
 ): string {
   const timeline = frames.map((frame) => {
     const transcript = cueForFrame(intent.transcriptCues ?? [], frame.descriptor.tSec);
+    const creativeLock = creativeLockForFrame(intent.creativeLocks ?? [], frame.descriptor.tSec);
     const reasons = frame.descriptor.selectionReasons.join(",");
-    return `- ${frame.descriptor.id} @${frame.descriptor.tSec.toFixed(1)}s [${reasons}]${transcript ? ` narration: "${transcript}"` : ""}`;
+    const lockText = creativeLock
+      ? ` visual-lock: "${creativeLock.expected.slice(0, 700)}" criteria: ${creativeLock.acceptanceCriteria.slice(0, 5).map((criterion) => `"${criterion.slice(0, 220)}"`).join("; ")}`
+      : "";
+    return `- ${frame.descriptor.id} @${frame.descriptor.tSec.toFixed(1)}s [${reasons}]${transcript ? ` narration: "${transcript}"` : ""}${lockText}`;
   }).join("\n");
   const allowedVisualConditions = (intent.allowedVisualConditions ?? [])
     .map((condition) => condition.replace(/\s+/g, " ").trim().slice(0, 300))
     .filter(Boolean);
+  const criticDoctrine = intent.criticDoctrine?.replace(/\s+/g, " ").trim().slice(0, 600);
+  const criticEmphasis = (intent.criticEmphasis ?? [])
+    .map((item) => item.replace(/\s+/g, " ").trim().slice(0, 240))
+    .filter(Boolean)
+    .slice(0, 4);
+  const qualityCriteria = (intent.qualityCriteria ?? [])
+    .map((item) => item.replace(/\s+/g, " ").trim().slice(0, 360))
+    .filter(Boolean)
+    .slice(0, 6);
   return (
     `You are the production visual QA director for a rendered YouTube video. Review only what is visible in the ` +
     `timestamped frames below. This is the ${phase} pass; do not claim continuous-frame coverage.\n\n` +
+    // Per-channel grounding first: a critic that does not know the channel's own
+    // standard falls back to a uniform rubric, which is exactly what this gate
+    // must not do. The doctrine informs SEVERITY, never the defect vocabulary —
+    // the bounded category list below is still the only thing it may return.
+    (criticDoctrine
+      ? `CHANNEL CRITIC DOCTRINE (this channel's standing instruction — apply it when weighing how serious a ` +
+        `finding is; it does NOT license new defect categories): ${criticDoctrine}\n\n`
+      : "") +
+    (criticEmphasis.length
+      ? `LANE SCRUTINY (inspect specifically for these): ${criticEmphasis.map((item) => `"${item}"`).join("; ")}\n\n`
+      : "") +
+    (qualityCriteria.length
+      ? `CHANNEL QUALITY BAR (apply these as observable production standards when the supplied frames permit; ` +
+        `they describe transferable mechanics only, not an automatic comparison with any reference channel): ` +
+        `${qualityCriteria.map((item) => `"${item}"`).join("; ")}\n\n`
+      : "") +
     `INTENT\n- Title: "${intent.title}"\n` +
     (intent.topic ? `- Topic: "${intent.topic}"\n` : "") +
     (intent.niche ? `- Niche: ${intent.niche}\n` : "") +
@@ -477,6 +704,7 @@ function reviewerPrompt(
     `\nFRAME LEDGER\n${timeline}\n\n` +
     `Find only viewer-noticeable defects: overlays/captions clipped, off-canvas, colliding, covering a face or key subject, ` +
     `unreadable text, wrong/repeated footage, black/frozen frames, broken transitions, or missing/broken intro/outro. ` +
+    `For an active visual-lock violation, report wrong_footage when the literal story/subject/location is wrong; use a major general_visual defect when the visible identity, mood, continuity, or composition lock is violated. ` +
     `Never flag a short on-screen hook merely because it differs from the SEO title. Do not invent defects outside the supplied evidence.\n\n` +
     `Return STRICT JSON {"defects":[{"startSec":number,"endSec":number,"severity":"critical|major|minor",` +
     `"category":"overlay_off_canvas|overlay_occlusion|overlay_collision|caption_cutoff|caption_unreadable|wrong_footage|repeated_clip|black_frame|frozen_frame|transition_break|intro_card|outro_card|general_visual",` +
@@ -528,15 +756,34 @@ function parseModelDefects(
   frames: readonly ExtractedFrame[],
   intent: VisualReviewIntent,
   phase: "broad" | "focus",
-): { defects: VisualReviewDefect[]; summary: string } {
-  const parsed = parseJsonLoose<{
-    defects?: Array<Record<string, unknown>>;
-    summary?: unknown;
-  }>(raw);
+): { defects: VisualReviewDefect[]; summary: string; complete: boolean } {
+  let parsed: unknown;
+  try {
+    parsed = parseJsonLoose<unknown>(raw);
+  } catch {
+    return { defects: [], summary: "", complete: false };
+  }
+  if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
+    return { defects: [], summary: "", complete: false };
+  }
+  const receipt = parsed as Record<string, unknown>;
+  const reportedDefects = receipt.defects;
+  const summary = typeof receipt.summary === "string" ? receipt.summary.trim().slice(0, 500) : "";
+  if (!Array.isArray(reportedDefects) || !summary) {
+    return { defects: [], summary, complete: false };
+  }
   const known = new Set(frames.map((frame) => frame.descriptor.id));
-  const defects = (parsed?.defects ?? []).flatMap((item) => {
+  let complete = true;
+  const defects = reportedDefects.flatMap((item) => {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      complete = false;
+      return [];
+    }
     const observed = String(item["observed"] ?? item["issue"] ?? "").trim();
-    if (!observed) return [];
+    if (!observed) {
+      complete = false;
+      return [];
+    }
     const startSec = clamp(finite(item["startSec"] ?? item["tSec"], frames[0]?.descriptor.tSec ?? 0), 0, Number.MAX_SAFE_INTEGER);
     const endSec = Math.max(startSec, finite(item["endSec"], startSec));
     const ids = Array.isArray(item["evidenceFrameIds"])
@@ -561,7 +808,7 @@ function parseModelDefects(
       source: "vision" as const,
     } satisfies VisualReviewDefect];
   });
-  return { defects, summary: String(parsed?.summary ?? "").slice(0, 500) };
+  return { defects, summary, complete };
 }
 
 function rectIntersection(a: NormalizedRect, b: NormalizedRect): number {
@@ -658,9 +905,10 @@ async function reviewBatches(
   intent: VisualReviewIntent,
   frames: readonly ExtractedFrame[],
   phase: "broad" | "focus",
-): Promise<{ defects: VisualReviewDefect[]; summaries: string[] }> {
+): Promise<{ defects: VisualReviewDefect[]; summaries: string[]; incompleteReceiptCount: number }> {
   const defects: VisualReviewDefect[] = [];
   const summaries: string[] = [];
+  let incompleteReceiptCount = 0;
   for (let index = 0; index < frames.length; index += 12) {
     const batch = frames.slice(index, index + 12);
     const raw = await reviewer({
@@ -670,9 +918,10 @@ async function reviewBatches(
     });
     const parsed = parseModelDefects(raw, batch, intent, phase);
     defects.push(...parsed.defects);
+    if (!parsed.complete) incompleteReceiptCount += 1;
     if (parsed.summary) summaries.push(parsed.summary);
   }
-  return { defects, summaries };
+  return { defects, summaries, incompleteReceiptCount };
 }
 
 function defaultReviewer(input: VisualReviewerInput): Promise<string> {
@@ -680,16 +929,31 @@ function defaultReviewer(input: VisualReviewerInput): Promise<string> {
     prompt: input.prompt,
     imagePaths: input.frames.map((frame) => frame.localPath),
     json: true,
-    maxTokens: 2200,
+    maxTokens: VISION_GATE_MAX_TOKENS,
+    // Final render evidence is an independent non-Google gate. Do not let a
+    // Gemini fallback certify pixels generated by another pipeline stage.
+    providers: ["openrouter"], tier: "final",
   });
 }
 
-function fingerprint(intent: VisualReviewIntent, durationSec: number, frames: readonly VisualReviewFrame[]): string {
+function fingerprint(
+  intent: VisualReviewIntent,
+  durationSec: number,
+  frames: readonly VisualReviewFrame[],
+  sourceSha256?: string,
+): string {
   return createHash("sha256")
     // A render must never reuse review evidence that was judged against a
     // different channel world, lane structure, transcript, overlay receipt, or
-    // repair focus range. The full typed intent is compact and deterministic.
-    .update(JSON.stringify({ version: VISUAL_REVIEW_VERSION, intent, durationSec, frames: frames.map((frame) => [frame.tSec, frame.selectionReasons]) }))
+    // repair focus range. When supplied, the master hash prevents a review
+    // receipt from being detached from the exact bytes whose frames were read.
+    .update(JSON.stringify({
+      version: VISUAL_REVIEW_VERSION,
+      intent,
+      durationSec,
+      ...(sourceSha256 ? { sourceSha256 } : {}),
+      frames: frames.map((frame) => [frame.tSec, frame.selectionReasons]),
+    }))
     .digest("hex")
     .slice(0, 24);
 }
@@ -733,16 +997,29 @@ export async function reviewRender(
   const log = opts.log ?? (() => {});
   const required = opts.required === true;
   const reviewer = opts.reviewer ?? defaultReviewer;
-  if (!opts.reviewer && !hasVisionKey()) {
-    if (required) throw new Error("visualReview required grader unavailable (no configured vision provider)");
+  const sourceSha256 = opts.sourceSha256?.trim().toLowerCase();
+  if (opts.sourceSha256 !== undefined && !/^[a-f0-9]{64}$/.test(sourceSha256 ?? "")) {
+    throw new Error("visualReview sourceSha256 must be a 64-character hexadecimal SHA-256");
+  }
+  if (!opts.reviewer && !hasNonGoogleVisionKey()) {
+    if (required) {
+      throw new Error(
+        "visualReview required grader unavailable (configure OPENROUTER_API_KEY; Google/Gemini is not an eligible final-review provider)",
+      );
+    }
     return {
       ran: false,
       verdict: "needs_human",
       defects: [],
-      evidence: { version: VISUAL_REVIEW_VERSION, source: { durationSec }, frames: [], coverage: { maxGapSec: durationSec, focusedWindows: [] } },
+      evidence: {
+        version: VISUAL_REVIEW_VERSION,
+        source: { durationSec, ...(sourceSha256 ? { sha256: sourceSha256 } : {}) },
+        frames: [],
+        coverage: { maxGapSec: durationSec, maxAllowedGapSec: maxAllowedVisualReviewGapSec(durationSec), focusedWindows: [] },
+      },
       summary: "vision unavailable",
       focusWindows: [],
-      reviewFingerprint: fingerprint(intent, durationSec, []),
+      reviewFingerprint: fingerprint(intent, durationSec, [], sourceSha256),
       framePaths: [],
     };
   }
@@ -753,6 +1030,7 @@ export async function reviewRender(
     sceneTimes,
     transcriptCues: intent.transcriptCues,
     overlays: intent.overlays,
+    creativeLocks: intent.creativeLocks,
     focusWindows: intent.focusWindows,
     maxFrames: finite(opts.maxFrames, 48),
   });
@@ -763,10 +1041,19 @@ export async function reviewRender(
       ran: false,
       verdict: "needs_human",
       defects: [],
-      evidence: { version: VISUAL_REVIEW_VERSION, source: { durationSec }, frames: planned, coverage: { maxGapSec: maxGap(planned.map((frame) => frame.tSec), durationSec), focusedWindows: [] } },
+      evidence: {
+        version: VISUAL_REVIEW_VERSION,
+        source: { durationSec, ...(sourceSha256 ? { sha256: sourceSha256 } : {}) },
+        frames: planned,
+        coverage: {
+          maxGapSec: maxGap(planned.map((frame) => frame.tSec), durationSec),
+          maxAllowedGapSec: maxAllowedVisualReviewGapSec(durationSec),
+          focusedWindows: [],
+        },
+      },
       summary: "insufficient extracted evidence",
       focusWindows: [],
-      reviewFingerprint: fingerprint(intent, durationSec, planned),
+      reviewFingerprint: fingerprint(intent, durationSec, planned, sourceSha256),
       framePaths: broad.map((frame) => frame.localPath),
     };
   }
@@ -778,24 +1065,45 @@ export async function reviewRender(
     ...(intent.focusWindows ?? []),
     ...focusForDefects(initialDefects, durationSec),
   ], durationSec);
-  const focusCandidates = focusOnlyEvidence(durationSec, focusWindows, Math.max(0, Math.floor(finite(opts.maxFocusFrames, 24))))
+  const requireCompleteFocusCoverage = opts.requireCompleteFocusCoverage === true;
+  const requiredFocusFrames = requireCompleteFocusCoverage
+    ? planCompleteFocusEvidence(durationSec, focusWindows)
+    : [];
+  const focusCandidates = focusOnlyEvidence(
+    durationSec,
+    focusWindows,
+    Math.max(0, Math.floor(finite(opts.maxFocusFrames, 24))),
+    requireCompleteFocusCoverage,
+  )
     .filter((candidate) => !broad.some((frame) => Math.abs(frame.descriptor.tSec - candidate.tSec) < 0.11))
     .map((candidate, index) => ({ ...candidate, id: `x${String(index + 1).padStart(3, "0")}` }));
   const focused = focusCandidates.length
     ? await extractFrames(videoPath, focusCandidates, opts.runId, "focus", log)
     : [];
-  const focusPass = focused.length ? await reviewBatches(reviewer, intent, focused, "focus") : { defects: [], summaries: [] };
+  const focusPass = focused.length
+    ? await reviewBatches(reviewer, intent, focused, "focus")
+    : { defects: [], summaries: [], incompleteReceiptCount: 0 };
   const allExtracted = [...broad, ...focused];
   const defects = dedupeDefects([...geometry, ...firstPass.defects, ...focusPass.defects]);
   const allFrames = allExtracted.map((frame) => frame.descriptor);
-  const reviewFingerprint = fingerprint(intent, durationSec, allFrames);
+  const missingFocusFrameCount = requiredFocusFrames.filter((requiredFrame) =>
+    !allFrames.some((frame) => Math.abs(frame.tSec - requiredFrame.tSec) < 0.11),
+  ).length;
+  const reviewFingerprint = fingerprint(intent, durationSec, allFrames, sourceSha256);
   let evidence: VisualReviewEvidence = {
     version: VISUAL_REVIEW_VERSION,
-    source: { durationSec },
+    source: { durationSec, ...(sourceSha256 ? { sha256: sourceSha256 } : {}) },
     frames: allFrames,
     coverage: {
       maxGapSec: maxGap(allFrames.map((frame) => frame.tSec), durationSec),
+      maxAllowedGapSec: maxAllowedVisualReviewGapSec(durationSec),
       focusedWindows: focusWindows,
+      ...(requireCompleteFocusCoverage
+        ? {
+            requiredFocusFrameCount: requiredFocusFrames.length,
+            missingFocusFrameCount,
+          }
+        : {}),
     },
   };
   if (opts.persistEvidence !== false) {
@@ -803,19 +1111,50 @@ export async function reviewRender(
     evidence = await persistEvidence(evidence, allExtracted, { runId: opts.runId, keyPrefix: opts.keyPrefix }, reviewFingerprint);
   }
 
+  const rawMinConfidence = Number(opts.minBlockingConfidence);
+  const minBlockingConfidence = Number.isFinite(rawMinConfidence)
+    ? Math.min(1, Math.max(0, rawMinConfidence))
+    : 0.6;
   const blocking = defects.filter((defect) =>
     (defect.severity === "critical" || defect.severity === "major") &&
     defect.category !== "general_visual" &&
-    defect.confidence >= 0.6,
+    defect.confidence >= minBlockingConfidence,
   );
   const uncertain = defects.some((defect) =>
     (defect.severity === "critical" || defect.severity === "major") &&
-    (defect.category === "general_visual" || defect.confidence < 0.6),
+    (defect.category === "general_visual" || defect.confidence < minBlockingConfidence),
   );
-  const verdict: VisualReviewVerdict = blocking.length ? "fail" : uncertain ? "needs_human" : "pass";
-  const summary = [...firstPass.summaries, ...focusPass.summaries].filter(Boolean).join(" | ").slice(0, 1000) ||
+  const incompleteReviewerReceipts = firstPass.incompleteReceiptCount + focusPass.incompleteReceiptCount;
+  const coverageIncomplete = evidence.coverage.maxGapSec > evidence.coverage.maxAllowedGapSec + 0.01;
+  const focusCoverageIncomplete = requireCompleteFocusCoverage && missingFocusFrameCount > 0;
+  const verdict: VisualReviewVerdict = blocking.length
+    ? "fail"
+    : incompleteReviewerReceipts > 0 || uncertain || focusCoverageIncomplete || (required && coverageIncomplete)
+      ? "needs_human"
+      : "pass";
+  const reviewerSummary = [...firstPass.summaries, ...focusPass.summaries].filter(Boolean).join(" | ") ||
     `${defects.length} evidence-backed defect(s); ${allFrames.length} frames reviewed`;
-  log(`visualReview: ${allFrames.length} frames (${Math.ceil(allFrames.length / 12)} batch(es)), ${defects.length} defect(s) → ${verdict.toUpperCase()}`);
+  const summary = [
+    reviewerSummary,
+    incompleteReviewerReceipts
+      ? `${incompleteReviewerReceipts} reviewer batch(es) returned an incomplete structured receipt`
+      : "",
+    coverageIncomplete
+      ? `evidence gap ${evidence.coverage.maxGapSec.toFixed(2)}s exceeds ${evidence.coverage.maxAllowedGapSec.toFixed(2)}s coverage cap`
+      : "",
+    focusCoverageIncomplete
+      ? `${missingFocusFrameCount}/${requiredFocusFrames.length} required focus frames were not extracted`
+      : "",
+  ].filter(Boolean).join(" | ").slice(0, 1000);
+  // Record that the critique was channel-grounded: the review fingerprint
+  // already covers criticDoctrine/criticEmphasis (they are part of `intent`), so
+  // changing a channel's doctrine correctly invalidates cached review evidence.
+  const grounding = [
+    intent.criticDoctrine ? "doctrine" : "",
+    (intent.criticEmphasis ?? []).length ? `lane-emphasis×${(intent.criticEmphasis ?? []).length}` : "",
+    (intent.qualityCriteria ?? []).length ? `quality-bar×${(intent.qualityCriteria ?? []).length}` : "",
+  ].filter(Boolean).join("+");
+  log(`visualReview: ${allFrames.length} frames (${Math.ceil(allFrames.length / 12)} batch(es)), ${defects.length} defect(s), ${incompleteReviewerReceipts} incomplete receipt(s), coverage ${evidence.coverage.maxGapSec.toFixed(2)}/${evidence.coverage.maxAllowedGapSec.toFixed(2)}s${grounding ? `, grounded by ${grounding}` : ""} → ${verdict.toUpperCase()}`);
   return {
     ran: true,
     verdict,

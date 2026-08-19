@@ -85,6 +85,12 @@ export async function presignUpload(
   });
   return getSignedUrl(getR2Client(), command, {
     expiresIn: opts.expiresIn ?? 3600,
+    // R2 stores signed object metadata only when the client sends it as
+    // canonical request headers. Hoisting it into the query string both drops
+    // the metadata and makes worker uploads fail signature verification.
+    unhoistableHeaders: new Set(
+      Object.keys(opts.metadata ?? {}).map((key) => `x-amz-meta-${key}`),
+    ),
   });
 }
 

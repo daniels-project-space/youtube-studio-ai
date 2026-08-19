@@ -96,6 +96,24 @@ export const PRODUCTION_CONTRACT_POLICY: PipelinePolicy = {
   allowOpaqueMigrationArtifacts: true,
 };
 
+/**
+ * A Channel Inception probe is a real, private master plus the complete
+ * editorial/technical evidence chain. It deliberately omits only publishing
+ * capabilities because its source pipeline has already removed `upload_draft`.
+ * This is not a softer production policy: crew, story alignment, certification,
+ * metadata, thumbnail, compliance, and final-master QA remain mandatory.
+ */
+export const PRIVATE_PROBE_CONTRACT_POLICY: PipelinePolicy = {
+  ...PRODUCTION_CONTRACT_POLICY,
+  id: "private-probe-contract",
+  version: "1.0.0",
+  requiredCapabilities: PRODUCTION_CONTRACT_POLICY.requiredCapabilities.filter(
+    (capability) =>
+      capability !== "publish.connector_bound" &&
+      capability !== "publish.synthetic_disclosed",
+  ),
+};
+
 const certificationRank = { revoked: -1, legacy: 0, contract: 1, golden: 2 } as const;
 
 export const CREW_ARTIFACT_BINDINGS: ReadonlyArray<{
@@ -114,7 +132,9 @@ export const CREW_ARTIFACT_BINDINGS: ReadonlyArray<{
       "novita_render_video",
       "whiteboard_scribe",
       "motion_comic",
+      "lore_short",
       "story_spine",
+      "visual_matter",
     ],
     artifact: "visualBrief",
     capability: "crew.dp_visual_spec",
@@ -365,6 +385,79 @@ function validatePublicationApproval(entry: PipelineEntry): void {
   }
 }
 
+/**
+ * A module contract that declares `publish.private_only` (every Casefile
+ * source/evidence/cinematic-signing admission module, the children curriculum
+ * seed, the children show bible, and the child-content safety receipt) is
+ * asserting that this content may only ever surface as a private,
+ * human-reviewed draft — never an automatic or channel-approved public
+ * release. This is a fail-closed pipeline-graph guarantee, not a per-block
+ * default: it must hold regardless of family/lane naming, regardless of
+ * `approvedForPublish` (validatePublicationApproval, above), and regardless
+ * of a channel's `approvalMode` schedule setting
+ * (src/lib/publishingPolicy.ts) — none of those may ever satisfy it.
+ */
+const PRIVATE_ONLY_CAPABILITY = "publish.private_only";
+
+interface PublicPublishAttemptSpec {
+  block: string;
+  isPublicAttempt: (params: Readonly<Record<string, unknown>>) => boolean;
+}
+
+/**
+ * Every pipeline block capable of an actual external/public side effect,
+ * paired with the exact param shape that means "this call leaves
+ * draft/private". Kept in lockstep with channelPublishConfiguration()'s
+ * block/action mapping (src/lib/channelPublishPolicy.ts) and with
+ * validatePublicationApproval() above.
+ */
+const PUBLIC_PUBLISH_ATTEMPTS: readonly PublicPublishAttemptSpec[] = [
+  {
+    block: "upload_draft",
+    isPublicAttempt: (params) => {
+      const mode = String(params["publishMode"] ?? "draft");
+      return mode === "public" || mode === "scheduled";
+    },
+  },
+  {
+    block: "shorts_spinoff",
+    isPublicAttempt: (params) =>
+      params["publishShort"] === "public" || params["crosspostShort"] === true,
+  },
+  // crosspost has exactly one capability, `publish.crossposted`: its mere
+  // presence in the graph is itself the public side effect, with no private
+  // mode to opt out of.
+  { block: "crosspost", isPublicAttempt: () => true },
+];
+
+/**
+ * Fail-closed guard for `publish.private_only`. `capabilities` is the
+ * pipeline's fully-aggregated capability set (every module's manifest,
+ * regardless of position), so a single Casefile/children-safety admission
+ * module anywhere in the graph poisons the whole compiled run: no
+ * `upload_draft` / `shorts_spinoff` / `crosspost` entry may attempt a
+ * public, scheduled, or crossposted release. Unlike `validatePublicationApproval`,
+ * this check is deliberately NOT satisfiable by any param (there is no
+ * `approvedForPublish`-shaped escape hatch here) and runs independently of
+ * the channel's `approvalMode` setting, which this compiler never reads.
+ */
+function enforcePrivateOnlyPublication(
+  entries: readonly PipelineEntry[],
+  capabilities: ReadonlySet<string>,
+): void {
+  if (!capabilities.has(PRIVATE_ONLY_CAPABILITY)) return;
+  for (const entry of entries) {
+    const spec = PUBLIC_PUBLISH_ATTEMPTS.find((candidate) => candidate.block === entry.block);
+    if (!spec) continue;
+    const params = (entry.params ?? {}) as Record<string, unknown>;
+    if (spec.isPublicAttempt(params)) {
+      throw new PipelinePolicyError(
+        `pipeline declares capability "${PRIVATE_ONLY_CAPABILITY}" (a Casefile/children-safety admission module is present), so "${entry.block}" may never leave a private draft; public/scheduled/crosspost publish attempts are rejected regardless of approvedForPublish or the channel's approvalMode setting`,
+      );
+    }
+  }
+}
+
 export function compilePipeline(
   resolved: ResolvedPipeline,
   policy: PipelinePolicy = PRODUCTION_CONTRACT_POLICY,
@@ -430,6 +523,8 @@ export function compilePipeline(
   }
 
   for (const capability of policy.requiredCapabilities) requireCapability(capabilities, capability);
+
+  enforcePrivateOnlyPublication(resolved.entries, capabilities);
 
   if (capabilities.has("script.generated")) {
     requireCapability(capabilities, "script.qa_passed", "a script-producing pipeline must certify its script");

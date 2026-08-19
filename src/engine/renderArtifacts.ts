@@ -59,7 +59,20 @@ export const ShotRenderManifestSchema = z.object({
   generation: GenerationIdentitySchema.extend({
     fps: z.number().int().positive(),
     guidanceScale: z.number().positive(),
-    twoStageRefine: z.boolean(),
+    pipeline: z.literal("distilled"),
+    twoStageRefine: z.literal(true),
+    textEncoderCheckpoint: z.string().min(1),
+    videoVaeCheckpoint: z.string().min(1),
+    audioVaeCheckpoint: z.string().min(1),
+    spatialUpscalerCheckpoint: z.string().min(1),
+    quantization: z.literal("fp8-cast"),
+    offload: z.literal("cpu"),
+    spatialUpscaleFactor: z.literal(2),
+    stageOneWidth: z.number().int().positive(),
+    stageOneHeight: z.number().int().positive(),
+    /** Worker-observed encoded dimensions after the LTX latent x2 stage. */
+    outputWidth: z.number().int().positive(),
+    outputHeight: z.number().int().positive(),
   }),
   durationSec: z.number().finite().positive(),
   items: z.array(z.object({
@@ -69,7 +82,16 @@ export const ShotRenderManifestSchema = z.object({
     t1: z.number().finite().positive(),
     sourceSentenceIds: z.array(z.string()).min(1),
     continuityState: z.string().min(1),
-  }).refine((item) => item.t1 > item.t0, "rendered shot t1 must follow t0")).min(1),
+    /**
+     * Present only when this clip is LTX-conditioned to arrive at the
+     * already-selected first frame of the following continuous shot.
+     */
+    terminalAnchorShotId: z.string().min(1).optional(),
+    terminalStillKey: z.string().min(1).optional(),
+  }).refine((item) => item.t1 > item.t0, "rendered shot t1 must follow t0").refine(
+    (item) => Boolean(item.terminalAnchorShotId) === Boolean(item.terminalStillKey),
+    "rendered terminal anchor id and still key must be supplied together",
+  )).min(1),
 });
 
 export const ShotQaReportSchema = z.object({
@@ -85,6 +107,8 @@ export const ShotQaReportSchema = z.object({
     continuity: z.number().min(0).max(1),
     motionIntegrity: z.number().min(0).max(1),
     artifactFree: z.number().min(0).max(1),
+    /** Required whenever the rendered shot had a terminalStillKey. */
+    terminalFrameAlignment: z.number().min(0).max(1).optional(),
     notes: z.array(z.string()),
   })).min(1),
 });

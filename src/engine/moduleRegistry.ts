@@ -49,8 +49,9 @@ export function moduleSurface(blockId: string): CustomizationSurface | undefined
 }
 
 /** Every registered module that exposes a customization surface (what the UI renders toggles for). */
-export function configurableModules(): { blockId: string; card: ModuleCard; surface: CustomizationSurface }[] {
+export function configurableModules(activeBlockIds?: readonly string[]): { blockId: string; card: ModuleCard; surface: CustomizationSurface }[] {
+  const active = activeBlockIds ? new Set(activeBlockIds) : undefined;
   return Object.entries(MODULE_REGISTRY)
-    .filter(([, c]) => c.customization)
+    .filter(([blockId, card]) => card.customization && (!active || active.has(blockId)))
     .map(([blockId, card]) => ({ blockId, card, surface: card.customization as CustomizationSurface }));
 }

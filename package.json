@@ -13,6 +13,8 @@
     "test:engine": "tsx src/engine/__tests__/engine.test.ts",
     "test:module-contracts": "tsx src/engine/__tests__/moduleContracts.test.ts",
     "test:assembly": "tsx scripts/assembly-smoke.ts",
+    "test:assembly-parity": "tsx scripts/assembly-parity.ts",
+    "test:assembly-render-parity": "tsx scripts/assembly-render-parity.ts",
     "test:visual-review": "tsx src/lib/__tests__/visualReview.test.ts",
     "test:visual-review-recovery": "tsx src/engine/__tests__/visualReviewRecovery.test.ts",
     "test:visual-review-live": "tsx scripts/visual-review-comic-live.ts",
@@ -23,6 +25,7 @@
     "youtube:revalidate": "tsx scripts/revalidate-youtube-connectors.ts",
     "export:channel-flow": "tsx scripts/export-channel-module-flow.ts",
     "test:live": "tsx scripts/test-live-convex.ts",
+    "test:golden-proof-media": "node scripts/golden-proof-media-check.mjs",
     "trigger:dev": "npx --yes trigger.dev@4.5.9 dev",
     "trigger:deploy": "npx --yes trigger.dev@4.5.9 deploy"
   },

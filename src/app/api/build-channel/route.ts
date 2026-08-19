@@ -7,38 +7,56 @@ import {
   youtubeChannelIntentApprovalSubject,
 } from "@/lib/studioActionApproval";
 import { validateChannelBuildRequestKey } from "@/lib/channelBuildRequestKey";
-import { FAMILIES, type FamilyKey } from "@/engine/families";
+import {
+  FAMILIES,
+  familyEpisodeLengthError,
+  familyProductionReadiness,
+  productionReadyFamilyFallback,
+  type FamilyKey,
+} from "@/engine/families";
 import { getNiche } from "@/lib/nicheCatalog";
 import { channelInceptionSlug } from "@/lib/channelInceptionIdentity";
 import { channelBuildCostAuthority } from "@/lib/channelBuildCostAuthority";
+import {
+  dataStoryProductionReadiness,
+  isDataStoryContract,
+  supportsDataStoryFamily,
+} from "@/engine/dataStory";
+import { isSyntheticScenarioContract } from "@/engine/syntheticScenario";
 import {
   normalizeYoutubeChannelName,
   normalizeYoutubeHandle,
   suggestYoutubeHandle,
 } from "@/lib/youtubeChannelCreationClaim";
+import { formatPreflight } from "@/engine/creative/selectFormat";
+import { validateCreativeCapabilitySelections } from "@/engine/creative/creativeCapabilityCatalog";
 
 /**
- * POST /api/build-channel  { seed: string }   → { id }  (Trigger run handle)
- * GET  /api/build-channel?id=<runId>          → { status, output }
+ * POST /api/build-channel  { design, requestKey } → { id, requestKey, slug }
+ * GET  /api/build-channel?id=<runId>              → { status, output }
  *
- * Fires + polls the autonomous `build-channel-package` task. Server-only (the
- * Trigger SDK needs Node + the secret key). Graceful 503 when the engine isn't
- * deployed yet (no TRIGGER_SECRET_KEY).
+ * Starts the attested modular Channel Inception workflow only. Server-only
+ * because the Trigger SDK needs Node + the secret key. Graceful 503 when the
+ * engine isn't deployed yet (no TRIGGER_SECRET_KEY).
  */
 export const runtime = "nodejs";
 
 export async function POST(request: Request) {
   const authFailure = await authorizeStudioRoute(request);
   if (authFailure) return authFailure;
-  let body: { seed?: string; design?: Record<string, unknown>; requestKey?: string };
+  let body: { design?: Record<string, unknown>; requestKey?: string };
   try {
     body = await request.json();
   } catch {
     return NextResponse.json({ error: "invalid JSON body" }, { status: 400 });
   }
-  const seed = body.seed?.trim();
-  if (!seed && !body.design) {
-    return NextResponse.json({ error: "missing seed or design" }, { status: 400 });
+  // The seed-only creator predated signed intent, family/lane selection, and
+  // the quality proof contract. Retire it before touching Trigger or any
+  // provider-capable path rather than allowing an un-attested channel row.
+  if (!body.design) {
+    return NextResponse.json({
+      error: "seed-only channel creation is retired; submit a structured channel design",
+    }, { status: 410 });
   }
   if (!process.env.TRIGGER_SECRET_KEY) {
     return NextResponse.json(
@@ -48,37 +66,146 @@ export async function POST(request: Request) {
   }
   try {
     const { tasks } = await import("@trigger.dev/sdk");
-    // Structured wizard design → modular `design-channel`; legacy single seed →
-    // `build-channel-package`. Advanced-editor param overrides are sanitized
-    // (unknown blocks/keys dropped, numbers clamped) before reaching the task.
+    // Advanced-editor param overrides are sanitized (unknown blocks/keys
+    // dropped, numbers clamped) before reaching the modular task.
     let design = body.design;
     const requestKey = body.requestKey?.trim();
-    if (design && !requestKey) {
+    if (!requestKey) {
       return NextResponse.json({ error: "missing channel creation requestKey" }, { status: 400 });
     }
     // Bind the key to the operator's exact submitted intent before any server
     // normalization. This makes retries stable without allowing changed input.
-    if (design && requestKey && !validateChannelBuildRequestKey(requestKey, design)) {
+    if (!validateChannelBuildRequestKey(requestKey, design)) {
       return NextResponse.json(
         { error: "channel creation requestKey was reused with a different design" },
         { status: 409 },
       );
     }
-    if (design && design.paramOverrides) {
+    if (design.paramOverrides) {
       const { sanitizeParamOverrides } = await import("@/engine/moduleCatalog");
       design = { ...design, paramOverrides: sanitizeParamOverrides(design.paramOverrides) };
     }
-    let channelSlug: string | undefined;
-    if (design) {
+    let channelSlug: string;
+    {
       const normalizedRequestKey = requestKey!;
       const familyKey = typeof design.family === "string" ? design.family : "";
       if (!(familyKey in FAMILIES)) {
         return NextResponse.json({ error: "unsupported channel family" }, { status: 400 });
       }
       const family = FAMILIES[familyKey as FamilyKey];
+      if (design.dataStory !== undefined) {
+        if (!isDataStoryContract(design.dataStory)) {
+          return NextResponse.json({ error: "invalid source-attributed data-story contract" }, { status: 400 });
+        }
+        if (!supportsDataStoryFamily(family.key)) {
+          return NextResponse.json({
+            error: "source-attributed data story is currently supported only by Narrated + Stock Footage",
+          }, { status: 400 });
+        }
+        const dataStoryReadiness = dataStoryProductionReadiness();
+        if (!dataStoryReadiness.autonomous) {
+          return NextResponse.json({
+            error: `source-attributed Data Story cannot start automatic production: ${dataStoryReadiness.blockers.join(" ")}`,
+            runtimeBlockers: dataStoryReadiness.blockers,
+            remediation: dataStoryReadiness.remediation,
+          }, { status: 409 });
+        }
+      }
+      if (design.syntheticScenario !== undefined) {
+        if (!isSyntheticScenarioContract(design.syntheticScenario)) {
+          return NextResponse.json({ error: "invalid fictional AI scenario contract" }, { status: 400 });
+        }
+        if (family.key !== "illustrated_explainer") {
+          return NextResponse.json({
+            error: "fictional AI scenarios are currently supported only by Illustrated Explainer",
+          }, { status: 400 });
+        }
+      }
+      const lengthError = familyEpisodeLengthError(family.key, design.lengthMinutes);
+      if (lengthError) {
+        return NextResponse.json({ error: lengthError }, { status: 400 });
+      }
       const nicheKey = typeof design.nicheKey === "string" ? design.nicheKey.trim() : "";
       if (!nicheKey) {
         return NextResponse.json({ error: "missing channel niche" }, { status: 400 });
+      }
+      const concept = typeof design.concept === "string" ? design.concept.trim() : "";
+      // Cinematic is the only family where a one-line label can mean either an
+      // original mini-film or a factual reconstruction. Require the explicit
+      // concept that the creator advised on, then re-run that same deterministic
+      // admission server-side before any provider-capable inception work.
+      if (family.key === "cinematic" && concept.length < 12) {
+        return NextResponse.json({
+          error: "cinematic channel creation requires a specific concept so factual Casefile work can be admitted safely",
+        }, { status: 400 });
+      }
+      const requestedLengthMinutes = Number(design.lengthMinutes);
+      const requestedBudgetUsd = Number(design.budget);
+      const creatorPreflight = formatPreflight(family.key, {
+        concept,
+        niche: getNiche(nicheKey)?.label,
+        nicheKey,
+        ...(Number.isFinite(requestedLengthMinutes) && requestedLengthMinutes > 0
+          ? { targetDurationSeconds: Math.round(requestedLengthMinutes * 60) }
+          : {}),
+        ...(Number.isFinite(requestedBudgetUsd) && requestedBudgetUsd > 0
+          ? { maxPerVideoBudgetUsd: requestedBudgetUsd }
+          : {}),
+      });
+      // Capability selections are never trusted as a browser-side toggle. The
+      // server re-resolves family compatibility, current catalog identity, and
+      // intent eligibility before this payload can reach the designer.
+      let selectedCapabilitySelections: Array<{ capability: string; catalogFingerprint: string }>;
+      try {
+        selectedCapabilitySelections = validateCreativeCapabilitySelections({
+          family: family.key,
+          selections: design.capabilitySelections,
+          intent: { concept, niche: getNiche(nicheKey)?.label, nicheKey },
+        }).map(({ selection }) => ({ ...selection }));
+      } catch (error) {
+        const message = error instanceof Error ? error.message : "invalid creative capability selection";
+        return NextResponse.json(
+          { error: message },
+          { status: message.includes("private review only") ? 409 : 400 },
+        );
+      }
+      if (selectedCapabilitySelections.length) {
+        design = { ...design, capabilitySelections: selectedCapabilitySelections };
+      }
+      const casefileModules = creatorPreflight.moduleAdmissions.filter(
+        (module) => module.profile === "source_first_casefile/v1" ||
+          module.profile === "claim_to_source_to_shot_map/v1" ||
+          module.profile === "faceless_source_bound_cinematic_sequence/v1",
+      );
+      if (casefileModules.length) {
+        return NextResponse.json({
+          error: "factual cinematic Casefile concepts are private supervised episode workflows, not automatic channel creation",
+          runtimeBlockers: creatorPreflight.runtimeBlockers,
+          sourceRequirements: creatorPreflight.sourceRequirements,
+          recommendedModules: casefileModules.map((module) => module.block),
+          remediation: casefileModules.map((module) => module.remediation),
+        }, { status: 409 });
+      }
+      const supervisedModules = creatorPreflight.moduleAdmissions.filter(
+        (module) => module.requiredForConcept && !module.autonomous,
+      );
+      if (supervisedModules.length) {
+        return NextResponse.json({
+          error: `${family.label} requires a supervised episode admission before automatic channel creation`,
+          runtimeBlockers: creatorPreflight.runtimeBlockers,
+          sourceRequirements: creatorPreflight.sourceRequirements,
+          recommendedModules: supervisedModules.map((module) => module.block),
+          remediation: supervisedModules.map((module) => module.remediation),
+        }, { status: 409 });
+      }
+      const runtimeReadiness = familyProductionReadiness(family.key);
+      if (!runtimeReadiness.productionReady) {
+        const fallbackFamily = productionReadyFamilyFallback(family.key);
+        return NextResponse.json({
+          error: `${family.label} cannot start a validation or production run: ${runtimeReadiness.blockers.join(" ")}`,
+          runtimeBlockers: runtimeReadiness.blockers,
+          ...(fallbackFamily ? { fallbackFamily } : {}),
+        }, { status: 409 });
       }
       // This authenticated route is the only place the wizard's explicit
       // confirmations become their separate external-action authorities.
@@ -87,13 +214,16 @@ export async function POST(request: Request) {
       const approvedForYoutubeCreation = design.autoYoutube === true;
       const approvedForProbe = design.runProbe === true;
       const minimumBudgetUsd = family.defaultRunBudgetUsd ?? 0.5;
+      const maximumBudgetUsd = Math.max(100, minimumBudgetUsd);
       const perVideoBudgetUsd = Number(design.budget ?? family.defaultRunBudgetUsd ?? 5);
       if (
         !Number.isFinite(perVideoBudgetUsd) ||
         perVideoBudgetUsd < minimumBudgetUsd ||
-        perVideoBudgetUsd > 100
+        perVideoBudgetUsd > maximumBudgetUsd
       ) {
-        return NextResponse.json({ error: "per-video budget must be greater than $0 and at most $100" }, { status: 400 });
+        return NextResponse.json({
+          error: `per-video budget must be at least $${minimumBudgetUsd.toFixed(2)} and at most $${maximumBudgetUsd.toFixed(2)}`,
+        }, { status: 400 });
       }
       if (familyKey === "documentary_collage_short") {
         if (!Array.isArray(design.sourceReferences) || design.sourceReferences.length === 0) {
@@ -117,6 +247,7 @@ export async function POST(request: Request) {
         approveSetupSpend: approvedForSetupSpend,
         runProbe: approvedForProbe,
         perVideoBudgetUsd,
+        family: family.key,
       });
       const submittedName = normalizeYoutubeChannelName(
         typeof design.name === "string" ? design.name : "",
@@ -213,23 +344,22 @@ export async function POST(request: Request) {
           : undefined,
       };
     }
-    const handle = design
-      ? await (async () => {
-          const { idempotencyKeys } = await import("@trigger.dev/sdk");
-          const idempotencyKey = await idempotencyKeys.create(
-            `design-channel:${requestKey!}`,
-            { scope: "global" },
-          );
-          return tasks.trigger(
-            "design-channel",
-            { ...design, ownerId: OWNER_ID },
-            { idempotencyKey },
-          );
-        })()
-      : await tasks.trigger("build-channel-package", { seed, ownerId: OWNER_ID });
+    const handle = await (async () => {
+      const { idempotencyKeys } = await import("@trigger.dev/sdk");
+      const idempotencyKey = await idempotencyKeys.create(
+        `design-channel:${requestKey}`,
+        { scope: "global" },
+      );
+      return tasks.trigger(
+        "design-channel",
+        { ...design, ownerId: OWNER_ID },
+        { idempotencyKey },
+      );
+    })();
     return NextResponse.json({
       id: handle.id,
-      ...(design && requestKey ? { requestKey, slug: channelSlug } : {}),
+      requestKey,
+      slug: channelSlug,
     });
   } catch (err) {
     return NextResponse.json(

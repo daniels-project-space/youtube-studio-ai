@@ -30,12 +30,59 @@ export interface VoiceColdOpenReceipt {
   };
 }
 
+/** A transparent provider-metadata pre-cast; it is not an audio audition. */
+export interface VoiceProviderSelectionReceipt {
+  version: "voice-provider-selection/v1";
+  ownerId: string;
+  channelId: string;
+  provider: "elevenlabs";
+  voiceId: string;
+  score: number;
+  selectedAt: number;
+  shortlistedCount: number;
+  shortlistFingerprint: string;
+  selectionFingerprint: string;
+}
+
+/**
+ * Health evidence from a real provider-rendered cold open. It establishes a
+ * usable take without pretending that FFmpeg can judge acting or timbre.
+ */
+export interface VoiceLocalColdOpenReceipt {
+  version: "voice-local-cold-open/v1";
+  ownerId: string;
+  channelId: string;
+  provider: "elevenlabs";
+  voiceId: string;
+  measuredAt: number;
+  textFingerprint: string;
+  physicsFingerprint: string;
+  audioFingerprint: string;
+  durationSec: number;
+  wordsPerSec: number;
+  integratedLufs: number;
+}
+
 export interface PersistedVoiceCasting {
   voiceId: string;
   score: number;
   at: number;
   auditionReceipt?: VoiceCastingAuditionReceipt;
   coldOpenReceipt?: VoiceColdOpenReceipt;
+  providerSelectionReceipt?: VoiceProviderSelectionReceipt;
+  localColdOpenReceipt?: VoiceLocalColdOpenReceipt;
+}
+
+function sha256(value: unknown): boolean {
+  return typeof value === "string" && /^[a-f0-9]{64}$/.test(value);
+}
+
+function score(value: unknown): boolean {
+  return Number.isFinite(value) && Number(value) >= 7 && Number(value) <= 10;
+}
+
+function current(value: unknown, now: number): boolean {
+  return Number.isFinite(value) && Number(value) > 0 && Number(value) <= now + 5 * 60 * 1_000;
 }
 
 export function makeVoiceColdOpenReceipt(args: {
@@ -117,6 +164,71 @@ export function makeVoiceCastingAuditionReceipt(args: {
   return receipt;
 }
 
+export function makeVoiceProviderSelectionReceipt(args: {
+  ownerId: string;
+  channelId: string;
+  voiceId: string;
+  score: number;
+  selectedAt: number;
+  shortlisted: unknown[];
+  selection: unknown;
+}): VoiceProviderSelectionReceipt {
+  if (!args.shortlisted.length) throw new Error("voice provider selection requires at least one declared candidate");
+  const receipt: VoiceProviderSelectionReceipt = {
+    version: "voice-provider-selection/v1",
+    ownerId: args.ownerId,
+    channelId: args.channelId,
+    provider: "elevenlabs",
+    voiceId: args.voiceId,
+    score: args.score,
+    selectedAt: args.selectedAt,
+    shortlistedCount: args.shortlisted.length,
+    shortlistFingerprint: channelInceptionContentSha256(args.shortlisted),
+    selectionFingerprint: channelInceptionContentSha256(args.selection),
+  };
+  if (!validateVoiceProviderSelectionReceipt({
+    cast: { voiceId: args.voiceId, score: args.score, at: args.selectedAt, providerSelectionReceipt: receipt },
+    ownerId: args.ownerId,
+    channelId: args.channelId,
+  })) throw new Error("generated voice provider selection receipt is invalid");
+  return receipt;
+}
+
+export function makeVoiceLocalColdOpenReceipt(args: {
+  ownerId: string;
+  channelId: string;
+  voiceId: string;
+  measuredAt: number;
+  text: string;
+  physics: unknown;
+  audioFingerprint: string;
+  durationSec: number;
+  wordsPerSec: number;
+  integratedLufs: number;
+}): VoiceLocalColdOpenReceipt {
+  const receipt: VoiceLocalColdOpenReceipt = {
+    version: "voice-local-cold-open/v1",
+    ownerId: args.ownerId,
+    channelId: args.channelId,
+    provider: "elevenlabs",
+    voiceId: args.voiceId,
+    measuredAt: args.measuredAt,
+    textFingerprint: channelInceptionContentSha256(args.text),
+    physicsFingerprint: channelInceptionContentSha256(args.physics),
+    audioFingerprint: args.audioFingerprint,
+    durationSec: args.durationSec,
+    wordsPerSec: args.wordsPerSec,
+    integratedLufs: args.integratedLufs,
+  };
+  if (!validateVoiceLocalColdOpenReceipt({
+    receipt,
+    ownerId: args.ownerId,
+    channelId: args.channelId,
+    voiceId: args.voiceId,
+  })) throw new Error("generated local cold-open receipt is invalid");
+  return receipt;
+}
+
 export function validateVoiceCastingAuditionReceipt(args: {
   cast: PersistedVoiceCasting | null | undefined;
   ownerId: string;
@@ -145,6 +257,26 @@ export function validateVoiceCastingAuditionReceipt(args: {
     receipt.auditionedCount >= 1 &&
     /^[a-f0-9]{64}$/.test(receipt.shortlistFingerprint) &&
     /^[a-f0-9]{64}$/.test(receipt.verdictFingerprint)
+  );
+}
+
+export function validateVoiceProviderSelectionReceipt(args: {
+  cast: PersistedVoiceCasting | null | undefined;
+  ownerId: string;
+  channelId: string;
+  now?: number;
+}): args is { cast: PersistedVoiceCasting & { providerSelectionReceipt: VoiceProviderSelectionReceipt }; ownerId: string; channelId: string; now?: number } {
+  const cast = args.cast;
+  const receipt = cast?.providerSelectionReceipt;
+  const now = args.now ?? Date.now();
+  return Boolean(
+    cast && receipt && receipt.version === "voice-provider-selection/v1" &&
+    receipt.ownerId === args.ownerId && receipt.channelId === args.channelId &&
+    receipt.provider === "elevenlabs" && receipt.voiceId === cast.voiceId &&
+    receipt.score === cast.score && receipt.selectedAt === cast.at &&
+    score(receipt.score) && current(receipt.selectedAt, now) &&
+    Number.isInteger(receipt.shortlistedCount) && receipt.shortlistedCount >= 1 &&
+    sha256(receipt.shortlistFingerprint) && sha256(receipt.selectionFingerprint),
   );
 }
 
@@ -185,27 +317,47 @@ export function validateVoiceColdOpenReceipt(args: {
   );
 }
 
+export function validateVoiceLocalColdOpenReceipt(args: {
+  receipt: VoiceLocalColdOpenReceipt | null | undefined;
+  ownerId: string;
+  channelId: string;
+  voiceId: string;
+  now?: number;
+}): args is { receipt: VoiceLocalColdOpenReceipt; ownerId: string; channelId: string; voiceId: string; now?: number } {
+  const receipt = args.receipt;
+  const now = args.now ?? Date.now();
+  return Boolean(
+    receipt && receipt.version === "voice-local-cold-open/v1" &&
+    receipt.ownerId === args.ownerId && receipt.channelId === args.channelId &&
+    receipt.provider === "elevenlabs" && receipt.voiceId === args.voiceId &&
+    current(receipt.measuredAt, now) && sha256(receipt.textFingerprint) &&
+    sha256(receipt.physicsFingerprint) && sha256(receipt.audioFingerprint) &&
+    Number.isFinite(receipt.durationSec) && receipt.durationSec >= 2 && receipt.durationSec <= 60 &&
+    Number.isFinite(receipt.wordsPerSec) && receipt.wordsPerSec >= 0.7 && receipt.wordsPerSec <= 4 &&
+    Number.isFinite(receipt.integratedLufs) && receipt.integratedLufs >= -36 && receipt.integratedLufs <= -5,
+  );
+}
+
 export function validateVoiceCastingReadinessReceipt(args: {
   cast: PersistedVoiceCasting | null | undefined;
   ownerId: string;
   channelId: string;
   now?: number;
 }): args is {
-  cast: PersistedVoiceCasting & {
-    auditionReceipt: VoiceCastingAuditionReceipt;
-    coldOpenReceipt: VoiceColdOpenReceipt;
-  };
+  cast: PersistedVoiceCasting;
   ownerId: string;
   channelId: string;
   now?: number;
 } {
-  return validateVoiceCastingAuditionReceipt(args) && validateVoiceColdOpenReceipt({
+  const legacy = validateVoiceCastingAuditionReceipt(args) && validateVoiceColdOpenReceipt({
     receipt: args.cast.coldOpenReceipt,
-    ownerId: args.ownerId,
-    channelId: args.channelId,
-    voiceId: args.cast.voiceId,
-    now: args.now,
+    ownerId: args.ownerId, channelId: args.channelId, voiceId: args.cast.voiceId, now: args.now,
   });
+  const providerMetadata = validateVoiceProviderSelectionReceipt(args) && validateVoiceLocalColdOpenReceipt({
+    receipt: args.cast.localColdOpenReceipt,
+    ownerId: args.ownerId, channelId: args.channelId, voiceId: args.cast.voiceId, now: args.now,
+  });
+  return legacy || providerMetadata;
 }
 
 export function voiceCastingOutputFingerprint(cast: PersistedVoiceCasting): string {

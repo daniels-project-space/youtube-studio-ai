@@ -2,6 +2,7 @@ import assert from "node:assert/strict";
 import {
   EpisodeSpecSchema,
   QualityEvidenceSchema,
+  assessProductionEditorialAcceptance,
   buildEpisodeSpec,
   buildQualityEvidence,
 } from "@/engine/qualityEvidence";
@@ -61,6 +62,7 @@ function recordsMeasuredEvidenceWithoutOverclaiming(): void {
     receipt.release.calibrationComplete,
     "a complete evaluator set is explicitly distinguishable from a merely passing hard gate",
   );
+  assert.equal(assessProductionEditorialAcceptance(receipt).ready, true);
 }
 
 function blocksOnlyExplicitHardGateFailures(): void {
@@ -101,6 +103,126 @@ function keepsScoresWithoutRubricsAdvisory(): void {
   );
 }
 
+function rejectsPartialReceiptAtProductionEditorialBoundary(): void {
+  const receipt = buildQualityEvidence({
+    episode: {
+      lane: { key: "narrated_documentary", renderer: "stock_footage" },
+      topic: "Why locks made canal trade reliable",
+    },
+    technical: { passed: true, evaluator: "render-validator", evidence: ["Container and streams are valid."] },
+    visual: { passed: true, evaluator: "visual-review", evidence: ["Chronological review passed."] },
+    temporal: { passed: true, evaluator: "timing-review", evidence: ["No pacing defect detected."] },
+    audio: { passed: true, evaluator: "loudness-meter", evidence: ["Integrated loudness is measurable."] },
+    brand: { passed: true, evaluator: "identity-grader", evidence: ["Identity lock is visible."] },
+  });
+
+  // Keep the raw receipt contract stable: absent editorial evidence is not
+  // silently converted into an unrelated hard-gate failure.
+  assert.equal(receipt.release.hardGateReady, true);
+  const editorial = assessProductionEditorialAcceptance(receipt);
+  assert.equal(editorial.ready, false);
+  assertCondition(
+    editorial.blockers.some((blocker) => blocker.includes("narrative evidence")),
+    "production requires a passing narrative evaluator",
+  );
+  assertCondition(
+    editorial.blockers.some((blocker) => blocker.includes("story evidence was not measured")),
+    "story-spine lanes require durable story provenance",
+  );
+  assertCondition(
+    editorial.blockers.some((blocker) => blocker.includes("audio-aesthetics")),
+    "narrated lanes require a scored final-master audio review, not loudness alone",
+  );
+}
+
+function requiresAestheticAudioForAudioFirstLanes(): void {
+  const receipt = buildQualityEvidence({
+    episode: { lane: { key: "music_loop", renderer: "loop_clips" }, topic: "Rainy-night study loop" },
+    technical: { passed: true, evaluator: "render-validator", evidence: ["Container and streams are valid."] },
+    visual: { passed: true, evaluator: "visual-review", evidence: ["Chronological review passed."] },
+    temporal: { passed: true, evaluator: "loop-review", evidence: ["Loop seam is clean."] },
+    audio: {
+      score: 8.1,
+      minimumScore: 7,
+      evaluator: "audio-aesthetics",
+      evidence: ["Narration, effects, and music passed the final-master quality score."],
+    },
+    brand: { passed: true, evaluator: "identity-grader", evidence: ["Identity lock is visible."] },
+  });
+
+  const editorial = assessProductionEditorialAcceptance(receipt);
+  assert.equal(
+    editorial.ready,
+    true,
+    "a scored aesthetics review must satisfy the audio-first lane rather than be mistaken for a loudness-only proxy",
+  );
+}
+
+function acceptsWordlessAmbientWithoutNarrativeOrStoryReceipt(): void {
+  const receipt = buildQualityEvidence({
+    episode: { lane: { key: "ambient_guided", renderer: "stock_footage" }, topic: "Wordless ocean sleep soundscape" },
+    technical: { passed: true, evaluator: "render-validator", evidence: ["Container and streams are valid."] },
+    visual: { passed: true, evaluator: "visual-review", evidence: ["Chronological review passed."] },
+    temporal: { passed: true, evaluator: "pace-review", evidence: ["Slow visual cadence remains stable."] },
+    audio: {
+      score: 8.2,
+      minimumScore: 7,
+      evaluator: "audio-aesthetics",
+      evidence: ["Production-quality score passed across sampled windows."],
+    },
+    brand: { passed: true, evaluator: "identity-grader", evidence: ["Calm channel grammar remains intact."] },
+    requiredAudio: { required: true, minimumScore: 7, label: "ambient audio aesthetics" },
+  });
+
+  assert.equal(
+    assessProductionEditorialAcceptance(receipt).ready,
+    true,
+    "wordless ambient lanes use their own audio/visual editorial grammar",
+  );
+}
+
+function selfContainedLaneDoesNotRequireSharedStoryReceipt(): void {
+  const receipt = buildQualityEvidence({
+    episode: { lane: { key: "motion_comic", renderer: "motion_comic" }, topic: "A comic retelling of the canal age" },
+    technical: { passed: true, evaluator: "render-validator", evidence: ["Container and streams are valid."] },
+    visual: { passed: true, evaluator: "visual-review", evidence: ["Panel review passed."] },
+    temporal: { passed: true, evaluator: "panel-timing-review", evidence: ["Panel reveals match the voice beat." ] },
+    narrative: { passed: true, evaluator: "critic validation specification", evidence: ["All story assertions passed."] },
+    audio: {
+      score: 8.1,
+      minimumScore: 7,
+      evaluator: "audio-aesthetics",
+      evidence: ["Final-master production-quality score passed."],
+    },
+    brand: { passed: true, evaluator: "identity-grader", evidence: ["Panel style lock is intact."] },
+  });
+
+  assert.equal(
+    assessProductionEditorialAcceptance(receipt).ready,
+    true,
+    "self-contained engines rely on their real critic evidence instead of a nonexistent shared story receipt",
+  );
+}
+
+function rejectsLegacyReceiptAtProductionEditorialBoundary(): void {
+  const receipt = buildQualityEvidence({
+    episode: { lane: { key: "legacy_unclassified" }, topic: "Legacy run" },
+    technical: { passed: true, evaluator: "render-validator", evidence: ["Container and streams are valid."] },
+    visual: { passed: true, evaluator: "visual-review", evidence: ["Chronological review passed."] },
+    temporal: { passed: true, evaluator: "timing-review", evidence: ["No pacing defect detected."] },
+    narrative: { passed: true, evaluator: "story-review", evidence: ["Story review passed."] },
+    audio: { passed: true, evaluator: "loudness-meter", evidence: ["Integrated loudness is measurable."] },
+    brand: { passed: true, evaluator: "identity-grader", evidence: ["Identity lock is visible."] },
+  });
+
+  const editorial = assessProductionEditorialAcceptance(receipt);
+  assert.equal(editorial.ready, false);
+  assertCondition(
+    editorial.blockers.some((blocker) => blocker.includes("no production editorial acceptance policy")),
+    "legacy receipts fail closed at upload until migrated",
+  );
+}
+
 function sanitizesUnsafeCountsAndRetainsTheDiagnostic(): void {
   const episode = buildEpisodeSpec({
     lane: { key: "motion_comic" },
@@ -135,6 +257,11 @@ function main(): void {
   recordsMeasuredEvidenceWithoutOverclaiming();
   blocksOnlyExplicitHardGateFailures();
   keepsScoresWithoutRubricsAdvisory();
+  rejectsPartialReceiptAtProductionEditorialBoundary();
+  requiresAestheticAudioForAudioFirstLanes();
+  acceptsWordlessAmbientWithoutNarrativeOrStoryReceipt();
+  selfContainedLaneDoesNotRequireSharedStoryReceipt();
+  rejectsLegacyReceiptAtProductionEditorialBoundary();
   sanitizesUnsafeCountsAndRetainsTheDiagnostic();
   console.log("\nQUALITY EVIDENCE TEST PASSED");
 }

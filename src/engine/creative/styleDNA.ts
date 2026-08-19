@@ -1,7 +1,7 @@
 /**
  * Style-DNA distiller — Inception's grounding step.
  *
- * Turns AUTO-DISCOVERED research (top competitors + the Gemini thumbnail-vision
+ * Turns AUTO-DISCOVERED research (top competitors + the metadata-backed thumbnail
  * style guide + the SEO databank) into a single FROZEN, machine-readable
  * `StyleDNA`: the channel's recurring subject, setting, palette, motion/audio/
  * narrative vocabulary, and SEO formulas. Every downstream block generates
@@ -15,10 +15,10 @@
  */
 import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
-import { hasGeminiKey } from "@/lib/gemini";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import type { FamilyKey } from "@/engine/families";
+import { attachReferenceQualityContract } from "./referenceQuality";
 import type { QualityBar, QualityDimension, StyleDNA } from "./types";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
@@ -26,8 +26,11 @@ type Logger = (msg: string, extra?: Record<string, unknown>) => void;
 /** Visual signals mined by `refreshNicheResearchCore` (nicheIntelligence). */
 export interface ThumbnailStyleGuide {
   dominantColors?: string[];
-  hasTextOverlayPct?: number;
+  hasTextOverlayPct?: number | null;
   notes?: string;
+  evidenceSource?: "youtube_data_api_v3_metadata";
+  visualEvidenceStatus?: "metadata_only";
+  sampledVideoCount?: number;
 }
 
 /** SEO databank slice (the parts that inform visual/narrative DNA). */
@@ -50,11 +53,11 @@ export interface StyleDNAInput {
   competitorTitles?: string[];
   /** Power words mined from the niche. */
   powerWords?: string[];
-  /** Gemini-vision analysis of the niche's top thumbnails. */
+  /** Metadata-backed analysis of the niche's top thumbnails. */
   thumbnailStyleGuide?: ThumbnailStyleGuide;
   /** SEO databank signals. */
   databank?: DatabankSignals;
-  /** Gemini analysis of the operator's example clip ("make it like this"). */
+  /** Operator-provided example-clip notes ("make it like this"). */
   exampleClipNotes?: string;
   now: number;
   log?: Logger;
@@ -211,15 +214,18 @@ function groundingContext(input: StyleDNAInput): { text: string; gaps: string[];
   // be the exact silent-fallback we're eliminating, so detect + reject it.
   const noteLc = (tg?.notes ?? "").toLowerCase();
   const minimalNote = noteLc.startsWith("minimal guide");
+  const metadataOnly =
+    tg?.visualEvidenceStatus === "metadata_only" ||
+    tg?.evidenceSource === "youtube_data_api_v3_metadata";
   // The vision call is asked to flag OFF-NICHE thumbnails (search pollution). If
   // it says the discovered references don't match the niche, they are wrong refs
   // — grounding the DNA on them would be confidently wrong, so reject + gap it.
   const offNiche = /not consistent|off[- ]niche|do not match|don't match|not match|not related|unrelated|inconsistent with/.test(noteLc);
-  const hasVision = !minimalNote && !offNiche && !!(tg && ((tg.dominantColors && tg.dominantColors.length > 0) || tg.notes));
+  const hasVision = !minimalNote && !metadataOnly && !offNiche && !!(tg && ((tg.dominantColors && tg.dominantColors.length > 0) || tg.notes));
   if (hasVision) {
     parts.push(
       [
-        "THUMBNAIL VISION ANALYSIS (Gemini over the niche's top thumbnails):",
+        "THUMBNAIL VISUAL ANALYSIS (reviewed niche evidence):",
         tg?.dominantColors?.length ? `- dominant colors: ${tg.dominantColors.join(", ")}` : "",
         typeof tg?.hasTextOverlayPct === "number" ? `- % with bold text overlay: ${tg.hasTextOverlayPct}` : "",
         tg?.notes ? `- notes: ${tg.notes}` : "",
@@ -227,6 +233,8 @@ function groundingContext(input: StyleDNAInput): { text: string; gaps: string[];
     );
   } else if (offNiche) {
     gaps.push("thumbnail vision ran but the discovered references are OFF-NICHE (search pollution) — visual DNA NOT grounded on real niche thumbnails; Doctor must refine discovery queries");
+  } else if (metadataOnly) {
+    gaps.push("thumbnail metadata was collected, but thumbnail pixels were not analysed — visual DNA (palette/composition/subject) remains under-grounded; this is an evidence boundary, not a failed visual pass");
   } else if (minimalNote) {
     gaps.push("thumbnail vision FAILED upstream (placeholder guide) — visual DNA grounded only in titles/text, NOT the niche's real thumbnails; Doctor must repair the vision pass");
   } else {
@@ -257,8 +265,8 @@ function groundingContext(input: StyleDNAInput): { text: string; gaps: string[];
  */
 export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
   const log = input.log ?? (() => {});
-  if (!hasAnthropicKey() && !hasGeminiKey()) {
-    log("styleDNA: no LLM key — ungrounded skeleton (Doctor must heal before established)");
+  if (!hasAnthropicKey()) {
+    log("styleDNA: no non-Google creative-model key — ungrounded skeleton (Doctor must heal before established)");
     return ungroundedDNA(input);
   }
 
@@ -307,8 +315,8 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
     .filter(Boolean)
     .join("\n");
 
-  // ITERATIVE distillation (Reflexion): the Showrunner (Claude) drafts the DNA;
-  // a DIFFERENT-model critic (Gemini) scores it for genuine specificity +
+  // ITERATIVE distillation (Reflexion): the Showrunner drafts the DNA;
+  // the non-Google critic scores it for genuine specificity +
   // fidelity to the research, with deterministic anti-generic guards folded in;
   // the draft is regenerated carrying the critique forward. No fallback — if the
   // generator throws outright we return an ungrounded skeleton for the Doctor.
@@ -457,14 +465,39 @@ export const ESTABLISHED_CONFIDENCE = 0.7;
 
 /* --------------------------- Quality Bar ------------------------------ */
 
-/** Which quality dimensions matter for each family (the critic's scorecard). */
-const FAMILY_DIMENSIONS: Record<string, string[]> = {
+/**
+ * Which quality dimensions matter for each family (the critic's scorecard).
+ *
+ * Keep this exhaustive: a newly available family must deliberately declare
+ * what its reviewer can inspect rather than silently inheriting the generic
+ * identity/thumbnail fallback. The IDs below are intentionally limited to the
+ * shared evaluator vocabulary: they are passed through to the final visual
+ * reviewer, and visual IDs (identity/footage/motion) also reach the cinematic
+ * asset and shot graders.
+ */
+const FAMILY_DIMENSIONS: Record<FamilyKey, readonly string[]> = {
   music_loop: ["identity", "loop_seam", "music", "thumbnail"],
   narrated_stock: ["identity", "script", "footage", "voice", "thumbnail"],
   cinematic: ["identity", "script", "footage", "voice", "thumbnail"],
   sleep: ["identity", "music", "voice", "thumbnail"],
   whiteboard: ["identity", "script", "footage", "thumbnail"],
   shorts: ["hook", "captions", "pacing", "thumbnail"],
+  // The page renderer is self-contained, but its story, narration, visual
+  // grammar, and constrained page/camera motion remain independently
+  // inspectable in the render review.
+  comic: ["identity", "script", "voice", "footage", "motion", "thumbnail"],
+  // A documentary Short succeeds only when sourced story beats, portrait-safe
+  // collage visuals, spoken words, captions, and rhythm agree with one another.
+  documentary_collage_short: ["identity", "script", "voice", "footage", "captions", "pacing", "thumbnail"],
+  // The Lore lane is a Novita shot chain, so make both visual continuity and
+  // purposeful camera/scene motion visible to its asset and final reviewers.
+  loreshort: ["identity", "script", "voice", "footage", "motion", "pacing", "thumbnail"],
+  // Quiz videos have no narration or stock-footage contract. Their quality is
+  // the branded question UI: immediate promise, readable timed copy, and an
+  // answer/reveal cadence that is fair rather than merely fast.
+  quizyear: ["identity", "hook", "captions", "pacing", "thumbnail"],
+  illustrated_explainer: ["identity", "script", "voice", "footage", "motion", "pacing", "thumbnail"],
+  children_learning: ["identity", "script", "voice", "footage", "motion", "pacing", "thumbnail"],
 };
 
 /**
@@ -484,8 +517,9 @@ export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): 
     voice: dna.narrative ? `${dna.narrative.voiceProfile}; delivery: ${dna.narrative.delivery}; sits cleanly over the bed.` : "Human, on-tone narration mixed over the bed.",
     footage: `On-theme visuals that match the narration; ${dna.composition || "strong composition"}; grade: ${dna.colorGrade || "on-brand"}; avoid: ${dna.visualAvoid.join(", ") || "off-brand shots"}.`,
     hook: "Scroll-stopping in the first 1-2s; clear payoff promise.",
-    captions: "Readable karaoke captions with keyword emphasis, correctly timed.",
+    captions: "Time-critical on-screen copy is mobile-legible and correctly timed: karaoke captions where narrated; otherwise prompts, options, timer, and reveal text stay readable without covering the answer or subject.",
     pacing: "Tight, pattern-interrupted pacing with no dead air.",
+    motion: `Purposeful, continuous motion only: ${dna.motionVocabulary.join(", ") || "the approved visual actions"}; ${dna.motionDiscipline || "no unplanned camera or character motion"}.`,
   };
   // Deterministic floors the iteration loop cannot game.
   const floors: Record<string, Pick<QualityDimension, "metric" | "op" | "threshold">> = {
@@ -500,5 +534,5 @@ export function buildQualityBar(family: FamilyKey, dna: StyleDNA, now: number): 
     ...(floors[id] ?? {}),
   }));
 
-  return { target: 1.6, dimensions, refreshedAt: now };
+  return attachReferenceQualityContract(family, { target: 1.6, dimensions, refreshedAt: now });
 }

@@ -63,7 +63,8 @@ export const provisionYoutubeTask = task({
         const sh = shU as SH;
         const page = await sh.context.newPage("https://www.youtube.com/channel_switcher");
         await page.waitForTimeout(3000);
-        const agent = sh.agent({ mode: "hybrid", model: "google/gemini-2.5-flash" });
+        // Inherit the non-Google model pinned by withStagehand().
+        const agent = sh.agent({ mode: "hybrid" });
 
         // 1+2: create the brand channel (if needed) and make it the ACTIVE channel.
         const create = await agent.execute({

@@ -97,6 +97,7 @@ export const listRunStages = query({
     if (!args.slim) return rows;
     return rows.map((r) => {
       const { inputs: _inputs, outputs, ...rest } = r;
+      void _inputs;
       return {
         ...rest,
         ...(outputs !== undefined ? { outputs: slimValue(outputs) } : {}),

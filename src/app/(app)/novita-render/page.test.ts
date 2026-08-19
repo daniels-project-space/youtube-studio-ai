@@ -21,16 +21,26 @@ assert.match(page, /cache: "no-store"/);
 assert.match(page, /return \(\) => controller\.abort\(\)/);
 assert.match(page, /isFleetHealth\(payload\) \? payload : UNAVAILABLE_FLEET_HEALTH/);
 assert.match(page, /setFleetHealth\(UNAVAILABLE_FLEET_HEALTH\)/);
+assert.match(page, /hasExactLtx25X2Attestation/);
+assert.match(
+  page,
+  /assessNovitaVideoProfileRuntime\(profile\)\.ready/,
+  "the console must require the same local benchmark allow-list as the worker launcher before it presents production readiness",
+);
+assert.match(page, /source === "direct-trigger"/);
+assert.match(page, /exactLtx25Rtx4090X2 === true/);
+assert.match(page, /profileIdentity === novitaVideoProfileIdentity\(profile\)/);
+assert.match(page, /const launchBlocked = busy \|\| recoverableJob !== null \|\| !exactLtx25X2Ready/);
 
-assert.match(page, /aria-label="Live Novita fleet readiness"/);
-assert.match(page, /Checking live fleet…/);
-assert.match(page, /fleetHealth\.ready \? "Ready" : "Unavailable"/);
+assert.match(page, /aria-label="Novita render admission readiness"/);
+assert.match(page, /Checking admission…/);
+assert.match(page, /exactLtx25X2Ready \? "Ready" : "Not attested"/);
 assert.match(page, />Architecture ceiling</);
 assert.match(page, />Verified provider quota</);
 assert.match(page, />Available now</);
 assert.match(page, /Orchestration design limit/);
-assert.match(page, /Live bridge attestation/);
-assert.match(page, /Contract \{fleetHealth\.contract\?\.version/);
+assert.match(page, /Direct Trigger attestation/);
+assert.match(page, /Contract \{attestedFleetHealth\.contract\?\.version/);
 assert.match(page, /Models · Gemma/);
 assert.match(page, /persistent model disk verified/);
 assert.match(page, /R2 recovery/);

@@ -157,6 +157,57 @@ export async function seamlessLoopUnit(
 }
 
 /**
+ * Measure the visual discontinuity at a loop boundary. The value is
+ * `1 - SSIM(firstFrame, lastFrame)`, so 0 is a perfect match and lower is
+ * better. Frames are downscaled before SSIM: this is a stable boundary check,
+ * not a perceptual-quality grade, and it should remain cheap even for a 4K
+ * loop unit.
+ */
+export async function measureLoopSeamDiff(
+  inputPath: string,
+  workDir: string,
+  opts: { sampleOffsetSec?: number; timeoutMs?: number } = {},
+): Promise<number> {
+  const durationSec = (await probe(inputPath)).durationSec;
+  if (!Number.isFinite(durationSec) || durationSec < 0.2) {
+    throw new FfmpegError(`loop seam measurement requires a video of at least 0.2s (received ${durationSec})`);
+  }
+  const offsetSec = Math.min(
+    Math.max(0.02, opts.sampleOffsetSec ?? 0.08),
+    Math.max(0.02, durationSec / 4),
+  );
+  const firstPath = join(workDir, "loop-seam-first.png");
+  const lastPath = join(workDir, "loop-seam-last.png");
+  const frameArgs = (atSec: number, outPath: string) => [
+    "-y",
+    "-i",
+    inputPath,
+    "-ss",
+    atSec.toFixed(3),
+    "-vframes",
+    "1",
+    "-vf",
+    "scale=480:-2:flags=area",
+    outPath,
+  ];
+  await Promise.all([
+    run(FFMPEG, frameArgs(offsetSec, firstPath), opts.timeoutMs ?? 60_000),
+    run(FFMPEG, frameArgs(Math.max(offsetSec, durationSec - offsetSec), lastPath), opts.timeoutMs ?? 60_000),
+  ]);
+  const { stderr } = await run(
+    FFMPEG,
+    ["-i", firstPath, "-i", lastPath, "-lavfi", "[0:v][1:v]ssim", "-f", "null", "-"],
+    opts.timeoutMs ?? 60_000,
+  );
+  const match = /All:([0-9.]+)/.exec(stderr);
+  const similarity = match ? Number(match[1]) : Number.NaN;
+  if (!Number.isFinite(similarity)) {
+    throw new FfmpegError("loop seam measurement did not emit an SSIM score");
+  }
+  return Number(Math.max(0, Math.min(1, 1 - similarity)).toFixed(6));
+}
+
+/**
  * BOOMERANG (ping-pong) loop unit — the most RELIABLE seamless loop for AI i2v
  * output. Plays the clip forward then reversed, so the unit is seamless at BOTH
  * joins (forward-end == reverse-start, and reverse-end == forward-start) NO MATTER
@@ -291,6 +342,8 @@ export async function assembleBeatBody(args: {
   width?: number;
   height?: number;
   fps?: number;
+  /** Preserve in-world source audio. `required` rejects any silent source take. */
+  bodyAudioMode?: "off" | "available" | "required";
   preset?: string;
 }): Promise<string> {
   const { clipPaths, targetSec, tmpDir } = args;
@@ -299,6 +352,7 @@ export async function assembleBeatBody(args: {
   const H = args.height ?? 1080;
   const fps = args.fps ?? 30;
   const maxSeg = args.maxSegSec ?? 10;
+  const bodyAudioMode = args.bodyAudioMode ?? "off";
 
   // MEMOIZE probe + scene-detect per PATH: an EDL plan cycles its pool, so the
   // same file can appear many times — re-probing and re-scene-scanning each
@@ -317,6 +371,15 @@ export async function assembleBeatBody(args: {
     return d;
   };
   const sceneCache = new Map<string, number[]>();
+  const audioCache = new Map<string, boolean>();
+  const hasSourceAudio = async (path: string): Promise<boolean> => {
+    const hit = audioCache.get(path);
+    if (hit !== undefined) return hit;
+    let hasAudio = false;
+    try { hasAudio = (await probe(path)).hasAudio; } catch { /* handled below for required takes */ }
+    audioCache.set(path, hasAudio);
+    return hasAudio;
+  };
   const scenesOf = async (p: string): Promise<number[]> => {
     const hit = sceneCache.get(p);
     if (hit) return hit;
@@ -384,7 +447,29 @@ export async function assembleBeatBody(args: {
         }
       }
     }
-    const sf = join(tmpDir, `beatseg_${i}.mp4`);
+    // AAC carries encoder delay. Keep intermediate in-world audio lossless so
+    // every later concat boundary remains exactly on the planned visual cut;
+    // the finished body is encoded to AAC once below.
+    const sf = join(tmpDir, `beatseg_${i}${bodyAudioMode === "off" ? ".mp4" : ".mkv"}`);
+    const sourceHasAudio = bodyAudioMode === "off" ? false : await hasSourceAudio(clipPaths[i]);
+    if (bodyAudioMode === "required" && !sourceHasAudio) {
+      throw new FfmpegError(`assembleBeatBody: required diegetic audio missing from segment ${i}`);
+    }
+    const sourceAudio = sourceHasAudio
+      ? "[0:a]"
+      : "anullsrc=channel_layout=stereo:sample_rate=44100";
+    // Preserve the cut timing while avoiding a discontinuity click when LTX
+    // changes physical sound sources between adjacent visual shots.
+    const audioEdgeFadeSec = Math.min(0.02, segLen / 4);
+    const audioEdgeFades = `afade=t=in:st=0:d=${audioEdgeFadeSec.toFixed(3)},` +
+      `afade=t=out:st=${Math.max(0, segLen - audioEdgeFadeSec).toFixed(3)}:d=${audioEdgeFadeSec.toFixed(3)}`;
+    const av = bodyAudioMode === "off"
+      ? ["-vf", `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps}`, "-an"]
+      : [
+          "-filter_complex",
+          `[0:v]scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps},setpts=PTS-STARTPTS[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,atrim=duration=${segLen.toFixed(3)},asetpts=PTS-STARTPTS,${audioEdgeFades}[a]`,
+          "-map", "[v]", "-map", "[a]",
+        ];
     await run(FFMPEG, [
       "-y",
       "-ss",
@@ -393,9 +478,7 @@ export async function assembleBeatBody(args: {
       clipPaths[i],
       "-t",
       segLen.toFixed(3),
-      "-vf",
-      `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps}`,
-      "-an",
+      ...av,
       "-c:v",
       "libx264",
       "-preset",
@@ -404,6 +487,7 @@ export async function assembleBeatBody(args: {
       "20",
       "-pix_fmt",
       "yuv420p",
+      ...(bodyAudioMode === "off" ? [] : ["-c:a", "pcm_s16le"]),
       sf,
     ]);
     // BLACK-SEGMENT GUARD: sample two frames; a (near-)black segment is dropped
@@ -436,7 +520,11 @@ export async function assembleBeatBody(args: {
     listFile,
     segFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"),
   );
-  await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  await run(FFMPEG, [
+    "-y", "-f", "concat", "-safe", "0", "-i", listFile,
+    ...(bodyAudioMode === "off" ? ["-c", "copy"] : ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]),
+    args.outPath,
+  ]);
   return args.outPath;
 }
 
@@ -455,6 +543,8 @@ export async function assembleAuthoredBody(args: {
   width?: number;
   height?: number;
   fps?: number;
+  /** Preserve LTX's in-world audio; `required` rejects a video-only take. */
+  bodyAudioMode?: "off" | "available" | "required";
   preset?: string;
 }): Promise<string> {
   if (args.clipPaths.length === 0 || args.clipPaths.length !== args.segDurationsSec.length) {
@@ -464,6 +554,7 @@ export async function assembleAuthoredBody(args: {
   const H = args.height ?? 1080;
   const fps = args.fps ?? 30;
   const tailHold = Math.max(0, args.tailHoldSec ?? 0);
+  const bodyAudioMode = args.bodyAudioMode ?? "off";
   const segFiles: string[] = [];
   let expectedTotal = 0;
 
@@ -475,6 +566,9 @@ export async function assembleAuthoredBody(args: {
     const media = await probe(args.clipPaths[index]);
     if (!media.hasVideo || !Number.isFinite(media.durationSec) || media.durationSec <= 0) {
       throw new FfmpegError(`assembleAuthoredBody: segment ${index} is not a valid video`);
+    }
+    if (bodyAudioMode === "required" && !media.hasAudio) {
+      throw new FfmpegError(`assembleAuthoredBody: required diegetic audio missing from segment ${index}`);
     }
     // LTX clips are quantized to 8n+1 frames, so their container duration can
     // differ from the authored window by a few frames. Larger deficits are a
@@ -491,14 +585,32 @@ export async function assembleAuthoredBody(args: {
       `pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps},` +
       `tpad=stop_mode=clone:stop_duration=${pad.toFixed(3)},` +
       `trim=duration=${outputDur.toFixed(3)},setpts=PTS-STARTPTS`;
-    const segmentPath = join(args.tmpDir, `authored_${String(index).padStart(4, "0")}.mp4`);
+    // See beat assembly: lossless intermediates prevent AAC priming samples
+    // from accumulating between narrated LTX cuts.
+    const segmentPath = join(
+      args.tmpDir,
+      `authored_${String(index).padStart(4, "0")}${bodyAudioMode === "off" ? ".mp4" : ".mkv"}`,
+    );
+    const sourceAudio = media.hasAudio
+      ? "[0:a]"
+      : "anullsrc=channel_layout=stereo:sample_rate=44100";
+    // A 20ms boundary fade is short enough not to move a causal cut, but
+    // prevents a phase/amplitude jump from producing a click in the master.
+    const audioEdgeFadeSec = Math.min(0.02, outputDur / 4);
+    const audioEdgeFades = `afade=t=in:st=0:d=${audioEdgeFadeSec.toFixed(3)},` +
+      `afade=t=out:st=${Math.max(0, outputDur - audioEdgeFadeSec).toFixed(3)}:d=${audioEdgeFadeSec.toFixed(3)}`;
+    const av = bodyAudioMode === "off"
+      ? ["-vf", vf, "-an"]
+      : [
+          "-filter_complex",
+          `[0:v]${vf}[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,apad=pad_dur=${pad.toFixed(3)},atrim=duration=${outputDur.toFixed(3)},asetpts=PTS-STARTPTS,${audioEdgeFades}[a]`,
+          "-map", "[v]", "-map", "[a]",
+        ];
     await run(FFMPEG, [
       "-y",
       "-i",
       args.clipPaths[index],
-      "-vf",
-      vf,
-      "-an",
+      ...av,
       "-c:v",
       "libx264",
       "-preset",
@@ -507,6 +619,7 @@ export async function assembleAuthoredBody(args: {
       "20",
       "-pix_fmt",
       "yuv420p",
+      ...(bodyAudioMode === "off" ? [] : ["-c:a", "pcm_s16le"]),
       segmentPath,
     ]);
 
@@ -529,7 +642,11 @@ export async function assembleAuthoredBody(args: {
     listFile,
     segFiles.map((file) => `file '${file.replace(/'/g, "'\\\\''")}'`).join("\n"),
   );
-  await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  await run(FFMPEG, [
+    "-y", "-f", "concat", "-safe", "0", "-i", listFile,
+    ...(bodyAudioMode === "off" ? ["-c", "copy"] : ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]),
+    args.outPath,
+  ]);
   const assembled = await probe(args.outPath);
   if (Math.abs(assembled.durationSec - expectedTotal) > Math.max(0.2, 3 / fps)) {
     throw new FfmpegError(
@@ -556,6 +673,8 @@ export async function assembleStructuredBody(args: {
   width?: number;
   height?: number;
   fps?: number;
+  /** Preserve in-world source audio; silent cards/inserts receive a silent track. */
+  bodyAudioMode?: "off" | "available" | "required";
   maxSegSec?: number;
   preset?: string;
 }): Promise<string> {
@@ -563,11 +682,20 @@ export async function assembleStructuredBody(args: {
   const H = args.height ?? 1080;
   const fps = args.fps ?? 30;
   const maxSeg = args.maxSegSec ?? 25;
+  const bodyAudioMode = args.bodyAudioMode ?? "off";
   const scalePad =
     `scale=${W}:${H}:force_original_aspect_ratio=decrease,pad=${W}:${H}:(ow-iw)/2:(oh-ih)/2:black,setsar=1,fps=${fps}`;
   const clipDur: number[] = [];
+  const clipHasAudio: boolean[] = [];
   for (const c of args.clipPaths) {
-    try { clipDur.push((await probe(c)).durationSec || maxSeg); } catch { clipDur.push(maxSeg); }
+    try {
+      const media = await probe(c);
+      clipDur.push(media.durationSec || maxSeg);
+      clipHasAudio.push(media.hasAudio);
+    } catch {
+      clipDur.push(maxSeg);
+      clipHasAudio.push(false);
+    }
   }
   const segFiles: string[] = [];
   let sj = 0;
@@ -576,12 +704,29 @@ export async function assembleStructuredBody(args: {
   // window of the clip instead of re-cutting the identical opening (visible
   // duplicate segments — the defect the beat body already guards against).
   const useCount = new Map<number, number>();
-  const cut = async (input: string, dur: number, ssSec = 0) => {
-    const sf = join(args.tmpDir, `sbody_${sj++}.mp4`);
+  const cut = async (input: string, dur: number, ssSec = 0, sourceHasAudio = false) => {
+    const sf = join(args.tmpDir, `sbody_${sj++}${bodyAudioMode === "off" ? ".mp4" : ".mkv"}`);
+    if (bodyAudioMode === "required" && !sourceHasAudio) {
+      throw new FfmpegError("assembleStructuredBody: required diegetic audio missing from a source segment");
+    }
+    const sourceAudio = sourceHasAudio
+      ? "[0:a]"
+      : "anullsrc=channel_layout=stereo:sample_rate=44100";
+    const audioEdgeFadeSec = Math.min(0.02, dur / 4);
+    const audioEdgeFades = `afade=t=in:st=0:d=${audioEdgeFadeSec.toFixed(3)},` +
+      `afade=t=out:st=${Math.max(0, dur - audioEdgeFadeSec).toFixed(3)}:d=${audioEdgeFadeSec.toFixed(3)}`;
+    const av = bodyAudioMode === "off"
+      ? ["-vf", scalePad, "-an"]
+      : [
+          "-filter_complex",
+          `[0:v]${scalePad},setpts=PTS-STARTPTS[v];${sourceAudio}aresample=44100,aformat=channel_layouts=stereo,atrim=duration=${dur.toFixed(3)},asetpts=PTS-STARTPTS,${audioEdgeFades}[a]`,
+          "-map", "[v]", "-map", "[a]",
+        ];
     await run(FFMPEG, [
       "-y", ...(ssSec > 0.01 ? ["-ss", ssSec.toFixed(3)] : []), "-i", input,
-      "-t", dur.toFixed(3), "-vf", scalePad, "-an",
-      "-c:v", "libx264", "-preset", args.preset ?? "veryfast", "-crf", "20", "-pix_fmt", "yuv420p", sf,
+      "-t", dur.toFixed(3), ...av,
+      "-c:v", "libx264", "-preset", args.preset ?? "veryfast", "-crf", "20", "-pix_fmt", "yuv420p",
+      ...(bodyAudioMode === "off" ? [] : ["-c:a", "pcm_s16le"]), sf,
     ]);
     segFiles.push(sf);
   };
@@ -606,7 +751,7 @@ export async function assembleStructuredBody(args: {
         // golden-ratio hop: k=0 ⇒ center; each reuse lands on a well-spread,
         // deterministic, non-repeating offset within the clip.
         const ss = head * ((0.5 + k * 0.381966) % 1);
-        await cut(clip, seg, Math.min(ss, head));
+        await cut(clip, seg, Math.min(ss, head), clipHasAudio[idx] ?? false);
         need -= seg;
         ci++;
       }
@@ -615,7 +760,11 @@ export async function assembleStructuredBody(args: {
   if (segFiles.length === 0) throw new FfmpegError("assembleStructuredBody: no segments");
   const listFile = join(args.tmpDir, "sbody_list.txt");
   await writeFile(listFile, segFiles.map((f) => `file '${f.replace(/'/g, "'\\''")}'`).join("\n"));
-  await run(FFMPEG, ["-y", "-f", "concat", "-safe", "0", "-i", listFile, "-c", "copy", args.outPath]);
+  await run(FFMPEG, [
+    "-y", "-f", "concat", "-safe", "0", "-i", listFile,
+    ...(bodyAudioMode === "off" ? ["-c", "copy"] : ["-c:v", "copy", "-c:a", "aac", "-b:a", "192k"]),
+    args.outPath,
+  ]);
   return args.outPath;
 }
 
@@ -754,6 +903,63 @@ export async function loopUnderAudio(args: {
 }
 
 /**
+ * Add a looped instrumental bed to a finished silent master without
+ * re-encoding its video stream. Self-contained game and data-rendered formats
+ * use this when their renderer owns pixels but a separate original-music block
+ * owns audio. The explicit duration prevents a long music source from changing
+ * the visual format's authored cadence.
+ */
+export async function muxLoopedMusicBed(args: {
+  videoPath: string;
+  musicPath: string;
+  outPath: string;
+  durationSec: number;
+  /** Linear bed gain; defaults to a present-but-background 0.42. */
+  volume?: number;
+  /** Small musical tail fade, bounded inside the authored video length. */
+  fadeOutSec?: number;
+}): Promise<string> {
+  const durationSec = Math.max(1, Number(args.durationSec) || 1);
+  const requestedVolume = Number(args.volume);
+  const volume = Number.isFinite(requestedVolume) ? Math.min(1, Math.max(0, requestedVolume)) : 0.42;
+  const fadeOutSec = Math.min(
+    Math.max(0, Number(args.fadeOutSec) || 0),
+    Math.max(0, durationSec - 0.05),
+  );
+  const fade = fadeOutSec > 0
+    ? `,afade=t=out:st=${Math.max(0, durationSec - fadeOutSec).toFixed(2)}:d=${fadeOutSec.toFixed(2)}`
+    : "";
+  await run(FFMPEG, [
+    "-y",
+    "-i",
+    args.videoPath,
+    "-stream_loop",
+    "-1",
+    "-i",
+    args.musicPath,
+    "-filter_complex",
+    `[1:a]volume=${volume.toFixed(3)}${fade}[bed]`,
+    "-map",
+    "0:v:0",
+    "-map",
+    "[bed]",
+    "-t",
+    durationSec.toFixed(3),
+    "-c:v",
+    "copy",
+    "-c:a",
+    "aac",
+    "-b:a",
+    "192k",
+    "-movflags",
+    "+faststart",
+    "-shortest",
+    args.outPath,
+  ]);
+  return args.outPath;
+}
+
+/**
  * Final composition with a Remotion title-card intro + a music bed.
  *
  * Timeline (all on one uniform W×H canvas):
@@ -775,6 +981,317 @@ export async function loopUnderAudio(args: {
  * The body video is stream-looped to cover bodySec+tailSec, so short footage
  * (or a lofi loop unit) tiles to length without extra cost.
  */
+/**
+ * Build an ffmpeg video-filter fragment applying film grain (noise) and a
+ * vignette darkening, driven by 0-1 strength values on the SAME scale as
+ * DocuTheme.grain/vignette (src/remotion/docuStyles.ts) and LtxStyleDef.
+ * grain/vignette (src/engine/ltxStylePresets.ts). Pure string construction —
+ * no I/O, no ffmpeg invocation — so it is independently unit-testable.
+ * Returns "" when both values are ~0 so callers can omit the filter
+ * entirely instead of chaining a zero-strength no-op.
+ */
+export function filmGrainVignetteFilter(grain: number, vignette: number): string {
+  const g = Math.max(0, Math.min(1, Number.isFinite(grain) ? grain : 0));
+  const v = Math.max(0, Math.min(1, Number.isFinite(vignette) ? vignette : 0));
+  const parts: string[] = [];
+  if (g > 0.001) {
+    // ffmpeg `noise` filter: alls is an integer per-plane strength (0-100);
+    // allf mixes temporal ("t") + uniform ("u") noise for a photographic-
+    // grain feel rather than flat static. Real film grain reads convincingly
+    // at low strength, so 0-1 maps onto a subtle 0-40 range, not 0-100.
+    const alls = Math.round(g * 40);
+    parts.push(`noise=alls=${alls}:allf=t+u`);
+  }
+  if (v > 0.001) {
+    // ffmpeg `vignette` filter: `angle` is the radius (radians) of the
+    // UNvignetted center — smaller angle = a tighter, stronger vignette;
+    // larger angle = a weaker, barely-visible one. Map 0-1 vignette
+    // strength onto a PI/8 (strong) .. PI/2 (very weak) range.
+    const angle = Math.PI / 2 - v * (Math.PI / 2 - Math.PI / 8);
+    parts.push(`vignette=angle=${angle.toFixed(4)}:mode=forward`);
+  }
+  return parts.join(",");
+}
+
+/**
+ * Standalone grain+vignette finishing pass over an already-assembled video:
+ * re-encodes the video stream only (audio is stream-copied, untouched), so
+ * it can be applied to any finished export without re-running the full
+ * compose graph. No-ops to a straight remux when both grain and vignette
+ * are ~0 (filmGrainVignetteFilter returns "").
+ */
+export async function applyFilmGrainVignette(
+  inputPath: string,
+  outputPath: string,
+  opts: { grain: number; vignette: number; timeoutMs?: number },
+): Promise<string> {
+  const vf = filmGrainVignetteFilter(opts.grain, opts.vignette);
+  if (!vf) {
+    await run(FFMPEG, ["-y", "-i", inputPath, "-c", "copy", outputPath], opts.timeoutMs ?? 600_000);
+    return outputPath;
+  }
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-i",
+      inputPath,
+      "-vf",
+      vf,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ],
+    opts.timeoutMs ?? 900_000,
+  );
+  return outputPath;
+}
+
+/**
+ * Character-introduction NAME CARD typography — the on-screen exception
+ * carved out narrowly for `narrativeRole: "introduction"` beats in the
+ * source-bound Casefile cinematic sequence (see `nameCardText` on
+ * `CinematicCoverageShotSchema` and the `name_card_invalid` checks in
+ * `evaluateCinematicCaseSequence`, src/engine/cinematicCaseSequence.ts).
+ * Every other narrative role stays governed by that module's "never render
+ * this as on-screen text" prompt discipline; this is the one narrow,
+ * explicit carve-out, and it renders ONLY the reviewed name-card string —
+ * never a causal question or any other prose.
+ *
+ * FINDING (Phase 14): the source-bound Casefile cinematic route has no
+ * Remotion compositing pass at all today. Its LTX clips flow
+ * cinematicCaseSequence.ts → genFootageBlocks.ts (render) →
+ * cinematicSequenceRenderBinding.ts → cinematicHandoff.ts's
+ * CinematicAssemblyHandoff ("the exact clip-order assembler"), and nothing
+ * in src/lib/assembly/*.ts actually implements that assembler yet — it is
+ * re-exported from src/lib/assembly/index.ts but has no ffmpeg concat/mux
+ * call site to wire an overlay into. Remotion's CinematicFrame/
+ * CinematicSpeech (src/remotion/speech/) and DocuMotion.tsx are a DIFFERENT
+ * pipeline (raw-footage motivational-speech and parallax-cutout
+ * documentary renders), not the Casefile mannequin-reconstruction route.
+ * Rather than invent a parallel compositing mechanism (Remotion or
+ * otherwise) for an assembler that does not exist yet, this adds ONE
+ * reusable primitive to this module's existing post-render finishing-pass
+ * family — same doctrine as `filmGrainVignetteFilter`/
+ * `applyFilmGrainVignette` above: applied once to an already-rendered clip
+ * (video re-encoded, audio stream-copied), never baked into the LTX
+ * generation prompt itself — ready for the exact clip-order assembler to
+ * call on a beat's name-card shot once that assembler is built.
+ *
+ * Theme-driven (accent color from the channel's DocuTheme — see
+ * src/remotion/docuStyles.ts DETECTIVE/ROBBERY `theme.accent`) so a name
+ * card reads consistently with whatever documentary look the cinematic
+ * beat sits beside, instead of inventing new typography. NOTE: ffmpeg's
+ * drawtext filter needs a local TTF file, not the Google Fonts CSS stack
+ * (`fontCss` / `theme.fontDisplay: "Oswald, sans-serif"`) that powers the
+ * Remotion/browser rendering path — a caller with a resolved Oswald .ttf on
+ * disk may pass `fontFile`; otherwise this falls back to the same
+ * CLOUD_FONTS condensed-sans face already used for on-brand title/
+ * lower-third text elsewhere in this module.
+ *
+ * A true "typography behind/beside the mannequin figure" composite would
+ * need a subject-aware alpha mask, which an already-rendered LTX clip does
+ * not provide; this renders a themed lower-third/side name card instead —
+ * the same realistic approximation SpeakerNameTag.tsx uses for the
+ * Remotion speech pipeline, adapted to a post-render ffmpeg pass for LTX
+ * clips that never go through Remotion.
+ */
+export function nameCardOverlayFilter(opts: {
+  text: string;
+  durationSec: number;
+  accentColor?: string;
+  fontFile?: string;
+  fadeInSec?: number;
+  fadeOutSec?: number;
+  position?: "left" | "right" | "center";
+}): string {
+  const text = opts.text.trim();
+  // Degrade-safe like filmGrainVignetteFilter above: a non-finite or
+  // non-positive duration must never reach the filter graph as NaN — treat
+  // it the same as "no text" (empty filter, straight remux).
+  if (!text || !Number.isFinite(opts.durationSec) || opts.durationSec <= 0) return "";
+  const duration = Math.max(0.1, opts.durationSec);
+  const safeFadeInSec = Number.isFinite(opts.fadeInSec) ? opts.fadeInSec : undefined;
+  const safeFadeOutSec = Number.isFinite(opts.fadeOutSec) ? opts.fadeOutSec : undefined;
+  const fadeIn = Math.max(0.01, Math.min(duration / 2, safeFadeInSec ?? 0.5));
+  const fadeOut = Math.max(0.01, Math.min(duration / 2, safeFadeOutSec ?? 0.6));
+  const holdStart = fadeIn;
+  const holdEnd = Math.max(holdStart, duration - fadeOut);
+  const font = opts.fontFile ?? CLOUD_FONTS.impact;
+  const color = opts.accentColor ? thumbnailColor(opts.accentColor, "0xffd400") : "white";
+  // Unescaped commas match this file's established alpha-expression
+  // convention (see composeMusicLoopDeblur's aName/aTitle above): the value
+  // sits inside a single-quoted drawtext option, so ffmpeg's filtergraph
+  // parser treats it literally without needing `\,` escapes.
+  const alpha =
+    `if(lt(t,${holdStart.toFixed(2)}),t/${fadeIn.toFixed(2)},` +
+    `if(lt(t,${holdEnd.toFixed(2)}),1,` +
+    `max(0,1-(t-${holdEnd.toFixed(2)})/${fadeOut.toFixed(2)})))`;
+  const x = opts.position === "left" ? "w*0.08" : opts.position === "right" ? "w-text_w-w*0.08" : "(w-text_w)/2";
+  return (
+    `drawtext=fontfile=${font}:text='${escapeDrawtext(text)}':expansion=none:` +
+    `fontcolor=${color}:fontsize=h*0.055:` +
+    `box=1:boxcolor=black@0.38:boxborderw=18:` +
+    `borderw=2:bordercolor=black@0.7:` +
+    `alpha='${alpha}':x=${x}:y=h*0.74`
+  );
+}
+
+/**
+ * Standalone name-card finishing pass over one already-rendered cinematic
+ * clip: re-encodes the video stream only (audio is stream-copied,
+ * untouched), matching `applyFilmGrainVignette`'s no-op-safe shape. Empty
+ * `text` is a straight remux (no drawtext filter emitted).
+ */
+export async function applyNameCardOverlay(
+  inputPath: string,
+  outputPath: string,
+  opts: {
+    text: string;
+    durationSec: number;
+    accentColor?: string;
+    fontFile?: string;
+    fadeInSec?: number;
+    fadeOutSec?: number;
+    position?: "left" | "right" | "center";
+    timeoutMs?: number;
+  },
+): Promise<string> {
+  const vf = nameCardOverlayFilter(opts);
+  if (!vf) {
+    await run(FFMPEG, ["-y", "-i", inputPath, "-c", "copy", outputPath], opts.timeoutMs ?? 600_000);
+    return outputPath;
+  }
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-i",
+      inputPath,
+      "-vf",
+      vf,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ],
+    opts.timeoutMs ?? 900_000,
+  );
+  return outputPath;
+}
+
+/**
+ * Composite a rendered HyperFrames evidence-overlay clip (src/lib/
+ * hyperframesOverlay.ts `buildOverlayComposition`/`renderOverlay`) onto an
+ * already-rendered base clip — the pure filter-graph half of
+ * `applyHyperframesOverlayClip` below, split out the same way
+ * `nameCardOverlayFilter`/`applyNameCardOverlay` are, so it is unit-testable
+ * without shelling out to ffmpeg.
+ *
+ * `renderOverlay` renders its composition to WEBM with `--format webm`
+ * (Phase 18): the overlay is a brief graphic ACCENT meant to sit over
+ * existing footage, so it needs a real alpha channel, not a `background:
+ * transparent` CSS body silently flattened to opaque by a non-alpha codec.
+ * This filter decodes that WebM with `-c:v libvpx` (input codec set by the
+ * caller, see `applyHyperframesOverlayClip`) and `format=yuva420p` so the
+ * alpha channel is honored — the SAME convention already established here
+ * for Remotion-rendered alpha cards (`applyQuoteOverlays`/
+ * `applyOverlaysAndCaptions` above; `codec: "vp8", pixelFormat: "yuva420p"`
+ * in src/lib/remotionRender.ts) — then overlays it at the top-left corner
+ * for exactly `durationSec` from the start of the base clip (evidence
+ * overlays are always a brief opening accent on the shot they are placed
+ * on, never a full-clip treatment).
+ */
+export function hyperframesOverlayCompositeFilter(opts: { durationSec: number }): string {
+  const duration = Number.isFinite(opts.durationSec) ? opts.durationSec : 0;
+  // Degrade-safe like nameCardOverlayFilter/filmGrainVignetteFilter above: a
+  // non-finite or non-positive duration must never reach the filter graph —
+  // treat it the same as "no overlay", empty filter, straight remux.
+  if (duration <= 0) return "";
+  const dur = Math.max(0.1, duration).toFixed(3);
+  return (
+    `[1:v]format=yuva420p[ov];` +
+    `[0:v][ov]overlay=0:0:eof_action=pass:enable='between(t,0,${dur})'[vout]`
+  );
+}
+
+/**
+ * Standalone HyperFrames evidence-overlay finishing pass over one
+ * already-rendered clip: re-encodes the video stream only (audio is
+ * stream-copied, untouched), matching `applyNameCardOverlay`'s no-op-safe
+ * shape. `overlayWebmPath` must be the WEBM `renderOverlay` produced (its
+ * alpha channel is required for a correct composite — see
+ * `hyperframesOverlayCompositeFilter` above). A non-finite/non-positive
+ * `durationSec` is a straight remux (no overlay filter emitted).
+ */
+export async function applyHyperframesOverlayClip(
+  basePath: string,
+  overlayWebmPath: string,
+  outputPath: string,
+  opts: { durationSec: number; timeoutMs?: number },
+): Promise<string> {
+  const filter = hyperframesOverlayCompositeFilter(opts);
+  if (!filter) {
+    await run(FFMPEG, ["-y", "-i", basePath, "-c", "copy", outputPath], opts.timeoutMs ?? 600_000);
+    return outputPath;
+  }
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-i",
+      basePath,
+      // libvpx decoder for the overlay input so its WebM ALPHA channel is
+      // honored — the native vp8 decoder ignores it, making the card
+      // opaque black (same convention as applyOverlaysAndCaptions above).
+      "-c:v",
+      "libvpx",
+      "-i",
+      overlayWebmPath,
+      "-filter_complex",
+      filter,
+      "-map",
+      "[vout]",
+      "-map",
+      "0:a?",
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ],
+    opts.timeoutMs ?? 900_000,
+  );
+  return outputPath;
+}
+
 export async function composeWithIntro(args: {
   introCardPath?: string;
   loopBodyPath: string;
@@ -801,6 +1318,10 @@ export async function composeWithIntro(args: {
   /** Seconds over which the music GRADUALLY ducks from intro→body level once the
    * narration starts (instead of an instant drop). Default 3s. */
   musicDuckRampSec?: number;
+  /** Mix the body track's admitted in-world audio beneath narration. */
+  bodyAudioMode?: "off" | "available" | "required";
+  /** Linear gain before sidechain ducking; deliberately below narration. */
+  diegeticBodyAudioVol?: number;
   /**
    * Outro card FOLDED into this same encode: the tail dissolves into this card
    * via xfade so the video ends on a deliberate beat. Previously the outro was
@@ -811,6 +1332,14 @@ export async function composeWithIntro(args: {
   outroCardPath?: string;
   /** Outro dissolve duration (seconds). Default 1.2 (the old patch fade-in). */
   outroFadeInSec?: number;
+  /**
+   * Per-style film grain + vignette (0-1 scale, see filmGrainVignetteFilter
+   * above / LtxStyleDef.grain+vignette in ltxStylePresets.ts) applied to the
+   * WHOLE composed video (intro card through outro) in this same encode —
+   * no second full-video pass. Omitted (undefined) reproduces the exact
+   * prior output for every existing caller.
+   */
+  filmGrain?: { grain: number; vignette: number };
   preset?: string;
   timeoutMs?: number;
 }): Promise<string> {
@@ -829,6 +1358,9 @@ export async function composeWithIntro(args: {
   const introVol = args.introMusicVol ?? 0.6;
   const bodyVol = args.narrationPath ? (args.bodyMusicVol ?? 0.12) : introVol;
   const duckRamp = Math.max(0.05, args.musicDuckRampSec ?? 3);
+  const bodyAudioMode = args.bodyAudioMode ?? "off";
+  const includeBodyAudio = bodyAudioMode !== "off";
+  const diegeticVol = Math.min(0.35, Math.max(0.03, args.diegeticBodyAudioVol ?? 0.18));
 
   const scalePad =
     `scale=${W}:${H}:force_original_aspect_ratio=decrease,` +
@@ -896,10 +1428,15 @@ export async function composeWithIntro(args: {
     vparts.push(`[vpre][ocard]xfade=transition=fade:duration=${oFade.toFixed(3)}:offset=${oOffset.toFixed(3)}[vwo]`);
     vcat = "[vwo]";
   }
-  const vout =
-    fade > 0
-      ? `${vcat}fade=t=out:st=${fadeSt.toFixed(2)}:d=${fade.toFixed(2)}[vout]`
-      : `${vcat}null[vout]`;
+  // Grain/vignette (when supplied) chains onto the SAME video pad before the
+  // fade-out, one filter_complex, one encode — never a second full-video pass.
+  const grainVignette = args.filmGrain
+    ? filmGrainVignetteFilter(args.filmGrain.grain, args.filmGrain.vignette)
+    : "";
+  const preOut = [grainVignette, fade > 0 ? `fade=t=out:st=${fadeSt.toFixed(2)}:d=${fade.toFixed(2)}` : ""]
+    .filter(Boolean)
+    .join(",");
+  const vout = preOut ? `${vcat}${preOut}[vout]` : `${vcat}null[vout]`;
 
   // ----- audio -----
   const aparts: string[] = [];
@@ -914,13 +1451,36 @@ export async function composeWithIntro(args: {
   aparts.push(
     `[${musicIdx}:a]aresample=44100,atrim=0:${total.toFixed(3)},volume='${volExpr}':eval=frame[mbed]`,
   );
+  if (includeBodyAudio) {
+    // LTX's audio VAE creates in-world sound for the take. It begins with the
+    // body (never under the title card), then gets aggressively ducked by the
+    // spoken track below. This is a distinct narration-safe layer, not score.
+    aparts.push(
+      `[${bodyIdx}:a]aresample=44100,aformat=channel_layouts=stereo,adelay=${introMs}:all=1,` +
+        `atrim=0:${total.toFixed(3)},volume=${diegeticVol.toFixed(3)}[diegeticbase]`,
+    );
+  }
   let amixOut: string;
   if (narrIdx >= 0) {
     aparts.push(
       `[${narrIdx}:a]aresample=44100,adelay=${introMs}:all=1,` +
-        `atrim=0:${total.toFixed(3)}[narr]`,
+        // Keep the sidechain alive through the body. Without this padded silent
+        // tail, FFmpeg ends sidechaincompress when narration ends and erases
+        // every later LTX sound instead of letting it recover naturally.
+        `atrim=0:${total.toFixed(3)},apad=whole_dur=${total.toFixed(3)}[narr]`,
     );
-    aparts.push(`[narr][mbed]amix=inputs=2:duration=longest:normalize=0[amixraw]`);
+    if (includeBodyAudio) {
+      aparts.push(`[narr]asplit=2[narrmix][narrkey]`);
+      aparts.push(
+        `[diegeticbase][narrkey]sidechaincompress=threshold=0.015:ratio=20:attack=20:release=400:detection=rms[diegeticduck]`,
+      );
+      aparts.push(`[narrmix][mbed][diegeticduck]amix=inputs=3:duration=longest:normalize=0[amixraw]`);
+    } else {
+      aparts.push(`[narr][mbed]amix=inputs=2:duration=longest:normalize=0[amixraw]`);
+    }
+    amixOut = "[amixraw]";
+  } else if (includeBodyAudio) {
+    aparts.push(`[mbed][diegeticbase]amix=inputs=2:duration=longest:normalize=0[amixraw]`);
     amixOut = "[amixraw]";
   } else {
     amixOut = "[mbed]";
@@ -1261,6 +1821,44 @@ export async function measureAudio(
     } catch { /* unmeasurable → null */ }
   }
   return { integratedLufs, windowMeanDb };
+}
+
+/**
+ * Proves that an authored narration signal survives into the assembled master.
+ * Unlike final-mix loudness, this is resistant to a music bed masking a missing
+ * dialogue track: FFmpeg cross-correlates the narration waveform with the
+ * final mix after the planned intro offset. It measures presence, not speech
+ * intelligibility or aesthetic quality.
+ */
+export async function measureNarrationMixCorrelation(args: {
+  narrationPath: string;
+  masterPath: string;
+  narrationStartSec?: number;
+}): Promise<{ correlation: number | null }> {
+  const offset = Number.isFinite(args.narrationStartSec) && (args.narrationStartSec ?? 0) > 0
+    ? args.narrationStartSec!
+    : 0;
+  try {
+    const { stderr } = await run(FFMPEG, [
+      "-nostats",
+      "-i", args.narrationPath,
+      ...(offset > 0 ? ["-ss", offset.toFixed(3)] : []),
+      "-i", args.masterPath,
+      "-filter_complex",
+      "[0:a]aresample=16000,aformat=channel_layouts=mono[narration];" +
+        "[1:a]aresample=16000,aformat=channel_layouts=mono[master];" +
+        "[narration][master]axcorrelate=size=2048:algo=fast,astats=metadata=1:reset=0[correlation]",
+      "-map", "[correlation]",
+      "-f", "null", "-",
+    ], 600_000);
+    const matches = [...stderr.matchAll(/DC offset:\s*(-?\d+(?:\.\d+)?)/g)];
+    const value = matches.length ? Number(matches[matches.length - 1]![1]) : Number.NaN;
+    // Polarity can flip during a legitimate encoder/mixer pass. Presence is
+    // its magnitude; a missing narration signal remains near zero.
+    return { correlation: Number.isFinite(value) ? Math.abs(value) : null };
+  } catch {
+    return { correlation: null };
+  }
 }
 
 /**
@@ -1612,6 +2210,46 @@ const assText = (t: string) => t.replace(/[{}]/g, "").replace(/\r?\n/g, " ").tri
  * text — no ASR errors). White text, heavy black outline + shadow, sat near the
  * bottom. Non-fatal at the call site: caller keeps the uncaptioned video on error.
  */
+/**
+ * Aspect-aware caption geometry (font size + margins), shared by every caption
+ * writer so landscape and portrait stay consistent.
+ *
+ * ASS `Fontsize` is expressed in PlayRes units, so deriving it from HEIGHT alone
+ * — correct for 16:9 — is catastrophic for 9:16. At 1080x1920 `H * 0.053` gives a
+ * 102px font with only 908px of usable width, so a 42-char cue needs ~2.8x the
+ * room it has. Combined with the old `WrapStyle: 2` (explicit `\N` breaks ONLY,
+ * no auto-wrap) the overflow was silently CLIPPED at both frame edges rather than
+ * wrapped — every portrait Short shipped with captions cut off on the left and
+ * right. For portrait frames WIDTH is the binding constraint, so we size off W.
+ *
+ * Landscape behaviour is unchanged (`H * fontRatio`, 8% side margins).
+ */
+export function captionGeometry(
+  W: number,
+  H: number,
+  opts: { fontRatio?: number; marginRatio?: number } = {},
+): { fontSize: number; marginV: number; sideM: number; availableWidth: number; portrait: boolean } {
+  const fontRatio = opts.fontRatio ?? 0.053;
+  const marginRatio = opts.marginRatio ?? 0.06;
+  const portrait = W < H;
+  // Portrait: size off width; the 1.15 bump keeps captions legible at Shorts scale.
+  const fontSize = Math.round(portrait ? W * fontRatio * 1.15 : H * fontRatio);
+  const marginV = Math.round(H * marginRatio);
+  // Tighter side margins in portrait buy back horizontal room for wrapped lines.
+  const sideM = Math.round(W * (portrait ? 0.06 : 0.08));
+  return { fontSize, marginV, sideM, availableWidth: W - 2 * sideM, portrait };
+}
+
+/**
+ * Shared `[Script Info]` header. `WrapStyle: 0` = smart auto-wrap (balanced
+ * lines). Safe for both orientations: wrapping only ever engages on a line that
+ * would otherwise overflow the available width — which under the old
+ * `WrapStyle: 2` just got clipped — so cues that already fit render identically.
+ */
+const ASS_WRAP_STYLE = 0;
+const assScriptInfo = (W: number, H: number) =>
+  `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: ${ASS_WRAP_STYLE}\nScaledBorderAndShadow: yes\n\n`;
+
 /** Write the styled .ass caption file (shared by burnCaptions + the
  * single-pass finisher). Returns null when there are no cues. */
 export async function writeCaptionsAss(
@@ -1622,11 +2260,9 @@ export async function writeCaptionsAss(
   if (cues.length === 0) return null;
   const W = opts.width ?? 1920;
   const H = opts.height ?? 1080;
-  const fontSize = Math.round(H * 0.053);
-  const marginV = Math.round(H * 0.06);
-  const sideM = Math.round(W * 0.08);
+  const { fontSize, marginV, sideM } = captionGeometry(W, H);
   const head =
-    `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n` +
+    assScriptInfo(W, H) +
     `[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
     `Style: Cap,DejaVu Sans,${fontSize},&H00FFFFFF,&H00000000,&H64000000,1,1,4,2,2,${sideM},${sideM},${marginV},1\n\n` +
     `[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;
@@ -1647,11 +2283,10 @@ export async function burnCaptions(
   if (cues.length === 0) { await copyFile(videoPath, outPath); return outPath; }
   const W = opts.width ?? 1920;
   const H = opts.height ?? 1080;
-  const fontSize = Math.round(H * 0.053); // ~20% larger than before (was 0.044)
-  const marginV = Math.round(H * 0.06);
-  const sideM = Math.round(W * 0.08);
+  // Aspect-aware: 0.053H in landscape, 0.053W*1.15 in portrait (see captionGeometry).
+  const { fontSize, marginV, sideM } = captionGeometry(W, H);
   const head =
-    `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n` +
+    assScriptInfo(W, H) +
     `[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
     // BorderStyle 1 = outline+shadow; Alignment 2 = bottom-center; colours are &HAABBGGRR
     `Style: Cap,DejaVu Sans,${fontSize},&H00FFFFFF,&H00000000,&H64000000,1,1,4,2,2,${sideM},${sideM},${marginV},1\n\n` +

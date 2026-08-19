@@ -1,13 +1,22 @@
+import { createHash } from "node:crypto";
+
 import { admitProviderTaskOwner } from "@/lib/providerTaskOwnerAdmission";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
+import { exampleClipAnalysisUnavailable } from "@/lib/exampleClipAnalysisUnavailable";
 import { synthChannelConcept } from "@/lib/conceptSynth";
 import { generateChannelArtAsset } from "@/lib/channelArt";
 import { designPipeline, enforceLengthContract, type DesignOptions } from "@/engine/designer";
 import type { PipelineEntry } from "@/engine/types";
-import { FAMILIES, type FamilyKey } from "@/engine/families";
+import {
+  assertFamilyAutonomousPlanningPipeline,
+  FAMILIES,
+  familyProductionReadiness,
+  productionReadyFamilyFallback,
+  type FamilyKey,
+} from "@/engine/families";
 import { getArchetype } from "@/engine/archetypes";
 import { getNiche } from "@/lib/nicheCatalog";
 import { refreshNicheResearchCore } from "@/lib/nicheResearch";
@@ -17,7 +26,20 @@ import {
   type ChannelResearchEvidence,
 } from "@/lib/channelResearchEvidence";
 import { optimizeTopics } from "@/lib/topicOptimizer";
-import { channelPrefix, headObjectMetadata } from "@/lib/storage";
+import { channelPrefix, headObjectMetadata, putObject } from "@/lib/storage";
+import { makeRunTempDir, writeBytes } from "@/lib/files";
+import { preflightNarrationPerformance } from "@/lib/narrationPerformance";
+import { selectDeterministicElevenVoice } from "@/lib/deterministicVoiceCast";
+import { renderNarration } from "@/lib/voicecraft";
+import {
+  buildAndPersistQuizYearFoundation,
+  buildQuizYearFoundation,
+  type DeterministicFoundationObjectWriter,
+} from "@/trigger/deterministicQuizYearFoundation";
+import {
+  buildAndPersistIllustratedFoundation,
+  buildIllustratedFoundation,
+} from "@/trigger/deterministicIllustratedFoundation";
 import {
   planWeekArtifactHeadMatches,
   type PlanWeekArtifactReceipt,
@@ -30,7 +52,10 @@ import {
   ESTABLISHED_CONFIDENCE,
 } from "@/engine/creative/styleDNA";
 import { architectPipeline } from "@/engine/creative/architect";
-import { CHANNEL_INCEPTION_SETUP_COST_CEILING_USD } from "@/engine/channelInceptionContracts";
+import {
+  CHANNEL_INCEPTION_SETUP_COST_CEILING_USD,
+  channelInceptionProbeCostCeilingUsd,
+} from "@/engine/channelInceptionContracts";
 import { channelInceptionSlug } from "@/lib/channelInceptionIdentity";
 import {
   channelPublishConfiguration,
@@ -56,6 +81,7 @@ import {
   MAX_CHANNEL_INCEPTION_PROBE_ATTEMPTS,
   MAX_CHANNEL_INCEPTION_PROBE_COST_USD,
   assessChannelInceptionProbeQuality,
+  resolveChannelInceptionProbeHolisticReview,
   freezeChannelInceptionProbeContext,
   freezeChannelInceptionProbeInput,
   prepareChannelInceptionProbeAttempt,
@@ -71,15 +97,18 @@ import {
 } from "@/lib/channelInceptionProbe";
 import {
   makeVoicecraftAuditionEvidence,
+  makeProviderMetadataSelectionEvidence,
   validateVoiceQualityEvidence,
 } from "@/lib/voiceReadiness";
 import {
-  makeVoiceCastingAuditionReceipt,
-  makeVoiceColdOpenReceipt,
+  makeVoiceLocalColdOpenReceipt,
+  makeVoiceProviderSelectionReceipt,
   validateVoiceCastingReadinessReceipt,
   voiceCastingOutputFingerprint,
   type VoiceCastingAuditionReceipt,
   type VoiceColdOpenReceipt,
+  type VoiceLocalColdOpenReceipt,
+  type VoiceProviderSelectionReceipt,
 } from "@/lib/voiceCastingReceipt";
 import {
   positioningIdentityProjection,
@@ -99,6 +128,8 @@ import {
 import { compilePipeline, completePipelineForPolicy } from "@/engine/pipelineCompiler";
 import { validatePipeline } from "@/engine/validate";
 import { registerAllBlocks } from "@/engine/blocks";
+import { childrenShowBibleSeedKeys } from "@/engine/childrenShowBible";
+import { contentLaneForFamily } from "@/engine/contentLane";
 import {
   convexChannelInceptionLedger,
   initializeChannelInceptionLedger,
@@ -144,6 +175,8 @@ interface VoiceCastingSlim {
   at: number;
   auditionReceipt?: VoiceCastingAuditionReceipt;
   coldOpenReceipt?: VoiceColdOpenReceipt;
+  providerSelectionReceipt?: VoiceProviderSelectionReceipt;
+  localColdOpenReceipt?: VoiceLocalColdOpenReceipt;
 }
 
 interface ChannelIdentityState {
@@ -254,6 +287,203 @@ export function assertStarterPlanChildSucceeded(result: {
 
 function asIdentity(value: unknown): ChannelIdentityState {
   return value as ChannelIdentityState;
+}
+
+async function writeImmutableDeterministicFoundationObject(
+  artifact: Parameters<DeterministicFoundationObjectWriter["writeImmutable"]>[0],
+) {
+  let persisted = await headObjectMetadata(artifact.key);
+  if (!persisted) {
+    try {
+      await putObject(artifact.key, artifact.bytes, {
+        contentType: artifact.contentType,
+        metadata: { sha256: artifact.sha256 },
+        ifNoneMatch: "*",
+      });
+    } catch (error) {
+      // A concurrent retry may have won the immutable write. Only accept it
+      // after verifying the exact content-addressed object below.
+      persisted = await headObjectMetadata(artifact.key);
+      if (!persisted) throw error;
+    }
+  }
+  persisted = persisted ?? await headObjectMetadata(artifact.key);
+  if (
+    !persisted ||
+    persisted.contentLength !== artifact.byteLength ||
+    persisted.contentType !== artifact.contentType ||
+    persisted.metadata.sha256 !== artifact.sha256
+  ) {
+    throw new Error(
+      `deterministic channel foundation object failed immutable verification: ${artifact.key}`,
+    );
+  }
+  return {
+    key: artifact.key,
+    sha256: artifact.sha256,
+    contentType: artifact.contentType,
+    byteLength: artifact.byteLength,
+  };
+}
+
+async function completeDeterministicQuizYearInception(args: {
+  readonly convex: ConvexHttpClient;
+  readonly channelId: Id<"channels">;
+  readonly ownerId: string;
+  readonly slug: string;
+  readonly channelName: string;
+  readonly family: (typeof FAMILIES)["quizyear"];
+}): Promise<{
+  readonly foundationFingerprint: string;
+  readonly receiptFingerprint: string;
+}> {
+  const expected = buildQuizYearFoundation({
+    channelName: args.channelName,
+    storagePrefix: channelPrefix(args.ownerId, args.slug),
+  });
+  const current = await currentChannel(args.convex, args.channelId);
+  const identity = asIdentity(current.identity);
+  for (const [slot, actual, intended] of [
+    ["avatar", identity.imageKey, expected.brandAssets[0].key],
+    ["banner", identity.bannerKey, expected.brandAssets[1].key],
+  ] as const) {
+    if (actual && actual !== intended) {
+      throw new Error(
+        `QuizYear deterministic inception will not replace an existing ${slot}. ` +
+          "Use a new channel identity or retain the existing draft outside the deterministic route.",
+      );
+    }
+  }
+  const persisted = await buildAndPersistQuizYearFoundation({
+    channelName: args.channelName,
+    storagePrefix: channelPrefix(args.ownerId, args.slug),
+    writer: { writeImmutable: writeImmutableDeterministicFoundationObject },
+  });
+  const foundationIdentity: ChannelIdentityState = {
+    ...identity,
+    persona: persisted.foundation.positioning.persona,
+    styleGrammar: persisted.foundation.positioning.styleGrammar,
+    palette: [...persisted.foundation.positioning.palette],
+    topicPool: [...persisted.foundation.positioning.topicPool],
+    bannedWords: [...persisted.foundation.positioning.bannedWords],
+    thumbnailTemplate: args.family.defaultThumbnailStyle,
+    niche: persisted.foundation.positioning.audience,
+    imageKey: persisted.foundation.brandAssets[0].key,
+    bannerKey: persisted.foundation.brandAssets[1].key,
+    thumbnailIdentity: {
+      colorPalette: [...persisted.foundation.positioning.palette],
+      visualStyle: "local QuizYear game-show grid",
+      textPosition: "center",
+      avoid: [...persisted.foundation.positioning.bannedWords],
+    },
+  };
+  await args.convex.mutation(api.channels.updateChannel, {
+    channelId: args.channelId,
+    name: persisted.foundation.positioning.channelName,
+    identity: foundationIdentity,
+    thumbnailer: args.family.defaultThumbnailStyle,
+    status: "draft",
+    architectReport: {
+      summary: "deterministic QuizYear foundation completed; draft-only until its independently admitted episode pipeline is run (every episode cover uses the sealed Nano Banana thumbnail module)",
+      applied: ["deterministic-positioning", "local-brand-assets", "source-first-starter-slate"],
+      rejected: ["Gemini Style DNA/Showrunner", "Gemini visual judge", "automatic publishing"],
+      missingCapabilities: [],
+      groundingActions: ["CC0 Wikidata starter slate persisted with immutable hashes"],
+      deterministicFoundation: {
+        foundationFingerprint: persisted.foundation.foundationFingerprint,
+        receipt: persisted.receipt,
+        artifacts: {
+          avatarKey: persisted.foundation.brandAssets[0].key,
+          bannerKey: persisted.foundation.brandAssets[1].key,
+          starterSlateKey: persisted.foundation.manifestArtifact.key,
+        },
+      },
+    },
+  });
+  return {
+    foundationFingerprint: persisted.foundation.foundationFingerprint,
+    receiptFingerprint: persisted.receipt.fingerprint,
+  };
+}
+
+async function completeDeterministicIllustratedInception(args: {
+  readonly convex: ConvexHttpClient;
+  readonly channelId: Id<"channels">;
+  readonly ownerId: string;
+  readonly slug: string;
+  readonly channelName: string;
+  readonly family: (typeof FAMILIES)["illustrated_explainer"];
+}): Promise<{
+  readonly foundationFingerprint: string;
+  readonly receiptFingerprint: string;
+}> {
+  const expected = buildIllustratedFoundation({
+    channelName: args.channelName,
+    storagePrefix: channelPrefix(args.ownerId, args.slug),
+  });
+  const current = await currentChannel(args.convex, args.channelId);
+  const identity = asIdentity(current.identity);
+  for (const [slot, actual, intended] of [
+    ["avatar", identity.imageKey, expected.brandAssets[0].key],
+    ["banner", identity.bannerKey, expected.brandAssets[1].key],
+  ] as const) {
+    if (actual && actual !== intended) {
+      throw new Error(
+        `Illustrated Explainer deterministic inception will not replace an existing ${slot}. ` +
+          "Use a new channel identity or retain the existing draft outside the deterministic route.",
+      );
+    }
+  }
+  const persisted = await buildAndPersistIllustratedFoundation({
+    channelName: args.channelName,
+    storagePrefix: channelPrefix(args.ownerId, args.slug),
+    writer: { writeImmutable: writeImmutableDeterministicFoundationObject },
+  });
+  const foundationIdentity: ChannelIdentityState = {
+    ...identity,
+    persona: persisted.foundation.positioning.persona,
+    styleGrammar: persisted.foundation.positioning.styleGrammar,
+    palette: [...persisted.foundation.positioning.palette],
+    topicPool: [...persisted.foundation.positioning.topicPool],
+    bannedWords: [...persisted.foundation.positioning.bannedWords],
+    thumbnailTemplate: args.family.defaultThumbnailStyle,
+    niche: persisted.foundation.positioning.audience,
+    imageKey: persisted.foundation.brandAssets[0].key,
+    bannerKey: persisted.foundation.brandAssets[1].key,
+    thumbnailIdentity: {
+      colorPalette: [...persisted.foundation.positioning.palette],
+      visualStyle: "local fictional AI scenario-board vectors",
+      textPosition: "center",
+      avoid: [...persisted.foundation.positioning.bannedWords],
+    },
+  };
+  await args.convex.mutation(api.channels.updateChannel, {
+    channelId: args.channelId,
+    name: persisted.foundation.positioning.channelName,
+    identity: foundationIdentity,
+    thumbnailer: args.family.defaultThumbnailStyle,
+    status: "draft",
+    architectReport: {
+      summary: "deterministic Illustrated Explainer foundation completed; draft-only until its independently admitted episode pipeline is run (every episode cover uses the sealed Nano Banana thumbnail module)",
+      applied: ["deterministic-positioning", "local-brand-assets", "fictional-no-external-claims-starter-slate"],
+      rejected: ["Google/Gemini creative services outside the required Nano Banana thumbnail module", "real-simulation claims", "automatic publishing"],
+      missingCapabilities: [],
+      groundingActions: ["fictional no-external-claims starter slate persisted with immutable hashes"],
+      deterministicFoundation: {
+        foundationFingerprint: persisted.foundation.foundationFingerprint,
+        receipt: persisted.receipt,
+        artifacts: {
+          avatarKey: persisted.foundation.brandAssets[0].key,
+          bannerKey: persisted.foundation.brandAssets[1].key,
+          starterSlateKey: persisted.foundation.manifestArtifact.key,
+        },
+      },
+    },
+  });
+  return {
+    foundationFingerprint: persisted.foundation.foundationFingerprint,
+    receiptFingerprint: persisted.receipt.fingerprint,
+  };
 }
 
 async function currentChannel(
@@ -456,8 +686,11 @@ async function groundingSignals(
   const thumbnailStyleGuide = (nicheIntel as {
     thumbnailStyleGuide?: {
       dominantColors?: string[];
-      hasTextOverlayPct?: number;
+      hasTextOverlayPct?: number | null;
       notes?: string;
+      evidenceSource?: "youtube_data_api_v3_metadata";
+      visualEvidenceStatus?: "metadata_only";
+      sampledVideoCount?: number;
     };
   } | null)?.thumbnailStyleGuide;
   const competitorContext = [
@@ -549,13 +782,22 @@ function wireVoiceReadiness(
   if (!validateVoiceCastingReadinessReceipt(voiceCastingValidation)) return { pipeline, wired: [] };
   const qualifiedCast = voiceCastingValidation.cast;
   const wired: string[] = [];
-  const voiceCastEvidence = makeVoicecraftAuditionEvidence({
-    channelId: String(channelId),
-    provider: "elevenlabs",
-    voiceId: qualifiedCast.voiceId,
-    castScore: qualifiedCast.score,
-    castJudgedAt: qualifiedCast.at,
-  });
+  const voiceCastEvidence = qualifiedCast.providerSelectionReceipt
+    ? makeProviderMetadataSelectionEvidence({
+        channelId: String(channelId),
+        provider: "elevenlabs",
+        voiceId: qualifiedCast.voiceId,
+        castScore: qualifiedCast.score,
+        castJudgedAt: qualifiedCast.at,
+        selectionFingerprint: qualifiedCast.providerSelectionReceipt.selectionFingerprint,
+      })
+    : makeVoicecraftAuditionEvidence({
+        channelId: String(channelId),
+        provider: "elevenlabs",
+        voiceId: qualifiedCast.voiceId,
+        castScore: qualifiedCast.score,
+        castJudgedAt: qualifiedCast.at,
+      });
   const narration = pipeline.find((entry) => entry.block === "narration_tts");
   if (narration) {
     const params = (narration.params ?? {}) as Record<string, unknown>;
@@ -717,7 +959,16 @@ function certifyChannelPipeline(args: {
   if (args.pipeline.some((entry) => args.disabledBlocks.includes(entry.block))) {
     throw new Error("pipeline contains an operator-disabled module");
   }
-  const compilation = compilePipeline(validatePipeline(args.pipeline));
+  // The designer certifies the initial family spine, but positioning/architect
+  // stages may subsequently revise the graph. Re-assert the same registered
+  // autonomous-planning contract against the exact graph we are about to seal;
+  // a structurally valid graph must not silently lose Story Spine, the local
+  // quiz route, or another family-owned non-Gemini admission requirement.
+  assertFamilyAutonomousPlanningPipeline(args.family, args.pipeline);
+  const lane = contentLaneForFamily(args.family);
+  const compilation = compilePipeline(
+    validatePipeline(args.pipeline, ["contentLane", ...childrenShowBibleSeedKeys(lane)]),
+  );
   const claims = {
     version: "channel-inception-pipeline-certification/v1" as const,
     family: args.family,
@@ -774,19 +1025,17 @@ function reviewProbeArtifacts(stages: readonly ProbeRunStage[]): ProbeArtifactRe
   const qaReport = qaOutput.qaReport && typeof qaOutput.qaReport === "object"
     ? qaOutput.qaReport as Record<string, unknown>
     : {};
-  const watch = qaReport.watch && typeof qaReport.watch === "object"
-    ? qaReport.watch as Record<string, unknown>
-    : {};
+  const holisticReview = resolveChannelInceptionProbeHolisticReview(qaReport) ?? {};
   const thumbnail = qaReport.thumbnail && typeof qaReport.thumbnail === "object"
     ? qaReport.thumbnail as Record<string, unknown>
     : {};
   const review: ProbeArtifactReview = {
     source: "qa_visual",
     quality,
-    ...(typeof watch.summary === "string" ? { feel: { summary: watch.summary } } : {}),
-    ...(Array.isArray(watch.defects)
+    ...(typeof holisticReview.summary === "string" ? { feel: { summary: holisticReview.summary } } : {}),
+    ...(Array.isArray(holisticReview.defects)
       ? {
-        defects: watch.defects.map((candidate) => {
+        defects: holisticReview.defects.map((candidate) => {
           if (!candidate || typeof candidate !== "object") return String(candidate);
           const defect = candidate as Record<string, unknown>;
           return `[${String(defect.severity ?? "unknown")}] ${String(defect.issue ?? "")}`;
@@ -822,8 +1071,19 @@ export async function executeDesignChannel(
 ) {
   const log = (message: string, extra?: Record<string, unknown>) =>
     console.log(`[design-channel] ${message}`, extra ?? "");
-  await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
-
+  const family = FAMILIES[payload.family];
+  if (!family) throw new Error(`unknown family: ${payload.family}`);
+  const runtimeReadiness = familyProductionReadiness(payload.family);
+  if (!runtimeReadiness.productionReady) {
+    const fallback = productionReadyFamilyFallback(payload.family);
+    throw new Error(
+      `${family.label} cannot start channel inception because its production path is unavailable: ` +
+      `${runtimeReadiness.blockers.join(" ")}` +
+      (fallback
+        ? ` Choose ${FAMILIES[fallback].label} after its own admission check.`
+        : " No no-Gemini production-family fallback is registered."),
+    );
+  }
   const ownerId = admitProviderTaskOwner({
     requestedOwnerId: payload.ownerId,
     configuredOwnerId: process.env.STUDIO_OWNER_ID,
@@ -833,8 +1093,6 @@ export async function executeDesignChannel(
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = new ConvexHttpClient(url);
-  const family = FAMILIES[payload.family];
-  if (!family) throw new Error(`unknown family: ${payload.family}`);
   const niche = getNiche(payload.nicheKey ?? "");
   const requestKey = payload.requestKey?.trim() || runtime.runId;
   const requestedYoutubeName = normalizeYoutubeChannelName(
@@ -865,7 +1123,7 @@ export async function executeDesignChannel(
     payload.inceptionApproval.maxCostUsd === CHANNEL_INCEPTION_SETUP_COST_CEILING_USD;
   const requestedProbeCapUsd = Math.min(
     Math.max(payload.budget ?? family.defaultRunBudgetUsd ?? 5, 0),
-    MAX_CHANNEL_INCEPTION_PROBE_COST_USD,
+    channelInceptionProbeCostCeilingUsd(payload.family),
   );
   const probeApproved = payload.runProbe === true && verifyStudioActionApproval(payload.probeApproval, {
     action: "channel-inception-probe",
@@ -914,12 +1172,16 @@ export async function executeDesignChannel(
     seriesCount: payload.seriesCount,
     sourceReferences: payload.sourceReferences,
     claimEvidence: payload.claimEvidence,
+    dataStory: payload.dataStory,
+    capabilitySelections: payload.capabilitySelections,
+    syntheticScenario: payload.syntheticScenario,
     toggles: payload.toggles,
     paramOverrides: payload.paramOverrides,
   });
-  const lengthSeconds = payload.lengthMinutes ? Math.round(payload.lengthMinutes * 60) : 0;
+  // Preserve the exact design resolution: an omitted operator duration may
+  // intentionally use a valid niche preset rather than the generic family default.
+  const lengthSeconds = design.episodeLengthSeconds;
   const withLengthLaw = (pipeline: PipelineEntry[]): PipelineEntry[] => {
-    if (!lengthSeconds) return pipeline;
     const result = enforceLengthContract(pipeline, lengthSeconds, payload.family);
     if (result.changed.length) log(`length law re-pinned: ${result.changed.join(", ")}`);
     return result.pipeline;
@@ -937,6 +1199,31 @@ export async function executeDesignChannel(
   const existingAtStart = await convex.query(api.channels.getChannelBySlug, { ownerId, slug });
   if (existingAtStart?.family && existingAtStart.family !== payload.family) {
     throw new Error(`inception key already belongs to family ${existingAtStart.family}`);
+  }
+  // RESUME HOLE: `createChannel` below is the ONLY writer in this flow that
+  // stamps `family`/`contentLane`, and the `existingAtStart?._id ??`
+  // short-circuit skips it entirely whenever a row already sits on this slug.
+  // A row that predates persisted families (or one seeded by a path that
+  // omitted it) would therefore be carried through every stage and finish
+  // inception with an IMPLICIT, pipeline-inferred lane — reintroducing on a
+  // freshly built channel exactly the fragility the backfill migration exists
+  // to close. Stamp it explicitly before any stage runs.
+  //
+  // `backfillChannelFamily` is the right tool rather than a raw patch: it is
+  // idempotent, never overwrites an existing family, re-derives the lane from
+  // this row's OWN stored pipeline, and REFUSES any family whose lane differs
+  // from the one already resolved today. So it can only make current behaviour
+  // explicit, never change it — and the refusal makes an implicit-family
+  // mismatch as loud as the explicit-family mismatch rejected just above.
+  // Locked rows are skipped: the migration's writability guard refuses them and
+  // the fork path owns that case.
+  if (existingAtStart && !existingAtStart.family && existingAtStart.locked !== true) {
+    const stamped = await convex.mutation(api.channels.backfillChannelFamily, {
+      ownerId,
+      channelId: existingAtStart._id,
+      family: payload.family,
+    });
+    log(`resumed channel carried an implicit family: ${stamped.reason}`);
   }
   const provisionalIdentity: ChannelIdentityState = existingAtStart
     ? asIdentity(existingAtStart.identity)
@@ -978,18 +1265,80 @@ export async function executeDesignChannel(
     });
   }
 
-  // An unavailable family cannot pass an end-to-end proof. Persist only the
-  // deterministic shell and stop before research/model/art/thumbnail spend.
-  if (!design.available) {
+  // QuizYear's complete creator path is local/source-first and draft-only.
+  // It must return before generic research, Style DNA, art, starter-thumbnail,
+  // provider bootstrap, or publishing logic can route it back to Gemini.
+  if (payload.family === "quizyear") {
+    const foundation = await completeDeterministicQuizYearInception({
+      convex,
+      channelId,
+      ownerId,
+      slug,
+      channelName: baseName,
+      family: FAMILIES.quizyear,
+    });
+    log("QuizYear deterministic foundation persisted", foundation);
+    return {
+      ok: true,
+      channelId,
+      slug,
+      name: baseName,
+      family: payload.family,
+      status: "draft" as const,
+      probe: { ok: false, attempts: 0, error: "QuizYear foundation is intentionally draft-only" },
+      zeroSpendDraft: true,
+      deterministicFoundation: foundation,
+      warnings: design.warnings,
+    };
+  }
+
+  // Illustrated Explainer is its own local creative lane. It exits before the
+  // generic Channel Inception stages because its foundation is deterministic;
+  // its episode pipeline still uses the required sealed Nano Banana thumbnail
+  // module after the local scene compiler has rendered the video.
+  if (payload.family === "illustrated_explainer") {
+    const foundation = await completeDeterministicIllustratedInception({
+      convex,
+      channelId,
+      ownerId,
+      slug,
+      channelName: baseName,
+      family: FAMILIES.illustrated_explainer,
+    });
+    log("Illustrated Explainer deterministic foundation persisted", foundation);
+    return {
+      ok: true,
+      channelId,
+      slug,
+      name: baseName,
+      family: payload.family,
+      status: "draft" as const,
+      probe: { ok: false, attempts: 0, error: "Illustrated Explainer foundation is intentionally draft-only" },
+      zeroSpendDraft: true,
+      deterministicFoundation: foundation,
+      warnings: design.warnings,
+    };
+  }
+
+  // No creator-time Gemini prerequisite: admission above rejects any family
+  // whose autonomous planning path still depends on it.
+  await bootstrapSecrets(log);
+
+  // A missing template or unavailable runtime cannot pass an end-to-end proof.
+  // Persist only the deterministic shell and stop before research/model/art/
+  // thumbnail spend. The entrypoint above rejects known blocked families;
+  // retain this guard for resumed or future dynamic capability changes.
+  if (!design.available || !design.productionReady) {
     const blockers = [
-      `${family.label} production engine is not available`,
+      `${family.label} production engine or runtime is not available`,
+      ...design.runtimeBlockers,
       ...design.warnings,
     ];
     await convex.mutation(api.channels.updateChannel, {
       channelId,
       status: "draft",
       architectReport: {
-        summary: "zero-spend draft: family engine unavailable",
+        summary: "zero-spend draft: family engine or runtime unavailable",
         applied: [],
         rejected: [],
         missingCapabilities: [],
@@ -1005,7 +1354,7 @@ export async function executeDesignChannel(
       name: baseName,
       family: payload.family,
       status: "draft" as const,
-      probe: { ok: false, attempts: 0, error: "family engine unavailable" },
+      probe: { ok: false, attempts: 0, error: "family engine or runtime unavailable" },
       zeroSpendDraft: true,
       blockers,
       warnings: design.warnings,
@@ -1319,23 +1668,15 @@ export async function executeDesignChannel(
         voiceId: concept.voiceId,
         thumbnailTemplate: family.defaultThumbnailStyle,
       };
-      let exampleClipNotes: string | undefined;
-      if (payload.exampleClipUrl?.trim()) {
-        const { analyzeClip } = await import("@/lib/clipAnalysis");
-        const analysis = await analyzeClip(payload.exampleClipUrl.trim());
-        if (analysis.couldAnalyze) {
-          exampleClipNotes = [
-            analysis.visualStyle ? `visual style: ${analysis.visualStyle}` : "",
-            analysis.pacing ? `pacing: ${analysis.pacing}` : "",
-            analysis.hasNarration
-              ? `narration tone: ${analysis.narrationTone ?? "unspecified"}`
-              : "no narration",
-            analysis.musicRole !== "none" ? `music role: ${analysis.musicRole}` : "",
-            analysis.captionStyle ? `captions: ${analysis.captionStyle}` : "",
-            analysis.thumbnailStyle ? `thumbnail style: ${analysis.thumbnailStyle}` : "",
-            analysis.notes,
-          ].filter(Boolean).join("; ");
-        }
+      // An example URL is optional reference material, not authority to invent
+      // unseen visual/narrative traits. Keep the channel-design route usable by
+      // skipping it, while persistently exposing the exact remediation instead
+      // of reaching the retired provider-backed analyzer.
+      const exampleClipAdmission = payload.exampleClipUrl?.trim()
+        ? exampleClipAnalysisUnavailable()
+        : undefined;
+      if (exampleClipAdmission) {
+        log(`[positioning] example clip skipped: ${exampleClipAdmission.code}; ${exampleClipAdmission.remediation}`);
       }
       const signals = await groundingSignals(convex, ownerId, identity.niche);
       const now = Date.now();
@@ -1350,7 +1691,7 @@ export async function executeDesignChannel(
         powerWords: signals.powerWords,
         thumbnailStyleGuide: signals.thumbnailStyleGuide,
         databank: signals.databank,
-        exampleClipNotes,
+        exampleClipNotes: undefined,
         now,
         log,
       });
@@ -1394,6 +1735,7 @@ export async function executeDesignChannel(
           confidence: styleDNA.confidence,
           groundingGaps: styleDNA.groundingGaps,
           competitorCount: signals.competitorCount,
+          ...(exampleClipAdmission ? { exampleClip: exampleClipAdmission } : {}),
         },
         outputFingerprint: channelInceptionContentSha256({
           ...value,
@@ -1499,8 +1841,12 @@ export async function executeDesignChannel(
           ? {
               value: validation.cast,
               evidence: {
-                auditionReceipt: validation.cast.auditionReceipt,
-                coldOpenReceipt: validation.cast.coldOpenReceipt,
+                ...(validation.cast.providerSelectionReceipt
+                  ? { providerSelectionReceipt: validation.cast.providerSelectionReceipt }
+                  : { auditionReceipt: validation.cast.auditionReceipt }),
+                ...(validation.cast.localColdOpenReceipt
+                  ? { localColdOpenReceipt: validation.cast.localColdOpenReceipt }
+                  : { coldOpenReceipt: validation.cast.coldOpenReceipt }),
               },
               outputFingerprint: voiceCastingOutputFingerprint(validation.cast),
             }
@@ -1511,28 +1857,23 @@ export async function executeDesignChannel(
         loadCompleted: loadVoice,
         adoptExisting: loadVoice,
         execute: async () => {
-          const { castVoice, gateColdOpen } = await import("@/lib/voicecraft");
-          const cast = await castVoice({
-            convex,
-            ownerId,
-            channelName: positioning.name,
-            niche: seoIdentity.niche,
-            persona: seoIdentity.persona,
-            register: JSON.stringify(positioning.styleDNA.narrative ?? {}),
-            log,
-          });
-          if (!cast || cast.score < 7) throw new Error("voice audition did not produce a qualified winner");
+          // Provider labels make an explicit, repeatable pre-cast. They do not
+          // masquerade as a listened Gemini audition: an actual provider take
+          // is immediately measured below, and production narration still runs
+          // its own local performance + final transcript evidence gates.
+          const cast = await selectDeterministicElevenVoice({ niche: seoIdentity.niche });
           const judgedAt = Date.now();
-          const auditionReceipt = makeVoiceCastingAuditionReceipt({
+          const providerSelectionReceipt = makeVoiceProviderSelectionReceipt({
             ownerId,
             channelId: String(channelId),
             voiceId: cast.voiceId,
-            score: cast.score,
-            judgedAt,
-            auditioned: cast.auditioned,
-            verdict: {
-              winner: cast.voiceId,
-              score: cast.score,
+            score: cast.selectionScore,
+            selectedAt: judgedAt,
+            shortlisted: cast.shortlisted,
+            selection: {
+              voiceId: cast.voiceId,
+              name: cast.name,
+              character: cast.character,
               why: cast.why,
               physics: cast.physics,
             },
@@ -1541,38 +1882,52 @@ export async function executeDesignChannel(
           const coldOpenText =
             `${sampleTopic} looks simple until one overlooked detail changes the whole picture. ` +
             `Follow that detail carefully, because it reveals what most explanations leave out.`;
-          const coldOpen = await gateColdOpen({
+          const coldOpenBytes = await renderNarration({
             text: coldOpenText,
             elevenVoiceId: cast.voiceId,
             physics: cast.physics,
             seed: 4242,
-            log,
           });
+          const coldOpenDir = await makeRunTempDir(`${runtime.runId}_voice_inception`);
+          const coldOpenPath = `${coldOpenDir}/cold_open.mp3`;
+          await writeBytes(coldOpenPath, coldOpenBytes);
+          const coldOpenEvidence = await preflightNarrationPerformance({
+            audioPath: coldOpenPath,
+            text: coldOpenText,
+            speed: cast.physics.speed,
+          });
+          const localColdOpenReceipt = makeVoiceLocalColdOpenReceipt({
+            ownerId,
+            channelId: String(channelId),
+            voiceId: cast.voiceId,
+            measuredAt: Date.now(),
+            text: coldOpenText,
+            physics: cast.physics,
+            audioFingerprint: createHash("sha256").update(coldOpenBytes).digest("hex"),
+            durationSec: coldOpenEvidence.durationSec,
+            wordsPerSec: coldOpenEvidence.wordsPerSec,
+            integratedLufs: coldOpenEvidence.integratedLufs,
+          });
+          log(
+            `voice inception: selected ${cast.name} from provider metadata and measured a real local cold-open ` +
+            `(${coldOpenEvidence.durationSec.toFixed(1)}s, ${coldOpenEvidence.wordsPerSec.toFixed(2)} words/s, ${coldOpenEvidence.integratedLufs.toFixed(1)} LUFS)`,
+          );
           const slim: VoiceCastingSlim = {
             voiceId: cast.voiceId,
             name: cast.name,
             character: cast.character.slice(0, 300),
-            score: cast.score,
+            score: cast.selectionScore,
             why: cast.why.slice(0, 300),
             at: judgedAt,
-            auditionReceipt,
-            coldOpenReceipt: makeVoiceColdOpenReceipt({
-              ownerId,
-              channelId: String(channelId),
-              voiceId: cast.voiceId,
-              judgedAt: Date.now(),
-              seed: coldOpen.seed,
-              text: coldOpenText,
-              physics: cast.physics,
-              verdict: coldOpen.verdict,
-            }),
+            providerSelectionReceipt,
+            localColdOpenReceipt,
           };
           await mergeIdentity(convex, channelId, { voiceCasting: slim });
           return {
             value: slim,
             evidence: {
-              auditionReceipt: slim.auditionReceipt,
-              coldOpenReceipt: slim.coldOpenReceipt,
+              providerSelectionReceipt: slim.providerSelectionReceipt,
+              localColdOpenReceipt: slim.localColdOpenReceipt,
             },
             outputFingerprint: voiceCastingOutputFingerprint(slim),
           };
@@ -1607,7 +1962,16 @@ export async function executeDesignChannel(
         "avatar",
         artIdentity,
         log,
-        { version: { avatar: avatarStage.inputFingerprint.slice(0, 20) } },
+        {
+          version: { avatar: avatarStage.inputFingerprint.slice(0, 20) },
+          maxProviderSpendUsd: avatarStage.maximumCostUsd,
+          providerLifecycle: {
+            ownerId,
+            channelId,
+            runId: runtime.runId,
+            blockId: "channel-inception-avatar",
+          },
+        },
       );
       await mergeIdentity(convex, channelId, { imageKey });
       return { value: imageKey, evidence: { imageKey } };
@@ -1628,7 +1992,16 @@ export async function executeDesignChannel(
         "banner",
         artIdentity,
         log,
-        { version: { banner: bannerStage.inputFingerprint.slice(0, 20) } },
+        {
+          version: { banner: bannerStage.inputFingerprint.slice(0, 20) },
+          maxProviderSpendUsd: bannerStage.maximumCostUsd,
+          providerLifecycle: {
+            ownerId,
+            channelId,
+            runId: runtime.runId,
+            blockId: "channel-inception-banner",
+          },
+        },
       );
       await mergeIdentity(convex, channelId, { bannerKey });
       return { value: bannerKey, evidence: { bannerKey } };
@@ -2120,6 +2493,7 @@ export async function executeDesignChannel(
               moduleConfigOverride,
               invocationContext: freezeChannelInceptionProbeContext({
                 ownerId,
+                family: payload.family,
                 channel: channelSnapshot,
               }),
               productionFingerprint: effectivePipelineFingerprint(channelSnapshot),

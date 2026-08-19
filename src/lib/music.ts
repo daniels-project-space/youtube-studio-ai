@@ -28,6 +28,7 @@
  * so end==start and every loop splice is seamless.
  */
 import { execFile } from "node:child_process";
+import { stat, unlink } from "node:fs/promises";
 import { promisify } from "node:util";
 
 const execFileP = promisify(execFile);
@@ -83,6 +84,58 @@ export type MusicProvider = "mureka" | "suno";
 const FFMPEG_BIN = () => process.env.FFMPEG_BIN ?? "ffmpeg";
 const FFPROBE_BIN = () => process.env.FFPROBE_BIN ?? "ffprobe";
 
+const MP3_ENCODE_ARGS = ["-c:a", "libmp3lame", "-b:a", "320k", "-ar", "44100"];
+
+/**
+ * Exact duration of a PCM WAV, straight from its header (data-chunk bytes /
+ * byte rate). Unlike the compressed case below, there is nothing to estimate.
+ */
+async function pcmWavDurationSec(path: string): Promise<number> {
+  const { stdout } = await execFileP(FFPROBE_BIN(), [
+    "-v", "error",
+    "-show_entries", "format=duration",
+    "-of", "csv=p=0",
+    path,
+  ]);
+  return Number(String(stdout).trim());
+}
+
+/**
+ * DECODE-ACCURATE duration in seconds, for COMPRESSED files.
+ *
+ * `ffprobe -show_entries format=duration` is only a BITRATE ESTIMATE for MP3s
+ * that carry no Xing/VBR header — which is every Suno-provider mp3. ffmpeg even
+ * says so ("Estimating duration from bitrate, this may be inaccurate"). Measured
+ * error on a real Suno track: 101.38s reported vs 111.00s actual (~9.5% short);
+ * on a synthetic VBR-without-header file: 168.70s reported vs 111.00s actual
+ * (+52% long). Any timestamp math built on that number is silently wrong.
+ *
+ * Decoding the whole stream to the null muxer and reading the final progress
+ * timestamp is exact, and runs at ~100x realtime for audio (a 2-minute bed
+ * measures in about a second). Returns 0 when ffmpeg emitted no timestamp.
+ */
+async function decodeAccurateDurationSec(path: string): Promise<number> {
+  const { stdout } = await execFileP(
+    FFMPEG_BIN(),
+    [
+      "-v", "error",
+      // One progress block every 5s of wall time keeps stdout tiny; ffmpeg
+      // always emits a final block when the stream ends, which is the one we use.
+      "-stats_period", "5",
+      "-i", path,
+      "-f", "null", "-",
+      "-progress", "pipe:1",
+    ],
+    { maxBuffer: 16 * 1024 * 1024 },
+  );
+  let seconds = 0;
+  for (const m of String(stdout).matchAll(/^out_time_us=(\d+)$/gm)) {
+    const us = Number(m[1]);
+    if (Number.isFinite(us)) seconds = Math.max(seconds, us / 1_000_000);
+  }
+  return seconds;
+}
+
 /**
  * Make a music mix SELF-LOOPING: fold the tail into the head with ONE
  * triangular acrossfade, then trim, so the file's end flows seamlessly into its
@@ -93,11 +146,24 @@ const FFPROBE_BIN = () => process.env.FFPROBE_BIN ?? "ffprobe";
  *   main = A[0 .. D-T],  tail = A[D-T .. D],  out = acrossfade(tail, main).
  * `out` ends exactly where `tail` begins (A[D-T]), so on loop the pure 0.5s
  * tail lead-in continues the waveform sample-perfectly, then fades into the
- * head. Output is ~D - F seconds.
+ * head. Output is D - F seconds.
  *
- * Throws MusicError on ffmpeg/ffprobe failure; tracks too short to fold
- * (< ~4×fade) are returned unchanged (a tiny bed loops too often for the fold
- * to matter and acrossfade would eat most of it).
+ * THE TWO SEGMENTS MUST BE SEPARATE FILES, and it must stay that way. The
+ * single-graph form of this — feeding `acrossfade` from two `atrim` branches of
+ * the SAME decoded input — DEADLOCKS:
+ * acrossfade has to drain its first input to EOF before it can emit anything,
+ * which requires decoding the whole file, while the second branch must
+ * simultaneously buffer the earlier portion. The graph starves and ffmpeg
+ * writes a ~1KB header-only mp3 with ZERO audio frames — and still EXITS 0, so
+ * nothing downstream noticed. (`asplit=2` does not fix it.) The two segments are
+ * therefore extracted to separate temp files first, so acrossfade reads two
+ * genuinely independent inputs. Temps are lossless WAV: the fold then costs one
+ * mp3 generation, not three, and segment edges land on exact sample boundaries
+ * instead of mp3 frame boundaries.
+ *
+ * Throws MusicError on ffmpeg/ffprobe failure OR on a corrupt/short result;
+ * tracks too short to fold (< ~4×fade) are returned unchanged (a tiny bed loops
+ * too often for the fold to matter and acrossfade would eat most of it).
  */
 export async function selfLoopAudio(
   inPath: string,
@@ -105,42 +171,109 @@ export async function selfLoopAudio(
   opts?: { crossfadeSec?: number; log?: (msg: string) => void },
 ): Promise<string> {
   const fade = Math.min(4, Math.max(0.5, opts?.crossfadeSec ?? 2));
+  const tmpFull = `${outPath}.selfloop-src.tmp.wav`;
+  const tmpMain = `${outPath}.selfloop-main.tmp.wav`;
+  const tmpTail = `${outPath}.selfloop-tail.tmp.wav`;
   let durationSec = 0;
   try {
-    const { stdout } = await execFileP(FFPROBE_BIN(), [
-      "-v", "error",
-      "-show_entries", "format=duration",
-      "-of", "csv=p=0",
-      inPath,
-    ]);
-    durationSec = Number(String(stdout).trim());
-  } catch (e) {
-    throw new MusicError(`selfLoopAudio: ffprobe failed (${e instanceof Error ? e.message : e})`);
+    // PASS 0 — decode the source ONCE, losslessly. One cheap pass buys three
+    // things: an EXACT duration (WAV header, not a bitrate guess), a
+    // sample-exact grid for the two slices below, and a single mp3 generation
+    // for the whole fold instead of three. Slicing the compressed mp3 directly
+    // instead lands on frame/decoder-delay boundaries and leaves a ~0.25ms
+    // phase step at the loop seam (measured: 11x the adjacent-sample delta,
+    // versus 1.01x — i.e. indistinguishable from continuous — when slicing the
+    // decoded WAV).
+    try {
+      await execFileP(
+        FFMPEG_BIN(),
+        ["-y", "-i", inPath, "-c:a", "pcm_s16le", tmpFull],
+        { maxBuffer: 16 * 1024 * 1024 },
+      );
+      durationSec = await pcmWavDurationSec(tmpFull);
+    } catch (e) {
+      throw new MusicError(`selfLoopAudio: could not decode ${inPath} (${e instanceof Error ? e.message : e})`);
+    }
+    if (!Number.isFinite(durationSec) || durationSec <= 0) {
+      // A decode that yields no audio at all means the INPUT is unreadable —
+      // that is a real failure, not a "too short" no-op.
+      throw new MusicError(`selfLoopAudio: could not measure input duration of ${inPath}`);
+    }
+    if (durationSec < fade * 4) {
+      opts?.log?.(`selfLoopAudio: track too short to fold (${durationSec.toFixed(1)}s) — keeping as-is`);
+      return inPath;
+    }
+
+    const tail = fade + 0.5; // 0.5s pure lead-in before the fade (see proof above)
+    const mainEnd = (durationSec - tail).toFixed(6);
+    try {
+      // PASS 1 — head/main segment A[0 .. D-T] to its own file.
+      await execFileP(
+        FFMPEG_BIN(),
+        ["-y", "-i", tmpFull, "-t", mainEnd, "-c:a", "pcm_s16le", tmpMain],
+        { maxBuffer: 16 * 1024 * 1024 },
+      );
+      // PASS 2 — tail segment A[D-T .. D] to its own file.
+      await execFileP(
+        FFMPEG_BIN(),
+        ["-y", "-ss", mainEnd, "-i", tmpFull, "-c:a", "pcm_s16le", tmpTail],
+        { maxBuffer: 16 * 1024 * 1024 },
+      );
+      // PASS 3 — crossfade TWO SEPARATE inputs (no shared-decoder deadlock).
+      await execFileP(
+        FFMPEG_BIN(),
+        [
+          "-y",
+          "-i", tmpTail,
+          "-i", tmpMain,
+          "-filter_complex", `[0:a][1:a]acrossfade=d=${fade}:c1=tri:c2=tri[out]`,
+          "-map", "[out]",
+          ...MP3_ENCODE_ARGS,
+          outPath,
+        ],
+        { maxBuffer: 16 * 1024 * 1024 },
+      );
+    } catch (e) {
+      throw new MusicError(`selfLoopAudio: ffmpeg fold failed (${e instanceof Error ? e.message : e})`);
+    }
+  } finally {
+    await unlink(tmpFull).catch(() => {});
+    await unlink(tmpMain).catch(() => {});
+    await unlink(tmpTail).catch(() => {});
   }
-  if (!Number.isFinite(durationSec) || durationSec < fade * 4) {
-    opts?.log?.(`selfLoopAudio: track too short to fold (${durationSec.toFixed(1)}s) — keeping as-is`);
-    return inPath;
-  }
-  const tail = fade + 0.5; // 0.5s pure lead-in before the fade (see proof above)
-  const mainEnd = (durationSec - tail).toFixed(3);
+
+  // ---- PROVE THE OUTPUT IS REAL BEFORE CLAIMING SUCCESS ----------------
+  // ffmpeg exits 0 on an empty mux, so a zero-frame file is indistinguishable
+  // from success by exit code alone. That is exactly how the single-pass
+  // filtergraph shipped a ~1KB corrupt bed into every lofi render. Never return
+  // a path this function has not decoded and measured.
+  const expectedSec = durationSec - fade;
+  let outBytes = 0;
   try {
-    await execFileP(FFMPEG_BIN(), [
-      "-y",
-      "-i", inPath,
-      "-filter_complex",
-      `[0:a]atrim=0:${mainEnd},asetpts=PTS-STARTPTS[main];` +
-        `[0:a]atrim=${mainEnd},asetpts=PTS-STARTPTS[tail];` +
-        `[tail][main]acrossfade=d=${fade}:c1=tri:c2=tri[out]`,
-      "-map", "[out]",
-      "-c:a", "libmp3lame",
-      "-b:a", "320k",
-      "-ar", "44100",
-      outPath,
-    ], { maxBuffer: 16 * 1024 * 1024 });
+    outBytes = (await stat(outPath)).size;
   } catch (e) {
-    throw new MusicError(`selfLoopAudio: ffmpeg fold failed (${e instanceof Error ? e.message : e})`);
+    throw new MusicError(`selfLoopAudio: output ${outPath} was not written (${e instanceof Error ? e.message : e})`);
   }
-  opts?.log?.(`selfLoopAudio: folded tail→head (${fade}s crossfade) — mix now loops seamlessly`);
+  if (outBytes < 16 * 1024) {
+    throw new MusicError(
+      `selfLoopAudio: output is ${outBytes}B — corrupt/empty mux (expected ~${expectedSec.toFixed(1)}s of 320k audio)`,
+    );
+  }
+  let outSec = 0;
+  try {
+    outSec = await decodeAccurateDurationSec(outPath);
+  } catch (e) {
+    throw new MusicError(`selfLoopAudio: output verification decode failed (${e instanceof Error ? e.message : e})`);
+  }
+  const tolerance = Math.max(1, expectedSec * 0.03);
+  if (!Number.isFinite(outSec) || outSec <= 0 || Math.abs(outSec - expectedSec) > tolerance) {
+    throw new MusicError(
+      `selfLoopAudio: output duration ${outSec.toFixed(2)}s is not the expected ${expectedSec.toFixed(2)}s (±${tolerance.toFixed(2)}s) — refusing to return a bad loop`,
+    );
+  }
+  opts?.log?.(
+    `selfLoopAudio: folded tail→head (${fade}s crossfade) — ${durationSec.toFixed(1)}s → ${outSec.toFixed(1)}s, ${(outBytes / 1024).toFixed(0)}KB, verified non-empty; mix now loops seamlessly`,
+  );
   return outPath;
 }
 

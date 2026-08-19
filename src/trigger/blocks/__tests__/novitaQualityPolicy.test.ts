@@ -6,6 +6,7 @@ import { getManifest } from "@/engine/registry";
 import {
   MAX_CINEMATIC_QUALITY_REPAIR_ATTEMPTS,
   canAttemptCinematicQualityRepair,
+  combineAssetCandidateGrades,
   planCinematicQualityRepair,
   resolveChannelVisualQualityPolicy,
 } from "@/trigger/blocks/novitaRenderBlocks";
@@ -167,8 +168,14 @@ const videoRepair = planCinematicQualityRepair({
   notes: ["The middle frame freezes and the camera move reverses."],
   attempt: 1,
   stillKey: "owner/demo/runs/run/novita/image/selected.png",
+  endStillKey: "owner/demo/runs/run/novita/image/selected-next.png",
 });
 assert.equal(videoRepair.shot.stillKey, "owner/demo/runs/run/novita/image/selected.png");
+assert.equal(
+  videoRepair.shot.endStillKey,
+  "owner/demo/runs/run/novita/image/selected-next.png",
+  "a repaired continuous shot must retain its reviewed LTX endpoint rather than silently dropping the handoff",
+);
 assert.match(videoRepair.shot.prompt, /First-frame constraint/);
 assert.match(videoRepair.shot.prompt, /middle frame freezes/);
 assert.throws(
@@ -182,6 +189,38 @@ assert.throws(
   }),
   /requires the selected still/,
   "video repair must remain attached to the approved still rather than silently changing identity",
+);
+
+const conservativeReferenceGrade = combineAssetCandidateGrades([
+  {
+    candidates: [
+      { candidateIndex: 0, semanticAlignment: 0.95, continuity: 0.94, artifactFree: 0.96, notes: ["matches character sheet"] },
+      { candidateIndex: 1, semanticAlignment: 0.92, continuity: 0.93, artifactFree: 0.95, notes: ["clean composition"] },
+    ],
+  },
+  {
+    candidates: [
+      { candidateIndex: 0, semanticAlignment: 0.93, continuity: 0.72, artifactFree: 0.96, notes: ["coat silhouette diverges"] },
+      { candidateIndex: 1, semanticAlignment: 0.94, continuity: 0.91, artifactFree: 0.94, notes: ["matches setting sheet"] },
+    ],
+  },
+]);
+assert.equal(
+  conservativeReferenceGrade.candidates[0]!.continuity,
+  0.72,
+  "a candidate must satisfy every Visual Matter reference batch, not only the most forgiving one",
+);
+assert.deepEqual(
+  conservativeReferenceGrade.candidates[0]!.notes,
+  ["matches character sheet", "coat silhouette diverges"],
+);
+assert.throws(
+  () => combineAssetCandidateGrades([
+    { candidates: [{ candidateIndex: 0, semanticAlignment: 1, continuity: 1, artifactFree: 1, notes: [] }] },
+    { candidates: [{ candidateIndex: 1, semanticAlignment: 1, continuity: 1, artifactFree: 1, notes: [] }] },
+  ]),
+  /same exact candidate set/,
+  "a partial grader response must fail closed rather than misalign candidate grades",
 );
 
 console.log("Novita channel quality policy tests passed");

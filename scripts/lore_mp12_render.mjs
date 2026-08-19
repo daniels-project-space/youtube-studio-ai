@@ -1,7 +1,7 @@
 // LORECRAFT MULTIPLANE v3 — ~12 layers (9 clean background depth-planes + 3 whole figure layers),
 // driven by a BIG global zoom-out pull-back. 1080p. Figures stay whole (cut at depth gaps); the
 // background is sliced into many planes (no figures in it, so nothing tears).
-import { writeFile, readFile, copyFile, mkdir } from "node:fs/promises";
+import { writeFile, copyFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";

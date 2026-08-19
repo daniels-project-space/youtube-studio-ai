@@ -4,7 +4,7 @@
 import { execFileSync } from "node:child_process";
 import { readFileSync, writeFileSync } from "node:fs";
 
-const SOUL = readFileSync("/tmp/soulid.txt", "utf8").trim();
+readFileSync("/tmp/soulid.txt", "utf8").trim();
 // The canonical locked hero render — referenced DIRECTLY on every keyframe
 // (9/10 identity match vs 6/10 for the trained soul; the soul drops fine
 // features like the thin mustache). This anchors the same face every shot.

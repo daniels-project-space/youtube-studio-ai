@@ -4,7 +4,6 @@ import {
   PRICE,
   bananaUnitRate,
   falFluxProImageCost,
-  narrationTtsCost,
   qaVisualCost,
   thumbnailGenerationCost,
 } from "@/engine/pricing";
@@ -38,15 +37,7 @@ import {
 import { music } from "@/trigger/blocks/lofiBlocks";
 import { qaVisual } from "@/trigger/blocks/narratedBlocks";
 import { synthNarration, TtsError } from "@/lib/tts";
-import {
-  NARRATION_CHAPTER_HEADING_MAX_CHARS,
-  NARRATION_COLD_OPEN_MAX_CHARS,
-  NARRATION_MAX_CHAPTER_CARDS,
-  boundNarrationChapterHeadings,
-  boundNarrationColdOpen,
-  narrationChapterHeadingCharacterCeiling,
-} from "@/lib/narrationBounds";
-import { gateColdOpen, narrationPhysics } from "@/lib/voicecraft";
+import { GEMINI_RUNTIME_OPT_IN_ENV } from "@/lib/gemini";
 
 function providerAwarePricing(): void {
   assert.equal(
@@ -111,7 +102,8 @@ function costPatches(): void {
   assert.equal(qaVisualCost({}), PRICE.qaBaseUsd * qaEvidenceBatches);
   assert.equal(
     qaVisualCost({ nativeWatch: true, audioQa: true }),
-    PRICE.qaBaseUsd * qaEvidenceBatches + PRICE.nativeVideoQaUsd + PRICE.audioQaUsd,
+    PRICE.qaBaseUsd * qaEvidenceBatches + PRICE.audioQaUsd,
+    "retired nativeWatch must not reserve a Gemini native-video review",
   );
 }
 
@@ -285,124 +277,22 @@ async function successfulTinyTtsIsTerminal(): Promise<void> {
   }
 }
 
-async function coldOpenAccounting(): Promise<void> {
-  const originalFetch = globalThis.fetch;
-  const originalElevenKey = process.env.ELEVENLABS_API_KEY;
-  const originalGeminiKey = process.env.GEMINI_API_KEY;
-  process.env.ELEVENLABS_API_KEY = "test-eleven-key";
-  process.env.GEMINI_API_KEY = "test-gemini-key";
-
-  const probeText = "The opening narration should sound measured, natural, and completely clean.";
-  const physics = narrationPhysics("documentary");
-  const bounded = boundNarrationColdOpen(`${"complete ".repeat(100)}tail`);
-  assert(bounded.length <= NARRATION_COLD_OPEN_MAX_CHARS);
-  assert(!bounded.endsWith("com"), "cold-open cap keeps complete words");
-  const oversizedHeadings = Array.from(
-    { length: NARRATION_MAX_CHAPTER_CARDS + 20 },
-    (_, index) => `Useful heading ${index + 1} ${"complete ".repeat(40)}`,
-  );
-  const boundedHeadings = boundNarrationChapterHeadings(oversizedHeadings);
-  assert.equal(boundedHeadings.length, NARRATION_MAX_CHAPTER_CARDS);
-  assert(boundedHeadings.every((heading) => heading.length <= NARRATION_CHAPTER_HEADING_MAX_CHARS));
-  const actualSpokenHeadingCharacters = boundedHeadings.reduce(
-    (total, heading, index) => total + `Chapter ${index + 1}: ${heading.replace(/[.:;,\s]+$/, "")}.`.length,
-    0,
-  );
-  assert(
-    actualSpokenHeadingCharacters <= narrationChapterHeadingCharacterCeiling(),
-    "oversized chapter output cannot exceed the paid heading ceiling",
-  );
-  assert.equal(narrationChapterHeadingCharacterCeiling(), 2_385);
-  try {
-    let ttsCalls = 0;
-    let judgeRequests = 0;
-    let billableCharacters = 0;
-    let audioJudgeCalls = 0;
-    globalThis.fetch = async (input) => {
-      const url = String(input);
-      if (url.includes("api.elevenlabs.io")) {
-        ttsCalls += 1;
-        // judgeNarrationTake uses CBR byte length as its local duration probe.
-        return new Response(new Uint8Array(48_000), { status: 200 });
-      }
-      judgeRequests += 1;
-      return new Response(JSON.stringify({
-        candidates: [{
-          content: {
-            parts: [{
-              text: JSON.stringify({
-                register: 8,
-                pace: 8,
-                performance: 8,
-                clean: 8,
-                why: "production ready",
-              }),
-            }],
-          },
-        }],
-      }), { status: 200, headers: { "content-type": "application/json" } });
-    };
-
-    await gateColdOpen({
-      text: probeText,
-      elevenVoiceId: "voice-test",
-      physics,
-      onBillableCharacters: (characters) => { billableCharacters += characters; },
-      onAudioJudgeCall: () => { audioJudgeCalls += 1; },
-    });
-    assert.equal(ttsCalls, 1);
-    assert.equal(judgeRequests, 1);
-    assert.equal(billableCharacters, probeText.length);
-    assert.equal(audioJudgeCalls, 1);
-    assert.equal(
-      narrationTtsCost("elevenlabs", billableCharacters, audioJudgeCalls),
-      (probeText.length * PRICE.ttsElevenPerKCharUsd) / 1_000 + PRICE.visionGraderUsd,
-    );
-    assert.equal(
-      narrationTtsCost("fish", 0, 0),
-      0,
-      "a resumed/cache-restored narration performs no new paid work",
-    );
-
-    // A provider-accepted but invalid response can consume character quota.
-    // It is counted once and is terminal; gateColdOpen must not buy take two.
-    ttsCalls = 0;
-    billableCharacters = 0;
-    audioJudgeCalls = 0;
-    globalThis.fetch = async () => {
-      ttsCalls += 1;
-      return new Response(new Uint8Array(32), { status: 200 });
-    };
-    await assert.rejects(
-      gateColdOpen({
-        text: probeText,
-        elevenVoiceId: "voice-test",
-        physics,
-        onBillableCharacters: (characters) => { billableCharacters += characters; },
-        onAudioJudgeCall: () => { audioJudgeCalls += 1; },
-      }),
-      /tiny audio after a successful response/,
-    );
-    assert.equal(ttsCalls, 1);
-    assert.equal(billableCharacters, probeText.length);
-    assert.equal(audioJudgeCalls, 0);
-  } finally {
-    globalThis.fetch = originalFetch;
-    if (originalElevenKey === undefined) delete process.env.ELEVENLABS_API_KEY;
-    else process.env.ELEVENLABS_API_KEY = originalElevenKey;
-    if (originalGeminiKey === undefined) delete process.env.GEMINI_API_KEY;
-    else process.env.GEMINI_API_KEY = originalGeminiKey;
-  }
-}
-
 async function main(): Promise<void> {
-  providerAwarePricing();
-  costPatches();
-  requestBounds();
-  await cachedMusicIsFree();
-  await successfulTinyTtsIsTerminal();
-  await coldOpenAccounting();
-  console.log("RUNTIME COST ACCOUNTING PASS: provider routes, patches, cache reuse, request bounds");
+  const originalGeminiRuntime = process.env[GEMINI_RUNTIME_OPT_IN_ENV];
+  process.env[GEMINI_RUNTIME_OPT_IN_ENV] = "1";
+  try {
+    providerAwarePricing();
+    costPatches();
+    requestBounds();
+    await cachedMusicIsFree();
+    await successfulTinyTtsIsTerminal();
+    // Gemini audio judging is retired. Production narration now uses the
+    // local FFmpeg evidence tested in narrationPerformance/narrationMix tests.
+    console.log("RUNTIME COST ACCOUNTING PASS: provider routes, patches, cache reuse, request bounds");
+  } finally {
+    if (originalGeminiRuntime === undefined) delete process.env[GEMINI_RUNTIME_OPT_IN_ENV];
+    else process.env[GEMINI_RUNTIME_OPT_IN_ENV] = originalGeminiRuntime;
+  }
 }
 
 void main();

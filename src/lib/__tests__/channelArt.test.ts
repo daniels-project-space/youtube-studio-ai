@@ -141,6 +141,11 @@ async function assertApprovedIndependentOutputs(): Promise<void> {
     "production",
     "production",
   ]);
+  assert.deepEqual(
+    state.renders.map((request) => request.maxCostUsd),
+    [0.35, 0.35, 0.35],
+    "each judged candidate must receive only its own direct-worker envelope",
+  );
   assert.match(state.renders[0].prefix, /art\/avatar\/avatar-v7$/);
   assert.match(state.renders[2].prefix, /art\/banner\/banner-v9$/);
   assert.match(state.renders[1].prompt, /subject is too small/i, "critique must guide the retry");
@@ -310,17 +315,25 @@ async function assertFlagBannerUsesSameGate(): Promise<void> {
 async function assertDefaultProviderHasNoFallback(): Promise<void> {
   const source = await readFile(new URL("../channelArt.ts", import.meta.url), "utf8");
   assert.match(source, /renderNovitaImage/);
+  assert.match(source, /novitaCostEnvelope/);
+  assert.match(source, /maxProviderSpendUsd/);
+  assert.match(source, /imageJobs: args\.maxAttempts/);
   assert.doesNotMatch(source, /falImage|generateFal|replicate|generateFluxImage/);
   assert.match(source, /profileId: "production"/);
   assert.match(source, /ifNoneMatch: "\*"/);
+  assert.match(source, /hasJudge: hasVisionKey/);
+  assert.doesNotMatch(source, /hasJudge: hasGeminiKey/);
 
   const refreshSource = await readFile(
     new URL("../../trigger/refreshShowBible.ts", import.meta.url),
     "utf8",
   );
-  assert.match(refreshSource, /avatar: payload\.art\?\.avatar === true \? false : true/);
-  assert.match(refreshSource, /imageKey: identity\.imageKey/);
-  assert.match(refreshSource, /bannerKey: identity\.bannerKey/);
+  // Show-Bible refresh is intentionally a no-spend maintenance task. Identity
+  // art must go through its admitted channel-inception stage, not an ambient
+  // Trigger task that can silently create paid work.
+  assert.doesNotMatch(refreshSource, /generateChannelArt/);
+  assert.match(refreshSource, /refuses standalone paid art generation/);
+  assert.match(refreshSource, /identity: \{ \.\.\.identity, creativeBrief \}/);
 }
 
 async function main(): Promise<void> {

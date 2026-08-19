@@ -276,15 +276,15 @@ Spot must be explicit and testable. There must be no automatic on-demand fallbac
 
 The current local still worker runs Z-Image **Base** at 40 steps and CFG 4.0. The separate scaffold uses Z-Image **Turbo**. These are not interchangeable parameter profiles. The official Z-Image repository describes Turbo as an eight-forward-pass distilled model with CFG 0 and Base as the flexible CFG model; official examples use nine scheduler steps for eight Turbo DiT evaluations ([Z-Image official repository](https://github.com/Tongyi-MAI/Z-Image), [Z-Image Turbo model card](https://huggingface.co/Tongyi-MAI/Z-Image-Turbo)). If Turbo is the mandated production still model, pin the exact checkpoint and Turbo settings; do not reuse Base’s 40-step/CFG-4 settings.
 
-The current LTX worker defaults to an INT8 path even though local comments identify an INT8/low-bit text-encoder profile as a prior warping cause. The current LTX-2.3 model card distinguishes a full BF16 development checkpoint from an 8-step, CFG-1 distilled checkpoint, provides spatial/temporal latent upscalers, requires dimensions divisible by 32, and requires frame counts of `8n+1` ([LTX-2.3 official model card](https://huggingface.co/Lightricks/LTX-2.3)). Production profiles should be explicit:
+The active LTX worker is pinned to LTX 2.5 with BF16 weights, FP8-cast inference, CPU offload, and native two-stage spatial refinement. Production profiles must remain explicit and must never silently fall back in model, precision, resolution, or GPU class:
 
 | Profile | Purpose | Required behavior |
 |---|---|---|
 | Draft | Cheap prompt/coverage test | Quantized or distilled is allowed, watermarked as draft, never silently promoted. |
-| Production | Final normal shot | Pinned full-quality validated profile, preferably BF16 where current quality tests require it; 1920×1088 render/crop or official multiscale workflow; no silent precision/resolution fallback. |
+| Production | Final normal shot | Pinned LTX 2.5 BF16 profile with 640×352 stage one and native 2× refinement to 1280×704; no silent precision/resolution fallback. |
 | Hero | Faces, identity, difficult motion, opening hook | Multiple candidates, stronger continuity references, full semantic/motion QA, and explicit selection. |
 
-The official API exposes LTX-2.3 Pro at 1920×1080, while open-model dimensions must honor the divisible-by-32 rule ([LTX Image-to-Video API](https://docs.ltx.video/api-documentation/api-reference/video-generation/image-to-video)). This is why the local open-model path should render 1920×1088 and crop—or use the official multiscale path—rather than pretending 1920×1080 is natively valid for that implementation.
+The local open-model path must preserve the pinned two-stage geometry and validate the final encoded dimensions, frame rate, generated-audio stream, visual continuity, and render evidence before publication.
 
 ## YouTube connector, scheduler, and analytics
 
@@ -423,7 +423,7 @@ Deliver:
 - Signed immutable job manifests and per-run R2 namespaces.
 - Novita-local lease-driven coordinator/workers with spot-only provisioning, Network Volume model caches, disposable local scratch, R2 checkpointing, heartbeats, preemption recovery, and verified shutdown.
 - Dynamic queue claiming so a partial fleet still completes all work.
-- Pinned Z-Image Turbo and LTX-2.3 draft/production/hero profiles; no silent model, precision, step, or resolution fallback.
+- Pinned Z-Image Turbo and LTX 2.5 draft/production/hero profiles; no silent model, precision, step, or resolution fallback.
 - Full expected-ID reconciliation and cost telemetry.
 
 Acceptance gate:

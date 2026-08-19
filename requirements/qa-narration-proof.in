@@ -1,0 +1,4 @@
+# Offline final-narration verification.  The resolved file is installed into a
+# dedicated Trigger worker virtualenv with hashes; no task is allowed to pip
+# install or download a model at review time.
+faster-whisper==1.2.1

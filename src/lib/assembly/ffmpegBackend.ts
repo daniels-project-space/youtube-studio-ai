@@ -39,7 +39,9 @@ import {
   applyQuoteOverlays,
   burnCaptions,
   writeCaptionsAss,
+  captionGeometry,
   makeVerticalClip,
+  normalizeAudioOnly,
 } from "@/lib/ffmpeg";
 import { renderTitleCard } from "@/lib/remotionRender";
 import { getObjectBytes, putObject } from "@/lib/storage";
@@ -92,6 +94,20 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
 
   return {
     async renderCard(card: CardSpec, fmt: Format): Promise<string> {
+      // REUSE an already-rendered card instead of paying for a second Remotion
+      // render. The intro card is produced upstream by the `intro_card` block and
+      // the god-block composites that exact file — re-rendering here both wasted
+      // a render and produced a structurally different card. Fail-SOFT: on a
+      // fresh worker the local file may be gone, and a fresh card beats a crash.
+      if (card.src) {
+        try {
+          return await (await getResolver()).resolve(card.src);
+        } catch (e) {
+          console.warn(
+            `renderCard: could not reuse pre-rendered ${card.role} card (${card.src}) — rendering a fresh one: ${(e as Error).message}`,
+          );
+        }
+      }
       let bgImagePath: string | undefined;
       if (card.bgSrc) {
         try {
@@ -129,7 +145,21 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
         .map((s) => s as Extract<Segment, { kind: "footage" }>)
         .filter((s) => Boolean(s.src));
       const localClips = await resolverInst.resolveAll(clipSegs.map((s) => s.src));
-      const segDurationsSec = clipSegs.map((s) => s.durSec);
+      // Planned per-segment screen time — EXCEPT the last entry, which is left
+      // uncapped (0 ⇒ the renderer falls back to maxSegSec + its trim rule).
+      //
+      // WHY: planTimeline is PURE. It sizes each window from the nominal cadence
+      // and cannot know a real clip is SHORTER than its window — the renderer
+      // clamps to `min(plannedDur, realDur)`, so every short clip silently steals
+      // time from the body. A body that ends up under the runtime is LOOPED by
+      // composeWithIntro (repeated footage at the tail). The god-block never hits
+      // this because it passes NO per-segment durations at all: its final segment
+      // absorbs the slack via `segLen = targetSec - total + 0.5`.
+      //
+      // Capping only the LAST window keeps every deliberate edit decision (pacing
+      // curve, cutEnergy) intact while restoring the god-block's slack absorption.
+      // Overrun is free — composeWithIntro trims the body to the exact runtime.
+      const segDurationsSec = clipSegs.map((s, i) => (i === clipSegs.length - 1 ? 0 : s.durSec));
 
       if (hasChapterCard) {
         // Structured (chapter) body: render each chapter card to a clip, then
@@ -160,6 +190,8 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
 
       // Beat body: cut each entry at its PLANNED durSec (≤ its real length) to
       // cover targetSec — the Timeline's cadence is rendered, not re-decided.
+      // The sole exception is the final window (see segDurationsSec above), which
+      // stretches to absorb slack so the body can never underrun and loop.
       return assembleBeatBody({
         clipPaths: localClips,
         outPath,
@@ -231,6 +263,12 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
         // hardcut ⇒ 0 (composeWithIntro treats 0 as a hard cut); crossfade ⇒ 0.8s.
         // dip_to_black ⇒ 0 here (we render the dip ourselves below, post-compose).
         ...(isDip ? { crossfadeSec: 0 } : typeof args.crossfadeSec === "number" ? { crossfadeSec: args.crossfadeSec } : {}),
+        // OUTRO FOLDED IN — one encode, exactly like the god-block. The old EDL
+        // behaviour (a post-hoc patchSegment pass) cost a second full-video x264
+        // encode and produced non-CFR output (measured frame-count mismatch).
+        ...(args.outroCardPath
+          ? { outroCardPath: args.outroCardPath, outroFadeInSec: args.outroFadeInSec ?? 1.2 }
+          : {}),
       });
 
       if (!isDip) return composedPath;
@@ -355,22 +393,21 @@ export function createFfmpegBackend(opts: FfmpegBackendOpts): RenderBackend {
     },
 
     async normalizeLoudness(basePath: string, lufs: number) {
-      // Single-pass EBU R128 loudnorm to the integrated target. TP=-1.5 (true-peak
-      // ceiling) + LRA=11 match masterAudio's broadcast recipe; we clamp the target
-      // to the same sane window. VIDEO is stream-copied (audio-only re-encode), so
-      // this is cheap and never re-transcodes the picture.
+      // Delegates to `normalizeAudioOnly` — the SAME primitive the god-block's
+      // finishing pass calls (narratedBlocks.ts:2369). That is a TWO-pass measured
+      // LINEAR loudnorm (measure with print_format=json, then apply the measured
+      // values with linear=true); video is stream-copied, so the picture is never
+      // re-encoded.
+      //
+      // This used to be a hand-rolled SINGLE-pass dynamic loudnorm. It hit the same
+      // integrated LUFS but produced audibly different samples — one-pass dynamic
+      // loudnorm pumps under music swells, which is exactly why the shared helper
+      // is two-pass. Re-implementing a shipped primitive here was the divergence.
       const warnings: string[] = [];
       const target = Math.max(-24, Math.min(-9, lufs));
       if (target !== lufs) warnings.push(`normalizeLoudness: targetLufs ${lufs} clamped to ${target} (sane [-24,-9] window)`);
       const outPath = await out("loudnorm.mp4");
-      await execFileP(process.env.FFMPEG_BIN ?? "ffmpeg", [
-        "-y", "-i", basePath,
-        "-af", `loudnorm=I=${target}:TP=-1.5:LRA=11`,
-        "-c:v", "copy",
-        "-c:a", "aac", "-b:a", "256k", "-ar", "44100",
-        "-movflags", "+faststart",
-        outPath,
-      ]);
+      await normalizeAudioOnly(basePath, outPath, target);
       return { path: outPath, warnings };
     },
 
@@ -478,30 +515,27 @@ const assTextLocal = (t: string) => t.replace(/[{}]/g, "").replace(/\r?\n/g, " "
  * Returns { styleLine, inline } — inline is prepended to each Dialogue Text.
  */
 function styleSpec(style: CaptionStyle, W: number, H: number): { styleLine: string; inline: string } {
-  // base proportions (match writeCaptionsAss): font 0.053H, sideM 0.08W, marginV 0.06H
-  const side = Math.round(W * 0.08);
+  // Proportions come from the shared aspect-aware helper (captionGeometry in
+  // ffmpeg.ts): landscape sizes off H, portrait off W with tighter side margins,
+  // so styled portrait captions no longer overflow and clip at the frame edges.
   switch (style) {
     case "minimal": {
-      const fs = Math.round(H * 0.040);
-      const mv = Math.round(H * 0.05);
+      const { fontSize: fs, marginV: mv, sideM: side } = captionGeometry(W, H, { fontRatio: 0.040, marginRatio: 0.05 });
       // PrimaryColour slightly translucent white, thin outline (1), no shadow, Bold off.
       return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H10FFFFFF,&H00000000,&H64000000,0,1,1,0,2,${side},${side},${mv},1`, inline: "" };
     }
     case "bold": {
-      const fs = Math.round(H * 0.072);
-      const mv = Math.round(H * 0.08);
+      const { fontSize: fs, marginV: mv, sideM: side } = captionGeometry(W, H, { fontRatio: 0.072, marginRatio: 0.08 });
       // Heavy: Bold on, thick outline (5) + shadow (3).
       return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H00FFFFFF,&H00000000,&H96000000,1,1,5,3,2,${side},${side},${mv},1`, inline: "" };
     }
     case "karaoke": {
-      const fs = Math.round(H * 0.056);
-      const mv = Math.round(H * 0.06);
+      const { fontSize: fs, marginV: mv, sideM: side } = captionGeometry(W, H, { fontRatio: 0.056, marginRatio: 0.06 });
       // Mid weight + a yellow active-word tint (inline \c&H0000FFFF& = yellow in BGR).
       return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H00FFFFFF,&H00000000,&H64000000,1,1,4,2,2,${side},${side},${mv},1`, inline: "{\\c&H0000FFFF&}" };
     }
     default: {
-      const fs = Math.round(H * 0.053);
-      const mv = Math.round(H * 0.06);
+      const { fontSize: fs, marginV: mv, sideM: side } = captionGeometry(W, H);
       return { styleLine: `Style: Cap,DejaVu Sans,${fs},&H00FFFFFF,&H00000000,&H64000000,1,1,4,2,2,${side},${side},${mv},1`, inline: "" };
     }
   }
@@ -522,7 +556,8 @@ async function writeStyledCaptionsAss(
   const H = opts.height ?? 1080;
   const { styleLine, inline } = styleSpec(opts.style, W, H);
   const head =
-    `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 2\nScaledBorderAndShadow: yes\n\n` +
+    // WrapStyle 0 = smart auto-wrap; 2 (no wrap) silently CLIPPED overflowing lines.
+    `[Script Info]\nScriptType: v4.00+\nPlayResX: ${W}\nPlayResY: ${H}\nWrapStyle: 0\nScaledBorderAndShadow: yes\n\n` +
     `[V4+ Styles]\nFormat: Name, Fontname, Fontsize, PrimaryColour, OutlineColour, BackColour, Bold, BorderStyle, Outline, Shadow, Alignment, MarginL, MarginR, MarginV, Encoding\n` +
     `${styleLine}\n\n` +
     `[Events]\nFormat: Layer, Start, End, Style, Name, MarginL, MarginR, MarginV, Effect, Text\n`;

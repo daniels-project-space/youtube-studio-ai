@@ -33,12 +33,15 @@
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
 import { PRICE } from "@/engine/pricing";
+import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
 import { resolveContentLane } from "@/engine/contentLane";
-import { QualityEvidenceSchema } from "@/engine/qualityEvidence";
+import { assertChildContentRenderEvidence } from "@/trigger/blocks/childrenSafetyBlocks";
+import { assessProductionEditorialAcceptance, QualityEvidenceSchema } from "@/engine/qualityEvidence";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
 import { renderNovitaI2V, renderNovitaImage } from "@/lib/novitaMedia";
+import { LtxCreativeAdapterSelectionSchema } from "@/lib/ltxCreativeAdapter";
 import {
   generateMureka,
   generateSuno,
@@ -50,20 +53,39 @@ import {
 } from "@/lib/music";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
-import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
+import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
-import { hasGeminiKey, parseJsonLoose } from "@/lib/gemini";
-import { hasVisionKey, visionLocal } from "@/lib/vision";
+import { parseJsonLoose } from "@/lib/gemini";
+import { hasAnthropicKey } from "@/lib/anthropic";
+import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { craftTopics, loadOutlierBank } from "@/lib/topicraft";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import { agentJson } from "@/agents/mastra";
 import { loadPerformanceContext } from "@/lib/performance";
+import { renderStoryStateForPrompt } from "@/lib/seriesStoryState";
 import { z } from "zod";
 
-/** Topic-chunk structured-output schemas (validated on both Mastra + REST). */
+/**
+ * Topic-chunk structured-output schema (validated on both Mastra + REST).
+ * The arcSummary/newPlotBeat/unresolvedThreads/entities fields are only
+ * populated by the SERIES MODE continuation prompt (topic_select, below);
+ * every other caller of this schema simply gets the zod defaults ("" / []).
+ */
 const producerTopicSchema = z.object({
   candidates: z
-    .array(z.object({ topic: z.string(), angle: z.string().optional().default("") }))
+    .array(
+      z.object({
+        topic: z.string(),
+        angle: z.string().optional().default(""),
+        arcSummary: z.string().optional().default(""),
+        newPlotBeat: z.string().optional().default(""),
+        unresolvedThreads: z.array(z.string()).optional().default([]),
+        entities: z
+          .array(z.object({ name: z.string(), role: z.string() }))
+          .optional()
+          .default([]),
+      }),
+    )
     .optional()
     .default([]),
 });
@@ -238,8 +260,8 @@ export const topicSelect: Block = {
       return { topic: reuseTopic };
     }
     // Director-chosen, identity-aligned, non-repeating topic (Phase 1).
-    // Producer (Gemini) proposes identity-fit candidates excluding history;
-    // Director (Claude) ranks for fit/freshness/CTR; a HARD no-repeat check runs
+    // The non-Google creative planner proposes and ranks evidence-backed
+    // candidates; a HARD no-repeat check runs
     // in code (never trusted to the model). `policy` param:
     //   "no_repeat"     — must always be a brand-new topic (error if impossible)
     //   "prefer_fresh"  — dedup; may recycle the pool when exhausted (default)
@@ -294,6 +316,19 @@ export const topicSelect: Block = {
     // gets a unique subtitle that continues the arc. When the series is finished
     // (epNum > seriesCount) we fall through to normal topic generation so the
     // channel keeps publishing. Episode order is encoded in the (clean) title.
+    //
+    // Phase 4 (episodic continuity): beyond avoiding title repetition, the
+    // continuation call is now grounded in REAL prior plot content — a running
+    // arc summary, unresolved narrative threads, and known entities (name +
+    // one-line ROLE, never wardrobe/appearance) — read from the Convex
+    // `seriesStoryState` table. The SAME LLM call that proposes the next
+    // subtitle also proposes the updated story state, written back immediately
+    // alongside the existing topic-memory commit — so the write never depends
+    // on a downstream "finalization" step that doesn't exist for every family
+    // sharing this block. A series with no seriesStoryState row yet (first
+    // episode, or a non-series channel) behaves exactly as before: the prompt
+    // simply omits the "story so far" section and the write below just starts
+    // one.
     const seriesTitle = (ctx.params["seriesTitle"] as string | undefined)?.trim();
     const seriesCount = Number(ctx.params["seriesCount"] ?? 0) || 0;
     if (seriesTitle) {
@@ -302,8 +337,20 @@ export const topicSelect: Block = {
       if (!(seriesCount > 0 && epNum > seriesCount)) {
         const label = seriesCount > 0 ? `Part ${epNum} of ${seriesCount}` : `Part ${epNum}`;
         const prior = recentList.filter((t) => t.includes(seriesTitle));
+        const existingStoryState = await c
+          .query(api.seriesStoryState.getForSeries, { channelId, seriesTitle })
+          .catch((e) => {
+            ctx.log(`topic_select(series): story-state read failed (continuing without it): ${e instanceof Error ? e.message : e}`);
+            return null;
+          });
+        const storyContext = renderStoryStateForPrompt(existingStoryState);
         let subtitle = "";
-        if (hasGeminiKey()) {
+        let angle = "";
+        let arcSummaryOut = "";
+        let newPlotBeatOut = "";
+        let unresolvedThreadsOut: string[] = [];
+        let entitiesOut: { name: string; role: string }[] = [];
+        if (hasAnthropicKey()) {
           try {
             const out = await agentJson({
               role: "producer",
@@ -314,12 +361,27 @@ export const topicSelect: Block = {
                 (seriesCount > 0 ? ` (a ${seriesCount}-part series).` : ".") + "\n" +
                 `Channel "${channelName}" — persona: ${persona || "n/a"}; niche: ${niche || "n/a"}; style: ${style || "n/a"}.\n` +
                 `Episodes already published (CONTINUE the arc, do NOT repeat):\n${prior.join("\n") || "(none yet — this is episode 1)"}\n\n` +
+                (storyContext
+                  ? `STORY SO FAR (use this — not just the titles above — to continue REAL plot/thematic content):\n${storyContext}\n\n`
+                  : "") +
                 `Propose the SINGLE best focus for episode ${epNum}: a specific, compelling SUBTITLE (the episode's unique theme — not the series name) and a one-line angle. ` +
-                `It must build on prior episodes and fit the whole series. Return STRICT JSON {"candidates":[{"topic":string,"angle":string}]}.`,
-              maxTokens: 400,
+                `It must build on prior episodes and fit the whole series. ` +
+                `Also update the running story state: a short 2-4 sentence ARC SUMMARY covering everything through THIS episode, ` +
+                `a one-line PLOT BEAT capturing what this specific episode adds, the UPDATED list of unresolved narrative threads ` +
+                `(open questions/promises still to pay off), and any newly introduced entities (name + one-line ROLE only — never wardrobe or appearance). ` +
+                `Return STRICT JSON {"candidates":[{"topic":string,"angle":string,"arcSummary":string,"newPlotBeat":string,"unresolvedThreads":string[],"entities":[{"name":string,"role":string}]}]}.`,
+              maxTokens: 600,
               temperature: 0.8,
             });
-            subtitle = (out.candidates?.[0]?.topic ?? "").trim().replace(/^["']|["']$/g, "");
+            const cand = out.candidates?.[0];
+            subtitle = (cand?.topic ?? "").trim().replace(/^["']|["']$/g, "");
+            angle = (cand?.angle ?? "").trim();
+            arcSummaryOut = (cand?.arcSummary ?? "").trim();
+            newPlotBeatOut = (cand?.newPlotBeat ?? "").trim();
+            unresolvedThreadsOut = (cand?.unresolvedThreads ?? []).map((t) => t.trim()).filter(Boolean);
+            entitiesOut = (cand?.entities ?? [])
+              .map((e) => ({ name: (e.name ?? "").trim(), role: (e.role ?? "").trim() }))
+              .filter((e) => e.name);
           } catch (e) {
             ctx.log(`topic_select(series): subtitle gen failed (continuing): ${e instanceof Error ? e.message : e}`);
           }
@@ -327,17 +389,42 @@ export const topicSelect: Block = {
         const topic = subtitle
           ? `${seriesTitle} — ${label}: ${subtitle}`
           : `${seriesTitle} — ${label}`;
-        if (ctx.params["dryRun"] !== true) await recordTopicMemory(c, ctx, topic);
+        if (ctx.params["dryRun"] !== true) {
+          await recordTopicMemory(c, ctx, topic);
+          // Best-effort write-back: a failed story-state write must never break
+          // topic selection — the no-repeat guarantee (topicMemory, above) is
+          // the only FATAL write on this path.
+          const hasUpdate =
+            subtitle || arcSummaryOut || newPlotBeatOut || unresolvedThreadsOut.length > 0 || entitiesOut.length > 0;
+          if (hasUpdate) {
+            await c
+              .mutation(api.seriesStoryState.recordEpisodeBeat, {
+                ownerId: ctx.ownerId,
+                channelId,
+                seriesTitle,
+                episode: epNum,
+                arcSummary: arcSummaryOut || undefined,
+                newPlotBeat:
+                  newPlotBeatOut || (subtitle ? `${label}: ${subtitle}${angle ? ` — ${angle}` : ""}` : undefined),
+                unresolvedThreads: unresolvedThreadsOut.length ? unresolvedThreadsOut : undefined,
+                newEntities: entitiesOut.length ? entitiesOut : undefined,
+              })
+              .catch((e) => {
+                ctx.log(`topic_select(series): story-state write-back failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+              });
+          }
+        }
         ctx.log(`topic_select(series): "${topic}" (episode ${epNum}${seriesCount ? `/${seriesCount}` : ""})`);
         return { topic };
       }
       ctx.log(`topic_select(series): "${seriesTitle}" complete (${doneCount}/${seriesCount}) — falling through to normal topics`);
     }
 
-    // TOPICRAFT — the golden topic-intel engine: evidence-cited, judged BETS.
-    // No silent pool fallback: a missing key fails loud (heal loop's job).
-    if (!hasGeminiKey()) {
-      throw new Error("topic_select: GEMINI_API_KEY missing — refusing silent pool fallback");
+    // TOPICRAFT — the golden topic-intel engine: metadata-evidenced, judged
+    // bets. No silent pool fallback: a missing permitted creative provider
+    // fails loud (the recovery loop's job).
+    if (!hasAnthropicKey()) {
+      throw new Error("topic_select: ANTHROPIC_API_KEY missing — refusing silent pool fallback");
     }
     const competitorRows = niche
       ? await c.query(api.competitors.listCompetitors, { ownerId: ctx.ownerId, niche }).catch(() => [])
@@ -464,8 +551,8 @@ export const keyframes: Block = {
   produces: ["f1Url", "f1Key", "motionPrompt"],
   paid: true,
   run: async (ctx) => {
-    // CLOUD REBUILD: a single FLUX-pro still via fal.ai (HTTP/key-based) replaces
-    // the Higgsfield CLI (local binary + login session — impossible on Trigger).
+    // CLOUD REBUILD: one attested Novita still replaces the old local/Higgsfield
+    // path, retaining a durable receipt and a bounded direct-worker envelope.
     // We make ONE keyframe; the seamless loop is built from one forward i2v clip
     // (crossfade self-loop), so we never need a second "frame B" still.
     const style = styleGrammar(ctx);
@@ -483,20 +570,37 @@ export const keyframes: Block = {
     });
     const dna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null) ?? null;
     const tmp = await makeRunTempDir(ctx.runId);
+    const productionVisualQa = ctx.params["qaProfile"] !== "draft" && ctx.params["qualityProfile"] !== "draft";
+    const hasGroundedIdentity = !!(dna?.recurringSubject?.trim() && dna.setting?.trim());
 
     // Per-block CREATIVE-DIRECTOR LOOP (Phase 2): generate the still → a vision
     // critic scores it against the channel's DNA identity → regenerate carrying the
     // critique forward. Keep the BEST attempt; NEVER fall back to a generic image.
-    // The critic only runs with a grounded DNA + ANY routed vision provider
-    // (visionLocal routes groq→fal→gemini; gating on the Gemini key alone
-    // silently disabled the critic in zero-Google deployments).
-    const canCritique = hasVisionKey() && !!(dna && dna.recurringSubject?.trim());
+    // Production loops need a concrete identity lock and an independent,
+    // non-Google reviewer before a paid keyframe is admitted. A successful
+    // render log cannot prove a loop is on-brand or free of baked-in text.
+    if (productionVisualQa && !hasGroundedIdentity) {
+      throw new Error("keyframes: production loop requires a grounded Style DNA subject and setting before image generation");
+    }
+    if (productionVisualQa && !hasNonGoogleVisionKey()) {
+      throw new Error("keyframes: production loop requires a configured non-Google OpenRouter vision reviewer (OPENROUTER_API_KEY)");
+    }
+    const canCritique = hasNonGoogleVisionKey() && hasGroundedIdentity;
+    const maximumImageAttempts = canCritique ? 2 : 1;
+    // The director loop is deliberately bounded. Admit its complete possible
+    // still fanout before the first worker so a retry can never borrow the
+    // run-wide budget or leave a partially regenerated visual behind.
+    novitaCostEnvelope({
+      label: "keyframes",
+      imageJobs: maximumImageAttempts,
+      maxCostUsd: ctx.stageBudgetUsd,
+    });
     let stills = 0;
     let imageCostUsd = 0;
     const loop = await produceAndCritique<{ url: string; local: string; key: string; jobId: string; model: string }>({
       label: "keyframe",
       threshold: 0.8,
-      maxIters: canCritique ? 2 : 1,
+      maxIters: maximumImageAttempts,
       log: (m) => ctx.log(m),
       produce: async (priorIssues) => {
         const fix = priorIssues.length
@@ -509,6 +613,7 @@ export const keyframes: Block = {
           id: `keyframe-${stills}`,
           prompt: baseFluxPrompt + fix,
           profileId: "production",
+          maxCostUsd: PRICE.novitaImageMaxUsd,
           lifecycle: {
             ownerId: ctx.ownerId,
             channelId: ctx.channelId,
@@ -541,14 +646,18 @@ export const keyframes: Block = {
             ].filter(Boolean).join("\n"),
             imagePaths: [cand.local],
             json: true,
-            maxTokens: 600,
+            maxTokens: VISION_GATE_MAX_TOKENS,
+            providers: ["openrouter"], tier: "final",
           });
           const v = parseJsonLoose<{ score?: number; issues?: string[] }>(raw);
           const score = Math.max(0, Math.min(1, Number(v.score) || 0));
           const issues = (v.issues ?? []).filter((s): s is string => typeof s === "string" && s.length > 0).slice(0, 5);
           return { score, pass: score >= 0.8, issues };
         } catch (e) {
-          ctx.log(`keyframes: critic failed (${e instanceof Error ? e.message : e}) — accepting attempt`);
+          if (productionVisualQa) {
+            throw new Error(`keyframes: independent art-direction review failed: ${e instanceof Error ? e.message : e}`);
+          }
+          ctx.log(`keyframes: critic failed (${e instanceof Error ? e.message : e}) — accepting draft attempt`);
           return { score: 0.8, pass: true, issues: [] };
         }
       },
@@ -566,11 +675,11 @@ export const keyframes: Block = {
       identityScore: loop.critique.score,
     });
 
-    // SCENE DIRECTOR (golden v1 mechanic) — Gemini Vision reads the ACTUAL still
-    // and names the animatable elements + subtle motion (static camera), so i2v
-    // animates what's really in the frame, not a templated guess.
+    // SCENE DIRECTOR reads the actual accepted still through the same independent
+    // reviewer and names animatable elements, so I2V moves real pixels rather
+    // than relying on a generic template motion guess.
     let motionPrompt = scene.klingMotionPrompt;
-    if (hasVisionKey()) {
+    if (canCritique) {
       try {
         const raw = await visionLocal({
           prompt:
@@ -581,12 +690,16 @@ export const keyframes: Block = {
             '{"motion":"one concise sentence describing only the subtle looping motion of the named elements"}.',
           imagePaths: [f1Local],
           json: true,
-          maxTokens: 200,
+          maxTokens: VISION_GATE_MAX_TOKENS,
+          providers: ["openrouter"], tier: "final",
         });
         const m = parseJsonLoose<{ motion?: string }>(raw).motion;
         if (m && m.length > 12) { motionPrompt = m; ctx.log(`keyframes: scene-director motion → "${m.slice(0, 90)}"`); }
       } catch (e) {
-        ctx.log(`keyframes: scene-director failed (using template): ${e instanceof Error ? e.message : e}`);
+        if (productionVisualQa) {
+          throw new Error(`keyframes: independent motion-direction review failed: ${e instanceof Error ? e.message : e}`);
+        }
+        ctx.log(`keyframes: scene-director failed (using draft template): ${e instanceof Error ? e.message : e}`);
       }
     }
 
@@ -633,8 +746,14 @@ export const loopClips: Block = {
     // ghost over a seam that FLF2V had already closed. flf gets its OWN small
     // param, hard-capped: anything longer than ~0.6s reads as a double exposure.
     const flfCrossfadeSec = Math.min(0.6, Math.max(0, Number(ctx.params.flfCrossfadeSec ?? 0.4)));
+    // This optional adapter travels through the same sealed direct-worker path
+    // as cinematic I2V: base/revision, benchmark, strength and trigger tokens
+    // are validated there before a GPU job starts. Do not flatten it into text.
+    const creativeAdapter = LtxCreativeAdapterSelectionSchema.optional().parse(
+      ctx.params["ltxCreativeAdapter"],
+    );
 
-    // Prefer the Gemini scene-director motion (golden v1) over the template, and
+    // Prefer the independently reviewed scene-director motion over the template, and
     // push hard for a LOCKED camera + NON-directional ambient motion so the loop
     // (esp. the boomerang's reverse half) reads naturally with no scale/pan pop.
     const motion = (ctx.store["motionPrompt"] as string | undefined) || scene.klingMotionPrompt;
@@ -648,15 +767,22 @@ export const loopClips: Block = {
       extraNegative: "zoom, push in, dolly, camera move, scale change, framing change, pan, tilt",
     });
 
-    ctx.log(`loop_clips: Novita LTX-2.3 (loop=${loopMode}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
+    ctx.log(`loop_clips: Novita LTX-2.5 distilled x2 (loop=${loopMode}) — prompt: "${fwd.prompt.slice(0, 80)}…"`);
+    const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "loop_clips");
     const clip = await renderNovitaI2V({
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/lofi-loop`,
       id: "loop-clip",
       prompt: fwd.prompt,
       negativePrompt: fwd.negativePrompt,
       imageKey: f1Key,
+      // The actual worker receives the first still again at the final frame.
+      // This makes FLF2V a real image-conditioned loop closure, rather than a
+      // prompt-only request followed by a crossfade that hides a seam.
+      ...(flf ? { endImageKey: f1Key } : {}),
       durationSec: dur,
       profileId: "production",
+      creativeAdapter,
+      maxCostUsd: stageBudgetUsd,
       lifecycle: {
         ownerId: ctx.ownerId,
         channelId: ctx.channelId,
@@ -702,8 +828,8 @@ export const upscale: Block = {
   ],
   paid: false,
   run: async (ctx) => {
-    // The generative pixels already came from the attested Novita LTX-2.3
-    // two-stage HQ pipeline and its pinned spatial upscaler. This finishing
+    // The generative pixels already came from the attested Novita LTX-2.5
+    // distilled two-stage latent x2 pipeline and its pinned spatial upscaler. This finishing
     // stage performs only deterministic local Lanczos scaling on the short loop
     // unit; no Replicate/Topaz provider or hidden fallback can re-render it.
     const targetResolution = (ctx.params.targetResolution as string) ?? "4k";
@@ -734,7 +860,7 @@ export const upscale: Block = {
     const finalLoopPath = join(tmp, `loopunit_${targetResolution}.mp4`);
     const [width, height] = target;
     ctx.log(`upscale: deterministic local Lanczos finish → ${width}x${height}@${targetFps}fps…`);
-    await promisify(execFile)(process.env.FFMPEG_PATH || "ffmpeg", [
+    await promisify(execFile)(process.env.FFMPEG_BIN ?? "ffmpeg", [
       "-y", "-i", loopUnit,
       "-vf",
       `scale=${width}:${height}:force_original_aspect_ratio=decrease:flags=lanczos,` +
@@ -754,7 +880,7 @@ export const upscale: Block = {
       upscaled,
       resolution,
       targetFps,
-      sourceRender: "novita-ltx-2.3-two-stage-hq",
+      sourceRender: "novita-ltx-distilled-two-stage-x2",
       finish: "local-lanczos",
     });
 
@@ -805,7 +931,15 @@ export const music: Block = {
           `${a.genre} instrumental to study and relax to, evoking "${topic}".`,
           a.instrumentation?.length ? `Instrumentation: ${a.instrumentation.join(", ")}.` : "",
           a.textures?.length ? `Texture: ${a.textures.join(", ")}.` : "",
-          a.moodArc ? `Mood: ${a.moodArc.split(/[.;]/)[0]}.` : "",
+          // Neither Mureka nor Suno exposes a structural/section parameter
+          // (verified against both providers' actual request shapes in
+          // src/lib/music.ts — `duration` is the only real metadata either
+          // returns; BPM only ever appears as OUTBOUND prompt text). Prose is
+          // the only lever these providers expose for mood movement across a
+          // track, so carry the DNA's full mood-arc sentence (not just its
+          // first clause) — an author who wrote "opens tense, resolves
+          // warmer" wants that shift reaching the model, not truncated away.
+          a.moodArc ? `Emotional arc across the track: ${a.moodArc.trim().slice(0, 240)}.` : "",
           `${a.bpmRange?.[0] ?? 70}-${a.bpmRange?.[1] ?? 88} BPM, ${a.loopable ? "loop-friendly, resolves back to the tonic" : "natural ending"}, purely instrumental, no vocals, no lyrics.`,
         ].filter(Boolean).join(" ")
       : "";
@@ -980,7 +1114,7 @@ export const music: Block = {
 export const assemble: Block = {
   id: "assemble",
   consumes: ["loopUnitKey", "musicUrl"],
-  produces: ["videoKey", "videoLocalPath", "videoDurationSec", "introApplied"],
+  produces: ["videoKey", "videoLocalPath", "videoDurationSec", "introApplied", "loopSeamDiff"],
   run: async (ctx) => {
     // SHORT for M1; set durationSec=7200 in the channel pipeline for a 2h render.
     // The loop UNIT is already upscaled (Topaz) by the upscale block; assemble
@@ -1031,6 +1165,20 @@ export const assemble: Block = {
     W -= W % 2;
     const preset = (ctx.params.encodePreset as string) ?? "veryfast";
 
+    // The seamless unit is the actual repeated visual artifact. Measure its
+    // first/last-frame SSIM before it is streamed under the full music bed so
+    // a critic that requests a loop-seam assertion gets a real deterministic
+    // value rather than an unmeasured, silently skipped assertion.
+    let loopSeamDiff: number | undefined;
+    try {
+      loopSeamDiff = await measureLoopSeamDiff(loopUnitPath, tmp);
+      ctx.log(`assemble: loop seam diff=${loopSeamDiff.toFixed(4)} (0=perfect)`);
+    } catch (e) {
+      // Draft exploration can still surface the render. Production QA will
+      // fail closed if its critic requires this metric and it remains absent.
+      ctx.log(`assemble: loop seam metric unavailable: ${e instanceof Error ? e.message : e}`);
+    }
+
     const fadeOutSec = Number(ctx.params.fadeOutSec ?? 0);
     const finalPath = join(tmp, "final.mp4");
     // GOLDEN: deblur intro (channel + title over the animated bg, 20-step deblur,
@@ -1080,9 +1228,16 @@ export const assemble: Block = {
       durationSec: videoDurationSec,
       introSec,
       loopUnitResolution: ctx.store["loopUnitResolution"],
+      ...(loopSeamDiff === undefined ? {} : { loopSeamDiff }),
     });
 
-    return { videoKey, videoLocalPath: finalPath, videoDurationSec, introApplied };
+    return {
+      videoKey,
+      videoLocalPath: finalPath,
+      videoDurationSec,
+      introApplied,
+      ...(loopSeamDiff === undefined ? {} : { loopSeamDiff }),
+    };
   },
 };
 
@@ -1115,6 +1270,17 @@ export const uploadDraft: Block = {
         quality.data.episode.lane.renderer !== lane.primaryRenderer)
     ) {
       throw new Error("upload_draft: final quality evidence belongs to a different content lane — refusing to upload");
+    }
+    // `hardGateReady` is intentionally a narrow raw-receipt signal. Publishing
+    // needs the lane's full editorial contract: a real passing evaluator for
+    // every required axis, and a source-backed story receipt where the format
+    // exposes one. Unknown/legacy lanes have no such contract and fail closed
+    // here until migration supplies one.
+    const editorialAcceptance = assessProductionEditorialAcceptance(quality.data);
+    if (!editorialAcceptance.ready) {
+      throw new Error(
+        `upload_draft: final editorial acceptance did not pass — ${editorialAcceptance.blockers.join("; ")}`,
+      );
     }
     if (!quality.data.release.calibrationComplete) {
       ctx.log(`upload_draft: quality calibration gaps retained for review: ${quality.data.calibrationGaps.join(" | ")}`);
@@ -1158,6 +1324,33 @@ export const uploadDraft: Block = {
     // approves). A scheduled timestamp is reused from the durable upload row so
     // a worker retry cannot change metadata and accidentally create a duplicate.
     const publishMode = (ctx.params["publishMode"] as string | undefined) ?? "draft";
+    const isSupervisedChildrenLane = lane.key === "children_learning_supervised";
+    const childSafety = ctx.store["childContentSafety"] as
+      | {
+          pass?: unknown;
+          madeForKids?: unknown;
+          release?: unknown;
+          allowedPublishMode?: unknown;
+          sceneManifestFingerprint?: unknown;
+        }
+      | undefined;
+    if (isSupervisedChildrenLane) {
+      if (
+        childSafety?.pass !== true ||
+        childSafety.madeForKids !== true ||
+        childSafety.release !== "human-editorial-approval-required" ||
+        childSafety.allowedPublishMode !== "draft"
+      ) {
+        throw new Error("upload_draft: children-learning lane lacks its mandatory human-review safety receipt");
+      }
+      assertChildContentRenderEvidence({
+        childSafety,
+        sceneCompilerReceipt: ctx.store["sceneCompilerReceipt"],
+      });
+      if (publishMode !== "draft") {
+        throw new Error("upload_draft: children-learning episodes may only create private drafts; public/scheduled release is human-gated");
+      }
+    }
     const dispatchRequestedAt = Date.now();
     let privacyStatus: "private" | "public" | "unlisted" = "private";
     let publishAt: string | undefined;
@@ -1213,6 +1406,9 @@ export const uploadDraft: Block = {
       typeof ctx.params["madeForKids"] === "boolean"
         ? (ctx.params["madeForKids"] as boolean)
         : (channel.schedule?.madeForKids ?? false);
+    if (isSupervisedChildrenLane && !madeForKids) {
+      throw new Error("upload_draft: children-learning lane must set madeForKids=true");
+    }
     const metadata = {
       title,
       description,

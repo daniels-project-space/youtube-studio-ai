@@ -21,7 +21,7 @@
  */
 import { join } from "node:path";
 import { parseJsonLoose } from "@/lib/gemini";
-import { hasVisionKey, visionLocal } from "@/lib/vision";
+import { hasVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { imageToJpeg } from "@/lib/ffmpeg";
 import {
@@ -121,6 +121,13 @@ const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
   textObject: NonNullable<VisualLanguage["textObject"]>;
   imageStyle: string;
 }> = {
+  // Quiz thumbnails live or die on a single legible question + a big "?" beat,
+  // so a bold impact plate is the right grammar — the same one narrated_stock
+  // uses, deliberately, rather than inventing a fifth treatment.
+  quizyear: {
+    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    imageStyle: "bold flat graphic quiz card, high-contrast, one clear subject, no text baked in",
+  },
   narrated_stock: {
     energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
     imageStyle: "premium cinematic editorial photograph with dramatic subject isolation",
@@ -152,6 +159,18 @@ const FAMILY_VISUAL_LANGUAGE: Record<FamilyKey, {
   comic: {
     energy: "bold", font: "bebas", treatment: "stamp", textObject: "carved",
     imageStyle: "cinematic inked graphic-novel panel with cross-hatched dimensional light",
+  },
+  loreshort: {
+    energy: "spectacle", font: "serif", treatment: "clean", textObject: "movie_poster",
+    imageStyle: "epic painted concept-art tableau with chiaroscuro light and vast receding depth",
+  },
+  illustrated_explainer: {
+    energy: "bold", font: "impact", treatment: "plate", textObject: "block_plate",
+    imageStyle: "original premium editorial vector scene with one causal visual idea and clean diagrammatic hierarchy",
+  },
+  children_learning: {
+    energy: "cozy_pop", font: "rounded", treatment: "clean", textObject: "block_plate",
+    imageStyle: "original cheerful 2D learning scene with one clear safe action, stable friendly characters, and no branded properties",
   },
 };
 
@@ -380,7 +399,7 @@ export async function runThumbnailMobileReferenceQa(args: {
       `"storyMatch":1-10,"uiClean":boolean,"reason":"..."}.`,
     imagePaths: [mobileJpg, ...refPaths],
     json: true,
-    maxTokens: 250,
+    maxTokens: VISION_GATE_MAX_TOKENS,
   });
   const verdict = parseJsonLoose<Partial<ThumbnailGateVerdict>>(raw);
   return {
@@ -700,6 +719,14 @@ export async function renderCandidate(args: {
   outJpg: string;
   tmpDir: string;
   idx: number;
+  /**
+   * Concrete defects the QA grader found in the PREVIOUS candidate for this
+   * same video (P1-3). Present only on a regenerate; the art director must fix
+   * these specifically rather than re-rolling the same concept blindly.
+   */
+  priorIssues?: readonly string[];
+  /** This channel's standing critic instruction, applied to the art direction. */
+  criticDoctrine?: string;
   /** Explicit production still route. There is deliberately no provider fallback. */
   generateScene?: GenerateScene;
   log?: Logger;
@@ -713,6 +740,15 @@ export async function renderCandidate(args: {
     system: "You are an elite YouTube thumbnail art director. Return ONLY JSON.",
     prompt:
       `Instantiate this thumbnail PATTERN for the video "${args.title}".\n` +
+      // Regenerate feedback comes FIRST so it cannot be buried under the
+      // standing pattern rules — this is the whole point of the critique loop.
+      ((args.priorIssues ?? []).length
+        ? `THE PREVIOUS ATTEMPT WAS REJECTED BY THE QA GRADER. Fix these specific defects — do not simply re-roll ` +
+          `the same concept:\n${(args.priorIssues ?? []).slice(0, 6).map((issue) => `- ${String(issue).replace(/\s+/g, " ").trim().slice(0, 240)}`).join("\n")}\n`
+        : "") +
+      (args.criticDoctrine
+        ? `CHANNEL CRITIC DOCTRINE (this channel's standing standard — honour it): ${args.criticDoctrine.replace(/\s+/g, " ").trim().slice(0, 400)}\n`
+        : "") +
       `${args.sceneMandate ? `MANDATORY SCENE (operator/DNA-locked - NOT inspiration, NOT optional): the heroProp MUST be exactly this subject, adapted to this topic: ${args.sceneMandate}. Invent background and details AROUND it - never replace it.\n` : ""}` +
       (args.sceneSeed
         ? `TOPICRAFT-JUDGED STORY MOMENT (mandatory grounding): ${args.sceneSeed}. Preserve its actors, objects, physical action, and cause/effect. The pattern controls composition and styling; it may not substitute a different story.\n`

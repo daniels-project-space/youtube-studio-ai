@@ -186,64 +186,280 @@ class WorkerContractTests(unittest.TestCase):
         finally:
             worker.STOP.clear()
 
-    def test_ltx_cli_contract_matches_distilled_and_hq_modules(self):
+    def test_ltx_25_cli_contract_uses_split_components_and_rtx_4090_execution_mode(self):
         models = {
-            "gemma-3-12b": Path("/models/gemma"),
+            "ltx-transformer": Path("/models/transformer.safetensors"),
+            "ltx-text-encoder": Path("/models/text-encoder.safetensors"),
+            "ltx-video-vae": Path("/models/video-vae.safetensors"),
+            "ltx-audio-vae": Path("/models/audio-vae.safetensors"),
             "ltx-spatial-upscaler": Path("/models/upscaler.safetensors"),
-            "ltx-distilled": Path("/models/distilled.safetensors"),
-            "ltx-dev": Path("/models/dev.safetensors"),
-            "ltx-distilled-lora": Path("/models/lora.safetensors"),
         }
         job = {
             "prompt": "A slow dolly push",
-            "negativePrompt": "flicker",
             "seed": 42,
-            "height": 1088,
-            "width": 1920,
+            "height": 704,
+            "width": 1280,
             "frames": 121,
             "fps": 25,
-            "steps": 40,
+            "steps": 8,
         }
-        distilled = worker.build_video_command(
+        command = worker.build_video_command(
             job,
-            {"pipeline": "distilled", "guidanceScale": 1},
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
             models,
-            Path("/output/draft.mp4"),
+            Path("/output/clip.mp4"),
             Path("/input/still.png"),
         )
-        self.assertEqual(distilled[2], "ltx_pipelines.distilled")
-        self.assertIn("--distilled-checkpoint-path", distilled)
-        self.assertNotIn("--checkpoint-path", distilled)
-        self.assertNotIn("--num-inference-steps", distilled)
+        self.assertEqual(command[2], "ltx_pipelines.distilled")
+        self.assertEqual(command[command.index("--transformer-path") + 1], "/models/transformer.safetensors")
+        self.assertEqual(command[command.index("--text-encoder-path") + 1], "/models/text-encoder.safetensors")
+        self.assertEqual(command[command.index("--video-vae-path") + 1], "/models/video-vae.safetensors")
+        self.assertEqual(command[command.index("--audio-vae-path") + 1], "/models/audio-vae.safetensors")
+        self.assertEqual(command[command.index("--quantization") + 1], "fp8-cast")
+        self.assertEqual(command[command.index("--offload") + 1], "cpu")
+        self.assertIn("--image", command)
+        for legacy in ("--gemma-root", "--distilled-checkpoint-path", "--checkpoint-path", "--distilled-lora", "--negative-prompt"):
+            self.assertNotIn(legacy, command)
 
-        hq = worker.build_video_command(
+        endpoint_command = worker.build_video_command(
             job,
-            {"pipeline": "two-stage-hq", "guidanceScale": 4},
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
             models,
-            Path("/output/production.mp4"),
-            None,
+            Path("/output/endpoint.mp4"),
+            Path("/input/start.png"),
+            Path("/input/end.png"),
         )
-        self.assertEqual(hq[2], "ltx_pipelines.ti2vid_two_stages_hq")
-        self.assertEqual(hq[hq.index("--video-cfg-guidance-scale") + 1], "4.0")
-        self.assertEqual(hq[hq.index("--distilled-lora") + 2], "0.8")
-        self.assertEqual(hq[hq.index("--num-inference-steps") + 1], "40")
-        self.assertEqual(hq[hq.index("--negative-prompt") + 1], "flicker")
+        image_indices = [index for index, value in enumerate(endpoint_command) if value == "--image"]
+        self.assertEqual(len(image_indices), 2)
+        self.assertEqual(
+            endpoint_command[image_indices[0]:image_indices[0] + 4],
+            ["--image", "/input/start.png", "0", "1.0"],
+        )
+        self.assertEqual(
+            endpoint_command[image_indices[1]:image_indices[1] + 4],
+            ["--image", "/input/end.png", str(job["frames"] - 1), "1.0"],
+        )
+
+        with self.assertRaisesRegex(ValueError, "unsupported LTX pipeline"):
+            worker.build_video_command(job, {"pipeline": "two-stage-hq"}, models, Path("/output/nope.mp4"), None)
+
+        adapter_job = {
+            **job,
+            "prompt": "faceless mannequin enters the archive",
+            "creativeAdapter": {
+                "id": "ltx-creative-faceless-mannequin",
+                "strength": 0.8,
+                "triggerTokens": ["faceless mannequin"],
+            },
+        }
+        adapter_command = worker.build_video_command(
+            adapter_job,
+            {"pipeline": "distilled", "quantization": "fp8-cast", "offload": "cpu"},
+            {**models, "ltx-creative-faceless-mannequin": Path("/models/loras/faceless.safetensors")},
+            Path("/output/adapter.mp4"),
+            Path("/input/still.png"),
+        )
+        self.assertEqual(
+            adapter_command[adapter_command.index("--lora") + 1:adapter_command.index("--lora") + 3],
+            ["/models/loras/faceless.safetensors", "0.8"],
+        )
 
     def test_ltx_model_specs_require_official_file_hashes_and_sizes(self):
-        specs = [{
-            "id": "gemma-3-12b", "kind": "tree", "sourcePath": "gemma", "localPath": "gemma",
-            "manifestSha256": "a" * 64, "repository": worker.GEMMA_MODEL, "revision": "c" * 40,
-        }]
-        for model_id in ("ltx-dev", "ltx-distilled-lora", "ltx-spatial-upscaler"):
-            filename, digest, size = worker.LTX_FILE_CONTRACTS[model_id]
+        specs = []
+        for model_id, (relative_path, digest, size) in worker.LTX_FILE_CONTRACTS.items():
             specs.append({
-                "id": model_id, "kind": "file", "sourcePath": f"ltx/{filename}",
-                "localPath": f"ltx/{filename}", "manifestSha256": digest, "sizeBytes": size,
+                "id": model_id, "kind": "file", "sourcePath": f"models/LTX-2.5/{relative_path}",
+                "localPath": f"ltx-2.5/{relative_path}", "manifestSha256": digest, "sizeBytes": size,
+                "repository": worker.LTX_MODEL, "revision": worker.LTX_REVISION,
             })
-        self.assertEqual(worker.validate_model_specs(specs, "video", "two-stage-hq"), specs)
-        specs[1] = {**specs[1], "manifestSha256": "f" * 64}
+        self.assertEqual(worker.validate_model_specs(specs, "video", "distilled"), specs)
+        specs[0] = {**specs[0], "manifestSha256": "f" * 64}
         with self.assertRaisesRegex(ValueError, "official pinned LTX file"):
-            worker.validate_model_specs(specs, "video", "two-stage-hq")
+            worker.validate_model_specs(specs, "video", "distilled")
+
+    def test_shared_zimage_and_ltx_manifest_hydrates_only_the_active_phase(self):
+        ltx_specs = []
+        for model_id, (relative_path, digest, size) in worker.LTX_FILE_CONTRACTS.items():
+            ltx_specs.append({
+                "id": model_id, "kind": "file", "sourcePath": f"models/LTX-2.5/{relative_path}",
+                "localPath": f"ltx-2.5/{relative_path}", "manifestSha256": digest, "sizeBytes": size,
+                "repository": worker.LTX_MODEL, "revision": worker.LTX_REVISION,
+            })
+        zimage = {
+            "id": "z-image-turbo", "kind": "tree", "sourcePath": "models/z-image",
+            "localPath": "z-image", "manifestSha256": "a" * 64,
+            "repository": worker.ZIMAGE_MODEL, "revision": worker.ZIMAGE_REVISION,
+        }
+        self.assertEqual(
+            worker.validate_model_specs([zimage, *ltx_specs], "image", None),
+            [zimage],
+        )
+        self.assertEqual(
+            worker.validate_model_specs([zimage, *ltx_specs], "video", "distilled"),
+            ltx_specs,
+        )
+
+    def test_ltx_creative_adapter_requires_exact_runtime_and_benchmark(self):
+        specs = []
+        for model_id, (relative_path, digest, size) in worker.LTX_FILE_CONTRACTS.items():
+            specs.append({
+                "id": model_id, "kind": "file", "sourcePath": f"models/LTX-2.5/{relative_path}",
+                "localPath": f"ltx-2.5/{relative_path}", "manifestSha256": digest, "sizeBytes": size,
+                "repository": worker.LTX_MODEL, "revision": worker.LTX_REVISION,
+            })
+        adapter_id = "ltx-creative-faceless-mannequin"
+        adapter = {
+            "id": adapter_id,
+            "kind": "file",
+            "sourcePath": "models/LTX-2.5/loras/faceless.safetensors",
+            "localPath": "ltx-2.5/loras/faceless.safetensors",
+            "manifestSha256": "a" * 64,
+            "repository": worker.LTX_MODEL,
+            "revision": worker.LTX_REVISION,
+            "creativeAdapter": {
+                "contractVersion": "ltx-creative-adapter/v1",
+                "role": "material-style",
+                "baseModel": worker.LTX_MODEL,
+                "baseRevision": worker.LTX_REVISION,
+                "runtimeRevision": worker.LTX_RUNTIME_REVISION,
+                "triggerTokens": ["faceless mannequin"],
+                "benchmark": {"rtx4090ProfileBenchmarked": True, "visualVerdict": "pass"},
+            },
+        }
+        self.assertEqual(
+            worker.validate_model_specs(specs + [adapter], "video", "distilled", {adapter_id}),
+            specs + [adapter],
+        )
+        self.assertEqual(
+            worker.validate_model_specs(specs + [adapter], "video", "distilled"),
+            specs,
+            "a cached but unselected adapter must not be hydrated into an ordinary LTX job",
+        )
+        with self.assertRaisesRegex(ValueError, "exact benchmarked"):
+            worker.validate_model_specs(specs + [{**adapter, "creativeAdapter": {**adapter["creativeAdapter"], "runtimeRevision": "b" * 40}}], "video", "distilled", {adapter_id})
+        with self.assertRaisesRegex(ValueError, "trigger tokens"):
+            worker.requested_creative_adapter_ids([{
+                "creativeAdapter": {"id": adapter_id, "strength": 0.8, "triggerTokens": ["faceless mannequin"]},
+                "prompt": "cinematic archive exterior",
+            }], "video")
+
+    def test_ltx_25_profile_and_ffprobe_gate_require_the_sealed_x2_target(self):
+        profile = worker.approved_profile("production", "video")
+        self.assertEqual(profile["model"], "Lightricks/LTX-2.5")
+        self.assertEqual((profile["width"], profile["height"]), (1280, 704))
+        self.assertEqual((profile["stageOneWidth"], profile["stageOneHeight"]), (640, 352))
+        self.assertEqual(profile["spatialUpscaleFactor"], 2)
+        self.assertEqual(profile["quantization"], "fp8-cast")
+        self.assertEqual(profile["offload"], "cpu")
+
+        original_run = worker.subprocess.run
+        try:
+            def audible_output(command, *_args, **_kwargs):
+                if command[0] == "ffprobe":
+                    return worker.subprocess.CompletedProcess(
+                        command, 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}, {"codec_type": "audio"}]}), "",
+                    )
+                return worker.subprocess.CompletedProcess(command, 0, "", "mean_volume: -32.0 dB")
+
+            worker.subprocess.run = audible_output
+            self.assertEqual(worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704), {"outputWidth": 1280, "outputHeight": 704, "hasAudio": True})
+            def wrong_geometry(command, *_args, **_kwargs):
+                return worker.subprocess.CompletedProcess(
+                    command, 0, json.dumps({"streams": [{"codec_type": "video", "width": 640, "height": 352}, {"codec_type": "audio"}]}), "",
+                )
+
+            worker.subprocess.run = wrong_geometry
+            with self.assertRaisesRegex(RuntimeError, "geometry"):
+                worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704)
+            def video_only(command, *_args, **_kwargs):
+                return worker.subprocess.CompletedProcess(
+                    command, 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}]}), "",
+                )
+
+            worker.subprocess.run = video_only
+            with self.assertRaisesRegex(RuntimeError, "generated audio"):
+                worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704)
+            def digital_silence(command, *_args, **_kwargs):
+                if command[0] == "ffprobe":
+                    return worker.subprocess.CompletedProcess(
+                        command, 0, json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}, {"codec_type": "audio"}]}), "",
+                    )
+                return worker.subprocess.CompletedProcess(command, 0, "", "mean_volume: -91.0 dB")
+
+            worker.subprocess.run = digital_silence
+            with self.assertRaisesRegex(RuntimeError, "no usable generated audio"):
+                worker.probe_video_output(Path("/tmp/clip.mp4"), 1280, 704)
+        finally:
+            worker.subprocess.run = original_run
+
+    def test_native_720p_x2_smoke_profile_is_exact_and_vram_bounded(self):
+        image_profile = worker.approved_profile(worker.LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID, "image")
+        self.assertTrue(image_profile["benchmarkOnly"])
+        self.assertEqual((image_profile["width"], image_profile["height"]), (1280, 704))
+        profile = worker.approved_profile(worker.LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID, "video")
+        self.assertTrue(profile["benchmarkOnly"])
+        self.assertEqual((profile["stageOneWidth"], profile["stageOneHeight"]), (1280, 704))
+        self.assertEqual((profile["width"], profile["height"], profile["maxFrames"]), (2560, 1408, 17))
+        self.assertEqual(profile["maxSampledPeakVramMib"], 22_000)
+
+        original_run = worker.subprocess.run
+        try:
+            worker.subprocess.run = lambda argv, **_kwargs: worker.subprocess.CompletedProcess(argv, 0, "21999\n", "")
+            self.assertEqual(worker._sample_vram_mib(22_000), 21_999)
+            worker.subprocess.run = lambda argv, **_kwargs: worker.subprocess.CompletedProcess(argv, 0, "22001\n", "")
+            with self.assertRaisesRegex(RuntimeError, "exceeded 22000 MiB"):
+                worker._sample_vram_mib(22_000)
+
+            def exact_smoke_output(command, *_args, **_kwargs):
+                if command[0] == "ffprobe":
+                    return worker.subprocess.CompletedProcess(
+                        command,
+                        0,
+                        json.dumps({"streams": [
+                            {"codec_type": "video", "width": 2560, "height": 1408, "avg_frame_rate": "25/1", "nb_read_frames": "17"},
+                            {"codec_type": "audio"},
+                        ]}),
+                        "",
+                    )
+                return worker.subprocess.CompletedProcess(command, 0, "", "mean_volume: -32.0 dB")
+
+            worker.subprocess.run = exact_smoke_output
+            self.assertEqual(
+                worker.probe_video_output(Path("/tmp/smoke.mp4"), 2560, 1408, expected_frames=17, expected_fps=25),
+                {"outputWidth": 2560, "outputHeight": 1408, "hasAudio": True, "frameCount": 17, "frameRate": 25},
+            )
+        finally:
+            worker.subprocess.run = original_run
+
+    def test_native_720p_x2_smoke_manifest_allows_only_one_exact_17_frame_job(self):
+        profile = worker.approved_profile(worker.LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID, "video")
+        manifest_id = "video-" + "c" * 32
+        profile_hash = worker.sha256_bytes(worker.canonical_bytes(profile))
+        job = {
+            "id": "smoke-01", "prompt": "A small bounded smoke clip", "seed": 42,
+            "width": 2560, "height": 1408, "steps": 8, "frames": 17, "fps": 25, "timeoutSeconds": 600,
+            "artifact": {"putUrl": "https://objects.example/smoke.mp4", "headers": {
+                "x-amz-meta-manifest-id": manifest_id, "x-amz-meta-profile-sha256": profile_hash, "x-amz-meta-job-id": "smoke-01",
+            }},
+        }
+        unsigned = {
+            "contractVersion": worker.CONTRACT_VERSION, "manifestId": manifest_id, "phase": "video",
+            "gpuSku": worker.REQUIRED_GPU_SKU, "gpuCount": worker.REQUIRED_GPU_COUNT,
+            "expiresAt": int(time.time() * 1000) + 60_000, "maxCostUsd": 1.25,
+            "profile": profile, "profileSha256": profile_hash,
+            "runtimeRepository": worker.LTX_RUNTIME_REPOSITORY, "runtimeRevision": worker.LTX_RUNTIME_REVISION,
+            "checkpoint": {"getUrl": "https://objects.example/checkpoint.json", "putUrl": "https://objects.example/checkpoint.json"},
+            "heartbeat": {"putUrl": "https://objects.example/heartbeat.json"},
+            "completion": {"putUrl": "https://objects.example/completion.json"}, "jobs": [job],
+        }
+        manifest, digest = self._seal(unsigned)
+        self.assertEqual(worker.validate_manifest(manifest, digest)["profile"]["id"], profile["id"])
+        two_jobs, two_digest = self._seal({**unsigned, "jobs": [job, {**job, "id": "smoke-02", "artifact": {**job["artifact"], "headers": {**job["artifact"]["headers"], "x-amz-meta-job-id": "smoke-02"}}}]})
+        with self.assertRaisesRegex(ValueError, "exactly one job"):
+            worker.validate_manifest(two_jobs, two_digest)
+        wrong_frame, wrong_digest = self._seal({**unsigned, "jobs": [{**job, "frames": 9}]})
+        with self.assertRaisesRegex(ValueError, "exactly 17 smoke frames"):
+            worker.validate_manifest(wrong_frame, wrong_digest)
 
     def test_artifact_upload_streams_file_and_binds_length(self):
         captured = {}
@@ -373,6 +589,12 @@ class WorkerContractTests(unittest.TestCase):
     def test_http_transport_rejects_non_tls_urls(self):
         with self.assertRaisesRegex(ValueError, "HTTPS"):
             worker._request("http://example.invalid/object")
+
+    def test_failure_receipt_preserves_renderer_root_cause_tail(self):
+        message = worker._bounded_error_message(RuntimeError("trace-start " + "x" * 2_000 + " ROOT_CAUSE"))
+        self.assertLessEqual(len(message), 1_200)
+        self.assertIn("diagnostic tail", message)
+        self.assertTrue(message.endswith("ROOT_CAUSE"))
 
 
 if __name__ == "__main__":

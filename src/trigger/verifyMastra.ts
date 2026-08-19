@@ -30,7 +30,9 @@ export const verifyMastraTask = task({
     }
 
     // Real structured-output round trip through the SAME path production uses.
-    await bootstrapSecrets((m) => console.log(`[verify-mastra] ${m}`), { required: ["GEMINI_API_KEY"] });
+    // This probes the declared non-Google Mastra route. Gemini is intentionally
+    // unavailable here and remains sealed to the thumbnail module.
+    await bootstrapSecrets((m) => console.log(`[verify-mastra] ${m}`));
     const { agentJson } = await import("@/agents/mastra");
     let generate: { ok: boolean; detail: string } = { ok: false, detail: "not run" };
     // agentJson quietly falls back to REST when the Mastra path breaks — the

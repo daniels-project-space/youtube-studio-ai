@@ -8,7 +8,7 @@ import { buildChannelProfile, type ChannelProfile } from "@/engine/channelProfil
 import { configurableModules, moduleSurface } from "@/engine/moduleRegistry";
 import { resolveDirectorConfig, directorChapterPlan, DIRECTOR_SURFACE, type StructureBeat } from "../director";
 import { resolveKnobs } from "@/engine/customization";
-import { planTimeline, ASSEMBLE_DEFAULTS, type PlanInput } from "@/lib/assembly/planTimeline";
+import { planTimeline, ASSEMBLE_DEFAULTS } from "@/lib/assembly/planTimeline";
 
 function profileWith(params: Record<string, unknown>): ChannelProfile {
   return buildChannelProfile({

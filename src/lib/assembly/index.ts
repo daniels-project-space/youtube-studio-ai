@@ -26,3 +26,16 @@ export {
 export type { PlanInput, AssembleParams } from "./planTimeline";
 export { renderTimeline, hashTimeline } from "./renderTimeline";
 export type { RenderBackend, CardSpec, RenderOpts } from "./renderTimeline";
+export {
+  CINEMATIC_ASSEMBLY_HANDOFF_VERSION,
+  CinematicShotToClipSchema,
+  CinematicShotToClipManifestSchema,
+  CinematicAssemblyHandoffSchema,
+  createCinematicAssemblyHandoff,
+  assertCinematicAssemblyHandoff,
+} from "./cinematicHandoff";
+export type {
+  CinematicShotToClip,
+  CinematicShotToClipManifest,
+  CinematicAssemblyHandoff,
+} from "./cinematicHandoff";

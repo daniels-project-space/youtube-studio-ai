@@ -10,15 +10,14 @@
  *                         overlap-weighted view estimate. Replaces `metadata`.
  *   thumbnail_gen       → one Style-DNA/playbook route: text-free flash base →
  *                         deterministic local typography → one production QA
- *                         alarm. Generic cards are explicit nonpublishable
- *                         draft previews only; failures never swap renderers.
+ *                         alarm. Every execution is pinned to Nano Banana;
+ *                         failures never swap renderers or emit a card fallback.
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { PRICE } from "@/engine/pricing";
 import { accountedModelUsageCost } from "@/engine/modelUsageCost";
 import {
   assertThumbnailGate,
-  assertThumbnailStrategy,
   qualityProfile,
   thumbnailGatePassed,
   type ThumbnailGateVerdict,
@@ -37,7 +36,6 @@ import {
   thumbnailRequestHash,
   type ThumbnailNanoBananaEvidence,
 } from "@/lib/thumbnailCheckpoint";
-import { titleCard, solidImage } from "@/lib/ffmpeg";
 import {
   generateNanoBananaImageWithReceipt,
   hasNanoBanana,
@@ -45,7 +43,6 @@ import {
 } from "@/lib/banana";
 import { craftMetadata } from "@/lib/metacraft";
 import { hasAnthropicKey } from "@/lib/anthropic";
-import { hasGeminiKey } from "@/lib/gemini";
 import { hasVisionKey } from "@/lib/vision";
 import {
   renderCandidate,
@@ -55,7 +52,8 @@ import {
   type ThumbnailPlaybook,
 } from "@/lib/thumbnailLab";
 import { agentJson } from "@/agents/mastra";
-import { produceAndCritique } from "@/engine/critiqueLoop";
+import { produceAndCritique, type ChannelCritiqueContext } from "@/engine/critiqueLoop";
+import { laneQualityPolicy } from "@/engine/contentLane";
 import { loadPerformanceContext } from "@/lib/performance";
 import { z } from "zod";
 
@@ -284,12 +282,33 @@ function finishMetadata(
   return { title, description, tags };
 }
 
+/**
+ * The image provider must receive an actual visual story, not an SEO title
+ * alone. This stays deterministic so every metadata outcome (including the
+ * non-provider fallback) supplies the same required thumbnail handoff.
+ */
+function buildThumbnailDescription(args: {
+  title: string;
+  topic: string;
+  scriptExcerpt: string;
+}): string {
+  const episodeContext = args.scriptExcerpt.replace(/\s+/g, " ").trim().slice(0, 420);
+  return [
+    `Thumbnail promise: ${args.title.trim()}.`,
+    `Visually enact the topic "${args.topic.trim()}" through one dominant subject, a concrete physical action, and a clear consequence; the image must communicate the promise without decorative filler or written words.`,
+    episodeContext
+      ? `Ground the scene in this actual episode context: ${episodeContext}`
+      : "Keep the scene specific to this episode's topic and honest promise.",
+  ].join(" ");
+}
+
 export const metadataOptimized: Block = {
   id: "metadata",
   consumes: ["topic"],
   produces: [
     "title",
     "description",
+    "thumbnailDescription",
     "tags",
     "estimatedViews",
     "estimatedViewsSource",
@@ -377,14 +396,26 @@ export const metadataOptimized: Block = {
       return { estimatedViews, estimatedViewsSource };
     };
 
-    // Degrade: no model available → niche-correct (NOT lofi) static metadata.
-    if (!hasGeminiKey()) {
+    // Degrade only when the permitted non-Google text provider is unavailable.
+    if (!hasAnthropicKey()) {
       const title = topic.slice(0, titleMax);
       const description = `${topic}.\n\n${persona || channelName}.`;
       const tags = [topic.toLowerCase(), niche].filter(Boolean) as string[];
       const ve = await viewEstimate(tags);
-      ctx.log(`metadata (degraded, no Gemini): "${title}"`);
-      return { title: plannedTitle || title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
+      ctx.log(`metadata (degraded, no permitted text provider): "${title}"`);
+      return {
+        title: plannedTitle || title,
+        description,
+        thumbnailDescription: buildThumbnailDescription({
+          title: plannedTitle || title,
+          topic,
+          scriptExcerpt,
+        }),
+        tags,
+        pinnedComment: "",
+        titleAlternate: "",
+        ...ve,
+      };
     }
 
     // Phase 7: bias titles toward past high-CTR/retention winners ("" until data).
@@ -430,6 +461,11 @@ export const metadataOptimized: Block = {
       return {
         title: plannedTitle || title,
         description,
+        thumbnailDescription: buildThumbnailDescription({
+          title: plannedTitle || title,
+          topic,
+          scriptExcerpt,
+        }),
         tags,
         pinnedComment: m.pinnedComment,
         titleAlternate: m.titleAlternate,
@@ -652,43 +688,27 @@ export const metadataOptimized: Block = {
     ctx.log(
       `metadata: title="${title.slice(0, 60)}…" (${tournament ? `tournament ${(tournament.score * 10).toFixed(0)}/10` : `score=${loop!.critique.score.toFixed(2)}, accepted=${loop!.accepted}`}) est=${ve.estimatedViews} (${ve.estimatedViewsSource})`,
     );
-    return { title: plannedTitle || title, description, tags, pinnedComment: "", titleAlternate: "", ...ve };
+    return {
+      title: plannedTitle || title,
+      description,
+      thumbnailDescription: buildThumbnailDescription({
+        title: plannedTitle || title,
+        topic,
+        scriptExcerpt,
+      }),
+      tags,
+      pinnedComment: "",
+      titleAlternate: "",
+      ...ve,
+    };
   },
 };
 
 /* -------------------------- 3. thumbnail_gen ---------------------------- */
 
-/**
- * Explicit draft preview only. This is deliberately free, visibly labelled,
- * and marked nonpublishable; it is never an automatic recovery path.
- */
-async function draftTitleCardPreview(ctx: StageContext): Promise<{ thumbnailKey: string; costUsd: 0 }> {
-  const channelName = (ctx.store["channelName"] as string | undefined) ?? "Lofi";
-  const topic = (ctx.store["topic"] as string | undefined) ?? "";
-  const tmp = await makeRunTempDir(ctx.runId);
-  const outJpg = join(tmp, "thumbnail.jpg");
-  const base = await solidImage(join(tmp, "thumb_base.jpg"), 1_280, 720, "#172033");
-  const seoTitle = ((ctx.store["title"] as string | undefined) ?? topic ?? channelName).split(/[:|]/)[0].trim();
-  const cardTitle = seoTitle.length > 34 ? seoTitle.slice(0, 34).replace(/\s+\S*$/, "") : seoTitle;
-  await titleCard({
-    basePath: base,
-    outJpg,
-    title: cardTitle || channelName,
-    subtitle: `DRAFT PREVIEW — ${channelName}`,
-  });
-  const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-  await putObject(thumbnailKey, await readBytes(outJpg), { contentType: "image/jpeg" });
-  await recordAsset(ctx, "thumbnail", thumbnailKey, {
-    strategy: "draft_preview_placeholder",
-    publishable: false,
-    thumbnailTitle: channelName,
-  });
-  return { thumbnailKey, costUsd: 0 };
-}
-
 export const thumbnailGen: Block = {
   id: "thumbnail_gen",
-  consumes: ["title"],
+  consumes: ["title", "thumbnailDescription"],
   // `strategy` feeds the thumbnail learning loop (which path produced the
   // shipped thumbnail); every return path below must include it.
   produces: ["thumbnailKey", "strategy", "thumbnailPublishable"],
@@ -696,11 +716,17 @@ export const thumbnailGen: Block = {
   run: async (ctx) => {
     const quality = qualityProfile(ctx.params["qualityProfile"]);
     const title = str(ctx, "title");
-    const thumbnailer =
-      (ctx.store["thumbnailer"] as string | undefined) ??
-      (ctx.params["thumbnailer"] as string | undefined) ??
-      "banana";
+    const thumbnailDescription = str(ctx, "thumbnailDescription").replace(/\s+/g, " ").trim();
+    if (thumbnailDescription.length < 80) {
+      throw new Error("thumbnail_gen: thumbnailDescription must contain a concrete visual brief of at least 80 characters");
+    }
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
+    // P1-17: the channel's durable lane calibrates how hard the critique loop
+    // pushes (iteration cap + what the critic is told to scrutinise).
+    const laneKey = typeof (ctx.store["contentLane"] as { key?: unknown } | null)?.key === "string"
+      ? String((ctx.store["contentLane"] as { key?: unknown }).key)
+      : undefined;
+    const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
     let nanoBananaImageCostUsd = 0;
     let checkpointGenerationCostUsd = 0;
     let checkpointQaCostUsd = 0;
@@ -758,19 +784,6 @@ export const thumbnailGen: Block = {
       : null;
 
     const channelDoc = await loadChannel(ctx);
-    // The generic card is an explicit UI preview, never a provider/gate
-    // fallback. Production stops before creating or uploading it.
-    if (thumbnailer === "title_card") {
-      assertThumbnailStrategy(quality, "draft_preview_placeholder");
-      const preview = await draftTitleCardPreview(ctx);
-      return {
-        thumbnailKey: preview.thumbnailKey,
-        strategy: "draft_preview_placeholder",
-        thumbnailPublishable: false,
-        [COST_PATCH_KEY]: thumbnailCost(preview.costUsd),
-      };
-    }
-
     const fullDna = (
       (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null | undefined) ??
       (channelDoc as { styleDNA?: import("@/engine/creative/types").StyleDNA } | null)?.styleDNA ??
@@ -797,164 +810,272 @@ export const thumbnailGen: Block = {
     const effectivePlaybook = energyOverride ? { ...playbook, energy: energyOverride } : playbook;
 
     const scriptHint = String(ctx.store["narrationText"] ?? "").slice(0, 500);
-    const requestHash = thumbnailRequestHash({
-      contract: "thumbnail-gen-checkpoint-v4-nano-banana-only",
-      title,
-      scriptHint,
-      sceneMandate: dnaThumb?.subject,
-      pattern,
-      playbook: effectivePlaybook,
-      patternIndex: idx,
-      providerRoute: NANO_BANANA_THUMBNAIL_PROFILE,
-    });
-    const tmp = await makeRunTempDir(ctx.runId, `thumbnail-${requestHash.slice(0, 20)}`);
-    const outJpg = join(tmp, "thumbnail.jpg");
-    const nanoBananaRequestContext = thumbnailNanoBananaRequestContext({
-      keyPrefix: ctx.keyPrefix,
-      runId: ctx.runId,
-      requestHash,
-    });
-    let checkpoint = await openThumbnailCheckpoint({
-      checkpointRoot: `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,
-      requestHash,
-      localImagePath: outJpg,
-      beforeClaim: () => {
-        if (!hasGeminiKey()) {
-          throw new Error("thumbnail_gen: no configured concept provider");
+
+    // ── PRODUCE → CRITIQUE → REGENERATE (P1-3) ───────────────────────────────
+    // The thumbnail is the highest-CTR-leverage asset in the run and used to be
+    // generated exactly once, graded post-hoc, and shipped regardless. It now
+    // runs on the shared `produceAndCritique` primitive: a rejected candidate is
+    // regenerated with the grader's concrete defects fed back into the art
+    // direction.
+    //
+    // Cost safety (this block is `paid: true`):
+    //   - Each iteration carries its OWN requestHash (the iteration index and
+    //     the prior defects are part of the hash), so it gets its own immutable
+    //     checkpoint. A retry/self-heal replay re-reads those checkpoints and
+    //     re-purchases NOTHING — which is exactly why the healer's
+    //     "thumbnail missing" rule stays safe.
+    //   - A second iteration only happens when QA actually RAN and REJECTED the
+    //     candidate. A grader outage stops the loop rather than blind-spending.
+    //   - Default cap is 2 (at most ONE regenerate), operator-overridable via
+    //     the `thumbnailCritiqueIters` param.
+    const criticDoctrine = typeof ctx.store["criticDoctrine"] === "string"
+      ? (ctx.store["criticDoctrine"] as string)
+      : undefined;
+    const thumbnailChannel: ChannelCritiqueContext = {
+      ...(ctx.store["channelName"] ? { channelName: String(ctx.store["channelName"]) } : {}),
+      ...(ctx.store["persona"] ? { persona: String(ctx.store["persona"]) } : {}),
+      ...(criticDoctrine ? { criticDoctrine } : {}),
+      ...(laneKey ? { contentLaneKey: laneKey } : {}),
+      laneEmphasis: laneQuality.emphasis,
+    };
+    const requestedIters = Number(ctx.params["thumbnailCritiqueIters"]);
+    const maxThumbnailIters = Number.isFinite(requestedIters) && requestedIters >= 1
+      ? Math.min(3, Math.floor(requestedIters))
+      : Math.min(2, laneQuality.maxCritiqueIters);
+
+    interface ThumbnailAttempt {
+      outJpg: string;
+      requestHash: string;
+      refQA: ThumbnailGateVerdict | null;
+      providerEvidence?: ThumbnailNanoBananaEvidence;
+    }
+
+    const attemptLoop = await produceAndCritique<ThumbnailAttempt>({
+      label: "thumbnail_gen",
+      threshold: 1,
+      maxIters: maxThumbnailIters,
+      log: (message) => ctx.log(message),
+      channel: thumbnailChannel,
+      produce: async (priorIssues, iter): Promise<ThumbnailAttempt> => {
+        const requestHash = thumbnailRequestHash({
+          contract: "thumbnail-gen-checkpoint-v4-nano-banana-only",
+          title,
+          thumbnailDescription,
+          scriptHint,
+          sceneMandate: dnaThumb?.subject,
+          pattern,
+          playbook: effectivePlaybook,
+          patternIndex: idx,
+          providerRoute: NANO_BANANA_THUMBNAIL_PROFILE,
+          // Iteration identity: without these two, a regenerate would re-read
+          // the previous rejected candidate's checkpoint and change nothing.
+          critiqueIteration: iter,
+          critiqueIssues: priorIssues,
+          ...(criticDoctrine ? { criticDoctrine } : {}),
+        });
+        const tmp = await makeRunTempDir(ctx.runId, `thumbnail-${requestHash.slice(0, 20)}`);
+        const outJpg = join(tmp, "thumbnail.jpg");
+        const nanoBananaRequestContext = thumbnailNanoBananaRequestContext({
+          keyPrefix: ctx.keyPrefix,
+          runId: ctx.runId,
+          requestHash,
+        });
+        let checkpoint = await openThumbnailCheckpoint({
+          checkpointRoot: `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail-checkpoints`,
+          requestHash,
+          localImagePath: outJpg,
+          beforeClaim: () => {
+            if (!hasNanoBanana()) {
+              throw new Error("thumbnail_gen: Nano Banana is not configured");
+            }
+            if (quality === "production" && !hasVisionKey()) {
+              throw new Error("thumbnail_gen: no configured production QA provider");
+            }
+          },
+        });
+
+        if (checkpoint.manifest) {
+          if (
+            (checkpoint.manifest.version !== 2 || !checkpoint.manifest.providerEvidence)
+          ) {
+            throw new Error(
+              "thumbnail_gen: generated Nano Banana checkpoint is missing durable provider evidence",
+            );
+          }
+          checkpointGenerationCostUsd += checkpoint.manifest.generationCostUsd;
+          ctx.log(
+            `thumbnail_gen: reused ${checkpoint.source} paid candidate checkpoint ${requestHash.slice(0, 12)}`,
+          );
+        } else {
+          checkpoint = await beginThumbnailPaidWork(checkpoint);
+          let nanoBananaProviderEvidence: ThumbnailNanoBananaEvidence | undefined;
+          const generateScene = async (
+            request: import("@/lib/thumbnailRenderer").ThumbnailImageRequest,
+          ): Promise<Buffer> => {
+            const generated = await generateNanoBananaImageWithReceipt({
+              prompt: request.prompt,
+              aspectRatio: request.aspectRatio,
+              maxProviderAttempts: 1,
+              idempotencyContext: nanoBananaRequestContext,
+            });
+            nanoBananaImageCostUsd += generated.receipt.costUsd;
+            nanoBananaProviderEvidence = {
+              version: "thumbnail-nano-banana-evidence/v1",
+              requestContext: nanoBananaRequestContext,
+              receipt: generated.receipt,
+            };
+            return generated.bytes;
+          };
+          const spentBefore = observedImageCost() + observedConceptCost();
+          await renderCandidate({
+            pattern,
+            title,
+            scriptHint,
+            sceneSeed: thumbnailDescription,
+            playbook: effectivePlaybook,
+            outJpg,
+            tmpDir: tmp,
+            idx,
+            generateScene,
+            log: ctx.log,
+            ...(dnaThumb?.subject ? { sceneMandate: dnaThumb.subject } : {}),
+            ...(priorIssues.length ? { priorIssues } : {}),
+            ...(criticDoctrine ? { criticDoctrine } : {}),
+          });
+          // Persist THIS iteration's authoritative generation spend: the exact
+          // concept token usage plus the actual image counter delta. The local
+          // manifest is written before R2, so a storage retry on this worker
+          // cannot re-purchase.
+          const iterationSpend = Math.max(0, observedImageCost() + observedConceptCost() - spentBefore);
+          checkpointGenerationCostUsd += iterationSpend;
+          checkpoint = await saveThumbnailGenerationCheckpoint(
+            checkpoint,
+            iterationSpend,
+            nanoBananaProviderEvidence,
+          );
         }
-        if (!hasNanoBanana()) {
-          throw new Error("thumbnail_gen: Nano Banana is not configured");
+
+        // One post-render alarm per candidate. It can block publishing and it
+        // now feeds the regenerate; it never starts another paid RENDERER or
+        // swaps in a generic card.
+        const qaRequestHash = thumbnailRequestHash({
+          contract: "thumbnail-mobile-reference-qa-v2-exact-accounting",
+          candidateRequestHash: requestHash,
+          quality,
+          title,
+          niche,
+          qaBrandContext,
+          playbookRules: effectivePlaybook.rules,
+          playbookAvoid: effectivePlaybook.avoid,
+          referenceThumbs,
+        });
+        let refQA: ThumbnailGateVerdict | null;
+        const cachedQa = checkpoint.manifest?.qa;
+        if (cachedQa?.completed && cachedQa.requestHash === qaRequestHash) {
+          checkpointQaCostUsd += cachedQa.costUsd;
+          if (cachedQa.verdict === null) {
+            refQA = null;
+          } else {
+            const verdict = cachedQa.verdict as Partial<ThumbnailGateVerdict> | undefined;
+            if (
+              !verdict ||
+              typeof verdict.textOk !== "boolean" ||
+              typeof verdict.faceClear !== "boolean" ||
+              !Number.isFinite(verdict.punch) ||
+              !Number.isFinite(verdict.styleMatch) ||
+              !Number.isFinite(verdict.storyMatch) ||
+              typeof verdict.uiClean !== "boolean" ||
+              typeof verdict.reason !== "string"
+            ) {
+              throw new Error("thumbnail_gen: cached QA verdict is invalid");
+            }
+            refQA = verdict as ThumbnailGateVerdict;
+          }
+          ctx.log("thumbnail_gen: reused checkpointed mobile/reference QA verdict");
+        } else {
+          const qaSpentBefore = observedQaCost();
+          try {
+            refQA = await runThumbnailMobileReferenceQa({
+              outJpg,
+              tmpDir: tmp,
+              title,
+              niche,
+              playbook: effectivePlaybook,
+              referenceUrls: referenceThumbs,
+              brandContext: qaBrandContext,
+              log: ctx.log,
+            });
+          } catch (error) {
+            ctx.log(
+              `thumbnail_gen: reference/mobile QA errored: ${error instanceof Error ? error.message : error}`,
+            );
+            refQA = null;
+          }
+          const iterationQaSpend = Math.max(0, observedQaCost() - qaSpentBefore);
+          checkpointQaCostUsd += iterationQaSpend;
+          checkpoint = await saveThumbnailQaCheckpoint(checkpoint, {
+            requestHash: qaRequestHash,
+            verdict: refQA,
+            costUsd: iterationQaSpend,
+          });
         }
-        if (quality === "production" && !hasVisionKey()) {
-          throw new Error("thumbnail_gen: no configured production QA provider");
+        const providerEvidence = checkpoint.manifest?.version === 2
+          ? checkpoint.manifest.providerEvidence
+          : undefined;
+        return {
+          outJpg,
+          requestHash,
+          refQA,
+          ...(providerEvidence ? { providerEvidence } : {}),
+        };
+      },
+      critique: async (attempt, iter) => {
+        const verdict = attempt.refQA;
+        if (!verdict) {
+          // Grader outage. Regenerating cannot help (the next candidate would be
+          // ungraded too) and would burn another paid image, so stop here. On
+          // iteration 1 this reproduces the historic single-shot behaviour
+          // exactly; a later outage scores 0 so the earlier GRADED candidate
+          // wins best-selection. Production still fails closed below at
+          // `assertThumbnailGate`, which is the real gate.
+          return { score: iter === 1 ? 1 : 0, pass: true, issues: [] };
         }
+        if (thumbnailGatePassed(verdict)) return { score: 1, pass: true, issues: [] };
+        const numeric = (verdict.punch + verdict.styleMatch + verdict.storyMatch) / 30;
+        const booleans = [verdict.textOk, verdict.faceClear, verdict.uiClean].filter(Boolean).length / 3;
+        const issues = [
+          verdict.reason,
+          verdict.textOk ? "" : "the headline text is broken, misspelled, or unreadable at mobile size",
+          verdict.faceClear ? "" : "the text or a graphic covers the subject's face / hero artwork",
+          verdict.uiClean ? "" : "content sits under the YouTube duration chip or other player UI",
+          verdict.punch >= 7 ? "" : `visual punch scored ${verdict.punch}/10 — the frame is not arresting enough in a feed`,
+          verdict.styleMatch >= 7 ? "" : `style match scored ${verdict.styleMatch}/10 — it is off this channel's visual world`,
+          verdict.storyMatch >= 7 ? "" : `story match scored ${verdict.storyMatch}/10 — the image does not enact the video's topic`,
+        ].map((issue) => String(issue ?? "").trim()).filter(Boolean).slice(0, 6);
+        ctx.log(
+          `thumbnail_gen: candidate ${iter} REJECTED by the grader (${verdict.reason.slice(0, 120)})` +
+          (iter < maxThumbnailIters ? " — regenerating with the defects fed back" : " — iteration cap reached"),
+        );
+        // `pass:false` is authoritative; the score only ranks attempts so the
+        // best near-miss ships if no candidate ever clears the bar.
+        return { score: 0.5 * numeric + 0.5 * booleans, pass: false, issues };
       },
     });
 
-    if (checkpoint.manifest) {
-      if (
-        (checkpoint.manifest.version !== 2 || !checkpoint.manifest.providerEvidence)
-      ) {
-        throw new Error(
-          "thumbnail_gen: generated Nano Banana checkpoint is missing durable provider evidence",
-        );
-      }
-      checkpointGenerationCostUsd = checkpoint.manifest.generationCostUsd;
-      ctx.log(
-        `thumbnail_gen: reused ${checkpoint.source} paid candidate checkpoint ${requestHash.slice(0, 12)}`,
-      );
-    } else {
-      checkpoint = await beginThumbnailPaidWork(checkpoint);
-      let nanoBananaProviderEvidence: ThumbnailNanoBananaEvidence | undefined;
-      const generateScene = async (
-        request: import("@/lib/thumbnailRenderer").ThumbnailImageRequest,
-      ): Promise<Buffer> => {
-        const generated = await generateNanoBananaImageWithReceipt({
-          prompt: request.prompt,
-          aspectRatio: request.aspectRatio,
-          maxProviderAttempts: 1,
-          idempotencyContext: nanoBananaRequestContext,
-        });
-        nanoBananaImageCostUsd += generated.receipt.costUsd;
-        nanoBananaProviderEvidence = {
-          version: "thumbnail-nano-banana-evidence/v1",
-          requestContext: nanoBananaRequestContext,
-          receipt: generated.receipt,
-        };
-        return generated.bytes;
-      };
-      await renderCandidate({
-        pattern,
-        title,
-        scriptHint,
-        playbook: effectivePlaybook,
-        outJpg,
-        tmpDir: tmp,
-        idx,
-        generateScene,
-        log: ctx.log,
-        ...(dnaThumb?.subject ? { sceneMandate: dnaThumb.subject } : {}),
-      });
-      // Persist the whole authoritative generation spend: the exact concept
-      // token usage plus the actual image counter delta. This local manifest is
-      // written before R2, so a storage retry on this worker cannot re-purchase.
-      checkpointGenerationCostUsd = observedImageCost() + observedConceptCost();
-      checkpoint = await saveThumbnailGenerationCheckpoint(
-        checkpoint,
-        checkpointGenerationCostUsd,
-        nanoBananaProviderEvidence,
-      );
-    }
-
-    // One post-render alarm. It can block publishing; it never starts another
-    // paid renderer or swaps in a generic card.
-    const qaRequestHash = thumbnailRequestHash({
-      contract: "thumbnail-mobile-reference-qa-v2-exact-accounting",
-      candidateRequestHash: requestHash,
-      quality,
-      title,
-      niche,
-      qaBrandContext,
-      playbookRules: effectivePlaybook.rules,
-      playbookAvoid: effectivePlaybook.avoid,
-      referenceThumbs,
-    });
-    let refQA: ThumbnailGateVerdict | null;
-    const cachedQa = checkpoint.manifest?.qa;
-    if (cachedQa?.completed && cachedQa.requestHash === qaRequestHash) {
-      checkpointQaCostUsd = cachedQa.costUsd;
-      if (cachedQa.verdict === null) {
-        refQA = null;
-      } else {
-        const verdict = cachedQa.verdict as Partial<ThumbnailGateVerdict> | undefined;
-        if (
-          !verdict ||
-          typeof verdict.textOk !== "boolean" ||
-          typeof verdict.faceClear !== "boolean" ||
-          !Number.isFinite(verdict.punch) ||
-          !Number.isFinite(verdict.styleMatch) ||
-          !Number.isFinite(verdict.storyMatch) ||
-          typeof verdict.uiClean !== "boolean" ||
-          typeof verdict.reason !== "string"
-        ) {
-          throw new Error("thumbnail_gen: cached QA verdict is invalid");
-        }
-        refQA = verdict as ThumbnailGateVerdict;
-      }
-      ctx.log("thumbnail_gen: reused checkpointed mobile/reference QA verdict");
-    } else {
-      try {
-        refQA = await runThumbnailMobileReferenceQa({
-          outJpg,
-          tmpDir: tmp,
-          title,
-          niche,
-          playbook: effectivePlaybook,
-          referenceUrls: referenceThumbs,
-          brandContext: qaBrandContext,
-          log: ctx.log,
-        });
-      } catch (error) {
-        ctx.log(
-          `thumbnail_gen: reference/mobile QA errored: ${error instanceof Error ? error.message : error}`,
-        );
-        refQA = null;
-      }
-      checkpointQaCostUsd = observedQaCost();
-      checkpoint = await saveThumbnailQaCheckpoint(checkpoint, {
-        requestHash: qaRequestHash,
-        verdict: refQA,
-        costUsd: checkpointQaCostUsd,
-      });
-    }
+    const winner = attemptLoop.value;
+    const outJpg = winner.outJpg;
+    const requestHash = winner.requestHash;
+    const refQA = winner.refQA;
+    ctx.log(
+      `thumbnail_gen: critique loop finished after ${attemptLoop.iterations} candidate(s) ` +
+      `(${attemptLoop.accepted ? "accepted" : "best of the rejected set"})`,
+    );
     assertThumbnailGate(quality, refQA, `${strategy} candidate`);
     const passed = refQA !== null && thumbnailGatePassed(refQA);
     const publishable = quality === "production" ? true : passed;
     const finalStrategy = publishable ? strategy : "playbook_belowbar";
     const thumbnailKey = `${ctx.keyPrefix}runs/${ctx.runId}/thumbnail.jpg`;
-    const providerEvidence = checkpoint.manifest?.version === 2
-      ? checkpoint.manifest.providerEvidence
-      : undefined;
+    const providerEvidence = winner.providerEvidence;
     await putObject(thumbnailKey, await readBytes(outJpg), {
       contentType: "image/jpeg",
       metadata: {
@@ -971,6 +1092,7 @@ export const thumbnailGen: Block = {
       pattern: pattern.name,
       publishable,
       thumbnailTitle: title,
+      thumbnailDescription,
       providerRoute: providerEvidence?.receipt.route ?? "verified-video-still",
       providerRequestSha256: providerEvidence?.receipt.providerRequestSha256,
       providerResponseSha256: providerEvidence?.receipt.responseSha256,

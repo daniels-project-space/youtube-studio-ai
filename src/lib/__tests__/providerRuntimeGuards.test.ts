@@ -1,24 +1,20 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
 import { join } from "node:path";
-import { LTX_23_MODEL_REVISION, generationProfile } from "@/engine/generationProfiles";
+import { LTX_25_MODEL_REVISION, generationProfile } from "@/engine/generationProfiles";
 import { parseJsonLoose } from "@/lib/gemini";
 import { toNovitaPhaseProfile } from "@/lib/novitaRenderFarm";
-import { boundFalVideoPrompt, FAL_VIDEO_PROMPT_MAX_CHARS } from "@/lib/providerText";
-
-function providerPromptGuard(): void {
-  const source = `${"cinematic rain over neon glass ".repeat(120)}FINAL_SENTINEL`;
-  const bounded = boundFalVideoPrompt(source);
-  assert.ok(bounded.length <= FAL_VIDEO_PROMPT_MAX_CHARS);
-  assert.ok(!bounded.endsWith("cinem"), "long prompts end on a word boundary");
-  assert.equal(boundFalVideoPrompt("short prompt"), "short prompt");
-}
 
 function novitaProfileGuard(): void {
   const profile = toNovitaPhaseProfile(generationProfile("production"), "video");
-  assert.equal(profile.model, "Lightricks/LTX-2.3");
-  assert.equal(profile.revision, LTX_23_MODEL_REVISION);
-  assert.equal(profile.pipeline, "two-stage-hq");
+  assert.equal(profile.model, "Lightricks/LTX-2.5");
+  assert.equal(profile.revision, LTX_25_MODEL_REVISION);
+  assert.equal(profile.pipeline, "distilled");
+  assert.equal(profile.twoStageRefine, true);
+  assert.equal(profile.quantization, "fp8-cast");
+  assert.equal(profile.offload, "cpu");
+  assert.equal(profile.spatialUpscaleFactor, 2);
+  assert.deepEqual([profile.width, profile.height, profile.stageOneWidth, profile.stageOneHeight], [1280, 704, 640, 352]);
   assert.equal(profile.infrastructure.weightStorage, "local-persistent-disk");
   assert.equal(profile.infrastructure.elasticGpuCeiling, 8);
   assert.equal(profile.allowFallback, false);
@@ -45,8 +41,7 @@ function comicFontGuard(): void {
   assert.equal(result.status, 0, `comic font fallback failed: ${result.stderr || result.stdout}`);
 }
 
-providerPromptGuard();
 novitaProfileGuard();
 trailingModelOutputGuard();
 comicFontGuard();
-console.log("PROVIDER RUNTIME GUARDS PASS: prompt bound, Novita model pin, JSON tail repair, packaged font fallback");
+console.log("PROVIDER RUNTIME GUARDS PASS: Novita model pin, JSON tail repair, packaged font fallback");

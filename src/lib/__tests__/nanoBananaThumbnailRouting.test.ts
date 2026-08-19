@@ -32,6 +32,21 @@ async function main(): Promise<void> {
   assert.doesNotMatch(production, /verifiedSceneBase|isThumbnailBaseProvenance|baseArt/,
     "publishable thumbnail_gen must purchase its pixels from the pinned Nano route");
   assert.match(production, /generateNanoBananaImageWithReceipt\s*\(/);
+  assert.match(production, /consumes:\s*\["title", "thumbnailDescription"\]/,
+    "the universal thumbnail block must require a concrete visual brief");
+  assert.match(production, /sceneSeed:\s*thumbnailDescription/,
+    "the required brief must reach the thumbnail art director");
+  assert.doesNotMatch(production, /draft_preview_placeholder|thumbnailer\s*===\s*["']title_card["']/,
+    "title-card previews must not remain an alternate thumbnail route");
+
+  const quizPlanning = await source("src/trigger/blocks/quizPlanningBlocks.ts");
+  assert.match(quizPlanning, /thumbnailDescription/,
+    "QuizYear metadata must provide the same concrete visual handoff");
+  assert.doesNotMatch(quizPlanning, /id:\s*["']quiz_thumbnail["']/,
+    "QuizYear must not retain a renderer-native thumbnail bypass");
+  const sceneCompiler = await source("src/trigger/blocks/sceneCompilerBlocks.ts");
+  assert.doesNotMatch(sceneCompiler, /id:\s*["']scene_compiler_thumbnail["']/,
+    "Scene Compiler must not retain a renderer-native thumbnail bypass");
 
   const candidate = await source("src/lib/thumbnailLab.ts");
   assert.doesNotMatch(candidate, /baseArt\??:/,

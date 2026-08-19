@@ -1,11 +1,13 @@
 import assert from "node:assert/strict";
 import { spawnSync } from "node:child_process";
+import { readFileSync } from "node:fs";
 import { mkdtemp, rm } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { planHeal, type HealableBlock } from "@/engine/healer";
 import {
   channelVisualReviewProfile,
+  maxAllowedVisualReviewGapSec,
   planVisualReviewEvidence,
   reviewRender,
   visualRepairSignals,
@@ -15,6 +17,23 @@ import {
 const FFMPEG = process.env.FFMPEG_BIN ?? "ffmpeg";
 const fixture = join(process.cwd(), "public", "golden", "comic", "comic3d.mp4");
 const reviewer = async () => JSON.stringify({ defects: [], summary: "No model findings in hermetic geometry test." });
+const malformedReviewer = async () => "this is not a structured review receipt";
+const reviewSource = readFileSync(new URL("../visualReview.ts", import.meta.url), "utf8");
+assert.match(
+  reviewSource,
+  /hasNonGoogleVisionKey\(\)/,
+  "the default final-master reviewer must reject a Gemini-only environment",
+);
+assert.match(
+  reviewSource,
+  /providers: \["openrouter"\]/,
+  "the default final-master reviewer must scope its evidence calls to non-Google providers",
+);
+assert.match(
+  reviewSource,
+  /video-review\/v4/,
+  "a pre-boundary review receipt must not be mistaken for current non-Google evidence",
+);
 const phraseReviewer = async () => JSON.stringify({
   defects: [{
     startSec: 6,
@@ -49,6 +68,30 @@ function makeBadComic(input: string, output: string): void {
   assert.equal(rendered.status, 0, rendered.stderr?.slice(-1200));
 }
 
+function makeSparseCoverageFixture(output: string): void {
+  const rendered = spawnSync(
+    FFMPEG,
+    [
+      "-y",
+      "-f", "lavfi",
+      "-i", "color=c=black:s=160x90:r=1",
+      "-t", "90",
+      "-c:v", "libx264",
+      "-preset", "ultrafast",
+      "-crf", "40",
+      "-pix_fmt", "yuv420p",
+      output,
+    ],
+    { encoding: "utf8", maxBuffer: 1 << 26 },
+  );
+  assert.equal(rendered.status, 0, rendered.stderr?.slice(-1200));
+}
+
+function plannedMaxGapSec(frames: Array<{ tSec: number }>, durationSec: number): number {
+  const timestamps = [0, ...frames.map((frame) => frame.tSec), durationSec].sort((a, b) => a - b);
+  return timestamps.slice(1).reduce((max, timestamp, index) => Math.max(max, timestamp - timestamps[index]), 0);
+}
+
 async function main(): Promise<void> {
   const comicProfile = channelVisualReviewProfile({
     contentLaneKey: "motion_comic",
@@ -57,9 +100,35 @@ async function main(): Promise<void> {
     persona: "Comic history fans",
     styleGrammar: "inked panels; restrained captions",
     qualityDimensions: ["identity", "footage"],
+    qualityCriteria: [
+      "footage: Every visual change must clarify or advance the current spoken point; decorative novelty is a defect.",
+      "pacing: Reference-quality mechanics only, no automatic comparison with a reference channel.",
+    ],
   });
   assert.match(comicProfile.expectedStructure, /speech bubbles/i, "comic channels must tell the reviewer their layout contract");
   assert.match(comicProfile.channelWorld ?? "", /Silent Night Stories/, "frozen channel identity must reach the reviewer");
+  assert.equal(comicProfile.qualityCriteria.length, 2, "full QualityBar criteria must survive the channel-review profile");
+
+  let groundedPrompt = "";
+  const groundedReviewer = async (input: { prompt: string }) => {
+    groundedPrompt = input.prompt;
+    return JSON.stringify({ defects: [], summary: "Grounded review fixture." });
+  };
+  const grounded = await reviewRender(fixture, 18, {
+    title: "Reference-quality QA grounding fixture",
+    expectTitleCard: false,
+    qualityCriteria: comicProfile.qualityCriteria,
+  }, {
+    runId: "visual-review-quality-bar",
+    reviewer: groundedReviewer,
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(grounded.verdict, "pass");
+  assert.match(groundedPrompt, /CHANNEL QUALITY BAR/, "the final reviewer must receive the full channel quality standard");
+  assert.match(groundedPrompt, /decorative novelty is a defect/i);
+  assert.match(groundedPrompt, /not an automatic comparison/i);
 
   const planned = planVisualReviewEvidence({
     durationSec: 18,
@@ -72,6 +141,27 @@ async function main(): Promise<void> {
   assert(planned.some((frame) => frame.selectionReasons.includes("scene")), "scene boundaries must contribute evidence");
   assert(planned.some((frame) => frame.selectionReasons.includes("cue")), "caption/narration cues must contribute evidence");
   assert(planned.filter((frame) => frame.selectionReasons.includes("focus")).length >= 4, "repair windows must receive dense evidence");
+
+  // Temporal anchors are reserved before high-priority scene/cue/focus frames,
+  // so a long master cannot silently lose its middle to priority truncation.
+  const longDurationSec = 3_600;
+  const longPlanned = planVisualReviewEvidence({
+    durationSec: longDurationSec,
+    sceneTimes: Array.from({ length: 120 }, (_, index) => index * 20 + 1),
+    transcriptCues: Array.from({ length: 120 }, (_, index) => ({
+      text: `Cue ${index + 1}`,
+      startSec: index * 20 + 2,
+      endSec: index * 20 + 8,
+    })),
+    focusWindows: [{ startSec: 4, endSec: 20, reason: "repair" }],
+    maxFrames: 48,
+  });
+  assert.equal(longPlanned.length, 48, "broad evidence must stay within its configured cap");
+  assert(longPlanned.filter((frame) => frame.selectionReasons.includes("uniform")).length >= 40, "long masters must retain their reserved temporal anchors");
+  assert(
+    plannedMaxGapSec(longPlanned, longDurationSec) <= maxAllowedVisualReviewGapSec(longDurationSec),
+    "priority frames must not create an unreviewed long-duration middle",
+  );
 
   // A real provider used this common phrase during the live comic proof. It
   // must become a typed, repairable occlusion rather than general_visual.
@@ -90,8 +180,44 @@ async function main(): Promise<void> {
     "provider wording such as covering the face must route to overlay_occlusion",
   );
 
+  // A malformed model reply previously became an empty defect list and could
+  // silently certify a weak render. Receipt completeness is now fail-closed.
+  const malformedReceipt = await reviewRender(fixture, 18, {
+    title: "Malformed reviewer receipt fixture",
+    expectTitleCard: false,
+  }, {
+    runId: "visual-review-malformed-receipt",
+    required: true,
+    reviewer: malformedReviewer,
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(malformedReceipt.verdict, "needs_human", "an incomplete reviewer receipt must never certify visual QA");
+  assert.match(malformedReceipt.summary, /incomplete structured receipt/i, "the receipt failure must be diagnosable");
+
   const work = await mkdtemp(join(tmpdir(), "ysa-visual-review-"));
   try {
+    const sparseCoverage = join(work, "sparse-coverage.mp4");
+    makeSparseCoverageFixture(sparseCoverage);
+    const coverageEscalated = await reviewRender(sparseCoverage, 90, {
+      title: "Required coverage-gate fixture",
+      expectTitleCard: false,
+    }, {
+      runId: "visual-review-coverage-gate",
+      required: true,
+      reviewer,
+      persistEvidence: false,
+      maxFrames: 8,
+      maxFocusFrames: 0,
+    });
+    assert.equal(coverageEscalated.verdict, "needs_human", "required review must not pass when its frame budget cannot cover the master");
+    assert(
+      coverageEscalated.evidence.coverage.maxGapSec > coverageEscalated.evidence.coverage.maxAllowedGapSec,
+      "coverage evidence must record the failed cap",
+    );
+    assert.match(coverageEscalated.summary, /evidence gap/i, "coverage escalation must be diagnosable in the QA report");
+
     const badComic = join(work, "comic-overlay-defects.mp4");
     makeBadComic(fixture, badComic);
     const flawedIntent: VisualReviewIntent = {

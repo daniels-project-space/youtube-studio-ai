@@ -1,5 +1,16 @@
 import { z } from "zod";
 import { generationProfile } from "./generationProfiles";
+import {
+  planCinematicShotLanguage,
+  type CinematicCameraMove,
+  type CinematicShotScale,
+} from "./cinematicShotLanguage";
+import {
+  causalBeatWindows,
+  coverageBoundaries,
+  MIN_CINEMATIC_BEAT_SEC,
+  pickCoverageCount,
+} from "./shotBoundaryTiming";
 
 const EPSILON = 0.02;
 
@@ -12,12 +23,47 @@ export const TimedSentenceSchema = z.object({
   evidenceRefs: z.array(z.string()),
 }).refine((value) => value.t1 > value.t0, "sentence t1 must follow t0");
 
+/**
+ * Per-beat/shot MOOD TAG (music-mood threading). DATA ONLY — no
+ * mood-to-music-section selection logic is built here; that is future work
+ * for whatever consumes this field. A bounded enum (not free text) keeps it
+ * safe for any automated consumer without needing to sanitize an open
+ * string. Optional everywhere it appears, so every existing beat/shot
+ * payload that predates this field keeps validating unchanged.
+ *
+ * Defined here — not in cinematicCaseSequence.ts — because Story Spine is
+ * upstream and already the shared ShotPlan source cinematicCaseSequence.ts
+ * imports from; cinematicCaseSequence.ts imports this same schema for its
+ * own per-beat mood field rather than redeclaring the enum.
+ */
+export const BeatMoodSchema = z.enum(["tense", "somber", "triumphant", "mysterious", "neutral"]);
+export type BeatMood = z.infer<typeof BeatMoodSchema>;
+
+/**
+ * Lightweight AUTOMATIC-PATH character-introduction concept (Phase 17). The
+ * Casefile cinematic route has its own richer `CinematicNarrativeRoleSchema`
+ * (7 values: cold_open/orientation/investigation/contradiction/reveal/
+ * aftermath/closing_residue/introduction — see cinematicCaseSequence.ts) with
+ * strict evidence-citation/cast-lock validation. Story Spine deliberately
+ * does NOT reuse that schema or its validation: this is a narrow, single-value
+ * enum (extensible later) for the one concept the automatic path needs —
+ * "this beat introduces a character on-screen" — with the same lightweight,
+ * additive-only doctrine as `BeatMoodSchema` above: optional everywhere,
+ * unrecognized values dropped rather than thrown (see planStorySpine below).
+ */
+export const NarrativeRoleSchema = z.enum(["introduction"]);
+export type NarrativeRole = z.infer<typeof NarrativeRoleSchema>;
+
 export const NarrativeBeatSchema = z.object({
   id: z.string().min(1),
   sourceSentenceIds: z.array(z.string()).min(1),
   t0: z.number().finite().nonnegative(),
   t1: z.number().finite().positive(),
   purpose: z.string().min(1),
+  /** Optional bounded mood tag; threaded down onto this beat's shots. */
+  mood: BeatMoodSchema.optional(),
+  /** Optional narrow narrative-role tag; see NarrativeRoleSchema above. */
+  narrativeRole: NarrativeRoleSchema.optional(),
   evidenceRefs: z.array(z.string()),
 }).refine((value) => value.t1 > value.t0, "beat t1 must follow t0");
 
@@ -63,6 +109,43 @@ export const ShotPlanSchema = z.object({
   prompt: z.string().min(1),
   seconds: z.number().positive(),
   storyFunction: z.string().min(1),
+  /** Optional bounded mood tag inherited from the parent narrative beat. */
+  mood: BeatMoodSchema.optional(),
+  /** Optional narrative-role tag inherited from the parent beat (see
+   *  NarrativeRoleSchema above). */
+  narrativeRole: NarrativeRoleSchema.optional(),
+  /**
+   * Character-introduction NAME CARD text (automatic-path lightweight
+   * counterpart to the Casefile route's `nameCardText` on
+   * `CinematicCoverageShotSchema`, cinematicCaseSequence.ts). Rendered via
+   * `applyNameCardOverlay`/`nameCardOverlayFilter` (src/lib/ffmpeg.ts).
+   * Optional so every shot payload that predates this field keeps validating
+   * unchanged. Lightly validated in `validateStorySpine` below (requires a
+   * non-empty `entities` list on the same shot) — NOT the Casefile route's
+   * strict citation/locked-cast checks; see the field's own comment there.
+   */
+  nameCardText: z.string().min(1).max(120).optional(),
+  /**
+   * REAL-IMAGE INSERT query (Phase 18). When present, the automatic-path
+   * renderer substitutes a real Wikimedia Commons photograph for this
+   * shot's LTX-generated clip instead of rendering it — see the
+   * `realImageInsertQuery` handling inside `gen_footage`'s per-scene loop
+   * (src/trigger/blocks/genFootageBlocks.ts), which resolves it via
+   * `searchWikimediaImage` (src/lib/wikimedia.ts) and turns the result into
+   * a short clip via `kenBurns` (src/lib/ffmpeg.ts). Lightweight and
+   * additive-only, same doctrine as `nameCardText` above: optional
+   * everywhere, so every shot payload that predates this field keeps
+   * validating unchanged. UNLIKE `nameCardText`, this is schema-only —
+   * intentionally NOT threaded through `PlanStorySpineInput`/
+   * `planStorySpine` (no automatic-path caller sets this on a beat today)
+   * and `validateStorySpine` has no companion check for it (unlike
+   * `nameCardText`'s `entities` requirement): a real-image insert is not a
+   * Casefile-style cited claim, so there is nothing to cross-validate. Any
+   * future story-outline/entity-tagging step can set it directly on a
+   * `shotList` entry — the same "standalone primitive, no live caller yet"
+   * status `src/lib/hyperframesOverlay.ts` documents for itself.
+   */
+  realImageInsertQuery: z.string().min(1).max(200).optional(),
   section: z.string().min(1),
   seed: z.number().int().nonnegative(),
 }).refine((value) => value.t1 > value.t0, "shot t1 must follow t0");
@@ -114,7 +197,19 @@ export interface PlanStorySpineInput {
   topic: string;
   narrationDurationSec: number;
   sentenceTimings: Array<{ text: string; start: number; end: number }>;
-  structure?: { beats?: Array<{ name?: string; note?: string; intentSec?: number }> };
+  structure?: {
+    beats?: Array<{
+      name?: string;
+      note?: string;
+      intentSec?: number;
+      mood?: string;
+      /** See NarrativeRoleSchema; unrecognized values are dropped, not thrown. */
+      narrativeRole?: string;
+      /** See ShotPlanSchema.nameCardText; only honored on an "introduction"
+       *  narrativeRole beat, and only on that beat's first cut shot. */
+      nameCardText?: string;
+    }>;
+  };
   visualBrief?: Record<string, unknown>;
   styleDNA?: Record<string, unknown> | null;
   generationProfile?: unknown;
@@ -166,6 +261,18 @@ export function validateStorySpine(value: StorySpine): StorySpine {
   if (spine.coverage.gaps.length || spine.coverage.ratio < 0.999999) {
     throw new Error(`story coverage is not complete (${spine.coverage.ratio})`);
   }
+  // Lightweight automatic-path validation for the character-introduction
+  // name-card exception (ShotPlanSchema.nameCardText above): NOT the
+  // Casefile route's strict evidence-citation/locked-cast checks
+  // (evaluateCinematicCaseSequence in cinematicCaseSequence.ts) — this only
+  // requires that a shot carrying on-screen name-card text also identifies
+  // which entity it introduces, so the render pipeline has something
+  // concrete to key the overlay off.
+  for (const shot of spine.shotList) {
+    if (shot.nameCardText && shot.entities.length === 0) {
+      throw new Error(`shot ${shot.id} carries nameCardText but has no entities to introduce`);
+    }
+  }
   return spine;
 }
 
@@ -202,17 +309,45 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
     t1: index === sentences.length - 1 ? duration : sentence.t1,
   }));
   const structureBeats = input.structure?.beats ?? [];
-  const narrativeBeats = intervals.map((sentence, index) => ({
-    id: `beat-${String(index + 1).padStart(4, "0")}`,
-    sourceSentenceIds: [sentence.id],
-    t0: sentence.t0,
-    t1: sentence.t1,
-    purpose:
-      structureBeats[Math.min(structureBeats.length - 1, Math.floor(index * structureBeats.length / intervals.length))]?.note ||
-      structureBeats[Math.min(structureBeats.length - 1, Math.floor(index * structureBeats.length / intervals.length))]?.name ||
-      "advance the narrated argument",
-    evidenceRefs: sentence.evidenceRefs,
-  }));
+  // Factored out of the duplicated modulo-index expression below so the new
+  // mood lookup does not triple it a third time.
+  const structureBeatForIndex = (index: number) =>
+    structureBeats.length
+      ? structureBeats[Math.min(structureBeats.length - 1, Math.floor((index * structureBeats.length) / intervals.length))]
+      : undefined;
+  // Beat id -> reviewed name-card text, populated below alongside
+  // narrativeBeats. Kept OUT of NarrativeBeatSchema (name-card text is a
+  // shot-level concept, applied to only the beat's first cut shot below) but
+  // needs to survive from this map into the shot-construction loop further
+  // down, which only has the built beat object (not the raw structureBeat)
+  // in scope.
+  const introNameCardByBeatId = new Map<string, string>();
+  const narrativeBeats = intervals.map((sentence, index) => {
+    const structureBeat = structureBeatForIndex(index);
+    // Unrecognized mood/narrativeRole values are dropped, not thrown: this is
+    // optional, non-critical metadata and must never fail an otherwise-valid
+    // spine.
+    const moodParsed = structureBeat?.mood ? BeatMoodSchema.safeParse(structureBeat.mood) : undefined;
+    const narrativeRoleParsed = structureBeat?.narrativeRole
+      ? NarrativeRoleSchema.safeParse(structureBeat.narrativeRole)
+      : undefined;
+    const beatId = `beat-${String(index + 1).padStart(4, "0")}`;
+    // Same drop-not-throw doctrine for an oversized/empty name-card string.
+    const nameCardParsed = structureBeat?.nameCardText?.trim()
+      ? z.string().min(1).max(120).safeParse(structureBeat.nameCardText.trim())
+      : undefined;
+    if (nameCardParsed?.success) introNameCardByBeatId.set(beatId, nameCardParsed.data);
+    return {
+      id: beatId,
+      sourceSentenceIds: [sentence.id],
+      t0: sentence.t0,
+      t1: sentence.t1,
+      purpose: structureBeat?.note || structureBeat?.name || "advance the narrated argument",
+      mood: moodParsed?.success ? moodParsed.data : undefined,
+      narrativeRole: narrativeRoleParsed?.success ? narrativeRoleParsed.data : undefined,
+      evidenceRefs: sentence.evidenceRefs,
+    };
+  });
 
   const dna = input.styleDNA ?? {};
   const recurringSubject = typeof dna.recurringSubject === "string" ? dna.recurringSubject : "";
@@ -238,77 +373,154 @@ export function planStorySpine(input: PlanStorySpineInput): StorySpine {
   const shotList: StorySpine["shotList"] = [];
   const dpVisualSpecs: StorySpine["dpVisualSpecs"] = [];
   let shotNo = 0;
-  const moves = ["dolly_push", "truck_left", "static", "dolly_pull", "handheld_drift"] as const;
-  const scales = ["establishing", "medium", "close", "wide", "extreme_close"] as const;
+
+  /**
+   * Not every rendered shot needs to be the same length. A beat with
+   * enough contiguous narration (>= MIN_CINEMATIC_BEAT_SEC) earns the
+   * same weighted, purpose-appropriate coverage split the Casefile
+   * cinematic draft uses instead of a blind equal division: this saves
+   * render time by putting duration where a cut earns it, while every
+   * shot still respects the locked LTX minimum. A beat too short to
+   * safely support that split (most single narrated sentences) keeps
+   * the original bounded equal division unchanged.
+   */
+  function boundariesForBeat(beat: { t0: number; t1: number }): number[][] {
+    const beatDuration = beat.t1 - beat.t0;
+    if (beatDuration < MIN_CINEMATIC_BEAT_SEC) {
+      const chunks = Math.max(1, Math.ceil(beatDuration / targetShotSec));
+      const boundaries = [beat.t0];
+      for (let chunk = 1; chunk < chunks; chunk++) {
+        boundaries.push(beat.t0 + (beatDuration * chunk) / chunks);
+      }
+      boundaries.push(beat.t1);
+      return [boundaries];
+    }
+    // Seed causalBeatWindows with the same bounded-length candidate
+    // pieces the equal split would have used, then let it regroup them
+    // into >= MIN_CINEMATIC_BEAT_SEC windows (merging a short tail into
+    // its predecessor). Each window then gets a weighted, non-uniform
+    // coverageBoundaries split instead of an equal one. Safe to call
+    // unconditionally here: causalBeatWindows only throws when total
+    // input duration is below MIN_CINEMATIC_BEAT_SEC, already excluded.
+    const candidateChunks = Math.max(1, Math.ceil(beatDuration / targetShotSec));
+    const candidates: { t0: number; t1: number }[] = [];
+    for (let chunk = 0; chunk < candidateChunks; chunk++) {
+      const t0 = beat.t0 + (beatDuration * chunk) / candidateChunks;
+      const t1 = chunk === candidateChunks - 1
+        ? beat.t1
+        : beat.t0 + (beatDuration * (chunk + 1)) / candidateChunks;
+      candidates.push({ t0, t1 });
+    }
+    return causalBeatWindows(candidates).map((window) => {
+      const windowT0 = window[0]!.t0;
+      const windowT1 = window.at(-1)!.t1;
+      const coverageCount = pickCoverageCount(windowT1 - windowT0);
+      return coverageBoundaries(windowT0, windowT1, coverageCount);
+    });
+  }
+
   for (const beat of narrativeBeats) {
     const source = intervals.find((sentence) => sentence.id === beat.sourceSentenceIds[0]);
     if (!source) throw new Error(`missing source for ${beat.id}`);
-    const chunks = Math.max(1, Math.ceil((beat.t1 - beat.t0) / targetShotSec));
-    for (let chunk = 0; chunk < chunks; chunk++) {
-      shotNo++;
-      const t0 = beat.t0 + ((beat.t1 - beat.t0) * chunk) / chunks;
-      const t1 = chunk === chunks - 1
-        ? beat.t1
-        : beat.t0 + ((beat.t1 - beat.t0) * (chunk + 1)) / chunks;
-      const id = `shot-${String(shotNo).padStart(4, "0")}`;
-      const cameraMove = moves[(shotNo - 1) % moves.length];
-      const shotScale = scales[(shotNo - 1) % scales.length];
-      const styleLock = [recurringSubject, setting, String(dna.colorGrade ?? ""), palette.join(", ")]
-        .filter(Boolean)
-        .join(". ");
-      const literalContent = source.text;
-      const prompt = [
-        `Literal story moment: ${literalContent}`,
-        styleLock ? `Locked channel world: ${styleLock}` : "",
-        `Shot scale: ${shotScale}; lens: ${shotScale === "close" ? "85mm portrait" : "35mm natural"}`,
-        "No text, letters, captions, logos, or watermarks in the image.",
-      ].filter(Boolean).join(". ");
-      const motion =
-        `Continue the literal action implied by: ${literalContent}. ` +
-        `Camera performs a restrained ${cameraMove.replaceAll("_", " ")}; preserve identity, setting, wardrobe, props, and lighting through the final frame.`;
-      const continuityState = `entity-primary/location-primary/shot-${shotNo}; no unmotivated identity, era, wardrobe, prop, palette, or lighting change`;
-      const highRisk = shotNo === 1 || /\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(literalContent);
-      const candidateCount = Math.max(profile.image.candidates, highRisk ? 2 : 1);
-      shotList.push({
-        id,
-        beatId: beat.id,
-        sourceSentenceIds: beat.sourceSentenceIds,
-        t0,
-        t1,
-        coveragePurpose: beat.purpose,
-        literalContent,
-        entities: recurringSubject ? ["entity-primary"] : [],
-        locationId: setting ? "location-primary" : undefined,
-        era: continuityLedger.era,
-        wardrobe: continuityLedger.wardrobe,
-        props: continuityLedger.props,
-        continuityState,
-        cameraMove,
-        shotScale,
-        lens: shotScale === "close" || shotScale === "extreme_close" ? "85mm portrait" : "35mm natural",
-        lighting: typeof dna.lighting === "string" ? dna.lighting : "consistent motivated natural lighting",
-        motion,
-        negative: negativeConstraints.join(", "),
-        generationProfile: profile.id,
-        candidateCount,
-        imageMinScore: profile.qa.imageMinScore,
-        shotMinScore: profile.qa.shotMinScore,
-        prompt,
-        seconds: t1 - t0,
-        storyFunction: beat.purpose,
-        section: source.sectionId,
-        seed: 100_000 + shotNo,
-      });
-      dpVisualSpecs.push({
-        shotId: id,
-        keyframePrompt: prompt,
-        motionPrompt: motion,
-        negativePrompt: negativeConstraints.join(", "),
-        styleLock,
-        firstFrameConstraint: `depict the exact story state at ${t0.toFixed(2)}s`,
-        lastFrameConstraint: `end in the same identity/setting state at ${t1.toFixed(2)}s with only motivated action advanced`,
-        continuityState,
-      });
+    const groupedBoundaries = boundariesForBeat(beat);
+    const totalChunks = groupedBoundaries.reduce((total, boundaries) => total + (boundaries.length - 1), 0);
+    let chunk = 0;
+    for (const boundaries of groupedBoundaries) {
+      for (let slot = 0; slot < boundaries.length - 1; slot++) {
+        shotNo++;
+        const t0 = boundaries[slot]!;
+        const t1 = boundaries[slot + 1]!;
+        const id = `shot-${String(shotNo).padStart(4, "0")}`;
+        const shotLanguage = planCinematicShotLanguage({
+          literalContent: source.text,
+          beatPurpose: beat.purpose,
+          shotIndex: shotNo,
+          chunkIndex: chunk,
+          chunksInBeat: totalChunks,
+          previous: shotList.length
+            ? {
+                cameraMove: shotList[shotList.length - 1]!.cameraMove as CinematicCameraMove,
+                shotScale: shotList[shotList.length - 1]!.shotScale as CinematicShotScale,
+              }
+            : undefined,
+        });
+        const { cameraMove, shotScale, lens } = shotLanguage;
+        const styleLock = [recurringSubject, setting, String(dna.colorGrade ?? ""), palette.join(", ")]
+          .filter(Boolean)
+          .join(". ");
+        const literalContent = source.text;
+        const prompt = [
+          `Literal story moment: ${literalContent}`,
+          styleLock ? `Locked channel world: ${styleLock}` : "",
+          `Visual purpose: ${shotLanguage.coveragePurpose}`,
+          `Cut rationale: ${shotLanguage.cutRationale}`,
+          `Shot scale: ${shotScale}; lens: ${lens}; camera: ${cameraMove.replaceAll("_", " ")}`,
+          "No text, letters, captions, logos, or watermarks in the image.",
+        ].filter(Boolean).join(". ");
+        const motion =
+          `Continue the literal action implied by: ${literalContent}. ${shotLanguage.motionDirection} ` +
+          `Camera performs a restrained ${cameraMove.replaceAll("_", " ")}; preserve identity, setting, wardrobe, props, and lighting through the final frame.`;
+        // A continuity state describes a *continuous dramatic unit*, not an
+        // individual shot. Shots within one narrated beat may therefore share
+        // an endpoint-conditioned LTX handoff; a new beat remains a deliberate
+        // editorial cut even when it happens in the same world.
+        const continuityState = `entity-primary/location-primary/${beat.id}; no unmotivated identity, era, wardrobe, prop, palette, or lighting change`;
+        const highRisk = shotNo === 1 || /\b[A-Z][a-z]+\s+[A-Z][a-z]+\b/.test(literalContent);
+        const candidateCount = Math.max(profile.image.candidates, highRisk ? 2 : 1);
+        shotList.push({
+          id,
+          beatId: beat.id,
+          sourceSentenceIds: beat.sourceSentenceIds,
+          t0,
+          t1,
+          coveragePurpose: shotLanguage.coveragePurpose,
+          literalContent,
+          entities: recurringSubject ? ["entity-primary"] : [],
+          locationId: setting ? "location-primary" : undefined,
+          era: continuityLedger.era,
+          wardrobe: continuityLedger.wardrobe,
+          props: continuityLedger.props,
+          continuityState,
+          cameraMove,
+          shotScale,
+          lens,
+          lighting: typeof dna.lighting === "string" ? dna.lighting : "consistent motivated natural lighting",
+          motion,
+          negative: negativeConstraints.join(", "),
+          generationProfile: profile.id,
+          candidateCount,
+          imageMinScore: profile.qa.imageMinScore,
+          shotMinScore: profile.qa.shotMinScore,
+          prompt,
+          seconds: t1 - t0,
+          storyFunction: `${beat.purpose}; ${shotLanguage.intent}; ${shotLanguage.cutRationale}`,
+          // Threaded straight from the parent beat — no mood-to-music-section
+          // selection logic here yet; this only makes the data available on
+          // the shot object for a future consumer.
+          mood: beat.mood,
+          narrativeRole: beat.narrativeRole,
+          // The name card is placed on the beat's FIRST cut shot only (chunk
+          // === 0) — a multi-shot introduction beat should not repeat the
+          // same on-screen text on every one of its shots.
+          nameCardText:
+            chunk === 0 && beat.narrativeRole === "introduction"
+              ? introNameCardByBeatId.get(beat.id)
+              : undefined,
+          section: source.sectionId,
+          seed: 100_000 + shotNo,
+        });
+        dpVisualSpecs.push({
+          shotId: id,
+          keyframePrompt: prompt,
+          motionPrompt: motion,
+          negativePrompt: negativeConstraints.join(", "),
+          styleLock,
+          firstFrameConstraint: `depict the exact story state at ${t0.toFixed(2)}s`,
+          lastFrameConstraint: `end in the same identity/setting state at ${t1.toFixed(2)}s with only motivated action advanced`,
+          continuityState,
+        });
+        chunk++;
+      }
     }
   }
 

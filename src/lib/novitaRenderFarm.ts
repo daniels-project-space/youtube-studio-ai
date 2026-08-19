@@ -5,8 +5,15 @@
  * deletion-verifying reaper. Workers never receive provider credentials.
  */
 import { createHash, createHmac } from "node:crypto";
-import { NOVITA_ELASTIC_GPU_CEILING, type GenerationProfile } from "@/engine/generationProfiles";
+import {
+  LTX_25_RTX_4090_VIDEO,
+  NOVITA_ELASTIC_GPU_CEILING,
+  type GenerationProfile,
+} from "@/engine/generationProfiles";
 import { NovitaAdmissionError, requireNovitaFleetReadiness } from "@/lib/novitaFleet";
+import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
+import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
+import type { LtxCreativeAdapterSelection } from "@/lib/ltxCreativeAdapter";
 import {
   waitForNovitaRenderPoll,
   type NovitaRenderPollWait,
@@ -43,11 +50,19 @@ export interface Shot {
   seconds: number;
   /** Motion cue — what actually moves in-frame (subject/particles), independent of camera. */
   motion: string;
+  /**
+   * Optional in-world sound direction for LTX's audio-aware video pass. This
+   * must describe only ambience or physical action: narration, dialogue, and
+   * score remain the responsibility of the separately attested final mix.
+   */
+  diegeticSoundscape?: string;
   /** Per-shot negative prompt, appended to the global negative. */
   negative?: string;
   seed?: number;
   /** R2 key of the rendered still once the image phase has produced it. */
   stillKey?: string;
+  /** Optional R2 key of a reviewed target for LTX's final conditioned frame. */
+  endStillKey?: string;
   section?: string;
   storyFunction?: string;
   /** Authored story timecodes and lineage; preserved into render manifests. */
@@ -57,6 +72,8 @@ export interface Shot {
   continuityState?: string;
   generationProfile?: "draft" | "production" | "hero";
   candidateCount?: number;
+  /** Optional cache-pinned LTX creative LoRA; exact-base and benchmark admission is enforced before spend. */
+  creativeAdapter?: LtxCreativeAdapterSelection;
 }
 
 export interface NovitaPhaseProfile {
@@ -77,7 +94,15 @@ export interface NovitaPhaseProfile {
   pipeline?: GenerationProfile["video"]["pipeline"];
   twoStageRefine?: boolean;
   distilledLoraCheckpoint?: string;
+  textEncoderCheckpoint?: string;
+  videoVaeCheckpoint?: string;
+  audioVaeCheckpoint?: string;
   spatialUpscalerCheckpoint?: string;
+  quantization?: "fp8-cast";
+  offload?: "cpu";
+  spatialUpscaleFactor?: 2;
+  stageOneWidth?: number;
+  stageOneHeight?: number;
   allowFallback: false;
 }
 
@@ -92,9 +117,22 @@ export interface NovitaRuntimeAttestation {
   model: string;
   revision: string;
   checkpoint: string;
+  precision?: "bf16" | "fp16";
   pipeline?: GenerationProfile["video"]["pipeline"];
+  twoStageRefine?: boolean;
   distilledLoraCheckpoint?: string;
+  textEncoderCheckpoint?: string;
+  videoVaeCheckpoint?: string;
+  audioVaeCheckpoint?: string;
   spatialUpscalerCheckpoint?: string;
+  quantization?: "fp8-cast";
+  offload?: "cpu";
+  spatialUpscaleFactor?: 2;
+  stageOneWidth?: number;
+  stageOneHeight?: number;
+  /** Worker-probed encoded frame dimensions, not controller intent. */
+  outputWidth?: number;
+  outputHeight?: number;
 }
 
 /** Convert one approved studio profile into the exact direct-worker phase contract. */
@@ -125,9 +163,17 @@ export function toNovitaPhaseProfile(
           ...(profile.video.distilledLoraCheckpoint
             ? { distilledLoraCheckpoint: profile.video.distilledLoraCheckpoint }
             : {}),
+          textEncoderCheckpoint: profile.video.textEncoderCheckpoint,
+          videoVaeCheckpoint: profile.video.videoVaeCheckpoint,
+          audioVaeCheckpoint: profile.video.audioVaeCheckpoint,
           ...(profile.video.spatialUpscalerCheckpoint
             ? { spatialUpscalerCheckpoint: profile.video.spatialUpscalerCheckpoint }
             : {}),
+          quantization: profile.video.quantization,
+          offload: profile.video.offload,
+          spatialUpscaleFactor: profile.video.spatialUpscaleFactor,
+          stageOneWidth: profile.video.stageOneWidth,
+          stageOneHeight: profile.video.stageOneHeight,
         }
       : {}),
     allowFallback: false,
@@ -141,6 +187,20 @@ export interface RenderedCandidate {
   key: string;
 }
 
+/** Evidence emitted by the worker only after ffprobe validates the produced MP4. */
+export interface NovitaVideoOutputProof {
+  outputWidth: number;
+  outputHeight: number;
+  /** Worker-observed LTX audio stream; required for diegetic scene assembly. */
+  hasAudio: true;
+  stageOneWidth: number;
+  stageOneHeight: number;
+  spatialUpscaleFactor: 2;
+  pipeline: "distilled";
+  quantization: "fp8-cast";
+  offload: "cpu";
+}
+
 /** Full render job config — maps ~1:1 onto the orchestrator's job schema (no translation layer). */
 export interface NovitaRenderCfg {
   /** R2 key prefix for this render's outputs, e.g. "adart2". */
@@ -150,6 +210,14 @@ export interface NovitaRenderCfg {
   profile: NovitaPhaseProfile;
   /** Global style string appended to every shot prompt. */
   style?: string;
+  /**
+   * Optional LTX 2.5 visual-style preset id (src/engine/ltxStylePresets.ts),
+   * merged into the video phase's I2V prompt contract via
+   * applyLtxI2vPromptContract. Distinct from `style` above, which is raw
+   * prose appended to every shot prompt in both phases. Omitted/unknown ids
+   * fall back to DEFAULT_LTX_STYLE_ID through getLtxStyle's own fallback.
+   */
+  styleId?: string;
   /** Global negative prompt, prepended to every shot's negative. */
   negative?: string;
   /** Director notes — appended to every shot prompt (global creative direction). */
@@ -192,6 +260,8 @@ export interface NovitaRenderResult {
   footageKeys?: string[];
   /** Exact shot/candidate mapping; callers never infer identity from array order. */
   candidates?: RenderedCandidate[];
+  /** Per-shot ffprobe evidence for the LTX x2 video phase. */
+  videoOutputProofs?: Readonly<Record<string, NovitaVideoOutputProof>>;
   outputs: number;
   durationSec: number;
   costUsd: number;
@@ -274,9 +344,21 @@ const RuntimeAttestationSchema = z.object({
   model: z.string().min(1),
   revision: z.string().regex(/^[a-f0-9]{40}$/),
   checkpoint: z.string().min(1),
+  precision: z.enum(["bf16", "fp16"]).optional(),
   pipeline: z.enum(["distilled", "two-stage-hq"]).optional(),
+  twoStageRefine: z.boolean().optional(),
   distilledLoraCheckpoint: z.string().min(1).optional(),
+  textEncoderCheckpoint: z.string().min(1).optional(),
+  videoVaeCheckpoint: z.string().min(1).optional(),
+  audioVaeCheckpoint: z.string().min(1).optional(),
   spatialUpscalerCheckpoint: z.string().min(1).optional(),
+  quantization: z.literal("fp8-cast").optional(),
+  offload: z.literal("cpu").optional(),
+  spatialUpscaleFactor: z.literal(2).optional(),
+  stageOneWidth: z.number().int().positive().optional(),
+  stageOneHeight: z.number().int().positive().optional(),
+  outputWidth: z.number().int().positive().optional(),
+  outputHeight: z.number().int().positive().optional(),
 });
 
 const BillingReceiptSchema = z.object({
@@ -367,10 +449,9 @@ export function hasNovitaRenderFarmConfig(): boolean {
   try {
     // `require` would break the ESM/Next boundary; this fast path deliberately
     // mirrors the direct config's required names without loading provider code.
-    return [
+    const required = [
       "NOVITA_API_KEY",
       "NOVITA_RENDER_WORKER_IMAGE",
-      "NOVITA_RENDER_IMAGE_AUTH_ID",
       "NOVITA_RENDER_4090_PRODUCT_ID",
       "NOVITA_VERIFIED_4090_GPU_QUOTA",
       "NOVITA_MODEL_MANIFEST_KEY",
@@ -378,7 +459,15 @@ export function hasNovitaRenderFarmConfig(): boolean {
       "NOVITA_RENDER_MAX_JOB_USD",
       "NOVITA_RENDER_MAX_FLEET_USD",
       "INTERNAL_QUERY_SECRET",
-    ].every((name) => Boolean(process.env[name]?.trim()));
+    ];
+    const usesPublicRuntimeBase = process.env.NOVITA_RENDER_WORKER_IMAGE
+      === "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
+    if (usesPublicRuntimeBase) {
+      required.push("NOVITA_RUNTIME_BUNDLE_KEY", "NOVITA_RUNTIME_BUNDLE_SHA256");
+    } else if (process.env.NOVITA_RENDER_PUBLIC_WORKER_IMAGE !== "1") {
+      required.push("NOVITA_RENDER_IMAGE_AUTH_ID");
+    }
+    return required.every((name) => Boolean(process.env[name]?.trim()));
   } catch {
     return false;
   }
@@ -445,17 +534,30 @@ export function validate(cfg: NovitaRenderCfg, phase: "image" | "video"): void {
       errs.push("fps override conflicts with pinned profile");
     }
     if (phase === "video") {
-      if (profile.id === "draft") {
-        if (profile.pipeline !== "distilled" || profile.twoStageRefine !== false || !profile.spatialUpscalerCheckpoint) {
-          errs.push("draft video must use the pinned efficient distilled pipeline and spatial upscaler");
-        }
-      } else if (
-        profile.pipeline !== "two-stage-hq"
-        || profile.twoStageRefine !== true
-        || !profile.distilledLoraCheckpoint
-        || !profile.spatialUpscalerCheckpoint
+      const expected = LTX_25_RTX_4090_VIDEO;
+      if (
+        profile.model !== expected.model
+        || profile.revision !== expected.revision
+        || profile.checkpoint !== expected.checkpoint
+        || profile.width !== expected.width
+        || profile.height !== expected.height
+        || profile.fps !== expected.fps
+        || profile.steps !== expected.steps
+        || profile.guidanceScale !== expected.guidanceScale
+        || profile.precision !== expected.precision
+        || profile.pipeline !== expected.pipeline
+        || profile.twoStageRefine !== expected.twoStageRefine
+        || profile.textEncoderCheckpoint !== expected.textEncoderCheckpoint
+        || profile.videoVaeCheckpoint !== expected.videoVaeCheckpoint
+        || profile.audioVaeCheckpoint !== expected.audioVaeCheckpoint
+        || profile.spatialUpscalerCheckpoint !== expected.spatialUpscalerCheckpoint
+        || profile.quantization !== expected.quantization
+        || profile.offload !== expected.offload
+        || profile.spatialUpscaleFactor !== expected.spatialUpscaleFactor
+        || profile.stageOneWidth !== expected.stageOneWidth
+        || profile.stageOneHeight !== expected.stageOneHeight
       ) {
-        errs.push("production and hero video must use the pinned two-stage HQ pipeline with distilled LoRA and spatial upscaler");
+        errs.push("video must use the exact LTX-2.5 distilled 640x352-to-1280x704 x2 RTX-4090 contract");
       }
     }
   }
@@ -588,7 +690,12 @@ async function launchBridgeRender(
   const readiness = await requireNovitaFleetReadiness({ baseUrl, token });
   const budget = readiness.attestation?.budget;
   if (!budget) throw new Error("novitaRenderFarm: fleet readiness omitted its spend admission contract");
-  const requestedCap = callerMaxCostUsd === undefined ? Number.POSITIVE_INFINITY : callerMaxCostUsd;
+  // Retired today, but keep this dormant bridge safe if it is ever revived:
+  // an omitted caller cap must not become fleet-wide admission.
+  if (!Number.isFinite(callerMaxCostUsd) || callerMaxCostUsd === undefined || callerMaxCostUsd <= 0) {
+    throw new NovitaAdmissionError("legacy Novita bridge requires an explicit positive signed worker cost ceiling");
+  }
+  const requestedCap = callerMaxCostUsd;
   const maxCostUsd = Math.min(budget.maxFleetUsd, budget.maxJobUsd * expectedJobIds.length, requestedCap);
   if (!Number.isFinite(maxCostUsd) || maxCostUsd <= 0) {
     throw new Error("novitaRenderFarm: fleet readiness returned an invalid hard spend cap");
@@ -712,9 +819,21 @@ function assertStatusMatchesLaunch(
     || attestation.model !== launch.profile.model
     || attestation.revision !== launch.profile.revision
     || attestation.checkpoint !== launch.profile.checkpoint
+    || (launch.phase === "video" && attestation.precision !== launch.profile.precision)
     || attestation.pipeline !== launch.profile.pipeline
+    || attestation.twoStageRefine !== launch.profile.twoStageRefine
     || attestation.distilledLoraCheckpoint !== launch.profile.distilledLoraCheckpoint
+    || attestation.textEncoderCheckpoint !== launch.profile.textEncoderCheckpoint
+    || attestation.videoVaeCheckpoint !== launch.profile.videoVaeCheckpoint
+    || attestation.audioVaeCheckpoint !== launch.profile.audioVaeCheckpoint
     || attestation.spatialUpscalerCheckpoint !== launch.profile.spatialUpscalerCheckpoint
+    || attestation.quantization !== launch.profile.quantization
+    || attestation.offload !== launch.profile.offload
+    || attestation.spatialUpscaleFactor !== launch.profile.spatialUpscaleFactor
+    || attestation.stageOneWidth !== launch.profile.stageOneWidth
+    || attestation.stageOneHeight !== launch.profile.stageOneHeight
+    || (launch.phase === "video" && attestation.outputWidth !== launch.profile.width)
+    || (launch.phase === "video" && attestation.outputHeight !== launch.profile.height)
   ) {
     throw new Error(`novitaRenderFarm: bridge worker did not attest the pinned Novita spot/local-disk model contract for ${launch.jobId}`);
   }
@@ -855,7 +974,7 @@ async function startImageRender(userCfg: NovitaRenderCfg) {
 }
 
 async function startVideoRender(userCfg: NovitaRenderCfg) {
-  const cfg = normalizedCfg(userCfg);
+  const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map((shot) => applyLtxI2vPromptContract(shot, userCfg.styleId)) });
   validate(cfg, "video");
   await bootstrapSecrets(() => {}, { required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
   const jobs = videoJobs(cfg);
@@ -888,12 +1007,23 @@ export async function launchVideo(userCfg: NovitaRenderCfg): Promise<NovitaRende
 export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
   const cfg = normalizedCfg(userCfg);
   validate(cfg, "image");
+  if (cfg.maxCostUsd === undefined) {
+    throw new NovitaAdmissionError("novita image render requires an explicit signed worker cost ceiling");
+  }
+  // Do not let a caller hand the direct fleet a broad stage/run ceiling. The
+  // immutable profile and actual candidate fanout determine the only valid
+  // per-worker envelope, and the caller ceiling merely admits or rejects it.
+  const envelope = novitaCostEnvelope({
+    label: "novita image render",
+    imageJobs: imageJobs(cfg).length,
+    maxCostUsd: cfg.maxCostUsd,
+  });
   // Dynamic import prevents the type-only direct controller dependency from
   // creating a module cycle while retaining the old bridge helpers solely for
   // historical receipt validation. Runtime rendering never reaches the VPS
   // bridge.
   const { renderDirectNovita } = await import("./novitaDirectRender");
-  return await renderDirectNovita(cfg, "image");
+  return await renderDirectNovita({ ...cfg, maxCostUsd: envelope.imageMaxCostUsd }, "image");
 }
 
 /**
@@ -903,8 +1033,16 @@ export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRend
  * `timeline_assemble` (and any other downstream block) consumes it unmodified.
  */
 export async function renderVideo(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
-  const cfg = normalizedCfg(userCfg);
+  const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map((shot) => applyLtxI2vPromptContract(shot, userCfg.styleId)) });
   validate(cfg, "video");
+  if (cfg.maxCostUsd === undefined) {
+    throw new NovitaAdmissionError("novita video render requires an explicit signed worker cost ceiling");
+  }
+  const envelope = novitaCostEnvelope({
+    label: "novita video render",
+    videoJobs: videoJobs(cfg).length,
+    maxCostUsd: cfg.maxCostUsd,
+  });
   const { renderDirectNovita } = await import("./novitaDirectRender");
-  return await renderDirectNovita(cfg, "video");
+  return await renderDirectNovita({ ...cfg, maxCostUsd: envelope.videoMaxCostUsd }, "video");
 }

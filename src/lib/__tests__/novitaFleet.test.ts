@@ -20,7 +20,11 @@ import {
   assertRtx4090VideoRuntime,
   automaticRtx4090Concurrency,
   budgetBoundedWorkerLifetime,
+  runtimeBootstrapSource,
+  settleNovitaWorkerWave,
 } from "@/lib/novitaDirectRender";
+import { generationProfile } from "@/engine/generationProfiles";
+import { toNovitaPhaseProfile } from "@/lib/novitaRenderFarm";
 
 function attestation(): NovitaFleetAttestation {
   return {
@@ -46,15 +50,12 @@ function attestation(): NovitaFleetAttestation {
       modelManifestSha256: "b".repeat(64),
     },
     models: {
-      gemma: { model: OFFICIAL_RENDER_PINS.gemma.model, revision: "c".repeat(40), localCacheVerified: true },
       zImage: { ...OFFICIAL_RENDER_PINS.zImage, localCacheVerified: true },
       ltx: {
-        model: OFFICIAL_RENDER_PINS.ltx.model,
-        revision: OFFICIAL_RENDER_PINS.ltx.revision,
-        runtimeRepository: OFFICIAL_RENDER_PINS.ltx.runtimeRepository,
-        runtimeRevision: OFFICIAL_RENDER_PINS.ltx.runtimeRevision,
+        ...OFFICIAL_RENDER_PINS.ltx,
         localCacheVerified: true,
-        twoStageHqVerified: true,
+        distilledTwoStageX2Verified: true,
+        rtx4090ProfileBenchmarked: true,
       },
     },
     controls: {
@@ -156,14 +157,56 @@ async function main() {
   assert.equal(automaticRtx4090Concurrency(Array.from({ length: 7 }, () => ({ seconds: 5 }))), 1);
   assert.equal(automaticRtx4090Concurrency(Array.from({ length: 8 }, () => ({ seconds: 5 }))), 8);
   assert.equal(automaticRtx4090Concurrency(Array.from({ length: 5 }, () => ({ seconds: 12 }))), 8);
+
+  // A renderer failure must not release the parent stage while another worker
+  // is still live. The wave fence waits for the second worker's terminal
+  // teardown outcome before it surfaces the first worker's failure.
+  const waveEvents: string[] = [];
+  let releaseSecondWorker!: () => void;
+  const secondWorkerTerminal = new Promise<void>((resolve) => { releaseSecondWorker = resolve; });
+  const failingWave = settleNovitaWorkerWave(["first", "second"], async (worker) => {
+    waveEvents.push(`${worker}:started`);
+    if (worker === "first") throw new Error("first worker failed");
+    await secondWorkerTerminal;
+    waveEvents.push("second:teardown-complete");
+    return worker;
+  });
+  await Promise.resolve();
+  await Promise.resolve();
+  let waveFailureObserved = false;
+  void failingWave.catch(() => { waveFailureObserved = true; });
+  await Promise.resolve();
+  assert.equal(waveFailureObserved, false, "wave must remain open until the sibling reaches terminal teardown");
+  assert.deepEqual(waveEvents, ["first:started", "second:started"]);
+  releaseSecondWorker();
+  await assert.rejects(failingWave, /2 terminal outcome\(s\) with 1 failure\(s\): first worker failed/);
+  assert.deepEqual(waveEvents, ["first:started", "second:started", "second:teardown-complete"]);
+
   assert.equal(budgetBoundedWorkerLifetime({ maximumCostUsd: 0.4, hourlyRate: 0.17 }).maxRuntimeSeconds, 7_200);
   assert(budgetBoundedWorkerLifetime({ maximumCostUsd: 0.35, hourlyRate: 0.17 }).maxRuntimeSeconds < 7_200);
   assert(budgetBoundedWorkerLifetime({ maximumCostUsd: 0.1, hourlyRate: 0.17 }).maxRuntimeSeconds < 7_200);
   assert.throws(() => budgetBoundedWorkerLifetime({ maximumCostUsd: 0.001, hourlyRate: 0.17 }), NovitaAdmissionError);
   assert.throws(
-    () => assertRtx4090VideoRuntime({ model: OFFICIAL_RENDER_PINS.ltx.model }),
-    /needs at least 32 GB.*RTX 4090 has 24 GB/,
+    () => assertRtx4090VideoRuntime(toNovitaPhaseProfile(generationProfile("production"), "video")),
+    /ltx_2_5_revision_not_benchmarked_on_rtx_4090/,
   );
+
+  const publicLtxBootstrap = runtimeBootstrapSource("a".repeat(64));
+  assert.match(publicLtxBootstrap, /\.torch-cu128-2\.8\.0/);
+  assert.match(publicLtxBootstrap, /torch==2\.8\.0/);
+  assert.match(publicLtxBootstrap, /torchvision==0\.23\.0/);
+  assert.match(publicLtxBootstrap, /torchaudio==2\.8\.0/);
+  assert.match(publicLtxBootstrap, /download\.pytorch\.org\/whl\/cu128/);
+  assert.doesNotMatch(publicLtxBootstrap, /cu118|torch==2\.7\.1/);
+  assert.match(publicLtxBootstrap, /ensure_triton_toolchain\(\)/);
+  assert.match(publicLtxBootstrap, /build-essential/);
+  assert.match(publicLtxBootstrap, /'build-essential','ffmpeg'/);
+  assert.match(publicLtxBootstrap, /ffmpeg=shutil\.which\('ffmpeg'\)/);
+  assert.match(publicLtxBootstrap, /ffprobe=shutil\.which\('ffprobe'\)/);
+  assert.match(publicLtxBootstrap, /media_tool_ready\(ffmpeg\).*media_tool_ready\(ffprobe\)/);
+  assert.match(publicLtxBootstrap, /compiler_ready\(cc\)[\s\S]*compiler_ready\(cxx\)/);
+  assert.match(publicLtxBootstrap, /packages\/ltx-core\/src/);
+  assert.match(publicLtxBootstrap, /packages\/ltx-pipelines\/src/);
 
   assert.throws(
     () => planNovitaCapacityWaves({
@@ -217,6 +260,66 @@ async function main() {
   assert.equal(request.billingMode, "spot");
   assert.deepEqual(request.networkStorages, [{ Id: "storage-id", mountPoint: "/network" }]);
   assert(!request.envs.some((item) => /SECRET|ACCESS_KEY|API_KEY|TOKEN/.test(item.key)));
+  const publicRequest = buildNovitaCreateWorkerRequest({
+    ...requestArgs,
+    imageAuthId: undefined,
+    publicImage: true,
+  });
+  assert.equal("imageAuthId" in publicRequest, false);
+  assert.throws(
+    () => buildNovitaCreateWorkerRequest({ ...requestArgs, imageAuthId: undefined }),
+    /registry authentication, or be the approved public GHCR worker/,
+  );
+  const runtimeBaseImage = "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385";
+  const runtimeBundleRequest = buildNovitaCreateWorkerRequest({
+    ...requestArgs,
+    image: runtimeBaseImage,
+    imageAuthId: undefined,
+    publicImage: true,
+    runtimeBundle: {
+      downloadUrl: "https://signed.example/ltx-runtime.tar.gz?signature=redacted",
+      sha256: "f".repeat(64),
+      archive: "gzip",
+      bootstrapUrl: "https://signed.example/ltx-runtime-bootstrap.py?signature=redacted",
+    },
+  });
+  assert.match(String(runtimeBundleRequest.command), /NOVITA_RUNTIME_BOOTSTRAP_URL/);
+  assert(runtimeBundleRequest.envs.some((item) => item.key === "NOVITA_RUNTIME_BUNDLE_URL"));
+  assert(runtimeBundleRequest.envs.some((item) => item.key === "NOVITA_RUNTIME_BOOTSTRAP_URL"));
+  assert.throws(
+    () => buildNovitaCreateWorkerRequest({ ...requestArgs, image: runtimeBaseImage, imageAuthId: undefined, publicImage: true }),
+    /requires a sealed runtime bundle/,
+  );
+  assert.throws(
+    () => buildNovitaCreateWorkerRequest({
+      ...requestArgs,
+      image: `ghcr.io/example/untrusted-worker@sha256:${"e".repeat(64)}`,
+      imageAuthId: undefined,
+      publicImage: true,
+    }),
+    /registry authentication, or be the approved public GHCR worker/,
+  );
+
+  assert.equal(isRtx4090Sku("RTX 4090"), true);
+  assert.equal(isRtx4090Sku("NVIDIA GeForce RTX 4090 24GB"), true);
+  assert.equal(isRtx4090Sku("RTX 4090D"), false);
+  assert.equal(isRtx4090Sku("NVIDIA H100 80GB HBM3"), false);
+  assert.throws(
+    () => buildNovitaCreateWorkerRequest({ ...requestArgs, gpuSku: "RTX 4090D" }),
+    /exactly RTX 4090/,
+  );
+  assert.throws(
+    () => selectRtx4090SpotProduct([{
+      id: "h100.8c80g",
+      name: "NVIDIA H100 80GB HBM3",
+      gpuCount: 1,
+      availableDeploy: true,
+      inventoryState: "high",
+      spotPriceUsdPerHour: 2.5,
+      regions: ["US-CA-NAS-02 (California)"],
+    }], "h100.8c80g"),
+    /RTX 4090/,
+  );
 
   assert.equal(isRtx4090Sku("RTX 4090"), true);
   assert.equal(isRtx4090Sku("NVIDIA GeForce RTX 4090 24GB"), true);
@@ -276,7 +379,7 @@ async function main() {
       inventoryState: "high", spotPrice: "17000", regions: ["US-CA-NAS-02 (California)"],
       }] });
     }
-    if (url.includes("/gpu/instances?")) return Response.json({ instances: [] });
+    if (url.includes("/gpu/instances?")) return Response.json({ data: { instances: [] } });
     if (url.includes("/networkstorages/list")) return Response.json({ data: [{
       storageId: "volume-id", storageName: "ai-infra-models", storageSize: 200,
       clusterId: "us-ca-nas-2", clusterName: "US-CA-NAS-02 (California)",
@@ -284,6 +387,13 @@ async function main() {
     if (url.endsWith("/repository/auths")) return Response.json({ data: [{
       id: "registry-id", name: "ghcr", username: "must-not-leak", password: "must-not-leak",
     }] });
+    if (url.endsWith("/image/prewarm") && init?.method === "POST") {
+      const body = JSON.parse(String(init.body)) as Record<string, unknown>;
+      assert.equal(body.imageUrl, requestArgs.image);
+      assert.equal("repositoryAuth" in body, false);
+      assert.deepEqual(body.productIds, ["4090.16c96g.v2"]);
+      return Response.json({ data: { id: "prewarm-123" } });
+    }
     if (url.includes("/image/prewarm")) {
       assert.equal(parsedUrl.searchParams.get("page"), "1");
       assert.equal(parsedUrl.searchParams.get("pageSize"), "100");
@@ -292,7 +402,7 @@ async function main() {
         imageUrl: `ghcr.io/daniels-project-space/youtube-render-worker@sha256:${"a".repeat(64)}`,
       }] });
     }
-    if (url.endsWith("/gpu/instance/create")) return Response.json({ id: "instance-123" });
+    if (url.endsWith("/gpu/instance/create")) return Response.json({ data: { id: "instance-123" } });
     if (url.endsWith("/gpu/instance/stop") || url.endsWith("/gpu/instance/delete")) return Response.json({});
     if (url.includes("/gpu/instance?instanceId=")) {
       instanceReads += 1;
@@ -307,6 +417,12 @@ async function main() {
   assert.equal(snapshot.registryAuthCount, 1);
   assert.deepEqual(snapshot.prewarmedImageDigests, [`sha256:${"a".repeat(64)}`]);
   assert.equal(JSON.stringify(snapshot).includes("must-not-leak"), false);
+  assert.equal(await provider.createImagePrewarm({
+    image: requestArgs.image,
+    clusterId: "us-ca-nas-2",
+    productIds: ["4090.16c96g.v2"],
+    note: "sealed LTX worker prewarm",
+  }), "prewarm-123");
   assert.equal(await provider.createSpotWorker(request), "instance-123");
   const waits: number[] = [];
   await provider.deleteAndVerify("instance-123", async (milliseconds) => { waits.push(milliseconds); });
@@ -322,20 +438,20 @@ async function main() {
     const url = new URL(String(input));
     const page = Number(url.searchParams.get("pageNum"));
     if (url.pathname.endsWith("/gpu/instances") && page === 0) {
-      return Response.json({
+      return Response.json({ data: {
         total: 101,
         instances: Array.from({ length: 100 }, (_, index) => ({
           id: `foreign-${index}`,
           name: `other-service-${index}`,
           status: "running",
         })),
-      });
+      } });
     }
     if (url.pathname.endsWith("/gpu/instances") && page === 1) {
-      return Response.json({
+      return Response.json({ data: {
         total: 101,
         instances: [{ id: "late-worker", name: "yt-render-4090-late-page", status: "running" }],
-      });
+      } });
     }
     return Response.json({}, { status: 404 });
   });

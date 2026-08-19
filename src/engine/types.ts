@@ -54,6 +54,23 @@ export interface StageContext {
   artifactRefs?: Readonly<Record<string, ArtifactRef>>;
   /** Per-run budget ceiling in USD (preflight asserts this is set). */
   budgetUsd: number;
+  /**
+   * Exact compiler reservation for this individual paid block. It is absent
+   * for unpaid blocks and intentionally absent in unauthenticated/direct
+   * contexts; a provider-facing block must fail closed rather than substitute
+   * the broader run budget.
+   */
+  stageBudgetUsd?: number;
+  /**
+   * Re-evaluate the remaining compiler envelopes against the live artifact
+   * store before a provider starts. This is for deterministic late-bound
+   * contracts whose exact bounded cost is only knowable after an unpaid plan
+   * stage has completed (for example, a cinematic final-master review plan).
+   */
+  assertRemainingBudgetReservation?: (args?: {
+    reason?: string;
+    requiredFuturePaidBlockIds?: readonly string[];
+  }) => { reservedMaxCostUsd: number; blockIds: readonly string[] };
   /** Exact provider-token spend observed in this block's runner scope so a
    * composite cost/checkpoint can include it without estimating or hiding it. */
   modelUsageCostUsd?: (kinds?: readonly CostModelUsageKind[]) => number;

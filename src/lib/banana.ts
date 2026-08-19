@@ -10,9 +10,15 @@ import { createHash } from "node:crypto";
 import { writeFile } from "node:fs/promises";
 import { dirname } from "node:path";
 import { canonicalJson } from "@/lib/canonicalJson";
-import { parseJsonLoose } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import {
+  assertGeminiRuntimeAllowed,
+  isGeminiRuntimeEnabled,
+  parseJsonLoose,
+  sealedNanoBananaThumbnailPurpose,
+} from "@/lib/gemini";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateFalImage } from "@/lib/falImage";
+import { hydrateEnv } from "@/lib/vault";
 import { PRICE } from "@/engine/pricing";
 import { recordImageUsage } from "@/lib/imageUsage";
 import { rasterImageDimensions } from "@/lib/imageDimensions";
@@ -38,14 +44,6 @@ export {
  * upgrades to Pro (a transient flash blip must not 3.4x the price).
  * BANANA_FORCE_MODEL overrides everything (emergency pin).
  */
-const PRO_MODELS = ["gemini-3-pro-image-preview", "gemini-2.5-flash-image"];
-const FLASH_MODELS = ["gemini-2.5-flash-image"];
-
-function modelsFor(tier: "pro" | "flash"): string[] {
-  if (process.env.BANANA_FORCE_MODEL) return [process.env.BANANA_FORCE_MODEL];
-  return tier === "pro" ? PRO_MODELS : FLASH_MODELS;
-}
-
 /** Billed-generation counters (by tier) — pipeline blocks report real cost from
  *  these. `fal` counts router-delegated FLUX renders (≈ $0.04/image — the same
  *  rate as banana flash, which is what cost consumers bill it at). */
@@ -77,23 +75,41 @@ export class BananaImageSubmissionError extends Error {
  * the operator sets IMAGE_DISABLE_GEMINI=1 or puts "fal" FIRST in
  * IMAGE_PROVIDERS. Default (both unset) keeps the Google path byte-for-byte.
  */
-function falImageRouteActive(): boolean {
-  if (process.env.IMAGE_DISABLE_GEMINI === "1") return true;
-  const providers = (process.env.IMAGE_PROVIDERS || "")
-    .split(",")
-    .map((s) => s.trim().toLowerCase())
-    .filter(Boolean);
-  return providers[0] === "fal";
-}
+
 
 export function hasBanana(): boolean {
-  if (falImageRouteActive()) return !!process.env.FAL_KEY;
-  return !!process.env.GEMINI_API_KEY;
+  // Generic image generation is FAL-only. Gemini's distinct capability is
+  // intentionally exposed only as `hasNanoBanana()` for sealed thumbnails.
+  return !!process.env.FAL_KEY;
 }
 
 /** Thumbnail readiness ignores the generic image router by design. */
 export function hasNanoBanana(): boolean {
-  return !!process.env.GEMINI_API_KEY;
+  // Normal worker bootstrap intentionally does not load the thumbnail-only
+  // credential. A vault-authenticated worker is therefore *eligible* here;
+  // the actual sealed route hydrates and verifies the key immediately before
+  // its provider boundary below.
+  return isGeminiRuntimeEnabled() && Boolean(process.env.GEMINI_API_KEY || process.env.VAULT_ACCESS_TOKEN);
+}
+
+/**
+ * Keep the Gemini credential inside the only admitted caller. Generic worker
+ * bootstrap must never make this credential available to scripts, planners,
+ * reviewers, or any future Google SDK import.
+ */
+async function hydrateSealedNanoBananaThumbnailCredential(): Promise<void> {
+  assertGeminiRuntimeAllowed(
+    "Nano Banana thumbnail credential",
+    sealedNanoBananaThumbnailPurpose(),
+  );
+  if (!process.env.GEMINI_API_KEY) {
+    await hydrateEnv("gemini", {
+      geminiPurpose: sealedNanoBananaThumbnailPurpose(),
+    });
+  }
+  if (!process.env.GEMINI_API_KEY) {
+    throw new Error("nano banana thumbnail: GEMINI_API_KEY is not configured in the sealed thumbnail vault service");
+  }
 }
 
 /** The proven craft contract — prepended to EVERY brief. */
@@ -257,7 +273,7 @@ export async function bananaTypeCard(args: {
           `spelled, fully legible, no gibberish or extra words? Return STRICT JSON {"exact":bool,"legible":bool,"fix":"<=12 words"}.`,
         imagePaths: [args.outJpg],
         json: true,
-        maxTokens: 150,
+        maxTokens: VISION_GATE_MAX_TOKENS,
       }, args.log);
       if (raw == null) {
         // Judge unavailable after retry → spelling is UNVERIFIED. Re-rendering
@@ -347,6 +363,14 @@ async function generateGeminiImage(
     strictNanoThumbnail?: boolean;
   },
 ): Promise<GeminiImageResult> {
+  // Gemini is thumbnail-only. Generic `generateBananaImage()` callers must
+  // take their FAL route; only the receipt-bound profile below can spend here.
+  assertGeminiRuntimeAllowed(
+    options.strictNanoThumbnail
+      ? "sealed Nano Banana thumbnail image generation"
+      : "Gemini image generation outside the sealed thumbnail module",
+    options.strictNanoThumbnail ? sealedNanoBananaThumbnailPurpose() : undefined,
+  );
   const key = process.env.GEMINI_API_KEY;
   if (!key) throw new Error("banana: GEMINI_API_KEY missing (vault service 'gemini')");
   const prompt = args.allowText ? args.prompt : args.prompt + NO_TEXT_CLAUSE;
@@ -550,6 +574,7 @@ export async function generateNanoBananaImageWithReceipt(
     idempotencyContext?: string;
   },
 ): Promise<NanoBananaImageResult> {
+  await hydrateSealedNanoBananaThumbnailCredential();
   const profile = NANO_BANANA_THUMBNAIL_PROFILE;
   const generated = await generateGeminiImage({
     prompt: args.prompt,
@@ -612,36 +637,27 @@ export async function generateNanoBananaImage(
 }
 
 export async function generateBananaImage(args: BananaImageArgs): Promise<Buffer> {
-  // PROVIDER ROUTER: when the operator disabled Google image gen, EVERY engine
-  // that calls generateBananaImage transparently renders on fal FLUX instead
-  // (same args, bytes out). A missing FAL_KEY throws — never silently fall back
-  // to the provider the operator explicitly turned off.
-  if (falImageRouteActive()) {
-    if (!process.env.FAL_KEY) {
-      throw new Error(
-        "banana: fal image route active (IMAGE_DISABLE_GEMINI/IMAGE_PROVIDERS) but FAL_KEY missing " +
-          "(vault service 'fal') — refusing to fall back to the disabled Google provider",
-      );
-    }
-    const bytes = await generateFalImage({
-      prompt: args.prompt,
-      aspectRatio: args.aspectRatio,
-      imageSize: args.imageSize,
-      images: (args.images ?? []).map((im) => ({ data: im.data, mimeType: im.mimeType ?? "image/png" })),
-      allowText: args.allowText, // generateFalImage appends NO_TEXT_CLAUSE itself
-      // Mirror banana's tiering on the fal route: flash (picture-only bulk
-      // assets) rides the cheap model; text-design renders stay on quality.
-      tier: args.tier ?? (args.allowText ? "pro" : "flash"),
-      maxProviderAttempts: args.maxProviderAttempts,
-      onUsage: (usage) => {
-        bananaCounters.fal += usage.images;
-        bananaCounters.falCostUsd += usage.costUsd;
-      },
-    });
-    return bytes;
+  if (!process.env.FAL_KEY) {
+    throw new Error(
+      "banana: generic image generation requires FAL_KEY; Gemini is reserved exclusively for sealed Nano Banana thumbnails",
+    );
   }
-  const tier = args.tier ?? (args.allowText ? "pro" : "flash");
-  return (await generateGeminiImage(args, { models: modelsFor(tier) })).bytes;
+  const bytes = await generateFalImage({
+    prompt: args.prompt,
+    aspectRatio: args.aspectRatio,
+    imageSize: args.imageSize,
+    images: (args.images ?? []).map((im) => ({ data: im.data, mimeType: im.mimeType ?? "image/png" })),
+    allowText: args.allowText, // generateFalImage appends NO_TEXT_CLAUSE itself
+    // Mirror banana's tiering: picture-only bulk assets ride the cheap model;
+    // text-design renders remain on the quality model.
+    tier: args.tier ?? (args.allowText ? "pro" : "flash"),
+    maxProviderAttempts: args.maxProviderAttempts,
+    onUsage: (usage) => {
+      bananaCounters.fal += usage.images;
+      bananaCounters.falCostUsd += usage.costUsd;
+    },
+  });
+  return bytes;
 }
 
 export interface BananaVerdict {
@@ -726,7 +742,7 @@ export async function bananaThumbnail(args: {
         `Return STRICT JSON {"textOk":bool,"faceClear":bool,"punch":n,"styleMatch":n,"storyMatch":n,"uiClean":bool,"fix":"<=15 words"}.`,
       imagePaths: [args.outJpg],
       json: true,
-      maxTokens: 250,
+      maxTokens: VISION_GATE_MAX_TOKENS,
     }, args.log);
     if (raw == null) {
       // Judge unavailable after retry — a thumbnail is an allowText render, so

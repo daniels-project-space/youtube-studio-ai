@@ -35,6 +35,58 @@ export interface RunSpecInputs {
   log?: (msg: string, extra?: Record<string, unknown>) => void;
 }
 
+/**
+ * The runtime keeps skipped assertions non-blocking so draft exploration can
+ * continue when an optional evaluator is unavailable. Production editorial
+ * evidence has a stricter question: did the critic actually evaluate at least
+ * one assertion, and were all must-pass assertions measurable? Keep that
+ * decision separate from `runValidationSpec()` so callers can preserve useful
+ * draft diagnostics without turning an unmeasured result into a release claim.
+ */
+export interface ProductionValidationAcceptance {
+  ready: boolean;
+  blockers: string[];
+  evaluatedAssertionCount: number;
+}
+
+export function assessProductionValidationAcceptance(
+  outcome: ValidationOutcome | undefined,
+): ProductionValidationAcceptance {
+  if (!outcome) {
+    return {
+      ready: false,
+      blockers: ["critic validation specification did not run"],
+      evaluatedAssertionCount: 0,
+    };
+  }
+
+  const blockers: string[] = [];
+  const required = outcome.results.filter((result) => result.severity === "block");
+  const skippedRequired = required.filter((result) => result.skipped === true);
+  const evaluated = outcome.results.filter((result) => result.skipped !== true);
+
+  if (outcome.results.length === 0) {
+    blockers.push("critic validation specification contained no assertions");
+  }
+  if (evaluated.length === 0) {
+    blockers.push("critic validation specification did not evaluate any assertion");
+  }
+  if (skippedRequired.length) {
+    blockers.push(
+      `required critic assertions were skipped or unmeasured: ${skippedRequired.map((result) => result.id).join(", ")}`,
+    );
+  }
+  if (!outcome.passed) {
+    blockers.push("a required critic assertion failed");
+  }
+
+  return {
+    ready: blockers.length === 0,
+    blockers,
+    evaluatedAssertionCount: evaluated.length,
+  };
+}
+
 async function evalAssertion(
   a: ValidationAssertion,
   inputs: RunSpecInputs,

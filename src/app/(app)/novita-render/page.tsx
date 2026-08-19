@@ -2,6 +2,10 @@
 
 import { useEffect, useRef, useState, type CSSProperties } from "react";
 import { GENERATION_PROFILES, type GenerationProfile } from "@/engine/generationProfiles";
+import {
+  assessNovitaVideoProfileRuntime,
+  novitaVideoProfileIdentity,
+} from "@/engine/runtimeCapability";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
 import {
   NOVITA_RENDER_STATUS_TIMEOUT_MS,
@@ -64,6 +68,12 @@ interface NovitaFleetHealth {
   effectiveGpuLimit: number | null;
   activeGpuCount: number | null;
   blockers: string[];
+  attestation: {
+    /** Only Trigger may set this to direct-trigger after a direct-controller check. */
+    source: "direct-trigger" | "studio-static" | "unavailable";
+    profileIdentity: string | null;
+    exactLtx25Rtx4090X2: boolean;
+  };
   contract: {
     version: string;
     dispatchReady: boolean;
@@ -72,7 +82,12 @@ interface NovitaFleetHealth {
   models: {
     gemma: { name: string; localCacheVerified: boolean };
     zImage: { name: string; localCacheVerified: boolean };
-    ltx: { name: string; localCacheVerified: boolean; twoStageHqVerified: boolean };
+    ltx: {
+      name: string;
+      localCacheVerified: boolean;
+      distilledTwoStageX2Verified: boolean;
+      rtx4090ProfileBenchmarked: boolean;
+    };
   } | null;
   storage: {
     persistentModelVolumeVerified: boolean;
@@ -96,6 +111,11 @@ const UNAVAILABLE_FLEET_HEALTH: NovitaFleetHealth = {
   effectiveGpuLimit: null,
   activeGpuCount: null,
   blockers: ["fleet_readiness_unavailable"],
+  attestation: {
+    source: "unavailable",
+    profileIdentity: null,
+    exactLtx25Rtx4090X2: false,
+  },
   contract: null,
   models: null,
   storage: null,
@@ -162,6 +182,7 @@ function waitUntilVisible(signal: AbortSignal): Promise<void> {
 function isFleetHealth(value: unknown): value is NovitaFleetHealth {
   if (!value || typeof value !== "object") return false;
   const health = value as Partial<NovitaFleetHealth>;
+  const attestation = health.attestation as Partial<NovitaFleetHealth["attestation"]> | undefined;
   return (
     typeof health.ok === "boolean" &&
     typeof health.ready === "boolean" &&
@@ -170,8 +191,34 @@ function isFleetHealth(value: unknown): value is NovitaFleetHealth {
     (health.effectiveGpuLimit === null || Number.isInteger(health.effectiveGpuLimit)) &&
     (health.activeGpuCount === null || Number.isInteger(health.activeGpuCount)) &&
     Array.isArray(health.blockers) &&
-    health.blockers.every((blocker) => typeof blocker === "string")
+    health.blockers.every((blocker) => typeof blocker === "string") &&
+    (attestation?.source === "direct-trigger" || attestation?.source === "studio-static" || attestation?.source === "unavailable") &&
+    (attestation?.profileIdentity === null || typeof attestation?.profileIdentity === "string") &&
+    typeof attestation?.exactLtx25Rtx4090X2 === "boolean"
   );
+}
+
+/**
+ * A generic `ready` bit is never sufficient for an LTX claim. It must be the
+ * direct Trigger attestation for this exact pinned x2 profile, including its
+ * 4090 benchmark proof. Static Studio metadata deliberately fails this gate.
+ */
+function hasExactLtx25X2Attestation(
+  health: NovitaFleetHealth | null,
+  profile: GenerationProfile,
+): boolean {
+  // The browser must not promote a remote health boolean into production
+  // admission. The same local, digest/profile allow-list used by the worker
+  // launcher has to admit this profile too; it intentionally remains false
+  // until a real benchmark seal is recorded.
+  if (!assessNovitaVideoProfileRuntime(profile).ready) return false;
+  const ltx = health?.models?.ltx;
+  return health?.ready === true
+    && health.attestation.source === "direct-trigger"
+    && health.attestation.profileIdentity === novitaVideoProfileIdentity(profile)
+    && health.attestation.exactLtx25Rtx4090X2 === true
+    && ltx?.distilledTwoStageX2Verified === true
+    && ltx.rtx4090ProfileBenchmarked === true;
 }
 
 export default function NovitaRenderPage() {
@@ -187,6 +234,8 @@ export default function NovitaRenderPage() {
   const [recoverableJob, setRecoverableJob] = useState<PersistedNovitaRenderJob | null>(null);
   const activePoll = useRef<AbortController | null>(null);
   const profile = GENERATION_PROFILES[profileId];
+  const exactLtx25X2Ready = hasExactLtx25X2Attestation(fleetHealth, profile);
+  const attestedFleetHealth = exactLtx25X2Ready ? fleetHealth : null;
 
   useEffect(() => {
     const restoreTimer = window.setTimeout(() => {
@@ -466,7 +515,7 @@ export default function NovitaRenderPage() {
   }
 
   const busy = phase === "rendering-images" || phase === "rendering-video";
-  const launchBlocked = busy || recoverableJob !== null;
+  const launchBlocked = busy || recoverableJob !== null || !exactLtx25X2Ready;
 
   return (
     <>
@@ -475,18 +524,18 @@ export default function NovitaRenderPage() {
         subtitle="Operator console for signed, pinned-profile image and image-to-video jobs on the capacity-aware Novita spot fleet."
       />
 
-      <section aria-label="Live Novita fleet readiness" style={{ ...CARD, marginBottom: "1rem" }}>
+      <section aria-label="Novita render admission readiness" style={{ ...CARD, marginBottom: "1rem" }}>
         <div style={{ display: "flex", alignItems: "center", justifyContent: "space-between", gap: "0.75rem", flexWrap: "wrap" }}>
-          <span style={LABEL}>Live fleet readiness</span>
+          <span style={LABEL}>Render admission readiness</span>
           <span
             aria-live="polite"
             style={{
               fontSize: "0.74rem",
               fontWeight: 700,
-              color: fleetHealth === null ? "var(--color-muted)" : fleetHealth.ready ? "#30a46c" : "#e5484d",
+              color: fleetHealth === null ? "var(--color-muted)" : exactLtx25X2Ready ? "#30a46c" : "#e5484d",
             }}
           >
-            {fleetHealth === null ? "Checking live fleet…" : fleetHealth.ready ? "Ready" : "Unavailable"}
+            {fleetHealth === null ? "Checking admission…" : exactLtx25X2Ready ? "Ready" : "Not attested"}
           </span>
         </div>
         <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(145px, 1fr))", gap: "0.5rem" }}>
@@ -498,7 +547,7 @@ export default function NovitaRenderPage() {
           <div style={FLEET_STAT}>
             <span style={FIELD_LABEL}>Verified provider quota</span>
             <strong>{fleetHealth?.verifiedGpuQuota == null ? "—" : `${fleetHealth.verifiedGpuQuota} GPUs`}</strong>
-            <span style={FAINT}>Live bridge attestation</span>
+            <span style={FAINT}>Direct Trigger attestation</span>
           </div>
           <div style={FLEET_STAT}>
             <span style={FIELD_LABEL}>Available now</span>
@@ -508,26 +557,28 @@ export default function NovitaRenderPage() {
             </span>
           </div>
         </div>
-        {fleetHealth?.ready ? (
+        {attestedFleetHealth ? (
           <div style={{ display: "grid", gap: "0.25rem", fontSize: "0.72rem", color: "var(--color-muted)" }}>
             <span>
-              Contract {fleetHealth.contract?.version ?? "unverified"} · dispatch {fleetHealth.contract?.dispatchReady ? "ready" : "blocked"} · worker image {fleetHealth.contract?.workerImageReady ? "prewarmed" : "unverified"}
+              Contract {attestedFleetHealth.contract?.version ?? "unverified"} · dispatch {attestedFleetHealth.contract?.dispatchReady ? "ready" : "blocked"} · worker image {attestedFleetHealth.contract?.workerImageReady ? "prewarmed" : "unverified"}
             </span>
             <span>
-              Models · Gemma {fleetHealth.models?.gemma.localCacheVerified ? "cached" : "unverified"} · Z-Image {fleetHealth.models?.zImage.localCacheVerified ? "cached" : "unverified"} · LTX {fleetHealth.models?.ltx.twoStageHqVerified ? "HQ verified" : "unverified"}
+              Models · Gemma {attestedFleetHealth.models?.gemma.localCacheVerified ? "cached" : "unverified"} · Z-Image {attestedFleetHealth.models?.zImage.localCacheVerified ? "cached" : "unverified"} · LTX {attestedFleetHealth.models?.ltx.distilledTwoStageX2Verified && attestedFleetHealth.models?.ltx.rtx4090ProfileBenchmarked ? "2.5 x2 benchmarked" : "2.5 x2 unverified"}
             </span>
             <span>
-              Storage · {fleetHealth.storage?.persistentModelVolumeVerified ? `${fleetHealth.storage.volumeSizeGb} GB persistent model disk verified` : "unverified"}
+              Storage · {attestedFleetHealth.storage?.persistentModelVolumeVerified ? `${attestedFleetHealth.storage.volumeSizeGb} GB persistent model disk verified` : "unverified"}
             </span>
             <span>
-              Controls · {fleetHealth.controls?.capacityAwareWaves ? "capacity-aware waves" : "waves unverified"} · {fleetHealth.controls?.r2CheckpointRecovery ? "R2 recovery" : "recovery unverified"} · {fleetHealth.controls?.verifiedReaper ? "verified reaper" : "reaper unverified"} · {fleetHealth.controls?.idleShutdownSeconds ?? "—"}s idle shutdown
+              Controls · {attestedFleetHealth.controls?.capacityAwareWaves ? "capacity-aware waves" : "waves unverified"} · {attestedFleetHealth.controls?.r2CheckpointRecovery ? "R2 recovery" : "recovery unverified"} · {attestedFleetHealth.controls?.verifiedReaper ? "verified reaper" : "reaper unverified"} · {attestedFleetHealth.controls?.idleShutdownSeconds ?? "—"}s idle shutdown
             </span>
           </div>
         ) : (
           <span style={fleetHealth === null ? FAINT : WARN}>
             {fleetHealth === null
-              ? "Reading the authenticated bridge attestation once…"
-              : "Live capacity could not be verified. Render admission remains server-gated."}
+              ? "Reading direct render admission…"
+              : fleetHealth.attestation.source === "studio-static"
+                ? "Studio has no direct provider attestation. Trigger must verify this exact LTX 2.5 RTX 4090 x2 profile before paid work."
+                : "Direct capacity could not be verified. Render admission remains server-gated."}
           </span>
         )}
         {fleetHealth && fleetHealth.blockers.length > 0 && (
@@ -653,9 +704,9 @@ export default function NovitaRenderPage() {
           <span style={FAINT}>Pinned revision · fallback disabled</span>
         </div>
         <div style={CARD}>
-          <span style={LABEL}>Video · LTX-2.3</span>
+          <span style={LABEL}>Video · LTX-2.5 distilled x2</span>
           <span style={SPEC}>{profile.video.width}×{profile.video.height} · {profile.video.fps} fps · {profile.video.steps} steps · {profile.video.precision.toUpperCase()}</span>
-          <span style={FAINT}>Shot seconds compile to valid 8n+1 frames · fallback disabled</span>
+          <span style={FAINT}>{profile.video.stageOneWidth}×{profile.video.stageOneHeight} → 2× latent upscale · FP8-cast + CPU offload · fallback disabled</span>
         </div>
       </div>
       {!nshardValid && <span style={WARN}>Shard count must be between 1 and 3.</span>}

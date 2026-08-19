@@ -37,6 +37,20 @@ export interface ModuleSpec {
 /** Ordered, de-duplicated set of every module the builder can place + tune. */
 export const MODULE_CATALOG: ModuleSpec[] = [
   {
+    block: "synthetic_scenario",
+    label: "Fictional AI Scenario",
+    description: "Locks an explicit fictional town, decision, or AI POV contract before writing; the profile is selected in the channel form rather than via free-form overrides.",
+    optional: true,
+    params: [],
+  },
+  {
+    block: "scenario_disclosure_gate",
+    label: "Scenario Disclosure Gate",
+    description: "Rejects a fictional AI scenario script unless the opening explicitly discloses illustrative assumptions.",
+    optional: true,
+    params: [],
+  },
+  {
     block: "director_brief",
     label: "Crew · Director",
     description: "Designs each video's structure: hook + beat map + pacing, from the Show Bible.",
@@ -72,6 +86,19 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     params: [],
   },
   {
+    block: "visual_matter",
+    label: "Visual Matter",
+    description: "Creates mood, character, setting, and storyboard locks for a cinematic story; reference-image rendering remains explicitly paid and capped.",
+    optional: true,
+    params: [
+      { key: "enabled", label: "Use Visual Matter", type: "toggle", help: "Keep the typed visual-development handoff active for this cinematic pipeline." },
+      { key: "maxCharacters", label: "Character sheets", type: "number", min: 0, max: 6, step: 1 },
+      { key: "maxSettings", label: "Setting sheets", type: "number", min: 0, max: 6, step: 1 },
+      { key: "renderReferenceAssets", label: "Render fal.ai Nano Banana 2 references", type: "toggle", help: "Explicit paid action; requires FAL_KEY and a configured Nano Banana 2 unit-cost guard." },
+      { key: "maxReferenceImages", label: "Reference-image cap", type: "number", min: 1, max: 12, step: 1 },
+    ],
+  },
+  {
     block: "topic_select",
     label: "Topic Select",
     description: "Chooses each video's topic (no-repeat memory, optional ordered series).",
@@ -104,6 +131,8 @@ export const MODULE_CATALOG: ModuleSpec[] = [
           { value: "crime", label: "True-crime / mystery" },
           { value: "shorts", label: "Punchy short-form" },
           { value: "meditation", label: "Calm / guided" },
+          { value: "illustrated_explainer", label: "Illustrated explainer" },
+          { value: "children_learning", label: "Children’s learning" },
         ],
       },
     ],
@@ -173,7 +202,7 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   {
     block: "visual_inserts",
     label: "Data Inserts",
-    description: "Script-synced motion graphics (animated stats, charts, comparisons) rendered when the narration speaks numbers.",
+    description: "Script-synced motion graphics (animated stats, charts, comparisons) rendered when the narration speaks numbers. The explicit Source-attributed Data Story profile renders only numbers spoken in a sentence naming a concrete source.",
     optional: true,
     params: [
       { key: "maxInserts", label: "Max inserts", type: "number", min: 1, max: 8, step: 1 },
@@ -199,6 +228,49 @@ export const MODULE_CATALOG: ModuleSpec[] = [
     params: [
       { key: "width", label: "Resolution", type: "select", options: [{ value: "1920", label: "1080p" }, { value: "2560", label: "2K (1440p)" }] },
       { key: "styleId", label: "Whiteboard style", type: "select", options: [{ value: "history", label: "History" }, { value: "finance", label: "Finance" }] },
+    ],
+  },
+  {
+    block: "lore_short",
+    label: "Lore micro-doc (depth camera)",
+    description:
+      "Self-contained first-person 'Histories & Lore' micro-documentary: Gemini writes the beat sheet, the attested Novita farm paints each beat and animates a real 3D depth camera move over it, and the cut follows the narration. Replaces script + footage + assembly for the Lore family.",
+    optional: false,
+    params: [
+      { key: "subStyle", label: "Art look", type: "select", options: [{ value: "cinematic", label: "Cinematic concept art" }, { value: "watercolor_pencil", label: "Watercolour + pencil" }] },
+      { key: "narrator", label: "Narrator identity", type: "text", help: "WHO speaks, in first person — identity plus tone. Defaults to the channel persona." },
+    ],
+  },
+  {
+    block: "quiz_year",
+    label: "Mixed trivia quiz",
+    description:
+      "Self-contained multiple-choice trivia quiz that MIXES categories inside one video the way real trivia channels do — guess-the-year, capital cities, currencies, chemical symbols, atomic numbers and citation-verified general knowledge. Facts come from Wikidata (CC0); general-knowledge rounds are accepted only when an independently fetched Wikipedia article is shown to state the answer and to not state any of the wrong options. Each round shows four options with a depleting timer and locks in the correct one on reveal. The answer is never LLM-generated — a model only phrases the question. Replaces script + footage + assembly for the Quiz family.",
+    optional: false,
+    params: [
+      {
+        key: "categories",
+        label: "Question categories",
+        type: "text",
+        help: "Comma-separated mix, e.g. \"guess_year, capital_city, general_knowledge\". Leave blank for the full mix. Options: guess_year, capital_city, country_currency, element_symbol, element_atomic_number, general_knowledge.",
+      },
+      {
+        key: "topic",
+        label: "Guess-the-year topic",
+        type: "select",
+        options: [
+          { value: "science_discovery", label: "Scientific discoveries" },
+          { value: "space_exploration", label: "Space missions" },
+          { value: "invention_technology", label: "Inventions & technology" },
+          { value: "video_games", label: "Video game releases" },
+          { value: "film_release", label: "Film releases" },
+          { value: "sports_championship", label: "Sporting events" },
+          { value: "landmark_architecture", label: "Landmarks & monuments" },
+        ],
+      },
+      { key: "countdownSeconds", label: "Guess time (sec)", type: "number", min: 3, max: 15, step: 1, help: "How long the viewer gets before the answer locks in." },
+      { key: "revealSeconds", label: "Reveal hold (sec)", type: "number", min: 2, max: 10, step: 1 },
+      { key: "minNotability", label: "Minimum fame", type: "number", min: 0, max: 200, step: 5, help: "Wikipedia language editions the subject must appear in. Higher = more widely known, fewer available facts." },
     ],
   },
   {
@@ -266,6 +338,34 @@ export const MODULE_CATALOG: ModuleSpec[] = [
       { key: "durationSec", label: "Runtime (sec)", type: "number", min: 30, max: 36000, step: 30, help: "Total video length the loop is extended to." },
       { key: "deblurIntro", label: "Deblur intro", type: "toggle", help: "Open on a focus-pull from blur with the title." },
     ],
+  },
+  {
+    block: "episode_graph",
+    label: "Episode Graph",
+    description: "Locks causal beats, continuity, sources, and a deterministic scene manifest before rendering.",
+    optional: false,
+    params: [],
+  },
+  {
+    block: "learning_contract",
+    label: "Learning Contract",
+    description: "Locks the learning objective, source-linked demonstration beats, retrieval prompt, and human-review checklist.",
+    optional: false,
+    params: [],
+  },
+  {
+    block: "child_content_safety",
+    label: "Children’s Safety Review",
+    description: "Requires curriculum evidence, child-safe language, and a human-reviewed private draft for children-learning channels.",
+    optional: false,
+    params: [],
+  },
+  {
+    block: "scene_compiler",
+    label: "Scene Compiler",
+    description: "Builds an original deterministic illustrated 16:9 master from the locked scene manifest.",
+    optional: false,
+    params: [],
   },
   {
     block: "upload_draft",

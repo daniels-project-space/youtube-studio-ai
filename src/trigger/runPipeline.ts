@@ -21,6 +21,11 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { registerAllBlocks } from "@/engine/blocks";
 import { validatePipeline, preflight } from "@/engine/validate";
 import {
+  assertFamilyAutonomousPlanningPipeline,
+  FAMILY_KEYS,
+  type FamilyKey,
+} from "@/engine/families";
+import {
   assertPipelineMatchesContentLane,
   injectContentLaneIntoPipeline,
   resolveContentLane,
@@ -29,6 +34,7 @@ import {
   compilePipeline,
   completePipelineForPolicy,
   materializeRuntimePipelineParams,
+  PRIVATE_PROBE_CONTRACT_POLICY,
 } from "@/engine/pipelineCompiler";
 import { runPipeline as runEngine } from "@/engine/runner";
 import { renderBlockTask } from "@/trigger/render-block";
@@ -36,7 +42,8 @@ import { planHeal } from "@/engine/healer";
 import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
 import { channelPrefix } from "@/lib/storage";
-import { alertFailure } from "@/lib/telegram";
+import { alertBudget, alertFailure } from "@/lib/telegram";
+import { evaluateBudgetAlert } from "@/lib/budgetAlert";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { rehydrateOutputs } from "@/lib/rehydrate";
 import type { PipelineEntry } from "@/engine/types";
@@ -69,6 +76,12 @@ import {
   type ChannelInceptionProbeAttemptCheckpoint,
   type ChannelInceptionProbeInvocationContext,
 } from "@/lib/channelInceptionProbe";
+import { CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD } from "@/engine/channelInceptionContracts";
+import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
+import {
+  assertChildrenShowBibleSeeded,
+  childrenShowBibleSeedKeys,
+} from "@/engine/childrenShowBible";
 
 export interface RunPipelineInput {
   channelId: string;
@@ -100,6 +113,27 @@ export interface RunPipelineInput {
     approval: StudioActionApprovalReceipt;
     dispatchEnvelopeFingerprint: string;
   };
+  /**
+   * Fresh, child-editor-approved per-episode packet for the supervised
+   * children lane. It is frozen into the invocation snapshot before any
+   * provider work and is never a channel-level automatic-production setting.
+   */
+  childrenShowBibleInput?: unknown;
+  /**
+   * Fresh, child-editor-approved episode intent that must run before Story
+   * Spine / Episode Graph planning in the supervised children lane.
+   */
+  curriculumEpisodeSeedInput?: unknown;
+  /**
+   * A freshly researched (or human-curated) Casefile Case Packet for the
+   * cinematic_ai lane's `casefile_source_packet` admission block. Supplied
+   * either by `generation-scheduler`'s opt-in auto-research dispatch
+   * (`@/engine/casefileAutoResearchDispatch`) or, in principle, any other
+   * caller — the manual `/api/casefile-episodes` desk workflow does not use
+   * this field today; it is a fully separate, unaffected admission chain.
+   * Same freeze-before-provider-work contract as `childrenShowBibleInput`.
+   */
+  casefileSourcePacketInput?: unknown;
   /**
    * Render-group reuse: when a language sibling is fanned out by the base run's
    * emit_bundle, the base assets are passed here and seeded into the store so the
@@ -140,13 +174,13 @@ export const runPipelineTask = task({
     } catch (error) {
       throwForTaskRetryPolicy(error);
     }
-    // CRITICAL-KEY GATE: without the core model keys every creative block falls
-    // back to generic output (the "basic and stale" failure mode). Fail the run
-    // at minute 0 instead of silently producing a degraded video.
+    // Hydrate the scoped provider credentials used by this run. Gemini is not a
+    // production-run dependency: the only admitted Gemini surface is the
+    // receipt-bound thumbnail module, while creative text routes through the
+    // declared non-Google provider or deterministic modules.
     try {
       await bootstrapSecrets(
         (m, x) => console.log(`[run-pipeline] ${m}`, x ?? ""),
-        { required: ["GEMINI_API_KEY"] },
       );
     } catch (error) {
       throwForTaskRetryPolicy(error);
@@ -270,6 +304,13 @@ export const runPipelineTask = task({
     let probeBudgetAdmission: PipelineInvocationSnapshot["budgetAdmission"];
     if (payload.probeAdmission) {
       const maximumCostUsd = payload.probeAdmission.maximumCostUsd;
+      // The immutable child envelope is the authority here. New cinematic
+      // envelopes carry their explicitly signed $55 ceiling; a legacy envelope
+      // without that field stays at the historic $3 ceiling rather than gaining
+      // a larger authority merely because the global contract evolved.
+      const frozenProbeCeilingUsd =
+        durableProbeEnvelope?.input.invocationContext.probeMaximumCostUsd ??
+        CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD;
       if (
         !rawOverrideFingerprint ||
         !durableProbeEnvelope ||
@@ -278,10 +319,10 @@ export const runPipelineTask = task({
         rawOverrideFingerprint !== durableProbeEnvelope.input.overrideFingerprint ||
         !Number.isFinite(maximumCostUsd) ||
         maximumCostUsd <= 0 ||
-        maximumCostUsd > 3
+        maximumCostUsd > frozenProbeCeilingUsd
       ) {
         throwForTaskRetryPolicy(
-          new Error("run-pipeline probe admission requires an override and a $0-$3 ceiling"),
+          new Error("run-pipeline probe admission requires an override within its frozen signed ceiling"),
         );
       }
       const subject = pipelineProbeApprovalSubject({
@@ -385,6 +426,31 @@ export const runPipelineTask = task({
       family: (channel as { family?: unknown }).family,
       pipeline: (channel.pipeline ?? []) as PipelineEntry[],
     });
+    if (
+      (payload.childrenShowBibleInput !== undefined || payload.curriculumEpisodeSeedInput !== undefined) &&
+      contentLane.key !== "children_learning_supervised"
+    ) {
+      throwForTaskRetryPolicy(
+        new Error("children editorial inputs are only accepted by the supervised children-learning lane"),
+      );
+    }
+    if (durableInvocation && (
+      payload.childrenShowBibleInput !== undefined || payload.curriculumEpisodeSeedInput !== undefined
+    )) {
+      throwForTaskRetryPolicy(
+        new Error("children editorial inputs cannot replace frozen packets on a resumed run"),
+      );
+    }
+    if (payload.casefileSourcePacketInput !== undefined && contentLane.key !== "cinematic_ai") {
+      throwForTaskRetryPolicy(
+        new Error("casefileSourcePacketInput is only accepted by the cinematic_ai lane"),
+      );
+    }
+    if (durableInvocation && payload.casefileSourcePacketInput !== undefined) {
+      throwForTaskRetryPolicy(
+        new Error("casefileSourcePacketInput cannot replace a frozen packet on a resumed run"),
+      );
+    }
     if (!durableInvocation && payload.pipelineOverride) {
       console.log(`[run-pipeline] using one-off pipelineOverride (${entries.length} blocks) — channel config untouched`);
     }
@@ -471,6 +537,10 @@ export const runPipelineTask = task({
             const { resolveKnobs } = await import("@/engine/customization");
             for (const [blockId, cfg] of Object.entries(moduleConfig)) {
               if (!cfg || typeof cfg !== "object") continue;
+              if (!entries.some((entry) => entry.block === blockId)) {
+                log(`moduleConfig[${blockId}] SKIPPED (module is not selected in this pipeline)`);
+                continue;
+              }
               const { preset, ...overrides } = cfg as { preset?: string } & Record<string, unknown>;
               const surface = moduleSurface(blockId);
               let values: Record<string, unknown> = overrides;
@@ -535,11 +605,37 @@ export const runPipelineTask = task({
       if (!durableInvocation) {
         entries = injectContentLaneIntoPipeline(entries, contentLane);
       }
+      // A content lane proves the visual grammar, but it deliberately does
+      // not own the complete non-Gemini planning spine. Enforce the family's
+      // registered admission on the exact frozen graph before any provider
+      // preflight or execution. Unknown legacy lanes retain their existing
+      // legacy handling; canonical lanes always carry a known family.
+      const laneFamily = contentLane.family;
+      if (laneFamily && (FAMILY_KEYS as readonly string[]).includes(laneFamily)) {
+        assertFamilyAutonomousPlanningPipeline(laneFamily as FamilyKey, entries);
+      }
+
+      // The provider/hardware contract is a pre-spend gate, not a diagnostic
+      // emitted after an image, TTS pass, or child worker has already billed.
+      // It protects persisted/custom/forged graphs as well as the creator's
+      // normal family selection; direct video helpers repeat it in depth.
+      assertPipelineVideoRuntimeReady(entries);
 
       // Compile the exact frozen entries. On a retry, a changed/revoked module
       // implementation must fail closed before any stage/provider executes.
-      const resolved = validatePipeline(entries);
-      const compilation = compilePipeline(resolved);
+      // contentLane is resolved from the persisted channel and placed in
+      // seedStore below. It is a channel-level policy input, not something a
+      // render block may synthesize or replace.
+      const resolved = validatePipeline(entries, ["contentLane", ...childrenShowBibleSeedKeys(contentLane)]);
+      // A signed Channel Inception probe is intentionally private: the frozen
+      // probe shape has no upload block, but retains every actual editorial
+      // and technical release requirement. Choose that narrow policy only
+      // after admission validation above; ordinary and forged invocations
+      // always keep the full publish-capable production contract.
+      const compilation = compilePipeline(
+        resolved,
+        probeBudgetAdmission ? PRIVATE_PROBE_CONTRACT_POLICY : undefined,
+      );
       if (durableInvocation) {
         assertPipelineInvocationCompilation(durableInvocation, compilation);
       }
@@ -561,6 +657,13 @@ export const runPipelineTask = task({
           palette: channel.identity?.palette ?? [],
           persona: channel.identity?.persona ?? "",
           niche: channel.identity?.niche ?? "",
+          // The Showrunner-authored stance for THIS channel's critic. Frozen
+          // into the seed store alongside the rest of the identity so every
+          // model-graded gate (script, thumbnail, narration, visual review)
+          // judges against the channel's own standard, not a generic rubric.
+          ...(channel.identity?.creativeBrief?.criticDoctrine
+            ? { criticDoctrine: channel.identity.creativeBrief.criticDoctrine }
+            : {}),
           ...(channel.identity?.voiceId ? { voiceId: channel.identity.voiceId } : {}),
           bannedWords: channel.identity?.bannedWords ?? [],
           ...(channel.identity?.imageKey ? { channelAvatarKey: channel.identity.imageKey } : {}),
@@ -570,6 +673,15 @@ export const runPipelineTask = task({
           styleDNA: (channel as { styleDNA?: unknown }).styleDNA ?? null,
           qualityBar: (channel as { qaRubric?: unknown }).qaRubric ?? null,
           contentLane,
+          ...(payload.childrenShowBibleInput !== undefined
+            ? { childrenShowBibleInput: structuredClone(payload.childrenShowBibleInput) }
+            : {}),
+          ...(payload.curriculumEpisodeSeedInput !== undefined
+            ? { curriculumEpisodeSeedInput: structuredClone(payload.curriculumEpisodeSeedInput) }
+            : {}),
+          ...(payload.casefileSourcePacketInput !== undefined
+            ? { casefileSourcePacketInput: structuredClone(payload.casefileSourcePacketInput) }
+            : {}),
           ...(scheduledPlan ? scheduledPlanSeed(scheduledPlan) : {}),
         };
         if (payload.reuse) {
@@ -581,6 +693,11 @@ export const runPipelineTask = task({
           log(`run-pipeline: render-group REUSE active (lang=${payload.reuse.language}, ${payload.reuse.footageKeys?.length ?? 0} clips)`);
         }
       }
+
+      // A children lane is intentionally executable only with a fresh,
+      // operator-supplied editorial packet. This happens before preflight and
+      // snapshotting, so a missing packet cannot reach a paid provider stage.
+      assertChildrenShowBibleSeeded(contentLane, seedStore);
 
       const invocationCandidate = durableInvocation ?? normalizePipelineInvocationSnapshot({
         version: 1,
@@ -736,7 +853,13 @@ export const runPipelineTask = task({
         paid: (b as { paid?: boolean }).paid,
       }));
       while (!result.ok && heals < MAX_HEALS) {
-        const plan = planHeal(result.error ?? "", healable, (m) => log(m), result.visualRepair);
+        const plan = planHeal(result.error ?? "", healable, (m) => log(m), result.visualRepair, {
+          contentLaneKey: contentLane.key,
+          ...(channel.identity?.creativeBrief?.criticDoctrine
+            ? { criticDoctrine: channel.identity.creativeBrief.criticDoctrine }
+            : {}),
+          ...(channel.identity?.styleGrammar ? { styleGrammar: channel.identity.styleGrammar } : {}),
+        });
         if (!plan) break;
         heals++;
         log(
@@ -767,6 +890,10 @@ export const runPipelineTask = task({
           seedStore: {
             ...seedStore,
             healHints: plan.hints,
+            // The DECLARED repair strategy per block (healer.ts `HealClass`).
+            // Blocks switch on this instead of pattern-matching the hint prose,
+            // whose wording is not a contract.
+            healClasses: plan.healClasses,
             healAttempt: heals,
             ...(plan.visualRepair?.length ? { visualRepair: plan.visualRepair } : {}),
           },
@@ -833,14 +960,19 @@ export const runPipelineTask = task({
           costTotal: result.costTotal,
         });
       }
-      // This should be unreachable for declared provider envelopes because
-      // preflight reserves the worst case before execution. Keep the alert as
-      // a second rail for a provider returning a charge above its contract.
-      if (result.costTotal > invocation.budgetUsd) {
-        await safeAlert(
-          `budget exceeded (${channel.slug})`,
-          `run cost $${result.costTotal.toFixed(2)} > budget $${invocation.budgetUsd.toFixed(2)}`,
-        );
+      // Ship-stage "budget alert" gate (GOLDEN_MODULES catalog key "ship").
+      // The hard ceiling is already enforced above (throw when costTotal >
+      // budgetUsd) and per-block in engine/runner.ts, so a true overage can't
+      // reach this line for declared provider envelopes. This is the
+      // advisory rail: fire when spend lands at/near the frozen per-run
+      // budget so the operator sees a channel running hot via Telegram
+      // before the NEXT run trips the hard ceiling.
+      const budgetAlert = evaluateBudgetAlert({
+        costUsd: result.costTotal,
+        budgetUsd: invocation.budgetUsd,
+      });
+      if (budgetAlert?.shouldAlert) {
+        await safeBudgetAlert(`budget alert (${channel.slug})`, budgetAlert.message);
       }
       return {
         ok: true,
@@ -886,6 +1018,18 @@ async function safeAlert(context: string, error: string): Promise<void> {
   } catch (e) {
     console.error(
       "[run-pipeline] telegram alert failed:",
+      e instanceof Error ? e.message : e,
+    );
+  }
+}
+
+/** Fire the ship-stage budget alert but never let alerting failures fail a completed run. */
+async function safeBudgetAlert(context: string, message: string): Promise<void> {
+  try {
+    await alertBudget(context, message);
+  } catch (e) {
+    console.error(
+      "[run-pipeline] telegram budget alert failed:",
       e instanceof Error ? e.message : e,
     );
   }

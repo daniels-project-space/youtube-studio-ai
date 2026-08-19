@@ -1,28 +1,41 @@
 /**
- * Niche catalog — the "metrics" surface for the channel builder (wizard step 1)
- * and the per-channel Settings tab. Curated RPM ($/1000 views) + difficulty +
- * subcategories, each carrying a rough monthly search/view volume, an optional
- * per-subcategory RPM, and a SEED ARRAY OF SEO TAGS.
+ * Niche catalog — a curated planning-seed surface for the channel builder
+ * (wizard step 1) and the per-channel Settings tab. It is deliberately not a
+ * live keyword-volume or monetisation dataset.
  *
  * Ported + extended from v1 autostudio's CONTENT_CATEGORIES (dashboard/server.js):
  * v1 attached a default `tags[]` to every subcategory and expanded them with
  * Gemini at publish time (its /api/smart-tags). We do the same: the chosen
  * subcategory's tags seed `metadata.baseTags`, which the metadata block merges
- * with its AI-generated tags. Live search volume + power words still come from
- * `competitor_research` at build time; these are the curated starting point.
+ * with its AI-generated tags. Live, attributable market evidence comes from
+ * `competitor_research` at build time; these are only the curated starting
+ * point and must never be displayed as measured market facts.
  */
 import type { FamilyKey } from "@/engine/families";
 
 export type Difficulty = "Easy" | "Medium" | "Hard";
+
+/**
+ * Single provenance boundary for every numeric planning hint in this static
+ * catalog. A future measured provider may add a distinct evidence-backed
+ * surface; it must not silently reuse these seed values as current facts.
+ */
+export const NICHE_CATALOG_EVIDENCE = {
+  status: "curated_planning_seed",
+  measured: false,
+  label: "Planning seed — validate demand and RPM with research",
+  detail:
+    "Catalog demand and RPM values are internal planning hints, not current measured SEO or monetisation data.",
+} as const;
 
 export interface Subcategory {
   /** Stable kebab id (used as the value + for tag seeding). */
   id: string;
   /** Display name. */
   name: string;
-  /** Rough monthly search/avg-view volume, K-scale. */
+  /** Internal relative-demand hint. Never a measured monthly search volume. */
   searchVolume: number;
-  /** Optional per-subcategory RPM (USD / 1000 views); falls back to the niche RPM. */
+  /** Internal revenue-planning hint. Never a measured or guaranteed RPM. */
   rpm?: number;
   /** Seed SEO tags — the pipeline expands these with AI at metadata time. */
   tags: string[];
@@ -31,7 +44,8 @@ export interface Niche {
   key: string;
   label: string;
   icon: string; // emoji for the card
-  rpm: number; // USD / 1000 views
+  /** Internal revenue-planning hint. Never a measured or guaranteed RPM. */
+  rpm: number;
   difficulty: Difficulty;
   blurb: string;
   defaultFamily: FamilyKey;
@@ -62,7 +76,7 @@ export const NICHES: Niche[] = [
   },
   {
     key: "finance", label: "Finance", icon: "💲", rpm: 9.5, difficulty: "Hard",
-    blurb: "Investment, money tips (highest RPM)", defaultFamily: "whiteboard",
+    blurb: "Investment and money education", defaultFamily: "whiteboard",
     subcategories: [
       { id: "money-basics", name: "Money basics (Fed, 2008, history of money)", searchVolume: 88, rpm: 8.0, tags: ["history of money", "federal reserve", "2008 crash", "how money works", "economy explained", "inflation", "central banks", "financial literacy"] },
       { id: "investing", name: "Investing 101", searchVolume: 95, rpm: 12.0, tags: ["investing", "stocks", "stock market", "portfolio", "dividends", "index funds", "wealth building", "investing for beginners"] },
@@ -75,7 +89,7 @@ export const NICHES: Niche[] = [
   },
   {
     key: "technology", label: "Technology", icon: "🖥️", rpm: 6.2, difficulty: "Medium",
-    blurb: "AI tools, software reviews (fastest-growing)", defaultFamily: "narrated_stock",
+    blurb: "AI tools and software reviews", defaultFamily: "narrated_stock",
     subcategories: [
       { id: "ai-tools-automation", name: "AI tools & automation (agents)", searchVolume: 145, rpm: 7.0, tags: ["ai tools", "ai automation", "ai agents", "best ai tools", "chatgpt", "ai workflow", "automation", "ai apps", "ai for business"] },
       { id: "ai-ml", name: "AI news / tools", searchVolume: 99, rpm: 6.0, tags: ["artificial intelligence", "AI", "machine learning", "chatgpt", "AI tools", "deep learning", "AI news", "tech"] },
@@ -158,8 +172,8 @@ export const NICHES: Niche[] = [
     ],
   },
   {
-    // 2026 breakout: ~21x growth, remarkably low competition, huge watch-time.
-    // Faceless-perfect (AI voiceover + stock/atmospheric visuals).
+    // Curated narrative planning seed. Validate current demand and competition
+    // with attributable research before making growth claims.
     key: "stories", label: "Storytelling / Drama", icon: "🎭", rpm: 4.2, difficulty: "Easy",
     blurb: "Revenge, betrayal, Reddit stories", defaultFamily: "narrated_stock",
     subcategories: [
@@ -169,7 +183,8 @@ export const NICHES: Niche[] = [
     ],
   },
   {
-    // 2026 breakout: GLP-1/Ozempic search +800% since 2022; senior health rising.
+    // Curated health planning seed. Validate current demand and medical-policy
+    // requirements with attributable research before making growth claims.
     key: "health", label: "Health & Wellness", icon: "🩺", rpm: 7.5, difficulty: "Medium",
     blurb: "GLP-1, senior health, longevity", defaultFamily: "narrated_stock",
     subcategories: [
@@ -180,7 +195,8 @@ export const NICHES: Niche[] = [
     ],
   },
   {
-    // Highest-CPM cluster (research: business/SaaS/skills $14-35 CPM), low comp on skills.
+    // Curated business planning seed. Validate current monetisation and
+    // competition with attributable research before making revenue claims.
     key: "business", label: "Business & Skills", icon: "💼", rpm: 9.5, difficulty: "Medium",
     blurb: "Entrepreneurship, SaaS, pro skills", defaultFamily: "narrated_stock",
     subcategories: [

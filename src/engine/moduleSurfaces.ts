@@ -91,14 +91,16 @@ const INSERTS_MODULE: ModuleCard = {
   key: "visual_inserts",
   title: "Data Inserts",
   stage: "visual",
-  does: "Renders script-synced motion graphics (stats / charts / comparisons) when the narration speaks numbers.",
+  does: "Renders script-synced motion graphics (stats / charts / comparisons) when the narration speaks numbers; its source-attributed data-story profile rejects unsourced numeric claims.",
   customization: {
-    capabilities: ["number-triggered data viz", "spacing control"],
+    capabilities: ["number-triggered data viz", "spacing control", "source-attributed data-story contract"],
     knobs: [
       { id: "maxInserts", type: "number", range: [1, 8], default: 4, describes: "max data inserts per video", servesStyles: ["finance", "explainer"] },
       { id: "minGapSec", type: "number", range: [10, 60], default: 25, describes: "minimum spacing between inserts", servesStyles: ["explainer"] },
     ],
-    presets: {},
+    presets: {
+      source_attributed_data_story: { maxInserts: 5, minGapSec: 25 },
+    },
   },
 };
 
@@ -251,6 +253,62 @@ const UPLOAD_MODULE: ModuleCard = {
   },
 };
 
+const VISUAL_MATTER_MODULE: ModuleCard = {
+  key: "visual_matter",
+  title: "Visual Matter",
+  stage: "visual development",
+  does: "Builds a channel-and-topic-specific mood board, character and setting sheets, plus per-shot storyboard locks. fal.ai Nano Banana 2 references are an explicit paid option; the visual lock itself feeds cinematic rendering and QA.",
+  customization: {
+    capabilities: [
+      "topic-specific mood direction",
+      "character and setting continuity sheets",
+      "per-shot storyboard and visual QA locks",
+      "optional fal.ai Nano Banana 2 reference assets",
+    ],
+    knobs: [
+      { id: "enabled", type: "boolean", default: true, describes: "apply the Visual Matter contract to cinematic renders", servesStyles: ["cinematic", "story"] },
+      { id: "maxCharacters", type: "number", range: [0, 6], default: 3, describes: "maximum character sheets planned from the story continuity ledger", servesStyles: ["character", "comic", "cinematic"] },
+      { id: "maxSettings", type: "number", range: [0, 6], default: 3, describes: "maximum setting sheets planned from the channel world", servesStyles: ["worldbuilding", "cinematic"] },
+      { id: "renderReferenceAssets", type: "boolean", default: false, describes: "explicitly spend on fal.ai Nano Banana 2 mood/character/setting/storyboard reference images", servesStyles: ["reference", "cinematic"] },
+      { id: "maxReferenceImages", type: "number", range: [1, 12], default: 8, describes: "hard cap for the paid fal.ai Nano Banana 2 reference pack", servesStyles: ["reference", "budget"] },
+    ],
+    presets: {
+      planning_only: { enabled: true, renderReferenceAssets: false, maxCharacters: 3, maxSettings: 3 },
+      reference_pack: { enabled: true, renderReferenceAssets: true, maxCharacters: 3, maxSettings: 3, maxReferenceImages: 8 },
+      world_only: { enabled: true, renderReferenceAssets: false, maxCharacters: 0, maxSettings: 3 },
+    },
+  },
+};
+
+const SYNTHETIC_SCENARIO_MODULE: ModuleCard = {
+  key: "synthetic_scenario",
+  title: "Fictional AI Scenario",
+  stage: "story safety",
+  does: "Locks an explicit fictional AI town, decision, or POV contract before writing. It never represents a real simulation, prediction, or model result.",
+  customization: {
+    capabilities: [
+      "explicit town / decision / POV profile",
+      "opening disclosure requirement",
+      "assumption-led writing directive",
+      "local scenario-board visual grammar",
+    ],
+    knobs: [],
+    presets: {},
+  },
+};
+
+const SCENARIO_DISCLOSURE_GATE_MODULE: ModuleCard = {
+  key: "scenario_disclosure_gate",
+  title: "Scenario Disclosure Gate",
+  stage: "story safety",
+  does: "Rejects a script unless its opening plainly identifies the story as a fictional AI scenario with illustrative assumptions.",
+  customization: {
+    capabilities: ["opening-disclosure verification", "assumption-language verification", "hard fail before narration"],
+    knobs: [],
+    presets: {},
+  },
+};
+
 /** Core pipeline surfaces — registered into MODULE_REGISTRY. */
 export const CORE_MODULE_SURFACES: ModuleCard[] = [
   TOPIC_MODULE,
@@ -267,5 +325,8 @@ export const CORE_MODULE_SURFACES: ModuleCard[] = [
   LOOP_CLIPS_MODULE,
   UPSCALE_MODULE,
   LOOP_ASSEMBLE_MODULE,
+  VISUAL_MATTER_MODULE,
+  SYNTHETIC_SCENARIO_MODULE,
+  SCENARIO_DISCLOSURE_GATE_MODULE,
   UPLOAD_MODULE,
 ];

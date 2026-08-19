@@ -22,6 +22,17 @@ assert.match(wizard, /href=\{`\/channels\/\$\{encodeURIComponent\(activeBuild\.s
 assert.match(wizard, /The exact build identity is preserved/);
 assert.match(detail, /channel-inception-stage-error[\s\S]*role="alert"/);
 
+// The no-Gemini policy must be legible in the creator itself: an optional
+// reference URL is retained as operator context, never presented as a live
+// automatic clip-analysis or style-copying capability.
+assert.doesNotMatch(wizard, /\/api\/analyze-clip/);
+assert.doesNotMatch(wizard, /Gemini analyzes|Gemini suggests/);
+assert.match(wizard, /no automatic copying or clip analysis/);
+assert.match(wizard, /deterministic advisor/);
+assert.match(wizard, /Creator foundation: verified no-Gemini planning/);
+assert.match(wizard, /preflight\.planning\.plannerBlock/);
+assert.match(wizard, /preflight\.planning\.provenance/);
+
 assert.doesNotMatch(sidebar, /health-dot-ready/);
 assert.doesNotMatch(sidebar, /Live production workspace/);
 assert.doesNotMatch(sidebar, /href:\s*["']\/runs["']/);

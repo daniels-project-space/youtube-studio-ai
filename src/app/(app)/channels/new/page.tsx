@@ -4,10 +4,29 @@ import { useCallback, useEffect, useMemo, useRef, useState, type CSSProperties, 
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { PageHeader } from "@/components/PageHeader";
-import { NICHES, getNiche } from "@/lib/nicheCatalog";
+import { NICHE_CATALOG_EVIDENCE, NICHES, getNiche } from "@/lib/nicheCatalog";
 import { nichePreset } from "@/engine/golden";
-import { FAMILIES, FAMILY_KEYS, FAMILY_CREW, CREW_ROLE_BLOCK, getFamily, type FamilyKey } from "@/engine/families";
+import {
+  FAMILIES,
+  FAMILY_KEYS,
+  FAMILY_CREW,
+  CREW_ROLE_BLOCK,
+  clampFamilyEpisodeLengthMinutes,
+  familyDurationContract,
+  familyProductionReadiness,
+  formatFamilyDurationContract,
+  getFamily,
+  isFamilyProductionReady,
+  type FamilyKey,
+} from "@/engine/families";
 import { ARCHETYPES } from "@/engine/archetypes";
+import {
+  supportsDataStoryFamily,
+} from "@/engine/dataStory";
+import {
+  syntheticScenarioContract,
+  type SyntheticScenarioProfile,
+} from "@/engine/syntheticScenario";
 import { MODULE_CATALOG, type ParamField } from "@/engine/moduleCatalog";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -24,6 +43,7 @@ import {
   normalizeYoutubeChannelName,
   suggestYoutubeHandle,
 } from "@/lib/youtubeChannelCreationClaim";
+import { familySupervisedChannelInceptionCapability } from "@/engine/channelInceptionCapability";
 
 type Phase = "form" | "building" | "error";
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -72,7 +92,30 @@ interface Toggles {
   crosspost: boolean;
   shorts: boolean;
   documentaryCandidates: boolean;
+  visualMatter: boolean;
 }
+
+type SupervisedCreatorSelection = {
+  capabilityId: string;
+  provenance?: string;
+  requiredArtifacts: string[];
+  reviewHref?: string;
+};
+
+type CreativeCapabilityUiOffer = {
+  capability: string;
+  title: string;
+  description: string;
+  selectionMode: "explicit_opt_in" | "private_review_only";
+  reviewHref?: string;
+  requirements?: string[];
+  qualityFocus?: string[];
+  automationAdmission?: {
+    autonomous?: boolean;
+    blockers?: string[];
+    remediation?: string;
+  };
+};
 const DEFAULT_TOGGLES: Toggles = {
   quotes: true,
   captions: true,
@@ -81,6 +124,7 @@ const DEFAULT_TOGGLES: Toggles = {
   crosspost: false,
   shorts: false,
   documentaryCandidates: false,
+  visualMatter: true,
 };
 
 async function browserSha256(value: string): Promise<string> {
@@ -89,7 +133,13 @@ async function browserSha256(value: string): Promise<string> {
 }
 
 // Client preview of the designed block list (mirrors src/engine/designer filter).
-function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string): string[] {
+function previewBlocks(
+  familyKey: FamilyKey,
+  t: Toggles,
+  nicheKey?: string,
+  dataStory = false,
+  syntheticScenarioProfile?: SyntheticScenarioProfile,
+): string[] {
   const fam = FAMILIES[familyKey];
   const base = ARCHETYPES[fam.archetypeKey]?.pipeline ?? [];
   let blocks = base
@@ -106,6 +156,36 @@ function previewBlocks(familyKey: FamilyKey, t: Toggles, nicheKey?: string): str
     const at = blocks.indexOf("topic_select");
     const i = at >= 0 ? at + 1 : 0;
     blocks = [...blocks.slice(0, i), ...crew, ...blocks.slice(i)];
+  }
+  if (syntheticScenarioProfile) {
+    const script = blocks.indexOf("script_gen");
+    if (script >= 0) {
+      blocks = [...blocks.slice(0, script), "synthetic_scenario", ...blocks.slice(script)];
+      const resolvedScript = blocks.indexOf("script_gen");
+      blocks = [...blocks.slice(0, resolvedScript + 1), "scenario_disclosure_gate", ...blocks.slice(resolvedScript + 1)];
+    }
+  }
+  // The designer inserts a durable story spine for externally narrated lanes.
+  // Cinematic then inserts Visual Matter immediately after it; mirror that in
+  // the review preview so the optional creative module is never invisible.
+  if (fam.narrated && !blocks.includes("story_spine")) {
+    const narration = blocks.indexOf("narration_tts");
+    if (narration >= 0) blocks = [...blocks.slice(0, narration + 1), "story_spine", ...blocks.slice(narration + 1)];
+  }
+  if (familyKey === "cinematic" && !blocks.includes("visual_matter")) {
+    const story = blocks.indexOf("story_spine");
+    if (story >= 0) blocks = [...blocks.slice(0, story + 1), "visual_matter", ...blocks.slice(story + 1)];
+  }
+  // Mirror the design pipeline's existing niche inserts plus the explicit
+  // source-attributed data-story contract. The contract is only supported by
+  // the narrated-stock timeline, so the preview never promises a no-op module
+  // for a self-contained or scene-compiler renderer.
+  const needsDataInserts = (dataStory && supportsDataStoryFamily(familyKey))
+    || Boolean(nichePreset(nicheKey)?.insertTypes?.length);
+  if (needsDataInserts && blocks.includes("timeline_assemble") && !blocks.includes("visual_inserts")) {
+    const anchors = ["quote_overlays", "intro_card", "narration_tts"];
+    const anchor = anchors.map((block) => blocks.indexOf(block)).find((index) => index >= 0) ?? -1;
+    if (anchor >= 0) blocks = [...blocks.slice(0, anchor + 1), "visual_inserts", ...blocks.slice(anchor + 1)];
   }
   if (t.crosspost) {
     const i = blocks.findIndex((b) => b === "notify" || b === "cleanup");
@@ -168,44 +248,99 @@ export default function NewChannelWizard() {
   const [runProbe, setRunProbe] = useState(false);
   const createRequestKeyRef = useRef<{ intent: string; key: string } | null>(null);
   const [toggles, setToggles] = useState<Toggles>(DEFAULT_TOGGLES);
+  // Capability acceptance never turns on from a suggestion alone. Each entry
+  // stores the server-issued catalog fingerprint so stale UI advice cannot
+  // mutate a pipeline after a catalog upgrade.
+  const [creativeCapabilityOffers, setCreativeCapabilityOffers] = useState<CreativeCapabilityUiOffer[]>([]);
+  const [capabilitySelections, setCapabilitySelections] = useState<Record<string, string>>({});
+  const [capabilityCatalogFingerprint, setCapabilityCatalogFingerprint] = useState("");
+  const dataStory = Boolean(capabilitySelections.source_attributed_data_story);
+  const dataStorySuggested = creativeCapabilityOffers.some(
+    (capability) => capability.capability === "source_attributed_data_story",
+  );
+  // Explicitly opt into a thought-experiment profile; no scenario is inferred
+  // from a topic or advisor suggestion.
+  const [syntheticScenarioProfile, setSyntheticScenarioProfile] = useState<SyntheticScenarioProfile | "">("");
   // Advanced per-module param editor: paramOverrides[blockId][key] = value.
   const [paramOverrides, setParamOverrides] = useState<Record<string, Record<string, unknown>>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
   // Pipeline style — per-module presets/knobs the new channel starts with
   // (validated server-side by channels.setModuleConfig in design-channel).
   const [moduleConfig, setModuleConfig] = useState<ModuleConfigMap>({});
-  // example-clip analysis
-  const [analyzing, setAnalyzing] = useState(false);
   const [clipNote, setClipNote] = useState<string | null>(null);
-  const analyzeRef = useRef<ReturnType<typeof setInterval> | null>(null);
   const [concept, setConcept] = useState("");
   const [suggesting, setSuggesting] = useState(false);
+  const [supervisedAdmission, setSupervisedAdmission] = useState<SupervisedCreatorSelection | null>(null);
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;
+  const duration = family ? familyDurationContract(family) : undefined;
   const costAuthority = channelBuildCostAuthority({
     approveSetupSpend,
     runProbe,
     perVideoBudgetUsd: budget,
+    family: family || undefined,
   });
 
-  const selectFamily = (next: FamilyKey) => {
+  const selectFamily = (
+    next: FamilyKey,
+    requestedSeconds?: number,
+    supervised?: SupervisedCreatorSelection,
+  ) => {
+    if (!isFamilyProductionReady(next) && !supervised) {
+      const readiness = familyProductionReadiness(next);
+      setClipNote(`${FAMILIES[next].label} is registered but cannot start production today: ${readiness.blockers.join(" ")}`);
+      return;
+    }
     setFamily(next);
-    // The native documentary master has a truthful reserved cost envelope;
-    // selecting it must not leave a newly-created channel below preflight.
+    setSupervisedAdmission(supervised ?? null);
+    setCreativeCapabilityOffers([]);
+    setCapabilitySelections({});
+    setCapabilityCatalogFingerprint("");
+    // A supervised family intake is deliberately not a channel-build
+    // authorization. Clear any authority retained from an earlier autonomous
+    // selection before the UI can show the review-only package.
+    if (supervised) {
+      setApproveSetupSpend(false);
+      setRunProbe(false);
+      setAutoYoutube(false);
+      setPublishMode("draft");
+      setApprovedForPublish(false);
+      setToggles((current) => ({ ...current, crosspost: false }));
+    }
+    if (next !== "illustrated_explainer") setSyntheticScenarioProfile("");
     setBudget((current) => Math.max(current, FAMILIES[next].defaultRunBudgetUsd ?? 0.5));
+    const authoredMinutes = requestedSeconds === undefined
+      ? familyDurationContract(next).defaultSeconds / 60
+      : requestedSeconds / 60;
+    setLengthMinutes(clampFamilyEpisodeLengthMinutes(next, authoredMinutes));
   };
 
   // pick niche → default its family + subcategory + research-tuned target length
   const pickNiche = (k: string) => {
     setNicheKey(k);
     const n = getNiche(k);
-    if (n) { selectFamily(n.defaultFamily); setSubcategory(n.subcategories[0]?.name ?? ""); }
     const preset = nichePreset(k);
-    if (preset) setLengthMinutes(Math.min(60, Math.max(1, Math.round(preset.targetSeconds / 60))));
+    if (n) {
+      setSubcategory(n.subcategories[0]?.name ?? "");
+      if (isFamilyProductionReady(n.defaultFamily)) {
+        selectFamily(n.defaultFamily, preset?.targetSeconds);
+      } else {
+        // A blocked renderer is not permission to turn a lofi, lore, or
+        // cinematic channel into an unrelated format. Leave the format
+        // unselected until an operator deliberately chooses an available lane.
+        setFamily("");
+        setSupervisedAdmission(null);
+        const readiness = familyProductionReadiness(n.defaultFamily);
+        setClipNote(`${FAMILIES[n.defaultFamily].label} is currently blocked by its production contract: ${readiness.blockers.join(" ")}. No unlike fallback was selected automatically.`);
+      }
+    }
   };
 
-  const preview = useMemo(() => (family ? previewBlocks(family, toggles, nicheKey) : []), [family, toggles, nicheKey]);
+  const preview = useMemo(
+    () => (family ? previewBlocks(family, toggles, nicheKey, dataStory, syntheticScenarioProfile || undefined) : []),
+    [family, toggles, nicheKey, dataStory, syntheticScenarioProfile],
+  );
 
   // Describe the channel in words → suggest a format + crew (operator confirms).
   function suggest() {
@@ -214,63 +349,140 @@ export default function NewChannelWizard() {
     setSuggesting(true); setClipNote(null);
     (async () => {
       try {
-        const res = await fetch("/api/suggest-format", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ concept: c, niche: nicheKey || undefined }) });
+        const res = await fetch("/api/suggest-format", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ concept: c, niche: niche?.label, nicheKey: nicheKey || undefined }) });
         const d = await res.json();
         if (!res.ok || !d.family) { setClipNote(d.error ?? "Could not suggest a format."); setSuggesting(false); return; }
-        selectFamily(d.family as FamilyKey);
         const fam = FAMILIES[d.family as FamilyKey]?.label ?? d.family;
         const alts = Array.isArray(d.alternates) && d.alternates.length
           ? ` Alternates: ${d.alternates.map((a: { family: string }) => FAMILIES[a.family as FamilyKey]?.label ?? a.family).join(", ")}.`
           : "";
-        setClipNote(`Suggested format: ${fam}${d.available ? "" : " (draft — engine not built yet)"} · crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}`);
+        const preflight = d.preflight as {
+          templateAvailable?: boolean;
+          productionReady?: boolean;
+          runtimeBlockers?: string[];
+          planning?: {
+            ready?: boolean;
+            mode?: "registered_non_gemini" | "unregistered";
+            capabilityId?: string;
+            plannerBlock?: string;
+            provenance?: string;
+          };
+          creatorAdmission?: {
+            mode?: "registered_non_gemini" | "registered_supervised_non_gemini" | "unregistered";
+            selectable?: boolean;
+            privateReviewOnly?: boolean;
+            capabilityId?: string;
+            provenance?: string;
+            requiredArtifacts?: string[];
+            reviewHref?: string;
+          };
+          fallbackFamily?: FamilyKey;
+          runtimeCompilationRequired?: boolean;
+          primaryRenderer?: string;
+          minimumPerVideoBudgetUsd?: number;
+          missingRequirements?: string[];
+          providerRequirements?: string[];
+          requiredPipelineModules?: string[];
+          requiredRendererChains?: string[][];
+          rendererChainGuards?: Array<{ whenPresent?: string[]; requires?: string[] }>;
+          qualityFocus?: string[];
+          recommendedModules?: Array<{
+            block?: string;
+            profile?: string;
+            requirements?: string[];
+            automationAdmission?: {
+              autonomous?: boolean;
+              blockers?: string[];
+              remediation?: string;
+            };
+          }>;
+          creativeCapabilities?: CreativeCapabilityUiOffer[];
+          capabilityCatalogFingerprint?: string;
+          duration?: { label?: string; rationale?: string };
+          validationRenderRequired?: boolean;
+        } | undefined;
+        const creativeCapabilities = Array.isArray(preflight?.creativeCapabilities)
+          ? preflight.creativeCapabilities
+          : [];
+        const supervised = preflight?.creatorAdmission?.mode === "registered_supervised_non_gemini"
+          && preflight.creatorAdmission.selectable
+          && preflight.creatorAdmission.capabilityId
+          ? {
+              capabilityId: preflight.creatorAdmission.capabilityId,
+              provenance: preflight.creatorAdmission.provenance,
+              requiredArtifacts: [...(preflight.creatorAdmission.requiredArtifacts ?? [])],
+              ...(preflight.creatorAdmission.reviewHref
+                ? { reviewHref: preflight.creatorAdmission.reviewHref }
+                : {}),
+            }
+          : undefined;
+        if (preflight?.productionReady && isFamilyProductionReady(d.family as FamilyKey)) {
+          selectFamily(d.family as FamilyKey);
+          setCreativeCapabilityOffers(creativeCapabilities);
+          setCapabilityCatalogFingerprint(preflight?.capabilityCatalogFingerprint ?? "");
+        } else if (supervised) {
+          selectFamily(d.family as FamilyKey, undefined, supervised);
+          setCreativeCapabilityOffers(creativeCapabilities);
+          setCapabilityCatalogFingerprint(preflight?.capabilityCatalogFingerprint ?? "");
+        } else if (preflight?.productionReady === false) {
+          setFamily("");
+          setSupervisedAdmission(null);
+          setCreativeCapabilityOffers([]);
+          setCapabilitySelections({});
+          setCapabilityCatalogFingerprint("");
+        }
+        const requirements = preflight?.missingRequirements?.length
+          ? ` Before design can compile: ${preflight.missingRequirements.join(", ")}.`
+          : preflight?.templateAvailable
+            ? " The authorized design task will compile the exact pipeline and cost reservation before any validation probe can start."
+            : " This template is not available for runtime design.";
+        const quality = preflight?.qualityFocus?.length ? ` Quality focus: ${preflight.qualityFocus.slice(0, 3).join(", ")}.` : "";
+        const providers = preflight?.providerRequirements?.length ? ` Required capabilities: ${preflight.providerRequirements.join(", ")}.` : "";
+        const planningFoundation = preflight?.planning?.ready
+          ? ` Creator foundation: verified no-Gemini planning${preflight.planning.plannerBlock ? ` via ${preflight.planning.plannerBlock}` : ""}${preflight.planning.capabilityId ? ` (${preflight.planning.capabilityId})` : ""}.${preflight.planning.provenance ? ` ${preflight.planning.provenance}` : ""}`
+          : "";
+        const chain = preflight?.requiredRendererChains?.length
+          ? ` Required visual renderer path: ${preflight.requiredRendererChains.map((path) => path.join(" → ")).join(" OR ")}.`
+          : preflight?.requiredPipelineModules?.length
+            ? ` Required visual chain: ${preflight.requiredPipelineModules.join(" → ")}.`
+          : "";
+        const rendererGuards = preflight?.rendererChainGuards?.length
+          ? ` Renderer guard: ${preflight.rendererChainGuards.map((guard) =>
+            `when ${guard.whenPresent?.join(" + ") ?? "this renderer"} is selected, require ${guard.requires?.join(" + ") ?? "its required direction"}`,
+          ).join("; ")}.`
+          : "";
+        const renderer = preflight?.primaryRenderer ? ` Renderer: ${preflight.primaryRenderer}.` : "";
+        const budgetFloor = typeof preflight?.minimumPerVideoBudgetUsd === "number"
+          ? ` Baseline standard-episode envelope: $${preflight.minimumPerVideoBudgetUsd.toFixed(2)} (exact runtime reservation is compiled before spend).`
+          : "";
+        const duration = preflight?.duration?.label ? ` Authored episode length: ${preflight.duration.label}.` : "";
+        const runtime = preflight?.productionReady === false
+          ? ` Renderer blocked: ${(preflight.runtimeBlockers ?? []).join(" ")}${preflight.fallbackFamily ? ` Operator-visible alternative: ${FAMILIES[preflight.fallbackFamily].label}.` : ""}`
+          : "";
+        const validation = preflight?.validationRenderRequired ? " A held-out validation render is required before promotion." : "";
+        const capabilityNotes = creativeCapabilities.map((capability) => {
+          const requirements = capability.requirements?.length
+            ? ` Requirements: ${capability.requirements.join(", ")}.`
+            : "";
+          const admission = capability.automationAdmission?.autonomous === false
+            ? ` Automatic production remains blocked: ${capability.automationAdmission.remediation ?? "complete its stated admission."}`
+            : "";
+          return capability.selectionMode === "explicit_opt_in"
+            ? ` ${capability.title} is available as an explicit opt-in in Details.${requirements}${admission}`
+            : ` ${capability.title} is private-review only and cannot authorize automatic build, render, spend, or publication.${requirements}`;
+        }).join("");
+        const supervisedNote = supervised
+          ? " Private-review intake selected — it cannot start an automatic build, render, spend, or publish action."
+          : "";
+        const availability = supervised
+          ? " (private review available; automatic renderer unavailable)"
+          : d.available ? "" : " (renderer unavailable)";
+        setClipNote(`Suggested format: ${fam}${availability} · pipeline crew: ${(d.crew ?? []).join(", ")}. ${d.reasoning ?? ""}${alts}${renderer}${chain}${rendererGuards}${duration}${budgetFloor}${providers}${planningFoundation}${requirements}${quality}${runtime}${validation}${capabilityNotes}${supervisedNote}`);
       } catch {
         setClipNote("Suggestion failed — pick a format manually below.");
       } finally {
         setSuggesting(false);
       }
-    })();
-  }
-
-  // Analyze a pasted example clip → suggest a family + style (operator confirms).
-  function analyze() {
-    const u = clipUrl.trim();
-    if (!u || analyzing) return;
-    setAnalyzing(true); setClipNote(null);
-    (async () => {
-      try {
-        const res = await fetch("/api/analyze-clip", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ url: u }) });
-        const d = await res.json();
-        if (!res.ok || !d.id) { setClipNote(d.error ?? "Could not start analysis."); setAnalyzing(false); return; }
-        if (analyzeRef.current) clearInterval(analyzeRef.current);
-        analyzeRef.current = setInterval(async () => {
-          try {
-            const r = await fetch(`/api/analyze-clip?id=${encodeURIComponent(d.id)}`);
-            const j = await r.json();
-            if (j.status === "COMPLETED" && j.output?.analysis) {
-              if (analyzeRef.current) clearInterval(analyzeRef.current);
-              const a = j.output.analysis;
-              if (a.couldAnalyze === false) {
-                setClipNote("Couldn't analyze this clip (live stream, private, or unavailable) — pick a format manually below.");
-                setAnalyzing(false);
-                return;
-              }
-              if (a.recommendedFamily && a.recommendedFamily in FAMILIES) {
-                selectFamily(a.recommendedFamily as FamilyKey);
-              }
-              if (a.recommendedNicheKey) { setNicheKey(a.recommendedNicheKey); }
-              if (a.recommendedFootageTheme) setFootageTheme(a.recommendedFootageTheme);
-              if (typeof a.approxLengthSec === "number" && a.approxLengthSec > 0) setLengthMinutes(Math.max(1, Math.round(a.approxLengthSec / 60)));
-              setToggles((p) => ({ ...p, quotes: !!a.hasNarration && p.quotes, captions: !!a.hasNarration && p.captions, chapters: !!a.hasNarration && p.chapters }));
-              setClipNote(`Detected: ${a.visualStyle || "?"} · ${a.hasNarration ? "narrated" : "no narration"} · music ${a.musicRole}. Suggested format: ${FAMILIES[a.recommendedFamily as FamilyKey]?.label ?? a.recommendedFamily}. ${a.notes ?? ""}`);
-              setAnalyzing(false);
-            } else if (["FAILED", "CRASHED", "CANCELED", "TIMED_OUT"].includes(j.status)) {
-              if (analyzeRef.current) clearInterval(analyzeRef.current);
-              setClipNote("Analysis failed (is the video public?). You can still pick a format manually.");
-              setAnalyzing(false);
-            }
-          } catch { /* keep polling */ }
-        }, 2500);
-      } catch { setClipNote("Network error starting analysis."); setAnalyzing(false); }
     })();
   }
 
@@ -308,15 +520,24 @@ export default function NewChannelWizard() {
           return;
         }
       }
+      const selectedCapabilitySelections = Object.entries(capabilitySelections)
+        .filter(([, catalogFingerprint]) => Boolean(catalogFingerprint))
+        .map(([capability, catalogFingerprint]) => ({ capability, catalogFingerprint }));
       const design: Record<string, unknown> = {
-        nicheKey, subcategory, family, name: requestedYoutubeName || undefined,
-        lengthMinutes: fam?.narrated ? lengthMinutes : undefined,
+        nicheKey, subcategory, family, concept: concept.trim() || undefined, name: requestedYoutubeName || undefined,
+        // Every variable-duration family receives its own authored unit. Fixed
+        // engines own their timing and never receive a misleading generic value.
+        lengthMinutes: fam && duration?.inputUnit !== "fixed" ? lengthMinutes : undefined,
         locale, footageTheme: family === "narrated_stock" ? footageTheme : undefined,
         voiceFx: fam?.narrated && voiceFx !== "none" ? voiceFx : undefined,
         seriesTitle: seriesTitle.trim() || undefined,
         seriesCount: seriesTitle.trim() && seriesCount > 0 ? seriesCount : undefined,
         cadence, days, budget, publishMode, approvedForPublish, toggles, autoYoutube, runProbe,
         ...(family === "documentary_collage_short" ? { sourceReferences, claimEvidence } : {}),
+        ...(selectedCapabilitySelections.length ? { capabilitySelections: selectedCapabilitySelections } : {}),
+        ...(family === "illustrated_explainer" && syntheticScenarioProfile
+          ? { syntheticScenario: syntheticScenarioContract(syntheticScenarioProfile) }
+          : {}),
         ...(autoYoutube ? { requestedYoutubeName, requestedYoutubeHandle } : {}),
         approveSetupSpend,
         setupBudgetUsd: costAuthority.setupCapUsd,
@@ -567,7 +788,6 @@ export default function NewChannelWizard() {
       submissionGate.abort();
       if (pollCallbackRef.current === poll) pollCallbackRef.current = null;
       document.removeEventListener("visibilitychange", resumeVisiblePolling);
-      if (analyzeRef.current) clearInterval(analyzeRef.current);
     };
   }, [poll, submitPending]);
 
@@ -618,7 +838,7 @@ export default function NewChannelWizard() {
   const canNext = step === 0
     ? !!nicheKey
     : step === 1
-      ? Boolean(family && fam?.available)
+      ? Boolean(family && fam?.available && (isFamilyProductionReady(family) || supervisedAdmission))
       : true;
   const stepNames = ["Niche", "Format", "Details", "Review"];
 
@@ -668,7 +888,7 @@ export default function NewChannelWizard() {
                 <div style={{ fontSize: "1.5rem" }}>{n.icon}</div>
                 <div style={{ fontWeight: 600, marginTop: "0.4rem" }}>{n.label}</div>
                 <div style={{ display: "flex", gap: "0.4rem", margin: "0.4rem 0", fontSize: "0.72rem" }}>
-                  <span style={{ color: "var(--color-ok)" }}>${n.rpm} RPM</span>
+                  <span style={{ color: "var(--color-faint)" }}>Planning seed</span>
                   <span style={{ color: n.difficulty === "Easy" ? "var(--color-ok)" : n.difficulty === "Hard" ? "var(--color-failed)" : "var(--color-accent)" }}>{n.difficulty}</span>
                 </div>
                 <div style={{ fontSize: "0.76rem", color: "var(--color-muted)" }}>{n.blurb}</div>
@@ -677,9 +897,9 @@ export default function NewChannelWizard() {
           })}
           {niche && (
             <div className="glass" style={{ gridColumn: "1 / -1", padding: "1rem", display: "grid", gap: "0.5rem" }}>
-              <span style={{ fontSize: "0.78rem", color: "var(--color-muted)" }}>Subcategory (est. monthly searches)</span>
+              <span style={{ fontSize: "0.78rem", color: "var(--color-muted)" }}>{NICHE_CATALOG_EVIDENCE.label}</span>
               <select value={subcategory} onChange={(e) => setSubcategory(e.target.value)} style={selStyle}>
-                {niche.subcategories.map((s) => <option key={s.id} value={s.name}>{s.name} — ~{s.searchVolume}K · ${(s.rpm ?? niche.rpm).toFixed(1)} RPM</option>)}
+                {niche.subcategories.map((s) => <option key={s.id} value={s.name}>{s.name} — planning seed</option>)}
               </select>
             </div>
           )}
@@ -692,11 +912,26 @@ export default function NewChannelWizard() {
           <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(260px,1fr))", gap: "0.8rem" }}>
             {FAMILY_KEYS.map((k) => {
               const f = FAMILIES[k]; const on = k === family;
+              const productionReady = isFamilyProductionReady(k);
+              const readiness = familyProductionReadiness(k);
+              const supervisedCapability = familySupervisedChannelInceptionCapability(k);
+              const supervised = supervisedCapability
+                ? {
+                    capabilityId: supervisedCapability.id,
+                    provenance: supervisedCapability.provenance,
+                    requiredArtifacts: [...supervisedCapability.requiredArtifacts],
+                    ...(supervisedCapability.reviewHref ? { reviewHref: supervisedCapability.reviewHref } : {}),
+                  }
+                : undefined;
+              const selectable = f.available && (productionReady || Boolean(supervised));
               return (
-                <button key={k} disabled={!f.available} onClick={() => f.available && selectFamily(k)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: f.available ? "pointer" : "not-allowed", opacity: f.available ? 1 : 0.55,
+                <button key={k} disabled={!selectable} onClick={() => selectable && selectFamily(k, undefined, supervised)} className="glass lift" style={{ textAlign: "left", padding: "1rem", cursor: selectable ? "pointer" : "not-allowed", opacity: selectable ? 1 : 0.55,
                   border: on ? "1px solid var(--color-accent)" : "1px solid var(--color-border)", background: on ? "rgba(124,124,255,0.08)" : undefined }}>
-                  <div style={{ fontWeight: 600 }}>{f.label}{!f.available && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· unavailable — no spend</span>}</div>
+                  <div style={{ fontWeight: 600 }}>{f.label}{supervised ? <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· private review only</span> : !selectable && <span style={{ fontSize: "0.66rem", marginLeft: 6, color: "var(--color-accent)" }}>· renderer blocked — no spend</span>}</div>
                   <div style={{ fontSize: "0.78rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{f.description}</div>
+                  {supervised
+                    ? <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>Select to see the private-review requirements; no automatic build, render, spend, or publish can start here.</div>
+                    : !selectable && readiness.blockers[0] && <div style={{ fontSize: "0.7rem", color: "var(--color-muted)", marginTop: "0.35rem" }}>{readiness.blockers[0]}</div>}
                 </button>
               );
             })}
@@ -706,13 +941,10 @@ export default function NewChannelWizard() {
               setName(e.target.value);
               if (!normalizeYoutubeChannelName(e.target.value)) setAutoYoutube(false);
             }} placeholder="e.g. Stoic Truths" style={inpStyle} /></label>
-          <label style={lblStyle}><span style={capStyle}>Example clip URL (optional — Gemini analyzes it to match the style)</span>
-            <div style={{ display: "flex", gap: "0.5rem" }}>
-              <input value={clipUrl} onChange={(e) => setClipUrl(e.target.value)} placeholder="paste a YouTube link you like" style={{ ...inpStyle, flex: 1 }} />
-              <button onClick={analyze} disabled={!clipUrl.trim() || analyzing} style={{ ...btnGhost, opacity: !clipUrl.trim() || analyzing ? 0.5 : 1, whiteSpace: "nowrap" }}>{analyzing ? "Analyzing…" : "Analyze"}</button>
-            </div>
+          <label style={lblStyle}><span style={capStyle}>Reference video URL (optional — retained as operator context; no automatic copying or clip analysis)</span>
+            <input value={clipUrl} onChange={(e) => setClipUrl(e.target.value)} placeholder="paste a YouTube link whose qualities you want to discuss" style={inpStyle} />
           </label>
-          <label style={lblStyle}><span style={capStyle}>Or describe the channel in words (Gemini suggests a format + the crew it needs)</span>
+          <label style={lblStyle}><span style={capStyle}>Describe the channel in words (the deterministic advisor suggests a compatible format and production contract)</span>
             <div style={{ display: "flex", gap: "0.5rem" }}>
               <input value={concept} onChange={(e) => setConcept(e.target.value)} placeholder="e.g. calm daily stoicism lessons over cinematic nature b-roll" style={{ ...inpStyle, flex: 1 }} />
               <button onClick={suggest} disabled={!concept.trim() || suggesting} style={{ ...btnGhost, opacity: !concept.trim() || suggesting ? 0.5 : 1, whiteSpace: "nowrap" }}>{suggesting ? "Thinking…" : "Suggest"}</button>
@@ -726,8 +958,29 @@ export default function NewChannelWizard() {
       {step === 2 && (
         <div style={{ display: "grid", gap: "1rem", maxWidth: 720 }}>
           <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.9rem" }}>
-            {fam?.narrated && (
-              <Row label="Target length"><input type="number" min={1} max={60} value={lengthMinutes} onChange={(e) => setLengthMinutes(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>min</span></Row>
+            {duration?.inputUnit !== "fixed" && duration && (
+              <Row label="Target length">
+                <input
+                  type="number"
+                  min={duration.inputUnit === "minutes" ? duration.minimumSeconds / 60 : duration.minimumSeconds}
+                  max={duration.inputUnit === "minutes" ? duration.maximumSeconds / 60 : duration.maximumSeconds}
+                  step={duration.inputUnit === "minutes" ? duration.stepSeconds / 60 : duration.stepSeconds}
+                  value={duration.inputUnit === "minutes" ? lengthMinutes : Math.round(lengthMinutes * 60)}
+                  onChange={(e) => {
+                    const raw = Number(e.target.value);
+                    if (!Number.isFinite(raw)) return;
+                    setLengthMinutes(clampFamilyEpisodeLengthMinutes(
+                      family as FamilyKey,
+                      duration.inputUnit === "minutes" ? raw : raw / 60,
+                    ));
+                  }}
+                  style={{ ...inpStyle, width: 90 }}
+                />
+                <span style={muted}>{duration.inputUnit === "minutes" ? "min" : "sec"} · {formatFamilyDurationContract(family as FamilyKey)} authored range</span>
+              </Row>
+            )}
+            {duration?.inputUnit === "fixed" && family && (
+              <Row label="Episode cadence"><span style={muted}>{formatFamilyDurationContract(family)} · {duration.rationale}</span></Row>
             )}
             <Row label="Language"><select value={locale} onChange={(e) => setLocale(e.target.value)} style={selStyle}><option value="en">English</option><option value="es">Spanish</option><option value="de">German</option></select></Row>
             {family === "narrated_stock" && (
@@ -735,6 +988,58 @@ export default function NewChannelWizard() {
             )}
             {fam?.narrated && (
               <Row label="Voice effect"><select value={voiceFx} onChange={(e) => setVoiceFx(e.target.value)} style={selStyle}><option value="none">None (clean)</option><option value="radio">Old radio (vintage AM)</option></select></Row>
+            )}
+            {creativeCapabilityOffers
+              .filter((capability) => capability.selectionMode === "explicit_opt_in")
+              .map((capability) => {
+                const selected = Boolean(capabilitySelections[capability.capability]);
+                return (
+                  <Row key={capability.capability} label={capability.title}>
+                    <label style={{ display: "flex", alignItems: "flex-start", gap: "0.6rem", cursor: "pointer", fontSize: "0.8rem", color: "var(--color-muted)" }}>
+                      <input
+                        type="checkbox"
+                        checked={selected}
+                        onChange={(event) => {
+                          const checked = event.target.checked;
+                          setCapabilitySelections((current) => {
+                            const next = { ...current };
+                            if (checked) next[capability.capability] = capabilityCatalogFingerprint;
+                            else delete next[capability.capability];
+                            return next;
+                          });
+                        }}
+                      />
+                      <span>
+                        {dataStorySuggested && capability.capability === "source_attributed_data_story"
+                          ? "Advisor recommended this for the described channel. "
+                          : ""}
+                        {capability.description} {capability.requirements?.join(" ")}
+                        {capability.automationAdmission?.autonomous === false
+                          ? ` Automatic production remains blocked: ${capability.automationAdmission.remediation ?? "complete its stated admission."}`
+                          : ""}
+                      </span>
+                    </label>
+                  </Row>
+                );
+              })}
+            {family === "illustrated_explainer" && (
+              <Row label="Fictional AI format">
+                <select
+                  value={syntheticScenarioProfile}
+                  onChange={(event) => setSyntheticScenarioProfile(event.target.value as SyntheticScenarioProfile | "")}
+                  style={selStyle}
+                >
+                  <option value="">Standard illustrated explainer</option>
+                  <option value="ai_town">AI runs a fictional town</option>
+                  <option value="ai_decision">What would AI do?</option>
+                  <option value="ai_pov">AI POV story</option>
+                </select>
+                {syntheticScenarioProfile && (
+                  <div style={{ ...muted, marginTop: "0.4rem" }}>
+                    Adds a mandatory “Fictional AI Scenario” opening, an assumptions gate, local scenario-board visuals, and a required Nano Banana thumbnail. It does not simulate or claim real AI results; Google is used only for the final thumbnail image.
+                  </div>
+                )}
+              </Row>
             )}
             {family === "documentary_collage_short" && (
               <>
@@ -781,50 +1086,80 @@ export default function NewChannelWizard() {
                 </div>
               </Row>
             )}
-            <Row label="Auto-publish"><select value={publishMode} onChange={(e) => { setPublishMode(e.target.value); setApprovedForPublish(false); }} style={selStyle}><option value="draft">Private draft</option><option value="scheduled">Scheduled</option><option value="public">Public</option></select></Row>
-            <Row label="One-time setup">
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={approveSetupSpend}
-                  onChange={(e) => {
-                    setApproveSetupSpend(e.target.checked);
-                    if (!e.target.checked) { setRunProbe(false); setAutoYoutube(false); }
-                  }}
-                />
-                <span style={muted}>authorize up to ${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)} for research, identity, art and starter thumbnails</span>
-              </label>
-            </Row>
-            <Row label="Auto-create YouTube channel">
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  disabled={!approveSetupSpend || !normalizeYoutubeChannelName(name)}
-                  checked={autoYoutube}
-                  onChange={(e) => setAutoYoutube(e.target.checked)}
-                />
-                <span style={muted}>
-                  {normalizeYoutubeChannelName(name)
-                    ? `create exactly “${normalizeYoutubeChannelName(name)}” as @${suggestYoutubeHandle(name)} (explicit opt-in)`
-                    : "enter a channel name first so the exact external identity can be approved"}
-                </span>
-              </label>
-            </Row>
-            <Row label="Paid validation render">
-              <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                <input type="checkbox" disabled={!approveSetupSpend} checked={runProbe} onChange={(e) => setRunProbe(e.target.checked)} />
-                <span style={muted}>run one bounded private proof · up to ${costAuthority.validationCapUsd.toFixed(2)} extra</span>
-              </label>
-            </Row>
-            <Row label="Production budget / video"><input type="number" min={fam?.defaultRunBudgetUsd ?? 0.5} max={100} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD{family === "documentary_collage_short" ? " · native master requires at least $30" : ""}</span></Row>
+            {supervisedAdmission ? (
+              <div className="glass" style={{ padding: "0.75rem 0.85rem", fontSize: "0.8rem", color: "var(--color-muted)", border: "1px solid rgba(124,124,255,0.45)" }}>
+                Private-review intake only: no setup spend, validation render, YouTube creation, publishing, cross-posting, or production budget can be authorized here.
+              </div>
+            ) : (
+              <>
+                <Row label="Auto-publish"><select value={publishMode} onChange={(e) => { setPublishMode(e.target.value); setApprovedForPublish(false); }} style={selStyle}><option value="draft">Private draft</option><option value="scheduled">Scheduled</option><option value="public">Public</option></select></Row>
+                <Row label="One-time setup">
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      checked={approveSetupSpend}
+                      onChange={(e) => {
+                        setApproveSetupSpend(e.target.checked);
+                        if (!e.target.checked) { setRunProbe(false); setAutoYoutube(false); }
+                      }}
+                    />
+                    <span style={muted}>authorize up to ${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)} for research, identity, art and starter thumbnails</span>
+                  </label>
+                </Row>
+                <Row label="Auto-create YouTube channel">
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                    <input
+                      type="checkbox"
+                      disabled={!approveSetupSpend || !normalizeYoutubeChannelName(name)}
+                      checked={autoYoutube}
+                      onChange={(e) => setAutoYoutube(e.target.checked)}
+                    />
+                    <span style={muted}>
+                      {normalizeYoutubeChannelName(name)
+                        ? `create exactly “${normalizeYoutubeChannelName(name)}” as @${suggestYoutubeHandle(name)} (explicit opt-in)`
+                        : "enter a channel name first so the exact external identity can be approved"}
+                    </span>
+                  </label>
+                </Row>
+                <Row label="Paid validation render">
+                  <label style={{ display: "flex", alignItems: "center", gap: "0.5rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                    <input type="checkbox" disabled={!approveSetupSpend} checked={runProbe} onChange={(e) => setRunProbe(e.target.checked)} />
+                    <span style={muted}>run one bounded private proof · up to ${costAuthority.validationCapUsd.toFixed(2)} extra</span>
+                  </label>
+                </Row>
+                <Row label="Production budget / video"><input type="number" min={fam?.defaultRunBudgetUsd ?? 0.5} max={Math.max(100, fam?.defaultRunBudgetUsd ?? 0.5)} step={0.5} value={budget} onChange={(e) => setBudget(+e.target.value)} style={{ ...inpStyle, width: 90 }} /> <span style={muted}>USD{family === "documentary_collage_short" ? " · native master requires at least $30" : family === "cinematic" ? " · locked Novita chain requires at least $130" : ""}</span></Row>
+              </>
+            )}
           </div>
           <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.6rem" }}>
             <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Advanced — optional modules</div>
-            {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
+            {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).filter(([key]) => !supervisedAdmission || key !== "crosspost").map(([k, lbl]) => (
               <label key={k} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
                 <input type="checkbox" checked={toggles[k]} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}
               </label>
             ))}
+            {family === "cinematic" && (
+              <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                <input
+                  type="checkbox"
+                  checked={toggles.visualMatter}
+                  onChange={(e) => {
+                    const enabled = e.target.checked;
+                    setToggles((current) => ({ ...current, visualMatter: enabled }));
+                    setModuleConfig((current) => {
+                      const visualMatter = { ...(current.visual_matter ?? {}) };
+                      if (enabled) delete visualMatter.enabled;
+                      else visualMatter.enabled = false;
+                      const next = { ...current };
+                      if (Object.keys(visualMatter).length) next.visual_matter = visualMatter;
+                      else delete next.visual_matter;
+                      return next;
+                    });
+                  }}
+                />
+                Visual Matter (mood board, character/settings sheets, storyboard locks)
+              </label>
+            )}
           </div>
         </div>
       )}
@@ -833,27 +1168,50 @@ export default function NewChannelWizard() {
       {step === 3 && fam && (
         <div style={{ display: "grid", gap: "1rem", maxWidth: 760 }}>
           {!fam.available && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {fam.label}: visual engine “{fam.visualEngine}” not built yet — channel will be created as a DRAFT until it ships.</div>}
+          {!isFamilyProductionReady(fam.key) && <div className="glass" style={{ padding: "0.8rem 1rem", border: "1px solid rgba(245,158,11,0.45)", color: "#fbbf24", fontSize: "0.84rem" }}>⚠ {familyProductionReadiness(fam.key).blockers.join(" ")}</div>}
+          {supervisedAdmission && (
+            <div className="glass" style={{ padding: "0.9rem 1rem", border: "1px solid rgba(124,124,255,0.55)", color: "#d7d9ff", display: "grid", gap: "0.45rem", fontSize: "0.84rem" }}>
+              <strong>Private-review intake selected</strong>
+              <span>This registered route is not automatic production and cannot render, spend, create a YouTube channel, or publish.</span>
+              {supervisedAdmission.requiredArtifacts.length > 0 && <span>Required before a separately authorized next stage: {supervisedAdmission.requiredArtifacts.join(" · ")}.</span>}
+              {supervisedAdmission.provenance && <span style={{ color: "var(--color-muted)", fontSize: "0.76rem" }}>{supervisedAdmission.provenance}</span>}
+              {supervisedAdmission.reviewHref && <Link href={supervisedAdmission.reviewHref} style={{ ...btnGhost, justifySelf: "start" }}>Open private review desk</Link>}
+            </div>
+          )}
           <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.5rem", fontSize: "0.86rem" }}>
             <SummaryRow k="Niche" v={`${niche?.label}${subcategory ? " · " + subcategory : ""}`} />
             <SummaryRow k="Format" v={fam.label} />
             <SummaryRow k="Visual engine" v={fam.visualEngine} />
-            {fam.narrated && <SummaryRow k="Length / language" v={`~${lengthMinutes} min · ${locale.toUpperCase()}`} />}
+            {duration && <SummaryRow k="Episode unit" v={duration.inputUnit === "fixed"
+              ? formatFamilyDurationContract(family as FamilyKey)
+              : duration.inputUnit === "minutes"
+                ? `${lengthMinutes} min · ${formatFamilyDurationContract(family as FamilyKey)} contract`
+                : `${Math.round(lengthMinutes * 60)} sec · ${formatFamilyDurationContract(family as FamilyKey)} contract`} />}
+            {fam.narrated && <SummaryRow k="Language" v={locale.toUpperCase()} />}
             {fam.narrated && voiceFx !== "none" && <SummaryRow k="Voice effect" v={voiceFx === "radio" ? "Old radio" : voiceFx} />}
+            {dataStory && <SummaryRow k="Data story" v="Source-attributed charts only · 3+ named-source numeric sentences required" />}
+            {syntheticScenarioProfile && <SummaryRow k="Fictional AI format" v={`${syntheticScenarioProfile === "ai_town" ? "AI runs a fictional town" : syntheticScenarioProfile === "ai_decision" ? "What would AI do?" : "AI POV story"} · disclosure gate + local scenario visuals`} />}
             {seriesTitle.trim() && <SummaryRow k="Series" v={`${seriesTitle.trim()}${seriesCount > 0 ? ` · ${seriesCount} parts` : " · open-ended"}`} />}
             <SummaryRow k="Cadence" v={`${cadence}${(cadence === "weekly" || cadence === "biweekly") && days.length ? " · " + days.map((d) => DOW[d]).join(",") : ""} · ${publishMode}`} />
-            <SummaryRow k="Setup" v={approveSetupSpend ? `Approved · capped at $${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)}` : "Plan only · $0 provider spend"} />
-            {runProbe && <SummaryRow k="Private validation" v={`Approved separately · capped at $${costAuthority.validationCapUsd.toFixed(2)}`} />}
-            <SummaryRow k="Maximum setup + validation" v={`$${costAuthority.combinedSetupAndValidationCapUsd.toFixed(2)}`} />
-            <SummaryRow k="Future production videos" v={`$${costAuthority.perVideoProductionBudgetUsd.toFixed(2)} maximum each`} />
+            {supervisedAdmission ? (
+              <SummaryRow k="Authority" v="Private review only · $0 provider spend · no render, YouTube creation, or publishing" />
+            ) : (
+              <>
+                <SummaryRow k="Setup" v={approveSetupSpend ? `Approved · capped at $${CHANNEL_INCEPTION_SETUP_COST_CEILING_USD.toFixed(2)}` : "Plan only · $0 provider spend"} />
+                {runProbe && <SummaryRow k="Private validation" v={`Approved separately · capped at $${costAuthority.validationCapUsd.toFixed(2)}`} />}
+                <SummaryRow k="Maximum setup + validation" v={`$${costAuthority.combinedSetupAndValidationCapUsd.toFixed(2)}`} />
+                <SummaryRow k="Future production videos" v={`$${costAuthority.perVideoProductionBudgetUsd.toFixed(2)} maximum each`} />
+              </>
+            )}
           </div>
-          {(publishMode !== "draft" || toggles.crosspost) && (
+          {!supervisedAdmission && (publishMode !== "draft" || toggles.crosspost) && (
             <label className="glass" style={{ padding: "0.9rem 1rem", display: "flex", alignItems: "flex-start", gap: "0.65rem", fontSize: "0.82rem", cursor: "pointer", border: "1px solid rgba(245,158,11,0.45)" }}>
               <input type="checkbox" checked={approvedForPublish} onChange={(e) => setApprovedForPublish(e.target.checked)} />
               <span>I explicitly approve automatic external publishing for this channel. This includes scheduled/public YouTube uploads and any enabled cross-posting.</span>
             </label>
           )}
           <div className="glass" style={{ padding: "1.1rem 1.2rem" }}>
-            <div style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.6rem" }}>Designed pipeline ({preview.length} modules)</div>
+            <div style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.6rem" }}>{supervisedAdmission ? "Proposed family modules (not an executable build)" : `Designed pipeline (${preview.length} modules)`}</div>
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
               {preview.map((b, i) => (
                 <span key={b + i} style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem", borderRadius: 6, background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}>{b}</span>
@@ -905,7 +1263,7 @@ export default function NewChannelWizard() {
                 Pick a preset per module and flip toggles — wired into every render. Editable later in Settings.
               </div>
             </div>
-            <ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} />
+            <ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} activeBlockIds={preview} />
           </div>
         </div>
       )}
@@ -915,7 +1273,11 @@ export default function NewChannelWizard() {
         <button onClick={() => setStep((s) => Math.max(0, s - 1))} disabled={step === 0} style={{ ...btnGhost, opacity: step === 0 ? 0.4 : 1 }}>Back</button>
         {step < 3
           ? <button onClick={() => canNext && setStep((s) => s + 1)} disabled={!canNext} style={{ ...btnPrimary, opacity: canNext ? 1 : 0.5 }}>Next</button>
-          : <button onClick={() => void create(Date.now())} disabled={(publishMode !== "draft" || toggles.crosspost) && !approvedForPublish} style={{ ...btnPrimary, opacity: (publishMode !== "draft" || toggles.crosspost) && !approvedForPublish ? 0.5 : 1 }}>{approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
+          : supervisedAdmission
+            ? supervisedAdmission.reviewHref
+              ? <Link href={supervisedAdmission.reviewHref} style={btnPrimary}>Open private review desk</Link>
+              : <button disabled style={{ ...btnPrimary, opacity: 0.5 }}>Private review package required</button>
+            : <button onClick={() => void create(Date.now())} disabled={(publishMode !== "draft" || toggles.crosspost) && !approvedForPublish} style={{ ...btnPrimary, opacity: (publishMode !== "draft" || toggles.crosspost) && !approvedForPublish ? 0.5 : 1 }}>{approveSetupSpend ? "Build channel" : "Save channel plan"}</button>}
       </div>
     </>
   );

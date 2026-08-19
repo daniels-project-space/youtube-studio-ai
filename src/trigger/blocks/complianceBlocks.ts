@@ -15,7 +15,7 @@
 import type { Block, StageContext } from "@/engine/types";
 import { embedText, cosine, hasEmbedKey } from "@/lib/embeddings";
 import { putObject, getObjectBytes } from "@/lib/storage";
-import { geminiJson, hasGeminiKey } from "@/lib/gemini";
+import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 
 interface EmbeddingEntry {
   ts: number;
@@ -64,9 +64,9 @@ function str(ctx: StageContext, key: string): string {
  * pass without a model key (the topic-level gate already ran).
  */
 async function scanSpokenLines(text: string, log: (m: string) => void): Promise<void> {
-  if (!hasGeminiKey()) return;
+  if (!hasAnthropicKey()) return;
   try {
-    const out = await geminiJson<{ violation?: boolean; category?: string; reason?: string }>({
+    const out = await claudeJson<{ violation?: boolean; category?: string; reason?: string }>({
       prompt:
         `You are a YouTube advertiser-safety reviewer reading the SPOKEN NARRATION of a faceless video. ` +
         `Flag ONLY clear policy violations in the words themselves: glorification/encouragement of violence or ` +
@@ -138,14 +138,14 @@ export const complianceCheck: Block = {
   run: async (ctx) => {
     const topic = str(ctx, "topic");
     const niche = (ctx.store["niche"] as string | undefined) ?? "";
-    if (!hasGeminiKey()) {
+    if (!hasAnthropicKey()) {
       return { disclosureRequired: false, sensitiveTopic: false, complianceNote: "" };
     }
     let sensitive = false;
     let synthRealistic = false;
     let reason = "";
     try {
-      const out = await geminiJson<{
+      const out = await claudeJson<{
         sensitive?: boolean;
         depictsRealPeopleRealistically?: boolean;
         reason?: string;

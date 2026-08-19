@@ -15,6 +15,7 @@ import type {
   VisualBrief,
   CutSheet,
   AudioBrief,
+  ValidationAssertion,
   ValidationSpec,
 } from "./types";
 
@@ -249,13 +250,74 @@ const specSchema = z.object({
   })).default([]),
 });
 
-/** Known deterministic metrics the executor can actually compute (§ validate.ts). */
-const KNOWN_METRICS = [
-  "durationSec", "captionCoveragePct", "overlapSec", "loopSeamDiff", "bedLufs", "footageRepeatMaxRun",
-];
+/**
+ * Deterministic metrics are a production contract, not a menu of aspirational
+ * measurements. Keep the critic's options aligned with what final QA actually
+ * supplies for each renderer; otherwise a skipped assertion can look like a
+ * passing review.
+ */
+const NARRATED_QA_METRICS = ["durationSec", "captionCoveragePct", "overlapSec"] as const;
+const BASIC_QA_METRICS = ["durationSec"] as const;
+const MUSIC_LOOP_QA_METRICS = ["durationSec", "loopSeamDiff"] as const;
+
+const QA_METRICS_BY_FAMILY: Record<string, readonly string[]> = {
+  narrated_stock: NARRATED_QA_METRICS,
+  cinematic: NARRATED_QA_METRICS,
+  sleep: NARRATED_QA_METRICS,
+  shorts: NARRATED_QA_METRICS,
+  music_loop: MUSIC_LOOP_QA_METRICS,
+  documentary_collage_short: BASIC_QA_METRICS,
+  whiteboard: BASIC_QA_METRICS,
+  comic: BASIC_QA_METRICS,
+  loreshort: BASIC_QA_METRICS,
+  quizyear: BASIC_QA_METRICS,
+};
+
+/** Union retained for the existing catalog/UI export below. */
+const KNOWN_METRICS = [...new Set(Object.values(QA_METRICS_BY_FAMILY).flat())];
+
+export function measurableValidationMetricsForFamily(family: string): readonly string[] {
+  return QA_METRICS_BY_FAMILY[family] ?? BASIC_QA_METRICS;
+}
+
+/**
+ * An LLM can still request a metric it was told not to use. Remove malformed or
+ * unsupported deterministic assertions before they become a release contract;
+ * if nothing usable remains, `critic_spec` fails loudly instead of emitting a
+ * spec whose only result would be "skipped".
+ */
+export function filterCriticAssertionsForQa(
+  assertions: ValidationAssertion[],
+  family: string,
+  log: Logger = () => {},
+): ValidationAssertion[] {
+  const allowedMetrics = new Set(measurableValidationMetricsForFamily(family));
+  return assertions.filter((assertion) => {
+    if (assertion.check === "vision") return true;
+    if (
+      typeof assertion.metric !== "string" ||
+      assertion.metric.length === 0 ||
+      assertion.op === undefined ||
+      typeof assertion.threshold !== "number" ||
+      !Number.isFinite(assertion.threshold)
+    ) {
+      log(`crew/critic: dropping malformed deterministic assertion ${assertion.id}`);
+      return false;
+    }
+    if (!allowedMetrics.has(assertion.metric)) {
+      log(
+        `crew/critic: dropping deterministic assertion ${assertion.id}; ` +
+        `metric ${assertion.metric} is not measured for ${family}`,
+      );
+      return false;
+    }
+    return true;
+  });
+}
 
 export async function briefCritic(bible: ShowBible, ctx: CrewContext): Promise<ValidationSpec | undefined> {
   const log = ctx.log ?? (() => {});
+  const measurableMetrics = measurableValidationMetricsForFamily(ctx.family);
   try {
     const raw = await agentJson({
       role: "critic",
@@ -270,11 +332,14 @@ export async function briefCritic(bible: ShowBible, ctx: CrewContext): Promise<V
         `dealbreakers (a 39-item spec is noise, not a gate). Each assertion: a stable id, a description, ` +
         `a check kind ("deterministic" for measurable checks, "vision" for judged ones), and a severity ` +
         `("block" = must pass, "warn" = nice-to-have).\n` +
-        `For deterministic checks set metric/op/threshold. The executor can compute these metrics ONLY: ` +
-        `${KNOWN_METRICS.join(", ")}. UNITS + CALIBRATION: captionCoveragePct = PERCENT of the video BODY that is ` +
+        `For deterministic checks set metric/op/threshold. The executor can compute these metrics for THIS format ONLY: ` +
+        `${measurableMetrics.join(", ")}. UNITS + CALIBRATION: captionCoveragePct = PERCENT of the video BODY that is ` +
         `spoken narration — deliberate inter-sentence pauses mean calm channels run 70-85, so use floors like >=60, ` +
         `NEVER >=90. durationSec/overlapSec are seconds — narration length varies, so bound durationSec generously ` +
-        `(between 0.6x and 1.5x the target length, not a tight cap). bedLufs is LUFS (negative). ` +
+        `(between 0.6x and 1.5x the target length, not a tight cap). ` +
+        (measurableMetrics.includes("loopSeamDiff")
+          ? `loopSeamDiff is 1 - first/last-frame SSIM (0 is best); use <= 0.12 for a clean visual loop. `
+          : "") +
         `Use those exact metric names where they fit; otherwise use "vision". ` +
         `"vision" assertions are judged on sampled STILL FRAMES — only author vision checks that are visually ` +
         `assessable (never audio/music/voice/pacing).\n` +
@@ -282,7 +347,11 @@ export async function briefCritic(bible: ShowBible, ctx: CrewContext): Promise<V
         `present + caption coverage + no overlap for narrated essays; hook-in-2s for shorts). Return STRICT ` +
         `JSON {"assertions":[{"id","description","check","metric"?,"op"?,"threshold"?,"severity"}]}.`,
     });
-    const assertions = (raw.assertions ?? []).filter((a) => a && a.id && a.description);
+    const assertions = filterCriticAssertionsForQa(
+      (raw.assertions ?? []).filter((a) => a && a.id && a.description),
+      ctx.family,
+      log,
+    );
     if (assertions.length === 0) return undefined;
     return { assertions };
   } catch (e) {

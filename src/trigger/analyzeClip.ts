@@ -1,11 +1,10 @@
 /**
- * `analyze-example-clip` — Gemini-analyzes a pasted YouTube clip and returns a
- * family/niche/style recommendation for the channel wizard. No download (Gemini
- * reads the YouTube URL directly).
+ * `analyze-example-clip` is retained only as a safe compatibility endpoint for
+ * legacy queued runs. The former provider-backed implementation is retired: it
+ * must not claim to have analyzed a clip or reach a model provider.
  */
 import { task } from "@trigger.dev/sdk";
-import { bootstrapSecrets } from "@/lib/bootstrap";
-import { analyzeClip } from "@/lib/clipAnalysis";
+import { exampleClipAnalysisUnavailable } from "@/lib/exampleClipAnalysisUnavailable";
 
 export interface AnalyzeClipArgs {
   url: string;
@@ -15,11 +14,8 @@ export const analyzeClipTask = task({
   id: "analyze-example-clip",
   maxDuration: 180,
   run: async (payload: AnalyzeClipArgs) => {
-    await bootstrapSecrets((m) => console.log(`[analyze-clip] ${m}`));
     const url = (payload.url ?? "").trim();
     if (!url) throw new Error("url is required");
-    const analysis = await analyzeClip(url);
-    console.log("[analyze-clip] →", JSON.stringify(analysis).slice(0, 300));
-    return { ok: true, analysis };
+    return exampleClipAnalysisUnavailable();
   },
 });

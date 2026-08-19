@@ -3,7 +3,7 @@
 // text-cutout separation, 12:52-14:32) that the detective+robbery renders use.
 // Re-render the SAME cached plan + assets through the CURRENT composition, then
 // reuse the approved narration.mp3 + music.wav and re-mux (frame-hold extend).
-import { readFile, writeFile, rename } from "node:fs/promises";
+import { readFile, rename } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { spawn } from "node:child_process";
 import { join } from "node:path";

@@ -29,6 +29,7 @@ import {
 } from "@/lib/renderBlockAdmission";
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
+import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
 
 export interface RenderBlockInput {
   runId: string;
@@ -49,6 +50,10 @@ export const renderBlockTask = task({
   // OOM/crash retry — the render block re-runs cleanly (it re-reads its inputs).
   retry: { maxAttempts: 2, minTimeoutInMs: 5000, maxTimeoutInMs: 30000, factor: 2 },
   run: async (payload: RenderBlockInput) => {
+    // Fail before registry initialization, secret bootstrap, provider admission,
+    // or large-worker execution when this individual block requires a video
+    // runtime the frozen fleet cannot execute.
+    assertPipelineVideoRuntimeReady([{ block: payload.blockId, params: payload.params }]);
     registerAllBlocks();
     await bootstrapSecrets((m, x) => console.log(`[render-block] ${m}`, x ?? ""), { required: [] });
 

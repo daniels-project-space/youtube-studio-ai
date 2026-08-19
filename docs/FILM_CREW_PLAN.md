@@ -181,7 +181,8 @@ interface ValidationSpec { assertions: ValidationAssertion[]; }
 - **Deterministic** assertions run in code (cheap, trustworthy): loop seam frame-diff,
   caption coverage %, duration band, quote↔chapter overlap seconds, audio LUFS,
   text-over-face detection on thumbnail. We already have most of these primitives in
-  `ffmpeg.ts` / `videoVerifier.ts` / `thumbnailFormula.ts`.
+  `ffmpeg.ts` / `videoVerifier.ts` (the static `thumbnailFormula.ts` style-preset module
+  was retired — thumbnail art-direction is now evidence-driven via `thumbnailLab.ts`).
 - **Vision** assertions go to the Critic/Director with sampled frames: hook strength,
   pacing feel, visual cohesion, "does it match the vibe."
 - The spec is **generated from the Bible + family**, so it is automatically correct per

@@ -39,7 +39,9 @@ export const retentionAnalystTask = task({
   maxDuration: 600,
   run: async (payload: { runId: string; dryRun?: boolean }) => {
     const log = (m: string) => console.log(`[retention] ${m}`);
-    await bootstrapSecrets(log, { required: ["GEMINI_API_KEY"] });
+    // Retention learning is distilled with the declared non-Google text model;
+    // do not make it dependent on the thumbnail-only Gemini capability.
+    await bootstrapSecrets(log);
 
     const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
     if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");

@@ -1,5 +1,12 @@
 import type { PipelineEntry } from "@/engine/types";
-import { QualityEvidenceSchema } from "@/engine/qualityEvidence";
+import {
+  channelInceptionProbeCostCeilingUsd,
+} from "@/engine/channelInceptionContracts";
+import type { FamilyKey } from "@/engine/families";
+import {
+  assessProductionEditorialAcceptance,
+  QualityEvidenceSchema,
+} from "@/engine/qualityEvidence";
 import {
   pipelineOverrideFingerprint,
   pipelineProbeApprovalSubject,
@@ -64,7 +71,7 @@ function validSha256(value: unknown): value is string {
 }
 
 export const CHANNEL_INCEPTION_PROBE_QUALITY_VERSION =
-  "channel-inception-probe-quality/v1" as const;
+  "channel-inception-probe-quality/v2" as const;
 
 export interface ChannelInceptionProbeQualityEvidence {
   version: typeof CHANNEL_INCEPTION_PROBE_QUALITY_VERSION;
@@ -74,6 +81,10 @@ export interface ChannelInceptionProbeQualityEvidence {
   reasons: string[];
   videoScore?: number;
   thumbnailScore?: number;
+  /**
+   * Holistic reviewer verdict. Current `qa_visual` receipts store it at
+   * `qaReport.visualReview`; `qaReport.watch` remains a legacy input only.
+   */
   watchVerdict?: string;
 }
 
@@ -85,6 +96,22 @@ function objectRecord(value: unknown): Record<string, unknown> | undefined {
 
 function finiteScore(value: unknown): number | undefined {
   return typeof value === "number" && Number.isFinite(value) ? value : undefined;
+}
+
+/**
+ * Current `qa_visual` writes its authoritative chronological review under
+ * `qaReport.visualReview`. Keep `watch` only for historical probe receipts,
+ * and never let a malformed current receipt silently fall back to the old one.
+ */
+export function resolveChannelInceptionProbeHolisticReview(
+  qaReport: unknown,
+): Record<string, unknown> | undefined {
+  const report = objectRecord(qaReport);
+  if (!report) return undefined;
+  if (Object.prototype.hasOwnProperty.call(report, "visualReview")) {
+    return objectRecord(report.visualReview);
+  }
+  return objectRecord(report.watch);
 }
 
 /**
@@ -102,11 +129,13 @@ export function assessChannelInceptionProbeQuality(
   const lengthMatch = objectRecord(report?.lengthMatch);
   const video = objectRecord(report?.video);
   const thumbnail = objectRecord(report?.thumbnail);
-  const watch = objectRecord(report?.watch);
+  const holisticReview = resolveChannelInceptionProbeHolisticReview(report);
   const qualityEvidence = QualityEvidenceSchema.safeParse(outputs?.qualityEvidence);
   const videoScore = finiteScore(video?.score);
   const thumbnailScore = finiteScore(thumbnail?.score);
-  const watchVerdict = typeof watch?.verdict === "string" ? watch.verdict : undefined;
+  const watchVerdict = typeof holisticReview?.verdict === "string"
+    ? holisticReview.verdict
+    : undefined;
   const reasons: string[] = [];
 
   if (outputs?.qaPassed !== true) reasons.push("qa_visual did not issue a passing receipt");
@@ -117,6 +146,16 @@ export function assessChannelInceptionProbeQuality(
     reasons.push(
       `typed final quality evidence did not clear hard gates: ${qualityEvidence.data.release.blockers.join("; ")}`,
     );
+  } else {
+    // A held-out probe is the promotion proof for a new channel, so the
+    // narrower raw hard-gate flag is not enough. Use the exact same lane-aware
+    // editorial acceptance decision that protects draft upload.
+    const editorialAcceptance = assessProductionEditorialAcceptance(qualityEvidence.data);
+    if (!editorialAcceptance.ready) {
+      reasons.push(
+        `typed final quality evidence did not meet production editorial acceptance: ${editorialAcceptance.blockers.join("; ")}`,
+      );
+    }
   }
   if (structural?.ok !== true) reasons.push("structural render QA did not pass");
   if (lengthMatch?.ok !== true) reasons.push("render length QA did not pass");
@@ -130,11 +169,11 @@ export function assessChannelInceptionProbeQuality(
   } else if (thumbnailScore < 5) {
     reasons.push(`thumbnail quality score ${thumbnailScore} is below the production minimum 5`);
   }
-  if (watch?.ran !== true || watchVerdict !== "pass") {
+  if (holisticReview?.ran !== true || watchVerdict !== "pass") {
     reasons.push("holistic render review did not explicitly pass");
   }
 
-  const defects = watch?.defects;
+  const defects = holisticReview?.defects;
   if (!Array.isArray(defects)) {
     reasons.push("holistic render defect evidence is missing");
   } else if (defects.some((candidate) => {
@@ -159,6 +198,9 @@ export function assessChannelInceptionProbeQuality(
     version: CHANNEL_INCEPTION_PROBE_QUALITY_VERSION,
     qaPassed: outputs?.qaPassed,
     qaReport: outputs?.qaReport,
+    // The complete receipt is now promotion-critical. Bind it directly so a
+    // changed editorial verdict cannot reuse an otherwise identical QA report.
+    qualityEvidence: outputs?.qualityEvidence,
   });
   return {
     version: CHANNEL_INCEPTION_PROBE_QUALITY_VERSION,
@@ -173,6 +215,7 @@ export function assessChannelInceptionProbeQuality(
 
 export function freezeChannelInceptionProbeContext(args: {
   ownerId: string;
+  family: FamilyKey;
   channel: ProbeChannelSnapshot;
 }): ChannelInceptionProbeInvocationContext {
   const identity = args.channel.identity ?? {};
@@ -196,6 +239,7 @@ export function freezeChannelInceptionProbeContext(args: {
   };
   return {
     channelBudgetUsd: finiteUsd(args.channel.budget ?? 0, "probe channel budget"),
+    probeMaximumCostUsd: channelInceptionProbeCostCeilingUsd(args.family),
     keyPrefix: channelPrefix(args.ownerId, args.channel.slug),
     seedStore,
     madeForKids: args.channel.schedule?.madeForKids ?? false,
@@ -226,7 +270,16 @@ export function channelInceptionProbeEffectiveBudgetUsd(
 ): number {
   const channelBudgetUsd = finiteUsd(context.channelBudgetUsd, "probe channel budget");
   const cap = finiteUsd(admittedCapUsd, "probe admitted cap");
-  if (cap <= 0 || cap > MAX_CHANNEL_INCEPTION_PROBE_COST_USD) {
+  const familyCeiling = finiteUsd(
+    context.probeMaximumCostUsd ?? MAX_CHANNEL_INCEPTION_PROBE_COST_USD,
+    "probe family ceiling",
+  );
+  if (
+    familyCeiling <= 0 ||
+    familyCeiling > MAX_CHANNEL_INCEPTION_PROBE_COST_USD ||
+    cap <= 0 ||
+    cap > familyCeiling
+  ) {
     throw new Error("probe admitted cap is outside its bounded contract");
   }
   if (channelBudgetUsd <= 0) {
@@ -303,12 +356,19 @@ export function prepareChannelInceptionProbeAttempt(args: {
   approval: StudioActionApprovalReceipt;
 }): ChannelInceptionProbeAttemptCheckpoint {
   const maximumCostUsd = finiteUsd(args.maximumCostUsd, "probe attempt authority");
+  const familyCeiling = finiteUsd(
+    args.input.invocationContext.probeMaximumCostUsd ?? MAX_CHANNEL_INCEPTION_PROBE_COST_USD,
+    "probe family ceiling",
+  );
   if (
     !Number.isInteger(args.attempt) ||
     args.attempt < 1 ||
     args.attempt > MAX_CHANNEL_INCEPTION_PROBE_ATTEMPTS ||
     maximumCostUsd <= 0 ||
-    maximumCostUsd > MAX_CHANNEL_INCEPTION_PROBE_COST_USD
+    maximumCostUsd > MAX_CHANNEL_INCEPTION_PROBE_COST_USD ||
+    familyCeiling <= 0 ||
+    familyCeiling > MAX_CHANNEL_INCEPTION_PROBE_COST_USD ||
+    maximumCostUsd > familyCeiling
   ) {
     throw new Error("probe attempt or authority is outside its bounded contract");
   }
@@ -350,7 +410,17 @@ export function assertChannelInceptionProbeAttempt(
     throw new Error("probe attempt checkpoint identity is invalid");
   }
   const maximumCostUsd = finiteUsd(attempt.maximumCostUsd, "probe attempt authority");
-  if (maximumCostUsd <= 0 || maximumCostUsd > MAX_CHANNEL_INCEPTION_PROBE_COST_USD) {
+  const familyCeiling = finiteUsd(
+    attempt.input.invocationContext.probeMaximumCostUsd ?? MAX_CHANNEL_INCEPTION_PROBE_COST_USD,
+    "probe family ceiling",
+  );
+  if (
+    maximumCostUsd <= 0 ||
+    maximumCostUsd > MAX_CHANNEL_INCEPTION_PROBE_COST_USD ||
+    familyCeiling <= 0 ||
+    familyCeiling > MAX_CHANNEL_INCEPTION_PROBE_COST_USD ||
+    maximumCostUsd > familyCeiling
+  ) {
     throw new Error("probe attempt authority exceeds the stage ceiling");
   }
   const expectedInputFingerprint = pipelineOverrideFingerprint({

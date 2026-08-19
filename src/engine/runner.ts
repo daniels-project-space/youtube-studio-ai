@@ -629,6 +629,7 @@ export async function runPipeline(
       configuredEnvelope = configuredMaxCostUsd(manifest, params, {
         entries: resolved.entries,
         index: blockIndex,
+        store,
       });
       if (
         opts.budgetUsd > 0 &&
@@ -651,6 +652,59 @@ export async function runPipeline(
         return { status: "failed", cost: 0, error: message };
       }
     }
+
+    /**
+     * A deterministic planning block can emit an exact bounded cost only after
+     * the run has begun. Let the first subsequent paid renderer re-evaluate all
+     * still-pending envelopes against that durable store before it calls a
+     * provider. This complements compile-time preflight; it never replaces it.
+     */
+    const assertRemainingBudgetReservation: NonNullable<StageContext["assertRemainingBudgetReservation"]> = (
+      args = {},
+    ) => {
+      const blockIds: string[] = [];
+      let reservedMaxCostUsd = 0;
+      for (let candidateIndex = blockIndex; candidateIndex < resolved.blocks.length; candidateIndex++) {
+        const candidate = resolved.blocks[candidateIndex]!;
+        if (candidateIndex !== blockIndex && completedMap[candidate.id]) continue;
+        const candidateManifest = resolved.manifests[candidateIndex];
+        if (!candidateManifest) {
+          throw new Error(`remaining budget reservation lost manifest alignment at step ${candidateIndex}`);
+        }
+        if (!candidateManifest.costAndLatency.paid) continue;
+        const candidateParams =
+          opts.paramsByBlock?.[candidate.id] ?? resolved.entries[candidateIndex]?.params ?? {};
+        const candidateEnvelope =
+          candidateIndex === blockIndex && configuredEnvelope !== undefined
+            ? configuredEnvelope
+            : configuredMaxCostUsd(candidateManifest, candidateParams, {
+                entries: resolved.entries,
+                index: candidateIndex,
+                store,
+              });
+        reservedMaxCostUsd += candidateEnvelope;
+        blockIds.push(candidate.id);
+      }
+      const required = args.requiredFuturePaidBlockIds ?? [];
+      const missing = required.filter((id) => !blockIds.includes(id));
+      if (missing.length > 0) {
+        throw new Error(
+          `remaining budget reservation requires pending paid block(s) ${missing.join(", ")}, but found ${blockIds.join(", ") || "none"}`,
+        );
+      }
+      if (
+        opts.budgetUsd > 0 &&
+        spentUsd + reservedMaxCostUsd > opts.budgetUsd + Number.EPSILON
+      ) {
+        const reason = args.reason ? ` (${args.reason})` : "";
+        throw new Error(
+          `budget reservation rejected before paid block "${block.id}"${reason}: ` +
+            `$${spentUsd.toFixed(2)} spent + $${reservedMaxCostUsd.toFixed(2)} remaining reserved ` +
+            `for ${blockIds.join(", ")} > $${opts.budgetUsd.toFixed(2)} budget`,
+        );
+      }
+      return { reservedMaxCostUsd, blockIds };
+    };
 
     await opts.sink.upsert({
       ownerId: opts.ownerId,
@@ -680,6 +734,8 @@ export async function runPipeline(
       store: declaredArtifactStore(manifest, store, optionalFallbacks, log),
       artifactRefs: inputRefs,
       budgetUsd: opts.budgetUsd,
+      ...(configuredEnvelope === undefined ? {} : { stageBudgetUsd: configuredEnvelope }),
+      assertRemainingBudgetReservation,
       modelUsageCostUsd: (kinds) => {
         const summary = usageScope.snapshot();
         return kinds === undefined

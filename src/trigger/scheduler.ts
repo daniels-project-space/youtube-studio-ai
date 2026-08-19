@@ -22,14 +22,47 @@ import {
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import type { ChannelSchedulePolicy } from "@/lib/publishingPolicy";
 import { parsePlanGenerationLeadMs } from "@/lib/scheduledPlanRuntime";
+import { researchCase } from "@/engine/casefileCaseResearcher";
+import {
+  casefileResearchDayKey,
+  dispatchCasefileAutoResearch,
+  parseCasefileAutoResearchDailyLimit,
+} from "@/engine/casefileAutoResearchDispatch";
+import { resolveContentLane } from "@/engine/contentLane";
 
 interface ChannelRow {
   _id: Id<"channels">;
   name: string;
   slug: string;
   status?: string;
-  identity?: { cadence?: string };
+  identity?: { cadence?: string; niche?: string };
   schedule?: ChannelSchedulePolicy;
+  // Strictly opt-in signal for the automatic Casefile real-case research
+  // path (see casefileAutoResearchDispatch.ts). Unset/false = unchanged
+  // behavior for every existing channel, including cinematic_ai ones.
+  casefileAutoResearchEnabled?: boolean;
+  // Needed only to re-resolve the durable content lane for the Casefile
+  // spend gate; the pipeline itself is resolved inside run-pipeline.
+  contentLane?: unknown;
+  family?: unknown;
+  pipeline?: unknown;
+}
+
+/**
+ * Resolve a channel's durable lane defensively. A row whose lane cannot be
+ * resolved is reported as an unknown key, which the Casefile dispatch treats
+ * as ineligible — never as "assume cinematic_ai".
+ */
+function channelLaneKey(ch: ChannelRow): string {
+  try {
+    return resolveContentLane({
+      stored: ch.contentLane,
+      family: ch.family,
+      pipeline: Array.isArray(ch.pipeline) ? ch.pipeline : [],
+    }).key;
+  } catch {
+    return "unresolved";
+  }
 }
 export const generationScheduler = schedules.task({
   id: "generation-scheduler",
@@ -55,6 +88,13 @@ export const generationScheduler = schedules.task({
       ownerId: owner,
     })) as ChannelRow[];
     const leadMs = parsePlanGenerationLeadMs(process.env.STUDIO_PLAN_GENERATION_LEAD_HOURS);
+    // Fleet-wide daily ceiling for the one spend path that runs BEFORE
+    // run-pipeline (and therefore outside invocation.budgetUsd). Parsed once
+    // per cycle; a malformed value throws here rather than being ignored.
+    const casefileResearchLimit = parseCasefileAutoResearchDailyLimit(
+      process.env.STUDIO_CASEFILE_RESEARCH_MAX_ATTEMPTS_PER_DAY,
+    );
+    const casefileResearchDay = casefileResearchDayKey();
     let triggered = 0;
     let enabled = 0;
     for (const ch of channels) {
@@ -93,12 +133,93 @@ export const generationScheduler = schedules.task({
           }
         : undefined;
       const idempotencyKey = await idempotencyKeys.create(`generation-scheduler:${runId}`);
-      // concurrencyKey: one render at a time PER CHANNEL; channels in parallel.
-      await tasks.trigger(
-        "run-pipeline",
-        { channelId: ch._id, runId, ...(scheduledPlan ? { scheduledPlan } : {}) },
-        { concurrencyKey: String(ch._id), idempotencyKey },
-      );
+
+      if (ch.casefileAutoResearchEnabled === true) {
+        // Strictly opt-in per channel: only channels with the flag set ever
+        // reach dispatchCasefileAutoResearch, so researchCase() is never
+        // called for an ordinary channel. The lane gate and the fleet-wide
+        // daily ceiling are both enforced inside the dispatch, before any
+        // billable call.
+        const dispatched = await dispatchCasefileAutoResearch(
+          {
+            channelId: String(ch._id),
+            channelName: ch.name,
+            niche: ch.identity?.niche,
+            casefileAutoResearchEnabled: true,
+            contentLaneKey: channelLaneKey(ch),
+          },
+          {
+            researchCase,
+            maxResearchAttemptsPerDay: casefileResearchLimit,
+            countResearchAttemptsToday: async () =>
+              (await convex.query(api.casefileResearchAttempts.countForDay, {
+                ownerId: owner,
+                day: casefileResearchDay,
+              })) as number,
+            recordResearchAttempt: async (channelId) => {
+              await convex.mutation(api.casefileResearchAttempts.recordAttempt, {
+                ownerId: owner,
+                channelId: channelId as Id<"channels">,
+                day: casefileResearchDay,
+              });
+            },
+            listExcludedCaseIds: async (channelId) => {
+              const rows = (await convex.query(api.topicMemory.listForChannel, {
+                channelId: channelId as Id<"channels">,
+              })) as Array<{ key: string }>;
+              return rows.map((row) => row.key);
+            },
+            recordCaseId: async (channelId, caseId) => {
+              await convex.mutation(api.topicMemory.recordTopic, {
+                ownerId: owner,
+                channelId: channelId as Id<"channels">,
+                key: caseId,
+              });
+            },
+            triggerPipeline: async ({ casefileSourcePacketInput }) => {
+              // concurrencyKey: one render at a time PER CHANNEL; channels in parallel.
+              await tasks.trigger(
+                "run-pipeline",
+                {
+                  channelId: ch._id,
+                  runId,
+                  ...(scheduledPlan ? { scheduledPlan } : {}),
+                  casefileSourcePacketInput,
+                },
+                { concurrencyKey: String(ch._id), idempotencyKey },
+              );
+            },
+            log: (message) => console.log(`[scheduler] ${message}`),
+          },
+        );
+        if (dispatched.outcome !== "researched_and_triggered") {
+          // Every non-success outcome is expected/normal and NEVER alertable:
+          //  - research_failed        researchCase()'s fail-closed design —
+          //                           no real, well-sourced case converged.
+          //  - daily_ceiling_reached  the fleet-wide spend guard did its job.
+          //  - ineligible             lane gate rejected an opted-in channel.
+          // In all three the already-claimed run/plan slot is left exactly
+          // as-is; it stays "queued" and claimNextPlanRun safely reattaches
+          // to it on the NEXT due cycle (bounded by the 6h cron — no tight
+          // retry, and no fallback to non-Casefile content).
+          const detail = dispatched.outcome === "daily_ceiling_reached"
+            ? `daily research ceiling reached (${dispatched.attemptsToday}/${dispatched.limit})`
+            : dispatched.outcome === "ineligible"
+              ? "channel is opted in but not on the cinematic_ai lane"
+              : "found no admissible case this cycle";
+          console.log(`[scheduler] ${ch.name}: Casefile auto-research skipped — ${detail}`);
+          continue;
+        }
+        // "researched_and_triggered" falls through to the shared
+        // recoveryDispatch/triggered bookkeeping below.
+      } else {
+        // concurrencyKey: one render at a time PER CHANNEL; channels in parallel.
+        await tasks.trigger(
+          "run-pipeline",
+          { channelId: ch._id, runId, ...(scheduledPlan ? { scheduledPlan } : {}) },
+          { concurrencyKey: String(ch._id), idempotencyKey },
+        );
+      }
       if ("recoveryDispatch" in admitted && admitted.recoveryDispatch === true) {
         await convex.mutation(api.runs.markLeaseRecoveryDispatched, {
           ownerId: owner,

@@ -23,7 +23,7 @@ const { fontFamily } = loadFont();
 
 export const KtMetalSlice: React.FC = () => {
   const frame = useCurrentFrame();
-  const { fps, width } = useVideoConfig();
+  const { fps } = useVideoConfig();
 
   // Metallic shimmer: scroll the gradient background-position across the text.
   const shimmer = interpolate(frame, [0, 150], [0, 300], {

@@ -21,12 +21,14 @@ const SERVICES = [
   "videvo", // VIDEVO_API_KEY (federated stock — partner; VIDEVO_API_BASE overridable)
   "replicate", // REPLICATE_API_TOKEN
   "fal", // FAL_KEY (FLUX1.1 [pro] thumbnail base via fal.ai)
-  "groq", // GROQ_API_KEY (llama-4-scout vision — the FREE first hop of the vision router chain)
+  "groq", // Legacy only; YouTube intelligence and vision are pinned through OpenRouter.
+  "openrouter", // OPENROUTER_API_KEY (non-Google pinned text + vision fleet)
   "telegram", // TELEGRAM_BOT_TOKEN (+ admin chat id)
   "browserbase", // BROWSERBASE_API_KEY/PROJECT_ID (+ optional CONTEXT_ID) — headless YouTube channel creation
-  // Competitor-intelligence engine. hydrateEnv tolerates a missing service
-  // (logs + continues), so these are safe even before the vault entries exist.
-  "gemini", // GEMINI_API_KEY (Gemini 2.5 Flash + Vision) — script_gen, research, metadata
+  // Gemini is deliberately absent. Its credential is hydrated only by the
+  // sealed Nano Banana thumbnail adapter after it presents its opaque runtime
+  // capability. Loading it into every worker would let legacy/operator code
+  // make direct Google calls outside that one admitted module.
   "google", // GOOGLE_* (places / app credentials)
   "langfuse", // LANGFUSE_PUBLIC_KEY/SECRET_KEY (Mastra agent tracing; optional)
   "assemblyai", // ASSEMBLYAI_API_KEY (captions SRT; optional — chapters work without)
@@ -73,13 +75,10 @@ export async function bootstrapSecrets(
   if (!process.env.TELEGRAM_CHAT_ID && process.env.TELEGRAM_ADMIN_CHAT_ID) {
     process.env.TELEGRAM_CHAT_ID = process.env.TELEGRAM_ADMIN_CHAT_ID;
   }
-  // Mastra producer (Gemini): the model router reads GOOGLE_API_KEY; the raw
-  // @ai-sdk/google provider reads GOOGLE_GENERATIVE_AI_API_KEY. Set both.
-  if (process.env.GEMINI_API_KEY) {
-    if (!process.env.GOOGLE_API_KEY) process.env.GOOGLE_API_KEY = process.env.GEMINI_API_KEY;
-    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY)
-      process.env.GOOGLE_GENERATIVE_AI_API_KEY = process.env.GEMINI_API_KEY;
-  }
+  // Never promote the thumbnail-only Gemini credential to general Google SDK
+  // variables. Non-thumbnail model routes must declare and use their own
+  // provider credentials; otherwise a future SDK import could silently bypass
+  // the sealed-thumbnail admission boundary.
   done = true;
   log(`bootstrap: hydrated ${loaded.length} keys`, { keys: loaded });
   if (opts?.required) requireKeys(opts.required);

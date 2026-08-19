@@ -2,6 +2,10 @@ import { schedules, task, tasks } from "@trigger.dev/sdk";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import type { Id } from "../../convex/_generated/dataModel";
 import { api } from "../../convex/_generated/api";
+import {
+  STUDIO_AUTOMATION_GATES,
+  studioAutomationGate,
+} from "@/lib/automationGate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { dispatchPublishIntent } from "@/lib/publishDispatcher";
 import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
@@ -35,10 +39,10 @@ export const publishIntentScheduler = schedules.task({
   // Deliberately manual until the operator explicitly enables autonomous live
   // publishing. Add `cron: "*/5 * * * *"` only at that transition.
   run: async () => {
+    const gate = studioAutomationGate(STUDIO_AUTOMATION_GATES.autopilot);
+    if (!gate.enabled) return gate;
+
     await bootstrapSecrets((message) => console.log(`[publisher-scheduler] ${message}`));
-    if ((process.env.STUDIO_AUTOPILOT ?? "").toLowerCase() === "off") {
-      return { triggered: 0, disabled: true };
-    }
     const convex = convexClient();
     const due = await convex.query(api.publishIntents.listDue, {
       secret: requireInternalQuerySecret(),

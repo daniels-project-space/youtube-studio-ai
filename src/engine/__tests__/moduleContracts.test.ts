@@ -1,16 +1,17 @@
 import assert from "node:assert/strict";
-import { readdirSync, readFileSync } from "node:fs";
+import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import ts from "typescript";
 import { registerAllBlocks } from "@/engine/blocks";
 import { allManifests, getManifest } from "@/engine/registry";
-import { FAMILIES, type FamilyKey } from "@/engine/families";
+import { familyDurationContract, FAMILIES, type FamilyKey } from "@/engine/families";
 import { designPipeline } from "@/engine/designer";
 import { validatePipeline } from "@/engine/validate";
 import {
   compilePipeline,
   completePipelineForPolicy,
   materializeRuntimePipelineParams,
+  PRIVATE_PROBE_CONTRACT_POLICY,
   PipelinePolicyError,
 } from "@/engine/pipelineCompiler";
 import { declaredArtifactStore } from "@/engine/runner";
@@ -161,7 +162,10 @@ function compileRepresentativeFamilies(): void {
     const design = designPipeline({
       family,
       nicheKey: "history",
-      lengthMinutes: family === "shorts" ? 0.75 : 3,
+      // Each format is compiled at its own authored cadence. A generic
+      // three-minute probe is invalid for native Shorts and obscures a real
+      // format contract violation behind a test fixture.
+      lengthMinutes: familyDurationContract(family).defaultSeconds / 60,
       publishMode: "draft",
     });
     if (design.available) {
@@ -174,6 +178,55 @@ function compileRepresentativeFamilies(): void {
       );
     }
   }
+}
+
+function defaultBudgetsCoverCompilerReservations(): void {
+  for (const family of Object.keys(FAMILIES) as FamilyKey[]) {
+    const design = designPipeline({ family, publishMode: "draft" });
+    assert.ok(design.compilation, `${family} must compile its default production chain`);
+    assert.ok(
+      (FAMILIES[family].defaultRunBudgetUsd ?? 0) >= design.compilation.reservedMaxCostUsd,
+      `${family}'s creator floor must cover its exact default compiler reservation`,
+    );
+  }
+}
+
+function privateProbeKeepsEveryNonPublishingQualityRequirement(): void {
+  const production = designPipeline({ family: "cinematic", publishMode: "draft" });
+  // Mirror the deliberately private probe shape: all delivery/post-processing
+  // stages are excluded, while rendering and every QA/creative gate remain.
+  const privateProbe = production.pipeline.filter(
+    (entry) => !new Set([
+      "upload_draft",
+      "notify",
+      "cleanup",
+      "shorts_spinoff",
+      "crosspost",
+      "emit_bundle",
+    ]).has(entry.block),
+  );
+  const compilation = compilePipeline(
+    validatePipeline(privateProbe),
+    PRIVATE_PROBE_CONTRACT_POLICY,
+  );
+  assert.equal(compilation.policyId, "private-probe-contract");
+  assert.equal(privateProbe.some((entry) => entry.block === "upload_draft"), false);
+  for (const capability of [
+    "topic.researched",
+    "topic.selected",
+    "final.compliance_passed",
+    "master.assembled",
+    "master.quality_passed",
+    "package.metadata",
+    "package.thumbnail",
+  ]) {
+    assert(compilation.capabilities.includes(capability), `private probe must retain ${capability}`);
+  }
+  assert.throws(
+    () => compilePipeline(validatePipeline(privateProbe)),
+    /publish\.connector_bound/,
+    "the ordinary production policy must continue to reject a non-uploading pipeline",
+  );
 }
 
 function runtimeConfigurationIsCompiledBeforeSpendReservation(): void {
@@ -359,10 +412,20 @@ function goldenPromotionGuards(manifests: readonly ModuleManifest[]): void {
     );
   }
 
+  // motioncraft is still a genuine catalog-only reference (no executable ids).
+  // loreshort used to hold this slot; it is now a real pipeline module bound to
+  // `lore_short`, so the catalog-only guard moved to a module that still is one.
   assert.throws(
-    () => selectGoldenProductionModules("loreshort", manifests),
+    () => selectGoldenProductionModules("motioncraft", manifests),
     /catalog-only|no module ids/,
     "catalog-only references must never be production-Golden",
+  );
+  // ...and the newly-wired loreshort must still refuse promotion: being
+  // executable is NOT being Golden. Only a signed promotion receipt does that.
+  assert.throws(
+    () => selectGoldenProductionModules("loreshort", manifests),
+    /contract-certified, not golden-certified/,
+    "a wired module is still not Golden without a promotion receipt",
   );
 
   const thumbnail = GOLDEN_MODULES.find((module) => module.key === "thumbnail")!;
@@ -417,6 +480,18 @@ function failClosedQualityGuards(): void {
     () => assertThumbnailGate("production", { ...passingThumbnail, storyMatch: 6 }, "fixture"),
     /failed the production gate/,
   );
+  // The BOOLEAN half of the gate is the text-integrity half: `textOk` is the
+  // judge's "every visible word is correctly spelled and readable" verdict and
+  // `uiClean` its "no broken glyphs / unreadable clutter" verdict. A provider
+  // that ignores the text-free scene request and hallucinates garbled signage
+  // must not be able to ship, so each boolean has to fail the gate on its own.
+  for (const failing of ["textOk", "faceClear", "uiClean"] as const) {
+    assert.throws(
+      () => assertThumbnailGate("production", { ...passingThumbnail, [failing]: false }, "fixture"),
+      /failed the production gate/,
+      `a false ${failing} must fail the production thumbnail gate`,
+    );
+  }
   assert.doesNotThrow(() => assertThumbnailGate("draft", null, "fixture"));
   assert.throws(() => assertThumbnailStrategy("production", "playbook_belowbar"), /draft-only/);
   assert.throws(() => assertThumbnailStrategy("production", "title_card_fallback"), /draft-only/);
@@ -440,6 +515,11 @@ function failClosedQualityGuards(): void {
   assert.doesNotThrow(() => assertVoiceGatePreconditions(voice));
   assert.throws(() => assertVoiceGatePreconditions({ ...voice, gateEnabled: false }), /cannot be disabled/);
   assert.throws(() => assertVoiceGatePreconditions({ ...voice, judgeAvailable: false }), /requires the audio judge/);
+  assert.doesNotThrow(() => assertVoiceGatePreconditions({
+    ...voice,
+    judgeAvailable: false,
+    localEvidenceGateAvailable: true,
+  }));
   assert.throws(() => assertVoiceGatePreconditions({ ...voice, voiceId: undefined }), /explicitly cast voice/);
   assert.throws(() => assertVoiceGatePreconditions({ ...voice, castScore: 6.99 }), /audition score >= 7/);
   assert.throws(
@@ -492,7 +572,7 @@ function configurationSpecificCostEnvelopes(): void {
 
   const whiteboardPanels = 6;
   const whiteboardCharacters = Math.ceil(Math.round(132 * 3.1)) * 12;
-  const whiteboardArt = whiteboardPanels * 5 * bananaUnitRate("flash");
+  const whiteboardArt = whiteboardPanels * 5 * PRICE.novitaImageMaxUsd;
   assert.equal(
     envelope("whiteboard_scribe", { targetSeconds: 132 }),
     whiteboardArt + (whiteboardCharacters / 1_000) * PRICE.ttsPerKCharUsd,
@@ -512,11 +592,18 @@ function configurationSpecificCostEnvelopes(): void {
   const comicCharacters = Math.ceil(180 * 16);
   assert.equal(
     envelope("motion_comic", { panels: comicPanels, targetSeconds: 180 }),
-    (2 * comicPanels + 8) * bananaUnitRate("flash") +
+    2 * comicPanels * PRICE.novitaImageMaxUsd +
       (comicCharacters / 1_000) * PRICE.ttsElevenPerKCharUsd +
       PRICE.musicTrackUsd +
       2 * comicPanels * PRICE.visionGraderUsd,
     "motion-comic reservation must cover art, dialogue, music, and lettering graders",
+  );
+
+  const maxWhiteboardArt = 16 * 5 * PRICE.novitaImageMaxUsd;
+  const maxWhiteboardPremiumTts = (16 * 120 * 12 / 1_000) * PRICE.ttsElevenPerKCharUsd;
+  assert.ok(
+    (MODULE_CONTRACTS.whiteboard_scribe.maxCostUsd ?? 0) >= maxWhiteboardArt + maxWhiteboardPremiumTts,
+    "whiteboard hard cap must cover all 16 panels, five direct Novita art workers each, and premium narration",
   );
 
   assert.equal(
@@ -530,9 +617,24 @@ function configurationSpecificCostEnvelopes(): void {
     "Novita video reservation must follow the pinned profile fanout",
   );
   assert.equal(
+    envelope("visual_matter", { renderReferenceAssets: false }),
+    0,
+    "planning-only Visual Matter must not reserve or silently spend image money",
+  );
+  assert.equal(
+    envelope("visual_matter", { renderReferenceAssets: true, maxReferenceImages: 8 }),
+    8 * PRICE.falNanoBanana2Usd,
+    "an explicit Visual Matter reference pack must reserve its bounded fal.ai Nano Banana 2 allowance",
+  );
+  assert.equal(
     envelope("gen_footage", { maxClips: 6 }),
     6 * (PRICE.novitaImageMaxUsd + PRICE.novitaVideoMaxUsd),
     "generated footage must reserve the pinned Novita image and video ceilings",
+  );
+  assert.equal(
+    envelope("gen_footage", { maxCinematicClips: 30 }),
+    30 * (2 * PRICE.novitaImageMaxUsd + 2 * PRICE.novitaVideoMaxUsd),
+    "a cinematic sequence must reserve every source-bound shot plus one bounded keyframe and LTX-motion recovery",
   );
   assert.equal(
     envelope("qa_visual", { nativeWatch: true, audioQa: true }),
@@ -541,10 +643,55 @@ function configurationSpecificCostEnvelopes(): void {
   );
 }
 
+/**
+ * A catalog entry citing "src/lib/foo.ts" as if it's present on disk, when it
+ * was actually deleted, is exactly the P2-7 regression this test guards
+ * against (lofi.ts / motioncraft.ts / imagecraft-novita.ts / videocraft-novita.ts
+ * were deleted in commit 183ee6a but their golden.ts entries kept describing
+ * them as live "pending decision" files for a full session afterward).
+ *
+ * Every literal src/lib/*.ts, src/engine/*.ts, or src/trigger/**\/*.ts path
+ * named in a module's `engine` + `how` prose must exist on disk UNLESS that
+ * same mention sits within a short window of an explicit deletion/retirement
+ * marker (DELETED, RETIRED, "removed outright", "now-deleted", "is retired",
+ * "hard-disabled") -- the vocabulary this catalog already uses for cinecraft.ts
+ * (retired) and the corrected lofi/motioncraft/imagecraft-novita/videocraft-novita
+ * entries (deleted). This intentionally does NOT try to parse English well
+ * enough to know a path is "deleted" from arbitrary phrasing -- it only
+ * recognizes this catalog's own small, consistent vocabulary, so a genuinely
+ * new phrasing must adopt one of these words rather than silently passing.
+ */
+function catalogCitedFilePathsExistOrAreExplicitlyRetired(): void {
+  const PATH_RE = /\bsrc\/(?:lib|engine|trigger)\/[A-Za-z0-9_.\/-]+\.ts\b/g;
+  const DELETION_MARKERS = /\b(DELETED|RETIRED|removed outright|now-deleted|is retired|hard-disabled)\b/i;
+  const WINDOW = 150;
+  const root = process.cwd();
+  const stale: string[] = [];
+
+  for (const mod of GOLDEN_MODULES) {
+    const text = `${mod.engine ?? ""} ${mod.how ?? ""}`;
+    for (const match of text.matchAll(PATH_RE)) {
+      const filePath = match[0];
+      const idx = match.index ?? 0;
+      const windowText = text.slice(Math.max(0, idx - WINDOW), Math.min(text.length, idx + filePath.length + WINDOW));
+      const explicitlyRetired = DELETION_MARKERS.test(windowText);
+      if (!explicitlyRetired && !existsSync(join(root, filePath))) {
+        stale.push(`${mod.key} -> ${filePath}`);
+      }
+    }
+  }
+
+  assert.deepEqual(
+    stale,
+    [],
+    `golden.ts cites file path(s) that do not exist on disk and are not flagged DELETED/RETIRED nearby: ${stale.join(", ")}`,
+  );
+}
+
 function main(): void {
   registerAllBlocks();
   const manifests = allManifests();
-  assert.equal(manifests.length, 49, "all 49 executable blocks must have manifests");
+  assert.equal(manifests.length, 70, "all 70 executable blocks must have manifests");
   assert.deepEqual(
     manifests.filter((manifest) => manifest.certification.status === "legacy").map((manifest) => manifest.id),
     [],
@@ -552,6 +699,8 @@ function main(): void {
   );
   directContractAudit();
   compileRepresentativeFamilies();
+  defaultBudgetsCoverCompilerReservations();
+  privateProbeKeepsEveryNonPublishingQualityRequirement();
   runtimeConfigurationIsCompiledBeforeSpendReservation();
   legacyMusicLoopNormalization();
   crewRemovalAndOrderFail();
@@ -560,6 +709,7 @@ function main(): void {
   goldenPromotionGuards(manifests);
   failClosedQualityGuards();
   configurationSpecificCostEnvelopes();
+  catalogCitedFilePathsExistOrAreExplicitlyRetired();
   console.log("module ABI, production compiler, and Golden promotion guard tests passed");
 }
 

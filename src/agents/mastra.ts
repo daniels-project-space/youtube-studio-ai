@@ -2,9 +2,9 @@
  * Mastra agent layer (hybrid: Mastra authors the agent calls; the block engine
  * still orchestrates the pipeline DAG; Trigger.dev runs it).
  *
- * Two agents shared by every creative chunk:
- *   - producer  → Gemini 2.5 Flash (cheap, fast generation)
- *   - director  → Claude Sonnet (separate, stronger critic / judge)
+ * Creative agents shared by every chunk use the configured non-Google model.
+ * Gemini is deliberately not a text-agent fallback: its sole admitted use is
+ * the sealed Nano Banana thumbnail module.
  *
  * `agentJson()` is the single entry point chunks call. It is RESILIENT by design:
  * it tries the Mastra agent (structured output validated by a zod schema, traced
@@ -18,7 +18,7 @@
  * image rather than being bundled.
  */
 import type { z } from "zod";
-import { geminiJson, hasGeminiKey } from "@/lib/gemini";
+import { assertNonGeminiModelIdentifier } from "@/lib/gemini";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import {
   cacheModelResponse,
@@ -44,35 +44,35 @@ export type AgentRole =
   | "composer"
   | "critic";
 
-const GEMINI_MODEL = process.env.MASTRA_PRODUCER_MODEL ?? "google/gemini-2.5-flash";
-// Anthropic removed for cost (2026-06-12): the Director + Showrunner now run on
-// Gemini like the rest of the crew. MASTRA_DIRECTOR_MODEL can still override.
-const DIRECTOR_MODEL = process.env.MASTRA_DIRECTOR_MODEL ?? GEMINI_MODEL;
+const CLAUDE_MODEL = process.env.MASTRA_PRODUCER_MODEL
+  ?? process.env.ANTHROPIC_CREATIVE_FAST_MODEL
+  ?? "anthropic/claude-sonnet-4-5-20250929";
+const DIRECTOR_MODEL = process.env.MASTRA_DIRECTOR_MODEL
+  ?? process.env.ANTHROPIC_CREATIVE_PRO_MODEL
+  ?? CLAUDE_MODEL;
 
 interface RoleConfig {
   /** REST-fallback provider when Mastra is unavailable. */
-  provider: "gemini" | "claude";
+  provider: "claude";
   model: string;
   instructions: string;
 }
 
 /**
- * One row per agent. Generation-heavy crew roles run on Gemini (cheap, fast);
- * the Showrunner (creation-time, high value) + the strategist Director run on
- * Claude. The Critic AUTHORS the validation spec on Gemini; vision JUDGING of
- * that spec is done elsewhere (gemini-vision / the director).
+ * Text agents are non-Google by default. Gemini is reserved for the sealed
+ * Nano Banana thumbnail module; visual judging is separately non-Google.
  */
 const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
   producer: {
-    provider: "gemini",
-    model: GEMINI_MODEL,
+    provider: "claude",
+    model: CLAUDE_MODEL,
     instructions:
       "You are the Producer in an autonomous YouTube content pipeline. You generate " +
       "high-quality candidates that strictly fit the given channel identity and " +
       "constraints. Always return valid structured output and nothing else.",
   },
   director: {
-    provider: "gemini",
+    provider: "claude",
     model: DIRECTOR_MODEL,
     instructions:
       "You are the Director: a senior YouTube content strategist and critic. You " +
@@ -81,7 +81,7 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "issues as structured output.",
   },
   showrunner: {
-    provider: "gemini",
+    provider: "claude",
     model: DIRECTOR_MODEL,
     instructions:
       "You are the Showrunner: you define a YouTube channel's creative essence. From a " +
@@ -91,16 +91,16 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "opinionated; generic answers are failures. Return structured output only.",
   },
   crew_director: {
-    provider: "gemini",
-    model: GEMINI_MODEL,
+    provider: "claude",
+    model: CLAUDE_MODEL,
     instructions:
       "You are the Director (narrative). For one video you design the STRUCTURE: a " +
       "scroll-stopping hook and an ordered beat map with intended durations and the emotional " +
       "intent of each beat, faithful to the channel's vibe. Return structured output only.",
   },
   cinematographer: {
-    provider: "gemini",
-    model: GEMINI_MODEL,
+    provider: "claude",
+    model: CLAUDE_MODEL,
     instructions:
       "You are the Cinematographer (DP). You own the LOOK: concrete footage/keyframe " +
       "selection criteria, color/mood, and motion language for one video, consistent with the " +
@@ -108,16 +108,16 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "Return structured output only.",
   },
   editor: {
-    provider: "gemini",
-    model: GEMINI_MODEL,
+    provider: "claude",
+    model: CLAUDE_MODEL,
     instructions:
       "You are the Editor. You own CUTS & RHYTHM: cut cadence per section, transition language, " +
       "caption styling, and overlay placement rules for one video, matched to the channel's pace. " +
       "Return structured output only.",
   },
   composer: {
-    provider: "gemini",
-    model: GEMINI_MODEL,
+    provider: "claude",
+    model: CLAUDE_MODEL,
     instructions:
       "You are the Composer / Sound designer. You write the MUSIC generation prompt (genre, " +
       "instrumentation, dynamics, BPM band, and what to avoid) and the audio brief (ducking, " +
@@ -125,8 +125,8 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "structured output only.",
   },
   critic: {
-    provider: "gemini",
-    model: GEMINI_MODEL,
+    provider: "claude",
+    model: CLAUDE_MODEL,
     instructions:
       "You are the Critic / QA Director. You author the VALIDATION SPEC for one video: the " +
       "specific, checkable assertions it must satisfy given its format and the channel's " +
@@ -134,19 +134,6 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
       "measurable checks. Return structured output only.",
   },
 };
-
-/**
- * Map our GEMINI_API_KEY to the names the model layer expects. Mastra's model
- * router (models.dev gateway) looks up GOOGLE_API_KEY for the `google` provider;
- * the raw @ai-sdk/google provider uses GOOGLE_GENERATIVE_AI_API_KEY. Set both.
- */
-function ensureProviderEnv(): void {
-  const g = process.env.GEMINI_API_KEY;
-  if (g) {
-    if (!process.env.GOOGLE_API_KEY) process.env.GOOGLE_API_KEY = g;
-    if (!process.env.GOOGLE_GENERATIVE_AI_API_KEY) process.env.GOOGLE_GENERATIVE_AI_API_KEY = g;
-  }
-}
 
 interface MastraUsage {
   inputTokens?: number;
@@ -196,7 +183,7 @@ function recordMastraUsage(
     finiteToken(usage?.outputTokenDetails?.textTokens) ??
     (totalOutput !== undefined ? Math.max(0, totalOutput - reasoning) : undefined);
   recordModelUsage({
-    provider: configuredModel.startsWith("google/") ? "gemini" : "mastra",
+    provider: configuredModel.startsWith("anthropic/") ? "anthropic" : "mastra",
     model: response.response?.modelId ?? response.modelId ?? configuredModel,
     kind: "text",
     requestId: response.response?.id,
@@ -220,7 +207,6 @@ async function getBundle(): Promise<MastraBundle | null> {
   if (bundlePromise) return bundlePromise;
   bundlePromise = (async () => {
     try {
-      ensureProviderEnv();
       const { Mastra } = await import("@mastra/core");
       const { Agent } = await import("@mastra/core/agent");
 
@@ -300,6 +286,9 @@ export interface AgentJsonOptions<T> {
 export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
   const log = o.log ?? (() => {});
   const cfg = ROLE_CONFIG[o.role];
+  // A model override must never route creative text through Gemini. The only
+  // admitted Google integration lives in the receipt-bound thumbnail module.
+  assertNonGeminiModelIdentifier(cfg.model, `agentJson(${o.role})`);
   const requestKey = modelRequestCacheKey("mastra", cfg.model, {
     role: o.role,
     prompt: o.prompt,
@@ -307,7 +296,7 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
     maxTokens: o.maxTokens,
   });
   const cached = getCachedModelResponse<T>(requestKey, {
-    provider: cfg.model.startsWith("google/") ? "gemini" : "mastra",
+    provider: cfg.model.startsWith("anthropic/") ? "anthropic" : "mastra",
     model: cfg.model,
     kind: "text",
   });
@@ -321,9 +310,6 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
         structuredOutput: { schema: o.schema },
         ...(o.temperature !== undefined ? { temperature: o.temperature } : {}),
         ...(o.maxTokens !== undefined ? { maxOutputTokens: o.maxTokens } : {}),
-        // Flash agents were silently billing THINKING tokens (the REST helper
-        // disables thinking; the AI-SDK path never did) — kill it here too.
-        providerOptions: { google: { thinkingConfig: { thinkingBudget: 0 } } },
       });
       recordMastraUsage(cfg.model, res);
       if (res?.object !== undefined && res.object !== null) {
@@ -337,23 +323,9 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
     }
   }
 
-  // REST fallback (existing, proven, vault-wired helpers), routed by the role's
-  // declared provider. If the preferred provider's key is missing, fall back to
-  // the other so a crew brief never hard-fails when only one key is configured.
-  const preferGemini = cfg?.provider === "gemini";
+  // REST fallback uses the same declared non-Google provider. No hidden
+  // provider substitution is allowed for creative text.
   const system = o.system ?? cfg?.instructions;
-  const useGemini = preferGemini ? hasGeminiKey() : !hasAnthropicKey() && hasGeminiKey();
-  if (useGemini) {
-    if (!hasGeminiKey()) throw new Error(`agentJson(${o.role}): no Mastra and no GEMINI_API_KEY`);
-    const out = await geminiJson<T>({
-      prompt: system ? `${system}\n\n${o.prompt}` : o.prompt,
-      maxTokens: o.maxTokens,
-      temperature: o.temperature,
-    });
-    const parsed = o.schema.parse(out);
-    cacheModelResponse(requestKey, parsed);
-    return parsed;
-  }
   if (!hasAnthropicKey()) throw new Error(`agentJson(${o.role}): no Mastra and no ANTHROPIC_API_KEY`);
   const out = await claudeJson<T>({
     prompt: o.prompt,

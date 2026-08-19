@@ -14,7 +14,8 @@ export interface ChannelPipelineSyncItem {
   sourceCount: number;
   effectiveCount: number;
   fingerprint: string;
-  writeState: "not-needed" | "dry-run" | "updated" | "current" | "conflict";
+  // "forked": the channel is locked ("done"), so the upgrade landed on its v2.
+  writeState: "not-needed" | "dry-run" | "updated" | "current" | "conflict" | "forked";
 }
 
 export interface ChannelPipelineSyncReport {
@@ -93,6 +94,11 @@ export async function syncChannelPipelines({
       item.writeState = write.state;
       if (write.state === "conflict") {
         log(`${channel.name}: skipped because its pipeline changed during sync`);
+      }
+      if (write.state === "forked") {
+        log(
+          `${channel.name}: locked (done) — upgrade forked onto ${write.newChannelId ?? "a new version"}`,
+        );
       }
     }
   }

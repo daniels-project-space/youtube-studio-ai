@@ -116,6 +116,14 @@ export default defineSchema({
     })),
     // Operator hard rail: blocks the architect may never re-add.
     disabledBlocks: v.optional(v.array(v.string())),
+    // Strictly opt-in per channel. When true AND the cinematic_ai lane is
+    // active, `generation-scheduler` researches a fresh real case via
+    // `researchCase()` (fail-closed, zero-fabrication) each due cycle instead
+    // of expecting a human-curated packet from the /api/casefile-episodes
+    // desk workflow. Undefined/false = today's behavior, unchanged — this
+    // must never silently start applying to every existing cinematic_ai
+    // channel.
+    casefileAutoResearchEnabled: v.optional(v.boolean()),
     identity: v.object({
       persona: v.string(),
       voiceId: v.optional(v.string()),
@@ -154,6 +162,32 @@ export default defineSchema({
               performance: v.number(),
               clean: v.number(),
             }),
+          })),
+          providerSelectionReceipt: v.optional(v.object({
+            version: v.literal("voice-provider-selection/v1"),
+            ownerId: v.string(),
+            channelId: v.string(),
+            provider: v.literal("elevenlabs"),
+            voiceId: v.string(),
+            score: v.number(),
+            selectedAt: v.number(),
+            shortlistedCount: v.number(),
+            shortlistFingerprint: v.string(),
+            selectionFingerprint: v.string(),
+          })),
+          localColdOpenReceipt: v.optional(v.object({
+            version: v.literal("voice-local-cold-open/v1"),
+            ownerId: v.string(),
+            channelId: v.string(),
+            provider: v.literal("elevenlabs"),
+            voiceId: v.string(),
+            measuredAt: v.number(),
+            textFingerprint: v.string(),
+            physicsFingerprint: v.string(),
+            audioFingerprint: v.string(),
+            durationSec: v.number(),
+            wordsPerSec: v.number(),
+            integratedLufs: v.number(),
           })),
     }),
   ),
@@ -202,11 +236,13 @@ export default defineSchema({
       ),
     }),
     // Which thumbnail strategy this channel uses (default "banana" — the
-    // engine). claude_flux/ideogram are retired, kept only for existing rows.
+    // engine). renderer_native is a local media-renderer still; claude_flux/
+    // ideogram are retired, kept only for existing rows.
     thumbnailer: v.optional(
       v.union(
         v.literal("banana"),
         v.literal("title_card"),
+        v.literal("renderer_native"),
         v.literal("claude_flux"),
         v.literal("ideogram"),
       ),
@@ -293,11 +329,27 @@ export default defineSchema({
         avatarSet: v.optional(v.boolean()),
       }),
     ),
+    // CHANNEL LOCK ("done"). Set MANUALLY and explicitly by the operator via
+    // channels.lockChannel — never auto-detected from status/progress. While
+    // locked === true no config/content write lands on this row: every guarded
+    // mutation forks the change onto a v2 row (see convex/channelLock.ts) so the
+    // finished channel is frozen exactly as it shipped. Clearing it is equally
+    // manual — channels.unlockChannel, owner identity + typed confirmation only.
+    locked: v.optional(v.boolean()),
+    lockedAt: v.optional(v.number()),
+    lockedBy: v.optional(v.string()),
+    // Fork lineage. Set on a v2+ row to the locked ancestor it was forked from;
+    // versionNumber is 1 for an original channel and parent+1 for each fork.
+    parentChannelId: v.optional(v.id("channels")),
+    versionNumber: v.optional(v.number()),
   })
     .index("by_owner", ["ownerId"])
     .index("by_owner_slug", ["ownerId", "slug"])
     .index("by_group", ["groupId"])
-    .index("by_youtube_channel_id", ["youtubeCreated.ytChannelId"]),
+    .index("by_youtube_channel_id", ["youtubeCreated.ytChannelId"])
+    // Lets the lock guard find a locked channel's editable fork head without a
+    // table scan, so repeated edits reuse v2 instead of spawning v3, v4, v5…
+    .index("by_parent", ["parentChannelId"]),
 
   // Durable exactly-once boundary for the irreversible Browserbase YouTube
   // channel-create click. A request can enter provider_started only once; all
@@ -406,8 +458,11 @@ export default defineSchema({
     medianViewsTop50: v.number(),
     thumbnailStyleGuide: v.object({
       dominantColors: v.array(v.string()),
-      hasTextOverlayPct: v.number(),
+      hasTextOverlayPct: v.union(v.number(), v.null()),
       notes: v.string(),
+      evidenceSource: v.optional(v.literal("youtube_data_api_v3_metadata")),
+      visualEvidenceStatus: v.optional(v.literal("metadata_only")),
+      sampledVideoCount: v.optional(v.number()),
     }),
     refreshedAt: v.number(),
   }).index("by_owner_niche", ["ownerId", "niche"]),
@@ -435,7 +490,7 @@ export default defineSchema({
     refreshedAt: v.number(),
   }).index("by_owner_niche", ["ownerId", "niche"]),
 
-  // Derived SEO strategy databank (Gemini-synthesised from the above).
+  // Source-attributed SEO databank derived from collected YouTube metadata.
   seoDatabank: defineTable({
     ownerId: v.string(),
     niche: v.string(),
@@ -445,6 +500,14 @@ export default defineSchema({
     thumbnailRules: v.array(v.string()),
     hookPatterns: v.array(v.string()),
     competitorGaps: v.array(v.string()),
+    sourceAttribution: v.optional(v.object({
+      provider: v.literal("youtube_data_api_v3"),
+      sampledVideoIds: v.array(v.string()),
+      sourceFields: v.array(v.string()),
+      videosAnalysed: v.number(),
+      topPerformersAnalysed: v.number(),
+      limitations: v.array(v.string()),
+    })),
     refreshedAt: v.number(),
   }).index("by_owner_niche", ["ownerId", "niche"]),
 
@@ -734,6 +797,39 @@ export default defineSchema({
     .index("by_owner", ["ownerId"])
     .index("by_channel", ["channelId"])
     .index("by_channel_key", ["channelId", "key"]),
+
+  // Real episodic story-state memory (Phase 4 — episodic continuity). One row
+  // per (channelId, seriesTitle): a running arc summary, prior plot beats,
+  // unresolved narrative threads, and known entities (name + one-line ROLE
+  // only — never wardrobe/appearance, which is a separate concern owned by
+  // the character/wardrobe continuity system). `topic_select`'s SERIES MODE
+  // reads this to ground its continuation LLM call in real prior plot content
+  // (not just prior titles), then writes an updated summary back in the same
+  // call. No row for a series = today's exact title-only-continuity behavior.
+  seriesStoryState: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    seriesTitle: v.string(),
+    arcSummary: v.string(),
+    plotBeats: v.array(
+      v.object({
+        episode: v.number(),
+        beat: v.string(),
+        at: v.number(),
+      }),
+    ),
+    unresolvedThreads: v.array(v.string()),
+    entities: v.array(
+      v.object({
+        name: v.string(),
+        role: v.string(),
+      }),
+    ),
+    updatedAt: v.number(),
+  })
+    .index("by_owner", ["ownerId"])
+    .index("by_channel", ["channelId"])
+    .index("by_channel_series", ["channelId", "seriesTitle"]),
 
   // -------------------- Analytics (stats-refresh sink) --------------------
   // Per-video performance snapshots, captured by the stats-refresh task from
@@ -1209,4 +1305,60 @@ export default defineSchema({
     .index("by_key", ["ownerId", "recommendationKey"])
     .index("by_owner_status", ["ownerId", "status"])
     .index("by_channel_created", ["channelId", "createdAt"]),
+
+  // A factual cinematic episode is deliberately separate from a normal
+  // channel run. It stores only immutable review handoffs and can never
+  // authorize a provider call or public/scheduled upload by itself.
+  casefileEpisodes: defineTable({
+    ownerId: v.string(),
+    caseId: v.string(),
+    /** Content identity of this immutable source-evidence revision. */
+    sourcePacketFingerprint: v.string(),
+    status: v.union(
+      v.literal("source_admitted"),
+      v.literal("awaiting_evidence_review"),
+      v.literal("awaiting_cinematic_direction"),
+      v.literal("awaiting_cinematic_review"),
+      v.literal("render_admitted"),
+    ),
+    workflow: v.any(),
+    createdAt: v.number(),
+    updatedAt: v.number(),
+  })
+    .index("by_owner_source_packet", ["ownerId", "sourcePacketFingerprint"])
+    .index("by_owner_status", ["ownerId", "status"])
+    .index("by_owner_case_updated", ["ownerId", "caseId", "updatedAt"])
+    .index("by_owner_updated", ["ownerId", "updatedAt"]),
+
+  // SPEND LEDGER for the automatic Casefile case-research path
+  // (`src/engine/casefileCaseResearcher.ts`'s `researchCase()`, dispatched by
+  // `generation-scheduler`). That call spends real money — one live
+  // Browserbase/Stagehand session per `searchWeb()` plus an Anthropic
+  // semantic-verification call per critique iteration — BEFORE
+  // `run-pipeline` starts, so it is structurally outside every
+  // `invocation.budgetUsd` check the rest of the system enforces. One row is
+  // written per billable dispatch attempt (success OR fail-closed research
+  // failure; a genuinely skipped/ineligible dispatch costs nothing and is
+  // never recorded). The scheduler counts today's rows across ALL channels
+  // and refuses to research past the configured ceiling.
+  casefileResearchAttempts: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    /** UTC day bucket, "YYYY-MM-DD". Counting key — never a display value. */
+    day: v.string(),
+    attemptedAt: v.number(),
+  })
+    .index("by_owner_day", ["ownerId", "day"])
+    .index("by_channel_day", ["channelId", "day"]),
+
+  // Single project-wide "what are we working toward right now" record, so
+  // both automation and Daniel can query current intent/priorities. Not
+  // per-owner scoped (one project, one active goal) — history is simply the
+  // set of rows ordered by updatedAt; the latest is authoritative.
+  projectGoals: defineTable({
+    statement: v.string(),
+    priorities: v.array(v.string()),
+    setBy: v.string(),
+    updatedAt: v.number(),
+  }).index("by_updatedAt", ["updatedAt"]),
 });

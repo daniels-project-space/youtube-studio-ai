@@ -1,0 +1,52 @@
+import type { Block } from "@/engine/types";
+import { assertCasefileEvidenceShotMap } from "@/engine/casefileEvidenceShotMap";
+import { draftCasefileEvidenceShotMap } from "@/engine/casefileEvidenceShotMapAutoDrafter";
+
+/**
+ * Reviewer-gated documentary visual handoff. This has no provider, planner,
+ * renderer, publishing, or channel-family side effect.
+ */
+const casefileEvidenceShotMap: Block = {
+  id: "casefile_evidence_shot_map",
+  consumes: [
+    "casefileSourcePacket",
+    "casefileSourceAdmission",
+    "casefileEvidenceShotMapInput",
+    "sceneManifest",
+    "shotList",
+  ],
+  produces: ["casefileEvidenceShotMap", "casefileEvidenceShotMapAdmission"],
+  run: async (ctx) => {
+    // A human-pasted draft always wins unchanged; only when none was
+    // supplied do we deterministically draft one (zero provider calls) so
+    // the exact same assertCasefileEvidenceShotMap gate below still runs.
+    const providedInput = ctx.store["casefileEvidenceShotMapInput"];
+    const input =
+      providedInput !== undefined
+        ? providedInput
+        : await draftCasefileEvidenceShotMap({
+            sourcePacket: ctx.store["casefileSourcePacket"],
+            sourceAdmission: ctx.store["casefileSourceAdmission"],
+            sceneManifest: ctx.store["sceneManifest"],
+            shotList: ctx.store["shotList"],
+          });
+    const admitted = assertCasefileEvidenceShotMap({
+      input,
+      sourcePacket: ctx.store["casefileSourcePacket"],
+      sourceAdmission: ctx.store["casefileSourceAdmission"],
+      sceneManifest: ctx.store["sceneManifest"],
+      shotList: ctx.store["shotList"],
+    });
+    ctx.log(
+      `casefile_evidence_shot_map: ${providedInput !== undefined ? "human-drafted" : "auto-drafted"} claim map — ` +
+        `${admitted.receipt.factualClaimCount} factual claim(s) → ` +
+        `${admitted.receipt.bindingCount} reviewed scene/shot binding(s); provider calls: 0; private human-review draft only`,
+    );
+    return {
+      casefileEvidenceShotMap: admitted.map,
+      casefileEvidenceShotMapAdmission: admitted.receipt,
+    };
+  },
+};
+
+export const casefileEvidenceShotMapBlocks: Block[] = [casefileEvidenceShotMap];

@@ -85,3 +85,16 @@ export async function notifyDraftReady(
     : `✅ Draft ready: ${title}`;
   return sendMessage(body, opts);
 }
+
+/**
+ * Convenience: ship-stage budget alert (GOLDEN_MODULES "ship" gate). Distinct
+ * from `alertFailure` — the run succeeded, this is an advisory heads-up that
+ * spend landed at/near the channel's frozen per-run budget ceiling.
+ */
+export async function alertBudget(
+  context: string,
+  message: string,
+  opts: TelegramOptions = {},
+): Promise<number> {
+  return sendMessage(`⚠️ ${context}\n${message}`, opts);
+}

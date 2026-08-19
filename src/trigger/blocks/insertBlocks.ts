@@ -15,10 +15,22 @@
  * gets none). Empty/missing types → block no-ops.
  */
 import type { Block } from "@/engine/types";
+import {
+  hasNamedSourceAttribution,
+  hasSourceAttributedDataStoryParams,
+} from "@/engine/dataStory";
+import { assertDataStorySourceLedger } from "@/engine/dataStorySourceLedger";
+import {
+  assertEvidenceVisualManifestCollection,
+  evidenceVisualManifestAllowsNumbers,
+  evidenceVisualManifestBindsNarration,
+  evidenceVisualManifestPrompt,
+  type EvidenceVisualManifest,
+} from "@/engine/evidenceVisualManifest";
 import { join } from "node:path";
+import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { makeRunTempDir, readBytes } from "@/lib/files";
 import { putObject } from "@/lib/storage";
-import { geminiJson, hasGeminiKey } from "@/lib/gemini";
 import { renderDataInsert } from "@/lib/remotionRender";
 
 const KINDS = ["big_stat", "line_chart", "bar_compare", "annotated_line", "lower_third"] as const;
@@ -39,6 +51,8 @@ interface InsertPlanItem {
   events?: { idx: number; label: string }[];
   /** The spoken numbers this insert is built on (validated vs the sentence). */
   anchorValues?: (number | string)[];
+  /** Required for factual chart data: selects a reviewed value/source manifest. */
+  evidenceVisualId?: string;
 }
 
 /**
@@ -80,6 +94,33 @@ function anchorsSpoken(item: InsertPlanItem, sentence: string): boolean {
   return anchors.every((a) => spoken.has(a) || spoken.has(a.split(".")[0]));
 }
 
+/** Every numeral rendered anywhere in a factual insert must be reviewed. */
+function numericPlanValues(item: InsertPlanItem): number[] {
+  const values: number[] = [];
+  const collect = (value: unknown): void => {
+    if (typeof value === "number" && Number.isFinite(value)) {
+      values.push(value);
+      return;
+    }
+    if (typeof value === "string") {
+      for (const match of value.replace(/[,_\s](?=\d)/g, "").matchAll(/\d+(?:\.\d+)?/g)) values.push(Number(match[0]));
+    }
+  };
+  collect(item.title);
+  collect(item.value);
+  collect(item.label);
+  for (const value of item.anchorValues ?? []) collect(value);
+  for (const value of item.series ?? []) collect(value);
+  for (const label of item.xLabels ?? []) collect(label);
+  for (const bar of item.bars ?? []) {
+    collect(bar.label);
+    collect(bar.value);
+    collect(bar.display);
+  }
+  for (const event of item.events ?? []) collect(event.label);
+  return values;
+}
+
 export const visualInserts: Block = {
   id: "visual_inserts",
   consumes: ["sentenceTimings"],
@@ -94,17 +135,48 @@ export const visualInserts: Block = {
       ctx.log("visual_inserts: no insertTypes enabled for this channel — skipping");
       return { insertOverlays: [] };
     }
-    if (!hasGeminiKey() || timings.length === 0) {
-      ctx.log("visual_inserts: no Gemini key or no timings — skipping");
+    if (timings.length === 0) {
+      ctx.log("visual_inserts: no timings — skipping");
       return { insertOverlays: [] };
     }
 
     // Candidate sentences = the ones that actually SPEAK numbers.
-    const candidates = timings
+    const strictDataStory = hasSourceAttributedDataStoryParams(ctx.params);
+    const numericCandidates = timings
       .map((t, i) => ({ i, text: t.text }))
       .filter((c) => /\d/.test(c.text));
+    const candidates = strictDataStory
+      ? numericCandidates.filter((candidate) => hasNamedSourceAttribution(candidate.text))
+      : numericCandidates;
     if (candidates.length === 0) {
-      ctx.log("visual_inserts: narration speaks no numbers — nothing to visualize");
+      ctx.log(strictDataStory
+        ? "visual_inserts: source-attributed data story has no eligible named-source numeric sentence — nothing to visualize"
+        : "visual_inserts: narration speaks no numbers — nothing to visualize");
+      return { insertOverlays: [] };
+    }
+    // A named source in the prose is not enough. Before Claude can select a
+    // chart, prove every source/number pairing against the reviewed ledger.
+    // This is intentionally fail-closed: a source-attributed data story must
+    // never silently degrade into an unreviewed data visual.
+    if (strictDataStory) {
+      assertDataStorySourceLedger(
+        ctx.store["dataStorySourceLedger"],
+        timings.map((timing) => timing.text).join(" "),
+      );
+    }
+    // A ledger proves spoken claims; it does not prove every plotted series
+    // point. Charts consequently require their own review-bound value
+    // manifest. No manifest means a citation badge may still render, but no
+    // factual graphic can silently interpolate or invent data.
+    let evidenceVisualManifests: EvidenceVisualManifest[] = [];
+    if (strictDataStory && ctx.store["evidenceVisualManifests"] !== undefined) {
+      evidenceVisualManifests = assertEvidenceVisualManifestCollection(ctx.store["evidenceVisualManifests"]);
+    }
+    const evidenceVisualById = new Map(evidenceVisualManifests.map((manifest) => [manifest.id, manifest]));
+    // Keep evidence eligibility ahead of the planner/provider boundary. A
+    // missing permitted planner is a no-op, never a fallback to Gemini.
+    if (!hasAnthropicKey()) {
+      ctx.log("visual_inserts: no permitted planner key — skipping");
       return { insertOverlays: [] };
     }
 
@@ -120,6 +192,11 @@ export const visualInserts: Block = {
     const palette =
       dna?.palette?.length ? dna.palette : ((ctx.store["palette"] as string[] | undefined) ?? []);
     const accent = palette.length >= 2 ? palette[palette.length - 2] : undefined;
+    const factualManifestDocs = strictDataStory
+      ? (evidenceVisualManifests.length
+        ? `\nREVIEWED FACTUAL VISUAL MANIFESTS — use only one of these for a chart/bar/line and return its evidenceVisualId. Every rendered number, unit-bearing point, and numeric label must be copied from that manifest; do not interpolate a series.\n${evidenceVisualManifests.map(evidenceVisualManifestPrompt).join("\n")}`
+        : "\nNO REVIEWED FACTUAL VISUAL MANIFESTS are available. You may plan only lower_third source badges; do not plan charts, bars, lines, or big-stat graphics.")
+      : "";
 
     // ---- Insert Director: plan which numbers become which visual ----
     const kindDocs = [
@@ -142,7 +219,7 @@ export const visualInserts: Block = {
 
     let plan: InsertPlanItem[] = [];
     try {
-      const raw = await geminiJson<{ inserts?: InsertPlanItem[] }>({
+      const raw = await claudeJson<{ inserts?: InsertPlanItem[] }>({
         prompt:
           `You are the channel's MOTION-GRAPHICS DIRECTOR for a ${niche || "YouTube"} video: "${topic}".\n` +
           `These narration sentences speak numbers (sentenceIdx: text):\n` +
@@ -155,6 +232,7 @@ export const visualInserts: Block = {
           `data (same as sentenceIdx if one sentence; at most sentenceIdx+4). The visual HOLDS on screen for that ` +
           `whole span so the viewer can actually read it while it is being talked about.\n` +
           `Available kinds:\n${kindDocs}\n\n` +
+          factualManifestDocs +
           `HARD RULES:\n` +
           `- anchorValues: list the EXACT numbers from the chosen sentence that the insert visualizes. ` +
           `You may NOT use numbers that are not spoken in that sentence (inserts are fact-checked against the script).\n` +
@@ -162,9 +240,10 @@ export const visualInserts: Block = {
           `- One insert per sentence; spread them across the video.\n` +
           `Return STRICT JSON {"inserts":[{"sentenceIdx":number,"endSentenceIdx":number,"kind":string,"title":string,"value"?:string,` +
           `"label"?:string,"series"?:number[],"xLabels"?:string[],"bars"?:[{"label":string,"value":number,"display"?:string}],` +
-          `"anchorValues":number[]|string[]}]}.`,
+          `"anchorValues":number[]|string[],"evidenceVisualId"?:string}]}.`,
         maxTokens: 1800,
         temperature: 0.4,
+        log: ctx.log,
       });
       plan = Array.isArray(raw.inserts) ? raw.inserts : [];
     } catch (e) {
@@ -178,6 +257,10 @@ export const visualInserts: Block = {
       const t = timings[it.sentenceIdx];
       if (!t) continue;
       if (!enabled.includes(it.kind)) continue;
+      if (strictDataStory && !hasNamedSourceAttribution(t.text)) {
+        ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — strict data-story source missing ("${t.text.slice(0, 60)}…")`);
+        continue;
+      }
       // lower_third has its own integrity gate (the SOURCE must be named in
       // the sentence); everything else fact-checks the anchor NUMBERS.
       if (it.kind === "lower_third") {
@@ -187,6 +270,21 @@ export const visualInserts: Block = {
         }
         valid.push(it);
         continue;
+      }
+      if (strictDataStory) {
+        const evidenceManifest = it.evidenceVisualId ? evidenceVisualById.get(it.evidenceVisualId) : undefined;
+        if (!evidenceManifest || evidenceManifest.surface !== "data_insert" || evidenceManifest.visualKind !== "chart") {
+          ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — factual data visual has no reviewed chart manifest`);
+          continue;
+        }
+        if (!evidenceVisualManifestBindsNarration(evidenceManifest, t.text)) {
+          ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — selected manifest is not bound to this narration anchor`);
+          continue;
+        }
+        if (!evidenceVisualManifestAllowsNumbers(evidenceManifest, numericPlanValues(it))) {
+          ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — rendered numbers are not all present in the reviewed manifest`);
+          continue;
+        }
       }
       if (!anchorsSpoken(it, t.text)) {
         ctx.log(`visual_inserts: DROPPED ${it.kind}@${it.sentenceIdx} — anchor numbers not spoken verbatim ("${t.text.slice(0, 60)}…")`);

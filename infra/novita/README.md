@@ -13,16 +13,22 @@ performs its authenticated zero-cost readiness check before every paid launch.
 - Z-Image Turbo is loaded from the local SSD cache at
   `/workspace/model-cache`, hydrated from the existing `ai-infra-models`
   network volume. Every file/tree manifest is SHA-256 verified.
-- Video uses official LTX-2.3 weights at the pinned Hugging Face revision and
-  official Lightricks runtime commit. Production and hero profiles use the
-  official two-stage HQ pipeline, distilled LoRA, and x2 spatial upscaler.
-- The text encoder tree must identify the exact, 40-character pinned revision
-  of Lightricks' documented `google/gemma-3-12b-it-qat-q4_0-unquantized`
-  repository, and readiness must attest that same local cache.
-- Draft video uses the official distilled entry point and distilled checkpoint.
-  Each phase accepts only the three exact approved draft/production/hero
-  profiles; dimensions, steps, guidance, BF16 precision, FPS, checkpoint names,
-  and pipeline choice cannot drift inside a self-signed manifest.
+- Video uses official LTX-2.5 at a pinned Hugging Face revision and official
+  Lightricks runtime commit. Its one permitted RTX 4090 profile uses the
+  distilled two-stage pipeline: `640×352 → 1280×704` through LTX's native
+  latent-space x2 refinement, not a post-render resize.
+- The worker requires all five exact split components from the persistent model
+  manifest: transformer, Gemma 4 text encoder, video VAE, audio VAE, and x2
+  spatial upscaler. Each has a pinned repository/revision, SHA-256, byte count,
+  source path, and local-cache path. The local Gemma 4 encoder is a model file,
+  not a Gemini API call.
+- FP8-cast quantization and CPU offload are part of the signed video profile;
+  they cannot be omitted, substituted, or silently changed by the worker.
+  Each profile accepts only 1280×704, 25 fps, eight-step distilled generation,
+  and the pinned x2 component set.
+- Before upload, `ffprobe` must observe an encoded 1280×704 video stream. The
+  worker preserves per-shot x2 geometry/execution evidence in checkpoints and
+  completion data; the controller rejects a clip without it.
 - The worker receives one presigned manifest URL and object-scoped input/output
   URLs. It never receives Novita or R2 account credentials.
 - Delivery URLs and R2 metadata are validated before GPU inference. Artifact
@@ -59,9 +65,12 @@ accepted by dispatch; the provider request must use `image@sha256:<digest>`.
 
 The worker code is deployable, but dispatch intentionally remains blocked until
 all v2 readiness fields pass. In particular, registry auth/image digest,
-prewarm state, staged model manifests, bridge v2 attestation, spend caps, and
-verified deletion/reaper controls must exist. The readiness check is read-only
-and must pass before the first GPU create call.
+prewarm state, a regenerated R2/persistent-volume manifest containing the five
+LTX-2.5 component files, bridge v2 attestation, spend caps, verified
+deletion/reaper controls, and one controlled **exact-profile RTX 4090**
+benchmark must exist. The benchmark must prove no OOM and produce the
+ffprobe-verified 1280×704 result. The readiness check is read-only and must
+pass before the first GPU create call.
 
 The current eight-GPU contract means up to eight independent one-GPU RTX 4090
 workers rendering shots in parallel. It is not a single distributed eight-GPU

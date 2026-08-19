@@ -44,18 +44,18 @@ export interface GoldenStage {
 }
 
 export const GOLDEN_SPINE: GoldenStage[] = [
-  { stage: "intel", blocks: ["competitor_research", "topic_select"], note: "Pick topics from real outliers + competitor signal, learning-weighted." },
-  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "story_spine", "short_strategy"], note: "Show Bible crew and timed story spine; collage Shorts lock claim/source/beat/motion evidence before render." },
+  { stage: "intel", blocks: ["competitor_research", "topic_select", "quiz_topic_plan"], note: "Pick topics from real outliers + competitor signal, learning-weighted; QuizYear alternatively rotates a curated CC0 Wikidata topic registry with a durable provenance receipt." },
+  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "casefile_source_packet", "casefile_evidence_shot_map", "source_bound_story_spine", "cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence", "synthetic_scenario", "short_strategy"], note: "Show Bible crew and timed story spine; curriculum_episode_seed locks a child-editor-approved age band, one objective, vocabulary/actions, assessment, and original recurring world/characters before Story Spine planning, and emits only a private review receipt; episode_graph locks causal beat-to-scene continuity before render; learning_contract turns an approved objective into source-linked demonstrations and retrieval practice; children_show_bible binds that earlier intent into its graph-and-lesson proof; casefile_source_packet admits only an operator-supplied, primary-source- and rights-bound Case Packet with fresh Case Packet and source-use-ledger-bound editorial approval, and can emit only a private human-review draft; casefile_evidence_shot_map additionally binds every factual claim to reviewed current Scene Manifest / ShotPlan targets under an explicit no-gore/no-unsupported-recreation policy; source_bound_story_spine carries those exact reviewed claim/source/citation/treatment bindings into every timed Story Spine shot without generating facts or admitting a family; cinematic_case_sequence_draft converts that evidence into source-bound, faceless mannequin multi-shot coverage; cinematic_case_sequence_finalize accepts only a real editor’s matching signature before strict cinematic admission and Novita generation; synthetic_scenario locks an explicitly fictional, assumption-led scenario before writing; collage Shorts lock claim/source/beat/motion evidence before render." },
   { stage: "write", blocks: ["script_gen", "hook_craft"], note: "Hook-first, CRAFT_RULES applied." },
-  { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check"], note: "Quality + originality + compliance floor." },
+  { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check", "quiz_topic_safety", "quiz_critic_spec", "scenario_disclosure_gate"], note: "Quality + originality + compliance floor; QuizYear contributes deterministic topic-safety and game-format critic receipts; synthetic scenarios must disclose their illustrative assumptions before narration." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
   { stage: "sound", blocks: ["music"], note: "Channel-scoped score or long-form music product." },
-  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "novita_render_images", "novita_render_video", "whiteboard_scribe", "motion_comic", "documotion_short"], note: "The family selects only the visual engine and QA chain it needs; documentary Shorts render natively at 9:16." },
+  { stage: "visual", blocks: ["scene_planner", "keyframes", "loop_clips", "upscale", "stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter", "novita_render_images", "novita_render_video", "scene_compiler", "whiteboard_scribe", "motion_comic", "lore_short", "quiz_year", "documotion_short", "shorts_spinoff", "documentary_short_candidates"], note: "The family selects only the visual engine and QA chain it needs; cinematic can add a reusable mood/cast/setting/storyboard lock, the deterministic Scene Compiler turns a reviewed scene manifest into a local 16:9 master, and documentary Shorts render natively at 9:16. shorts_spinoff/documentary_short_candidates (P2-9) are the shorts catalog module's planning-only Short-window selection — they execute late in the real timeline but are owned here per CATALOG_EXECUTION_BINDINGS.shorts, not by ship." },
   { stage: "layer", blocks: ["captions", "quote_overlays", "intro_card", "visual_inserts"], note: "Conditional word-level captions, overlays and data-viz." },
-  { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both." },
-  { stage: "package", blocks: ["thumbnail_gen", "metadata"], note: "SEO metadata + text-free Flash scene, deterministic Style-DNA typography, and one publishing gate." },
-  { stage: "verify", blocks: ["qa_assets", "qa_shots", "short_scene_qa", "length_check", "qa_visual"], note: "Required asset/shot checks, portrait scene-safe-area proof, and deterministic final quality gate." },
-  { stage: "ship", blocks: ["upload_draft", "emit_bundle", "shorts_spinoff", "documentary_short_candidates", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + optional planning-only Short window selection + multilang reuse + optional distribution + scoped cleanup." },
+  { stage: "build", blocks: ["timeline_assemble", "assemble"], note: "Narrated EDL or loop assembly, never both. NOTE (P2-10): this spine block id \"assemble\" is lofi's loop-assembly step — it has no dedicated GOLDEN_MODULES row and is folded into the `lofi` catalog entry's executableIds (see goldenExecution.ts CATALOG_EXECUTION_BINDINGS.lofi). Do not confuse it with the unrelated catalog key `assemble` below (also stage \"build\"), which documents the separate build-stage EDL/Timeline engine used by narrated content." },
+  { stage: "package", blocks: ["thumbnail_gen", "metadata", "quiz_metadata"], note: "SEO metadata plus a required thumbnail description flow into one universal Nano Banana scene route with deterministic Style-DNA typography and one publishing gate; QuizYear retains a source-grounded metadata package while every channel shares the same final thumbnail provider." },
+  { stage: "verify", blocks: ["qa_assets", "qa_shots", "short_scene_qa", "length_check", "qa_visual", "child_content_safety"], note: "Required asset/shot checks, portrait scene-safe-area proof, deterministic final quality gate, and an additional children-learning human-review admission gate where applicable." },
+  { stage: "ship", blocks: ["upload_draft", "emit_bundle", "crosspost", "notify", "cleanup"], note: "PRIVATE-first upload + multilang reuse + optional distribution + scoped cleanup. NOTE (P2-9): planning-only Short window selection (shorts_spinoff / documentary_short_candidates) is NOT owned by ship — goldenExecution.ts's CATALOG_EXECUTION_BINDINGS assigns those two executables to the `shorts` catalog module (stage: visual); they were moved to the visual stage row to match." },
 ];
 
 /**
@@ -497,6 +497,20 @@ export interface GoldenModule {
   how: string;
   /** The QA gates that protect its output. */
   gates: string[];
+  /**
+   * EDITORIAL LABEL ONLY — this is NOT a runtime gate. `"reference"` vs
+   * `"active"` records a curator's judgment for this catalog page; it has no
+   * bearing on whether the module actually executes in production. The only
+   * things that enforce anything at runtime are block registration
+   * (registerAllBlocks -> runner.ts:208 block.run(ctx)) plus each block's own
+   * fail-closed checks. Golden certification — the layer that WOULD give
+   * `status` teeth (GOLDEN_PROMOTION_PROOFS, compileGoldenExecutionFlow,
+   * selectGoldenProductionModules in goldenExecution.ts) — has zero production
+   * call sites as of this audit (2026-08); see
+   * docs/GOLDEN_MODULE_AUDIT_2026-08.md P2-11. Do not read `status: "active"`
+   * as "verified running in prod" — read it as "editorially promoted on this
+   * page."
+   */
   status: CatalogModuleStatus;
 }
 
@@ -506,20 +520,221 @@ export const GOLDEN_MODULES: GoldenModule[] = [
   // receipts exist; catalog presence must not be confused with qualification.
   ...CHANNEL_INCEPTION_CATALOG_MODULES,
   {
+    key: "episode-graph",
+    stage: "brief",
+    title: "Episode Graph — Causal Scene Plan",
+    engine: "Typed Story Spine bridge → provider-free Episode Graph + deterministic Scene Manifest",
+    how:
+      "Turns an approved timed story spine into a stable causal graph: every beat is timed, source-linked, attached to a " +
+      "character and setting catalog, and given a visual purpose before any renderer runs. The module is deliberately a planner, " +
+      "not a script or media generator. It emits a content-addressed Scene Manifest that downstream renderers must honor. " +
+      "Implemented by src/engine/episodeGraph.ts and src/trigger/blocks/episodeGraphBlocks.ts.",
+    gates: [
+      "full narration-to-beat coverage",
+      "causal edge between every adjacent beat",
+      "canonical character and setting continuity",
+      "source references on every factual beat",
+      "children-learning graphs require curriculum evidence and an explicit resolution",
+    ],
+    status: "reference",
+  },
+  {
+    key: "casefile-documentary",
+    stage: "brief",
+    title: "Casefile Documentary — Source-First Evidence Grammar",
+    engine: "Provider-independent Case Packet → primary-source / rights / editorial-admission receipt → cited evidence grammar",
+    how:
+      "A reusable true-crime / investigation foundation rather than an automatic crime-channel switch. The registered " +
+      "casefile_source_packet block requires every claim to name an exact primary-source URL/provenance, every ledger source to declare " +
+      "citation-versus-visual use, non-public visual assets to carry matching rights evidence, and a fresh reviewer-identified approval " +
+      "bound to the exact Case Packet and source-use ledger fingerprints. It emits only a private human-review draft receipt plus cited evidence grammar; active " +
+      "allegations, graphic details, doxxing, actionable wrongdoing, stale/mismatched review, and missing evidence fail closed. No automatic " +
+      "channel family consumes it yet.",
+    gates: [
+      "primary-source URL/provenance for every claim",
+      "exhaustive citation-versus-visual source-use ledger",
+      "matching rights/usage evidence for every non-public visual asset",
+      "fresh reviewer-identified approval bound to the exact Case Packet and source-use ledger fingerprints",
+      "active allegations, graphic detail, doxxing, and actionable wrongdoing blocked",
+      "reconstructions require a visible disclosure",
+      "every evidence scene carries an on-screen citation",
+      "private human-editorial-review draft only; no automatic family admission",
+    ],
+    status: "reference",
+  },
+  {
+    key: "casefile-evidence-shot-map",
+    stage: "brief",
+    title: "Casefile Evidence Shot Map — Claim-to-Visual Review",
+    engine:
+      "Provider-free admitted Casefile Source Packet + current Scene Manifest + current Story Spine ShotPlan → reviewer-signed factual claim map",
+    how:
+      "A reusable dark-documentary / true-crime quality handoff, not an automatic channel route. The registered " +
+      "casefile_evidence_shot_map block requires every factual Case Packet claim to bind to one or more current scene and/or shot ids, " +
+      "with a closed visual-treatment vocabulary of map, timeline, document abstraction, or a narrowly declared neutral reenactment. " +
+      "Every binding names claim-supported source ids including an admitted primary source, keeps an on-screen citation, and is reviewed " +
+      "against the exact source-packet, Scene Manifest, and ShotPlan fingerprints. The only reconstruction path requires the existing " +
+      "illustrated-reconstruction declaration and exact visible disclosure; no gore or unsupported recreation can be represented in the map. " +
+      "It emits a private human-review-only receipt and no automatic crime, documentary, or cinematic family consumes it.",
+    gates: [
+      "every factual claim maps exactly once to one or more current Scene Manifest and/or ShotPlan ids",
+      "every mapped visual names claim-supported evidence including a declared primary source and a visible citation",
+      "Scene Manifest and canonical ShotPlan fingerprints must match the editor-reviewed map",
+      "closed treatment vocabulary: map, timeline, document abstraction, or declared neutral reenactment only",
+      "no-gore and no-unsupported-recreation policy must both be explicitly true",
+      "neutral reenactment requires illustrated-reconstruction declaration plus exact visible disclosure",
+      "fresh reviewer approval bound to both the source-packet and canonical shot-map fingerprints",
+      "private human-editorial-review receipt only; no automatic family admission or public/scheduled release",
+    ],
+    status: "reference",
+  },
+  {
+    key: "source-bound-story-spine",
+    stage: "brief",
+    title: "Source-Bound Story Spine — Timed Evidence Handoff",
+    engine:
+      "Provider-free admitted Casefile source packet + reviewed evidence-shot map + current timed Story Spine → exact claim/source/citation/treatment handoff",
+    how:
+      "This reusable boundary does not write a fact, create a prompt, render media, or admit a channel. It verifies that every " +
+      "timed Story Spine shot remains covered by a current reviewer-signed Casefile binding, then carries the exact claim ids, admitted " +
+      "primary-source ids, on-screen citations, treatments, scenes, beats, sentences, and shot ids into a content-addressed private " +
+      "handoff. Downstream cinematic direction can use it to preserve evidence while changing visual grammar rather than silently " +
+      "turning a researched narrative into generic b-roll.",
+    gates: [
+      "source packet, source-admission, evidence map, and map-admission fingerprints must all be current and matching",
+      "the reviewed ShotPlan fingerprint must equal the timed Story Spine shot list",
+      "every claim binding retains an admitted primary-source id, visible citation, approved treatment, and real timed shot coverage",
+      "unknown, orphaned, or stale Story Spine shot ids fail closed",
+      "private human-editorial-review-only handoff; no automatic family, render, spend, or publication authority",
+    ],
+    status: "reference",
+  },
+  {
+    key: "cinematic-case-sequence",
+    stage: "brief",
+    title: "Cinematic Case Sequence — Evidence-Led Multi-Shot Direction",
+    engine:
+      "Admitted Casefile evidence map + Story Spine → reviewer-signed causal coverage units → exact Novita scene plan / EDL / visual-review locks",
+    how:
+      "The production bridge for a Fern-grade investigative treatment: each narrated causal beat becomes two to four purpose-specific " +
+      "shots—spatial anchor, anonymous mannequin action or relationship, cited evidence insert, and consequence/reaction—rather than a " +
+      "rotating b-roll carousel. Original faceless mannequin roles retain a distinct wardrobe silhouette, palette, prop, and movement profile; " +
+      "they are never likenesses of real people. Every camera move, lens, scale, tension state, and cut has an explicit narrative reason. " +
+      "The renderer preserves ordered scene identity across Novita batches and timeline_assemble uses the signed EDL directly; qa_visual samples " +
+      "the exact identity/reveal/contradiction windows. It remains private human-editorial-review-only and does not make crime automatic.",
+    gates: [
+      "every causal beat has continuous two-to-four-shot coverage of its exact Story Spine window",
+      "cold opens, investigations, contradictions, and reveals use geography/person/evidence scale variation—not modulo camera cycling",
+      "question → pressure/uncertainty → reversal/release/residue tension grammar and cut rationale must be explicit",
+      "every factual claim stays bound to an admitted source, cited treatment, and current scene/shot map",
+      "anonymous mannequins are faceless, non-likeness roles with distinct wardrobe/silhouette/prop/movement locks",
+      "no gore, unsupported recreation, or fact-inventing visual treatment; neutral reconstruction carries its exact disclosure",
+      "fresh cinematic-editor approval binds source packet, evidence map, prompt/camera/cut/timing content fingerprint",
+      "ordered renderer receipt and EDL must match every scene id and timing before assembly",
+      "private human-editorial-review only; no automatic family admission or public release",
+    ],
+    status: "reference",
+  },
+  {
+    key: "learning-contract",
+    stage: "brief",
+    title: "Learning Contract — Objective to Retrieval Practice",
+    engine: "Episode Graph → typed objective, source-linked demonstration, recap, retrieval-practice, and human-review handoff",
+    how:
+      "Extracts the learning objective already present in an approved Episode Graph and locks which source-backed beats demonstrate it, " +
+      "how the final beat recaps it, and what a learner should be asked afterward. It does not claim subject-matter accreditation or " +
+      "invent a curriculum; the receipt binds a human review checklist to the exact graph fingerprint. This one contract is reusable by " +
+      "supervised children’s learning now and future language / visual-STEM renderers. Implemented by src/engine/learningContract.ts.",
+    gates: [
+      "objective must be present in one or more Episode Graph beats",
+      "demonstration and recap beats must belong to the active causal graph",
+      "source references must resolve to the active graph source ledger",
+      "children contracts require curriculum or primary evidence and child-safe retrieval wording",
+      "stale receipt / graph fingerprint mismatch fails closed",
+    ],
+    status: "reference",
+  },
+  {
+    key: "children-show-bible",
+    stage: "brief",
+    title: "Children’s Show Bible — Curriculum, Identity, and Participation",
+    engine: "Operator-authored age band + one measurable objective + original recurring world/character identity + five-stage child-participation admission",
+    how:
+      "A reusable supervised-learning format contract rather than an automatic children’s channel. The registered " +
+      "children_show_bible block binds an explicit age band, one observable objective/assessment, original recurring character and world " +
+      "locks, and familiar problem → guided attempt → varied repetition → participation → resolution/recall to the active Episode Graph and " +
+      "Learning Contract. A reviewer-identified human child-editor approval must match the exact content, graph, and lesson fingerprints. It " +
+      "blocks obvious borrowed/IP-identifying terms but does not pretend to be trademark clearance; the human editor makes the affirmative " +
+      "original-identity decision. The receipt is private-review-only and does not alter the existing children-learning family’s publishing policy.",
+    gates: [
+      "bounded declared toddler / preschool / early-primary age band",
+      "exactly one observable, measurable learning objective tied to every graph beat and the Learning Contract",
+      "original recurring guide/world identity locks must exactly match the active Episode Graph catalog",
+      "obvious borrowed/IP-identifying identity terms blocked; human child editor affirms original identity",
+      "full causal graph coverage in familiar problem → guided attempt → varied repetition → participation → resolution/recall order",
+      "varied repetition changes at least two dimensions; participation and recall use the locked assessment/retrieval prompts",
+      "fresh child-editor approval bound to the exact bible, Episode Graph, and Learning Contract fingerprints",
+      "private human child-editor-review receipt only; no automatic family admission or public/scheduled release",
+    ],
+    status: "reference",
+  },
+  {
+    key: "scene-compiler",
+    stage: "visual",
+    title: "Scene Compiler — Deterministic Illustration",
+    engine: "Episode Graph Scene Manifest → local Remotion + FFmpeg master (zero remote media calls)",
+    how:
+      "Renders original maps, diagrams, panels, simple character puppets, screen cards, and transitions from the locked Scene Manifest, " +
+      "then uses the standard audio assembly path for narration and score. It is intentionally separate from cinematic Novita: the " +
+      "compiler is the reusable, deterministic visual lane for explainers and supervised learning content; cinematic retains its attested " +
+      "Novita render-farm chain. Implemented by src/remotion/sceneCompiler and src/trigger/blocks/sceneCompilerBlocks.ts.",
+    gates: [
+      "manifest fingerprint and causal coverage match the story spine",
+      "audited 16:9 master profile only",
+      "narration/video duration agreement",
+      "final master must contain audio and video streams",
+      "manifest declares zero external provider calls",
+    ],
+    status: "reference",
+  },
+  {
+    key: "child-content-safety",
+    stage: "verify",
+    title: "Children’s Learning Safety — Human Review Receipt",
+    engine: "Deterministic audience, language, curriculum, and release-mode admission gate",
+    how:
+      "Admits only the supervised children-learning lane after the Episode Graph and deterministic Scene Manifest agree on a child-directed " +
+      "learning objective. It emits a typed receipt that permits a private draft for human editorial approval—never an automated public or " +
+      "scheduled release. Implemented by src/trigger/blocks/childrenSafetyBlocks.ts and enforced again at upload_draft.",
+    gates: [
+      "children audience declared across graph and scene manifest",
+      "curriculum source plus explicit learning objective",
+      "age-language and commercial-pressure checks",
+      "only the audited zero-provider scene renderer admitted",
+      "private draft and human editorial approval required",
+    ],
+    status: "reference",
+  },
+  {
     key: "loreshort",
     stage: "visual",
     title: "Lore Short — Loreshort Engine",
     engine:
-      "Loreshort — Gemini first-person lore script + Nano Banana art + ElevenLabs per-line TTS + image-to-video camera moves (Seedance-1-lite / LTX) + 4K Real-ESRGAN — two cost/quality lanes",
+      "Loreshort — Gemini first-person lore script + attested Novita stills + per-line cast-voice TTS + attested Novita LTX image-to-video depth camera moves + FREE ffmpeg 2K finish",
     how:
       "A single figure narrates history in FIRST PERSON (GoT \"Histories & Lore\" style): one Gemini-Pro call writes a paced " +
       "narration arc plus per-beat layered-depth SCENE prompts; Nano Banana paints each beat; ElevenLabs voices each line " +
       "separately so every shot is cut to its exact spoken length. A vision pass reads each painting and writes a motion brief " +
       "(subject + particles + a DEPTH camera move, scaled to honest intensity), which drives image-to-video into a GENUINE 3D " +
-      "shot — real perspective and parallax, never a 2D pan. Two lanes: BUDGET (LTX-distilled + free ffmpeg 2K, ~$0.4/video) " +
-      "and PREMIUM (Seedance-1-lite 480p → Real-ESRGAN 4K, ~$1.35/video, far richer figures). A title card plays before the " +
+      "shot — real perspective and parallax, never a 2D pan. A title card plays before the " +
       "narration; ffmpeg fits each shot to its beat, dissolves, titles and grades. Self-describing (LORESHORT_MODULE contract), " +
-      "fail-proof (data-URI inputs, no nginx dependency, retries, no cross-engine fallback), fully resumable. src/lib/loreshort.ts.",
+      "fail-proof (retries, no cross-engine fallback), fully resumable. src/lib/loreshort.ts. " +
+      "WIRED: the engine's providers are now INJECTED (LoreShortDeps), and the `lore_short` block " +
+      "(src/trigger/blocks/loreShortBlocks.ts, registered in src/engine/blocks.ts) supplies the attested Novita render farm for " +
+      "both stills (createAttestedNovitaImageGenerator) and the i2v camera move (generateI2V -> renderNovitaI2V), the channel's " +
+      "cast voice instead of a hardcoded ElevenLabs id, and an R2 putObjectFromFile sink instead of the nginx docroot copy. " +
+      "Every receipt accumulates with `+=`. Real-ESRGAN is NOT purchased: the block pins the engine's free ffmpeg 2K lane. " +
+      "Calling craftLoreShort with no deps still runs the original standalone Replicate/ElevenLabs/nginx path unchanged.",
     gates: [
       "required inputs validated (topic / narrator / title / kicker / slug)",
       "de-branded visuals (content-policy safe)",
@@ -527,6 +742,8 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "title card BEFORE narration",
       "no cross-engine fallback — retry same engine or fail loud",
       "genuine-3D camera move (not a 2D pan)",
+      "beat sheet settled by the Director at TEXT prices, then frozen to a content-addressed R2 checkpoint — a rejected draft never costs a render",
+      "all paid stills and clips run through the attested Novita farm with per-call receipts",
     ],
     status: "reference",
   },
@@ -535,25 +752,24 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     stage: "visual",
     title: "Novita Render Farm",
     engine:
-      "Novita 8×4090 spot-pod render farm — static modulo sharding, per-shot camera/director/script control, individual pod autoclose + spot-reclaim requeue, R2-backed idempotent resume (image + image-to-video)",
+      "Direct Trigger-controlled Novita RTX 4090 spot workers — Z-Image keyframes followed by sealed LTX-2.5 image-to-video, one exact shot job per worker, durable R2 manifests, and verified worker teardown",
     how:
-      "An editable shot list (script line, camera move, shot scale, lens, seconds, motion cue) is submitted straight into the " +
-      "orchestrator's job schema — no translation layer. The image phase renders every shot's still on however many 4090 pods " +
-      "are sharded (nshard, capped at 3 by the Novita account); each pod pushes its stills plus a `.done` marker to R2 and " +
-      "self-deletes on completion. The video phase pipelines off the SAME R2 stills into image-to-video camera moves once they " +
-      "land, converting seconds to the nearest valid 8n+1 frame count. A monitor loop verifies every pod's autoclose, " +
-      "force-deletes stragglers, and RELAUNCHES any shard whose pod vanished to a spot reclaim — workers skip outputs already " +
-      "in R2, so a requeue never double-renders. Output is drop-in producer-compatible with gen_footage (same footageClips / " +
-      "footageKeys contract), so timeline_assemble works unmodified. Self-describing (NOVITA_RENDER_FARM_MODULE contract). " +
-      "src/lib/novitaRenderFarm.ts; the render itself runs VPS-side (/root/ltx-build/novita/orchestrator.py), reached over " +
-      "HTTP by the module, never spawned in Vercel/Trigger.",
+      "Only after an approved script, timed shot plan, and keyframe review, the Trigger controller creates a sealed direct worker " +
+      "for each admitted image or LTX take. Z-Image Turbo supplies the reference still; LTX-2.5 then receives that exact R2 still " +
+      "and its locked camera/motion prompt. The cinematic profile is Lightricks/LTX-2.5 distilled with FP8-cast plus CPU offload, " +
+      "640×352 stage one → native latent x2 1280×704 at 25fps. Every worker writes a content-addressed R2 receipt, settles before " +
+      "the stage returns, and is deleted/verified by the lifecycle controller. The retired VPS/HTTP bridge cannot launch work. " +
+      "Video remains fail-closed until the exact LTX-2.5 RTX 4090 profile is present in the local benchmark allow-list.",
     gates: [
+      "keyframe text/logo/wardrobe/continuity review completes before any LTX spend",
+      "LTX accepts only the exact LTX-2.5 640×352 → 1280×704 x2 RTX 4090 profile and a local benchmark admission",
       "video frames always 8n+1 — rounded, never truncated silently",
       "every shot needs a motion cue — cameraMove !== 'static' or a non-empty motion field",
       "width/height must be a multiple of 32 (VAE tiling requirement)",
-      "shard count capped at 3 (Novita account pod limit) — validate() fails loud above it",
-      "no cross-engine fallback — a failed shard retries the same pod pattern, then fails loud",
-      "R2-backed idempotent resume — a spot-reclaim requeue never double-renders",
+      "an explicit signed cost envelope and live RTX 4090 capacity admission precede every worker start",
+      "no cross-engine or legacy-bridge fallback — a failed take is repaired or fails loud",
+      "all started workers settle and verify deletion before the parent stage returns",
+      "R2-backed idempotent receipts prevent a recovery from double-rendering",
     ],
     status: "active",
   },
@@ -562,87 +778,144 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     stage: "visual",
     title: "Imagecraft (Novita Z-Image)",
     engine:
-      "Imagecraft — Z-Image base bf16 stills at 2048×1152 / 40 steps on Novita RTX 4090 spot pods (NAS-staged weights, slot-aware 3-pod queue, verified autoclose, R2-idempotent resume) via the live VPS render bridge",
+      "Imagecraft — direct Novita Z-Image Turbo BF16 reference stills on RTX 4090 spot workers, with profile-bound 1280×736, 1920×1088, or 2048×1152 output, R2 provenance, and verified autoclose",
     how:
-      "A director shot list (per-shot prompt/lens/shotScale/seed + global style/negative/director/steps/cfg/width/height) is POSTed to the live nginx bridge and polled to done; inline sharpness/exposure QA re-renders weak stills pod-side. Self-describing (IMAGECRAFT_NOVITA_MODULE contract). src/lib/imagecraft-novita.ts.",
+      "The director's exact prompt, lens, scale, seed, continuity locks, and signed budget enter the direct Trigger controller. " +
+      "It starts a single-purpose worker only after capacity and cost admission, persists the reference image and receipt to R2, " +
+      "runs quality/keyframe review, then deletes the worker. Those accepted stills are the only permitted reference inputs for " +
+      "the LTX-2.5 image-to-video branch; there is no live nginx/VPS bridge or retired Imagecraft implementation in this route.",
     gates: [
-      "inline sharpness + exposure QA on every still — weak frames re-render pod-side, never ship",
-      "width/height must be a multiple of 32 (VAE tiling requirement) — validate() fails loud",
-      "shard count capped at 3 (Novita account pod limit) — no silent clamp",
-      "no cross-engine fallback — a failed shard retries the same Z-Image pod pattern, then fails loud",
-      "R2-idempotent resume — a requeue never double-renders",
-      "per-pod verified autoclose — stragglers force-deleted, no ghost billing",
+      "the exact Z-Image Turbo revision, profile geometry, signed cost envelope, and live RTX 4090 capacity are admitted before start",
+      "keyframe review rejects text, logos, wardrobe, continuity, and composition defects before any LTX take can be purchased",
+      "no cross-engine or legacy-bridge fallback — a failed still is repaired or fails loud",
+      "R2 receipt fingerprints make recovery idempotent rather than double-rendering",
+      "every started worker is reaped and deletion-verified before its parent wave settles",
     ],
     status: "reference",
   },
   {
     key: "videocraft-novita",
     stage: "visual",
-    title: "Videocraft (Novita LTX-2.3)",
+    title: "Videocraft (Novita LTX-2.5 x2)",
     engine:
-      "Videocraft — LTX-2.3 22B int8 image-to-video via Wan2GP at 1920×1088 / 40 steps / guidance 4.0 on Novita RTX 4090 spot pods, driving the 10-move camera grammar over Imagecraft's R2 stills (slot-aware 3-pod queue, verified autoclose, R2-idempotent resume)",
+      "Videocraft — LTX-2.5 distilled image-to-video on an exact RTX 4090 spot profile: 640×352 stage one → native latent-space x2 refinement → 1280×704 final output, FP8-cast + CPU offload, with no model or hardware fallback.",
     how:
-      "Each shot's rendered still + camera move + motion cue + seconds (rounded to 8n+1 frames) is POSTed to the live nginx bridge and polled to done; a freeze-detection QA gate rejects still-frame clips (the frozen-frame fix). Emits gen_footage-compatible footageClips/footageKeys, so timeline_assemble works unmodified. Self-describing (VIDEOCRAFT_NOVITA_MODULE contract). src/lib/videocraft-novita.ts.",
+      "Each already-reviewed Z-Image still, camera move, motion cue, continuity lock, and duration is sealed into a one-shot direct " +
+      "worker manifest. The worker verifies the digest-pinned LTX-2.5 components, probes the encoded 1280×704 MP4 at 25fps, and " +
+      "returns exact scene order, frame geometry, GPU identity, and x2 evidence before timeline assembly. Accepted footage keeps the " +
+      "same footageClips/footageKeys handoff, while the cinematic manifest preserves the source-to-shot binding. The legacy bridge " +
+      "and retired videocraft module cannot be used as an alternative path. This module is deliberately not a production admission " +
+      "until a sealed live RTX 4090 benchmark records the exact profile in the local allow-list.",
     gates: [
-      "freeze-detection QA (the still-frame fix) — a clip that doesn't move is rejected and re-rendered, never shipped",
+      "accepted Z-Image keyframes bind identity, wardrobe, props, text/logo rejection, and first/last-frame continuity before LTX starts",
+      "FFmpeg temporal-dynamism, pacing, black/dead-air, and final-master QA reject a clip that does not move or cut as planned",
       "video frames always 8n+1 — rounded, never truncated silently",
       "every shot needs a stillKey + motion cue (cameraMove !== 'static' or a non-empty motion field) — validate() fails loud",
-      "shard count capped at 3 (Novita account pod limit) — no silent clamp",
-      "no cross-engine fallback — a failed shard retries the same LTX pod pattern, then fails loud",
-      "R2-idempotent resume — a spot-reclaim requeue never double-renders",
+      "only the local benchmark allow-list can unlock the exact LTX-2.5 RTX 4090 profile",
+      "no cross-engine or old-bridge fallback — a failed take is repaired or fails loud",
+      "R2-idempotent receipts plus all-settled worker teardown prevent double-rendering and ghost billing",
     ],
     status: "reference",
   },
   {
     key: "lofi",
     stage: "visual",
-    title: "Lofi Loop — Seaside Engine",
+    title: "Lofi Loop — Novita Ambient Engine",
     engine:
-      "Lofi — Nano Banana Pro still + Gemini-Vision grounded motion prompt + Kling v3 Omni pro 2×15s seamless loop + temporal de-warble + optional Topaz 4K — a coherent Ghibli sunny-seaside world",
+      "A Style-DNA-locked Novita Z-Image Turbo still, independently reviewed by a non-Google vision provider, is the exact source frame for a certified Novita LTX-2.5 image-to-video loop. A bounded seam treatment, mastered music mix, and final visual evidence turn it into an ambient product.",
     how:
-      "A single Nano Banana Pro painting (gemini-3-pro-image-preview — the standard still engine because it " +
-      "obeys negative rules like no-rain-inside; Flux is opt-in) from a coherent Ghibli seaside catalogue (beach cafe, seaside room, sunset " +
-      "pier, hillside meadow) is brought to life as an HOURS-loopable lofi video. Each scene declares ranked " +
-      "animation priorities + forbidden motion + spatial rules, and a Gemini-Vision pass writes the motion " +
-      "prompt grounded in the actual painting, so clouds, water, foliage, a calm dark-haired host and her cat " +
-      "all move while the distance stays still. The SEAMLESS loop is the 2×15s method: clip A animates freely, " +
-      "clip B animates BACK to the origin frame, so the 30s unit's last frame == first frame and a plain " +
-      "stream_loop has an invisible seam — never a crossfade or boomerang. The camera is locked twice over: a " +
-      "hard tripod-lock clause on every Kling prompt (wind moves the subjects, never the viewpoint) AND a " +
-      "motion-aware temporal de-warble that strips AI shimmer from the loop unit (seam preserved). No upscale " +
-      "is baked in — Topaz 4K is a separate optional pass on the short loop unit. A deblur title intro + lofi " +
-      "music finish it. Self-describing (LOFI_MODULE contract), fully resumable. src/lib/lofi.ts.",
+      "scene_planner selects an authored ambient scene; keyframes refuses production before paid work unless the channel supplies a recurring subject and setting plus a configured Groq or FAL reviewer. It permits at most two Novita still attempts and reviews the accepted image for identity, visual motifs, physics, and baked-in text. That accepted still is the LTX source frame; the independent scene director names only its real, subtle moving elements. loop_clips adds a hard static-camera prompt, renders one LTX-2.5 clip from that frame, and uses an explicit loop mode. FLF2V uses a separately capped <=0.6s safety blend; crossfade and boomerang remain explicit alternatives. assemble measures the final loop unit's first/last-frame difference and retains it as evidence, then streams the unit under mastered music with a deblur title intro.",
     gates: [
-      "required inputs validated (scene / channel / title / music / slug)",
-      "motion ensured — ranked priorities + forbidden + spatial, ≥5 element types",
-      "seamless 2×15s loop — last frame == first frame (no crossfade, no boomerang)",
-      "static camera locked in-prompt (wind moves subjects, not the viewpoint)",
-      "temporal de-warble removes AI camera shimmer (seam preserved)",
-      "no baked-in upscale — native res; Topaz 4K is a separate optional pass",
+      "production keyframes require a grounded Style DNA subject and setting before any paid image work",
+      "production keyframes require Groq or FAL review; Google/Gemini is not an eligible reviewer",
+      "the accepted still is reviewed for channel identity, motifs, indoor-weather physics, and no baked-in text",
+      "one exact accepted still anchors the Novita LTX-2.5 image-to-video job; the camera is explicitly locked",
+      "loop mode is explicit; FLF2V's safety blend is independently capped at 0.6 seconds",
+      "the assembled loop unit retains a measured first/last-frame difference for final QA",
     ],
     status: "reference",
   },
   {
     key: "quiz",
     stage: "visual",
-    title: "Quiz — Quizcraft (standalone multi-type quiz engine)",
+    title: "Quiz — Quizcraft (NOT BUILDABLE under current licensing — design reference only)",
     engine:
-      "Quizcraft — a standalone quiz-channel engine: trivia / flag-guess / music-guess → a deterministic dataset-backed answer → an isolated Remotion composition (depleting timer, answer reveal + image/poster), cloud-rendered",
+      "No implementation exists. This entry documents a design intent — trivia / flag-guess / music-guess → a " +
+      "deterministic dataset-backed answer → an isolated Remotion composition — that three independent audit " +
+      "passes (2026-08) each found unbuildable as specified. Nothing in this entry is wired: no executableIds, " +
+      "no family, no content lane. `public/golden/quiz/*.{jpg,mp4}` are early visual-format proofs only, not " +
+      "evidence the pipeline can produce this content lawfully or repeatably.",
     how:
-      "One engine, three capabilities, all copyright-safe. TRIVIA asks a common-knowledge question, counts down a " +
-      "depleting timer, then reveals the answer card plus a vision-verified image. FLAG-GUESS draws from 195 CC0 flags " +
-      "on an EASY→IMPOSSIBLE ramp with a deterministic country reveal — a dataset can't hallucinate the answer. " +
-      "MUSIC-GUESS plays a film's public-domain theme behind a countdown ring, then shows the poster + title. Every " +
-      "question is answered from a dataset (never a model guess), deduped by key, and laid out by a per-capability " +
-      "timing + layout pass. Renders through an ISOLATED Remotion bundle so a quiz render can't be broken by sibling " +
-      "compositions. The proofs below are real first-try renders.",
+      "All three capabilities were independently closed off, each on its own grounds, not one shared blocker: " +
+      "TRIVIA — every open trivia dataset checked either carries CC BY-SA 4.0 (ShareAlike is structurally " +
+      "incompatible with YouTube's Standard License / CC BY 3.0-only options), is NonCommercial-licensed, is " +
+      "offline, is unlicensed scraped third-party content (e.g. Jeopardy!), or is itself LLM-generated (which " +
+      "fails gate 1 below regardless of license — it launders hallucination risk through an unauditable third " +
+      "party instead of removing it). FLAG-GUESS — no source of national flag artwork carries a genuine CC0 " +
+      "dedication (the closest, flag-icons, is MIT-licensed software with an unrecorded, since-deleted artwork " +
+      "provenance); separately, national flags/emblems are subject to Paris Convention Art. 6ter and national " +
+      "statutes restricting commercial use independently of copyright, which a monetized channel triggers; the " +
+      "\"195\" sovereign-state figure is also an unresolved political classification (Taiwan/Kosovo/Palestine/" +
+      "etc.), and no confusable-pairs data exists anywhere to ground an honest EASY→IMPOSSIBLE ramp. MUSIC-GUESS " +
+      "— the shipped proof render uses the actual Star Wars theme (John Williams, 1977), which directly " +
+      "contradicts this entry's own former claim of a public-domain theme; no clearable-audio sourcing exists. " +
+      "Building any of the three today, under any of the found sources, would mean shipping a legal claim this " +
+      "codebase's own audit found to be false. Rebuilding this capability needs a product/legal decision — " +
+      "e.g. a licensed flag/trivia dataset with sourcing accepted by the business, a resolved list of which " +
+      "territories count, a curated (not automatic) difficulty methodology, and genuinely clearable music — " +
+      "not an engineering fix.",
     gates: [
-      "deterministic dataset answer (never model-guessed)",
-      "dedupe by question key",
-      "per-capability timing + layout",
-      "isolated Remotion bundle",
+      "deterministic dataset answer (never model-guessed) — no compliant dataset found for trivia or flag-guess",
+      "dedupe by question key — trivially satisfiable once a dataset exists, not itself a blocker",
+      "per-capability timing + layout — proven achievable by the visual-format proof media, not a blocker",
+      "isolated Remotion bundle — tractable new infra (second bundle entrypoint), not a blocker",
     ],
     status: "reference",
+    // SUPERSEDED IN PART: the format was never the problem, only the content
+    // sourcing was. See the `quiz-year` entry below for the one guess-the-year
+    // capability that IS buildable and is now wired.
+  },
+  {
+    key: "quiz-year",
+    stage: "visual",
+    title: "Quiz — Guess the Year (Wikidata)",
+    engine:
+      "quiz_year — CC0 Wikidata facts → four-option rounds → isolated Remotion bundle " +
+      "(src/lib/quizYearFacts.ts, src/trigger/blocks/quizYearBlocks.ts:341's quiz_year block, " +
+      "src/remotion/quiz/Root.tsx, src/lib/quizYearRender.ts)",
+    how:
+      "This is the guess-the-year format that survives the licensing analysis that closed the three sub-formats " +
+      "in the `quiz` entry above. It needs NO third-party media at all: the only external input is Wikidata's " +
+      "structured statements, released under CC0 1.0 — a genuine public-domain dedication with neither " +
+      "attribution nor ShareAlike obligation (the exact property every trivia dataset in the prior audit " +
+      "lacked). Nothing is scraped, no artwork or audio is reused, and every frame is typography rendered " +
+      "locally by Remotion. THE ANSWER IS NEVER MODEL-GUESSED: the year is read from a Wikidata time value, " +
+      "the phrasing model's response schema has no year field to populate, any phrasing containing a " +
+      "four-digit number is rejected in favour of a deterministic template, and assertAnswerIntegrity re-checks " +
+      "QID + year immediately before render. Three real data-integrity failure modes found by live probing are " +
+      "gated deterministically: entities carrying multiple conflicting dates are dropped (Q49740 'Skyrim' has " +
+      "P577 values in both 2009 and 2011 — a question with two defensible answers is broken), any four-digit " +
+      "year in the label/description that disagrees with the structured year is treated as an unresolved " +
+      "contradiction and dropped (Q94501: data 1998 vs description '1997 ... video game'), and time values " +
+      "coarser than year precision are dropped. Each round shows the sourced year plus THREE GENERATED DECOYS; " +
+      "decoys carry provenance: 'generated-decoy' in the type system and are never cited, never recorded as " +
+      "facts, and proven by assertOptionIntegrity to be incapable of being the correct option. Cost is the " +
+      "smallest in the catalog — facts are free, the render is local, and the only spend is a bounded text " +
+      "phrasing pass per round, critique-looped on WORDING only and frozen into a content-addressed checkpoint.",
+    gates: [
+      "deterministic dataset answer (never model-guessed) — SATISFIED: year read from a Wikidata time value; LLM schema has no year field",
+      "no four-digit number in question text — rejected phrasings fall back to a deterministic template",
+      "exactly one sourced option among four; decoys type-tagged and provably never correct",
+      "single unambiguous year per subject (multi-date entities dropped)",
+      "label/description year must agree with the structured year",
+      "date precision ≥ year (precision 9)",
+      "sensitive/tragedy content excluded by default (allowlisted topics + term filter)",
+      "isolated Remotion bundle — src/remotion/quiz/index.ts, separate from src/remotion/index.ts",
+    ],
+    // WIRED, not yet Golden-certified: no signed promotion receipt from a real
+    // end-to-end run exists. Fact sourcing has been verified live against the
+    // real endpoint; a full pipeline run has not been performed.
+    status: "active",
   },
   {
     key: "thumbnail",
@@ -721,7 +994,7 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "STORY JOURNEY (Calm-style): arrival ritual → experience-before-explanation movements carried by ONE " +
       "image → integration into the viewer's day → a landing with a quotable takeaway. Episodic programs " +
       "get formal series support (phase-aware curriculum, previous-episode thread, next-episode seed).",
-    gates: ["hook lint (≤7s, no filler, concrete)", "punch / specificity / curiosity / voiceMatch / promise-by-15s ≥ 7", "grounded fact-check (search-verified claims, false = rejected)", "loop payoff verified by qa_script", "midpoint re-hook verified"],
+    gates: ["hook lint (≤7s, no filler, concrete)", "punch / specificity / curiosity / voiceMatch / promise-by-15s ≥ 7", "grounded fact-check (search-verified claims, false = rejected)", "loop payoff verified by qa_script", "midpoint re-hook verified", "measured hook window: a real shot/beat transition inside the first ~10s of actual audio timeline (hookcraft.ts measureHookWindow, additive to the estimated-duration lint — never requires an on-screen text card that early)"],
     status: "reference",
   },
   {
@@ -799,8 +1072,20 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "image as a DIRECT reference, the prompt leads with the identity lock and names the distinctive features (never a " +
       "generic re-description — that's what made early renders \"four different people\"), a vision gate re-rolls drift, " +
       "then Seedance/Kling animates the locked keyframe. Establishing + multi-subject shots supported; any style. Operator " +
-      "approves the hero before any Soul. Standalone src/lib/cinecraft.ts, visual-only (a pipeline adds audio + assembly).",
-    gates: ["hero-image identity anchor (not the soul)", "vision consistency gate \u2265 8 (re-roll on drift)", "per-kind lock: same person / place / object", "operator-approved hero before Soul"],
+      "approves the hero before any Soul. Standalone src/lib/cinecraft.ts (480 L), visual-only (a pipeline adds audio + assembly). " +
+      "cinecraft.ts ITSELF IS RETIRED, NOT PENDING (P1-10 resolved, superseded): its render path is hard-disabled at the source " +
+      "(hasCinecraft() returns a literal false, src/lib/cinecraft.ts:47-52) because designSubject/trainSoul/renderShot all drive the " +
+      "retired PAID Higgsfield CLI; that renderer must never be reopened. The file survives as a type/catalog surface only " +
+      "(ShotSpec, src/lib/crew/cinematographer.ts:16). The hero-anchor consistency LAW described above IS nevertheless enforced in " +
+      "production, by an equivalent renderer-neutral module rather than by cinecraft: the `visual_matter` block " +
+      "(src/engine/visualMatter.ts + src/trigger/blocks/visualMatterBlocks.ts) emits per-character `identityLock` and per-setting " +
+      "`continuityLock` plus character_sheet/setting_sheet reference assets, and the Z-Image -> qa_assets -> LTX -> qa_shots chain " +
+      "HARD-REQUIRES that manifest (requireVisualMatter throws, src/trigger/blocks/novitaRenderBlocks.ts:452-456; consumed at :550, " +
+      ":610, :808, :888). Per shot the sheets are pulled from R2 and passed to the vision grader alongside the candidates " +
+      "(visualMatterReferenceAssetsForShot, :635/:927) under an enforced identity floor with bounded repair re-rolls (:626-627, :645). " +
+      "So the gates below are REAL, but they are cinecraft's law re-implemented with attested receipts and content-addressed " +
+      "idempotency -- not cinecraft's own code.",
+    gates: ["reference-sheet identity anchor via visual_matter (not the retired Soul)", "vision identity floor with bounded repair re-rolls (qa_assets)", "per-kind lock: identityLock (person) / continuityLock (place)", "operator-authorized reference-asset spend (renderReferenceAssets)"],
     status: "reference",
   },
   {
@@ -836,7 +1121,20 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "(Marigold + feathered alpha) and flies a camera through it in Remotion with a kinetic title overlaid — never " +
       "baked in; generative paints a drifting intel-network background in p5.js. One tool contract (__ready / __dur / " +
       "__frame / __settle) drives a single generic Playwright capture, so new tools plug in with zero rework. Clips are " +
-      "timed to each narration cue and per-clip failures stay isolated. Standalone src/lib/motioncraft.ts, visual-only.",
+      "timed to each narration cue and per-clip failures stay isolated. Was standalone in src/lib/motioncraft.ts (246 L), visual-only. " +
+      "DELETED, NOT PENDING (P1-11 resolved by P2-7): src/lib/motioncraft.ts had zero pipeline importers (it was always \"catalog-only\" " +
+      "in goldenExecution.ts CATALOG_EXECUTION_BINDINGS) and was removed outright as confirmed-dead in commit 183ee6a. Of its four " +
+      "tools, only data_stats' verbatim-number animation has a real successor: it is DUPLICATED, not consumed, by the production " +
+      "Insert module (src/trigger/blocks/insertBlocks.ts:22,72,107, catalog key \"inserts\"), which is the one actually wired and " +
+      "gated. The other three demonstrated tools do NOT have a like-for-like successor and their own implementations are now gone " +
+      "outright with the file: geo_map's live MapLibre/OSM street-tile renderer, hero_title's Marigold depth-cutout + kinetic-title " +
+      "camera-through-photo treatment, and generative's p5.js drifting intel-network background are all permanently deleted code. " +
+      "(The wired documotion.ts module separately and independently built its OWN real-place map reveal (geo_map shot kind, pulling " +
+      "live OSM street data via src/lib/geoMap.ts) and its OWN single-image depth-cutout camera-through-photo move (depth_parallax " +
+      "shot kind) -- similar creative ideas achieving a similar effect, but distinct, independently-authored code, not motioncraft's; " +
+      "generative's p5.js procedural background technique has no equivalent anywhere else in the repo and is the one capability with " +
+      "nothing standing in for it at all.) The only surviving evidence of what all four looked like is the proof media at " +
+      "public/golden/motioncraft/{map,stats,hero,crew}.mp4.",
     gates: ["the LLM earns each graphic (3-6 / video, never per line)", "best-tool routing per beat", "verbatim numbers only (stats)", "no text baked into the hero image — the title is a crisp overlay", "per-clip failure isolated"],
     status: "reference",
   },
@@ -855,7 +1153,10 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "script-relevant. Driven by a typed contract — words + segments + an LLM cue-track — so the source/" +
       "transcribe/cue-gen stages plug in later with zero rework. One opaque H.264 render via " +
       "src/lib/remotionRender.ts (renderMotivationalSpeech) into both a full-frame MotivationalSpeech look and a " +
-      "letterboxed CinematicSpeech variant. Proof: the Steve Jobs 2005 Stanford commencement, motivation-edited.",
+      "letterboxed CinematicSpeech variant. Proof: the Steve Jobs 2005 Stanford commencement, motivation-edited. " +
+      "NOT REACHABLE FROM THE PIPELINE (P1-12): renderMotivationalSpeech (src/lib/remotionRender.ts:360) has zero callers anywhere " +
+      "in src/trigger or src/engine -- invocable only via a manual Remotion CLI render, not the production pipeline. The library " +
+      "exists; a production adapter does not yet.",
     gates: [
       "caption highlight synced to word-level timings",
       "segment channel bug matches plan boundaries",
@@ -936,17 +1237,27 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     title: "Verify + Heal",
     engine: "Per-artifact qa_visual + critic ValidationSpec + self-heal loop",
     how:
-      "Every artifact is vision-checked — the thumbnail at real 168px browse size against scraped top " +
-      "competitors — and the critic's ValidationSpec is enforced. Failures route back through the heal " +
-      "loop with defect hints instead of shipping degraded output.",
-    gates: ["ValidationSpec", "mobile-size legibility", "reference comparison"],
+      "Every generated artifact is vision-checked inside the qa_visual block (src/trigger/blocks/narratedBlocks.ts: " +
+      "structural/length/frame checks ~2002-2212, thumbnail check ~2219-2231 via evaluateThumbnail in videoVerifier.ts, critic " +
+      "ValidationSpec ~2412-2450+ via runValidationSpec/getValidationSpec). Failures route back through the heal loop with defect " +
+      "hints instead of shipping degraded output. RECONCILED AGAINST THE REAL THROW SITES (P2-2): only \"ValidationSpec\" below is " +
+      "a directly traceable, standalone gate. \"mobile-size legibility\" is NOT implemented inside verify's own evaluateThumbnail() " +
+      "-- the real 168px-mobile-render comparison it paraphrases lives in the separate thumbnail module's own candidate judge " +
+      "(src/lib/thumbnailLab.ts:348-381), not here. \"reference comparison\" is not a standalone verify check either -- it " +
+      "corresponds to the optional marketAwareCritic knob (src/lib/crew/critic.ts:21,58, \"beats the scraped top competitors\") " +
+      "which, when enabled, authors an assertion INTO the same ValidationSpec that runValidationSpec enforces, rather than " +
+      "running as its own gate.",
+    gates: [
+      "ValidationSpec (runValidationSpec, narratedBlocks.ts ~2412-2450+ -- critic-authored BLOCK-severity assertions, incl. the optional marketAwareCritic \"reference comparison\" assertion)",
+      "thumbnail vision grade (evaluateThumbnail, videoVerifier.ts:61 -- fails closed if the required grader doesn't run; NOT the 168px mobile-render comparison, which belongs to the thumbnail module)",
+    ],
     status: "active",
   },
   {
     key: "whiteboard",
     stage: "visual",
     title: "Whiteboard — Drawn Cinema (synced scribe)",
-    engine: "whiteboardSync — narration-synced deterministic write-on: Gemini layered storyboard + 2K Nano-Banana scenes + Fish narration, Whisper-aligned, drawn by a real hand in time with the voice. ZERO render credits.",
+    engine: "whiteboardSync — narration-synced deterministic write-on: Gemini layered storyboard + bounded attested 2K image scenes + Fish narration, Whisper-aligned, drawn by a real hand in time with the voice.",
     how:
       "The whiteboard family's self-contained visual engine (src/lib/whiteboardSync.ts, block whiteboard_scribe). Gemini-Pro " +
       "designs each panel as a STACK OF LAYERS — composed line-art SCENES (no baked text) + marker-font LABELS — each carrying " +
@@ -996,7 +1307,11 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "Pre-builds the next N videos for a channel — each item's topic, thumbnail and description staged into the " +
       "contentPlan board with a generating → ready → used lifecycle. A pinned scheduledAt becomes the video's native " +
       "YouTube publish date, so scheduled-mode channels release on a fixed calendar. The autopilot scheduler consumes " +
-      "the next READY item — its exact topic — instead of picking fresh each run.",
+      "the next READY item — its exact topic — instead of picking fresh each run. " +
+      "P2-8 catalog-count reconciliation (2026-08): this is the 28th explicit GOLDEN_MODULES entry, and the one not covered by " +
+      "the audit's 27-row stage table -- its stage \"plan\" falls outside GOLDEN_SPINE's 12 stages, so the per-spine-stage audit " +
+      "methodology never reached it. Binding: kind \"external-task\", executableId \"plan-week-ahead\" (goldenExecution.ts). Now " +
+      "accounted for.",
     gates: [
       "topic + thumbnail + description pre-built per slot",
       "scheduledAt = native publish date",
@@ -1009,13 +1324,19 @@ export const GOLDEN_MODULES: GoldenModule[] = [
     key: "shorts",
     stage: "visual",
     title: "Shorts (vertical)",
-    engine: "9:16 short-form archetype (template D) + shorts_cuts assembly + long-form → Short repurposer",
+    engine: "9:16 short-form archetype (template D; families.ts visualEngine label \"shorts_cuts\" is a designer-internal switch, not a registered block) + long-form → Short repurposer (shorts_spinoff / documentary_short_candidates)",
     how:
       "A dedicated vertical archetype: a sub-50s shorts-style script, hook_craft, the originality + compliance gates, " +
       "then narration and 9:16 footage / entity imagery assembled at a frenetic ~4s cadence with word-level karaoke " +
       "captions and no chapter cards. A separate repurposer can cut the hook window of any long-form into a 9:16 Short " +
       "and upload it PRIVATE alongside (default OFF). The whole vertical surface — aspect, subject reframe, caption " +
-      "emphasis — is one assembly preset.",
+      "emphasis — is one assembly preset. " +
+      "CORRECTION (P1-16): \"shorts_cuts\" (families.ts:97) is only the family's internal visualEngine LABEL -- there is no block " +
+      "or file by that name; the archetype's own assembly runs through the standard timeline_assemble path, configured by this " +
+      "preset. Separately, goldenExecution.ts's CATALOG_EXECUTION_BINDINGS.shorts actually maps this catalog key's executableIds " +
+      "to the planning-only repurposer (shorts_spinoff / documentary_short_candidates), NOT to the primary vertical archetype " +
+      "described above -- two materially different capabilities share this one catalog key; see goldenExecution.ts's shorts " +
+      "binding note for the split.",
     gates: [
       "9:16 throughout (footage + imagery + assembly)",
       "originality + compliance gated",

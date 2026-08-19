@@ -56,6 +56,8 @@ export function assertVoiceGatePreconditions(args: {
   profile: QualityProfile;
   gateEnabled: boolean;
   judgeAvailable: boolean;
+  /** A provider-free FFmpeg evidence gate may substitute for an unavailable remote audio judge. */
+  localEvidenceGateAvailable?: boolean;
   channelId?: string;
   provider?: string;
   voiceId?: string;
@@ -68,8 +70,8 @@ export function assertVoiceGatePreconditions(args: {
   if (!args.gateEnabled) {
     throw new Error("narration_tts: voiceGate cannot be disabled in production");
   }
-  if (!args.judgeAvailable) {
-    throw new Error("narration_tts: production voice QA requires the audio judge");
+  if (!args.judgeAvailable && !args.localEvidenceGateAvailable) {
+    throw new Error("narration_tts: production voice QA requires the audio judge or the local narration-evidence gate");
   }
   if (!args.voiceId?.trim()) {
     throw new Error("narration_tts: production narration requires an explicitly cast voice");

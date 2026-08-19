@@ -2,24 +2,31 @@
  * LORESHORT — standalone lore micro-doc engine (GoT "Histories & Lore" style) with
  * GENUINE AI 3D camera moves, as a reusable module.
  *
- * Gemini first-person narration + per-beat LAYERED-DEPTH scene prompts → Nano Banana
- * art → ElevenLabs PER-LINE TTS (for exact beat timing) → cheap image-to-video camera
+ * Claude first-person narration + per-beat LAYERED-DEPTH scene prompts → non-Google
+ * art → ElevenLabs PER-LINE TTS (for exact beat timing) → LTX image-to-video camera
  * moves (Replicate LTX-distilled / Wan 2.2) → optional Real-ESRGAN 2K upscale → ffmpeg
  * beat-cut edit (fit each shot to its narration line + breath, dissolve, title, grade).
  * Every stage caches to output/loreshort/<slug>/ → fully resumable.
  *
  * Art SUB-STYLES are swappable (cinematic concept-art, watercolour+pencil, …) so the
  * SAME engine renders any lore in any look. Visual-only; narration muxed at the end.
+ *
+ * PROVIDERS ARE INJECTED (see LoreShortDeps). Called with no deps — the CLI /
+ * proof-gallery path — every provider above is the default and behaviour is
+ * unchanged. The pipeline block (src/trigger/blocks/loreShortBlocks.ts) injects
+ * the attested Novita render farm, the channel's cast voice and an R2 publish
+ * sink, so nothing paid escapes the cost-attestation rail and nothing depends on
+ * a VPS filesystem.
  */
 import { writeFile, readFile, mkdir, copyFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { bootstrapSecrets } from "./bootstrap";
-import { geminiJsonPro, parseJsonLoose } from "./gemini";
-import { visionLocal } from "./vision";
+import { claudeJsonPro, hasAnthropicKey } from "./anthropic";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "./vision";
 import { synthNarration } from "./tts";
-import { generateBananaImage } from "./banana";
+import { generateFalImage } from "./falImage";
 import { ffprobeDuration } from "./ffmpeg";
 
 export interface LoreSubStyle {
@@ -105,13 +112,17 @@ export const LORESHORT_MODULE = {
     introSec: "title-card seconds", pause: "breath between beats", dissolve: "crossfade seconds",
   },
   needs: { // environment
-    secrets: ["GEMINI_API_KEY", "ELEVENLABS_API_KEY", "REPLICATE_API_TOKEN"],
+    // Claude is required for story planning. FAL / ELEVENLABS / REPLICATE are
+    // only required by the DEFAULT implementations —
+    // an injected caller (LoreShortDeps) supplies its own providers and neither
+    // token is demanded. See the secret computation in craftLoreShort.
+    secrets: ["ANTHROPIC_API_KEY", "FAL_KEY (default art only)", "ELEVENLABS_API_KEY (default TTS only)", "REPLICATE_API_TOKEN (default i2v/upscale only)"],
     tools: ["ffmpeg", "ffprobe"],
-    note: "Render is nginx-INDEPENDENT (all Replicate inputs are base64 data URIs). Only the final published file needs a web host (cfg.host).",
+    note: "Render is nginx-INDEPENDENT (all Replicate inputs are base64 data URIs). The DEFAULT publish sink copies to cfg.webDir and returns cfg.host; an injected `publish` dep (the pipeline block) writes to R2 instead and needs no web host at all.",
   },
   paths: LORESHORT_PATHS,
   rules: [
-    "DE-BRAND the visuals: SCENE art prompts use only generic, non-trademarked terms (Gemini image refuses IP); narration text may be freer.",
+    "DE-BRAND the visuals: scene-art prompts use only generic, non-trademarked terms; narration text may be freer.",
     "The DEPTH camera move is the CORE and always leads; subject/particle motion is added only where a vision pass finds it, scaled to honest intensity — never forced onto still objects.",
     "A title card plays BEFORE the narration starts (rule).",
     "NO cross-engine fallback: a failed clip retries the SAME engine, then fails LOUD; fix content-policy refusals at the art source (re-gen / de-brand).",
@@ -156,15 +167,110 @@ const HOLD: Record<string, string> = {
 const NEG_BASE = "warping, morphing, deforming, melting, distorted, glitch, flicker artifacts, extra limbs, duplicated objects, wobbling, jitter, text, watermark, blurry";
 const NEG_ANTISTATIC = ", static, still image, frozen, motionless"; // added ONLY for moderate/strong so calm scenes aren't forced to move
 
-interface LoreScene {
+export interface LoreScene {
   line: string;
   shot?: string;
   visual: string;
   camera: string;
 }
 
-interface LorePlan {
+export interface LorePlan {
   scenes?: LoreScene[];
+}
+
+/**
+ * Is the engine's own (non-injectable) story planner configured? LoreCraft uses
+ * Claude for text planning; the visual analysis route is pinned to Groq/FAL.
+ */
+export function hasLoreShort(): boolean {
+  return hasAnthropicKey();
+}
+
+/** What the story writer needs. Deliberately a subset of LoreShortCfg. */
+export interface LoreStoryBrief {
+  narrator: string;
+  topic: string;
+  nScenes: number;
+}
+
+/**
+ * The story pass, hoisted out of craftLoreShort so a caller can run it under a
+ * produce→critique loop at TEXT prices BEFORE any art, narration or clip is
+ * bought (mirrors planWhiteboardStoryboard). `priorIssues` feeds a rejected
+ * draft's defects back into the rewrite.
+ *
+ * This is one Claude text call per invocation and reaches NO image, TTS or
+ * video provider — by construction an iteration here cannot spend render money.
+ */
+export async function planLoreShortStory(
+  brief: LoreStoryBrief,
+  log: (message: string) => void = () => {},
+  priorIssues: readonly string[] = [],
+): Promise<LorePlan> {
+  const fixes = priorIssues.length
+    ? `\n\nYour previous draft was REJECTED. Fix EVERY one of these and return a complete rewrite:\n` +
+      priorIssues.map((issue, index) => `${index + 1}. ${issue}`).join("\n")
+    : "";
+  let plan: LorePlan = {};
+  for (let attempt = 0; attempt < 3; attempt++) {
+    plan = await claudeJsonPro<LorePlan>({
+      prompt:
+        `Write a lore micro-documentary in the EXACT spirit of the Game of Thrones "Histories & Lore" featurettes: a single ` +
+        `figure narrates history in FIRST PERSON — proud, intimate, epic, measured, never breathless, with DRAMATIC PACING ` +
+        `(mix short punchy lines with a few longer ones; let it breathe). NARRATOR: ${brief.narrator}. TOPIC: ${brief.topic}. ` +
+        `Compose a tight narration ARC across EXACTLY ${brief.nScenes} beats that BUILDS: a calm opening, rising dread, a climax, a cold resolution. ` +
+        `Return STRICT JSON {"scenes":[{...}]} with EXACTLY ${brief.nScenes} scene objects IN ORDER, each with: ` +
+        `"line" = that beat's spoken narration sentence (vary length 6–22 words for rhythm); ` +
+        `"shot" = the cinematic SHOT TYPE, chosen for rhythm and to vary across beats: one of "wide establishing", "sweeping aerial", "slow low-angle hero", "intimate close", "dramatic reveal", "looming over-the-shoulder", "vast vista"; ` +
+        `"visual" = a vivid description of that moment composed in THREE SEPARATED DEPTH PLANES — a distinct CLOSE FOREGROUND element, a clear MIDGROUND subject, and a DEEP receding BACKGROUND — so a moving camera reveals strong parallax depth; atmospheric, dramatic; use ONLY generic original NON-trademarked terms (no franchise/brand/character names, no graphic gore); ` +
+        `"camera" = ONE cinematic camera move that TRAVELS THROUGH THE DEPTH for this shot (e.g. "slow dolly push-in past the foreground toward X, revealing the depth", "crane up and back to unveil the vast Y behind", "track laterally past the foreground W as the background slides"). Vary the moves. ` +
+        `The "scenes" array MUST contain EXACTLY ${brief.nScenes} complete objects — do not stop early, do not summarise. Keep each "visual" to ~40 words.` +
+        fixes,
+      maxTokens: 28000, temperature: 0.75,
+    });
+    if ((plan.scenes?.length ?? 0) >= brief.nScenes) break;
+    log(`story attempt ${attempt + 1}: got ${plan?.scenes?.length || 0}/${brief.nScenes} beats, retrying`);
+  }
+  if (!plan?.scenes || plan.scenes.length < brief.nScenes) {
+    throw new Error(`story only produced ${plan?.scenes?.length || 0} beats`);
+  }
+  return plan;
+}
+
+/**
+ * DETERMINISTIC story defects, computed in code (critiqueLoop's design rule: the
+ * Director is never asked to count beats or measure word counts).
+ */
+export function loreStoryDefects(plan: LorePlan, wantScenes: number): string[] {
+  const issues: string[] = [];
+  const scenes = plan.scenes ?? [];
+  if (scenes.length < wantScenes) {
+    issues.push(`only ${scenes.length} of the ${wantScenes} requested beats came back — return exactly ${wantScenes}`);
+  }
+  scenes.slice(0, wantScenes).forEach((scene, index) => {
+    const words = String(scene.line ?? "").trim().split(/\s+/).filter(Boolean).length;
+    if (words < 5) {
+      issues.push(`beat ${index + 1}'s narration line is only ${words} words — write a full spoken sentence (6-22 words)`);
+    }
+    if (words > 30) {
+      issues.push(`beat ${index + 1}'s narration line is ${words} words — too long to hold one shot; tighten it under 22`);
+    }
+    // The art prompt IS scene.visual; a thin one produces a generic painting and
+    // the depth camera move has nothing to travel through.
+    const visualWords = String(scene.visual ?? "").trim().split(/\s+/).filter(Boolean).length;
+    if (visualWords < 10) {
+      issues.push(`beat ${index + 1}'s "visual" is only ${visualWords} words — describe a CLOSE FOREGROUND, a MIDGROUND subject and a DEEP BACKGROUND`);
+    }
+    if (!String(scene.camera ?? "").trim()) {
+      issues.push(`beat ${index + 1} has no "camera" move — every beat needs one move that travels through the depth`);
+    }
+  });
+  for (let i = 1; i < scenes.length; i++) {
+    if (String(scenes[i].line ?? "").trim() === String(scenes[i - 1].line ?? "").trim()) {
+      issues.push(`beats ${i} and ${i + 1} repeat the same narration line — each beat must advance the history`);
+    }
+  }
+  return issues.slice(0, 8);
 }
 
 interface MotionAnalysis {
@@ -173,6 +279,21 @@ interface MotionAnalysis {
   particles?: string;
   secondary?: string;
   intensity?: "gentle" | "moderate" | "strong";
+}
+
+/**
+ * Motion analysis is advisory: recover a JSON object from a vision answer, and
+ * allow the camera-prompt fallback to take over when the answer is malformed.
+ * Keeping this local prevents LoreCraft's non-Google route from depending on a
+ * provider-specific utility module.
+ */
+function parseMotionAnalysis(raw: string): MotionAnalysis {
+  let text = raw.trim().replace(/^```(?:json)?\s*/i, "").replace(/```\s*$/, "").trim();
+  if (!text.startsWith("{")) {
+    const object = text.match(/\{[\s\S]*\}/);
+    if (object) text = object[0];
+  }
+  return JSON.parse(text) as MotionAnalysis;
 }
 
 interface ReplicatePrediction {
@@ -192,8 +313,73 @@ type ResolvedLoreShortCfg = LoreShortCfg & Required<Pick<LoreShortCfg,
 
 export interface LoreShortResult { videoPath: string; url: string; scenes: LoreScene[]; durationSec: number; width: number; height: number; }
 
+/* ── INJECTION SEAM ───────────────────────────────────────────────────────────
+ *
+ * The engine used to reach four paid providers itself (FAL for art, Replicate
+ * LTX/Seedance for i2v, Replicate Real-ESRGAN for upscale, ElevenLabs for TTS) and to
+ * "publish" by copying into an nginx docroot. None of that survives on a
+ * Trigger.dev cloud worker, and the Replicate calls bypassed the pipeline's
+ * cost-attestation rail entirely.
+ *
+ * Every one of those is now a caller-supplied callback with the ORIGINAL
+ * implementation as its default, so:
+ *   - a standalone CLI / proof-gallery run that calls craftLoreShort(cfg) with
+ *     no deps uses non-Google FAL art plus the remaining local defaults;
+ *   - the pipeline block injects the attested Novita render farm, the
+ *     pipeline's cast voice, and an R2 sink instead.
+ *
+ * The shape deliberately mirrors castWhiteboardSync's `generateImage`
+ * injection (src/lib/whiteboardSync.ts) so both self-contained engines are
+ * wired the same way.
+ */
+export interface LoreArtRequest { id: string; index: number; prompt: string; }
+export interface LoreClipRequest {
+  id: string;
+  index: number;
+  prompt: string;
+  negativePrompt: string;
+  /** Local path to the already-downscaled 1280px JPEG still for this beat. */
+  imagePath: string;
+  durationSec: number;
+}
+export interface LoreNarrationRequest { index: number; text: string; voiceId: string; speed: number; }
+export interface LorePublishRequest { slug: string; localPath: string; }
+export interface LorePublishResult {
+  /** Where the finished master now lives (an R2 key, a docroot path, …). */
+  videoPath: string;
+  /** How a consumer reaches it. */
+  url: string;
+}
+
+export interface LoreShortDeps {
+  /**
+   * A story the caller already settled (e.g. under a produce→critique loop).
+   * When present the engine does ZERO planning calls and renders exactly this.
+   */
+  plan?: LorePlan;
+  /** Beat art. Default: non-Google FAL image route. */
+  generateImage?: (request: LoreArtRequest) => Promise<Buffer | Uint8Array>;
+  /** Image→video camera move. Default: Replicate LTX/Seedance/Wan. */
+  generateClip?: (request: LoreClipRequest) => Promise<Buffer | Uint8Array>;
+  /** Per-line narration. Default: ElevenLabs via synthNarration. */
+  synthLine?: (request: LoreNarrationRequest) => Promise<Buffer | Uint8Array>;
+  /** Where the finished master goes. Default: copy into cfg.webDir (nginx). */
+  publish?: (request: LorePublishRequest) => Promise<LorePublishResult>;
+  /**
+   * Fired once per ACTUAL motion-analysis vision call — never on a cache hit,
+   * so a resumed run does not book a charge it did not incur. The engine drives
+   * this pass itself (it is not swappable), so this is how a caller keeps the
+   * cost it reports equal to the cost it spent.
+   */
+  onVisionCall?: (index: number) => void;
+  /** Resumable scratch dir. Default: <cwd>/output/loreshort/<slug>. */
+  workDir?: string;
+  /** Default: console.error("[loreshort] …"). */
+  log?: (message: string) => void;
+}
+
 /** Run the full lore-short pipeline for one config. Resumable; returns the published video. */
-export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortResult> {
+export async function craftLoreShort(userCfg: LoreShortCfg, deps: LoreShortDeps = {}): Promise<LoreShortResult> {
   const pathPreset = userCfg.path ? LORESHORT_PATHS[userCfg.path] : {};
   const cfg = { ...DEFAULTS, ...pathPreset, ...userCfg } as ResolvedLoreShortCfg; // explicit fields override the path lane
   // VALIDATE required inputs — fail clearly whether run alone or inside an orchestrator
@@ -201,18 +387,35 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
   const missing = requiredFields.filter((key) => !String(cfg[key] ?? "").trim());
   if (missing.length) throw new Error(`loreshort: missing required input(s): ${missing.join(", ")}. See LORESHORT_MODULE.requires.`);
   const style = SUB_STYLES[cfg.subStyle] ?? SUB_STYLES.cinematic;
-  await bootstrapSecrets(() => {}, { required: ["GEMINI_API_KEY", "ELEVENLABS_API_KEY", "REPLICATE_API_TOKEN"] });
+  // Only demand the secrets the DEFAULT implementations still in play actually
+  // need. An injected caller (the pipeline block) supplies its own attested
+  // providers, so requiring a FAL/Replicate/ElevenLabs token would fail a run
+  // that never touches those fallbacks. Claude remains required for the story
+  // planner; visual analysis is explicitly limited to non-Google providers.
+  const usesReplicate = !deps.generateClip || cfg.upscale === "realesrgan";
+  const usesFalImage = !deps.generateImage;
+  await bootstrapSecrets(() => {}, {
+    required: [
+      "ANTHROPIC_API_KEY",
+      ...(usesFalImage ? ["FAL_KEY"] : []),
+      ...(deps.synthLine ? [] : ["ELEVENLABS_API_KEY"]),
+      ...(usesReplicate ? ["REPLICATE_API_TOKEN"] : []),
+    ],
+  });
   const RT = process.env.REPLICATE_API_TOKEN as string;
-  const RUN = join(process.cwd(), "output", "loreshort", cfg.slug);
+  const RUN = deps.workDir ?? join(process.cwd(), "output", "loreshort", cfg.slug);
   const WEB = cfg.webDir;
   await mkdir(RUN, { recursive: true });
-  await mkdir(WEB, { recursive: true });
+  // The nginx docroot only exists for the DEFAULT publish sink; an injected
+  // sink (R2) must not make the engine mkdir into a path a cloud worker has no
+  // business writing to.
+  if (!deps.publish) await mkdir(WEB, { recursive: true });
   const rd = (f: string) => join(RUN, f);
   const is4k = cfg.upscale !== "none" && cfg.upscaleRes === "4k"; // 3840x2160 canvas at 4K
   const OW = cfg.upscale === "none" ? 1920 : is4k ? 3840 : 2560;
   const OH = cfg.upscale === "none" ? 1080 : is4k ? 2160 : 1440;
   const PRESET = is4k ? "fast" : "medium"; // 4K encodes are heavy on CPU — faster x264 preset
-  const log = (m: string) => console.error("[loreshort]", m);
+  const log = deps.log ?? ((m: string) => console.error("[loreshort]", m));
   const sh = (c: string, a: string[]) => new Promise<void>((res, rej) => { const p = spawn(c, a, { stdio: ["ignore", "inherit", "inherit"] }); p.on("close", (x) => (x === 0 ? res() : rej(new Error(c + " " + x)))); });
   const probe = ffprobeDuration; // shared (was a local ffprobe-duration one-liner)
   // VPS DNS/network flakes (EAI_AGAIN); retry with backoff so a blip can't kill a long run
@@ -224,27 +427,15 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
 
   // 1 ── STORY ────────────────────────────────────────────────────────────────
   let plan: LorePlan = {};
-  if (existsSync(rd("plan.json"))) plan = JSON.parse(await readFile(rd("plan.json"), "utf8")) as LorePlan;
-  else {
-    for (let attempt = 0; attempt < 3; attempt++) {
-      plan = await geminiJsonPro<LorePlan>({
-        prompt:
-          `Write a lore micro-documentary in the EXACT spirit of the Game of Thrones "Histories & Lore" featurettes: a single ` +
-          `figure narrates history in FIRST PERSON — proud, intimate, epic, measured, never breathless, with DRAMATIC PACING ` +
-          `(mix short punchy lines with a few longer ones; let it breathe). NARRATOR: ${cfg.narrator}. TOPIC: ${cfg.topic}. ` +
-          `Compose a tight narration ARC across EXACTLY ${cfg.nScenes} beats that BUILDS: a calm opening, rising dread, a climax, a cold resolution. ` +
-          `Return STRICT JSON {"scenes":[{...}]} with EXACTLY ${cfg.nScenes} scene objects IN ORDER, each with: ` +
-          `"line" = that beat's spoken narration sentence (vary length 6–22 words for rhythm); ` +
-          `"shot" = the cinematic SHOT TYPE, chosen for rhythm and to vary across beats: one of "wide establishing", "sweeping aerial", "slow low-angle hero", "intimate close", "dramatic reveal", "looming over-the-shoulder", "vast vista"; ` +
-          `"visual" = a vivid description of that moment composed in THREE SEPARATED DEPTH PLANES — a distinct CLOSE FOREGROUND element, a clear MIDGROUND subject, and a DEEP receding BACKGROUND — so a moving camera reveals strong parallax depth; atmospheric, dramatic; use ONLY generic original NON-trademarked terms (no franchise/brand/character names, no graphic gore); ` +
-          `"camera" = ONE cinematic camera move that TRAVELS THROUGH THE DEPTH for this shot (e.g. "slow dolly push-in past the foreground toward X, revealing the depth", "crane up and back to unveil the vast Y behind", "track laterally past the foreground W as the background slides"). Vary the moves. ` +
-          `The "scenes" array MUST contain EXACTLY ${cfg.nScenes} complete objects — do not stop early, do not summarise. Keep each "visual" to ~40 words.`,
-        maxTokens: 28000, temperature: 0.75,
-      });
-      if ((plan.scenes?.length ?? 0) >= cfg.nScenes) break;
-      log(`story attempt ${attempt + 1}: got ${plan?.scenes?.length || 0}/${cfg.nScenes} beats, retrying`);
-    }
-    if (!plan?.scenes || plan.scenes.length < cfg.nScenes) throw new Error(`story only produced ${plan?.scenes?.length || 0} beats`);
+  if (deps.plan) {
+    // The caller already settled the story under its own critique loop; never
+    // re-plan (a second draft here would silently discard the accepted one).
+    plan = deps.plan;
+    await writeFile(rd("plan.json"), JSON.stringify(plan, null, 2));
+  } else if (existsSync(rd("plan.json"))) {
+    plan = JSON.parse(await readFile(rd("plan.json"), "utf8")) as LorePlan;
+  } else {
+    plan = await planLoreShortStory({ narrator: cfg.narrator, topic: cfg.topic, nScenes: cfg.nScenes }, log);
     await writeFile(rd("plan.json"), JSON.stringify(plan, null, 2));
   }
   const scenes = (plan.scenes ?? []).slice(0, cfg.nScenes);
@@ -256,7 +447,10 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
     if (existsSync(out)) return;
     const text = `${scenes[i].shot ? scenes[i].shot.toUpperCase() + " SHOT. " : ""}${style.art}\nCompose in THREE clear depth layers (close foreground / midground subject / deep background). SCENE: ${scenes[i].visual}`;
     try {
-      await writeFile(out, await generateBananaImage({ prompt: text, aspectRatio: "16:9", imageSize: "2K" }));
+      const bytes = deps.generateImage
+        ? await deps.generateImage({ id: `${cfg.slug}-scene-${i}`, index: i, prompt: text })
+        : await generateFalImage({ prompt: text, aspectRatio: "16:9", imageSize: "2K", tier: "pro" });
+      await writeFile(out, Buffer.from(bytes));
       log(`art ${i} ✓`);
     } catch (e) {
       log(`scene ${i} art FAILED: ${e instanceof Error ? e.message : e}`);
@@ -269,7 +463,13 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
   const lineDur: number[] = [];
   for (let i = 0; i < scenes.length; i++) {
     const f = rd(`line_${i}.mp3`);
-    if (!existsSync(f)) { const b = await synthNarration({ text: scenes[i].line, provider: "elevenlabs", elevenVoiceId: cfg.voiceId, speed: cfg.narrationSpeed ?? 0.96 }); await writeFile(f, Buffer.from(b)); }
+    if (!existsSync(f)) {
+      const speed = cfg.narrationSpeed ?? 0.96;
+      const b = deps.synthLine
+        ? await deps.synthLine({ index: i, text: scenes[i].line, voiceId: cfg.voiceId, speed })
+        : await synthNarration({ text: scenes[i].line, provider: "elevenlabs", elevenVoiceId: cfg.voiceId, speed });
+      await writeFile(f, Buffer.from(b));
+    }
     lineDur[i] = await probe(f);
   }
   log(`lines: ${lineDur.map((d) => d.toFixed(1)).join(", ")}s  total≈${(lineDur.reduce((a, b) => a + b, 0) + scenes.length * cfg.pause).toFixed(0)}s`);
@@ -281,8 +481,9 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
   async function analyzeMotion(i: number) {
     const out = rd(`motion_${i}.json`);
     if (existsSync(out)) { motion[i] = JSON.parse(await readFile(out, "utf8")); return; }
+    deps.onVisionCall?.(i);
     const raw = await visionLocal({
-      imagePaths: [rd(`scene_${i}.png`)], json: true, maxTokens: 700, model: "gemini-2.5-flash",
+      imagePaths: [rd(`scene_${i}.png`)], json: true, maxTokens: VISION_GATE_MAX_TOKENS, providers: ["openrouter"], tier: "standard",
       prompt:
         `You are the SHOT DIRECTOR for an image-to-video clip (~6s). Look CAREFULLY at this ${String(cfg.subStyle).replace(/_/g, " ")} illustration ` +
         `and decide what should MOVE, grounded ONLY in what is ACTUALLY visible. The CAMERA move is the heart of the shot; subject and particle motion are added ONLY when they genuinely belong. Do NOT invent motion. ` +
@@ -295,7 +496,7 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
         `Be concrete and specific to THIS picture. Output ONLY the JSON object.`,
     }).catch(() => "");
     let analysis: MotionAnalysis = {};
-    try { analysis = (parseJsonLoose(raw) || {}) as MotionAnalysis; } catch { analysis = {}; }
+    try { analysis = parseMotionAnalysis(raw); } catch { analysis = {}; }
     motion[i] = analysis;
     await writeFile(out, JSON.stringify(analysis, null, 2));
     log(`motion ${i}: ${String(analysis.subject_action || analysis.camera || "?").slice(0, 56)}`);
@@ -321,8 +522,24 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
     // downscale the scene to a compact 1280px JPEG and send it as a data URI (no nginx dependency)
     const imgJpg = rd(`img_${i}.jpg`);
     if (!existsSync(imgJpg)) await sh("ffmpeg", ["-y", "-loglevel", "error", "-i", rd(`scene_${i}.png`), "-vf", "scale=1280:-2", "-q:v", "3", imgJpg]);
-    const image = await dataUri(imgJpg, "image/jpeg");
     const { prompt, negative } = shotPrompt(i);
+    // INJECTED LANE (the pipeline block): the attested Novita render farm gets
+    // the same shot prompt and the same downscaled still, and its receipts are
+    // accumulated by the caller. No Replicate submission happens at all.
+    if (deps.generateClip) {
+      const bytes = await deps.generateClip({
+        id: `${cfg.slug}-clip-${i}`,
+        index: i,
+        prompt,
+        negativePrompt: negative,
+        imagePath: imgJpg,
+        durationSec: cfg.model === "seedance" ? cfg.seedanceDur : Math.max(1, Math.round(cfg.frames / 24)),
+      });
+      await writeFile(rd(`clip_${i}.mp4`), Buffer.from(bytes));
+      log(`clip ${i} ✓ (injected generator)`);
+      return;
+    }
+    const image = await dataUri(imgJpg, "image/jpeg");
     let endpoint: string, input: Record<string, unknown>, body: Record<string, unknown>;
     if (cfg.model === "seedance") {
       endpoint = "https://api.replicate.com/v1/predictions";
@@ -413,8 +630,16 @@ export async function craftLoreShort(userCfg: LoreShortCfg): Promise<LoreShortRe
   }
   // narration begins only AFTER the title card
   await sh("ffmpeg", ["-y", "-loglevel", "error", "-i", head, "-i", rd("audio.m4a"), "-filter_complex", `[1:a]adelay=${delayMs}|${delayMs}[a]`, "-map", "0:v", "-map", "[a]", "-c:v", "copy", "-c:a", "aac", "-shortest", rd("final.mp4")]);
-  const pub = join(WEB, `${cfg.slug}.mp4`);
-  await copyFile(rd("final.mp4"), pub);
-  log(`DONE ${pub}`);
-  return { videoPath: pub, url: `${cfg.host}/loreshort/${cfg.slug}.mp4`, scenes, durationSec: total, width: OW, height: OH };
+  // PUBLICATION is a sink, not a hardcoded nginx copy. The default reproduces
+  // the original VPS behaviour byte-for-byte; the pipeline block swaps in an R2
+  // putObjectFromFile and returns a videoKey.
+  const published = deps.publish
+    ? await deps.publish({ slug: cfg.slug, localPath: rd("final.mp4") })
+    : await (async (): Promise<LorePublishResult> => {
+        const pub = join(WEB, `${cfg.slug}.mp4`);
+        await copyFile(rd("final.mp4"), pub);
+        return { videoPath: pub, url: `${cfg.host}/loreshort/${cfg.slug}.mp4` };
+      })();
+  log(`DONE ${published.videoPath}`);
+  return { videoPath: published.videoPath, url: published.url, scenes, durationSec: total, width: OW, height: OH };
 }

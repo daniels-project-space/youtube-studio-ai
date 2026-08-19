@@ -40,14 +40,24 @@ async function main() {
     assert.equal(healthResponse.headers.get("cache-control"), "no-store");
     const health = await healthResponse.json() as {
       ok: boolean;
-      ready: string;
+      ready: boolean;
       checkedAt: string;
+      attestation: {
+        source: string;
+        profileIdentity: string | null;
+        exactLtx25Rtx4090X2: boolean;
+      };
       controlPlane: Record<string, unknown>;
     };
     assert.equal(providerCalls, 0);
     assert.equal(health.ok, true);
-    assert.equal(health.ready, "trigger-evaluated");
+    assert.equal(health.ready, false);
     assert.match(health.checkedAt, /^\d{4}-\d{2}-\d{2}T/);
+    assert.deepEqual(health.attestation, {
+      source: "studio-static",
+      profileIdentity: null,
+      exactLtx25Rtx4090X2: false,
+    });
     assert.deepEqual(health.controlPlane, {
       provider: "novita",
       execution: "trigger-cloud-only",
@@ -76,6 +86,8 @@ async function main() {
     assert.match(source, /await requireStudioActor\(request\);[\s\S]*searchParams\.get\("health"\) === "1"/);
     assert.match(source, /execution: "trigger-cloud-only"/);
     assert.match(source, /gpuSku: NOVITA_REQUIRED_GPU_SKU/);
+    assert.match(source, /source: "studio-static"/);
+    assert.match(source, /exactLtx25Rtx4090X2: false/);
     assert.doesNotMatch(source, /NOVITA_RENDER_FARM_(API|TOKEN)/);
     assert.doesNotMatch(source, /bootstrapSecrets|getNovitaRenderStatus|launchImages|fetch\s*\(/);
   } finally {

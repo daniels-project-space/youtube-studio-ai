@@ -24,12 +24,14 @@ export const EDITOR_SURFACE: CustomizationSurface = {
     { id: "overlayDensity", type: "enum", values: ["sparse", "standard", "rich"], default: "standard", describes: "how many quote/insert overlays", servesStyles: ["explainer"] },
     { id: "pacingShape", type: "enum", values: ["flat", "accelerate", "frontload"], default: "flat", describes: "cut-pacing CURVE over the body — flat / build-to-climax / front-loaded hook (not one constant cuts/min)", servesStyles: ["hype", "shorts", "documentary"] },
     { id: "silenceTrim", type: "enum", values: ["off", "gentle", "aggressive"], default: "off", describes: "carve dead air out of the narration (auto-editor) → shorter, tighter video", servesStyles: ["shorts", "hype", "explainer"] },
+    { id: "hookSec", type: "number", range: [0, 30], default: 0, describes: "front-load a fast-cut retention hook for the first N seconds of the body, in ABSOLUTE seconds (0 = off; pairs with hookCutsPerMin)", servesStyles: ["shorts", "hype"] },
+    { id: "hookCutsPerMin", type: "number", range: [0, 60], default: 0, describes: "cuts/min during the hookSec retention window (0 = off; requires hookSec > 0)", servesStyles: ["shorts", "hype"] },
   ],
   presets: {
     documentary: { cadence: "slow", transitions: "crossfade", captionStyle: "minimal", overlayDensity: "rich" },
     essay: { cadence: "measured", transitions: "hardcut", captionStyle: "minimal", overlayDensity: "standard" },
     hype: { cadence: "frenetic", transitions: "hardcut", captionStyle: "bold", overlayDensity: "rich", pacingShape: "accelerate", silenceTrim: "gentle" },
-    shorts: { cadence: "frenetic", transitions: "hardcut", captionStyle: "karaoke", overlayDensity: "sparse", pacingShape: "frontload", silenceTrim: "aggressive" },
+    shorts: { cadence: "frenetic", transitions: "hardcut", captionStyle: "karaoke", overlayDensity: "sparse", pacingShape: "frontload", silenceTrim: "aggressive", hookSec: 8, hookCutsPerMin: 16 },
     meditation: { cadence: "still", transitions: "crossfade", captionStyle: "none", overlayDensity: "sparse" },
     lofi: { cadence: "still", transitions: "crossfade", captionStyle: "none", overlayDensity: "sparse" },
   },
@@ -49,6 +51,10 @@ export interface EditorConfig {
   pacingShape: string;
   /** Silence-trim aggressiveness: off / gentle / aggressive (auto-editor dead-air removal). */
   silenceTrim: string;
+  /** Retention-hook length in absolute seconds (0 = off). Special-case of the pacing curve (P2). */
+  hookSec: number;
+  /** Cuts/min during the hookSec window (0 = off; requires hookSec > 0). */
+  hookCutsPerMin: number;
 }
 
 /** silenceTrim → detector thresholds. `off` ⇒ undefined (no trim = parity). minSilenceSec = ignore gaps shorter than this; padSec = breathing room kept around speech. */
@@ -91,6 +97,8 @@ export function resolveEditorConfig(profile: ChannelProfile, block = EDITOR_BLOC
     overlayDensity: String(k.overlayDensity),
     pacingShape: String(k.pacingShape),
     silenceTrim: String(k.silenceTrim),
+    hookSec: Number(k.hookSec) || 0,
+    hookCutsPerMin: Number(k.hookCutsPerMin) || 0,
   };
 }
 
@@ -104,6 +112,15 @@ export interface EditorDirectives {
   pacingCurve?: { atFrac: number; cutsPerMin: number }[];
   /** Silence-trim thresholds (auto-editor). Present only when silenceTrim != off — the WIRE that tells Assembly + the probe to carve dead air. */
   trim?: { minSilenceSec: number; padSec: number };
+  /**
+   * Retention-hook window (P2): the first `hookSec` ABSOLUTE seconds of the body cut at
+   * `hookCutsPerMin`. A special-case of the pacing curve — Assembly (`planTimeline.ts`
+   * `resolvePacingCurve`) seeds/overrides whatever curve is already driving the body
+   * (explicit pacingCurve, or one derived from the per-video CutSheet) rather than being a
+   * separate code path. Present only when both are set to a positive value.
+   */
+  hookSec?: number;
+  hookCutsPerMin?: number;
 }
 
 /** Map an EditorConfig to the directives Assembly's planTimeline consumes. */
@@ -116,6 +133,7 @@ export function editorDirectives(cfg: EditorConfig): EditorDirectives {
     overlayDensity: cfg.overlayDensity,
     pacingCurve: buildPacingCurve(cfg.pacingShape, baseCpm),
     trim: SILENCE_TRIM_PROFILES[cfg.silenceTrim],
+    ...(cfg.hookSec > 0 && cfg.hookCutsPerMin > 0 ? { hookSec: cfg.hookSec, hookCutsPerMin: cfg.hookCutsPerMin } : {}),
   };
 }
 

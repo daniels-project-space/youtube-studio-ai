@@ -102,6 +102,16 @@ export const authorize = query({
     if (channel.ownerId !== args.ownerId) {
       return { authorized: false as const, reason: "tenant_mismatch" as const };
     }
+    // The channel's own operator toggle (draft|active|paused|archived, schema.ts
+    // `channels.status`) is a SEPARATE control from this row's approval status.
+    // Without this check, pausing/archiving a channel only stops the autopilot
+    // scheduler from admitting NEW runs (src/trigger/scheduler.ts) — it does not
+    // retroactively stop an already-admitted/in-flight/manually-triggered run
+    // from shipping through upload_draft or crosspost. This is the actual final
+    // gate, so it must enforce the toggle directly.
+    if (channel.status !== "active") {
+      return { authorized: false as const, reason: "channel_not_active" as const };
+    }
     const row = await ctx.db
       .query("channelPublishPolicies")
       .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))

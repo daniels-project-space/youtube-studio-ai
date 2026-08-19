@@ -1,14 +1,13 @@
 // LORECRAFT MULTIPLANE v2 — 4 WHOLE layers per beat (thresholds at depth GAPS so objects don't
 // tear) + clean fresh back, driven by a ZOOM-OUT (each layer recedes as one rigid piece, nearer
 // = recedes more). Crossfade-concat, engraving grade, title, narration.
-import { writeFile, readFile, copyFile, mkdir } from "node:fs/promises";
+import { writeFile, copyFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
 const ROOT = process.cwd();
 const RUN = join(ROOT, "output", "lorecraft", "moria2");
 const NARR = join(ROOT, "output", "lorecraft", "moria", "narr.mp3");
-const REF = join(ROOT, "output", "lorecraft", "ref", "ref2min.mkv");
 const WEB = "/var/www/html/lorecraft";
 const PY = "/home/ubuntu/dfvenv/bin/python";
 const rd = (f) => join(RUN, f);

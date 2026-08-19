@@ -25,6 +25,16 @@ export interface VoicecraftAuditionEvidence extends VoiceEvidenceBase {
   source: "voicecraft-audition";
 }
 
+/**
+ * A deterministic provider-metadata pre-cast. It is accepted only alongside
+ * a separately attested real local cold-open receipt at channel inception and
+ * the actual production-take evidence in narration_tts.
+ */
+export interface ProviderMetadataSelectionEvidence extends VoiceEvidenceBase {
+  source: "provider-metadata-selection";
+  selectionFingerprint: string;
+}
+
 export interface HistoricalRealAudioEvidence extends VoiceEvidenceBase {
   source: "historical-real-audio";
   runId: string;
@@ -37,6 +47,7 @@ export interface HistoricalRealAudioEvidence extends VoiceEvidenceBase {
 
 export type VoiceQualityEvidence =
   | VoicecraftAuditionEvidence
+  | ProviderMetadataSelectionEvidence
   | HistoricalRealAudioEvidence;
 
 export interface VoiceCastingRecord {
@@ -117,7 +128,11 @@ export function validateVoiceQualityEvidence(args: {
   if (!value || value["schema"] !== VOICE_QUALITY_EVIDENCE_SCHEMA) {
     return { ok: false, reason: "structured voice-quality evidence v1 is missing" };
   }
-  if (value["source"] !== "voicecraft-audition" && value["source"] !== "historical-real-audio") {
+  if (
+    value["source"] !== "voicecraft-audition" &&
+    value["source"] !== "provider-metadata-selection" &&
+    value["source"] !== "historical-real-audio"
+  ) {
     return { ok: false, reason: "voice-quality evidence source is not recognized" };
   }
   if (typeof value["channelId"] !== "string" || value["channelId"] !== args.channelId) {
@@ -139,6 +154,12 @@ export function validateVoiceQualityEvidence(args: {
   const castJudgedAt = finiteTimestamp(value["castJudgedAt"]);
   if (castJudgedAt === null) {
     return { ok: false, reason: "voice-quality evidence has no valid audition timestamp" };
+  }
+
+  if (value["source"] === "provider-metadata-selection") {
+    if (typeof value["selectionFingerprint"] !== "string" || !/^[a-f0-9]{64}$/.test(value["selectionFingerprint"])) {
+      return { ok: false, reason: "provider metadata selection evidence has no valid selection fingerprint" };
+    }
   }
 
   if (value["source"] === "historical-real-audio") {
@@ -190,6 +211,35 @@ export function makeVoicecraftAuditionEvidence(args: {
     castScore: args.castScore,
   });
   if (!validation.ok) throw new Error(`invalid voicecraft audition evidence: ${validation.reason}`);
+  return evidence;
+}
+
+export function makeProviderMetadataSelectionEvidence(args: {
+  channelId: string;
+  provider: VoiceProvider;
+  voiceId: string;
+  castScore: number;
+  castJudgedAt: number;
+  selectionFingerprint: string;
+}): ProviderMetadataSelectionEvidence {
+  const evidence: ProviderMetadataSelectionEvidence = {
+    schema: VOICE_QUALITY_EVIDENCE_SCHEMA,
+    source: "provider-metadata-selection",
+    channelId: args.channelId,
+    provider: args.provider,
+    voiceId: args.voiceId,
+    castScore: args.castScore,
+    castJudgedAt: args.castJudgedAt,
+    selectionFingerprint: args.selectionFingerprint,
+  };
+  const validation = validateVoiceQualityEvidence({
+    evidence,
+    channelId: args.channelId,
+    provider: args.provider,
+    voiceId: args.voiceId,
+    castScore: args.castScore,
+  });
+  if (!validation.ok) throw new Error(`invalid provider metadata selection evidence: ${validation.reason}`);
   return evidence;
 }
 

@@ -5,9 +5,10 @@
  *   - geminiJson    — structured JSON generation (SEO databank, title optimise)
  *   - geminiVision  — multimodal image analysis (thumbnail style guide / QA)
  *
- * Key: GEMINI_API_KEY. If absent, callers should `hasGeminiKey()`-guard and
- * degrade gracefully — these functions throw loud only when actually invoked
- * without a key, so the build/import never crashes.
+ * Key: GEMINI_API_KEY. Gemini is not a general runtime provider: the only
+ * admitted production use is the sealed Nano Banana thumbnail image route.
+ * A key alone never authorizes text, audio, video, embeddings, browser agents,
+ * or visual review; those paths must use approved alternatives.
  */
 
 import {
@@ -20,10 +21,31 @@ import {
 
 const BASE = "https://generativelanguage.googleapis.com/v1beta";
 
+/**
+ * Deliberate thumbnail-only latch. The product's default is no Gemini
+ * execution even if an old vault secret remains available.
+ */
+export const GEMINI_RUNTIME_OPT_IN_ENV = "YOUTUBE_STUDIO_ALLOW_GEMINI_RUNTIME";
+
 export class GeminiError extends Error {
   constructor(message: string) {
     super(message);
     this.name = "GeminiError";
+  }
+}
+
+/** A deterministic, non-retryable refusal before any Gemini provider request. */
+export class GeminiRuntimeDisabledError extends GeminiError {
+  readonly retryable = false;
+  readonly code = "GEMINI_RUNTIME_DISABLED";
+
+  constructor(operation: string) {
+    super(
+      `${operation}: Gemini runtime is disabled by policy. ` +
+        "Use the approved non-Gemini module/provider. The sole exception is the sealed Nano Banana thumbnail " +
+        `route, which additionally requires ${GEMINI_RUNTIME_OPT_IN_ENV}=1 alongside GEMINI_API_KEY.`,
+    );
+    this.name = "GeminiRuntimeDisabledError";
   }
 }
 
@@ -47,11 +69,76 @@ export class GeminiSubmissionError extends GeminiError {
   }
 }
 
+export function isGeminiRuntimeEnabled(): boolean {
+  return process.env[GEMINI_RUNTIME_OPT_IN_ENV] === "1";
+}
+
+/**
+ * Generic Gemini is intentionally unavailable. Thumbnail code must use its
+ * own `hasNanoBanana()` capability instead of treating this as an LLM key.
+ */
 export function hasGeminiKey(): boolean {
-  return Boolean(process.env.GEMINI_API_KEY);
+  return false;
+}
+
+/**
+ * Opaque capability used by the receipt-bound Nano Banana adapter.  This is a
+ * runtime identity, rather than an exported string literal, so a future
+ * Google caller cannot accidentally inherit the thumbnail exception by
+ * spelling a purpose string correctly.
+ */
+const SEALED_NANO_BANANA_THUMBNAIL_PURPOSE = Symbol("sealed-nano-banana-thumbnail");
+export type GeminiRuntimePurpose = typeof SEALED_NANO_BANANA_THUMBNAIL_PURPOSE;
+
+/**
+ * The sole capability issuer. Keep the raw symbol private: callers can obtain
+ * it only by deliberately importing the sealed thumbnail capability.
+ */
+export function sealedNanoBananaThumbnailPurpose(): GeminiRuntimePurpose {
+  return SEALED_NANO_BANANA_THUMBNAIL_PURPOSE;
+}
+
+/**
+ * Reject every Gemini provider boundary before it can read, upload, or send
+ * data, except the receipt-bound Nano Banana thumbnail route. This purpose is
+ * deliberately a closed union so a new Gemini caller must be consciously
+ * reviewed rather than inheriting the thumbnail exception.
+ */
+export function assertGeminiRuntimeAllowed(operation: string, purpose?: GeminiRuntimePurpose): void {
+  if (purpose !== SEALED_NANO_BANANA_THUMBNAIL_PURPOSE || !isGeminiRuntimeEnabled()) {
+    throw new GeminiRuntimeDisabledError(operation);
+  }
+}
+
+/** Detect the two model-id forms used by raw REST and model-router clients. */
+export function isGeminiModelIdentifier(model: string | undefined): boolean {
+  const normalized = model?.trim().toLowerCase() ?? "";
+  // Creative callers must fail closed on every Google-model notation that the
+  // SDK router could resolve, not only the two spellings we currently use.
+  return (
+    normalized.startsWith("gemini-") ||
+    normalized.startsWith("models/gemini-") ||
+    normalized.startsWith("google/") ||
+    normalized.startsWith("google:")
+  );
+}
+
+/**
+ * Use this at model-router boundaries (Mastra, browser agents, SDK adapters).
+ * A router model is not a thumbnail image request, so it can never receive the
+ * sealed Nano Banana capability even when the thumbnail environment opt-in is
+ * present.
+ */
+export function assertNonGeminiModelIdentifier(model: string | undefined, operation: string): void {
+  if (isGeminiModelIdentifier(model)) {
+    throw new GeminiRuntimeDisabledError(
+      `${operation}: Gemini models are thumbnail-only and cannot be selected for this runtime`,
+    );
+  }
 }
 
 function key(): string {
+  assertGeminiRuntimeAllowed("Gemini REST provider");
   const k = process.env.GEMINI_API_KEY;
   if (!k) throw new GeminiError("GEMINI_API_KEY is not configured");
   return k;
@@ -87,6 +174,7 @@ export async function uploadGeminiVideo(
   path: string,
   mime?: string,
 ): Promise<{ fileUri: string; mimeType: string }> {
+  assertGeminiRuntimeAllowed("Gemini File API upload");
   const { readFile } = await import("node:fs/promises");
   const bytes = await readFile(path);
   const mimeType = mime ?? "video/mp4";
@@ -239,6 +327,7 @@ async function generate(
   parts: GeminiPart[],
   opts: { json?: boolean; maxTokens?: number; temperature?: number; tools?: unknown[] } = {},
 ): Promise<string> {
+  assertGeminiRuntimeAllowed("Gemini generateContent");
   const thinking = thinkingConfigFor(model);
   const body: Record<string, unknown> = {
     contents: [{ role: "user", parts }],

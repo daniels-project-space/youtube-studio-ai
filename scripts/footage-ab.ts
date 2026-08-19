@@ -6,7 +6,7 @@
  * Run:  set -a; . .env.local; set +a; npx tsx scripts/footage-ab.ts
  * Output: /var/www/html/footage-ab/ (index.html + clips) + report.md
  */
-import { mkdirSync, writeFileSync, copyFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { searchFootage, scoreClip, activeProviders, type FootageClip } from "@/lib/footage";

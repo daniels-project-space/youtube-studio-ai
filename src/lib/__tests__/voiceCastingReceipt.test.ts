@@ -4,6 +4,8 @@ import { join } from "node:path";
 import {
   makeVoiceCastingAuditionReceipt,
   makeVoiceColdOpenReceipt,
+  makeVoiceLocalColdOpenReceipt,
+  makeVoiceProviderSelectionReceipt,
   validateVoiceCastingAuditionReceipt,
   validateVoiceCastingReadinessReceipt,
   voiceCastingOutputFingerprint,
@@ -90,6 +92,46 @@ assert.equal(validateVoiceCastingAuditionReceipt({
   now: cast.at + 1_000,
 }), false);
 
+const providerSelectionReceipt = makeVoiceProviderSelectionReceipt({
+  ownerId,
+  channelId,
+  voiceId: cast.voiceId,
+  score: 7.4,
+  selectedAt: judgedAt,
+  shortlisted: [{ name: "Declared documentary voice", score: 7.4, reasons: ["use_case:narrative_story"] }],
+  selection: { provider: "elevenlabs", voiceId: cast.voiceId, method: "metadata-only" },
+});
+const localColdOpenReceipt = makeVoiceLocalColdOpenReceipt({
+  ownerId,
+  channelId,
+  voiceId: cast.voiceId,
+  measuredAt: judgedAt,
+  text: "A quiet fact changes the whole story.",
+  physics: { speed: 0.96, archetype: "narrator-teacher" },
+  audioFingerprint: "a".repeat(64),
+  durationSec: 4.2,
+  wordsPerSec: 2.1,
+  integratedLufs: -18.4,
+});
+const providerReady = {
+  voiceId: cast.voiceId,
+  score: 7.4,
+  at: judgedAt,
+  providerSelectionReceipt,
+  localColdOpenReceipt,
+};
+assert.equal(validateVoiceCastingReadinessReceipt({
+  cast: providerReady,
+  ownerId,
+  channelId,
+  now: judgedAt + 1_000,
+}), true, "a metadata pre-cast needs a real local cold-open health receipt before it is usable");
+assert.equal(validateVoiceCastingReadinessReceipt({
+  cast: { ...providerReady, localColdOpenReceipt: { ...localColdOpenReceipt, audioFingerprint: "bad" } },
+  ownerId,
+  channelId,
+}), false, "provider metadata may not substitute for a fingerprinted real take");
+
 for (const relativePath of ["convex/schema.ts", "convex/channels.ts"]) {
   const source = readFileSync(join(process.cwd(), relativePath), "utf8");
   assert.match(source, /auditionReceipt:\s*v\.optional\(v\.object\(\{/);
@@ -97,6 +139,10 @@ for (const relativePath of ["convex/schema.ts", "convex/channels.ts"]) {
   assert.match(source, /verdictFingerprint:\s*v\.string\(\)/);
   assert.match(source, /coldOpenReceipt:\s*v\.optional\(v\.object\(\{/);
   assert.match(source, /version:\s*v\.literal\("voice-cold-open\/v1"\)/);
+  assert.match(source, /providerSelectionReceipt:\s*v\.optional\(v\.object\(\{/);
+  assert.match(source, /version:\s*v\.literal\("voice-provider-selection\/v1"\)/);
+  assert.match(source, /localColdOpenReceipt:\s*v\.optional\(v\.object\(\{/);
+  assert.match(source, /version:\s*v\.literal\("voice-local-cold-open\/v1"\)/);
 }
 
 console.log("voice casting receipt tests passed");

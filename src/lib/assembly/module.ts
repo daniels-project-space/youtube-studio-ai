@@ -24,10 +24,33 @@ export const ASSEMBLY_SURFACE: CustomizationSurface = {
     { id: "chapterCards", type: "boolean", default: false, describes: "splice heading cards on chapter beats", servesStyles: ["documentary", "essay"] },
     { id: "musicDuckProfile", type: "enum", values: ["none", "gentle", "standard", "aggressive"], default: "standard", describes: "how hard music ducks under the voice", servesStyles: ["asmr", "meditation", "hype"] },
     { id: "targetLufs", type: "number", range: [-23, -12], default: -14, describes: "integrated loudness target", servesStyles: ["platform"] },
-    { id: "transitions", type: "enum", values: ["hardcut", "crossfade", "dip_to_black"], default: "hardcut", describes: "between-shot transition", servesStyles: ["documentary", "hype"] },
+    // default "crossfade" DESCRIBES PRODUCTION: the live god-block passes no
+    // crossfadeSec to composeWithIntro, whose default is 0.8s — so a channel that
+    // never touches this knob gets a title→body dissolve today. `hardcut` here
+    // used to misreport that (and forced crossfadeSec 0 on the EDL path). The
+    // `hype` preset still opts into a straight cut explicitly.
+    { id: "transitions", type: "enum", values: ["hardcut", "crossfade", "dip_to_black"], default: "crossfade", describes: "between-shot transition", servesStyles: ["documentary", "hype"] },
     { id: "reframe", type: "enum", values: ["none", "center", "subject_track"], default: "none", describes: "repurpose horizontal → vertical", servesStyles: ["shorts", "social"] },
     { id: "tailSec", type: "number", range: [0, 8], default: 3, describes: "silent fade-out tail", servesStyles: ["shorts", "ambient"] },
     { id: "captions", type: "boolean", default: true, describes: "burn word-level captions over the video (toggle off to ship caption-free)", servesStyles: ["accessibility", "shorts", "social"] },
+    // ────────────────────────────────────────────────────────────────────────
+    // OPERATOR-ONLY CUTOVER SWITCH — NOT a creative knob. DEFAULT false.
+    //
+    // `true` makes the live `timeline_assemble` block compose through THIS
+    // module (cutover.assembleViaEdl) instead of the god-block's own inline
+    // compose/heal code. It is the per-channel opt-in for a cutover that has
+    // NOT been validated on a real render yet: the `essay`-preset parity claim
+    // is proven only for the DETERMINISTIC PLAN MATH (scripts/assembly-parity.ts),
+    // never for a finished video. Flipping it is an OPERATOR decision on ONE
+    // channel at a time, not an engineering default.
+    //
+    // Deliberately absent from every preset below, so no preset — and no
+    // Architect pass that picks a preset — can turn it on implicitly. The only
+    // way it becomes true is an explicit per-channel
+    // `setModuleConfig(channelId, "timeline_assemble", { useAssemblyEdl: true })`.
+    // `servesStyles: []` marks it as serving no channel style at all.
+    // ────────────────────────────────────────────────────────────────────────
+    { id: "useAssemblyEdl", type: "boolean", default: false, describes: "OPERATOR CUTOVER SWITCH (unvalidated): compose via the standalone Assembly EDL module instead of the legacy inline god-block path. Leave off unless you are piloting the cutover on this one channel.", servesStyles: [] },
   ],
   presets: {
     documentary: { cutEnergy: "slow", chapterCards: true, transitions: "crossfade", introStyle: "title_card", outroStyle: "closing_card", musicDuckProfile: "standard", aspect: "16:9", targetLufs: -14 },

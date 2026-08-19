@@ -1,8 +1,6 @@
 import { bootstrapSecrets } from "../src/lib/bootstrap.ts";
 await bootstrapSecrets(() => {}, { required: ["REPLICATE_API_TOKEN"] });
 const RT = process.env.REPLICATE_API_TOKEN;
-// hardware $/sec (Replicate public pricing, approx)
-const RATE = { "Nvidia T4": 0.000225, "Nvidia A40 (Large)": 0.000725, "Nvidia A40": 0.000575, "Nvidia L40S": 0.000975, "Nvidia A100 (80GB)": 0.0014, "CPU": 0.0001 };
 let url = "https://api.replicate.com/v1/predictions";
 const agg = {};
 for (let page = 0; page < 4 && url; page++) {

@@ -7,6 +7,7 @@ import {
   CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD,
   assertChannelInceptionContracts,
   channelInceptionContract,
+  channelInceptionProbeCostCeilingUsd,
   type ChannelInceptionCostClass,
   type ChannelInceptionExecutionOwner,
   type ChannelInceptionFamilyPolicy,
@@ -452,6 +453,9 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
   ): void => {
     if (!includedKeys.has(moduleKey)) return;
     const contract = channelInceptionContract(moduleKey);
+    const maximumCostUsd = moduleKey === "channel-inception-probe"
+      ? channelInceptionProbeCostCeilingUsd(request.family)
+      : CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD[moduleKey];
     const dependsOn = [
       ...contract.requiredDependencies,
       ...contract.optionalDependencies.filter((dependency) => includedKeys.has(dependency)),
@@ -469,7 +473,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     const keys = stageKey({
       moduleKey,
       contractVersion: contract.version,
-      maximumCostUsd: CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD[moduleKey],
+      maximumCostUsd,
       channelScope,
       params,
       dependencyStageKeys,
@@ -481,7 +485,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
       title: contract.title,
       executionOwner: executionOwner ?? contract.defaultExecutionOwner,
       costClass: contract.costClass,
-      maximumCostUsd: CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD[moduleKey],
+      maximumCostUsd,
       providerCallsAuthorized: false as const,
       dependsOn,
       dependencyStageKeys,

@@ -1,0 +1,521 @@
+/**
+ * Declarative creative-capability catalog.
+ *
+ * A channel family owns its base visual lane. Capabilities are smaller,
+ * reusable overlays: source-attributed data storytelling, a supervised
+ * Casefile intake, or a supervised children's-show intake. Keeping their
+ * discovery, admission, selection semantics, and pipeline obligations here
+ * prevents the creator, API, and compiler from each growing a separate
+ * `if (block === ...)` branch.
+ *
+ * This file is deliberately server-safe metadata. It must never import the
+ * executable block registry or a provider runtime; the authorized designer is
+ * still the only place that compiles a runnable pipeline and reserves spend.
+ */
+import { MODULE_CONTRACTS } from "../moduleContracts";
+import type { FamilyKey } from "../families";
+import type { PipelineEntry } from "../types";
+import {
+  SOURCE_ATTRIBUTED_DATA_STORY,
+  dataStoryInsertParams,
+  dataStoryRecommendationForIntent,
+  type DataStoryContract,
+} from "../dataStory";
+
+export const CREATIVE_CAPABILITY_CATALOG_VERSION = "creative-capability-catalog/v1" as const;
+
+export type CreativeCapabilityKey =
+  | "source_attributed_data_story"
+  | "casefile_cinematic"
+  | "children_show_bible";
+
+export type CreativeCapabilitySelectionMode = "explicit_opt_in" | "private_review_only";
+
+export interface CreativeCapabilityIntent {
+  concept?: string;
+  niche?: string;
+  nicheKey?: string;
+  audience?: string;
+  sampleTopics?: readonly string[];
+}
+
+/**
+ * This is the only client-to-server capability reference. The server always
+ * recomputes eligibility from the current catalog; the fingerprint catches a
+ * stale browser offer before it can become a hidden pipeline mutation.
+ */
+export interface CreativeCapabilitySelection {
+  capability: CreativeCapabilityKey;
+  catalogFingerprint: string;
+}
+
+export interface CreativeCapabilityModule {
+  block: string;
+  profile: string;
+  contract?: DataStoryContract;
+  /** A capability may give individual review stages more specific remediation. */
+  automationAdmission?: CreativeCapabilityAdmission;
+  requirements: readonly string[];
+  qualityFocus: readonly string[];
+}
+
+export interface CreativeCapabilityAdmission {
+  autonomous: boolean;
+  blockers: readonly string[];
+  remediation: string;
+}
+
+export interface CreativeCapabilityPipelineObligation {
+  block: string;
+  /** Required key/value subset on the effective compiled block. */
+  params?: Readonly<Record<string, unknown>>;
+}
+
+export interface CreativeCapabilityOffer {
+  capability: CreativeCapabilityKey;
+  title: string;
+  description: string;
+  selectionMode: CreativeCapabilitySelectionMode;
+  /** A private-review link is informational only; it is never a render authority. */
+  reviewHref?: string;
+  modules: readonly CreativeCapabilityModule[];
+  automationAdmission: CreativeCapabilityAdmission;
+  requirements: readonly string[];
+  qualityFocus: readonly string[];
+  /**
+   * Exact effective-pipeline evidence required if this capability is selected.
+   * Review-only capabilities intentionally have no automatic compiler path.
+   */
+  pipelineObligations: readonly CreativeCapabilityPipelineObligation[];
+}
+
+export interface CreativeCapabilityDefinition {
+  capability: CreativeCapabilityKey;
+  supportedFamilies: readonly FamilyKey[];
+  selectionMode: CreativeCapabilitySelectionMode;
+  matches: (intent: CreativeCapabilityIntent, family: FamilyKey) => boolean;
+  materialize: (intent: CreativeCapabilityIntent, family: FamilyKey) => CreativeCapabilityOffer;
+}
+
+const CASEFILE_CINEMATIC_SIGNALS = [
+  "true crime",
+  "casefile",
+  "cold case",
+  "missing person",
+  "missing people",
+  "murder",
+  "homicide",
+  "criminal investigation",
+  "crime investigation",
+  "real crime",
+  "historical crime",
+  "factual reconstruction",
+  "documentary reconstruction",
+] as const;
+
+const CASEFILE_SOURCE_REQUIREMENTS = [
+  "reviewed Case Packet with one allowed primary-source URL and provenance record per factual claim",
+  "exhaustive source-asset usage and rights-basis ledger",
+  "fresh fingerprint-bound human editorial approval",
+] as const;
+
+const CASEFILE_SHOT_MAP_REQUIREMENTS = [
+  "admitted Casefile source packet",
+  "claim-to-source-to-scene-to-shot coverage map with a fresh reviewer signature",
+] as const;
+
+const CASEFILE_SEQUENCE_REQUIREMENTS = [
+  "admitted evidence-shot map",
+  "reviewer-signed causal multi-shot sequence with faceless mannequin wardrobe, prop, era, and location continuity locks",
+] as const;
+
+const CHILDREN_SHOW_REQUIREMENTS = [
+  "declared age band and one measurable learning objective with an observable assessment",
+  "original recurring-character and world continuity locks with no IP-adjacent identity",
+  "five-stage familiar-problem → guided-attempt → participation → resolution-recall → varied-repetition pattern",
+  "fresh child-editor approval bound to the Show Bible, Episode Graph, and lesson contract",
+] as const;
+
+function normalizedIntent(input: CreativeCapabilityIntent): string {
+  return [
+    input.concept,
+    input.niche,
+    input.nicheKey?.replace(/[_-]+/g, " "),
+    input.audience,
+    ...(input.sampleTopics ?? []),
+  ]
+    .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
+    .join(" ")
+    .toLocaleLowerCase();
+}
+
+/** Shared by the advisor and source requirement gate so factual fiction stays distinct. */
+export function isCasefileCinematicIntent(
+  input: CreativeCapabilityIntent,
+  family: FamilyKey,
+): boolean {
+  if (family !== "cinematic") return false;
+  const intent = normalizedIntent(input);
+  if (/\b(fictional|fiction|screenplay|original story)\b/.test(intent)) return false;
+  return CASEFILE_CINEMATIC_SIGNALS.some((signal) => intent.includes(signal));
+}
+
+function sourceAttributedDataStoryOffer(
+  input: CreativeCapabilityIntent,
+  family: FamilyKey,
+): CreativeCapabilityOffer {
+  // Selection validation and the designer intentionally do not need to repeat
+  // a creator's prose. Use a canonical matching phrase only to recover the
+  // data-story contract metadata; eligibility itself remains enforced by
+  // `matches()` at the creator/API boundary.
+  const recommendation = dataStoryRecommendationForIntent(input, family)[0]
+    ?? dataStoryRecommendationForIntent({
+      concept: "source-attributed data storytelling with animated charts",
+    }, family)[0];
+  if (!recommendation) {
+    throw new Error("source-attributed data-story offer was materialized outside its declared eligibility");
+  }
+  const contract = recommendation.contract ?? SOURCE_ATTRIBUTED_DATA_STORY;
+  const insertParams = dataStoryInsertParams(contract);
+  return {
+    capability: "source_attributed_data_story",
+    title: "Source-attributed data story",
+    description:
+      "Chart-led statistics and comparisons with a named source and spoken numeric anchor for every rendered claim.",
+    selectionMode: "explicit_opt_in",
+    modules: [{
+      block: recommendation.block,
+      profile: recommendation.profile,
+      contract,
+      requirements: recommendation.requirements,
+      qualityFocus: recommendation.qualityFocus,
+    }],
+    automationAdmission: recommendation.automationAdmission,
+    requirements: recommendation.requirements,
+    qualityFocus: recommendation.qualityFocus,
+    pipelineObligations: [
+      { block: "timeline_assemble" },
+      { block: "visual_inserts", params: insertParams },
+      { block: "script_gen", params: { dataRich: true, sourceAttributionRequired: true } },
+      {
+        block: "qa_script",
+        params: {
+          dataStoryContract: contract.version,
+          requireNamedSource: true,
+          requireSpokenNumericAnchor: true,
+        },
+      },
+    ],
+  };
+}
+
+function casefileCinematicOffer(): CreativeCapabilityOffer {
+  const admission: CreativeCapabilityAdmission = {
+    autonomous: false,
+    blockers: ["Casefile source admission is private human-editorial review only."],
+    remediation: "Supply the source-first packet and a current fingerprint-bound editorial approval.",
+  };
+  const modules: readonly CreativeCapabilityModule[] = [
+    {
+      block: "casefile_source_packet",
+      profile: "source_first_casefile/v1",
+      automationAdmission: admission,
+      requirements: CASEFILE_SOURCE_REQUIREMENTS,
+      qualityFocus: ["primary-source claim integrity", "rights-aware visual provenance"],
+    },
+    {
+      block: "casefile_evidence_shot_map",
+      profile: "claim_to_source_to_shot_map/v1",
+      automationAdmission: {
+        autonomous: false,
+        blockers: ["Casefile evidence-to-shot mapping is private human-editorial review only."],
+        remediation: "Bind every factual claim to admitted source, scene, and coverage shots, then obtain current map approval.",
+      },
+      requirements: CASEFILE_SHOT_MAP_REQUIREMENTS,
+      qualityFocus: ["no unsupported visual reconstruction", "claim-to-shot traceability"],
+    },
+    {
+      block: "cinematic_case_sequence",
+      profile: "faceless_source_bound_cinematic_sequence/v1",
+      automationAdmission: {
+        autonomous: false,
+        blockers: ["Cinematic Casefile sequences remain private human-review candidates, not automatic channel output."],
+        remediation: "Approve a fingerprint-bound sequence with faceless cast, wardrobe, prop, era, and cut-continuity locks.",
+      },
+      requirements: CASEFILE_SEQUENCE_REQUIREMENTS,
+      qualityFocus: ["causal tension-and-reveal edit", "faceless wardrobe continuity", "source-bound multi-shot coverage"],
+    },
+  ];
+  return {
+    capability: "casefile_cinematic",
+    title: "Source-bound cinematic Casefile",
+    description:
+      "A factual reconstruction intake with claim-to-source-to-shot traceability and faceless continuity locks.",
+    selectionMode: "private_review_only",
+    reviewHref: "/casefile",
+    modules,
+    automationAdmission: admission,
+    requirements: modules.flatMap((module) => module.requirements),
+    qualityFocus: modules.flatMap((module) => module.qualityFocus),
+    pipelineObligations: [],
+  };
+}
+
+function childrenShowBibleOffer(): CreativeCapabilityOffer {
+  const admission: CreativeCapabilityAdmission = {
+    autonomous: false,
+    blockers: ["Children’s show admission is private child-editorial review only."],
+    remediation:
+      "Supply an age-banded original Show Bible with one observable objective, five-stage participation pattern, and a current graph-and-lesson-bound child-editor approval.",
+  };
+  return {
+    capability: "children_show_bible",
+    title: "Original children’s Show Bible",
+    description:
+      "An age-banded, original learning-show intake with a measurable lesson, safe recurring world, and child-editor approval.",
+    selectionMode: "private_review_only",
+    modules: [{
+      block: "children_show_bible",
+      profile: "original_child_show_bible/v1",
+      requirements: CHILDREN_SHOW_REQUIREMENTS,
+      qualityFocus: ["age-appropriate causal learning", "original character/world continuity", "participation-and-recall rhythm"],
+    }],
+    automationAdmission: admission,
+    requirements: CHILDREN_SHOW_REQUIREMENTS,
+    qualityFocus: ["age-appropriate causal learning", "original character/world continuity", "participation-and-recall rhythm"],
+    pipelineObligations: [],
+  };
+}
+
+export const CREATIVE_CAPABILITY_CATALOG: readonly CreativeCapabilityDefinition[] = [
+  {
+    capability: "source_attributed_data_story",
+    supportedFamilies: ["narrated_stock"],
+    selectionMode: "explicit_opt_in",
+    matches: (intent, family) => dataStoryRecommendationForIntent(intent, family).length > 0,
+    materialize: sourceAttributedDataStoryOffer,
+  },
+  {
+    capability: "casefile_cinematic",
+    supportedFamilies: ["cinematic"],
+    selectionMode: "private_review_only",
+    matches: isCasefileCinematicIntent,
+    materialize: () => casefileCinematicOffer(),
+  },
+  {
+    capability: "children_show_bible",
+    supportedFamilies: ["children_learning"],
+    selectionMode: "private_review_only",
+    matches: (_intent, family) => family === "children_learning",
+    materialize: () => childrenShowBibleOffer(),
+  },
+] as const;
+
+function fnv1a(value: string): string {
+  let hash = 0x811c9dc5;
+  for (let index = 0; index < value.length; index += 1) {
+    hash ^= value.charCodeAt(index);
+    hash = Math.imul(hash, 0x01000193);
+  }
+  return (hash >>> 0).toString(16).padStart(8, "0");
+}
+
+/**
+ * A deterministic content fingerprint, not an authorization signature. The
+ * server recomputes eligibility and never trusts it as authority.
+ */
+export const CREATIVE_CAPABILITY_CATALOG_FINGERPRINT = `${CREATIVE_CAPABILITY_CATALOG_VERSION}:${fnv1a(
+  JSON.stringify(CREATIVE_CAPABILITY_CATALOG.map((definition) => {
+    const offer = definition.materialize(
+      { concept: "source-attributed data storytelling with animated charts" },
+      definition.supportedFamilies[0]!,
+    );
+    return {
+      capability: definition.capability,
+      supportedFamilies: definition.supportedFamilies,
+      selectionMode: definition.selectionMode,
+      offer,
+    };
+  })),
+)}`;
+
+function definitionFor(capability: string): CreativeCapabilityDefinition | undefined {
+  return CREATIVE_CAPABILITY_CATALOG.find((definition) => definition.capability === capability);
+}
+
+/** Resolve every capability the stated concept can honestly expose. */
+export function resolveCreativeCapabilities(
+  input: CreativeCapabilityIntent,
+  family: FamilyKey,
+): CreativeCapabilityOffer[] {
+  assertCreativeCapabilityCatalog();
+  return CREATIVE_CAPABILITY_CATALOG
+    .filter((definition) => definition.supportedFamilies.includes(family))
+    .filter((definition) => definition.matches(input, family))
+    .map((definition) => definition.materialize(input, family));
+}
+
+export function creativeCapabilitySelection(
+  capability: CreativeCapabilityKey,
+): CreativeCapabilitySelection {
+  return { capability, catalogFingerprint: CREATIVE_CAPABILITY_CATALOG_FINGERPRINT };
+}
+
+function isRecord(value: unknown): value is Record<string, unknown> {
+  return Boolean(value) && typeof value === "object" && !Array.isArray(value);
+}
+
+/** Strict parser at the HTTP boundary; unknown fields are not executable authority. */
+export function parseCreativeCapabilitySelections(value: unknown): CreativeCapabilitySelection[] {
+  if (value === undefined) return [];
+  if (!Array.isArray(value)) throw new Error("capabilitySelections must be an array");
+  const seen = new Set<string>();
+  return value.map((entry, index) => {
+    if (!isRecord(entry)) throw new Error(`capabilitySelections[${index}] must be an object`);
+    const capability = entry.capability;
+    const catalogFingerprint = entry.catalogFingerprint;
+    if (typeof capability !== "string" || !capability.trim()) {
+      throw new Error(`capabilitySelections[${index}].capability is required`);
+    }
+    if (typeof catalogFingerprint !== "string" || !catalogFingerprint.trim()) {
+      throw new Error(`capabilitySelections[${index}].catalogFingerprint is required`);
+    }
+    if (seen.has(capability)) throw new Error(`capabilitySelections repeats ${capability}`);
+    seen.add(capability);
+    return {
+      capability: capability as CreativeCapabilityKey,
+      catalogFingerprint,
+    };
+  });
+}
+
+export interface ValidateCreativeCapabilitySelectionsInput {
+  family: FamilyKey;
+  selections: unknown;
+  /** Pass the original creator input to require a current matching offer. */
+  intent?: CreativeCapabilityIntent;
+}
+
+/**
+ * Validates a creator's selected capability against current catalog shape,
+ * family compatibility, freshness, and—when present—the stated channel intent.
+ * Private-review capabilities deliberately cannot enter an automatic build.
+ */
+export function validateCreativeCapabilitySelections(
+  input: ValidateCreativeCapabilitySelectionsInput,
+): Array<{ selection: CreativeCapabilitySelection; offer: CreativeCapabilityOffer }> {
+  assertCreativeCapabilityCatalog();
+  const selections = parseCreativeCapabilitySelections(input.selections);
+  return selections.map((selection) => {
+    if (selection.catalogFingerprint !== CREATIVE_CAPABILITY_CATALOG_FINGERPRINT) {
+      throw new Error(`capability ${selection.capability} uses a stale creative-capability catalog fingerprint`);
+    }
+    const definition = definitionFor(selection.capability);
+    if (!definition) throw new Error(`unknown creative capability: ${selection.capability}`);
+    if (!definition.supportedFamilies.includes(input.family)) {
+      throw new Error(`creative capability ${selection.capability} is not eligible for ${input.family}`);
+    }
+    if (definition.selectionMode !== "explicit_opt_in") {
+      const reviewOffer = definition.materialize(input.intent ?? {}, input.family);
+      throw new Error(
+        `${selection.capability} is private review only${reviewOffer.reviewHref ? `; use ${reviewOffer.reviewHref}` : ""}`,
+      );
+    }
+    if (input.intent && !definition.matches(input.intent, input.family)) {
+      throw new Error(`creative capability ${selection.capability} is not eligible for the stated channel concept`);
+    }
+    return { selection, offer: definition.materialize(input.intent ?? {}, input.family) };
+  });
+}
+
+function matchesRequiredParams(
+  actual: Readonly<Record<string, unknown>> | undefined,
+  expected: Readonly<Record<string, unknown>> | undefined,
+): boolean {
+  if (!expected) return true;
+  if (!actual) return false;
+  return Object.entries(expected).every(([key, value]) => {
+    const candidate = actual[key];
+    return Array.isArray(value)
+      ? Array.isArray(candidate) && candidate.length === value.length && candidate.every((item, index) => item === value[index])
+      : candidate === value;
+  });
+}
+
+/**
+ * Proves a selected opt-in is represented by the effective compiled pipeline,
+ * rather than merely being displayed as an advisor suggestion.
+ */
+export function assertCreativeCapabilityPipelineObligations(
+  family: FamilyKey,
+  selections: readonly CreativeCapabilitySelection[],
+  pipeline: readonly Pick<PipelineEntry, "block" | "params">[],
+): void {
+  const resolved = validateCreativeCapabilitySelections({ family, selections });
+  for (const { selection, offer } of resolved) {
+    for (const obligation of offer.pipelineObligations) {
+      const entry = pipeline.find((candidate) => candidate.block === obligation.block);
+      if (!entry) {
+        throw new Error(
+          `creative capability ${selection.capability} requires effective pipeline block ${obligation.block}`,
+        );
+      }
+      if (!matchesRequiredParams(entry.params, obligation.params)) {
+        throw new Error(
+          `creative capability ${selection.capability} has incomplete effective pipeline evidence at ${obligation.block}`,
+        );
+      }
+    }
+  }
+}
+
+/** Catalog integrity is checked before discovery and selection validation. */
+export function assertCreativeCapabilityCatalog(
+  catalog: readonly CreativeCapabilityDefinition[] = CREATIVE_CAPABILITY_CATALOG,
+): void {
+  const seen = new Set<string>();
+  for (const definition of catalog) {
+    if (seen.has(definition.capability)) throw new Error(`duplicate creative capability: ${definition.capability}`);
+    seen.add(definition.capability);
+    if (!definition.supportedFamilies.length) {
+      throw new Error(`creative capability ${definition.capability} supports no channel family`);
+    }
+    for (const family of definition.supportedFamilies) {
+      if (typeof family !== "string" || !family) {
+        throw new Error(`creative capability ${definition.capability} has an invalid family`);
+      }
+    }
+    // Materialize against its first declared family solely to validate static
+    // block obligations. A matcher may be false for an empty intent; that is
+    // irrelevant to whether the declarative module names exist.
+    const offer = definition.materialize({}, definition.supportedFamilies[0]!);
+    for (const block of [
+      ...offer.modules.map((module) => module.block),
+      ...offer.pipelineObligations.map((obligation) => obligation.block),
+    ]) {
+      if (!MODULE_CONTRACTS[block as keyof typeof MODULE_CONTRACTS]) {
+        throw new Error(`creative capability ${definition.capability} declares unknown pipeline block ${block}`);
+      }
+    }
+    if (definition.selectionMode === "private_review_only" && offer.pipelineObligations.length) {
+      throw new Error(`private-review capability ${definition.capability} cannot declare an automatic pipeline path`);
+    }
+    if (definition.selectionMode !== offer.selectionMode) {
+      throw new Error(`creative capability ${definition.capability} materialized an inconsistent selection mode`);
+    }
+  }
+}
+
+/** The catalog owns the canonical data-story contract used by the compiler adapter. */
+export function selectedDataStoryContract(
+  selections: readonly CreativeCapabilitySelection[],
+): DataStoryContract | undefined {
+  return selections.some((selection) => selection.capability === "source_attributed_data_story")
+    ? SOURCE_ATTRIBUTED_DATA_STORY
+    : undefined;
+}
+
+/** Exported for focused tests and migration audits. */
+export const CREATIVE_CAPABILITY_CATALOG_KEYS = CREATIVE_CAPABILITY_CATALOG.map(
+  (definition) => definition.capability,
+) as readonly CreativeCapabilityKey[];

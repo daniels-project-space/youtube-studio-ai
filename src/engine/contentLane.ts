@@ -1,6 +1,7 @@
 import { z } from "zod";
 import type { FamilyKey } from "./families";
 import type { PipelineEntry } from "./types";
+import type { VisualPacingPolicy } from "@/lib/visualPacing";
 
 /**
  * A content lane is the durable visual-production contract for a channel.
@@ -21,6 +22,10 @@ export const ContentLaneKeySchema = z.enum([
   "documentary_collage_short",
   "whiteboard_explainer",
   "motion_comic",
+  "lore_micro_doc",
+  "quiz_year",
+  "illustrated_explainer",
+  "children_learning_supervised",
   "legacy_unclassified",
 ]);
 
@@ -34,6 +39,23 @@ export interface ContentLaneDefinition {
   primaryRenderer: string;
   /** Required end-to-end visual chain blocks (not merely optional creative blocks). */
   requiredBlocks: readonly string[];
+  /**
+   * Complete interchangeable renderer chains for this lane. Every chain is
+   * independently sufficient, but a pipeline must contain one of them in
+   * full. This is deliberately a chain rather than an individual optional
+   * block: it keeps an alternate Novita handoff from becoming a renderer
+   * bypass.
+   */
+  requiredRendererChains?: readonly (readonly string[])[];
+  /**
+   * Additional production evidence required when an alternate renderer chain
+   * is selected. This keeps a shared renderer from bypassing the module that
+   * gives that route its visual/safety semantics.
+   */
+  rendererChainGuards?: readonly {
+    whenPresent: readonly string[];
+    requires: readonly string[];
+  }[];
   /** Known renderers that would change this channel's visual language. */
   forbiddenRendererBlocks: readonly string[];
   /** Non-renderer blocks that would bypass a self-contained visual engine. */
@@ -56,6 +78,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -65,17 +88,26 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
     family: "cinematic",
     primaryRenderer: "novita_render_video",
     requiredBlocks: [
-      "novita_render_images",
-      "qa_assets",
-      "novita_render_video",
-      "qa_shots",
       "timeline_assemble",
       "qa_visual",
     ],
+    // Standard cinematic channels use the direct image → I2V chain. A
+    // source-admitted Casefile may instead use gen_footage, which is not
+    // generic stock footage: it runs the same Novita Z-Image/LTX route with
+    // mandatory keyframe, clip, and transition review against the approved
+    // cinematic sequence. Requiring the whole chain prevents partial mixing.
+    requiredRendererChains: [
+      ["novita_render_images", "qa_assets", "novita_render_video", "qa_shots"],
+      ["gen_footage"],
+    ],
+    rendererChainGuards: [{
+      whenPresent: ["gen_footage"],
+      requires: ["cinematic_case_sequence"],
+    }],
     forbiddenRendererBlocks: [
       "stock_footage",
-      "gen_footage",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -90,9 +122,14 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "gen_footage",
       "novita_render_images",
       "novita_render_video",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
+    // Visual Matter is a story-visual module, not a decorative-loop feature.
+    // Keeping it out of lo-fi prevents an irrelevant paid-reference option
+    // from silently appearing in music-loop channels.
+    forbiddenBlocks: ["visual_matter"],
   },
   ambient_guided: {
     key: "ambient_guided",
@@ -104,6 +141,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -118,6 +156,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -133,6 +172,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
       "motion_comic",
     ],
@@ -151,6 +191,7 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "motion_comic",
     ],
     forbiddenBlocks: ["timeline_assemble", "assemble"],
@@ -166,7 +207,85 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
       "novita_render_images",
       "novita_render_video",
       "loop_clips",
+      "lore_short",
       "whiteboard_scribe",
+    ],
+    forbiddenBlocks: ["timeline_assemble", "assemble"],
+  },
+  lore_micro_doc: {
+    key: "lore_micro_doc",
+    family: "loreshort",
+    primaryRenderer: "lore_short",
+    requiredBlocks: ["lore_short", "qa_visual"],
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      // NOTE: the lore engine drives the Novita farm from INSIDE itself, so a
+      // separate novita_render_* stage in the pipeline would be a second,
+      // uncoordinated renderer — exactly the visual-language swap this contract
+      // exists to prevent.
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
+    ],
+    forbiddenBlocks: ["timeline_assemble", "assemble"],
+  },
+  quiz_year: {
+    key: "quiz_year",
+    family: "quizyear",
+    primaryRenderer: "quiz_year",
+    requiredBlocks: ["quiz_year", "qa_visual"],
+    // The quiz engine renders its own finished video from typography alone, so
+    // ANY pixel-producing sibling would be a second, uncoordinated renderer.
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
+      "lore_short",
+    ],
+    forbiddenBlocks: ["timeline_assemble", "assemble"],
+  },
+  illustrated_explainer: {
+    key: "illustrated_explainer",
+    family: "illustrated_explainer",
+    primaryRenderer: "scene_compiler",
+    requiredBlocks: ["story_spine", "episode_graph", "scene_compiler", "qa_visual"],
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
+      "lore_short",
+      "documotion_short",
+      "quiz_year",
+    ],
+    forbiddenBlocks: ["timeline_assemble", "assemble"],
+  },
+  children_learning_supervised: {
+    key: "children_learning_supervised",
+    family: "children_learning",
+    primaryRenderer: "scene_compiler",
+    requiredBlocks: ["curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "child_content_safety", "scene_compiler", "qa_visual"],
+    forbiddenRendererBlocks: [
+      "stock_footage",
+      "gen_footage",
+      "novita_render_images",
+      "novita_render_video",
+      "loop_clips",
+      "whiteboard_scribe",
+      "motion_comic",
+      "lore_short",
+      "documotion_short",
+      "quiz_year",
     ],
     forbiddenBlocks: ["timeline_assemble", "assemble"],
   },
@@ -178,6 +297,283 @@ export const CONTENT_LANE_POLICIES: Record<ContentLaneKey, ContentLaneDefinition
   },
 };
 
+/**
+ * LANE-TUNED QUALITY CALIBRATION (P1-17).
+ *
+ * The lane contract above governs pipeline SHAPE. This second map governs how
+ * hard the MODEL-GRADED quality loops push on a render from that lane — a lo-fi
+ * loop and a narrated essay are not the same product and must not be judged by
+ * one generic bar.
+ *
+ * Deliberately scoped:
+ *   - Only MODEL-GRADED checks read this. Deterministic ffmpeg/file/probe rails
+ *     (resolution, audio presence, structural integrity) stay lane-agnostic —
+ *     a broken file is broken in every lane. The single exception is
+ *     `blackSegmentMinSec` and `maxStaticHoldSec`, which are genuinely
+ *     lane-dependent DETERMINISTIC facts (a night-time ambient loop can hold a
+ *     frame far longer than a 45s Short), not taste judgements.
+ *   - `visualPacing` is a separate final-master scene-marker receipt. It never
+ *     calls a cut count universal quality: lanes with legitimate sustained
+ *     visual evolution request a calibrated human confirmation when markers
+ *     are sparse instead of being falsely failed by automation.
+ *   - `legacy_unclassified` keeps the historic generic score/hold defaults and
+ *     receives the same conservative pacing-calibration receipt as any unknown
+ *     lane; it cannot claim automatic editorial readiness from missing context.
+ */
+export interface LaneQualityPolicy {
+  /** Accept threshold (0..1) for produce→critique loops on this lane. */
+  critiqueThreshold: number;
+  /** Hard cap on produce→critique iterations (each iteration can cost money). */
+  maxCritiqueIters: number;
+  /** Minimum 1-10 score this lane demands from a holistic visual grader. */
+  visualScoreFloor: number;
+  /** Minimum 1-10 score this lane demands from the thumbnail grader. */
+  thumbnailScoreFloor: number;
+  /**
+   * Minimum contiguous near-black duration that counts as dead air. Higher for
+   * lanes whose visual language legitimately includes long dark holds.
+   */
+  blackSegmentMinSec: number;
+  /**
+   * Maximum contiguous near-identical programme hold permitted by deterministic
+   * temporal QA. `null` is reserved for genuinely static visual products such
+   * as an ambient sound bed; planned title/outro cards are excluded separately.
+   */
+  maxStaticHoldSec: number | null;
+  /**
+   * Final-master scene-marker calibration. This complements freeze detection:
+   * a changing one-take can pass the latter while still needing a pacing review.
+   */
+  visualPacing: VisualPacingPolicy;
+  /** Lane-specific things the critic must actively scrutinise (prompt input). */
+  emphasis: readonly string[];
+}
+
+const GENERIC_LANE_QUALITY: LaneQualityPolicy = {
+  critiqueThreshold: 0.8,
+  maxCritiqueIters: 3,
+  visualScoreFloor: 6,
+  thumbnailScoreFloor: 5,
+  blackSegmentMinSec: 2.5,
+  maxStaticHoldSec: 4.5,
+  visualPacing: {
+    mode: "calibrated_review",
+    sceneThreshold: 0.12,
+    maxMarkerHoldSec: 10,
+    rationale: "Scene markers corroborate editorial movement, but a valid continuous take must be confirmed by the scene-aware reviewer rather than failed by cut count.",
+  },
+  emphasis: [],
+};
+
+export const LANE_QUALITY_POLICIES: Record<ContentLaneKey, LaneQualityPolicy> = {
+  narrated_documentary: {
+    ...GENERIC_LANE_QUALITY,
+    // Documentary maps, archive moves, and carefully held evidence cards can
+    // evolve without a hard cut. Ten seconds is a conservative review trigger,
+    // not a claim that every narration-led story must cut on a timer.
+    visualPacing: {
+      ...GENERIC_LANE_QUALITY.visualPacing,
+      mode: "calibrated_review",
+      maxMarkerHoldSec: 10,
+      rationale: "Narrated factual beats should visibly progress, while slow evidence maps and continuous archive moves remain legitimate human-review cases.",
+    },
+    emphasis: [
+      "Every visual must be earned by the sentence being narrated over it; decorative b-roll that ignores the claim is a defect.",
+    ],
+  },
+  cinematic_ai: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.82,
+    // A generated shot can be a deliberately sustained camera move. Sparse
+    // cut markers therefore request calibrated visual review rather than
+    // falsely condemning deliberate cinematography.
+    visualPacing: {
+      ...GENERIC_LANE_QUALITY.visualPacing,
+      mode: "calibrated_review",
+      maxMarkerHoldSec: 12,
+      rationale: "Cinematic AI may sustain an evolving camera move; a marker-free hold beyond twelve seconds needs scene-aware review, not an automatic cut-count verdict.",
+    },
+    emphasis: [
+      "Generated shots must hold ONE consistent world: subject identity, wardrobe, lighting key and grade may not drift between shots.",
+      "Anatomy, hands, text-like artefacts and morphing edges are the known failure modes of generated video — inspect for them explicitly.",
+    ],
+  },
+  music_loop: {
+    ...GENERIC_LANE_QUALITY,
+    // Music-first: the audio is the product and the visual is a decorative bed.
+    // A lower visual bar is honest here; a lower iteration cap keeps a
+    // decorative loop from out-spending the track it exists to carry.
+    critiqueThreshold: 0.75,
+    maxCritiqueIters: 2,
+    visualScoreFloor: 5,
+    blackSegmentMinSec: 6,
+    maxStaticHoldSec: null,
+    visualPacing: {
+      mode: "exempt",
+      sceneThreshold: 0.12,
+      maxMarkerHoldSec: null,
+      rationale: "Music-loop visuals are a decorative bed; loop continuity and audio quality are the meaningful release evidence, not scene cadence.",
+    },
+    emphasis: [
+      "The loop seam must be invisible: no jump, flash, or frozen hold where the clip wraps.",
+      "Slow, uneventful, low-contrast night imagery is the INTENT of this lane, not a defect.",
+    ],
+  },
+  ambient_guided: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.75,
+    maxCritiqueIters: 2,
+    visualScoreFloor: 5,
+    blackSegmentMinSec: 6,
+    maxStaticHoldSec: null,
+    visualPacing: {
+      mode: "exempt",
+      sceneThreshold: 0.12,
+      maxMarkerHoldSec: null,
+      rationale: "Guided ambient visual beds can intentionally stay slow or near-static, so scene-marker cadence is not a valid quality claim.",
+    },
+    emphasis: [
+      "Deliberately slow pacing and long, near-static holds are the intent of this lane, not a defect.",
+    ],
+  },
+  short_form: {
+    ...GENERIC_LANE_QUALITY,
+    // Highest attention-per-second surface, shortest runtime: a defect costs a
+    // proportionally larger share of the video, and a regenerate is cheap.
+    critiqueThreshold: 0.85,
+    visualScoreFloor: 7,
+    thumbnailScoreFloor: 6,
+    blackSegmentMinSec: 1.2,
+    maxStaticHoldSec: 1.5,
+    // A short needs a readable rhythm signal. A one-take may still be good,
+    // however, so missing markers deliberately become `needs_human`, never a
+    // simplistic automatic "bad video" result.
+    visualPacing: {
+      ...GENERIC_LANE_QUALITY.visualPacing,
+      mode: "scene_rhythm",
+      maxMarkerHoldSec: 5.5,
+      rationale: "A viewer-facing Short should demonstrate a strong visual change within roughly six seconds; an intentional continuous take is routed to review rather than rejected by cut count.",
+    },
+    emphasis: [
+      "Judge at phone size: anything unreadable on a 6-inch screen is unreadable.",
+      "Every element must sit inside the vertical safe areas, clear of the UI chrome.",
+    ],
+  },
+  documentary_collage_short: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.85,
+    visualScoreFloor: 7,
+    thumbnailScoreFloor: 6,
+    blackSegmentMinSec: 1.2,
+    maxStaticHoldSec: 1.5,
+    visualPacing: {
+      ...GENERIC_LANE_QUALITY.visualPacing,
+      mode: "scene_rhythm",
+      maxMarkerHoldSec: 5.5,
+      rationale: "Documentary collage Shorts need visible beat-to-beat rhythm, while a deliberate continuous source clip remains a reviewer-confirmed exception.",
+    },
+    emphasis: [
+      "Judge at phone size; source/evidence cards must stay legible and inside the vertical safe areas.",
+    ],
+  },
+  whiteboard_explainer: {
+    ...GENERIC_LANE_QUALITY,
+    emphasis: [
+      "The drawing must stay in lockstep with the narration: a label that appears before or after the words that explain it is a defect.",
+    ],
+  },
+  motion_comic: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.82,
+    emphasis: [
+      "Bubbles and captions must sit inside their panel and never cover a face or hero artwork.",
+    ],
+  },
+  lore_micro_doc: {
+    ...GENERIC_LANE_QUALITY,
+    // Every beat is a paid still AND a paid clip, so an extra critique iteration
+    // is far cheaper than an extra render pass — but the cap stays at 2 because
+    // the loop sits on the beat sheet, which is where a defect is still free.
+    critiqueThreshold: 0.82,
+    maxCritiqueIters: 2,
+    // Long, dark, near-static painterly holds are the LOOK of this lane.
+    blackSegmentMinSec: 5,
+    // Calm painterly beats are intentional, but a whole factual beat frozen
+    // beyond this is almost certainly a dropped motion layer.
+    maxStaticHoldSec: 12,
+    emphasis: [
+      "The camera must travel through real depth — foreground, midground and background sliding at different rates. A flat pan or zoom on a single plane is the defining defect of this lane.",
+      "Painted concept-art stillness is the intent: a calm beat that only breathes is correct, and forced motion on a still subject (warping, melting, drifting statues) is the defect.",
+      "The narration is one first-person voice throughout; a slip into neutral documentary register breaks the format.",
+    ],
+  },
+  quiz_year: {
+    ...GENERIC_LANE_QUALITY,
+    // The critique loop here grades WORDING only and runs at text prices, so an
+    // extra iteration is nearly free — but it can never touch an answer, which
+    // is why the bar sits at the generic level rather than higher.
+    critiqueThreshold: 0.8,
+    maxCritiqueIters: 2,
+    // Question cards need a readable thinking window; title/outro cards are
+    // excluded independently, so this only covers programme content.
+    maxStaticHoldSec: 8,
+    emphasis: [
+      "The question must never contain its own answer, in any form — a year, a city, a currency, a symbol. That either spoils the round or contradicts the cited source.",
+      "Every question must be readable at a glance; the viewer has seconds, not paragraphs.",
+      "All four options must look equally plausible, so the answer cannot be found by elimination: period-plausible years, same-region capitals, real currencies, real chemical symbols.",
+      "The video mixes categories on purpose. Each question must stand alone and read clearly without the one before it.",
+    ],
+  },
+  illustrated_explainer: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.84,
+    visualScoreFloor: 7,
+    maxStaticHoldSec: 4,
+    emphasis: [
+      "Every scene must make a causal claim, state transition, or learning step visible; decorative motion is a defect.",
+      "Maps, charts, diagrams, labels, and captions must be readable at normal viewing size and change only when the narrated idea changes.",
+      "The same character and setting IDs must retain their visual identity throughout the episode.",
+    ],
+  },
+  children_learning_supervised: {
+    ...GENERIC_LANE_QUALITY,
+    critiqueThreshold: 0.86,
+    visualScoreFloor: 7,
+    thumbnailScoreFloor: 6,
+    // Calm does not mean stalled: an educational story still needs visible
+    // progression after its planned title card.
+    maxStaticHoldSec: 4,
+    // Children’s content must progress without the rapid attention bait of a
+    // generic Short. The receipt uses a calm eight-second review threshold and
+    // leaves a continuously animated learning scene for human confirmation.
+    visualPacing: {
+      ...GENERIC_LANE_QUALITY.visualPacing,
+      mode: "calibrated_review",
+      maxMarkerHoldSec: 8,
+      rationale: "Children’s learning scenes need calm visible progression; a long marker-free but continuously animated lesson requires review, not rapid-cut enforcement.",
+    },
+    emphasis: [
+      "One clear age-appropriate learning or life-skill objective must be resolved in a coherent beginning, middle, and safe prosocial ending.",
+      "Dialogue, labels, and transitions must be calm, intelligible, and understandable without rapid attention bait or unexplained visual changes.",
+      "Only original, stable characters and settings may appear; resemblance to recognizable children’s properties is a release defect.",
+    ],
+  },
+  legacy_unclassified: { ...GENERIC_LANE_QUALITY },
+};
+
+/**
+ * Resolve the quality calibration for a lane. Accepts a parsed lane, a raw
+ * persisted lane, a bare lane key, or nothing — an unresolvable input falls
+ * back to the historic generic bar rather than inventing a stricter one.
+ */
+export function laneQualityPolicy(lane: ContentLane | ContentLaneKey | unknown): LaneQualityPolicy {
+  if (typeof lane === "string") {
+    return LANE_QUALITY_POLICIES[lane as ContentLaneKey] ?? GENERIC_LANE_QUALITY;
+  }
+  const parsed = ContentLaneSchema.safeParse(lane);
+  return parsed.success ? LANE_QUALITY_POLICIES[parsed.data.key] : GENERIC_LANE_QUALITY;
+}
+
 export const CONTENT_LANE_BY_FAMILY: Record<FamilyKey, ContentLaneKey> = {
   narrated_stock: "narrated_documentary",
   cinematic: "cinematic_ai",
@@ -187,6 +583,10 @@ export const CONTENT_LANE_BY_FAMILY: Record<FamilyKey, ContentLaneKey> = {
   documentary_collage_short: "documentary_collage_short",
   whiteboard: "whiteboard_explainer",
   comic: "motion_comic",
+  loreshort: "lore_micro_doc",
+  quizyear: "quiz_year",
+  illustrated_explainer: "illustrated_explainer",
+  children_learning: "children_learning_supervised",
 };
 
 export const ContentLaneSchema = z.object({
@@ -350,14 +750,46 @@ export function assertPipelineMatchesContentLane(
       .filter((block): block is string => typeof block === "string"),
   );
   const missing = definition.requiredBlocks.filter((block) => !blocks.has(block));
+  const rendererChains = definition.requiredRendererChains ?? [];
+  const hasRequiredRendererChain = rendererChains.length === 0 || rendererChains
+    .some((chain) => chain.every((block) => blocks.has(block)));
+  const missingRendererChainGuards = (definition.rendererChainGuards ?? [])
+    .filter((guard) => guard.whenPresent.every((block) => blocks.has(block)))
+    .filter((guard) => !guard.requires.every((block) => blocks.has(block)));
   const forbidden = [...definition.forbiddenRendererBlocks, ...(definition.forbiddenBlocks ?? [])]
     .filter((block) => blocks.has(block));
-  if (missing.length || forbidden.length) {
+  if (missing.length || !hasRequiredRendererChain || missingRendererChainGuards.length || forbidden.length) {
     const issues = [
       ...(missing.length ? [`requires ${missing.join(", ")}`] : []),
+      ...(!hasRequiredRendererChain
+        ? [`requires one renderer chain: ${rendererChains
+            .map((chain) => chain.join(" + "))
+            .join(" OR ")}`]
+        : []),
+      ...missingRendererChainGuards.map((guard) =>
+        `${guard.whenPresent.join(" + ")} requires ${guard.requires.join(" + ")}`,
+      ),
       ...(forbidden.length ? [`forbids ${forbidden.join(", ")}`] : []),
     ];
     throw new Error(`Pipeline violates content lane ${parsed.key}: ${issues.join("; ")}`);
+  }
+  // The children curriculum seed is an actual planning boundary, not a badge
+  // that can be appended after a generated story. Preserve its order here so a
+  // persisted or one-off pipeline cannot place the review after Story Spine.
+  if (parsed.key === "children_learning_supervised") {
+    const positions = new Map<string, number>();
+    pipeline.forEach((entry, index) => {
+      if (typeof entry?.block === "string" && !positions.has(entry.block)) positions.set(entry.block, index);
+    });
+    const prerequisiteOrder = ["curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "child_content_safety"];
+    const outOfOrder = prerequisiteOrder.some((block, index) =>
+      index > 0 && (positions.get(prerequisiteOrder[index - 1]) ?? -1) >= (positions.get(block) ?? Number.MAX_SAFE_INTEGER),
+    );
+    if (outOfOrder) {
+      throw new Error(
+        "Pipeline violates content lane children_learning_supervised: curriculum_episode_seed must precede Story Spine, Episode Graph, Show Bible, and child safety review",
+      );
+    }
   }
 }
 
@@ -395,10 +827,13 @@ export function injectContentLaneIntoPipeline(
       ...entry,
       params: {
         ...(entry.params ?? {}),
-        // For a music channel, audio is not a supporting asset: it is the
-        // product. Make the existing aesthetics evaluator mandatory at the
-        // runtime boundary even for old persisted pipelines.
-        ...(parsed.key === "music_loop" && entry.params?.["audioQa"] === undefined
+        // Every final master has an audience-facing audio experience: spoken
+        // narration, score, ambience, or quiz/game sound. Make the existing
+        // aesthetics evaluator mandatory at the runtime boundary even for old
+        // persisted pipelines, so a release never relies on loudness alone.
+        // Legacy/unclassified lanes remain untouched because they have no
+        // approved editorial grammar and already fail closed at upload.
+        ...(parsed.key !== "legacy_unclassified" && entry.params?.["audioQa"] !== true
           ? { audioQa: true }
           : {}),
         contentLane: { ...parsed },

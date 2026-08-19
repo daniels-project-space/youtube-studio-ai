@@ -727,17 +727,13 @@ function splitNarrationIntoBeats(text: string, count: number): string[] {
     const targetWords = Math.ceil(words.length / count);
     const lines: string[] = [];
     let current: string[] = [];
-    let usedWords = 0;
     for (const sentence of sentences) {
-      const sentenceWords = sentence.split(/\s+/).length;
       const slotsLeft = count - lines.length - 1;
-      const sentencesLeft = sentences.length - (usedWords === 0 ? 0 : 0);
       if (current.length && current.join(" ").split(/\s+/).length >= targetWords && slotsLeft > 0) {
         lines.push(current.join(" "));
         current = [];
       }
       current.push(sentence);
-      usedWords += sentenceWords;
     }
     if (current.length) lines.push(current.join(" "));
     if (lines.length === count) return lines;
@@ -752,6 +748,8 @@ function splitNarrationIntoBeats(text: string, count: number): string[] {
 }
 
 function resolveSources(value: unknown, _runId: string, _topic: string): ShortSource[] {
+  void _runId;
+  void _topic;
   if (value === undefined || value === null) {
     throw new Error(
       "documentary collage Shorts require sourceReferences: provide at least one externally auditable source record before factual/context narration can render",

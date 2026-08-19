@@ -92,6 +92,80 @@ const NARRATED: PipelineEntry[] = [
   { block: "cleanup" }, // keep only the finished video + thumbnail; drop all intermediates
 ];
 
+// Deterministic scene-compiler base. It intentionally keeps the established
+// text, narration, music, metadata, quality and upload rails, but replaces
+// stock/generative footage and the legacy timeline assembler with a single
+// locally-rendered scene grammar. `episode_graph` turns the timed Story Spine
+// into causal, sourced scene nodes; `scene_compiler` is the only pixel producer.
+const ILLUSTRATED_EXPLAINER: PipelineEntry[] = [
+  { block: "competitor_research" },
+  { block: "topic_select", params: { policy: "no_repeat" } },
+  { block: "script_gen", params: { style: "illustrated_explainer", maxSeconds: 300 } },
+  { block: "qa_script" },
+  { block: "originality_gate" },
+  { block: "compliance_check" },
+  { block: "narration_tts", params: { sentenceGapSec: 0.8, sentenceGapJitter: 0.15 } },
+  { block: "story_spine", params: { targetShotSec: 6 } },
+  { block: "episode_graph" },
+  {
+    block: "music",
+    params: {
+      provider: "mureka",
+      prompt: "original light instrumental underscore, clear and unobtrusive, no vocals, no sudden impacts",
+    },
+  },
+  { block: "scene_compiler", params: { aspect: "16:9" } },
+  { block: "length_check", params: { minSeconds: 60, maxSeconds: 900 } },
+  { block: "captions" },
+  { block: "metadata" },
+  { block: "thumbnail_gen" },
+  { block: "qa_visual" },
+  { block: "upload_draft" },
+  { block: "notify" },
+  { block: "cleanup" },
+];
+
+// A deliberately separate product lane. The renderer is shared with the
+// illustrated explainer, but the contract requires a declared age band,
+// original canon, one learning objective, child-safety evidence, and human
+// editorial approval. The upload block independently refuses public/scheduled
+// release for this family.
+const CHILDREN_LEARNING: PipelineEntry[] = [
+  { block: "competitor_research" },
+  { block: "topic_select", params: { policy: "no_repeat", targetSeconds: 180 } },
+  // A fresh, child-editor-signed intent constrains every later story/graph
+  // artifact. It is an invocation seed, never a channel-level auto-create key.
+  { block: "curriculum_episode_seed" },
+  { block: "script_gen", params: { style: "children_learning", maxSeconds: 180 } },
+  { block: "qa_script" },
+  { block: "originality_gate" },
+  { block: "compliance_check" },
+  { block: "narration_tts", params: { sentenceGapSec: 0.9, sentenceGapJitter: 0.1 } },
+  { block: "story_spine", params: { targetShotSec: 6 } },
+  { block: "episode_graph", params: { audience: "children" } },
+  { block: "learning_contract" },
+  // This is an operator-supplied, fingerprint-bound child-editor admission.
+  // It is a per-episode seed, never an automatic channel-creation shortcut.
+  { block: "children_show_bible" },
+  { block: "child_content_safety" },
+  {
+    block: "music",
+    params: {
+      provider: "mureka",
+      prompt: "original gentle playful instrumental underscore, no lyrics, no sudden impacts, narration-first mix",
+    },
+  },
+  { block: "scene_compiler", params: { aspect: "16:9", audience: "children" } },
+  { block: "length_check", params: { minSeconds: 60, maxSeconds: 360 } },
+  { block: "captions" },
+  { block: "metadata" },
+  { block: "thumbnail_gen" },
+  { block: "qa_visual" },
+  { block: "upload_draft", params: { publishMode: "draft", madeForKids: true } },
+  { block: "notify" },
+  { block: "cleanup" },
+];
+
 export const ARCHETYPES: Record<string, Archetype> = {
   "lofi-ambient": {
     key: "lofi-ambient",
@@ -111,6 +185,26 @@ export const ARCHETYPES: Record<string, Archetype> = {
     defaultVoiceId: "sleepless_historian",
     thumbnailTemplate: "banana",
     pipeline: NARRATED,
+  },
+  "illustrated-explainer": {
+    key: "illustrated-explainer",
+    label: "Illustrated causal explainer",
+    description:
+      "Timed story spine → Episode Graph → deterministic maps, diagrams, panels and original vector characters; no image/video generation provider.",
+    template: "A",
+    defaultVoiceId: "narrator_teacher",
+    thumbnailTemplate: "banana",
+    pipeline: ILLUSTRATED_EXPLAINER,
+  },
+  "children-learning": {
+    key: "children-learning",
+    label: "Original supervised children’s learning show",
+    description:
+      "Age-banded original learning story rendered through a deterministic scene grammar; private draft only pending child-content editorial approval.",
+    template: "A",
+    defaultVoiceId: "gentle_guide",
+    thumbnailTemplate: "banana",
+    pipeline: CHILDREN_LEARNING,
   },
   "crime-narrative": {
     key: "crime-narrative",
@@ -183,6 +277,72 @@ export const ARCHETYPES: Record<string, Archetype> = {
       { block: "documotion_short", params: { styleId: "archival_collage", targetSeconds: 52 } },
       { block: "short_scene_qa" },
       { block: "length_check", params: { minSeconds: 20, maxSeconds: 60 } },
+      { block: "metadata" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+      { block: "notify" },
+      { block: "cleanup" },
+    ],
+  },
+  "lore-short": {
+    key: "lore-short",
+    label: "Lore micro-documentary",
+    description:
+      "First-person 'Histories & Lore' micro-doc: one narrator over painted concept art with genuine 3D depth camera moves, cut to the voice.",
+    template: "A",
+    defaultVoiceId: "sleepless_historian",
+    thumbnailTemplate: "banana",
+    // SELF-CONTAINED: `lore_short` writes the beat sheet, paints it, animates
+    // it and cuts it to its own narration, so there is deliberately no
+    // script_gen / narration_tts / footage / timeline_assemble chain here.
+    // compliance_check gates the TOPIC before the paid engine runs;
+    // originality_gate judges the narration the engine wrote, so it sits after.
+    pipeline: [
+      { block: "competitor_research" },
+      { block: "topic_select", params: { targetSeconds: 54 } },
+      { block: "compliance_check" },
+      { block: "lore_short", params: { subStyle: "cinematic", targetSeconds: 54 } },
+      { block: "originality_gate" },
+      { block: "length_check", params: { minSeconds: 25, maxSeconds: 150 } },
+      { block: "metadata" },
+      { block: "thumbnail_gen" },
+      { block: "qa_visual" },
+      { block: "upload_draft" },
+      { block: "notify" },
+      { block: "cleanup" },
+    ],
+  },
+  "quiz-year": {
+    key: "quiz-year",
+    label: "Guess the year quiz",
+    description:
+      "Multiple-choice 'guess the year': a CC0 Wikidata fact, four year options, a depleting timer, then the correct option locks in.",
+    template: "A",
+    thumbnailTemplate: "banana",
+    // SELF-CONTAINED: `quiz_year` sources its own facts, writes its own
+    // questions and renders the finished video, so there is deliberately no
+    // script_gen / narration_tts / footage / timeline_assemble chain here.
+    //
+    // topic_select IS kept, with a clear division of responsibility: it frames
+    // the EPISODE (the title, the thumbnail promise, the crew brief — all of
+    // which consume `topic`), while the ROUNDS are chosen by quiz_year from
+    // Wikidata by notability. An LLM never picks a fact and never picks a year.
+    //
+    // originality_gate is omitted: the questions are deliberately templated
+    // around third-party facts, which is what this format IS rather than a
+    // plagiarism signal. compliance_check still gates before the engine runs.
+    pipeline: [
+      { block: "competitor_research" },
+      { block: "topic_select", params: { targetSeconds: 80 } },
+      { block: "compliance_check" },
+      // No `categories` param → the block uses the full default mix, so a
+      // channel created from this archetype gets a genuinely mixed trivia video
+      // (years, capitals, currencies, symbols, general knowledge) rather than
+      // eight rounds of the same question type. `topic` still steers only the
+      // guess-the-year share of the mix.
+      { block: "quiz_year", params: { topic: "science_discovery", targetSeconds: 80 } },
+      { block: "length_check", params: { minSeconds: 25, maxSeconds: 400 } },
       { block: "metadata" },
       { block: "thumbnail_gen" },
       { block: "qa_visual" },

@@ -1,56 +1,24 @@
 /**
- * `generate-channel-art` — generate a channel's avatar + banner via Flux and
- * persist the R2 keys onto the channel identity. Callable for backfill and
- * reused by the package builder (Stage 2). Cheap (two Flux stills); not a video
- * render.
+ * Retired channel-art backfill task.
+ *
+ * Channel art may now be generated only from an admitted stage that supplies
+ * both an aggregate provider envelope and durable lifecycle. This legacy task
+ * accepted only a channel id, so it could not prove either condition.
  */
 import { task } from "@trigger.dev/sdk";
-import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
-import { api } from "../../convex/_generated/api";
-import type { Id } from "../../convex/_generated/dataModel";
-import { bootstrapSecrets } from "@/lib/bootstrap";
-import { generateChannelArt } from "@/lib/channelArt";
 
 export interface ChannelArtArgs {
   channelId: string;
 }
 
+const RETIRED_REASON =
+  "generate-channel-art is retired: a channel id alone is not a signed provider budget or lifecycle. Use the admitted channel-inception art stages instead.";
+
 export const generateChannelArtTask = task({
   id: "generate-channel-art",
   maxDuration: 600,
-  run: async (payload: ChannelArtArgs) => {
-    const log = (m: string, x?: Record<string, unknown>) =>
-      console.log(`[generate-channel-art] ${m}`, x ?? "");
-    await bootstrapSecrets(log);
-
-    const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
-    if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
-    const convex = new ConvexHttpClient(url);
-
-    const channelId = payload.channelId as Id<"channels">;
-    const channel = await convex.query(api.channels.getChannel, { channelId });
-    if (!channel) throw new Error(`channel not found: ${payload.channelId}`);
-
-    const art = await generateChannelArt(
-      channel.ownerId,
-      channel.slug,
-      {
-        name: channel.name,
-        persona: channel.identity?.persona,
-        styleGrammar: channel.identity?.styleGrammar,
-        palette: channel.identity?.palette,
-        niche: channel.identity?.niche,
-        iconicMotif: channel.identity?.creativeBrief?.iconicMotif,
-        vibe: channel.identity?.creativeBrief?.vibe,
-      },
-      log,
-    );
-
-    await convex.mutation(api.channels.updateChannel, {
-      channelId,
-      identity: { ...channel.identity, ...art },
-    });
-    log("channel art persisted", { ...art });
-    return { ok: true, ...art };
+  run: async (_payload: ChannelArtArgs) => {
+    void _payload;
+    throw new Error(RETIRED_REASON);
   },
 });

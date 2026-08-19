@@ -1,5 +1,6 @@
 import { z } from "zod";
 import { CHANNEL_INCEPTION_MODULE_CONTRACTS } from "./channelInceptionContracts";
+import { LTX_25_RTX_4090_VIDEO } from "./generationProfiles";
 import { GOLDEN_MODULES, type GoldenModule } from "./golden";
 import type { ModuleManifest } from "./moduleManifest";
 
@@ -75,7 +76,7 @@ export interface CatalogExecutionStep {
  * motion does. Infrastructure must satisfy this contract before strict rollout.
  */
 export const NOVITA_GPU_VIDEO_RENDER_BINDING = {
-  id: "novita-gpu-zimage-ltx-v1",
+  id: "novita-gpu-zimage-ltx25-v2",
   catalogKey: "novita-render-farm",
   providerExecutableIds: ["novita_render_images", "novita_render_video"] as const,
   requiredChain: ["novita_render_images", "qa_assets", "novita_render_video", "qa_shots"] as const,
@@ -87,8 +88,8 @@ export const NOVITA_GPU_VIDEO_RENDER_BINDING = {
   legacyProviderExecutableIds: [] as const,
   imageModel: "Tongyi-MAI/Z-Image-Turbo",
   imageStorage: "local-persistent-disk",
-  videoModel: "Lightricks/LTX-2.3@7caa482d5cd10a2eae6b34cb48f093ebc45a263e",
-  productionPipeline: "two-stage-hq",
+  videoModel: `${LTX_25_RTX_4090_VIDEO.model}@${LTX_25_RTX_4090_VIDEO.revision}`,
+  productionPipeline: "distilled-two-stage-x2-fp8-cpu-offload",
   elasticGpuCeiling: 8,
 } as const;
 
@@ -126,10 +127,64 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
       },
     ]),
   ),
-  loreshort: { kind: "catalog-only", executableIds: [], note: "Standalone library; pipeline adapter pending." },
+  loreshort: { kind: "pipeline-module", executableIds: ["lore_short"] },
+  "episode-graph": { kind: "pipeline-module", executableIds: ["episode_graph"] },
+  "learning-contract": { kind: "pipeline-module", executableIds: ["learning_contract"] },
+  "children-show-bible": {
+    kind: "pipeline-module",
+    executableIds: ["curriculum_episode_seed", "children_show_bible"],
+    note: "Provider-free, operator-supplied children-show admission only. A child-editor-signed CurriculumEpisodeSeed locks the exact age band, objective, vocabulary/actions, assessment, and original identity before Story Spine planning; the later Show Bible binds that same seed to the Episode Graph and Learning Contract. Both emit private-review-only receipts and do not auto-admit children_learning.",
+  },
+  "casefile-documentary": {
+    kind: "pipeline-module",
+    executableIds: ["casefile_source_packet"],
+    note: "Provider-free source-admission executable only. It remains deliberately outside every automatic channel-family route: an operator must supply a rights-bound Case Packet and a fresh human editorial approval receipt, and its output is private-review-only.",
+  },
+  "casefile-evidence-shot-map": {
+    kind: "pipeline-module",
+    executableIds: ["casefile_evidence_shot_map"],
+    note: "Provider-free claim-to-visual review executable only. It requires the private source-admission receipt plus current Scene Manifest / ShotPlan fingerprints and a fresh human reviewer approval; it emits private-review-only evidence mapping and does not auto-admit crime, documentary, or cinematic families.",
+  },
+  "source-bound-story-spine": {
+    kind: "pipeline-module",
+    executableIds: ["source_bound_story_spine"],
+    note: "Provider-free reviewed-evidence handoff only. It proves every timed Story Spine shot retains a current Casefile claim/source/citation/treatment binding; it emits private-review-only provenance and cannot generate facts, render media, or admit a family.",
+  },
+  "cinematic-case-sequence": {
+    kind: "pipeline-module",
+    executableIds: ["cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence"],
+    note: "Provider-free cinematic direction draft → human signature → strict admission. It converts the admitted Casefile map and Story Spine into a source-bound multi-shot/EDL handoff for the existing Novita renderer, but cannot mint its own crime-editor approval or auto-admit a crime family.",
+  },
+  "scene-compiler": {
+    kind: "pipeline-module",
+    // One deterministic local renderer lane owns its admitted scenario
+    // contract/disclosure and causal graph pixels; the shared thumbnail module
+    // supplies the required Nano Banana cover image for every family.
+    executableIds: [
+      "synthetic_scenario",
+      "scenario_disclosure_gate",
+      "scene_compiler",
+    ],
+  },
+  "child-content-safety": { kind: "pipeline-module", executableIds: ["child_content_safety"] },
+  "quiz-year": {
+    kind: "pipeline-module",
+    // The autonomous QuizYear route owns its deterministic topic/safety/cue,
+    // critic and metadata receipts as one Golden module. Its final thumbnail
+    // is intentionally owned by the shared Nano Banana module. Binding only
+    // the final renderer left its actual production
+    // planner outside the catalog proof graph.
+    executableIds: [
+      "quiz_topic_plan",
+      "quiz_topic_safety",
+      "quiz_critic_spec",
+      "quiz_metadata",
+      "quiz_year",
+    ],
+  },
   "novita-render-farm": { kind: "pipeline-module", executableIds: ["novita_render_images", "novita_render_video"] },
-  "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "Reference engine is executed through the Novita render-farm module." },
-  "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "Reference engine is executed through the Novita render-farm module." },
+  "imagecraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/imagecraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production image rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_images block) instead — same Z-Image family, different implementation and gate set." },
+  "videocraft-novita": { kind: "catalog-only", executableIds: [], note: "src/lib/videocraft-novita.ts was never on the executed path (no import chain reached it from src/trigger or src/engine) and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). This was never a capability gap: production video rendering runs, and always ran, through the separate novita-render-farm module (src/lib/novitaRenderFarm.ts, called from src/trigger/blocks/novitaRenderBlocks.ts:39's novita_render_video block) instead — same LTX family, different implementation and gate set." },
   lofi: { kind: "pipeline-module", executableIds: ["scene_planner", "keyframes", "loop_clips", "upscale", "assemble"] },
   quiz: { kind: "catalog-only", executableIds: [], note: "Proof engine is not registered in the production runner." },
   thumbnail: { kind: "pipeline-module", executableIds: ["thumbnail_gen"] },
@@ -142,22 +197,22 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
   guard: { kind: "pipeline-module", executableIds: ["qa_script", "originality_gate", "compliance_check"] },
   narration: { kind: "pipeline-module", executableIds: ["narration_tts"] },
   music: { kind: "pipeline-module", executableIds: ["music"] },
-  visuals: { kind: "pipeline-module", executableIds: ["stock_footage", "entity_imagery", "gen_footage", "signature_clips"] },
+  visuals: { kind: "pipeline-module", executableIds: ["stock_footage", "entity_imagery", "gen_footage", "signature_clips", "visual_matter"] },
   // Cinematic is the editorial composition of the Novita render-farm modules.
   // The render modules retain their single catalog owner below, so this entry
   // must not duplicate them or claim a separate executable ABI.
   cinematic: {
     kind: "catalog-only",
     executableIds: [],
-    note: "Cinematic channels execute the enforced Z-Image → QA → LTX → QA chain owned by novita-render-farm; a frozen spend ceiling and Golden proof receipt are both required before promotion.",
+    note: "Cinematic channels execute the enforced Z-Image → QA → LTX → QA chain owned by novita-render-farm (src/lib/novitaRenderFarm.ts). cinecraft.ts's OWN code is not applied and never will be: its render path is hard-disabled at the source (hasCinecraft() returns a literal false, src/lib/cinecraft.ts:47-52) because it drives the retired paid Higgsfield CLI, so the file survives only as a type-only ShotSpec import (src/lib/crew/cinematographer.ts:16). This is NOT a capability gap (P1-10 superseded): the equivalent hero-anchor identity-lock is supplied by the wired `visual_matter` module — see the `visuals` binding above — whose manifest this chain HARD-REQUIRES (requireVisualMatter throws; src/trigger/blocks/novitaRenderBlocks.ts:452-456, consumed at :550/:610/:808/:888) and whose character/setting reference sheets feed the qa_assets identity floor (:635/:927). A frozen spend ceiling and Golden proof receipt are both required before promotion.",
   },
   documotion: {
     kind: "pipeline-module",
     executableIds: ["short_strategy", "documotion_short"],
     note: "Native 9:16 documentary-collage lane; direct Short uploads remain private-first through upload_draft.",
   },
-  motioncraft: { kind: "catalog-only", executableIds: [], note: "Standalone library; the production data-viz subset is owned by Inserts." },
-  "speech-tv": { kind: "catalog-only", executableIds: [], note: "Proof composition is not a production pipeline module." },
+  motioncraft: { kind: "catalog-only", executableIds: [], note: "src/lib/motioncraft.ts (246 L) had zero pipeline importers — was never reachable from any executed path — and was deleted outright as confirmed-dead in commit 183ee6a (P2-7). Of its four demonstrated tools, only the data_stats subset has a real successor: it is owned and duplicated by the wired Inserts module (src/trigger/blocks/insertBlocks.ts, catalog key \"inserts\"). The other three (geo_map's MapLibre/OSM renderer, hero_title's depth-cutout camera-through-photo, generative's p5.js background) have no like-for-like successor and are gone with the file; documotion.ts separately built its own, differently-implemented real-map and depth-cutout capabilities, but that is convergent design, not reuse of this code. See golden.ts's \"motioncraft\" catalog entry for detail." },
+  "speech-tv": { kind: "catalog-only", executableIds: [], note: "Library exists (src/lib/remotionRender.ts:360 renderMotivationalSpeech) but has zero callers anywhere in src/trigger or src/engine — not reachable from the pipeline yet, only via a manual Remotion CLI render. A real capability gap, not a doc issue." },
   inserts: { kind: "pipeline-module", executableIds: ["visual_inserts"] },
   layer: { kind: "pipeline-module", executableIds: ["intro_card", "quote_overlays", "captions"] },
   assemble: { kind: "pipeline-module", executableIds: ["timeline_assemble"] },
@@ -172,6 +227,7 @@ export const CATALOG_EXECUTION_BINDINGS: Readonly<Record<string, CatalogExecutio
     // Candidate mining is planning-only: it identifies full-documentary windows
     // for a later, freshly rendered native Short and never crops or publishes.
     executableIds: ["shorts_spinoff", "documentary_short_candidates"],
+    note: "This binds ONLY the long-form -> Short repurposer/candidate-mining path. The primary 9:16 vertical archetype described in golden.ts's \"shorts\" catalog entry (script -> hook_craft -> narration -> footage -> assembly) runs through the standard narrated pipeline-module bindings above (script/guard/narration/visuals/layer/etc.) and has no dedicated executable id of its own — see docs/GOLDEN_MODULE_AUDIT_2026-08.md P1-16.",
   },
 };
 

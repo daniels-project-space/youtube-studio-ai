@@ -1,13 +1,15 @@
 ﻿/**
  * Narrated-archetype text blocks (Stage 3a) â€” the "brain" shared by essay /
  * crime / shorts / meditation:
- *   script_gen  â†’ script + narrationText   (Gemini)
- *   hook_craft  â†’ hook + narrationText'     (Gemini; prepends a punchy opener)
- *   qa_script   â†’ scriptApproved            (Claude critique; soft gate)
+ *   script_gen  â†’ script + narrationText   (non-Google creative model)
+ *   hook_craft  â†’ hook + narrationText'     (non-Google creative model; prepends a punchy opener)
+ *   qa_script   â†’ scriptApproved            (independent critique; hard-gates paid narration)
  *
- * All degrade gracefully on a missing key so the pipeline never hard-fails.
+ * An unavailable or rejected narrative critic fails before any paid voice/video
+ * work. Quality cannot quietly degrade into a polished-looking release.
  */
 import { join } from "node:path";
+import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -17,18 +19,98 @@ import {
   qualityProfile,
 } from "@/engine/qualityPolicy";
 import {
+  ShotRenderManifestSchema,
   validateQualifiedShotRender,
 } from "@/engine/renderArtifacts";
-import { resolveContentLane } from "@/engine/contentLane";
-import { buildQualityEvidence } from "@/engine/qualityEvidence";
-import { narrationTtsCost, qaVisualCost } from "@/engine/pricing";
+import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
+import {
+  DATA_STORY_MIN_SOURCED_NUMERIC_SENTENCES,
+  hasNamedSourceAttribution,
+  hasSourceAttributedDataStoryParams,
+} from "@/engine/dataStory";
+import {
+  assertSyntheticScenarioContract,
+  syntheticScenarioWritingDirective,
+} from "@/engine/syntheticScenario";
+import {
+  assertDataStorySourceLedger,
+  dataStorySourceLedgerPrompt,
+} from "@/engine/dataStorySourceLedger";
+import { casefileNarrativeGroundingPrompt } from "@/engine/casefileNarrativeGrounding";
+import { getLtxStyle } from "@/engine/ltxStylePresets";
+import {
+  channelCritiqueBrief,
+  produceAndCritique,
+  type ChannelCritiqueContext,
+} from "@/engine/critiqueLoop";
+import type { HealClass } from "@/engine/healer";
+import {
+  assessProductionEditorialAcceptance,
+  buildQualityEvidence,
+  EpisodeSpecSchema,
+} from "@/engine/qualityEvidence";
+import {
+  assertScriptApprovedForNarration,
+  assertScriptCritiqueAccepted,
+} from "@/engine/scriptQualityGate";
+import { narrationTtsCost, qaVisualCost, PRICE } from "@/engine/pricing";
+import { visualMatterFromUnknown, visualMatterReviewLocks } from "@/engine/visualMatter";
+import {
+  CinematicCaseSequenceAdmissionReceiptSchema,
+  CinematicCaseSequenceInputSchema,
+  CinematicCreativeLocksSchema,
+  CinematicEditDecisionListSchema,
+  cinematicCaseSequenceContentFingerprint,
+} from "@/engine/cinematicCaseSequence";
+import { assertSourceBoundNarrationAlignment } from "@/engine/sourceBoundStorySpine";
+import {
+  assertCinematicAssemblyRoute,
+  assertCinematicSequenceRenderBinding,
+} from "@/engine/cinematicSequenceRenderBinding";
+import { createCinematicAssemblyHandoff } from "@/lib/assembly/cinematicHandoff";
+import { cinematicFinalMasterQaEvidence } from "@/engine/cinematicQaEvidence";
+import {
+  assertCinematicFinalMasterQaAdmission,
+  assertCinematicFinalMasterQaProfile,
+} from "@/engine/cinematicFinalMasterQaAdmission";
+import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
+import {
+  evaluateAuthoredShotEditIntegrity,
+  evaluateCinematicEditIntegrity,
+} from "@/engine/cinematicEditIntegrity";
+import {
+  cinematicFinalMasterQaPlan,
+  reviewCinematicFinalMasterQaEvidence,
+  type CinematicFinalMasterQaEvidenceReceipt,
+} from "@/lib/cinematicQaEvidenceContract";
+import { analyzeShotBoundaries, sha256ShotAnalysisSource } from "@/lib/shotAnalysis";
+import {
+  proveOnScreenText,
+  sha256OnScreenTextSource,
+  TimedOnScreenTextCueSchema,
+} from "@/lib/onScreenTextProof";
 import { synthScript, translateScript, type Script } from "@/lib/scriptGen";
-import { geminiJson, parseJsonLoose, hasGeminiKey } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { parseJsonLoose } from "@/lib/gemini";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { existsSync } from "node:fs";
 import { claudeJson, hasAnthropicKey } from "@/lib/anthropic";
 import { synthNarration, hasFishKey, stripAudioTags } from "@/lib/tts";
-import { narrationPhysics, gateColdOpen, judgeNarrationTake } from "@/lib/voicecraft";
+import { narrationPhysics } from "@/lib/voicecraft";
+import {
+  assertNarrationPerformanceEvidence,
+  assertNarrationTimingMeasurementIntegrity,
+  planNarrationCadence,
+  preflightNarrationPerformance,
+  reconcileNarrationCadenceAfterDurationMeasurement,
+} from "@/lib/narrationPerformance";
+import {
+  proveNarrationTranscript,
+  sha256NarrationTranscriptSource,
+} from "@/lib/narrationTranscriptProof";
+import {
+  assertNarrationCueTimingEvidence,
+  type NarrationCueTimingEvidence,
+} from "@/lib/narrationCueTiming";
 import {
   boundNarrationChapterHeadings,
   boundNarrationColdOpen,
@@ -50,6 +132,7 @@ import {
   applyOverlaysAndCaptions,
   assembleStructuredBody,
   measureAudio,
+  measureNarrationMixCorrelation,
   normalizeAudioOnly,
   grabFrame,
   kenBurns,
@@ -59,9 +142,11 @@ import {
   type QuoteOverlaySpec,
 } from "@/lib/ffmpeg";
 import { renderTitleCard, renderQuoteOverlay } from "@/lib/remotionRender";
-import { runValidationSpec } from "@/engine/creative/validate";
+import {
+  assessProductionValidationAcceptance,
+  runValidationSpec,
+} from "@/engine/creative/validate";
 import { getVisualBrief, getMusicBrief, getValidationSpec, getStructure, getCutSheet } from "@/engine/creative/brief";
-import { nativeWatchRender } from "@/lib/renderWatch";
 import {
   channelVisualReviewProfile,
   reviewRender,
@@ -175,12 +260,103 @@ function opt(ctx: StageContext, key: string): string | undefined {
   return typeof v === "string" && v.length > 0 ? v : undefined;
 }
 
+/**
+ * CONTENT-ADDRESSED ITERATION CHECKPOINT — the cost-safety primitive behind
+ * every produce→critique loop in this file that spends money.
+ *
+ * A produce→critique loop multiplies a block's spend by its iteration count,
+ * and the self-healer re-runs blocks. Without a checkpoint, one heal of a
+ * two-iteration loop re-purchases BOTH candidates. So each iteration derives a
+ * hash over everything that determines its result — including the iteration
+ * index and the prior critique issues, without which a regenerate would just
+ * re-read the rejected candidate and change nothing — and persists its paid
+ * outcome under that hash. A replay re-reads; it never re-buys.
+ *
+ * Deliberately JSON + R2 rather than a bespoke manifest type: what these loops
+ * buy is *decisions* (which entities, which hook), not large binaries, and the
+ * local derivation from those decisions (download, Ken Burns) is free.
+ */
+function iterationRequestHash(payload: unknown): string {
+  return createHash("sha256").update(JSON.stringify(payload)).digest("hex");
+}
+
+async function readIterationCheckpoint<T>(key: string, log: (msg: string) => void): Promise<T | null> {
+  try {
+    return JSON.parse(new TextDecoder().decode(await getObjectBytes(key))) as T;
+  } catch {
+    // Absent (the normal first-run case) or unreadable — either way, produce it.
+    log(`checkpoint miss: ${key.split("/").pop() ?? key}`);
+    return null;
+  }
+}
+
+async function writeIterationCheckpoint(key: string, value: unknown, log: (msg: string) => void): Promise<void> {
+  try {
+    await putObject(key, Buffer.from(JSON.stringify(value)), { contentType: "application/json" });
+  } catch (e) {
+    // A checkpoint is an optimisation, never a correctness requirement: losing
+    // the write costs a future replay money, but failing the run costs more.
+    log(`checkpoint write failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+  }
+}
+
+const HEAL_CLASSES: readonly HealClass[] = ["overlay_finish", "body_rebuild", "asset_regen"];
+
+/**
+ * Read the healer's DECLARED repair strategy for one block out of the seed
+ * store (P0-1 step 2).
+ *
+ * Validated rather than cast: `store.healClasses` crosses a run boundary (it is
+ * re-seeded on resume), so an unrecognised value must degrade to "no declared
+ * class" — which sends the caller to its conservative branch — instead of
+ * type-asserting a bad string into a repair decision that costs money.
+ */
+function readDeclaredHealClasses(raw: unknown, blockId: string): HealClass[] {
+  if (!raw || typeof raw !== "object" || Array.isArray(raw)) return [];
+  const declared = (raw as Record<string, unknown>)[blockId];
+  if (!Array.isArray(declared)) return [];
+  return declared.filter((value): value is HealClass =>
+    typeof value === "string" && (HEAL_CLASSES as readonly string[]).includes(value),
+  );
+}
+
+/**
+ * Assemble this channel's critique grounding from the frozen seed store (P1-1).
+ *
+ * `criticDoctrine` is `identity.creativeBrief.criticDoctrine`, seeded by
+ * runPipeline alongside the rest of the identity. Every model-graded gate in
+ * this file reads it from here, so there is exactly one place to change what a
+ * per-channel critic is told.
+ */
+function channelCritiqueContext(ctx: StageContext): ChannelCritiqueContext {
+  const laneKey = (ctx.store["contentLane"] as { key?: unknown } | null | undefined)?.key;
+  return {
+    ...(opt(ctx, "channelName") ? { channelName: opt(ctx, "channelName") } : {}),
+    ...(opt(ctx, "persona") ? { persona: opt(ctx, "persona") } : {}),
+    ...(opt(ctx, "styleGrammar") ? { styleGrammar: opt(ctx, "styleGrammar") } : {}),
+    ...(opt(ctx, "criticDoctrine") ? { criticDoctrine: opt(ctx, "criticDoctrine") } : {}),
+    ...(typeof laneKey === "string" && laneKey ? { contentLaneKey: laneKey } : {}),
+    laneEmphasis: laneQualityPolicy(ctx.store["contentLane"]).emphasis,
+  };
+}
+
 export const scriptGen: Block = {
   id: "script_gen",
   consumes: ["topic"],
   produces: ["script", "narrationText"],
   run: async (ctx) => {
     const topic = str(ctx, "topic");
+    const sourceGrounding = [
+      hasSourceAttributedDataStoryParams(ctx.params)
+        ? dataStorySourceLedgerPrompt(assertDataStorySourceLedger(ctx.store["dataStorySourceLedger"]))
+        : undefined,
+      ctx.store["casefileSourcePacket"] !== undefined
+        ? casefileNarrativeGroundingPrompt(ctx.store["casefileSourcePacket"])
+        : undefined,
+      ctx.store["syntheticScenario"] !== undefined
+        ? syntheticScenarioWritingDirective(assertSyntheticScenarioContract(ctx.store["syntheticScenario"]))
+        : undefined,
+    ].filter((value): value is string => Boolean(value)).join("\n\n") || undefined;
     // RENDER-GROUP REUSE: a language sibling translates the base script instead of
     // regenerating it (reuses the base's structure + research; only words change).
     const reuseScript = ctx.store["reuseScript"] as Script | undefined;
@@ -211,6 +387,8 @@ export const scriptGen: Block = {
       // The channel has a data-viz insert layer â€” the script must speak the
       // numbers the inserts will render.
       dataRich: ctx.params["dataRich"] as boolean | undefined,
+      sourceAttributionRequired: ctx.params["sourceAttributionRequired"] === true,
+      sourceGrounding,
       structure: getStructure(ctx.store),
       // The channel's locked narrative register (Style DNA) â€” outranks the
       // generic archetype tone in the prompt.
@@ -223,47 +401,92 @@ export const scriptGen: Block = {
       playbook: ctx.store["scriptPlaybook"] as import("@/lib/scriptLab").ScriptPlaybook | undefined,
       openingDeviceIdx: [...ctx.runId].reduce((s, c) => s + c.charCodeAt(0), 0),
     };
-    let script = await synthScript(req, ctx.log);
+    // EVALUATOR-OPTIMIZER: an independent non-Google critic reviews every
+    // duration. A rejected draft gets one informed retry; exhaustion or a
+    // reviewer outage is an admission failure, never permission to synthesize
+    // an unreviewed script.
+    const critiqueEnabled = hasAnthropicKey();
+    const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
+    const scriptChannel: ChannelCritiqueContext = channelCritiqueContext(ctx);
 
-    // EVALUATOR-OPTIMIZER (short-form only â€” regenerating a 30-min chunked
-    // script doubles cost): Claude critiques the draft; a rejected draft is
-    // regenerated ONCE with the issues injected. Keep the informed second
-    // attempt either way â€” never a generic fallback, and the critique signal
-    // actually feeds back instead of evaporating in qa_script.
-    const maxSec = Number(req.maxSeconds ?? 240);
-    if (hasAnthropicKey() && maxSec <= 420) {
-      try {
-        const persona = req.persona ?? "";
-        const crit = await claudeJson<{ pass?: boolean; issues?: string[] }>({
-          prompt:
-            `Critique this YouTube narration draft for quality and on-brand voice` +
-            (persona ? ` (channel persona: ${persona})` : "") +
-            `. Flag dull sections, off-brand language, factual hedging, weak structure, or generic ` +
-            `templated writing.` +
-            (script.hookLoop
-              ? ` CRITICAL: the cold open promised "${script.hookLoop}" — flag it as an issue if the script ` +
-                `does not EXPLICITLY pay that promise off.`
-              : "") +
-            ` Return STRICT JSON {"pass": boolean, "issues": string[]} â€” at most 5 ` +
-            `issues, each under 140 characters.\n\n` +
-            (script.narrationText.length <= 9000
-              ? script.narrationText
-              : script.narrationText.slice(0, 4000) + `\n\n[... OMITTED ...]\n\n` + script.narrationText.slice(-3500)),
-          maxTokens: 1200,
-          temperature: 0.3,
-        });
-        const issues = (Array.isArray(crit.issues) ? crit.issues : []).filter(Boolean).slice(0, 6);
-        if (crit.pass === false && issues.length) {
-          ctx.log(`script_gen: draft rejected by critic â€” regenerating once`, { issues });
-          // Reuse the judge-gated hook: only the narration was rejected, so the
-          // regen must not re-bill hookcraft (Pro + grounded fact-checks).
-          script = await synthScript({ ...req, priorIssues: issues, precraftedHook: script.crafted }, ctx.log);
+    let precraftedHook: Script["crafted"] | undefined;
+    const loop = await produceAndCritique<Script>({
+      label: "script_gen",
+      threshold: laneQuality.critiqueThreshold,
+      // One informed retry, exactly as before — a script regenerate is the most
+      // expensive text spend in the pipeline.
+      maxIters: critiqueEnabled ? 2 : 1,
+      log: (message, extra) => ctx.log(message, extra),
+      channel: scriptChannel,
+      produce: async (priorIssues) => {
+        const draft = await synthScript(
+          {
+            ...req,
+            ...(priorIssues.length ? { priorIssues } : {}),
+            // Only the narration was rejected, so the regen must not re-bill
+            // hookcraft (Pro + grounded fact-checks).
+            ...(priorIssues.length && precraftedHook ? { precraftedHook } : {}),
+          },
+          ctx.log,
+        );
+        precraftedHook = draft.crafted;
+        return draft;
+      },
+      critique: async (draft, iter) => {
+        if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
+        try {
+          const crit = await claudeJson<{ pass?: boolean; issues?: string[] }>({
+            prompt:
+              `Critique this YouTube narration draft for quality and on-brand voice` +
+              (req.persona ? ` (channel persona: ${req.persona})` : "") +
+              `. Flag dull sections, off-brand language, factual hedging, weak structure, or generic ` +
+              `templated writing.` +
+              (draft.hookLoop
+                ? ` CRITICAL: the cold open promised "${draft.hookLoop}" — flag it as an issue if the script ` +
+                  `does not EXPLICITLY pay that promise off.`
+                : "") +
+              channelCritiqueBrief(scriptChannel) +
+              ` Return STRICT JSON {"pass": boolean, "issues": string[]} â€” at most 5 ` +
+              `issues, each under 140 characters.\n\n` +
+              (draft.narrationText.length <= 9000
+                ? draft.narrationText
+                : draft.narrationText.slice(0, 4000) + `\n\n[... OMITTED ...]\n\n` + draft.narrationText.slice(-3500)),
+            maxTokens: 1200,
+            temperature: 0.3,
+          });
+          const issues = (Array.isArray(crit.issues) ? crit.issues : []).filter(Boolean).slice(0, 6);
+          const rejected = crit.pass === false;
+          const rejectionIssues = issues.length
+            ? issues
+            : ["independent narrative critic rejected the draft without usable remediation"];
+          if (rejected) ctx.log(`script_gen: draft rejected by critic â€” regenerating once`, { issues: rejectionIssues });
+          // The `0.01 * iter` term preserves the legacy "keep the informed
+          // second attempt" rule: produceAndCritique returns the best candidate
+          // by STRICT score comparison, so without it an equally-rated retry
+          // would lose the tie to the uninformed first draft.
+          return rejected
+            ? { score: Math.max(0, 0.5 - 0.05 * rejectionIssues.length) + 0.01 * iter, pass: false, issues: rejectionIssues }
+            : { score: 1, pass: true, issues: [] };
+        } catch (e) {
+          // An independent critic outage cannot be treated as a quality pass.
+          throw new Error(
+            `script_gen FAILED: independent narrative critic unavailable — refusing an unreviewed script (${e instanceof Error ? e.message : e})`,
+          );
         }
-      } catch (e) {
-        ctx.log(`script_gen: critic unavailable (kept draft): ${e instanceof Error ? e.message : e}`);
-      }
+      },
+    });
+    if (critiqueEnabled) {
+      assertScriptCritiqueAccepted({
+        accepted: loop.accepted,
+        issues: loop.critique.issues,
+        stage: "script_gen",
+      });
     }
-    ctx.log(`script_gen: ${script.sections.length} sections, ~${script.estDurationSec}s`);
+    const script = loop.value;
+    ctx.log(
+      `script_gen: ${script.sections.length} sections, ~${script.estDurationSec}s ` +
+      `(${loop.iterations} iter, ${loop.accepted ? "accepted" : "best-effort"})`,
+    );
     return { script, narrationText: script.narrationText };
   },
 };
@@ -278,24 +501,156 @@ export const hookCraft: Block = {
     // modify narrationText (single-producer rule).
     const narration = str(ctx, "narrationText");
     const firstLine = () => narration.split(/\n+/)[0].slice(0, 140);
-    if (!hasGeminiKey()) return { hook: firstLine() };
-    let hook = "";
-    try {
-      const out = await geminiJson<{ hook?: string }>({
-        prompt:
-          "Write ONE scroll-stopping hook line for this video (for the title/thumbnail). " +
-          'Return STRICT JSON {"hook": string}. No markdown.\n\n' +
-          narration.slice(0, 2000),
-        maxTokens: 200,
-        temperature: 0.9,
+    if (!hasAnthropicKey()) return { hook: firstLine() };
+
+    // ── PRODUCE → CRITIQUE → REGENERATE (P1-4) ───────────────────────────────
+    // The hook is the title/thumbnail line — the single highest-leverage string
+    // in the run — and used to be a one-shot generation that shipped whatever
+    // came back, including a hook that over-promises something the narration
+    // never delivers. It now runs on the shared `produceAndCritique` primitive.
+    //
+    // Cost safety (this block spends on every produce):
+    //   - Each iteration is content-addressed and checkpointed, so a self-heal
+    //     replay re-reads the drafted hook and re-purchases NOTHING.
+    //   - Deterministic defects (empty, too long, markdown, or just the
+    //     narration's first line echoed back) are computed in code — they cost
+    //     nothing and can drive a retry with no critic at all.
+    //   - A critic OUTAGE accepts the current draft instead of blind-spending
+    //     another draft that would be equally ungraded.
+    //   - Cap 2 (one informed retry), the established convention here.
+    const hookChannel = channelCritiqueContext(ctx);
+    const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
+    const critiqueEnabled = hasAnthropicKey();
+    const checkpointRoot = `${ctx.keyPrefix}runs/${ctx.runId}/hook-checkpoints`;
+    const narrationDigest = iterationRequestHash(narration);
+    let observedCostUsd = 0;
+
+    const loop = await produceAndCritique<string>({
+      label: "hook_craft",
+      threshold: laneQuality.critiqueThreshold,
+      maxIters: critiqueEnabled ? Math.min(2, Math.max(1, laneQuality.maxCritiqueIters)) : 1,
+      log: (message, extra) => ctx.log(message, extra),
+      channel: hookChannel,
+      produce: async (priorIssues, iter) => {
+        const requestHash = iterationRequestHash({
+          contract: "hook-craft-checkpoint-v1",
+          narrationDigest,
+          critiqueIteration: iter,
+          critiqueIssues: priorIssues,
+          criticDoctrine: hookChannel.criticDoctrine ?? null,
+        });
+        const checkpointKey = `${checkpointRoot}/${requestHash}.json`;
+        const cached = await readIterationCheckpoint<{ hook: string; costUsd: number }>(
+          checkpointKey,
+          (m) => ctx.log(`hook_craft: ${m}`),
+        );
+        if (cached && typeof cached.hook === "string") {
+          observedCostUsd += Number(cached.costUsd) || 0;
+          ctx.log(`hook_craft: reused checkpointed draft ${requestHash.slice(0, 12)} (no re-spend)`);
+          return cached.hook;
+        }
+        let drafted = "";
+        try {
+          const out = await claudeJson<{ hook?: string }>({
+            prompt:
+              "Write ONE scroll-stopping hook line for this video (for the title/thumbnail). " +
+              "It must be concrete and must promise ONLY something this narration actually " +
+              "delivers — a hook the video does not pay off is a failure, not a win. " +
+              (priorIssues.length
+                ? `A previous attempt was REJECTED for: ${priorIssues.join("; ")}. Fix all of it. `
+                : "") +
+              channelCritiqueBrief(hookChannel) +
+              'Return STRICT JSON {"hook": string}. No markdown.\n\n' +
+              narration.slice(0, 2000),
+            maxTokens: 200,
+            temperature: 0.9,
+          });
+          observedCostUsd += PRICE.boundedTextPassUsd;
+          drafted = typeof out.hook === "string" ? out.hook.trim() : "";
+        } catch (e) {
+          ctx.log(`hook_craft: permitted text planner failed (${e instanceof Error ? e.message : e})`);
+        }
+        const hook = drafted || firstLine();
+        await writeIterationCheckpoint(
+          checkpointKey,
+          { hook, costUsd: drafted ? PRICE.boundedTextPassUsd : 0 },
+          (m) => ctx.log(`hook_craft: ${m}`),
+        );
+        return hook;
+      },
+      critique: async (candidate, iter) => {
+        // DETERMINISTIC first — free, and the primitive's contract says the
+        // caller must compute countable facts rather than ask a model to count.
+        const trimmed = candidate.trim();
+        const deterministic = [
+          trimmed.length === 0 ? "the hook is empty" : "",
+          trimmed.length > 120 ? `the hook is ${trimmed.length} chars — too long for a title/thumbnail line` : "",
+          /^[*_#>`]|[*_`]{2}/.test(trimmed) ? "the hook contains markdown formatting" : "",
+          trimmed && trimmed === firstLine().trim()
+            ? "the hook is just the narration's opening line echoed back, not a crafted hook"
+            : "",
+        ].filter(Boolean);
+        if (deterministic.length) {
+          ctx.log(`hook_craft: candidate ${iter} failed deterministic checks`, { issues: deterministic });
+          return { score: 0.2, pass: false, issues: deterministic };
+        }
+        if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
+        try {
+          const verdict = await claudeJson<{ pass?: boolean; score?: number; issues?: string[] }>({
+            prompt:
+              `Judge ONE hook line written for a YouTube title/thumbnail. Reject it if it is generic, ` +
+              `vague, clickbait that the narration does not pay off, or indistinguishable from every ` +
+              `other video in its niche. Accept it if it would genuinely stop a scroll AND is honest ` +
+              `about what the video delivers.` +
+              channelCritiqueBrief(hookChannel) +
+              ` Return STRICT JSON {"pass": boolean, "score": number 0..1, "issues": string[]} — at most ` +
+              `4 issues, each under 140 characters.\n\nHOOK: ${trimmed}\n\nNARRATION (excerpt):\n` +
+              narration.slice(0, 2500),
+            maxTokens: 700,
+            temperature: 0.3,
+          });
+          observedCostUsd += PRICE.boundedTextPassUsd;
+          const issues = (Array.isArray(verdict.issues) ? verdict.issues : []).filter(Boolean).slice(0, 4);
+          const rejected = verdict.pass === false;
+          const rejectionIssues = issues.length
+            ? issues
+            : ["independent hook critic rejected the line without usable remediation"];
+          const score = Number.isFinite(verdict.score)
+            ? Math.max(0, Math.min(1, Number(verdict.score)))
+            : rejected ? 0.4 : 1;
+          if (rejected) {
+            ctx.log(
+              `hook_craft: candidate ${iter} rejected by the critic` +
+              (iter < 2 ? " — regenerating with the defects fed back" : " — iteration cap reached"),
+              { issues: rejectionIssues },
+            );
+          }
+          // The +0.01*iter tiebreak keeps the INFORMED retry when it merely ties
+          // the first draft (produceAndCritique picks the best by strict >).
+          return rejected
+            ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues: rejectionIssues }
+            : { score, pass: true, issues: [] };
+        } catch (e) {
+          throw new Error(
+            `hook_craft FAILED: independent hook critic unavailable — refusing an unreviewed promise (${e instanceof Error ? e.message : e})`,
+          );
+        }
+      },
+    });
+
+    if (critiqueEnabled) {
+      assertScriptCritiqueAccepted({
+        accepted: loop.accepted,
+        issues: loop.critique.issues,
+        stage: "hook_craft",
       });
-      hook = typeof out.hook === "string" ? out.hook.trim() : "";
-    } catch (e) {
-      ctx.log(`hook_craft: gemini failed (${e instanceof Error ? e.message : e})`);
     }
-    if (!hook) hook = firstLine();
-    ctx.log(`hook_craft: "${hook.slice(0, 60)}â€¦"`);
-    return { hook };
+    const hook = loop.value || firstLine();
+    ctx.log(
+      `hook_craft: "${hook.slice(0, 60)}â€¦" (${loop.iterations} iter, ` +
+      `${loop.accepted ? "accepted" : "best-effort"})`,
+    );
+    return { hook, [COST_PATCH_KEY]: observedCostUsd };
   },
 };
 
@@ -305,11 +660,22 @@ export const qaScript: Block = {
   produces: ["scriptApproved"],
   run: async (ctx) => {
     const narration = str(ctx, "narrationText");
+    if (hasSourceAttributedDataStoryParams(ctx.params)) {
+      assertDataStorySourceLedger(ctx.store["dataStorySourceLedger"], narration);
+      const sourcedNumericSentences = splitSentences(narration)
+        .filter((sentence) => /\d/.test(sentence) && hasNamedSourceAttribution(sentence));
+      if (sourcedNumericSentences.length < DATA_STORY_MIN_SOURCED_NUMERIC_SENTENCES) {
+        throw new Error(
+          `qa_script FAILED: source-attributed data story requires at least ${DATA_STORY_MIN_SOURCED_NUMERIC_SENTENCES} ` +
+          `numeric sentences naming a concrete source; found ${sourcedNumericSentences.length}`,
+        );
+      }
+      ctx.log(`qa_script: source-attributed data-story evidence passed (${sourcedNumericSentences.length} sourced numeric sentences)`);
+    }
     if (!hasAnthropicKey()) {
-      // HONEST: unverified is not the same as approved. Nothing downstream hard-
-      // gates on this yet, but the flag must not lie to the run record/Doctor.
-      ctx.log("qa_script: no Anthropic key â€” script UNVERIFIED (scriptApproved=false)");
-      return { scriptApproved: false };
+      throw new Error(
+        "qa_script FAILED: independent narrative critic unavailable — refusing to synthesize an unreviewed script",
+      );
     }
     try {
       const persona = opt(ctx, "persona") ?? "";
@@ -345,27 +711,45 @@ export const qaScript: Block = {
         temperature: 0.3,
       });
       const issues = Array.isArray(res.issues) ? res.issues : [];
-      ctx.log(`qa_script: pass=${res.pass !== false}`, { issues: issues.slice(0, 5) });
-      return { scriptApproved: res.pass !== false };
+      const pass = res.pass !== false;
+      ctx.log(`qa_script: pass=${pass}`, { issues: issues.slice(0, 5) });
+      // HARD GATE: a confirmed craft-quality failure must not proceed into the
+      // paid narration/visual stages that follow — same pattern as the sibling
+      // guard-stage blocks originality_gate / compliance_check (throw to halt
+      // the pipeline; PARALLEL_GROUPS in runner.ts fails the whole group).
+      if (!pass) {
+        throw new Error(
+          `qa_script FAILED: narration failed craft-quality critique — refusing to proceed to paid ` +
+          `narration/visual stages (${issues.slice(0, 5).join(" | ") || "no specific issues returned"})`,
+        );
+      }
+      return { scriptApproved: true };
     } catch (e) {
-      ctx.log(`qa_script: critique failed (non-fatal, UNVERIFIED): ${e instanceof Error ? e.message : e}`);
-      return { scriptApproved: false };
+      // A confirmed quality failure must propagate. A model/parse/network
+      // error is also fail-closed: unverified is not approved for paid media.
+      if (e instanceof Error && e.message.startsWith("qa_script FAILED")) throw e;
+      throw new Error(
+        `qa_script FAILED: independent narrative critic unavailable — refusing paid narration (${e instanceof Error ? e.message : e})`,
+      );
     }
   },
 };
 
 export const narrationTts: Block = {
   id: "narration_tts",
-  consumes: ["narrationText"],
+  consumes: ["narrationText", "scriptApproved"],
   produces: [
     "narrationKey",
     "narrationDurationSec",
     "narrationLocalPath",
+    "narrationTranscriptText",
+    "narrationPerformanceEvidence",
     "sentenceTimings",
     "chapterPlan",
   ],
   paid: true,
   run: async (ctx) => {
+    assertScriptApprovedForNarration(ctx.store["scriptApproved"]);
     const quality = qualityProfile(ctx.params["qualityProfile"]);
     // TTS engine: fish (default) or elevenlabs (v3 expressive â€” PERFORMS inline
     // [audio tags] the script writer placed; tags survive sanitization here but
@@ -375,16 +759,12 @@ export const narrationTts: Block = {
     // sanitizeSpoken strips any markdown/slashes/stage-directions that slipped
     // through script_gen so the voice never reads a symbol aloud.
     const text = sanitizeSpoken(str(ctx, "narrationText"), { keepAudioTags: ttsProvider === "elevenlabs" });
-    // Count provider-accepted responses rather than estimating from the final
-    // script. This includes cold-open auditions, a verdict-driven second take,
-    // and spoken chapter headings; 429/5xx/network retries do not increment.
+    // Count provider-accepted TTS responses rather than estimating from the
+    // final script. The local cold-open evidence is deliberately not a second
+    // remote model call, so thumbnail-only Google permission cannot leak here.
     let billableTtsCharacters = 0;
-    let audioJudgeCalls = 0;
     const onBillableCharacters = (characters: number) => {
       billableTtsCharacters += characters;
-    };
-    const onAudioJudgeCall = () => {
-      audioJudgeCalls += 1;
     };
     try {
     if (ttsProvider === "elevenlabs") {
@@ -417,21 +797,22 @@ export const narrationTts: Block = {
         `narration_tts: speaking rate x${speed} (${ctx.params["ttsSpeed"] ? "param" : dnaSpeed ? "Style DNA pacing" : `physics:${physics.archetype}`})`,
       );
     // ElevenLabs render settings from the physics (v3 stability/style/seed).
-    let elevenSeed = 4242;
+    const elevenSeed = 4242;
     const elevenSettings = ttsProvider === "elevenlabs"
       ? { stability: physics.stability, ...(physics.style ? { style: physics.style } : {}) }
       : undefined;
 
-    // COLD-OPEN GATE — production requires a persisted >=7 audition, an
-    // explicit voice, the audio judge, and a passing real-audio probe. Draft is
-    // the only profile that may opt out. Fish and ElevenLabs are both judged.
+    // COLD-OPEN GATE — production requires a persisted >=7 human audition, an
+    // explicit voice, and physical evidence from the real take. Draft is the
+    // only profile that may opt out. Google/Gemini is thumbnail-only.
     const gateEnabled = ctx.params["voiceGate"] !== false;
     const castScore = Number(ctx.params["voiceCastScore"] ?? Number.NaN);
     const selectedVoiceId = ttsProvider === "elevenlabs" ? (elevenVoiceId ?? voiceId) : voiceId;
     assertVoiceGatePreconditions({
       profile: quality,
       gateEnabled,
-      judgeAvailable: hasGeminiKey(),
+      judgeAvailable: false,
+      localEvidenceGateAvailable: true,
       channelId: ctx.channelId,
       provider: ttsProvider,
       voiceId: selectedVoiceId,
@@ -440,57 +821,34 @@ export const narrationTts: Block = {
       readinessStatus: ctx.params["voiceReadinessStatus"],
       readinessReason: ctx.params["voiceReadinessReason"],
     });
-    if (gateEnabled && hasGeminiKey()) {
-      const probe = boundNarrationColdOpen(splitSentences(text).slice(0, 2).join(" "));
-      if (!probe.trim() && quality === "production") {
+    const tmp = await makeRunTempDir(ctx.runId);
+    if (quality === "production" && gateEnabled) {
+      // Keep the casting decision, then prove this *actual* cold-open take has a
+      // real audio stream, audible loudness, and plausible spoken timing.
+      const coldOpenText = boundNarrationColdOpen(splitSentences(text).slice(0, 2).join(" "));
+      if (!coldOpenText.trim()) {
         throw new Error("narration_tts: production cold-open probe is empty");
       }
-      if (probe.trim() && ttsProvider === "elevenlabs") {
-        const gate = await gateColdOpen({
-          text: probe,
-          elevenVoiceId: selectedVoiceId ?? "JBFqnCBsd6RMkjVDRZzb",
-          physics,
-          log: (m) => ctx.log(m),
-          onBillableCharacters,
-          onAudioJudgeCall,
-        });
-        elevenSeed = gate.seed;
-        ctx.log(
-          `narration_tts: cold-open gate PASSED (register ${gate.verdict.register} | pace ${gate.verdict.pace} | performance ${gate.verdict.performance} | clean ${gate.verdict.clean}, seed ${gate.seed})`,
-        );
-      } else if (probe.trim()) {
-        let passed = false;
-        let lastWhy = "judge returned no verdict";
-        for (let attempt = 0; attempt < 2; attempt++) {
-          const bytes = await synthNarration({
-            text: probe,
-            voiceId: selectedVoiceId,
-            niche,
-            speed,
-            provider: ttsProvider,
-            onBillableCharacters,
-          });
-          const verdict = await judgeNarrationTake({
-            mp3: bytes,
-            physics,
-            text: probe,
-            log: (message) => ctx.log(message),
-            onAudioJudgeCall,
-          });
-          if (verdict.pass) {
-            passed = true;
-            ctx.log(
-              `narration_tts: cold-open gate PASSED (register ${verdict.register} | pace ${verdict.pace} | performance ${verdict.performance} | clean ${verdict.clean})`,
-            );
-            break;
-          }
-          lastWhy = verdict.why;
-          ctx.log(`narration_tts: cold-open attempt ${attempt + 1} failed — ${lastWhy}`);
-        }
-        if (!passed) {
-          throw new Error(`narration_tts: cold-open failed the gate twice — ${lastWhy}`);
-        }
-      }
+      const coldOpenPath = join(tmp, "cold_open_local_evidence.mp3");
+      const coldOpenBytes = await synthNarration({
+        text: coldOpenText,
+        voiceId: selectedVoiceId,
+        niche,
+        speed,
+        provider: ttsProvider,
+        elevenVoiceId: selectedVoiceId,
+        eleven: elevenSettings ? { ...elevenSettings, seed: elevenSeed } : undefined,
+        onBillableCharacters,
+      });
+      await writeBytes(coldOpenPath, coldOpenBytes);
+      const evidence = await preflightNarrationPerformance({
+        audioPath: coldOpenPath,
+        text: coldOpenText,
+        speed,
+      });
+      ctx.log(
+        `narration_tts: local cold-open evidence PASSED (${evidence.durationSec.toFixed(1)}s | ${evidence.wordsPerSec.toFixed(2)} words/s | ${evidence.integratedLufs.toFixed(1)} LUFS)`,
+      );
     }
     // Optional stylized voice filter (e.g. "radio" â†’ vintage AM set). Applied to
     // the finished narration track before upload; no-op when unset. The Composer
@@ -498,8 +856,6 @@ export const narrationTts: Block = {
     const voiceFx =
       (ctx.params["voiceFx"] as string | undefined) ??
       getMusicBrief(ctx.store)?.audio?.voiceFx;
-    const tmp = await makeRunTempDir(ctx.runId);
-
     // CHAPTER MODE â€” speak each section heading as a spoken "chapter card" (the
     // card holds while it's read, then a short break, then the section narration
     // resumes). Emits `chapterPlan` (the body layout: alternating card/footage
@@ -550,6 +906,11 @@ export const narrationTts: Block = {
       // PARALLEL synthesis (small pool â€” Fish concurrency limit; see sentence mode).
       const speakOf = (it: Item) =>
         it.kind === "heading" ? `Chapter ${it.chap}: ${it.text.replace(/[.:;,\s]+$/, "")}.` : it.text;
+      const chapterCadencePlan = planNarrationCadence({
+        sentences: items.map(speakOf),
+        baseGapSec: baseGap,
+        jitterSec: jitter,
+      });
       const chPool = Math.max(1, Number(process.env.TTS_CONCURRENCY ?? 2));
       // Probe-fallback counter: an ESTIMATED duration shifts every later
       // sentenceTiming (captions/quotes/inserts) by the estimation error —
@@ -578,9 +939,10 @@ export const narrationTts: Block = {
         }
         return { p, dur };
       });
-      if (probeEstimates > 2) {
-        throw new Error(`narration_tts: ${probeEstimates} sentence durations are ESTIMATES (probe failures) — caption/overlay sync would be fiction; failing loud`);
-      }
+      assertNarrationTimingMeasurementIntegrity({
+        sentenceCount: items.length,
+        estimatedDurationCount: probeEstimates,
+      });
       if (probeEstimates > 0) ctx.log(`narration_tts: WARNING ${probeEstimates} sentence duration(s) estimated (probe failed) — timings may drift slightly`);
       for (let i = 0; i < items.length; i++) {
         const it = items[i];
@@ -603,7 +965,7 @@ export const narrationTts: Block = {
             gapAfter = preSec;
             footAccum += dur;
           } else {
-            gapAfter = Math.max(0.2, baseGap + (Math.random() * 2 - 1) * jitter);
+            gapAfter = chapterCadencePlan.gapsSec[i] ?? baseGap;
             footAccum += dur + gapAfter;
           }
         }
@@ -617,6 +979,15 @@ export const narrationTts: Block = {
       local = await applyVoiceFx(local, voiceFx, join(tmp, "narration_fx.mp3"));
       let durationSec = 0;
       try { durationSec = (await probe(local)).durationSec; } catch { durationSec = cursor; }
+      const narrationTranscriptText = items.map(speakOf).join(" ");
+      const narrationPerformanceEvidence = await preflightNarrationPerformance({
+        audioPath: local,
+        text: narrationTranscriptText,
+        speed,
+      });
+      ctx.log(
+        `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,
+      );
       const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
       await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
       await recordAsset(ctx, "narration", narrationKey, { durationSec, chapters: chap, mode: "chapter" });
@@ -625,9 +996,14 @@ export const narrationTts: Block = {
         narrationKey,
         narrationDurationSec: durationSec,
         narrationLocalPath: local,
+        // The actually spoken sequence includes bounded chapter headings, which
+        // are deliberately absent from the display-only narrationText.  Final
+        // QA must compare against this exact source, not a nearby script.
+        narrationTranscriptText,
+        narrationPerformanceEvidence,
         sentenceTimings,
         chapterPlan,
-        [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, audioJudgeCalls),
+        [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0),
       };
     }
 
@@ -635,8 +1011,15 @@ export const narrationTts: Block = {
     // exact per-sentence timings (used to anchor quote overlays). Gaps are
     // jittered per sentence so the pacing feels human, not metronomic.
     const sentences = splitSentences(text);
-    const gaps = sentences.map(() => Math.max(0.2, baseGap + (Math.random() * 2 - 1) * jitter));
-    ctx.log(`narration_tts: ${sentences.length} sentences, ~${baseGap}s (Â±${jitter}) pausesâ€¦`);
+    const cadencePlan = planNarrationCadence({
+      sentences,
+      baseGapSec: baseGap,
+      jitterSec: jitter,
+    });
+    const gaps = cadencePlan.gapsSec;
+    ctx.log(
+      `narration_tts: ${sentences.length} sentences, ${cadencePlan.purposes.filter((purpose) => purpose !== "continuation").length} planned delivery beats (deterministic semantic cadence)`,
+    );
 
     // PARALLEL synthesis (order preserved) â€” sequential per-sentence HTTP calls
     // made TTS the slowest non-encode stage (~140 calls Ã— ~5s). Pool kept SMALL:
@@ -665,10 +1048,18 @@ export const narrationTts: Block = {
       }
       return { p, dur };
     });
+    // Do not build an edit timeline around several estimated sentence lengths.
+    // The final master can only reconcile a small, bounded probe miss; beyond
+    // that captions, story beats, and Fern-style causal cuts would all be
+    // planned against fiction.
+    assertNarrationTimingMeasurementIntegrity({
+      sentenceCount: sentences.length,
+      estimatedDurationCount: probeFailures,
+    });
     const partPaths: string[] = parts.map((x) => x.p);
     // Timings carry the DISPLAY text â€” audio tags are performed by the voice,
     // never shown in captions/quote cards/insert matching.
-    const sentenceTimings: { text: string; start: number; end: number }[] = [];
+    let sentenceTimings: { text: string; start: number; end: number }[] = [];
     let cursor = 0;
     for (let i = 0; i < sentences.length; i++) {
       sentenceTimings.push({ text: stripAudioTags(sentences[i]), start: cursor, end: cursor + parts[i].dur });
@@ -684,19 +1075,36 @@ export const narrationTts: Block = {
     } catch {
       durationSec = cursor;
     }
-    // TIMING SELF-CHECK: a failed per-sentence probe injected an ESTIMATED
-    // duration into the cumulative cursor, silently shifting every later
-    // caption/quote/insert sync point. When probes failed AND the real
-    // narration length disagrees with the cursor, rescale timings linearly to
-    // the measured truth instead of shipping drifted sync.
-    if (probeFailures > 0 && durationSec > 0 && Math.abs(durationSec - cursor) > 1.5) {
-      const k = durationSec / Math.max(0.1, cursor);
-      for (const t of sentenceTimings) {
-        t.start *= k;
-        t.end *= k;
-      }
-      ctx.log(`narration_tts: ${probeFailures} probe failure(s) — sentence timings rescaled ×${k.toFixed(4)} to the measured ${durationSec.toFixed(1)}s`);
+    // TIMING RECONCILIATION: a failed per-sentence probe injected an ESTIMATED
+    // duration into the cumulative cursor. If the final take materially differs,
+    // reconcile its cue clock to measured truth AND re-prove the semantic pause
+    // plan on that adjusted clock; a simple post-cadence scale would make every
+    // reveal/turn pause unaccountable.
+    const reconciledTiming = reconcileNarrationCadenceAfterDurationMeasurement({
+      sentences,
+      sentenceTimings,
+      plan: cadencePlan,
+      estimatedDurationSec: cursor,
+      measuredDurationSec: probeFailures > 0 && durationSec > 0 ? durationSec : cursor,
+    });
+    if (reconciledTiming.scale !== 1) {
+      sentenceTimings = sentenceTimings.map((timing, index) => ({
+        ...timing,
+        ...reconciledTiming.sentenceTimings[index]!,
+      }));
+      ctx.log(
+        `narration_tts: ${probeFailures} probe failure(s) — sentence timings reconciled ×${reconciledTiming.scale.toFixed(4)} ` +
+        `to the measured ${durationSec.toFixed(1)}s; cadence remains certified`,
+      );
     }
+    const cadence = reconciledTiming.cadence;
+    ctx.log(
+      `narration_tts: cadence evidence PASSED (${cadence.minGapSec.toFixed(2)}–${cadence.maxGapSec.toFixed(2)}s pauses; ${cadence.distinctGapCount} distinct delivery beats)`,
+    );
+    const narrationPerformanceEvidence = await preflightNarrationPerformance({ audioPath: local, text, speed });
+    ctx.log(
+      `narration_tts: local final evidence PASSED (${narrationPerformanceEvidence.durationSec.toFixed(1)}s | ${narrationPerformanceEvidence.wordsPerSec.toFixed(2)} words/s | ${narrationPerformanceEvidence.integratedLufs.toFixed(1)} LUFS)`,
+    );
 
     const narrationKey = `${ctx.keyPrefix}runs/${ctx.runId}/narration.mp3`;
     await putObject(narrationKey, await readBytes(local), { contentType: "audio/mpeg" });
@@ -710,18 +1118,20 @@ export const narrationTts: Block = {
       narrationKey,
       narrationDurationSec: durationSec,
       narrationLocalPath: local,
+      narrationTranscriptText: text,
+      narrationPerformanceEvidence,
       sentenceTimings,
       // Declared in `produces`, so it must ALWAYS be returned â€” an empty plan
       // means "no chapter cards". (chapterCards:false channels hit the engine's
       // undefined-produce guard here on their very first render.)
       chapterPlan: [],
-      [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, audioJudgeCalls),
+      [COST_PATCH_KEY]: narrationTtsCost(ttsProvider, billableTtsCharacters, 0),
     };
     } catch (error) {
       const observedCostUsd = narrationTtsCost(
         ttsProvider,
         billableTtsCharacters,
-        audioJudgeCalls,
+        0,
       );
       if (observedCostUsd <= 0) throw error;
       // The provider work has already happened. Make the failure terminal so an
@@ -928,8 +1338,8 @@ export const entityImagery: Block = {
       }
       return keys;
     };
-    if (!hasGeminiKey()) {
-      ctx.log("entity_imagery: no Gemini key â€” skipping");
+    if (!hasAnthropicKey()) {
+      ctx.log("entity_imagery: no permitted text planner â€” skipping");
       return { entityClips: clips, entityKeys: [], attributions };
     }
     const narration = str(ctx, "narrationText");
@@ -937,68 +1347,253 @@ export const entityImagery: Block = {
     const W = portrait ? 1080 : 1920;
     const H = portrait ? 1920 : 1080;
 
-    // Pull SPECIFIC named entities that have real imagery (people/places/artworks).
-    let entities: string[] = [];
-    try {
-      const out = await geminiJson<{ entities?: string[] }>({
-        prompt:
-          "From this narration, list up to 4 SPECIFIC named entities with well-known " +
-          'real photographs/portraits (e.g. "Marcus Aurelius", "the Colosseum"). ' +
-          "Skip abstract concepts. Return STRICT JSON {\"entities\":string[]}.\n\n" +
-          narration.slice(0, 3000),
-        maxTokens: 250,
-        temperature: 0.3,
-      });
-      entities = (out.entities ?? [])
-        .filter((e): e is string => typeof e === "string" && e.trim().length > 0)
-        .slice(0, 4);
-    } catch (e) {
-      ctx.log(`entity_imagery: extraction failed (${e instanceof Error ? e.message : e})`);
+    // ── PRODUCE → CRITIQUE → REGENERATE (P1-4) ───────────────────────────────
+    // Entity imagery had no judge at all: whatever four names the extractor
+    // returned became on-screen visuals, so an off-topic or unillustratable
+    // pick (an abstract noun, a person with no usable portrait) simply produced
+    // a worse video that nothing noticed until qa_visual — after the spend.
+    // The candidate here is the RESOLVED SET, which is the thing worth judging:
+    // an individually plausible entity can still be a bad set (all four from one
+    // paragraph, none from the argument the video actually makes).
+    //
+    // Cost safety (this block buys an extraction pass + a vision identity check
+    // per image):
+    //   - Every iteration checkpoints its RESOLUTION (chosen entities, image
+    //     URLs, verify verdicts) content-addressed by narration+iteration+prior
+    //     issues, so a self-heal replay re-reads those decisions and re-buys
+    //     nothing. Only the free local work (download, Ken Burns) repeats.
+    //   - An extraction that legitimately finds NO entities is accepted, never
+    //     retried: paying again to be told the same true thing is pure waste.
+    //   - A critic outage accepts the current set rather than blind-spending.
+    //   - Cap 2 (one informed retry).
+    const entityChannel = channelCritiqueContext(ctx);
+    const laneQuality = laneQualityPolicy(ctx.store["contentLane"]);
+    const critiqueEnabled = hasAnthropicKey();
+    const checkpointRoot = `${ctx.keyPrefix}runs/${ctx.runId}/entity-checkpoints`;
+    const narrationDigest = iterationRequestHash(narration);
+    let observedCostUsd = 0;
+
+    interface ResolvedEntity {
+      entity: string;
+      url: string;
+      attribution?: string;
+    }
+    interface EntityCandidate {
+      /** Everything the extractor proposed — distinguishes "found nothing" from "found nothing usable". */
+      proposed: string[];
+      resolved: ResolvedEntity[];
     }
 
-    const tmp = await makeRunTempDir(ctx.runId);
-    let i = 0;
-    for (const e of entities) {
-      try {
-        const wi = await searchWikimediaImage(e);
-        if (!wi) {
-          ctx.log(`entity_imagery: no Wikimedia image for "${e}"`);
-          continue;
+    const loop = await produceAndCritique<EntityCandidate>({
+      label: "entity_imagery",
+      threshold: laneQuality.critiqueThreshold,
+      maxIters: critiqueEnabled ? Math.min(2, Math.max(1, laneQuality.maxCritiqueIters)) : 1,
+      log: (message, extra) => ctx.log(message, extra),
+      channel: entityChannel,
+      produce: async (priorIssues, iter): Promise<EntityCandidate> => {
+        const requestHash = iterationRequestHash({
+          contract: "entity-imagery-checkpoint-v1",
+          narrationDigest,
+          critiqueIteration: iter,
+          critiqueIssues: priorIssues,
+          criticDoctrine: entityChannel.criticDoctrine ?? null,
+        });
+        const checkpointKey = `${checkpointRoot}/${requestHash}.json`;
+        const cached = await readIterationCheckpoint<EntityCandidate & { costUsd: number }>(
+          checkpointKey,
+          (m) => ctx.log(`entity_imagery: ${m}`),
+        );
+        if (cached && Array.isArray(cached.resolved) && Array.isArray(cached.proposed)) {
+          observedCostUsd += Number(cached.costUsd) || 0;
+          ctx.log(
+            `entity_imagery: reused checkpointed resolution ${requestHash.slice(0, 12)} ` +
+            `(${cached.resolved.length} entity/entities, no re-spend)`,
+          );
+          return { proposed: cached.proposed, resolved: cached.resolved };
         }
-        const img = await downloadTo(wi.url, join(tmp, `entity_${i}.jpg`));
-        // Verify the Wikimedia image actually depicts the entity (search can
-        // return the wrong person/place). Reject mismatches rather than show a
-        // wrong face. Verify failure (not mismatch) keeps the image.
-        if (hasGeminiKey()) {
+
+        let iterationCostUsd = 0;
+        // Pull SPECIFIC named entities that have real imagery (people/places/artworks).
+        let proposed: string[] = [];
+        try {
+          const out = await claudeJson<{ entities?: string[] }>({
+            prompt:
+              "From this narration, list up to 4 SPECIFIC named entities with well-known " +
+              'real photographs/portraits (e.g. "Marcus Aurelius", "the Colosseum"). ' +
+              "Skip abstract concepts. Prefer entities central to the narration's ARGUMENT, " +
+              "spread across the whole piece rather than clustered in one passage. " +
+              (priorIssues.length
+                ? `A previous selection was REJECTED for: ${priorIssues.join("; ")}. Choose differently. `
+                : "") +
+              channelCritiqueBrief(entityChannel) +
+              "Return STRICT JSON {\"entities\":string[]}.\n\n" +
+              narration.slice(0, 3000),
+            maxTokens: 250,
+            temperature: 0.3,
+          });
+          iterationCostUsd += PRICE.boundedTextPassUsd;
+          proposed = (out.entities ?? [])
+            .filter((e): e is string => typeof e === "string" && e.trim().length > 0)
+            .slice(0, 4);
+        } catch (e) {
+          ctx.log(`entity_imagery: extraction failed (${e instanceof Error ? e.message : e})`);
+        }
+
+        const resolved: ResolvedEntity[] = [];
+        for (const e of proposed) {
           try {
-            const raw = await visionLocal({
-              prompt:
-                `Does this image clearly depict "${e}"? Be strict about identity for ` +
-                `people and specific places. Return STRICT JSON {"match":boolean,"reason":string}.`,
-              imagePaths: [img],
-              json: true,
-              maxTokens: 120,
-            });
-            const v = parseJsonLoose<{ match?: boolean; reason?: string }>(raw);
-            if (v.match === false) {
-              ctx.log(`entity_imagery: image for "${e}" did NOT verify (${v.reason ?? ""}) â€” skipping`);
+            const wi = await searchWikimediaImage(e);
+            if (!wi) {
+              ctx.log(`entity_imagery: no Wikimedia image for "${e}"`);
               continue;
             }
-          } catch {
-            /* verification failed â†’ keep the image rather than drop the entity */
+            const probeDir = await makeRunTempDir(ctx.runId);
+            const img = await downloadTo(wi.url, join(probeDir, `entity_probe_${resolved.length}.jpg`));
+            // Verify the Wikimedia image actually depicts the entity (search can
+            // return the wrong person/place). Reject mismatches rather than show a
+            // wrong face. Verify failure (not mismatch) keeps the image.
+            try {
+              const raw = await visionLocal({
+                prompt:
+                  `Does this image clearly depict "${e}"? Be strict about identity for ` +
+                  `people and specific places. Return STRICT JSON {"match":boolean,"reason":string}.`,
+                imagePaths: [img],
+                json: true,
+                maxTokens: VISION_GATE_MAX_TOKENS,
+              });
+              iterationCostUsd += PRICE.visionGraderUsd;
+              const v = parseJsonLoose<{ match?: boolean; reason?: string }>(raw);
+              if (v.match === false) {
+                ctx.log(`entity_imagery: image for "${e}" did NOT verify (${v.reason ?? ""}) â€” skipping`);
+                continue;
+              }
+            } catch (error) {
+              ctx.log(
+                `entity_imagery: image for "${e}" could not be independently verified (${error instanceof Error ? error.message : error}) — skipping`,
+              );
+              continue;
+            }
+            resolved.push({ entity: e, url: wi.url, ...(wi.attribution ? { attribution: wi.attribution } : {}) });
+          } catch (err) {
+            ctx.log(`entity_imagery: "${e}" failed (${err instanceof Error ? err.message : err})`);
           }
         }
+
+        observedCostUsd += iterationCostUsd;
+        await writeIterationCheckpoint(
+          checkpointKey,
+          { proposed, resolved, costUsd: iterationCostUsd },
+          (m) => ctx.log(`entity_imagery: ${m}`),
+        );
+        return { proposed, resolved };
+      },
+      critique: async (candidate, iter) => {
+        // A narration with no depictable named entities is a legitimate, common
+        // outcome (abstract//essayistic scripts). Retrying buys the identical
+        // answer, so accept and let the footage layer carry the visuals.
+        if (candidate.proposed.length === 0) {
+          ctx.log("entity_imagery: no named entities in this narration — accepting the empty set");
+          return { score: 1, pass: true, issues: [] };
+        }
+        // DETERMINISTIC: entities were proposed but none survived lookup +
+        // identity verification. That IS worth one informed retry with
+        // different picks, and it costs nothing to detect.
+        if (candidate.resolved.length === 0) {
+          return {
+            score: 0.2,
+            pass: false,
+            issues: [
+              `none of [${candidate.proposed.join(", ")}] resolved to a verified image — ` +
+              `pick entities with well-known, unambiguous photographs`,
+            ],
+          };
+        }
+        if (!critiqueEnabled) return { score: 1, pass: true, issues: [] };
+        try {
+          const verdict = await claudeJson<{ pass?: boolean; score?: number; issues?: string[] }>({
+            prompt:
+              `Judge a set of named entities chosen to be shown as on-screen imagery during this ` +
+              `narration. Reject the SET if the entities are peripheral to the argument, redundant ` +
+              `with each other, clustered in one passage instead of spread across the piece, or ` +
+              `tonally wrong for the channel.` +
+              channelCritiqueBrief(entityChannel) +
+              ` Return STRICT JSON {"pass": boolean, "score": number 0..1, "issues": string[]} — at ` +
+              `most 4 issues, each under 140 characters.\n\nENTITIES: ` +
+              candidate.resolved.map((r) => r.entity).join(", ") +
+              `\n\nNARRATION (excerpt):\n` + narration.slice(0, 3000),
+            maxTokens: 700,
+            temperature: 0.3,
+          });
+          observedCostUsd += PRICE.boundedTextPassUsd;
+          const issues = (Array.isArray(verdict.issues) ? verdict.issues : []).filter(Boolean).slice(0, 4);
+          const rejected = verdict.pass === false;
+          const rejectionIssues = issues.length
+            ? issues
+            : ["independent entity-imagery critic rejected the set without usable remediation"];
+          const score = Number.isFinite(verdict.score)
+            ? Math.max(0, Math.min(1, Number(verdict.score)))
+            : rejected ? 0.4 : 1;
+          if (rejected) {
+            ctx.log(
+              `entity_imagery: selection ${iter} rejected by the critic` +
+              (iter < 2 ? " — re-selecting with the defects fed back" : " — iteration cap reached"),
+              { issues: rejectionIssues },
+            );
+          }
+          return rejected
+            ? { score: Math.min(0.99, score) + 0.01 * iter, pass: false, issues: rejectionIssues }
+            : { score, pass: true, issues: [] };
+        } catch (e) {
+          return {
+            score: 0,
+            pass: false,
+            issues: [
+              `independent entity-imagery critic unavailable (${e instanceof Error ? e.message : e})`,
+            ],
+          };
+        }
+      },
+    });
+
+    // Materialize ONLY an independently accepted set. Ken Burns encoding is local compute, so
+    // deferring it out of `produce` means a rejected candidate never pays for it.
+    if (critiqueEnabled && !loop.accepted) {
+      ctx.log(
+        `entity_imagery: no accepted entity set after ${loop.iterations} attempt(s); ` +
+          "falling back to primary footage rather than materializing unreviewed imagery",
+        { issues: loop.critique.issues.slice(0, 4) },
+      );
+      return {
+        entityClips: [],
+        entityKeys: [],
+        attributions: [],
+        [COST_PATCH_KEY]: observedCostUsd,
+      };
+    }
+    const tmp = await makeRunTempDir(ctx.runId);
+    let i = 0;
+    for (const r of loop.value.resolved) {
+      try {
+        const img = await downloadTo(r.url, join(tmp, `entity_${i}.jpg`));
         const clip = await kenBurns(img, join(tmp, `entity_${i}.mp4`), 5, W, H);
         clips.push(clip);
-        if (wi.attribution) attributions.push(`${e}: ${wi.attribution}`);
-        ctx.log(`entity_imagery: "${e}" â†’ verified Ken Burns clip`);
+        if (r.attribution) attributions.push(`${r.entity}: ${r.attribution}`);
+        ctx.log(`entity_imagery: "${r.entity}" â†’ verified Ken Burns clip`);
         i++;
       } catch (err) {
-        ctx.log(`entity_imagery: "${e}" failed (${err instanceof Error ? err.message : err})`);
+        ctx.log(`entity_imagery: "${r.entity}" failed (${err instanceof Error ? err.message : err})`);
       }
     }
-    ctx.log(`entity_imagery: ${clips.length} entity clip(s), ${attributions.length} attribution(s)`);
-    return { entityClips: clips, entityKeys: await uploadEntityKeys(clips), attributions };
+    ctx.log(
+      `entity_imagery: ${clips.length} entity clip(s), ${attributions.length} attribution(s) ` +
+      `(${loop.iterations} iter, ${loop.accepted ? "accepted" : "best-effort"})`,
+    );
+    return {
+      entityClips: clips,
+      entityKeys: await uploadEntityKeys(clips),
+      attributions,
+      [COST_PATCH_KEY]: observedCostUsd,
+    };
   },
 };
 
@@ -1104,8 +1699,8 @@ export const quoteOverlaysBlock: Block = {
     const timings =
       (ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined) ?? [];
     const out: QuoteOverlaySpec[] = [];
-    if (!hasGeminiKey() || timings.length === 0) {
-      ctx.log("quote_overlays: skipping (no Gemini key or no sentence timings)");
+    if (!hasAnthropicKey() || timings.length === 0) {
+      ctx.log("quote_overlays: skipping (no permitted text planner or no sentence timings)");
       return { quoteOverlays: out };
     }
     const introSec = Number(ctx.store["introSec"] ?? 0);
@@ -1126,7 +1721,7 @@ export const quoteOverlaysBlock: Block = {
     let picks: { index: number; highlights: string[] }[] = [];
     try {
       const indexed = timings.map((t, i) => `${i}: ${t.text}`).join("\n");
-      const res = await geminiJson<{ quotes?: { index?: number; highlights?: string[] }[] }>({
+      const res = await claudeJson<{ quotes?: { index?: number; highlights?: string[] }[] }>({
         prompt:
           `From these narration sentences, choose the ${maxN} MOST quotable, aphoristic, or emotionally ` +
           `striking ones to show as on-screen quote cards. Pick EXACTLY ${maxN} (or all available if fewer than ` +
@@ -1373,7 +1968,111 @@ export const timelineAssemble: Block = {
     "preOverlayLocalPath",
   ],
   run: async (ctx) => {
+    assertCinematicAssemblyRoute({
+      useAssemblyEdl: ctx.params["useAssemblyEdl"],
+      scenePlan: ctx.store["cinematicGeneratedScenePlan"],
+      editDecisionList: ctx.store["cinematicEditDecisionList"],
+      footageManifest: ctx.store["generatedFootageSceneManifest"],
+    });
+    // ========================================================================
+    // ⚠️  USE_ASSEMBLY_EDL — DELIBERATELY-GATED, NOT-YET-VALIDATED CUTOVER PATH
+    // ========================================================================
+    // Everything BELOW this branch is the legacy god-block: the compose/heal
+    // code that has rendered every video this studio has ever shipped. The
+    // branch swaps it wholesale for the standalone Assembly module
+    // (`assembleViaEdl` — plan → renderTimeline → ffmpeg backend).
+    //
+    // IT IS OFF FOR EVERY CHANNEL AND MUST STAY THAT WAY UNTIL A REAL RENDER
+    // PROVES PARITY. What is actually proven today is narrow: the
+    // DETERMINISTIC PLAN MATH matches (scripts/assembly-parity.ts — duration,
+    // per-clip screen time, interleave order, card presence, coverage), and
+    // the adapter emits all 11 keys this block `produces`
+    // (src/lib/assembly/__tests__/cutover.test.ts). NOTHING has proven that
+    // the finished MP4 is equivalent. The bar before this goes anywhere near a
+    // default is the `essay`-preset parity claim demonstrated on a REAL RENDER,
+    // compared side-by-side against the god-block's output for the same run.
+    //
+    // Enabling it is an OPERATOR decision, on ONE channel, reversible in one
+    // config write — never an engineering default and never a code edit:
+    //
+    //   setModuleConfig(channelId, "timeline_assemble", { useAssemblyEdl: true })
+    //
+    // The switch is the `useAssemblyEdl` knob on ASSEMBLY_SURFACE
+    // (src/lib/assembly/module.ts), default `false`, deliberately absent from
+    // every preset. runPipeline only folds EXPLICITLY-CHOSEN knobs into
+    // `ctx.params` (runPipeline.ts:488-496), so a channel that has never
+    // written this knob has no `useAssemblyEdl` key here at all.
+    //
+    // `=== true` — not truthiness — so an absent key, a stale string "true", or
+    // any half-written config falls through to the legacy path. The import is
+    // DYNAMIC so the default path does not even evaluate the module.
+    //
+    // No `profile` is passed on purpose: with one, `assembleViaEdl` layers
+    // per-account params + Editor directives on top, which ADDS divergence.
+    // Params-only is the configuration the parity script actually covers.
+    // ========================================================================
+    if (ctx.params["useAssemblyEdl"] === true) {
+      ctx.log(
+        "timeline_assemble: useAssemblyEdl=true for this channel — composing through the standalone " +
+          "Assembly EDL module (assembleViaEdl) instead of the legacy god-block path. " +
+          "UNVALIDATED CUTOVER: no real-render parity proof exists yet.",
+      );
+      const { assembleViaEdl } = await import("@/lib/assembly/cutover");
+      const produced = await assembleViaEdl({
+        // Copies, not the live bags: the adapter can never mutate this block's
+        // readonly store or the frozen run params.
+        store: { ...ctx.store },
+        params: { ...ctx.params },
+        runId: ctx.runId,
+        keyPrefix: ctx.keyPrefix,
+      });
+      // Spread widens the `AssembleProduces` interface (no index signature) into
+      // a BlockPatch. All 11 declared `produces` keys are carried — the adapter's
+      // key contract is pinned in src/lib/assembly/__tests__/cutover.test.ts.
+      return { ...produced };
+    }
+
     const footage = ctx.store["footageClips"] as string[] | undefined;
+    const narration = str(ctx, "narrationLocalPath");
+    const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
+    const cinematicPlanRaw = ctx.store["cinematicGeneratedScenePlan"];
+    const cinematicEditRaw = ctx.store["cinematicEditDecisionList"];
+    const generatedFootageRaw = ctx.store["generatedFootageSceneManifest"];
+    const cinematicManifestSignaled = Boolean(
+      generatedFootageRaw &&
+      typeof generatedFootageRaw === "object" &&
+      (generatedFootageRaw as Record<string, unknown>)["source"] === "cinematic_case_sequence",
+    );
+    const cinematicArtifactsPresent = cinematicPlanRaw !== undefined || cinematicEditRaw !== undefined || cinematicManifestSignaled;
+    // This is the final pre-spend boundary for a source-bound cinematic body.
+    // The regular binding proves the three upstream receipts agree; the durable
+    // handoff additionally proves their timelines are contiguous, ordered, and
+    // safe for the exact concat renderer. Do not use raw generated-footage
+    // items here: matching-but-gapped timestamps would otherwise pass the
+    // receipt comparison and make composeWithIntro loop a previous shot.
+    const cinematicAssemblyHandoff = cinematicArtifactsPresent
+      ? createCinematicAssemblyHandoff({
+          scenePlan: cinematicPlanRaw,
+          editDecisionList: cinematicEditRaw,
+          footageManifest: generatedFootageRaw,
+          narrationDurationSec: narrationSec,
+        })
+      : undefined;
+    const cinematicFootageManifest = cinematicAssemblyHandoff?.manifest;
+    // The generated-footage manifest is the only reliable signal that this
+    // body came from LTX rather than ordinary stock/entity sources. Preserve
+    // its in-world audio when available; cinematic Casefile is stricter and
+    // requires every admitted LTX take to carry the worker-attested stream.
+    const generatedLtxBodyAudio = Boolean(
+      generatedFootageRaw &&
+      typeof generatedFootageRaw === "object" &&
+      typeof (generatedFootageRaw as Record<string, unknown>)["source"] === "string",
+    );
+    const bodyAudioMode: "off" | "available" | "required" = cinematicFootageManifest
+      ? "required"
+      : generatedLtxBodyAudio
+        ? "available"
+        : "off";
     const authoredManifest = ctx.store["shotRenderManifest"]
       ? validateQualifiedShotRender({
           manifest: ctx.store["shotRenderManifest"],
@@ -1381,20 +2080,21 @@ export const timelineAssemble: Block = {
           coverage: ctx.store["visualCoverage"],
         }).manifest
       : undefined;
-    if ((!footage || footage.length === 0) && !authoredManifest) {
+    if (authoredManifest && cinematicFootageManifest) {
+      throw new Error("timeline_assemble: cannot combine a shot-render manifest with an exact cinematic generated-footage manifest");
+    }
+    if ((!footage || footage.length === 0) && !authoredManifest && !cinematicFootageManifest) {
       throw new Error("timeline_assemble: no footageClips");
     }
     // Interleave entity images (Ken Burns) amongst the stock b-roll so named
     // figures (e.g. Marcus Aurelius) appear when relevant.
-    const entity = authoredManifest ? [] : ((ctx.store["entityClips"] as string[] | undefined) ?? []);
+    const entity = authoredManifest || cinematicFootageManifest ? [] : ((ctx.store["entityClips"] as string[] | undefined) ?? []);
     const clips: string[] = [];
     const maxn = Math.max(footage?.length ?? 0, entity.length);
     for (let k = 0; k < maxn; k++) {
       if (footage?.[k]) clips.push(footage[k]);
       if (entity[k]) clips.push(entity[k]);
     }
-    const narration = str(ctx, "narrationLocalPath");
-    const narrationSec = Number(ctx.store["narrationDurationSec"] ?? 0) || 60;
     if (authoredManifest && Math.abs(authoredManifest.durationSec - narrationSec) > 0.02) {
       throw new Error(
         `timeline_assemble: authored story duration ${authoredManifest.durationSec}s does not match narration ${narrationSec}s`,
@@ -1483,10 +2183,40 @@ export const timelineAssemble: Block = {
           ? (healHintsRaw["timeline_assemble"] ?? []).map(String)
           : [];
     const healHints = healHintsArr.join(" | ");
-    const overlayClassHeal =
-      healHints.length > 0 &&
-      /overlay|caption|quote|insert|card text|outro text/i.test(healHints) &&
-      !/black|dead.?air|footage|off.?world|cut|loop|duration|length/i.test(healHints);
+
+    // TYPED HEAL CLASS (P0-1 step 2) — the repair strategy is now DECLARED by
+    // the healer's defect catalog (`HealClass` in engine/healer.ts) and read
+    // here as a typed field, instead of being re-derived by running a regex
+    // over the hint prose.
+    //
+    // The regex below it is what that replaced, and it is the reason this
+    // comment exists: the hints are human-readable diagnosis strings whose
+    // wording is not a contract, so a hint reworded upstream silently stopped
+    // matching and EVERY overlay-class heal paid the full ~40-min recompose —
+    // a permanent heal outage nothing could detect, because both branches
+    // produce a correct video and only the bill differs.
+    //
+    // It is kept ONLY as the fallback for a heal payload that carries no
+    // declared class (a run resumed from a store seeded by the previous
+    // deploy). Once a class is present it is authoritative and the prose is
+    // never consulted.
+    const declaredHealClasses = readDeclaredHealClasses(ctx.store["healClasses"], "timeline_assemble");
+    const overlayClassHeal = declaredHealClasses.length > 0
+      // `every`, not `some`: a mixed diagnosis (an overlay defect AND a body
+      // defect in the same failure) must take the branch that can actually fix
+      // both. Re-finishing cannot repair the body, so it loses the tie.
+      ? declaredHealClasses.every((healClass) => healClass === "overlay_finish")
+      : healHints.length > 0 &&
+        /overlay|caption|quote|insert|card text|outro text/i.test(healHints) &&
+        !/black|dead.?air|footage|off.?world|cut|loop|duration|length/i.test(healHints);
+    if (declaredHealClasses.length > 0) {
+      ctx.log(
+        `timeline_assemble: heal class declared by the healer [${declaredHealClasses.join(", ")}] → ` +
+        `${overlayClassHeal ? "surgical re-finish" : "full rebuild"} (no prose matching)`,
+      );
+    } else if (healHints.length > 0) {
+      ctx.log("timeline_assemble: heal payload carries no declared heal class — falling back to legacy hint matching");
+    }
     if (overlayClassHeal) {
       try {
         const preKey = `${ctx.keyPrefix}runs/${ctx.runId}/pre_overlay.mp4`;
@@ -1533,7 +2263,28 @@ export const timelineAssemble: Block = {
       } catch { /* default bust */ }
     }
 
-    if (authoredManifest) {
+    if (cinematicFootageManifest) {
+      const cinematicPaths: string[] = [];
+      for (const [index, item] of cinematicFootageManifest.items.entries()) {
+        const local = join(tmp, `cinematic_source_${String(index).padStart(4, "0")}.mp4`);
+        await writeBytes(local, await getObjectBytes(item.clipKey));
+        cinematicPaths.push(local);
+      }
+      ctx.log(
+        `timeline_assemble: exact cinematic body from ${cinematicPaths.length} source-bound multi-shot clip(s); ` +
+          `sequence ${cinematicFootageManifest.sequenceFingerprint.slice(0, 12)}`,
+      );
+      concat = await assembleAuthoredBody({
+        clipPaths: cinematicPaths,
+        segDurationsSec: cinematicFootageManifest.items.map((item) => item.t1 - item.t0),
+        outPath: join(tmp, "body.mp4"),
+        tmpDir: tmp,
+        tailHoldSec: tailSec,
+        width: W,
+        height: H,
+        bodyAudioMode,
+      });
+    } else if (authoredManifest) {
       const authoredPaths: string[] = [];
       for (const [index, item] of authoredManifest.items.entries()) {
         const local = join(tmp, `authored_source_${String(index).padStart(4, "0")}.mp4`);
@@ -1587,6 +2338,7 @@ export const timelineAssemble: Block = {
         tmpDir: tmp,
         width: W,
         height: H,
+        bodyAudioMode,
         maxSegSec: bodyMaxSeg,
       });
     } else {
@@ -1599,6 +2351,7 @@ export const timelineAssemble: Block = {
         beats,
         width: W,
         height: H,
+        bodyAudioMode,
         // per-clip screen time matches stock_footage's coverage credit (PER_CLIP=25)
         // so the gathered footage fills the full length without the body looping.
         maxSegSec: bodyMaxSeg,
@@ -1653,6 +2406,18 @@ export const timelineAssemble: Block = {
     ctx.log(
       `timeline_assemble: compose intro ${introSec}s + narration ${narrationSec}s + ${tailSec}s tail â†’ ${videoSec}sâ€¦`,
     );
+    // LTX cinematic body only: source-bound Novita/LTX clips get the
+    // per-style film-grain + vignette finish so they read consistently with
+    // that style's world (docuStyles-scale doctrine lives on LtxStyleDef,
+    // see src/engine/ltxStylePresets.ts). Non-cinematic bodies (stock,
+    // entity, chapter, authored) are untouched — this never forces a look
+    // onto footage that wasn't part of the cinematic render.
+    const cinematicFilmLook = cinematicFootageManifest
+      ? (() => {
+          const ltxStyle = getLtxStyle(ctx.store["ltxStyleId"] as string | undefined);
+          return { grain: ltxStyle.grain, vignette: ltxStyle.vignette };
+        })()
+      : undefined;
     const out = join(tmp, "video.mp4");
     await composeWithIntro({
       introCardPath: introCardPath || undefined,
@@ -1667,11 +2432,13 @@ export const timelineAssemble: Block = {
       audioFadeOutSec,
       width: W,
       height: H,
+      filmGrain: cinematicFilmLook,
       // music bed a further 5% quieter (intro 0.54â†’0.513, under-voice 0.108â†’0.1026)
       introMusicVol: Number(ctx.params["introMusicVol"] ?? 0.513),
       bodyMusicVol: Number(ctx.params["bodyMusicVol"] ?? 0.1026),
       // slower, gentler duck into/out of the narration bed
       musicDuckRampSec: Number(ctx.params["musicDuckRampSec"] ?? 4),
+      bodyAudioMode,
       outroCardPath,
       outroFadeInSec: 1.2,
     });
@@ -1957,11 +2724,11 @@ export const captions: Block = {
 export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
-  produces: ["qaPassed", "qaReport", "qualityEvidence", "reviewEvidence", "reviewResult", "reviewFingerprint"],
+  produces: ["qaPassed", "qaReport", "qualityEvidence", "temporalDynamism", "visualPacing", "reviewEvidence", "reviewResult", "reviewFingerprint"],
   paid: true,
   run: async (ctx) => {
     const productionQa = ctx.params["qaProfile"] !== "draft";
-    const qaCost = qaVisualCost(ctx.params);
+    let qaCost = qaVisualCost(ctx.params);
     const video = str(ctx, "videoLocalPath");
     const title = str(ctx, "title");
     const dur = Number(ctx.store["videoDurationSec"] ?? 0);
@@ -1971,13 +2738,17 @@ export const qaVisual: Block = {
       stored: ctx.params["contentLane"],
       pipeline: [],
     });
+    // P1-1 / P1-17: the two per-channel inputs the quality loop was missing —
+    // the operator's critic doctrine, and the lane's own quality calibration.
+    const criticDoctrine = opt(ctx, "criticDoctrine");
+    const laneQuality = laneQualityPolicy(contentLane);
     // Make the channel's stored QualityBar executable where an evaluator can
     // genuinely measure it. Its historic 0..2 target maps to the 0..10 QA
     // scales; dimensions without a matching evaluator remain visible gaps,
     // never invented scores.
     const qualityBar = ctx.store["qualityBar"] as {
       target?: unknown;
-      dimensions?: Array<{ id?: unknown }>;
+      dimensions?: Array<{ id?: unknown; description?: unknown }>;
     } | null;
     const qualityFloor = (dimensionIds: readonly string[], fallback: number): number => {
       if (!productionQa) return fallback;
@@ -1988,8 +2759,16 @@ export const qaVisual: Block = {
       if (!applies || !Number.isFinite(target) || target < 0 || target > 2) return fallback;
       return Math.max(fallback, Math.min(10, target * 5));
     };
-    const videoMinimum = qualityFloor(["footage"], productionQa ? 6 : 4);
-    const thumbnailMinimum = qualityFloor(["thumbnail"], productionQa ? 5 : 4);
+    // P1-17: the lane raises the model-graded floors where that is meaningful
+    // (a Short is judged harder than a lo-fi loop). Draft runs keep the loose
+    // draft bar, and `qualityFloor` only ever RAISES, so a lane can tighten the
+    // bar but never silently ship below the historic minimum.
+    const videoMinimum = productionQa
+      ? qualityFloor(["footage"], Math.max(6, laneQuality.visualScoreFloor))
+      : qualityFloor(["footage"], 4);
+    const thumbnailMinimum = productionQa
+      ? qualityFloor(["thumbnail"], Math.max(5, laneQuality.thumbnailScoreFloor))
+      : qualityFloor(["thumbnail"], 4);
     const audioMinimum = qualityFloor(["music", "voice"], 5);
     const brandMinimum = qualityFloor(["identity"], 5);
     const tmp = await makeRunTempDir(ctx.runId);
@@ -2011,6 +2790,18 @@ export const qaVisual: Block = {
     const lengthOk = ratio >= 0.5 && ratio <= 2.0;
     if (!lengthOk) {
       throw new Error(`qa_visual FAILED (length): video ${p.durationSec}s vs target ${target}s`);
+    }
+
+    // Detect the cinematic route before the overview vision call. A partial
+    // cinematic handoff must not be able to hide behind qaProfile=draft and
+    // spend on an advisory review before the stricter final-master contract
+    // rejects it later in this block.
+    const cinematicQaArtifactsPresent =
+      ctx.store["cinematicGeneratedScenePlan"] !== undefined ||
+      ctx.store["cinematicEditDecisionList"] !== undefined ||
+      ctx.store["generatedFootageSceneManifest"] !== undefined;
+    if (cinematicQaArtifactsPresent) {
+      assertCinematicFinalMasterQaProfile(ctx.params["qaProfile"]);
     }
 
     // 3) Video frames (vision, separate).
@@ -2132,10 +2923,145 @@ export const qaVisual: Block = {
       channelName: opt(ctx, "channelName"),
       persona: opt(ctx, "persona"),
       styleGrammar: opt(ctx, "styleGrammar"),
+      // P1-1: the channel's own critic doctrine now reaches the mandatory
+      // holistic gate. P1-17: the lane supplies what this lane's critic must
+      // actively scrutinise.
+      ...(criticDoctrine ? { criticDoctrine } : {}),
+      laneEmphasis: laneQuality.emphasis,
       qualityDimensions: (qualityBar?.dimensions ?? []).flatMap((dimension) =>
         typeof dimension?.id === "string" ? [dimension.id] : [],
       ),
+      // Reference-quality mechanics are appended to the persisted QualityBar
+      // descriptions. Sending only short IDs made the final review generic;
+      // these bounded criteria become reviewer input and fingerprint evidence.
+      qualityCriteria: (qualityBar?.dimensions ?? []).flatMap((dimension) =>
+        typeof dimension?.id === "string" && typeof dimension?.description === "string"
+          ? [`${dimension.id}: ${dimension.description}`]
+          : [],
+      ),
     });
+    const visualMatter = visualMatterFromUnknown(ctx.store["visualMatterManifest"]);
+    const visualMatterLocks = visualMatterReviewLocks(visualMatter);
+    // Assembly checks this binding on its legacy path, but QA must re-check it
+    // too: Assembly EDL cutover and future assemblers must never turn a
+    // source-bound sequence into a final master without retaining every
+    // accepted keyframe and moving-clip review receipt.
+    const cinematicPlanRaw = ctx.store["cinematicGeneratedScenePlan"];
+    const cinematicEdlRaw = ctx.store["cinematicEditDecisionList"];
+    const generatedFootageRaw = ctx.store["generatedFootageSceneManifest"];
+    const cinematicManifestSignaled = Boolean(
+      generatedFootageRaw &&
+      typeof generatedFootageRaw === "object" &&
+      (generatedFootageRaw as Record<string, unknown>)["source"] === "cinematic_case_sequence",
+    );
+    const cinematicArtifactsPresent = cinematicPlanRaw !== undefined || cinematicEdlRaw !== undefined || cinematicManifestSignaled;
+    const cinematicBinding = cinematicArtifactsPresent
+      ? assertCinematicSequenceRenderBinding({
+          scenePlan: cinematicPlanRaw,
+          editDecisionList: cinematicEdlRaw,
+          footageManifest: generatedFootageRaw,
+          narrationDurationSec: target,
+        })
+      : undefined;
+    const cinematicSequenceInput = cinematicBinding
+      ? CinematicCaseSequenceInputSchema.parse(ctx.store["cinematicCaseSequenceInput"])
+      : undefined;
+    const cinematicSequenceAdmission = cinematicBinding
+      ? CinematicCaseSequenceAdmissionReceiptSchema.parse(ctx.store["cinematicCaseSequenceAdmission"])
+      : undefined;
+    if (cinematicBinding && (
+      cinematicCaseSequenceContentFingerprint(cinematicSequenceInput!) !== cinematicBinding.scenePlan.sequenceFingerprint ||
+      cinematicSequenceAdmission!.sequenceFingerprint !== cinematicBinding.scenePlan.sequenceFingerprint
+    )) {
+      throw new Error(
+        "qa_visual FAILED: cinematic source sequence/admission do not bind the generated scenes retained in the final master",
+      );
+    }
+    const authoredShotManifest = !cinematicBinding && ctx.store["shotRenderManifest"] !== undefined
+      ? ShotRenderManifestSchema.parse(ctx.store["shotRenderManifest"])
+      : undefined;
+    const cinematicSequencePresent = cinematicBinding !== undefined;
+    const cinematicReceiptEvidence = cinematicBinding
+      ? [
+          `cinematicSequence=${cinematicBinding.scenePlan.sequenceFingerprint}`,
+          `acceptedKeyframes=${cinematicBinding.footageManifest.items.filter((item) => item.keyframeReview?.pass).length}/${cinematicBinding.footageManifest.items.length}`,
+          `acceptedMovingTakes=${cinematicBinding.footageManifest.items.filter((item) => item.clipReview?.pass).length}/${cinematicBinding.footageManifest.items.length}`,
+          `acceptedTransitions=${cinematicBinding.footageManifest.items.filter((item) => item.transitionToNextReview?.pass).length}/${Math.max(0, cinematicBinding.footageManifest.items.length - 1)}`,
+        ]
+      : [];
+    const cinematicCreativeLocksRaw = ctx.store["cinematicCreativeLocks"];
+    const cinematicCreativeLocks = cinematicCreativeLocksRaw === undefined
+      ? undefined
+      : CinematicCreativeLocksSchema.parse(cinematicCreativeLocksRaw);
+    const cinematicEdl = cinematicEdlRaw === undefined
+      ? undefined
+      : CinematicEditDecisionListSchema.parse(cinematicEdlRaw);
+    if (cinematicSequencePresent && (!cinematicCreativeLocks || !cinematicEdl)) {
+      throw new Error(
+        "qa_visual FAILED: cinematic sequence requires its reviewer-facing creative locks and exact edit decision list",
+      );
+    }
+    if (
+      cinematicCreativeLocks && cinematicEdl &&
+      cinematicCreativeLocks.sequenceFingerprint !== cinematicEdl.sequenceFingerprint
+    ) {
+      throw new Error("qa_visual FAILED: cinematic creative locks and edit decision list do not bind the same sequence");
+    }
+    const cinematicFinalMasterQaAdmission = cinematicSequencePresent
+      ? assertCinematicFinalMasterQaAdmission({
+          admission: ctx.store["cinematicFinalMasterQaAdmission"],
+          creativeLocks: cinematicCreativeLocks,
+          editDecisionList: cinematicEdl,
+        })
+      : undefined;
+    // The exact lock/cut count was admitted before Novita rendered. Charge the
+    // same durable envelope here so the runner's stage ceiling and recorded
+    // QA spend cannot silently diverge on a resumed final-master review.
+    qaCost = qaVisualCost(ctx.params, cinematicFinalMasterQaAdmission?.reviewCostUsd);
+    const cinematicBodyOffsetSec = ctx.store["introApplied"] === true && Number(ctx.store["introSec"]) > 0
+      ? Number(ctx.store["introSec"])
+      : 0;
+    const cinematicQaEvidence = cinematicCreativeLocks && cinematicEdl
+      ? cinematicFinalMasterQaEvidence({
+          creativeLocks: cinematicCreativeLocks,
+          editDecisionList: cinematicEdl,
+          bodyOffsetSec: cinematicBodyOffsetSec,
+        })
+      : { creativeLocks: [], focusWindows: [] };
+    const cinematicReviewLocks = cinematicQaEvidence.creativeLocks;
+    const cinematicFocus = cinematicQaEvidence.focusWindows;
+    // A Casefile cinematic sequence is stronger evidence than a family label:
+    // it has source-admission and claim→shot-map receipts. Apply the existing
+    // Fern-calibrated documentary mechanics to that final review only in this
+    // state. This is not a similarity claim and does not impose true-crime
+    // requirements on ordinary fiction that also uses the cinematic renderer.
+    const casefileCinematicReference = cinematicSequencePresent &&
+      ctx.store["casefileSourceAdmission"] !== undefined &&
+      ctx.store["casefileEvidenceShotMapAdmission"] !== undefined
+      ? referenceQualityContractFor("documentary_collage_short")
+      : undefined;
+    const casefileCinematicQualityCriteria = casefileCinematicReference
+      ? casefileCinematicReference.requirements.map((requirement) => {
+          const sources = requirement.sourceIds
+            .map((id) => casefileCinematicReference.sources.find((source) => source.id === id)?.label ?? id)
+            .join(", ");
+          return [
+            `Casefile cinematic reference-quality ${requirement.area} (${sources}; mechanics only, no automatic comparison): ${requirement.standard}`,
+            `Required evidence: ${requirement.evidence.join(", ")}`,
+          ].join(" ");
+        })
+      : [];
+    const casefileCinematicReferenceEvidence = casefileCinematicReference
+      ? [
+          `casefileReferenceMechanics=${casefileCinematicReference.sources.map((source) => source.id).join(",")}`,
+          `casefileReferenceRequirements=${casefileCinematicReference.requirements.map((requirement) => requirement.id).join(",")}`,
+          "casefileReferenceComparison=mechanics-only-no-automatic-comparison",
+        ]
+      : [];
+    const cinematicQualityEvidence = [
+      ...cinematicReceiptEvidence,
+      ...casefileCinematicReferenceEvidence,
+    ];
     const channelWorld = [
       watchDna?.recurringSubject
         ? [watchDna.recurringSubject, watchDna.setting, ...(watchDna.motifs ?? []).slice(0, 4)]
@@ -2143,6 +3069,10 @@ export const qaVisual: Block = {
             .join("; ")
         : "",
       channelReviewProfile.channelWorld ?? "",
+      visualMatter?.status !== "disabled" ? visualMatter?.channelWorld ?? "" : "",
+      cinematicSequencePresent
+        ? "source-bound faceless mannequin reconstruction; wardrobe, role, prop, camera, evidence, and cut rationale are locked per reviewed scene"
+        : "",
     ].filter(Boolean).join("; ") || undefined;
     const reviewIntent = {
       title,
@@ -2154,39 +3084,125 @@ export const qaVisual: Block = {
       channelWorld,
       expectedStructure: channelReviewProfile.expectedStructure,
       allowedVisualConditions: channelReviewProfile.allowedVisualConditions,
+      ...(channelReviewProfile.criticDoctrine
+        ? { criticDoctrine: channelReviewProfile.criticDoctrine }
+        : {}),
+      criticEmphasis: channelReviewProfile.criticEmphasis,
+      qualityCriteria: [...channelReviewProfile.qualityCriteria, ...casefileCinematicQualityCriteria],
       transcriptCues,
       overlays: reviewOverlays,
-      focusWindows: repairFocus,
+      creativeLocks: [...visualMatterLocks, ...cinematicReviewLocks],
+      focusWindows: [...repairFocus, ...cinematicFocus],
     };
     // This is the visual release gate. It persists timestamped scene/cue/overlay
     // evidence, reviews <=12-image chronological batches, then creates a dense
     // 2-fps focus pass for suspect or previously repaired intervals.
+    // A cinematic master is a file, not just a logical scene plan. Hash its
+    // exact bytes before extracting any final-review evidence so the persisted
+    // frames and their fingerprint cannot later be paired with a replacement.
+    const finalMasterSha256BeforeVisualReview = cinematicBinding && productionQa
+      ? await sha256ShotAnalysisSource(video)
+      : undefined;
     const visualReview = await reviewRender(video, p.durationSec, reviewIntent, {
       runId: ctx.runId,
       keyPrefix: ctx.keyPrefix,
+      sourceSha256: finalMasterSha256BeforeVisualReview,
       required: productionQa,
       maxFrames: Number(ctx.params["visualReviewFrames"] ?? 48),
       maxFocusFrames: Number(ctx.params["visualReviewFocusFrames"] ?? 24),
+      // A source-bound cinematic sequence has an accepted receipt for every
+      // planned join. Its final review must inspect every one at 2fps; the
+      // normal 24-frame repair cap would silently skip later cuts.
+      requireCompleteFocusCoverage: cinematicSequencePresent,
       log: (message) => ctx.log(message),
     });
+    // Close the final-master TOCTOU window opened by frame extraction and the
+    // independent visual reviewer. A changed master cannot retain this review.
+    const finalMasterSha256AfterVisualReview = cinematicBinding && productionQa
+      ? await sha256ShotAnalysisSource(video)
+      : undefined;
+    if (cinematicBinding && productionQa && (
+      !finalMasterSha256BeforeVisualReview ||
+      visualReview.evidence.source.sha256 !== finalMasterSha256BeforeVisualReview ||
+      finalMasterSha256AfterVisualReview !== finalMasterSha256BeforeVisualReview
+    )) {
+      throw new Error("qa_visual FAILED: cinematic final master changed during evidence-backed visual review");
+    }
     if (productionQa && !visualReview.ran) {
       throw new Error("qa_visual FAILED: required evidence-backed visual reviewer did not run");
     }
-
-    // Native Gemini video review remains an opt-in, full-audio escalation path.
-    // Its mood/pacing findings are valuable evidence but never replace the
-    // structured, repairable frame/overlay review above.
-    let nativeWatch: Awaited<ReturnType<typeof nativeWatchRender>> | null = null;
-    if (ctx.params["nativeWatch"] === true) {
-      nativeWatch = await nativeWatchRender(video, p.durationSec, reviewIntent, { log: ctx.log });
-      if (nativeWatch?.moodMatch !== undefined || nativeWatch?.musicFit !== undefined) {
-        const low = [
-          (nativeWatch.moodMatch ?? 10) < 6 ? `mood coherence ${nativeWatch.moodMatch}/10` : "",
-          (nativeWatch.pacing ?? 10) < 6 ? `pacing ${nativeWatch.pacing}/10` : "",
-          (nativeWatch.musicFit ?? 10) < 6 ? `music fit ${nativeWatch.musicFit}/10` : "",
-        ].filter(Boolean);
-        if (low.length) ctx.log(`qa_visual: LOW NATIVE WATCH FEEL SCORES (advisory): ${low.join(", ")} — ${nativeWatch.summary.slice(0, 120)}`);
+    // Generic evidence review catches defects across the whole master. A
+    // source-bound cinematic sequence also needs a second, strict semantic
+    // receipt for every identity/wardrobe lock, factual claim, causal cut, and
+    // tension transition. It receives only the exact evidence frames already
+    // selected by reviewRender, never a new or partial frame sample.
+    let cinematicFinalMasterQaReceipt: CinematicFinalMasterQaEvidenceReceipt | undefined;
+    const cinematicFinalMasterSha256: string | undefined = finalMasterSha256AfterVisualReview;
+    if (cinematicBinding && productionQa) {
+      if (visualReview.verdict !== "pass") {
+        throw new Error(
+          `qa_visual FAILED: cinematic final-master evidence requires a passing general visual review (got ${visualReview.verdict})`,
+        );
       }
+      try {
+        // The visual plan can only earn its causal cuts if the master still
+        // speaks the exact reviewed Story Spine. Generic narration QA verifies
+        // audio against its own transcript; this closes the source-bound gap.
+        assertSourceBoundNarrationAlignment({
+          sourceBoundStorySpine: ctx.store["sourceBoundStorySpine"],
+          sentenceTimings: ctx.store["sentenceTimings"],
+          narrationDurationSec: target,
+          expectedCinematicBinding: {
+            caseId: cinematicSequenceInput!.caseId,
+            sourcePacketFingerprint: cinematicSequenceInput!.sourcePacketFingerprint,
+            evidenceShotMapFingerprint: cinematicSequenceInput!.evidenceShotMapFingerprint,
+            shotPlanFingerprint: cinematicSequenceInput!.shotPlanFingerprint,
+          },
+        });
+        if (!cinematicFinalMasterSha256 || !visualReview.evidence.source.sha256) {
+          throw new Error("cinematic final-master evidence is missing its mandatory source SHA-256");
+        }
+        const cinematicQaPlan = cinematicFinalMasterQaPlan({
+          sequence: cinematicSequenceInput!,
+          creativeLocks: cinematicCreativeLocks!,
+          editDecisionList: cinematicEdl!,
+          bodyOffsetSec: cinematicBodyOffsetSec,
+        });
+        cinematicFinalMasterQaReceipt = await reviewCinematicFinalMasterQaEvidence({
+          plan: cinematicQaPlan,
+          evidence: visualReview.evidence,
+          framePaths: visualReview.framePaths,
+          visualReviewFingerprint: visualReview.reviewFingerprint,
+          finalMasterSha256: cinematicFinalMasterSha256,
+        });
+        if (cinematicFinalMasterQaReceipt.finalMasterSha256 !== visualReview.evidence.source.sha256) {
+          throw new Error("cinematic final-master receipt SHA-256 does not match the visual-review evidence source");
+        }
+        // The strict cinematic receipt itself can take time to collect. Hash
+        // once more before admitting it so both review layers attest the exact
+        // file that will move into the remaining release checks.
+        const finalMasterSha256AfterCinematicReceipt = await sha256ShotAnalysisSource(video);
+        if (finalMasterSha256AfterCinematicReceipt !== cinematicFinalMasterSha256) {
+          throw new Error("cinematic final master changed while its strict evidence receipt was being collected");
+        }
+        ctx.log(
+          `qa_visual: cinematic final-master evidence PASS (${cinematicFinalMasterQaReceipt.locks.length} locks, ` +
+            `${cinematicFinalMasterQaReceipt.claims.length} claim views, ${cinematicFinalMasterQaReceipt.cuts.length} causal cuts)`,
+        );
+      } catch (error) {
+        throw new Error(
+          `qa_visual FAILED: cinematic final-master continuity/cut/claim evidence was not accepted: ${
+            error instanceof Error ? error.message : String(error)
+          }`,
+        );
+      }
+    }
+
+    // The old native-video escalation uploaded the full master to Gemini. It is
+    // retired under the no-Gemini production policy; the evidence-backed frame
+    // review above remains the required, repairable quality path.
+    if (ctx.params["nativeWatch"] === true) {
+      ctx.log("qa_visual: nativeWatch is retired; using the configured no-Gemini QA routes only");
     }
 
     // 4) Thumbnail (vision, separate) â€” download from R2.
@@ -2259,17 +3275,6 @@ export const qaVisual: Block = {
         summary: visualReview.summary,
         reviewFingerprint: visualReview.reviewFingerprint,
       },
-      nativeWatch: nativeWatch
-        ? {
-            ran: nativeWatch.ran,
-            verdict: nativeWatch.verdict,
-            defects: nativeWatch.defects,
-            summary: nativeWatch.summary,
-            moodMatch: nativeWatch.moodMatch,
-            pacing: nativeWatch.pacing,
-            musicFit: nativeWatch.musicFit,
-          }
-        : undefined,
     };
 
     // Hard-gate on egregious VISUAL defects (video frames + thumbnail). Footage
@@ -2277,28 +3282,16 @@ export const qaVisual: Block = {
     // fallback), so here it's ADVISORY â€” a single borderline clip must not nuke a
     // fully-rendered, paid video. SEO/identity are advisory too (logged).
     const critical: string[] = [];
-    // TITLE-CARD TRUCE: when the shipped thumbnail is the DELIBERATE
-    // deterministic title card (operator choice or the fal-route degrade), the
-    // vision judge's clickbait rubric must not gate it — it scored a clean,
-    // correctly-spelled card 2/10 and the heal loop then regenerated the SAME
-    // card to exhaustion (observed live: a finished $1.2 run died healing a
-    // cosmetic verdict about a card that was working as designed).
-    const thumbStrategy = String(ctx.store["strategy"] ?? "");
-    const thumbIsDeliberateCard =
-      thumbStrategy === "title_card_fallback" ||
-      thumbStrategy === "draft_preview_placeholder" ||
-      String(ctx.store["thumbnailer"] ?? "") === "title_card";
+    // There is no title-card exemption: every executable thumbnail is a
+    // Nano Banana scene plus deterministic typography, so the same visual bar
+    // applies to every channel and every retry.
     if (!video_.skipped && video_.score < videoMinimum) {
       // Three overview frames are retained as a cheap health signal, but they
       // cannot overrule the evidence-backed chronological reviewer.
       ctx.log(`qa_visual: LOW overview score ${video_.score}/10 (advisory; visual review is authoritative): ${video_.issues.slice(0, 2).join("; ")}`);
     }
     if (!thumbnail.skipped && thumbnail.score < thumbnailMinimum) {
-      if (thumbIsDeliberateCard) {
-        ctx.log(`qa_visual: thumbnail ${thumbnail.score}/10 on a deliberate title card (ADVISORY, not gating): ${thumbnail.issues.slice(0, 2).join("; ")}`);
-      } else {
-        critical.push(`thumbnail score ${thumbnail.score} below ${thumbnailMinimum}: ${thumbnail.issues.slice(0, 2).join("; ")}`);
-      }
+      critical.push(`thumbnail score ${thumbnail.score} below ${thumbnailMinimum}: ${thumbnail.issues.slice(0, 2).join("; ")}`);
     }
     if (!footage.skipped && footage.score < 5) {
       ctx.log(`qa_visual: LOW FOOTAGE score ${footage.score} (advisory): ${footage.issues.slice(0, 2).join("; ")}`);
@@ -2311,10 +3304,158 @@ export const qaVisual: Block = {
       introSec: Number(ctx.store["introSec"] ?? 0),
       tailSec: Number(ctx.params["tailSec"] ?? 3),
       introApplied: ctx.store["introApplied"] === true,
+      outroApplied: ctx.store["outroApplied"] === true,
+      // Lane-aware dead-air threshold only: this gate stays deterministic and
+      // the doctrine is carried for evidence, never to flip a verdict.
+      channel: {
+        contentLaneKey: contentLane.key,
+        blackSegmentMinSec: laneQuality.blackSegmentMinSec,
+        maxStaticHoldSec: laneQuality.maxStaticHoldSec,
+        visualPacingPolicy: laneQuality.visualPacing,
+        ...(criticDoctrine ? { criticDoctrine } : {}),
+      },
       log: ctx.log,
     });
+    let cinematicEditIntegrity: ReturnType<typeof evaluateCinematicEditIntegrity> | undefined;
+    let authoredShotEditIntegrity: ReturnType<typeof evaluateAuthoredShotEditIntegrity> | undefined;
+    // Adaptive PySceneDetect sees true shot boundaries rather than only large
+    // FFmpeg marker deltas. It is required for every production lane whose
+    // pacing policy expects moving/editable visuals; ambient and music lanes
+    // remain explicitly exempt because their long continuous holds are the
+    // deliberate product.
+    let finalShotAnalysis: ReturnType<typeof analyzeShotBoundaries> | undefined;
+    const requiresAdaptiveShotAnalysis = productionQa && rv.visualPacing.policy.mode !== "exempt";
+    if (requiresAdaptiveShotAnalysis || cinematicBinding || authoredShotManifest) {
+      try {
+        const finalMasterSha256 = cinematicFinalMasterSha256 ?? await sha256ShotAnalysisSource(video);
+        finalShotAnalysis = analyzeShotBoundaries({ videoPath: video, sourceSha256: finalMasterSha256 });
+        if (cinematicBinding) {
+          cinematicEditIntegrity = evaluateCinematicEditIntegrity({
+            editDecisionList: cinematicBinding.editDecisionList,
+            shotAnalysis: finalShotAnalysis,
+            bodyOffsetSec: cinematicBodyOffsetSec,
+          });
+          if (!cinematicEditIntegrity.pass) {
+            const missed = cinematicEditIntegrity.cuts
+              .filter((cut) => !cut.matched)
+              .map((cut) => `${cut.shotId}@${cut.expectedSec.toFixed(2)}s`)
+              .join(", ");
+            critical.push(
+              `cinematic edit integrity: ${cinematicEditIntegrity.matchedCutCount}/${cinematicEditIntegrity.plannedCutCount} ` +
+                `planned causal cuts were observed in the final master (missing ${missed})`,
+            );
+          }
+        }
+        if (authoredShotManifest) {
+          authoredShotEditIntegrity = evaluateAuthoredShotEditIntegrity({
+            manifest: authoredShotManifest,
+            shotAnalysis: finalShotAnalysis,
+            bodyOffsetSec: cinematicBodyOffsetSec,
+          });
+          if (!authoredShotEditIntegrity.pass) {
+            const missed = authoredShotEditIntegrity.cuts
+              .filter((cut) => !cut.matched)
+              .map((cut) => `${cut.shotId}@${cut.expectedSec.toFixed(2)}s`)
+              .join(", ");
+            critical.push(
+              `LTX edit integrity: ${authoredShotEditIntegrity.matchedCutCount}/${authoredShotEditIntegrity.plannedCutCount} ` +
+                `authored shot boundaries were observed in the final master (missing ${missed})`,
+            );
+          }
+        }
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (productionQa) {
+          critical.push(
+            requiresAdaptiveShotAnalysis
+              ? `adaptive scene-analysis evidence unavailable: ${detail}`
+              : `LTX edit integrity evidence unavailable: ${detail}`,
+          );
+        } else {
+          ctx.log(`qa_visual: adaptive scene analysis unavailable in draft: ${detail}`);
+        }
+      }
+    }
+    const adaptiveSceneEvidence = finalShotAnalysis
+      ? [
+          `adaptiveSceneDetector=${finalShotAnalysis.provider}/${finalShotAnalysis.detector}`,
+          `adaptiveSceneSource=${finalShotAnalysis.source.sha256}`,
+          `adaptiveSceneCount=${finalShotAnalysis.scenes.length}`,
+          `adaptiveSceneMaxSec=${Math.max(...finalShotAnalysis.scenes.map((scene) => scene.endSecExclusive - scene.startSec), 0).toFixed(2)}`,
+        ]
+      : [];
+    // Any renderer can declare exact words and their intended frame times.
+    // Treat malformed declarations or unavailable OCR as release blockers in
+    // production: visible text is often the entire instructional payload.
+    const rawOnScreenTextCues = ctx.store["onScreenTextCues"];
+    const parsedOnScreenTextCues = rawOnScreenTextCues === undefined
+      ? { success: true as const, data: [] as const }
+      : TimedOnScreenTextCueSchema.array().safeParse(rawOnScreenTextCues);
+    let onScreenTextEvidence: string[] = [];
+    if (!parsedOnScreenTextCues.success) {
+      if (productionQa) {
+        critical.push(
+          `on-screen text evidence is malformed: ${parsedOnScreenTextCues.error.issues.map((issue) => issue.message).join("; ")}`,
+        );
+      }
+    } else if (parsedOnScreenTextCues.data.length) {
+      try {
+        const sourceSha256 = await sha256OnScreenTextSource(video);
+        const proof = await proveOnScreenText({
+          videoPath: video,
+          sourceSha256,
+          cues: parsedOnScreenTextCues.data,
+        });
+        const failed = proof.cues.filter((cue) => !cue.passed);
+        onScreenTextEvidence = [
+          `onScreenTextOcr=${proof.engine.name}/${proof.engine.version}`,
+          `onScreenTextCues=${proof.cues.length}`,
+          `onScreenTextPass=${proof.passed}`,
+          ...failed.slice(0, 3).map((cue) => `unreadable:${cue.id}=${cue.tokenCoverage.toFixed(2)}/${cue.minTokenCoverage.toFixed(2)}`),
+        ];
+        if (!proof.passed) {
+          critical.push(
+            `on-screen text legibility failure: ${failed.map((cue) => `${cue.id} ${cue.tokenCoverage.toFixed(2)} < ${cue.minTokenCoverage.toFixed(2)}`).join(", ")}`,
+          );
+        }
+        ctx.log(`qa_visual: on-screen text OCR ${proof.passed ? "PASSED" : "FAILED"} (${proof.cues.length} required frame(s))`);
+      } catch (error) {
+        if (productionQa) {
+          critical.push(`on-screen text evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        } else {
+          ctx.log(`qa_visual: on-screen text evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+    const ltxEditIntegrityEvidence = cinematicEditIntegrity
+      ? [
+          `cinematicCuts=${cinematicEditIntegrity.matchedCutCount}/${cinematicEditIntegrity.plannedCutCount}`,
+          `sceneMarkers=${cinematicEditIntegrity.observedCutCount}`,
+        ]
+      : authoredShotEditIntegrity
+        ? [
+            `authoredLtxCuts=${authoredShotEditIntegrity.matchedCutCount}/${authoredShotEditIntegrity.plannedCutCount}`,
+            `sceneMarkers=${authoredShotEditIntegrity.observedCutCount}`,
+          ]
+        : [];
     if (rv.verdict === "fail") {
       critical.push(`render-validate: ${rv.defects.filter((d) => d.severity === "critical").map((d) => d.issue).join(" | ")}`);
+    }
+    if (!rv.ran) {
+      critical.push("render-validate: deterministic evidence did not complete; release is fail-closed");
+    }
+    if (rv.visualPacing.verdict === "needs_human") {
+      // A sparse scene-marker receipt is deliberately not mislabelled as a
+      // cut-count failure. In production it does mean the final master needs
+      // an accountable human confirmation that its continuous visual evolution
+      // really matches the lane, rather than auto-publishing an uncalibrated
+      // pacing claim.
+      const pacingReview = `visual pacing ${rv.visualPacing.signal}: ${rv.visualPacing.detail ?? "scene-marker calibration requires human confirmation"}`;
+      if (productionQa) {
+        critical.push(pacingReview);
+      } else {
+        ctx.log(`qa_visual: ${pacingReview} (draft retained for review)`);
+      }
     }
     if (visualReview.verdict === "fail") {
       critical.push(visualReviewFailureMessage(visualReview));
@@ -2388,6 +3529,153 @@ export const qaVisual: Block = {
         ctx.log(`qa_visual: audio meters skipped: ${e instanceof Error ? e.message : e}`);
       }
     }
+    // Whole-mix loudness cannot prove that dialogue survived a music/FX pass.
+    // Compare the actual authored narration waveform with the final master
+    // after the planned intro offset. This is local signal-presence evidence,
+    // not a claim that a waveform metric proves intelligibility.
+    const narrationDuration = Number(ctx.store["narrationDurationSec"] ?? 0);
+    const storedNarrationPath = typeof ctx.store["narrationLocalPath"] === "string"
+      ? ctx.store["narrationLocalPath"]
+      : undefined;
+    const narrationKey = opt(ctx, "narrationKey");
+    const expectsNarrationMixEvidence = narrationDuration >= 1.5 && Boolean(storedNarrationPath || narrationKey);
+    let finalNarrationMix: { correlation: number | null; narrationStartSec: number } | undefined;
+    let finalNarrationTranscript: { wordErrorRate: number; lexicalRecall: number; passed: boolean } | undefined;
+    let narrationCueTiming: NarrationCueTimingEvidence | undefined;
+    let narrationPerformance: ReturnType<typeof assertNarrationPerformanceEvidence> | undefined;
+    const narrationPerformanceEvidence: string[] = [];
+    const narrationCueTimingEvidence: string[] = [];
+    if (expectsNarrationMixEvidence) {
+      try {
+        narrationPerformance = assertNarrationPerformanceEvidence(ctx.store["narrationPerformanceEvidence"]);
+        if (Math.abs(narrationPerformance.durationSec - narrationDuration) > 0.75) {
+          critical.push(
+            `narration performance evidence duration ${narrationPerformance.durationSec.toFixed(2)}s does not bind the authored narration ${narrationDuration.toFixed(2)}s`,
+          );
+        }
+        narrationPerformanceEvidence.push(
+          `narrationPerformance=local_ffmpeg`,
+          `narrationWps=${narrationPerformance.wordsPerSec.toFixed(2)}`,
+          `narrationLufs=${narrationPerformance.integratedLufs.toFixed(1)}`,
+        );
+      } catch (error) {
+        if (productionQa) {
+          critical.push(`narration performance evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+      try {
+        let narrationPath = storedNarrationPath && existsSync(storedNarrationPath)
+          ? storedNarrationPath
+          : undefined;
+        if (!narrationPath) {
+          if (!narrationKey) throw new Error("narration local path is unavailable and no narrationKey can rehydrate it");
+          narrationPath = join(tmp, "qa-narration-source.mp3");
+          await writeBytes(narrationPath, await getObjectBytes(narrationKey));
+        }
+        // Prove that the authored narration source says the approved spoken
+        // script. FFmpeg correlation below then proves that this same source
+        // survived into the final master. Neither signal alone can establish
+        // both facts.
+        const expectedNarrationText = typeof ctx.store["narrationTranscriptText"] === "string"
+          ? ctx.store["narrationTranscriptText"].trim()
+          : "";
+        if (productionQa && !expectedNarrationText) {
+          critical.push("narration transcript evidence unavailable: narration_tts did not preserve the exact spoken script");
+        } else if (expectedNarrationText) {
+          try {
+            const sourceSha256 = await sha256NarrationTranscriptSource(narrationPath);
+            const proof = proveNarrationTranscript({
+              audioPath: narrationPath,
+              expectedText: expectedNarrationText,
+              sourceSha256,
+            });
+            finalNarrationTranscript = {
+              wordErrorRate: proof.assessment.wordErrorRate,
+              lexicalRecall: proof.assessment.lexicalRecall,
+              passed: proof.assessment.passed,
+            };
+            if (!proof.assessment.passed) {
+              critical.push(
+                `narration transcript fidelity failure: WER ${proof.assessment.wordErrorRate.toFixed(3)} / recall ${proof.assessment.lexicalRecall.toFixed(3)} outside certified bounds`,
+              );
+            }
+            ctx.log(
+              `qa_visual: narration transcript WER ${proof.assessment.wordErrorRate.toFixed(3)}, recall ${proof.assessment.lexicalRecall.toFixed(3)} ` +
+              `(${proof.assessment.passed ? "passed" : "failed"})`,
+            );
+            try {
+              narrationCueTiming = assertNarrationCueTimingEvidence({
+                sentenceTimings: ctx.store["sentenceTimings"],
+                transcriptProof: proof,
+                narrationDurationSec: narrationPerformance?.durationSec ?? narrationDuration,
+              });
+              narrationCueTimingEvidence.push(
+                `narrationCueTiming=${narrationCueTiming.timingAlignedTokenCount}/${narrationCueTiming.matchedTokenCount}`,
+                `narrationCueMatch=${narrationCueTiming.matchedTokenRatio.toFixed(3)}`,
+                `narrationCueAlignment=${narrationCueTiming.timingAlignedTokenRatio.toFixed(3)}`,
+                `narrationCueMaxDriftSec=${narrationCueTiming.maxTimingDriftSec.toFixed(3)}`,
+                "narrationCueEvaluator=faster-whisper-small.en/timestamped-source",
+              );
+              ctx.log(
+                `qa_visual: narration cue timing ${narrationCueTiming.timingAlignedTokenCount}/${narrationCueTiming.matchedTokenCount} ` +
+                `source words aligned (max drift ${narrationCueTiming.maxTimingDriftSec.toFixed(2)}s)`,
+              );
+            } catch (error) {
+              if (productionQa) {
+                critical.push(`narration cue timing evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+              } else {
+                ctx.log(`qa_visual: narration cue timing evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
+              }
+            }
+          } catch (error) {
+            if (productionQa) {
+              critical.push(`narration transcript evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+            } else {
+              ctx.log(`qa_visual: narration transcript evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
+            }
+          }
+        }
+        const narrationStartSec = ctx.store["introApplied"] === true
+          ? Math.max(0, Number(ctx.store["introSec"] ?? 0))
+          : 0;
+        const evidence = await measureNarrationMixCorrelation({
+          narrationPath,
+          masterPath: video,
+          narrationStartSec,
+        });
+        finalNarrationMix = { ...evidence, narrationStartSec };
+        if (productionQa && evidence.correlation === null) {
+          critical.push("narration-mix evidence unavailable: production QA requires source-to-master correlation");
+        } else if (evidence.correlation !== null && evidence.correlation < 0.2) {
+          critical.push(`narration missing or masked in final mix: source correlation ${evidence.correlation.toFixed(2)} < 0.20`);
+        }
+        ctx.log(
+          `qa_visual: narration-to-master correlation ${evidence.correlation?.toFixed(3) ?? "unmeasured"} ` +
+            `(start ${narrationStartSec.toFixed(2)}s)`,
+        );
+      } catch (error) {
+        if (productionQa) {
+          critical.push(`narration-mix evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+        } else {
+          ctx.log(`qa_visual: narration-mix evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
+        }
+      }
+    }
+    const narrationMixEvidence = finalNarrationMix
+      ? [
+          `narrationMixCorrelation=${finalNarrationMix.correlation ?? "unmeasured"}`,
+          `narrationMixStartSec=${finalNarrationMix.narrationStartSec.toFixed(2)}`,
+          "narrationMixEvaluator=ffmpeg/axcorrelate-presence-only",
+        ]
+      : [];
+    const narrationTranscriptEvidence = finalNarrationTranscript
+      ? [
+          `narrationTranscriptWer=${finalNarrationTranscript.wordErrorRate.toFixed(3)}`,
+          `narrationTranscriptRecall=${finalNarrationTranscript.lexicalRecall.toFixed(3)}`,
+          `narrationTranscriptProof=${finalNarrationTranscript.passed ? "passed" : "failed"}`,
+          "narrationTranscriptEvaluator=faster-whisper-small.en/offline",
+        ]
+      : [];
     // 8) Critic (crew) VALIDATION SPEC â€” the per-video checklist this content must
     // pass. Deterministic assertions compare metrics we computed; vision ones are
     // judged on the sampled frames. A failed BLOCK-severity assertion fails QA;
@@ -2408,7 +3696,16 @@ export const qaVisual: Block = {
         metrics.captionCoveragePct = Math.min(1, spoken / bodyWindow) * 100;
       }
       const overlapSec = Number(ctx.store["quoteOverlapSec"] ?? NaN);
-      if (Number.isFinite(overlapSec)) metrics.overlapSec = overlapSec;
+      if (Number.isFinite(overlapSec)) {
+        metrics.overlapSec = overlapSec;
+      } else if (!Array.isArray(ctx.store["quoteOverlays"]) || ctx.store["quoteOverlays"].length === 0) {
+        // No quote overlays means there is no possible quote overlap. Supplying
+        // the measured zero keeps a valid narrator-family critic assertion from
+        // degrading into an unnecessary skipped result.
+        metrics.overlapSec = 0;
+      }
+      const loopSeamDiff = Number(ctx.store["loopSeamDiff"] ?? NaN);
+      if (Number.isFinite(loopSeamDiff)) metrics.loopSeamDiff = loopSeamDiff;
 
       // BATCHED vision judging: ALL vision assertions in ONE call (the
       // per-assertion loop cost up to 12 separate multi-image vision calls).
@@ -2480,9 +3777,12 @@ export const qaVisual: Block = {
       }
     }
 
-    // A release result is evidence, not a marketing label. The ledger records
-    // the evaluators that actually ran and explicitly surfaces unmeasured
-    // dimensions; only its explicit hard blockers can fail the release.
+    const narrativeValidation = assessProductionValidationAcceptance(specOutcome);
+
+    // A release result is evidence, not a marketing label. The raw receipt
+    // records exactly what ran and leaves unmeasured axes visible; the
+    // lane-aware production editorial contract below decides whether that
+    // evidence is sufficient to upload.
     const assetQa = ctx.store["assetQaReport"] as Record<string, unknown> | undefined;
     const shotQa = ctx.store["shotQaReport"] as Record<string, unknown> | undefined;
     const storyCoverage = ctx.store["storyCoverage"] as Record<string, unknown> | undefined;
@@ -2503,18 +3803,65 @@ export const qaVisual: Block = {
       ? assetQa!["selected"].length
       : undefined;
     const storyRatio = Number(storyCoverage?.["ratio"]);
+    // A renderer-specific planning block may have already produced the durable
+    // episode receipt (for example story_spine or short_strategy). Reuse its
+    // measured provenance rather than reconstructing a weaker story claim from
+    // final QA state. A mismatched/legacy receipt is ignored and cannot leak
+    // provenance across content lanes.
+    const storedEpisode = EpisodeSpecSchema.safeParse(ctx.store["episodeSpec"]);
+    const storedStory = storedEpisode.success &&
+      storedEpisode.data.lane.key === contentLane.key &&
+      (storedEpisode.data.lane.renderer === undefined ||
+        storedEpisode.data.lane.renderer === contentLane.primaryRenderer) &&
+      storedEpisode.data.story.status === "measured"
+      ? storedEpisode.data.story
+      : undefined;
+    const temporalDynamismPassed = rv.temporalDynamism.verdict === "pass" || rv.temporalDynamism.verdict === "not_required";
+    const visualPacingPassed = rv.visualPacing.verdict === "pass" || rv.visualPacing.verdict === "not_required";
+    const temporalDynamismEvidence = [
+      `source=${rv.temporalDynamism.source}`,
+      `verdict=${rv.temporalDynamism.verdict}`,
+      `thresholdSec=${rv.temporalDynamism.thresholdSec ?? "exempt"}`,
+      `maxFrozenHoldSec=${rv.temporalDynamism.maxFrozenHoldSec.toFixed(2)}`,
+      `rawFrozenIntervals=${rv.temporalDynamism.frozenIntervals.length}`,
+      `evaluatedFrozenIntervals=${rv.temporalDynamism.evaluatedIntervals.length}`,
+      ...rv.temporalDynamism.violatingIntervals.slice(0, 6).map((interval) => (
+        `repair=${interval.startSec.toFixed(2)}-${interval.endSec.toFixed(2)}s (${interval.durationSec.toFixed(2)}s frozen)`
+      )),
+    ];
+    const visualPacingEvidence = [
+      `source=${rv.visualPacing.source}`,
+      `usable=${rv.visualPacing.usable}`,
+      `verdict=${rv.visualPacing.verdict}`,
+      `signal=${rv.visualPacing.signal}`,
+      `mode=${rv.visualPacing.policy.mode}`,
+      `changeCount=${rv.visualPacing.changeCount}`,
+      `maxMarkerHoldSec=${rv.visualPacing.maxHoldSec.toFixed(2)}`,
+      `medianMarkerHoldSec=${rv.visualPacing.medianHoldSec.toFixed(2)}`,
+      `targetMarkerHoldSec=${rv.visualPacing.policy.maxMarkerHoldSec ?? "exempt"}`,
+      `meetsPolicy=${rv.visualPacing.meetsPolicy ?? "exempt"}`,
+      ...rv.visualPacing.changeTimestampsSec.slice(0, 8).map((timeSec) => `change@${timeSec.toFixed(2)}s`),
+      ...(rv.visualPacing.detail ? [rv.visualPacing.detail] : []),
+    ];
     const qualityEvidence = buildQualityEvidence({
       episode: {
         lane: { key: contentLane.key, renderer: contentLane.primaryRenderer },
         topic,
         title,
         durationSec: p.durationSec,
-        story: {
-          source: Array.isArray(ctx.store["shotList"]) ? "validated-story-spine/v1" : undefined,
-          beatCount: Array.isArray(ctx.store["narrativeBeats"]) ? ctx.store["narrativeBeats"].length : undefined,
-          shotCount: Array.isArray(ctx.store["shotList"]) ? ctx.store["shotList"].length : undefined,
-          coverageRatio: Number.isFinite(storyRatio) ? storyRatio : undefined,
-        },
+        story: storedStory
+          ? {
+              source: storedStory.source,
+              beatCount: storedStory.beatCount,
+              shotCount: storedStory.shotCount,
+              coverageRatio: storedStory.coverageRatio,
+            }
+          : {
+              source: Array.isArray(ctx.store["shotList"]) ? "validated-story-spine/v1" : undefined,
+              beatCount: Array.isArray(ctx.store["narrativeBeats"]) ? ctx.store["narrativeBeats"].length : undefined,
+              shotCount: Array.isArray(ctx.store["shotList"]) ? ctx.store["shotList"].length : undefined,
+              coverageRatio: Number.isFinite(storyRatio) ? storyRatio : undefined,
+            },
         candidateSelection: Number.isFinite(candidateCount) && selectedCandidates !== undefined
           ? {
               generated: candidateCount,
@@ -2525,13 +3872,19 @@ export const qaVisual: Block = {
           : undefined,
       },
       technical: {
-        passed: rv.verdict === "pass" && p.hasVideo && p.hasAudio && lengthOk,
+        passed: rv.ran && rv.verdict === "pass" && p.hasVideo && p.hasAudio && lengthOk,
         evaluator: "ffprobe + deterministic render validation",
         evidence: [
           `render=${rv.verdict}`,
+          `renderEvidence=${rv.ran ? "complete" : "incomplete"}`,
           `resolution=${p.width}x${p.height}`,
           `duration=${p.durationSec.toFixed(2)}s`,
           ...(finalAudioMeters ? [`loudness=${finalAudioMeters.integratedLufs ?? "unmeasured"}`] : []),
+          ...narrationMixEvidence,
+          ...narrationTranscriptEvidence,
+          ...narrationPerformanceEvidence,
+          ...narrationCueTimingEvidence,
+          ...onScreenTextEvidence,
         ],
       },
       visual: visualReview.ran
@@ -2541,52 +3894,81 @@ export const qaVisual: Block = {
             evidence: [
               `frames=${visualReview.evidence.frames.length}`,
               `manifest=${visualReview.evidence.manifestKey ?? "not-persisted"}`,
+              ...cinematicQualityEvidence,
+              ...ltxEditIntegrityEvidence,
+              ...adaptiveSceneEvidence,
               ...visualReview.defects.slice(0, 3).map((defect) => `@${defect.startSec.toFixed(1)} ${defect.category}`),
             ],
           }
         : undefined,
       temporal: shotScore !== undefined && shotMinimum !== undefined
         ? {
-            passed: shotScore >= shotMinimum,
+            passed: shotScore >= shotMinimum && temporalDynamismPassed && visualPacingPassed,
             score: shotScore,
             minimumScore: shotMinimum,
-            evaluator: "qualified per-shot render QA",
-            evidence: [`gradedShots=${scoredShots.length}`],
+            evaluator: "qualified per-shot render QA + deterministic temporal dynamism + final-master visual pacing",
+            evidence: [
+              `gradedShots=${scoredShots.length}`,
+              ...cinematicQualityEvidence,
+              ...ltxEditIntegrityEvidence,
+              ...adaptiveSceneEvidence,
+              ...temporalDynamismEvidence,
+              ...visualPacingEvidence,
+            ],
           }
         : visualReview.ran
           ? {
-              passed: visualReview.verdict === "pass",
-              evaluator: "scene/cue-aware evidence-backed visual review",
+              passed: visualReview.verdict === "pass" && temporalDynamismPassed && visualPacingPassed,
+              evaluator: "scene/cue-aware visual review + deterministic temporal dynamism + final-master visual pacing",
               evidence: [
                 `reviewedFrames=${visualReview.evidence.frames.length}`,
                 `maxGapSec=${visualReview.evidence.coverage.maxGapSec}`,
                 `manifest=${visualReview.evidence.manifestKey ?? "not-persisted"}`,
                 visualReview.summary,
+                ...cinematicQualityEvidence,
+                ...ltxEditIntegrityEvidence,
+                ...adaptiveSceneEvidence,
+                ...temporalDynamismEvidence,
+                ...visualPacingEvidence,
               ],
             }
           : undefined,
       narrative: specOutcome
         ? {
-            passed: specOutcome.passed,
+            passed: narrativeValidation.ready,
             evaluator: "critic validation specification",
-            evidence: [`assertions=${specOutcome.results.length}`],
+            evidence: [
+              `assertions=${specOutcome.results.length}`,
+              `evaluated=${narrativeValidation.evaluatedAssertionCount}`,
+              ...(narrativeValidation.blockers.length
+                ? narrativeValidation.blockers
+                : ["required critic assertions were measured and passed"]),
+            ],
           }
         : undefined,
       audio: audioAestheticScore !== undefined
         ? {
-            passed: audioAestheticScore >= audioMinimum,
+            passed: audioAestheticScore >= audioMinimum && (
+              !expectsNarrationMixEvidence || (finalNarrationMix?.correlation ?? 0) >= 0.2
+            ),
             score: audioAestheticScore,
             minimumScore: audioMinimum,
             evaluator: "audio aesthetics grader",
-            evidence: ["audiobox production quality"],
+            evidence: ["audiobox production quality", ...narrationMixEvidence, ...narrationTranscriptEvidence, ...narrationPerformanceEvidence, ...narrationCueTimingEvidence],
           }
         : finalAudioMeters
           ? {
-              passed: finalAudioMeters.integratedLufs !== null,
+              passed: finalAudioMeters.integratedLufs !== null && (
+                !expectsNarrationMixEvidence || (finalNarrationMix?.correlation ?? 0) >= 0.2
+              ),
               evaluator: "final-mix loudness meter (not an aesthetics score)",
               evidence: [
                 `integratedLufs=${finalAudioMeters.integratedLufs ?? "unmeasured"}`,
                 `introWindowDb=${finalAudioMeters.windowMeanDb ?? "unmeasured"}`,
+                ...narrationMixEvidence,
+                ...narrationTranscriptEvidence,
+                ...narrationPerformanceEvidence,
+                ...narrationCueTimingEvidence,
               ],
             }
           : undefined,
@@ -2597,14 +3979,27 @@ export const qaVisual: Block = {
             score: identity.score,
             minimumScore: brandMinimum,
             evaluator: "channel identity grader",
-            evidence: identity.issues.slice(0, 3),
+            evidence: [
+              `identityScore=${identity.score.toFixed(2)}`,
+              `minimum=${brandMinimum.toFixed(2)}`,
+              ...identity.issues.slice(0, 3),
+            ],
           },
-      requiredAudio: contentLane.key === "music_loop"
+      requiredAudio: contentLane.key === "music_loop" || contentLane.key === "ambient_guided"
         ? { required: true, minimumScore: audioMinimum, label: "music-lane audio aesthetics" }
         : undefined,
     });
     if (!qualityEvidence.release.hardGateReady) {
       critical.push(`quality evidence: ${qualityEvidence.release.blockers.join("; ")}`);
+    }
+    if (productionQa && !narrativeValidation.ready) {
+      critical.push(`critic evidence: ${narrativeValidation.blockers.join("; ")}`);
+    }
+    const editorialAcceptance = assessProductionEditorialAcceptance(qualityEvidence);
+    if (productionQa && !editorialAcceptance.ready) {
+      critical.push(`editorial acceptance: ${editorialAcceptance.blockers.join("; ")}`);
+    } else if (!productionQa && !editorialAcceptance.ready) {
+      ctx.log(`qa_visual: draft editorial gaps retained for review: ${editorialAcceptance.blockers.join(" | ")}`);
     }
 
     if (critical.length > 0) {
@@ -2631,8 +4026,30 @@ export const qaVisual: Block = {
     });
     return {
       qaPassed: true,
-      qaReport: specOutcome ? { ...report, validation: specOutcome.results } : report,
+      qaReport: {
+        ...report,
+        ...(specOutcome ? { validation: specOutcome.results } : {}),
+        renderValidation: {
+          verdict: rv.verdict,
+          ran: rv.ran,
+          temporalDynamism: rv.temporalDynamism,
+          visualPacing: rv.visualPacing,
+          cinematicFinalMasterQaEvidence: cinematicFinalMasterQaReceipt,
+          adaptiveShotAnalysis: finalShotAnalysis
+            ? {
+                provider: finalShotAnalysis.provider,
+                detector: finalShotAnalysis.detector,
+                sourceSha256: finalShotAnalysis.source.sha256,
+                sceneCount: finalShotAnalysis.scenes.length,
+              }
+            : undefined,
+          narrationMix: finalNarrationMix ?? undefined,
+          narrationCueTiming,
+        },
+      },
       qualityEvidence,
+      temporalDynamism: rv.temporalDynamism,
+      visualPacing: rv.visualPacing,
       reviewEvidence: visualReview.evidence,
       reviewResult: {
         verdict: visualReview.verdict,

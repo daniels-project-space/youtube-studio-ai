@@ -1,7 +1,9 @@
 import {
   CHANNEL_INCEPTION_SETUP_COST_CEILING_USD,
   CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD,
+  channelInceptionProbeCostCeilingUsd,
 } from "@/engine/channelInceptionContracts";
+import type { FamilyKey } from "@/engine/families";
 
 export interface ChannelBuildCostAuthority {
   setupCapUsd: number;
@@ -15,6 +17,8 @@ export function channelBuildCostAuthority(args: {
   approveSetupSpend: boolean;
   runProbe: boolean;
   perVideoBudgetUsd: number;
+  /** Omitted only for legacy callers; they retain the standard $3 probe cap. */
+  family?: FamilyKey;
 }): ChannelBuildCostAuthority {
   const perVideoProductionBudgetUsd = Number.isFinite(args.perVideoBudgetUsd)
     ? Math.max(0, args.perVideoBudgetUsd)
@@ -25,7 +29,9 @@ export function channelBuildCostAuthority(args: {
   const validationCapUsd = args.approveSetupSpend && args.runProbe
     ? Math.min(
         perVideoProductionBudgetUsd,
-        CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD["channel-inception-probe"],
+        args.family
+          ? channelInceptionProbeCostCeilingUsd(args.family)
+          : CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD["channel-inception-probe"],
       )
     : 0;
   return {

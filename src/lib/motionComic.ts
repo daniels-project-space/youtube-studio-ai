@@ -6,21 +6,20 @@
  * an open comic page of empty panel boxes, and a HAND DRAWS each panel in (the
  * whiteboard scribe pixel-reveal, adapted to colour art) as a multi-voice
  * narration plays, with comic SPEECH BUBBLES popping at each spoken line, over a
- * music bed. Only spend is per-panel art (Nano Banana, image-to-image for
- * character consistency) + ElevenLabs voices + one music track; the draw + camera
- * are deterministic (zero video-model credits).
+ * music bed. Only spend is bounded per-panel attested image art + ElevenLabs
+ * voices + one music track; the draw + camera are deterministic (no video-model
+ * generation).
  *
  * Pipeline (one castMotionComic() call):
  *   1. STORYBOARD — Gemini-Pro writes a tight, coherent story as PANELS, casts a
  *                   narrator + characters to ElevenLabs voices, tags each panel's
  *                   ordered lines (narrator = VO, character = SPEECH BUBBLE).
- *   2. CHARACTERS — one reusable model-sheet per character (Nano Banana).
- *   3. PANELS     — each panel rendered image-to-image with the appearing
- *                   characters' sheets fed back in → identical characters, NO text.
- *   4. VOICES     — each line synthesised in its speaker's voice (exact per-line
+ *   2. PANELS     — each panel is rendered through the pinned image route with
+ *                   the closed character identity schema → continuity, NO text.
+ *   3. VOICES     — each line synthesised in its speaker's voice (exact per-line
  *                   timing → precise bubble cues); concatenated per panel.
- *   5. MUSIC      — one Suno bed, ducked under the narration.
- *   6. RENDER     — scripts/mc_page_render.py draws the page panel-by-panel, hand
+ *   4. MUSIC      — one Suno bed, ducked under the narration.
+ *   5. RENDER     — scripts/mc_page_render.py draws the page panel-by-panel, hand
  *                   following the ink, bubbles on cue; ffmpeg muxes voice + music.
  */
 import { mkdir, readFile, readdir, rename, unlink, writeFile } from "node:fs/promises";
@@ -29,7 +28,7 @@ import { join } from "node:path";
 import { spawn } from "node:child_process";
 import { createHash, randomUUID } from "node:crypto";
 import { geminiJsonPro } from "@/lib/gemini";
-import { visionLocal } from "@/lib/vision";
+import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { generateMusic } from "@/lib/music";
 import { ffprobeDuration } from "@/lib/ffmpeg";
 import { preflightPythonRenderer } from "@/lib/pydeps";
@@ -187,6 +186,23 @@ interface Plan { title: string; logline: string; narratorVoiceId: string; charac
 interface RawPlanChar { id?: string; name?: string; look?: unknown; visual?: unknown; voiceId?: string }
 interface RawPlanPanel { scene?: unknown; visual?: unknown; characters?: string[]; shot?: string; lines?: PlanLine[] }
 interface RawPlan { title?: string; logline?: string; narratorVoiceId?: string; characters?: RawPlanChar[]; panels?: RawPlanPanel[] }
+
+/**
+ * THE PLAN/RENDER SEAM (pattern: documotion's `CraftDocuArgs.plan`).
+ *
+ * `MotionComicStoryboard` is the CHEAP half of this engine: one Gemini text
+ * call decides the whole story, cast, shot list and dialogue. Everything
+ * downstream of it — per-panel Nano-Banana/Novita art, per-line ElevenLabs
+ * voices, a Suno bed, the python page render — is PAID and irreversible.
+ *
+ * Exporting the storyboard as a first-class value is what lets a caller run a
+ * produce→critique→regenerate loop at TEXT prices and then hand the ACCEPTED
+ * storyboard to `castMotionComic({ plan })`, which spends exactly once.
+ */
+export type MotionComicStoryboard = Plan;
+export type MotionComicStoryboardPanel = PlanPanel;
+export type MotionComicStoryboardLine = PlanLine;
+export type MotionComicStoryboardCharacter = PlanChar;
 
 export interface MotionComicArtReference {
   data: string;
@@ -741,7 +757,7 @@ async function locatePanelText(imgPath: string, lines: PlanLine[], chars: PlanCh
     `"keepClear":[[x,y,w,h], ...]}\n` +
     `keepClear = a TIGHT box around EVERY face AND every important/hero object the text must not cover. No prose.`;
   try {
-    const raw = await visionLocal({ prompt, imagePaths: [imgPath], json: true, maxTokens: 900 });
+    const raw = await visionLocal({ prompt, imagePaths: [imgPath], json: true, maxTokens: VISION_GATE_MAX_TOKENS });
     const j = safeJson<{ bubbles?: { name?: string; mouth?: number[]; anchor?: number[] }[]; keepClear?: number[][] }>(raw, {});
     const anchors: Record<string, BubbleAnchor> = {};
     const point = (value: unknown): [number, number] | undefined => {
@@ -796,7 +812,7 @@ async function meanLuma(png: string): Promise<number> {
     const { execFile } = await import("node:child_process");
     const { promisify } = await import("node:util");
     const ex = promisify(execFile);
-    const { stderr } = await ex(process.env.FFMPEG_PATH || "ffmpeg", ["-i", png, "-vf", "signalstats,metadata=print", "-f", "null", "-"]);
+    const { stderr } = await ex(process.env.FFMPEG_BIN ?? "ffmpeg", ["-i", png, "-vf", "signalstats,metadata=print", "-f", "null", "-"]);
     // metadata=print emits "lavfi.signalstats.YAVG=12.3" (EQUALS, not colon) —
     // the colon-only regex never matched, the gate silently never fired, and
     // two pure-black panels shipped. Accept both separators; scan all frames
@@ -1229,6 +1245,46 @@ function normalizePlan(raw: RawPlan | Plan, log: Logger, maxPanels: number, targ
   };
 }
 
+/**
+ * A rejected storyboard's issues, folded back into the writer's prompt. Empty
+ * notes render "" so an un-critiqued call sends the byte-identical old prompt.
+ */
+function revisionClause(revisionNotes: readonly string[]): string {
+  const notes = revisionNotes.map((note) => String(note ?? "").trim()).filter(Boolean).slice(0, 8);
+  if (!notes.length) return "";
+  return (
+    `\n\nREVISION — a director REJECTED your previous storyboard before any art, voice or music was bought. ` +
+    `Rewrite the whole story so that EVERY issue below is fixed; do not simply repeat the rejected draft:\n` +
+    notes.map((note, index) => `${index + 1}. ${note}`).join("\n")
+  );
+}
+
+/**
+ * Write the storyboard and NOTHING else — the CHEAP half of the engine.
+ *
+ * This makes ONLY a Gemini text call: no image generator is touched, no
+ * ElevenLabs line is voiced, no music is generated, no python renderer runs.
+ * It is therefore safe to call repeatedly inside a produce→critique→regenerate
+ * loop; the ACCEPTED result is then passed to `castMotionComic({ plan })`,
+ * which spends exactly once. `revisionNotes` are a critic's prior issues; omit
+ * them and the prompt is byte-identical to the storyboard `castMotionComic`
+ * writes for itself.
+ */
+export async function planMotionComicStoryboard(
+  brief: MotionComicBrief,
+  log: Logger = () => {},
+  revisionNotes: readonly string[] = [],
+): Promise<MotionComicStoryboard> {
+  const nPanels = motionComicPanelCount(brief.panels);
+  const raw = await geminiJsonPro<RawPlan>({
+    prompt: storyPrompt(brief, nPanels) + revisionClause(revisionNotes),
+    maxTokens: 14000,
+    temperature: 0.85,
+    log,
+  });
+  return normalizePlan(raw, log, nPanels, brief.targetSeconds);
+}
+
 /* -------------------------------- main --------------------------------- */
 
 export async function castMotionComic(args: {
@@ -1237,6 +1293,13 @@ export async function castMotionComic(args: {
   outPath: string;
   generateImage: MotionComicImageGenerator;
   log?: Logger;
+  /**
+   * A caller-approved storyboard from `planMotionComicStoryboard` (typically
+   * the winner of a produce→critique loop). When supplied the engine makes ZERO
+   * planning calls and renders exactly this story; omit it and the engine plans
+   * for itself exactly as it always has.
+   */
+  plan?: MotionComicStoryboard;
 }): Promise<MotionComicResult> {
   const log = args.log ?? (() => {});
   const brief = args.brief;
@@ -1266,28 +1329,48 @@ export async function castMotionComic(args: {
   await mkdir(args.runDir, { recursive: true });
   const rd = (f: string) => join(args.runDir, f);
 
-  // 1. STORYBOARD (cached)
+  // A bounded/normalized line must never reuse audio or letter-placement
+  // produced for the old text. Keeps paid ART/music caches (those are content-
+  // hash validated in step 2); invalidates only text-dependent derived files.
+  const invalidateTextDerived = async (): Promise<number> => {
+    const stale = (await readdir(args.runDir)).filter((name) =>
+      /^(?:line_\d+_\d+\.mp3|panel_\d+\.mp3|alist_\d+\.txt|vision_\d+\.json|narration\.mp3|narr_list\.txt)$/.test(name),
+    );
+    await Promise.all(stale.map((name) => unlink(rd(name)).catch(() => {})));
+    return stale.length;
+  };
+
+  // 1. STORYBOARD — SUPPLIED (already critiqued) → cached → planned here.
   let plan: Plan;
-  if (existsSync(rd("plan.json"))) {
+  if (args.plan) {
+    // normalizePlan rebuilds the whole object graph, so the caller's frozen
+    // storyboard is never mutated by the render, AND every spend bound (panel
+    // cap, line cap, dialogue budget) is re-applied to a supplied plan exactly
+    // as it is to a model-written one — a caller cannot widen spend by handing
+    // in an oversized story.
+    plan = normalizePlan(args.plan, log, nPanels, brief.targetSeconds);
+    const serialized = JSON.stringify(plan, null, 2);
+    const onDisk = existsSync(rd("plan.json")) ? await readFile(rd("plan.json"), "utf8") : null;
+    if (onDisk !== serialized) {
+      await writeFile(rd("plan.json"), serialized);
+      const dropped = onDisk === null ? 0 : await invalidateTextDerived();
+      log(`plan: supplied (critique-approved) — ${plan.panels.length} panels, zero planning calls${dropped ? `; invalidated ${dropped} stale text-dependent cache file(s)` : ""}`);
+    } else {
+      log(`plan: supplied (critique-approved) — ${plan.panels.length} panels, matches this runDir's frozen plan`);
+    }
+  } else if (existsSync(rd("plan.json"))) {
     const cached = JSON.parse(await readFile(rd("plan.json"), "utf8")) as RawPlan | Plan;
     plan = normalizePlan(cached, log, nPanels, brief.targetSeconds);
     if (JSON.stringify(plan) !== JSON.stringify(cached)) {
       await writeFile(rd("plan.json"), JSON.stringify(plan, null, 2));
-      // A bounded/normalized line must never reuse audio or letter-placement
-      // produced for the old text. Keep paid art/music caches; invalidate only
-      // text-dependent derived files.
-      const stale = (await readdir(args.runDir)).filter((name) =>
-        /^(?:line_\d+_\d+\.mp3|panel_\d+\.mp3|alist_\d+\.txt|vision_\d+\.json|narration\.mp3|narr_list\.txt)$/.test(name),
-      );
-      await Promise.all(stale.map((name) => unlink(rd(name)).catch(() => {})));
-      log(`plan: cached plan normalized/capped to ${nPanels}; invalidated ${stale.length} text-dependent cache file(s)`);
+      const dropped = await invalidateTextDerived();
+      log(`plan: cached plan normalized/capped to ${nPanels}; invalidated ${dropped} text-dependent cache file(s)`);
     } else {
       log("plan: cached");
     }
   }
   else {
-    const raw = await geminiJsonPro<RawPlan>({ prompt: storyPrompt(brief, nPanels), maxTokens: 14000, temperature: 0.85, log });
-    plan = normalizePlan(raw, log, nPanels, brief.targetSeconds);
+    plan = await planMotionComicStoryboard(brief, log);
     await writeFile(rd("plan.json"), JSON.stringify(plan, null, 2));
   }
   const voiceOf = (s: string) => s === "narrator" ? plan.narratorVoiceId : (plan.characters.find((c) => c.id === s)?.voiceId ?? plan.narratorVoiceId);

@@ -24,7 +24,21 @@ const FootageSeg = z.object({
   kind: z.literal("footage"),
   src: z.string(), // local path / R2 key / url
   inSec: z.number().nonnegative().optional(),
+  /**
+   * Source in-point (auto-editor's clip model — RESEARCH_EDITOR_ADVANCED.md "Adopt
+   * auto-editor's clip model on Segment"): the position in the RAW, untrimmed source
+   * this clip starts playing from. Undefined ⇒ 0 (play `src` from its own start —
+   * every segment's behavior before P3's clip model landed; parity preserved).
+   */
+  offset: z.number().nonnegative().optional(),
   durSec: z.number().positive(),
+  /**
+   * Playback speed multiplier (auto-editor's clip model). Undefined ⇒ 1 (normal
+   * speed, today's behavior for every existing caller). Forward-looking plumbing for
+   * retime work (P4 beat-sync / P6 J-L cuts) — the render backend does not yet read
+   * this field.
+   */
+  speed: z.number().positive().optional(),
   /** true if this cut was placed on a beat / sentence boundary. */
   onBeat: z.boolean().optional(),
 });
@@ -37,6 +51,21 @@ const CardSeg = z.object({
   subtitle: z.string().optional(),
   bgSrc: z.string().optional(),
   fadeInSec: z.number().nonnegative().optional(),
+  /**
+   * An ALREADY-RENDERED card clip (local path / R2 key / url). When present the
+   * renderer REUSES this file verbatim instead of rendering a fresh card.
+   *
+   * This exists because the intro card is produced (and paid for) UPSTREAM by
+   * the `intro_card` block; the god-block composites that exact file
+   * (`ctx.store.introCardPath` → composeWithIntro). Without this field the EDL
+   * path threw the upstream card away and rendered a structurally DIFFERENT one
+   * through Remotion — a wasted render plus a real picture divergence.
+   *
+   * Only cards that genuinely have an upstream artifact set this (intro today).
+   * Outro/chapter cards are authored from the plan's own title/subtitle and are
+   * still rendered fresh, exactly as the god-block does.
+   */
+  src: z.string().optional(),
 });
 export const SegmentSchema = z.discriminatedUnion("kind", [FootageSeg, EntitySeg, CardSeg]);
 

@@ -5,8 +5,9 @@
  * `competitor_research` pipeline block and the `refresh-niche-research`
  * Trigger task can import it without instantiating tasks at load time.
  *
- * Mines YouTube Data API v3 for a niche, analyses titles/tags/thumbnails, and
- * writes nicheIntelligence + competitors + seoDatabank to Convex.
+ * Mines YouTube Data API v3 for a niche, analyses titles/tags and thumbnail
+ * metadata availability, and writes nicheIntelligence + competitors +
+ * seoDatabank to Convex.
  *
  * SOURCE: YouTube Data API v3 ONLY (locked decision — no web search).
  * Graceful degradation: any missing key is logged and that stage is skipped.
@@ -27,12 +28,7 @@ import {
   bestPerformers,
   aggStats,
 } from "@/lib/nicheAnalysis";
-import {
-  hasGeminiKey,
-  geminiJson,
-  parseJsonLoose,
-} from "@/lib/gemini";
-import { visionUrls } from "@/lib/vision";
+import { deriveNicheResearchFromYouTubeMetadata } from "@/lib/nicheResearchDerivation";
 import { NICHES } from "@/lib/nicheCatalog";
 
 const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
@@ -89,7 +85,7 @@ export interface RefreshResult {
   videosAnalysed?: number;
   competitorCount?: number;
   databankWritten?: boolean;
-  styleGuideSource?: "gemini" | "minimal";
+  styleGuideSource?: "youtube_data_api_v3_metadata";
 }
 
 export async function refreshNicheResearchCore(
@@ -150,54 +146,18 @@ export async function refreshNicheResearchCore(
   const { topTitlePatterns, powerWords, optimalTitleLen, topTags } =
     analyzeTitles(best);
 
-  // 4. Thumbnail style guide (Gemini Vision over ~8 top thumbnails).
-  let styleGuide = {
-    dominantColors: [] as string[],
-    hasTextOverlayPct: 0,
-    notes: "minimal guide (no Gemini key or vision call failed)",
-  };
-  let styleGuideSource: "gemini" | "minimal" = "minimal";
-  if (hasGeminiKey()) {
-    const thumbUrls = best
-      .map((v) => v.thumbnailUrl)
-      .filter(Boolean)
-      .slice(0, 8);
-    if (thumbUrls.length) {
-      try {
-        const raw = await visionUrls({
-          prompt:
-            "You are a YouTube thumbnail analyst. Examine these top-performing " +
-            `thumbnails for the niche "${args.niche}". AGGREGATE ALL of them into ` +
-            "ONE summary (do NOT return a per-image array). Return ONLY a single " +
-            'JSON OBJECT: {"dominantColors": ["#hex", ...up to 5 across the set], ' +
-            '"hasTextOverlayPct": 0-100 (percent of thumbnails with bold text ' +
-            'overlay), "notes": "3-4 sentence style summary — recurring subject, ' +
-            'composition, faces vs scenery, contrast, mood; call out anything ' +
-            'that looks OFF-NICHE for this topic"}.',
-          imageUrls: thumbUrls,
-          json: true,
-          // 700 truncated mid-JSON (finishReason MAX_TOKENS) once the model
-          // described several images → parse failed → silent "minimal" guide.
-          maxTokens: 2048,
-        });
-        const parsed = parseJsonLoose<{
-          dominantColors?: string[];
-          hasTextOverlayPct?: number;
-          notes?: string;
-        }>(raw);
-        styleGuide = {
-          dominantColors: parsed.dominantColors ?? [],
-          hasTextOverlayPct: Number(parsed.hasTextOverlayPct) || 0,
-          notes: parsed.notes ?? styleGuide.notes,
-        };
-        styleGuideSource = "gemini";
-      } catch (e) {
-        log(`gemini vision style guide failed: ${e instanceof Error ? e.message : e}`);
-      }
-    }
-  } else {
-    log("GEMINI_API_KEY missing — storing minimal thumbnail style guide");
-  }
+  // 4. Derive only evidence that the already-collected YouTube metadata can
+  // support. Visual thumbnail characteristics, opening hooks, and demand gaps
+  // stay explicitly unavailable until their respective evidence exists.
+  const derivation = deriveNicheResearchFromYouTubeMetadata({
+    niche: args.niche,
+    videos,
+    topPerformers: best,
+    topTitlePatterns,
+    topTags,
+  });
+  const styleGuide = derivation.thumbnailStyleGuide;
+  const styleGuideSource = "youtube_data_api_v3_metadata" as const;
 
   // Persist niche intelligence + competitors.
   await convex.mutation(api.seo.upsertNiche, {
@@ -222,54 +182,27 @@ export async function refreshNicheResearchCore(
     })),
   });
 
-  // 5. SEO databank via Gemini 2.5 Flash (json mode).
+  // 5. Persist the deterministic metadata databank. Its empty fields are
+  // deliberate evidence boundaries, not a silent fallback.
+  const databank = derivation.databank;
   let databankWritten = false;
-  if (hasGeminiKey()) {
-    const topTitles = best.slice(0, 30).map((v) => v.title);
-    const tagSample = topTags.slice(0, 25).map((t) => t.tag);
-    try {
-      const databank = await geminiJson<{
-        titleTemplates?: string[];
-        tagClusters?: unknown[];
-        thumbnailRules?: string[];
-        hookPatterns?: string[];
-        competitorGaps?: string[];
-      }>({
-        prompt:
-          "You are an expert YouTube SEO strategist. Given top-performing " +
-          `competitor data for the niche "${args.niche}", produce a strategy ` +
-          "databank. Return ONLY JSON with keys: titleTemplates (8-10 " +
-          "fill-in-the-blank templates using [BRACKETS] for variables), " +
-          "tagClusters (array of {name, tags:[...]}), thumbnailRules (array of " +
-          "short imperative rules), hookPatterns (array of opening-hook " +
-          "formulas), competitorGaps (array of underserved angles competitors " +
-          "miss).\n\n" +
-          `TOP TITLES:\n${topTitles.join("\n")}\n\n` +
-          `COMMON TAGS: ${tagSample.join(", ")}\n` +
-          `TITLE PATTERNS: ${topTitlePatterns
-            .map((p) => `${p.pattern}(${p.count})`)
-            .join(", ")}\n` +
-          `POWER WORDS: ${powerWords.map((p) => p.word).join(", ")}`,
-        maxTokens: 2048,
-      });
-      await convex.mutation(api.seo.upsertDatabank, {
-        ownerId: args.ownerId,
-        niche: args.niche,
-        channelId: args.channelId
-          ? (args.channelId as Id<"channels">)
-          : undefined,
-        titleTemplates: databank.titleTemplates ?? [],
-        tagClusters: (databank.tagClusters ?? []) as unknown[],
-        thumbnailRules: databank.thumbnailRules ?? [],
-        hookPatterns: databank.hookPatterns ?? [],
-        competitorGaps: databank.competitorGaps ?? [],
-      });
-      databankWritten = true;
-    } catch (e) {
-      log(`gemini SEO databank failed: ${e instanceof Error ? e.message : e}`);
-    }
-  } else {
-    log("GEMINI_API_KEY missing — skipping SEO databank synthesis");
+  try {
+    await convex.mutation(api.seo.upsertDatabank, {
+      ownerId: args.ownerId,
+      niche: args.niche,
+      channelId: args.channelId
+        ? (args.channelId as Id<"channels">)
+        : undefined,
+      titleTemplates: databank.titleTemplates,
+      tagClusters: databank.tagClusters,
+      thumbnailRules: databank.thumbnailRules,
+      hookPatterns: databank.hookPatterns,
+      competitorGaps: databank.competitorGaps,
+      sourceAttribution: databank.sourceAttribution,
+    });
+    databankWritten = true;
+  } catch (e) {
+    log(`deterministic SEO databank write failed: ${e instanceof Error ? e.message : e}`);
   }
 
   log(

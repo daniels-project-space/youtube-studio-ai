@@ -39,8 +39,18 @@ export interface PlanInput {
   cardBgSrc?: string;
   /** Optional precomputed overlay windows (captions/quotes/inserts). */
   overlays?: Overlay[];
-  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle + overlayDensity + a pacing CURVE + silence-trim thresholds. */
-  editor?: { transitions?: string; cutsPerMin?: number; captionStyle?: string; overlayDensity?: string; pacingCurve?: { atFrac: number; cutsPerMin: number }[]; trim?: { minSilenceSec: number; padSec: number } };
+  /** Editor crew directives (the WIRE from the Editor sub-module): transitions + cadence + captionStyle + overlayDensity + a pacing CURVE + a retention hook + silence-trim thresholds. */
+  editor?: {
+    transitions?: string;
+    cutsPerMin?: number;
+    captionStyle?: string;
+    overlayDensity?: string;
+    pacingCurve?: { atFrac: number; cutsPerMin: number }[];
+    /** Retention-hook window (P2): first `hookSec` absolute seconds of the body at `hookCutsPerMin`. */
+    hookSec?: number;
+    hookCutsPerMin?: number;
+    trim?: { minSilenceSec: number; padSec: number };
+  };
   /** Composer crew directives (the WIRE from the Composer sub-module): duck level + loudness + voiceFx. */
   composer?: { bodyMusicVol?: number; targetLufs?: number; voiceFx?: string };
   /** Measured silence intervals in the RAW narration (from the injected probe). Combined with editor.trim ⇒ the renderer carves these out. */
@@ -75,6 +85,24 @@ export interface AssembleParams {
   reframe?: string;
 }
 
+/**
+ * ANTI-LOOP BUFFER — extra footage the BEAT body lays down beyond the visible
+ * runtime (narration + tail), so the body track can never underrun.
+ *
+ * The god-block asks its body renderer for `narrationSec + tailSec + 3`
+ * (narratedBlocks.ts:2122). The margin is not cosmetic: `composeWithIntro`
+ * LOOPS a short body to fill the runtime, so a body even a fraction under
+ * length replays earlier clips at the tail — the "duplicate footage" defect QA
+ * flags. The EDL path planned exactly `bodySec + tailSec`, so any clip shorter
+ * than its planned window (very common: a 10s window on a 9.7s stock clip) made
+ * the body underrun and loop.
+ *
+ * Applies to the BEAT body only — the chapter (structured) and authored
+ * shot-manifest paths are exact-coverage by construction and the god-block adds
+ * no buffer there either.
+ */
+export const BODY_BUFFER_SEC = 3;
+
 /** God-block defaults, preserved verbatim. */
 export const ASSEMBLE_DEFAULTS: AssembleParams = {
   aspect: "16:9",
@@ -88,9 +116,18 @@ export const ASSEMBLE_DEFAULTS: AssembleParams = {
   introMusicVol: 0.513,
   bodyMusicVol: 0.1026,
   musicDuckRampSec: 4,
+  // The god-block ALWAYS loudness-normalizes the final mix, defaulting to -14
+  // LUFS (`Number(ctx.params["targetLufs"] ?? -14)`, narratedBlocks.ts:2368) —
+  // it is not an opt-in. Leaving this undefined made renderTimeline skip the
+  // normalize pass entirely, shipping ~8 LUFS quieter than every legacy video.
+  targetLufs: -14,
   outroCard: true,
   chapterCards: true,
-  transitions: "hardcut",
+  // The god-block passes NO crossfadeSec to composeWithIntro, whose documented
+  // default is 0.8s — so every legacy video dissolves title→body. "hardcut" here
+  // was a mis-transcription that forced crossfadeSec 0 on the EDL path. Presets
+  // that genuinely want a straight cut (e.g. `hype`) still set it explicitly.
+  transitions: "crossfade",
   captions: true,
   reframe: "none",
   // cutsPerMin omitted ⇒ legacy length-based cadence (god-block parity for the default/essay path)
@@ -211,7 +248,9 @@ export function resolveAssembleParams(profile: ChannelProfile, block = "timeline
     introMusicVol: num("introMusicVol", duck.introVol),
     bodyMusicVol: num("bodyMusicVol", duck.bodyVol),
     musicDuckRampSec: num("musicDuckRampSec", ASSEMBLE_DEFAULTS.musicDuckRampSec),
-    targetLufs: Number(k.targetLufs),
+    // Never let an absent/!finite knob become NaN — that would silently disable
+    // the loudness pass again (the exact class of bug this path just fixed).
+    targetLufs: Number.isFinite(Number(k.targetLufs)) ? Number(k.targetLufs) : ASSEMBLE_DEFAULTS.targetLufs,
     cutsPerMin: CUT_ENERGY_CPM[String(k.cutEnergy)],
     outroCard: k.outroStyle !== "none",
     chapterCards: Boolean(k.chapterCards),
@@ -253,6 +292,97 @@ function segSecondsFromCpm(cpm: number): number {
 }
 
 /**
+ * P1 — un-average the per-video CutSheet: `briefEditor()` (crew.ts) already produces a
+ * per-SECTION cadence (`CutSheet.sections[].cutsPerMin`), which `bodySegSeconds` otherwise
+ * collapses into one flat average. When the sections actually carry DIFFERENT cadences,
+ * turn them into a step-shaped pacing curve instead — each section holds its own cadence
+ * flat across its slice of the body, then jumps at the boundary.
+ *
+ * Sections have no id shared with `chapterPlan` windows (separate authoring surfaces, and
+ * chapter mode is a branch of `planTimeline` mutually exclusive with the beat body this
+ * curve feeds — see the caller), so boundaries are an EVEN split across the body, per the
+ * doc's documented fallback. Returns undefined (⇒ flat parity) when there's nothing to gain:
+ * fewer than 2 usable sections, or all sections already agree on one cadence.
+ */
+export function cutSheetPacingCurve(
+  sections?: { cutsPerMin: number }[],
+): { atFrac: number; cutsPerMin: number }[] | undefined {
+  const secs = (sections ?? []).filter((s) => s.cutsPerMin > 0);
+  if (secs.length < 2) return undefined;
+  if (secs.every((s) => s.cutsPerMin === secs[0].cutsPerMin)) return undefined; // uniform ⇒ parity
+  const n = secs.length;
+  const pts: { atFrac: number; cutsPerMin: number }[] = [];
+  for (let i = 0; i < n; i++) {
+    const start = i / n;
+    const end = (i + 1) / n;
+    const preEnd = Math.max(start, end - 1e-4);
+    pts.push({ atFrac: start, cutsPerMin: secs[i].cutsPerMin });
+    if (preEnd > start) pts.push({ atFrac: preEnd, cutsPerMin: secs[i].cutsPerMin });
+  }
+  return pts;
+}
+
+/**
+ * P2 — seed/override a pacing curve with a fast-cut retention hook for the first `hookSec`
+ * ABSOLUTE seconds of the body: `posFrac < hookSec/bodyTargetSec` ⇒ `hookCutsPerMin`, then
+ * hands off to whatever curve (or flat cadence) was already driving the rest of the body.
+ * Composes INTO the curve (a single interpolation call downstream) rather than being a
+ * separate code path, per the doc. A no-op (returns `base` unchanged) when hookSec/
+ * hookCutsPerMin aren't both set to a positive value, or the body has no length yet.
+ */
+export function composeHookCurve(
+  base: { atFrac: number; cutsPerMin: number }[] | undefined,
+  hookSec: number | undefined,
+  hookCutsPerMin: number | undefined,
+  bodyTargetSec: number,
+  fallbackCpm: number,
+): { atFrac: number; cutsPerMin: number }[] | undefined {
+  if (!hookSec || hookSec <= 0 || !hookCutsPerMin || hookCutsPerMin <= 0 || !(bodyTargetSec > 0)) return base;
+  const hookFrac = Math.max(0, Math.min(1, hookSec / bodyTargetSec));
+  if (hookFrac <= 0) return base;
+  const settleCpm = base && base.length ? cpmAtFrac(base, hookFrac) : fallbackCpm;
+  const rest = (base ?? []).filter((p) => p.atFrac > hookFrac);
+  const preEnd = Math.max(0, hookFrac - 1e-4);
+  return [
+    { atFrac: 0, cutsPerMin: hookCutsPerMin },
+    ...(preEnd > 0 ? [{ atFrac: preEnd, cutsPerMin: hookCutsPerMin }] : []),
+    { atFrac: hookFrac, cutsPerMin: settleCpm },
+    ...rest,
+  ];
+}
+
+/**
+ * Resolve the ONE pacing curve driving the beat body, in priority order: an explicit
+ * editor-authored curve (channel's `pacingShape`) → a curve derived from the per-video
+ * CutSheet's per-section cadence (P1, only when it actually varies) → flat (undefined).
+ * A retention hook (P2) then seeds/overrides the start of whichever wins. Computed ONCE
+ * per plan — `segSecondsAt` below is called per-clip and must not rebuild this.
+ */
+function resolvePacingCurve(
+  editor: PlanInput["editor"],
+  cutSheetSections: { cutsPerMin: number }[] | undefined,
+  bodyTargetSec: number,
+  fallbackSec: number,
+): { atFrac: number; cutsPerMin: number }[] | undefined {
+  const baseCurve = editor?.pacingCurve && editor.pacingCurve.length ? editor.pacingCurve : cutSheetPacingCurve(cutSheetSections);
+  return composeHookCurve(baseCurve, editor?.hookSec, editor?.hookCutsPerMin, bodyTargetSec, 60 / Math.max(1, fallbackSec));
+}
+
+/**
+ * `segSecondsAt(posFrac, curve)` — the un-averaged replacement for a flat `bodySegSeconds`
+ * scalar: per-clip screen time at body position `posFrac` (0–1). Falls back to `fallbackSec`
+ * (the legacy flat `bodyMaxSeg`) verbatim when there's no curve — BACKWARD COMPATIBLE with
+ * every caller that doesn't set an editor pacing curve, a varying CutSheet, or a hook.
+ */
+function segSecondsAt(
+  posFrac: number,
+  curve: { atFrac: number; cutsPerMin: number }[] | undefined,
+  fallbackSec: number,
+): number {
+  return curve && curve.length ? segSecondsFromCpm(cpmAtFrac(curve, posFrac)) : fallbackSec;
+}
+
+/**
  * Lay clips end-to-end until `target` is covered, cycling the pool. `segAt(posFrac)`
  * gives the per-clip screen time at the current body fraction — a CONSTANT for flat
  * cadence (parity) or a varying value along the editor's pacing curve (P1/P2).
@@ -270,6 +400,46 @@ function fillBody(clips: string[], entitySet: Set<string>, target: number, segAt
     i++;
     filled += dur;
     if (out.length > 20000) break; // defensive cap (the narration guard already bounds this)
+  }
+  return out;
+}
+
+/**
+ * P3 (Segment side) — adopt auto-editor's clip model (doc: "Adopt auto-editor's clip
+ * model on Segment", RESEARCH_EDITOR_ADVANCED.md "RECOMMENDED next-level Editor
+ * design"). When the body's footage pool IS the narration's own recording
+ * (talking-head / screen-capture where mic and camera are the same file — the exact
+ * shape auto-editor targets), materialize the silence-trim's KEEP ranges as REAL
+ * per-clip `offset` (position in the RAW, untrimmed source) + `durSec`, instead of
+ * cadence-cycling a generic b-roll pool that doesn't exist for this shape. Long kept
+ * stretches are still sub-split at `segAt`'s target seg length so cuts/pacing keep
+ * landing inside them; a segment NEVER straddles a removed gap. `segAt` receives the
+ * position fraction ALONG THE TRIMMED (kept) timeline — the same contract `fillBody`
+ * uses. `speed` is always 1 here: P3 only trims, it doesn't retime (P4/P6 are where a
+ * non-1 speed would come from) — the field exists on Segment now so a future backend
+ * has somewhere to read it once retime lands.
+ */
+export function segmentsFromKeepRanges(
+  src: string,
+  keep: TimeRange[],
+  totalKeptSec: number,
+  segAt: (posFrac: number) => number,
+  onBeat: boolean,
+): Segment[] {
+  const out: Segment[] = [];
+  let keptSoFar = 0; // position along the TRIMMED (kept) timeline — feeds segAt's posFrac
+  for (const range of keep) {
+    let cursor = range.startSec;
+    while (cursor + 0.001 < range.endSec) {
+      const posFrac = totalKeptSec > 0 ? keptSoFar / totalKeptSec : 0;
+      const want = segAt(posFrac);
+      const safeSeg = want > 0.05 ? want : 4; // never 0 → no infinite loop (mirrors fillBody)
+      const dur = Math.min(safeSeg, range.endSec - cursor);
+      out.push({ kind: "footage", src, offset: cursor, durSec: dur, speed: 1, onBeat });
+      cursor += dur;
+      keptSoFar += dur;
+      if (out.length > 20000) return out; // defensive cap, mirrors fillBody
+    }
   }
   return out;
 }
@@ -355,7 +525,10 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
   const onBeat = (input.sentenceTimings?.length ?? 0) > 0;
 
   const segments: Segment[] = [];
-  if (hasIntro) segments.push({ kind: "card", role: "intro", durSec: introSec, bgSrc: input.cardBgSrc });
+  // The intro card is ALREADY RENDERED upstream (the `intro_card` block) and the
+  // god-block composites that exact file. Carry its path on the segment so the
+  // renderer reuses it instead of paying for a second, different Remotion card.
+  if (hasIntro) segments.push({ kind: "card", role: "intro", durSec: introSec, bgSrc: input.cardBgSrc, src: input.introCardSrc });
 
   if (storyManifest) {
     segments.push(...storyManifest.items.map((item) => ({
@@ -396,12 +569,37 @@ export function planTimeline(input: PlanInput, params: AssembleParams = ASSEMBLE
       }
     }
   } else {
-    // beat body: cover narration + tail at the cut cadence. A pacing CURVE (from the
-    // editor) varies the per-clip length over the body; absent one, the constant
-    // bodyMaxSeg is used (flat cadence = parity with the old averaged behaviour).
-    const curve = input.editor?.pacingCurve;
-    const segAt = curve && curve.length ? (f: number) => segSecondsFromCpm(cpmAtFrac(curve, f)) : () => bodyMaxSeg;
-    segments.push(...fillBody(clips, entitySet, effectiveNarrationSec + tailSec, segAt, onBeat));
+    // beat body: cover narration + tail at the cut cadence. A pacing CURVE — explicit
+    // (editor.pacingCurve), or derived from the per-video CutSheet's per-section cadence
+    // when it varies (P1), optionally seeded with a retention hook (P2) — varies the
+    // per-clip length over the body; absent all three, the constant bodyMaxSeg is used
+    // (flat cadence = parity with the old averaged behaviour).
+    // +BODY_BUFFER_SEC — god-block parity (narratedBlocks.ts:2122). The extra
+    // footage is never SHOWN (runtime is intro+body+tail); it exists so the body
+    // track cannot underrun and make composeWithIntro loop back to clip 1.
+    const bodyTargetSec = effectiveNarrationSec + tailSec + BODY_BUFFER_SEC;
+    const pacingCurve = resolvePacingCurve(input.editor, input.cutSheet?.sections, bodyTargetSec, bodyMaxSeg);
+    const segAt = (f: number) => segSecondsAt(f, pacingCurve, bodyMaxSeg);
+    // P3 (Segment side): the ONE shape where auto-editor's real clip model applies —
+    // a single footage source that IS the narration's own recording (talking-head /
+    // screen-cap). Materialize the trim's keep ranges as real offset/durSec segments
+    // instead of cadence-cycling a b-roll pool (there's nothing to cycle: it's one
+    // clip). Every other shape (multi-clip pool, entity clips, trim off) falls
+    // straight through to fillBody, byte for byte — unchanged.
+    const singleSourceIsNarration =
+      keepRanges && clips.length === 1 && !!input.narrationSrc && clips[0] === input.narrationSrc;
+    if (singleSourceIsNarration && keepRanges) {
+      segments.push(...segmentsFromKeepRanges(clips[0], keepRanges, effectiveNarrationSec, segAt, onBeat));
+      // Same anti-loop guarantee fillBody gets from BODY_BUFFER_SEC: hold the
+      // source forward past the last kept range so the body can never underrun.
+      const bufferSec = tailSec + BODY_BUFFER_SEC;
+      if (bufferSec > 0.05) {
+        const lastEnd = keepRanges[keepRanges.length - 1]?.endSec ?? 0;
+        segments.push({ kind: "footage", src: clips[0], offset: lastEnd, durSec: bufferSec, speed: 1, onBeat });
+      }
+    } else {
+      segments.push(...fillBody(clips, entitySet, bodyTargetSec, segAt, onBeat));
+    }
   }
 
   if (params.outroCard && tailSec >= 2) {

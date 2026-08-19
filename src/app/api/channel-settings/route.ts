@@ -12,6 +12,7 @@ import {
   requireStudioActor,
   StudioAuthError,
 } from "@/lib/operatorSession";
+import { resolveContentLane } from "@/engine/contentLane";
 import { hydrateEnv } from "@/lib/vault";
 
 export const runtime = "nodejs";
@@ -124,6 +125,53 @@ export function validatedSchedule(
   };
 }
 
+/**
+ * SPEND GUARD for the automatic Casefile case-research opt-in, applied at
+ * settings-write time.
+ *
+ * Enabling this flag makes `generation-scheduler` call `researchCase()` every
+ * 6h for the channel, which spends real money (live Browserbase search
+ * sessions + LLM verification calls) before `run-pipeline` even starts.
+ * `run-pipeline` then refuses a `casefileSourcePacketInput` on any lane other
+ * than cinematic_ai — so enabling it on the wrong lane buys research that is
+ * guaranteed to be thrown away. Refuse the write with an immediate, explicit
+ * error rather than accepting it and letting it fail silently every cycle.
+ *
+ * Convex's `channels.updateChannel` enforces the same rule authoritatively
+ * (it covers every write path, not just this route); this check exists so the
+ * operator gets a 400 with an actionable message instead of a 500.
+ *
+ * Disabling (`enabled === false`) is always allowed, on any lane — an
+ * operator must never be blocked from turning off spend.
+ */
+export function assertCasefileAutoResearchLaneEligible(
+  channel: { contentLane?: unknown; family?: unknown; pipeline?: unknown },
+  enabled: boolean,
+): void {
+  if (!enabled) return;
+  let laneKey: string;
+  try {
+    laneKey = resolveContentLane({
+      stored: channel.contentLane,
+      family: channel.family,
+      pipeline: Array.isArray(channel.pipeline) ? channel.pipeline : [],
+    }).key;
+  } catch (error) {
+    throw new SettingsValidationError(
+      `cannot resolve this channel's content lane, so automatic Casefile research cannot be enabled: ${
+        error instanceof Error ? error.message : String(error)
+      }`,
+    );
+  }
+  if (laneKey !== "cinematic_ai") {
+    throw new SettingsValidationError(
+      `automatic Casefile case research requires the cinematic_ai content lane; this channel's lane is ${laneKey}. ` +
+        "run-pipeline only accepts a researched Casefile source packet on cinematic_ai, so enabling this here " +
+        "would spend real research budget on runs that can never succeed.",
+    );
+  }
+}
+
 export async function POST(request: Request) {
   try {
     const actor = await requireStudioActor(request);
@@ -134,13 +182,15 @@ export async function POST(request: Request) {
         | "crosspost_policy"
         | "schedule"
         | "status"
-        | "budget";
+        | "budget"
+        | "casefile_auto_research";
       channelId?: string;
       mode?: string;
       schedule?: Record<string, unknown>;
       status?: string;
       budget?: number;
       approved?: boolean;
+      enabled?: boolean;
     };
     if (!body.channelId || !body.action) {
       return NextResponse.json(
@@ -318,6 +368,22 @@ export async function POST(request: Request) {
       }
       await convex.mutation(api.channels.updateChannel, { channelId, budget });
       return NextResponse.json({ ok: true, budget });
+    }
+
+    if (body.action === "casefile_auto_research") {
+      if (typeof body.enabled !== "boolean") {
+        return NextResponse.json(
+          { ok: false, error: "enabled must be true or false" },
+          { status: 400 },
+        );
+      }
+      // Throws SettingsValidationError (→ 400) when the lane is wrong.
+      assertCasefileAutoResearchLaneEligible(channel, body.enabled);
+      await convex.mutation(api.channels.updateChannel, {
+        channelId,
+        casefileAutoResearchEnabled: body.enabled,
+      });
+      return NextResponse.json({ ok: true, casefileAutoResearchEnabled: body.enabled });
     }
 
     return NextResponse.json(

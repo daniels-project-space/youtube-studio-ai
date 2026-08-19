@@ -32,6 +32,72 @@ export interface Critique {
   issues: string[];
 }
 
+/**
+ * PER-CHANNEL CRITIQUE GROUNDING (P1-1).
+ *
+ * The Director is not a generic YouTube reviewer: it judges ONE channel with a
+ * stated identity and an operator-authored critic doctrine. This is the bounded
+ * carrier for that grounding, shared by every model-graded loop (script,
+ * narration, thumbnail, visual review) so the tuning surface is one place.
+ *
+ * `criticDoctrine` is `channels.identity.creativeBrief.criticDoctrine` — the
+ * schema field purpose-built for exactly this and, before this wiring, read by
+ * nothing in the quality loop.
+ */
+export interface ChannelCritiqueContext {
+  channelName?: string;
+  persona?: string;
+  styleGrammar?: string;
+  /** Operator/Showrunner-authored stance for THIS channel's critic. */
+  criticDoctrine?: string;
+  /** Durable content-lane key; drives lane-tuned thresholds + emphases. */
+  contentLaneKey?: string;
+  /** Lane-specific things the critic must actively scrutinise. */
+  laneEmphasis?: readonly string[];
+  /** Channel QualityBar dimension ids the operator actually cares about. */
+  qualityDimensions?: readonly string[];
+}
+
+function compact(value: string | undefined, max: number): string | undefined {
+  const out = value?.replace(/\s+/g, " ").trim().slice(0, max);
+  return out || undefined;
+}
+
+/**
+ * Render the channel grounding as a bounded prompt fragment. Returns "" when
+ * there is nothing channel-specific to say, so a caller can concatenate it
+ * unconditionally and a doctrine-less channel keeps its exact old prompt.
+ */
+export function channelCritiqueBrief(channel?: ChannelCritiqueContext): string {
+  if (!channel) return "";
+  const lines = [
+    compact(channel.channelName, 120) ? `Channel: ${compact(channel.channelName, 120)}` : "",
+    compact(channel.persona, 180) ? `Audience/persona: ${compact(channel.persona, 180)}` : "",
+    compact(channel.styleGrammar, 240) ? `Style grammar: ${compact(channel.styleGrammar, 240)}` : "",
+    compact(channel.contentLaneKey, 60) ? `Content lane: ${compact(channel.contentLaneKey, 60)}` : "",
+    (channel.qualityDimensions ?? []).length
+      ? `Operator quality priorities: ${(channel.qualityDimensions ?? []).slice(0, 8).join(", ")}`
+      : "",
+  ].filter(Boolean);
+  const doctrine = compact(channel.criticDoctrine, 600);
+  const emphasis = (channel.laneEmphasis ?? [])
+    .map((item) => compact(item, 240))
+    .filter((item): item is string => Boolean(item))
+    .slice(0, 4);
+  if (!lines.length && !doctrine && !emphasis.length) return "";
+  return (
+    `\nCHANNEL CRITIQUE GROUNDING — judge THIS channel, not a generic video.\n` +
+    (lines.length ? `${lines.map((line) => `- ${line}`).join("\n")}\n` : "") +
+    // The doctrine is the operator's own words. It outranks generic advice
+    // precisely because a channel that says "punchy over polished" must not be
+    // failed by a rubric that prizes polish.
+    (doctrine
+      ? `- CRITIC DOCTRINE (this channel's standing instruction — it OUTRANKS generic criteria where they conflict): ${doctrine}\n`
+      : "") +
+    (emphasis.length ? `- Scrutinise for this lane: ${emphasis.map((item) => `"${item}"`).join("; ")}\n` : "")
+  );
+}
+
 export interface LoopOptions<T> {
   produce: (priorIssues: string[], iter: number) => Promise<T>;
   critique: (candidate: T, iter: number) => Promise<Critique>;
@@ -42,6 +108,12 @@ export interface LoopOptions<T> {
   log?: (msg: string, extra?: Record<string, unknown>) => void;
   /** Label for logs/observability. */
   label?: string;
+  /**
+   * Per-channel grounding. The loop itself never prompts, so this is carried
+   * for observability + so every caller threads ONE object; `produce`/`critique`
+   * are what actually fold `channelCritiqueBrief(channel)` into their prompts.
+   */
+  channel?: ChannelCritiqueContext;
 }
 
 export interface LoopResult<T> {
@@ -63,6 +135,12 @@ export async function produceAndCritique<T>(
   const history: Critique[] = [];
   let priorIssues: string[] = [];
   let best: { value: T; critique: Critique } | null = null;
+
+  if (o.channel?.criticDoctrine || o.channel?.contentLaneKey) {
+    log(
+      `${label}: channel-grounded critique (lane=${o.channel.contentLaneKey ?? "n/a"}, doctrine=${o.channel.criticDoctrine ? "yes" : "no"}, threshold=${threshold.toFixed(2)}, maxIters=${maxIters})`,
+    );
+  }
 
   for (let iter = 1; iter <= maxIters; iter++) {
     const value = await o.produce(priorIssues, iter);

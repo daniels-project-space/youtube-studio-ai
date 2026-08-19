@@ -1,4 +1,5 @@
 import { createHash } from "node:crypto";
+import { LTX_25_RTX_4090_VIDEO } from "@/engine/generationProfiles";
 
 export const NOVITA_FLEET_CONTRACT_VERSION = "2.0.0" as const;
 export const NOVITA_HARD_GPU_LIMIT = 8 as const;
@@ -12,24 +13,25 @@ export const NOVITA_IDLE_SHUTDOWN_SECONDS = 300 as const;
  */
 export const NOVITA_REQUIRED_GPU_SKU = "RTX 4090" as const;
 export const NOVITA_REQUIRED_GPU_COUNT = 1 as const;
+/**
+ * Public images are normally forbidden: a digest alone is not a publisher
+ * identity. This one repository is published by our sealed CI workflow and
+ * remains an immutable, source-linked exception so Novita does not need a
+ * long-lived registry credential to pull it.
+ */
+export const NOVITA_PUBLIC_WORKER_REPOSITORY =
+  "ghcr.io/daniels-project-space/youtube-render-worker" as const;
+/** Public, digest-pinned base used only with the sealed runtime-bundle mode. */
+export const NOVITA_PUBLIC_RUNTIME_BASE_IMAGE =
+  "pytorch/pytorch@sha256:417bd75df6365104c283ea4c1651fb3530d9eb5a4c2fafa51943cff2a94e6385" as const;
 
 export const OFFICIAL_RENDER_PINS = Object.freeze({
-  gemma: {
-    model: "google/gemma-3-12b-it-qat-q4_0-unquantized",
-  },
   zImage: {
     model: "Tongyi-MAI/Z-Image-Turbo",
     revision: "f332072aa78be7aecdf3ee76d5c247082da564a6",
   },
   ltx: {
-    model: "Lightricks/LTX-2.3",
-    revision: "7caa482d5cd10a2eae6b34cb48f093ebc45a263e",
-    runtimeRepository: "Lightricks/LTX-2",
-    runtimeRevision: "4f8905737aac86a554637cac86c178877a39c744",
-    devCheckpoint: "ltx-2.3-22b-dev.safetensors",
-    distilledCheckpoint: "ltx-2.3-22b-distilled-1.1.safetensors",
-    distilledLoraCheckpoint: "ltx-2.3-22b-distilled-lora-384-1.1.safetensors",
-    spatialUpscalerCheckpoint: "ltx-2.3-spatial-upscaler-x2-1.1.safetensors",
+    ...LTX_25_RTX_4090_VIDEO,
   },
 });
 
@@ -91,15 +93,24 @@ export interface NovitaFleetAttestation {
     modelManifestSha256: string;
   };
   models: {
-    gemma: { model: string; revision: string; localCacheVerified: boolean };
     zImage: { model: string; revision: string; localCacheVerified: boolean };
     ltx: {
       model: string;
       revision: string;
       runtimeRepository: string;
       runtimeRevision: string;
+      checkpoint: string;
+      textEncoderCheckpoint: string;
+      videoVaeCheckpoint: string;
+      audioVaeCheckpoint: string;
+      spatialUpscalerCheckpoint: string;
+      quantization: "fp8-cast";
+      offload: "cpu";
+      spatialUpscaleFactor: 2;
       localCacheVerified: boolean;
-      twoStageHqVerified: boolean;
+      distilledTwoStageX2Verified: boolean;
+      /** Set only after a real, digest-pinned RTX 4090 benchmark. */
+      rtx4090ProfileBenchmarked: boolean;
     };
   };
   controls: {
@@ -150,6 +161,15 @@ export function isSha256(value: unknown): value is string {
 
 export function isPinnedImage(value: unknown): value is string {
   return typeof value === "string" && /^[a-z0-9][a-z0-9._/-]*@sha256:[a-f0-9]{64}$/i.test(value);
+}
+
+export function isApprovedPublicWorkerImage(value: unknown): value is string {
+  return isPinnedImage(value)
+    && value.toLowerCase().startsWith(`${NOVITA_PUBLIC_WORKER_REPOSITORY}@sha256:`);
+}
+
+export function isApprovedPublicRuntimeBaseImage(value: unknown): value is string {
+  return value === NOVITA_PUBLIC_RUNTIME_BASE_IMAGE;
 }
 
 export function canonicalJson(value: unknown): string {
@@ -259,20 +279,23 @@ export function assessNovitaFleetReadiness(raw: unknown): NovitaFleetReadiness {
       || zImage.localCacheVerified !== true) {
     blockers.push("z_image_cache_or_revision_unverified");
   }
-  const gemma = a.models?.gemma;
-  if (gemma?.model !== OFFICIAL_RENDER_PINS.gemma.model
-      || !/^[a-f0-9]{40}$/.test(gemma.revision ?? "")
-      || gemma.localCacheVerified !== true) {
-    blockers.push("gemma_cache_or_revision_unverified");
-  }
   const ltx = a.models?.ltx;
   if (ltx?.model !== OFFICIAL_RENDER_PINS.ltx.model
       || ltx.revision !== OFFICIAL_RENDER_PINS.ltx.revision
       || ltx.runtimeRepository !== OFFICIAL_RENDER_PINS.ltx.runtimeRepository
       || ltx.runtimeRevision !== OFFICIAL_RENDER_PINS.ltx.runtimeRevision
+      || ltx.checkpoint !== OFFICIAL_RENDER_PINS.ltx.checkpoint
+      || ltx.textEncoderCheckpoint !== OFFICIAL_RENDER_PINS.ltx.textEncoderCheckpoint
+      || ltx.videoVaeCheckpoint !== OFFICIAL_RENDER_PINS.ltx.videoVaeCheckpoint
+      || ltx.audioVaeCheckpoint !== OFFICIAL_RENDER_PINS.ltx.audioVaeCheckpoint
+      || ltx.spatialUpscalerCheckpoint !== OFFICIAL_RENDER_PINS.ltx.spatialUpscalerCheckpoint
+      || ltx.quantization !== OFFICIAL_RENDER_PINS.ltx.quantization
+      || ltx.offload !== OFFICIAL_RENDER_PINS.ltx.offload
+      || ltx.spatialUpscaleFactor !== OFFICIAL_RENDER_PINS.ltx.spatialUpscaleFactor
       || ltx.localCacheVerified !== true
-      || ltx.twoStageHqVerified !== true) {
-    blockers.push("ltx_runtime_cache_or_hq_pipeline_unverified");
+      || ltx.distilledTwoStageX2Verified !== true
+      || ltx.rtx4090ProfileBenchmarked !== true) {
+    blockers.push("ltx_2_5_runtime_cache_or_rtx_4090_x2_pipeline_unverified");
   }
 
   const controls = a.controls;
@@ -470,18 +493,68 @@ export interface NovitaCreateWorkerRequestArgs {
   clusterId: string;
   storageId: string;
   image: string;
-  imageAuthId: string;
+  /** Required unless the one allowed source-linked public GHCR image is used. */
+  imageAuthId?: string;
+  /** Opt-in only; prevents an unauthenticated arbitrary registry pull. */
+  publicImage?: boolean;
+  /** Exact R2 runtime bundle used only with the approved public PyTorch base. */
+  runtimeBundle?: {
+    downloadUrl: string;
+    sha256: string;
+    /** The public PyTorch base has gzip but not a guaranteed zstd binary. */
+    archive: "gzip";
+    /** Short-lived, content-bound Python bootstrap source. */
+    bootstrapUrl: string;
+  };
   manifestUrl: string;
   manifestSha256: string;
   approval: NovitaCapacityPlan;
+}
+
+/**
+ * Public registries do not need a permanent credential, but they must never
+ * be allowed to substitute an arbitrary image.  The full bootstrap is loaded
+ * from a signed R2 object rather than placed in Novita's command field: the
+ * provider re-wraps long shell commands and can otherwise corrupt quoting.
+ */
+function runtimeBundleBootstrapCommand(): string {
+  return "python -c \"import os,urllib.request;exec(urllib.request.urlopen(os.environ['NOVITA_RUNTIME_BOOTSTRAP_URL']).read())\"";
+}
+
+/** A cache-only provider operation; it does not allocate or bill a GPU. */
+export interface NovitaImagePrewarmRequest {
+  image: string;
+  clusterId: string;
+  productIds: string[];
+  /** Required only for a private image; public worker image uses no credential. */
+  repositoryAuthId?: string;
+  note: string;
 }
 
 export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestArgs) {
   if (args.approval.admitted !== true || args.approval.workerCount > NOVITA_HARD_GPU_LIMIT) {
     throw new NovitaAdmissionError("an admitted bounded capacity plan is required");
   }
-  if (!isPinnedImage(args.image) || !args.imageAuthId) {
-    throw new NovitaAdmissionError("worker image must be digest-pinned and have registry authentication");
+  const approvedPublicImage = args.publicImage === true
+    && (isApprovedPublicWorkerImage(args.image) || isApprovedPublicRuntimeBaseImage(args.image));
+  if (!isPinnedImage(args.image) || (!args.imageAuthId && !approvedPublicImage)) {
+    throw new NovitaAdmissionError(
+      "worker image must be digest-pinned and have registry authentication, or be the approved public GHCR worker",
+    );
+  }
+  if (args.runtimeBundle && !isApprovedPublicRuntimeBaseImage(args.image)) {
+    throw new NovitaAdmissionError("runtime bundle mode requires the approved public PyTorch base image");
+  }
+  if (isApprovedPublicRuntimeBaseImage(args.image) && !args.runtimeBundle) {
+    throw new NovitaAdmissionError("approved public PyTorch base image requires a sealed runtime bundle");
+  }
+  if (args.runtimeBundle && (
+    !isSha256(args.runtimeBundle.sha256)
+    || !/^https:\/\//.test(args.runtimeBundle.downloadUrl)
+    || args.runtimeBundle.archive !== "gzip"
+    || !/^https:\/\//.test(args.runtimeBundle.bootstrapUrl)
+  )) {
+    throw new NovitaAdmissionError("runtime bundle must use a signed HTTPS URL and SHA-256 identity");
   }
   if (!isSha256(args.manifestSha256) || !/^https:\/\//.test(args.manifestUrl)) {
     throw new NovitaAdmissionError("worker manifest must use a signed HTTPS URL and SHA-256 identity");
@@ -503,7 +576,8 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
     kind: "gpu",
     billingMode: "spot",
     imageUrl: args.image,
-    imageAuthId: args.imageAuthId,
+    ...(args.imageAuthId ? { imageAuthId: args.imageAuthId } : {}),
+    ...(args.runtimeBundle ? { command: runtimeBundleBootstrapCommand() } : {}),
     rootfsSize: 120,
     networkStorages: [{ Id: args.storageId, mountPoint: "/network" }],
     envs: [
@@ -511,6 +585,11 @@ export function buildNovitaCreateWorkerRequest(args: NovitaCreateWorkerRequestAr
       { key: "NOVITA_MANIFEST_SHA256", value: args.manifestSha256 },
       { key: "NOVITA_MODEL_VOLUME", value: "/network" },
       { key: "NOVITA_LOCAL_MODEL_CACHE", value: "/workspace/model-cache" },
+      ...(args.runtimeBundle ? [
+        { key: "NOVITA_RUNTIME_BUNDLE_URL", value: args.runtimeBundle.downloadUrl },
+        { key: "NOVITA_RUNTIME_BUNDLE_SHA256", value: args.runtimeBundle.sha256 },
+        { key: "NOVITA_RUNTIME_BOOTSTRAP_URL", value: args.runtimeBundle.bootstrapUrl },
+      ] : []),
     ],
   };
 }
@@ -573,13 +652,17 @@ export class NovitaGpuApiClient {
     for (let pageNum = 0; pageNum < 20; pageNum += 1) {
       const raw = await this.request(`/gpu/instances?pageSize=${pageSize}&pageNum=${pageNum}`);
       const envelope = raw && typeof raw === "object" ? raw as Record<string, unknown> : {};
+      const data = envelope.data && typeof envelope.data === "object" && !Array.isArray(envelope.data)
+        ? envelope.data as Record<string, unknown>
+        : undefined;
       const page = Array.isArray(envelope.instances)
         ? envelope.instances
+        : Array.isArray(data?.instances) ? data.instances
         : Array.isArray(envelope.data) ? envelope.data : [];
       rows.push(...page.flatMap((value) => value && typeof value === "object"
         ? [value as Record<string, unknown>]
         : []));
-      const declaredTotal = Number(envelope.total ?? envelope.totalCount ?? NaN);
+      const declaredTotal = Number(envelope.total ?? envelope.totalCount ?? data?.total ?? data?.totalCount ?? NaN);
       if (page.length < pageSize || (Number.isFinite(declaredTotal) && (pageNum + 1) * pageSize >= declaredTotal)) {
         return rows;
       }
@@ -671,8 +754,44 @@ export class NovitaGpuApiClient {
       method: "POST",
       body: JSON.stringify(request),
     }) as Record<string, unknown>;
-    const id = String(response.id ?? "");
+    const data = response.data && typeof response.data === "object" && !Array.isArray(response.data)
+      ? response.data as Record<string, unknown>
+      : undefined;
+    const id = String(response.id ?? data?.id ?? "");
     if (!id) throw new Error("Novita create did not return an instance identity");
+    return id;
+  }
+
+  /**
+   * Prime Novita's cluster-local image cache before a billable worker exists.
+   * The API accepts public images without an auth ID; retain that omission so
+   * a public pull cannot accidentally inherit an unrelated registry secret.
+   */
+  async createImagePrewarm(request: NovitaImagePrewarmRequest): Promise<string> {
+    if (
+      !isPinnedImage(request.image)
+      || !request.clusterId.trim()
+      || !request.productIds.length
+      || !request.productIds.every((id) => id.trim())
+      || !request.note.trim()
+    ) {
+      throw new NovitaAdmissionError("image prewarm requires a digest-pinned image, cluster, product, and note");
+    }
+    const response = await this.request("/image/prewarm", {
+      method: "POST",
+      body: JSON.stringify({
+        imageUrl: request.image,
+        ...(request.repositoryAuthId ? { repositoryAuth: request.repositoryAuthId } : {}),
+        clusterId: request.clusterId,
+        productIds: request.productIds,
+        note: request.note,
+      }),
+    }) as Record<string, unknown>;
+    const data = response.data && typeof response.data === "object" && !Array.isArray(response.data)
+      ? response.data as Record<string, unknown>
+      : undefined;
+    const id = String(response.id ?? data?.id ?? "");
+    if (!id) throw new Error("Novita image prewarm did not return a task identity");
     return id;
   }
 

@@ -501,7 +501,8 @@ export const youtubeCreateChannelTask = task({
                 "the exact YouTube name and handle now exist; a new channel cannot be causally proven",
               );
             }
-            const agent = sh.agent({ mode: "hybrid", model: "google/gemini-2.5-flash" });
+            // Inherit the non-Google model pinned by withStagehand().
+            const agent = sh.agent({ mode: "hybrid" });
             // This durable checkpoint is the one-way gate. Once it commits,
             // no retry can enter this create closure again.
             await checkpointProviderStarted();

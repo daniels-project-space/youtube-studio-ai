@@ -2,6 +2,7 @@ import { v } from "convex/values";
 import { mutation, query } from "./studioFunctions";
 import type { Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
+import { patchChannelExternalFact } from "./channelLock";
 import {
   YOUTUBE_CREATION_CLAIM_LEASE_MS,
   assertYoutubeChannelId,
@@ -547,7 +548,25 @@ export const markCreated = mutation({
     });
     // This is intentionally in the same Convex transaction as the durable
     // receipt. No provisional/ambiguous state is projected onto the channel.
-    await ctx.db.patch(args.channelId, {
+    //
+    // DELIBERATE CHANNEL-LOCK EXCEPTION (convex/channelLock.ts). This is the
+    // one channels write that goes through neither patchChannelRespectingLock
+    // (fork-on-locked) nor assertChannelWritable (block-on-locked); it uses
+    // patchChannelExternalFact instead, which never forks and never blocks:
+    //   - Forking is definitionally wrong — `youtubeCreated` is in
+    //     NON_INHERITED_FORK_FIELDS (two rows may not project one
+    //     ytChannelId, enforced by assertYoutubeChannelIdUniqueBinding
+    //     above), so a fork would DROP the receipt entirely.
+    //   - Blocking is worse — the YouTube channel already exists at the
+    //     provider by the time this runs. Throwing here would strand the
+    //     exactly-once claim in provider_started and permanently lose the
+    //     receipt for a completed, irreversible action.
+    // This records an external fact that already happened rather than
+    // editing the operator's config/content, so it is exempt from the lock
+    // guard by design — not merely unreachable in practice. See
+    // patchChannelExternalFact / EXTERNAL_FACT_FIELDS in channelLock.ts for
+    // the allowlist that keeps this exception from silently widening.
+    await patchChannelExternalFact(ctx, args.channelId, {
       youtubeCreated: {
         ytChannelId: args.ytChannelId,
         handle,

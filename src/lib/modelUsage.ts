@@ -92,7 +92,7 @@ function normalizeModel(model: string): string {
     .trim()
     .toLowerCase()
     .replace(/^models\//, "")
-    .replace(/^google\//, "");
+    .replace(/^(?:google|anthropic)\//, "");
 }
 
 function validRate(value: unknown): ModelRate | undefined {
@@ -150,6 +150,22 @@ function builtInRate(provider: string, model: string, inputTokens: number): Mode
         ? { inputUsdPerMillion: 4, outputUsdPerMillion: 18, cachedInputUsdPerMillion: 0.4 }
         : { inputUsdPerMillion: 2, outputUsdPerMillion: 12, cachedInputUsdPerMillion: 0.2 };
     }
+  }
+  // First-party Claude API pricing. Keep this exact model family explicit so
+  // an unknown provider revision never turns into an invented zero cost.
+  if (p === "anthropic") {
+    if (m === "claude-sonnet-4-5-20250929" || m === "claude-sonnet-4.5") {
+      return { inputUsdPerMillion: 3, outputUsdPerMillion: 15, cachedInputUsdPerMillion: 0.3 };
+    }
+  }
+  // Exact OpenRouter rates for the pinned, non-Google YouTube fleet. Model
+  // overrides are intentionally not priced here: an unknown override must show
+  // as unpriced rather than appearing cheaper than it is.
+  if (p === "openrouter") {
+    if (m === "openai/gpt-oss-20b") return { inputUsdPerMillion: 0.03, outputUsdPerMillion: 0.13 };
+    if (m === "mistralai/ministral-3b-2512") return { inputUsdPerMillion: 0.1, outputUsdPerMillion: 0.1, cachedInputUsdPerMillion: 0.01 };
+    if (m === "mistralai/ministral-8b-2512") return { inputUsdPerMillion: 0.15, outputUsdPerMillion: 0.15, cachedInputUsdPerMillion: 0.015 };
+    if (m === "qwen/qwen3.6-27b") return { inputUsdPerMillion: 0.289, outputUsdPerMillion: 2.4 };
   }
   if (p === "groq") {
     if (m === "qwen/qwen3.6-27b") {
