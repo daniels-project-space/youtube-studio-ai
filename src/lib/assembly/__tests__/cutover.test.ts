@@ -20,7 +20,7 @@ import {
 } from "../cutover";
 import { overlaysToCuesAndSpecs } from "../overlays";
 import { TimelineSchema, ReceiptSchema, type Timeline, type Receipt, type Overlay, type Segment } from "../timeline";
-import { preOverlayCacheKey, type RenderBackend } from "../renderTimeline";
+import { type RenderBackend } from "../renderTimeline";
 import type { QuoteOverlaySpec } from "@/lib/ffmpeg";
 
 /* ---------- 1. store → PlanInput field-by-field ---------- */

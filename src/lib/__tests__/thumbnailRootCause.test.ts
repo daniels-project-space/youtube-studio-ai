@@ -9,7 +9,6 @@ import { classifyExecutionError } from "@/engine/executionErrors";
 import { FAMILIES, type FamilyKey } from "@/engine/families";
 import {
   BananaImageSubmissionError,
-  generateBananaImage,
   generateNanoBananaImageWithReceipt,
   NANO_BANANA_THUMBNAIL_PROFILE,
 } from "@/lib/banana";

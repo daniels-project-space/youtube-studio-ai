@@ -62,7 +62,7 @@ import {
   WIKIDATA_USER_AGENT,
   type SparqlFetchOptions,
 } from "./quizSource";
-import { QUIZ_OPTION_COUNT, type QuizOption } from "./quizFacts";
+import { QUIZ_OPTION_COUNT } from "./quizFacts";
 
 export const WIKIPEDIA_SUMMARY_ENDPOINT = "https://en.wikipedia.org/api/rest_v1/page/summary";
 

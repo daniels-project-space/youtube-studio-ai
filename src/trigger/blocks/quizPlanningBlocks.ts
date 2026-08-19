@@ -13,7 +13,7 @@
  * by `quiz_year` from CC0 Wikidata and re-validated before pixels render.
  */
 import { createHash } from "node:crypto";
-import { type Block, type StageContext } from "@/engine/types";
+import { type Block } from "@/engine/types";
 import { QUIZ_YEAR_TOPIC_KEYS, type QuizYearTopicKey } from "@/lib/quizYearFacts";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";

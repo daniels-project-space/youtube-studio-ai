@@ -70,6 +70,7 @@ export const propose = mutation({
     }
     const basePolicyVersion = channel.learningPolicyVersion ?? 0;
     const { secret: _secret, ...doc } = args;
+    void _secret;
     const id = await ctx.db.insert("learningRecommendations", {
       ...doc,
       basePolicyVersion,

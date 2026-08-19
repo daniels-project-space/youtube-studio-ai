@@ -444,7 +444,10 @@ export function cinematicCaseSequenceContentFingerprint(
   input: CinematicCaseSequenceContent | CinematicCaseSequenceInput,
 ): string {
   const content = "editorialReview" in input
-    ? (({ editorialReview: _editorialReview, ...withoutReview }) => withoutReview)(input)
+    ? (({ editorialReview: _editorialReview, ...withoutReview }) => {
+        void _editorialReview;
+        return withoutReview;
+      })(input)
     : input;
   return hash(CinematicCaseSequenceContentSchema.parse(content));
 }

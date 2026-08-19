@@ -377,6 +377,7 @@ async function main(): Promise<void> {
     const map = admittedMap();
     const fullInput = approvedSequence(map);
     const { editorialReview: _humanReview, ...content } = fullInput;
+    void _humanReview;
     const baseArgs = (candidateContent: typeof content) => ({
       content: candidateContent,
       sourceAdmission: admittedSource.receipt,

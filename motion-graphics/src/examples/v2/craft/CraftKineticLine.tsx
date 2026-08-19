@@ -85,7 +85,6 @@ const { fontFamily: oswald } = loadOswald();
 export const CRAFT_KINETIC_DURATION = 210; // 7.0s @ 30fps
 
 const W = 1920;
-const H = 1080;
 
 /** Frames a word starts entering BEFORE its onset, so it settles on-beat.
  *  ITER 3: heroes are spring-driven and reach their target ≈ENTER_DUR frames in,

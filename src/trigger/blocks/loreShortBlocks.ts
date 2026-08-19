@@ -25,7 +25,6 @@
  *    frozen into a content-addressed R2 checkpoint, so a rejected draft never
  *    costs a paid render and a replay never re-buys one.
  */
-import { join } from "node:path";
 import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";

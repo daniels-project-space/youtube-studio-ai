@@ -1,6 +1,6 @@
 // Depth-map each CLEAN background plate (figure-removed) so it can be sliced into
 // multiple parallax bands. Publishes each plate to nginx (fal needs a public URL).
-import { writeFile, copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { bootstrapSecrets } from "../src/lib/bootstrap.ts";

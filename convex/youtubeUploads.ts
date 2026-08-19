@@ -84,6 +84,7 @@ export const save = mutation({
       )
       .unique();
     const { secret: _secret, ...row } = args;
+    void _secret;
     if (existing) {
       if (existing.channelId !== args.channelId) {
         throw new Error("youtubeUploads.save: channel mismatch");

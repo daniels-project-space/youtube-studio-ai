@@ -17,6 +17,7 @@ export const buildChannelPackageTask = task({
   id: "build-channel-package",
   maxDuration: 60,
   run: async (_payload: BuildChannelArgs) => {
+    void _payload;
     // Deliberately the first action: no secrets, database, model, or renderer
     // is initialized for a stale/discovered legacy task invocation.
     throw new Error(LEGACY_CHANNEL_PACKAGE_RETIRED);

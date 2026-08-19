@@ -39,7 +39,7 @@ import {
   assertCertifiedQuizTopicSafety,
   quizTopicPlanFingerprint,
 } from "../quizPlanningBlocks";
-import { wikidataSourceUrl, type QuizYearQuestion } from "@/lib/quizYearFacts";
+import { wikidataSourceUrl } from "@/lib/quizYearFacts";
 
 const ROOT = join(__dirname, "../../../..");
 

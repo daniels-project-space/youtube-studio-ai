@@ -14,7 +14,6 @@ import {
   AbsoluteFill,
   interpolate,
   useCurrentFrame,
-  useVideoConfig,
 } from "remotion";
 import { loadFont as loadAnton } from "@remotion/google-fonts/Anton";
 import { loadFont as loadOswald } from "@remotion/google-fonts/Oswald";

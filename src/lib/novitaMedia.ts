@@ -527,8 +527,8 @@ export async function renderNovitaGeneratedScenes(args: {
       throw imageSpendError(error, observedImageCostUsd);
     }
   }
-  let terminalStillByShot = new Map<string, string>();
-  let terminalKeyframeReviewByShot = new Map<string, CinematicKeyframeReview>();
+  const terminalStillByShot = new Map<string, string>();
+  const terminalKeyframeReviewByShot = new Map<string, CinematicKeyframeReview>();
   if (terminalImageShots.length) {
     let terminalImageResult: NovitaRenderResult;
     try {

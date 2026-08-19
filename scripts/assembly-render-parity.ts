@@ -47,7 +47,7 @@
  * thresholds to manufacture a pass.
  */
 import { execFile } from "node:child_process";
-import { mkdtemp, readFile, stat } from "node:fs/promises";
+import { mkdtemp, readFile } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
@@ -61,7 +61,6 @@ import {
   writeCaptionsAss,
   captionCuesFromTimings,
   normalizeAudioOnly,
-  probe as ffprobeLib,
   type QuoteOverlaySpec,
 } from "@/lib/ffmpeg";
 import { renderTitleCard } from "@/lib/remotionRender";

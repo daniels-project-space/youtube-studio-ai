@@ -44,14 +44,6 @@ export {
  * upgrades to Pro (a transient flash blip must not 3.4x the price).
  * BANANA_FORCE_MODEL overrides everything (emergency pin).
  */
-const PRO_MODELS = ["gemini-3-pro-image-preview", "gemini-2.5-flash-image"];
-const FLASH_MODELS = ["gemini-2.5-flash-image"];
-
-function modelsFor(tier: "pro" | "flash"): string[] {
-  if (process.env.BANANA_FORCE_MODEL) return [process.env.BANANA_FORCE_MODEL];
-  return tier === "pro" ? PRO_MODELS : FLASH_MODELS;
-}
-
 /** Billed-generation counters (by tier) — pipeline blocks report real cost from
  *  these. `fal` counts router-delegated FLUX renders (≈ $0.04/image — the same
  *  rate as banana flash, which is what cost consumers bill it at). */

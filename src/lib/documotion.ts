@@ -524,6 +524,7 @@ const CAMERA_MOVES = ["push_in", "pull_back", "pan_left", "pan_right", "drift"];
 const CAMERA_INTENSITIES = ["subtle", "medium", "strong"];
 
 export function validatePlan(plan: DocuPlan, durationSec: number, _style: DocuStyleDef): string[] {
+  void _style;
   const problems: string[] = [];
   if (!plan.shots?.length || plan.shots.length < 5) problems.push("need 6-8 shots");
   // Any KNOWN capability is allowed — a style biases selection, it does not
@@ -819,6 +820,7 @@ async function downloadTo(url: string, outPath: string): Promise<void> {
 
 /** BiRefNet background removal via fal.ai → alpha PNG. v2 first, then v1. */
 async function removeBackground(imgPath: string, outPng: string, log?: Logger): Promise<string> {
+  void log;
   const key = process.env.FAL_KEY;
   if (!key) throw new Error("documotion: FAL_KEY missing (vault service 'fal')");
   const dataUri = `data:image/jpeg;base64,${(await readFile(imgPath)).toString("base64")}`;

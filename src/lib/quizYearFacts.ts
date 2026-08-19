@@ -66,7 +66,6 @@ import {
   qidFromUri,
   resolveEntityMeta,
   runSparql,
-  SENSITIVE_TERMS,
   wikidataSourceUrl,
   type SparqlFetchOptions,
 } from "./quizSource";

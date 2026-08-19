@@ -52,7 +52,6 @@ function loadWhisper(p: string) {
 }
 
 async function selectQuotes(segs: { start: number; end: number; text: string }[], speaker: string, windowLen: number): Promise<Clip[]> {
-  const transcript = segs.map((s) => `[${s.start.toFixed(1)}-${s.end.toFixed(1)}] ${s.text}`).join("\n");
   const prompt = `From this ${speaker} transcript (seconds), extract the strongest quotes ON THE THEME "${TOPIC}" (perseverance, refusing to quit, pushing through failure). Pick 2-4 CONTIGUOUS passages, each a COMPLETE thought, high-energy, totaling <= ${PER_SPEAKER_SEC}s. Skip tangents/intros/chatter. Return ONLY JSON: {"clips":[{"start":<sec>,"end":<sec>}]} within 0..${windowLen.toFixed(0)}.`;
   const res = await geminiJson<{ clips?: Clip[] }>({ prompt, maxTokens: 700 });
   const clips = (res.clips ?? []).map((c) => ({ start: Math.max(0, +c.start), end: Math.min(windowLen, +c.end) }))

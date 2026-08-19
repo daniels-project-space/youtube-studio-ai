@@ -797,7 +797,7 @@ export const narrationTts: Block = {
         `narration_tts: speaking rate x${speed} (${ctx.params["ttsSpeed"] ? "param" : dnaSpeed ? "Style DNA pacing" : `physics:${physics.archetype}`})`,
       );
     // ElevenLabs render settings from the physics (v3 stability/style/seed).
-    let elevenSeed = 4242;
+    const elevenSeed = 4242;
     const elevenSettings = ttsProvider === "elevenlabs"
       ? { stability: physics.stability, ...(physics.style ? { style: physics.style } : {}) }
       : undefined;

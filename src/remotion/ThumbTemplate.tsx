@@ -38,7 +38,7 @@ export const ThumbTemplate: React.FC<ThumbTemplateProps> = ({
   layout, artSrc, artSrc2, words, number, badge,
   panelColor = "#101018", accentColor = "#ffd400", font = "impact", uppercase = true,
 }) => {
-  const W = 1280, H = 720;
+  const W = 1280;
   const fam = FAM[font] ?? FAM.impact;
   const gw = GW[font] ?? 0.55;
   const panel = panelColor;

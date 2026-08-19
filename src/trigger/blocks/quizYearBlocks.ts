@@ -80,7 +80,6 @@ import {
   questionTextDefects,
   QUIZ_CATEGORIES,
   QUIZ_CATEGORY_KEYS,
-  seededRandom,
   type QuizCategoryFact,
   type QuizCategoryKey,
   type QuizDecoyCandidate,

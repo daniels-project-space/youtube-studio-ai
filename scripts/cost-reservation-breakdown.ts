@@ -122,7 +122,7 @@ function main(): void {
     const row = LENGTHS.map((l) => {
       try {
         return usd(auditFamily(family, l, false)).padStart(12);
-      } catch (error) {
+      } catch {
         return "ERR".padStart(12);
       }
     }).join("");

@@ -105,7 +105,13 @@ export function referenceMechanicsPacketContentFingerprint(
   value: ReferenceMechanicsPacketContent | ReferenceMechanicsPacket,
 ): string {
   const content = "editorialReview" in value
-    ? (({ contentFingerprint: _contentFingerprint, editorialReview: _editorialReview, release: _release, requiresHumanEditorialReview: _requiresHumanEditorialReview, ...packet }) => packet)(value)
+    ? (({ contentFingerprint: _contentFingerprint, editorialReview: _editorialReview, release: _release, requiresHumanEditorialReview: _requiresHumanEditorialReview, ...packet }) => {
+        void _contentFingerprint;
+        void _editorialReview;
+        void _release;
+        void _requiresHumanEditorialReview;
+        return packet;
+      })(value)
     : value;
   return fingerprint(ReferenceMechanicsPacketContentSchema.parse(content));
 }

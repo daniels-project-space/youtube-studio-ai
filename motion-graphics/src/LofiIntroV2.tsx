@@ -35,7 +35,7 @@ function seededRandom(seed: number) {
 // ==========================================
 const ExpandingRings: React.FC = () => {
   const frame = useCurrentFrame();
-  const { fps, durationInFrames } = useVideoConfig();
+  const { durationInFrames } = useVideoConfig();
 
   const rings = [
     { delay: 8, color: "rgba(167,139,250,0.25)", duration: 90 },
@@ -236,8 +236,7 @@ const FloatingOrbs: React.FC = () => {
 // ==========================================
 const LightTrails: React.FC = () => {
   const frame = useCurrentFrame();
-  const { fps, durationInFrames } = useVideoConfig();
-  const time = frame / fps;
+  const { durationInFrames } = useVideoConfig();
 
   const fadeIn = interpolate(frame, [0, 30], [0, 1], {
     extrapolateRight: "clamp",
@@ -524,7 +523,7 @@ export const LofiIntroV2: React.FC<{
   transparent = false,
 }) => {
   const frame = useCurrentFrame();
-  const { fps, width, height, durationInFrames } = useVideoConfig();
+  const { fps, durationInFrames } = useVideoConfig();
   const time = frame / fps;
 
   const fadeIn = interpolate(frame, [0, 30], [0, 1], {

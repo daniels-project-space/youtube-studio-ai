@@ -72,13 +72,6 @@ function targetSeconds(
   return boundedNumber(direct ?? upstream, fallback, 30, 36_000);
 }
 
-function bananaImageUnitCeiling(tier: "flash" | "pro"): number {
-  return Math.max(
-    bananaUnitRate(tier),
-    bananaUnitRate(tier, process.env, { hasReferences: true }),
-  );
-}
-
 function shotCount(
   params: Readonly<Record<string, unknown>>,
   context: Readonly<ModuleCostContext> | undefined,
@@ -175,6 +168,8 @@ function quizYearCostCeiling(
   _params: Readonly<Record<string, unknown>>,
   _context: Readonly<ModuleCostContext> | undefined,
 ): number {
+  void _params;
+  void _context;
   // The QuizYear engine is fully deterministic: source statements, question
   // wording, render props, and integrity checks are local. Its preceding music
   // block independently reserves/attests the only external creative cost.

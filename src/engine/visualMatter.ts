@@ -261,7 +261,6 @@ export function planVisualMatter(input: PlanVisualMatterInput): VisualMatterMani
   };
 
   const storyboard = shots.map((shot) => {
-    const spec = specByShot.get(shot.id)!;
     const beat = beatById.get(shot.beatId);
     const characterIds = shot.entities.filter((id) => characterById.has(id));
     const settingId = shot.locationId && settingById.has(shot.locationId) ? shot.locationId : undefined;

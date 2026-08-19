@@ -58,6 +58,7 @@ export const set = mutation({
       });
     } else {
       const { secret: _secret, ...row } = args;
+      void _secret;
       await ctx.db.insert("youtubeAuth", {
         ...row,
         tokenVersion: 1,

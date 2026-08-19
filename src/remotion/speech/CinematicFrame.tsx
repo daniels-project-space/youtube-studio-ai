@@ -152,7 +152,7 @@ const CornerSigil: React.FC<{
   theme: CinematicTheme;
   barH: number;
   width: number;
-}> = ({ segments, ms, theme, barH, width }) => {
+}> = ({ segments, ms, theme, barH }) => {
   const seg =
     segments.find((s) => ms >= s.start && ms < s.end) ?? segments[segments.length - 1];
   const size = 64;

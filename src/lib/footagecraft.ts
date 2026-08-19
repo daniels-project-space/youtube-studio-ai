@@ -45,7 +45,6 @@ import {
   searchFootageLegacy,
   hasAnyFootageProvider,
   activeProviders,
-  is4k,
   scoreClip,
   type FootageClip,
 } from "@/lib/footage";

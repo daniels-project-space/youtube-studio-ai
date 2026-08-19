@@ -241,7 +241,7 @@ export function assertChildrenShowBibleSeeded(
   }
 }
 
-const ChildrenShowBibleIssueCodeSchema = z.enum([
+export const ChildrenShowBibleIssueCodeSchema = z.enum([
   "show_bible_schema_invalid",
   "age_band_missing",
   "learning_objective_missing",

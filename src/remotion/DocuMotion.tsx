@@ -1323,7 +1323,6 @@ const PhotoSlideShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, 
 
 const MatteSequenceShot: React.FC<{ shot: DocuShotSpec; seed: number }> = ({ shot, seed }) => {
   const frame = useCurrentFrame();
-  const { width, height } = useVideoConfig();
   const t = useTheme();
   const dur = shot.durationInFrames;
   const cam = useCam(shot.camera ?? { move: "drift", intensity: "subtle" }, dur, seed);

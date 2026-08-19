@@ -1,7 +1,7 @@
 // LORECRAFT v3 — full engraving video. Each of the 4 beats = DepthFlow zoom-out reveal
 // (foreground element parallaxing IN FRONT), crossfade-concat, light engraving grade,
 // EB-Garamond title, Khazad-dûm narration. Render each scene as its own clip in tmux-safe steps.
-import { readFile, copyFile, mkdir } from "node:fs/promises";
+import { copyFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";

@@ -15,7 +15,6 @@ import {
   AbsoluteFill,
   interpolate,
   useCurrentFrame,
-  useVideoConfig,
 } from "remotion";
 import { noise2D } from "@remotion/noise";
 import { loadFont } from "@remotion/google-fonts/Oswald";
@@ -24,7 +23,6 @@ const { fontFamily } = loadFont();
 
 export const GlitchChroma: React.FC = () => {
   const frame = useCurrentFrame();
-  const { fps } = useVideoConfig();
 
   // Ken-Burns slow zoom on the scene.
   const zoom = interpolate(frame, [0, 150], [1.0, 1.12]);

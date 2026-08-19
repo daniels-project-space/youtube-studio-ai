@@ -25,6 +25,7 @@ export const renderValidatedComicTask = task({
   maxDuration: 1800,
   retry: { maxAttempts: 1 },
   run: async (_input: RenderValidatedComicInput) => {
+    void _input;
     throw new Error(RETIRED_REASON);
   },
 });

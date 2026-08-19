@@ -5,7 +5,6 @@ import { z } from "zod";
 import {
   assertCasefilePacket,
   CasePacketSchema,
-  CasefileRightsProvenanceSchema,
   casefileFingerprint,
   compileCasefileEvidenceGrammar,
   type CasePacket,
@@ -32,7 +31,6 @@ const FUTURE_REVIEW_CLOCK_SKEW_MS = 5 * 60 * 1_000;
 const identifier = (prefix: string) =>
   z.string().regex(new RegExp(`^${prefix}-[a-z0-9][a-z0-9-]{1,119}$`), `expected ${prefix}- prefixed identifier`);
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/, "expected sha256 fingerprint");
-const text = (maximum: number) => z.string().trim().min(1).max(maximum);
 const httpsUrl = z.string().url().refine((value) => value.startsWith("https://"), "expected an https URL");
 
 /** Only these Casefile source kinds are treated as primary evidence. */
@@ -107,7 +105,7 @@ export type CasefileClaimPrimarySource = z.infer<typeof CasefileClaimPrimarySour
 export type CasefileSourceUsage = z.infer<typeof CasefileSourceUsageSchema>;
 export type CasefileEditorialReview = z.infer<typeof CasefileEditorialReviewSchema>;
 
-const CasefileSourceAdmissionIssueCodeSchema = z.enum([
+export const CasefileSourceAdmissionIssueCodeSchema = z.enum([
   "case_identifier_missing",
   "case_packet_invalid",
   "case_packet_safety_blocked",

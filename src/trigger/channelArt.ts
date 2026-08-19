@@ -18,6 +18,7 @@ export const generateChannelArtTask = task({
   id: "generate-channel-art",
   maxDuration: 600,
   run: async (_payload: ChannelArtArgs) => {
+    void _payload;
     throw new Error(RETIRED_REASON);
   },
 });

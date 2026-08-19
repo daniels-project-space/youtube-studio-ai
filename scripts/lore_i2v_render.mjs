@@ -1,7 +1,7 @@
 // LORECRAFT v4 — GENERATED CAMERA MOVES. Each beat's engraving is fed to Kling (via the
 // Higgsfield CLI) with a cinematic camera-move prompt → a GENUINE 3D camera shot (real
 // perspective, parallax, the model generates the revealed space). Concat + narration + title.
-import { writeFile, readFile, copyFile, mkdir } from "node:fs/promises";
+import { writeFile, copyFile, mkdir } from "node:fs/promises";
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { spawn } from "node:child_process";
@@ -20,7 +20,7 @@ const MOVES = [
   "The CAMERA slowly pulls back and tilts upward to reveal the colossal towering Balrog of shadow and flame in full, the foreground runestone and shield sinking away, embers and smoke swirling in 3D." + STYLE,
   "The CAMERA cranes slowly back and upward over the ruined hall of Moria, the armoured dwarf king in the foreground, revealing the fallen columns and silent tombs receding into mist and faint embers." + STYLE,
 ];
-const N = 4, FPS = 24;
+const N = 4;
 
 // 1. generate a camera-move clip per scene via Higgsfield/Kling (skip if already downloaded)
 for (let i = 0; i < N; i++) {

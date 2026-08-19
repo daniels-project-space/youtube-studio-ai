@@ -14,7 +14,6 @@ import {
   CinematicCutReasonSchema,
   CinematicEditDecisionListSchema,
   CinematicTensionStateSchema,
-  type CinematicEditDecisionList,
 } from "@/engine/cinematicCaseSequence";
 import { assertCinematicSequenceRenderBinding } from "@/engine/cinematicSequenceRenderBinding";
 

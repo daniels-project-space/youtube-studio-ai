@@ -163,6 +163,7 @@ export function assessNovitaVideoPhaseProfileRuntime(
 ): NovitaVideoRuntimeAssessment {
   const requirement = NOVITA_VIDEO_MODEL_RUNTIME_REQUIREMENTS[profile.model];
   const { id: _id, ...settings } = profile;
+  void _id;
   const profileIdentity = runtimeProfileIdentity(settings);
   const blockers: string[] = [];
 

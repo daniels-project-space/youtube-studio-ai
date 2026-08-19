@@ -21,7 +21,6 @@ import {
   casefileSourcePacketContentFingerprint,
   type CasefileSourcePacket,
 } from "@/engine/sourceFirstAdmission";
-import { createSourceBoundStorySpineHandoff } from "@/engine/sourceBoundStorySpine";
 
 /**
  * End-to-end behavioral test for the new `introduction` narrativeRole and
@@ -224,57 +223,6 @@ function admittedMap() {
   };
   input.editorialReview.reviewedShotMapFingerprint = casefileEvidenceShotMapContentFingerprint(input);
   return assertCasefileEvidenceShotMap({ input, sourcePacket, sourceAdmission: admittedSource.receipt, sceneManifest, shotList }, { now: NOW });
-}
-
-function sourceBoundStorySpineFor(map: ReturnType<typeof admittedMap>) {
-  const storySpine = {
-    version: "1.0.0" as const,
-    timedScript: {
-      version: "1.0.0" as const,
-      narrationDurationSec: 30,
-      sentences: [
-        { id: "sentence-team-formed", text: "The court record documents when the investigation team was formed.", t0: 0, t1: 12, sectionId: "section-formed", evidenceRefs: ["source-court-archive"] },
-        { id: "sentence-lead-named", text: "The court record names the lead investigator assigned to the case.", t0: 12, t1: 18, sectionId: "section-lead", evidenceRefs: ["source-court-archive"] },
-        { id: "sentence-team-verdict", text: "The documented verdict names the team's final determination.", t0: 18, t1: 30, sectionId: "section-verdict", evidenceRefs: ["source-court-archive"] },
-      ],
-    },
-    narrativeBeats: [
-      { id: "beat-team-formed", sourceSentenceIds: ["sentence-team-formed"], t0: 0, t1: 12, purpose: "Establish the cited team formation.", evidenceRefs: ["source-court-archive"] },
-      { id: "beat-lead-named", sourceSentenceIds: ["sentence-lead-named"], t0: 12, t1: 18, purpose: "Name the cited lead investigator.", evidenceRefs: ["source-court-archive"] },
-      { id: "beat-team-verdict", sourceSentenceIds: ["sentence-team-verdict"], t0: 18, t1: 30, purpose: "Show the documented verdict.", evidenceRefs: ["source-court-archive"] },
-    ],
-    continuityLedger: {
-      version: "1.0.0" as const,
-      entities: [], locations: [], era: "historical",
-      wardrobe: ["charcoal coat"], props: ["court document", "folio", "timeline"], palette: ["charcoal", "ash"],
-      cameraGrammar: ["restrained"], negativeConstraints: ["no likeness", "no gore"],
-    },
-    shotList,
-    dpVisualSpecs: shotList.map((shot) => ({
-      shotId: shot.id,
-      keyframePrompt: shot.prompt,
-      motionPrompt: shot.motion,
-      negativePrompt: shot.negative,
-      styleLock: "case-file-neutral",
-      firstFrameConstraint: `Start at ${shot.t0}s.`,
-      lastFrameConstraint: `End at ${shot.t1}s.`,
-      continuityState: shot.continuityState,
-    })),
-    editorEdl: {
-      version: "1.0.0" as const,
-      durationSec: 30,
-      shots: shotList.map((shot) => ({ shotId: shot.id, sourceSentenceIds: shot.sourceSentenceIds, t0: shot.t0, t1: shot.t1 })),
-    },
-    coverage: { mappedSec: 30, totalSec: 30, ratio: 1, gaps: [] },
-  };
-  return createSourceBoundStorySpineHandoff({
-    sourcePacket,
-    sourceAdmission: admittedSource.receipt,
-    evidenceShotMap: map.map,
-    evidenceShotMapAdmission: map.receipt,
-    storySpine,
-    now: NOW,
-  });
 }
 
 function coverageShot(args: {

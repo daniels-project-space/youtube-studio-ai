@@ -399,7 +399,6 @@ export async function findRawSources(opts: {
   const log = opts.log ?? (() => {});
   const topic: SpeechTopic = { theme: opts.theme, speaker: opts.speaker, query: "" };
   const want = opts.count ?? 3;
-  const minH = opts.minHeight ?? MIN_HEIGHT;
   const queries = await resolveSourceQueries(opts.speaker, opts.theme, log);
   queries.forEach((q) => log(`  query: ${q}`));
   const candidates = dumpCandidates(queries, opts.speaker, opts.perQuery ?? 6, log);

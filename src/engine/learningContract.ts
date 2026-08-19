@@ -148,6 +148,7 @@ export function assertLearningContract(value: unknown, graphValue: unknown): Lea
   const contract = LearningContractSchema.parse(value);
   const graph = assertEpisodeGraph(graphValue);
   const { fingerprint: _fingerprint, ...unsigned } = contract;
+  void _fingerprint;
   if (contract.fingerprint !== learningContractFingerprint(unsigned)) {
     throw new Error("learning_contract: fingerprint does not match the contract contents");
   }

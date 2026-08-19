@@ -16,7 +16,7 @@ import {
   useVideoConfig,
 } from "remotion";
 import { ComposableMap, Geographies, Geography } from "react-simple-maps";
-import { geoInterpolate, geoMercator, geoPath } from "d3-geo";
+import { geoInterpolate, geoMercator } from "d3-geo";
 import { loadFont } from "@remotion/google-fonts/Oswald";
 // world-atlas TopoJSON shipped with the package.
 import worldTopo from "world-atlas/countries-110m.json";

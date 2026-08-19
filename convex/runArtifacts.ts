@@ -75,6 +75,7 @@ export const upsert = mutation({
       .withIndex("by_artifact_id", (q) => q.eq("artifactId", args.artifactId))
       .unique();
     const { secret: _secret, ...row } = args;
+    void _secret;
     if (existing) {
       const immutableMatch =
         existing.ownerId === row.ownerId &&

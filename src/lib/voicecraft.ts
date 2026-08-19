@@ -42,9 +42,6 @@ import type { ConvexHttpClient } from "convex/browser";
 import { api } from "../../convex/_generated/api";
 import { synthNarration, stripAudioTags, type ElevenSettings, type TtsStitch } from "@/lib/tts";
 import {
-  narrationPhysicsFor,
-  NARRATION_PHYSICS,
-  V3_TAG_PALETTES,
   type NarrationPhysics,
 } from "@/engine/golden";
 
@@ -359,14 +356,6 @@ export interface CastResult {
   physics: NarrationPhysics & { archetype: string };
 }
 
-const AGE_ORDER = ["young", "middle_aged", "old"];
-
-function ageCompatible(spec: string, got: string): boolean {
-  if (spec === "any") return true;
-  const a = AGE_ORDER.indexOf(spec);
-  const b = AGE_ORDER.indexOf(got);
-  return a < 0 || b < 0 || Math.abs(a - b) <= 1;
-}
 
 /** Vendor use_case labels → the archetypes they're natural casting for. */
 const USE_CASE_ARCHETYPES: Record<string, string[]> = {

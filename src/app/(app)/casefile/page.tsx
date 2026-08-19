@@ -32,10 +32,6 @@ const card: React.CSSProperties = {
   background: "linear-gradient(140deg, rgba(19,26,38,.94), rgba(10,15,24,.94))",
 };
 
-function pretty(value: unknown): string {
-  return JSON.stringify(value, null, 2);
-}
-
 function parseObject(raw: string, label: string): Record<string, unknown> {
   try {
     const parsed = JSON.parse(raw);
@@ -74,6 +70,13 @@ export default function CasefilePage() {
     setEpisodes(payload.episodes ?? []);
   }, []);
 
+  // One-shot mount fetch: refresh has stable [] deps so this effect runs once; setEpisodes/setMessage
+  // fire only after the fetch settles (success or error), not synchronously in the effect body, and
+  // there is no render-triggered loop. This is the standard "fetch data on mount" effect pattern
+  // (https://react.dev/learn/you-might-not-need-an-effect#fetching-data); restructuring it to satisfy
+  // the compiler's static setState-in-effect heuristic would require moving the fetch into a separate
+  // custom hook/module or an experimental useEffectEvent, which is out of scope for a mechanical lint cleanup.
+  // eslint-disable-next-line react-hooks/set-state-in-effect
   useEffect(() => { void refresh().catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error))); }, [refresh]);
 
   const selected = useMemo(
