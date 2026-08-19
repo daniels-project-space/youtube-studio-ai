@@ -321,6 +321,27 @@ async function main() {
     /RTX 4090/,
   );
 
+  assert.equal(isRtx4090Sku("RTX 4090"), true);
+  assert.equal(isRtx4090Sku("NVIDIA GeForce RTX 4090 24GB"), true);
+  assert.equal(isRtx4090Sku("RTX 4090D"), false);
+  assert.equal(isRtx4090Sku("NVIDIA H100 80GB HBM3"), false);
+  assert.throws(
+    () => buildNovitaCreateWorkerRequest({ ...requestArgs, gpuSku: "RTX 4090D" }),
+    /exactly RTX 4090/,
+  );
+  assert.throws(
+    () => selectRtx4090SpotProduct([{
+      id: "h100.8c80g",
+      name: "NVIDIA H100 80GB HBM3",
+      gpuCount: 1,
+      availableDeploy: true,
+      inventoryState: "high",
+      spotPriceUsdPerHour: 2.5,
+      regions: ["US-CA-NAS-02 (California)"],
+    }], "h100.8c80g"),
+    /RTX 4090/,
+  );
+
   const now = Date.now();
   assert.deepEqual(selectIdleReapCandidates([
     { id: "owned", name: "yt-render-video-abcd", status: "running", lastHeartbeatAt: now - 301_000 },

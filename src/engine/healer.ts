@@ -337,6 +337,25 @@ export function planHeal(
     acceptedVisualRepair.push(signal);
   }
 
+  // Structured reviewer signals are intentionally handled separately from the
+  // legacy regex catalog.  In particular, do not add a broad /overlay/ rule:
+  // a model's vague aesthetic complaint must never start a paid rerender loop.
+  const acceptedVisualRepair: VisualRepairSignal[] = [];
+  for (const signal of visualRepair) {
+    if (signal.severity === "minor") continue;
+    if (!blocks.some((block) => block.id === signal.owner)) {
+      log(`healer: visual repair owner ${signal.owner} is not in this pipeline; leaving it for human review`);
+      continue;
+    }
+    owners.add(signal.owner);
+    labels.push(`visual ${signal.category} → ${signal.action}`);
+    const at = Number.isFinite(signal.startSec) ? ` @${signal.startSec.toFixed(1)}s` : "";
+    (hints[signal.owner] ??= []).push(
+      `[visual-review${at}] ${signal.category}: ${signal.observed}`.slice(0, 300),
+    );
+    acceptedVisualRepair.push(signal);
+  }
+
   if (owners.size === 0) {
     if (UNHEALABLE.test(failureMsg)) {
       log("healer: failure is in the UNHEALABLE class (length/duration — fixing means re-spending paid generation) — failing honestly");
