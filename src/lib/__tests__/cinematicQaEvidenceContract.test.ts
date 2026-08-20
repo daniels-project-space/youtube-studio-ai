@@ -3,6 +3,7 @@ import assert from "node:assert/strict";
 import {
   CINEMATIC_FINAL_MASTER_QA_EVIDENCE_VERSION,
   assertCinematicFinalMasterQaEvidence,
+  cinematicFinalMasterQaEvidenceReceiptFingerprint,
   cinematicFinalMasterQaPlan,
   reviewCinematicFinalMasterQaEvidence,
   type CinematicFinalMasterQaReviewer,
@@ -162,6 +163,7 @@ const receipt = {
       middleFrameId: "f2",
       endFrameId: "f3",
       continuity: [{ castId: "mannequin-detective", faceless: true, noLikeness: true, silhouetteContinuous: true, wardrobeContinuous: true, paletteContinuous: true, keyPropContinuous: true, movementProfileContinuous: true }],
+      unplannedInSceneTextFree: true,
       pass: true,
     },
     {
@@ -171,6 +173,7 @@ const receipt = {
       middleFrameId: "f7",
       endFrameId: "f8",
       continuity: [{ castId: "mannequin-detective", faceless: true, noLikeness: true, silhouetteContinuous: true, wardrobeContinuous: true, paletteContinuous: true, keyPropContinuous: true, movementProfileContinuous: true }],
+      unplannedInSceneTextFree: true,
       pass: true,
     },
   ],
@@ -321,6 +324,7 @@ function approvedLockJudgement(firstFrameSec: number): string {
   const opening = firstFrameSec < 3;
   return JSON.stringify({
     pass: true,
+    unplannedInSceneTextFree: true,
     acceptedCriteria: opening ? ["faceless", "coat", "scarf", "file"] : ["faceless", "coat", "scarf", "reveal"],
     continuity: [continuity],
     claims: [{
@@ -349,7 +353,8 @@ function approvedLockJudgement(firstFrameSec: number): string {
 
 async function main(): Promise<void> {
   const reviewerCalls: Array<{ kind: "lock" | "cut"; frameIds: string[] }> = [];
-  const nonGoogleReviewer: CinematicFinalMasterQaReviewer = async ({ kind, frames }) => {
+  const lockPrompts: string[] = [];
+  const nonGoogleReviewer: CinematicFinalMasterQaReviewer = async ({ kind, frames, prompt }) => {
     reviewerCalls.push({ kind, frameIds: frames.map((frame) => frame.id) });
     if (kind === "cut") {
       return JSON.stringify({
@@ -360,6 +365,7 @@ async function main(): Promise<void> {
         tensionTransitionVisible: true,
       });
     }
+    lockPrompts.push(prompt);
     return approvedLockJudgement(frames[0]?.tSec ?? Number.NaN);
   };
 
@@ -372,6 +378,26 @@ async function main(): Promise<void> {
     reviewer: nonGoogleReviewer,
   });
   assert.equal(reviewedReceipt.pass, true, "an injected non-Google reviewer may certify an evidence-bound receipt");
+  assert.equal(
+    reviewedReceipt.locks.every((lock) => lock.unplannedInSceneTextFree),
+    true,
+    "the final-master receipt must retain the literal sampled-frame in-scene text clearance for every lock",
+  );
+  assert.match(
+    lockPrompts[0] ?? "",
+    /readable, unreadable, or fabricated signs, papers, timetables, labels, glyphs/i,
+    "lock reviewers must be explicitly prompted to inspect planned and fabricated in-scene text artifacts",
+  );
+  assert.match(
+    lockPrompts[0] ?? "",
+    /limited to these sampled START\/MIDDLE\/END evidence frames, not OCR and not a whole-master certification/i,
+    "the text check must stay scoped to sampled evidence rather than claim a whole-master OCR audit",
+  );
+  assert.match(
+    lockPrompts[0] ?? "",
+    /approved source-proof insert named above.*deterministic planned overlays/i,
+    "approved source-proof inserts and deterministic overlays must be expressly exempt from the narrow text check",
+  );
   assert.deepEqual(
     reviewerCalls.map(({ kind, frameIds }) => ({ kind, frameCount: frameIds.length })),
     [{ kind: "lock", frameCount: 3 }, { kind: "lock", frameCount: 3 }, { kind: "cut", frameCount: 2 }],
@@ -388,6 +414,18 @@ async function main(): Promise<void> {
     "the no-extra-call review path must carry the exact source/right/asset receipt into final QA",
   );
   assert.equal(reviewedReceipt.cuts[0]?.tensionState, "reversal", "the cut attestation must preserve the planned tension turn");
+  const receiptFingerprint = cinematicFinalMasterQaEvidenceReceiptFingerprint(reviewedReceipt);
+  assert.match(receiptFingerprint, /^[a-f0-9]{64}$/, "the complete strict receipt must have a SHA-256 fingerprint");
+  assert.equal(
+    cinematicFinalMasterQaEvidenceReceiptFingerprint({ ...reviewedReceipt }),
+    receiptFingerprint,
+    "the strict receipt fingerprint must be stable across equivalent receipt objects",
+  );
+  assert.notEqual(
+    cinematicFinalMasterQaEvidenceReceiptFingerprint({ ...reviewedReceipt, finalMasterSha256: "d".repeat(64) }),
+    receiptFingerprint,
+    "the strict receipt fingerprint must bind the exact final-master SHA-256",
+  );
 
   const incompleteReviewer: CinematicFinalMasterQaReviewer = async ({ kind, frames }) => {
     if (kind === "cut") {
@@ -401,6 +439,7 @@ async function main(): Promise<void> {
     }
     return JSON.stringify({
       pass: true,
+      unplannedInSceneTextFree: true,
       acceptedCriteria: frames[0]?.tSec && frames[0].tSec < 3 ? ["faceless", "coat", "scarf", "file"] : ["faceless", "coat", "scarf", "reveal"],
       continuity: [continuity],
     });
@@ -416,6 +455,29 @@ async function main(): Promise<void> {
     }),
     /claims|storyPayoffs/,
     "an incomplete lock judgement must fail closed before a receipt is created",
+  );
+
+  const missingTextAuditReceipt = {
+    ...receipt,
+    locks: receipt.locks.map((lock, index) => {
+      if (index !== 0) return lock;
+      const { unplannedInSceneTextFree: _omitted, ...withoutTextAudit } = lock;
+      return withoutTextAudit;
+    }),
+  };
+  assert.throws(
+    () => assertCinematicFinalMasterQaEvidence({ receipt: missingTextAuditReceipt, plan, evidence, visualReviewFingerprint: review, finalMasterSha256: master }),
+    /unplannedInSceneTextFree/,
+    "a strict final-master receipt must fail parsing when any lock omits the in-scene text clearance",
+  );
+  const falseTextAuditReceipt = {
+    ...receipt,
+    locks: receipt.locks.map((lock, index) => index === 0 ? { ...lock, unplannedInSceneTextFree: false } : lock),
+  };
+  assert.throws(
+    () => assertCinematicFinalMasterQaEvidence({ receipt: falseTextAuditReceipt, plan, evidence, visualReviewFingerprint: review, finalMasterSha256: master }),
+    /unplannedInSceneTextFree/,
+    "a strict final-master receipt must fail parsing when any lock denies the in-scene text clearance",
   );
 
   const payoffOmittingReviewer: CinematicFinalMasterQaReviewer = async ({ kind, frames }) => {

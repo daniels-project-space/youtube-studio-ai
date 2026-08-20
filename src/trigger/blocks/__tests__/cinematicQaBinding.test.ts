@@ -3,6 +3,7 @@ import { readFileSync } from "node:fs";
 import { join } from "node:path";
 
 const source = readFileSync(join(process.cwd(), "src/trigger/blocks/narratedBlocks.ts"), "utf8");
+const cinematicQaEvidenceContractSource = readFileSync(join(process.cwd(), "src/lib/cinematicQaEvidenceContract.ts"), "utf8");
 const qaStart = source.indexOf("export const qaVisual: Block");
 const timelineStart = source.indexOf("export const timelineAssemble: Block");
 const qaSource = source.slice(qaStart);
@@ -115,6 +116,26 @@ assert.match(
   qaSource,
   /authoredLtxCuts=/,
   "shared-LTX cut evidence must be retained in final quality evidence",
+);
+assert.match(
+  qaSource,
+  /cinematicFinalMasterQaEvidenceReceiptFingerprint\(cinematicFinalMasterQaReceipt\)/,
+  "the strict final-master QA receipt must itself receive a stable content fingerprint",
+);
+assert.match(
+  qaSource,
+  /finalMasterSha256: cinematicFinalMasterSha256[\s\S]{0,360}cinematicFinalMasterQaReceiptFingerprint/,
+  "QA output must retain both the exact final-master SHA-256 and strict cinematic receipt fingerprint",
+);
+assert.match(
+  cinematicQaEvidenceContractSource,
+  /unplannedInSceneTextFree:\s*z\.literal\(true\)/,
+  "the strict cinematic lock judgement and receipt must require a literal sampled-frame in-scene text clearance",
+);
+assert.match(
+  cinematicQaEvidenceContractSource,
+  /readable, unreadable, or fabricated signs, papers, timetables, labels, glyphs[\s\S]*approved source-proof insert named above[\s\S]*deterministic planned overlays/,
+  "the reviewer prompt must scope the text check to sampled evidence and exempt only approved source-proof or deterministic overlays",
 );
 
 console.log("cinematic QA binding test passed");

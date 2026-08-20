@@ -9,6 +9,7 @@
  * sequence. A releasable receipt must bind the actual final-master frames to
  * every creative lock, planned claim, and causal/tension cut in the EDL.
  */
+import { createHash } from "node:crypto";
 import { z } from "zod";
 
 import type {
@@ -23,6 +24,7 @@ import {
   SourceProofMediaReceiptSchema,
   type SourceProofMediaReceipt,
 } from "@/engine/sourceProofMedia";
+import { canonicalJson } from "@/lib/canonicalJson";
 import type { VisualReviewEvidence, VisualReviewFrame } from "@/lib/visualReview";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
@@ -58,6 +60,11 @@ const LockReceiptSchema = z.object({
   middleFrameId: frameId,
   endFrameId: frameId,
   continuity: z.array(ContinuitySchema).max(4),
+  /**
+   * Limited to the sampled START/MIDDLE/END evidence frames. Approved
+   * source-proof inserts and deterministic overlays are intentionally exempt.
+   */
+  unplannedInSceneTextFree: z.literal(true),
   pass: z.literal(true),
 }).strict();
 
@@ -129,6 +136,16 @@ export const CinematicFinalMasterQaEvidenceReceiptSchema = z.object({
 
 export type CinematicFinalMasterQaEvidenceReceipt = z.infer<typeof CinematicFinalMasterQaEvidenceReceiptSchema>;
 
+/**
+ * Stable fingerprint for the complete, validated cinematic final-master QA
+ * receipt. This is a content binding only; it is not a human approval,
+ * similarity result, or release authorization.
+ */
+export function cinematicFinalMasterQaEvidenceReceiptFingerprint(receipt: unknown): string {
+  const parsed = CinematicFinalMasterQaEvidenceReceiptSchema.parse(receipt);
+  return createHash("sha256").update(canonicalJson(parsed)).digest("hex");
+}
+
 export interface CinematicQaExpectedLock {
   shotId: string;
   startSec: number;
@@ -198,6 +215,8 @@ export type CinematicFinalMasterQaReviewer = (
 
 const LockJudgementSchema = z.object({
   pass: z.literal(true),
+  /** See the matching receipt field: this is not OCR or a whole-master claim. */
+  unplannedInSceneTextFree: z.literal(true),
   acceptedCriteria: z.array(z.string().trim().min(1).max(360)).min(4).max(10),
   continuity: z.array(ContinuitySchema).max(4),
   claims: z.array(z.object({
@@ -381,7 +400,8 @@ function lockReviewerPrompt(args: {
     sourceProof
       ? `Required source-proof insert: approved source ${sourceProof.sourceProofMediaReceipt.obligation.sourceId}, asset ${sourceProof.sourceProofMediaReceipt.obligation.assetId}. The receipt binds its exact bytes; return sourceProof only when the resulting evidence insert and its on-screen citation are visibly present in these frames.`
       : "No source-proof insert is assigned to this lock; omit sourceProof.",
-    "Return JSON only: {\"pass\":true,\"acceptedCriteria\":[...],\"continuity\":[{\"castId\":\"...\",\"faceless\":true,\"noLikeness\":true,\"silhouetteContinuous\":true,\"wardrobeContinuous\":true,\"paletteContinuous\":true,\"keyPropContinuous\":true,\"movementProfileContinuous\":true}],\"claims\":[{\"claimId\":\"...\",\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"storyPayoffs\":[{\"coldOpenBeatId\":\"...\",\"revealBeatId\":\"...\",\"causalQuestionAnsweredOrReframed\":true,\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"sourceProof\":{\"onScreenCitationVisible\":true,\"visualSourceProofVisible\":true,\"pass\":true}}. Omit sourceProof when none is required. If any condition fails or cannot be seen, return {\"pass\":false}.",
+    "Text-artifact check is limited to these sampled START/MIDDLE/END evidence frames, not OCR and not a whole-master certification. Inspect readable, unreadable, or fabricated signs, papers, timetables, labels, glyphs, or similar in-scene text. Return unplannedInSceneTextFree:true only when no such unplanned generated in-scene text appears. Exempt only the approved source-proof insert named above (if any) and visibly deterministic planned overlays such as captions, title/name cards, or citations; never exempt generated scene text merely because it resembles an overlay.",
+    "Return JSON only: {\"pass\":true,\"unplannedInSceneTextFree\":true,\"acceptedCriteria\":[...],\"continuity\":[{\"castId\":\"...\",\"faceless\":true,\"noLikeness\":true,\"silhouetteContinuous\":true,\"wardrobeContinuous\":true,\"paletteContinuous\":true,\"keyPropContinuous\":true,\"movementProfileContinuous\":true}],\"claims\":[{\"claimId\":\"...\",\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"storyPayoffs\":[{\"coldOpenBeatId\":\"...\",\"revealBeatId\":\"...\",\"causalQuestionAnsweredOrReframed\":true,\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"sourceProof\":{\"onScreenCitationVisible\":true,\"visualSourceProofVisible\":true,\"pass\":true}}. Omit sourceProof when none is required. If any condition fails or cannot be seen, return {\"pass\":false}.",
   ].join("\n");
 }
 
@@ -472,6 +492,7 @@ export async function reviewCinematicFinalMasterQaEvidence(args: {
       middleFrameId: selected[1].id,
       endFrameId: selected[2].id,
       continuity: judgement.continuity,
+      unplannedInSceneTextFree: judgement.unplannedInSceneTextFree,
       pass: true,
     });
     for (const claim of judgement.claims) {
