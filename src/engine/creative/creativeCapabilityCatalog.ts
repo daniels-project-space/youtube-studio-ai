@@ -114,7 +114,8 @@ const CASEFILE_CINEMATIC_SIGNALS = [
 ] as const;
 
 const CASEFILE_SOURCE_REQUIREMENTS = [
-  "reviewed Case Packet with one allowed primary-source URL and provenance record per factual claim",
+  "source-first Case Packet",
+  "one allowed primary-source URL and provenance record per factual claim",
   "exhaustive source-asset usage and rights-basis ledger",
   "fresh fingerprint-bound human editorial approval",
 ] as const;
@@ -130,7 +131,8 @@ const CASEFILE_SEQUENCE_REQUIREMENTS = [
 ] as const;
 
 const CHILDREN_SHOW_REQUIREMENTS = [
-  "declared age band and one measurable learning objective with an observable assessment",
+  "age-banded original Children’s Show Bible",
+  "one observable learning objective and assessment",
   "original recurring-character and world continuity locks with no IP-adjacent identity",
   "five-stage familiar-problem → guided-attempt → participation → resolution-recall → varied-repetition pattern",
   "fresh child-editor approval bound to the Show Bible, Episode Graph, and lesson contract",
@@ -353,6 +355,18 @@ export function resolveCreativeCapabilities(
     .filter((definition) => definition.supportedFamilies.includes(family))
     .filter((definition) => definition.matches(input, family))
     .map((definition) => definition.materialize(input, family));
+}
+
+/**
+ * A review-only offer is an intake destination, never an executable selected
+ * capability. Keeping the classification here lets every caller use the
+ * same catalog rule instead of re-identifying Casefile/children modules by
+ * profile string.
+ */
+export function privateReviewCapabilityOffers(
+  offers: readonly CreativeCapabilityOffer[],
+): CreativeCapabilityOffer[] {
+  return offers.filter((offer) => offer.selectionMode === "private_review_only");
 }
 
 export function creativeCapabilitySelection(
