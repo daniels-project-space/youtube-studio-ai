@@ -467,10 +467,13 @@ async function legacyThumbnailResumeFailsClosedWithoutRespend(): Promise<void> {
   _clear();
   register(thumbnail);
   const resumed = await runPipeline(
-    validatePipeline([{ block: thumbnail.id }], ["title"]),
+    validatePipeline([{ block: thumbnail.id }], ["title", "thumbnailDescription"]),
     {
       ...base,
-      seedStore: { title: "A real legacy rental-economy thumbnail" },
+      seedStore: {
+        title: "A real legacy rental-economy thumbnail",
+        thumbnailDescription: "A real legacy rental-economy thumbnail concept",
+      },
       sink: {
         async upsert(args) {
           if (args.status === "ok") {
