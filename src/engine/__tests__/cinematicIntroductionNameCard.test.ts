@@ -21,6 +21,11 @@ import {
   casefileSourcePacketContentFingerprint,
   type CasefileSourcePacket,
 } from "@/engine/sourceFirstAdmission";
+import {
+  SOURCE_PROOF_MEDIA_VERSION,
+  sourceProofMediaProvenanceFingerprint,
+  type SourceProofMediaObligation,
+} from "@/engine/sourceProofMedia";
 
 /**
  * End-to-end behavioral test for the new `introduction` narrativeRole and
@@ -235,6 +240,7 @@ function coverageShot(args: {
   tension: "question" | "orientation" | "pressure" | "uncertainty" | "reversal" | "release" | "residue";
   cast?: string[];
   nameCardText?: string;
+  sourceProofMedia?: SourceProofMediaObligation;
 }) {
   return {
     id: args.id, t0: args.t0, t1: args.t1, coveragePurpose: args.purpose, visualMode: args.mode, castIds: args.cast ?? [],
@@ -248,10 +254,23 @@ function coverageShot(args: {
     onScreenCitation: true as const,
     ...(args.mode === "abstract_reenactment" ? { reconstructionDisclosure: RECONSTRUCTION_DISCLOSURE } : {}),
     ...(args.nameCardText ? { nameCardText: args.nameCardText } : {}),
+    ...(args.sourceProofMedia ? { sourceProofMedia: args.sourceProofMedia } : {}),
   };
 }
 
 function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSequenceInput {
+  const sourceProofMedia: SourceProofMediaObligation = {
+    version: SOURCE_PROOF_MEDIA_VERSION,
+    sourceId: "source-court-archive",
+    assetId: "asset-court-archive-team-finding",
+    rightsEvidenceLocator: "https://court.example.org/rights/archive-team-license",
+    sourcePacketFingerprint: admittedSource.receipt.sourcePacketFingerprint,
+    assetUrl: "https://court.example.org/media/archive-team-finding.jpg",
+    assetSha256: "b".repeat(64),
+    approvalReceiptId: "source-proof-receipt-archive-team-001",
+    provenanceFingerprint: "0".repeat(64),
+  };
+  sourceProofMedia.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(sourceProofMedia);
   const input: CinematicCaseSequenceInput = {
     version: CINEMATIC_CASE_SEQUENCE_VERSION,
     sequenceId: "cinematic-sequence-archive-team-001",
@@ -270,7 +289,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
         id: "cinematic-beat-team-formed", narrativeRole: "cold_open", t0: 0, t1: 12, parentShotIds: ["shot-team-formed"],
         claimIds: ["claim-team-formed"], sourceIds: ["source-court-archive"], causalQuestion: "Why was this investigation team formed?",
         shots: [
-          coverageShot({ id: "cinematic-shot-team-formed-proof", t0: 0, t1: 4, purpose: "evidence_insert", mode: "source_proof", scale: "close", move: "static", cut: "new_fact", tension: "question" }),
+          coverageShot({ id: "cinematic-shot-team-formed-proof", t0: 0, t1: 4, purpose: "evidence_insert", mode: "source_proof", scale: "extreme_close", move: "static", cut: "new_fact", tension: "question", sourceProofMedia }),
           coverageShot({ id: "cinematic-shot-team-formed-figure", t0: 4, t1: 8, purpose: "mannequin_action", mode: "abstract_reenactment", scale: "medium", move: "dolly_push", cut: "physical_action", tension: "pressure", cast: ["mannequin-investigator"] }),
           coverageShot({ id: "cinematic-shot-team-formed-space", t0: 8, t1: 12, purpose: "spatial_anchor", mode: "spatial_reconstruction", scale: "establishing", move: "crane_up", cut: "new_location", tension: "uncertainty" }),
         ],
@@ -298,7 +317,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
           citedSourceIds: ["source-court-archive"],
         },
         shots: [
-          coverageShot({ id: "cinematic-shot-verdict-proof", t0: 18, t1: 22, purpose: "evidence_insert", mode: "source_proof", scale: "close", move: "truck_right", cut: "reveal", tension: "reversal" }),
+          coverageShot({ id: "cinematic-shot-verdict-proof", t0: 18, t1: 22, purpose: "evidence_insert", mode: "source_proof", scale: "extreme_close", move: "truck_right", cut: "reveal", tension: "reversal", sourceProofMedia }),
           coverageShot({ id: "cinematic-shot-verdict-map", t0: 22, t1: 26, purpose: "spatial_anchor", mode: "spatial_reconstruction", scale: "wide", move: "orbit_left", cut: "new_relationship", tension: "release" }),
           coverageShot({ id: "cinematic-shot-verdict-aftermath", t0: 26, t1: 30, purpose: "aftermath", mode: "atmosphere", scale: "establishing", move: "dolly_pull", cut: "breath", tension: "residue" }),
         ],
@@ -319,7 +338,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
 function main() {
   const map = admittedMap();
   const input = approvedSequence(map);
-  const args = { input, sourceAdmission: admittedSource.receipt, evidenceShotMap: map.map, evidenceShotMapAdmission: map.receipt, sceneManifest, shotList };
+  const args = { input, sourcePacket, sourceAdmission: admittedSource.receipt, evidenceShotMap: map.map, evidenceShotMapAdmission: map.receipt, sceneManifest, shotList };
 
   // ---- POSITIVE: the well-formed introduction beat is admitted -----------
   const report = evaluateCinematicCaseSequence(args);

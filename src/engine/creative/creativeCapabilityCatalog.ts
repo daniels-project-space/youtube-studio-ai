@@ -599,13 +599,13 @@ export function assessCreativeCapabilityAutomaticBuildAdmission(
         admission: item.offer.automationAdmission,
       });
     }
-    for (const module of item.offer.modules) {
-      if (module.automationAdmission && !module.automationAdmission.autonomous) {
+    for (const creativeModule of item.offer.modules) {
+      if (creativeModule.automationAdmission && !creativeModule.automationAdmission.autonomous) {
         blockers.push({
           selection: item.selection,
           offer: item.offer,
-          admission: module.automationAdmission,
-          block: module.block,
+          admission: creativeModule.automationAdmission,
+          block: creativeModule.block,
         });
       }
     }

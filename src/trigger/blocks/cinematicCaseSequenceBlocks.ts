@@ -173,6 +173,7 @@ const cinematicCaseSequence: Block = {
           ...CinematicCaseSequenceContentSchema.parse(rawInput),
           editorialReview: await autoReviewCinematicCaseSequence({
             content: rawInput,
+            sourcePacket: ctx.store["casefileSourcePacket"],
             sourceAdmission: ctx.store["casefileSourceAdmission"],
             evidenceShotMap: ctx.store["casefileEvidenceShotMap"],
             evidenceShotMapAdmission: ctx.store["casefileEvidenceShotMapAdmission"],
