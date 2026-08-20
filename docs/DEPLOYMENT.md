@@ -78,11 +78,12 @@ and verified teardown configuration are all present.
 
 ### LTX activation guard
 
-The currently pinned LTX-2.3 video profile requires at least 32 GB VRAM, while
-the mandated RTX 4090 has 24 GB. Video generation is therefore intentionally
-disabled until a separately cloud-benchmarked, pinned 4090-compatible LTX
-worker/profile is available. Deployment alone must not launch a paid GPU or
-silently lower the quality bar.
+The currently pinned LTX-2.5 video profile is a 24 GB RTX 4090 candidate: it
+uses the distilled FP8/CPU-offloaded two-stage path, refining 640x352 to a
+1280x704 near-720p deliverable with the pinned x2 latent upscaler. Video
+generation remains intentionally disabled until that exact digest-pinned
+profile has a separately cloud-benchmarked RTX 4090 attestation. Deployment
+alone must not launch a paid GPU or silently lower the quality bar.
 
 ## Clobber guard
 
