@@ -1,6 +1,6 @@
-import { createHash } from "node:crypto";
-
 import { z } from "zod";
+
+import { sha256Hex } from "@/lib/sha256";
 
 /**
  * Provider-free narrative semantics for already-reviewed factual evidence.
@@ -152,6 +152,12 @@ export const NarrativeEvidenceLedgerReviewSchema = z.object({
 }).strict();
 export type NarrativeEvidenceLedgerReview = z.infer<typeof NarrativeEvidenceLedgerReviewSchema>;
 
+/** Human review input before the ledger's canonical fingerprint is derived. */
+export const NarrativeEvidenceLedgerReviewDraftSchema = NarrativeEvidenceLedgerReviewSchema
+  .omit({ decision: true, reviewedLedgerFingerprint: true })
+  .strict();
+export type NarrativeEvidenceLedgerReviewDraft = z.infer<typeof NarrativeEvidenceLedgerReviewDraftSchema>;
+
 export const NarrativeEvidenceLedgerContentSchema = z.object({
   version: z.literal(NARRATIVE_EVIDENCE_LEDGER_VERSION),
   subject: text(240),
@@ -251,9 +257,7 @@ export function canonicalNarrativeEvidenceLedgerContent(
 export function narrativeEvidenceLedgerContentFingerprint(
   value: NarrativeEvidenceLedgerContent | Omit<NarrativeEvidenceLedger, "contentFingerprint" | "editorialReview" | "release" | "requiresHumanEditorialReview">,
 ): string {
-  return createHash("sha256")
-    .update(`narrative-evidence-ledger\0${canonicalJson(canonicalNarrativeEvidenceLedgerContent(value))}`)
-    .digest("hex");
+  return sha256Hex(`narrative-evidence-ledger\0${canonicalJson(canonicalNarrativeEvidenceLedgerContent(value))}`);
 }
 
 function hasDuplicates(values: readonly string[]): boolean {

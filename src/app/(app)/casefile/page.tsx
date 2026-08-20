@@ -12,6 +12,8 @@ type Episode = {
     cinematicDraft?: { sequenceContentFingerprint?: string };
     cinematicAdmission?: { generatedSceneCount?: number; release?: string };
     referenceMechanicsPacket?: { contentFingerprint?: string; release?: string };
+    sourceBoundStorySpine?: { storySpineFingerprint?: string; release?: string };
+    narrativeEvidenceLedger?: { contentFingerprint?: string; release?: string };
   };
 };
 
@@ -52,6 +54,16 @@ function parsePlanning(raw: string): { sceneManifest: Record<string, unknown>; s
   return { sceneManifest: parsed.sceneManifest as Record<string, unknown>, shotList: parsed.shotList };
 }
 
+function requiredClaims(input: Record<string, unknown>): unknown[] {
+  if (!Array.isArray(input.claims)) throw new Error("Narrative evidence annotations need a claims array");
+  return input.claims;
+}
+
+function requiredRelations(value: unknown): unknown[] {
+  if (!Array.isArray(value)) throw new Error("Narrative evidence relations must be an array when supplied");
+  return value;
+}
+
 /** Private editor desk for the immutable Casefile → cinematic render handoff. */
 export default function CasefilePage() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -61,6 +73,9 @@ export default function CasefilePage() {
   const [evidenceMap, setEvidenceMap] = useState("");
   const [referenceMechanics, setReferenceMechanics] = useState("");
   const [referenceMechanicsReview, setReferenceMechanicsReview] = useState("");
+  const [sourceBoundStorySpine, setSourceBoundStorySpine] = useState("");
+  const [narrativeEvidenceLedger, setNarrativeEvidenceLedger] = useState("");
+  const [narrativeEvidenceReview, setNarrativeEvidenceReview] = useState("");
   const [direction, setDirection] = useState("");
   const [review, setReview] = useState("");
   const [busy, setBusy] = useState(false);
@@ -167,6 +182,29 @@ export default function CasefilePage() {
           </>}
 
           {selected?.status === "awaiting_cinematic_direction" && <>
+            <section style={{ border: "1px solid #294468", borderRadius: 11, padding: 14, display: "grid", gap: 10, background: "rgba(17,37,62,.32)" }}>
+              <h2 style={{ margin: 0, fontSize: 17 }}>Optional: bind the reviewed narration and evidence ledger</h2>
+              <p style={{ margin: 0, color: "#b9c8da", fontSize: 13, lineHeight: 1.5 }}>
+                Use this stricter factual route only when the editor has reviewed the full timed Story Spine and a narrative-evidence ledger. The system binds every narration shot to the approved Casefile claims and sources, then carries the ledger through cinematic review and final QA. This desk cannot render, spend, or publish.
+              </p>
+              {selected.workflow?.sourceBoundStorySpine ? <>
+                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Source-bound Story Spine attached</strong>
+                {selected.workflow.sourceBoundStorySpine.storySpineFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.sourceBoundStorySpine.storySpineFingerprint}</code>}
+              </> : <>
+                <textarea aria-label="Source-bound Story Spine JSON" style={{ ...textarea, minHeight: 260 }} value={sourceBoundStorySpine} onChange={(event) => setSourceBoundStorySpine(event.target.value)} placeholder='{"version":"story-spine/v1", "timedScript": { ... }, "narrativeBeats": [ ... ], "shotList": [ ... ], ...}' />
+                <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("attach_source_bound_story_spine", { episodeId: selected._id, storySpine: parseObject(sourceBoundStorySpine, "Source-bound Story Spine") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze source-bound Story Spine</button>
+              </>}
+              {selected.workflow?.narrativeEvidenceLedger ? <>
+                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Reviewed Narrative Evidence Ledger attached</strong>
+                {selected.workflow.narrativeEvidenceLedger.contentFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.narrativeEvidenceLedger.contentFingerprint}</code>}
+                <small style={{ color: "#9eadc1" }}>It will be derived into the signed cinematic direction; replacing it requires a fresh Casefile revision.</small>
+              </> : <>
+                <textarea aria-label="Narrative evidence annotations JSON" style={{ ...textarea, minHeight: 260 }} value={narrativeEvidenceLedger} onChange={(event) => setNarrativeEvidenceLedger(event.target.value)} placeholder='{"claims":[{"id":"…", "approvedText":"…", "assertionState":"…", "confidence":"…", "uncertainty":{…}, "causalRole":"…", "supports":[{"sourceIds":[…], "upstreamClaimIds":[…]}], "allowedVisualTreatments":[…]}], "relations":[]}' />
+                <textarea aria-label="Narrative evidence editorial review JSON" style={{ ...textarea, minHeight: 110 }} value={narrativeEvidenceReview} onChange={(event) => setNarrativeEvidenceReview(event.target.value)} placeholder='{"reviewerId":"reviewer-…", "reviewId":"narrative-ledger-review-…", "reviewedAt":"2026-08-20T12:00:00.000Z"}' />
+                <button type="button" disabled={actionDisabled || !selected.workflow?.sourceBoundStorySpine} onClick={() => { try { const input = parseObject(narrativeEvidenceLedger, "Narrative evidence annotations"); void submit("attach_narrative_evidence_ledger", { episodeId: selected._id, claims: requiredClaims(input), ...(input.relations === undefined ? {} : { relations: requiredRelations(input.relations) }), review: parseObject(narrativeEvidenceReview, "Narrative evidence review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze Narrative Evidence Ledger</button>
+                {!selected.workflow?.sourceBoundStorySpine && <small style={{ color: "#f4c785" }}>Freeze the matching source-bound Story Spine first. This prevents a ledger from being attached to a different narration timeline.</small>}
+              </>}
+            </section>
             <section style={{ border: "1px solid #294468", borderRadius: 11, padding: 14, display: "grid", gap: 10, background: "rgba(17,37,62,.32)" }}>
               <h2 style={{ margin: 0, fontSize: 17 }}>Optional: attach reviewed reference mechanics</h2>
               <p style={{ margin: 0, color: "#b9c8da", fontSize: 13, lineHeight: 1.5 }}>

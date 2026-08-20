@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
+
+import { sha256Hex } from "@/lib/sha256";
 
 import {
   evaluateDataStorySourceLedger,
@@ -109,9 +110,7 @@ export function editorialEvidencePacketContentFingerprint(
     sources: value.sources,
     claims: value.claims,
   });
-  return createHash("sha256")
-    .update(`editorial-evidence-packet\0${canonicalJson(content)}`)
-    .digest("hex");
+  return sha256Hex(`editorial-evidence-packet\0${canonicalJson(content)}`);
 }
 
 export function evaluateEditorialEvidencePacket(

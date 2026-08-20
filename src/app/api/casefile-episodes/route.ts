@@ -21,6 +21,11 @@ function requiredObject(value: unknown, name: string): Record<string, unknown> {
   return value as Record<string, unknown>;
 }
 
+function requiredArray(value: unknown, name: string): unknown[] {
+  if (!Array.isArray(value)) throw new CasefileRequestError(`${name} must be an array`);
+  return value;
+}
+
 function requiredId(value: unknown): string {
   if (typeof value !== "string" || !value.trim()) {
     throw new CasefileRequestError("episodeId is required");
@@ -96,6 +101,29 @@ export async function POST(request: Request) {
         // annotations and a human review draft. Source URLs/labels, hashes,
         // policies, and the current ShotPlan binding are derived server-side.
         mechanics: requiredObject(body.mechanics, "mechanics"),
+        review: requiredObject(body.review, "review"),
+        now,
+      });
+      return NextResponse.json({ ok: true, episode });
+    }
+    if (action === "attach_source_bound_story_spine") {
+      const episode = await convex.mutation(api.casefileEpisodes.attachSourceBoundStorySpine, {
+        ownerId: actor.ownerId,
+        episodeId: episodeId as never,
+        storySpine: requiredObject(body.storySpine, "storySpine"),
+        now,
+      });
+      return NextResponse.json({ ok: true, episode });
+    }
+    if (action === "attach_narrative_evidence_ledger") {
+      const episode = await convex.mutation(api.casefileEpisodes.attachNarrativeEvidenceLedger, {
+        ownerId: actor.ownerId,
+        episodeId: episodeId as never,
+        // The desk derives the Casefile rail, canonical fingerprint, release,
+        // and review binding. Operators may provide only claim annotations,
+        // optional relations, and a human review draft.
+        claims: requiredArray(body.claims, "claims"),
+        ...(body.relations === undefined ? {} : { relations: requiredArray(body.relations, "relations") }),
         review: requiredObject(body.review, "review"),
         now,
       });
