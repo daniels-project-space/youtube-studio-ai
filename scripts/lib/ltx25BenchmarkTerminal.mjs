@@ -1,4 +1,5 @@
 import crypto from "node:crypto";
+import { assertLtx25BenchmarkOutputBinding } from "./ltx25BenchmarkOutputProvenance.mjs";
 
 /** Serialize a receipt deterministically before deriving its integrity hash. */
 export function canonicalJson(value) {
@@ -20,6 +21,25 @@ export function incompleteReason(error) {
     .replace(/https?:\/\/[^\s"<>]+/g, "[url]")
     .replace(/[A-Za-z0-9_-]{40,}/g, "[redacted]")
     .slice(0, 500);
+}
+
+function assertTerminalOutputBindings(unsignedReport) {
+  if (!Array.isArray(unsignedReport?.outputs) || unsignedReport.outputs.length < 1) {
+    throw new Error("complete LTX benchmark reports require controller output proofs");
+  }
+  const ids = new Set();
+  const keys = new Set();
+  for (const output of unsignedReport.outputs) {
+    if (!output || typeof output.id !== "string" || !output.id || !output.key || typeof output.key !== "string") {
+      throw new Error("complete LTX benchmark reports require identified output artifacts");
+    }
+    if (ids.has(output.id) || keys.has(output.key)) {
+      throw new Error("complete LTX benchmark reports cannot duplicate output artifacts");
+    }
+    ids.add(output.id);
+    keys.add(output.key);
+    assertLtx25BenchmarkOutputBinding(output.controllerProof);
+  }
 }
 
 /**
@@ -70,6 +90,7 @@ export function createLtx25BenchmarkTerminal({
     if (state !== "running") {
       throw new Error(`benchmark cannot seal a success report after terminal state ${state}`);
     }
+    assertTerminalOutputBindings(unsignedReport);
     state = "sealing";
     const core = { ...unsignedReport, status: "complete" };
     const report = { ...core, reportSha256: sha256(canonicalJson(core)) };
