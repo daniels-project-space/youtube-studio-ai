@@ -30,6 +30,7 @@ import {
   QUIZ_ROUND_CATEGORIES,
   resolveCertifiedNoGeminiCategories,
   resolveCategories,
+  buildQuizOnScreenTextCues,
   type PlannedRound,
   type QuizRoundCategory,
 } from "@/trigger/blocks/quizYearBlocks";
@@ -263,6 +264,71 @@ async function main(): Promise<void> {
   assert.equal(quizRoundCount(0, 6, 4), 8, "no target → engine default");
   assert.ok(quizRoundCount(10_000, 6, 4) <= 15, "round count is capped so LLM calls are bounded");
   assert.ok(quizRoundCount(1, 6, 4) >= 3, "round count has a floor so the video is watchable");
+
+  // Final-master QA must independently see the post-timeout factual payoff.
+  // A countdown-only frame has the choices, but neither this reveal subject nor
+  // its citation; each cue therefore has to sample after the exact round timer.
+  const revealCues = buildQuizOnScreenTextCues([
+    {
+      questionText: "In what year did Apollo 11 land on the Moon?",
+      options: [
+        { label: "1969", isCorrect: true },
+        { label: "1967", isCorrect: false },
+        { label: "1971", isCorrect: false },
+        { label: "1973", isCorrect: false },
+      ],
+      subject: "Apollo 11 lunar landing",
+      sourceUrl: "https://www.nasa.gov/history/apollo-11/",
+      countdownSeconds: 6,
+      revealSeconds: 4,
+    },
+    {
+      questionText: "Which capital belongs to Japan?",
+      options: [
+        { label: "Tokyo", isCorrect: true },
+        { label: "Kyoto", isCorrect: false },
+        { label: "Osaka", isCorrect: false },
+        { label: "Nagoya", isCorrect: false },
+      ],
+      subject: "Japan",
+      sourceUrl: "https://www.wikidata.org/wiki/Q17",
+      countdownSeconds: 3,
+      revealSeconds: 2,
+    },
+  ]);
+  assert.deepEqual(
+    revealCues.map((cue) => cue.id),
+    [
+      "quiz-round-01-prompt",
+      "quiz-round-01-reveal-context",
+      "quiz-round-01-reveal-source",
+      "quiz-round-02-prompt",
+      "quiz-round-02-reveal-context",
+      "quiz-round-02-reveal-source",
+    ],
+  );
+  const firstRevealContext = revealCues[1];
+  const firstRevealSource = revealCues[2];
+  assert.ok(firstRevealContext.sampleSec > 6, "reveal context must be sampled after the countdown ends");
+  assert.ok(firstRevealContext.sampleSec < 10, "reveal context must remain inside the first reveal window");
+  assert.equal(firstRevealContext.sampleSec, firstRevealSource.sampleSec);
+  assert.match(firstRevealContext.expectedText, /1969 Apollo 11 lunar landing/);
+  assert.match(firstRevealSource.expectedText, /source nasa\.gov/);
+  const secondRevealContext = revealCues[4];
+  assert.ok(secondRevealContext.sampleSec > 13, "later rounds must use the actual cumulative round duration");
+  assert.match(revealCues[5].expectedText, /source wikidata\.org/);
+  assert.throws(
+    () => buildQuizOnScreenTextCues([{
+      questionText: "Too soon?",
+      options: [{ label: "Yes", isCorrect: true }],
+      subject: "Test",
+      sourceUrl: "https://example.com/",
+      countdownSeconds: 3,
+      revealSeconds: 1,
+    }]),
+    /too short to prove/,
+    "a reveal too short to show settled context must fail before render",
+  );
 
   assert.equal(resolveTopic("space_exploration"), "space_exploration");
   assert.equal(resolveTopic("not_a_topic"), "science_discovery", "unknown topics fall back safely");

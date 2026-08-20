@@ -90,6 +90,7 @@ import {
 } from "@/trigger/blocks/quizPlanningBlocks";
 import { renderQuizYear, type QuizYearRound } from "@/lib/quizYearRender";
 import { muxLoopedMusicBed } from "@/lib/ffmpeg";
+import { quizCitationLabel } from "@/lib/quizCitation";
 import type { TimedOnScreenTextCue } from "@/lib/onScreenTextProof";
 
 function convex(): ConvexHttpClient {
@@ -126,6 +127,75 @@ export const QUIZ_DEFAULT_REVEAL_SECONDS = 4;
 /** Round-count bounds. Floor keeps a watchable video; ceiling caps LLM calls. */
 export const QUIZ_MIN_ROUNDS = 3;
 export const QUIZ_MAX_ROUNDS = 15;
+
+/**
+ * Build final-master OCR requirements from the exact rounds sent to Remotion.
+ *
+ * A quiz's factual payoff occurs after the timer locks: the answer context and
+ * its provenance are not present during the guessing phase.  Keeping those as
+ * separate, post-countdown cues prevents a countdown-only frame from proving a
+ * broken reveal, while a dedicated citation cue makes the small source footer
+ * a release requirement rather than a decorative detail.
+ */
+export function buildQuizOnScreenTextCues(
+  rounds: readonly QuizYearRound[],
+): TimedOnScreenTextCue[] {
+  let cursorSec = 0;
+  const cues: TimedOnScreenTextCue[] = [];
+  for (const [index, round] of rounds.entries()) {
+    const countdownSeconds = Number(round.countdownSeconds);
+    const revealSeconds = Number(round.revealSeconds);
+    if (!Number.isFinite(countdownSeconds) || countdownSeconds < 1) {
+      throw new Error(`quiz: round ${index + 1} has no valid countdown for text QA`);
+    }
+    if (!Number.isFinite(revealSeconds) || revealSeconds < 1.1) {
+      throw new Error(`quiz: round ${index + 1} reveal is too short to prove its context and citation`);
+    }
+
+    const roundId = `quiz-round-${String(index + 1).padStart(2, "0")}`;
+    const correctOption = round.options.find((option) => option.isCorrect);
+    const correctAnswer = correctOption
+      ? (typeof correctOption.label === "string" && correctOption.label.trim()
+        ? correctOption.label.trim()
+        : correctOption.year === undefined ? "" : String(correctOption.year))
+      : "";
+    if (!correctAnswer) {
+      throw new Error(`quiz: round ${index + 1} has no readable correct answer for reveal QA`);
+    }
+
+    // The prompt probe settles after the entrance but remains safely inside
+    // the guessing period. The reveal probe is deliberately >0.9s after the
+    // countdown: RoundView's context fade has completed and countdown pixels
+    // cannot satisfy it.
+    const promptOffsetSec = Math.min(2, Math.max(0.75, countdownSeconds - 0.75));
+    const revealOffsetSec = Math.min(1.1, revealSeconds - 0.1);
+    const revealSampleSec = cursorSec + countdownSeconds + revealOffsetSec;
+    cues.push({
+      id: `${roundId}-prompt`,
+      sampleSec: cursorSec + promptOffsetSec,
+      expectedText: [round.questionText, ...round.options.map((option) =>
+        typeof option.label === "string" && option.label.trim()
+          ? option.label.trim()
+          : option.year === undefined ? "" : String(option.year),
+      )].filter(Boolean).join(" "),
+      minTokenCoverage: 0.8,
+    });
+    cues.push({
+      id: `${roundId}-reveal-context`,
+      sampleSec: revealSampleSec,
+      expectedText: `${correctAnswer} ${round.subject}`,
+      minTokenCoverage: 0.8,
+    });
+    cues.push({
+      id: `${roundId}-reveal-source`,
+      sampleSec: revealSampleSec,
+      expectedText: `source ${quizCitationLabel(round.sourceUrl)}`,
+      minTokenCoverage: 0.8,
+    });
+    cursorSec += countdownSeconds + revealSeconds;
+  }
+  return cues;
+}
 
 /**
  * Every category a round can be drawn from. `guess_year` is the original build,
@@ -787,12 +857,7 @@ export const quizYear: Block = {
     // must remain readable during its active countdown—not merely be present
     // in the React props. The generic OCR proof consumes these timed cues in
     // qa_visual after the music mux has produced the actual release master.
-    const onScreenTextCues: TimedOnScreenTextCue[] = quizRounds.map((round, index) => ({
-      id: `quiz-round-${String(index + 1).padStart(2, "0")}`,
-      sampleSec: index * (countdown + reveal) + Math.min(2, Math.max(0.75, countdown - 0.75)),
-      expectedText: [round.questionText, ...round.options.map((option) => option.label)].join(" "),
-      minTokenCoverage: 0.8,
-    }));
+    const onScreenTextCues: TimedOnScreenTextCue[] = buildQuizOnScreenTextCues(quizRounds);
 
     const runDir = await makeRunTempDir(ctx.runId, "quiz_year");
     const outPath = join(runDir, "quiz-year.mp4");
