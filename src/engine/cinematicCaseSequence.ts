@@ -775,8 +775,12 @@ export function evaluateCinematicCaseSequence(
   const evidenceAdmission = CasefileEvidenceShotMapAdmissionReceiptSchema.safeParse(args.evidenceShotMapAdmission);
   const sceneManifest = SceneManifestSchema.safeParse(args.sceneManifest);
   const shots = z.array(ShotPlanSchema).min(1).max(2_000).safeParse(args.shotList);
+  // `source_proof` is a factual evidence treatment, not an LTX prompt style.
+  // Every such shot must eventually resolve to exact approved source bytes,
+  // so parse the full source packet whenever a sequence claims source proof—
+  // not only when an optional receipt happened to be supplied already.
   const requiresSourceProofMedia = input.beats.some((beat) =>
-    beat.shots.some((shot) => shot.sourceProofMedia !== undefined),
+    beat.shots.some((shot) => shot.visualMode === "source_proof"),
   );
   const sourcePacket = requiresSourceProofMedia
     ? CasefileSourcePacketSchema.safeParse(args.sourcePacket)
@@ -896,13 +900,14 @@ export function evaluateCinematicCaseSequence(
     const hasEarlySourceObject = coldOpen.shots.some((shot) =>
       shot.t0 < sourceObjectDeadlineSec &&
       shot.coveragePurpose === "evidence_insert" &&
-      shot.visualMode === "source_proof",
+      shot.visualMode === "source_proof" &&
+      shot.sourceProofMedia !== undefined,
     );
     if (!hasEarlySourceObject) {
       issues.push(issue(
         "coverage_grammar_invalid",
-        "The cold open lacks a cited source-proof evidence insert in its first eight seconds.",
-        "Show a source document, object, map, or timeline that establishes the opening question before relying on reconstruction or atmosphere.",
+        "The cold open lacks an exact approved source-proof evidence insert in its first eight seconds.",
+        "Use an approved source document, object, map, or timeline asset that establishes the opening question before relying on reconstruction or atmosphere.",
       ));
     }
   }
@@ -945,8 +950,17 @@ export function evaluateCinematicCaseSequence(
           issues.push(issue("story_payoff_invalid", `Reveal ${beat.id}'s payoff claim ${claimId} is not source-bound to its declared payoff sources.`, "Bind the payoff claim to the exact cited source ids through casefile_evidence_shot_map before review."));
         }
       }
-      if (!beat.shots.some((shot) => shot.coveragePurpose === "evidence_insert" && shot.visualMode === "source_proof")) {
-        issues.push(issue("story_payoff_invalid", `Reveal ${beat.id}'s storyPayoff has no cited source-proof evidence insert.`, "Include a source_proof evidence_insert in the payoff reveal so final-master QA can see the cited answer or reframe."));
+      if (!beat.shots.some((shot) =>
+        shot.coveragePurpose === "evidence_insert" &&
+        shot.visualMode === "source_proof" &&
+        shot.sourceProofMedia !== undefined &&
+        payoff.citedSourceIds.includes(shot.sourceProofMedia.sourceId),
+      )) {
+        issues.push(issue(
+          "story_payoff_invalid",
+          `Reveal ${beat.id}'s storyPayoff has no exact approved source-proof asset bound to one of its cited sources.`,
+          "Attach an approved sourceProofMedia asset for a cited payoff source; final-master QA must see the real evidence rather than an LTX-generated document approximation.",
+        ));
       }
     }
   }
@@ -1021,6 +1035,21 @@ export function evaluateCinematicCaseSequence(
     }
     for (const shot of beat.shots) {
       allCinematicShots.push(shot);
+      const proofMedia: SourceProofMediaObligation | undefined = shot.sourceProofMedia;
+      if (shot.visualMode === "source_proof" && shot.coveragePurpose !== "evidence_insert") {
+        issues.push(issue(
+          "source_proof_media_invalid",
+          `Cinematic shot ${shot.id} uses source_proof outside an evidence_insert coverage purpose.`,
+          "Reserve source_proof for a cited evidence_insert; establishers, relationships, and atmosphere must not present generated visuals as factual source media.",
+        ));
+      }
+      if (shot.visualMode === "source_proof" && !proofMedia) {
+        issues.push(issue(
+          "source_proof_media_invalid",
+          `Cinematic shot ${shot.id} declares source_proof without an exact approved source asset receipt.`,
+          "Attach sourceProofMedia with the admitted source id, asset id, rights locator, immutable asset SHA-256, and human approval receipt; never render a factual source proof through LTX.",
+        ));
+      }
       const binding = beat.claimIds
         .flatMap((claimId) => compatibleMapBindingsFor(map, claimId, beat.parentShotIds, beat.sourceIds))
         .find((candidate) => modeAllowedByBinding(shot.visualMode, candidate, shot.reconstructionDisclosure));
@@ -1029,6 +1058,20 @@ export function evaluateCinematicCaseSequence(
       }
       for (const castId of shot.castIds) {
         if (!castById.has(castId)) issues.push(issue("cast_invalid", `Cinematic shot ${shot.id} references unknown mannequin ${castId}.`, "Use only a declared faceless non-likeness cast token."));
+      }
+      // A mannequin action is a narrow neutral-reenactment treatment. Without
+      // this pairing, a planner can label a generic document/map atmosphere
+      // shot as `mannequin_action`, satisfy mechanical scale/camera variety,
+      // and still send repetitive non-action coverage to LTX.
+      const isMannequinAction = shot.coveragePurpose === "mannequin_action";
+      const isNeutralMannequinReenactment =
+        shot.visualMode === "abstract_reenactment" && shot.castIds.length > 0;
+      if (isMannequinAction !== isNeutralMannequinReenactment) {
+        issues.push(issue(
+          "coverage_grammar_invalid",
+          `Cinematic shot ${shot.id} must use mannequin_action exactly for a cast-bound neutral abstract reenactment.`,
+          "Use mannequin_action only with abstract_reenactment and a locked faceless mannequin cast; use relationship for documentary, map, timeline, or atmosphere coverage.",
+        ));
       }
       if (shot.visualMode === "abstract_reenactment" && shot.castIds.length === 0) {
         issues.push(issue("cast_invalid", `Abstract reenactment shot ${shot.id} has no locked anonymous mannequin cast.`, "Bind abstract reenactment to a declared faceless mannequin token with wardrobe/silhouette/prop/movement locks."));
@@ -1064,7 +1107,6 @@ export function evaluateCinematicCaseSequence(
           "Replace the query with sourceProofMedia containing the exact admitted source id, asset id, rights locator, immutable asset SHA-256, approval receipt, and provenance fingerprint.",
         ));
       }
-      const proofMedia: SourceProofMediaObligation | undefined = shot.sourceProofMedia;
       if (proofMedia) {
         if (shot.coveragePurpose !== "evidence_insert") {
           issues.push(issue(

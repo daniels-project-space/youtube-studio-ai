@@ -14,6 +14,7 @@ import {
   cinematicContinuitySeed,
   cinematicCaseSequenceContentFingerprint,
   evaluateCinematicCaseSequence,
+  type CinematicCaseSequenceContent,
   type CinematicCaseSequenceInput,
 } from "@/engine/cinematicCaseSequence";
 import {
@@ -35,6 +36,11 @@ import {
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 import { admitCinematicFinalMasterQa } from "@/engine/cinematicFinalMasterQaAdmission";
 import { createNarrativeEvidenceLedger } from "@/engine/narrativeEvidenceLedger";
+import {
+  SOURCE_PROOF_MEDIA_VERSION,
+  sourceProofMediaProvenanceFingerprint,
+  type SourceProofMediaObligation,
+} from "@/engine/sourceProofMedia";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
@@ -196,6 +202,22 @@ const shotList = [
 
 const admittedSource = assertCasefileSourcePacket(sourcePacket, { now: NOW });
 
+function sourceProofMediaObligation(): SourceProofMediaObligation {
+  const obligation = {
+    version: SOURCE_PROOF_MEDIA_VERSION,
+    sourceId: "source-court-archive",
+    assetId: "asset-court-closure-finding",
+    rightsEvidenceLocator: "https://court.example.org/rights/vault-closure-license",
+    sourcePacketFingerprint: admittedSource.receipt.sourcePacketFingerprint,
+    assetUrl: "https://court.example.org/assets/vault-closure-finding.jpg",
+    assetSha256: "1".repeat(64),
+    approvalReceiptId: "source-proof-receipt-vault-closure-001",
+    provenanceFingerprint: "0".repeat(64),
+  } satisfies Omit<SourceProofMediaObligation, "provenanceFingerprint"> & { provenanceFingerprint: string };
+  obligation.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(obligation);
+  return obligation;
+}
+
 function admittedMap() {
   const input: CasefileEvidenceShotMapInput = {
     version: CASEFILE_EVIDENCE_SHOT_MAP_VERSION,
@@ -326,7 +348,7 @@ function coverageShot(args: {
   mode: "source_proof" | "spatial_reconstruction" | "abstract_reenactment" | "atmosphere";
   scale: "wide" | "medium" | "close" | "extreme_close" | "establishing"; move: "static" | "dolly_push" | "dolly_pull" | "crane_up" | "crane_down" | "orbit_left" | "orbit_right" | "truck_left" | "truck_right" | "handheld_drift";
   cut: "new_fact" | "new_location" | "new_relationship" | "physical_action" | "contradiction" | "reveal" | "breath";
-  tension: "question" | "orientation" | "pressure" | "uncertainty" | "reversal" | "release" | "residue"; cast?: string[];
+  tension: "question" | "orientation" | "pressure" | "uncertainty" | "reversal" | "release" | "residue"; cast?: string[]; sourceProofMedia?: SourceProofMediaObligation;
 }) {
   return {
     id: args.id, t0: args.t0, t1: args.t1, coveragePurpose: args.purpose, visualMode: args.mode, castIds: args.cast ?? [],
@@ -338,6 +360,7 @@ function coverageShot(args: {
     firstFrameConstraint: "Start from the exact cited story state with the same wardrobe and prop.",
     lastFrameConstraint: "End with only motivated action advanced; preserve wardrobe and setting continuity.",
     onScreenCitation: true as const,
+    ...(args.sourceProofMedia ? { sourceProofMedia: args.sourceProofMedia } : {}),
     ...(args.mode === "abstract_reenactment" ? { reconstructionDisclosure: RECONSTRUCTION_DISCLOSURE } : {}),
   };
 }
@@ -361,7 +384,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
         id: "cinematic-beat-closure-order", narrativeRole: "cold_open", t0: 0, t1: 12, parentShotIds: ["shot-closure-order"],
         claimIds: ["claim-closure-order"], sourceIds: ["source-court-archive"], causalQuestion: "Why did a single court order close the vault?",
         shots: [
-          coverageShot({ id: "cinematic-shot-closure-proof", t0: 0, t1: 4, purpose: "evidence_insert", mode: "source_proof", scale: "close", move: "static", cut: "new_fact", tension: "question" }),
+          coverageShot({ id: "cinematic-shot-closure-proof", t0: 0, t1: 4, purpose: "evidence_insert", mode: "source_proof", scale: "extreme_close", move: "static", cut: "new_fact", tension: "question", sourceProofMedia: sourceProofMediaObligation() }),
           coverageShot({ id: "cinematic-shot-closure-figure", t0: 4, t1: 8, purpose: "mannequin_action", mode: "abstract_reenactment", scale: "medium", move: "dolly_push", cut: "physical_action", tension: "pressure", cast: ["mannequin-investigator"] }),
           coverageShot({ id: "cinematic-shot-closure-space", t0: 8, t1: 12, purpose: "spatial_anchor", mode: "spatial_reconstruction", scale: "establishing", move: "crane_up", cut: "new_location", tension: "uncertainty" }),
         ],
@@ -376,7 +399,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
           citedSourceIds: ["source-court-archive"],
         },
         shots: [
-          coverageShot({ id: "cinematic-shot-response-proof", t0: 12, t1: 16, purpose: "evidence_insert", mode: "source_proof", scale: "close", move: "truck_right", cut: "reveal", tension: "reversal" }),
+          coverageShot({ id: "cinematic-shot-response-proof", t0: 12, t1: 16, purpose: "evidence_insert", mode: "source_proof", scale: "extreme_close", move: "truck_right", cut: "reveal", tension: "reversal", sourceProofMedia: sourceProofMediaObligation() }),
           coverageShot({ id: "cinematic-shot-response-map", t0: 16, t1: 20, purpose: "spatial_anchor", mode: "spatial_reconstruction", scale: "wide", move: "orbit_left", cut: "new_relationship", tension: "release" }),
           coverageShot({ id: "cinematic-shot-response-aftermath", t0: 20, t1: 24, purpose: "aftermath", mode: "atmosphere", scale: "establishing", move: "dolly_pull", cut: "breath", tension: "residue" }),
         ],
@@ -398,7 +421,7 @@ async function main() {
   const map = admittedMap();
   const sourceBoundStorySpine = sourceBoundStorySpineFor(map);
   const input = approvedSequence(map);
-  const args = { input, sourceAdmission: admittedSource.receipt, evidenceShotMap: map.map, evidenceShotMapAdmission: map.receipt, sceneManifest, shotList };
+  const args = { input, sourcePacket, sourceAdmission: admittedSource.receipt, evidenceShotMap: map.map, evidenceShotMapAdmission: map.receipt, sceneManifest, shotList };
 
   // The route is now reachable without hand-authoring every LTX shot. The
   // deterministic planner may draft coverage, but cannot manufacture the
@@ -434,20 +457,46 @@ async function main() {
   assert.match(draft.content.beats[0]?.shots[1]?.motion ?? "", /without revealing a face/i);
   assert.equal(draft.content.beats[0]?.shots[2]?.coveragePurpose, "evidence_insert");
   assert.equal(draft.content.beats[0]?.shots[3]?.coveragePurpose, "reaction");
+  assert.equal(
+    draft.content.beats[1]?.shots[1]?.coveragePurpose,
+    "relationship",
+    "a documentary/timeline beat must use a purpose-specific relationship shot instead of mislabeling generic atmosphere as mannequin action",
+  );
+  assert.equal(
+    draft.content.beats[1]?.shots[1]?.castIds.length,
+    0,
+    "non-reenactment relationship coverage must not invent a mannequin cast",
+  );
+  assert.match(
+    draft.content.beats[1]?.shots[1]?.motion ?? "",
+    /admitted relationship/i,
+    "the non-reenactment second angle must describe the cited relationship rather than generic atmosphere movement",
+  );
+  // The deterministic draft intentionally cannot choose a source asset. A
+  // human editor attaches the exact approved source-proof obligation before
+  // signing it; without that attachment, final admission must fail before
+  // LTX can invent a document approximation.
+  const reviewedDraft = structuredClone(draft);
+  for (const beat of reviewedDraft.content.beats) {
+    for (const shot of beat.shots) {
+      if (shot.visualMode === "source_proof") shot.sourceProofMedia = sourceProofMediaObligation();
+    }
+  }
+  reviewedDraft.sequenceContentFingerprint = cinematicCaseSequenceContentFingerprint(reviewedDraft.content);
   const draftReview = {
     id: "cinematic-sequence-review-vault-closure-draft",
     decision: "approved" as const,
     reviewerId: "reviewer-documentary-desk",
     reviewedAt: new Date(NOW.getTime() - 10 * 60 * 1_000).toISOString(),
-    reviewedSourcePacketFingerprint: draft.content.sourcePacketFingerprint,
-    reviewedEvidenceShotMapFingerprint: draft.content.evidenceShotMapFingerprint,
-    reviewedSequenceFingerprint: draft.sequenceContentFingerprint,
+    reviewedSourcePacketFingerprint: reviewedDraft.content.sourcePacketFingerprint,
+    reviewedEvidenceShotMapFingerprint: reviewedDraft.content.evidenceShotMapFingerprint,
+    reviewedSequenceFingerprint: reviewedDraft.sequenceContentFingerprint,
   };
-  const finalizedDraft = finalizeCinematicCaseSequenceDraft({ draft, editorialReview: draftReview });
+  const finalizedDraft = finalizeCinematicCaseSequenceDraft({ draft: reviewedDraft, editorialReview: draftReview });
   const draftedReport = evaluateCinematicCaseSequence({ ...args, input: finalizedDraft }, { now: NOW });
   assert.equal(draftedReport.safe, true, JSON.stringify(draftedReport.issues));
   assert.throws(
-    () => finalizeCinematicCaseSequenceDraft({ draft, editorialReview: { ...draftReview, reviewedSequenceFingerprint: "0".repeat(64) } }),
+    () => finalizeCinematicCaseSequenceDraft({ draft: reviewedDraft, editorialReview: { ...draftReview, reviewedSequenceFingerprint: "0".repeat(64) } }),
     /not bound to this exact source packet/i,
   );
   const tooShortSourceWindows = shotList.map((shot, index) => ({
@@ -705,6 +754,26 @@ async function main() {
     "even a reviewer-signed manual Casefile sequence may not send an unrenderable sub-three-second take to LTX",
   );
 
+  const inventedSourceProof = structuredClone(input);
+  delete inventedSourceProof.beats[1]!.shots[0]!.sourceProofMedia;
+  inventedSourceProof.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(inventedSourceProof);
+  assert.throws(
+    () => assertCinematicCaseSequence({ ...args, input: inventedSourceProof }, { now: NOW }),
+    /story_payoff_invalid:.*exact approved source-proof asset|source_proof_media_invalid:.*without an exact approved source asset/i,
+    "a factual payoff may not send a source-proof document through LTX when no exact approved source asset is attached",
+  );
+
+  const mislabeledAtmosphereAction = structuredClone(input);
+  mislabeledAtmosphereAction.beats[1]!.shots[1]!.coveragePurpose = "mannequin_action";
+  mislabeledAtmosphereAction.beats[1]!.shots[1]!.visualMode = "atmosphere";
+  mislabeledAtmosphereAction.beats[1]!.shots[1]!.castIds = [];
+  mislabeledAtmosphereAction.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(mislabeledAtmosphereAction);
+  assert.throws(
+    () => assertCinematicCaseSequence({ ...args, input: mislabeledAtmosphereAction }, { now: NOW }),
+    /coverage_grammar_invalid:.*mannequin_action exactly/i,
+    "a generic atmosphere plate may not masquerade as a mannequin action merely to satisfy multi-shot coverage grammar",
+  );
+
   const flatCoverage = structuredClone(input);
   flatCoverage.beats[1].shots.forEach((shot) => { shot.shotScale = "wide"; });
   flatCoverage.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(flatCoverage);
@@ -715,7 +784,7 @@ async function main() {
   unsupportedColdOpen.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(unsupportedColdOpen);
   assert.throws(
     () => assertCinematicCaseSequence({ ...args, input: unsupportedColdOpen }, { now: NOW }),
-    /coverage_grammar_invalid:.*cited source-proof evidence insert.*Remediation:/,
+    /coverage_grammar_invalid:.*exact approved source-proof evidence insert.*Remediation:/,
     "a cinematic Casefile hook cannot spend its opening beat on unsupported reconstruction or atmosphere before showing a source object",
   );
 
@@ -810,6 +879,16 @@ async function main() {
   });
   const blockDraft = draftPatch.cinematicCaseSequenceDraft;
   assert.ok(blockDraft);
+  const reviewedBlockDraft = structuredClone(blockDraft) as {
+    content: CinematicCaseSequenceContent;
+    sequenceContentFingerprint: string;
+  };
+  for (const beat of reviewedBlockDraft.content.beats) {
+    for (const shot of beat.shots) {
+      if (shot.visualMode === "source_proof") shot.sourceProofMedia = sourceProofMediaObligation();
+    }
+  }
+  reviewedBlockDraft.sequenceContentFingerprint = cinematicCaseSequenceContentFingerprint(reviewedBlockDraft.content);
   const finalizePatch = await finalizeBlock.run({
     ownerId: "owner-test",
     runId: "run-cinematic-case-sequence-finalize",
@@ -817,10 +896,10 @@ async function main() {
     keyPrefix: "owner/owner-test/channel/channel-test/",
     params: {},
     store: {
-      cinematicCaseSequenceDraft: blockDraft,
+      cinematicCaseSequenceDraft: reviewedBlockDraft,
       cinematicSequenceEditorialReview: {
         ...draftReview,
-        reviewedSequenceFingerprint: (blockDraft as { sequenceContentFingerprint: string }).sequenceContentFingerprint,
+        reviewedSequenceFingerprint: reviewedBlockDraft.sequenceContentFingerprint,
       },
     },
     budgetUsd: 0,
@@ -833,6 +912,7 @@ async function main() {
     keyPrefix: "owner/owner-test/channel/channel-test/",
     params: {},
     store: {
+      casefileSourcePacket: sourcePacket,
       casefileSourceAdmission: admittedSource.receipt,
       casefileEvidenceShotMap: map.map,
       casefileEvidenceShotMapAdmission: map.receipt,

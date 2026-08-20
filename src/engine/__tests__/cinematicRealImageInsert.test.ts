@@ -256,7 +256,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
         id: "cinematic-beat-team-formed", narrativeRole: "cold_open", t0: 0, t1: 12, parentShotIds: ["shot-team-formed"],
         claimIds: ["claim-team-formed"], sourceIds: ["source-court-archive"], causalQuestion: "Why was this investigation team formed?",
         shots: [
-          coverageShot({ id: "cinematic-shot-team-formed-proof", t0: 0, t1: 4, purpose: "evidence_insert", mode: "source_proof", scale: "close", move: "static", cut: "new_fact", tension: "question" }),
+          coverageShot({ id: "cinematic-shot-team-formed-proof", t0: 0, t1: 4, purpose: "evidence_insert", mode: "source_proof", scale: "extreme_close", move: "static", cut: "new_fact", tension: "question", sourceProofMedia }),
           coverageShot({ id: "cinematic-shot-team-formed-figure", t0: 4, t1: 8, purpose: "mannequin_action", mode: "abstract_reenactment", scale: "medium", move: "dolly_push", cut: "physical_action", tension: "pressure", cast: ["mannequin-investigator"] }),
           coverageShot({ id: "cinematic-shot-team-formed-space", t0: 8, t1: 12, purpose: "spatial_anchor", mode: "spatial_reconstruction", scale: "establishing", move: "crane_up", cut: "new_location", tension: "uncertainty" }),
         ],

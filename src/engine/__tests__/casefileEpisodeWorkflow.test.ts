@@ -14,6 +14,7 @@ import {
   attachCasefileEpisodeNarrativeEvidenceLedger,
   attachCasefileEpisodePlanning,
   attachCasefileEpisodeReferenceMechanics,
+  attachCasefileEpisodeSourceProofMedia,
   attachCasefileEpisodeSourceBoundStorySpine,
   draftCasefileEpisodeCinematicSequence,
   finalizeCasefileEpisodeCinematicSequence,
@@ -395,8 +396,70 @@ async function main(): Promise<void> {
     "the desk derives the frozen semantic ledger identity into the editor-signed cinematic direction",
   );
 
-  const final = finalizeCasefileEpisodeCinematicSequence({
+  const sourceProofShots = draft.cinematicDraft!.content.beats
+    .flatMap((beat) => beat.shots)
+    .filter((shot) => shot.visualMode === "source_proof");
+  assert.ok(sourceProofShots.length > 0, "the cinematic draft must expose source-proof slots before an editor signs it");
+  const sourceProofAttachments = sourceProofShots.map((shot, index) => ({
+    shotId: shot.id,
+    sourceId: "source-court-ledger",
+    assetId: "asset-court-ledger",
+    rightsEvidenceLocator: "https://court.example.org/rights/ledger-closure",
+    assetUrl: `https://court.example.org/assets/ledger-closure-${index + 1}.jpg`,
+    assetSha256: String(index + 1).repeat(64),
+    approvalReceiptId: `source-proof-receipt-ledger-${index + 1}`,
+  }));
+  assert.throws(
+    () => attachCasefileEpisodeSourceProofMedia({ episode: draft, attachments: sourceProofAttachments.slice(0, -1) }),
+    /every source-proof shot/i,
+    "an editor cannot sign a draft with a silent source-proof asset gap",
+  );
+  assert.throws(
+    () => attachCasefileEpisodeSourceProofMedia({
+      episode: draft,
+      attachments: [{ ...sourceProofAttachments[0]!, rightsEvidenceLocator: "https://court.example.org/rights/other" }],
+    }),
+    /visual-media source\/asset\/rights entitlement/i,
+    "an attachment cannot substitute a different rights record for the admitted asset",
+  );
+  assert.throws(
+    () => attachCasefileEpisodeSourceProofMedia({
+      episode: draft,
+      attachments: sourceProofAttachments.map((attachment) => ({
+        ...attachment,
+        sourcePacketFingerprint: "0".repeat(64),
+      })),
+    }),
+    /unrecognized key/i,
+    "the desk derives packet and provenance binding; the browser cannot inject either",
+  );
+  const sourceProofAttached = attachCasefileEpisodeSourceProofMedia({
     episode: draft,
+    attachments: sourceProofAttachments,
+  });
+  assert.notEqual(
+    sourceProofAttached.cinematicDraft?.sequenceContentFingerprint,
+    draft.cinematicDraft?.sequenceContentFingerprint,
+    "approved source assets alter the exact draft the editor must sign",
+  );
+  assert.ok(
+    sourceProofAttached.cinematicDraft?.content.beats
+      .flatMap((beat) => beat.shots)
+      .filter((shot) => shot.visualMode === "source_proof")
+      .every((shot) =>
+        shot.sourceProofMedia?.sourcePacketFingerprint === source.sourceAdmission.sourcePacketFingerprint &&
+        shot.sourceProofMedia.provenanceFingerprint.length === 64,
+      ),
+    "every source-proof slot carries a server-derived packet/provenance-bound obligation",
+  );
+  assert.throws(
+    () => attachCasefileEpisodeSourceProofMedia({ episode: sourceProofAttached, attachments: sourceProofAttachments }),
+    /already frozen/i,
+    "approved source assets cannot be swapped after the draft is prepared for final review",
+  );
+
+  const final = finalizeCasefileEpisodeCinematicSequence({
+    episode: sourceProofAttached,
     editorialReview: {
       id: "cinematic-sequence-review-ledger-closure",
       decision: "approved",
@@ -404,7 +467,7 @@ async function main(): Promise<void> {
       reviewedAt: NOW.toISOString(),
       reviewedSourcePacketFingerprint: source.sourceAdmission.sourcePacketFingerprint,
       reviewedEvidenceShotMapFingerprint: evidence.evidenceShotMap!.contentFingerprint,
-      reviewedSequenceFingerprint: draft.cinematicDraft!.sequenceContentFingerprint,
+      reviewedSequenceFingerprint: sourceProofAttached.cinematicDraft!.sequenceContentFingerprint,
     },
     now: NOW,
   });

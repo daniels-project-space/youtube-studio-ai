@@ -204,6 +204,7 @@ function beatCuts(
 function coveragePlan(
   role: DraftBeat["narrativeRole"],
   duration: number,
+  supportsMannequinAction: boolean,
 ): {
   coverageCount: 3 | 4;
   purposes: readonly DraftCoverageShot["coveragePurpose"][];
@@ -215,14 +216,22 @@ function coveragePlan(
     : role === "closing_residue"
       ? "aftermath"
       : "reaction";
+  // A `mannequin_action` is a specific, original neutral reenactment—not a
+  // generic label for a shot that happens to sit second in a coverage list.
+  // Documentary, map, and timeline treatments still need a second purposeful
+  // angle, but that angle must make an admitted relationship legible instead
+  // of inventing an anonymous actor or becoming a duplicate atmosphere plate.
+  const middlePurpose: DraftCoverageShot["coveragePurpose"] = supportsMannequinAction
+    ? "mannequin_action"
+    : "relationship";
   return {
     coverageCount,
     purposes: coverageCount === 4
-      ? ["spatial_anchor", "mannequin_action", "evidence_insert", finalPurpose]
-      : ["spatial_anchor", "mannequin_action", "evidence_insert"],
+      ? ["spatial_anchor", middlePurpose, "evidence_insert", finalPurpose]
+      : ["spatial_anchor", middlePurpose, "evidence_insert"],
     scales: coverageCount === 4
-      ? ["establishing", "medium", "close", "wide"]
-      : ["establishing", "medium", "close"],
+      ? ["establishing", "medium", "extreme_close", "wide"]
+      : ["establishing", "medium", "extreme_close"],
   };
 }
 
@@ -327,7 +336,7 @@ export function planCinematicCaseSequenceDraft(args: {
     if (!Number.isFinite(duration) || duration < MIN_CINEMATIC_BEAT_SEC) {
       throw new Error(`cinematic draft: source beat ${parents.map((parent) => parent.id).join(", ")} has no usable renderable narration duration`);
     }
-    const coverage = coveragePlan(role, duration);
+    const coverage = coveragePlan(role, duration, binding.treatment === "neutral_reenactment");
     const modes = modePlan(binding, coverage.coverageCount);
     const boundaries = coverageBoundaries(t0, t1, coverage.coverageCount);
     const tension = beatTension(role, index === causalWindows.length - 1, coverage.coverageCount);
@@ -356,6 +365,8 @@ export function planCinematicCaseSequenceDraft(args: {
         ? `${direction.cast[0]!.movementProfile}; complete one restrained, source-bound action without revealing a face`
         : visualMode === "source_proof"
           ? "hold the cited factual artifact long enough to read its relationship to the narration; no invented event"
+          : label === "relationship"
+            ? "make the admitted relationship between the cited document, map, timeline, place, or people legible; do not invent an action, actor, or factual event"
           : "move only through the already-cited space, relationship, or atmosphere; no new factual event";
       const shot: DraftCoverageShot = {
         id: `cinematic-shot-${primaryParent.id.replace(/^shot-/, "")}-${slot + 1}`,

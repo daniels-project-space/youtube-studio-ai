@@ -581,9 +581,16 @@ export function cinematicFinalMasterQaPlan(args: {
     }
     const sourceProofShot = [...beat.shots]
       .sort((left, right) => left.t0 - right.t0 || left.id.localeCompare(right.id))
-      .find((shot) => shot.coveragePurpose === "evidence_insert" && shot.visualMode === "source_proof");
+      .find((shot) =>
+        shot.coveragePurpose === "evidence_insert" &&
+        shot.visualMode === "source_proof" &&
+        shot.sourceProofMedia !== undefined &&
+        payoff.citedSourceIds.includes(shot.sourceProofMedia.sourceId),
+      );
     if (!sourceProofShot) {
-      throw new Error(`cinematic QA storyPayoff ${beat.id} lacks a cited source-proof evidence insert`);
+      throw new Error(
+        `cinematic QA storyPayoff ${beat.id} lacks an exact approved source-proof asset for one of its cited sources`,
+      );
     }
     payoffs.push({
       coldOpenBeatId: coldOpen.id,
