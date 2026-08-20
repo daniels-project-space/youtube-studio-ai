@@ -138,6 +138,11 @@ async function main(): Promise<void> {
     /const onScreenTextCues: TimedOnScreenTextCue\[\]/,
     "QuizYear must derive timed OCR cues from its actual rendered questions and options",
   );
+  assert.match(
+    source,
+    /const planned = orderQuizRoundsForDifficulty\(authored\);[\s\S]*assertQuizIntegrity\(planned\);/,
+    "the final sourced set must be ordered and integrity-checked immediately before quiz render props exist",
+  );
 
   const contract = MODULE_CONTRACTS.quiz_year;
   assert.ok(contract, "quiz_year needs a module contract");
@@ -229,6 +234,12 @@ async function main(): Promise<void> {
   assert.ok(
     !sharedRoot.includes("QuizYear"),
     "registering QuizYear in the shared root would defeat the isolation gate",
+  );
+  const quizComposition = await readFile(join(ROOT, "src/remotion/quiz/QuizYear.tsx"), "utf8");
+  assert.match(
+    quizComposition,
+    /round\.revealExplanation \?\? round\.subtext/,
+    "the compact integrity-approved explanation must cross the final render boundary",
   );
 
   // …and the isolated bundle only helps if the CLOUD IMAGE actually contains it.

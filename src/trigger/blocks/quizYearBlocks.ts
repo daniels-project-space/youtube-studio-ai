@@ -91,6 +91,11 @@ import {
 import { renderQuizYear, type QuizYearRound } from "@/lib/quizYearRender";
 import { muxLoopedMusicBed } from "@/lib/ffmpeg";
 import { quizCitationLabel } from "@/lib/quizCitation";
+import {
+  assertQuizIntegrity,
+  compactQuizRevealExplanation,
+  orderQuizRoundsForDifficulty,
+} from "@/lib/quizIntegrity";
 import type { TimedOnScreenTextCue } from "@/lib/onScreenTextProof";
 
 function convex(): ConvexHttpClient {
@@ -119,7 +124,9 @@ async function recordAsset(
   }
 }
 
-const QUIZ_QUESTIONS_CHECKPOINT_VERSION = "quiz-mixed-rounds/v1";
+// v2 adds source-familiarity ordering and a bound compact reveal explanation;
+// v1 checkpoints cannot truthfully satisfy the final-set quality contract.
+const QUIZ_QUESTIONS_CHECKPOINT_VERSION = "quiz-mixed-rounds/v2";
 
 /** Seconds a viewer gets to guess, and how long the reveal holds. */
 export const QUIZ_DEFAULT_COUNTDOWN_SECONDS = 6;
@@ -361,6 +368,10 @@ export interface PlannedRound {
   answerNumber?: number;
   sourceUrl: string;
   options: { label: string; isCorrect: boolean; provenance: string }[];
+  /** Deterministic source familiarity proxy used only for easy-to-hard ordering. */
+  notability?: number;
+  /** Source-derived, one-thought context rendered after the answer lock-in. */
+  revealExplanation?: string;
   phrasedByModel: boolean;
 }
 
@@ -489,6 +500,12 @@ async function sourceYearRounds(args: SourceArgs & { topic: QuizYearTopicKey }):
         isCorrect: o.isCorrect,
         provenance: o.provenance,
       })),
+      notability: fact.notability,
+      revealExplanation: compactQuizRevealExplanation({
+        subject: fact.eventLabel,
+        answerLabel: String(fact.year),
+        sourceDescription: fact.eventDescription,
+      }),
       phrasedByModel: q.phrasedByModel,
     });
   }
@@ -551,6 +568,12 @@ async function plannedRoundForFact(
     ...(fact.answerNumber !== undefined ? { answerNumber: fact.answerNumber } : {}),
     sourceUrl: fact.sourceUrl,
     options: options.map((o) => ({ label: o.label, isCorrect: o.isCorrect, provenance: o.provenance })),
+    notability: fact.notability,
+    revealExplanation: compactQuizRevealExplanation({
+      subject: fact.subjectLabel,
+      answerLabel: fact.answerLabel,
+      sourceDescription: fact.subjectDescription,
+    }),
     phrasedByModel: q.phrasedByModel,
   };
 }
@@ -803,7 +826,7 @@ export const quizYear: Block = {
     );
 
     // 1) FACTS + QUESTION WORDING. Both are deterministic and checkpointed.
-    const planned = await authorRounds({
+    const authored = await authorRounds({
       ctx,
       rounds,
       categories,
@@ -813,12 +836,17 @@ export const quizYear: Block = {
       minNotability,
     });
 
-    if (planned.length < QUIZ_MIN_ROUNDS) {
+    if (authored.length < QUIZ_MIN_ROUNDS) {
       throw new Error(
-        `quiz: only ${planned.length} clean rounds across [${categories.join(", ")}] ` +
+        `quiz: only ${authored.length} clean rounds across [${categories.join(", ")}] ` +
           `(need ≥ ${QUIZ_MIN_ROUNDS})`,
       );
     }
+
+    // Put the source-familiar subjects first while retaining the planned order
+    // for ties. This is deliberately immediately before render: checkpoint
+    // replays and fresh authoring pass through the same deterministic curve.
+    const planned = orderQuizRoundsForDifficulty(authored);
 
     // 2) FINAL INTEGRITY ASSERTION — the last gate before pixels. Everything
     //    here is deterministic and re-run on every checkpoint replay.
@@ -826,6 +854,7 @@ export const quizYear: Block = {
     if (setDefects.length) {
       throw new Error(`quiz: round set failed final integrity check: ${setDefects.join("; ")}`);
     }
+    assertQuizIntegrity(planned);
     for (const r of planned) {
       const sourced = r.options.filter(
         (o) => o.provenance === "wikidata-sourced" || o.provenance === "wikipedia-verified",
@@ -848,6 +877,7 @@ export const quizYear: Block = {
       options: r.options.map((o) => ({ label: o.label, isCorrect: o.isCorrect })),
       subject: r.subject,
       ...(r.subtext ? { subtext: r.subtext } : {}),
+      ...(r.revealExplanation ? { revealExplanation: r.revealExplanation } : {}),
       sourceUrl: r.sourceUrl,
       countdownSeconds: countdown,
       revealSeconds: reveal,

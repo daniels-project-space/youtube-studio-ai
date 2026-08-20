@@ -37,6 +37,8 @@ export interface QuizYearRound {
   subject: string;
   /** Short source description, shown small under the subject. */
   subtext?: string;
+  /** Compact source-derived explanation, required by current quiz release gate. */
+  revealExplanation?: string;
   /** Verifiable citation for the CORRECT option only. */
   sourceUrl: string;
   /** Seconds the viewer gets to answer. */
@@ -359,7 +361,7 @@ const RoundView: React.FC<{
           >
             {round.subject}
           </div>
-          {round.subtext ? (
+          {(round.revealExplanation ?? round.subtext) ? (
             <div
               style={{
                 fontSize: 22,
@@ -368,7 +370,7 @@ const RoundView: React.FC<{
                 fontFamily: "Inter, Helvetica, Arial, sans-serif",
               }}
             >
-              {round.subtext}
+              {round.revealExplanation ?? round.subtext}
             </div>
           ) : null}
         </div>
