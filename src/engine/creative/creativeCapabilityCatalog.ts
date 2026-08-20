@@ -22,10 +22,13 @@ import {
   type DataStoryContract,
 } from "../dataStory";
 
-export const CREATIVE_CAPABILITY_CATALOG_VERSION = "creative-capability-catalog/v1" as const;
+// Bump whenever an offer changes so a cached browser cannot submit a selection
+// against a less restrictive catalog.
+export const CREATIVE_CAPABILITY_CATALOG_VERSION = "creative-capability-catalog/v2" as const;
 
 export type CreativeCapabilityKey =
   | "source_attributed_data_story"
+  | "editorial_evidence_packet"
   | "casefile_cinematic"
   | "children_show_bible";
 
@@ -174,6 +177,40 @@ const CASEFILE_SEQUENCE_REQUIREMENTS = [
   "reviewer-signed causal multi-shot sequence with faceless mannequin wardrobe, prop, era, and location continuity locks",
 ] as const;
 
+const EDITORIAL_EVIDENCE_PACKET_SIGNALS = [
+  "factual explainer",
+  "fact based",
+  "fact-based",
+  "source based",
+  "source-based",
+  "source led",
+  "source-led",
+  "evidence based",
+  "evidence-led",
+  "research-backed",
+  "historical",
+  "history",
+  "geography",
+  "science",
+  "scientific",
+  "how it works",
+  "real world",
+  "real-world",
+  "systems explained",
+  "data driven",
+  "data-driven",
+  "statistics",
+  "documentary",
+  "true story",
+  "biography",
+] as const;
+
+const EDITORIAL_EVIDENCE_PACKET_REQUIREMENTS = [
+  "reviewed Editorial Evidence Packet with named sources, approved claims, and immutable source snapshots",
+  "fresh human-editorial approval bound to the packet fingerprint",
+  "reviewed map, chart, or factual visual manifests bound to the same source URL and snapshot before Episode Graph compilation",
+] as const;
+
 const CHILDREN_SHOW_REQUIREMENTS = [
   "age-banded original Children’s Show Bible",
   "one observable learning objective and assessment",
@@ -204,6 +241,23 @@ export function isCasefileCinematicIntent(
   const intent = normalizedIntent(input);
   if (/\b(fictional|fiction|screenplay|original story)\b/.test(intent)) return false;
   return CASEFILE_CINEMATIC_SIGNALS.some((signal) => intent.includes(signal));
+}
+
+/**
+ * Factual illustrated work is deliberately distinct from the existing
+ * fictional/no-external-claims illustrated lane. It may use the same local
+ * scene compiler only after a reviewer has bound its factual visual inputs.
+ */
+export function isReviewedFactualIllustratedExplainerIntent(
+  input: CreativeCapabilityIntent,
+  family: FamilyKey,
+): boolean {
+  if (family !== "illustrated_explainer") return false;
+  const intent = normalizedIntent(input);
+  if (/\b(fictional|fiction|original story|made up|made-up|hypothetical|thought experiment|scenario)\b/.test(intent)) {
+    return false;
+  }
+  return EDITORIAL_EVIDENCE_PACKET_SIGNALS.some((signal) => intent.includes(signal));
 }
 
 function sourceAttributedDataStoryOffer(
@@ -252,6 +306,35 @@ function sourceAttributedDataStoryOffer(
         },
       },
     ],
+  };
+}
+
+function editorialEvidencePacketOffer(): CreativeCapabilityOffer {
+  const admission: CreativeCapabilityAdmission = {
+    autonomous: false,
+    blockers: ["Factual illustrated-explainer evidence admission is private human-editorial review only."],
+    remediation:
+      "Supply a reviewed Editorial Evidence Packet, then bind every factual map, chart, or visual to its exact source URL and immutable snapshot before Episode Graph compilation.",
+  };
+  return {
+    capability: "editorial_evidence_packet",
+    title: "Reviewed factual illustrated explainer",
+    description:
+      "A private factual-explainer intake: reviewed sources, claims, and immutable snapshots must bind the maps, charts, and scene evidence before the deterministic scene compiler is allowed to receive them.",
+    selectionMode: "private_review_only",
+    modules: [{
+      block: "editorial_evidence_packet",
+      profile: "editorial-evidence-packet/v1",
+      automationAdmission: admission,
+      requirements: EDITORIAL_EVIDENCE_PACKET_REQUIREMENTS,
+      qualityFocus: ["factual source-to-visual traceability", "immutable snapshot integrity", "human-reviewed causal explanation"],
+    }],
+    automationAdmission: admission,
+    requirements: EDITORIAL_EVIDENCE_PACKET_REQUIREMENTS,
+    qualityFocus: ["factual source-to-visual traceability", "immutable snapshot integrity", "human-reviewed causal explanation"],
+    // This is an editorial intake, not a compiler mutation. The packet is
+    // supplied to the supervised episode-graph path only after review.
+    pipelineObligations: [],
   };
 }
 
@@ -340,6 +423,13 @@ export const CREATIVE_CAPABILITY_CATALOG: readonly CreativeCapabilityDefinition[
     selectionMode: "explicit_opt_in",
     matches: (intent, family) => dataStoryRecommendationForIntent(intent, family).length > 0,
     materialize: sourceAttributedDataStoryOffer,
+  },
+  {
+    capability: "editorial_evidence_packet",
+    supportedFamilies: ["illustrated_explainer"],
+    selectionMode: "private_review_only",
+    matches: isReviewedFactualIllustratedExplainerIntent,
+    materialize: () => editorialEvidencePacketOffer(),
   },
   {
     capability: "casefile_cinematic",

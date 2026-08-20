@@ -163,6 +163,46 @@ assert.deepEqual(
   ["casefile_cinematic"],
   "the format layer must carry review-only admission from the catalog, not re-parse Casefile module profiles",
 );
+
+const factualIllustratedIntent = {
+  concept: "A factual animated geography and science explainer with source-bound maps and charts",
+};
+const factualIllustrated = resolveCreativeCapabilities(factualIllustratedIntent, "illustrated_explainer").find(
+  (offer) => offer.capability === "editorial_evidence_packet",
+);
+assert(factualIllustrated, "factual illustrated concepts must discover the reusable reviewed evidence packet");
+assert.equal(factualIllustrated.selectionMode, "private_review_only");
+assert.equal(factualIllustrated.modules[0]?.block, "editorial_evidence_packet");
+assert.equal(factualIllustrated.reviewHref, undefined, "the creator must not invent an editorial desk that does not exist");
+assert.equal(
+  resolveCreativeCapabilities({ concept: "An original fictional illustrated scenario story" }, "illustrated_explainer")
+    .some((offer) => offer.capability === "editorial_evidence_packet"),
+  false,
+  "the reviewed factual intake must not capture the existing fictional illustrated lane",
+);
+const factualIllustratedPreflight = formatPreflight("illustrated_explainer", factualIllustratedIntent);
+assert.deepEqual(
+  factualIllustratedPreflight.recommendedModules.map((module) => module.block),
+  ["editorial_evidence_packet"],
+  "the creator preflight must expose the real reviewed packet module rather than claim a generic factual renderer",
+);
+assert.equal(factualIllustratedPreflight.creatorAdmission.mode, "registered_supervised_non_gemini");
+assert.equal(factualIllustratedPreflight.creatorAdmission.autonomous, false);
+assert.equal(factualIllustratedPreflight.creatorAdmission.privateReviewOnly, true);
+assert.equal(factualIllustratedPreflight.productionReady, false);
+assert(
+  factualIllustratedPreflight.sourceRequirements.some((requirement) => requirement.includes("immutable source snapshots")),
+  "the creator must name immutable factual-source evidence before it can expose this route",
+);
+assert.throws(
+  () => validateCreativeCapabilitySelections({
+    family: "illustrated_explainer",
+    intent: factualIllustratedIntent,
+    selections: [creativeCapabilitySelection("editorial_evidence_packet")],
+  }),
+  /private review only/,
+  "a reviewed factual packet is never an automatic channel-build selection",
+);
 assert.throws(
   () => validateCreativeCapabilitySelections({
     family: "cinematic",

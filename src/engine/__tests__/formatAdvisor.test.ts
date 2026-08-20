@@ -52,6 +52,18 @@ for (const [concept, family, expectedSignal] of reusableExplainerOpportunities) 
   assert.equal(recommendation.preflight.validationRenderRequired, true);
 }
 
+const factualIllustratedExplainer = recommendFormatDeterministically({
+  concept: "An animated geography atlas explaining factual trade routes with source-bound maps",
+});
+assert.equal(factualIllustratedExplainer.family, "illustrated_explainer");
+assert.equal(factualIllustratedExplainer.available, false, "reviewed factual illustrated work must not be advertised as automatic production");
+assert.deepEqual(
+  factualIllustratedExplainer.preflight.recommendedModules.map((module) => module.block),
+  ["editorial_evidence_packet"],
+);
+assert.equal(factualIllustratedExplainer.preflight.creatorAdmission.mode, "registered_supervised_non_gemini");
+assert.equal(factualIllustratedExplainer.preflight.creatorAdmission.reviewHref, undefined);
+
 // These are additional uses of the existing supervised Casefile evidence chain,
 // not new automatic channel types or renderer claims.
 for (const concept of [
