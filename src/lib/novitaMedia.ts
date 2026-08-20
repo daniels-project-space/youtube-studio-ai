@@ -44,6 +44,10 @@ export interface NovitaGeneratedScene {
   lens?: string;
   /** Stable mannequin identities that must remain visually continuous. */
   continuityIds?: string[];
+  /** Exact sealed cast allowed in a Casefile render; [] permits no people/mannequins. */
+  expectedCastIds?: string[];
+  /** Casefile scenes cannot add bystanders, background people, or mannequins. */
+  forbidAdditionalPeople?: true;
   /** Reviewer-facing source/camera/cut obligations for this exact first frame. */
   keyframeRequirements?: string[];
   /** Reviewer-facing endpoint obligations for a terminal conditioned frame. */

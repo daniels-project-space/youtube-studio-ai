@@ -130,6 +130,8 @@ const cinematicPlan = resolveGeneratedFootageScenePlan({
 });
 assert.equal(cinematicPlan.source, "cinematic_case_sequence");
 assert.equal(cinematicPlan.sequenceFingerprint, "c".repeat(64));
+assert.deepEqual(cinematicPlan.scenes[0]!.expectedCastIds, [], "an empty sealed cinematic cast must reach the render gate as an explicit no-people contract");
+assert.equal(cinematicPlan.scenes[0]!.forbidAdditionalPeople, true, "every cinematic LTX scene must prohibit undeclared people/mannequins");
 assert.deepEqual(cinematicPlan.scenes.map((scene) => scene.id), [
   "cinematic-shot-proof-1",
   "cinematic-shot-proof-2",

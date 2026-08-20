@@ -757,6 +757,18 @@ async function main() {
   assert.match(semanticTailScene.still, new RegExp(semanticTailToken));
   assert.match(semanticTailScene.motion, new RegExp(semanticTailToken));
   assert.match(semanticTailScene.terminalStill ?? "", new RegExp(semanticTailToken));
+  for (const prompt of [semanticTailScene.still, semanticTailScene.terminalStill ?? ""]) {
+    assert.match(
+      prompt,
+      /People lock: only declared faceless mannequin cast \([^)]*\)/,
+      "the no-extra-people instruction must survive alongside a maximum-length signed narration purpose",
+    );
+  }
+  assert.match(
+    semanticTailScene.negative,
+    /no extra people, mannequins, bystanders, crowds, human silhouettes, portraits, or reflections/,
+    "the LTX motion phase must retain the same no-extra-people instruction in its dedicated negative prompt",
+  );
   assert.equal(
     semanticTailAdmitted.creativeLocks.locks.find((lock) => lock.id === semanticTailScene.id)!.acceptanceCriteria[0],
     semanticTailInput.beats[0]!.shots[1]!.narrationPurpose,

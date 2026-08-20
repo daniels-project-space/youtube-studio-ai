@@ -1,9 +1,10 @@
 import { z } from "zod";
 
-export const CINEMATIC_KEYFRAME_REVIEW_VERSION = "cinematic-keyframe-review/v1" as const;
+export const CINEMATIC_KEYFRAME_REVIEW_VERSION = "cinematic-keyframe-review/v2" as const;
 export const CINEMATIC_KEYFRAME_MIN_SCORE = 0.84;
 
 const score = z.number().finite().min(0).max(1);
+const mannequinId = z.string().regex(/^mannequin-[a-z0-9-]+$/);
 
 /**
  * A durable, independent review receipt for the Z-Image keyframe that becomes
@@ -17,6 +18,12 @@ export const CinematicKeyframeReviewSchema = z.object({
   sceneId: z.string().regex(/^cinematic-shot-[a-z0-9-]+$/),
   /** Earlier accepted shots of the same mannequin cast, if this shot has any. */
   reviewedAgainstSceneIds: z.array(z.string().regex(/^cinematic-shot-[a-z0-9-]+$/)).max(2),
+  /** Exact sealed cast permitted in this frame; an empty list permits no people. */
+  expectedCastIds: z.array(mannequinId).max(4),
+  /** No bystanders, background people, extra mannequins, or human stand-ins. */
+  forbidAdditionalPeople: z.literal(true),
+  /** Independent reviewer explicitly confirmed the candidate contains only the sealed cast. */
+  onlyExpectedCastVisible: z.literal(true),
   semanticAlignment: score,
   composition: score,
   continuity: score,
@@ -31,6 +38,8 @@ export type CinematicKeyframeReview = z.infer<typeof CinematicKeyframeReviewSche
 export function assertCinematicKeyframeReview(value: unknown, expected: {
   sceneId: string;
   reviewedAgainstSceneIds: readonly string[];
+  expectedCastIds: readonly string[];
+  forbidAdditionalPeople: true;
 }): CinematicKeyframeReview {
   const review = CinematicKeyframeReviewSchema.parse(value);
   if (review.sceneId !== expected.sceneId) {
@@ -39,6 +48,13 @@ export function assertCinematicKeyframeReview(value: unknown, expected: {
   const expectedIds = [...expected.reviewedAgainstSceneIds];
   if (JSON.stringify(review.reviewedAgainstSceneIds) !== JSON.stringify(expectedIds)) {
     throw new Error(`cinematic keyframe review reference lineage does not match ${expected.sceneId}`);
+  }
+  const expectedCastIds = [...expected.expectedCastIds];
+  if (JSON.stringify(review.expectedCastIds) !== JSON.stringify(expectedCastIds)) {
+    throw new Error(`cinematic keyframe review cast contract does not match ${expected.sceneId}`);
+  }
+  if (review.forbidAdditionalPeople !== expected.forbidAdditionalPeople || !review.onlyExpectedCastVisible) {
+    throw new Error(`cinematic keyframe review did not affirm the no-extra-people contract for ${expected.sceneId}`);
   }
   const failing = ([
     ["semantic alignment", review.semanticAlignment],

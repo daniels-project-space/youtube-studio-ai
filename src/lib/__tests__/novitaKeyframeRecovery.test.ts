@@ -16,10 +16,13 @@ const scene: NovitaGeneratedScene = {
 };
 
 const review: CinematicKeyframeReview = {
-  version: "cinematic-keyframe-review/v1",
+  version: "cinematic-keyframe-review/v2",
   reviewer: "non_google_vision",
   sceneId: scene.id,
   reviewedAgainstSceneIds: [],
+  expectedCastIds: ["mannequin-investigator"],
+  forbidAdditionalPeople: true,
+  onlyExpectedCastVisible: true,
   semanticAlignment: 0.9,
   composition: 0.9,
   continuity: 0.9,

@@ -9,6 +9,9 @@ const receipt = {
   reviewer: "non_google_vision" as const,
   sceneId: "cinematic-shot-railway-1",
   sampleOffsetsSec: [0.25, 2.5, 4.75],
+  expectedCastIds: ["mannequin-investigator"],
+  forbidAdditionalPeople: true as const,
+  onlyExpectedCastVisible: true as const,
   semanticAlignment: 0.9,
   motionIntegrity: 0.9,
   continuity: 0.9,
@@ -25,18 +28,33 @@ assert.equal(assertCinematicClipReview(receipt, {
   sceneId: receipt.sceneId,
   sampleOffsetsSec: receipt.sampleOffsetsSec,
   terminalStillKey: receipt.terminalStillKey,
+  expectedCastIds: receipt.expectedCastIds,
+  forbidAdditionalPeople: true,
 }).sceneId, receipt.sceneId);
 assert.throws(() => assertCinematicClipReview({ ...receipt, motionIntegrity: 0.2 }, {
   sceneId: receipt.sceneId,
   sampleOffsetsSec: receipt.sampleOffsetsSec,
   terminalStillKey: receipt.terminalStillKey,
+  expectedCastIds: receipt.expectedCastIds,
+  forbidAdditionalPeople: true,
 }), /motion integrity/);
 assert.throws(() => assertCinematicClipReview({ ...receipt, terminalFrameAlignment: 0.2 }, {
   sceneId: receipt.sceneId,
   sampleOffsetsSec: receipt.sampleOffsetsSec,
   terminalStillKey: receipt.terminalStillKey,
+  expectedCastIds: receipt.expectedCastIds,
+  forbidAdditionalPeople: true,
 }), /terminal-frame alignment/);
 assert.throws(() => assertCinematicClipReview({ ...receipt, sampleOffsetsSec: [0.2, 2.5, 4.75] }, {
   sceneId: receipt.sceneId,
   sampleOffsetsSec: receipt.sampleOffsetsSec,
+  expectedCastIds: receipt.expectedCastIds,
+  forbidAdditionalPeople: true,
 }), /sample lineage/);
+assert.throws(() => assertCinematicClipReview({ ...receipt, expectedCastIds: ["mannequin-unapproved"] }, {
+  sceneId: receipt.sceneId,
+  sampleOffsetsSec: receipt.sampleOffsetsSec,
+  terminalStillKey: receipt.terminalStillKey,
+  expectedCastIds: receipt.expectedCastIds,
+  forbidAdditionalPeople: true,
+}), /cast contract/, "an undeclared extra mannequin cannot receive a moving-clip receipt");

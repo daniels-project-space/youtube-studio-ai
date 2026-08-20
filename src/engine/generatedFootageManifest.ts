@@ -125,6 +125,8 @@ export const GeneratedFootageSceneManifestSchema = z
             assertCinematicKeyframeReview(keyframeReview, {
               sceneId: item.sceneId,
               reviewedAgainstSceneIds: keyframeReview.reviewedAgainstSceneIds,
+              expectedCastIds: keyframeReview.expectedCastIds,
+              forbidAdditionalPeople: keyframeReview.forbidAdditionalPeople,
             });
           } catch (error) {
             ctx.addIssue({
@@ -153,6 +155,8 @@ export const GeneratedFootageSceneManifestSchema = z
               assertCinematicKeyframeReview(item.terminalKeyframeReview, {
                 sceneId: terminalSceneId,
                 reviewedAgainstSceneIds: item.terminalKeyframeReview.reviewedAgainstSceneIds,
+                expectedCastIds: item.terminalKeyframeReview.expectedCastIds,
+                forbidAdditionalPeople: item.terminalKeyframeReview.forbidAdditionalPeople,
               });
             } catch (error) {
               ctx.addIssue({
@@ -173,6 +177,8 @@ export const GeneratedFootageSceneManifestSchema = z
             assertCinematicClipReview(clipReview, {
               sceneId: item.sceneId,
               sampleOffsetsSec: clipReview.sampleOffsetsSec,
+              expectedCastIds: clipReview.expectedCastIds,
+              forbidAdditionalPeople: clipReview.forbidAdditionalPeople,
               ...(item.terminalStillKey ? { terminalStillKey: item.terminalStillKey } : {}),
             });
           } catch (error) {

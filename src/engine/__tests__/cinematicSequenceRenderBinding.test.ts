@@ -31,7 +31,7 @@ const scenes = [0, 1].map((index) => ({
   coveragePurpose: "evidence_insert" as const,
   cutReason: index === 0 ? "new_fact" as const : "reveal" as const,
   tensionState: index === 0 ? "pressure" as const : "reversal" as const,
-  castIds: [],
+  castIds: index === 0 ? [] : ["mannequin-investigator"],
   continuitySeed: index + 1,
 }));
 
@@ -75,6 +75,9 @@ const args = {
         reviewer: "non_google_vision" as const,
         sceneId: scene.id,
         reviewedAgainstSceneIds: [],
+        expectedCastIds: scene.castIds,
+        forbidAdditionalPeople: true as const,
+        onlyExpectedCastVisible: true as const,
         semanticAlignment: 0.9,
         composition: 0.9,
         continuity: 0.9,
@@ -88,6 +91,9 @@ const args = {
         reviewer: "non_google_vision" as const,
         sceneId: scene.id,
         sampleOffsetsSec: [0.2, 1.5, 2.8],
+        expectedCastIds: scene.castIds,
+        forbidAdditionalPeople: true as const,
+        onlyExpectedCastVisible: true as const,
         semanticAlignment: 0.9,
         motionIntegrity: 0.9,
         continuity: 0.9,
@@ -171,6 +177,14 @@ assert.throws(
   () => assertCinematicSequenceRenderBinding(narrationDrift),
   /do not bind the same exact reviewed sequence/,
   "edited cinematic timings must remain attached to the actual narration",
+);
+
+const undeclaredExtraPerson = structuredClone(args);
+undeclaredExtraPerson.footageManifest.items[0]!.keyframeReview.expectedCastIds = ["mannequin-unapproved"];
+assert.throws(
+  () => assertCinematicSequenceRenderBinding(undeclaredExtraPerson),
+  /sealed no-extra-people cast contract.*cast contract/i,
+  "a keyframe receipt that admits an undeclared person cannot reach LTX/assembly binding",
 );
 
 console.log("Cinematic sequence render binding tests passed");

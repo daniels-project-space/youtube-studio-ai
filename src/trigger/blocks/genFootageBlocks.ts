@@ -105,6 +105,10 @@ export interface PlannedScene {
   t1?: number;
   /** Reused by the independent still gate to compare recurring mannequins. */
   continuityIds?: string[];
+  /** Exact sealed cast allowed in a Casefile render; [] permits no people/mannequins. */
+  expectedCastIds?: string[];
+  /** Casefile scenes cannot add bystanders, background people, or mannequins. */
+  forbidAdditionalPeople?: true;
   /** Stable image prior emitted from the reviewer-approved cinematic sequence. */
   continuitySeed?: number;
   /** Literal causal/camera obligations that the first frame must visibly meet. */
@@ -341,6 +345,8 @@ function scenePlanFromCinematicCaseSequence(
       t0: scene.t0,
       t1: scene.t1,
       continuityIds: scene.castIds,
+      expectedCastIds: scene.castIds,
+      forbidAdditionalPeople: true,
       continuitySeed: scene.continuitySeed,
       cutReason: scene.cutReason,
       tensionState: scene.tensionState,
@@ -667,6 +673,15 @@ export const genFootage: Block = {
       );
     }
     const ltxScenes = scenes.filter((scene) => scene.sourceProofMedia === undefined);
+    if (plan.source === "cinematic_case_sequence") {
+      for (const scene of ltxScenes) {
+        if (!Array.isArray(scene.expectedCastIds) || scene.forbidAdditionalPeople !== true) {
+          throw new Error(
+            `gen_footage: cinematic scene ${scene.id} is missing its sealed no-extra-people contract; refusing any LTX render`,
+          );
+        }
+      }
+    }
 
     const requestedConcurrency = Number(ctx.params["maxConcurrent"] ?? 3);
     const maxConcurrent = Math.min(8, Math.max(1, Math.floor(requestedConcurrency)));
@@ -800,6 +815,8 @@ export const genFootage: Block = {
         shotScale: scene.shotScale,
         lens: scene.lens,
         ...(scene.continuityIds?.length ? { continuityIds: scene.continuityIds } : {}),
+        ...(scene.expectedCastIds ? { expectedCastIds: scene.expectedCastIds } : {}),
+        ...(scene.forbidAdditionalPeople ? { forbidAdditionalPeople: true as const } : {}),
         ...(scene.continuitySeed !== undefined ? { seed: scene.continuitySeed } : {}),
         ...(scene.keyframeRequirements?.length ? { keyframeRequirements: scene.keyframeRequirements } : {}),
         ...(creativeAdapter ? { creativeAdapter } : {}),

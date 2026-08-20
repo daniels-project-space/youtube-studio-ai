@@ -1270,6 +1270,12 @@ export function assertCinematicCaseSequence(
       // to crowd the causal story instruction or the actual visual prompt out
       // of LTX's useful context window.
       .slice(0, 650);
+    const castExclusivityLock = shot.castIds.length
+      ? `People lock: only declared faceless mannequin cast (${shot.castIds.join(", ")}); no extra people, mannequins, crowds, silhouettes, portraits, or reflections.`
+      : "People lock: no people, mannequins, faces, human silhouettes, portraits, reflections, crowds, or background human presence.";
+    const castExclusivityNegative = shot.castIds.length
+      ? "no extra people, mannequins, bystanders, crowds, human silhouettes, portraits, or reflections"
+      : "no people, mannequins, faces, human silhouettes, portraits, reflections, crowds, or background human presence";
     const parentLock = beat.parentShotIds
       .map((parentId) => parentShotById.get(parentId))
       .filter((parent): parent is ShotPlan => Boolean(parent))
@@ -1305,6 +1311,7 @@ export function assertCinematicCaseSequence(
     ].join(" ").slice(0, 620);
     const still = [
       narrativeLock,
+      castExclusivityLock,
       `Primary visual: ${shot.still}`,
       castLock,
       parentLock,
@@ -1337,6 +1344,7 @@ export function assertCinematicCaseSequence(
     // sequence a physical endpoint for a reveal or consequence beat.
     const terminalStill = [
       narrativeLock,
+      castExclusivityLock,
       `Terminal visual: ${shot.lastFrameConstraint}`,
       `Primary scene: ${shot.still}`,
       castLock,
@@ -1382,7 +1390,10 @@ export function assertCinematicCaseSequence(
     cameraMove: shot.cameraMove,
     shotScale: shot.shotScale,
     lens: shot.lens,
-    negative: shot.negative,
+    // Still/terminal prompts carry the positive cast contract; LTX's negative
+    // prompt carries it through the moving take without crowding the signed
+    // first/last-frame constraints out of its bounded motion instruction.
+    negative: `${castExclusivityNegative}; ${shot.negative}`.slice(0, 600),
     visualMode: shot.visualMode,
     coveragePurpose: shot.coveragePurpose,
     cutReason: shot.cutReason,

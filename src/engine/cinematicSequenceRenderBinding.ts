@@ -8,6 +8,8 @@ import {
   GeneratedFootageSceneManifestSchema,
   type GeneratedFootageSceneManifest,
 } from "./generatedFootageManifest";
+import { assertCinematicKeyframeReview } from "./cinematicKeyframeReview";
+import { assertCinematicClipReview } from "./cinematicClipReview";
 import { assertSourceProofMediaReceipt } from "./sourceProofMedia";
 
 export interface CinematicSequenceRenderBinding {
@@ -111,10 +113,46 @@ export function assertCinematicSequenceRenderBinding(args: {
           `cinematic source-proof shot ${scene.id} receipt does not bind the footage-manifest clip key; refusing a substituted evidence clip`,
         );
       }
-    } else if (rendered.sourceProofMediaReceipt) {
-      throw new Error(
-        `cinematic clip ${scene.id} carries source-proof media without an approved source-proof scene obligation`,
-      );
+    } else {
+      if (rendered.sourceProofMediaReceipt) {
+        throw new Error(
+          `cinematic clip ${scene.id} carries source-proof media without an approved source-proof scene obligation`,
+        );
+      }
+      const castContract = {
+        expectedCastIds: scene.castIds,
+        forbidAdditionalPeople: true as const,
+      };
+      const keyframeReview = rendered.keyframeReview;
+      const clipReview = rendered.clipReview;
+      if (!keyframeReview || !clipReview) {
+        throw new Error(`cinematic clip ${scene.id} is missing its sealed no-extra-people review evidence`);
+      }
+      try {
+        assertCinematicKeyframeReview(keyframeReview, {
+          sceneId: scene.id,
+          reviewedAgainstSceneIds: keyframeReview.reviewedAgainstSceneIds,
+          ...castContract,
+        });
+        if (rendered.terminalKeyframeReview) {
+          assertCinematicKeyframeReview(rendered.terminalKeyframeReview, {
+            sceneId: `${scene.id}-terminal`,
+            reviewedAgainstSceneIds: rendered.terminalKeyframeReview.reviewedAgainstSceneIds,
+            ...castContract,
+          });
+        }
+        assertCinematicClipReview(clipReview, {
+          sceneId: scene.id,
+          sampleOffsetsSec: clipReview.sampleOffsetsSec,
+          ...(rendered.terminalStillKey ? { terminalStillKey: rendered.terminalStillKey } : {}),
+          ...castContract,
+        });
+      } catch (error) {
+        throw new Error(
+          `cinematic clip ${scene.id} does not preserve its sealed no-extra-people cast contract: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
     }
     const nextScene = scenePlan.scenes[index + 1];
     if (nextScene) {

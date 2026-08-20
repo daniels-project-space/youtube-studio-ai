@@ -17,6 +17,8 @@ const ReviewerVerdictSchema = z.object({
   artifactFree: z.number().finite().min(0).max(1),
   terminalFrameAlignment: z.number().finite().min(0).max(1).optional(),
   textWatermarkFree: z.boolean(),
+  /** Reviewer must affirm the sealed cast is the only human/mannequin presence. */
+  onlyExpectedCastVisible: z.boolean(),
   pass: z.boolean(),
   notes: z.array(z.string().trim().min(1).max(280)).max(8).default([]),
 }).strict();
@@ -27,6 +29,10 @@ export interface CinematicClipGateScene {
   motionPrompt: string;
   durationSec: number;
   continuityIds?: readonly string[];
+  /** Exact cast from the sealed cinematic scene; [] means no people/mannequins. */
+  expectedCastIds?: readonly string[];
+  /** Casefile renders must never invent a bystander or an extra mannequin. */
+  forbidAdditionalPeople?: true;
   keyframeRequirements?: readonly string[];
 }
 
@@ -49,6 +55,18 @@ function sampleOffsets(durationSec: number): [number, number, number] {
   return [edge, Number((durationSec / 2).toFixed(3)), Number(Math.max(edge, durationSec - edge).toFixed(3))];
 }
 
+function sealedPeopleContract(scene: CinematicClipGateScene): {
+  expectedCastIds: string[];
+  forbidAdditionalPeople: true;
+} {
+  if (!Array.isArray(scene.expectedCastIds) || scene.forbidAdditionalPeople !== true) {
+    throw new Error(
+      `cinematic clip gate is missing the sealed no-extra-people contract for ${scene.id}; refusing clip admission`,
+    );
+  }
+  return { expectedCastIds: [...scene.expectedCastIds], forbidAdditionalPeople: true };
+}
+
 /**
  * Inspect the actual start, middle, and end frames of one LTX take. The
  * source still is evidence for continuity only; the moving frames determine
@@ -67,6 +85,7 @@ export async function reviewCinematicClip(args: {
   }
   const actualDurationSec = await ffprobeDuration(args.clipPath);
   const offsets = sampleOffsets(actualDurationSec);
+  const peopleContract = sealedPeopleContract(args.scene);
   const framePaths = await Promise.all(offsets.map((offset, index) =>
     grabFrame(args.clipPath, offset, join(args.workDir, `${args.scene.id}-clip-${index + 1}.jpg`)),
   ));
@@ -81,6 +100,9 @@ export async function reviewCinematicClip(args: {
       args.scene.continuityIds?.length
         ? `Locked faceless mannequin cast: ${args.scene.continuityIds.join(", ")}. Preserve their anonymous identity treatment, wardrobe silhouette/material/palette, key props, proportions, location, and lighting through the take.`
         : "No recurring cast is visible; preserve the stated environment, objects, and evidence treatment through the take.",
+      peopleContract.expectedCastIds.length
+        ? `Sealed people contract: ONLY declared faceless mannequin IDs ${peopleContract.expectedCastIds.join(", ")} may appear in every sampled frame. Reject any additional person, mannequin, bystander, crowd, silhouette, portrait, reflection, or background human presence.`
+        : "Sealed people contract: zero people or mannequins may appear in every sampled frame. Reject any person, mannequin, human silhouette, face, portrait, reflection, crowd, or background human presence.",
       args.scene.keyframeRequirements?.length
         ? `Specific shot obligations: ${args.scene.keyframeRequirements.join(" | ")}`
         : "Specific shot obligations: a causal, cinematic action with a clear ending beat.",
@@ -89,8 +111,8 @@ export async function reviewCinematicClip(args: {
         : "No independently reviewed terminal frame was supplied.",
       "Reject frozen or near-static action when movement is required, camera motion that contradicts the instruction, broken anatomy/geometry, morphing/replaced subjects, changed wardrobe/props/location, jump cuts, impossible physical motion, real-person likeness, visible mannequin faces, gore, text/letters/logos/watermarks, or an ending that does not resolve the planned action.",
       args.terminalStillPath
-        ? `Return STRICT JSON only: {"semanticAlignment":0..1,"motionIntegrity":0..1,"continuity":0..1,"endBeat":0..1,"artifactFree":0..1,"terminalFrameAlignment":0..1,"textWatermarkFree":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set pass true only when every score is at least ${CINEMATIC_CLIP_MIN_SCORE}, textWatermarkFree is true, the actual final frame matches the reviewed terminal image, and the take is safe to edit.`
-        : `Return STRICT JSON only: {"semanticAlignment":0..1,"motionIntegrity":0..1,"continuity":0..1,"endBeat":0..1,"artifactFree":0..1,"textWatermarkFree":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set pass true only when every score is at least ${CINEMATIC_CLIP_MIN_SCORE}, textWatermarkFree is true, and the actual moving clip is safe to edit.`,
+        ? `Return STRICT JSON only: {"semanticAlignment":0..1,"motionIntegrity":0..1,"continuity":0..1,"endBeat":0..1,"artifactFree":0..1,"terminalFrameAlignment":0..1,"textWatermarkFree":true|false,"onlyExpectedCastVisible":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set onlyExpectedCastVisible to false if any sampled frame includes an undeclared person or mannequin; when the expected cast list is empty, set it false for any people or mannequins at all. Set pass true only when every score is at least ${CINEMATIC_CLIP_MIN_SCORE}, textWatermarkFree is true, onlyExpectedCastVisible is true, the actual final frame matches the reviewed terminal image, and the take is safe to edit.`
+        : `Return STRICT JSON only: {"semanticAlignment":0..1,"motionIntegrity":0..1,"continuity":0..1,"endBeat":0..1,"artifactFree":0..1,"textWatermarkFree":true|false,"onlyExpectedCastVisible":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set onlyExpectedCastVisible to false if any sampled frame includes an undeclared person or mannequin; when the expected cast list is empty, set it false for any people or mannequins at all. Set pass true only when every score is at least ${CINEMATIC_CLIP_MIN_SCORE}, textWatermarkFree is true, onlyExpectedCastVisible is true, and the actual moving clip is safe to edit.`,
     ].join("\n"),
     imagePaths: args.terminalStillPath
       ? [args.stillPath, args.terminalStillPath, ...framePaths]
@@ -102,7 +124,7 @@ export async function reviewCinematicClip(args: {
     providers: ["openrouter"], tier: "final",
   });
   const verdict = parseVerdict(raw);
-  if (!verdict.pass || !verdict.textWatermarkFree ||
+  if (!verdict.pass || !verdict.textWatermarkFree || !verdict.onlyExpectedCastVisible ||
     (args.terminalStillPath && (verdict.terminalFrameAlignment === undefined || verdict.terminalFrameAlignment < CINEMATIC_CLIP_MIN_SCORE))) {
     throw new Error(`cinematic clip gate failed ${args.scene.id}: ${verdict.notes.join("; ") || "reviewer rejected the moving take"}`);
   }
@@ -111,6 +133,9 @@ export async function reviewCinematicClip(args: {
     reviewer: "non_google_vision",
     sceneId: args.scene.id,
     sampleOffsetsSec: offsets,
+    expectedCastIds: peopleContract.expectedCastIds,
+    forbidAdditionalPeople: peopleContract.forbidAdditionalPeople,
+    onlyExpectedCastVisible: verdict.onlyExpectedCastVisible,
     semanticAlignment: verdict.semanticAlignment,
     motionIntegrity: verdict.motionIntegrity,
     continuity: verdict.continuity,
@@ -125,6 +150,8 @@ export async function reviewCinematicClip(args: {
   }, {
     sceneId: args.scene.id,
     sampleOffsetsSec: offsets,
+    expectedCastIds: peopleContract.expectedCastIds,
+    forbidAdditionalPeople: peopleContract.forbidAdditionalPeople,
     ...(args.terminalStillKey ? { terminalStillKey: args.terminalStillKey } : {}),
   });
 }

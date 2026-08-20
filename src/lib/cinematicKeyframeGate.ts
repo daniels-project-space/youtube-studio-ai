@@ -13,6 +13,8 @@ const ReviewerVerdictSchema = z.object({
   continuity: z.number().finite().min(0).max(1),
   artifactFree: z.number().finite().min(0).max(1),
   textWatermarkFree: z.boolean(),
+  /** Reviewer must affirm the sealed cast is the only human/mannequin presence. */
+  onlyExpectedCastVisible: z.boolean(),
   /**
    * Dedicated, code-enforced field for the identifiable-likeness prohibition
    * — mirroring textWatermarkFree above. Every gate prompt already tells the
@@ -33,6 +35,10 @@ export interface CinematicKeyframeGateScene {
   imagePrompt: string;
   motionPrompt: string;
   continuityIds?: readonly string[];
+  /** Exact cast from the sealed cinematic scene; [] means no people/mannequins. */
+  expectedCastIds?: readonly string[];
+  /** Casefile renders must never invent a bystander or an extra mannequin. */
+  forbidAdditionalPeople?: true;
   keyframeRequirements?: readonly string[];
 }
 
@@ -64,6 +70,18 @@ function parseVerdict(raw: string): z.infer<typeof ReviewerVerdictSchema> {
   }
 }
 
+function sealedPeopleContract(scene: CinematicKeyframeGateScene): {
+  expectedCastIds: string[];
+  forbidAdditionalPeople: true;
+} {
+  if (!Array.isArray(scene.expectedCastIds) || scene.forbidAdditionalPeople !== true) {
+    throw new Error(
+      `cinematic keyframe gate is missing the sealed no-extra-people contract for ${scene.id}; refusing LTX admission`,
+    );
+  }
+  return { expectedCastIds: [...scene.expectedCastIds], forbidAdditionalPeople: true };
+}
+
 /**
  * Independent quality gate for the source still before it is allowed to spend
  * on LTX. Previous accepted keyframes of the same cast are evidence only; the
@@ -76,6 +94,7 @@ export async function reviewCinematicKeyframe(args: {
   reviewedAgainstSceneIds: readonly string[];
 }): Promise<CinematicKeyframeReview> {
   const references = args.referencePaths.slice(0, 2);
+  const peopleContract = sealedPeopleContract(args.scene);
   const raw = await visionLocal({
     prompt: [
       "You are the independent final keyframe gate for a source-bound cinematic documentary. Never infer success from the prompt; inspect the supplied pixels.",
@@ -87,11 +106,14 @@ export async function reviewCinematicKeyframe(args: {
       args.scene.continuityIds?.length
         ? `Locked anonymous mannequin cast IDs: ${args.scene.continuityIds.join(", ")}. Preserve faceless identity, wardrobe silhouette/material/palette, key prop, and body proportions when they are visible.`
         : "No recurring cast is visible; judge the stated environment and evidence treatment instead.",
+      peopleContract.expectedCastIds.length
+        ? `Sealed people contract: ONLY declared faceless mannequin IDs ${peopleContract.expectedCastIds.join(", ")} may appear. Reject any additional person, mannequin, bystander, crowd, silhouette, portrait, reflection, or background human presence.`
+        : "Sealed people contract: zero people or mannequins may appear. Reject any person, mannequin, human silhouette, face, portrait, reflection, crowd, or background human presence.",
       args.scene.keyframeRequirements?.length
         ? `Specific obligations: ${args.scene.keyframeRequirements.join(" | ")}`
         : "Specific obligations: coherent cinematic composition, correct camera scale, no unsupported factual visual claim.",
       "Reject real-person likeness, visible faces for mannequin treatments, gore, text/letters/logos/watermarks, duplicate limbs, broken anatomy/geometry, incompatible lighting, or generic imagery that misses the causal shot purpose.",
-      `Return STRICT JSON only: {"semanticAlignment":0..1,"composition":0..1,"continuity":0..1,"artifactFree":0..1,"textWatermarkFree":true|false,"noIdentifiableLikeness":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set noIdentifiableLikeness to false if the candidate shows any identifiable human face or real-person likeness rather than a strictly anonymous faceless mannequin treatment, even a partial or plausible one. Set pass true only when every score is at least ${CINEMATIC_KEYFRAME_MIN_SCORE}, textWatermarkFree is true, noIdentifiableLikeness is true, and the image is suitable as LTX's first frame.`,
+      `Return STRICT JSON only: {"semanticAlignment":0..1,"composition":0..1,"continuity":0..1,"artifactFree":0..1,"textWatermarkFree":true|false,"onlyExpectedCastVisible":true|false,"noIdentifiableLikeness":true|false,"pass":true|false,"notes":["concrete visual observation"]}. Set onlyExpectedCastVisible to false if any person or mannequin appears outside the sealed people contract; when the expected cast list is empty, set it false for any people or mannequins at all. Set noIdentifiableLikeness to false if the candidate shows any identifiable human face or real-person likeness rather than a strictly anonymous faceless mannequin treatment, even a partial or plausible one. Set pass true only when every score is at least ${CINEMATIC_KEYFRAME_MIN_SCORE}, textWatermarkFree is true, onlyExpectedCastVisible is true, noIdentifiableLikeness is true, and the image is suitable as LTX's first frame.`,
     ].join("\n"),
     imagePaths: [...references, args.candidatePath],
     json: true,
@@ -108,7 +130,7 @@ export async function reviewCinematicKeyframe(args: {
     verdict.continuity,
     verdict.artifactFree,
   ].some((score) => score < CINEMATIC_KEYFRAME_MIN_SCORE);
-  if (!verdict.pass || !verdict.textWatermarkFree || !verdict.noIdentifiableLikeness || failingScores) {
+  if (!verdict.pass || !verdict.textWatermarkFree || !verdict.onlyExpectedCastVisible || !verdict.noIdentifiableLikeness || failingScores) {
     throw new CinematicKeyframeRejectedError(args.scene.id, verdict.notes);
   }
   const review = assertCinematicKeyframeReview({
@@ -116,6 +138,9 @@ export async function reviewCinematicKeyframe(args: {
     reviewer: "non_google_vision",
     sceneId: args.scene.id,
     reviewedAgainstSceneIds: [...args.reviewedAgainstSceneIds],
+    expectedCastIds: peopleContract.expectedCastIds,
+    forbidAdditionalPeople: peopleContract.forbidAdditionalPeople,
+    onlyExpectedCastVisible: verdict.onlyExpectedCastVisible,
     semanticAlignment: verdict.semanticAlignment,
     composition: verdict.composition,
     continuity: verdict.continuity,
@@ -126,6 +151,8 @@ export async function reviewCinematicKeyframe(args: {
   }, {
     sceneId: args.scene.id,
     reviewedAgainstSceneIds: args.reviewedAgainstSceneIds,
+    expectedCastIds: peopleContract.expectedCastIds,
+    forbidAdditionalPeople: peopleContract.forbidAdditionalPeople,
   });
   return review;
 }
