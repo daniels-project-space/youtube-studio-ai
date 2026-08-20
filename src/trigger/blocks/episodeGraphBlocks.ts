@@ -181,6 +181,12 @@ export function buildEpisodeGraphFromStorySpine(args: {
   episodeId: string;
   curriculumLabel?: string;
   curriculumLocator?: string;
+  /**
+   * Exact measurable objective from the child-editor-approved CurriculumEpisodeSeed.
+   * It intentionally takes precedence over the generic children fallback so the
+   * renderer, Learning Contract, and later Show Bible review see the same lesson.
+   */
+  childrenLearningObjective?: string;
   syntheticScenario?: SyntheticScenarioContract;
   /** Fresh reviewed factual visuals for this supervised episode only. */
   evidenceVisualManifests?: unknown;
@@ -202,6 +208,13 @@ export function buildEpisodeGraphFromStorySpine(args: {
       label: args.curriculumLabel?.trim() || "Original channel learning curriculum",
       locator: args.curriculumLocator?.trim() || "channel://original-learning-curriculum/v1",
     });
+  }
+
+  const approvedChildrenLearningObjective = typeof args.childrenLearningObjective === "string"
+    ? args.childrenLearningObjective.trim()
+    : undefined;
+  if (audience === "children" && args.childrenLearningObjective !== undefined && !approvedChildrenLearningObjective) {
+    throw new Error("episode_graph: childrenLearningObjective must be a non-empty child-editor-approved objective");
   }
 
   const sentenceById = new Map(storySpine.timedScript.sentences.map((sentence) => [sentence.id, sentence]));
@@ -256,7 +269,7 @@ export function buildEpisodeGraphFromStorySpine(args: {
       .join(" ");
     if (!text) throw new Error(`episode_graph: narrative beat ${beat.id} has no timed source text`);
     const learningObjective = audience === "children"
-      ? `Practice one clear, kind idea about ${args.topic.trim()}.`
+      ? approvedChildrenLearningObjective ?? `Practice one clear, kind idea about ${args.topic.trim()}.`
       : undefined;
     const evidenceVisualManifest = sceneEvidenceVisuals.get(`scene-${beat.id.slice("beat-".length)}`);
     const factualSourceRefs = evidenceVisualManifest && editorialEvidencePacket
@@ -369,6 +382,7 @@ const episodeGraph: Block = {
       curriculumLocator: childrenSeed
         ? `curriculum://reviewed/${childrenSeed.seriesId}/${childrenSeed.episodeId}`
         : typeof ctx.params["curriculumLocator"] === "string" ? ctx.params["curriculumLocator"] : undefined,
+      childrenLearningObjective: childrenSeed?.measurableObjective.statement,
       syntheticScenario: ctx.store["syntheticScenario"] !== undefined
         ? assertSyntheticScenarioContract(ctx.store["syntheticScenario"])
         : undefined,

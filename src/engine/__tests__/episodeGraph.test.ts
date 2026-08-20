@@ -218,9 +218,32 @@ const bridgedChildren = buildEpisodeGraphFromStorySpine({
   episodeId: "episode-how-seeds-grow",
   curriculumLabel: "Primary science: plants grow",
   curriculumLocator: "curriculum://primary-science/plants",
+  childrenLearningObjective: "Explain that seeds need water and light to grow.",
 });
 assert.equal(bridgedChildren.episodeGraph.audience, "children");
 assert.equal(bridgedChildren.sceneManifest.externalProviderCalls, 0);
+assert.deepEqual(
+  bridgedChildren.episodeGraph.beats.map((beat) => beat.learningObjective),
+  ["Explain that seeds need water and light to grow.", "Explain that seeds need water and light to grow."],
+  "the signed child-editor objective must reach every planned learning beat",
+);
+assert.deepEqual(
+  bridgedChildren.sceneManifest.scenes.map((scene) => scene.learningObjective),
+  ["Explain that seeds need water and light to grow.", "Explain that seeds need water and light to grow."],
+  "the scene compiler handoff must preserve the signed objective rather than a generic topic label",
+);
+assert.throws(
+  () => buildEpisodeGraphFromStorySpine({
+    storySpine,
+    topic: "How seeds grow",
+    audience: "children",
+    seriesId: "series-curious-lantern",
+    episodeId: "episode-how-seeds-grow-empty-objective",
+    childrenLearningObjective: "   ",
+  }),
+  /childrenLearningObjective must be a non-empty child-editor-approved objective/,
+  "an explicitly supplied children objective must never degrade into the generic fallback",
+);
 
 // A reviewed factual visual must travel through the real Episode Graph bridge,
 // not remain a valid-but-orphaned artifact. The Scene Compiler consumes the
