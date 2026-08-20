@@ -141,6 +141,20 @@ const CASEFILE_CINEMATIC_SIGNALS = [
   "historical crime",
   "factual reconstruction",
   "documentary reconstruction",
+  // The Casefile evidence chain is not crime-specific. These are all existing
+  // supervised Casefile kinds; exposing them here expands discovery without
+  // inventing a renderer or relaxing source/editorial admission.
+  "systems failure",
+  "system failure",
+  "engineering failure",
+  "industrial disaster",
+  "historical disaster",
+  "aviation disaster",
+  "aviation accident",
+  "financial fraud",
+  "corporate fraud",
+  "company scandal",
+  "corporate scandal",
 ] as const;
 
 const CASEFILE_SOURCE_REQUIREMENTS = [

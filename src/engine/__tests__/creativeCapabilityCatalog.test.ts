@@ -144,6 +144,18 @@ const casefile = resolveCreativeCapabilities({
 assert(casefile, "factual cinematic intent must resolve to the Casefile capability");
 assert.equal(casefile.selectionMode, "private_review_only");
 assert.equal(casefile.reviewHref, "/casefile");
+for (const concept of [
+  "A source-led engineering systems failure investigation",
+  "A historical aviation disaster reconstruction with primary evidence",
+  "A financial fraud case explained through source documents",
+  "A company scandal timeline with cited records",
+]) {
+  assert.equal(
+    resolveCreativeCapabilities({ concept }, "cinematic").some((offer) => offer.capability === "casefile_cinematic"),
+    true,
+    `${concept} must discover the existing supervised Casefile path rather than need a separate channel pipeline`,
+  );
+}
 assert.deepEqual(
   privateReviewCapabilityOffers(formatPreflight("cinematic", {
     concept: "A Fern-style true crime investigation with source-bound faceless mannequin reconstructions",

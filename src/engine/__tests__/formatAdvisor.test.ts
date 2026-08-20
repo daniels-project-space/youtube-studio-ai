@@ -52,6 +52,24 @@ for (const [concept, family, expectedSignal] of reusableExplainerOpportunities) 
   assert.equal(recommendation.preflight.validationRenderRequired, true);
 }
 
+// These are additional uses of the existing supervised Casefile evidence chain,
+// not new automatic channel types or renderer claims.
+for (const concept of [
+  "An engineering systems failure investigation",
+  "A historical aviation disaster investigation",
+  "A financial fraud documentary investigation",
+  "A company scandal investigation",
+]) {
+  const recommendation = recommendFormatDeterministically({ concept });
+  assert.equal(recommendation.family, "cinematic", `${concept} must discover the cinematic Casefile intake`);
+  assert.equal(
+    recommendation.preflight.creativeCapabilities.some((offer) => offer.capability === "casefile_cinematic"),
+    true,
+    `${concept} must retain source-reviewed Casefile admission rather than a generic automatic route`,
+  );
+  assert.equal(recommendation.preflight.productionReady, false);
+}
+
 const ranked = rankFormatCandidates({ concept: "evidence-led archival documentary short" });
 assert.equal(ranked[0]?.family, "documentary_collage_short");
 assert(ranked[0]!.matchedSignals.length > 0, "ranking must explain its deterministic match");

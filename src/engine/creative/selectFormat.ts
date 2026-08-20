@@ -329,7 +329,11 @@ export const FORMAT_RECIPES: Record<FamilyKey, FormatRecipe> = {
   cinematic: {
     family: "cinematic",
     channelTypes: ["cinematic reconstructions", "true-crime / history scenes", "atmospheric mini-films", "story-led AI cinematics"],
-    signals: ["cinematic", "reconstruction", "true crime", "heist", "thriller", "crime", "ai scenes", "mini film", "mini-film"],
+    signals: [
+      "cinematic", "reconstruction", "true crime", "heist", "thriller", "crime", "ai scenes", "mini film", "mini-film",
+      "systems failure", "engineering failure", "industrial disaster", "historical disaster", "aviation disaster", "aviation accident",
+      "financial fraud", "corporate fraud", "company scandal", "corporate scandal",
+    ],
     qualityFocus: ["shot continuity", "character / setting locks", "causal scene progression", "cinematic sound and edit"],
     tradeoff: "The highest visual-control lane: its Novita shot chain is only ready after a pinned story, Visual Matter, and per-shot QA.",
   },
