@@ -11,6 +11,10 @@ import {
   assertCinematicTransitionReview,
   CinematicTransitionReviewSchema,
 } from "@/engine/cinematicTransitionReview";
+import {
+  assertSourceProofMediaReceipt,
+  SourceProofMediaReceiptSchema,
+} from "@/engine/sourceProofMedia";
 
 /**
  * Durable, ordered binding between a generated-scene plan and the clips that
@@ -38,6 +42,8 @@ export const GeneratedFootageSceneManifestSchema = z
       t1: z.number().finite().positive().optional(),
       /** Exact deterministic still-generation prior for a reviewed cinematic shot. */
       continuitySeed: z.number().int().min(1).max(2_147_483_647).optional(),
+      /** Exact approved evidence asset used instead of any LTX output for this scene. */
+      sourceProofMediaReceipt: SourceProofMediaReceiptSchema.optional(),
       /** Required before LTX for every source-bound cinematic shot. */
       keyframeReview: CinematicKeyframeReviewSchema.optional(),
       /** Reviewed endpoint image that conditioned LTX's final frame, when used. */
@@ -75,15 +81,43 @@ export const GeneratedFootageSceneManifestSchema = z
         if (item.continuitySeed === undefined) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index, "continuitySeed"], message: "cinematic manifest requires the exact approved continuity seed for every clip" });
         }
-        if (!item.keyframeReview) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index], message: "cinematic manifest requires an independent keyframe review before LTX" });
-        } else if (item.keyframeReview.sceneId !== item.sceneId) {
-          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index, "keyframeReview"], message: "keyframe review must bind this exact cinematic scene" });
-        } else {
+        if (item.sourceProofMediaReceipt) {
           try {
-            assertCinematicKeyframeReview(item.keyframeReview, {
+            assertSourceProofMediaReceipt({
+              receipt: item.sourceProofMediaReceipt,
               sceneId: item.sceneId,
-              reviewedAgainstSceneIds: item.keyframeReview.reviewedAgainstSceneIds,
+              sequenceFingerprint: value.sequenceFingerprint!,
+            });
+          } catch (error) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["items", index, "sourceProofMediaReceipt"],
+              message: error instanceof Error ? error.message : "source-proof media receipt is invalid",
+            });
+          }
+          if (
+            item.keyframeReview ||
+            item.terminalStillKey ||
+            item.terminalKeyframeReview ||
+            item.clipReview
+          ) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["items", index],
+              message: "source-proof media must bypass LTX completely and cannot carry generated-keyframe or clip-review evidence",
+            });
+          }
+        }
+        if (!item.sourceProofMediaReceipt && !item.keyframeReview) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index], message: "cinematic manifest requires an independent keyframe review before LTX" });
+        } else if (!item.sourceProofMediaReceipt && item.keyframeReview!.sceneId !== item.sceneId) {
+          ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index, "keyframeReview"], message: "keyframe review must bind this exact cinematic scene" });
+        } else if (!item.sourceProofMediaReceipt) {
+          const keyframeReview = item.keyframeReview!;
+          try {
+            assertCinematicKeyframeReview(keyframeReview, {
+              sceneId: item.sceneId,
+              reviewedAgainstSceneIds: keyframeReview.reviewedAgainstSceneIds,
             });
           } catch (error) {
             ctx.addIssue({
@@ -93,7 +127,7 @@ export const GeneratedFootageSceneManifestSchema = z
             });
           }
         }
-        if ((item.terminalStillKey === undefined) !== (item.terminalKeyframeReview === undefined)) {
+        if (!item.sourceProofMediaReceipt && (item.terminalStillKey === undefined) !== (item.terminalKeyframeReview === undefined)) {
           ctx.addIssue({
             code: z.ZodIssueCode.custom,
             path: ["items", index],
@@ -122,15 +156,16 @@ export const GeneratedFootageSceneManifestSchema = z
             }
           }
         }
-        if (!item.clipReview) {
+        if (!item.sourceProofMediaReceipt && !item.clipReview) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index], message: "cinematic manifest requires an independent moving-clip review before assembly" });
-        } else if (item.clipReview.sceneId !== item.sceneId) {
+        } else if (!item.sourceProofMediaReceipt && item.clipReview!.sceneId !== item.sceneId) {
           ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index, "clipReview"], message: "clip review must bind this exact cinematic scene" });
-        } else {
+        } else if (!item.sourceProofMediaReceipt) {
+          const clipReview = item.clipReview!;
           try {
-            assertCinematicClipReview(item.clipReview, {
+            assertCinematicClipReview(clipReview, {
               sceneId: item.sceneId,
-              sampleOffsetsSec: item.clipReview.sampleOffsetsSec,
+              sampleOffsetsSec: clipReview.sampleOffsetsSec,
               ...(item.terminalStillKey ? { terminalStillKey: item.terminalStillKey } : {}),
             });
           } catch (error) {

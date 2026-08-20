@@ -647,6 +647,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     "publish.private_only",
   ], {
     requiredConsumes: [
+      "casefileSourcePacket",
       "casefileSourceAdmission",
       "casefileEvidenceShotMap",
       "casefileEvidenceShotMapAdmission",

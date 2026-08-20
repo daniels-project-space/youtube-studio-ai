@@ -130,6 +130,7 @@ const cinematicCaseSequenceFinalize: Block = {
 const cinematicCaseSequence: Block = {
   id: "cinematic_case_sequence",
   consumes: [
+    "casefileSourcePacket",
     "casefileSourceAdmission",
     "casefileEvidenceShotMap",
     "casefileEvidenceShotMapAdmission",
@@ -196,6 +197,7 @@ const cinematicCaseSequence: Block = {
     });
     const admitted = assertCinematicCaseSequence({
       input,
+      sourcePacket: ctx.store["casefileSourcePacket"],
       sourceAdmission: ctx.store["casefileSourceAdmission"],
       evidenceShotMap: ctx.store["casefileEvidenceShotMap"],
       evidenceShotMapAdmission: ctx.store["casefileEvidenceShotMapAdmission"],

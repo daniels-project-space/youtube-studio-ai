@@ -120,6 +120,7 @@ import { buildFootageQueries, castFootage, hasAnyFootageProvider, type FootageBr
 import { searchWikimediaImage } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
 import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
+import { assertSourceProofMediaClipBytes } from "@/lib/sourceProofMedia";
 import { buildChapters } from "@/lib/assemblyai";
 import {
   probe,
@@ -2267,7 +2268,16 @@ export const timelineAssemble: Block = {
       const cinematicPaths: string[] = [];
       for (const [index, item] of cinematicFootageManifest.items.entries()) {
         const local = join(tmp, `cinematic_source_${String(index).padStart(4, "0")}.mp4`);
-        await writeBytes(local, await getObjectBytes(item.clipKey));
+        const clipBytes = await getObjectBytes(item.clipKey);
+        if (item.sourceProofMediaReceipt) {
+          assertSourceProofMediaClipBytes({
+            receipt: item.sourceProofMediaReceipt,
+            sceneId: item.shotId,
+            sequenceFingerprint: cinematicFootageManifest.sequenceFingerprint,
+            bytes: clipBytes,
+          });
+        }
+        await writeBytes(local, clipBytes);
         cinematicPaths.push(local);
       }
       ctx.log(
