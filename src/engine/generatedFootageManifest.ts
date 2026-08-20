@@ -95,6 +95,13 @@ export const GeneratedFootageSceneManifestSchema = z
               message: error instanceof Error ? error.message : "source-proof media receipt is invalid",
             });
           }
+          if (item.sourceProofMediaReceipt.clipKey !== item.clipKey) {
+            ctx.addIssue({
+              code: z.ZodIssueCode.custom,
+              path: ["items", index, "sourceProofMediaReceipt", "clipKey"],
+              message: "source-proof media receipt must bind the exact clip key persisted in this footage manifest",
+            });
+          }
           if (
             item.keyframeReview ||
             item.terminalStillKey ||

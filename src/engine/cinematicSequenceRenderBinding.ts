@@ -8,6 +8,7 @@ import {
   GeneratedFootageSceneManifestSchema,
   type GeneratedFootageSceneManifest,
 } from "./generatedFootageManifest";
+import { assertSourceProofMediaReceipt } from "./sourceProofMedia";
 
 export interface CinematicSequenceRenderBinding {
   scenePlan: CinematicGeneratedScenePlan;
@@ -84,6 +85,36 @@ export function assertCinematicSequenceRenderBinding(args: {
       rendered.continuitySeed !== scene.continuitySeed
     ) {
       throw new Error(`cinematic clip ${index + 1} is not bound to its approved scene, continuity seed, and edit window`);
+    }
+    if (scene.sourceProofMedia) {
+      if (!rendered.sourceProofMediaReceipt) {
+        throw new Error(
+          `cinematic source-proof shot ${scene.id} is missing its exact approved source-media receipt; ` +
+          "do not fall back to an LTX clip or another source asset",
+        );
+      }
+      try {
+        assertSourceProofMediaReceipt({
+          receipt: rendered.sourceProofMediaReceipt,
+          sceneId: scene.id,
+          sequenceFingerprint: scenePlan.sequenceFingerprint,
+          obligation: scene.sourceProofMedia,
+        });
+      } catch (error) {
+        throw new Error(
+          `cinematic source-proof shot ${scene.id} no longer preserves its exact approved source/right/asset obligation: ` +
+          `${error instanceof Error ? error.message : String(error)}`,
+        );
+      }
+      if (rendered.sourceProofMediaReceipt.clipKey !== rendered.clipKey) {
+        throw new Error(
+          `cinematic source-proof shot ${scene.id} receipt does not bind the footage-manifest clip key; refusing a substituted evidence clip`,
+        );
+      }
+    } else if (rendered.sourceProofMediaReceipt) {
+      throw new Error(
+        `cinematic clip ${scene.id} carries source-proof media without an approved source-proof scene obligation`,
+      );
     }
     const nextScene = scenePlan.scenes[index + 1];
     if (nextScene) {

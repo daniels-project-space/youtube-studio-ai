@@ -8,6 +8,7 @@ import {
 import {
   SOURCE_PROOF_MEDIA_VERSION,
   assertSourceProofMediaReceipt,
+  createSourceProofMediaReceipt,
   sourceProofMediaProvenanceFingerprint,
   type SourceProofMediaObligation,
 } from "@/engine/sourceProofMedia";
@@ -132,6 +133,22 @@ async function main() {
     () => GeneratedFootageSceneManifestSchema.parse({ ...manifest, items: [{ ...manifest.items[0], sourceProofMediaReceipt: mutatedReceipt }] }),
     /source-proof|fingerprint/i,
     "a durable manifest must reject a receipt whose clip bytes/key were altered after approval",
+  );
+  const validReceiptForDifferentClip = createSourceProofMediaReceipt({
+    sceneId,
+    sequenceFingerprint,
+    obligation: approved,
+    resolvedAssetSha256: approved.assetSha256,
+    sourceProofClipSha256: resolved.receipt.sourceProofClipSha256,
+    clipKey: "runs/test/source-proof/another-approved-looking-clip.mp4",
+  });
+  assert.throws(
+    () => GeneratedFootageSceneManifestSchema.parse({
+      ...manifest,
+      items: [{ ...manifest.items[0], sourceProofMediaReceipt: validReceiptForDifferentClip }],
+    }),
+    /exact clip key persisted in this footage manifest/i,
+    "a valid source-proof receipt still cannot be bound to a different manifest clip key",
   );
 
   let rejectedCreateCalls = 0;

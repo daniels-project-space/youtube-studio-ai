@@ -151,7 +151,12 @@ function validArgs() {
 function validArgsWithSourceProof(): Parameters<typeof createCinematicAssemblyHandoff>[0] {
   const args = validArgs();
   return {
-    scenePlan: args.scenePlan,
+    scenePlan: {
+      ...args.scenePlan,
+      scenes: args.scenePlan.scenes.map((scene, index) => index === 0
+        ? { ...scene, sourceProofMedia: sourceProofObligation }
+        : scene),
+    },
     editDecisionList: args.editDecisionList,
     footageManifest: {
       ...args.footageManifest,
@@ -192,6 +197,16 @@ assert.throws(
   () => assertCinematicAssemblyHandoff(swappedProofReceipt),
   /source-proof receipt|fingerprint/i,
   "a resumed handoff cannot substitute a different evidence object key",
+);
+
+const syntheticProofFallback = validArgs();
+syntheticProofFallback.scenePlan.scenes = syntheticProofFallback.scenePlan.scenes.map((scene, index) => index === 0
+  ? { ...scene, sourceProofMedia: sourceProofObligation }
+  : scene);
+assert.throws(
+  () => createCinematicAssemblyHandoff(syntheticProofFallback),
+  /source-proof shot.*missing.*source-media receipt|do not fall back to an LTX clip/i,
+  "a planned real source-proof insert cannot silently become a reviewed LTX take",
 );
 
 const reorderedHandoff = structuredClone(handoff);

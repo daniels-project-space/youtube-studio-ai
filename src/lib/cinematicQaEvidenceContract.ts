@@ -17,6 +17,12 @@ import type {
   CinematicEditDecisionList,
   CinematicMannequin,
 } from "@/engine/cinematicCaseSequence";
+import type { GeneratedFootageSceneManifest } from "@/engine/generatedFootageManifest";
+import {
+  assertSourceProofMediaReceipt,
+  SourceProofMediaReceiptSchema,
+  type SourceProofMediaReceipt,
+} from "@/engine/sourceProofMedia";
 import type { VisualReviewEvidence, VisualReviewFrame } from "@/lib/visualReview";
 import { visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 
@@ -65,6 +71,20 @@ const ClaimReceiptSchema = z.object({
   pass: z.literal(true),
 }).strict();
 
+/**
+ * The final-master proof view retains the exact approved asset/rights receipt
+ * that produced the evidence clip. Frames attest that the proof is visibly
+ * present; the receipt prevents it being rebound to another source asset.
+ */
+const SourceProofFrameReceiptSchema = z.object({
+  shotId,
+  sourceProofMediaReceipt: SourceProofMediaReceiptSchema,
+  evidenceFrameIds: z.array(frameId).min(1).max(12),
+  onScreenCitationVisible: z.literal(true),
+  visualSourceProofVisible: z.literal(true),
+  pass: z.literal(true),
+}).strict();
+
 const StoryPayoffReceiptSchema = z.object({
   coldOpenBeatId: beatId,
   revealBeatId: beatId,
@@ -100,6 +120,8 @@ export const CinematicFinalMasterQaEvidenceReceiptSchema = z.object({
   reviewer: z.literal("non_google_vision"),
   locks: z.array(LockReceiptSchema).min(2).max(2_000),
   claims: z.array(ClaimReceiptSchema).min(1).max(20_000),
+  /** Empty only for a sequence with no real approved source-media insert. */
+  sourceProofs: z.array(SourceProofFrameReceiptSchema).max(2_000).default([]),
   payoffs: z.array(StoryPayoffReceiptSchema).min(1).max(500),
   cuts: z.array(CutReceiptSchema).max(2_000),
   pass: z.literal(true),
@@ -124,6 +146,12 @@ export interface CinematicQaExpectedCut {
   tensionState: string;
 }
 
+/** The immutable evidence clip expected on one real source-proof shot. */
+export interface CinematicQaExpectedSourceProof {
+  shotId: string;
+  sourceProofMediaReceipt: SourceProofMediaReceipt;
+}
+
 /** A source-proof reveal which explicitly earns the opening causal question. */
 export interface CinematicQaExpectedStoryPayoff {
   coldOpenBeatId: string;
@@ -144,6 +172,7 @@ export interface CinematicFinalMasterQaPlan {
   sequenceFingerprint: string;
   bodyOffsetSec: number;
   locks: CinematicQaExpectedLock[];
+  sourceProofs: CinematicQaExpectedSourceProof[];
   payoffs: CinematicQaExpectedStoryPayoff[];
   cuts: CinematicQaExpectedCut[];
 }
@@ -400,10 +429,12 @@ export async function reviewCinematicFinalMasterQaEvidence(args: {
   const frames = selectedEvidenceFrames({ evidence: args.evidence, framePaths: args.framePaths });
   const locks: CinematicFinalMasterQaEvidenceReceipt["locks"] = [];
   const claims: CinematicFinalMasterQaEvidenceReceipt["claims"] = [];
+  const sourceProofFrameIdsByShot = new Map<string, string[]>();
   const payoffs: CinematicFinalMasterQaEvidenceReceipt["payoffs"] = [];
   const cuts: CinematicFinalMasterQaEvidenceReceipt["cuts"] = [];
   for (const lock of args.plan.locks) {
     const selected = lockEvidenceFrames(lock, frames);
+    sourceProofFrameIdsByShot.set(lock.shotId, selected.map((frame) => frame.id));
     const judgement = LockJudgementSchema.parse(parseReviewerJson(
       await reviewer({ kind: "lock", frames: selected, prompt: lockReviewerPrompt(lock, selected) }),
       `lock ${lock.shotId}`,
@@ -449,6 +480,20 @@ export async function reviewCinematicFinalMasterQaEvidence(args: {
       });
     }
   }
+  const sourceProofs: CinematicFinalMasterQaEvidenceReceipt["sourceProofs"] = args.plan.sourceProofs.map((proof) => {
+    const evidenceFrameIds = sourceProofFrameIdsByShot.get(proof.shotId);
+    if (!evidenceFrameIds?.length) {
+      throw new Error(`cinematic QA source-proof shot ${proof.shotId} has no selected final-master evidence frames`);
+    }
+    return {
+      shotId: proof.shotId,
+      sourceProofMediaReceipt: proof.sourceProofMediaReceipt,
+      evidenceFrameIds,
+      onScreenCitationVisible: true,
+      visualSourceProofVisible: true,
+      pass: true,
+    };
+  });
   for (const cut of args.plan.cuts) {
     const selected = cutEvidenceFrames(cut, frames);
     const judgement = CutJudgementSchema.parse(parseReviewerJson(
@@ -475,6 +520,7 @@ export async function reviewCinematicFinalMasterQaEvidence(args: {
       reviewer: "non_google_vision",
       locks,
       claims,
+      sourceProofs,
       payoffs,
       cuts,
       pass: true,
@@ -491,6 +537,8 @@ export function cinematicFinalMasterQaPlan(args: {
   sequence: Pick<CinematicCaseSequenceInput, "cast" | "beats"> & { contentFingerprint?: string };
   creativeLocks: CinematicCreativeLocks;
   editDecisionList: CinematicEditDecisionList;
+  /** Required whenever the reviewed sequence contains a real source-proof insert. */
+  footageManifest?: Pick<GeneratedFootageSceneManifest, "sequenceFingerprint" | "items">;
   bodyOffsetSec?: number;
 }): CinematicFinalMasterQaPlan {
   const offset = finiteNonNegative(args.bodyOffsetSec);
@@ -498,11 +546,19 @@ export function cinematicFinalMasterQaPlan(args: {
     throw new Error("cinematic QA plan cannot combine creative locks and EDL from different sequences");
   }
   const castById = new Map(args.sequence.cast.map((cast) => [cast.id, cast]));
-  const shotPlan = new Map<string, { castIds: string[]; claimIds: string[] }>();
+  const shotPlan = new Map<string, {
+    castIds: string[];
+    claimIds: string[];
+    sourceProofMedia?: SourceProofMediaReceipt["obligation"];
+  }>();
   for (const beat of args.sequence.beats) {
     for (const shot of beat.shots) {
       if (shotPlan.has(shot.id)) throw new Error(`cinematic QA plan contains duplicate shot ${shot.id}`);
-      shotPlan.set(shot.id, { castIds: [...shot.castIds], claimIds: [...beat.claimIds] });
+      shotPlan.set(shot.id, {
+        castIds: [...shot.castIds],
+        claimIds: [...beat.claimIds],
+        ...(shot.sourceProofMedia ? { sourceProofMedia: shot.sourceProofMedia } : {}),
+      });
     }
   }
   const coldOpen = args.sequence.beats.find((beat) => beat.narrativeRole === "cold_open");
@@ -584,6 +640,68 @@ export function cinematicFinalMasterQaPlan(args: {
       throw new Error(`cinematic QA lock ${lock.shotId} timing does not match the approved EDL`);
     }
   }
+  const expectedSourceProofs = [...shotPlan.entries()]
+    .flatMap(([shotId, planned]) => planned.sourceProofMedia
+      ? [{ shotId, obligation: planned.sourceProofMedia }]
+      : []);
+  if (expectedSourceProofs.length > 0 && !args.footageManifest) {
+    throw new Error(
+      "cinematic QA plan requires the exact footage-manifest source-proof receipt; " +
+      "a real approved source asset cannot be reviewed as an unbound generated clip",
+    );
+  }
+  if (
+    args.footageManifest &&
+    args.footageManifest.sequenceFingerprint !== args.creativeLocks.sequenceFingerprint
+  ) {
+    throw new Error("cinematic QA plan cannot combine a footage manifest from another sequence");
+  }
+  const expectedSourceProofByShot = new Map(expectedSourceProofs.map((proof) => [proof.shotId, proof]));
+  const renderedSourceProofByShot = new Map<string, SourceProofMediaReceipt>();
+  for (const item of args.footageManifest?.items ?? []) {
+    const receipt = item.sourceProofMediaReceipt;
+    if (!receipt) continue;
+    if (!expectedSourceProofByShot.has(item.sceneId)) {
+      throw new Error(
+        `cinematic QA plan found unplanned source-proof media on ${item.sceneId}; ` +
+        "a receipt cannot convert a generated scene into factual evidence",
+      );
+    }
+    if (renderedSourceProofByShot.has(item.sceneId)) {
+      throw new Error(`cinematic QA plan has duplicate source-proof footage receipts for ${item.sceneId}`);
+    }
+    if (receipt.clipKey !== item.clipKey) {
+      throw new Error(
+        `cinematic QA plan source-proof receipt for ${item.sceneId} does not bind the footage-manifest clip key`,
+      );
+    }
+    renderedSourceProofByShot.set(item.sceneId, receipt);
+  }
+  const sourceProofs: CinematicQaExpectedSourceProof[] = expectedSourceProofs.map(({ shotId, obligation }) => {
+    const receipt = renderedSourceProofByShot.get(shotId);
+    if (!receipt) {
+      throw new Error(
+        `cinematic QA plan is missing the exact approved source-proof footage receipt for ${shotId}; ` +
+        "do not fall back to LTX or a different source asset",
+      );
+    }
+    try {
+      return {
+        shotId,
+        sourceProofMediaReceipt: assertSourceProofMediaReceipt({
+          receipt,
+          sceneId: shotId,
+          sequenceFingerprint: args.creativeLocks.sequenceFingerprint,
+          obligation,
+        }),
+      };
+    } catch (error) {
+      throw new Error(
+        `cinematic QA plan source-proof receipt for ${shotId} does not preserve its exact approved source/right/asset obligation: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+      );
+    }
+  });
   const cuts = args.editDecisionList.edits.slice(1).map((edit) => {
     if (!lockIds.has(edit.shotId)) {
       throw new Error(`cinematic QA EDL edit ${edit.shotId} has no final-master creative lock`);
@@ -600,6 +718,7 @@ export function cinematicFinalMasterQaPlan(args: {
     sequenceFingerprint: args.creativeLocks.sequenceFingerprint,
     bodyOffsetSec: offset,
     locks,
+    sourceProofs,
     payoffs,
     cuts,
   };
@@ -695,6 +814,42 @@ function assertClaimCoverage(
   }
   const missing = [...expectedClaims.keys()].filter((id) => !covered.has(id));
   if (missing.length) throw new Error(`cinematic QA evidence is missing approved claim coverage: ${missing.join(", ")}`);
+}
+
+function assertSourceProofCoverage(
+  receipt: CinematicFinalMasterQaEvidenceReceipt,
+  plan: CinematicFinalMasterQaPlan,
+  frames: ReadonlyMap<string, VisualReviewFrame>,
+): void {
+  if (receipt.sourceProofs.length !== plan.sourceProofs.length) {
+    throw new Error(
+      `cinematic QA evidence has ${receipt.sourceProofs.length}/${plan.sourceProofs.length} exact source-proof receipt(s)`,
+    );
+  }
+  assertUnique(receipt.sourceProofs.map((proof) => proof.shotId), "source-proof receipt shot id");
+  const expected = new Map(plan.sourceProofs.map((proof) => [proof.shotId, proof]));
+  const lockByShot = new Map(plan.locks.map((lock) => [lock.shotId, lock]));
+  for (const proof of receipt.sourceProofs) {
+    const planned = expected.get(proof.shotId);
+    if (!planned) {
+      throw new Error(`cinematic QA evidence contains foreign source-proof receipt for ${proof.shotId}`);
+    }
+    if (
+      proof.sourceProofMediaReceipt.receiptFingerprint !==
+      planned.sourceProofMediaReceipt.receiptFingerprint
+    ) {
+      throw new Error(
+        `cinematic QA source-proof receipt for ${proof.shotId} does not retain the exact approved asset/rights/clip binding`,
+      );
+    }
+    const lock = lockByShot.get(proof.shotId);
+    if (!lock) throw new Error(`cinematic QA source-proof receipt ${proof.shotId} has no approved creative lock`);
+    assertUnique(proof.evidenceFrameIds, `source-proof evidence frame in ${proof.shotId}`);
+    for (const id of proof.evidenceFrameIds) {
+      const frame = frameAt(frames, id, `source-proof ${proof.shotId}`);
+      assertTimeWithin(frame.tSec, lock.startSec, lock.endSec, `source-proof ${proof.shotId}`);
+    }
+  }
 }
 
 function storyPayoffKey(coldOpenBeatId: string, revealBeatId: string): string {
@@ -821,6 +976,7 @@ export function assertCinematicFinalMasterQaEvidence(args: {
     assertContinuity(lock, planned);
   }
   assertClaimCoverage(receipt, args.plan, frames);
+  assertSourceProofCoverage(receipt, args.plan, frames);
   assertStoryPayoffCoverage(receipt, args.plan, frames);
   const tolerance = Number.isFinite(args.cutToleranceSec)
     ? Math.max(0.1, Math.min(1, Number(args.cutToleranceSec)))

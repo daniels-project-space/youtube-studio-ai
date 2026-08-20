@@ -3186,6 +3186,7 @@ export const qaVisual: Block = {
           sequence: cinematicSequenceInput!,
           creativeLocks: cinematicCreativeLocks!,
           editDecisionList: cinematicEdl!,
+          footageManifest: cinematicBinding.footageManifest,
           bodyOffsetSec: cinematicBodyOffsetSec,
         });
         cinematicFinalMasterQaReceipt = await reviewCinematicFinalMasterQaEvidence({
