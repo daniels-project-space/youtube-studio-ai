@@ -20,6 +20,7 @@ import type * as channels from "../channels.js";
 import type * as competitors from "../competitors.js";
 import type * as contentPlan from "../contentPlan.js";
 import type * as crons from "../crons.js";
+import type * as editorialEvidencePackets from "../editorialEvidencePackets.js";
 import type * as folders from "../folders.js";
 import type * as forgedModules from "../forgedModules.js";
 import type * as goals from "../goals.js";
@@ -62,6 +63,7 @@ declare const fullApi: ApiFromModules<{
   competitors: typeof competitors;
   contentPlan: typeof contentPlan;
   crons: typeof crons;
+  editorialEvidencePackets: typeof editorialEvidencePackets;
   folders: typeof folders;
   forgedModules: typeof forgedModules;
   goals: typeof goals;

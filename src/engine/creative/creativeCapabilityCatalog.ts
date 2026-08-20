@@ -332,6 +332,7 @@ function editorialEvidencePacketOffer(): CreativeCapabilityOffer {
     automationAdmission: admission,
     requirements: EDITORIAL_EVIDENCE_PACKET_REQUIREMENTS,
     qualityFocus: ["factual source-to-visual traceability", "immutable snapshot integrity", "human-reviewed causal explanation"],
+    reviewHref: "/editorial-evidence",
     // This is an editorial intake, not a compiler mutation. The packet is
     // supplied to the supervised episode-graph path only after review.
     pipelineObligations: [],

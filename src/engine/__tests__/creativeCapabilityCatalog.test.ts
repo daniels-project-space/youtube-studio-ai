@@ -173,7 +173,7 @@ const factualIllustrated = resolveCreativeCapabilities(factualIllustratedIntent,
 assert(factualIllustrated, "factual illustrated concepts must discover the reusable reviewed evidence packet");
 assert.equal(factualIllustrated.selectionMode, "private_review_only");
 assert.equal(factualIllustrated.modules[0]?.block, "editorial_evidence_packet");
-assert.equal(factualIllustrated.reviewHref, undefined, "the creator must not invent an editorial desk that does not exist");
+assert.equal(factualIllustrated.reviewHref, "/editorial-evidence", "the creator must route factual evidence review to the real private desk");
 assert.equal(
   resolveCreativeCapabilities({ concept: "An original fictional illustrated scenario story" }, "illustrated_explainer")
     .some((offer) => offer.capability === "editorial_evidence_packet"),

@@ -62,7 +62,7 @@ assert.deepEqual(
   ["editorial_evidence_packet"],
 );
 assert.equal(factualIllustratedExplainer.preflight.creatorAdmission.mode, "registered_supervised_non_gemini");
-assert.equal(factualIllustratedExplainer.preflight.creatorAdmission.reviewHref, undefined);
+assert.equal(factualIllustratedExplainer.preflight.creatorAdmission.reviewHref, "/editorial-evidence");
 
 // These are additional uses of the existing supervised Casefile evidence chain,
 // not new automatic channel types or renderer claims.
@@ -329,9 +329,10 @@ assert(
   "switching from an autonomous build to a supervised intake must clear retained spend, render, YouTube, publication, and cross-post authorities",
 );
 assert(
-  creatorSource.includes("Proposed family modules (not an executable build)") &&
+  creatorSource.includes("Registered private-review stages") &&
+    creatorSource.includes("supervisedAdmission ? activeReviewOnlyStages : preview") &&
     creatorSource.includes('!supervisedAdmission && (publishMode !== "draft" || toggles.crosspost)'),
-  "a private-review family must not present its blocked pipeline or publishing approval as an executable channel build",
+  "a private-review family must expose only its registered review stages and cannot present publishing approval as an executable build",
 );
 
 async function verifyPublicAsyncSelection(): Promise<void> {
