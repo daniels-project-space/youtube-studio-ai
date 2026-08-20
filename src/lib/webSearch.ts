@@ -41,6 +41,14 @@ export interface WebSearchResult {
   snippet: string;
 }
 
+/**
+ * This module uses Stagehand-on-Browserbase purely as a remote-Chrome driver:
+ * it navigates and reads the DOM, and makes NO `act`/`observe`/`extract` call,
+ * so no LLM is involved in a web search. It therefore binds only the `context`
+ * half of the session handed out by `withStagehand()` (see
+ * `StagehandSession` in src/lib/browserbase.ts) and ignores the `stagehand`
+ * half entirely.
+ */
 interface BingPage {
   goto(url: string, opts?: Record<string, unknown>): Promise<unknown>;
   evaluate<T>(fn: () => T | Promise<T>): Promise<T>;
@@ -48,7 +56,7 @@ interface BingPage {
 interface BingContext {
   newPage(url?: string): Promise<BingPage>;
 }
-interface BingStagehand {
+interface BingStagehandSession {
   context: BingContext;
 }
 
@@ -177,7 +185,7 @@ async function browserbaseSearchWeb(
   // env/config resolution belongs to browserbase.ts alone and is not
   // duplicated here.
   const { value } = await withStagehand(async (shU) => {
-    const sh = shU as BingStagehand;
+    const sh = shU as BingStagehandSession;
     const page = await sh.context.newPage("about:blank");
     await page.goto(url, { timeout: timeoutMs });
     const html = await page.evaluate(() => document.documentElement.outerHTML);

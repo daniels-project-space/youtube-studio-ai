@@ -49,34 +49,44 @@ export function isYoutubeRecoveryControlDenied(text: string, href = ""): boolean
     !isYoutubeRecoveryRequestAllowed("GET", href || "about:blank");
 }
 
-interface RecoveryRequest {
-  method(): string;
-  url(): string;
-}
+/**
+ * Domains the recovery flow legitimately needs in order to render a YouTube
+ * channel-switcher / channel-about / Studio page. Anything else is refused by
+ * the browser context's domain policy.
+ *
+ * IMPORTANT (see `installYoutubeRecoveryGuards` for the full caveat): because
+ * every provider MUTATION endpoint also lives on these same domains, this
+ * allowlist does NOT constrain what the page may do to the account. It only
+ * keeps traffic from leaving the provider's own origins.
+ */
+const RECOVERY_ALLOWED_DOMAINS = [
+  "youtube.com",
+  "www.youtube.com",
+  "studio.youtube.com",
+  "m.youtube.com",
+  "ytimg.com",
+  "i.ytimg.com",
+  "s.ytimg.com",
+  "ggpht.com",
+  "yt3.ggpht.com",
+  "googleusercontent.com",
+  "yt3.googleusercontent.com",
+  "gstatic.com",
+  "www.gstatic.com",
+  "google.com",
+  "www.google.com",
+  "accounts.google.com",
+  "googleapis.com",
+] as const;
 
-interface RecoveryRoute {
-  request(): RecoveryRequest;
-  abort(errorCode?: string): Promise<void>;
-  continue(): Promise<void>;
-}
-
-interface RecoveryWebSocketRoute {
-  close(options?: { code?: number; reason?: string }): Promise<void>;
+export interface YoutubeRecoveryDomainPolicy {
+  allowedDomains?: string[];
+  blockedDomains?: string[];
 }
 
 export interface YoutubeRecoveryContext {
-  route(
-    url: string,
-    handler: (route: RecoveryRoute) => Promise<void> | void,
-  ): Promise<void>;
-  routeWebSocket(
-    url: string,
-    handler: (route: RecoveryWebSocketRoute) => Promise<void> | void,
-  ): Promise<void>;
   addInitScript(script: () => void): Promise<void>;
-  newCDPSession(page: YoutubeRecoveryPage): Promise<{
-    send(method: string, params?: Record<string, unknown>): Promise<unknown>;
-  }>;
+  setDomainPolicy(policy: YoutubeRecoveryDomainPolicy | null): Promise<void>;
 }
 
 export interface YoutubeRecoveryPage {
@@ -84,45 +94,78 @@ export interface YoutubeRecoveryPage {
   waitForTimeout(ms: number): Promise<void>;
   evaluate<T>(fn: () => T | Promise<T>): Promise<T>;
   evaluate<T, A>(fn: (arg: A) => T | Promise<T>, arg: A): Promise<T>;
+  /** Optional: present on Stagehand 4.x pages; used to bind the guards to an existing tab. */
+  addInitScript?(script: () => void): Promise<void>;
 }
 
 /**
  * Installs the recovery safety boundary before any provider page is loaded.
- * Recovery allows only read requests, blocks WebSockets and beacons, and
- * suppresses every interactive DOM event. The recovery routine can therefore
- * navigate an exact existing link but cannot submit create/rename/edit UI.
+ *
+ * ⚠ REDUCED GUARANTEE SINCE THE STAGEHAND 4.x MIGRATION — READ THIS.
+ *
+ * This boundary used to have TWO layers. Stagehand 3.x exposed a real Playwright
+ * `BrowserContext`, so the outer layer was genuine network-level interception:
+ * `context.route()` inspected and aborted every request that was not a safe
+ * method or that touched a mutation URL, `context.routeWebSocket()` closed all
+ * WebSockets, and a CDP `Network.setBypassServiceWorker` stopped a service
+ * worker retained in the authenticated context from bypassing those routes.
+ *
+ * Stagehand 4.x replaced Playwright with its own CDP engine and a much narrower
+ * `BrowserContext`. `route()`, `routeWebSocket()` and `newCDPSession()` DO NOT
+ * EXIST in 4.x and have no public replacement, so the outer network layer is
+ * GONE. What remains is:
+ *
+ *  - `setDomainPolicy()` — a DOMAIN-level allowlist only. It cannot express the
+ *    method filter (GET/HEAD/OPTIONS) or the mutation-path blocklist, and every
+ *    YouTube mutation endpoint lives on the very domains the page needs in order
+ *    to render at all. It therefore does NOT constrain what the page can do to
+ *    the account; it only prevents traffic to unrelated third-party origins.
+ *  - `addInitScript()` — in-page patching, which now carries the ENTIRE
+ *    read-only enforcement on its own: interaction suppression, the method
+ *    filter and mutation-path blocklist on `fetch`/`XMLHttpRequest`, blocked
+ *    form submission, beacons, WebSockets, EventSource and service-worker
+ *    registration.
+ *
+ * RESIDUAL RISK, stated plainly. In-page patching is same-origin JavaScript and
+ * is weaker than network interception:
+ *  - A request issued from a context this script does not patch (a service
+ *    worker that was ALREADY active in the persisted Browserbase context, a
+ *    dedicated/shared worker, or a cross-origin iframe with its own realm) is
+ *    not filtered. `Network.setBypassServiceWorker` used to close exactly this
+ *    hole and is no longer available.
+ *  - Page code that captured a native reference before this script ran, or that
+ *    re-imports a clean `fetch` from a fresh same-origin iframe, can defeat the
+ *    monkey-patches.
+ *  - Navigations themselves are not method-filtered at the network layer; the
+ *    caller is responsible for only ever calling `page.goto()` with an href that
+ *    `isYoutubeRecoveryRequestAllowed()` has approved (which
+ *    `selectExactExistingYoutubeChannel` does).
+ *
+ * The compensating controls are unchanged and remain the real safety net: the
+ * recovery path never invokes an LLM agent, only navigates hrefs that passed
+ * `chooseExactExistingYoutubeChannelLink()`, and its result is accepted only
+ * after `proveExactActiveChannel()` verifies provider-owned metadata.
  */
 export async function installYoutubeRecoveryGuards(
   context: YoutubeRecoveryContext,
   page: YoutubeRecoveryPage,
 ): Promise<void> {
   if (
-    typeof context.route !== "function" ||
-    typeof context.routeWebSocket !== "function" ||
     typeof context.addInitScript !== "function" ||
-    typeof context.newCDPSession !== "function"
+    typeof context.setDomainPolicy !== "function"
   ) {
     throw new Error("read-only YouTube recovery guards are unavailable");
   }
 
-  await context.route("**/*", async (route) => {
-    const request = route.request();
-    if (!isYoutubeRecoveryRequestAllowed(request.method(), request.url())) {
-      await route.abort("blockedbyclient");
-      return;
-    }
-    await route.continue();
-  });
-  await context.routeWebSocket("**/*", async (socket) => {
-    await socket.close({ code: 1008, reason: "read-only YouTube recovery" });
-  });
-  const cdp = await context.newCDPSession(page);
-  await cdp.send("Network.enable");
-  // Playwright routes can otherwise be bypassed by a service worker retained
-  // in the authenticated Browserbase context. Force this page through the
-  // context request guard before loading any provider origin.
-  await cdp.send("Network.setBypassServiceWorker", { bypass: true });
-  await context.addInitScript(() => {
+  // Outer layer (weak): keep traffic on provider origins. This cannot stop a
+  // mutation aimed at youtube.com itself — see the caveat above.
+  await context.setDomainPolicy({ allowedDomains: [...RECOVERY_ALLOWED_DOMAINS] });
+
+  // Inner layer (now the only real enforcement): patch the page realm before
+  // any provider script runs. Installed on BOTH the context (applies to every
+  // page/navigation) and the already-created page, so an existing tab is
+  // covered too.
+  const recoveryInitScript = () => {
     const unsafeUrlFragments = [
       "create_channel",
       "create-channel",
@@ -178,7 +221,7 @@ export async function installYoutubeRecoveryGuards(
         );
         return nativeFetch(input, init);
       }) as typeof window.fetch;
-    } catch { /* context routing remains the outer request boundary */ }
+    } catch { /* best effort: a failed patch leaves this vector UNGUARDED */ }
 
     try {
       const nativeOpen = XMLHttpRequest.prototype.open;
@@ -194,13 +237,13 @@ export async function installYoutubeRecoveryGuards(
         }
         Reflect.apply(nativeOpen, this, [method, String(url), async, username, password]);
       };
-    } catch { /* context routing remains the outer request boundary */ }
+    } catch { /* best effort: a failed patch leaves this vector UNGUARDED */ }
 
     try {
       Navigator.prototype.sendBeacon = function recoveryBeacon(): boolean {
         return false;
       };
-    } catch { /* beacons are also denied by context routing */ }
+    } catch { /* best effort: a failed patch leaves beacons UNGUARDED */ }
     try {
       HTMLFormElement.prototype.submit = function recoverySubmit(): never {
         return block("form submission blocked by read-only YouTube recovery");
@@ -208,8 +251,50 @@ export async function installYoutubeRecoveryGuards(
       HTMLFormElement.prototype.requestSubmit = function recoveryRequestSubmit(): never {
         return block("form submission blocked by read-only YouTube recovery");
       };
-    } catch { /* submit events and non-read requests remain blocked */ }
-  });
+    } catch { /* best effort: suppressed submit events remain the fallback */ }
+
+    // Replaces the removed `context.routeWebSocket()` layer. Page-realm only:
+    // a socket opened by an already-active service worker is NOT covered.
+    try {
+      window.WebSocket = function recoveryWebSocket(): never {
+        return block("WebSocket blocked by read-only YouTube recovery");
+      } as unknown as typeof WebSocket;
+    } catch { /* best effort: a failed patch leaves WebSockets UNGUARDED */ }
+    try {
+      window.EventSource = function recoveryEventSource(): never {
+        return block("EventSource blocked by read-only YouTube recovery");
+      } as unknown as typeof EventSource;
+    } catch { /* best effort: a failed patch leaves EventSource UNGUARDED */ }
+
+    // Partial stand-in for the removed CDP `Network.setBypassServiceWorker`.
+    // This prevents NEW service-worker registrations and best-effort unregisters
+    // existing ones, but a worker already controlling this page keeps running
+    // until a reload — requests it issues itself bypass every patch above.
+    try {
+      const serviceWorker = navigator.serviceWorker as
+        | (ServiceWorkerContainer & { register: unknown })
+        | undefined;
+      if (serviceWorker) {
+        void serviceWorker.getRegistrations?.()
+          .then((registrations) => registrations.forEach((registration) => {
+            void registration.unregister().catch(() => {});
+          }))
+          .catch(() => {});
+        serviceWorker.register = function recoveryRegister(): Promise<never> {
+          return Promise.reject(
+            new DOMException("service worker blocked by read-only YouTube recovery", "SecurityError"),
+          );
+        };
+      }
+    } catch { /* best effort: an active worker may still bypass these patches */ }
+  };
+
+  await context.addInitScript(recoveryInitScript);
+  // Also bind to the already-created page: a context-level script is only
+  // guaranteed for pages/navigations created after installation.
+  if (typeof page.addInitScript === "function") {
+    await page.addInitScript(recoveryInitScript);
+  }
 }
 
 export type ExactExistingYoutubeChannelSelection =

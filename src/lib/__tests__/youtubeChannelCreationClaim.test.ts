@@ -542,7 +542,9 @@ async function main(): Promise<void> {
     taskSource.indexOf('if (claimed.action === "recover")'),
     taskSource.indexOf('action: "create"'),
   );
-  assert.doesNotMatch(recoverySource, /\.agent\(|agent\.execute\(/);
+  // Recovery must stay mechanically read-only: no built-in agent (3.x) and no
+  // hand-rolled step-loop (4.x) may ever run on the recovery path.
+  assert.doesNotMatch(recoverySource, /\.agent\(|agent\.execute\(|runStagehandAgentLoop/);
   assert.match(recoverySource, /installYoutubeRecoveryGuards/);
   assert.match(recoverySource, /selectExactExistingYoutubeChannel/);
   const inventoryCheckpoint = taskSource.indexOf("recordPreProviderInventory");
@@ -561,40 +563,105 @@ async function main(): Promise<void> {
   assert.equal(isYoutubeRecoveryRequestAllowed("GET", "https://www.youtube.com/create_channel"), false);
   assert.equal(isYoutubeRecoveryRequestAllowed("GET", "https://www.youtube.com/@exactchannel/about"), true);
   assert.equal(isYoutubeRecoveryControlDenied("Create a channel"), true);
-  type RoutedRequest = {
-    request(): { method(): string; url(): string };
-    abort(): Promise<void>;
-    continue(): Promise<void>;
-  };
-  type RoutedSocket = { close(): Promise<void> };
-  let requestGuard: ((route: RoutedRequest) => Promise<void> | void) | undefined;
-  let websocketGuard: ((route: RoutedSocket) => Promise<void> | void) | undefined;
-  let initScripts = 0;
-  const cdpCommands: string[] = [];
+  // Stagehand 4.x removed network-level route interception, so the in-page init
+  // script is now the ONLY read-only enforcement. It is exercised for real
+  // below rather than merely counted.
+  let domainPolicy: { allowedDomains?: string[]; blockedDomains?: string[] } | null | undefined;
+  const contextScripts: Array<() => void> = [];
+  const pageScripts: Array<() => void> = [];
   const fakeContext: YoutubeRecoveryContext = {
-    route: async (_url, handler) => { requestGuard = handler; },
-    routeWebSocket: async (_url, handler) => { websocketGuard = handler; },
-    addInitScript: async () => { initScripts += 1; },
-    newCDPSession: async () => ({
-      send: async (method) => { cdpCommands.push(method); },
-    }),
+    addInitScript: async (script) => { contextScripts.push(script); },
+    setDomainPolicy: async (policy) => { domainPolicy = policy; },
   };
-  await installYoutubeRecoveryGuards(fakeContext, {} as YoutubeRecoveryPage);
-  assert.equal(initScripts, 1);
-  assert.deepEqual(cdpCommands, ["Network.enable", "Network.setBypassServiceWorker"]);
-  let postAborted = false;
-  await requestGuard!({
-    request: () => ({
-      method: () => "POST",
-      url: () => "https://www.youtube.com/youtubei/v1/browse",
-    }),
-    abort: async () => { postAborted = true; },
-    continue: async () => assert.fail("unsafe recovery request was continued"),
-  });
-  assert.equal(postAborted, true);
-  let socketClosed = false;
-  await websocketGuard!({ close: async () => { socketClosed = true; } });
-  assert.equal(socketClosed, true);
+  const fakePage = {
+    addInitScript: async (script: () => void) => { pageScripts.push(script); },
+  } as unknown as YoutubeRecoveryPage;
+
+  // Fail closed when the SDK cannot provide the guard surface at all.
+  await assert.rejects(
+    () => installYoutubeRecoveryGuards({ addInitScript: async () => {} } as unknown as YoutubeRecoveryContext, fakePage),
+    /read-only YouTube recovery guards are unavailable/,
+  );
+
+  await installYoutubeRecoveryGuards(fakeContext, fakePage);
+  assert.equal(contextScripts.length, 1, "guards must bind an init script to the context");
+  assert.equal(pageScripts.length, 1, "guards must also bind the init script to the existing page");
+  assert.ok(domainPolicy?.allowedDomains?.includes("www.youtube.com"));
+  assert.ok(domainPolicy?.allowedDomains?.includes("studio.youtube.com"));
+  assert.ok(
+    !domainPolicy?.allowedDomains?.some((domain) => /evil|example\.com/i.test(domain)),
+    "the recovery domain allowlist must stay scoped to provider origins",
+  );
+
+  // Run the init script against stand-in browser globals and prove each vector
+  // it is now solely responsible for actually refuses a mutation.
+  {
+    const observedEvents: string[] = [];
+    const passedThrough: string[] = [];
+    const fakeWindow: Record<string, unknown> = {
+      addEventListener: (name: string) => { observedEvents.push(name); },
+      fetch: (input: unknown) => { passedThrough.push(String(input)); return Promise.resolve("ok"); },
+    };
+    const xhrOpened: string[] = [];
+    class FakeXMLHttpRequest {
+      open(method: string, url: string) { xhrOpened.push(`${method} ${url}`); }
+    }
+    class FakeNavigator { sendBeacon(): boolean { return true; } }
+    class FakeHTMLFormElement {
+      submit(): void {}
+      requestSubmit(): void {}
+    }
+    const globals = globalThis as unknown as Record<string, unknown>;
+    const priorGlobals = {
+      window: globals.window,
+      XMLHttpRequest: globals.XMLHttpRequest,
+      Navigator: globals.Navigator,
+      HTMLFormElement: globals.HTMLFormElement,
+    };
+    globals.window = fakeWindow;
+    globals.XMLHttpRequest = FakeXMLHttpRequest;
+    globals.Navigator = FakeNavigator;
+    globals.HTMLFormElement = FakeHTMLFormElement;
+    try {
+      contextScripts[0]();
+
+      assert.ok(observedEvents.includes("click"), "interaction suppression must cover click");
+      assert.ok(observedEvents.includes("submit"), "interaction suppression must cover submit");
+
+      const patchedFetch = fakeWindow.fetch as (input: unknown, init?: unknown) => Promise<unknown>;
+      await assert.doesNotReject(() => patchedFetch("https://www.youtube.com/@exactchannel/about"));
+      assert.deepEqual(passedThrough, ["https://www.youtube.com/@exactchannel/about"]);
+      await assert.rejects(
+        () => patchedFetch("https://www.youtube.com/youtubei/v1/browse", { method: "POST" }),
+        /read-only YouTube recovery/,
+      );
+      await assert.rejects(
+        () => patchedFetch("https://www.youtube.com/create_channel"),
+        /read-only YouTube recovery/,
+      );
+      assert.equal(passedThrough.length, 1, "no blocked request may reach the native fetch");
+
+      const xhr = new FakeXMLHttpRequest();
+      assert.throws(() => xhr.open("POST", "https://www.youtube.com/youtubei/v1/browse"), /read-only YouTube recovery/);
+      assert.throws(() => xhr.open("GET", "https://www.youtube.com/channel/rename"), /read-only YouTube recovery/);
+      xhr.open("GET", "https://www.youtube.com/@exactchannel/about");
+      assert.deepEqual(xhrOpened, ["GET https://www.youtube.com/@exactchannel/about"]);
+
+      assert.equal(new FakeNavigator().sendBeacon(), false, "beacons must be neutralised");
+      assert.throws(() => new FakeHTMLFormElement().submit(), /read-only YouTube recovery/);
+      assert.throws(() => new FakeHTMLFormElement().requestSubmit(), /read-only YouTube recovery/);
+
+      const PatchedWebSocket = fakeWindow.WebSocket as new () => unknown;
+      assert.throws(() => new PatchedWebSocket(), /read-only YouTube recovery/);
+      const PatchedEventSource = fakeWindow.EventSource as new () => unknown;
+      assert.throws(() => new PatchedEventSource(), /read-only YouTube recovery/);
+    } finally {
+      for (const [key, value] of Object.entries(priorGlobals)) {
+        if (value === undefined) delete globals[key];
+        else globals[key] = value;
+      }
+    }
+  }
   assert.deepEqual(chooseExactExistingYoutubeChannelLink([], {
     name: "Exact Channel",
     handle: "exactchannel",
