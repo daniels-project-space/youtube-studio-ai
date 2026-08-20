@@ -743,6 +743,26 @@ async function main() {
     "independent evidence and atmosphere shots must not inherit a mannequin identity seed",
   );
 
+  const semanticTailToken = "SOURCE-CAUSE-TAIL-LOCK";
+  const semanticTailInput = structuredClone(input);
+  const semanticTailPrefix = "Make the cited causal consequence clear without changing any approved fact. ";
+  semanticTailInput.beats[0]!.shots[1]!.narrationPurpose =
+    `${semanticTailPrefix}${"x".repeat(360 - semanticTailPrefix.length - semanticTailToken.length - 1)} ${semanticTailToken}`;
+  assert.equal(semanticTailInput.beats[0]!.shots[1]!.narrationPurpose.length, 360);
+  semanticTailInput.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(semanticTailInput);
+  const semanticTailAdmitted = assertCinematicCaseSequence({ ...args, input: semanticTailInput }, { now: NOW });
+  const semanticTailScene = semanticTailAdmitted.generatedScenePlan.scenes.find(
+    (scene) => scene.id === "cinematic-shot-closure-figure",
+  )!;
+  assert.match(semanticTailScene.still, new RegExp(semanticTailToken));
+  assert.match(semanticTailScene.motion, new RegExp(semanticTailToken));
+  assert.match(semanticTailScene.terminalStill ?? "", new RegExp(semanticTailToken));
+  assert.equal(
+    semanticTailAdmitted.creativeLocks.locks.find((lock) => lock.id === semanticTailScene.id)!.acceptanceCriteria[0],
+    semanticTailInput.beats[0]!.shots[1]!.narrationPurpose,
+    "the final-master reviewer must receive every signed narration-purpose character, including the tail source/cause qualifier",
+  );
+
   const staleReview = structuredClone(input);
   staleReview.editorialReview.reviewedAt = new Date(NOW.getTime() - 31 * 24 * 60 * 60 * 1_000).toISOString();
   assert.throws(() => assertCinematicCaseSequence({ ...args, input: staleReview }, { now: NOW }), /editorial_review_stale:.*Remediation:/);

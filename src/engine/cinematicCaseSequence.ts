@@ -1296,13 +1296,16 @@ export function assertCinematicCaseSequence(
       ? `On-screen typography permitted for this shot ONLY, as the narrow character-introduction exception: render exactly this name-card text and nothing else — no causal question, no other prose: "${shot.nameCardText}"`
       : `Narrative role ${beat.narrativeRole}; story driver (never render this as on-screen text): ${beat.causalQuestion}`;
     const narrativeLock = [
-      onScreenTextDirective,
+      // Keep this first. `narrationPurpose` is the exact compact causal/source
+      // instruction signed by the editor; free-form still/motion text can be
+      // much longer and must never crowd its tail out of an LTX prompt.
       `This shot must make the narration purpose visually clear: ${shot.narrationPurpose}`,
+      onScreenTextDirective,
       ...(mechanicsGuidance ? [`Approved editorial mechanics: ${mechanicsGuidance}`] : []),
     ].join(" ").slice(0, 620);
     const still = [
-      `Primary visual: ${shot.still}`,
       narrativeLock,
+      `Primary visual: ${shot.still}`,
       castLock,
       parentLock,
       `Approved framing: ${shot.shotScale} at ${shot.lens}.`,
@@ -1313,13 +1316,13 @@ export function assertCinematicCaseSequence(
       .slice(0, 1_800)
       .trim();
     const motion = [
-      `Motivated motion: ${shot.motion}`,
       // The structured camera field is the reviewed source of truth. Put it
       // directly in the I2V instruction so a vague or conflicting free-text
       // motion description cannot silently turn a planned dolly/orbit/crane
       // into a generic static take before final-master QA sees it.
       `Approved camera treatment: ${shot.cameraMove}; execute only this motivated movement: ${shot.cameraRationale}`,
       narrativeLock,
+      `Motivated motion: ${shot.motion}`,
       castLock,
       parentLock,
       `First frame: ${shot.firstFrameConstraint}`,
@@ -1333,9 +1336,9 @@ export function assertCinematicCaseSequence(
     // frame. Unlike the motion prompt, this target gives a reviewed cinematic
     // sequence a physical endpoint for a reveal or consequence beat.
     const terminalStill = [
+      narrativeLock,
       `Terminal visual: ${shot.lastFrameConstraint}`,
       `Primary scene: ${shot.still}`,
-      narrativeLock,
       castLock,
       parentLock,
       `Coverage ${shot.coveragePurpose}; visual mode ${shot.visualMode}; ${shot.cameraMove} ${shot.shotScale} ${shot.lens}.`,
@@ -1422,7 +1425,11 @@ export function assertCinematicCaseSequence(
         // contract. Rich source windows can be longer, so cap the rendered
         // instruction here rather than rejecting a valid multi-shot plan at
         // final admission after the editor has reviewed it.
-        `The frame fulfills the narrated purpose: ${shot.narrationPurpose}`.slice(0, 360),
+        // The schema already bounds narrationPurpose to 360 characters. Do
+        // not spend part of that budget on a prefix and silently lose a
+        // source/cause qualifier at the end before the final QA reviewer sees
+        // it.
+        shot.narrationPurpose,
         // Camera direction is not decorative metadata. The final-master
         // reviewer sees the lock's start/middle/end evidence frames, so make
         // the approved framing and motivated movement an exact criterion it
