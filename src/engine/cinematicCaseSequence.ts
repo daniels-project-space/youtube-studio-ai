@@ -1375,6 +1375,12 @@ export function assertCinematicCaseSequence(
         // instruction here rather than rejecting a valid multi-shot plan at
         // final admission after the editor has reviewed it.
         `The frame fulfills the narrated purpose: ${shot.narrationPurpose}`.slice(0, 360),
+        // Camera direction is not decorative metadata. The final-master
+        // reviewer sees the lock's start/middle/end evidence frames, so make
+        // the approved framing and motivated movement an exact criterion it
+        // must attest rather than leaving cameraMove only in the generation
+        // prompt and editor-facing `expected` summary.
+        `The planned ${shot.shotScale} framing and ${shot.cameraMove} camera treatment are visibly motivated: ${shot.cameraRationale}`.slice(0, 360),
         `The viewer can understand the beat's causal question without on-screen prose: ${beat.causalQuestion}`.slice(0, 360),
         `The cut communicates ${shot.cutReason}; tension state is ${shot.tensionState}`,
         ...(mechanicsGuidance

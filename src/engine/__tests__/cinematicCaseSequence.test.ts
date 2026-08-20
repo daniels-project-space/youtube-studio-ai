@@ -668,6 +668,11 @@ async function main() {
     /causal question/i,
     "final master QA must receive the explicit story question that the shot was generated to answer",
   );
+  assert.match(
+    admitted.creativeLocks.locks[1]!.acceptanceCriteria.join(" "),
+    /medium framing and dolly_push camera treatment/i,
+    "final master QA must explicitly attest the planned cinematic framing and motivated movement, not treat camera direction as prompt-only metadata",
+  );
   assert.equal(
     mannequinScene.continuitySeed,
     cinematicContinuitySeed(admitted.plan.contentFingerprint, mannequinScene.castIds, mannequinScene.id),
