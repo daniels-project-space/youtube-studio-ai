@@ -455,10 +455,12 @@ export function cinematicCaseSequenceContentFingerprint(
 }
 
 /**
- * Preserve the same deterministic image prior whenever an approved mannequin
- * cast recurs, while letting non-cast evidence/atmosphere shots compose
- * independently. Prompts still carry every per-shot camera/action lock; the
- * seed is an additional continuity control, never a substitute for review.
+ * Give every approved cinematic shot its own deterministic image/video prior.
+ * A shared seed is a real repetition risk: it is forwarded to both Z-Image
+ * and LTX, so distinct angles of the same mannequin cast can begin from the
+ * same latent composition despite their signed camera prompts. Cast identity
+ * and wardrobe remain locked by the explicit cast contract plus independent
+ * keyframe, clip, and transition review—not by reusing a render seed.
  */
 export function cinematicContinuitySeed(
   sequenceFingerprint: string,
@@ -466,7 +468,7 @@ export function cinematicContinuitySeed(
   sceneId: string,
 ): number {
   const subject = castIds.length
-    ? `cast:${[...castIds].sort().join("|")}`
+    ? `cast:${[...castIds].sort().join("|")}\nscene:${sceneId}`
     : `scene:${sceneId}`;
   const hex = sha256Hex(`cinematic-continuity-seed/v1\n${sequenceFingerprint}\n${subject}`)
     .slice(0, 8);

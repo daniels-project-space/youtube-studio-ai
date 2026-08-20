@@ -732,10 +732,15 @@ async function main() {
     cinematicContinuitySeed(admitted.plan.contentFingerprint, mannequinScene.castIds, mannequinScene.id),
     "the mannequin's approved sequence/cast identity must deterministically control its still-generation seed",
   );
-  assert.equal(
+  assert.notEqual(
     cinematicContinuitySeed(admitted.plan.contentFingerprint, ["mannequin-investigator"], "new-shot-angle"),
     mannequinScene.continuitySeed,
-    "new angles of the same mannequin cast must retain the same image prior",
+    "new angles of the same mannequin cast must receive distinct deterministic render priors while explicit cast locks preserve identity and wardrobe",
+  );
+  assert.equal(
+    cinematicContinuitySeed(admitted.plan.contentFingerprint, ["mannequin-investigator"], mannequinScene.id),
+    cinematicContinuitySeed(admitted.plan.contentFingerprint, ["mannequin-investigator"], mannequinScene.id),
+    "the same signed scene must retain its deterministic render prior across retries",
   );
   assert.notEqual(
     cinematicContinuitySeed(admitted.plan.contentFingerprint, [], "cinematic-shot-closure-proof"),
