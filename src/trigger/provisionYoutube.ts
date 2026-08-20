@@ -15,6 +15,7 @@ import type { Id } from "../../convex/_generated/dataModel";
 import { requireInternalQuerySecret } from "@/lib/youtubeConnector";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { withStagehand, hasBrowserbase } from "@/lib/browserbase";
+import { runStagehandAgentLoop } from "@/lib/stagehandAgentLoop";
 
 export interface ProvisionYoutubeArgs {
   /** App channel id to link the new YouTube channel to. */
@@ -26,17 +27,27 @@ export interface ProvisionYoutubeArgs {
 const BASE = process.env.OAUTH_REDIRECT_BASE ?? "https://youtube-studio-ai.vercel.app";
 
 interface SHPage {
-  url: () => string;
+  /** Stagehand 4.x: page accessors are async (they round-trip over CDP). */
+  url: () => Promise<string>;
   goto: (url: string, opts?: Record<string, unknown>) => Promise<unknown>;
   waitForTimeout: (ms: number) => Promise<void>;
 }
-interface SHAgent {
-  execute: (instr: string | Record<string, unknown>) => Promise<{ success?: boolean; completed?: boolean; message?: string }>;
-}
 interface SH {
   context: { newPage: (url?: string) => Promise<SHPage> };
-  agent: (opts: Record<string, unknown>) => SHAgent;
+  /** Stagehand 4.x instance exposing act/observe/extract; driven by the step-loop. */
+  stagehand: unknown;
 }
+
+/**
+ * Extra per-step constraints for the hand-rolled agent loop. Stagehand 4.x
+ * removed the built-in agent, so these are re-asserted on EVERY decision rather
+ * than stated once in the top-level instruction.
+ */
+const channelSafetyRules = (name: string): string[] => [
+  `The ONLY channel you may create, select, or authorize is exactly "${name}".`,
+  "NEVER delete or rename an existing channel, under any circumstances.",
+  "If you cannot tell which option is the exact target channel, stop instead of guessing.",
+];
 
 export const provisionYoutubeTask = task({
   id: "provision-youtube",
@@ -63,35 +74,36 @@ export const provisionYoutubeTask = task({
         const sh = shU as SH;
         const page = await sh.context.newPage("https://www.youtube.com/channel_switcher");
         await page.waitForTimeout(3000);
-        // Inherit the non-Google model pinned by withStagehand().
-        const agent = sh.agent({ mode: "hybrid" });
 
         // 1+2: create the brand channel (if needed) and make it the ACTIVE channel.
-        const create = await agent.execute({
-          instruction:
-            `You are on YouTube, signed in. Ensure a brand-new YouTube channel named "${name}" exists, then ` +
+        // Inherits the non-Google Stagehand model pinned by withStagehand() for
+        // act/observe; the per-step decision uses the pinned OpenRouter route.
+        const create = await runStagehandAgentLoop(
+          sh.stagehand,
+          `You are on YouTube, signed in. Ensure a brand-new YouTube channel named "${name}" exists, then ` +
             `SWITCH to it so it becomes the ACTIVE channel. If "${name}" already exists, just switch to it. To ` +
             `create: from the channel switcher click "Create a channel"/"Create a new channel", enter the name ` +
             `"${name}", accept terms, click Create, skip optional photo/handle. NEVER delete/rename existing ` +
             `channels. Finish once "${name}" is the active channel (its name shows as the current account).`,
-          maxSteps: 35,
-        });
-        log("create+switch done", { msg: create?.message?.slice(0, 200) });
+          { maxSteps: 35, log, extraRules: channelSafetyRules(name) },
+        );
+        log("create+switch done", { msg: create?.message?.slice(0, 200), steps: create.steps });
 
         // 3: walk OUR consent screen; the callback stores the token server-side.
         await page.goto(`${BASE}/api/youtube-connect?channelId=${appChannelId}`, { timeout: 60000 });
         await page.waitForTimeout(3000);
-        const consent = await agent.execute({
-          instruction:
-            `You are on a Google OAuth consent flow for an app called "YouTube Studio AI". Complete it: if asked to ` +
+        const consent = await runStagehandAgentLoop(
+          sh.stagehand,
+          `You are on a Google OAuth consent flow for an app called "YouTube Studio AI". Complete it: if asked to ` +
             `choose an account or a channel, choose "${name}" (NOT any other channel). Click Continue / Allow / ` +
             `Authorize through every screen, including any "Google hasn't verified this app" → Advanced → Continue. ` +
             `Finish once the browser is redirected back to the youtube-studio-ai app (URL contains "youtube-studio-ai" ` +
             `or "yt=connected").`,
-          maxSteps: 30,
-        });
-        log("consent done", { url: page.url(), msg: consent?.message?.slice(0, 200) });
-        return { finalUrl: page.url(), createMsg: create?.message ?? "", consentMsg: consent?.message ?? "" };
+          { maxSteps: 30, log, extraRules: channelSafetyRules(name) },
+        );
+        const finalUrl = await page.url();
+        log("consent done", { url: finalUrl, msg: consent?.message?.slice(0, 200), steps: consent.steps });
+        return { finalUrl, createMsg: create?.message ?? "", consentMsg: consent?.message ?? "" };
       }, log);
 
       // Verify the callback actually stored a token for this channel.

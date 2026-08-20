@@ -1,9 +1,15 @@
 /**
  * `youtube-create-channel` — headless creation of a YouTube Brand-Account channel
- * via Browserbase + Stagehand's CUA agent, using a pre-authenticated Browserbase
- * context (BROWSERBASE_CONTEXT_ID). YouTube has NO channel-create API and the flow
- * is BotGuard-gated, so a real browser (running Google's JS) is required — this is
+ * via Browserbase + Stagehand, using a pre-authenticated Browserbase context
+ * (BROWSERBASE_CONTEXT_ID). YouTube has NO channel-create API and the flow is
+ * BotGuard-gated, so a real browser (running Google's JS) is required — this is
  * the right tool, not a workaround.
+ *
+ * Stagehand 4.x removed its built-in CUA agent, so the create path now drives an
+ * observe -> decide -> act step-loop (`src/lib/stagehandAgentLoop.ts`) over the
+ * SDK's single-shot primitives. That loop's self-reported outcome is NEVER a
+ * creation receipt: `proveExactActiveChannel()` re-derives identity from
+ * provider-owned metadata and is the only thing that can mark a claim created.
  *
  * The create dialog ("Your profile") exposes a NAME field and an @HANDLE field as
  * plain inputs, so we set a clean handle at birth. The avatar/photo, however, goes
@@ -25,6 +31,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { withStagehand, hasBrowserbase } from "@/lib/browserbase";
+import { runStagehandAgentLoop } from "@/lib/stagehandAgentLoop";
 import {
   studioActionApprovalFingerprint,
   verifyStudioActionApproval,
@@ -107,16 +114,15 @@ export interface CreateChannelArgs {
 }
 
 interface SHPage extends YoutubeRecoveryPage {
-  url: () => string;
+  /** Stagehand 4.x: page accessors are async (they round-trip over CDP). */
+  url: () => Promise<string>;
   goto: (url: string, opts?: Record<string, unknown>) => Promise<unknown>;
   waitForTimeout: (ms: number) => Promise<void>;
 }
-interface SHAgent {
-  execute: (instr: string | Record<string, unknown>) => Promise<{ success?: boolean; completed?: boolean; message?: string }>;
-}
 interface SH {
   context: YoutubeRecoveryContext & { newPage: (url?: string) => Promise<SHPage> };
-  agent: (opts: Record<string, unknown>) => SHAgent;
+  /** Stagehand 4.x instance exposing act/observe/extract; driven by the step-loop. */
+  stagehand: unknown;
 }
 
 /** Extract a UC… channel id from a studio/youtube URL. */
@@ -205,7 +211,7 @@ async function proveExactActiveChannel(
   }
   await page.goto("https://studio.youtube.com", { timeout: 45_000 });
   await page.waitForTimeout(3_500);
-  const studioChannelId = channelIdFromUrl(page.url());
+  const studioChannelId = channelIdFromUrl(await page.url());
   const activeAssessment = assessExactYoutubeProviderIdentity({
     expectedName,
     expectedHandle,
@@ -501,14 +507,16 @@ export const youtubeCreateChannelTask = task({
                 "the exact YouTube name and handle now exist; a new channel cannot be causally proven",
               );
             }
-            // Inherit the non-Google model pinned by withStagehand().
-            const agent = sh.agent({ mode: "hybrid" });
             // This durable checkpoint is the one-way gate. Once it commits,
             // no retry can enter this create closure again.
             await checkpointProviderStarted();
-            const res = await agent.execute({
-              instruction:
-                `Goal: create a NEW YouTube channel and switch to it. On this channel-switcher page click ` +
+            // Stagehand 4.x removed the built-in CUA agent; this is the
+            // observe -> decide -> act step-loop that replaces it. The creation
+            // receipt below (proveExactActiveChannel) — never the loop's own
+            // return value — remains the sole proof that creation succeeded.
+            const res = await runStagehandAgentLoop(
+              sh.stagehand,
+              `Goal: create a NEW YouTube channel and switch to it. On this channel-switcher page click ` +
                 `"Create a channel" / "+ Create a channel" / "Kanal erstellen". A dialog titled "Your profile"/"Dein ` +
                 `Profil" opens with a NAME field, an @handle/Alias field, a "Choose picture" button, and a final ` +
                 `"Create channel"/"Kanal erstellen" button. Type the name "${name}" into the NAME field. Set the ` +
@@ -518,14 +526,23 @@ export const youtubeCreateChannelTask = task({
                 `exact name and handle are accepted, click "Create channel"/"Kanal erstellen". Then make "${name}" the ACTIVE ` +
                 `channel and skip any later optional step (Set-up-later/Save-and-continue). Stop once "${name}" exists ` +
                 `and is active. Do NOT touch other existing channels.`,
-              maxSteps: 24,
-            });
+              {
+                maxSteps: 24,
+                log,
+                extraRules: [
+                  `The ONLY channel you may create or select is exactly "${name}" with handle "@${handle}".`,
+                  "NEVER delete, rename, or edit any existing channel.",
+                  `If the handle "${handle}" is reported unavailable, STOP immediately — do not accept a suggested alternative and do not click the final create button.`,
+                  "If you cannot tell which control is correct, stop instead of guessing.",
+                ],
+              },
+            );
             await page.waitForTimeout(2500);
             const proof = await proveExactActiveChannel(page, name, handle);
             return {
               ...proof,
               channelId: proof.exact ? proof.channelId : undefined,
-              finalUrl: page.url(),
+              finalUrl: await page.url(),
               agentMessage: res?.message ?? "",
             };
           }, log);
