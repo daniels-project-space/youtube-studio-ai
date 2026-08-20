@@ -14,12 +14,11 @@ import {
   FAMILY_KEYS,
   FAMILY_RUNTIME_PIPELINE,
   familyAutonomousPlanningCapability,
-  familyDurationContract,
   familyProductionReadiness,
   formatFamilyDurationContract,
   type FamilyKey,
 } from "@/engine/families";
-import { CONTENT_LANE_POLICIES, contentLaneForFamily } from "@/engine/contentLane";
+import { resolveChannelFamilyManifest } from "@/engine/channelFamilyManifest";
 import type { DataStoryContract } from "@/engine/dataStory";
 import {
   CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
@@ -536,9 +535,14 @@ function moduleAdmissions(modules: readonly FormatModuleRecommendation[]): Forma
  * prevents a lightweight creator request from bundling render workers into Next.
  */
 export function formatPreflight(family: FamilyKey, input: FormatSelectionInput): FormatPreflight {
-  const spec = FAMILIES[family];
-  const lane = contentLaneForFamily(family);
-  const laneDefinition = lane ? CONTENT_LANE_POLICIES[lane.key] : undefined;
+  // This is called by both the browser admission route and the direct Trigger
+  // authority before either can reserve provider work. Resolve the composed
+  // family contract here so a drift among independent catalog tables stops
+  // every pre-spend path instead of merely changing advisory output.
+  const manifest = resolveChannelFamilyManifest(family);
+  const spec = manifest.family;
+  const lane = manifest.contentLane;
+  const laneDefinition = manifest.contentLanePolicy;
   const planning = planningPreflight(family);
   const creativeCapabilities = resolveCreativeCapabilities(input, family);
   const creatorAdmission = creatorAdmissionPreflight(family, creativeCapabilities);
@@ -562,9 +566,9 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
       .flatMap((module) => module.requirements),
   ]);
   const sourceRequirementsReady = missingRequirements.length === 0;
-  const templateAvailable = Boolean(spec.available && lane);
+  const templateAvailable = spec.available;
   const readiness = familyProductionReadiness(family);
-  const duration = familyDurationContract(family);
+  const duration = manifest.duration;
   const targetSeconds = positiveFiniteNumber(input.targetDurationSeconds);
   const durationWithinFamilyContract = targetSeconds === undefined
     || (targetSeconds >= duration.minimumSeconds && targetSeconds <= duration.maximumSeconds);

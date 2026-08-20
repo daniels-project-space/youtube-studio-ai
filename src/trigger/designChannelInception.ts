@@ -1327,6 +1327,7 @@ export async function executeDesignChannel(
     syntheticScenario: payload.syntheticScenario,
     toggles: payload.toggles,
     paramOverrides: payload.paramOverrides,
+    quizProfile: payload.quizProfile,
   });
   // Preserve the exact design resolution: an omitted operator duration may
   // intentionally use a valid niche preset rather than the generic family default.

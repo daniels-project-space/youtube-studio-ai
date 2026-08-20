@@ -48,6 +48,26 @@ async function main() {
     assert.match(recommendation.reasoning, /Matched/i);
     assert.equal(remoteCalls, 0);
 
+    const audienceLedChildren = await POST(request({
+      concept: "Original animated bedtime stories",
+      audience: "Preschool children ages 3 to 5",
+      sampleTopics: ["A gentle toddler learning adventure"],
+    }));
+    assert.equal(audienceLedChildren.status, 200);
+    const childrenRecommendation = await audienceLedChildren.json() as {
+      family: string;
+      available: boolean;
+      preflight: { creativeCapabilities: Array<{ capability: string }> };
+    };
+    assert.equal(childrenRecommendation.family, "children_learning");
+    assert.equal(childrenRecommendation.available, false);
+    assert.equal(
+      childrenRecommendation.preflight.creativeCapabilities.some((offer) => offer.capability === "children_show_bible"),
+      true,
+      "audience/sample-topic context must reach the deterministic selector and surface its private-review admission",
+    );
+    assert.equal(remoteCalls, 0);
+
     const missing = await POST(request({ concept: "   " }));
     assert.equal(missing.status, 400);
     assert.deepEqual(await missing.json(), { error: "missing concept" });

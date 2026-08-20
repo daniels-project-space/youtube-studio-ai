@@ -243,31 +243,11 @@ export const MODULE_CATALOG: ModuleSpec[] = [
   },
   {
     block: "quiz_year",
-    label: "Mixed trivia quiz",
+    label: "Certified QuizYear",
     description:
-      "Self-contained multiple-choice trivia quiz that MIXES categories inside one video the way real trivia channels do — guess-the-year, capital cities, currencies, chemical symbols, atomic numbers and citation-verified general knowledge. Facts come from Wikidata (CC0); general-knowledge rounds are accepted only when an independently fetched Wikipedia article is shown to state the answer and to not state any of the wrong options. Each round shows four options with a depleting timer and locks in the correct one on reveal. The answer is never LLM-generated — a model only phrases the question. Replaces script + footage + assembly for the Quiz family.",
+      "Self-contained multiple-choice quiz. A certified QuizYear profile owns its deterministic CC0 Wikidata category and source-topic mapping; each round shows four options with a depleting timer and locks in the verified answer on reveal. Replaces script + footage + assembly for the Quiz family.",
     optional: false,
     params: [
-      {
-        key: "categories",
-        label: "Question categories",
-        type: "text",
-        help: "Comma-separated mix, e.g. \"guess_year, capital_city, general_knowledge\". Leave blank for the full mix. Options: guess_year, capital_city, country_currency, element_symbol, element_atomic_number, general_knowledge.",
-      },
-      {
-        key: "topic",
-        label: "Guess-the-year topic",
-        type: "select",
-        options: [
-          { value: "science_discovery", label: "Scientific discoveries" },
-          { value: "space_exploration", label: "Space missions" },
-          { value: "invention_technology", label: "Inventions & technology" },
-          { value: "video_games", label: "Video game releases" },
-          { value: "film_release", label: "Film releases" },
-          { value: "sports_championship", label: "Sporting events" },
-          { value: "landmark_architecture", label: "Landmarks & monuments" },
-        ],
-      },
       { key: "countdownSeconds", label: "Guess time (sec)", type: "number", min: 3, max: 15, step: 1, help: "How long the viewer gets before the answer locks in." },
       { key: "revealSeconds", label: "Reveal hold (sec)", type: "number", min: 2, max: 10, step: 1 },
       { key: "minNotability", label: "Minimum fame", type: "number", min: 0, max: 200, step: 5, help: "Wikipedia language editions the subject must appear in. Higher = more widely known, fewer available facts." },

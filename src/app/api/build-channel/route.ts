@@ -40,6 +40,7 @@ import {
   resolveUnhostedSupervisedCreativeCapabilityIntents,
   validateCreativeCapabilitySelections,
 } from "@/engine/creative/creativeCapabilityCatalog";
+import { resolveCertifiedQuizProfile } from "@/engine/certifiedQuizProfile";
 
 /**
  * POST /api/build-channel  { design, requestKey } → { id, requestKey, slug }
@@ -136,6 +137,33 @@ export async function POST(request: Request) {
         { error: "channel creation requestKey was reused with a different design" },
         { status: 409 },
       );
+    }
+    if (programBrief.family === "quizyear") {
+      const rawQuizOverrides = design.paramOverrides;
+      const quizOverrides = rawQuizOverrides && typeof rawQuizOverrides === "object"
+        ? (rawQuizOverrides as Record<string, unknown>)["quiz_year"]
+        : undefined;
+      if (
+        quizOverrides &&
+        typeof quizOverrides === "object" &&
+        ("categories" in quizOverrides || "topic" in quizOverrides)
+      ) {
+        return NextResponse.json({
+          error: "QuizYear categories and topics are selected only through a certified quiz profile",
+        }, { status: 400 });
+      }
+      try {
+        const profile = resolveCertifiedQuizProfile(design.quizProfile);
+        if (design.quizProfile !== undefined) design = { ...design, quizProfile: profile.key };
+      } catch (error) {
+        return NextResponse.json({
+          error: error instanceof Error ? error.message : "invalid certified QuizYear profile",
+        }, { status: 400 });
+      }
+    } else if (design.quizProfile !== undefined) {
+      return NextResponse.json({
+        error: "certified QuizYear profiles are currently supported only by QuizYear",
+      }, { status: 400 });
     }
     if (design.paramOverrides) {
       const { sanitizeParamOverrides } = await import("@/engine/moduleCatalog");

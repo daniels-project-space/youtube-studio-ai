@@ -27,6 +27,10 @@ import {
   syntheticScenarioContract,
   type SyntheticScenarioProfile,
 } from "@/engine/syntheticScenario";
+import {
+  CERTIFIED_QUIZ_PROFILE_OPTIONS,
+  type CertifiedQuizProfileKey,
+} from "@/engine/certifiedQuizProfile";
 import { MODULE_CATALOG, type ParamField } from "@/engine/moduleCatalog";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -133,6 +137,17 @@ const DEFAULT_TOGGLES: Toggles = {
 async function browserSha256(value: string): Promise<string> {
   const digest = await crypto.subtle.digest("SHA-256", new TextEncoder().encode(value));
   return [...new Uint8Array(digest)].map((byte) => byte.toString(16).padStart(2, "0")).join("");
+}
+
+// The creator keeps topic examples as readable textarea lines, while the
+// canonical ProgramBrief owns the normalized immutable list. These examples
+// are not decorative prompts: deterministic family/capability admission uses
+// them to distinguish otherwise identical-looking channel concepts.
+function channelSampleTopics(value: string): string[] {
+  return value
+    .split(/\r?\n/)
+    .map((topic) => topic.trim())
+    .filter(Boolean);
 }
 
 // Client preview of the designed block list (mirrors src/engine/designer filter).
@@ -264,6 +279,7 @@ export default function NewChannelWizard() {
   // Explicitly opt into a thought-experiment profile; no scenario is inferred
   // from a topic or advisor suggestion.
   const [syntheticScenarioProfile, setSyntheticScenarioProfile] = useState<SyntheticScenarioProfile | "">("");
+  const [quizProfile, setQuizProfile] = useState<CertifiedQuizProfileKey>("world_geography");
   // Advanced per-module param editor: paramOverrides[blockId][key] = value.
   const [paramOverrides, setParamOverrides] = useState<Record<string, Record<string, unknown>>>({});
   const [showAdvanced, setShowAdvanced] = useState(false);
@@ -272,11 +288,16 @@ export default function NewChannelWizard() {
   const [moduleConfig, setModuleConfig] = useState<ModuleConfigMap>({});
   const [clipNote, setClipNote] = useState<string | null>(null);
   const [concept, setConcept] = useState("");
+  const [audience, setAudience] = useState("");
+  const [sampleTopicsText, setSampleTopicsText] = useState("");
+  const sampleTopics = useMemo(() => channelSampleTopics(sampleTopicsText), [sampleTopicsText]);
   const [suggesting, setSuggesting] = useState(false);
   const [supervisedAdmission, setSupervisedAdmission] = useState<SupervisedCreatorSelection | null>(null);
 
   const niche = getNiche(nicheKey);
   const fam = family ? getFamily(family) : undefined;
+  const selectedQuizProfile = CERTIFIED_QUIZ_PROFILE_OPTIONS.find((profile) => profile.key === quizProfile)
+    ?? CERTIFIED_QUIZ_PROFILE_OPTIONS[0];
   const duration = family ? familyDurationContract(family) : undefined;
   const costAuthority = channelBuildCostAuthority({
     approveSetupSpend,
@@ -353,10 +374,21 @@ export default function NewChannelWizard() {
   function suggest() {
     const c = concept.trim();
     if (!c || suggesting) return;
+    const audienceText = audience.trim();
     setSuggesting(true); setClipNote(null);
     (async () => {
       try {
-        const res = await fetch("/api/suggest-format", { method: "POST", headers: { "content-type": "application/json" }, body: JSON.stringify({ concept: c, niche: niche?.label, nicheKey: nicheKey || undefined }) });
+        const res = await fetch("/api/suggest-format", {
+          method: "POST",
+          headers: { "content-type": "application/json" },
+          body: JSON.stringify({
+            concept: c,
+            niche: niche?.label,
+            nicheKey: nicheKey || undefined,
+            ...(audienceText ? { audience: audienceText } : {}),
+            ...(sampleTopics.length ? { sampleTopics } : {}),
+          }),
+        });
         const d = await res.json();
         if (!res.ok || !d.family) { setClipNote(d.error ?? "Could not suggest a format."); setSuggesting(false); return; }
         const fam = FAMILIES[d.family as FamilyKey]?.label ?? d.family;
@@ -500,13 +532,16 @@ export default function NewChannelWizard() {
     try {
       // Bind the creator-visible format promise before the recoverable intent
       // is fingerprinted. Execution choices stay on `design`; this immutable
-      // brief is the sole source of its family/niche/concept identity.
+      // brief is the sole source of its family/niche/concept/audience identity.
+      const normalizedAudience = audience.trim();
       const programBrief = createChannelProgramBrief({
         family,
         nicheKey,
         ...(subcategory.trim() ? { subcategory } : {}),
         locale,
         concept,
+        ...(normalizedAudience ? { audience: normalizedAudience } : {}),
+        ...(sampleTopics.length ? { sampleTopics } : {}),
       });
       const requestedYoutubeName = normalizeYoutubeChannelName(name);
       if (autoYoutube && !requestedYoutubeName) {
@@ -563,6 +598,7 @@ export default function NewChannelWizard() {
         ...(family === "illustrated_explainer" && syntheticScenarioProfile
           ? { syntheticScenario: syntheticScenarioContract(syntheticScenarioProfile) }
           : {}),
+        ...(family === "quizyear" ? { quizProfile } : {}),
         ...(autoYoutube ? { requestedYoutubeName, requestedYoutubeHandle } : {}),
         approveSetupSpend,
         setupBudgetUsd: costAuthority.setupCapUsd,
@@ -979,6 +1015,15 @@ export default function NewChannelWizard() {
               <button onClick={suggest} disabled={!concept.trim() || suggesting} style={{ ...btnGhost, opacity: !concept.trim() || suggesting ? 0.5 : 1, whiteSpace: "nowrap" }}>{suggesting ? "Thinking…" : "Suggest"}</button>
             </div>
           </label>
+          <label style={lblStyle}>
+            <span style={capStyle}>Intended audience (optional, but use it when age, learning level, or viewer role changes the format)</span>
+            <input value={audience} onChange={(e) => setAudience(e.target.value)} placeholder="e.g. preschool children ages 3–5, or curious adults new to finance" style={inpStyle} />
+          </label>
+          <label style={lblStyle}>
+            <span style={capStyle}>Sample episode ideas (optional — one per line)</span>
+            <textarea value={sampleTopicsText} onChange={(e) => setSampleTopicsText(e.target.value)} rows={3} placeholder={"e.g. A gentle bedtime treasure hunt\nA first counting adventure"} style={{ ...inpStyle, resize: "vertical" }} />
+            <span style={muted}>{sampleTopics.length}/12 examples. They are bound into the durable channel program and help the advisor select the right capability and safety path.</span>
+          </label>
           {clipNote && <div className="glass" style={{ padding: "0.7rem 0.9rem", fontSize: "0.8rem", color: "var(--color-muted)", border: "1px solid var(--color-accent)" }}>{clipNote}</div>}
         </div>
       )}
@@ -1051,6 +1096,22 @@ export default function NewChannelWizard() {
                   </Row>
                 );
               })}
+            {family === "quizyear" && (
+              <Row label="Certified quiz identity">
+                <div style={{ display: "grid", gap: "0.35rem", maxWidth: 360 }}>
+                  <select
+                    value={quizProfile}
+                    onChange={(event) => setQuizProfile(event.target.value as CertifiedQuizProfileKey)}
+                    style={selStyle}
+                  >
+                    {CERTIFIED_QUIZ_PROFILE_OPTIONS.map((profile) => (
+                      <option key={profile.key} value={profile.key}>{profile.label}</option>
+                    ))}
+                  </select>
+                  <span style={muted}>{selectedQuizProfile.description}</span>
+                </div>
+              </Row>
+            )}
             {family === "illustrated_explainer" && (
               <Row label="Fictional AI format">
                 <select
@@ -1217,6 +1278,7 @@ export default function NewChannelWizard() {
           <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.5rem", fontSize: "0.86rem" }}>
             <SummaryRow k="Niche" v={`${niche?.label}${subcategory ? " · " + subcategory : ""}`} />
             <SummaryRow k="Format" v={fam.label} />
+            {family === "quizyear" && <SummaryRow k="Quiz identity" v={selectedQuizProfile.label} />}
             <SummaryRow k="Visual engine" v={fam.visualEngine} />
             {duration && <SummaryRow k="Episode unit" v={duration.inputUnit === "fixed"
               ? formatFamilyDurationContract(family as FamilyKey)

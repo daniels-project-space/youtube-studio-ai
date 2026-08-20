@@ -5,9 +5,7 @@
  * theme / locale / optional-module toggles → validatePipeline. (A Claude
  * "architect" + clip analysis layer on top later only adjusts these inputs.)
  */
-import { ARCHETYPES } from "./archetypes";
 import {
-  FAMILIES,
   FAMILY_CREW,
   CREW_ROLE_BLOCK,
   assertFamilyAutonomousPlanningPipeline,
@@ -17,6 +15,7 @@ import {
   familyProductionReadiness,
   type FamilyKey,
 } from "./families";
+import { resolveChannelFamilyManifest } from "./channelFamilyManifest";
 import { subcategoryTags } from "@/lib/nicheCatalog";
 import { nichePreset } from "./golden";
 import {
@@ -41,13 +40,17 @@ import {
   syntheticScenarioContract,
   type SyntheticScenarioContract,
 } from "./syntheticScenario";
+import {
+  certifiedQuizProfileCategories,
+  resolveCertifiedQuizProfile,
+  type CertifiedQuizProfileKey,
+} from "./certifiedQuizProfile";
 import { registerAllBlocks } from "./blocks";
 import { validatePipeline } from "./validate";
 import { childrenShowBibleSeedKeys } from "./childrenShowBible";
 import type { PipelineEntry } from "./types";
 import {
   assertPipelineMatchesContentLane,
-  contentLaneForFamily,
   injectContentLaneIntoPipeline,
   type ContentLane,
 } from "./contentLane";
@@ -84,6 +87,8 @@ export interface DesignOptions {
   claimEvidence?: unknown;
   /** Advanced editor: per-block param overrides, keyed by block id. */
   paramOverrides?: Record<string, Record<string, unknown>>;
+  /** Server-owned QuizYear identity; category/topic combinations are profile-owned. */
+  quizProfile?: CertifiedQuizProfileKey;
   /**
    * Explicit opt-in for source-attributed chart-led narration. This is a
    * contract over the existing Data Inserts module, not a cosmetic toggle.
@@ -167,11 +172,13 @@ function lengthCheckEnvelope(
 
 /** Build a validated pipeline for a channel from the wizard's choices. */
 export function designPipeline(opts: DesignOptions): DesignResult {
+  // Resolve before block registration or compilation. The same composed
+  // contract powers creator admission, so a catalog drift cannot yield a
+  // pipeline with a different lane, cadence, or visual archetype.
+  const manifest = resolveChannelFamilyManifest(opts.family);
   registerAllBlocks();
-  const fam = FAMILIES[opts.family];
-  if (!fam) throw new Error(`unknown family: ${opts.family}`);
-  const base = ARCHETYPES[fam.archetypeKey];
-  if (!base) throw new Error(`family ${opts.family} → unknown archetype ${fam.archetypeKey}`);
+  const fam = manifest.family;
+  const base = manifest.archetype;
   if (opts.capabilitySelections?.length && !opts.programBrief) {
     throw new Error("creative capability selections require a canonical channel program brief");
   }
@@ -200,6 +207,9 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   if (opts.syntheticScenario && opts.family !== "illustrated_explainer") {
     throw new Error("synthetic AI scenario stories are currently supported only by Illustrated Explainer");
   }
+  if (opts.quizProfile !== undefined && opts.family !== "quizyear") {
+    throw new Error("certified QuizYear profiles are currently supported only by QuizYear");
+  }
 
   const t = opts.toggles ?? {};
   const warnings: string[] = [];
@@ -207,7 +217,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // inception when the operator/AI didn't specify them (so every niche launches
   // with its research-tuned defaults — covers wizard, API, and autopilot creation).
   const preset = nichePreset(opts.nicheKey);
-  const duration = familyDurationContract(opts.family);
+  const duration = manifest.duration;
   let lenSec: number;
   if (opts.lengthMinutes !== undefined) {
     lenSec = resolveFamilyEpisodeLengthSeconds(opts.family, opts.lengthMinutes);
@@ -389,21 +399,23 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // Keep this as a pipeline rewrite rather than a conditional inside Topicraft: the
   // compiled graph itself makes the non-Gemini route inspectable and reusable.
   if (opts.family === "quizyear") {
-    const pinnedTopic = opts.paramOverrides?.["quiz_year"]?.["topic"];
+    const quizOverrides = opts.paramOverrides?.["quiz_year"];
+    if (quizOverrides?.["categories"] !== undefined || quizOverrides?.["topic"] !== undefined) {
+      throw new Error(
+        "quiz: categories and topics are owned by the certified QuizYear profile; remove raw quiz_year overrides",
+      );
+    }
+    const quizProfile = resolveCertifiedQuizProfile(opts.quizProfile);
     const planner = familyAutonomousPlanningCapability("quizyear");
     const forbiddenPlannerBlocks = new Set(
       planner.mode === "registered_non_gemini" ? planner.forbiddenGeminiBlocks : [],
     );
-    const safeDefaultCategories =
-      "guess_year,capital_city,country_currency,element_symbol,element_atomic_number";
     pipeline = pipeline.flatMap((entry): PipelineEntry[] => {
       if (entry.block === "topic_select") {
         return [{
           block: "quiz_topic_plan",
           params: {
-            ...(typeof pinnedTopic === "string" && pinnedTopic.trim()
-              ? { pinnedTopic: pinnedTopic.trim() }
-              : {}),
+            ...(opts.quizProfile ? { quizProfile: quizProfile.key } : {}),
           },
         }];
       }
@@ -411,10 +423,11 @@ export function designPipeline(opts: DesignOptions): DesignResult {
       if (entry.block === "quiz_year") {
         const params = { ...(entry.params ?? {}) };
         // The archetype's former static topic is superseded by the planner's
-        // topic-memory-backed selection. An explicit editor pin travels to the
-        // planner above, never around it directly into the renderer.
+        // topic-memory-backed selection. Profiles own the topic/category
+        // mapping as a server-side contract.
         delete params.topic;
-        if (params.categories === undefined) params.categories = safeDefaultCategories;
+        params.categories = certifiedQuizProfileCategories(quizProfile);
+        if (opts.quizProfile) params.quizProfile = quizProfile.key;
         params.noGemini = true;
         return [
           {
@@ -820,8 +833,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     }
   }
 
-  const contentLane = contentLaneForFamily(opts.family);
-  if (!contentLane) throw new Error(`family ${opts.family} has no content lane policy`);
+  const contentLane = manifest.contentLane;
   assertPipelineMatchesContentLane(contentLane, pipeline);
   pipeline = injectContentLaneIntoPipeline(pipeline, contentLane);
   assertFamilyAutonomousPlanningPipeline(opts.family, pipeline);

@@ -33,6 +33,19 @@ assert.match(wizard, /Creator foundation: verified no-Gemini planning/);
 assert.match(wizard, /preflight\.planning\.plannerBlock/);
 assert.match(wizard, /preflight\.planning\.provenance/);
 
+// Audience and sample episodes are decision-bearing creator input, not inert
+// UI text. They must enter both the no-provider format request and the sealed
+// ProgramBrief that the spend-capable route revalidates.
+assert.match(wizard, /const \[audience, setAudience\] = useState\(""\)/);
+assert.match(wizard, /const \[sampleTopicsText, setSampleTopicsText\] = useState\(""\)/);
+assert.match(wizard, /\{ audience: audienceText \}/);
+assert.match(wizard, /\{ sampleTopics \}/);
+const programBriefArgs = wizard.match(/const programBrief = createChannelProgramBrief\(\{([\s\S]*?)\n      \}\);/)?.[1];
+assert.ok(programBriefArgs, "the creator must construct a canonical ProgramBrief before request-key binding");
+assert.match(programBriefArgs, /\{ audience: normalizedAudience \}/);
+assert.match(programBriefArgs, /\{ sampleTopics \}/);
+assert.match(wizard, /Sample episode ideas \(optional — one per line\)/);
+
 // A selectable private-review intake is not an inactive automatic family
 // pipeline in disguise. The creator must show only the registered review
 // stages and withhold all production-module controls.

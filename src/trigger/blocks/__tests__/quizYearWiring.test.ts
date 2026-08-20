@@ -470,8 +470,14 @@ async function main(): Promise<void> {
       "the automatic planner omits categories, so its default must be the certified no-Gemini mix",
     );
     assert.deepEqual(
-      resolveCertifiedNoGeminiCategories("capital_city, guess_year"),
-      ["capital_city", "guess_year"],
+      resolveCertifiedNoGeminiCategories("capital_city, country_currency", "world_geography"),
+      ["capital_city", "country_currency"],
+      "a renderer may only receive the selected profile's exact deterministic category set",
+    );
+    assert.throws(
+      () => resolveCertifiedNoGeminiCategories("capital_city, guess_year", "world_geography"),
+      /categories are owned/,
+      "a caller cannot turn a certified profile back into an arbitrary category mix",
     );
     assert.throws(
       () => resolveCertifiedNoGeminiCategories("general_knowledge"),
