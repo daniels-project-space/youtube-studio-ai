@@ -15,6 +15,7 @@ import {
 } from "@/engine/episodeGraph";
 import { assertLearningContract } from "@/engine/learningContract";
 import {
+  assertChildrenLearningExperience,
   ChildrenShowBibleApprovalReceiptSchema,
   ChildrenShowBibleSchema,
 } from "@/engine/childrenShowBible";
@@ -129,6 +130,12 @@ export function assertChildContentSafety(args: {
   }
   const showBible = ChildrenShowBibleSchema.parse(args.childrenShowBible);
   const approval = ChildrenShowBibleApprovalReceiptSchema.parse(args.childrenShowBibleApproval);
+  assertChildrenLearningExperience({
+    showBible,
+    episodeGraph: graph,
+    sceneManifest: manifest,
+    lessonContract,
+  });
   if (args.curriculumEpisodeSeed === undefined || args.curriculumEpisodeSeedApproval === undefined) {
     throw new Error("child_content_safety: a current child-editor-approved CurriculumEpisodeSeed is required");
   }
