@@ -211,6 +211,13 @@ const SECRET_FORWARDED_ENV = new Set([
  */
 export default defineConfig({
   project: process.env.TRIGGER_PROJECT_REF ?? "proj_vorkjqmnnpkzoiqqgbuu",
+  // Trigger.dev's unspecified default is Node 21.7.3, which predates the
+  // stable global WebSocket. @browserbasehq/stagehand 4.x's CDP client uses
+  // the native global WebSocket directly (no polyfill) and declares
+  // engines.node >= 22.18.0 — on the default runtime it throws
+  // "WebSocket is not defined" as soon as it opens a CDP connection.
+  // node-24 clears that floor with margin.
+  runtime: "node-24",
   dirs: ["./src/trigger"],
   build: {
     // Keep the Remotion stack OUT of the esbuild bundle. If bundled, esbuild
