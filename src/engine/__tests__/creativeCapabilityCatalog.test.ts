@@ -1,10 +1,12 @@
 import assert from "node:assert/strict";
+import { readFileSync } from "node:fs";
 import {
   CREATIVE_CAPABILITY_CATALOG,
   CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
   assertCreativeCapabilityCatalog,
   assertCreativeCapabilityPipelineObligations,
   creativeCapabilitySelection,
+  privateReviewCapabilityOffers,
   resolveCreativeCapabilities,
   validateCreativeCapabilitySelections,
 } from "@/engine/creative/creativeCapabilityCatalog";
@@ -80,6 +82,13 @@ const casefile = resolveCreativeCapabilities({
 assert(casefile, "factual cinematic intent must resolve to the Casefile capability");
 assert.equal(casefile.selectionMode, "private_review_only");
 assert.equal(casefile.reviewHref, "/casefile");
+assert.deepEqual(
+  privateReviewCapabilityOffers(formatPreflight("cinematic", {
+    concept: "A Fern-style true crime investigation with source-bound faceless mannequin reconstructions",
+  }).creativeCapabilities).map((offer) => offer.capability),
+  ["casefile_cinematic"],
+  "the format layer must carry review-only admission from the catalog, not re-parse Casefile module profiles",
+);
 assert.throws(
   () => validateCreativeCapabilitySelections({
     family: "cinematic",
@@ -139,5 +148,12 @@ assert.equal(
   false,
   "exact compiled evidence does not weaken the current data-story source-first admission gate",
 );
+
+const buildRouteSource = readFileSync(
+  new URL("../../app/api/build-channel/route.ts", import.meta.url),
+  "utf8",
+);
+assert.match(buildRouteSource, /privateReviewCapabilityOffers\(creatorPreflight\.creativeCapabilities\)/);
+assert.doesNotMatch(buildRouteSource, /source_first_casefile\/v1|faceless_source_bound_cinematic_sequence\/v1/);
 
 console.log("creative capability catalog contract tests passed");

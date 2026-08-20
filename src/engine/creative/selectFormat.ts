@@ -23,7 +23,7 @@ import { CONTENT_LANE_POLICIES, contentLaneForFamily } from "@/engine/contentLan
 import type { DataStoryContract } from "@/engine/dataStory";
 import {
   CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
-  isCasefileCinematicIntent,
+  privateReviewCapabilityOffers,
   resolveCreativeCapabilities,
   type CreativeCapabilityOffer,
 } from "@/engine/creative/creativeCapabilityCatalog";
@@ -366,25 +366,20 @@ function canonicalCrew(family: FamilyKey, input: FormatSelectionInput): FormatCr
   return KNOWN_ROLES.filter((role) => known.has(role));
 }
 
-function sourceRequirements(family: FamilyKey, input: FormatSelectionInput): string[] {
-  if (family === "documentary_collage_short") {
-    return ["structured sourceReferences", "per-claim claimEvidence"];
-  }
-  if (isCasefileCinematicIntent(input, family)) {
-    return [
-      "source-first Case Packet",
-      "claim-to-source-to-shot evidence map",
-      "current human editorial approval for the factual cinematic sequence",
-    ];
-  }
-  if (family === "children_learning") {
-    return [
-      "age-banded original Children’s Show Bible",
-      "one observable learning objective and assessment",
-      "current child-editor approval bound to the show, lesson, and Episode Graph",
-    ];
-  }
-  return [];
+function sourceRequirements(
+  family: FamilyKey,
+  creativeCapabilities: readonly CreativeCapabilityOffer[],
+): string[] {
+  const familyRequirements = family === "documentary_collage_short"
+    ? ["structured sourceReferences", "per-claim claimEvidence"]
+    : [];
+  // Review-only capabilities are concept-implied intake routes, not optional
+  // visual flourishes. Their source/evidence requirements come from the same
+  // catalog object that supplied their module and review-desk behavior.
+  return uniqueStrings([
+    ...familyRequirements,
+    ...privateReviewCapabilityOffers(creativeCapabilities).flatMap((capability) => capability.requirements),
+  ]);
 }
 
 function uniqueStrings(values: readonly string[]): string[] {
@@ -421,10 +416,14 @@ function planningPreflight(family: FamilyKey): FormatPlanningPreflight {
 
 function creatorAdmissionPreflight(
   family: FamilyKey,
-  input: FormatSelectionInput,
+  creativeCapabilities: readonly CreativeCapabilityOffer[],
 ): FormatCreatorAdmission {
+  // The catalog owns whether a stated intent enters a supervised capability
+  // route. The channel-inception registry still owns the concrete reviewer
+  // workflow, but does not get to re-parse a Casefile/children concept.
+  const privateReviewOffers = privateReviewCapabilityOffers(creativeCapabilities);
   const supervised = familySupervisedChannelInceptionCapability(family, {
-    casefileCinematic: isCasefileCinematicIntent(input, family),
+    casefileCinematic: family === "cinematic" && privateReviewOffers.length > 0,
   });
   const capability = supervised ?? familyChannelInceptionCapability(family);
 
@@ -511,9 +510,9 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
   const lane = contentLaneForFamily(family);
   const laneDefinition = lane ? CONTENT_LANE_POLICIES[lane.key] : undefined;
   const planning = planningPreflight(family);
-  const creatorAdmission = creatorAdmissionPreflight(family, input);
-  const runtime = runtimePreflight(family);
   const creativeCapabilities = resolveCreativeCapabilities(input, family);
+  const creatorAdmission = creatorAdmissionPreflight(family, creativeCapabilities);
+  const runtime = runtimePreflight(family);
   const recommendedModules: FormatModuleRecommendation[] = creativeCapabilities.flatMap((capability) =>
     capability.modules.map((module) => ({
       block: module.block,
@@ -525,7 +524,7 @@ export function formatPreflight(family: FamilyKey, input: FormatSelectionInput):
     })),
   );
   const admittedModules = moduleAdmissions(recommendedModules);
-  const requiredSources = sourceRequirements(family, input);
+  const requiredSources = sourceRequirements(family, creativeCapabilities);
   const missingRequirements = uniqueStrings([
     ...requiredSources,
     ...admittedModules

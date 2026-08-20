@@ -29,7 +29,10 @@ import {
   suggestYoutubeHandle,
 } from "@/lib/youtubeChannelCreationClaim";
 import { formatPreflight } from "@/engine/creative/selectFormat";
-import { validateCreativeCapabilitySelections } from "@/engine/creative/creativeCapabilityCatalog";
+import {
+  privateReviewCapabilityOffers,
+  validateCreativeCapabilitySelections,
+} from "@/engine/creative/creativeCapabilityCatalog";
 
 /**
  * POST /api/build-channel  { design, requestKey } → { id, requestKey, slug }
@@ -172,18 +175,19 @@ export async function POST(request: Request) {
       if (selectedCapabilitySelections.length) {
         design = { ...design, capabilitySelections: selectedCapabilitySelections };
       }
-      const casefileModules = creatorPreflight.moduleAdmissions.filter(
-        (module) => module.profile === "source_first_casefile/v1" ||
-          module.profile === "claim_to_source_to_shot_map/v1" ||
-          module.profile === "faceless_source_bound_cinematic_sequence/v1",
-      );
-      if (casefileModules.length) {
+      // A review-only catalog offer is a real destination, but never a
+      // channel-build authority. This deliberately uses catalog admission
+      // rather than brittle Casefile/children profile-name checks, so a new
+      // supervised module acquires the same no-spend boundary automatically.
+      const privateReviewOffers = privateReviewCapabilityOffers(creatorPreflight.creativeCapabilities);
+      if (privateReviewOffers.length) {
         return NextResponse.json({
-          error: "factual cinematic Casefile concepts are private supervised episode workflows, not automatic channel creation",
+          error: `${privateReviewOffers.map((offer) => offer.title).join(", ")} is private review only and cannot start automatic channel creation`,
           runtimeBlockers: creatorPreflight.runtimeBlockers,
           sourceRequirements: creatorPreflight.sourceRequirements,
-          recommendedModules: casefileModules.map((module) => module.block),
-          remediation: casefileModules.map((module) => module.remediation),
+          recommendedModules: privateReviewOffers.flatMap((offer) => offer.modules.map((module) => module.block)),
+          remediation: privateReviewOffers.map((offer) => offer.automationAdmission.remediation),
+          reviewHrefs: privateReviewOffers.flatMap((offer) => offer.reviewHref ? [offer.reviewHref] : []),
         }, { status: 409 });
       }
       const supervisedModules = creatorPreflight.moduleAdmissions.filter(
