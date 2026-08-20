@@ -1,5 +1,5 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
+import { sha256Hex } from "@/lib/sha256";
 
 /**
  * A real source-proof image is evidence, not a prompt.  This contract keeps
@@ -26,7 +26,11 @@ function canonicalJson(value: unknown): string {
 }
 
 function fingerprint(value: unknown): string {
-  return createHash("sha256").update(canonicalJson(value)).digest("hex");
+  // This schema is shared with Convex's V8 isolate through the Casefile
+  // admission spine, where `node:crypto` is unavailable. `sha256Hex` is a
+  // synchronous, byte-for-byte equivalent SHA-256 implementation with its own
+  // Node equivalence vectors, so the durable receipt identity is unchanged.
+  return sha256Hex(canonicalJson(value));
 }
 
 export const SourceProofMediaObligationSchema = z
