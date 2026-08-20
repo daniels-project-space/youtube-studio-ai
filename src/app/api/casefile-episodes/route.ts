@@ -88,6 +88,19 @@ export async function POST(request: Request) {
       });
       return NextResponse.json({ ok: true, episode });
     }
+    if (action === "attach_reference_mechanics") {
+      const episode = await convex.mutation(api.casefileEpisodes.attachReferenceMechanics, {
+        ownerId: actor.ownerId,
+        episodeId: episodeId as never,
+        // This intentionally accepts only the seven original-expression
+        // annotations and a human review draft. Source URLs/labels, hashes,
+        // policies, and the current ShotPlan binding are derived server-side.
+        mechanics: requiredObject(body.mechanics, "mechanics"),
+        review: requiredObject(body.review, "review"),
+        now,
+      });
+      return NextResponse.json({ ok: true, episode });
+    }
     if (action === "draft_cinematic_sequence") {
       const episode = await convex.mutation(api.casefileEpisodes.draftCinematicSequence, {
         ownerId: actor.ownerId,

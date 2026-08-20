@@ -11,6 +11,7 @@ type Episode = {
   workflow?: {
     cinematicDraft?: { sequenceContentFingerprint?: string };
     cinematicAdmission?: { generatedSceneCount?: number; release?: string };
+    referenceMechanicsPacket?: { contentFingerprint?: string; release?: string };
   };
 };
 
@@ -58,6 +59,8 @@ export default function CasefilePage() {
   const [sourcePacket, setSourcePacket] = useState("");
   const [planning, setPlanning] = useState("");
   const [evidenceMap, setEvidenceMap] = useState("");
+  const [referenceMechanics, setReferenceMechanics] = useState("");
+  const [referenceMechanicsReview, setReferenceMechanicsReview] = useState("");
   const [direction, setDirection] = useState("");
   const [review, setReview] = useState("");
   const [busy, setBusy] = useState(false);
@@ -114,7 +117,7 @@ export default function CasefilePage() {
         <p style={{ margin: 0, color: "#84a8ff", fontSize: 12, fontWeight: 700, letterSpacing: ".11em", textTransform: "uppercase" }}>Private editorial workflow</p>
         <h1 style={{ margin: 0, fontSize: 30 }}>Casefile cinematic desk</h1>
         <p style={{ margin: 0, maxWidth: 850, color: "#aeb9cb", lineHeight: 1.55 }}>
-          Build an evidence-led Fern-style sequence in two phases: lock real sources and causal shot coverage first, then approve the faceless-mannequin multi-shot treatment. This desk cannot render, spend, or publish.
+          Build an evidence-led cinematic sequence in two phases: lock real sources and causal shot coverage first, then approve the faceless-mannequin multi-shot treatment. This desk cannot render, spend, or publish.
         </p>
       </header>
 
@@ -164,6 +167,21 @@ export default function CasefilePage() {
           </>}
 
           {selected?.status === "awaiting_cinematic_direction" && <>
+            <section style={{ border: "1px solid #294468", borderRadius: 11, padding: 14, display: "grid", gap: 10, background: "rgba(17,37,62,.32)" }}>
+              <h2 style={{ margin: 0, fontSize: 17 }}>Optional: attach reviewed reference mechanics</h2>
+              <p style={{ margin: 0, color: "#b9c8da", fontSize: 13, lineHeight: 1.5 }}>
+                Supply original craft rules for the opening, rhythm, narration, cuts, audio, recurring identity, and exclusions. This intake accepts text only—never reference video, frames, audio, scripts, or an automatic similarity comparison. The server derives the current attributed documentary contract and binds the packet to this exact Story Spine before it is frozen.
+              </p>
+              {selected.workflow?.referenceMechanicsPacket ? <>
+                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Reviewed mechanics packet attached</strong>
+                {selected.workflow.referenceMechanicsPacket.contentFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.referenceMechanicsPacket.contentFingerprint}</code>}
+                <small style={{ color: "#9eadc1" }}>It will be signed into the cinematic sequence; replacing it requires a fresh immutable episode revision.</small>
+              </> : <>
+                <textarea aria-label="Reference mechanics annotations JSON" style={{ ...textarea, minHeight: 260 }} value={referenceMechanics} onChange={(event) => setReferenceMechanics(event.target.value)} placeholder={'{\n  "openingPromisePayoff": { "guidance": "State one source-bound question, then earn its answer later.", "sourceIds": ["fern"] },\n  "beatVisualRhythm": { "guidance": "Change the visual only when the evidence relationship changes.", "sourceIds": ["fern"] },\n  "narrationPaceClarity": { "guidance": "Keep the causal claim legible before underscoring it.", "sourceIds": ["fern"] },\n  "cutSceneFunction": { "guidance": "Each cut reveals a fact, relationship, or consequence.", "sourceIds": ["fern"] },\n  "audioRelationship": { "guidance": "Keep narration intelligible over restrained ambience.", "sourceIds": ["fern"] },\n  "recurringIdentity": { "guidance": "Use this channel’s own faceless cast and evidence treatment.", "sourceIds": ["fern"] },\n  "exclusions": { "guidance": "No copied cases, visual identity, footage, scripts, voices, or unsupported reconstructions.", "sourceIds": ["fern"] }\n}'} />
+                <textarea aria-label="Reference mechanics editorial review JSON" style={{ ...textarea, minHeight: 110 }} value={referenceMechanicsReview} onChange={(event) => setReferenceMechanicsReview(event.target.value)} placeholder='{"id":"reference-mechanics-review-...","reviewerId":"reviewer-...","reviewedAt":"2026-08-20T12:00:00.000Z"}' />
+                <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("attach_reference_mechanics", { episodeId: selected._id, mechanics: parseObject(referenceMechanics, "Reference mechanics"), review: parseObject(referenceMechanicsReview, "Reference mechanics review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze reviewed mechanics packet</button>
+              </>}
+            </section>
             <h2 style={{ margin: 0, fontSize: 19 }}>4. Draft cinematic coverage</h2>
             <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13 }}>Paste the compact direction card: causal question, visual world, and original faceless mannequin wardrobe/silhouette locks. The system writes the actual multi-shot, tension, cut, and continuity draft.</p>
             <textarea aria-label="Cinematic direction JSON" style={textarea} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder='{"version":"cinematic-case-direction/v1", ...}' />

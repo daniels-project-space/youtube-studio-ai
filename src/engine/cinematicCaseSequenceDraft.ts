@@ -16,6 +16,10 @@ import {
   type CinematicCaseSequenceContent,
   type CinematicCaseSequenceInput,
 } from "./cinematicCaseSequence";
+import {
+  validateReferenceMechanicsPacket,
+  type ReferenceMechanicsPacket,
+} from "./referenceMechanicsPacket";
 import { SceneManifestSchema } from "./episodeGraph";
 import {
   causalBeatWindows,
@@ -252,11 +256,18 @@ export function planCinematicCaseSequenceDraft(args: {
   evidenceShotMap: unknown;
   sceneManifest: unknown;
   shotList: unknown;
+  /** Optional, already human-reviewed mechanics from the private Casefile desk. */
+  referenceMechanicsPacket?: unknown;
+  now?: Date;
 }): CinematicCaseSequenceDraft {
   const direction = CinematicCaseDirectionSchema.parse(args.direction);
   const map = CasefileEvidenceShotMapSchema.parse(args.evidenceShotMap);
   const manifest = SceneManifestSchema.parse(args.sceneManifest);
   const shots = z.array(ShotPlanSchema).min(1).max(2_000).parse(args.shotList);
+  const referenceMechanicsPacket: ReferenceMechanicsPacket | undefined =
+    args.referenceMechanicsPacket === undefined
+      ? undefined
+      : validateReferenceMechanicsPacket(args.referenceMechanicsPacket, { now: args.now });
   if (direction.caseId !== map.caseId) {
     throw new Error("cinematic draft: direction caseId does not match the admitted Casefile evidence map");
   }
@@ -410,6 +421,7 @@ export function planCinematicCaseSequenceDraft(args: {
     shotPlanFingerprint: map.shotPlanFingerprint,
     cast: direction.cast,
     beats,
+    ...(referenceMechanicsPacket ? { referenceMechanicsPacket } : {}),
   };
   const sequenceContentFingerprint = cinematicCaseSequenceContentFingerprint(content);
   return CinematicCaseSequenceDraftSchema.parse({

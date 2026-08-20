@@ -6,6 +6,7 @@ import {
   admitCasefileEpisodeEvidenceMap,
   admitCasefileEpisodeSource,
   attachCasefileEpisodePlanning,
+  attachCasefileEpisodeReferenceMechanics,
   draftCasefileEpisodeCinematicSequence,
   finalizeCasefileEpisodeCinematicSequence,
   type CasefileEpisodeWorkflow,
@@ -88,8 +89,34 @@ export const draftCinematicSequence = mutation({
   args: { ownerId: v.string(), episodeId: v.id("casefileEpisodes"), direction: v.any(), now: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const episode = await ownedEpisode(ctx, args.episodeId, args.ownerId);
-    const next = draftCasefileEpisodeCinematicSequence({ episode: workflow(episode), direction: args.direction });
+    const next = draftCasefileEpisodeCinematicSequence({
+      episode: workflow(episode),
+      direction: args.direction,
+      ...(args.now === undefined ? {} : { now: new Date(args.now) }),
+    });
     await ctx.db.patch(episode._id, { status: next.status, workflow: next, updatedAt: args.now ?? Date.now() });
+    return await ctx.db.get(episode._id);
+  },
+});
+
+/** Private no-spend intake for human-authored, mechanics-only craft annotations. */
+export const attachReferenceMechanics = mutation({
+  args: {
+    ownerId: v.string(),
+    episodeId: v.id("casefileEpisodes"),
+    mechanics: v.any(),
+    review: v.any(),
+    now: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const episode = await ownedEpisode(ctx, args.episodeId, args.ownerId);
+    const next = attachCasefileEpisodeReferenceMechanics({
+      episode: workflow(episode),
+      mechanics: args.mechanics,
+      review: args.review,
+      ...(args.now === undefined ? {} : { now: new Date(args.now) }),
+    });
+    await ctx.db.patch(episode._id, { workflow: next, updatedAt: args.now ?? Date.now() });
     return await ctx.db.get(episode._id);
   },
 });

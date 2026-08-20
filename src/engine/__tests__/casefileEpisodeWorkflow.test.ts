@@ -12,6 +12,7 @@ import {
   admitCasefileEpisodeEvidenceMap,
   admitCasefileEpisodeSource,
   attachCasefileEpisodePlanning,
+  attachCasefileEpisodeReferenceMechanics,
   draftCasefileEpisodeCinematicSequence,
   finalizeCasefileEpisodeCinematicSequence,
 } from "@/engine/casefileEpisodeWorkflow";
@@ -226,6 +227,41 @@ async function main(): Promise<void> {
       noLikeness: true as const,
     }],
   };
+  const referenceMechanics = {
+    openingPromisePayoff: {
+      guidance: "Open on one source-bound question and earn its answer with the later cited consequence.",
+      sourceIds: ["fern"],
+    },
+    beatVisualRhythm: {
+      guidance: "Change the visual only when the evidence relationship or causal state changes.",
+      sourceIds: ["fern"],
+    },
+    narrationPaceClarity: {
+      guidance: "Make the cited causal claim intelligible before adding restrained dramatic emphasis.",
+      sourceIds: ["fern"],
+    },
+    cutSceneFunction: {
+      guidance: "Every cut must reveal a fact, relationship, physical consequence, or earned breath.",
+      sourceIds: ["fern"],
+    },
+    audioRelationship: {
+      guidance: "Keep narration ahead of restrained ambience and preserve deliberate pauses for evidence.",
+      sourceIds: ["fern"],
+    },
+    recurringIdentity: {
+      guidance: "Use this channel's own faceless cast, wardrobe, and source-proof presentation grammar.",
+      sourceIds: ["fern"],
+    },
+    exclusions: {
+      guidance: "Never copy cases, scripts, footage, voices, channel identity, or unsupported reconstructions.",
+      sourceIds: ["fern"],
+    },
+  };
+  const referenceMechanicsReview = {
+    id: "reference-mechanics-review-ledger-closure",
+    reviewerId: "reviewer-documentary-desk",
+    reviewedAt: NOW.toISOString(),
+  };
   const reconstructionOnlyInput: CasefileEvidenceShotMapInput = {
     ...evidenceInput,
     claimMappings: [{ ...evidenceInput.claimMappings[0]!, bindings: [evidenceInput.claimMappings[0]!.bindings[0]!] }],
@@ -239,13 +275,52 @@ async function main(): Promise<void> {
     "a mannequin action cannot crowd out the independently admitted proof cut",
   );
 
-  const draft = draftCasefileEpisodeCinematicSequence({
+  assert.throws(
+    () => attachCasefileEpisodeReferenceMechanics({
+      episode: evidence,
+      mechanics: { ...referenceMechanics, sources: [] },
+      review: referenceMechanicsReview,
+      now: NOW,
+    }),
+    /unrecognized key/i,
+    "the desk accepts annotations only; an operator cannot inject sources or copied-media metadata",
+  );
+  const evidenceWithReferenceMechanics = attachCasefileEpisodeReferenceMechanics({
     episode: evidence,
+    mechanics: referenceMechanics,
+    review: referenceMechanicsReview,
+    now: NOW,
+  });
+  assert.equal(evidenceWithReferenceMechanics.status, "awaiting_cinematic_direction");
+  assert.equal(
+    evidenceWithReferenceMechanics.referenceMechanicsPacket?.sources.map((source) => source.id).join(","),
+    "fern,fascinating-horror",
+    "the intake derives its attributed source set from the fixed documentary contract",
+  );
+  assert.throws(
+    () => attachCasefileEpisodeReferenceMechanics({
+      episode: evidenceWithReferenceMechanics,
+      mechanics: referenceMechanics,
+      review: referenceMechanicsReview,
+      now: NOW,
+    }),
+    /already frozen/i,
+    "a reviewed mechanics packet cannot be silently replaced before cinematic review",
+  );
+
+  const draft = draftCasefileEpisodeCinematicSequence({
+    episode: evidenceWithReferenceMechanics,
     direction,
+    now: NOW,
   });
   assert.equal(draft.status, "awaiting_cinematic_review");
   assert.equal(draft.cinematicDraft?.content.beats[0]?.shots.length, 4);
   assert.match(draft.cinematicDraft?.content.beats[0]?.shots[1]?.still ?? "", /charcoal wool coat/i);
+  assert.equal(
+    draft.cinematicDraft?.content.referenceMechanicsPacket?.contentFingerprint,
+    evidenceWithReferenceMechanics.referenceMechanicsPacket?.contentFingerprint,
+    "the reviewed mechanics packet is part of the editor-signed cinematic sequence content",
+  );
 
   const final = finalizeCasefileEpisodeCinematicSequence({
     episode: draft,
@@ -263,6 +338,10 @@ async function main(): Promise<void> {
   assert.equal(final.status, "render_admitted");
   assert.equal(final.cinematicAdmission?.generatedSceneCount, 8);
   assert.equal(final.cinematicAdmission?.release, "private_human_editorial_review_only");
+  assert.equal(
+    final.cinematicInput?.referenceMechanicsPacket?.contentFingerprint,
+    evidenceWithReferenceMechanics.referenceMechanicsPacket?.contentFingerprint,
+  );
   assert.throws(
     () => finalizeCasefileEpisodeCinematicSequence({ episode: final, editorialReview: {}, now: NOW }),
     /expected awaiting_cinematic_review/i,

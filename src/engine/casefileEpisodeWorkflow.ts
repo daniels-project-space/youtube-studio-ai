@@ -14,6 +14,11 @@ import {
   type CinematicCaseDirection,
   type CinematicCaseSequenceDraft,
 } from "./cinematicCaseSequenceDraft";
+import { referenceQualityContractFor } from "./creative/referenceQuality";
+import {
+  createReferenceMechanicsPacket,
+  type ReferenceMechanicsPacket,
+} from "./referenceMechanicsPacket";
 import {
   assertCasefileSourcePacket,
   type CasefileSourceAdmissionReceipt,
@@ -52,6 +57,8 @@ export type CasefileEpisodeWorkflow = {
   };
   evidenceShotMap?: CasefileEvidenceShotMap;
   evidenceShotMapAdmission?: CasefileEvidenceShotMapAdmissionReceipt;
+  /** Optional, immutable mechanics-only craft review attached before the cinematic draft. */
+  referenceMechanicsPacket?: ReferenceMechanicsPacket;
   cinematicDirection?: CinematicCaseDirection;
   cinematicDraft?: CinematicCaseSequenceDraft;
   cinematicInput?: CinematicCaseSequenceInput;
@@ -154,10 +161,41 @@ export function admitCasefileEpisodeEvidenceMap(args: {
   };
 }
 
+/**
+ * Stores one reviewed, mechanics-only reference packet after the factual plan
+ * is frozen. The desk never accepts reference footage, copied media, source
+ * metadata, or an automatic comparison: those fields are derived from the
+ * static documentary contract inside createReferenceMechanicsPacket.
+ */
+export function attachCasefileEpisodeReferenceMechanics(args: {
+  episode: CasefileEpisodeWorkflow;
+  mechanics: unknown;
+  review: unknown;
+  now?: Date;
+}): CasefileEpisodeWorkflow {
+  requireStatus(args.episode, "awaiting_cinematic_direction", "attach reference mechanics");
+  const planning = requirePlanning(args.episode);
+  requireEvidence(args.episode);
+  if (args.episode.referenceMechanicsPacket) {
+    throw new Error(
+      "casefile episode reference mechanics are already frozen; create a fresh immutable revision instead of replacing a reviewed craft packet",
+    );
+  }
+  const referenceMechanicsPacket = createReferenceMechanicsPacket({
+    referenceQuality: referenceQualityContractFor("documentary_collage_short"),
+    shotList: planning.shotList,
+    mechanics: args.mechanics,
+    review: args.review,
+    now: args.now,
+  });
+  return { ...args.episode, referenceMechanicsPacket };
+}
+
 /** Generates an editor-visible, faceless-mannequin multi-shot draft; it has no render authority. */
 export function draftCasefileEpisodeCinematicSequence(args: {
   episode: CasefileEpisodeWorkflow;
   direction: unknown;
+  now?: Date;
 }): CasefileEpisodeWorkflow {
   requireStatus(args.episode, "awaiting_cinematic_direction", "draft cinematic sequence");
   const planning = requirePlanning(args.episode);
@@ -167,6 +205,9 @@ export function draftCasefileEpisodeCinematicSequence(args: {
     evidenceShotMap: evidence.evidenceShotMap,
     sceneManifest: planning.sceneManifest,
     shotList: planning.shotList,
+    ...(args.episode.referenceMechanicsPacket
+      ? { referenceMechanicsPacket: args.episode.referenceMechanicsPacket, now: args.now }
+      : {}),
   });
   if (draft.content.caseId !== args.episode.caseId) {
     throw new Error("casefile episode cinematic direction caseId does not match the admitted source packet");
@@ -206,6 +247,12 @@ export function finalizeCasefileEpisodeCinematicSequence(args: {
     evidenceShotMapAdmission: evidence.evidenceShotMapAdmission,
     sceneManifest: planning.sceneManifest,
     shotList: planning.shotList,
+    ...(args.episode.referenceMechanicsPacket
+      ? {
+          referenceMechanicsPacket: args.episode.referenceMechanicsPacket,
+          referenceQuality: referenceQualityContractFor("documentary_collage_short"),
+        }
+      : {}),
   }, { now: args.now });
   return {
     ...args.episode,
