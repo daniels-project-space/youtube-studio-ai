@@ -27,6 +27,10 @@ import {
   assertEvidenceVisualManifestCollection,
   type EvidenceVisualManifest,
 } from "@/engine/evidenceVisualManifest";
+import {
+  assertEditorialEvidencePacket,
+  type EditorialEvidencePacket,
+} from "@/engine/editorialEvidencePacket";
 import { StorySpineSchema, type StorySpine } from "@/engine/storySpine";
 import type { Block } from "@/engine/types";
 
@@ -128,6 +132,46 @@ function sceneEvidenceVisualsForStorySpine(
   return bySceneId;
 }
 
+function editorialEpisodeSourceId(sourceId: string): string {
+  return `source-editorial-${stableFragment(sourceId, "evidence")}`;
+}
+
+/**
+ * A factual scene may use an Evidence Visual Manifest only when every source
+ * snapshot in that renderer-facing manifest matches the separately reviewed
+ * shared editorial packet. The manifest remains the authority on factual
+ * pixels; the packet remains the authority on approved claims/source review.
+ */
+function assertEditorialPacketBindsEvidenceVisuals(
+  packet: EditorialEvidencePacket | undefined,
+  visuals: Map<string, EvidenceVisualManifest>,
+): Set<string> {
+  if (!packet) return new Set();
+  const packetSources = new Map(packet.sources.map((source) => [source.id, source]));
+  const usedSourceIds = new Set<string>();
+  for (const visual of visuals.values()) {
+    for (const source of visual.sources) {
+      const approved = packetSources.get(source.id);
+      if (!approved) {
+        throw new Error(
+          `episode_graph: factual visual ${visual.id} references source ${source.id} outside the reviewed editorial evidence packet`,
+        );
+      }
+      if (
+        approved.name !== source.name ||
+        approved.url !== source.url ||
+        approved.snapshotSha256 !== source.snapshotSha256
+      ) {
+        throw new Error(
+          `episode_graph: factual visual ${visual.id} source ${source.id} does not match the packet's reviewed immutable snapshot`,
+        );
+      }
+      usedSourceIds.add(source.id);
+    }
+  }
+  return usedSourceIds;
+}
+
 /** Pure bridge used by the runtime and test suite. */
 export function buildEpisodeGraphFromStorySpine(args: {
   storySpine: StorySpine;
@@ -140,6 +184,8 @@ export function buildEpisodeGraphFromStorySpine(args: {
   syntheticScenario?: SyntheticScenarioContract;
   /** Fresh reviewed factual visuals for this supervised episode only. */
   evidenceVisualManifests?: unknown;
+  /** Shared reviewed factual source/claim packet; never required for original explainers. */
+  editorialEvidencePacket?: unknown;
 }): { episodeGraph: EpisodeGraph; sceneManifest: SceneManifest } {
   const storySpine = StorySpineSchema.parse(args.storySpine);
   const audience = args.audience ?? "general";
@@ -180,8 +226,26 @@ export function buildEpisodeGraphFromStorySpine(args: {
     ? assertSyntheticScenarioContract(args.syntheticScenario)
     : undefined;
   const sceneEvidenceVisuals = sceneEvidenceVisualsForStorySpine(args.evidenceVisualManifests, storySpine);
+  const editorialEvidencePacket = args.editorialEvidencePacket === undefined
+    ? undefined
+    : assertEditorialEvidencePacket(args.editorialEvidencePacket);
   if (syntheticScenario && sceneEvidenceVisuals.size > 0) {
     throw new Error("episode_graph: reviewed factual visuals cannot be combined with a fictional synthetic scenario");
+  }
+  if (syntheticScenario && editorialEvidencePacket) {
+    throw new Error("episode_graph: a reviewed factual editorial packet cannot be combined with a fictional synthetic scenario");
+  }
+  const usedEditorialSourceIds = assertEditorialPacketBindsEvidenceVisuals(editorialEvidencePacket, sceneEvidenceVisuals);
+  if (editorialEvidencePacket) {
+    for (const source of editorialEvidencePacket.sources) {
+      if (!usedEditorialSourceIds.has(source.id)) continue;
+      sourceRefs.push({
+        id: editorialEpisodeSourceId(source.id),
+        kind: source.kind === "reference" ? "reference" : "primary",
+        label: source.name,
+        locator: source.url,
+      });
+    }
   }
   const beats = storySpine.narrativeBeats.map((beat, index) => {
     const shots = shotsByBeat.get(beat.id) ?? [];
@@ -195,6 +259,9 @@ export function buildEpisodeGraphFromStorySpine(args: {
       ? `Practice one clear, kind idea about ${args.topic.trim()}.`
       : undefined;
     const evidenceVisualManifest = sceneEvidenceVisuals.get(`scene-${beat.id.slice("beat-".length)}`);
+    const factualSourceRefs = evidenceVisualManifest && editorialEvidencePacket
+      ? evidenceVisualManifest.sources.map((source) => editorialEpisodeSourceId(source.id))
+      : [];
     return {
       id: beat.id,
       kind: kindForPurpose(beat.purpose, index, storySpine.narrativeBeats.length, audience),
@@ -203,7 +270,10 @@ export function buildEpisodeGraphFromStorySpine(args: {
       claim: text,
       ...(learningObjective ? { learningObjective } : {}),
       scenePurpose: beat.purpose,
-      sourceRefs: audience === "children" ? [SCRIPT_SOURCE_ID, CURRICULUM_SOURCE_ID] : [SCRIPT_SOURCE_ID],
+      sourceRefs: [
+        ...(audience === "children" ? [SCRIPT_SOURCE_ID, CURRICULUM_SOURCE_ID] : [SCRIPT_SOURCE_ID]),
+        ...factualSourceRefs,
+      ],
       characterIds: (leadShot?.entities ?? []).map((id) => canonicalEpisodeCatalogId(id, "character")),
       ...(leadShot?.locationId
         ? { settingId: canonicalEpisodeCatalogId(leadShot.locationId, "setting") }
@@ -303,6 +373,7 @@ const episodeGraph: Block = {
         ? assertSyntheticScenarioContract(ctx.store["syntheticScenario"])
         : undefined,
       evidenceVisualManifests: ctx.store["evidenceVisualManifests"],
+      editorialEvidencePacket: ctx.store["editorialEvidencePacket"],
     });
     ctx.log(
       `episode_graph: ${episodeGraph.beats.length} source-grounded beats → ${sceneManifest.scenes.length} deterministic scenes (provider calls: 0)`,

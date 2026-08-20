@@ -18,6 +18,7 @@ import {
   evidenceVisualManifestFingerprint,
   type EvidenceVisualManifest,
 } from "@/engine/evidenceVisualManifest";
+import { createEditorialEvidencePacket } from "@/engine/editorialEvidencePacket";
 
 const graphInput = {
   seriesId: "series-curious-lantern",
@@ -274,6 +275,60 @@ const bridgedFactual = buildEpisodeGraphFromStorySpine({
 assert.equal(bridgedFactual.episodeGraph.beats[0].visualState.evidenceVisualIntent, "factual_chart");
 assert.equal(bridgedFactual.sceneManifest.scenes[0].visualState.evidenceVisualManifest?.id, factualVisual.id);
 assert.equal(sceneKindFor(bridgedFactual.sceneManifest.scenes[0]), "chart");
+const factualEditorialPacket = createEditorialEvidencePacket({
+  subject: "How seeds grow",
+  sources: [{
+    id: "source-seed-atlas",
+    name: "Seed Atlas",
+    url: "https://example.org/seed-atlas",
+    snapshotSha256: "b".repeat(64),
+    kind: "dataset",
+  }],
+  claims: [{
+    id: "claim-seed-sprout-trend",
+    sourceIds: ["source-seed-atlas"],
+    approvedText: "Seed Atlas records 20 sprouts in week one and 35 in week two.",
+    numericAnchor: "20 and 35",
+    context: "Reviewed Seed Atlas weekly sprout trend.",
+  }],
+  review: {
+    reviewerId: "editorial-data-desk",
+    reviewId: "review-editorial-seed-atlas",
+    reviewedAt: new Date().toISOString(),
+  },
+});
+const packetBoundFactual = buildEpisodeGraphFromStorySpine({
+  storySpine: factualStorySpine,
+  topic: "How seeds grow",
+  seriesId: "series-curious-lantern",
+  episodeId: "episode-how-seeds-grow-data-packet",
+  evidenceVisualManifests: [factualVisual],
+  editorialEvidencePacket: factualEditorialPacket,
+});
+assert.deepEqual(
+  packetBoundFactual.episodeGraph.beats[0].sourceRefs,
+  ["source-validated-story-spine", "source-editorial-source-seed-atlas"],
+  "the factual renderer route must retain the packet-bound source alongside the Story Spine source",
+);
+assert.equal(
+  packetBoundFactual.episodeGraph.sources.find((source) => source.id === "source-editorial-source-seed-atlas")?.locator,
+  "https://example.org/seed-atlas",
+);
+const mismatchedPacketVisual = structuredClone(factualVisual);
+mismatchedPacketVisual.sources[0]!.snapshotSha256 = "c".repeat(64);
+mismatchedPacketVisual.review.reviewedManifestFingerprint = evidenceVisualManifestFingerprint(mismatchedPacketVisual);
+assert.throws(
+  () => buildEpisodeGraphFromStorySpine({
+    storySpine: factualStorySpine,
+    topic: "How seeds grow",
+    seriesId: "series-curious-lantern",
+    episodeId: "episode-how-seeds-grow-data-packet-mismatch",
+    evidenceVisualManifests: [mismatchedPacketVisual],
+    editorialEvidencePacket: factualEditorialPacket,
+  }),
+  /does not match the packet's reviewed immutable snapshot/,
+  "changing a factual visual's source snapshot must fail before the scene compiler receives it",
+);
 assert.equal(
   assertSceneCompilerAdmission({
     manifest: bridgedFactual.sceneManifest,

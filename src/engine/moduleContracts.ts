@@ -506,9 +506,21 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "topic", "timedScript", "narrativeBeats", "continuityLedger", "shotList", "dpVisualSpecs", "editorEdl", "storyCoverage",
     ],
     optionalConsumes: [
-      "syntheticScenario", "contentLane", "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval", "evidenceVisualManifests",
+      "syntheticScenario", "contentLane", "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval", "evidenceVisualManifests", "editorialEvidencePacket",
     ],
     providerProfiles: [local],
+    qualityRequired: true,
+  }),
+
+  // Shared factual source/claim/snapshot admission. It is deliberately not a
+  // Casefile replacement and can only emit a private editorial-review packet.
+  editorial_evidence_packet: contract([
+    "factual.editorial_evidence_locked",
+    "publish.private_only",
+  ], {
+    requiredConsumes: ["editorialEvidencePacketInput"],
+    providerProfiles: [local],
+    maxCostUsd: 0,
     qualityRequired: true,
   }),
 

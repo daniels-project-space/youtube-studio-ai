@@ -45,7 +45,7 @@ export interface GoldenStage {
 
 export const GOLDEN_SPINE: GoldenStage[] = [
   { stage: "intel", blocks: ["competitor_research", "topic_select", "quiz_topic_plan"], note: "Pick topics from real outliers + competitor signal, learning-weighted; QuizYear alternatively rotates a curated CC0 Wikidata topic registry with a durable provenance receipt." },
-  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "casefile_source_packet", "casefile_evidence_shot_map", "source_bound_story_spine", "cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence", "synthetic_scenario", "short_strategy"], note: "Show Bible crew and timed story spine; curriculum_episode_seed locks a child-editor-approved age band, one objective, vocabulary/actions, assessment, and original recurring world/characters before Story Spine planning, and emits only a private review receipt; episode_graph locks causal beat-to-scene continuity before render; learning_contract turns an approved objective into source-linked demonstrations and retrieval practice; children_show_bible binds that earlier intent into its graph-and-lesson proof; casefile_source_packet admits only an operator-supplied, primary-source- and rights-bound Case Packet with fresh Case Packet and source-use-ledger-bound editorial approval, and can emit only a private human-review draft; casefile_evidence_shot_map additionally binds every factual claim to reviewed current Scene Manifest / ShotPlan targets under an explicit no-gore/no-unsupported-recreation policy; source_bound_story_spine carries those exact reviewed claim/source/citation/treatment bindings into every timed Story Spine shot without generating facts or admitting a family; cinematic_case_sequence_draft converts that evidence into source-bound, faceless mannequin multi-shot coverage; cinematic_case_sequence_finalize accepts only a real editor’s matching signature before strict cinematic admission and Novita generation; synthetic_scenario locks an explicitly fictional, assumption-led scenario before writing; collage Shorts lock claim/source/beat/motion evidence before render." },
+  { stage: "brief", blocks: ["director_brief", "dp_brief", "editor_brief", "composer_brief", "critic_spec", "curriculum_episode_seed", "story_spine", "episode_graph", "learning_contract", "children_show_bible", "casefile_source_packet", "casefile_evidence_shot_map", "source_bound_story_spine", "editorial_evidence_packet", "cinematic_case_sequence_draft", "cinematic_case_sequence_finalize", "cinematic_case_sequence", "synthetic_scenario", "short_strategy"], note: "Show Bible crew and timed story spine; curriculum_episode_seed locks a child-editor-approved age band, one objective, vocabulary/actions, assessment, and original recurring world/characters before Story Spine planning, and emits only a private review receipt; episode_graph locks causal beat-to-scene continuity before render; learning_contract turns an approved objective into source-linked demonstrations and retrieval practice; children_show_bible binds that earlier intent into its graph-and-lesson proof; casefile_source_packet admits only an operator-supplied, primary-source- and rights-bound Case Packet with fresh Case Packet and source-use-ledger-bound editorial approval, and can emit only a private human-review draft; casefile_evidence_shot_map additionally binds every factual claim to reviewed current Scene Manifest / ShotPlan targets under an explicit no-gore/no-unsupported-recreation policy; source_bound_story_spine carries those exact reviewed claim/source/citation/treatment bindings into every timed Story Spine shot without generating facts or admitting a family; editorial_evidence_packet provides the smaller shared source/claim/snapshot core for supervised factual explainers while Casefile keeps its separate rights and reconstruction rails; cinematic_case_sequence_draft converts that evidence into source-bound, faceless mannequin multi-shot coverage; cinematic_case_sequence_finalize accepts only a real editor’s matching signature before strict cinematic admission and Novita generation; synthetic_scenario locks an explicitly fictional, assumption-led scenario before writing; collage Shorts lock claim/source/beat/motion evidence before render." },
   { stage: "write", blocks: ["script_gen", "hook_craft"], note: "Hook-first, CRAFT_RULES applied." },
   { stage: "guard", blocks: ["qa_script", "originality_gate", "compliance_check", "quiz_topic_safety", "quiz_critic_spec", "scenario_disclosure_gate"], note: "Quality + originality + compliance floor; QuizYear contributes deterministic topic-safety and game-format critic receipts; synthetic scenarios must disclose their illustrative assumptions before narration." },
   { stage: "voice", blocks: ["narration_tts"], note: "Voice = #1 retention factor; tiered provider per niche." },
@@ -606,6 +606,27 @@ export const GOLDEN_MODULES: GoldenModule[] = [
       "every claim binding retains an admitted primary-source id, visible citation, approved treatment, and real timed shot coverage",
       "unknown, orphaned, or stale Story Spine shot ids fail closed",
       "private human-editorial-review-only handoff; no automatic family, render, spend, or publication authority",
+    ],
+    status: "reference",
+  },
+  {
+    key: "editorial-evidence-packet",
+    stage: "brief",
+    title: "Editorial Evidence Packet — Shared Factual Core",
+    engine: "Provider-free reviewed sources + approved claims + immutable snapshot hashes → factual-visual source binding",
+    how:
+      "A reusable supervised foundation for factual illustrated explainers and data-led formats. The registered " +
+      "editorial_evidence_packet block accepts only a fresh human-reviewed packet whose claim/source links and immutable source snapshots " +
+      "match its content fingerprint. When an Episode Graph receives both this packet and a reviewed Evidence Visual Manifest, it rejects " +
+      "any source name, URL, or snapshot mismatch before Scene Compiler rendering and retains the exact factual source on the affected beat. " +
+      "It intentionally does not inherit Casefile's separate source-use rights, crime sensitivity, reconstruction, or claim-to-shot policies.",
+    gates: [
+      "unique reviewed source and claim identifiers with no unknown claim-source reference",
+      "immutable source snapshot SHA-256 for every source",
+      "fresh reviewer-identified approval bound to the exact packet fingerprint",
+      "factual visual source name, URL, and snapshot must exactly match the shared packet before Scene Compiler admission",
+      "private human-editorial-review only; no automatic factual-channel, render, spend, or publication admission",
+      "Casefile source-use rights and reconstruction safeguards remain independently required for Casefile work",
     ],
     status: "reference",
   },

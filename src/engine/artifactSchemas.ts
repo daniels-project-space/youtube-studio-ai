@@ -51,6 +51,7 @@ import {
 } from "./sourceFirstAdmission";
 import { SourceBoundStorySpineHandoffSchema } from "./sourceBoundStorySpine";
 import { EvidenceVisualManifestSchema } from "./evidenceVisualManifest";
+import { EditorialEvidencePacketSchema } from "./editorialEvidencePacket";
 import {
   CinematicCaseSequenceAdmissionReceiptSchema,
   CinematicCaseSequenceInputSchema,
@@ -302,6 +303,16 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   evidenceVisualManifests: {
     type: "EvidenceVisualManifest[]",
     schema: z.array(EvidenceVisualManifestSchema).max(48),
+    persist: "reference",
+  },
+  editorialEvidencePacketInput: {
+    type: "EditorialEvidencePacketInput",
+    schema: EditorialEvidencePacketSchema,
+    persist: "reference",
+  },
+  editorialEvidencePacket: {
+    type: "EditorialEvidencePacket",
+    schema: EditorialEvidencePacketSchema,
     persist: "reference",
   },
   cinematicCaseSequenceInput: {
