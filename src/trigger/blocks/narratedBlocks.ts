@@ -70,6 +70,7 @@ import {
 import { createCinematicAssemblyHandoff } from "@/lib/assembly/cinematicHandoff";
 import { cinematicFinalMasterQaEvidence } from "@/engine/cinematicQaEvidence";
 import {
+  assertCinematicFinalMasterAudioAesthetics,
   assertCinematicFinalMasterQaAdmission,
   assertCinematicFinalMasterQaProfile,
 } from "@/engine/cinematicFinalMasterQaAdmission";
@@ -2858,6 +2859,15 @@ export const qaVisual: Block = {
         }
         ctx.log(`qa_visual: audio scoring skipped: ${e instanceof Error ? e.message : e}`);
       }
+    }
+    if (cinematicQaArtifactsPresent) {
+      // Unlike a generic draft, a source-bound cinematic master has already
+      // reserved final-master review. Do not let a missing scorer result fall
+      // through to the loudness-only evidence branch below.
+      audioAestheticScore = assertCinematicFinalMasterAudioAesthetics(
+        ctx.params["audioQa"],
+        audioAestheticScore,
+      );
     }
 
     const watchDna = ctx.store["styleDNA"] as

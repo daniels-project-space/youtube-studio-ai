@@ -128,6 +128,36 @@ export function assertCinematicFinalMasterQaProfile(qaProfile: unknown): void {
   }
 }
 
+/**
+ * A Casefile master is admitted as a cinematic experience, not merely a
+ * technically audible video.  Loudness proves that a track exists; it cannot
+ * prove that the final narration, score, and diegetic bed are production
+ * quality.  Keep that distinction executable at the final-master boundary so
+ * a failed/unavailable aesthetics scorer cannot be silently downgraded to a
+ * loudness-only green result.
+ */
+export function assertCinematicFinalMasterAudioAesthetics(
+  audioQa: unknown,
+  productionQuality: unknown,
+): number {
+  if (audioQa !== true) {
+    throw new Error(
+      "cinematic final-master QA requires audioQa=true for an independently scored final mix",
+    );
+  }
+  if (
+    typeof productionQuality !== "number" ||
+    !Number.isFinite(productionQuality) ||
+    productionQuality < 0 ||
+    productionQuality > 10
+  ) {
+    throw new Error(
+      "cinematic final-master QA requires a finite 0..10 audio aesthetics production-quality score; loudness alone is insufficient",
+    );
+  }
+  return productionQuality;
+}
+
 /** `undefined` means this is not a cinematic final-master route. */
 export function cinematicFinalMasterQaAdmissionCost(value: unknown): number {
   if (value === undefined) return 0;

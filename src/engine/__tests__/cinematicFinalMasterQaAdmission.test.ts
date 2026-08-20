@@ -1,6 +1,7 @@
 import assert from "node:assert/strict";
 import {
   admitCinematicFinalMasterQa,
+  assertCinematicFinalMasterAudioAesthetics,
   assertCinematicFinalMasterQaAdmission,
   assertCinematicFinalMasterQaProfile,
 } from "@/engine/cinematicFinalMasterQaAdmission";
@@ -93,6 +94,26 @@ assert.throws(
   () => assertCinematicFinalMasterQaProfile("draft"),
   /cannot use qaProfile=draft/,
   "a source-bound cinematic master must never report qaPassed without the independent final-master evidence receipt",
+);
+assert.equal(
+  assertCinematicFinalMasterAudioAesthetics(true, 8.4),
+  8.4,
+  "a finite final-master aesthetics score is retained as QA evidence",
+);
+assert.throws(
+  () => assertCinematicFinalMasterAudioAesthetics(false, undefined),
+  /requires audioQa=true/,
+  "a cinematic final master cannot opt out of independently scored audio",
+);
+assert.throws(
+  () => assertCinematicFinalMasterAudioAesthetics(true, undefined),
+  /loudness alone is insufficient/,
+  "an unavailable aesthetics scorer must not downgrade Casefile audio QA to loudness-only",
+);
+assert.throws(
+  () => assertCinematicFinalMasterAudioAesthetics(true, 10.1),
+  /finite 0\.\.10 audio aesthetics/,
+  "a malformed out-of-range scorer value must not become a passing production-quality score",
 );
 
 // A twelve-shot final master has 12 lock judgements and 11 cut judgements.
