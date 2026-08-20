@@ -484,6 +484,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: [
       "structure", "visualBrief", "cutSheet", "styleDNA", "contentLane",
       "curriculumEpisodeSeed", "curriculumEpisodeSeedApproval",
+      "editorialEvidencePacket",
     ],
     qualityRequired: true,
   }),
@@ -668,6 +669,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "sceneManifest",
       "shotList",
     ],
+    optionalConsumes: ["narrativeEvidenceLedger", "editorialEvidencePacket"],
     providerProfiles: [local],
     qualityRequired: true,
   }),

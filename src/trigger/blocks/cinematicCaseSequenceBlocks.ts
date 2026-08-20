@@ -206,6 +206,13 @@ const cinematicCaseSequence: Block = {
       ...(referenceMechanicsPacket && referenceQuality
         ? { referenceMechanicsPacket, referenceQuality }
         : {}),
+      ...(ctx.store["narrativeEvidenceLedger"] !== undefined
+        ? { narrativeEvidenceLedger: ctx.store["narrativeEvidenceLedger"] }
+        : {}),
+      ...(ctx.store["editorialEvidencePacket"] !== undefined
+        ? { editorialEvidencePacket: ctx.store["editorialEvidencePacket"] }
+        : {}),
+      sourceBoundStorySpine: ctx.store["sourceBoundStorySpine"],
     });
     const cinematicFinalMasterQaAdmission = admitCinematicFinalMasterQa({
       creativeLocks: admitted.creativeLocks,
@@ -213,9 +220,9 @@ const cinematicCaseSequence: Block = {
     });
     ctx.log(
       `cinematic_case_sequence: ${admitted.generatedScenePlan.scenes.length} source-bound coverage shots; ` +
-        `provider calls: 0; ${cinematicFinalMasterQaAdmission.reviewCallCount} final-master non-Google review call(s) ` +
-        `reserved at $${cinematicFinalMasterQaAdmission.reviewCostUsd.toFixed(2)} before Novita; ` +
-        "faceless-cast/cut/continuity locks → private human-review only",
+      `provider calls: 0; ${cinematicFinalMasterQaAdmission.reviewCallCount} final-master non-Google review call(s) ` +
+      `reserved at $${cinematicFinalMasterQaAdmission.reviewCostUsd.toFixed(2)} before Novita; ` +
+        `faceless-cast/cut/continuity locks${input.narrativeEvidenceLedgerFingerprint ? "/reviewed narrative-evidence ledger" : ""} → private human-review only`,
     );
     return {
       cinematicSequencePlan: admitted.plan,

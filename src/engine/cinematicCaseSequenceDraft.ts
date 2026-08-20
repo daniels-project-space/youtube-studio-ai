@@ -54,6 +54,8 @@ export const CinematicCaseDirectionSchema = z
     causalQuestion: text(400),
     visualWorld: text(500),
     cast: z.array(CinematicMannequinSchema).min(1).max(8),
+    /** Optional reviewed factual-semantics rail, signed into the final sequence if selected. */
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
   })
   .strict();
 export type CinematicCaseDirection = z.infer<typeof CinematicCaseDirectionSchema>;
@@ -86,6 +88,7 @@ function directionFingerprint(direction: CinematicCaseDirection): string {
     causalQuestion: direction.causalQuestion,
     visualWorld: direction.visualWorld,
     cast: direction.cast,
+    narrativeEvidenceLedgerFingerprint: direction.narrativeEvidenceLedgerFingerprint,
   });
 }
 
@@ -421,6 +424,9 @@ export function planCinematicCaseSequenceDraft(args: {
     shotPlanFingerprint: map.shotPlanFingerprint,
     cast: direction.cast,
     beats,
+    ...(direction.narrativeEvidenceLedgerFingerprint
+      ? { narrativeEvidenceLedgerFingerprint: direction.narrativeEvidenceLedgerFingerprint }
+      : {}),
     ...(referenceMechanicsPacket ? { referenceMechanicsPacket } : {}),
   };
   const sequenceContentFingerprint = cinematicCaseSequenceContentFingerprint(content);

@@ -34,6 +34,7 @@ import {
 } from "@/engine/referenceMechanicsPacket";
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 import { admitCinematicFinalMasterQa } from "@/engine/cinematicFinalMasterQaAdmission";
+import { createNarrativeEvidenceLedger } from "@/engine/narrativeEvidenceLedger";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
@@ -480,6 +481,74 @@ async function main() {
   assert.equal(admitted.editDecisionList.edits.length, 6);
   assert.equal(admitted.creativeLocks.locks.length, 6);
   assert.equal(admitted.receipt.release, "private_human_editorial_review_only");
+
+  // A ledger is optional for legacy reviewed Casefiles, but when selected it
+  // becomes a signed source/claim/Story-Spine/treatment rail all the way to
+  // final-master QA. It may not quietly become a prompt hint.
+  const narrativeLedger = createNarrativeEvidenceLedger({
+    subject: "Vault closure",
+    evidenceRails: [{
+      id: "rail-vault-casefile",
+      kind: "casefile_source_packet",
+      packetFingerprint: admittedSource.receipt.sourcePacketFingerprint,
+      sourceIds: ["source-court-archive"],
+      upstreamClaimIds: ["claim-closure-order", "claim-public-response"],
+    }],
+    claims: [
+      {
+        id: "narrative-closure-order",
+        approvedText: "The court finding ordered the vault's closure.",
+        assertionState: "established",
+        confidence: "high",
+        uncertainty: { level: "none", summary: "The cited court finding records the order." },
+        causalRole: "decision",
+        supports: [{ railId: "rail-vault-casefile", sourceIds: ["source-court-archive"], upstreamClaimIds: ["claim-closure-order"] }],
+        allowedVisualTreatments: [
+          { kind: "source_proof", onScreenCitation: true, exactSourceAssetRequired: true },
+          { kind: "neutral_reenactment", visiblyLabeled: true, disclosureText: RECONSTRUCTION_DISCLOSURE, anonymousDepictionOnly: true, doesNotClaimDirectObservation: true },
+          { kind: "ambient_context", doesNotDepictClaimAsObserved: true },
+        ],
+      },
+      {
+        id: "narrative-public-response",
+        approvedText: "The documented closure prompted public response.",
+        assertionState: "established",
+        confidence: "high",
+        uncertainty: { level: "none", summary: "The cited record establishes the documented response." },
+        causalRole: "consequence",
+        supports: [{ railId: "rail-vault-casefile", sourceIds: ["source-court-archive"], upstreamClaimIds: ["claim-public-response"] }],
+        allowedVisualTreatments: [
+          { kind: "source_proof", onScreenCitation: true, exactSourceAssetRequired: true },
+          { kind: "ambient_context", doesNotDepictClaimAsObserved: true },
+        ],
+      },
+    ],
+    editorialReview: { reviewerId: "reviewer-documentary-desk", reviewId: "narrative-ledger-vault-001", reviewedAt: new Date(NOW.getTime() - 5 * 60_000).toISOString() },
+    now: NOW.getTime(),
+  });
+  const ledgerInput = { ...input, narrativeEvidenceLedgerFingerprint: narrativeLedger.contentFingerprint };
+  ledgerInput.editorialReview = {
+    ...ledgerInput.editorialReview,
+    reviewedSequenceFingerprint: cinematicCaseSequenceContentFingerprint(ledgerInput),
+  };
+  const ledgerAdmitted = assertCinematicCaseSequence({
+    ...args,
+    input: ledgerInput,
+    sourcePacket,
+    narrativeEvidenceLedger: narrativeLedger,
+    sourceBoundStorySpine,
+  }, { now: NOW });
+  assert.equal(ledgerAdmitted.receipt.narrativeEvidenceLedgerFingerprint, narrativeLedger.contentFingerprint);
+  assert.equal(ledgerAdmitted.generatedScenePlan.narrativeEvidenceLedgerFingerprint, narrativeLedger.contentFingerprint);
+  assert.equal(
+    admitCinematicFinalMasterQa({ creativeLocks: ledgerAdmitted.creativeLocks, editDecisionList: ledgerAdmitted.editDecisionList }).narrativeEvidenceLedgerFingerprint,
+    narrativeLedger.contentFingerprint,
+  );
+  assert.throws(
+    () => assertCinematicCaseSequence({ ...args, input: ledgerInput, sourcePacket, narrativeEvidenceLedger: narrativeLedger }, { now: NOW }),
+    /narrative_evidence_ledger_invalid/i,
+    "a ledger-bearing cinematic sequence must retain the current source-bound Story Spine at admission",
+  );
 
   // An optional mechanics packet is useful only when it is tied to an
   // attributed, reviewed source contract and the exact current ShotPlan. It

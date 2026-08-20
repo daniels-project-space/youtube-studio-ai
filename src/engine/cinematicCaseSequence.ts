@@ -8,7 +8,9 @@ import {
   type CasefileEvidenceShotMap,
 } from "./casefileEvidenceShotMap";
 import type { ReferenceQualityContract } from "./creative/types";
+import { assertEditorialEvidencePacket } from "./editorialEvidencePacket";
 import { SceneManifestSchema } from "./episodeGraph";
+import { evaluateNarrativeEvidenceLedger } from "./narrativeEvidenceLedger";
 import {
   assertCurrentReferenceMechanicsPacket,
   referenceMechanicsPromptGuidance,
@@ -24,6 +26,7 @@ import {
   SourceProofMediaObligationSchema,
   type SourceProofMediaObligation,
 } from "./sourceProofMedia";
+import { validateSourceBoundStorySpineHandoff } from "./sourceBoundStorySpine";
 import { BeatMoodSchema, ShotPlanSchema, type ShotPlan } from "./storySpine";
 
 /**
@@ -252,6 +255,8 @@ export const CinematicCaseSequenceInputSchema = z
      * still/motion prompts and final-master QA provenance.
      */
     referenceMechanicsPacket: ReferenceMechanicsPacketSchema.optional(),
+    /** Optional reviewed factual-semantics rail; its full packet is revalidated at admission. */
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
     editorialReview: CinematicSequenceEditorialReviewSchema,
   })
   .strict();
@@ -310,6 +315,7 @@ export const CinematicGeneratedScenePlanSchema = z
     evidenceShotMapFingerprint: fingerprint,
     /** Optional review-only craft packet; it never authorizes a render by itself. */
     referenceMechanicsPacketFingerprint: fingerprint.optional(),
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
     durationSec: z.number().finite().positive(),
     scenes: z.array(CinematicGeneratedSceneSchema).min(2).max(2_000),
     release: z.literal("private_human_editorial_review_only"),
@@ -323,6 +329,7 @@ export const CinematicCreativeLocksSchema = z
     sequenceFingerprint: fingerprint,
     /** Preserves mechanics provenance into final-master QA without any source comparison. */
     referenceMechanicsPacketFingerprint: fingerprint.optional(),
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
     locks: z.array(z.object({
       id: identifier("cinematic-shot"),
       startSec: z.number().finite().nonnegative(),
@@ -339,6 +346,7 @@ export const CinematicEditDecisionListSchema = z
     version: z.literal(CINEMATIC_CASE_SEQUENCE_VERSION),
     sequenceFingerprint: fingerprint,
     referenceMechanicsPacketFingerprint: fingerprint.optional(),
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
     durationSec: z.number().finite().positive(),
     edits: z.array(z.object({
       shotId: identifier("cinematic-shot"),
@@ -368,6 +376,7 @@ export const CinematicCaseSequenceAdmissionReceiptSchema = z
     caseId: identifier("case"),
     sourcePacketFingerprint: fingerprint,
     evidenceShotMapFingerprint: fingerprint,
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
     sequenceFingerprint: fingerprint,
     generatedSceneCount: z.number().int().min(2),
     release: z.literal("private_human_editorial_review_only"),
@@ -397,6 +406,7 @@ export const CinematicCaseSequenceIssueCodeSchema = z.enum([
   "name_card_invalid",
   "real_image_insert_invalid",
   "source_proof_media_invalid",
+  "narrative_evidence_ledger_invalid",
 ]);
 export type CinematicCaseSequenceIssueCode = z.infer<typeof CinematicCaseSequenceIssueCodeSchema>;
 
@@ -479,6 +489,146 @@ function uniqueIssues(issues: readonly CinematicCaseSequenceIssue[]): CinematicC
     seen.add(key);
     return true;
   });
+}
+
+function ledgerTreatmentsForVisualMode(mode: CinematicVisualMode): Set<string> {
+  switch (mode) {
+    case "source_proof":
+      return new Set(["source_proof", "data_diagram", "map_timeline", "document_abstraction"]);
+    case "abstract_reenactment":
+      return new Set(["neutral_reenactment"]);
+    case "spatial_reconstruction":
+    case "atmosphere":
+      return new Set(["ambient_context"]);
+  }
+}
+
+/**
+ * Optional factual-semantics bridge.  It is deliberately evaluated only when
+ * a sequence carries the ledger fingerprint: legacy Casefile review packets
+ * remain valid, while a ledger-bearing sequence cannot silently drop its
+ * reviewed claim/source/treatment limits before a renderer is admitted.
+ */
+function validateNarrativeEvidenceLedgerBinding(args: {
+  input: CinematicCaseSequenceInput;
+  ledger: unknown;
+  sourcePacket: unknown;
+  evidenceShotMap: CasefileEvidenceShotMap;
+  sourceBoundStorySpine: unknown;
+  editorialEvidencePacket?: unknown;
+  now: number;
+}): string[] {
+  const report = evaluateNarrativeEvidenceLedger(args.ledger, args.now);
+  if (!report.safe || !report.ledger) {
+    return [`Narrative Evidence Ledger is invalid: ${report.issues.map((entry) => entry.message).join("; ")}`];
+  }
+  const ledger = report.ledger;
+  const issues: string[] = [];
+  if (args.input.narrativeEvidenceLedgerFingerprint !== ledger.contentFingerprint) {
+    issues.push("the signed cinematic sequence does not carry this exact Narrative Evidence Ledger fingerprint");
+  }
+  const sourcePacket = CasefileSourcePacketSchema.safeParse(args.sourcePacket);
+  if (!sourcePacket.success) {
+    issues.push("the Narrative Evidence Ledger requires the exact current Casefile source packet");
+    return issues;
+  }
+  if (casefileSourcePacketContentFingerprint(sourcePacket.data) !== args.input.sourcePacketFingerprint) {
+    issues.push("the supplied Casefile source packet no longer matches the source-packet fingerprint signed by this cinematic sequence");
+  }
+  let handoff: ReturnType<typeof validateSourceBoundStorySpineHandoff>;
+  try {
+    handoff = validateSourceBoundStorySpineHandoff(args.sourceBoundStorySpine);
+  } catch (error) {
+    issues.push(error instanceof Error ? error.message : "source-bound Story Spine handoff is invalid");
+    return issues;
+  }
+  if (
+    handoff.caseId !== args.input.caseId ||
+    handoff.sourcePacketFingerprint !== args.input.sourcePacketFingerprint ||
+    handoff.evidenceShotMapFingerprint !== args.input.evidenceShotMapFingerprint ||
+    handoff.storySpineShotPlanFingerprint !== args.input.shotPlanFingerprint
+  ) {
+    issues.push("the source-bound Story Spine does not match the Casefile/source/map/ShotPlan signed by this cinematic sequence");
+  }
+
+  const knownCasefileSources = new Set(sourcePacket.data.sourceUsage.map((entry) => entry.sourceId));
+  const knownCasefileClaims = new Set(sourcePacket.data.claimPrimarySources.map((entry) => entry.claimId));
+  const casefileRails = ledger.evidenceRails.filter((rail) => rail.kind === "casefile_source_packet");
+  if (casefileRails.length !== 1) {
+    issues.push("a Casefile cinematic ledger requires exactly one casefile_source_packet rail");
+  }
+  for (const rail of casefileRails) {
+    if (rail.packetFingerprint !== args.input.sourcePacketFingerprint) {
+      issues.push(`Casefile rail ${rail.id} does not match the signed Casefile source packet`);
+    }
+    if (rail.sourceIds.some((id) => !knownCasefileSources.has(id)) || rail.upstreamClaimIds.some((id) => !knownCasefileClaims.has(id))) {
+      issues.push(`Casefile rail ${rail.id} contains a source or claim outside the current reviewed source packet`);
+    }
+  }
+
+  const editorialRails = ledger.evidenceRails.filter((rail) => rail.kind === "editorial_evidence_packet");
+  if (editorialRails.length) {
+    if (args.editorialEvidencePacket === undefined) {
+      issues.push("an editorial_evidence_packet rail requires the exact reviewed Editorial Evidence Packet at cinematic admission");
+    } else {
+      try {
+        const packet = assertEditorialEvidencePacket(args.editorialEvidencePacket, args.now);
+        const sourceIds = new Set(packet.sources.map((source) => source.id));
+        const claimIds = new Set(packet.claims.map((claim) => claim.id));
+        for (const rail of editorialRails) {
+          if (rail.packetFingerprint !== packet.contentFingerprint || rail.sourceIds.some((id) => !sourceIds.has(id)) || rail.upstreamClaimIds.some((id) => !claimIds.has(id))) {
+            issues.push(`editorial rail ${rail.id} does not match the supplied reviewed Editorial Evidence Packet`);
+          }
+        }
+      } catch (error) {
+        issues.push(error instanceof Error ? error.message : "Editorial Evidence Packet is invalid");
+      }
+    }
+  }
+
+  const bindingsByClaim = new Map(handoff.claimBindings.map((binding) => [binding.claimId, binding]));
+  const casefileRailIds = new Set(casefileRails.map((rail) => rail.id));
+  for (const ledgerClaim of ledger.claims) {
+    const supports = ledgerClaim.supports.filter((support) => casefileRailIds.has(support.railId));
+    if (!supports.length) {
+      issues.push(`ledger claim ${ledgerClaim.id} has no Casefile source support`);
+      continue;
+    }
+    for (const support of supports) {
+      for (const upstreamClaimId of support.upstreamClaimIds) {
+        const binding = bindingsByClaim.get(upstreamClaimId);
+        const mapClaim = args.evidenceShotMap.claimMappings.find((mapping) => mapping.claimId === upstreamClaimId);
+        const mapHasExactSources = mapClaim?.bindings.some((binding) =>
+          support.sourceIds.every((sourceId) => binding.sourceIds.includes(sourceId)),
+        ) ?? false;
+        if (!binding || !mapHasExactSources || support.sourceIds.some((sourceId) => !binding.sourceIds.includes(sourceId))) {
+          issues.push(`ledger claim ${ledgerClaim.id} cannot be traced to an exact reviewed source-bound Story Spine claim/shot`);
+        }
+      }
+    }
+  }
+  for (const beat of args.input.beats) {
+    for (const casefileClaimId of beat.claimIds) {
+      const supportingLedgerClaims = ledger.claims.filter((ledgerClaim) =>
+        ledgerClaim.supports.some((support) =>
+          casefileRailIds.has(support.railId) &&
+          support.upstreamClaimIds.includes(casefileClaimId) &&
+          beat.sourceIds.every((sourceId) => support.sourceIds.includes(sourceId)),
+        ),
+      );
+      if (!supportingLedgerClaims.length) {
+        issues.push(`cinematic beat ${beat.id} claim ${casefileClaimId} is not covered by an exact reviewed Narrative Evidence Ledger support`);
+        continue;
+      }
+      for (const shot of beat.shots) {
+        const allowed = ledgerTreatmentsForVisualMode(shot.visualMode);
+        if (!supportingLedgerClaims.some((claim) => claim.allowedVisualTreatments.some((treatment) => allowed.has(treatment.kind)))) {
+          issues.push(`cinematic shot ${shot.id} uses ${shot.visualMode} beyond the Narrative Evidence Ledger's allowed visual treatments`);
+        }
+      }
+    }
+  }
+  return [...new Set(issues)];
 }
 
 function parseReviewedAt(value: string): Date | undefined {
@@ -565,6 +715,10 @@ export function evaluateCinematicCaseSequence(
     /** Optional; a supplied packet must bind the current contract and ShotPlan. */
     referenceMechanicsPacket?: unknown;
     referenceQuality?: ReferenceQualityContract;
+    /** Optional only with a matching signed sequence fingerprint; never a renderer authority. */
+    narrativeEvidenceLedger?: unknown;
+    editorialEvidencePacket?: unknown;
+    sourceBoundStorySpine?: unknown;
   },
   options: { now?: Date } = {},
 ): CinematicCaseSequenceAdmissionReport {
@@ -652,6 +806,33 @@ export function evaluateCinematicCaseSequence(
   const map = evidenceMap.data;
   const admission = evidenceAdmission.data;
   const source = sourceAdmission.data;
+  const usesNarrativeEvidenceLedger =
+    input.narrativeEvidenceLedgerFingerprint !== undefined || args.narrativeEvidenceLedger !== undefined;
+  if (usesNarrativeEvidenceLedger) {
+    if (input.narrativeEvidenceLedgerFingerprint === undefined || args.narrativeEvidenceLedger === undefined || args.sourceBoundStorySpine === undefined) {
+      issues.push(issue(
+        "narrative_evidence_ledger_invalid",
+        "Narrative Evidence Ledger use requires a signed ledger fingerprint, the exact ledger, and the current source-bound Story Spine handoff.",
+        "Keep the reviewed ledger fingerprint in the signed sequence and carry the exact ledger plus current source-bound Story Spine through cinematic admission.",
+      ));
+    } else {
+      for (const message of validateNarrativeEvidenceLedgerBinding({
+        input,
+        ledger: args.narrativeEvidenceLedger,
+        sourcePacket: args.sourcePacket,
+        evidenceShotMap: map,
+        sourceBoundStorySpine: args.sourceBoundStorySpine,
+        editorialEvidencePacket: args.editorialEvidencePacket,
+        now: (options.now ?? new Date()).getTime(),
+      })) {
+        issues.push(issue(
+          "narrative_evidence_ledger_invalid",
+          message,
+          "Repair the reviewed ledger's source/claim/Story Spine bindings or visual-treatment allowance, then obtain a fresh cinematic editorial signature.",
+        ));
+      }
+    }
+  }
   if (
     input.caseId !== source.caseId ||
     input.caseId !== map.caseId ||
@@ -1004,6 +1185,9 @@ export function assertCinematicCaseSequence(
     shotList: unknown;
     referenceMechanicsPacket?: unknown;
     referenceQuality?: ReferenceQualityContract;
+    narrativeEvidenceLedger?: unknown;
+    editorialEvidencePacket?: unknown;
+    sourceBoundStorySpine?: unknown;
   },
   options: { now?: Date } = {},
 ): AdmittedCinematicCaseSequence {
@@ -1170,6 +1354,7 @@ export function assertCinematicCaseSequence(
     sourcePacketFingerprint: input.sourcePacketFingerprint,
     evidenceShotMapFingerprint: input.evidenceShotMapFingerprint,
     ...(referenceMechanics ? { referenceMechanicsPacketFingerprint: referenceMechanics.contentFingerprint } : {}),
+    ...(input.narrativeEvidenceLedgerFingerprint ? { narrativeEvidenceLedgerFingerprint: input.narrativeEvidenceLedgerFingerprint } : {}),
     durationSec,
     scenes,
     release: "private_human_editorial_review_only",
@@ -1178,6 +1363,7 @@ export function assertCinematicCaseSequence(
     version: CINEMATIC_CASE_SEQUENCE_VERSION,
     sequenceFingerprint,
     ...(referenceMechanics ? { referenceMechanicsPacketFingerprint: referenceMechanics.contentFingerprint } : {}),
+    ...(input.narrativeEvidenceLedgerFingerprint ? { narrativeEvidenceLedgerFingerprint: input.narrativeEvidenceLedgerFingerprint } : {}),
     locks: input.beats.flatMap((beat) => beat.shots.map((shot) => ({
       id: shot.id,
       startSec: shot.t0,
@@ -1203,6 +1389,7 @@ export function assertCinematicCaseSequence(
     version: CINEMATIC_CASE_SEQUENCE_VERSION,
     sequenceFingerprint,
     ...(referenceMechanics ? { referenceMechanicsPacketFingerprint: referenceMechanics.contentFingerprint } : {}),
+    ...(input.narrativeEvidenceLedgerFingerprint ? { narrativeEvidenceLedgerFingerprint: input.narrativeEvidenceLedgerFingerprint } : {}),
     durationSec,
     edits: input.beats.flatMap((beat) => beat.shots.map((shot) => ({
       shotId: shot.id,
@@ -1219,6 +1406,7 @@ export function assertCinematicCaseSequence(
     caseId: input.caseId,
     sourcePacketFingerprint: input.sourcePacketFingerprint,
     evidenceShotMapFingerprint: input.evidenceShotMapFingerprint,
+    ...(input.narrativeEvidenceLedgerFingerprint ? { narrativeEvidenceLedgerFingerprint: input.narrativeEvidenceLedgerFingerprint } : {}),
     sequenceFingerprint,
     generatedSceneCount: scenes.length,
     release: "private_human_editorial_review_only",

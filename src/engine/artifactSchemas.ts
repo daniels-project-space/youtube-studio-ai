@@ -52,6 +52,7 @@ import {
 import { SourceBoundStorySpineHandoffSchema } from "./sourceBoundStorySpine";
 import { EvidenceVisualManifestSchema } from "./evidenceVisualManifest";
 import { EditorialEvidencePacketSchema } from "./editorialEvidencePacket";
+import { NarrativeEvidenceLedgerSchema } from "./narrativeEvidenceLedger";
 import {
   CinematicCaseSequenceAdmissionReceiptSchema,
   CinematicCaseSequenceInputSchema,
@@ -313,6 +314,11 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   editorialEvidencePacket: {
     type: "EditorialEvidencePacket",
     schema: EditorialEvidencePacketSchema,
+    persist: "reference",
+  },
+  narrativeEvidenceLedger: {
+    type: "NarrativeEvidenceLedger",
+    schema: NarrativeEvidenceLedgerSchema,
     persist: "reference",
   },
   cinematicCaseSequenceInput: {
