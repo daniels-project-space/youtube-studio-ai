@@ -85,6 +85,11 @@ import {
   type QuizDecoyCandidate,
 } from "@/lib/quizFacts";
 import {
+  CERTIFIED_QUIZ_CATEGORY_KEYS,
+  resolveCertifiedQuizProfile,
+  resolveCertifiedQuizProfileCategories,
+} from "@/engine/certifiedQuizProfile";
+import {
   assertCertifiedQuizTopicPlan,
   assertCertifiedQuizTopicSafety,
 } from "@/trigger/blocks/quizPlanningBlocks";
@@ -222,10 +227,8 @@ export const QUIZ_ROUND_CATEGORIES: readonly QuizRoundCategory[] = [
  * legacy full set and discovering the unsupported category only at render
  * time.
  */
-export const QUIZ_CERTIFIED_NO_GEMINI_CATEGORIES: readonly Exclude<QuizRoundCategory, "general_knowledge">[] = [
-  "guess_year",
-  ...QUIZ_CATEGORY_KEYS,
-];
+export const QUIZ_CERTIFIED_NO_GEMINI_CATEGORIES: readonly Exclude<QuizRoundCategory, "general_knowledge">[] =
+  CERTIFIED_QUIZ_CATEGORY_KEYS;
 
 /** On-screen eyebrow per category, so a mixed video signals the switch. */
 export const CATEGORY_PROMPTS: Readonly<Record<QuizRoundCategory, string>> = {
@@ -284,22 +287,18 @@ export function resolveCategories(raw: unknown): QuizRoundCategory[] {
 }
 
 /**
- * The automatic QuizYear planner intentionally emits no category parameter.
- * Its safe default therefore lives here, beside the legacy parser, rather
- * than relying on a renderer-time rejection of general_knowledge.
+ * Profile-owned categories are checked again at the renderer boundary. This
+ * closes the historical compiler/runtime gap where a caller could compile a
+ * `general_knowledge` override that the certified renderer later rejected.
  */
-export function resolveCertifiedNoGeminiCategories(raw: unknown): QuizRoundCategory[] {
-  const absent = raw === undefined || raw === null ||
-    (typeof raw === "string" && !raw.trim()) ||
-    (Array.isArray(raw) && raw.length === 0);
-  if (absent) return [...QUIZ_CERTIFIED_NO_GEMINI_CATEGORIES];
-  const categories = resolveCategories(raw);
-  if (categories.includes("general_knowledge")) {
-    throw new Error(
-      "quiz: certified no-Gemini mode does not allow general_knowledge; choose only the deterministic Wikidata-backed category set",
-    );
-  }
-  return categories;
+export function resolveCertifiedNoGeminiCategories(
+  raw: unknown,
+  profileRaw?: unknown,
+): QuizRoundCategory[] {
+  return resolveCertifiedQuizProfileCategories(
+    resolveCertifiedQuizProfile(profileRaw),
+    raw,
+  );
 }
 
 /**
@@ -800,10 +799,11 @@ export const quizYear: Block = {
     );
     const targetSeconds = Math.max(0, Number(ctx.params["targetSeconds"] ?? 0));
     const rounds = quizRoundCount(targetSeconds, countdown, reveal);
+    const profile = resolveCertifiedQuizProfile(ctx.params["quizProfile"]);
     // Re-check the exact planner → safety handoff immediately before sourcing
     // facts. This keeps retries and rehydration from marrying an older receipt
     // to a new renderer invocation.
-    const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"]);
+    const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"], profile);
     assertCertifiedQuizTopicSafety(ctx.store["quizSafety"], plan);
     const storedTopicKey = String(ctx.store["quizTopic"] ?? "").trim();
     const storedTopic = String(ctx.store["topic"] ?? "").trim();
@@ -811,7 +811,8 @@ export const quizYear: Block = {
       throw new Error("quiz: planner topic fields do not match the certified safety receipt");
     }
     const topic = plan.topicKey;
-    const categories = resolveCertifiedNoGeminiCategories(
+    const categories = resolveCertifiedQuizProfileCategories(
+      profile,
       ctx.params["categories"] ?? ctx.store["quizCategories"],
     );
     const allowSensitiveTopics = false;

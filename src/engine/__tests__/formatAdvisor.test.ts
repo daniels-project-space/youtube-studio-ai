@@ -248,6 +248,35 @@ assert(
   "children’s format advice must name its age/curriculum/editorial evidence before any automation claim",
 );
 
+// The creator can receive a neutral concept whose decisive format information
+// is the declared audience or sample episodes. Those fields must genuinely
+// influence deterministic classification rather than becoming detached UI copy.
+const neutralAnimatedBedtimeConcept = "Original animated bedtime stories";
+const unqualifiedBedtimeStories = recommendFormatDeterministically({
+  concept: neutralAnimatedBedtimeConcept,
+});
+assert.equal(
+  unqualifiedBedtimeStories.family,
+  "narrated_stock",
+  "without age or sample-topic context a neutral animated-story concept has no children-lane signal",
+);
+const audienceBoundChildrenShow = recommendFormatDeterministically({
+  concept: neutralAnimatedBedtimeConcept,
+  audience: "Preschool children ages 3 to 5",
+  sampleTopics: ["A gentle toddler learning adventure"],
+});
+assert.equal(
+  audienceBoundChildrenShow.family,
+  "children_learning",
+  "audience and sample topics must select the child-safe supervised lane when they carry the decisive intent",
+);
+assert.equal(audienceBoundChildrenShow.available, false);
+assert.equal(
+  audienceBoundChildrenShow.preflight.creativeCapabilities.some((offer) => offer.capability === "children_show_bible"),
+  true,
+  "audience-led child intent must retain the Show Bible admission instead of silently creating a narrated channel",
+);
+
 const blockedLofi = recommendFormatDeterministically({ concept: "Lo-fi study beats over a seamless animated loop" });
 assert.equal(blockedLofi.family, "music_loop", "the advisor must preserve the actual requested format");
 assert.equal(blockedLofi.available, false, "a blocked renderer must not become a fake production recommendation");

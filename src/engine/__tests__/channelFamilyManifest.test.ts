@@ -16,6 +16,8 @@ import {
   FAMILY_KEYS,
   type FamilyKey,
 } from "@/engine/families";
+import { formatPreflight } from "@/engine/creative/selectFormat";
+import { designPipeline } from "@/engine/designer";
 import { NICHES } from "@/lib/nicheCatalog";
 
 assert.doesNotThrow(
@@ -85,6 +87,16 @@ try {
     () => assertChannelFamilyManifestIntegrity(),
     /content lane quiz_year is owned by quizyear, not loreshort/,
     "a family-to-lane drift must not be hidden by a compatible-looking lane",
+  );
+  assert.throws(
+    () => formatPreflight("loreshort", { concept: "A first-person mythic history micro-documentary" }),
+    /content lane quiz_year is owned by quizyear, not loreshort/,
+    "the pre-spend creator admission must resolve the canonical family manifest",
+  );
+  assert.throws(
+    () => designPipeline({ family: "loreshort" }),
+    /content lane quiz_year is owned by quizyear, not loreshort/,
+    "the pipeline compiler entrypoint must resolve the canonical family manifest before registration",
   );
 } finally {
   (CONTENT_LANE_BY_FAMILY as Record<FamilyKey, ContentLaneKey>).loreshort = originalLoreLane;

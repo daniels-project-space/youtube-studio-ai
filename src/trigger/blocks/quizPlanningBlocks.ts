@@ -14,6 +14,12 @@
  */
 import { createHash } from "node:crypto";
 import { type Block } from "@/engine/types";
+import {
+  profileAllowsQuizTopic,
+  resolveCertifiedQuizProfile,
+  type CertifiedQuizProfileKey,
+  type ResolvedCertifiedQuizProfile,
+} from "@/engine/certifiedQuizProfile";
 import { QUIZ_YEAR_TOPIC_KEYS, type QuizYearTopicKey } from "@/lib/quizYearFacts";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
@@ -87,8 +93,23 @@ const QUIZ_TOPIC_PRESENTATIONS: Readonly<Record<QuizYearTopicKey, QuizTopicPrese
   },
 };
 
+function presentationFor(
+  profile: ResolvedCertifiedQuizProfile,
+  topicKey: QuizYearTopicKey,
+): QuizTopicPresentation {
+  if (profile.key === "legacy_mixed") return QUIZ_TOPIC_PRESENTATIONS[topicKey];
+  return {
+    label: profile.label,
+    titleStem: profile.presentation.titleStem,
+    keywords: profile.presentation.keywords,
+    audiencePromise: profile.presentation.audiencePromise,
+  };
+}
+
 export interface QuizTopicPlan {
   version: typeof QUIZ_PLANNER_VERSION;
+  /** Present only for v1 profile-backed plans; omitted plans retain legacy resume semantics. */
+  profileKey?: CertifiedQuizProfileKey;
   topicKey: QuizYearTopicKey;
   topic: string;
   episodeOrdinal: number;
@@ -134,16 +155,18 @@ function memoryParts(key: string): { runId: string; topicKey: QuizYearTopicKey; 
 }
 
 function planFor(args: {
+  profile: ResolvedCertifiedQuizProfile;
   topicKey: QuizYearTopicKey;
   ordinal: number;
   runId: string;
   selection: QuizTopicPlan["provenance"]["selection"];
   previousEpisodesForTopic: number;
 }): QuizTopicPlan {
-  const presentation = QUIZ_TOPIC_PRESENTATIONS[args.topicKey];
+  const presentation = presentationFor(args.profile, args.topicKey);
   const memoryKey = `${QUIZ_TOPIC_MEMORY_PREFIX}/${args.runId}/${args.topicKey}/${args.ordinal}`;
   return {
     version: QUIZ_PLANNER_VERSION,
+    ...(args.profile.key !== "legacy_mixed" ? { profileKey: args.profile.key } : {}),
     topicKey: args.topicKey,
     topic: `${presentation.label} Trivia Challenge #${args.ordinal}`,
     episodeOrdinal: args.ordinal,
@@ -157,18 +180,30 @@ function planFor(args: {
   };
 }
 
-export function assertCertifiedQuizTopicPlan(value: unknown): QuizTopicPlan {
+export function assertCertifiedQuizTopicPlan(
+  value: unknown,
+  expectedProfile?: ResolvedCertifiedQuizProfile,
+): QuizTopicPlan {
   if (!value || typeof value !== "object") throw new Error("quiz plan is missing");
   const candidate = value as Partial<QuizTopicPlan>;
   const topicKey = topicKeyFromUnknown(candidate.topicKey);
+  let profile: ResolvedCertifiedQuizProfile;
+  try {
+    profile = resolveCertifiedQuizProfile(candidate.profileKey);
+  } catch {
+    throw new Error("quiz plan is malformed or is not from a certified QuizYear profile");
+  }
   const ordinal = Number(candidate.episodeOrdinal);
   const parsedMemory = typeof candidate.memoryKey === "string"
     ? memoryParts(candidate.memoryKey)
     : undefined;
-  const presentation = topicKey ? QUIZ_TOPIC_PRESENTATIONS[topicKey] : undefined;
+  const presentation = topicKey ? presentationFor(profile, topicKey) : undefined;
   if (
     candidate.version !== QUIZ_PLANNER_VERSION ||
+    (candidate.profileKey !== undefined && candidate.profileKey !== profile.key) ||
+    (expectedProfile !== undefined && profile.key !== expectedProfile.key) ||
     !topicKey ||
+    !profileAllowsQuizTopic(profile, topicKey) ||
     typeof candidate.topic !== "string" ||
     !candidate.topic.trim() ||
     !Number.isInteger(ordinal) ||
@@ -194,6 +229,7 @@ export function quizTopicPlanFingerprint(value: QuizTopicPlan): string {
     episodeOrdinal: plan.episodeOrdinal,
     memoryKey: plan.memoryKey,
     provenance: plan.provenance,
+    ...(plan.profileKey ? { profileKey: plan.profileKey } : {}),
   })).digest("hex");
 }
 
@@ -230,7 +266,7 @@ export function assertCertifiedQuizTopicSafety(
 }
 
 function musicBriefFor(plan: QuizTopicPlan): Record<string, unknown> {
-  const presentation = QUIZ_TOPIC_PRESENTATIONS[plan.topicKey];
+  const presentation = presentationFor(resolveCertifiedQuizProfile(plan.profileKey), plan.topicKey);
   return {
     musicPrompt: [
       "bright modern game-show instrumental",
@@ -254,6 +290,7 @@ const quizTopicPlan: Block = {
   consumes: [],
   produces: ["topic", "quizTopic", "quizPlan", "musicBrief"],
   run: async (ctx) => {
+    const profile = resolveCertifiedQuizProfile(ctx.params["quizProfile"]);
     const client = convex();
     const rows = await client.query(
       api.topicMemory.listForChannel,
@@ -264,11 +301,17 @@ const quizTopicPlan: Block = {
       .map((row) => memoryParts(String(row.key)))
       .find((item) => item?.runId === ctx.runId);
     if (existing) {
+      if (!profileAllowsQuizTopic(profile, existing.topicKey)) {
+        throw new Error(
+          `quiz_topic_plan: ${existing.topicKey} is not a certified source key for the ${profile.key} profile`,
+        );
+      }
       const prior = rows
         .map((row) => memoryParts(String(row.key)))
         .filter((item): item is NonNullable<typeof item> => Boolean(item && item.topicKey === existing.topicKey && item.runId !== ctx.runId))
         .length;
       const reused = planFor({
+        profile,
         topicKey: existing.topicKey,
         ordinal: existing.ordinal,
         runId: ctx.runId,
@@ -288,18 +331,24 @@ const quizTopicPlan: Block = {
     if (ctx.params["pinnedTopic"] !== undefined && !pinnedTopic) {
       throw new Error("quiz_topic_plan: pinnedTopic must be a key from the curated QuizYear topic registry");
     }
+    if (pinnedTopic && !profileAllowsQuizTopic(profile, pinnedTopic)) {
+      throw new Error(
+        `quiz_topic_plan: ${pinnedTopic} is not a certified source key for the ${profile.key} profile`,
+      );
+    }
     const history = rows.map((row) => memoryParts(String(row.key))).filter(Boolean) as Array<{
       runId: string;
       topicKey: QuizYearTopicKey;
       ordinal: number;
     }>;
-    const counts = new Map<QuizYearTopicKey, number>(QUIZ_YEAR_TOPIC_KEYS.map((key) => [key, 0]));
+    const counts = new Map<QuizYearTopicKey, number>(profile.topicKeys.map((key) => [key, 0]));
     for (const item of history) counts.set(item.topicKey, (counts.get(item.topicKey) ?? 0) + 1);
-    const minCount = Math.min(...QUIZ_YEAR_TOPIC_KEYS.map((key) => counts.get(key) ?? 0));
-    const candidates = QUIZ_YEAR_TOPIC_KEYS.filter((key) => (counts.get(key) ?? 0) === minCount);
+    const minCount = Math.min(...profile.topicKeys.map((key) => counts.get(key) ?? 0));
+    const candidates = profile.topicKeys.filter((key) => (counts.get(key) ?? 0) === minCount);
     const topicKey = pinnedTopic ?? candidates[deterministicIndex(`${ctx.channelId}:${history.length}`, candidates.length)];
     const previousEpisodesForTopic = counts.get(topicKey) ?? 0;
     const plan = planFor({
+      profile,
       topicKey,
       ordinal: previousEpisodesForTopic + 1,
       runId: ctx.runId,
@@ -363,7 +412,7 @@ const quizMetadata: Block = {
   ],
   run: async (ctx) => {
     const plan = assertCertifiedQuizTopicPlan(ctx.store["quizPlan"]);
-    const presentation = QUIZ_TOPIC_PRESENTATIONS[plan.topicKey];
+    const presentation = presentationFor(resolveCertifiedQuizProfile(plan.profileKey), plan.topicKey);
     const title = `${presentation.titleStem} #${plan.episodeOrdinal} | Can You Get 8/8?`;
     if (title.length > 100) throw new Error("quiz_metadata: deterministic title unexpectedly exceeds YouTube's 100-character limit");
     const description = [
@@ -377,7 +426,6 @@ const quizMetadata: Block = {
       "trivia quiz",
       "multiple choice quiz",
       "quiz challenge",
-      "general knowledge",
       "guess the answer",
     ].map((tag) => tag.toLowerCase()))];
     const thumbnailDescription = [

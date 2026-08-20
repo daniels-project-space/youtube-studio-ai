@@ -100,6 +100,26 @@ async function main() {
     assert.equal(rootOmittedUsesNestedBrief.status, 409);
     assert.match((await rootOmittedUsesNestedBrief.json() as { error: string }).error, /private review/);
 
+    // The creator may only carry audience/topic signals inside the canonical
+    // nested brief. The authenticated route must still re-evaluate those
+    // signals before Trigger import/dispatch, so a neutral-looking concept
+    // cannot evade child-content private review by choosing a generic family.
+    const audienceBoundChildrenBrief = createChannelProgramBrief({
+      family: "narrated_stock",
+      nicheKey: "educational",
+      locale: "en",
+      concept: "Original animated bedtime stories",
+      audience: "Preschool children ages 3 to 5",
+      sampleTopics: ["A gentle toddler learning adventure"],
+    });
+    const audienceBoundChildrenDesign = designFor(audienceBoundChildrenBrief);
+    const audienceBoundChildren = await POST(request({
+      requestKey: requestKey(audienceBoundChildrenDesign),
+      design: audienceBoundChildrenDesign,
+    }));
+    assert.equal(audienceBoundChildren.status, 409);
+    assert.match((await audienceBoundChildren.json() as { error: string }).error, /private review/);
+
     const staleBrief = { ...brief, catalogFingerprint: "0".repeat(64) };
     const staleDesign = { ...design, programBrief: staleBrief };
     const stale = await POST(request({
