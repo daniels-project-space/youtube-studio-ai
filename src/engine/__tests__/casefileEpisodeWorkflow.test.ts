@@ -142,21 +142,7 @@ const plannedStorySpine = planStorySpine({
   ],
   targetShotSec: 12,
 });
-const storySpine = {
-  ...plannedStorySpine,
-  // Keep this fixture's causal copy compact enough to exercise the Casefile
-  // workflow rather than the unrelated cinematic prompt-length boundary.
-  shotList: [plannedStorySpine.shotList[0]!, plannedStorySpine.shotList[4]!].map((shot, index) => ({
-    ...shot,
-    t0: index === 0 ? 0 : 12,
-    t1: index === 0 ? 12 : 24,
-    seconds: 12,
-    coveragePurpose: index === 0 ? "Cited court finding." : "Cited closure order.",
-    literalContent: index === 0
-      ? "The cited court finding orders the room closed."
-      : "The cited order closes the ledger room.",
-  })),
-};
+const storySpine = plannedStorySpine;
 const shotList = storySpine.shotList;
 
 async function main(): Promise<void> {
@@ -393,6 +379,10 @@ async function main(): Promise<void> {
   });
   assert.equal(draft.status, "awaiting_cinematic_review");
   assert.equal(draft.cinematicDraft?.content.beats[0]?.shots.length, 4);
+  assert.ok(
+    draft.cinematicDraft?.content.beats.flatMap((beat) => beat.shots).every((shot) => shot.narrationPurpose.length <= 360),
+    "a normal multi-shot Story Spine must be compacted to the signed cinematic narration-purpose limit before review",
+  );
   assert.match(draft.cinematicDraft?.content.beats[0]?.shots[1]?.still ?? "", /charcoal wool coat/i);
   assert.equal(
     draft.cinematicDraft?.content.referenceMechanicsPacket?.contentFingerprint,

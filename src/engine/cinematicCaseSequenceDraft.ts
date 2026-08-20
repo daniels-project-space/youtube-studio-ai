@@ -370,7 +370,12 @@ export function planCinematicCaseSequenceDraft(args: {
         cutReason: cuts[slot]!,
         tensionState: tension[slot]!,
         cameraRationale: `${label.replace(/_/g, " ")} changes the audience's information: ${parents.map((parent) => parent.coveragePurpose).join("; ")}`.slice(0, 360),
-        narrationPurpose: `${role.replace(/_/g, " ")}: ${beatQuestion} Source window: ${sourceMoments}`.slice(0, 720),
+        // This field is part of the editor-signed sequence contract (360 char
+        // limit), not merely an unbounded prompt fragment. A normal Story
+        // Spine can group several rich source shots into one causal window;
+        // keep that valid plan renderable by bounding the persisted purpose at
+        // the same limit the schema enforces.
+        narrationPurpose: `${role.replace(/_/g, " ")}: ${beatQuestion} Source window: ${sourceMoments}`.slice(0, 360),
         still: [
           direction.visualWorld,
           sourceMoments,

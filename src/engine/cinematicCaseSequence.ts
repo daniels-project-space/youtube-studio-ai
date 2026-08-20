@@ -1370,8 +1370,12 @@ export function assertCinematicCaseSequence(
       endSec: shot.t1,
       expected: `${shot.visualMode}; ${shot.coveragePurpose}; ${shot.cameraRationale}. ${shot.firstFrameConstraint} ${shot.lastFrameConstraint}`,
       acceptanceCriteria: [
-        `The frame fulfills the narrated purpose: ${shot.narrationPurpose}`,
-        `The viewer can understand the beat's causal question without on-screen prose: ${beat.causalQuestion}`,
+        // Each reviewer-facing criterion is signed under a 360-character
+        // contract. Rich source windows can be longer, so cap the rendered
+        // instruction here rather than rejecting a valid multi-shot plan at
+        // final admission after the editor has reviewed it.
+        `The frame fulfills the narrated purpose: ${shot.narrationPurpose}`.slice(0, 360),
+        `The viewer can understand the beat's causal question without on-screen prose: ${beat.causalQuestion}`.slice(0, 360),
         `The cut communicates ${shot.cutReason}; tension state is ${shot.tensionState}`,
         ...(mechanicsGuidance
           ? [
