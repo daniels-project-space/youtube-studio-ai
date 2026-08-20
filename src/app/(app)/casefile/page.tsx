@@ -9,7 +9,14 @@ type Episode = {
   status: string;
   updatedAt: number;
   workflow?: {
-    cinematicDraft?: { sequenceContentFingerprint?: string };
+    cinematicDraft?: {
+      sequenceContentFingerprint?: string;
+      content?: {
+        beats?: Array<{
+          shots?: Array<{ id?: string; visualMode?: string; sourceProofMedia?: unknown }>;
+        }>;
+      };
+    };
     cinematicAdmission?: { generatedSceneCount?: number; release?: string };
     referenceMechanicsPacket?: { contentFingerprint?: string; release?: string };
     sourceBoundStorySpine?: { storySpineFingerprint?: string; release?: string };
@@ -64,6 +71,47 @@ function requiredRelations(value: unknown): unknown[] {
   return value;
 }
 
+const sourceProofAttachmentFields = [
+  "shotId",
+  "sourceId",
+  "assetId",
+  "rightsEvidenceLocator",
+  "assetUrl",
+  "assetSha256",
+  "approvalReceiptId",
+] as const;
+
+function parseSourceProofAttachments(raw: string): Record<string, unknown>[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Source-proof media attachments must be valid JSON array");
+  }
+  if (!Array.isArray(parsed)) throw new Error("Source-proof media attachments must be a JSON array");
+  return parsed.map((attachment, index) => {
+    if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
+      throw new Error(`Source-proof attachment ${index + 1} must be an object`);
+    }
+    const input = attachment as Record<string, unknown>;
+    const unexpectedFields = Object.keys(input).filter(
+      (key) => !sourceProofAttachmentFields.includes(key as (typeof sourceProofAttachmentFields)[number]),
+    );
+    if (unexpectedFields.length) {
+      throw new Error(`Source-proof attachment ${index + 1} cannot include ${unexpectedFields.join(", ")}; packet/provenance fields are server-derived`);
+    }
+    const missingFields = sourceProofAttachmentFields.filter((key) => input[key] === undefined);
+    if (missingFields.length) throw new Error(`Source-proof attachment ${index + 1} is missing ${missingFields.join(", ")}`);
+    return input;
+  });
+}
+
+function hasAttachedSourceProofMedia(episode: Episode | null): boolean {
+  return Boolean(episode?.workflow?.cinematicDraft?.content?.beats?.some((beat) =>
+    beat.shots?.some((shot) => shot.visualMode === "source_proof" && shot.sourceProofMedia),
+  ));
+}
+
 /** Private editor desk for the immutable Casefile → cinematic render handoff. */
 export default function CasefilePage() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -77,6 +125,7 @@ export default function CasefilePage() {
   const [narrativeEvidenceLedger, setNarrativeEvidenceLedger] = useState("");
   const [narrativeEvidenceReview, setNarrativeEvidenceReview] = useState("");
   const [direction, setDirection] = useState("");
+  const [sourceProofMedia, setSourceProofMedia] = useState("");
   const [review, setReview] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -125,6 +174,7 @@ export default function CasefilePage() {
 
   const activeStage = stages.findIndex(([status]) => status === selected?.status);
   const actionDisabled = busy;
+  const sourceProofMediaAttached = hasAttachedSourceProofMedia(selected);
 
   return (
     <main style={{ maxWidth: 1240, margin: "0 auto", padding: "28px 22px 80px", display: "grid", gap: 18 }}>
@@ -230,6 +280,19 @@ export default function CasefilePage() {
             <h2 style={{ margin: 0, fontSize: 19 }}>5. Finalize cinematic review</h2>
             <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13 }}>The editor review must bind the current source packet, evidence map, and draft sequence fingerprint. Any wardrobe, timing, claim, or cut change requires a new review.</p>
             {selected.workflow?.cinematicDraft?.sequenceContentFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.cinematicDraft.sequenceContentFingerprint}</code>}
+            <section style={{ border: "1px solid #294468", borderRadius: 11, padding: 14, display: "grid", gap: 10, background: "rgba(17,37,62,.32)" }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Bind approved source-proof media</h3>
+              <p style={{ margin: 0, color: "#b9c8da", fontSize: 13, lineHeight: 1.5 }}>
+                For every source-proof shot, attach the exact approved asset, rights locator, SHA-256, and approval receipt. The server derives the source packet and provenance binding; this desk cannot substitute a different source or approve generated evidence.
+              </p>
+              {sourceProofMediaAttached ? <>
+                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Approved source-proof media are frozen into this review draft</strong>
+                <small style={{ color: "#9eadc1" }}>Replacing an asset requires a fresh immutable Casefile revision and a new cinematic review.</small>
+              </> : <>
+                <textarea aria-label="Source-proof media attachments JSON" style={{ ...textarea, minHeight: 220 }} value={sourceProofMedia} onChange={(event) => setSourceProofMedia(event.target.value)} placeholder={'[{\n  "shotId": "cinematic-shot-…",\n  "sourceId": "source-…",\n  "assetId": "asset-…",\n  "rightsEvidenceLocator": "https://…",\n  "assetUrl": "https://…",\n  "assetSha256": "…",\n  "approvalReceiptId": "source-proof-receipt-…"\n}]'} />
+                <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("attach_source_proof_media", { episodeId: selected._id, attachments: parseSourceProofAttachments(sourceProofMedia) }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze approved source-proof media</button>
+              </>}
+            </section>
             <textarea aria-label="Cinematic editorial review JSON" style={textarea} value={review} onChange={(event) => setReview(event.target.value)} placeholder='{"id":"cinematic-sequence-review-...", "decision":"approved", ...}' />
             <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("finalize_cinematic_sequence", { episodeId: selected._id, editorialReview: parseObject(review, "Cinematic review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Finalize render package</button>
           </>}
