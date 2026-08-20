@@ -13,6 +13,7 @@ import {
   type ChannelInceptionPlan,
   type ChannelInceptionRequest,
 } from "@/engine/channelInceptionPlan";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { FAMILY_KEYS, type FamilyKey } from "@/engine/families";
 import { GOLDEN_MODULES } from "@/engine/golden";
 import { catalogExecutionBinding } from "@/engine/goldenExecution";
@@ -26,6 +27,7 @@ function fixture(
   nicheKey: string,
   overrides: Partial<ChannelInceptionRequest> = {},
 ): ChannelInceptionRequest {
+  const locale = overrides.locale ?? "en";
   return {
     ownerId: "owner_daniel",
     channelRef: `channel:${slug}`,
@@ -33,21 +35,27 @@ function fixture(
     slug,
     family,
     nicheKey,
-    locale: "en",
+    locale,
     sourceRevision: `${slug}@2026-08-07`,
     pipelineSourceFingerprint: `${PIPELINE_FINGERPRINT}:${family}`,
+    programBrief: createChannelProgramBrief({
+      family,
+      nicheKey,
+      locale,
+      concept: `${name} — a specific ${family} channel program`,
+    }),
     ...overrides,
   };
 }
 
 const REAL_FAMILY_FIXTURES: readonly ChannelInceptionRequest[] = [
-  fixture("The Quiet Stoic", "quiet-stoic", "narrated_stock", "stoic philosophy wisdom"),
-  fixture("Rainy Neon Lofi", "rainy-neon-lofi", "music_loop", "Lo-Fi Music"),
-  fixture("Gratitude Springs", "gratitude-springs", "sleep", "ambient sleep meditation"),
-  fixture("Inked Histories", "inked-histories", "comic", "History"),
-  fixture("Chalk & Compound", "chalk-compound", "whiteboard", "Finance"),
-  fixture("Vertical Stoic Cuts", "vertical-stoic-cuts", "shorts", "stoic philosophy resilience"),
-  fixture("Cinematic Crime Files", "cinematic-crime-files", "cinematic", "crime history"),
+  fixture("The Quiet Stoic", "quiet-stoic", "narrated_stock", "psychology"),
+  fixture("Rainy Neon Lofi", "rainy-neon-lofi", "music_loop", "lofi"),
+  fixture("Gratitude Springs", "gratitude-springs", "sleep", "lifestyle"),
+  fixture("Inked Histories", "inked-histories", "comic", "history"),
+  fixture("Chalk & Compound", "chalk-compound", "whiteboard", "finance"),
+  fixture("Vertical Stoic Cuts", "vertical-stoic-cuts", "shorts", "motivation"),
+  fixture("Cinematic Crime Files", "cinematic-crime-files", "cinematic", "crime"),
 ];
 
 function assertTopologicalAndUnique(plan: ChannelInceptionPlan): void {
@@ -135,7 +143,7 @@ function everyFamilyGetsOnlyApplicableModules(): void {
 
 function comicOwnsItsConsumedCast(): void {
   const plan = buildChannelInceptionPlan(
-    fixture("Inked Histories", "inked-histories", "comic", "History"),
+    fixture("Inked Histories", "inked-histories", "comic", "history"),
   );
   const voice = channelInceptionStage(plan, "channel-inception-voice")!;
   assert.equal(voice.executionOwner, "family-engine");
@@ -156,7 +164,7 @@ function protectedArtIsIndependentAndNeverOverwritten(): void {
     "The Quiet Stoic",
     "quiet-stoic",
     "narrated_stock",
-    "stoic philosophy wisdom",
+    "psychology",
     {
       brand: {
         avatar: { existing: quietAvatar, protectExisting: true },
@@ -197,7 +205,7 @@ function protectedArtIsIndependentAndNeverOverwritten(): void {
 }
 
 function starterSlateReusesAcceptedWork(): void {
-  const request = fixture("Neon Rain Penthouse", "neon-rain-penthouse", "music_loop", "Lo-Fi Music", {
+  const request = fixture("Neon Rain Penthouse", "neon-rain-penthouse", "music_loop", "lofi", {
     starter: {
       topicCount: 3,
       previewCount: 2,
@@ -222,7 +230,7 @@ function starterSlateReusesAcceptedWork(): void {
 }
 
 function plansAndOutputKeysAreContentAddressed(): void {
-  const request = fixture("Gratitude Springs", "gratitude-springs", "sleep", "ambient sleep meditation");
+  const request = fixture("Gratitude Springs", "gratitude-springs", "sleep", "lifestyle");
   const plan = buildChannelInceptionPlan(request);
   assert.deepEqual(plan, buildChannelInceptionPlan({ ...request }));
   assert.deepEqual(
@@ -236,6 +244,32 @@ function plansAndOutputKeysAreContentAddressed(): void {
     revisedPlan.stages.map((stage) => stage.stageKey),
     plan.stages.map((stage) => stage.stageKey),
     "an administrative revision must reuse unchanged content-addressed stage work",
+  );
+  const revisedProgram = buildChannelInceptionPlan({
+    ...request,
+    programBrief: createChannelProgramBrief({
+      family: request.family,
+      nicheKey: request.nicheKey,
+      locale: "en",
+      concept: "Slow, practical evening reflections that translate stoicism into one calming decision each episode",
+      audience: "Adults winding down after demanding workdays",
+      sampleTopics: ["The evening reset", "Choosing the next calm action"],
+    }),
+  });
+  assert.equal(
+    channelInceptionStage(revisedProgram, "channel-inception-research")!.stageKey,
+    channelInceptionStage(plan, "channel-inception-research")!.stageKey,
+    "a program revision must reuse unchanged research evidence",
+  );
+  assert.notEqual(
+    channelInceptionStage(revisedProgram, "channel-inception-positioning")!.stageKey,
+    channelInceptionStage(plan, "channel-inception-positioning")!.stageKey,
+    "the bound program must version positioning",
+  );
+  assert.notEqual(
+    channelInceptionStage(revisedProgram, "channel-inception-pipeline")!.stageKey,
+    channelInceptionStage(plan, "channel-inception-pipeline")!.stageKey,
+    "positioning descendants must receive a revised dependency key",
   );
   assert.equal(
     channelInceptionContentSha256({ b: 2, a: 1 }),
@@ -260,7 +294,7 @@ function plansAndOutputKeysAreContentAddressed(): void {
 
 function optionalProbeAndInvalidIntentsFailSafely(): void {
   const noProbe = buildChannelInceptionPlan({
-    ...fixture("Dusk Frequency", "dusk-frequency", "music_loop", "Lo-Fi Music"),
+    ...fixture("Dusk Frequency", "dusk-frequency", "music_loop", "lofi"),
     includeProbe: false,
   });
   assert.equal(channelInceptionStage(noProbe, "channel-inception-probe"), undefined);
@@ -273,21 +307,21 @@ function optionalProbeAndInvalidIntentsFailSafely(): void {
 
   assert.throws(
     () => buildChannelInceptionPlan({
-      ...fixture("Rainy Neon Lofi", "rainy-neon-lofi", "music_loop", "Lo-Fi Music"),
+      ...fixture("Rainy Neon Lofi", "rainy-neon-lofi", "music_loop", "lofi"),
       voice: { existingCastFingerprint: "unused-cast" },
     }),
     /omits voice inception/,
   );
   assert.throws(
     () => buildChannelInceptionPlan({
-      ...fixture("The Quiet Stoic", "quiet-stoic", "narrated_stock", "stoicism"),
+      ...fixture("The Quiet Stoic", "quiet-stoic", "narrated_stock", "psychology"),
       brand: { avatar: { protectExisting: true } },
     }),
     /cannot be protected without an existing asset/,
   );
   assert.throws(
     () => buildChannelInceptionPlan({
-      ...fixture("The Quiet Stoic", "quiet-stoic", "narrated_stock", "stoicism"),
+      ...fixture("The Quiet Stoic", "quiet-stoic", "narrated_stock", "psychology"),
       brand: {
         avatar: {
           existing: { assetKey: "approved-avatar", contentFingerprint: "approved-v1" },

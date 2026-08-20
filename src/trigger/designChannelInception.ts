@@ -5,7 +5,6 @@ import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHt
 import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
-import { exampleClipAnalysisUnavailable } from "@/lib/exampleClipAnalysisUnavailable";
 import { synthChannelConcept } from "@/lib/conceptSynth";
 import { generateChannelArtAsset } from "@/lib/channelArt";
 import { designPipeline, enforceLengthContract, type DesignOptions } from "@/engine/designer";
@@ -115,6 +114,22 @@ import {
   seoIdentityProjection,
 } from "@/engine/channelInceptionInvalidation";
 import {
+  assertCanonicalChannelProgramBrief,
+  assertPersistedProgramBriefIdentity,
+  briefToCreativeCapabilityIntent,
+  briefToFormatSelectionInput,
+  channelProgramBriefFingerprint,
+  channelProgramBriefPositioningText,
+  type ChannelProgramBrief,
+} from "@/engine/channelProgramBrief";
+import { formatPreflight } from "@/engine/creative/selectFormat";
+import {
+  assessCreativeCapabilityAutomaticBuildAdmission,
+  privateReviewCapabilityOffers,
+  resolveUnhostedSupervisedCreativeCapabilityIntents,
+  validateCreativeCapabilitySelections,
+} from "@/engine/creative/creativeCapabilityCatalog";
+import {
   buildChannelInceptionPlan,
   channelInceptionContentSha256,
   channelInceptionStage,
@@ -135,10 +150,12 @@ import {
   initializeChannelInceptionLedger,
 } from "@/trigger/channelInceptionLedgerAdapter";
 
-export interface DesignChannelArgs extends Omit<DesignOptions, "family"> {
+export interface DesignChannelArgs extends Omit<DesignOptions, "family" | "programBrief"> {
   ownerId?: string;
   name?: string;
   family: FamilyKey;
+  /** The already-canonical creator program required for every new execution. */
+  programBrief: ChannelProgramBrief;
   cadence?: string;
   days?: number[];
   budget?: number;
@@ -179,7 +196,20 @@ interface VoiceCastingSlim {
   localColdOpenReceipt?: VoiceLocalColdOpenReceipt;
 }
 
+type PersistedChannelProgramBrief = Omit<ChannelProgramBrief, "sampleTopics"> & {
+  sampleTopics?: string[];
+};
+
+function persistedChannelProgramBrief(brief: ChannelProgramBrief): PersistedChannelProgramBrief {
+  const { sampleTopics, ...canonical } = brief;
+  return {
+    ...canonical,
+    ...(sampleTopics ? { sampleTopics: [...sampleTopics] } : {}),
+  };
+}
+
 interface ChannelIdentityState {
+  programBrief?: PersistedChannelProgramBrief;
   persona: string;
   voiceId?: string;
   voiceCasting?: VoiceCastingSlim;
@@ -192,6 +222,8 @@ interface ChannelIdentityState {
   thumbnailTemplate: string;
   topicPool: string[];
   cadence: string;
+  /** Stable catalog key for reads; `niche` remains a human-facing display label. */
+  nicheKey?: string;
   niche?: string;
   imageKey?: string;
   bannerKey?: string;
@@ -289,6 +321,24 @@ function asIdentity(value: unknown): ChannelIdentityState {
   return value as ChannelIdentityState;
 }
 
+/** Storage/SEO indexes use catalog keys; `identity.niche` is display copy only. */
+function identityResearchNiche(identity: ChannelIdentityState): string | undefined {
+  return identity.programBrief?.nicheKey ?? identity.nicheKey ?? identity.niche;
+}
+
+/**
+ * Old ledgers have no canonical program brief. They are intentionally not
+ * replayable: accepting one would make a new run reuse positioning produced
+ * under an unbound concept.
+ */
+function sameChannelProgramBrief(left: unknown, right: ChannelProgramBrief): boolean {
+  try {
+    return channelProgramBriefFingerprint(left) === channelProgramBriefFingerprint(right);
+  } catch {
+    return false;
+  }
+}
+
 async function writeImmutableDeterministicFoundationObject(
   artifact: Parameters<DeterministicFoundationObjectWriter["writeImmutable"]>[0],
 ) {
@@ -333,13 +383,18 @@ async function completeDeterministicQuizYearInception(args: {
   readonly slug: string;
   readonly channelName: string;
   readonly family: (typeof FAMILIES)["quizyear"];
+  readonly programBrief: ChannelProgramBrief;
 }): Promise<{
   readonly foundationFingerprint: string;
   readonly receiptFingerprint: string;
 }> {
+  const programBriefFingerprint = channelProgramBriefFingerprint(args.programBrief);
+  const programBriefPositioningText = channelProgramBriefPositioningText(args.programBrief);
   const expected = buildQuizYearFoundation({
     channelName: args.channelName,
     storagePrefix: channelPrefix(args.ownerId, args.slug),
+    programBriefFingerprint,
+    programBriefPositioningText,
   });
   const current = await currentChannel(args.convex, args.channelId);
   const identity = asIdentity(current.identity);
@@ -357,10 +412,13 @@ async function completeDeterministicQuizYearInception(args: {
   const persisted = await buildAndPersistQuizYearFoundation({
     channelName: args.channelName,
     storagePrefix: channelPrefix(args.ownerId, args.slug),
+    programBriefFingerprint,
+    programBriefPositioningText,
     writer: { writeImmutable: writeImmutableDeterministicFoundationObject },
   });
   const foundationIdentity: ChannelIdentityState = {
     ...identity,
+    programBrief: persistedChannelProgramBrief(args.programBrief),
     persona: persisted.foundation.positioning.persona,
     styleGrammar: persisted.foundation.positioning.styleGrammar,
     palette: [...persisted.foundation.positioning.palette],
@@ -413,13 +471,18 @@ async function completeDeterministicIllustratedInception(args: {
   readonly slug: string;
   readonly channelName: string;
   readonly family: (typeof FAMILIES)["illustrated_explainer"];
+  readonly programBrief: ChannelProgramBrief;
 }): Promise<{
   readonly foundationFingerprint: string;
   readonly receiptFingerprint: string;
 }> {
+  const programBriefFingerprint = channelProgramBriefFingerprint(args.programBrief);
+  const programBriefPositioningText = channelProgramBriefPositioningText(args.programBrief);
   const expected = buildIllustratedFoundation({
     channelName: args.channelName,
     storagePrefix: channelPrefix(args.ownerId, args.slug),
+    programBriefFingerprint,
+    programBriefPositioningText,
   });
   const current = await currentChannel(args.convex, args.channelId);
   const identity = asIdentity(current.identity);
@@ -437,10 +500,13 @@ async function completeDeterministicIllustratedInception(args: {
   const persisted = await buildAndPersistIllustratedFoundation({
     channelName: args.channelName,
     storagePrefix: channelPrefix(args.ownerId, args.slug),
+    programBriefFingerprint,
+    programBriefPositioningText,
     writer: { writeImmutable: writeImmutableDeterministicFoundationObject },
   });
   const foundationIdentity: ChannelIdentityState = {
     ...identity,
+    programBrief: persistedChannelProgramBrief(args.programBrief),
     persona: persisted.foundation.positioning.persona,
     styleGrammar: persisted.foundation.positioning.styleGrammar,
     palette: [...persisted.foundation.positioning.palette],
@@ -1073,6 +1139,89 @@ export async function executeDesignChannel(
     console.log(`[design-channel] ${message}`, extra ?? "");
   const family = FAMILIES[payload.family];
   if (!family) throw new Error(`unknown family: ${payload.family}`);
+  // The creator route must provide the already-canonical program. Do this
+  // before creating a resumable shell, loading providers, or reserving spend;
+  // no legacy/implicit brief may silently receive a new execution.
+  const programBrief = assertCanonicalChannelProgramBrief(payload.programBrief);
+  if (programBrief.family !== payload.family) {
+    throw new Error("channel program brief family does not match the requested channel family");
+  }
+  if (payload.nicheKey !== undefined && payload.nicheKey !== programBrief.nicheKey) {
+    throw new Error("channel program brief niche does not match the requested channel niche");
+  }
+  if (payload.locale !== undefined && payload.locale !== programBrief.locale) {
+    throw new Error("channel program brief locale does not match the requested channel locale");
+  }
+  // A Trigger payload may bypass the browser route. Re-run the same canonical
+  // creator admission from the bound brief before readiness, Convex, providers
+  // or any cost authority is considered.
+  const requestedLengthMinutes = Number(payload.lengthMinutes);
+  const requestedBudgetUsd = Number(payload.budget);
+  const creatorPreflight = formatPreflight(
+    programBrief.family,
+    briefToFormatSelectionInput(programBrief, {
+      ...(Number.isFinite(requestedLengthMinutes) && requestedLengthMinutes > 0
+        ? { targetDurationSeconds: Math.round(requestedLengthMinutes * 60) }
+        : {}),
+      ...(Number.isFinite(requestedBudgetUsd) && requestedBudgetUsd > 0
+        ? { maxPerVideoBudgetUsd: requestedBudgetUsd }
+        : {}),
+    }),
+  );
+  if (!creatorPreflight.creatorAdmission.autonomous || creatorPreflight.creatorAdmission.privateReviewOnly) {
+    throw new Error(
+      `channel program is not admitted for automatic inception: ${creatorPreflight.creatorAdmission.remediation}`,
+    );
+  }
+  const privateReviewOffers = privateReviewCapabilityOffers(creatorPreflight.creativeCapabilities);
+  if (privateReviewOffers.length) {
+    throw new Error(
+      `channel program requires private review before automatic inception: ` +
+      privateReviewOffers.map((offer) => offer.title).join(", "),
+    );
+  }
+  const supervisedModules = creatorPreflight.moduleAdmissions.filter(
+    (module) => module.requiredForConcept && !module.autonomous,
+  );
+  if (supervisedModules.length) {
+    throw new Error(
+      `channel program requires supervised admission before automatic inception: ` +
+      supervisedModules.map((module) => module.block).join(", "),
+    );
+  }
+  const programCapabilityIntent = briefToCreativeCapabilityIntent(programBrief);
+  const unhostedSupervisedIntents = resolveUnhostedSupervisedCreativeCapabilityIntents(
+    programCapabilityIntent,
+    programBrief.family,
+  );
+  if (unhostedSupervisedIntents.length) {
+    throw new Error(
+      "channel program signals a supervised creative capability that is not authorized for the selected family: " +
+      unhostedSupervisedIntents
+        .map(({ offer, compatibleFamilies }) =>
+          `${offer.title} (available only for ${compatibleFamilies.join(", ")}): ${offer.automationAdmission.remediation}`,
+        )
+        .join("; "),
+    );
+  }
+  // Selected capabilities arrive on the direct Trigger payload rather than the
+  // format-selection input. Revalidate both their exact catalog eligibility and
+  // their automatic-build admission at this authority boundary so an explicit
+  // opt-in cannot bypass the browser's review gates.
+  const selectedCapabilities = validateCreativeCapabilitySelections({
+    family: programBrief.family,
+    selections: payload.capabilitySelections,
+    intent: programCapabilityIntent,
+  });
+  const selectedCapabilityAdmission = assessCreativeCapabilityAutomaticBuildAdmission(selectedCapabilities);
+  if (!selectedCapabilityAdmission.autonomous) {
+    throw new Error(
+      "selected creative capabilities require supervised admission before automatic inception: " +
+      selectedCapabilityAdmission.blockers
+        .map(({ offer, block, admission }) => `${offer.title}${block ? ` (${block})` : ""}: ${admission.remediation}`)
+        .join("; "),
+    );
+  }
   const runtimeReadiness = familyProductionReadiness(payload.family);
   if (!runtimeReadiness.productionReady) {
     const fallback = productionReadyFamilyFallback(payload.family);
@@ -1093,7 +1242,7 @@ export async function executeDesignChannel(
   const url = process.env.NEXT_PUBLIC_CONVEX_URL ?? process.env.CONVEX_URL;
   if (!url) throw new Error("NEXT_PUBLIC_CONVEX_URL is not configured");
   const convex = new ConvexHttpClient(url);
-  const niche = getNiche(payload.nicheKey ?? "");
+  const niche = getNiche(programBrief.nicheKey);
   const requestKey = payload.requestKey?.trim() || runtime.runId;
   const requestedYoutubeName = normalizeYoutubeChannelName(
     payload.requestedYoutubeName ?? "",
@@ -1160,10 +1309,11 @@ export async function executeDesignChannel(
 
   const design = designPipeline({
     family: payload.family,
-    nicheKey: payload.nicheKey,
-    subcategory: payload.subcategory,
+    nicheKey: programBrief.nicheKey,
+    subcategory: programBrief.subcategory,
+    programBrief,
     lengthMinutes: payload.lengthMinutes,
-    locale: payload.locale,
+    locale: programBrief.locale,
     footageTheme: payload.footageTheme,
     voiceFx: payload.voiceFx,
     publishMode: payload.publishMode ?? "draft",
@@ -1186,7 +1336,7 @@ export async function executeDesignChannel(
     if (result.changed.length) log(`length law re-pinned: ${result.changed.join(", ")}`);
     return result.pipeline;
   };
-  const baseName = payload.name?.trim() || `${niche?.label ?? payload.nicheKey ?? "New"} ${family.label}`;
+  const baseName = payload.name?.trim() || `${niche?.label ?? programBrief.nicheKey} ${family.label}`;
   const slug = channelInceptionSlug(baseName, requestKey);
   const archetype = getArchetype(family.archetypeKey);
   const disabledBlocks = [
@@ -1199,6 +1349,18 @@ export async function executeDesignChannel(
   const existingAtStart = await convex.query(api.channels.getChannelBySlug, { ownerId, slug });
   if (existingAtStart?.family && existingAtStart.family !== payload.family) {
     throw new Error(`inception key already belongs to family ${existingAtStart.family}`);
+  }
+  // A row at this idempotency key is a retry candidate, never a place to
+  // backfill a newly submitted program. Requiring its sealed brief before any
+  // mutation, ledger, deterministic foundation, research, or provider work
+  // keeps a legacy/superseded identity from being adopted into this execution.
+  if (existingAtStart) {
+    assertPersistedProgramBriefIdentity(existingAtStart.identity, {
+      context: "existing inception channel identity",
+      expectedFamily: programBrief.family,
+      expectedProgramBrief: programBrief,
+      requireProgramBrief: true,
+    });
   }
   // RESUME HOLE: `createChannel` below is the ONLY writer in this flow that
   // stamps `family`/`contentLane`, and the `existingAtStart?._id ??`
@@ -1228,6 +1390,7 @@ export async function executeDesignChannel(
   const provisionalIdentity: ChannelIdentityState = existingAtStart
     ? asIdentity(existingAtStart.identity)
     : {
+        programBrief: persistedChannelProgramBrief(programBrief),
         persona: payload.persona?.trim() || `Evidence-grounded ${family.label} channel`,
         styleGrammar: `${family.label}; identity pending Channel Inception positioning`,
         palette: payload.palette?.length ? payload.palette : ["#111827", "#F59E0B", "#F8FAFC"],
@@ -1235,7 +1398,8 @@ export async function executeDesignChannel(
         bannedWords: [],
         requiredCallbacks: [],
         cadence: payload.cadence ?? "weekly",
-        niche: niche?.label ?? payload.nicheKey,
+        nicheKey: programBrief.nicheKey,
+        niche: niche?.label ?? programBrief.nicheKey,
         thumbnailTemplate: family.defaultThumbnailStyle,
       };
   const channelId = existingAtStart?._id ?? await convex.mutation(api.channels.createChannel, {
@@ -1276,6 +1440,7 @@ export async function executeDesignChannel(
       slug,
       channelName: baseName,
       family: FAMILIES.quizyear,
+      programBrief,
     });
     log("QuizYear deterministic foundation persisted", foundation);
     return {
@@ -1304,6 +1469,7 @@ export async function executeDesignChannel(
       slug,
       channelName: baseName,
       family: FAMILIES.illustrated_explainer,
+      programBrief,
     });
     log("Illustrated Explainer deterministic foundation persisted", foundation);
     return {
@@ -1388,6 +1554,9 @@ export async function executeDesignChannel(
       )
     : [];
   const currentPreviewFingerprintSet = new Set(acceptedPreviewFingerprints);
+  const previousProgramBrief = previousSnapshot && typeof previousSnapshot === "object"
+    ? (previousSnapshot as Partial<ChannelInceptionRequest>).programBrief
+    : undefined;
   const canResumeSnapshot = Boolean(
     previousSnapshot &&
     typeof previousSnapshot === "object" &&
@@ -1398,6 +1567,7 @@ export async function executeDesignChannel(
     (previousSnapshot as Partial<ChannelInceptionRequest>).sourceRevision === requestKey &&
     (previousSnapshot as Partial<ChannelInceptionRequest>).moduleConfigFingerprint ===
       requestedModuleConfigFingerprint &&
+    sameChannelProgramBrief(previousProgramBrief, programBrief) &&
     previousPreviewFingerprints.every((fingerprint) => currentPreviewFingerprintSet.has(fingerprint)),
   );
   const currentRequest: ChannelInceptionRequest = {
@@ -1406,12 +1576,12 @@ export async function executeDesignChannel(
     name: existingChannel.name,
     slug,
     family: payload.family,
-    nicheKey: existingIdentity.niche ?? niche?.label ?? payload.nicheKey ?? "unknown",
-    locale: payload.locale ?? "en",
+    nicheKey: programBrief.nicheKey,
+    locale: programBrief.locale,
     sourceRevision: requestKey,
     pipelineSourceFingerprint: channelInceptionContentSha256(design.pipeline),
     moduleConfigFingerprint: requestedModuleConfigFingerprint,
-    identityBrief: [payload.persona, payload.subcategory, payload.exampleClipUrl].filter(Boolean).join(" | "),
+    programBrief,
     brand: {
       ...(existingIdentity.imageKey ? {
         avatar: {
@@ -1552,8 +1722,9 @@ export async function executeDesignChannel(
   } | undefined> => {
     const channel = await currentChannel(convex, channelId);
     const identity = asIdentity(channel.identity);
-    const expectedNiche = plan.requestSnapshot.nicheKey.trim();
-    if (!identity.niche || identity.niche !== expectedNiche) return undefined;
+    const expectedProgramBrief = plan.requestSnapshot.programBrief;
+    const expectedNiche = expectedProgramBrief.nicheKey;
+    if (!sameChannelProgramBrief(identity.programBrief, expectedProgramBrief)) return undefined;
     const [nicheIntel, competitors] = await Promise.all([
       convex.query(api.seo.getNiche, { ownerId, niche: expectedNiche }),
       convex.query(api.competitors.listCompetitors, { ownerId, niche: expectedNiche }),
@@ -1577,12 +1748,13 @@ export async function executeDesignChannel(
     adoptExisting: loadResearchEvidence,
     execute: async () => {
       const identity = asIdentity((await currentChannel(convex, channelId)).identity);
-      if (!identity.niche || identity.niche !== plan.requestSnapshot.nicheKey) {
-        throw new Error("research niche does not match the admitted channel request");
+      const expectedProgramBrief = plan.requestSnapshot.programBrief;
+      if (identity.programBrief && !sameChannelProgramBrief(identity.programBrief, expectedProgramBrief)) {
+        throw new Error("research program brief does not match the admitted channel request");
       }
       const result = await refreshNicheResearchCore({
         ownerId,
-        niche: identity.niche,
+        niche: expectedProgramBrief.nicheKey,
         channelId,
       }, log);
       if (!result.ok || result.skipped === "no_youtube_key") {
@@ -1599,6 +1771,17 @@ export async function executeDesignChannel(
     },
   });
 
+  const positioningStage = channelInceptionStage(plan, "channel-inception-positioning");
+  if (!positioningStage) throw new Error("inception plan omitted its required positioning stage");
+  // Execute only the exact brief that was content-addressed into this plan.
+  // Payload fields are deliberately not consulted below: a retry must not
+  // mutate the channel's creative program between the approval and execution.
+  const positioningProgramBrief = assertCanonicalChannelProgramBrief(
+    positioningStage.params.programBrief,
+  );
+  const positioningProgramText = channelProgramBriefPositioningText(positioningProgramBrief);
+  const positioningNiche = getNiche(positioningProgramBrief.nicheKey);
+
   const loadPositioning = async (): Promise<{
     value: PositioningState;
     evidence?: unknown;
@@ -1610,7 +1793,8 @@ export async function executeDesignChannel(
     const qualityBar = channel.qaRubric as QualityBar | undefined;
     if (!styleDNA || styleDNA.confidence < ESTABLISHED_CONFIDENCE || styleDNA.groundingGaps.length) return undefined;
     if (!qualityBar || !identity.creativeBrief) return undefined;
-    const signals = await groundingSignals(convex, ownerId, identity.niche);
+    if (!sameChannelProgramBrief(identity.programBrief, positioningProgramBrief)) return undefined;
+    const signals = await groundingSignals(convex, ownerId, identityResearchNiche(identity));
     const value: PositioningState = {
       name: channel.name,
       identity,
@@ -1634,19 +1818,20 @@ export async function executeDesignChannel(
     adoptExisting: loadPositioning,
     execute: async () => {
       const seed = [
-        niche?.label ?? payload.nicheKey,
-        payload.subcategory,
-        payload.name,
-        `${family.label} format`,
+        positioningProgramText,
+        positioningProgramBrief.subcategory
+          ? `Subcategory: ${positioningProgramBrief.subcategory}`
+          : "",
+        `${positioningStage.params.family} format`,
       ].filter(Boolean).join(" — ");
       const concept = await synthChannelConcept(seed, undefined, log);
-      const name = payload.name?.trim() || concept.name;
+      const name = positioningStage.params.name;
       const selfText = [
-        payload.name ?? "",
+        positioningProgramText,
+        name,
         concept.name,
-        payload.persona ?? concept.persona,
-        niche?.label ?? "",
-        payload.subcategory ?? "",
+        concept.persona,
+        positioningProgramBrief.subcategory ?? "",
         ...concept.topicPool,
       ].join(" ").toLowerCase();
       const bannedWords = (concept.bannedWords ?? []).filter((word) => {
@@ -1657,32 +1842,25 @@ export async function executeDesignChannel(
       const previous = asIdentity((await currentChannel(convex, channelId)).identity);
       const identity: ChannelIdentityState = {
         ...previous,
-        persona: payload.persona ?? concept.persona,
+        programBrief: persistedChannelProgramBrief(positioningProgramBrief),
+        persona: concept.persona,
         styleGrammar: concept.styleGrammar,
-        palette: payload.palette?.length ? payload.palette : concept.palette,
+        palette: previous.palette.length ? previous.palette : concept.palette,
         topicPool: concept.topicPool,
         bannedWords,
         requiredCallbacks: previous.requiredCallbacks ?? [],
-        cadence: payload.cadence ?? concept.cadence,
-        niche: niche?.label ?? concept.niche,
+        cadence: previous.cadence || concept.cadence,
+        nicheKey: positioningProgramBrief.nicheKey,
+        niche: positioningNiche?.label ?? positioningProgramBrief.nicheKey,
         voiceId: concept.voiceId,
-        thumbnailTemplate: family.defaultThumbnailStyle,
+        thumbnailTemplate: FAMILIES[positioningStage.params.family].defaultThumbnailStyle,
       };
-      // An example URL is optional reference material, not authority to invent
-      // unseen visual/narrative traits. Keep the channel-design route usable by
-      // skipping it, while persistently exposing the exact remediation instead
-      // of reaching the retired provider-backed analyzer.
-      const exampleClipAdmission = payload.exampleClipUrl?.trim()
-        ? exampleClipAnalysisUnavailable()
-        : undefined;
-      if (exampleClipAdmission) {
-        log(`[positioning] example clip skipped: ${exampleClipAdmission.code}; ${exampleClipAdmission.remediation}`);
-      }
-      const signals = await groundingSignals(convex, ownerId, identity.niche);
+      const signals = await groundingSignals(convex, ownerId, identityResearchNiche(identity));
       const now = Date.now();
       const styleDNA = await synthStyleDNA({
-        family: payload.family,
+        family: positioningStage.params.family,
         name,
+        programBrief: positioningProgramBrief,
         niche: identity.niche,
         persona: identity.persona,
         styleGrammar: identity.styleGrammar,
@@ -1701,10 +1879,11 @@ export async function executeDesignChannel(
           `${styleDNA.groundingGaps.length} unresolved gap(s))`,
         );
       }
-      const qualityBar = buildQualityBar(payload.family, styleDNA, now);
+      const qualityBar = buildQualityBar(positioningStage.params.family, styleDNA, now);
       const creativeBrief = await synthShowBible({
-        family: payload.family,
+        family: positioningStage.params.family,
         name,
+        programBrief: positioningProgramBrief,
         niche: identity.niche,
         persona: identity.persona,
         styleGrammar: identity.styleGrammar,
@@ -1735,7 +1914,6 @@ export async function executeDesignChannel(
           confidence: styleDNA.confidence,
           groundingGaps: styleDNA.groundingGaps,
           competitorCount: signals.competitorCount,
-          ...(exampleClipAdmission ? { exampleClip: exampleClipAdmission } : {}),
         },
         outputFingerprint: channelInceptionContentSha256({
           ...value,
@@ -1780,7 +1958,7 @@ export async function executeDesignChannel(
       ]));
       let scriptPlaybook = channel.scriptPlaybook;
       if (plan.familyPolicy.requiresNarrativePlaybook) {
-        const signals = await groundingSignals(convex, ownerId, identity.niche);
+        const signals = await groundingSignals(convex, ownerId, identityResearchNiche(identity));
         const { distillScriptPlaybook } = await import("@/lib/scriptLab");
         scriptPlaybook = await distillScriptPlaybook({
           refs: signals.topVideos,

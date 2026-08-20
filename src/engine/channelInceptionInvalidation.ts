@@ -10,9 +10,14 @@ const POSITIONING_IDENTITY_FIELDS = [
   "bannedWords",
   "requiredCallbacks",
   "cadence",
+  "nicheKey",
+  "programBrief",
   "creativeBrief",
 ] as const;
 
+// These values select the persisted research/grounding corpus. A change must
+// restart at research so no downstream receipt survives a different corpus.
+const RESEARCH_IDENTITY_FIELDS = ["niche", "nicheKey", "programBrief"] as const;
 const SEO_IDENTITY_FIELDS = ["topicPool"] as const;
 const VOICE_IDENTITY_FIELDS = ["voiceCasting", "voiceId", "voiceRef", "toneRefs"] as const;
 const AVATAR_IDENTITY_FIELDS = ["imageKey"] as const;
@@ -64,7 +69,7 @@ export function channelInceptionInvalidationRoots(
 
   const beforeIdentity = record(before["identity"]);
   const afterIdentity = record(after["identity"]);
-  if (changed(beforeIdentity["niche"], afterIdentity["niche"])) {
+  if (anyIdentityFieldChanged(beforeIdentity, afterIdentity, RESEARCH_IDENTITY_FIELDS)) {
     roots.add("channel-inception-research");
   }
   if (anyIdentityFieldChanged(beforeIdentity, afterIdentity, POSITIONING_IDENTITY_FIELDS)) {

@@ -44,6 +44,7 @@ import {
   suggestYoutubeHandle,
 } from "@/lib/youtubeChannelCreationClaim";
 import { familySupervisedChannelInceptionCapability } from "@/engine/channelInceptionCapability";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 
 type Phase = "form" | "building" | "error";
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -497,6 +498,16 @@ export default function NewChannelWizard() {
   async function create(startedAt: number) {
     setPhase("building"); setError(null); setBuildProgress(null);
     try {
+      // Bind the creator-visible format promise before the recoverable intent
+      // is fingerprinted. Execution choices stay on `design`; this immutable
+      // brief is the sole source of its family/niche/concept identity.
+      const programBrief = createChannelProgramBrief({
+        family,
+        nicheKey,
+        ...(subcategory.trim() ? { subcategory } : {}),
+        locale,
+        concept,
+      });
       const requestedYoutubeName = normalizeYoutubeChannelName(name);
       if (autoYoutube && !requestedYoutubeName) {
         setError("Enter the exact channel name before authorizing real YouTube creation.");
@@ -532,11 +543,17 @@ export default function NewChannelWizard() {
         .filter(([, catalogFingerprint]) => Boolean(catalogFingerprint))
         .map(([capability, catalogFingerprint]) => ({ capability, catalogFingerprint }));
       const design: Record<string, unknown> = {
-        nicheKey, subcategory, family, concept: concept.trim() || undefined, name: requestedYoutubeName || undefined,
+        nicheKey: programBrief.nicheKey,
+        subcategory: programBrief.subcategory,
+        family: programBrief.family,
+        concept: programBrief.concept,
+        locale: programBrief.locale,
+        programBrief,
+        name: requestedYoutubeName || undefined,
         // Every variable-duration family receives its own authored unit. Fixed
         // engines own their timing and never receive a misleading generic value.
         lengthMinutes: fam && duration?.inputUnit !== "fixed" ? lengthMinutes : undefined,
-        locale, footageTheme: family === "narrated_stock" ? footageTheme : undefined,
+        footageTheme: family === "narrated_stock" ? footageTheme : undefined,
         voiceFx: fam?.narrated && voiceFx !== "none" ? voiceFx : undefined,
         seriesTitle: seriesTitle.trim() || undefined,
         seriesCount: seriesTitle.trim() && seriesCount > 0 ? seriesCount : undefined,
@@ -588,7 +605,10 @@ export default function NewChannelWizard() {
     try {
       const res = await fetch("/api/build-channel", {
         method: "POST", headers: { "content-type": "application/json" },
-        body: JSON.stringify({ requestKey: pending.requestKey, design: pending.design }),
+        body: JSON.stringify({
+          requestKey: pending.requestKey,
+          design: pending.design,
+        }),
         signal: attempt.controller.signal,
       });
       const data = await res.json();

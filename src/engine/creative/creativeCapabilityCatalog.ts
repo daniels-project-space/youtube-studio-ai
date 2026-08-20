@@ -24,7 +24,7 @@ import {
 
 // Bump whenever an offer changes so a cached browser cannot submit a selection
 // against a less restrictive catalog.
-export const CREATIVE_CAPABILITY_CATALOG_VERSION = "creative-capability-catalog/v2" as const;
+export const CREATIVE_CAPABILITY_CATALOG_VERSION = "creative-capability-catalog/v3" as const;
 
 export type CreativeCapabilityKey =
   | "source_attributed_data_story"
@@ -97,6 +97,11 @@ export interface CreativeCapabilityDefinition {
   supportedFamilies: readonly FamilyKey[];
   selectionMode: CreativeCapabilitySelectionMode;
   matches: (intent: CreativeCapabilityIntent, family: FamilyKey) => boolean;
+  /**
+   * Explicit opt-in for reporting an otherwise-unhosted private-review intent
+   * at a cross-family admission boundary. It never creates a selection.
+   */
+  crossFamilySafetyGate?: (intent: CreativeCapabilityIntent) => boolean;
   materialize: (intent: CreativeCapabilityIntent, family: FamilyKey) => CreativeCapabilityOffer;
 }
 
@@ -128,6 +133,18 @@ export interface CreativeCapabilityAutomaticBuildBlocker {
 export interface CreativeCapabilityAutomaticBuildAdmission {
   autonomous: boolean;
   blockers: readonly CreativeCapabilityAutomaticBuildBlocker[];
+}
+
+/**
+ * A supervised/private-review route whose intent matches an existing catalog
+ * capability, but whose selected family cannot host that capability. This is
+ * diagnostic only: it carries no selection and enables no pipeline modules.
+ */
+export interface UnhostedSupervisedCreativeCapabilityIntent {
+  kind: "unhosted_supervised_intent";
+  selectedFamily: FamilyKey;
+  compatibleFamilies: readonly FamilyKey[];
+  offer: CreativeCapabilityOffer;
 }
 
 const CASEFILE_CINEMATIC_SIGNALS = [
@@ -219,6 +236,9 @@ const CHILDREN_SHOW_REQUIREMENTS = [
   "fresh child-editor approval bound to the Show Bible, Episode Graph, and lesson contract",
 ] as const;
 
+const CHILDREN_AUDIENCE_SIGNAL = /\b(?:children|child|kids|kid|preschool|toddler|kindergarten)\b/u;
+const CHILDREN_SHOW_SIGNAL = /\b(?:show|series|episode|learning|education|educational|phonics|language|participation|nursery)\b/u;
+
 function normalizedIntent(input: CreativeCapabilityIntent): string {
   return [
     input.concept,
@@ -229,7 +249,8 @@ function normalizedIntent(input: CreativeCapabilityIntent): string {
   ]
     .filter((value): value is string => typeof value === "string" && value.trim().length > 0)
     .join(" ")
-    .toLocaleLowerCase();
+    .toLocaleLowerCase()
+    .replace(/[_-]+/g, " ");
 }
 
 /** Shared by the advisor and source requirement gate so factual fiction stays distinct. */
@@ -238,6 +259,10 @@ export function isCasefileCinematicIntent(
   family: FamilyKey,
 ): boolean {
   if (family !== "cinematic") return false;
+  return isCasefileSupervisedIntent(input);
+}
+
+function isCasefileSupervisedIntent(input: CreativeCapabilityIntent): boolean {
   const intent = normalizedIntent(input);
   if (/\b(fictional|fiction|screenplay|original story)\b/.test(intent)) return false;
   return CASEFILE_CINEMATIC_SIGNALS.some((signal) => intent.includes(signal));
@@ -258,6 +283,11 @@ export function isReviewedFactualIllustratedExplainerIntent(
     return false;
   }
   return EDITORIAL_EVIDENCE_PACKET_SIGNALS.some((signal) => intent.includes(signal));
+}
+
+function isChildrenShowBibleIntent(input: CreativeCapabilityIntent): boolean {
+  const intent = normalizedIntent(input);
+  return CHILDREN_AUDIENCE_SIGNAL.test(intent) && CHILDREN_SHOW_SIGNAL.test(intent);
 }
 
 function sourceAttributedDataStoryOffer(
@@ -437,6 +467,7 @@ export const CREATIVE_CAPABILITY_CATALOG: readonly CreativeCapabilityDefinition[
     supportedFamilies: ["cinematic"],
     selectionMode: "private_review_only",
     matches: isCasefileCinematicIntent,
+    crossFamilySafetyGate: isCasefileSupervisedIntent,
     materialize: () => casefileCinematicOffer(),
   },
   {
@@ -444,6 +475,7 @@ export const CREATIVE_CAPABILITY_CATALOG: readonly CreativeCapabilityDefinition[
     supportedFamilies: ["children_learning"],
     selectionMode: "private_review_only",
     matches: (_intent, family) => family === "children_learning",
+    crossFamilySafetyGate: isChildrenShowBibleIntent,
     materialize: () => childrenShowBibleOffer(),
   },
 ] as const;
@@ -502,6 +534,37 @@ export function privateReviewCapabilityOffers(
   offers: readonly CreativeCapabilityOffer[],
 ): CreativeCapabilityOffer[] {
   return offers.filter((offer) => offer.selectionMode === "private_review_only");
+}
+
+/**
+ * Discover supervised intent that the chosen family cannot host. Every
+ * declared compatible family is evaluated so this guard cannot be bypassed by
+ * choosing a generic family; it only reports an existing private-review route
+ * and never creates a capability selection or pipeline obligation.
+ */
+export function resolveUnhostedSupervisedCreativeCapabilityIntents(
+  input: CreativeCapabilityIntent,
+  selectedFamily: FamilyKey,
+): UnhostedSupervisedCreativeCapabilityIntent[] {
+  assertCreativeCapabilityCatalog();
+  return CREATIVE_CAPABILITY_CATALOG
+    .filter(
+      (definition) => definition.selectionMode === "private_review_only" && definition.crossFamilySafetyGate,
+    )
+    .filter((definition) => !definition.supportedFamilies.includes(selectedFamily))
+    .flatMap((definition) => {
+      if (!definition.crossFamilySafetyGate!(input)) return [];
+      const compatibleFamilies = definition.supportedFamilies.filter(
+        (family) => definition.matches(input, family),
+      );
+      if (!compatibleFamilies.length) return [];
+      return [{
+        kind: "unhosted_supervised_intent" as const,
+        selectedFamily,
+        compatibleFamilies,
+        offer: definition.materialize(input, compatibleFamilies[0]!),
+      }];
+    });
 }
 
 export function creativeCapabilitySelection(
@@ -693,6 +756,9 @@ export function assertCreativeCapabilityCatalog(
     }
     if (definition.selectionMode === "private_review_only" && offer.pipelineObligations.length) {
       throw new Error(`private-review capability ${definition.capability} cannot declare an automatic pipeline path`);
+    }
+    if (definition.crossFamilySafetyGate && definition.selectionMode !== "private_review_only") {
+      throw new Error(`cross-family safety gate ${definition.capability} must be private review only`);
     }
     if (definition.selectionMode !== offer.selectionMode) {
       throw new Error(`creative capability ${definition.capability} materialized an inconsistent selection mode`);

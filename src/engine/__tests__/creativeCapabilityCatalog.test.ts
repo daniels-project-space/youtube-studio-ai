@@ -10,10 +10,12 @@ import {
   creativeCapabilitySelection,
   privateReviewCapabilityOffers,
   resolveCreativeCapabilities,
+  resolveUnhostedSupervisedCreativeCapabilityIntents,
   validateCreativeCapabilitySelections,
   type CreativeCapabilityOffer,
 } from "@/engine/creative/creativeCapabilityCatalog";
 import { formatPreflight } from "@/engine/creative/selectFormat";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { designPipeline } from "@/engine/designer";
 
 const dataIntent = {
@@ -163,6 +165,23 @@ assert.deepEqual(
   ["casefile_cinematic"],
   "the format layer must carry review-only admission from the catalog, not re-parse Casefile module profiles",
 );
+assert.deepEqual(
+  resolveUnhostedSupervisedCreativeCapabilityIntents({
+    concept: "A factual true-crime cold-case reconstruction with source-bound faceless scenes",
+  }, "narrated_stock").map((intent) => ({
+    kind: intent.kind,
+    selectedFamily: intent.selectedFamily,
+    compatibleFamilies: intent.compatibleFamilies,
+    capability: intent.offer.capability,
+  })),
+  [{
+    kind: "unhosted_supervised_intent",
+    selectedFamily: "narrated_stock",
+    compatibleFamilies: ["cinematic"],
+    capability: "casefile_cinematic",
+  }],
+  "a factual Casefile intent cannot escape its supervised cinematic route by choosing narrated stock",
+);
 
 const factualIllustratedIntent = {
   concept: "A factual animated geography and science explainer with source-bound maps and charts",
@@ -218,6 +237,47 @@ const children = formatPreflight("children_learning", {
 }).creativeCapabilities.find((offer) => offer.capability === "children_show_bible");
 assert(children, "children route must be catalogued as a reusable supervised capability");
 assert.equal(children.selectionMode, "private_review_only");
+assert(
+  formatPreflight("children_learning", {
+    concept: "A calm original curriculum for a recurring learning channel",
+  }).creativeCapabilities.some((offer) => offer.capability === "children_show_bible"),
+  "the selected children family must retain its private-review Show Bible even when creator prose is neutral",
+);
+assert.deepEqual(
+  resolveUnhostedSupervisedCreativeCapabilityIntents({
+    concept: "A preschool children’s educational language-learning show with gentle participation",
+  }, "narrated_stock").map((intent) => intent.offer.capability),
+  ["children_show_bible"],
+  "children’s educational-show intent cannot escape its supervised route by choosing a non-children family",
+);
+assert.deepEqual(
+  resolveUnhostedSupervisedCreativeCapabilityIntents({
+    concept: "A factual true-crime cold-case reconstruction with source-bound faceless scenes",
+  }, "cinematic"),
+  [],
+  "a compatible cinematic Casefile route must not be falsely reported as unhosted",
+);
+assert.deepEqual(
+  resolveUnhostedSupervisedCreativeCapabilityIntents({
+    concept: "A preschool children’s educational language-learning show with gentle participation",
+  }, "children_learning"),
+  [],
+  "a compatible children’s Show Bible route must not be falsely reported as unhosted",
+);
+assert.deepEqual(
+  resolveUnhostedSupervisedCreativeCapabilityIntents({
+    concept: "An adult childhood trauma recovery documentary",
+  }, "narrated_stock"),
+  [],
+  "word-bound child intent detection must not capture unrelated adult childhood content",
+);
+assert.deepEqual(
+  resolveUnhostedSupervisedCreativeCapabilityIntents({
+    concept: "A whiteboard science explainer about how satellites stay in orbit",
+  }, "whiteboard"),
+  [],
+  "ordinary whiteboard science must not be blocked by the illustrated-only editorial evidence route",
+);
 
 assert.throws(
   () => assertCreativeCapabilityPipelineObligations("narrated_stock", [dataSelection], [
@@ -247,6 +307,13 @@ assert.throws(
 
 const designed = designPipeline({
   family: "narrated_stock",
+  programBrief: createChannelProgramBrief({
+    family: "narrated_stock",
+    nicheKey: "business",
+    locale: "en",
+    concept: dataIntent.concept,
+    audience: "Adults who want source-attributed business-history explanations",
+  }),
   capabilitySelections: [dataSelection],
 });
 const blocks = designed.pipeline.map((entry) => entry.block);

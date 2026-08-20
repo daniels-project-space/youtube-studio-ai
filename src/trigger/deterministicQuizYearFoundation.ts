@@ -93,12 +93,16 @@ function starterSlate() {
 export function buildQuizYearFoundation(args: {
   readonly channelName: string;
   readonly storagePrefix: string;
+  readonly programBriefFingerprint: string;
+  readonly programBriefPositioningText: string;
 }): DeterministicChannelFoundation {
   return buildDeterministicChannelFoundation({
     profile: QUIZYEAR_DETERMINISTIC_FOUNDATION_PROFILE,
     family: "quizyear",
     channelName: args.channelName,
     storagePrefix: args.storagePrefix,
+    programBriefFingerprint: args.programBriefFingerprint,
+    programBriefPositioningText: args.programBriefPositioningText,
     sources: starterSources(),
     starterSlate: starterSlate(),
   });
@@ -107,6 +111,8 @@ export function buildQuizYearFoundation(args: {
 export async function buildAndPersistQuizYearFoundation(args: {
   readonly channelName: string;
   readonly storagePrefix: string;
+  readonly programBriefFingerprint: string;
+  readonly programBriefPositioningText: string;
   readonly writer: DeterministicFoundationObjectWriter;
 }): Promise<PersistedQuizYearFoundation> {
   const foundation = buildQuizYearFoundation(args);

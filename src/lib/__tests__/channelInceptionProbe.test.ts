@@ -1,5 +1,6 @@
 import assert from "node:assert/strict";
 import { buildChannelInceptionPlan } from "@/engine/channelInceptionPlan";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import type { PipelineEntry } from "@/engine/types";
 import {
   beginChannelInceptionLedger,
@@ -95,6 +96,12 @@ const lowBudgetPlan = buildChannelInceptionPlan({
   nicheKey: "history",
   sourceRevision: "low-budget-probe/v1",
   pipelineSourceFingerprint: "pipeline/narrated-stock/v1",
+  programBrief: createChannelProgramBrief({
+    family: "narrated_stock",
+    nicheKey: "history",
+    locale: "en",
+    concept: "Concise evidence-led history stories for curious adult viewers",
+  }),
   includeProbe: true,
 });
 const lowBudgetProbe = lowBudgetPlan.stages.find(

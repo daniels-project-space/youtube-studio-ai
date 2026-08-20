@@ -5,6 +5,7 @@ import {
   channelInceptionStageDescriptor,
 } from "@/engine/channelInceptionLedger";
 import { buildChannelInceptionPlan } from "@/engine/channelInceptionPlan";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 
 async function main(): Promise<void> {
   const {
@@ -12,6 +13,7 @@ async function main(): Promise<void> {
     assertInceptionOutputSize,
     assertInceptionStageDescriptor,
     invalidatePersistedInceptionProofs,
+    assertProgramBriefIdentityMutation,
   } =
     channelInceptionLedgerGuardsForTests;
 
@@ -37,9 +39,15 @@ async function main(): Promise<void> {
     name: "The Quiet Stoic",
     slug: "quiet-stoic",
     family: "narrated_stock",
-    nicheKey: "stoicism",
+    nicheKey: "psychology",
     sourceRevision: "security-test",
     pipelineSourceFingerprint: "pipeline-v1",
+    programBrief: createChannelProgramBrief({
+      family: "narrated_stock",
+      nicheKey: "psychology",
+      locale: "en",
+      concept: "Grounded stoic philosophy lessons with a calm practical program",
+    }),
   });
   const descriptor = channelInceptionStageDescriptor(plan.stages[0]);
   assert.doesNotThrow(() => assertInceptionStageDescriptor(descriptor));
@@ -106,6 +114,84 @@ async function main(): Promise<void> {
     ),
     undefined,
     "the service may persist its own leased stage output without invalidating its lease",
+  );
+
+  const initialProgramBrief = createChannelProgramBrief({
+    family: "narrated_stock",
+    nicheKey: "psychology",
+    locale: "en",
+    concept: "Grounded stoic philosophy lessons with a calm practical program",
+  });
+  const revisedProgramBrief = createChannelProgramBrief({
+    family: "narrated_stock",
+    nicheKey: "psychology",
+    locale: "en",
+    concept: "A sharper daily stoic challenge program for ambitious professionals",
+  });
+  assert.doesNotThrow(() => assertProgramBriefIdentityMutation({
+    existingIdentity: { persona: "Calm guide" },
+    nextIdentity: {
+      persona: "Calm guide",
+      nicheKey: initialProgramBrief.nicheKey,
+      programBrief: initialProgramBrief,
+    },
+    effectiveFamily: "narrated_stock",
+  }));
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: { persona: "Calm guide" },
+      nextIdentity: { persona: "Calm guide", nicheKey: "history", programBrief: initialProgramBrief },
+      effectiveFamily: "narrated_stock",
+    }),
+    /nicheKey history must match canonical program brief nicheKey psychology/,
+  );
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: { persona: "Calm guide" },
+      nextIdentity: { persona: "Calm guide", programBrief: initialProgramBrief },
+      effectiveFamily: "narrated_stock",
+    }),
+    /nicheKey undefined must match canonical program brief nicheKey psychology/,
+  );
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: {
+        persona: "Calm guide",
+        nicheKey: initialProgramBrief.nicheKey,
+        programBrief: initialProgramBrief,
+      },
+      nextIdentity: { persona: "Calm guide" },
+      effectiveFamily: "narrated_stock",
+    }),
+    /cannot be removed/,
+  );
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: {
+        persona: "Calm guide",
+        nicheKey: initialProgramBrief.nicheKey,
+        programBrief: initialProgramBrief,
+      },
+      nextIdentity: {
+        persona: "Calm guide",
+        nicheKey: revisedProgramBrief.nicheKey,
+        programBrief: revisedProgramBrief,
+      },
+      effectiveFamily: "narrated_stock",
+    }),
+    /immutable once stored/,
+  );
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: { persona: "Calm guide" },
+      nextIdentity: {
+        persona: "Calm guide",
+        nicheKey: initialProgramBrief.nicheKey,
+        programBrief: initialProgramBrief,
+      },
+      effectiveFamily: "illustrated_explainer",
+    }),
+    /does not match the effective channel family/,
   );
 
   console.log("channel inception ledger security guards passed");

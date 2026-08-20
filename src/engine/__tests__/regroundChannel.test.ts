@@ -26,6 +26,7 @@ import {
 } from "@/engine/creative/regroundChannel";
 import type { QualityBar, StyleDNA } from "@/engine/creative/types";
 import type { StyleDNAInput } from "@/engine/creative/styleDNA";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import type { FamilyKey } from "@/engine/families";
 
 /* --------------------------------- fakes -------------------------------- */
@@ -302,6 +303,107 @@ async function existingIdentityIsTheInput(): Promise<void> {
   assert.deepEqual(input.competitorTitles, ["a top title"]);
 }
 
+async function catalogNicheKeyDrivesGroundingLookup(): Promise<void> {
+  const programBrief = createChannelProgramBrief({
+    family: "music_loop",
+    nicheKey: "lofi",
+    locale: "en",
+    concept: "Night-shift focus music for quiet study sessions",
+  });
+  const h = harness(legacyChannel({
+    identity: {
+      niche: "Educational",
+      nicheKey: "lofi",
+      programBrief,
+      persona: "a patient explainer for curious learners",
+      styleGrammar: "clean diagram-led pacing",
+      palette: ["#101820", "#f2aa4c"],
+    },
+  }));
+  let queriedNiche: string | undefined;
+  h.deps.loadGrounding = async (_ownerId, niche) => {
+    queriedNiche = niche;
+    return { titles: [], powerWords: [] };
+  };
+  await regroundChannelCore(
+    { channelId: "fake_channel_not_real", family: "music_loop" },
+    h.deps,
+  );
+  assert.equal(
+    queriedNiche,
+    "lofi",
+    "a canonical program brief must preserve its catalog key over the display label",
+  );
+}
+
+async function staleProgramBriefIdentityRefusesBeforeGroundingOrSynthesis(): Promise<void> {
+  const programBrief = createChannelProgramBrief({
+    family: "music_loop",
+    nicheKey: "lofi",
+    locale: "en",
+    concept: "Night-shift focus music for quiet study sessions",
+  });
+  const h = harness(legacyChannel({
+    identity: {
+      niche: "Educational",
+      nicheKey: "educational",
+      programBrief,
+      persona: "a patient explainer for curious learners",
+      styleGrammar: "clean diagram-led pacing",
+      palette: ["#101820", "#f2aa4c"],
+    },
+  }));
+  let groundingRead = false;
+  h.deps.loadGrounding = async () => {
+    groundingRead = true;
+    return { titles: [], powerWords: [] };
+  };
+  await assert.rejects(
+    () => regroundChannelCore(
+      { channelId: "fake_channel_not_real", family: "music_loop" },
+      h.deps,
+    ),
+    /nicheKey educational must match canonical program brief nicheKey lofi/,
+  );
+  assert.equal(groundingRead, false, "stale identity must fail before research lookup");
+  assert.equal(h.synthInputs.length, 0, "stale identity must never reach Style DNA synthesis");
+  assert.equal(h.writes.length, 0, "stale identity must never write a repair patch");
+}
+
+async function staleProgramBriefFamilyRefusesBeforeGroundingOrSynthesis(): Promise<void> {
+  const programBrief = createChannelProgramBrief({
+    family: "whiteboard",
+    nicheKey: "educational",
+    locale: "en",
+    concept: "Clear visual explanations for curious adult learners",
+  });
+  const h = harness(legacyChannel({
+    identity: {
+      niche: "Educational",
+      nicheKey: "educational",
+      programBrief,
+      persona: "a patient explainer for curious learners",
+      styleGrammar: "clean diagram-led pacing",
+      palette: ["#101820", "#f2aa4c"],
+    },
+  }));
+  let groundingRead = false;
+  h.deps.loadGrounding = async () => {
+    groundingRead = true;
+    return { titles: [], powerWords: [] };
+  };
+  await assert.rejects(
+    () => regroundChannelCore(
+      { channelId: "fake_channel_not_real", family: "music_loop" },
+      h.deps,
+    ),
+    /family whiteboard does not match expected family music_loop/,
+  );
+  assert.equal(groundingRead, false, "wrong brief family must fail before research lookup");
+  assert.equal(h.synthInputs.length, 0, "wrong brief family must never reach Style DNA synthesis");
+  assert.equal(h.writes.length, 0, "wrong brief family must never write a repair patch");
+}
+
 /* --------- 5. the real Trigger write path forwards only 2 fields --------- */
 
 function triggerWrapperForwardsOnlyTwoFields(): void {
@@ -339,6 +441,9 @@ async function main(): Promise<void> {
   await dryRunWritesNothing();
   await missingChannelIsASoftRefusal();
   await existingIdentityIsTheInput();
+  await catalogNicheKeyDrivesGroundingLookup();
+  await staleProgramBriefIdentityRefusesBeforeGroundingOrSynthesis();
+  await staleProgramBriefFamilyRefusesBeforeGroundingOrSynthesis();
   triggerWrapperForwardsOnlyTwoFields();
   console.log("regroundChannel: all safety tests passed");
 }

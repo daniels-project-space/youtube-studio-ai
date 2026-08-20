@@ -1,6 +1,10 @@
 import { createHash } from "node:crypto";
 import type { FamilyKey } from "./families";
 import {
+  assertCanonicalChannelProgramBrief,
+  type ChannelProgramBrief,
+} from "./channelProgramBrief";
+import {
   CHANNEL_INCEPTION_FAMILY_POLICIES,
   CHANNEL_INCEPTION_MODULE_CONTRACTS,
   CHANNEL_INCEPTION_SCHEMA_VERSION,
@@ -65,7 +69,12 @@ export interface ChannelInceptionRequest {
   pipelineSourceFingerprint: string;
   /** Canonical hash of runtime module overrides consumed by the effective pipeline. */
   moduleConfigFingerprint?: string;
-  identityBrief?: string;
+  /**
+   * Immutable creator intent for this exact channel program. New plans refuse
+   * to invent or normalize this at execution time: the persisted canonical
+   * brief is the replayable creative authority.
+   */
+  programBrief: ChannelProgramBrief;
   brand?: ChannelBrandIntent;
   voice?: ChannelVoiceIntent;
   starter?: ChannelStarterIntent;
@@ -103,7 +112,7 @@ export interface ChannelInceptionStageParamsByKey {
     slug: string;
     family: FamilyKey;
     nicheKey: string;
-    identityBrief: string | null;
+    programBrief: ChannelProgramBrief;
     minimumStyleDnaConfidence: number;
     maximumUnresolvedGaps: number;
   };
@@ -391,7 +400,16 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
   const moduleConfigFingerprint = request.moduleConfigFingerprint
     ? requireText(request.moduleConfigFingerprint, "moduleConfigFingerprint")
     : channelInceptionContentSha256({});
-  const identityBrief = request.identityBrief?.trim() || null;
+  const programBrief = assertCanonicalChannelProgramBrief(request.programBrief);
+  if (programBrief.family !== request.family) {
+    throw new Error("channel program brief family does not match the inception request");
+  }
+  if (programBrief.nicheKey !== nicheKey) {
+    throw new Error("channel program brief niche does not match the inception request");
+  }
+  if (programBrief.locale !== locale) {
+    throw new Error("channel program brief locale does not match the inception request");
+  }
 
   if (policy.voiceOwnership === "none" && request.voice) {
     throw new Error(`${request.family} omits voice inception and cannot accept a voice intent`);
@@ -508,7 +526,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     slug,
     family: request.family,
     nicheKey,
-    identityBrief,
+    programBrief,
     minimumStyleDnaConfidence: 0.7,
     maximumUnresolvedGaps: 0,
   });
@@ -599,7 +617,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     nicheKey,
     locale,
     sourceRevision,
-    identityBrief,
+    programBrief,
     pipelineSourceFingerprint,
     moduleConfigFingerprint,
     brand: { avatar, banner, background, colors },
@@ -644,7 +662,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     sourceRevision,
     pipelineSourceFingerprint,
     moduleConfigFingerprint,
-    ...(identityBrief ? { identityBrief } : {}),
+    programBrief,
     ...(Object.values(snapshotBrand).some(Boolean) ? { brand: snapshotBrand } : {}),
     ...(policy.voiceOwnership !== "none" && existingCastFingerprint
       ? {

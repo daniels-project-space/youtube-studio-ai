@@ -27,6 +27,8 @@ async function main() {
   const result = await buildAndPersistQuizYearFoundation({
     channelName: "Quiz & Curiosity",
     storagePrefix: "owner/owner-test/channel/quiz-curiosity/",
+    programBriefFingerprint: "a".repeat(64),
+    programBriefPositioningText: "QuizYear trivia for curious adults; sourced rounds spanning science and history.",
     writer,
   });
 

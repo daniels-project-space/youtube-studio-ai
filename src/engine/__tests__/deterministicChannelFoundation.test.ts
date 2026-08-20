@@ -14,6 +14,8 @@ const input = {
   family: "quizyear" as const,
   channelName: "Quiz & Curiosity",
   storagePrefix: "channels/owner_test/quiz-curiosity",
+  programBriefFingerprint: digest("d"),
+  programBriefPositioningText: "QuizYear trivia for curious adults; fair, sourced rounds about space, science, and landmarks.",
   sources: [
     {
       id: "wikidata-q405",
@@ -76,6 +78,14 @@ const reordered = buildDeterministicChannelFoundation({
 });
 
 assert.equal(foundation.foundationFingerprint, reordered.foundationFingerprint);
+const revisedProgramFoundation = buildDeterministicChannelFoundation({
+  ...input,
+  programBriefFingerprint: digest("e"),
+  programBriefPositioningText: "QuizYear trivia for curious adults; fair, sourced rounds focused on overlooked inventions.",
+});
+assert.notEqual(foundation.foundationFingerprint, revisedProgramFoundation.foundationFingerprint);
+assert.notEqual(foundation.positioning.fingerprint, revisedProgramFoundation.positioning.fingerprint);
+assert.equal(foundation.starterSlate.programBrief.fingerprint, input.programBriefFingerprint);
 assert.equal(foundation.cost.maximumProviderCostUsd, 0);
 assert.equal(foundation.cost.providerCalls, "forbidden");
 assert.equal(foundation.publishing.initialState, "draft");
@@ -133,6 +143,8 @@ const fictionalInput = {
   family: "illustrated_explainer" as const,
   channelName: "The Scenario Desk",
   storagePrefix: "channels/owner_test/scenario-desk",
+  programBriefFingerprint: digest("f"),
+  programBriefPositioningText: "Illustrated fictional AI scenarios for curious adults; never present imagined outcomes as real simulations.",
   sources: [],
   starterSlate: [
     {

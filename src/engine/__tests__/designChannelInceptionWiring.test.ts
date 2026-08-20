@@ -8,12 +8,67 @@ const entrypoint = readFileSync(join(root, "src/trigger/designChannel.ts"), "utf
 const coordinator = readFileSync(join(root, "src/trigger/designChannelInception.ts"), "utf8");
 const adapter = readFileSync(join(root, "src/trigger/channelInceptionLedgerAdapter.ts"), "utf8");
 const mutations = readFileSync(join(root, "convex/channels.ts"), "utf8");
+const schema = readFileSync(join(root, "convex/schema.ts"), "utf8");
+const refreshShowBible = readFileSync(join(root, "src/trigger/refreshShowBible.ts"), "utf8");
+const regroundChannel = readFileSync(join(root, "src/engine/creative/regroundChannel.ts"), "utf8");
 const route = readFileSync(join(root, "src/app/api/build-channel/route.ts"), "utf8");
 const newChannelUi = readFileSync(join(root, "src/app/(app)/channels/new/page.tsx"), "utf8");
 
 assert.match(entrypoint, /executeDesignChannel\(payload/);
 assert.match(entrypoint, /maxAttempts:\s*3/);
 assert(!entrypoint.includes("generateChannelArt"), "the Trigger entrypoint must remain a thin retry shell");
+const canonicalProgramBriefGate = coordinator.indexOf("assertCanonicalChannelProgramBrief(payload.programBrief)");
+const directPreflightGate = coordinator.indexOf("formatPreflight(");
+const directCapabilityIntentGate = coordinator.indexOf("const programCapabilityIntent");
+const directReadinessGate = coordinator.indexOf("familyProductionReadiness(payload.family)");
+const directConvexGate = coordinator.indexOf("new ConvexHttpClient(url)");
+assert(
+  canonicalProgramBriefGate >= 0 &&
+    directPreflightGate > canonicalProgramBriefGate &&
+    directCapabilityIntentGate > directPreflightGate &&
+    directCapabilityIntentGate < directReadinessGate &&
+    directCapabilityIntentGate < directConvexGate &&
+    directReadinessGate > canonicalProgramBriefGate &&
+    directConvexGate > canonicalProgramBriefGate,
+  "a direct Trigger execution must require the canonical program brief before readiness, Convex, or spend-capable work",
+);
+assert.match(coordinator, /formatPreflight\(\s*programBrief\.family/);
+assert.match(coordinator, /briefToFormatSelectionInput\(programBrief/);
+assert.match(coordinator, /resolveUnhostedSupervisedCreativeCapabilityIntents\(/);
+assert.match(coordinator, /validateCreativeCapabilitySelections\(/);
+assert.match(coordinator, /assessCreativeCapabilityAutomaticBuildAdmission\(/);
+assert.match(coordinator, /export interface DesignChannelArgs extends Omit<DesignOptions, "family" \| "programBrief">/);
+assert.match(coordinator, /programBrief: ChannelProgramBrief/);
+assert.match(coordinator, /positioningStage\.params\.programBrief/,
+  "positioning must use the sealed plan-stage brief rather than mutable task payload text");
+assert.match(coordinator, /nicheKey:\s*programBrief\.nicheKey/);
+assert.match(coordinator, /function identityResearchNiche\(/);
+assert.match(coordinator, /identity\.programBrief\?\.nicheKey \?\? identity\.nicheKey \?\? identity\.niche/,
+  "SEO/storage reads must let the canonical program brief own the catalog key");
+assert.match(refreshShowBible, /programBrief\?\.nicheKey \?\? identity\.nicheKey \?\? identity\.niche/,
+  "Show Bible refresh must research the canonical brief's catalog key");
+assert.match(regroundChannel, /programBrief\?\.nicheKey \?\? identity\.nicheKey \?\? identity\.niche/,
+  "reground must research the canonical brief's catalog key");
+assert.match(refreshShowBible, /assertPersistedProgramBriefIdentity\(identity/,
+  "Show Bible refresh must validate a persisted brief before research or synthesis");
+assert.match(regroundChannel, /assertPersistedProgramBriefIdentity\(identity/,
+  "reground must validate a persisted brief before research or synthesis");
+assert(
+  refreshShowBible.indexOf("assertPersistedProgramBriefIdentity(identity") < refreshShowBible.indexOf("const researchNiche") &&
+    refreshShowBible.indexOf("assertPersistedProgramBriefIdentity(identity") < refreshShowBible.indexOf("await synthShowBible"),
+  "Show Bible refresh must fail closed before research or LLM synthesis",
+);
+assert(
+  regroundChannel.indexOf("assertPersistedProgramBriefIdentity(identity") < regroundChannel.indexOf("await deps.loadGrounding") &&
+    regroundChannel.indexOf("assertPersistedProgramBriefIdentity(identity") < regroundChannel.indexOf("await deps.synth"),
+  "reground must fail closed before research or Style DNA synthesis",
+);
+assert.doesNotMatch(coordinator, /groundingSignals\(convex, ownerId, identity\.niche\)/,
+  "Educational must query as educational, never its display label");
+assert.match(mutations, /assertProgramBriefIdentityMutation\(/);
+assert.match(mutations, /channel program brief is immutable once stored/);
+assert.match(schema, /programBrief:\s*v\.optional\(/);
+assert.match(schema, /catalogFingerprint:\s*v\.string\(\)/);
 assert(
   coordinator.indexOf("if (!design.available || !design.productionReady)") <
     coordinator.indexOf('runStage("channel-inception-research"'),
@@ -139,8 +194,8 @@ assert.match(
 );
 assert.match(route, /requires a supervised episode admission before automatic channel creation/,
   "future child-show readiness cannot bypass a required private child-editor admission");
-assert.match(newChannelUi, /concept:\s*concept\.trim\(\) \|\| undefined/,
-  "the server-side preflight must receive the exact concept the creator advised on");
+assert.match(newChannelUi, /const programBrief = createChannelProgramBrief\(\{[\s\S]*?concept,[\s\S]*?\}\);/,
+  "the recoverable build request must bind the exact creator concept into its canonical program brief");
 
 for (const operation of ["claim", "complete", "checkpoint", "heartbeat", "fail"] as const) {
   assert(adapter.includes(`${operation}: async`), `Convex ledger adapter must implement ${operation}`);
@@ -172,10 +227,34 @@ assert(
 assert.match(mutations, /if \(channel\.family !== undefined && channel\.family !== null\)/);
 assert.match(mutations, /refusing backfill: family/);
 
+// A legacy row at the idempotency key is not a resumable shell. It must carry
+// the exact sealed brief before the coordinator can mutate it or enter a stage.
+const existingProgramBriefGate = coordinator.indexOf(
+  "assertPersistedProgramBriefIdentity(existingAtStart.identity",
+);
+const existingFamilyBackfill = coordinator.indexOf("api.channels.backfillChannelFamily");
+const researchStage = coordinator.indexOf('runStage("channel-inception-research"');
+assert(
+  existingProgramBriefGate > coordinator.indexOf("const existingAtStart =") &&
+    existingProgramBriefGate < existingFamilyBackfill &&
+    existingProgramBriefGate < researchStage,
+  "an existing row without the exact canonical brief must fail before Convex stage mutations or research",
+);
+assert.match(
+  coordinator,
+  /expectedProgramBrief: programBrief/,
+  "an existing retry must bind exactly to the submitted canonical program brief",
+);
+assert.match(
+  coordinator,
+  /requireProgramBrief: true/,
+  "a partial legacy row with the brief missing must not resume into research",
+);
+
 // Style DNA / quality bar are the other field pair six legacy channels lack.
 // Positioning is an unconditional stage, and both its resume readers demand the
 // pair, so no channel can complete inception without them.
-assert.match(coordinator, /const qualityBar = buildQualityBar\(payload\.family, styleDNA, now\)/);
+assert.match(coordinator, /const qualityBar = buildQualityBar\(positioningStage\.params\.family, styleDNA, now\)/);
 assert.match(coordinator, /styleDNA,\n\s+qaRubric: qualityBar,/,
   "positioning must persist BOTH styleDNA and qaRubric on the channel");
 assert.match(coordinator,
