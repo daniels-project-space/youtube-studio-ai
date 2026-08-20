@@ -1,6 +1,7 @@
 import { task } from "@trigger.dev/sdk";
 import { withStagehand, type StagehandSession } from "@/lib/browserbase";
 import { runStagehandAgentLoop, type StagehandActor } from "@/lib/stagehandAgentLoop";
+import { bootstrapSecrets } from "@/lib/bootstrap";
 
 interface ProbePage {
   goto(url: string, options?: Record<string, unknown>): Promise<unknown>;
@@ -32,6 +33,7 @@ export const browserAutomationProbeTask = task({
   retry: { maxAttempts: 1 },
   run: async () => {
     const log = (m: string, x?: Record<string, unknown>) => console.log(`[browser-probe] ${m}`, x ?? "");
+    await bootstrapSecrets(log);
     const results: Record<string, unknown> = {};
 
     const { value } = await withStagehand(async (sessionU) => {
