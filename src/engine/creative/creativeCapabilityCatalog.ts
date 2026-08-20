@@ -97,6 +97,36 @@ export interface CreativeCapabilityDefinition {
   materialize: (intent: CreativeCapabilityIntent, family: FamilyKey) => CreativeCapabilityOffer;
 }
 
+/** A selected capability resolved from the current server-owned catalog. */
+export interface ResolvedCreativeCapabilitySelection {
+  selection: CreativeCapabilitySelection;
+  offer: CreativeCapabilityOffer;
+}
+
+/**
+ * A single materialized admission layer that prevents automatic channel
+ * creation. Capabilities own the default admission; an individual module may
+ * make that admission stricter for a specific review stage.
+ */
+export interface CreativeCapabilityAutomaticBuildBlocker {
+  selection: CreativeCapabilitySelection;
+  offer: CreativeCapabilityOffer;
+  admission: CreativeCapabilityAdmission;
+  /** Omitted when the capability-level admission is the blocking layer. */
+  block?: string;
+}
+
+/**
+ * Server-safe result for the boundary that may reserve spend or dispatch a
+ * build. Selection eligibility and automatic-build eligibility are separate:
+ * an explicit opt-in can legitimately compile as a draft while still being
+ * barred from an automatic paid run until its evidence admission is ready.
+ */
+export interface CreativeCapabilityAutomaticBuildAdmission {
+  autonomous: boolean;
+  blockers: readonly CreativeCapabilityAutomaticBuildBlocker[];
+}
+
 const CASEFILE_CINEMATIC_SIGNALS = [
   "true crime",
   "casefile",
@@ -417,7 +447,7 @@ export interface ValidateCreativeCapabilitySelectionsInput {
  */
 export function validateCreativeCapabilitySelections(
   input: ValidateCreativeCapabilitySelectionsInput,
-): Array<{ selection: CreativeCapabilitySelection; offer: CreativeCapabilityOffer }> {
+): ResolvedCreativeCapabilitySelection[] {
   assertCreativeCapabilityCatalog();
   const selections = parseCreativeCapabilitySelections(input.selections);
   return selections.map((selection) => {
@@ -442,6 +472,42 @@ export function validateCreativeCapabilitySelections(
   });
 }
 
+/**
+ * Decides whether the already-resolved selected capabilities may cross the
+ * automatic build boundary. This deliberately evaluates materialized
+ * admissions rather than selectionMode: explicit opt-in means a creator may
+ * request the capability, not that it may reserve spend or dispatch a task.
+ *
+ * Modules only add a blocker when they explicitly tighten the offer-level
+ * admission. Modules without an override inherit the offer admission and must
+ * not produce duplicate remediation entries.
+ */
+export function assessCreativeCapabilityAutomaticBuildAdmission(
+  resolved: readonly ResolvedCreativeCapabilitySelection[],
+): CreativeCapabilityAutomaticBuildAdmission {
+  const blockers: CreativeCapabilityAutomaticBuildBlocker[] = [];
+  for (const item of resolved) {
+    if (!item.offer.automationAdmission.autonomous) {
+      blockers.push({
+        selection: item.selection,
+        offer: item.offer,
+        admission: item.offer.automationAdmission,
+      });
+    }
+    for (const module of item.offer.modules) {
+      if (module.automationAdmission && !module.automationAdmission.autonomous) {
+        blockers.push({
+          selection: item.selection,
+          offer: item.offer,
+          admission: module.automationAdmission,
+          block: module.block,
+        });
+      }
+    }
+  }
+  return { autonomous: blockers.length === 0, blockers };
+}
+
 function matchesRequiredParams(
   actual: Readonly<Record<string, unknown>> | undefined,
   expected: Readonly<Record<string, unknown>> | undefined,
@@ -460,12 +526,10 @@ function matchesRequiredParams(
  * Proves a selected opt-in is represented by the effective compiled pipeline,
  * rather than merely being displayed as an advisor suggestion.
  */
-export function assertCreativeCapabilityPipelineObligations(
-  family: FamilyKey,
-  selections: readonly CreativeCapabilitySelection[],
+export function assertResolvedCreativeCapabilityPipelineObligations(
+  resolved: readonly ResolvedCreativeCapabilitySelection[],
   pipeline: readonly Pick<PipelineEntry, "block" | "params">[],
 ): void {
-  const resolved = validateCreativeCapabilitySelections({ family, selections });
   for (const { selection, offer } of resolved) {
     for (const obligation of offer.pipelineObligations) {
       const entry = pipeline.find((candidate) => candidate.block === obligation.block);
@@ -481,6 +545,17 @@ export function assertCreativeCapabilityPipelineObligations(
       }
     }
   }
+}
+
+export function assertCreativeCapabilityPipelineObligations(
+  family: FamilyKey,
+  selections: readonly CreativeCapabilitySelection[],
+  pipeline: readonly Pick<PipelineEntry, "block" | "params">[],
+): void {
+  assertResolvedCreativeCapabilityPipelineObligations(
+    validateCreativeCapabilitySelections({ family, selections }),
+    pipeline,
+  );
 }
 
 /** Catalog integrity is checked before discovery and selection validation. */

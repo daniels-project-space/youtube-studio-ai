@@ -3,12 +3,15 @@ import { readFileSync } from "node:fs";
 import {
   CREATIVE_CAPABILITY_CATALOG,
   CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
+  assessCreativeCapabilityAutomaticBuildAdmission,
   assertCreativeCapabilityCatalog,
   assertCreativeCapabilityPipelineObligations,
+  assertResolvedCreativeCapabilityPipelineObligations,
   creativeCapabilitySelection,
   privateReviewCapabilityOffers,
   resolveCreativeCapabilities,
   validateCreativeCapabilitySelections,
+  type CreativeCapabilityOffer,
 } from "@/engine/creative/creativeCapabilityCatalog";
 import { formatPreflight } from "@/engine/creative/selectFormat";
 import { designPipeline } from "@/engine/designer";
@@ -27,6 +30,65 @@ assert(dataOffer, "the resolver must expose the existing source-attributed data-
 assert.equal(dataOffer.selectionMode, "explicit_opt_in");
 assert.equal(dataOffer.modules[0]?.block, "visual_inserts");
 assert.equal(dataOffer.pipelineObligations.some((obligation) => obligation.block === "qa_script"), true);
+
+const resolvedDataSelection = validateCreativeCapabilitySelections({
+  family: "narrated_stock",
+  intent: dataIntent,
+  selections: [dataSelection],
+});
+const blockedDataStoryBuild = assessCreativeCapabilityAutomaticBuildAdmission(resolvedDataSelection);
+assert.equal(
+  blockedDataStoryBuild.autonomous,
+  false,
+  "a selected explicit opt-in must still be barred from automatic build when its materialized admission is non-autonomous",
+);
+assert.match(
+  blockedDataStoryBuild.blockers[0]?.admission.remediation ?? "",
+  /fingerprint-bound reviewed data-story source ledger/,
+  "the generic admission result must preserve the data-story source-ledger remediation",
+);
+
+// Future automatic opt-ins use the same materialized admission and exact
+// pipeline-evidence path; this synthetic materialization deliberately flips
+// only the admission rather than creating a separate one-off test capability.
+const hypotheticalAutomaticDataStoryOffer: CreativeCapabilityOffer = {
+  ...dataOffer,
+  automationAdmission: {
+    autonomous: true,
+    blockers: [],
+    remediation: "",
+  },
+};
+const hypotheticalAutomaticSelection = [{
+  selection: dataSelection,
+  offer: hypotheticalAutomaticDataStoryOffer,
+}];
+assert.equal(
+  assessCreativeCapabilityAutomaticBuildAdmission(hypotheticalAutomaticSelection).autonomous,
+  true,
+  "an autonomous explicit opt-in must remain eligible for an automatic build boundary",
+);
+assertResolvedCreativeCapabilityPipelineObligations(hypotheticalAutomaticSelection, [
+  { block: "timeline_assemble" },
+  {
+    block: "visual_inserts",
+    params: {
+      dataStoryContract: "source-attributed-data-story/v1",
+      requireNamedSource: true,
+      requireSpokenNumericAnchor: true,
+      insertTypes: ["big_stat", "line_chart", "bar_compare", "annotated_line", "lower_third"],
+    },
+  },
+  { block: "script_gen", params: { dataRich: true, sourceAttributionRequired: true } },
+  {
+    block: "qa_script",
+    params: {
+      dataStoryContract: "source-attributed-data-story/v1",
+      requireNamedSource: true,
+      requireSpokenNumericAnchor: true,
+    },
+  },
+]);
 
 const preflight = formatPreflight("narrated_stock", dataIntent);
 assert.equal(preflight.capabilityCatalogFingerprint, CREATIVE_CAPABILITY_CATALOG_FINGERPRINT);
@@ -154,6 +216,17 @@ const buildRouteSource = readFileSync(
   "utf8",
 );
 assert.match(buildRouteSource, /privateReviewCapabilityOffers\(creatorPreflight\.creativeCapabilities\)/);
+assert.match(buildRouteSource, /assessCreativeCapabilityAutomaticBuildAdmission/);
+const automaticAdmissionGate = buildRouteSource.indexOf("if (!automaticCapabilityAdmission.autonomous)");
+const taskDispatch = buildRouteSource.indexOf("return tasks.trigger(");
+assert(
+  automaticAdmissionGate >= 0 && automaticAdmissionGate < taskDispatch,
+  "a selected non-autonomous capability must return before the design task can dispatch",
+);
+const automaticAdmissionResponse = buildRouteSource.slice(automaticAdmissionGate, taskDispatch);
+assert.match(automaticAdmissionResponse, /sourceRequirements:/);
+assert.match(automaticAdmissionResponse, /remediation:/);
+assert.match(automaticAdmissionResponse, /\{ status: 409 \}/);
 assert.doesNotMatch(buildRouteSource, /source_first_casefile\/v1|faceless_source_bound_cinematic_sequence\/v1/);
 
 console.log("creative capability catalog contract tests passed");

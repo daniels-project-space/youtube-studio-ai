@@ -30,6 +30,7 @@ import {
 } from "@/lib/youtubeChannelCreationClaim";
 import { formatPreflight } from "@/engine/creative/selectFormat";
 import {
+  assessCreativeCapabilityAutomaticBuildAdmission,
   privateReviewCapabilityOffers,
   validateCreativeCapabilitySelections,
 } from "@/engine/creative/creativeCapabilityCatalog";
@@ -68,7 +69,6 @@ export async function POST(request: Request) {
     );
   }
   try {
-    const { tasks } = await import("@trigger.dev/sdk");
     // Advanced-editor param overrides are sanitized (unknown blocks/keys
     // dropped, numbers clamped) before reaching the modular task.
     let design = body.design;
@@ -160,11 +160,43 @@ export async function POST(request: Request) {
       // intent eligibility before this payload can reach the designer.
       let selectedCapabilitySelections: Array<{ capability: string; catalogFingerprint: string }>;
       try {
-        selectedCapabilitySelections = validateCreativeCapabilitySelections({
+        const resolvedCapabilities = validateCreativeCapabilitySelections({
           family: family.key,
           selections: design.capabilitySelections,
           intent: { concept, niche: getNiche(nicheKey)?.label, nicheKey },
-        }).map(({ selection }) => ({ ...selection }));
+        });
+        // An explicit opt-in authorizes a draft design choice only. The
+        // materialized catalog admission is separately authoritative for any
+        // automatic build, spend reservation, or Trigger dispatch. This is
+        // generic so a future evidence-bound module cannot accidentally turn
+        // selectable into autonomous by omitting a bespoke route guard.
+        const automaticCapabilityAdmission = assessCreativeCapabilityAutomaticBuildAdmission(
+          resolvedCapabilities,
+        );
+        if (!automaticCapabilityAdmission.autonomous) {
+          const blocked = automaticCapabilityAdmission.blockers;
+          const unique = (values: readonly string[]) => [...new Set(values.filter((value) => value.trim()))];
+          return NextResponse.json({
+            error: "The selected creative capability requires review or remediation before automatic channel creation",
+            runtimeBlockers: unique(blocked.flatMap((item) => item.admission.blockers)),
+            sourceRequirements: unique([
+              ...creatorPreflight.sourceRequirements,
+              ...blocked.flatMap((item) => item.offer.requirements),
+            ]),
+            recommendedModules: unique(blocked.flatMap((item) => item.offer.modules.map((module) => module.block))),
+            remediation: unique(blocked.map((item) => item.admission.remediation)),
+            reviewHrefs: unique(blocked.flatMap((item) => item.offer.reviewHref ? [item.offer.reviewHref] : [])),
+            blockedCapabilities: blocked.map((item) => ({
+              capability: item.selection.capability,
+              title: item.offer.title,
+              selectionMode: item.offer.selectionMode,
+              ...(item.block ? { block: item.block } : {}),
+              automationAdmission: item.admission,
+              requirements: item.offer.requirements,
+            })),
+          }, { status: 409 });
+        }
+        selectedCapabilitySelections = resolvedCapabilities.map(({ selection }) => ({ ...selection }));
       } catch (error) {
         const message = error instanceof Error ? error.message : "invalid creative capability selection";
         return NextResponse.json(
@@ -349,7 +381,7 @@ export async function POST(request: Request) {
       };
     }
     const handle = await (async () => {
-      const { idempotencyKeys } = await import("@trigger.dev/sdk");
+      const { idempotencyKeys, tasks } = await import("@trigger.dev/sdk");
       const idempotencyKey = await idempotencyKeys.create(
         `design-channel:${requestKey}`,
         { scope: "global" },
