@@ -1305,6 +1305,7 @@ export function assertCinematicCaseSequence(
       narrativeLock,
       castLock,
       parentLock,
+      `Approved framing: ${shot.shotScale} at ${shot.lens}.`,
       `Coverage ${shot.coveragePurpose}; visual mode ${shot.visualMode}.`,
     ]
       .filter(Boolean)
@@ -1313,6 +1314,11 @@ export function assertCinematicCaseSequence(
       .trim();
     const motion = [
       `Motivated motion: ${shot.motion}`,
+      // The structured camera field is the reviewed source of truth. Put it
+      // directly in the I2V instruction so a vague or conflicting free-text
+      // motion description cannot silently turn a planned dolly/orbit/crane
+      // into a generic static take before final-master QA sees it.
+      `Approved camera treatment: ${shot.cameraMove}; execute only this motivated movement: ${shot.cameraRationale}`,
       narrativeLock,
       castLock,
       parentLock,

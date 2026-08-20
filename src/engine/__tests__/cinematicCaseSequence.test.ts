@@ -709,6 +709,11 @@ async function main() {
   assert.match(mannequinScene.still, /Why did a single court order close the vault\?/i);
   assert.match(mannequinScene.still, /Make the narrated mannequin action concrete/i);
   assert.match(mannequinScene.motion, /deliberate measured gait/i);
+  assert.match(
+    mannequinScene.motion,
+    /Approved camera treatment: dolly_push/i,
+    "the exact structured camera move must reach the LTX motion prompt rather than relying on an unstructured motion description",
+  );
   assert.match(mannequinScene.motion, /Narrative role cold_open/i);
   assert.match(mannequinScene.motion, /First frame: Start from the exact cited story state/i);
   assert.match(mannequinScene.motion, /Last frame: End with only motivated action advanced/i);
