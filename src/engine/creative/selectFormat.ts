@@ -329,7 +329,11 @@ export const FORMAT_RECIPES: Record<FamilyKey, FormatRecipe> = {
   cinematic: {
     family: "cinematic",
     channelTypes: ["cinematic reconstructions", "true-crime / history scenes", "atmospheric mini-films", "story-led AI cinematics"],
-    signals: ["cinematic", "reconstruction", "true crime", "heist", "thriller", "crime", "ai scenes", "mini film", "mini-film"],
+    signals: [
+      "cinematic", "reconstruction", "true crime", "heist", "thriller", "crime", "ai scenes", "mini film", "mini-film",
+      "systems failure", "engineering failure", "industrial disaster", "historical disaster", "aviation disaster", "aviation accident",
+      "financial fraud", "corporate fraud", "company scandal", "corporate scandal",
+    ],
     qualityFocus: ["shot continuity", "character / setting locks", "causal scene progression", "cinematic sound and edit"],
     tradeoff: "The highest visual-control lane: its Novita shot chain is only ready after a pinned story, Visual Matter, and per-shot QA.",
   },
@@ -425,7 +429,51 @@ function creatorAdmissionPreflight(
   const supervised = familySupervisedChannelInceptionCapability(family, {
     casefileCinematic: family === "cinematic" && privateReviewOffers.length > 0,
   });
-  const capability = supervised ?? familyChannelInceptionCapability(family);
+  if (supervised) {
+    return {
+      mode: supervised.mode,
+      selectable: true,
+      autonomous: false,
+      privateReviewOnly: true,
+      capabilityId: supervised.id,
+      provenance: supervised.provenance,
+      coveredStages: [...supervised.coveredStages],
+      requiredArtifacts: [...supervised.requiredArtifacts],
+      ...(supervised.reviewHref ? { reviewHref: supervised.reviewHref } : {}),
+      blockers: [
+        "This route is registered for private human review only; it does not authorize automatic production, rendering, spend, or publishing.",
+      ],
+      remediation: "Complete the named private-review artifacts before requesting a separately authorized render or publication action.",
+    };
+  }
+
+  // A catalogued private-review module with no separate desk is still a
+  // truthful creator destination: show its input package, disable all spend
+  // and build authority, and leave the final action unavailable until an
+  // independently authorized internal review workflow supplies the artifact.
+  // This lets reusable reviewed modules reach the creator without inventing a
+  // render/publish path or duplicating a family-specific if-statement.
+  const catalogPrivateOffer = privateReviewOffers[0];
+  if (catalogPrivateOffer) {
+    return {
+      mode: "registered_supervised_non_gemini",
+      selectable: true,
+      autonomous: false,
+      privateReviewOnly: true,
+      capabilityId: `${catalogPrivateOffer.capability}-private-review/v1`,
+      provenance:
+        `the registered ${catalogPrivateOffer.modules.map((module) => module.block).join(", ")} module validates the operator-supplied evidence package locally and emits no automatic render, spend, or publication authority`,
+      coveredStages: catalogPrivateOffer.modules.map((module) => module.block),
+      requiredArtifacts: uniqueStrings(catalogPrivateOffer.requirements),
+      ...(catalogPrivateOffer.reviewHref ? { reviewHref: catalogPrivateOffer.reviewHref } : {}),
+      blockers: [
+        "This catalogued route is private human review only; it does not authorize automatic production, rendering, spend, or publishing.",
+      ],
+      remediation: catalogPrivateOffer.automationAdmission.remediation,
+    };
+  }
+
+  const capability = familyChannelInceptionCapability(family);
 
   if (capability.mode === "registered_non_gemini") {
     return {
@@ -438,24 +486,6 @@ function creatorAdmissionPreflight(
       coveredStages: [...capability.coveredStages],
       requiredArtifacts: [],
       blockers: [],
-    };
-  }
-
-  if (capability.mode === "registered_supervised_non_gemini") {
-    return {
-      mode: capability.mode,
-      selectable: true,
-      autonomous: false,
-      privateReviewOnly: true,
-      capabilityId: capability.id,
-      provenance: capability.provenance,
-      coveredStages: [...capability.coveredStages],
-      requiredArtifacts: [...capability.requiredArtifacts],
-      ...(capability.reviewHref ? { reviewHref: capability.reviewHref } : {}),
-      blockers: [
-        "This route is registered for private human review only; it does not authorize automatic production, rendering, spend, or publishing.",
-      ],
-      remediation: "Complete the named private-review artifacts before requesting a separately authorized render or publication action.",
     };
   }
 

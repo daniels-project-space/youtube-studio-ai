@@ -99,6 +99,8 @@ type SupervisedCreatorSelection = {
   capabilityId: string;
   provenance?: string;
   requiredArtifacts: string[];
+  /** Exact registered intake stages; never substitute a family production preview. */
+  reviewOnlyStages: string[];
   reviewHref?: string;
 };
 
@@ -341,6 +343,10 @@ export default function NewChannelWizard() {
     () => (family ? previewBlocks(family, toggles, nicheKey, dataStory, syntheticScenarioProfile || undefined) : []),
     [family, toggles, nicheKey, dataStory, syntheticScenarioProfile],
   );
+  // A supervised intake has no active family production pipeline. Keep its
+  // registered review stages separate from `preview`, which exists solely for
+  // executable automatic family designs.
+  const activeReviewOnlyStages = supervisedAdmission?.reviewOnlyStages ?? [];
 
   // Describe the channel in words → suggest a format + crew (operator confirms).
   function suggest() {
@@ -373,6 +379,7 @@ export default function NewChannelWizard() {
             privateReviewOnly?: boolean;
             capabilityId?: string;
             provenance?: string;
+            coveredStages?: string[];
             requiredArtifacts?: string[];
             reviewHref?: string;
           };
@@ -410,6 +417,7 @@ export default function NewChannelWizard() {
           ? {
               capabilityId: preflight.creatorAdmission.capabilityId,
               provenance: preflight.creatorAdmission.provenance,
+              reviewOnlyStages: [...(preflight.creatorAdmission.coveredStages ?? [])],
               requiredArtifacts: [...(preflight.creatorAdmission.requiredArtifacts ?? [])],
               ...(preflight.creatorAdmission.reviewHref
                 ? { reviewHref: preflight.creatorAdmission.reviewHref }
@@ -919,6 +927,7 @@ export default function NewChannelWizard() {
                 ? {
                     capabilityId: supervisedCapability.id,
                     provenance: supervisedCapability.provenance,
+                    reviewOnlyStages: [...supervisedCapability.coveredStages],
                     requiredArtifacts: [...supervisedCapability.requiredArtifacts],
                     ...(supervisedCapability.reviewHref ? { reviewHref: supervisedCapability.reviewHref } : {}),
                   }
@@ -1131,36 +1140,43 @@ export default function NewChannelWizard() {
               </>
             )}
           </div>
-          <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.6rem" }}>
-            <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Advanced — optional modules</div>
-            {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).filter(([key]) => !supervisedAdmission || key !== "crosspost").map(([k, lbl]) => (
-              <label key={k} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                <input type="checkbox" checked={toggles[k]} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}
-              </label>
-            ))}
-            {family === "cinematic" && (
-              <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
-                <input
-                  type="checkbox"
-                  checked={toggles.visualMatter}
-                  onChange={(e) => {
-                    const enabled = e.target.checked;
-                    setToggles((current) => ({ ...current, visualMatter: enabled }));
-                    setModuleConfig((current) => {
-                      const visualMatter = { ...(current.visual_matter ?? {}) };
-                      if (enabled) delete visualMatter.enabled;
-                      else visualMatter.enabled = false;
-                      const next = { ...current };
-                      if (Object.keys(visualMatter).length) next.visual_matter = visualMatter;
-                      else delete next.visual_matter;
-                      return next;
-                    });
-                  }}
-                />
-                Visual Matter (mood board, character/settings sheets, storyboard locks)
-              </label>
-            )}
-          </div>
+          {supervisedAdmission ? (
+            <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.35rem", color: "var(--color-muted)", fontSize: "0.8rem" }}>
+              <strong style={{ color: "var(--color-fg)" }}>Production module controls are unavailable</strong>
+              <span>This private-review intake does not activate optional modules, render settings, or publishing controls. Its registered review stages appear on the final review step.</span>
+            </div>
+          ) : (
+            <div className="glass" style={{ padding: "1rem", display: "grid", gap: "0.6rem" }}>
+              <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Advanced — optional modules</div>
+              {([["quotes", "Quote cards"], ["captions", "Burned captions"], ["chapters", "Chapter cards"], ["notify", "Telegram notify"], ["crosspost", "Cross-post (TikTok/Reels)"], ["shorts", "Auto Short (9:16, private)"], ["documentaryCandidates", "Find documentary Short candidates (no crop/upload)"]] as [keyof Toggles, string][]).map(([k, lbl]) => (
+                <label key={k} style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                  <input type="checkbox" checked={toggles[k]} onChange={(e) => setToggles((p) => ({ ...p, [k]: e.target.checked }))} /> {lbl}
+                </label>
+              ))}
+              {family === "cinematic" && (
+                <label style={{ display: "flex", alignItems: "center", gap: "0.6rem", fontSize: "0.84rem", cursor: "pointer" }}>
+                  <input
+                    type="checkbox"
+                    checked={toggles.visualMatter}
+                    onChange={(e) => {
+                      const enabled = e.target.checked;
+                      setToggles((current) => ({ ...current, visualMatter: enabled }));
+                      setModuleConfig((current) => {
+                        const visualMatter = { ...(current.visual_matter ?? {}) };
+                        if (enabled) delete visualMatter.enabled;
+                        else visualMatter.enabled = false;
+                        const next = { ...current };
+                        if (Object.keys(visualMatter).length) next.visual_matter = visualMatter;
+                        else delete next.visual_matter;
+                        return next;
+                      });
+                    }}
+                  />
+                  Visual Matter (mood board, character/settings sheets, storyboard locks)
+                </label>
+              )}
+            </div>
+          )}
         </div>
       )}
 
@@ -1211,60 +1227,74 @@ export default function NewChannelWizard() {
             </label>
           )}
           <div className="glass" style={{ padding: "1.1rem 1.2rem" }}>
-            <div style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.6rem" }}>{supervisedAdmission ? "Proposed family modules (not an executable build)" : `Designed pipeline (${preview.length} modules)`}</div>
+            <div style={{ fontSize: "0.8rem", fontWeight: 600, marginBottom: "0.6rem" }}>
+              {supervisedAdmission ? `Registered private-review stages (${activeReviewOnlyStages.length})` : `Designed pipeline (${preview.length} modules)`}
+            </div>
+            {supervisedAdmission && (
+              <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginBottom: "0.6rem" }}>
+                Only these private-review stages are active. The family production pipeline is not enabled for this intake.
+              </div>
+            )}
             <div style={{ display: "flex", flexWrap: "wrap", gap: "0.3rem" }}>
-              {preview.map((b, i) => (
+              {(supervisedAdmission ? activeReviewOnlyStages : preview).map((b, i) => (
                 <span key={b + i} style={{ fontSize: "0.7rem", padding: "0.2rem 0.5rem", borderRadius: 6, background: "var(--color-surface)", border: "1px solid var(--color-border)", color: "var(--color-muted)" }}>{b}</span>
               ))}
             </div>
-          </div>
-
-          {/* Advanced per-module param editor — tune any module's knobs. */}
-          <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.8rem" }}>
-            <button onClick={() => setShowAdvanced((s) => !s)} style={{ display: "flex", alignItems: "center", gap: "0.5rem", background: "none", border: "none", color: "var(--color-fg)", cursor: "pointer", font: "inherit", fontSize: "0.8rem", fontWeight: 600, padding: 0 }}>
-              <span style={{ transform: showAdvanced ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</span>
-              Advanced — tune module parameters
-              {Object.keys(paramOverrides).length > 0 && <span style={{ fontSize: "0.66rem", color: "var(--color-accent)" }}>· {Object.keys(paramOverrides).length} edited</span>}
-            </button>
-            {showAdvanced && (
-              <div style={{ display: "grid", gap: "0.9rem" }}>
-                {MODULE_CATALOG.filter((m) => preview.includes(m.block)).map((m) => (
-                  <div key={m.block} style={{ display: "grid", gap: "0.5rem", paddingBottom: "0.7rem", borderBottom: "1px solid var(--color-border)" }}>
-                    <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
-                      <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>{m.label}</span>
-                      {m.optional && <span style={{ fontSize: "0.62rem", color: "var(--color-accent)" }}>optional</span>}
-                      <span style={{ fontSize: "0.72rem", color: "var(--color-muted)" }}>{m.description}</span>
-                    </div>
-                    <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "0.5rem 1rem" }}>
-                      {m.params.map((f) => (
-                        <ParamControl key={f.key} field={f}
-                          value={paramOverrides[m.block]?.[f.key]}
-                          onChange={(v) => setParamOverrides((p) => {
-                            const block = { ...(p[m.block] ?? {}) };
-                            if (v === "" || v === undefined || v === null) delete block[f.key]; else block[f.key] = v;
-                            const next = { ...p };
-                            if (Object.keys(block).length) next[m.block] = block; else delete next[m.block];
-                            return next;
-                          })} />
-                      ))}
-                    </div>
-                  </div>
-                ))}
-                <div style={{ fontSize: "0.72rem", color: "var(--color-faint)" }}>Blank fields keep the smart default. Numbers are clamped to safe bounds on save.</div>
-              </div>
+            {supervisedAdmission && activeReviewOnlyStages.length === 0 && (
+              <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginTop: "0.6rem" }}>No private-review stages are registered for this selection yet; no production pipeline is available.</div>
             )}
           </div>
 
-          {/* Pipeline style — per-module presets/knobs (e.g. captions on/off). */}
-          <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.85rem" }}>
-            <div>
-              <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Pipeline style</div>
-              <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginTop: 2 }}>
-                Pick a preset per module and flip toggles — wired into every render. Editable later in Settings.
-              </div>
+          {/* Advanced per-module param editor — tune any module's knobs. */}
+          {!supervisedAdmission && (
+            <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.8rem" }}>
+              <button onClick={() => setShowAdvanced((s) => !s)} style={{ display: "flex", alignItems: "center", gap: "0.5rem", background: "none", border: "none", color: "var(--color-fg)", cursor: "pointer", font: "inherit", fontSize: "0.8rem", fontWeight: 600, padding: 0 }}>
+                <span style={{ transform: showAdvanced ? "rotate(90deg)" : "none", transition: "transform 0.15s" }}>›</span>
+                Advanced — tune module parameters
+                {Object.keys(paramOverrides).length > 0 && <span style={{ fontSize: "0.66rem", color: "var(--color-accent)" }}>· {Object.keys(paramOverrides).length} edited</span>}
+              </button>
+              {showAdvanced && (
+                <div style={{ display: "grid", gap: "0.9rem" }}>
+                  {MODULE_CATALOG.filter((m) => preview.includes(m.block)).map((m) => (
+                    <div key={m.block} style={{ display: "grid", gap: "0.5rem", paddingBottom: "0.7rem", borderBottom: "1px solid var(--color-border)" }}>
+                      <div style={{ display: "flex", alignItems: "baseline", gap: "0.5rem" }}>
+                        <span style={{ fontSize: "0.82rem", fontWeight: 600 }}>{m.label}</span>
+                        {m.optional && <span style={{ fontSize: "0.62rem", color: "var(--color-accent)" }}>optional</span>}
+                        <span style={{ fontSize: "0.72rem", color: "var(--color-muted)" }}>{m.description}</span>
+                      </div>
+                      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fill, minmax(240px, 1fr))", gap: "0.5rem 1rem" }}>
+                        {m.params.map((f) => (
+                          <ParamControl key={f.key} field={f}
+                            value={paramOverrides[m.block]?.[f.key]}
+                            onChange={(v) => setParamOverrides((p) => {
+                              const block = { ...(p[m.block] ?? {}) };
+                              if (v === "" || v === undefined || v === null) delete block[f.key]; else block[f.key] = v;
+                              const next = { ...p };
+                              if (Object.keys(block).length) next[m.block] = block; else delete next[m.block];
+                              return next;
+                            })} />
+                        ))}
+                      </div>
+                    </div>
+                  ))}
+                  <div style={{ fontSize: "0.72rem", color: "var(--color-faint)" }}>Blank fields keep the smart default. Numbers are clamped to safe bounds on save.</div>
+                </div>
+              )}
             </div>
-            <ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} activeBlockIds={preview} />
-          </div>
+          )}
+
+          {/* Pipeline style — per-module presets/knobs (e.g. captions on/off). */}
+          {!supervisedAdmission && (
+            <div className="glass" style={{ padding: "1.1rem 1.2rem", display: "grid", gap: "0.85rem" }}>
+              <div>
+                <div style={{ fontSize: "0.8rem", fontWeight: 600 }}>Pipeline style</div>
+                <div style={{ fontSize: "0.72rem", color: "var(--color-muted)", marginTop: 2 }}>
+                  Pick a preset per module and flip toggles — wired into every render. Editable later in Settings.
+                </div>
+              </div>
+              <ModuleConfigSection value={moduleConfig} onChange={setModuleConfig} activeBlockIds={preview} />
+            </div>
+          )}
         </div>
       )}
 

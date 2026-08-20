@@ -5,7 +5,11 @@ import type { MutationCtx, QueryCtx } from "./_generated/server";
 import {
   admitCasefileEpisodeEvidenceMap,
   admitCasefileEpisodeSource,
+  attachCasefileEpisodeNarrativeEvidenceLedger,
   attachCasefileEpisodePlanning,
+  attachCasefileEpisodeReferenceMechanics,
+  attachCasefileEpisodeSourceProofMedia,
+  attachCasefileEpisodeSourceBoundStorySpine,
   draftCasefileEpisodeCinematicSequence,
   finalizeCasefileEpisodeCinematicSequence,
   type CasefileEpisodeWorkflow,
@@ -88,8 +92,101 @@ export const draftCinematicSequence = mutation({
   args: { ownerId: v.string(), episodeId: v.id("casefileEpisodes"), direction: v.any(), now: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const episode = await ownedEpisode(ctx, args.episodeId, args.ownerId);
-    const next = draftCasefileEpisodeCinematicSequence({ episode: workflow(episode), direction: args.direction });
+    const next = draftCasefileEpisodeCinematicSequence({
+      episode: workflow(episode),
+      direction: args.direction,
+      ...(args.now === undefined ? {} : { now: new Date(args.now) }),
+    });
     await ctx.db.patch(episode._id, { status: next.status, workflow: next, updatedAt: args.now ?? Date.now() });
+    return await ctx.db.get(episode._id);
+  },
+});
+
+/**
+ * Private, no-spend attachment of the exact human-approved asset for each
+ * source-proof shot. The workflow derives its source-packet and provenance
+ * binding; callers can never provide either field.
+ */
+export const attachSourceProofMedia = mutation({
+  args: {
+    ownerId: v.string(),
+    episodeId: v.id("casefileEpisodes"),
+    attachments: v.any(),
+    now: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const episode = await ownedEpisode(ctx, args.episodeId, args.ownerId);
+    const next = attachCasefileEpisodeSourceProofMedia({
+      episode: workflow(episode),
+      attachments: args.attachments,
+    });
+    await ctx.db.patch(episode._id, { status: next.status, workflow: next, updatedAt: args.now ?? Date.now() });
+    return await ctx.db.get(episode._id);
+  },
+});
+
+/** Private no-spend intake for human-authored, mechanics-only craft annotations. */
+export const attachReferenceMechanics = mutation({
+  args: {
+    ownerId: v.string(),
+    episodeId: v.id("casefileEpisodes"),
+    mechanics: v.any(),
+    review: v.any(),
+    now: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const episode = await ownedEpisode(ctx, args.episodeId, args.ownerId);
+    const next = attachCasefileEpisodeReferenceMechanics({
+      episode: workflow(episode),
+      mechanics: args.mechanics,
+      review: args.review,
+      ...(args.now === undefined ? {} : { now: new Date(args.now) }),
+    });
+    await ctx.db.patch(episode._id, { workflow: next, updatedAt: args.now ?? Date.now() });
+    return await ctx.db.get(episode._id);
+  },
+});
+
+/** Private, no-spend handoff for the exact reviewed timed narration coverage. */
+export const attachSourceBoundStorySpine = mutation({
+  args: {
+    ownerId: v.string(),
+    episodeId: v.id("casefileEpisodes"),
+    storySpine: v.any(),
+    now: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const episode = await ownedEpisode(ctx, args.episodeId, args.ownerId);
+    const next = attachCasefileEpisodeSourceBoundStorySpine({
+      episode: workflow(episode),
+      storySpine: args.storySpine,
+      ...(args.now === undefined ? {} : { now: new Date(args.now) }),
+    });
+    await ctx.db.patch(episode._id, { workflow: next, updatedAt: args.now ?? Date.now() });
+    return await ctx.db.get(episode._id);
+  },
+});
+
+/** Private, no-spend semantic evidence handoff. Render admission remains separate. */
+export const attachNarrativeEvidenceLedger = mutation({
+  args: {
+    ownerId: v.string(),
+    episodeId: v.id("casefileEpisodes"),
+    claims: v.any(),
+    relations: v.optional(v.any()),
+    review: v.any(),
+    now: v.optional(v.number()),
+  },
+  handler: async (ctx, args) => {
+    const episode = await ownedEpisode(ctx, args.episodeId, args.ownerId);
+    const next = attachCasefileEpisodeNarrativeEvidenceLedger({
+      episode: workflow(episode),
+      claims: args.claims,
+      ...(args.relations === undefined ? {} : { relations: args.relations }),
+      review: args.review,
+      ...(args.now === undefined ? {} : { now: new Date(args.now) }),
+    });
+    await ctx.db.patch(episode._id, { workflow: next, updatedAt: args.now ?? Date.now() });
     return await ctx.db.get(episode._id);
   },
 });

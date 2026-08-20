@@ -14,10 +14,13 @@ const scene: NovitaGeneratedScene = {
   continuityIds: ["mannequin-investigator"],
 };
 const review: CinematicClipReview = {
-  version: "cinematic-clip-review/v1",
+  version: "cinematic-clip-review/v2",
   reviewer: "non_google_vision",
   sceneId: scene.id,
   sampleOffsetsSec: [0.2, 2, 3.8],
+  expectedCastIds: ["mannequin-investigator"],
+  forbidAdditionalPeople: true,
+  onlyExpectedCastVisible: true,
   semanticAlignment: 0.9,
   motionIntegrity: 0.9,
   continuity: 0.9,

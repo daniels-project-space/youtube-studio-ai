@@ -23,6 +23,8 @@ export const CinematicFinalMasterQaAdmissionSchema = z.object({
   sequenceFingerprint: z.string().min(1),
   /** Optional review-only provenance; never a similarity/comparison result. */
   referenceMechanicsPacketFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
+  /** Optional reviewed factual-semantics provenance carried from cinematic admission. */
+  narrativeEvidenceLedgerFingerprint: z.string().regex(/^[a-f0-9]{64}$/).optional(),
   reviewer: z.literal("non_google_vision"),
   lockCount: z.number().int().min(1).max(240),
   cutCount: z.number().int().min(0).max(239),
@@ -54,6 +56,12 @@ function expectedAdmission(args: {
   ) {
     throw new Error("cinematic final-master QA admission cannot combine mechanics provenance from different review packets");
   }
+  if (
+    args.creativeLocks.narrativeEvidenceLedgerFingerprint !==
+    args.editDecisionList.narrativeEvidenceLedgerFingerprint
+  ) {
+    throw new Error("cinematic final-master QA admission cannot combine Narrative Evidence Ledger provenance from different review packets");
+  }
   const lockIds = args.creativeLocks.locks.map((lock) => lock.id);
   const editIds = args.editDecisionList.edits.map((edit) => edit.shotId);
   if (!exactIds(lockIds, editIds)) {
@@ -66,6 +74,9 @@ function expectedAdmission(args: {
     sequenceFingerprint: args.creativeLocks.sequenceFingerprint,
     ...(args.creativeLocks.referenceMechanicsPacketFingerprint
       ? { referenceMechanicsPacketFingerprint: args.creativeLocks.referenceMechanicsPacketFingerprint }
+      : {}),
+    ...(args.creativeLocks.narrativeEvidenceLedgerFingerprint
+      ? { narrativeEvidenceLedgerFingerprint: args.creativeLocks.narrativeEvidenceLedgerFingerprint }
       : {}),
     reviewer: "non_google_vision",
     lockCount,
@@ -102,6 +113,7 @@ export function assertCinematicFinalMasterQaAdmission(args: {
   if (
     admission.sequenceFingerprint !== expected.sequenceFingerprint ||
     admission.referenceMechanicsPacketFingerprint !== expected.referenceMechanicsPacketFingerprint ||
+    admission.narrativeEvidenceLedgerFingerprint !== expected.narrativeEvidenceLedgerFingerprint ||
     admission.reviewer !== expected.reviewer ||
     admission.lockCount !== expected.lockCount ||
     admission.cutCount !== expected.cutCount ||
@@ -126,6 +138,36 @@ export function assertCinematicFinalMasterQaProfile(qaProfile: unknown): void {
         "run the evidence-backed production QA profile to obtain the required lock, claim, and causal-cut receipt",
     );
   }
+}
+
+/**
+ * A Casefile master is admitted as a cinematic experience, not merely a
+ * technically audible video.  Loudness proves that a track exists; it cannot
+ * prove that the final narration, score, and diegetic bed are production
+ * quality.  Keep that distinction executable at the final-master boundary so
+ * a failed/unavailable aesthetics scorer cannot be silently downgraded to a
+ * loudness-only green result.
+ */
+export function assertCinematicFinalMasterAudioAesthetics(
+  audioQa: unknown,
+  productionQuality: unknown,
+): number {
+  if (audioQa !== true) {
+    throw new Error(
+      "cinematic final-master QA requires audioQa=true for an independently scored final mix",
+    );
+  }
+  if (
+    typeof productionQuality !== "number" ||
+    !Number.isFinite(productionQuality) ||
+    productionQuality < 0 ||
+    productionQuality > 10
+  ) {
+    throw new Error(
+      "cinematic final-master QA requires a finite 0..10 audio aesthetics production-quality score; loudness alone is insufficient",
+    );
+  }
+  return productionQuality;
 }
 
 /** `undefined` means this is not a cinematic final-master route. */

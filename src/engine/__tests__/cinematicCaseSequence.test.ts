@@ -14,6 +14,7 @@ import {
   cinematicContinuitySeed,
   cinematicCaseSequenceContentFingerprint,
   evaluateCinematicCaseSequence,
+  type CinematicCaseSequenceContent,
   type CinematicCaseSequenceInput,
 } from "@/engine/cinematicCaseSequence";
 import {
@@ -34,6 +35,12 @@ import {
 } from "@/engine/referenceMechanicsPacket";
 import { referenceQualityContractFor } from "@/engine/creative/referenceQuality";
 import { admitCinematicFinalMasterQa } from "@/engine/cinematicFinalMasterQaAdmission";
+import { createNarrativeEvidenceLedger } from "@/engine/narrativeEvidenceLedger";
+import {
+  SOURCE_PROOF_MEDIA_VERSION,
+  sourceProofMediaProvenanceFingerprint,
+  type SourceProofMediaObligation,
+} from "@/engine/sourceProofMedia";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 
 const NOW = new Date("2026-08-14T12:00:00.000Z");
@@ -195,6 +202,22 @@ const shotList = [
 
 const admittedSource = assertCasefileSourcePacket(sourcePacket, { now: NOW });
 
+function sourceProofMediaObligation(): SourceProofMediaObligation {
+  const obligation = {
+    version: SOURCE_PROOF_MEDIA_VERSION,
+    sourceId: "source-court-archive",
+    assetId: "asset-court-closure-finding",
+    rightsEvidenceLocator: "https://court.example.org/rights/vault-closure-license",
+    sourcePacketFingerprint: admittedSource.receipt.sourcePacketFingerprint,
+    assetUrl: "https://court.example.org/assets/vault-closure-finding.jpg",
+    assetSha256: "1".repeat(64),
+    approvalReceiptId: "source-proof-receipt-vault-closure-001",
+    provenanceFingerprint: "0".repeat(64),
+  } satisfies Omit<SourceProofMediaObligation, "provenanceFingerprint"> & { provenanceFingerprint: string };
+  obligation.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(obligation);
+  return obligation;
+}
+
 function admittedMap() {
   const input: CasefileEvidenceShotMapInput = {
     version: CASEFILE_EVIDENCE_SHOT_MAP_VERSION,
@@ -325,7 +348,7 @@ function coverageShot(args: {
   mode: "source_proof" | "spatial_reconstruction" | "abstract_reenactment" | "atmosphere";
   scale: "wide" | "medium" | "close" | "extreme_close" | "establishing"; move: "static" | "dolly_push" | "dolly_pull" | "crane_up" | "crane_down" | "orbit_left" | "orbit_right" | "truck_left" | "truck_right" | "handheld_drift";
   cut: "new_fact" | "new_location" | "new_relationship" | "physical_action" | "contradiction" | "reveal" | "breath";
-  tension: "question" | "orientation" | "pressure" | "uncertainty" | "reversal" | "release" | "residue"; cast?: string[];
+  tension: "question" | "orientation" | "pressure" | "uncertainty" | "reversal" | "release" | "residue"; cast?: string[]; sourceProofMedia?: SourceProofMediaObligation;
 }) {
   return {
     id: args.id, t0: args.t0, t1: args.t1, coveragePurpose: args.purpose, visualMode: args.mode, castIds: args.cast ?? [],
@@ -337,6 +360,7 @@ function coverageShot(args: {
     firstFrameConstraint: "Start from the exact cited story state with the same wardrobe and prop.",
     lastFrameConstraint: "End with only motivated action advanced; preserve wardrobe and setting continuity.",
     onScreenCitation: true as const,
+    ...(args.sourceProofMedia ? { sourceProofMedia: args.sourceProofMedia } : {}),
     ...(args.mode === "abstract_reenactment" ? { reconstructionDisclosure: RECONSTRUCTION_DISCLOSURE } : {}),
   };
 }
@@ -360,7 +384,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
         id: "cinematic-beat-closure-order", narrativeRole: "cold_open", t0: 0, t1: 12, parentShotIds: ["shot-closure-order"],
         claimIds: ["claim-closure-order"], sourceIds: ["source-court-archive"], causalQuestion: "Why did a single court order close the vault?",
         shots: [
-          coverageShot({ id: "cinematic-shot-closure-proof", t0: 0, t1: 4, purpose: "evidence_insert", mode: "source_proof", scale: "close", move: "static", cut: "new_fact", tension: "question" }),
+          coverageShot({ id: "cinematic-shot-closure-proof", t0: 0, t1: 4, purpose: "evidence_insert", mode: "source_proof", scale: "extreme_close", move: "static", cut: "new_fact", tension: "question", sourceProofMedia: sourceProofMediaObligation() }),
           coverageShot({ id: "cinematic-shot-closure-figure", t0: 4, t1: 8, purpose: "mannequin_action", mode: "abstract_reenactment", scale: "medium", move: "dolly_push", cut: "physical_action", tension: "pressure", cast: ["mannequin-investigator"] }),
           coverageShot({ id: "cinematic-shot-closure-space", t0: 8, t1: 12, purpose: "spatial_anchor", mode: "spatial_reconstruction", scale: "establishing", move: "crane_up", cut: "new_location", tension: "uncertainty" }),
         ],
@@ -375,7 +399,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
           citedSourceIds: ["source-court-archive"],
         },
         shots: [
-          coverageShot({ id: "cinematic-shot-response-proof", t0: 12, t1: 16, purpose: "evidence_insert", mode: "source_proof", scale: "close", move: "truck_right", cut: "reveal", tension: "reversal" }),
+          coverageShot({ id: "cinematic-shot-response-proof", t0: 12, t1: 16, purpose: "evidence_insert", mode: "source_proof", scale: "extreme_close", move: "truck_right", cut: "reveal", tension: "reversal", sourceProofMedia: sourceProofMediaObligation() }),
           coverageShot({ id: "cinematic-shot-response-map", t0: 16, t1: 20, purpose: "spatial_anchor", mode: "spatial_reconstruction", scale: "wide", move: "orbit_left", cut: "new_relationship", tension: "release" }),
           coverageShot({ id: "cinematic-shot-response-aftermath", t0: 20, t1: 24, purpose: "aftermath", mode: "atmosphere", scale: "establishing", move: "dolly_pull", cut: "breath", tension: "residue" }),
         ],
@@ -397,7 +421,7 @@ async function main() {
   const map = admittedMap();
   const sourceBoundStorySpine = sourceBoundStorySpineFor(map);
   const input = approvedSequence(map);
-  const args = { input, sourceAdmission: admittedSource.receipt, evidenceShotMap: map.map, evidenceShotMapAdmission: map.receipt, sceneManifest, shotList };
+  const args = { input, sourcePacket, sourceAdmission: admittedSource.receipt, evidenceShotMap: map.map, evidenceShotMapAdmission: map.receipt, sceneManifest, shotList };
 
   // The route is now reachable without hand-authoring every LTX shot. The
   // deterministic planner may draft coverage, but cannot manufacture the
@@ -433,20 +457,46 @@ async function main() {
   assert.match(draft.content.beats[0]?.shots[1]?.motion ?? "", /without revealing a face/i);
   assert.equal(draft.content.beats[0]?.shots[2]?.coveragePurpose, "evidence_insert");
   assert.equal(draft.content.beats[0]?.shots[3]?.coveragePurpose, "reaction");
+  assert.equal(
+    draft.content.beats[1]?.shots[1]?.coveragePurpose,
+    "relationship",
+    "a documentary/timeline beat must use a purpose-specific relationship shot instead of mislabeling generic atmosphere as mannequin action",
+  );
+  assert.equal(
+    draft.content.beats[1]?.shots[1]?.castIds.length,
+    0,
+    "non-reenactment relationship coverage must not invent a mannequin cast",
+  );
+  assert.match(
+    draft.content.beats[1]?.shots[1]?.motion ?? "",
+    /admitted relationship/i,
+    "the non-reenactment second angle must describe the cited relationship rather than generic atmosphere movement",
+  );
+  // The deterministic draft intentionally cannot choose a source asset. A
+  // human editor attaches the exact approved source-proof obligation before
+  // signing it; without that attachment, final admission must fail before
+  // LTX can invent a document approximation.
+  const reviewedDraft = structuredClone(draft);
+  for (const beat of reviewedDraft.content.beats) {
+    for (const shot of beat.shots) {
+      if (shot.visualMode === "source_proof") shot.sourceProofMedia = sourceProofMediaObligation();
+    }
+  }
+  reviewedDraft.sequenceContentFingerprint = cinematicCaseSequenceContentFingerprint(reviewedDraft.content);
   const draftReview = {
     id: "cinematic-sequence-review-vault-closure-draft",
     decision: "approved" as const,
     reviewerId: "reviewer-documentary-desk",
     reviewedAt: new Date(NOW.getTime() - 10 * 60 * 1_000).toISOString(),
-    reviewedSourcePacketFingerprint: draft.content.sourcePacketFingerprint,
-    reviewedEvidenceShotMapFingerprint: draft.content.evidenceShotMapFingerprint,
-    reviewedSequenceFingerprint: draft.sequenceContentFingerprint,
+    reviewedSourcePacketFingerprint: reviewedDraft.content.sourcePacketFingerprint,
+    reviewedEvidenceShotMapFingerprint: reviewedDraft.content.evidenceShotMapFingerprint,
+    reviewedSequenceFingerprint: reviewedDraft.sequenceContentFingerprint,
   };
-  const finalizedDraft = finalizeCinematicCaseSequenceDraft({ draft, editorialReview: draftReview });
+  const finalizedDraft = finalizeCinematicCaseSequenceDraft({ draft: reviewedDraft, editorialReview: draftReview });
   const draftedReport = evaluateCinematicCaseSequence({ ...args, input: finalizedDraft }, { now: NOW });
   assert.equal(draftedReport.safe, true, JSON.stringify(draftedReport.issues));
   assert.throws(
-    () => finalizeCinematicCaseSequenceDraft({ draft, editorialReview: { ...draftReview, reviewedSequenceFingerprint: "0".repeat(64) } }),
+    () => finalizeCinematicCaseSequenceDraft({ draft: reviewedDraft, editorialReview: { ...draftReview, reviewedSequenceFingerprint: "0".repeat(64) } }),
     /not bound to this exact source packet/i,
   );
   const tooShortSourceWindows = shotList.map((shot, index) => ({
@@ -480,6 +530,74 @@ async function main() {
   assert.equal(admitted.editDecisionList.edits.length, 6);
   assert.equal(admitted.creativeLocks.locks.length, 6);
   assert.equal(admitted.receipt.release, "private_human_editorial_review_only");
+
+  // A ledger is optional for legacy reviewed Casefiles, but when selected it
+  // becomes a signed source/claim/Story-Spine/treatment rail all the way to
+  // final-master QA. It may not quietly become a prompt hint.
+  const narrativeLedger = createNarrativeEvidenceLedger({
+    subject: "Vault closure",
+    evidenceRails: [{
+      id: "rail-vault-casefile",
+      kind: "casefile_source_packet",
+      packetFingerprint: admittedSource.receipt.sourcePacketFingerprint,
+      sourceIds: ["source-court-archive"],
+      upstreamClaimIds: ["claim-closure-order", "claim-public-response"],
+    }],
+    claims: [
+      {
+        id: "narrative-closure-order",
+        approvedText: "The court finding ordered the vault's closure.",
+        assertionState: "established",
+        confidence: "high",
+        uncertainty: { level: "none", summary: "The cited court finding records the order." },
+        causalRole: "decision",
+        supports: [{ railId: "rail-vault-casefile", sourceIds: ["source-court-archive"], upstreamClaimIds: ["claim-closure-order"] }],
+        allowedVisualTreatments: [
+          { kind: "source_proof", onScreenCitation: true, exactSourceAssetRequired: true },
+          { kind: "neutral_reenactment", visiblyLabeled: true, disclosureText: RECONSTRUCTION_DISCLOSURE, anonymousDepictionOnly: true, doesNotClaimDirectObservation: true },
+          { kind: "ambient_context", doesNotDepictClaimAsObserved: true },
+        ],
+      },
+      {
+        id: "narrative-public-response",
+        approvedText: "The documented closure prompted public response.",
+        assertionState: "established",
+        confidence: "high",
+        uncertainty: { level: "none", summary: "The cited record establishes the documented response." },
+        causalRole: "consequence",
+        supports: [{ railId: "rail-vault-casefile", sourceIds: ["source-court-archive"], upstreamClaimIds: ["claim-public-response"] }],
+        allowedVisualTreatments: [
+          { kind: "source_proof", onScreenCitation: true, exactSourceAssetRequired: true },
+          { kind: "ambient_context", doesNotDepictClaimAsObserved: true },
+        ],
+      },
+    ],
+    editorialReview: { reviewerId: "reviewer-documentary-desk", reviewId: "narrative-ledger-vault-001", reviewedAt: new Date(NOW.getTime() - 5 * 60_000).toISOString() },
+    now: NOW.getTime(),
+  });
+  const ledgerInput = { ...input, narrativeEvidenceLedgerFingerprint: narrativeLedger.contentFingerprint };
+  ledgerInput.editorialReview = {
+    ...ledgerInput.editorialReview,
+    reviewedSequenceFingerprint: cinematicCaseSequenceContentFingerprint(ledgerInput),
+  };
+  const ledgerAdmitted = assertCinematicCaseSequence({
+    ...args,
+    input: ledgerInput,
+    sourcePacket,
+    narrativeEvidenceLedger: narrativeLedger,
+    sourceBoundStorySpine,
+  }, { now: NOW });
+  assert.equal(ledgerAdmitted.receipt.narrativeEvidenceLedgerFingerprint, narrativeLedger.contentFingerprint);
+  assert.equal(ledgerAdmitted.generatedScenePlan.narrativeEvidenceLedgerFingerprint, narrativeLedger.contentFingerprint);
+  assert.equal(
+    admitCinematicFinalMasterQa({ creativeLocks: ledgerAdmitted.creativeLocks, editDecisionList: ledgerAdmitted.editDecisionList }).narrativeEvidenceLedgerFingerprint,
+    narrativeLedger.contentFingerprint,
+  );
+  assert.throws(
+    () => assertCinematicCaseSequence({ ...args, input: ledgerInput, sourcePacket, narrativeEvidenceLedger: narrativeLedger }, { now: NOW }),
+    /narrative_evidence_ledger_invalid/i,
+    "a ledger-bearing cinematic sequence must retain the current source-bound Story Spine at admission",
+  );
 
   // An optional mechanics packet is useful only when it is tied to an
   // attributed, reviewed source contract and the exact current ShotPlan. It
@@ -591,6 +709,11 @@ async function main() {
   assert.match(mannequinScene.still, /Why did a single court order close the vault\?/i);
   assert.match(mannequinScene.still, /Make the narrated mannequin action concrete/i);
   assert.match(mannequinScene.motion, /deliberate measured gait/i);
+  assert.match(
+    mannequinScene.motion,
+    /Approved camera treatment: dolly_push/i,
+    "the exact structured camera move must reach the LTX motion prompt rather than relying on an unstructured motion description",
+  );
   assert.match(mannequinScene.motion, /Narrative role cold_open/i);
   assert.match(mannequinScene.motion, /First frame: Start from the exact cited story state/i);
   assert.match(mannequinScene.motion, /Last frame: End with only motivated action advanced/i);
@@ -599,21 +722,88 @@ async function main() {
     /causal question/i,
     "final master QA must receive the explicit story question that the shot was generated to answer",
   );
+  assert.match(
+    admitted.creativeLocks.locks[1]!.acceptanceCriteria.join(" "),
+    /medium framing and dolly_push camera treatment/i,
+    "final master QA must explicitly attest the planned cinematic framing and motivated movement, not treat camera direction as prompt-only metadata",
+  );
   assert.equal(
     mannequinScene.continuitySeed,
     cinematicContinuitySeed(admitted.plan.contentFingerprint, mannequinScene.castIds, mannequinScene.id),
     "the mannequin's approved sequence/cast identity must deterministically control its still-generation seed",
   );
-  assert.equal(
+  assert.notEqual(
     cinematicContinuitySeed(admitted.plan.contentFingerprint, ["mannequin-investigator"], "new-shot-angle"),
     mannequinScene.continuitySeed,
-    "new angles of the same mannequin cast must retain the same image prior",
+    "new angles of the same mannequin cast must receive distinct deterministic render priors while explicit cast locks preserve identity and wardrobe",
+  );
+  assert.equal(
+    cinematicContinuitySeed(admitted.plan.contentFingerprint, ["mannequin-investigator"], mannequinScene.id),
+    cinematicContinuitySeed(admitted.plan.contentFingerprint, ["mannequin-investigator"], mannequinScene.id),
+    "the same signed scene must retain its deterministic render prior across retries",
   );
   assert.notEqual(
     cinematicContinuitySeed(admitted.plan.contentFingerprint, [], "cinematic-shot-closure-proof"),
     cinematicContinuitySeed(admitted.plan.contentFingerprint, [], "cinematic-shot-closure-space"),
     "independent evidence and atmosphere shots must not inherit a mannequin identity seed",
   );
+
+  const semanticTailToken = "SOURCE-CAUSE-TAIL-LOCK";
+  const semanticTailInput = structuredClone(input);
+  const semanticTailPrefix = "Make the cited causal consequence clear without changing any approved fact. ";
+  semanticTailInput.beats[0]!.shots[1]!.narrationPurpose =
+    `${semanticTailPrefix}${"x".repeat(360 - semanticTailPrefix.length - semanticTailToken.length - 1)} ${semanticTailToken}`;
+  assert.equal(semanticTailInput.beats[0]!.shots[1]!.narrationPurpose.length, 360);
+  semanticTailInput.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(semanticTailInput);
+  const semanticTailAdmitted = assertCinematicCaseSequence({ ...args, input: semanticTailInput }, { now: NOW });
+  const semanticTailScene = semanticTailAdmitted.generatedScenePlan.scenes.find(
+    (scene) => scene.id === "cinematic-shot-closure-figure",
+  )!;
+  assert.match(semanticTailScene.still, new RegExp(semanticTailToken));
+  assert.match(semanticTailScene.motion, new RegExp(semanticTailToken));
+  assert.match(semanticTailScene.terminalStill ?? "", new RegExp(semanticTailToken));
+  for (const prompt of [semanticTailScene.still, semanticTailScene.terminalStill ?? ""]) {
+    assert.match(
+      prompt,
+      /People lock: only declared faceless mannequin cast \([^)]*\)/,
+      "the no-extra-people instruction must survive alongside a maximum-length signed narration purpose",
+    );
+  }
+  assert.match(
+    semanticTailScene.negative,
+    /no extra people, mannequins, bystanders, crowds, human silhouettes, portraits, or reflections/,
+    "the LTX motion phase must retain the same no-extra-people instruction in its dedicated negative prompt",
+  );
+  assert.equal(
+    semanticTailAdmitted.creativeLocks.locks.find((lock) => lock.id === semanticTailScene.id)!.acceptanceCriteria[0],
+    semanticTailInput.beats[0]!.shots[1]!.narrationPurpose,
+    "the final-master reviewer must receive every signed narration-purpose character, including the tail source/cause qualifier",
+  );
+
+  // Coverage purpose and visual mode used to live only at the tail of the
+  // still/terminal prompt (and only indirectly inside free-form motion). A
+  // valid maximum-length source description could therefore make differently
+  // planned angles look like the same generic LTX take. Their reviewed
+  // structured assignment must survive at the front of every actual prompt.
+  const longCoverageInput = structuredClone(input);
+  const longCoverageShot = longCoverageInput.beats[0]!.shots[1]!;
+  longCoverageShot.still = `${"dense cited visual context ".repeat(100)}`.slice(0, 1_800).trim();
+  longCoverageShot.motion = `${"restrained source-bound movement ".repeat(100)}`.slice(0, 1_200).trim();
+  longCoverageShot.lastFrameConstraint = `${"preserve the reviewed source state ".repeat(100)}`.slice(0, 700).trim();
+  longCoverageInput.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(longCoverageInput);
+  const longCoverageAdmitted = assertCinematicCaseSequence({ ...args, input: longCoverageInput }, { now: NOW });
+  const longCoverageScene = longCoverageAdmitted.generatedScenePlan.scenes.find(
+    (scene) => scene.id === "cinematic-shot-closure-figure",
+  )!;
+  const coverageLock =
+    "Coverage: mannequin_action; visual mode: abstract_reenactment; make this specific information change legible.";
+  for (const prompt of [longCoverageScene.still, longCoverageScene.motion, longCoverageScene.terminalStill ?? ""]) {
+    assert.match(prompt, new RegExp(coverageLock));
+    assert.ok(
+      prompt.indexOf(coverageLock) < 850,
+      "each actual LTX prompt must retain the signed coverage/visual assignment before long free-text visual direction can be truncated",
+    );
+  }
 
   const staleReview = structuredClone(input);
   staleReview.editorialReview.reviewedAt = new Date(NOW.getTime() - 31 * 24 * 60 * 60 * 1_000).toISOString();
@@ -631,6 +821,26 @@ async function main() {
     "even a reviewer-signed manual Casefile sequence may not send an unrenderable sub-three-second take to LTX",
   );
 
+  const inventedSourceProof = structuredClone(input);
+  delete inventedSourceProof.beats[1]!.shots[0]!.sourceProofMedia;
+  inventedSourceProof.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(inventedSourceProof);
+  assert.throws(
+    () => assertCinematicCaseSequence({ ...args, input: inventedSourceProof }, { now: NOW }),
+    /story_payoff_invalid:.*exact approved source-proof asset|source_proof_media_invalid:.*without an exact approved source asset/i,
+    "a factual payoff may not send a source-proof document through LTX when no exact approved source asset is attached",
+  );
+
+  const mislabeledAtmosphereAction = structuredClone(input);
+  mislabeledAtmosphereAction.beats[1]!.shots[1]!.coveragePurpose = "mannequin_action";
+  mislabeledAtmosphereAction.beats[1]!.shots[1]!.visualMode = "atmosphere";
+  mislabeledAtmosphereAction.beats[1]!.shots[1]!.castIds = [];
+  mislabeledAtmosphereAction.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(mislabeledAtmosphereAction);
+  assert.throws(
+    () => assertCinematicCaseSequence({ ...args, input: mislabeledAtmosphereAction }, { now: NOW }),
+    /coverage_grammar_invalid:.*mannequin_action exactly/i,
+    "a generic atmosphere plate may not masquerade as a mannequin action merely to satisfy multi-shot coverage grammar",
+  );
+
   const flatCoverage = structuredClone(input);
   flatCoverage.beats[1].shots.forEach((shot) => { shot.shotScale = "wide"; });
   flatCoverage.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(flatCoverage);
@@ -641,7 +851,7 @@ async function main() {
   unsupportedColdOpen.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(unsupportedColdOpen);
   assert.throws(
     () => assertCinematicCaseSequence({ ...args, input: unsupportedColdOpen }, { now: NOW }),
-    /coverage_grammar_invalid:.*cited source-proof evidence insert.*Remediation:/,
+    /coverage_grammar_invalid:.*exact approved source-proof evidence insert.*Remediation:/,
     "a cinematic Casefile hook cannot spend its opening beat on unsupported reconstruction or atmosphere before showing a source object",
   );
 
@@ -736,6 +946,16 @@ async function main() {
   });
   const blockDraft = draftPatch.cinematicCaseSequenceDraft;
   assert.ok(blockDraft);
+  const reviewedBlockDraft = structuredClone(blockDraft) as {
+    content: CinematicCaseSequenceContent;
+    sequenceContentFingerprint: string;
+  };
+  for (const beat of reviewedBlockDraft.content.beats) {
+    for (const shot of beat.shots) {
+      if (shot.visualMode === "source_proof") shot.sourceProofMedia = sourceProofMediaObligation();
+    }
+  }
+  reviewedBlockDraft.sequenceContentFingerprint = cinematicCaseSequenceContentFingerprint(reviewedBlockDraft.content);
   const finalizePatch = await finalizeBlock.run({
     ownerId: "owner-test",
     runId: "run-cinematic-case-sequence-finalize",
@@ -743,10 +963,10 @@ async function main() {
     keyPrefix: "owner/owner-test/channel/channel-test/",
     params: {},
     store: {
-      cinematicCaseSequenceDraft: blockDraft,
+      cinematicCaseSequenceDraft: reviewedBlockDraft,
       cinematicSequenceEditorialReview: {
         ...draftReview,
-        reviewedSequenceFingerprint: (blockDraft as { sequenceContentFingerprint: string }).sequenceContentFingerprint,
+        reviewedSequenceFingerprint: reviewedBlockDraft.sequenceContentFingerprint,
       },
     },
     budgetUsd: 0,
@@ -759,6 +979,7 @@ async function main() {
     keyPrefix: "owner/owner-test/channel/channel-test/",
     params: {},
     store: {
+      casefileSourcePacket: sourcePacket,
       casefileSourceAdmission: admittedSource.receipt,
       casefileEvidenceShotMap: map.map,
       casefileEvidenceShotMapAdmission: map.receipt,

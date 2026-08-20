@@ -52,6 +52,36 @@ for (const [concept, family, expectedSignal] of reusableExplainerOpportunities) 
   assert.equal(recommendation.preflight.validationRenderRequired, true);
 }
 
+const factualIllustratedExplainer = recommendFormatDeterministically({
+  concept: "An animated geography atlas explaining factual trade routes with source-bound maps",
+});
+assert.equal(factualIllustratedExplainer.family, "illustrated_explainer");
+assert.equal(factualIllustratedExplainer.available, false, "reviewed factual illustrated work must not be advertised as automatic production");
+assert.deepEqual(
+  factualIllustratedExplainer.preflight.recommendedModules.map((module) => module.block),
+  ["editorial_evidence_packet"],
+);
+assert.equal(factualIllustratedExplainer.preflight.creatorAdmission.mode, "registered_supervised_non_gemini");
+assert.equal(factualIllustratedExplainer.preflight.creatorAdmission.reviewHref, "/editorial-evidence");
+
+// These are additional uses of the existing supervised Casefile evidence chain,
+// not new automatic channel types or renderer claims.
+for (const concept of [
+  "An engineering systems failure investigation",
+  "A historical aviation disaster investigation",
+  "A financial fraud documentary investigation",
+  "A company scandal investigation",
+]) {
+  const recommendation = recommendFormatDeterministically({ concept });
+  assert.equal(recommendation.family, "cinematic", `${concept} must discover the cinematic Casefile intake`);
+  assert.equal(
+    recommendation.preflight.creativeCapabilities.some((offer) => offer.capability === "casefile_cinematic"),
+    true,
+    `${concept} must retain source-reviewed Casefile admission rather than a generic automatic route`,
+  );
+  assert.equal(recommendation.preflight.productionReady, false);
+}
+
 const ranked = rankFormatCandidates({ concept: "evidence-led archival documentary short" });
 assert.equal(ranked[0]?.family, "documentary_collage_short");
 assert(ranked[0]!.matchedSignals.length > 0, "ranking must explain its deterministic match");
@@ -299,9 +329,10 @@ assert(
   "switching from an autonomous build to a supervised intake must clear retained spend, render, YouTube, publication, and cross-post authorities",
 );
 assert(
-  creatorSource.includes("Proposed family modules (not an executable build)") &&
+  creatorSource.includes("Registered private-review stages") &&
+    creatorSource.includes("supervisedAdmission ? activeReviewOnlyStages : preview") &&
     creatorSource.includes('!supervisedAdmission && (publishMode !== "draft" || toggles.crosspost)'),
-  "a private-review family must not present its blocked pipeline or publishing approval as an executable channel build",
+  "a private-review family must expose only its registered review stages and cannot present publishing approval as an executable build",
 );
 
 async function verifyPublicAsyncSelection(): Promise<void> {

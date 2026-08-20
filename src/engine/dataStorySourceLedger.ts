@@ -1,5 +1,6 @@
-import { createHash } from "node:crypto";
 import { z } from "zod";
+
+import { sha256Hex } from "@/lib/sha256";
 
 export const DATA_STORY_SOURCE_LEDGER_VERSION = "data-story-source-ledger/v1" as const;
 const REVIEW_MAX_AGE_MS = 30 * 24 * 60 * 60 * 1000;
@@ -72,9 +73,7 @@ function canonical(value: unknown): string {
 
 export function dataStorySourceLedgerFingerprint(ledger: Omit<DataStorySourceLedger, "review"> | DataStorySourceLedger): string {
   const { version, topic, sources, claims } = ledger;
-  return createHash("sha256")
-    .update(`data-story-source-ledger\0${canonical({ version, topic, sources, claims })}`)
-    .digest("hex");
+  return sha256Hex(`data-story-source-ledger\0${canonical({ version, topic, sources, claims })}`);
 }
 
 function normalized(value: string): string {

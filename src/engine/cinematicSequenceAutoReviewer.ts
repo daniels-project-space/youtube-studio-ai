@@ -168,6 +168,8 @@ function shotContextLines(content: CinematicCaseSequenceContent): string {
 export interface CinematicSequenceAutoReviewArgs {
   /** The unreviewed sequence content (`CinematicCaseSequenceInput` minus `editorialReview`). */
   content: unknown;
+  /** Required when the candidate uses signed source-proof media. */
+  sourcePacket?: unknown;
   sourceAdmission: unknown;
   evidenceShotMap: unknown;
   evidenceShotMapAdmission: unknown;
@@ -220,6 +222,7 @@ export async function autoReviewCinematicCaseSequence(
   const structuralReport = evaluateCinematicCaseSequence(
     {
       input: { ...content, editorialReview: provisionalReview },
+      ...(args.sourcePacket !== undefined ? { sourcePacket: args.sourcePacket } : {}),
       sourceAdmission: args.sourceAdmission,
       evidenceShotMap: args.evidenceShotMap,
       evidenceShotMapAdmission: args.evidenceShotMapAdmission,

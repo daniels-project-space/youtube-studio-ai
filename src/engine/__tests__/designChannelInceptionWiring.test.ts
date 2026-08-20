@@ -121,8 +121,22 @@ assert.match(route, /formatPreflight\(family\.key/,
   "the server must re-run creator preflight rather than trusting a client-side format suggestion");
 assert.match(route, /cinematic channel creation requires a specific concept/,
   "factual and fictional cinematic requests must be distinguished before any inception provider work");
-assert.match(route, /factual cinematic Casefile concepts are private supervised episode workflows/,
-  "a Fern-style factual concept must never be silently admitted as a generic automatic cinematic channel");
+assert.match(route, /privateReviewCapabilityOffers\(creatorPreflight\.creativeCapabilities\)/,
+  "a Fern-style factual concept must resolve through the catalog-owned private-review admission");
+const privateReviewAdmissionGate = route.indexOf("if (privateReviewOffers.length)");
+const channelBuildCostAuthorityGate = route.indexOf("const costAuthority = channelBuildCostAuthority");
+const channelBuildDispatch = route.indexOf("return tasks.trigger(");
+assert(
+  privateReviewAdmissionGate >= 0 &&
+    privateReviewAdmissionGate < channelBuildCostAuthorityGate &&
+    privateReviewAdmissionGate < channelBuildDispatch,
+  "a private Casefile intake must return before it can reserve spend or dispatch a channel build",
+);
+assert.match(
+  route.slice(privateReviewAdmissionGate, channelBuildCostAuthorityGate),
+  /cannot start automatic channel creation[\s\S]*\{ status: 409 \}/,
+  "a private Casefile intake must fail closed rather than silently becoming an automatic cinematic channel",
+);
 assert.match(route, /requires a supervised episode admission before automatic channel creation/,
   "future child-show readiness cannot bypass a required private child-editor admission");
 assert.match(newChannelUi, /concept:\s*concept\.trim\(\) \|\| undefined/,

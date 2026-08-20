@@ -16,6 +16,10 @@ import {
   type CinematicCaseSequenceContent,
   type CinematicCaseSequenceInput,
 } from "./cinematicCaseSequence";
+import {
+  validateReferenceMechanicsPacket,
+  type ReferenceMechanicsPacket,
+} from "./referenceMechanicsPacket";
 import { SceneManifestSchema } from "./episodeGraph";
 import {
   causalBeatWindows,
@@ -50,6 +54,8 @@ export const CinematicCaseDirectionSchema = z
     causalQuestion: text(400),
     visualWorld: text(500),
     cast: z.array(CinematicMannequinSchema).min(1).max(8),
+    /** Optional reviewed factual-semantics rail, signed into the final sequence if selected. */
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
   })
   .strict();
 export type CinematicCaseDirection = z.infer<typeof CinematicCaseDirectionSchema>;
@@ -82,6 +88,7 @@ function directionFingerprint(direction: CinematicCaseDirection): string {
     causalQuestion: direction.causalQuestion,
     visualWorld: direction.visualWorld,
     cast: direction.cast,
+    narrativeEvidenceLedgerFingerprint: direction.narrativeEvidenceLedgerFingerprint,
   });
 }
 
@@ -197,6 +204,7 @@ function beatCuts(
 function coveragePlan(
   role: DraftBeat["narrativeRole"],
   duration: number,
+  supportsMannequinAction: boolean,
 ): {
   coverageCount: 3 | 4;
   purposes: readonly DraftCoverageShot["coveragePurpose"][];
@@ -208,14 +216,22 @@ function coveragePlan(
     : role === "closing_residue"
       ? "aftermath"
       : "reaction";
+  // A `mannequin_action` is a specific, original neutral reenactment—not a
+  // generic label for a shot that happens to sit second in a coverage list.
+  // Documentary, map, and timeline treatments still need a second purposeful
+  // angle, but that angle must make an admitted relationship legible instead
+  // of inventing an anonymous actor or becoming a duplicate atmosphere plate.
+  const middlePurpose: DraftCoverageShot["coveragePurpose"] = supportsMannequinAction
+    ? "mannequin_action"
+    : "relationship";
   return {
     coverageCount,
     purposes: coverageCount === 4
-      ? ["spatial_anchor", "mannequin_action", "evidence_insert", finalPurpose]
-      : ["spatial_anchor", "mannequin_action", "evidence_insert"],
+      ? ["spatial_anchor", middlePurpose, "evidence_insert", finalPurpose]
+      : ["spatial_anchor", middlePurpose, "evidence_insert"],
     scales: coverageCount === 4
-      ? ["establishing", "medium", "close", "wide"]
-      : ["establishing", "medium", "close"],
+      ? ["establishing", "medium", "extreme_close", "wide"]
+      : ["establishing", "medium", "extreme_close"],
   };
 }
 
@@ -252,11 +268,18 @@ export function planCinematicCaseSequenceDraft(args: {
   evidenceShotMap: unknown;
   sceneManifest: unknown;
   shotList: unknown;
+  /** Optional, already human-reviewed mechanics from the private Casefile desk. */
+  referenceMechanicsPacket?: unknown;
+  now?: Date;
 }): CinematicCaseSequenceDraft {
   const direction = CinematicCaseDirectionSchema.parse(args.direction);
   const map = CasefileEvidenceShotMapSchema.parse(args.evidenceShotMap);
   const manifest = SceneManifestSchema.parse(args.sceneManifest);
   const shots = z.array(ShotPlanSchema).min(1).max(2_000).parse(args.shotList);
+  const referenceMechanicsPacket: ReferenceMechanicsPacket | undefined =
+    args.referenceMechanicsPacket === undefined
+      ? undefined
+      : validateReferenceMechanicsPacket(args.referenceMechanicsPacket, { now: args.now });
   if (direction.caseId !== map.caseId) {
     throw new Error("cinematic draft: direction caseId does not match the admitted Casefile evidence map");
   }
@@ -313,7 +336,7 @@ export function planCinematicCaseSequenceDraft(args: {
     if (!Number.isFinite(duration) || duration < MIN_CINEMATIC_BEAT_SEC) {
       throw new Error(`cinematic draft: source beat ${parents.map((parent) => parent.id).join(", ")} has no usable renderable narration duration`);
     }
-    const coverage = coveragePlan(role, duration);
+    const coverage = coveragePlan(role, duration, binding.treatment === "neutral_reenactment");
     const modes = modePlan(binding, coverage.coverageCount);
     const boundaries = coverageBoundaries(t0, t1, coverage.coverageCount);
     const tension = beatTension(role, index === causalWindows.length - 1, coverage.coverageCount);
@@ -342,6 +365,8 @@ export function planCinematicCaseSequenceDraft(args: {
         ? `${direction.cast[0]!.movementProfile}; complete one restrained, source-bound action without revealing a face`
         : visualMode === "source_proof"
           ? "hold the cited factual artifact long enough to read its relationship to the narration; no invented event"
+          : label === "relationship"
+            ? "make the admitted relationship between the cited document, map, timeline, place, or people legible; do not invent an action, actor, or factual event"
           : "move only through the already-cited space, relationship, or atmosphere; no new factual event";
       const shot: DraftCoverageShot = {
         id: `cinematic-shot-${primaryParent.id.replace(/^shot-/, "")}-${slot + 1}`,
@@ -356,7 +381,12 @@ export function planCinematicCaseSequenceDraft(args: {
         cutReason: cuts[slot]!,
         tensionState: tension[slot]!,
         cameraRationale: `${label.replace(/_/g, " ")} changes the audience's information: ${parents.map((parent) => parent.coveragePurpose).join("; ")}`.slice(0, 360),
-        narrationPurpose: `${role.replace(/_/g, " ")}: ${beatQuestion} Source window: ${sourceMoments}`.slice(0, 720),
+        // This field is part of the editor-signed sequence contract (360 char
+        // limit), not merely an unbounded prompt fragment. A normal Story
+        // Spine can group several rich source shots into one causal window;
+        // keep that valid plan renderable by bounding the persisted purpose at
+        // the same limit the schema enforces.
+        narrationPurpose: `${role.replace(/_/g, " ")}: ${beatQuestion} Source window: ${sourceMoments}`.slice(0, 360),
         still: [
           direction.visualWorld,
           sourceMoments,
@@ -410,6 +440,10 @@ export function planCinematicCaseSequenceDraft(args: {
     shotPlanFingerprint: map.shotPlanFingerprint,
     cast: direction.cast,
     beats,
+    ...(direction.narrativeEvidenceLedgerFingerprint
+      ? { narrativeEvidenceLedgerFingerprint: direction.narrativeEvidenceLedgerFingerprint }
+      : {}),
+    ...(referenceMechanicsPacket ? { referenceMechanicsPacket } : {}),
   };
   const sequenceContentFingerprint = cinematicCaseSequenceContentFingerprint(content);
   return CinematicCaseSequenceDraftSchema.parse({

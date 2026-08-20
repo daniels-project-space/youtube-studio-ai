@@ -9,11 +9,46 @@ import {
 } from "@/lib/cinematicQaEvidenceContract";
 import { CINEMATIC_CASE_SEQUENCE_VERSION } from "@/engine/cinematicCaseSequence";
 import type { CinematicCaseSequenceInput, CinematicCreativeLocks, CinematicEditDecisionList } from "@/engine/cinematicCaseSequence";
+import {
+  SOURCE_PROOF_MEDIA_VERSION,
+  createSourceProofMediaReceipt,
+  sourceProofMediaProvenanceFingerprint,
+  type SourceProofMediaObligation,
+} from "@/engine/sourceProofMedia";
 import type { VisualReviewEvidence } from "@/lib/visualReview";
 
 const fingerprint = "a".repeat(64);
 const master = "b".repeat(64);
 const review = "c".repeat(24);
+
+const sourceProofObligation: SourceProofMediaObligation = {
+  version: SOURCE_PROOF_MEDIA_VERSION,
+  sourceId: "source-court-archive",
+  assetId: "asset-court-archive-timeline",
+  rightsEvidenceLocator: "https://court.example.org/rights/timeline",
+  sourcePacketFingerprint: "d".repeat(64),
+  assetUrl: "https://court.example.org/media/timeline.jpg",
+  assetSha256: "e".repeat(64),
+  approvalReceiptId: "source-proof-receipt-court-timeline",
+  provenanceFingerprint: "",
+};
+sourceProofObligation.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(sourceProofObligation);
+const sourceProofReceipt = createSourceProofMediaReceipt({
+  sceneId: "cinematic-shot-reveal",
+  sequenceFingerprint: fingerprint,
+  obligation: sourceProofObligation,
+  resolvedAssetSha256: sourceProofObligation.assetSha256,
+  sourceProofClipSha256: "f".repeat(64),
+  clipKey: "runs/case/cinematic-shot-reveal-source-proof.mp4",
+});
+const sourceProofFootageManifest = {
+  sequenceFingerprint: fingerprint,
+  items: [{
+    sceneId: "cinematic-shot-reveal",
+    clipKey: sourceProofReceipt.clipKey,
+    sourceProofMediaReceipt: sourceProofReceipt,
+  }],
+};
 
 const sequence = {
   cast: [{
@@ -46,7 +81,14 @@ const sequence = {
       citedClaimIds: ["claim-timeline"],
       citedSourceIds: ["source-court-archive"],
     },
-    shots: [{ id: "cinematic-shot-reveal", t0: 3, castIds: ["mannequin-detective"], coveragePurpose: "evidence_insert", visualMode: "source_proof" }],
+    shots: [{
+      id: "cinematic-shot-reveal",
+      t0: 3,
+      castIds: ["mannequin-detective"],
+      coveragePurpose: "evidence_insert",
+      visualMode: "source_proof",
+      sourceProofMedia: sourceProofObligation,
+    }],
   }],
 } as unknown as Pick<CinematicCaseSequenceInput, "cast" | "beats">;
 
@@ -89,10 +131,22 @@ const evidence: Pick<VisualReviewEvidence, "frames" | "coverage"> = {
   },
 };
 
-const plan = cinematicFinalMasterQaPlan({ sequence, creativeLocks, editDecisionList: edl });
+assert.throws(
+  () => cinematicFinalMasterQaPlan({ sequence, creativeLocks, editDecisionList: edl }),
+  /requires the exact footage-manifest source-proof receipt/i,
+  "final-master QA cannot replace a reviewed source-proof asset with an unbound generated clip",
+);
+
+const plan = cinematicFinalMasterQaPlan({
+  sequence,
+  creativeLocks,
+  editDecisionList: edl,
+  footageManifest: sourceProofFootageManifest,
+});
 assert.equal(plan.locks.length, 2, "approved locks must become receipt requirements");
 assert.equal(plan.cuts[0]?.atSec, 3, "EDL joins must use final-master timing");
 assert.equal(plan.payoffs[0]?.shotId, "cinematic-shot-reveal", "the cited reveal's source-proof lock must carry the opening-question payoff");
+assert.equal(plan.sourceProofs[0]?.sourceProofMediaReceipt.obligation.assetSha256, sourceProofObligation.assetSha256, "final QA must retain the exact approved source asset SHA-256");
 
 const receipt = {
   version: CINEMATIC_FINAL_MASTER_QA_EVIDENCE_VERSION,
@@ -124,6 +178,14 @@ const receipt = {
     { claimId: "claim-motive", shotId: "cinematic-shot-opening", evidenceFrameIds: ["f2"], onScreenCitationVisible: true, visualSupportVisible: true, pass: true },
     { claimId: "claim-timeline", shotId: "cinematic-shot-reveal", evidenceFrameIds: ["f7"], onScreenCitationVisible: true, visualSupportVisible: true, pass: true },
   ],
+  sourceProofs: [{
+    shotId: "cinematic-shot-reveal",
+    sourceProofMediaReceipt: sourceProofReceipt,
+    evidenceFrameIds: ["f6", "f7", "f8"],
+    onScreenCitationVisible: true,
+    visualSourceProofVisible: true,
+    pass: true,
+  }],
   payoffs: [{
     coldOpenBeatId: "cinematic-beat-opening",
     revealBeatId: "cinematic-beat-reveal",
@@ -168,6 +230,32 @@ assert.throws(
   }),
   /missing approved claim coverage/,
   "every approved claim must be tied to final-master frames",
+);
+
+const substitutedSourceProofReceipt = createSourceProofMediaReceipt({
+  sceneId: sourceProofReceipt.sceneId,
+  sequenceFingerprint: sourceProofReceipt.sequenceFingerprint,
+  obligation: sourceProofReceipt.obligation,
+  resolvedAssetSha256: sourceProofReceipt.resolvedAssetSha256,
+  sourceProofClipSha256: "1".repeat(64),
+  clipKey: sourceProofReceipt.clipKey,
+});
+assert.throws(
+  () => assertCinematicFinalMasterQaEvidence({
+    receipt: {
+      ...receipt,
+      sourceProofs: receipt.sourceProofs.map((proof) => ({
+        ...proof,
+        sourceProofMediaReceipt: substitutedSourceProofReceipt,
+      })),
+    },
+    plan,
+    evidence,
+    visualReviewFingerprint: review,
+    finalMasterSha256: master,
+  }),
+  /exact approved asset\/rights\/clip binding/i,
+  "final QA cannot replay its visible proof frames against another rendered evidence clip",
 );
 
 assert.throws(
@@ -249,6 +337,13 @@ function approvedLockJudgement(firstFrameSec: number): string {
       visualSupportVisible: true,
       pass: true,
     }],
+    ...(!opening ? {
+      sourceProof: {
+        onScreenCitationVisible: true,
+        visualSourceProofVisible: true,
+        pass: true,
+      },
+    } : {}),
   });
 }
 
@@ -286,6 +381,11 @@ async function main(): Promise<void> {
     reviewedReceipt.claims.map((claim) => claim.claimId).sort(),
     ["claim-motive", "claim-timeline"],
     "the reviewer receipt must preserve all approved claims",
+  );
+  assert.equal(
+    reviewedReceipt.sourceProofs[0]?.sourceProofMediaReceipt.receiptFingerprint,
+    sourceProofReceipt.receiptFingerprint,
+    "the no-extra-call review path must carry the exact source/right/asset receipt into final QA",
   );
   assert.equal(reviewedReceipt.cuts[0]?.tensionState, "reversal", "the cut attestation must preserve the planned tension turn");
 
@@ -342,6 +442,33 @@ async function main(): Promise<void> {
     }),
     /payoffs|story payoff receipt/,
     "the final-master reviewer cannot silently omit the cited payoff for the opening question",
+  );
+
+  const sourceProofOmittingReviewer: CinematicFinalMasterQaReviewer = async ({ kind, frames }) => {
+    if (kind === "cut") {
+      return JSON.stringify({
+        pass: true,
+        cutReason: "contradiction",
+        tensionState: "reversal",
+        causalTurnVisible: true,
+        tensionTransitionVisible: true,
+      });
+    }
+    const judgement = JSON.parse(approvedLockJudgement(frames[0]?.tSec ?? Number.NaN));
+    delete judgement.sourceProof;
+    return JSON.stringify(judgement);
+  };
+  await assert.rejects(
+    reviewCinematicFinalMasterQaEvidence({
+      plan,
+      evidence,
+      framePaths: evidence.frames.map((frame) => `/tmp/cinematic-qa/${frame.id}.jpg`),
+      visualReviewFingerprint: review,
+      finalMasterSha256: master,
+      reviewer: sourceProofOmittingReviewer,
+    }),
+    /omitted mandatory visible source-proof evidence/i,
+    "a planned receipt alone cannot fabricate final-master proof visibility without a reviewer attestation",
   );
 
   const malformedReviewer: CinematicFinalMasterQaReviewer = async () => "{not-json";

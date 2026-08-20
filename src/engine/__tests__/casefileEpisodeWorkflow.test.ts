@@ -11,7 +11,11 @@ import {
   CASEFILE_EPISODE_WORKFLOW_VERSION,
   admitCasefileEpisodeEvidenceMap,
   admitCasefileEpisodeSource,
+  attachCasefileEpisodeNarrativeEvidenceLedger,
   attachCasefileEpisodePlanning,
+  attachCasefileEpisodeReferenceMechanics,
+  attachCasefileEpisodeSourceProofMedia,
+  attachCasefileEpisodeSourceBoundStorySpine,
   draftCasefileEpisodeCinematicSequence,
   finalizeCasefileEpisodeCinematicSequence,
 } from "@/engine/casefileEpisodeWorkflow";
@@ -23,6 +27,7 @@ import {
   casefileSourcePacketContentFingerprint,
   type CasefileSourcePacket,
 } from "@/engine/sourceFirstAdmission";
+import { planStorySpine } from "@/engine/storySpine";
 
 const NOW = new Date("2026-08-15T12:00:00.000Z");
 
@@ -129,37 +134,17 @@ const sceneManifest = {
   externalProviderCalls: 0 as const,
 };
 
-const shotList = [{
-  id: "shot-ledger-order",
-  beatId: "beat-ledger-order",
-  sourceSentenceIds: ["sentence-ledger-order"],
-  t0: 0,
-  t1: 12,
-  coveragePurpose: "Show the cited court finding and the consequence of its closure order.",
-  literalContent: "A neutral court-record document beside the sealed ledger room.",
-  entities: [], era: "historical", wardrobe: [], props: ["court file", "sealed ledger"],
-  continuityState: "ledger-room-neutral", cameraMove: "static" as const, shotScale: "close" as const,
-  lens: "50mm", lighting: "soft archive light", motion: "restrained document parallax",
-  negative: "no gore, no likeness, no text", generationProfile: "production" as const,
-  candidateCount: 1, imageMinScore: 0.8, shotMinScore: 0.8,
-  prompt: "A neutral cited court finding beside a sealed ledger room.", seconds: 12,
-  storyFunction: "evidence", section: "closure", seed: 1,
-}, {
-  id: "shot-ledger-seal",
-  beatId: "beat-ledger-seal",
-  sourceSentenceIds: ["sentence-ledger-seal"],
-  t0: 12,
-  t1: 24,
-  coveragePurpose: "Show the documented closure as a cited room-and-file abstraction.",
-  literalContent: "A sealed ledger room and cited court file, without an invented event.",
-  entities: [], era: "historical", wardrobe: [], props: ["court file", "sealed ledger"],
-  continuityState: "ledger-room-neutral", cameraMove: "truck_right" as const, shotScale: "wide" as const,
-  lens: "35mm", lighting: "soft archive light", motion: "restrained lateral room reveal",
-  negative: "no gore, no likeness, no text", generationProfile: "production" as const,
-  candidateCount: 1, imageMinScore: 0.8, shotMinScore: 0.8,
-  prompt: "A neutral cited closure abstraction inside a sealed ledger room.", seconds: 12,
-  storyFunction: "consequence", section: "closure", seed: 2,
-}];
+const plannedStorySpine = planStorySpine({
+  topic: sourcePacket.casePacket.title,
+  narrationDurationSec: 24,
+  sentenceTimings: [
+    { text: "The court finding ordered the ledger room closed.", start: 0, end: 12 },
+    { text: "The documented court order closes the ledger room.", start: 12, end: 24 },
+  ],
+  targetShotSec: 12,
+});
+const storySpine = plannedStorySpine;
+const shotList = storySpine.shotList;
 
 async function main(): Promise<void> {
   const source = admitCasefileEpisodeSource(sourcePacket, { now: NOW });
@@ -183,14 +168,14 @@ async function main(): Promise<void> {
       claimId: "claim-ledger-order",
       bindings: [{
         sceneIds: ["scene-ledger-order", "scene-ledger-seal"],
-        shotIds: ["shot-ledger-order", "shot-ledger-seal"],
+        shotIds: shotList.map((shot) => shot.id),
         treatment: "neutral_reenactment",
         sourceIds: ["source-court-ledger"],
         onScreenCitation: true,
         reconstructionDisclosure: RECONSTRUCTION_DISCLOSURE,
       }, {
         sceneIds: ["scene-ledger-order", "scene-ledger-seal"],
-        shotIds: ["shot-ledger-order", "shot-ledger-seal"],
+        shotIds: shotList.map((shot) => shot.id),
         treatment: "document_abstraction",
         sourceIds: ["source-court-ledger"],
         onScreenCitation: true,
@@ -226,6 +211,41 @@ async function main(): Promise<void> {
       noLikeness: true as const,
     }],
   };
+  const referenceMechanics = {
+    openingPromisePayoff: {
+      guidance: "Open on one source-bound question and earn its answer with the later cited consequence.",
+      sourceIds: ["fern"],
+    },
+    beatVisualRhythm: {
+      guidance: "Change the visual only when the evidence relationship or causal state changes.",
+      sourceIds: ["fern"],
+    },
+    narrationPaceClarity: {
+      guidance: "Make the cited causal claim intelligible before adding restrained dramatic emphasis.",
+      sourceIds: ["fern"],
+    },
+    cutSceneFunction: {
+      guidance: "Every cut must reveal a fact, relationship, physical consequence, or earned breath.",
+      sourceIds: ["fern"],
+    },
+    audioRelationship: {
+      guidance: "Keep narration ahead of restrained ambience and preserve deliberate pauses for evidence.",
+      sourceIds: ["fern"],
+    },
+    recurringIdentity: {
+      guidance: "Use this channel's own faceless cast, wardrobe, and source-proof presentation grammar.",
+      sourceIds: ["fern"],
+    },
+    exclusions: {
+      guidance: "Never copy cases, scripts, footage, voices, channel identity, or unsupported reconstructions.",
+      sourceIds: ["fern"],
+    },
+  };
+  const referenceMechanicsReview = {
+    id: "reference-mechanics-review-ledger-closure",
+    reviewerId: "reviewer-documentary-desk",
+    reviewedAt: NOW.toISOString(),
+  };
   const reconstructionOnlyInput: CasefileEvidenceShotMapInput = {
     ...evidenceInput,
     claimMappings: [{ ...evidenceInput.claimMappings[0]!, bindings: [evidenceInput.claimMappings[0]!.bindings[0]!] }],
@@ -239,16 +259,207 @@ async function main(): Promise<void> {
     "a mannequin action cannot crowd out the independently admitted proof cut",
   );
 
-  const draft = draftCasefileEpisodeCinematicSequence({
+  assert.throws(
+    () => attachCasefileEpisodeReferenceMechanics({
+      episode: evidence,
+      mechanics: { ...referenceMechanics, sources: [] },
+      review: referenceMechanicsReview,
+      now: NOW,
+    }),
+    /unrecognized key/i,
+    "the desk accepts annotations only; an operator cannot inject sources or copied-media metadata",
+  );
+  const evidenceWithReferenceMechanics = attachCasefileEpisodeReferenceMechanics({
     episode: evidence,
+    mechanics: referenceMechanics,
+    review: referenceMechanicsReview,
+    now: NOW,
+  });
+  assert.equal(evidenceWithReferenceMechanics.status, "awaiting_cinematic_direction");
+  assert.equal(
+    evidenceWithReferenceMechanics.referenceMechanicsPacket?.sources.map((source) => source.id).join(","),
+    "fern,fascinating-horror",
+    "the intake derives its attributed source set from the fixed documentary contract",
+  );
+  assert.throws(
+    () => attachCasefileEpisodeReferenceMechanics({
+      episode: evidenceWithReferenceMechanics,
+      mechanics: referenceMechanics,
+      review: referenceMechanicsReview,
+      now: NOW,
+    }),
+    /already frozen/i,
+    "a reviewed mechanics packet cannot be silently replaced before cinematic review",
+  );
+
+  assert.throws(
+    () => attachCasefileEpisodeNarrativeEvidenceLedger({
+      episode: evidenceWithReferenceMechanics,
+      claims: [],
+      review: {},
+      now: NOW,
+    }),
+    /requires a frozen source-bound Story Spine/i,
+    "a semantic ledger cannot be attached to a different or unbound narration timeline",
+  );
+  const evidenceWithBoundStorySpine = attachCasefileEpisodeSourceBoundStorySpine({
+    episode: evidenceWithReferenceMechanics,
+    storySpine,
+    now: NOW,
+  });
+  assert.equal(
+    evidenceWithBoundStorySpine.sourceBoundStorySpine?.storySpineShotPlanFingerprint,
+    casefileShotPlanFingerprint(shotList),
+    "the desk freezes the exact Story Spine shot plan reviewed by the evidence map",
+  );
+  const narrativeEvidenceClaims = [{
+      id: "narrative-claim-ledger-order",
+      approvedText: "The court finding ordered the ledger room closed.",
+      assertionState: "established",
+      confidence: "high",
+      uncertainty: { level: "none", summary: "The reviewed court record directly supports this closed historical decision." },
+      causalRole: "decision",
+      supports: [{
+        sourceIds: ["source-court-ledger"],
+        upstreamClaimIds: ["claim-ledger-order"],
+      }],
+      allowedVisualTreatments: [
+        { kind: "source_proof", onScreenCitation: true, exactSourceAssetRequired: true },
+        { kind: "ambient_context", doesNotDepictClaimAsObserved: true },
+        {
+          kind: "neutral_reenactment",
+          visiblyLabeled: true,
+          disclosureText: RECONSTRUCTION_DISCLOSURE,
+          anonymousDepictionOnly: true,
+          doesNotClaimDirectObservation: true,
+        },
+      ],
+    }];
+  const narrativeEvidenceReview = {
+    reviewerId: "reviewer-documentary-desk",
+    reviewId: "narrative-ledger-review-ledger-closure",
+    reviewedAt: NOW.toISOString(),
+  };
+  assert.throws(
+    () => attachCasefileEpisodeNarrativeEvidenceLedger({
+      episode: evidenceWithBoundStorySpine,
+      claims: [{ ...narrativeEvidenceClaims[0]!, sources: ["source-injected"] }],
+      review: narrativeEvidenceReview,
+      now: NOW,
+    }),
+    /unrecognized key/i,
+    "the desk derives the sole Casefile rail and rejects injected source metadata",
+  );
+  const evidenceWithNarrativeLedger = attachCasefileEpisodeNarrativeEvidenceLedger({
+    episode: evidenceWithBoundStorySpine,
+    claims: narrativeEvidenceClaims,
+    review: narrativeEvidenceReview,
+    now: NOW,
+  });
+  const narrativeEvidenceLedger = evidenceWithNarrativeLedger.narrativeEvidenceLedger!;
+  assert.equal(
+    evidenceWithNarrativeLedger.narrativeEvidenceLedger?.contentFingerprint,
+    narrativeEvidenceLedger.contentFingerprint,
+    "the private ledger is immutable and bound before cinematic direction is signed",
+  );
+  assert.throws(
+    () => attachCasefileEpisodeNarrativeEvidenceLedger({
+      episode: evidenceWithNarrativeLedger,
+      claims: narrativeEvidenceClaims,
+      review: narrativeEvidenceReview,
+      now: NOW,
+    }),
+    /already frozen/i,
+    "a reviewed semantic ledger cannot be silently replaced on an episode revision",
+  );
+
+  const draft = draftCasefileEpisodeCinematicSequence({
+    episode: evidenceWithNarrativeLedger,
     direction,
+    now: NOW,
   });
   assert.equal(draft.status, "awaiting_cinematic_review");
   assert.equal(draft.cinematicDraft?.content.beats[0]?.shots.length, 4);
+  assert.ok(
+    draft.cinematicDraft?.content.beats.flatMap((beat) => beat.shots).every((shot) => shot.narrationPurpose.length <= 360),
+    "a normal multi-shot Story Spine must be compacted to the signed cinematic narration-purpose limit before review",
+  );
   assert.match(draft.cinematicDraft?.content.beats[0]?.shots[1]?.still ?? "", /charcoal wool coat/i);
+  assert.equal(
+    draft.cinematicDraft?.content.referenceMechanicsPacket?.contentFingerprint,
+    evidenceWithReferenceMechanics.referenceMechanicsPacket?.contentFingerprint,
+    "the reviewed mechanics packet is part of the editor-signed cinematic sequence content",
+  );
+  assert.equal(
+    draft.cinematicDraft?.content.narrativeEvidenceLedgerFingerprint,
+    narrativeEvidenceLedger.contentFingerprint,
+    "the desk derives the frozen semantic ledger identity into the editor-signed cinematic direction",
+  );
+
+  const sourceProofShots = draft.cinematicDraft!.content.beats
+    .flatMap((beat) => beat.shots)
+    .filter((shot) => shot.visualMode === "source_proof");
+  assert.ok(sourceProofShots.length > 0, "the cinematic draft must expose source-proof slots before an editor signs it");
+  const sourceProofAttachments = sourceProofShots.map((shot, index) => ({
+    shotId: shot.id,
+    sourceId: "source-court-ledger",
+    assetId: "asset-court-ledger",
+    rightsEvidenceLocator: "https://court.example.org/rights/ledger-closure",
+    assetUrl: `https://court.example.org/assets/ledger-closure-${index + 1}.jpg`,
+    assetSha256: String(index + 1).repeat(64),
+    approvalReceiptId: `source-proof-receipt-ledger-${index + 1}`,
+  }));
+  assert.throws(
+    () => attachCasefileEpisodeSourceProofMedia({ episode: draft, attachments: sourceProofAttachments.slice(0, -1) }),
+    /every source-proof shot/i,
+    "an editor cannot sign a draft with a silent source-proof asset gap",
+  );
+  assert.throws(
+    () => attachCasefileEpisodeSourceProofMedia({
+      episode: draft,
+      attachments: [{ ...sourceProofAttachments[0]!, rightsEvidenceLocator: "https://court.example.org/rights/other" }],
+    }),
+    /visual-media source\/asset\/rights entitlement/i,
+    "an attachment cannot substitute a different rights record for the admitted asset",
+  );
+  assert.throws(
+    () => attachCasefileEpisodeSourceProofMedia({
+      episode: draft,
+      attachments: sourceProofAttachments.map((attachment) => ({
+        ...attachment,
+        sourcePacketFingerprint: "0".repeat(64),
+      })),
+    }),
+    /unrecognized key/i,
+    "the desk derives packet and provenance binding; the browser cannot inject either",
+  );
+  const sourceProofAttached = attachCasefileEpisodeSourceProofMedia({
+    episode: draft,
+    attachments: sourceProofAttachments,
+  });
+  assert.notEqual(
+    sourceProofAttached.cinematicDraft?.sequenceContentFingerprint,
+    draft.cinematicDraft?.sequenceContentFingerprint,
+    "approved source assets alter the exact draft the editor must sign",
+  );
+  assert.ok(
+    sourceProofAttached.cinematicDraft?.content.beats
+      .flatMap((beat) => beat.shots)
+      .filter((shot) => shot.visualMode === "source_proof")
+      .every((shot) =>
+        shot.sourceProofMedia?.sourcePacketFingerprint === source.sourceAdmission.sourcePacketFingerprint &&
+        shot.sourceProofMedia.provenanceFingerprint.length === 64,
+      ),
+    "every source-proof slot carries a server-derived packet/provenance-bound obligation",
+  );
+  assert.throws(
+    () => attachCasefileEpisodeSourceProofMedia({ episode: sourceProofAttached, attachments: sourceProofAttachments }),
+    /already frozen/i,
+    "approved source assets cannot be swapped after the draft is prepared for final review",
+  );
 
   const final = finalizeCasefileEpisodeCinematicSequence({
-    episode: draft,
+    episode: sourceProofAttached,
     editorialReview: {
       id: "cinematic-sequence-review-ledger-closure",
       decision: "approved",
@@ -256,13 +467,22 @@ async function main(): Promise<void> {
       reviewedAt: NOW.toISOString(),
       reviewedSourcePacketFingerprint: source.sourceAdmission.sourcePacketFingerprint,
       reviewedEvidenceShotMapFingerprint: evidence.evidenceShotMap!.contentFingerprint,
-      reviewedSequenceFingerprint: draft.cinematicDraft!.sequenceContentFingerprint,
+      reviewedSequenceFingerprint: sourceProofAttached.cinematicDraft!.sequenceContentFingerprint,
     },
     now: NOW,
   });
   assert.equal(final.status, "render_admitted");
   assert.equal(final.cinematicAdmission?.generatedSceneCount, 8);
   assert.equal(final.cinematicAdmission?.release, "private_human_editorial_review_only");
+  assert.equal(
+    final.cinematicInput?.referenceMechanicsPacket?.contentFingerprint,
+    evidenceWithReferenceMechanics.referenceMechanicsPacket?.contentFingerprint,
+  );
+  assert.equal(
+    final.cinematicAdmission?.narrativeEvidenceLedgerFingerprint,
+    narrativeEvidenceLedger.contentFingerprint,
+    "final cinematic admission cannot drop the reviewed semantic evidence ledger",
+  );
   assert.throws(
     () => finalizeCasefileEpisodeCinematicSequence({ episode: final, editorialReview: {}, now: NOW }),
     /expected awaiting_cinematic_review/i,

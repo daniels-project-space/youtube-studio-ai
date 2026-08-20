@@ -1,6 +1,7 @@
 import type { Block } from "@/engine/types";
 import { getCutSheet, getStructure, getVisualBrief } from "@/engine/creative/brief";
 import { planStorySpine } from "@/engine/storySpine";
+import { assertEditorialEvidencePacketNarrationAlignment } from "@/engine/editorialEvidenceNarration";
 import { resolveContentLane } from "@/engine/contentLane";
 import { assertCurriculumEpisodeSeedForStoryInput } from "@/engine/curriculumEpisodeSeed";
 import { buildEpisodeSpec } from "@/engine/qualityEvidence";
@@ -55,6 +56,15 @@ export const storySpine: Block = {
       generationProfile: ctx.params["generationProfile"] ?? "production",
       targetShotSec: Number(ctx.params["targetShotSec"] ?? 6),
     });
+    if (ctx.store["editorialEvidencePacket"] !== undefined) {
+      const editorialNarrationBinding = assertEditorialEvidencePacketNarrationAlignment({
+        editorialEvidencePacket: ctx.store["editorialEvidencePacket"],
+        storySpine: spine,
+      });
+      ctx.log(
+        `story_spine: editorial narration binding passed for ${editorialNarrationBinding.claimBindings.length} reviewed claims`,
+      );
+    }
     // MEASURED HOOK GATE (src/lib/hookcraft.ts measureHookWindow) — additive
     // to hook_craft's word-estimate lintHook, which runs on the written hook
     // text long before any shot is timed. This instead reads the REAL

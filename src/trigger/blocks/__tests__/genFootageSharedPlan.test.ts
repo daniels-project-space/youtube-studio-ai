@@ -130,6 +130,8 @@ const cinematicPlan = resolveGeneratedFootageScenePlan({
 });
 assert.equal(cinematicPlan.source, "cinematic_case_sequence");
 assert.equal(cinematicPlan.sequenceFingerprint, "c".repeat(64));
+assert.deepEqual(cinematicPlan.scenes[0]!.expectedCastIds, [], "an empty sealed cinematic cast must reach the render gate as an explicit no-people contract");
+assert.equal(cinematicPlan.scenes[0]!.forbidAdditionalPeople, true, "every cinematic LTX scene must prohibit undeclared people/mannequins");
 assert.deepEqual(cinematicPlan.scenes.map((scene) => scene.id), [
   "cinematic-shot-proof-1",
   "cinematic-shot-proof-2",
@@ -357,13 +359,27 @@ assert.match(
 );
 assert.match(
   phase18Source,
-  /plan\.source === "story_spine" \? scenes\[index\]\?\.realImageInsertQuery : undefined/,
+  /plan\.source === "story_spine" \? plannedScene\.realImageInsertQuery : undefined/,
   "the real-image insert must be gated to the automatic story_spine path",
 );
 assert.match(
   phase18Source,
   /plan\.source === "story_spine" \? scenes\[index\]\?\.evidenceOverlay : undefined/,
   "the evidence overlay must be gated to the automatic story_spine path",
+);
+assert.match(
+  phase18Source,
+  /const ltxScenes = scenes\.filter\(\(scene\) => scene\.sourceProofMedia === undefined\);/,
+  "approved cinematic source-proof scenes must be removed from the LTX render wave",
+);
+assert.match(
+  phase18Source,
+  /scenes: ltxScenes\.map\(\(scene\) => \(/,
+  "the Novita handoff must receive only non-source-proof scenes",
+);
+assert.ok(
+  phase18Source.indexOf("const sourceProofBySceneId") < phase18Source.indexOf("const rendered = ltxScenes.length > 0"),
+  "approved source media must be resolved and hash-gated before any cinematic LTX render starts",
 );
 assert.match(
   phase18Source,

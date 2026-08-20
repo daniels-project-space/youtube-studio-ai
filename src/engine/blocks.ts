@@ -29,6 +29,7 @@ import { childContentSafetyBlocks } from "@/trigger/blocks/childrenSafetyBlocks"
 import { casefileSourcePacketBlocks } from "@/trigger/blocks/casefileSourcePacketBlocks";
 import { casefileEvidenceShotMapBlocks } from "@/trigger/blocks/casefileEvidenceShotMapBlocks";
 import { sourceBoundStorySpineBlocks } from "@/trigger/blocks/sourceBoundStorySpineBlocks";
+import { editorialEvidencePacketBlocks } from "@/trigger/blocks/editorialEvidencePacketBlocks";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 import { sceneCompilerBlocks } from "@/trigger/blocks/sceneCompilerBlocks";
 import { syntheticScenarioBlocks } from "@/trigger/blocks/syntheticScenarioBlocks";
@@ -79,6 +80,9 @@ export function registerAllBlocks(): void {
   // claims, citations, treatments, and exact cut IDs forward without planning
   // or admitting any source-led family.
   for (const b of sourceBoundStorySpineBlocks) register(b);
+  // Shared factual-explainer source/claim/snapshot admission. This retains a
+  // private human-editorial-review release rail and never replaces Casefile.
+  for (const b of editorialEvidencePacketBlocks) register(b);
   // Evidence-led cinematic coverage comes after the claim map. It creates the
   // exact multi-shot/mannequin/cut handoff used by generated footage, but is
   // still private-review-only and cannot self-admit a crime channel.

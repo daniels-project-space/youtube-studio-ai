@@ -25,6 +25,11 @@ import {
   casefileSourcePacketContentFingerprint,
   type CasefileSourcePacket,
 } from "@/engine/sourceFirstAdmission";
+import {
+  SOURCE_PROOF_MEDIA_VERSION,
+  sourceProofMediaProvenanceFingerprint,
+  type SourceProofMediaObligation,
+} from "@/engine/sourceProofMedia";
 import { createSourceBoundStorySpineHandoff } from "@/engine/sourceBoundStorySpine";
 import { cinematicCaseSequenceBlocks } from "@/trigger/blocks/cinematicCaseSequenceBlocks";
 
@@ -190,6 +195,22 @@ const shotList = [
 
 const admittedSource = assertCasefileSourcePacket(sourcePacket, { now: NOW });
 
+function sourceProofMediaObligation(): SourceProofMediaObligation {
+  const obligation = {
+    version: SOURCE_PROOF_MEDIA_VERSION,
+    sourceId: "source-court-archive",
+    assetId: "asset-court-closure-finding",
+    rightsEvidenceLocator: "https://court.example.org/rights/vault-closure-license",
+    sourcePacketFingerprint: admittedSource.receipt.sourcePacketFingerprint,
+    assetUrl: "https://court.example.org/assets/vault-closure-finding.jpg",
+    assetSha256: "1".repeat(64),
+    approvalReceiptId: "source-proof-receipt-vault-closure-001",
+    provenanceFingerprint: "0".repeat(64),
+  } satisfies Omit<SourceProofMediaObligation, "provenanceFingerprint"> & { provenanceFingerprint: string };
+  obligation.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(obligation);
+  return obligation;
+}
+
 function admittedMap() {
   const input: CasefileEvidenceShotMapInput = {
     version: CASEFILE_EVIDENCE_SHOT_MAP_VERSION,
@@ -275,7 +296,7 @@ function coverageShot(args: {
   mode: "source_proof" | "spatial_reconstruction" | "abstract_reenactment" | "atmosphere";
   scale: "wide" | "medium" | "close" | "extreme_close" | "establishing"; move: "static" | "dolly_push" | "dolly_pull" | "crane_up" | "crane_down" | "orbit_left" | "orbit_right" | "truck_left" | "truck_right" | "handheld_drift";
   cut: "new_fact" | "new_location" | "new_relationship" | "physical_action" | "contradiction" | "reveal" | "breath";
-  tension: "question" | "orientation" | "pressure" | "uncertainty" | "reversal" | "release" | "residue"; cast?: string[];
+  tension: "question" | "orientation" | "pressure" | "uncertainty" | "reversal" | "release" | "residue"; cast?: string[]; sourceProofMedia?: SourceProofMediaObligation;
 }) {
   return {
     id: args.id, t0: args.t0, t1: args.t1, coveragePurpose: args.purpose, visualMode: args.mode, castIds: args.cast ?? [],
@@ -287,6 +308,7 @@ function coverageShot(args: {
     firstFrameConstraint: "Start from the exact cited story state with the same wardrobe and prop.",
     lastFrameConstraint: "End with only motivated action advanced; preserve wardrobe and setting continuity.",
     onScreenCitation: true as const,
+    ...(args.sourceProofMedia ? { sourceProofMedia: args.sourceProofMedia } : {}),
     ...(args.mode === "abstract_reenactment" ? { reconstructionDisclosure: RECONSTRUCTION_DISCLOSURE } : {}),
   };
 }
@@ -310,7 +332,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
         id: "cinematic-beat-closure-order", narrativeRole: "cold_open", t0: 0, t1: 12, parentShotIds: ["shot-closure-order"],
         claimIds: ["claim-closure-order"], sourceIds: ["source-court-archive"], causalQuestion: "Why did a single court order close the vault?",
         shots: [
-          coverageShot({ id: "cinematic-shot-closure-proof", t0: 0, t1: 4, purpose: "evidence_insert", mode: "source_proof", scale: "close", move: "static", cut: "new_fact", tension: "question" }),
+          coverageShot({ id: "cinematic-shot-closure-proof", t0: 0, t1: 4, purpose: "evidence_insert", mode: "source_proof", scale: "extreme_close", move: "static", cut: "new_fact", tension: "question", sourceProofMedia: sourceProofMediaObligation() }),
           coverageShot({ id: "cinematic-shot-closure-figure", t0: 4, t1: 8, purpose: "mannequin_action", mode: "abstract_reenactment", scale: "medium", move: "dolly_push", cut: "physical_action", tension: "pressure", cast: ["mannequin-investigator"] }),
           coverageShot({ id: "cinematic-shot-closure-space", t0: 8, t1: 12, purpose: "spatial_anchor", mode: "spatial_reconstruction", scale: "establishing", move: "crane_up", cut: "new_location", tension: "uncertainty" }),
         ],
@@ -325,7 +347,7 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
           citedSourceIds: ["source-court-archive"],
         },
         shots: [
-          coverageShot({ id: "cinematic-shot-response-proof", t0: 12, t1: 16, purpose: "evidence_insert", mode: "source_proof", scale: "close", move: "truck_right", cut: "reveal", tension: "reversal" }),
+          coverageShot({ id: "cinematic-shot-response-proof", t0: 12, t1: 16, purpose: "evidence_insert", mode: "source_proof", scale: "extreme_close", move: "truck_right", cut: "reveal", tension: "reversal", sourceProofMedia: sourceProofMediaObligation() }),
           coverageShot({ id: "cinematic-shot-response-map", t0: 16, t1: 20, purpose: "spatial_anchor", mode: "spatial_reconstruction", scale: "wide", move: "orbit_left", cut: "new_relationship", tension: "release" }),
           coverageShot({ id: "cinematic-shot-response-aftermath", t0: 20, t1: 24, purpose: "aftermath", mode: "atmosphere", scale: "establishing", move: "dolly_pull", cut: "breath", tension: "residue" }),
         ],
@@ -380,6 +402,7 @@ async function main(): Promise<void> {
     void _humanReview;
     const baseArgs = (candidateContent: typeof content) => ({
       content: candidateContent,
+      sourcePacket,
       sourceAdmission: admittedSource.receipt,
       evidenceShotMap: map.map,
       evidenceShotMapAdmission: map.receipt,
@@ -408,6 +431,7 @@ async function main(): Promise<void> {
     const admitted = assertCinematicCaseSequence(
       {
         input: { ...content, editorialReview: autoReview },
+        sourcePacket,
         sourceAdmission: admittedSource.receipt,
         evidenceShotMap: map.map,
         evidenceShotMapAdmission: map.receipt,
@@ -518,6 +542,7 @@ async function main(): Promise<void> {
       keyPrefix: "owner/owner-test/channel/channel-test/",
       params: {},
       store: {
+        casefileSourcePacket: sourcePacket,
         casefileSourceAdmission: admittedSource.receipt,
         casefileEvidenceShotMap: map.map,
         casefileEvidenceShotMapAdmission: map.receipt,

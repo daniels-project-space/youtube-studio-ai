@@ -16,6 +16,7 @@ import {
   CinematicTensionStateSchema,
 } from "@/engine/cinematicCaseSequence";
 import { assertCinematicSequenceRenderBinding } from "@/engine/cinematicSequenceRenderBinding";
+import { SourceProofMediaReceiptSchema } from "@/engine/sourceProofMedia";
 
 export const CINEMATIC_ASSEMBLY_HANDOFF_VERSION = "cinematic-assembly-handoff/v1" as const;
 
@@ -38,6 +39,8 @@ export const CinematicShotToClipSchema = z.object({
   cutReason: CinematicCutReasonSchema,
   tensionState: CinematicTensionStateSchema,
   narrationPurpose: z.string().trim().min(1).max(360),
+  /** Exact approved evidence clip receipt when this is a real source insert. */
+  sourceProofMediaReceipt: SourceProofMediaReceiptSchema.optional(),
 }).strict().refine((item) => item.t1 > item.t0, "cinematic clip t1 must follow t0");
 export type CinematicShotToClip = z.infer<typeof CinematicShotToClipSchema>;
 
@@ -68,6 +71,17 @@ export const CinematicShotToClipManifestSchema = z.object({
       ctx.addIssue({ code: z.ZodIssueCode.custom, path: ["items", index, "shotId"], message: "cinematic shot ids must be unique" });
     }
     ids.add(item.shotId);
+    if (item.sourceProofMediaReceipt && (
+      item.sourceProofMediaReceipt.sceneId !== item.shotId ||
+      item.sourceProofMediaReceipt.sequenceFingerprint !== manifest.sequenceFingerprint ||
+      item.sourceProofMediaReceipt.clipKey !== item.clipKey
+    )) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["items", index, "sourceProofMediaReceipt"],
+        message: "source-proof receipt must bind this exact cinematic shot, sequence, and assembled clip key",
+      });
+    }
     if (Math.abs(item.t0 - cursor) > TIMING_TOLERANCE_SEC) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
@@ -158,6 +172,9 @@ export function createCinematicAssemblyHandoff(args: {
         cutReason: edit.cutReason,
         tensionState: edit.tensionState,
         narrationPurpose: edit.narrationPurpose,
+        ...(rendered.sourceProofMediaReceipt
+          ? { sourceProofMediaReceipt: rendered.sourceProofMediaReceipt }
+          : {}),
       };
     }),
   });

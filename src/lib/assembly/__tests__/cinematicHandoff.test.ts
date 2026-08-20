@@ -6,6 +6,12 @@ import { CINEMATIC_KEYFRAME_REVIEW_VERSION } from "@/engine/cinematicKeyframeRev
 import { CINEMATIC_TRANSITION_REVIEW_VERSION } from "@/engine/cinematicTransitionReview";
 import { GENERATED_FOOTAGE_SCENE_MANIFEST_VERSION } from "@/engine/generatedFootageManifest";
 import {
+  SOURCE_PROOF_MEDIA_VERSION,
+  createSourceProofMediaReceipt,
+  sourceProofMediaProvenanceFingerprint,
+  type SourceProofMediaObligation,
+} from "@/engine/sourceProofMedia";
+import {
   assertCinematicAssemblyHandoff,
   createCinematicAssemblyHandoff,
 } from "../cinematicHandoff";
@@ -34,6 +40,27 @@ const scenes = [0, 1].map((index) => ({
   castIds: [],
   continuitySeed: index + 1,
 }));
+
+const sourceProofObligation: SourceProofMediaObligation = {
+  version: SOURCE_PROOF_MEDIA_VERSION,
+  sourceId: "source-handoff",
+  assetId: "asset-handoff-proof",
+  rightsEvidenceLocator: "https://archive.example.org/rights/handoff-proof",
+  sourcePacketFingerprint: "b".repeat(64),
+  assetUrl: "https://archive.example.org/media/handoff-proof.jpg",
+  assetSha256: "c".repeat(64),
+  approvalReceiptId: "source-proof-receipt-handoff-proof",
+  provenanceFingerprint: "",
+};
+sourceProofObligation.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(sourceProofObligation);
+const sourceProofReceipt = createSourceProofMediaReceipt({
+  sceneId: scenes[0]!.id,
+  sequenceFingerprint: fingerprint,
+  obligation: sourceProofObligation,
+  resolvedAssetSha256: sourceProofObligation.assetSha256,
+  sourceProofClipSha256: "d".repeat(64),
+  clipKey: `runs/case/${scenes[0]!.id}.mp4`,
+});
 
 function validArgs() {
   return {
@@ -76,6 +103,9 @@ function validArgs() {
           reviewer: "non_google_vision" as const,
           sceneId: scene.id,
           reviewedAgainstSceneIds: [],
+          expectedCastIds: scene.castIds,
+          forbidAdditionalPeople: true as const,
+          onlyExpectedCastVisible: true as const,
           semanticAlignment: 0.9,
           composition: 0.9,
           continuity: 0.9,
@@ -89,6 +119,9 @@ function validArgs() {
           reviewer: "non_google_vision" as const,
           sceneId: scene.id,
           sampleOffsetsSec: [0.2, 1.5, 2.8],
+          expectedCastIds: scene.castIds,
+          forbidAdditionalPeople: true as const,
+          onlyExpectedCastVisible: true as const,
           semanticAlignment: 0.9,
           motionIntegrity: 0.9,
           continuity: 0.9,
@@ -121,6 +154,34 @@ function validArgs() {
   };
 }
 
+function validArgsWithSourceProof(): Parameters<typeof createCinematicAssemblyHandoff>[0] {
+  const args = validArgs();
+  return {
+    scenePlan: {
+      ...args.scenePlan,
+      scenes: args.scenePlan.scenes.map((scene, index) => index === 0
+        ? { ...scene, sourceProofMedia: sourceProofObligation }
+        : scene),
+    },
+    editDecisionList: args.editDecisionList,
+    footageManifest: {
+      ...args.footageManifest,
+      items: args.footageManifest.items.map((item, index) => index === 0
+        ? {
+            sceneId: item.sceneId,
+            clipKey: item.clipKey,
+            t0: item.t0,
+            t1: item.t1,
+            continuitySeed: item.continuitySeed,
+            sourceProofMediaReceipt: sourceProofReceipt,
+            transitionToNextReview: item.transitionToNextReview,
+          }
+        : item),
+    },
+    narrationDurationSec: args.narrationDurationSec,
+  };
+}
+
 const handoff = createCinematicAssemblyHandoff(validArgs());
 assert.equal(handoff.manifest.exactOrder, true);
 assert.deepEqual(
@@ -129,6 +190,30 @@ assert.deepEqual(
   "handoff preserves the reviewed scene order and exact renderer clip bindings",
 );
 assert.doesNotThrow(() => assertCinematicAssemblyHandoff(handoff));
+
+const sourceProofHandoff = createCinematicAssemblyHandoff(validArgsWithSourceProof());
+assert.equal(
+  sourceProofHandoff.manifest.items[0]?.sourceProofMediaReceipt?.receiptFingerprint,
+  sourceProofReceipt.receiptFingerprint,
+  "exact approved source-proof receipt must survive the cinematic render-to-assembly handoff",
+);
+const swappedProofReceipt = structuredClone(sourceProofHandoff);
+swappedProofReceipt.manifest.items[0]!.sourceProofMediaReceipt!.clipKey = "runs/case/substitute.mp4";
+assert.throws(
+  () => assertCinematicAssemblyHandoff(swappedProofReceipt),
+  /source-proof receipt|fingerprint/i,
+  "a resumed handoff cannot substitute a different evidence object key",
+);
+
+const syntheticProofFallback = validArgs();
+syntheticProofFallback.scenePlan.scenes = syntheticProofFallback.scenePlan.scenes.map((scene, index) => index === 0
+  ? { ...scene, sourceProofMedia: sourceProofObligation }
+  : scene);
+assert.throws(
+  () => createCinematicAssemblyHandoff(syntheticProofFallback),
+  /source-proof shot.*missing.*source-media receipt|do not fall back to an LTX clip/i,
+  "a planned real source-proof insert cannot silently become a reviewed LTX take",
+);
 
 const reorderedHandoff = structuredClone(handoff);
 [reorderedHandoff.manifest.items[0], reorderedHandoff.manifest.items[1]] = [

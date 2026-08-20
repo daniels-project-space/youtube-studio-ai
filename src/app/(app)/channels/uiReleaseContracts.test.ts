@@ -33,6 +33,16 @@ assert.match(wizard, /Creator foundation: verified no-Gemini planning/);
 assert.match(wizard, /preflight\.planning\.plannerBlock/);
 assert.match(wizard, /preflight\.planning\.provenance/);
 
+// A selectable private-review intake is not an inactive automatic family
+// pipeline in disguise. The creator must show only the registered review
+// stages and withhold all production-module controls.
+assert.match(wizard, /reviewOnlyStages: \[\.\.\.supervisedCapability\.coveredStages\]/);
+assert.match(wizard, /reviewOnlyStages: \[\.\.\.\(preflight\.creatorAdmission\.coveredStages \?\? \[\]\)\]/);
+assert.match(wizard, /supervisedAdmission \? activeReviewOnlyStages : preview/);
+assert.match(wizard, /Only these private-review stages are active\. The family production pipeline is not enabled/);
+assert.match(wizard, /Production module controls are unavailable/);
+assert.match(wizard, /\{!supervisedAdmission && \(/);
+
 assert.doesNotMatch(sidebar, /health-dot-ready/);
 assert.doesNotMatch(sidebar, /Live production workspace/);
 assert.doesNotMatch(sidebar, /href:\s*["']\/runs["']/);

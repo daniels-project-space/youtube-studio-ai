@@ -127,7 +127,7 @@ const graph = buildEpisodeGraph({
       sourceRefs: ["source-script-color", "source-curriculum-color"],
       characterIds: ["character-tavi"],
       settingId: "setting-color-corner",
-      text: "Tavi pauses with a blue block and invites the viewer to point to its color home.",
+      text: "Can you point to the red and blue color homes? Tavi waits with a blue block.",
       camera: { framing: "medium" as const, move: "push" as const },
       visualState: { action: "Tavi holds the blue block still and leaves a gentle participation pause.", props: ["blue block", "blue felt circle"] },
       transition: "cut" as const,
@@ -145,7 +145,7 @@ const graph = buildEpisodeGraph({
       sourceRefs: ["source-script-color", "source-curriculum-color"],
       characterIds: ["character-tavi"],
       settingId: "setting-color-corner",
-      text: "The blocks are sorted, and Tavi asks what color home each block needs.",
+      text: "What is one thing you learned about Sorting blocks by color? Tavi smiles.",
       camera: { framing: "wide" as const, move: "static" as const },
       visualState: { action: "Tavi smiles beside the three sorted color homes for a calm recall moment.", props: ["red block", "blue block", "yellow block"] },
       transition: "dissolve" as const,
@@ -347,6 +347,57 @@ async function main(): Promise<void> {
   });
   assert.equal(childSafety.allowedPublishMode, "draft");
   assert.equal(childSafety.childrenShowBibleFingerprint, admitted.bible.contentFingerprint);
+
+  // A signed prompt in the Show Bible is not sufficient: the final safety
+  // gate rechecks the actual timed graph/scene plan, even if a structurally
+  // valid but stale-looking receipt is attached outside the normal block path.
+  const rebindForCandidateGraph = (candidateGraph: typeof graph) => {
+    const candidateLessonContract = buildLearningContract(candidateGraph, lane);
+    const candidateBible = structuredClone(admitted.bible);
+    candidateBible.episodeGraphFingerprint = episodeGraphFingerprint(candidateGraph);
+    candidateBible.lessonContractFingerprint = candidateLessonContract.fingerprint;
+    candidateBible.editorialReview.reviewedEpisodeGraphFingerprint = candidateBible.episodeGraphFingerprint;
+    candidateBible.editorialReview.reviewedLessonContractFingerprint = candidateBible.lessonContractFingerprint;
+    const candidateApproval = structuredClone(admitted.receipt);
+    candidateApproval.episodeGraphFingerprint = candidateBible.episodeGraphFingerprint;
+    candidateApproval.lessonContractFingerprint = candidateLessonContract.fingerprint;
+    candidateApproval.editorialReview.reviewedEpisodeGraphFingerprint = candidateBible.episodeGraphFingerprint;
+    candidateApproval.editorialReview.reviewedLessonContractFingerprint = candidateLessonContract.fingerprint;
+    return { candidateBible, candidateApproval, candidateLessonContract };
+  };
+  const promptlessParticipationGraph = structuredClone(graph);
+  promptlessParticipationGraph.beats[3].text = "Tavi waits quietly with a blue block.";
+  const promptlessParticipation = rebindForCandidateGraph(promptlessParticipationGraph);
+  assert.throws(
+    () => assertChildContentSafety({
+      episodeGraph: promptlessParticipationGraph,
+      sceneManifest: compileSceneManifest(promptlessParticipationGraph),
+      lessonContract: promptlessParticipation.candidateLessonContract,
+      contentLane: lane,
+      childrenShowBible: promptlessParticipation.candidateBible,
+      childrenShowBibleApproval: promptlessParticipation.candidateApproval,
+      curriculumEpisodeSeed: admittedCurriculumEpisodeSeed.seed,
+      curriculumEpisodeSeedApproval: admittedCurriculumEpisodeSeed.receipt,
+    }),
+    /participation must say its exact approved prompt in timed Episode Graph text/,
+  );
+
+  const guideMissingParticipationGraph = structuredClone(graph);
+  guideMissingParticipationGraph.beats[3].characterIds = [];
+  const guideMissingParticipation = rebindForCandidateGraph(guideMissingParticipationGraph);
+  assert.throws(
+    () => assertChildContentSafety({
+      episodeGraph: guideMissingParticipationGraph,
+      sceneManifest: compileSceneManifest(guideMissingParticipationGraph),
+      lessonContract: guideMissingParticipation.candidateLessonContract,
+      contentLane: lane,
+      childrenShowBible: guideMissingParticipation.candidateBible,
+      childrenShowBibleApproval: guideMissingParticipation.candidateApproval,
+      curriculumEpisodeSeed: admittedCurriculumEpisodeSeed.seed,
+      curriculumEpisodeSeedApproval: admittedCurriculumEpisodeSeed.receipt,
+    }),
+    /participation prompt must be delivered in an Episode Graph moment containing a declared original guide/,
+  );
 
   // The manifest fingerprint deliberately equals the graph fingerprint for
   // idempotency. It must not be treated as proof that scene content was not

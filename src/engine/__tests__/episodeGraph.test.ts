@@ -18,6 +18,7 @@ import {
   evidenceVisualManifestFingerprint,
   type EvidenceVisualManifest,
 } from "@/engine/evidenceVisualManifest";
+import { createEditorialEvidencePacket } from "@/engine/editorialEvidencePacket";
 
 const graphInput = {
   seriesId: "series-curious-lantern",
@@ -217,9 +218,32 @@ const bridgedChildren = buildEpisodeGraphFromStorySpine({
   episodeId: "episode-how-seeds-grow",
   curriculumLabel: "Primary science: plants grow",
   curriculumLocator: "curriculum://primary-science/plants",
+  childrenLearningObjective: "Explain that seeds need water and light to grow.",
 });
 assert.equal(bridgedChildren.episodeGraph.audience, "children");
 assert.equal(bridgedChildren.sceneManifest.externalProviderCalls, 0);
+assert.deepEqual(
+  bridgedChildren.episodeGraph.beats.map((beat) => beat.learningObjective),
+  ["Explain that seeds need water and light to grow.", "Explain that seeds need water and light to grow."],
+  "the signed child-editor objective must reach every planned learning beat",
+);
+assert.deepEqual(
+  bridgedChildren.sceneManifest.scenes.map((scene) => scene.learningObjective),
+  ["Explain that seeds need water and light to grow.", "Explain that seeds need water and light to grow."],
+  "the scene compiler handoff must preserve the signed objective rather than a generic topic label",
+);
+assert.throws(
+  () => buildEpisodeGraphFromStorySpine({
+    storySpine,
+    topic: "How seeds grow",
+    audience: "children",
+    seriesId: "series-curious-lantern",
+    episodeId: "episode-how-seeds-grow-empty-objective",
+    childrenLearningObjective: "   ",
+  }),
+  /childrenLearningObjective must be a non-empty child-editor-approved objective/,
+  "an explicitly supplied children objective must never degrade into the generic fallback",
+);
 
 // A reviewed factual visual must travel through the real Episode Graph bridge,
 // not remain a valid-but-orphaned artifact. The Scene Compiler consumes the
@@ -274,6 +298,60 @@ const bridgedFactual = buildEpisodeGraphFromStorySpine({
 assert.equal(bridgedFactual.episodeGraph.beats[0].visualState.evidenceVisualIntent, "factual_chart");
 assert.equal(bridgedFactual.sceneManifest.scenes[0].visualState.evidenceVisualManifest?.id, factualVisual.id);
 assert.equal(sceneKindFor(bridgedFactual.sceneManifest.scenes[0]), "chart");
+const factualEditorialPacket = createEditorialEvidencePacket({
+  subject: "How seeds grow",
+  sources: [{
+    id: "source-seed-atlas",
+    name: "Seed Atlas",
+    url: "https://example.org/seed-atlas",
+    snapshotSha256: "b".repeat(64),
+    kind: "dataset",
+  }],
+  claims: [{
+    id: "claim-seed-sprout-trend",
+    sourceIds: ["source-seed-atlas"],
+    approvedText: "Seed Atlas records 20 sprouts in week one and 35 in week two.",
+    numericAnchor: "20 and 35",
+    context: "Reviewed Seed Atlas weekly sprout trend.",
+  }],
+  review: {
+    reviewerId: "editorial-data-desk",
+    reviewId: "review-editorial-seed-atlas",
+    reviewedAt: new Date().toISOString(),
+  },
+});
+const packetBoundFactual = buildEpisodeGraphFromStorySpine({
+  storySpine: factualStorySpine,
+  topic: "How seeds grow",
+  seriesId: "series-curious-lantern",
+  episodeId: "episode-how-seeds-grow-data-packet",
+  evidenceVisualManifests: [factualVisual],
+  editorialEvidencePacket: factualEditorialPacket,
+});
+assert.deepEqual(
+  packetBoundFactual.episodeGraph.beats[0].sourceRefs,
+  ["source-validated-story-spine", "source-editorial-source-seed-atlas"],
+  "the factual renderer route must retain the packet-bound source alongside the Story Spine source",
+);
+assert.equal(
+  packetBoundFactual.episodeGraph.sources.find((source) => source.id === "source-editorial-source-seed-atlas")?.locator,
+  "https://example.org/seed-atlas",
+);
+const mismatchedPacketVisual = structuredClone(factualVisual);
+mismatchedPacketVisual.sources[0]!.snapshotSha256 = "c".repeat(64);
+mismatchedPacketVisual.review.reviewedManifestFingerprint = evidenceVisualManifestFingerprint(mismatchedPacketVisual);
+assert.throws(
+  () => buildEpisodeGraphFromStorySpine({
+    storySpine: factualStorySpine,
+    topic: "How seeds grow",
+    seriesId: "series-curious-lantern",
+    episodeId: "episode-how-seeds-grow-data-packet-mismatch",
+    evidenceVisualManifests: [mismatchedPacketVisual],
+    editorialEvidencePacket: factualEditorialPacket,
+  }),
+  /does not match the packet's reviewed immutable snapshot/,
+  "changing a factual visual's source snapshot must fail before the scene compiler receives it",
+);
 assert.equal(
   assertSceneCompilerAdmission({
     manifest: bridgedFactual.sceneManifest,

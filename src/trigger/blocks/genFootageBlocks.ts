@@ -24,6 +24,7 @@ import { reviewCinematicKeyframe } from "@/lib/cinematicKeyframeGate";
 import { reviewCinematicClip } from "@/lib/cinematicClipGate";
 import { reviewCinematicTransition } from "@/lib/cinematicTransitionGate";
 import { LtxCreativeAdapterSelectionSchema } from "@/lib/ltxCreativeAdapter";
+import { resolveApprovedSourceProofMedia } from "@/lib/sourceProofMedia";
 import { FAMILIES } from "@/engine/families";
 import { SceneManifestSchema } from "@/engine/episodeGraph";
 import { StorySpineSchema, type ShotPlan, validateStorySpine } from "@/engine/storySpine";
@@ -33,6 +34,10 @@ import {
   GENERATED_FOOTAGE_SCENE_MANIFEST_VERSION,
   GeneratedFootageSceneManifestSchema,
 } from "@/engine/generatedFootageManifest";
+import type {
+  SourceProofMediaObligation,
+  SourceProofMediaReceipt,
+} from "@/engine/sourceProofMedia";
 import { COST_PATCH_KEY } from "@/engine/types";
 
 /** Ordered pool (same as narratedBlocks.mapPool â€” local copy, no cross-import). */
@@ -100,6 +105,10 @@ export interface PlannedScene {
   t1?: number;
   /** Reused by the independent still gate to compare recurring mannequins. */
   continuityIds?: string[];
+  /** Exact sealed cast allowed in a Casefile render; [] permits no people/mannequins. */
+  expectedCastIds?: string[];
+  /** Casefile scenes cannot add bystanders, background people, or mannequins. */
+  forbidAdditionalPeople?: true;
   /** Stable image prior emitted from the reviewer-approved cinematic sequence. */
   continuitySeed?: number;
   /** Literal causal/camera obligations that the first frame must visibly meet. */
@@ -132,6 +141,8 @@ export interface PlannedScene {
    * above.
    */
   realImageInsertQuery?: string;
+  /** Exact approved external evidence asset; never sent to LTX. */
+  sourceProofMedia?: SourceProofMediaObligation;
   /**
    * EVIDENCE OVERLAY selection (Phase 18 Part A). Computed ONCE, up front,
    * across the whole shot list by `selectAutomaticEvidenceOverlayShots`
@@ -334,9 +345,12 @@ function scenePlanFromCinematicCaseSequence(
       t0: scene.t0,
       t1: scene.t1,
       continuityIds: scene.castIds,
+      expectedCastIds: scene.castIds,
+      forbidAdditionalPeople: true,
       continuitySeed: scene.continuitySeed,
       cutReason: scene.cutReason,
       tensionState: scene.tensionState,
+      ...(scene.sourceProofMedia ? { sourceProofMedia: scene.sourceProofMedia } : {}),
       keyframeRequirements: [
         `treatment ${scene.visualMode}`,
         `coverage ${scene.coveragePurpose}`,
@@ -626,9 +640,54 @@ export const genFootage: Block = {
     );
     ctx.log(`gen_footage: using ${plan.source} (${scenes.length} validated scene(s))`);
 
+    // Source-proof scenes are not generated visual prompts. Resolve their
+    // approved bytes before Novita is even considered, so a missing/changed
+    // source asset fails without buying a synthetic substitute.
+    const tmp = await makeRunTempDir(ctx.runId);
+    const sourceProofBySceneId = new Map<string, { localPath: string; receipt: SourceProofMediaReceipt }>();
+    if (plan.source === "cinematic_case_sequence") {
+      await pool(
+        scenes.filter((scene) => scene.sourceProofMedia !== undefined),
+        2,
+        async (scene) => {
+          const safeSceneId = scene.id.replace(/[^a-z0-9_-]/gi, "_");
+          const sourceProof = await resolveApprovedSourceProofMedia({
+            sceneId: scene.id,
+            sequenceFingerprint: plan.sequenceFingerprint!,
+            obligation: scene.sourceProofMedia,
+            durationSec: boundedSceneDuration(scene.durationSec, clipSec),
+            assetPath: join(tmp, `${safeSceneId}-source-proof-asset`),
+            clipPath: join(tmp, `${safeSceneId}-source-proof.mp4`),
+            clipKey: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/generated-footage/source-proof/${safeSceneId}.mp4`,
+            downloadAsset: downloadTo,
+            readBytes,
+            createEvidenceClip: kenBurns,
+            putEvidenceClip: async (key, bytes) => {
+              await putObject(key, bytes, { contentType: "video/mp4" });
+              return key;
+            },
+          });
+          sourceProofBySceneId.set(scene.id, sourceProof);
+          ctx.log(`gen_footage: ${scene.id} resolved approved source-proof asset ${sourceProof.receipt.obligation.assetId}; LTX bypassed`);
+        },
+      );
+    }
+    const ltxScenes = scenes.filter((scene) => scene.sourceProofMedia === undefined);
+    if (plan.source === "cinematic_case_sequence") {
+      for (const scene of ltxScenes) {
+        if (!Array.isArray(scene.expectedCastIds) || scene.forbidAdditionalPeople !== true) {
+          throw new Error(
+            `gen_footage: cinematic scene ${scene.id} is missing its sealed no-extra-people contract; refusing any LTX render`,
+          );
+        }
+      }
+    }
+
     const requestedConcurrency = Number(ctx.params["maxConcurrent"] ?? 3);
     const maxConcurrent = Math.min(8, Math.max(1, Math.floor(requestedConcurrency)));
-    const stageBudgetUsd = requireNovitaStageBudget(ctx.stageBudgetUsd, "gen_footage");
+    const stageBudgetUsd = ltxScenes.length > 0
+      ? requireNovitaStageBudget(ctx.stageBudgetUsd, "gen_footage")
+      : 0;
     if (plan.source === "cinematic_case_sequence") {
       const finalMasterQaAdmission = assertCinematicFinalMasterQaAdmission({
         admission: ctx.store["cinematicFinalMasterQaAdmission"],
@@ -716,7 +775,8 @@ export const genFootage: Block = {
           },
         }
       : undefined;
-    const rendered = await renderGeneratedScenePlanInBatches({
+    const rendered = ltxScenes.length > 0
+      ? await renderGeneratedScenePlanInBatches({
       prefix: `${ctx.keyPrefix.replace(/\/$/, "")}/runs/${ctx.runId}/generated-footage`,
       maxCostUsd: stageBudgetUsd,
       maxConcurrent,
@@ -732,7 +792,7 @@ export const genFootage: Block = {
       // visual engine (see src/engine/families.ts) — no channel-level style
       // override exists yet, so every run gets that family's default look.
       styleId: FAMILIES.cinematic.styleId,
-      scenes: scenes.map((scene) => ({
+      scenes: ltxScenes.map((scene) => ({
         // Preserve the admitted id: timeline_assemble later verifies that the
         // R2 clip order still matches this exact cinematic cut plan.
         id: scene.id,
@@ -755,18 +815,20 @@ export const genFootage: Block = {
         shotScale: scene.shotScale,
         lens: scene.lens,
         ...(scene.continuityIds?.length ? { continuityIds: scene.continuityIds } : {}),
+        ...(scene.expectedCastIds ? { expectedCastIds: scene.expectedCastIds } : {}),
+        ...(scene.forbidAdditionalPeople ? { forbidAdditionalPeople: true as const } : {}),
         ...(scene.continuitySeed !== undefined ? { seed: scene.continuitySeed } : {}),
         ...(scene.keyframeRequirements?.length ? { keyframeRequirements: scene.keyframeRequirements } : {}),
         ...(creativeAdapter ? { creativeAdapter } : {}),
       })),
-    });
+      })
+      : { scenes: [] as Awaited<ReturnType<typeof renderNovitaGeneratedScenes>>["scenes"], costUsd: 0 };
     if (
-      rendered.scenes.length !== scenes.length ||
-      rendered.scenes.some((scene, index) => scene.id !== scenes[index]?.id)
+      rendered.scenes.length !== ltxScenes.length ||
+      rendered.scenes.some((scene, index) => scene.id !== ltxScenes[index]?.id)
     ) {
-      throw new Error("gen_footage: Novita completion no longer matches the admitted generated-scene order");
+      throw new Error("gen_footage: Novita completion no longer matches the admitted non-source-proof scene order");
     }
-    const tmp = await makeRunTempDir(ctx.runId);
     // Theme-consistent accent color for the name-card overlay below: the
     // channel's own locked Style DNA palette/color-grade, the same source
     // storySpine.ts already reads for its `styleLock` prompt clause. Neither
@@ -778,7 +840,17 @@ export const genFootage: Block = {
     // the real signal already available at this exact call site.
     const nameCardAccentColor = dna?.palette?.[0] || dna?.colorGrade || undefined;
     try {
-      const clips = await pool(rendered.scenes, 3, async (scene, index) => {
+      const renderedBySceneId = new Map(rendered.scenes.map((scene) => [scene.id, scene]));
+      const clips = await pool(scenes, 3, async (plannedScene, index) => {
+        const sourceProof = sourceProofBySceneId.get(plannedScene.id);
+        if (sourceProof) {
+          ctx.log(`gen_footage: scene ${index + 1}/${scenes.length} using approved source-proof media; no LTX output exists for this shot`);
+          return sourceProof.localPath;
+        }
+        const scene = renderedBySceneId.get(plannedScene.id);
+        if (!scene) {
+          throw new Error(`gen_footage: missing LTX result for admitted scene ${plannedScene.id}`);
+        }
         // REAL-IMAGE INSERT (Phase 18 Part B, automatic path only). Resolved
         // BEFORE any LTX download: when this scene carries
         // ShotPlanSchema.realImageInsertQuery (src/engine/storySpine.ts), a
@@ -788,7 +860,7 @@ export const genFootage: Block = {
         // name-card/evidence-overlay passes below; every shot without this
         // field downloads the generated clip exactly as before (default
         // behavior unchanged).
-        const realImageInsertQuery = plan.source === "story_spine" ? scenes[index]?.realImageInsertQuery : undefined;
+        const realImageInsertQuery = plan.source === "story_spine" ? plannedScene.realImageInsertQuery : undefined;
         let rawPath: string;
         if (realImageInsertQuery) {
           try {
@@ -800,10 +872,10 @@ export const genFootage: Block = {
             rawPath = await kenBurns(
               stillPath,
               join(tmp, `gen_${index}_realimage.mp4`),
-              boundedSceneDuration(scenes[index]?.durationSec ?? clipSec, clipSec),
+              boundedSceneDuration(plannedScene.durationSec, clipSec),
             );
             ctx.log(
-              `gen_footage: scene ${index + 1}/${rendered.scenes.length} used a real Wikimedia image for ` +
+              `gen_footage: scene ${index + 1}/${scenes.length} used a real Wikimedia image for ` +
               `"${realImageInsertQuery}" instead of the generated clip (${image.attribution})`,
             );
           } catch (e) {
@@ -827,7 +899,7 @@ export const genFootage: Block = {
         const nameCardText = plan.source === "story_spine" ? scenes[index]?.nameCardText : undefined;
         let namedPath = rawPath;
         if (!nameCardText) {
-          ctx.log(`gen_footage: scene ${index + 1}/${rendered.scenes.length} complete`);
+          ctx.log(`gen_footage: scene ${index + 1}/${scenes.length} complete`);
         } else {
           try {
             const cardPath = join(tmp, `gen_${index}_namecard.mp4`);
@@ -836,11 +908,11 @@ export const genFootage: Block = {
               // `scene` here is the Novita render RESPONSE (clipUrl/clipKey/
               // reviews) — the authored duration lives on the matching
               // PlannedScene input this response was rendered from.
-              durationSec: scenes[index]?.durationSec ?? clipSec,
+              durationSec: plannedScene.durationSec,
               accentColor: nameCardAccentColor,
             });
             namedPath = cardPath;
-            ctx.log(`gen_footage: scene ${index + 1}/${rendered.scenes.length} complete (name card applied)`);
+            ctx.log(`gen_footage: scene ${index + 1}/${scenes.length} complete (name card applied)`);
           } catch (e) {
             ctx.log(
               `gen_footage: name-card overlay failed on scene ${index + 1} (${e instanceof Error ? e.message : e}) — using the clip without it`,
@@ -859,7 +931,7 @@ export const genFootage: Block = {
         try {
           const overlayDurationSec = Math.max(
             1.2,
-            Math.min(2.2, (scenes[index]?.durationSec ?? clipSec) - 0.3),
+            Math.min(2.2, plannedScene.durationSec - 0.3),
           );
           const overlayClipPath = await renderOverlay({
             spec: {
@@ -877,7 +949,7 @@ export const genFootage: Block = {
             durationSec: overlayDurationSec,
           });
           ctx.log(
-            `gen_footage: scene ${index + 1}/${rendered.scenes.length} evidence overlay applied (${evidenceOverlay.templateId})`,
+            `gen_footage: scene ${index + 1}/${scenes.length} evidence overlay applied (${evidenceOverlay.templateId})`,
           );
           return overlaidPath;
         } catch (e) {
@@ -916,7 +988,7 @@ export const genFootage: Block = {
           });
           transitionToNextReviewByIndex.set(index, transition);
         }
-        ctx.log(`gen_footage: ${transitionToNextReviewByIndex.size} actual LTX cut transition(s) accepted`);
+        ctx.log(`gen_footage: ${transitionToNextReviewByIndex.size} actual cinematic cut transition(s) accepted`);
       }
       const generatedFootageSceneManifest = GeneratedFootageSceneManifestSchema.parse({
         version: GENERATED_FOOTAGE_SCENE_MANIFEST_VERSION,
@@ -926,26 +998,39 @@ export const genFootage: Block = {
         durationSec: plan.source === "cinematic_case_sequence"
           ? (scenes.at(-1)?.t1 ?? 0)
           : scenes.reduce((sum, scene) => sum + scene.durationSec, 0),
-        items: rendered.scenes.map((renderedScene, index) => ({
-          sceneId: scenes[index]!.id,
-          clipKey: renderedScene.clipKey,
-          ...(renderedScene.keyframeReview ? { keyframeReview: renderedScene.keyframeReview } : {}),
-          ...(renderedScene.terminalStillKey ? { terminalStillKey: renderedScene.terminalStillKey } : {}),
-          ...(renderedScene.terminalKeyframeReview
-            ? { terminalKeyframeReview: renderedScene.terminalKeyframeReview }
-            : {}),
-          ...(renderedScene.clipReview ? { clipReview: renderedScene.clipReview } : {}),
-          ...(transitionToNextReviewByIndex.has(index)
-            ? { transitionToNextReview: transitionToNextReviewByIndex.get(index)! }
-            : {}),
-          ...(scenes[index]!.t0 !== undefined ? { t0: scenes[index]!.t0 } : {}),
-          ...(scenes[index]!.t1 !== undefined ? { t1: scenes[index]!.t1 } : {}),
-          ...(scenes[index]!.continuitySeed !== undefined ? { continuitySeed: scenes[index]!.continuitySeed } : {}),
-        })),
+        items: scenes.map((plannedScene, index) => {
+          const sourceProof = sourceProofBySceneId.get(plannedScene.id);
+          const renderedScene = renderedBySceneId.get(plannedScene.id);
+          if (!sourceProof && !renderedScene) {
+            throw new Error(`gen_footage: manifest cannot find rendered output for ${plannedScene.id}`);
+          }
+          return {
+            sceneId: plannedScene.id,
+            clipKey: sourceProof?.receipt.clipKey ?? renderedScene!.clipKey,
+            ...(sourceProof ? { sourceProofMediaReceipt: sourceProof.receipt } : {}),
+            ...(renderedScene?.keyframeReview ? { keyframeReview: renderedScene.keyframeReview } : {}),
+            ...(renderedScene?.terminalStillKey ? { terminalStillKey: renderedScene.terminalStillKey } : {}),
+            ...(renderedScene?.terminalKeyframeReview
+              ? { terminalKeyframeReview: renderedScene.terminalKeyframeReview }
+              : {}),
+            ...(renderedScene?.clipReview ? { clipReview: renderedScene.clipReview } : {}),
+            ...(transitionToNextReviewByIndex.has(index)
+              ? { transitionToNextReview: transitionToNextReviewByIndex.get(index)! }
+              : {}),
+            ...(plannedScene.t0 !== undefined ? { t0: plannedScene.t0 } : {}),
+            ...(plannedScene.t1 !== undefined ? { t1: plannedScene.t1 } : {}),
+            ...(plannedScene.continuitySeed !== undefined ? { continuitySeed: plannedScene.continuitySeed } : {}),
+          };
+        }),
       });
-      const footageKeys = rendered.scenes.map((scene) => scene.clipKey);
+      const footageKeys = scenes.map((scene) => {
+        const sourceProof = sourceProofBySceneId.get(scene.id);
+        const renderedScene = renderedBySceneId.get(scene.id);
+        if (!sourceProof && !renderedScene) throw new Error(`gen_footage: missing durable footage key for ${scene.id}`);
+        return sourceProof?.receipt.clipKey ?? renderedScene!.clipKey;
+      });
       ctx.log(
-        `gen_footage: ${clips.length} Novita Z-Image/LTX clip(s), ` +
+        `gen_footage: ${ltxScenes.length} Novita Z-Image/LTX clip(s) + ${sourceProofBySceneId.size} approved source-proof clip(s), ` +
         `provider receipt $${rendered.costUsd.toFixed(4)}`,
       );
       return {

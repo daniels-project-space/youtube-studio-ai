@@ -9,8 +9,18 @@ type Episode = {
   status: string;
   updatedAt: number;
   workflow?: {
-    cinematicDraft?: { sequenceContentFingerprint?: string };
+    cinematicDraft?: {
+      sequenceContentFingerprint?: string;
+      content?: {
+        beats?: Array<{
+          shots?: Array<{ id?: string; visualMode?: string; sourceProofMedia?: unknown }>;
+        }>;
+      };
+    };
     cinematicAdmission?: { generatedSceneCount?: number; release?: string };
+    referenceMechanicsPacket?: { contentFingerprint?: string; release?: string };
+    sourceBoundStorySpine?: { storySpineFingerprint?: string; release?: string };
+    narrativeEvidenceLedger?: { contentFingerprint?: string; release?: string };
   };
 };
 
@@ -51,6 +61,57 @@ function parsePlanning(raw: string): { sceneManifest: Record<string, unknown>; s
   return { sceneManifest: parsed.sceneManifest as Record<string, unknown>, shotList: parsed.shotList };
 }
 
+function requiredClaims(input: Record<string, unknown>): unknown[] {
+  if (!Array.isArray(input.claims)) throw new Error("Narrative evidence annotations need a claims array");
+  return input.claims;
+}
+
+function requiredRelations(value: unknown): unknown[] {
+  if (!Array.isArray(value)) throw new Error("Narrative evidence relations must be an array when supplied");
+  return value;
+}
+
+const sourceProofAttachmentFields = [
+  "shotId",
+  "sourceId",
+  "assetId",
+  "rightsEvidenceLocator",
+  "assetUrl",
+  "assetSha256",
+  "approvalReceiptId",
+] as const;
+
+function parseSourceProofAttachments(raw: string): Record<string, unknown>[] {
+  let parsed: unknown;
+  try {
+    parsed = JSON.parse(raw);
+  } catch {
+    throw new Error("Source-proof media attachments must be valid JSON array");
+  }
+  if (!Array.isArray(parsed)) throw new Error("Source-proof media attachments must be a JSON array");
+  return parsed.map((attachment, index) => {
+    if (!attachment || typeof attachment !== "object" || Array.isArray(attachment)) {
+      throw new Error(`Source-proof attachment ${index + 1} must be an object`);
+    }
+    const input = attachment as Record<string, unknown>;
+    const unexpectedFields = Object.keys(input).filter(
+      (key) => !sourceProofAttachmentFields.includes(key as (typeof sourceProofAttachmentFields)[number]),
+    );
+    if (unexpectedFields.length) {
+      throw new Error(`Source-proof attachment ${index + 1} cannot include ${unexpectedFields.join(", ")}; packet/provenance fields are server-derived`);
+    }
+    const missingFields = sourceProofAttachmentFields.filter((key) => input[key] === undefined);
+    if (missingFields.length) throw new Error(`Source-proof attachment ${index + 1} is missing ${missingFields.join(", ")}`);
+    return input;
+  });
+}
+
+function hasAttachedSourceProofMedia(episode: Episode | null): boolean {
+  return Boolean(episode?.workflow?.cinematicDraft?.content?.beats?.some((beat) =>
+    beat.shots?.some((shot) => shot.visualMode === "source_proof" && shot.sourceProofMedia),
+  ));
+}
+
 /** Private editor desk for the immutable Casefile → cinematic render handoff. */
 export default function CasefilePage() {
   const [episodes, setEpisodes] = useState<Episode[]>([]);
@@ -58,7 +119,13 @@ export default function CasefilePage() {
   const [sourcePacket, setSourcePacket] = useState("");
   const [planning, setPlanning] = useState("");
   const [evidenceMap, setEvidenceMap] = useState("");
+  const [referenceMechanics, setReferenceMechanics] = useState("");
+  const [referenceMechanicsReview, setReferenceMechanicsReview] = useState("");
+  const [sourceBoundStorySpine, setSourceBoundStorySpine] = useState("");
+  const [narrativeEvidenceLedger, setNarrativeEvidenceLedger] = useState("");
+  const [narrativeEvidenceReview, setNarrativeEvidenceReview] = useState("");
   const [direction, setDirection] = useState("");
+  const [sourceProofMedia, setSourceProofMedia] = useState("");
   const [review, setReview] = useState("");
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
@@ -107,6 +174,7 @@ export default function CasefilePage() {
 
   const activeStage = stages.findIndex(([status]) => status === selected?.status);
   const actionDisabled = busy;
+  const sourceProofMediaAttached = hasAttachedSourceProofMedia(selected);
 
   return (
     <main style={{ maxWidth: 1240, margin: "0 auto", padding: "28px 22px 80px", display: "grid", gap: 18 }}>
@@ -114,7 +182,7 @@ export default function CasefilePage() {
         <p style={{ margin: 0, color: "#84a8ff", fontSize: 12, fontWeight: 700, letterSpacing: ".11em", textTransform: "uppercase" }}>Private editorial workflow</p>
         <h1 style={{ margin: 0, fontSize: 30 }}>Casefile cinematic desk</h1>
         <p style={{ margin: 0, maxWidth: 850, color: "#aeb9cb", lineHeight: 1.55 }}>
-          Build an evidence-led Fern-style sequence in two phases: lock real sources and causal shot coverage first, then approve the faceless-mannequin multi-shot treatment. This desk cannot render, spend, or publish.
+          Build an evidence-led cinematic sequence in two phases: lock real sources and causal shot coverage first, then approve the faceless-mannequin multi-shot treatment. This desk cannot render, spend, or publish.
         </p>
       </header>
 
@@ -164,6 +232,44 @@ export default function CasefilePage() {
           </>}
 
           {selected?.status === "awaiting_cinematic_direction" && <>
+            <section style={{ border: "1px solid #294468", borderRadius: 11, padding: 14, display: "grid", gap: 10, background: "rgba(17,37,62,.32)" }}>
+              <h2 style={{ margin: 0, fontSize: 17 }}>Optional: bind the reviewed narration and evidence ledger</h2>
+              <p style={{ margin: 0, color: "#b9c8da", fontSize: 13, lineHeight: 1.5 }}>
+                Use this stricter factual route only when the editor has reviewed the full timed Story Spine and a narrative-evidence ledger. The system binds every narration shot to the approved Casefile claims and sources, then carries the ledger through cinematic review and final QA. This desk cannot render, spend, or publish.
+              </p>
+              {selected.workflow?.sourceBoundStorySpine ? <>
+                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Source-bound Story Spine attached</strong>
+                {selected.workflow.sourceBoundStorySpine.storySpineFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.sourceBoundStorySpine.storySpineFingerprint}</code>}
+              </> : <>
+                <textarea aria-label="Source-bound Story Spine JSON" style={{ ...textarea, minHeight: 260 }} value={sourceBoundStorySpine} onChange={(event) => setSourceBoundStorySpine(event.target.value)} placeholder='{"version":"story-spine/v1", "timedScript": { ... }, "narrativeBeats": [ ... ], "shotList": [ ... ], ...}' />
+                <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("attach_source_bound_story_spine", { episodeId: selected._id, storySpine: parseObject(sourceBoundStorySpine, "Source-bound Story Spine") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze source-bound Story Spine</button>
+              </>}
+              {selected.workflow?.narrativeEvidenceLedger ? <>
+                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Reviewed Narrative Evidence Ledger attached</strong>
+                {selected.workflow.narrativeEvidenceLedger.contentFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.narrativeEvidenceLedger.contentFingerprint}</code>}
+                <small style={{ color: "#9eadc1" }}>It will be derived into the signed cinematic direction; replacing it requires a fresh Casefile revision.</small>
+              </> : <>
+                <textarea aria-label="Narrative evidence annotations JSON" style={{ ...textarea, minHeight: 260 }} value={narrativeEvidenceLedger} onChange={(event) => setNarrativeEvidenceLedger(event.target.value)} placeholder='{"claims":[{"id":"…", "approvedText":"…", "assertionState":"…", "confidence":"…", "uncertainty":{…}, "causalRole":"…", "supports":[{"sourceIds":[…], "upstreamClaimIds":[…]}], "allowedVisualTreatments":[…]}], "relations":[]}' />
+                <textarea aria-label="Narrative evidence editorial review JSON" style={{ ...textarea, minHeight: 110 }} value={narrativeEvidenceReview} onChange={(event) => setNarrativeEvidenceReview(event.target.value)} placeholder='{"reviewerId":"reviewer-…", "reviewId":"narrative-ledger-review-…", "reviewedAt":"2026-08-20T12:00:00.000Z"}' />
+                <button type="button" disabled={actionDisabled || !selected.workflow?.sourceBoundStorySpine} onClick={() => { try { const input = parseObject(narrativeEvidenceLedger, "Narrative evidence annotations"); void submit("attach_narrative_evidence_ledger", { episodeId: selected._id, claims: requiredClaims(input), ...(input.relations === undefined ? {} : { relations: requiredRelations(input.relations) }), review: parseObject(narrativeEvidenceReview, "Narrative evidence review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze Narrative Evidence Ledger</button>
+                {!selected.workflow?.sourceBoundStorySpine && <small style={{ color: "#f4c785" }}>Freeze the matching source-bound Story Spine first. This prevents a ledger from being attached to a different narration timeline.</small>}
+              </>}
+            </section>
+            <section style={{ border: "1px solid #294468", borderRadius: 11, padding: 14, display: "grid", gap: 10, background: "rgba(17,37,62,.32)" }}>
+              <h2 style={{ margin: 0, fontSize: 17 }}>Optional: attach reviewed reference mechanics</h2>
+              <p style={{ margin: 0, color: "#b9c8da", fontSize: 13, lineHeight: 1.5 }}>
+                Supply original craft rules for the opening, rhythm, narration, cuts, audio, recurring identity, and exclusions. This intake accepts text only—never reference video, frames, audio, scripts, or an automatic similarity comparison. The server derives the current attributed documentary contract and binds the packet to this exact Story Spine before it is frozen.
+              </p>
+              {selected.workflow?.referenceMechanicsPacket ? <>
+                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Reviewed mechanics packet attached</strong>
+                {selected.workflow.referenceMechanicsPacket.contentFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.referenceMechanicsPacket.contentFingerprint}</code>}
+                <small style={{ color: "#9eadc1" }}>It will be signed into the cinematic sequence; replacing it requires a fresh immutable episode revision.</small>
+              </> : <>
+                <textarea aria-label="Reference mechanics annotations JSON" style={{ ...textarea, minHeight: 260 }} value={referenceMechanics} onChange={(event) => setReferenceMechanics(event.target.value)} placeholder={'{\n  "openingPromisePayoff": { "guidance": "State one source-bound question, then earn its answer later.", "sourceIds": ["fern"] },\n  "beatVisualRhythm": { "guidance": "Change the visual only when the evidence relationship changes.", "sourceIds": ["fern"] },\n  "narrationPaceClarity": { "guidance": "Keep the causal claim legible before underscoring it.", "sourceIds": ["fern"] },\n  "cutSceneFunction": { "guidance": "Each cut reveals a fact, relationship, or consequence.", "sourceIds": ["fern"] },\n  "audioRelationship": { "guidance": "Keep narration intelligible over restrained ambience.", "sourceIds": ["fern"] },\n  "recurringIdentity": { "guidance": "Use this channel’s own faceless cast and evidence treatment.", "sourceIds": ["fern"] },\n  "exclusions": { "guidance": "No copied cases, visual identity, footage, scripts, voices, or unsupported reconstructions.", "sourceIds": ["fern"] }\n}'} />
+                <textarea aria-label="Reference mechanics editorial review JSON" style={{ ...textarea, minHeight: 110 }} value={referenceMechanicsReview} onChange={(event) => setReferenceMechanicsReview(event.target.value)} placeholder='{"id":"reference-mechanics-review-...","reviewerId":"reviewer-...","reviewedAt":"2026-08-20T12:00:00.000Z"}' />
+                <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("attach_reference_mechanics", { episodeId: selected._id, mechanics: parseObject(referenceMechanics, "Reference mechanics"), review: parseObject(referenceMechanicsReview, "Reference mechanics review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze reviewed mechanics packet</button>
+              </>}
+            </section>
             <h2 style={{ margin: 0, fontSize: 19 }}>4. Draft cinematic coverage</h2>
             <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13 }}>Paste the compact direction card: causal question, visual world, and original faceless mannequin wardrobe/silhouette locks. The system writes the actual multi-shot, tension, cut, and continuity draft.</p>
             <textarea aria-label="Cinematic direction JSON" style={textarea} value={direction} onChange={(event) => setDirection(event.target.value)} placeholder='{"version":"cinematic-case-direction/v1", ...}' />
@@ -174,6 +280,19 @@ export default function CasefilePage() {
             <h2 style={{ margin: 0, fontSize: 19 }}>5. Finalize cinematic review</h2>
             <p style={{ margin: 0, color: "#aeb9cb", fontSize: 13 }}>The editor review must bind the current source packet, evidence map, and draft sequence fingerprint. Any wardrobe, timing, claim, or cut change requires a new review.</p>
             {selected.workflow?.cinematicDraft?.sequenceContentFingerprint && <code style={{ color: "#9fc0ff", overflowWrap: "anywhere" }}>{selected.workflow.cinematicDraft.sequenceContentFingerprint}</code>}
+            <section style={{ border: "1px solid #294468", borderRadius: 11, padding: 14, display: "grid", gap: 10, background: "rgba(17,37,62,.32)" }}>
+              <h3 style={{ margin: 0, fontSize: 16 }}>Bind approved source-proof media</h3>
+              <p style={{ margin: 0, color: "#b9c8da", fontSize: 13, lineHeight: 1.5 }}>
+                For every source-proof shot, attach the exact approved asset, rights locator, SHA-256, and approval receipt. The server derives the source packet and provenance binding; this desk cannot substitute a different source or approve generated evidence.
+              </p>
+              {sourceProofMediaAttached ? <>
+                <strong style={{ color: "#9be2b3", fontSize: 13 }}>Approved source-proof media are frozen into this review draft</strong>
+                <small style={{ color: "#9eadc1" }}>Replacing an asset requires a fresh immutable Casefile revision and a new cinematic review.</small>
+              </> : <>
+                <textarea aria-label="Source-proof media attachments JSON" style={{ ...textarea, minHeight: 220 }} value={sourceProofMedia} onChange={(event) => setSourceProofMedia(event.target.value)} placeholder={'[{\n  "shotId": "cinematic-shot-…",\n  "sourceId": "source-…",\n  "assetId": "asset-…",\n  "rightsEvidenceLocator": "https://…",\n  "assetUrl": "https://…",\n  "assetSha256": "…",\n  "approvalReceiptId": "source-proof-receipt-…"\n}]'} />
+                <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("attach_source_proof_media", { episodeId: selected._id, attachments: parseSourceProofAttachments(sourceProofMedia) }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Freeze approved source-proof media</button>
+              </>}
+            </section>
             <textarea aria-label="Cinematic editorial review JSON" style={textarea} value={review} onChange={(event) => setReview(event.target.value)} placeholder='{"id":"cinematic-sequence-review-...", "decision":"approved", ...}' />
             <button type="button" disabled={actionDisabled} onClick={() => { try { void submit("finalize_cinematic_sequence", { episodeId: selected._id, editorialReview: parseObject(review, "Cinematic review") }); } catch (error) { setMessage(error instanceof Error ? error.message : String(error)); } }}>Finalize render package</button>
           </>}

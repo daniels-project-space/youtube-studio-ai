@@ -29,6 +29,11 @@ assert.match(
 );
 assert.match(
   source,
+  /assertCinematicFinalMasterAudioAesthetics\(\s*ctx\.params\["audioQa"\],\s*audioAestheticScore,\s*\)/,
+  "a source-bound cinematic master must not substitute loudness-only evidence when final-mix aesthetics scoring is unavailable",
+);
+assert.match(
+  source,
   /const narrationTranscriptText = items\.map\(speakOf\)\.join\(" "\)/,
   "chapter-mode narration proof must bind to the actual spoken headings and body, not display text",
 );

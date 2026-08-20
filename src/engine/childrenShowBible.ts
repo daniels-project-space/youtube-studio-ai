@@ -4,6 +4,7 @@ import { z } from "zod";
 
 import {
   assertEpisodeGraph,
+  assertSceneManifestMatchesEpisodeGraph,
   episodeGraphFingerprint,
   type EpisodeGraph,
 } from "./episodeGraph";
@@ -212,6 +213,180 @@ export type ChildrenShowBibleInput = z.infer<typeof ChildrenShowBibleInputSchema
 export type ChildrenShowBible = z.infer<typeof ChildrenShowBibleSchema>;
 export type ChildrenShowBibleApprovalReceipt = z.infer<typeof ChildrenShowBibleApprovalReceiptSchema>;
 export type ChildrenStoryPatternKind = z.infer<typeof ChildrenStoryPatternKindSchema>;
+export type ChildrenStoryPatternStep = z.infer<typeof ChildrenStoryPatternStepSchema>;
+
+type ChildrenLearningExperienceBible = Pick<
+  ChildrenShowBibleInput,
+  "identity" | "learningObjective" | "storyPattern"
+>;
+
+type ChildrenLearningMoment = {
+  beatId: string;
+  text: string;
+  characterIds: readonly string[];
+  settingId?: string;
+};
+
+function normalizedPrompt(value: string): string {
+  return value
+    .toLowerCase()
+    .replace(/[^a-z0-9]+/g, " ")
+    .trim()
+    .replace(/\s+/g, " ");
+}
+
+function assertPromptAppearsInStage(args: {
+  stage: ChildrenStoryPatternStep;
+  prompt: string | undefined;
+  label: "participation" | "resolution/recall";
+  guideIds: ReadonlySet<string>;
+  moments: readonly ChildrenLearningMoment[];
+  surface: "Episode Graph" | "Scene Manifest";
+}): void {
+  const prompt = args.prompt ? normalizedPrompt(args.prompt) : "";
+  if (!prompt) {
+    throw new Error(`children_learning_experience: ${args.label} has no declared prompt`);
+  }
+  const stageMoments = args.moments.filter((moment) => args.stage.episodeBeatIds.includes(moment.beatId));
+  if (!stageMoments.length) {
+    throw new Error(
+      `children_learning_experience: ${args.label} has no ${args.surface} moment for its approved story-stage beats`,
+    );
+  }
+  const promptedMoments = stageMoments.filter((moment) => normalizedPrompt(moment.text).includes(prompt));
+  if (!promptedMoments.length) {
+    throw new Error(
+      `children_learning_experience: ${args.label} must say its exact approved prompt in timed ${args.surface} text`,
+    );
+  }
+  if (!promptedMoments.some((moment) => moment.characterIds.some((id) => args.guideIds.has(id)))) {
+    const article = args.surface === "Episode Graph" ? "an" : "a";
+    throw new Error(
+      `children_learning_experience: ${args.label} prompt must be delivered in ${article} ${args.surface} moment containing a declared original guide`,
+    );
+  }
+}
+
+/**
+ * Proves that a supervised children episode contains the approved invitation
+ * and retrieval cue in its actual timed presentation—not solely in the Show
+ * Bible metadata—and that its original guide/world still reach that plan.
+ *
+ * It is intentionally provider-free and can run both when the Show Bible is
+ * admitted (Graph) and at the final child-safety boundary (Scene Manifest).
+ */
+export function assertChildrenLearningExperience(args: {
+  showBible: ChildrenLearningExperienceBible;
+  episodeGraph: unknown;
+  lessonContract: unknown;
+  sceneManifest?: unknown;
+}): void {
+  const graph = assertEpisodeGraph(args.episodeGraph);
+  const lessonContract = assertLearningContract(args.lessonContract, graph);
+  const charactersById = new Map(graph.characters.map((character) => [character.id, character]));
+  const settingsById = new Map(graph.settings.map((setting) => [setting.id, setting]));
+
+  const world = settingsById.get(args.showBible.identity.world.settingId);
+  if (
+    !world ||
+    world.displayName !== args.showBible.identity.world.displayName ||
+    world.continuityLock !== args.showBible.identity.world.continuityLock
+  ) {
+    throw new Error("children_learning_experience: original world does not match the active Episode Graph catalog");
+  }
+  for (const character of args.showBible.identity.recurringCharacters) {
+    const active = charactersById.get(character.characterId);
+    if (
+      !active ||
+      active.displayName !== character.displayName ||
+      active.continuityLock !== character.continuityLock
+    ) {
+      throw new Error(
+        `children_learning_experience: original recurring character ${character.characterId} does not match the active Episode Graph catalog`,
+      );
+    }
+  }
+
+  const guideIds = new Set(
+    args.showBible.identity.recurringCharacters
+      .filter((character) => character.role === "guide")
+      .map((character) => character.characterId),
+  );
+  if (!guideIds.size) {
+    throw new Error("children_learning_experience: no declared original guide character is available for the learning moments");
+  }
+
+  const graphMoments: ChildrenLearningMoment[] = graph.beats.map((beat) => ({
+    beatId: beat.id,
+    text: beat.text,
+    characterIds: beat.characterIds,
+    ...(beat.settingId ? { settingId: beat.settingId } : {}),
+  }));
+  const surfaces: Array<{ name: "Episode Graph" | "Scene Manifest"; moments: readonly ChildrenLearningMoment[] }> = [
+    { name: "Episode Graph", moments: graphMoments },
+  ];
+  if (args.sceneManifest !== undefined) {
+    const manifest = assertSceneManifestMatchesEpisodeGraph(args.sceneManifest, graph);
+    surfaces.push({
+      name: "Scene Manifest",
+      moments: manifest.scenes.map((scene) => ({
+        beatId: scene.beatId,
+        text: scene.text,
+        characterIds: scene.characterIds,
+        ...(scene.settingId ? { settingId: scene.settingId } : {}),
+      })),
+    });
+  }
+
+  const participation = args.showBible.storyPattern.find((step) => step.kind === "participation");
+  const resolution = args.showBible.storyPattern.find((step) => step.kind === "resolution_recall");
+  if (!participation || !resolution) {
+    throw new Error("children_learning_experience: approved story pattern must include participation and resolution/recall stages");
+  }
+  if (participation.participationPrompt !== args.showBible.learningObjective.assessment.prompt) {
+    throw new Error("children_learning_experience: participation prompt no longer matches the approved measurable assessment");
+  }
+  if (resolution.recallPrompt !== lessonContract.retrievalPractice.prompt) {
+    throw new Error("children_learning_experience: resolution/recall prompt no longer matches the active retrieval-practice contract");
+  }
+  for (const surface of surfaces) {
+    assertPromptAppearsInStage({
+      stage: participation,
+      prompt: args.showBible.learningObjective.assessment.prompt,
+      label: "participation",
+      guideIds,
+      moments: surface.moments,
+      surface: surface.name,
+    });
+    assertPromptAppearsInStage({
+      stage: resolution,
+      prompt: lessonContract.retrievalPractice.prompt,
+      label: "resolution/recall",
+      guideIds,
+      moments: surface.moments,
+      surface: surface.name,
+    });
+
+    for (const step of args.showBible.storyPattern) {
+      const stageMoments = surface.moments.filter((moment) => step.episodeBeatIds.includes(moment.beatId));
+      if (!stageMoments.some((moment) => moment.characterIds.some((id) => guideIds.has(id)))) {
+        throw new Error(
+          `children_learning_experience: no declared original guide appears in the ${step.kind} ${surface.name} stage`,
+        );
+      }
+    }
+    const worldStageCount = args.showBible.storyPattern.filter((step) =>
+      surface.moments
+        .filter((moment) => step.episodeBeatIds.includes(moment.beatId))
+        .some((moment) => moment.settingId === args.showBible.identity.world.settingId),
+    ).length;
+    if (worldStageCount < 3) {
+      throw new Error(
+        `children_learning_experience: original world is not carried through at least three ${surface.name} story stages`,
+      );
+    }
+  }
+}
 
 /** External seed keys required by a content lane before pipeline execution. */
 export function childrenShowBibleSeedKeys(contentLane: unknown): string[] {
@@ -842,6 +1017,11 @@ export function assertChildrenShowBible(
   const input = ChildrenShowBibleInputSchema.parse(args.input);
   const graph = assertEpisodeGraph(args.episodeGraph);
   const lessonContract = assertLearningContract(args.lessonContract, graph);
+  assertChildrenLearningExperience({
+    showBible: input,
+    episodeGraph: graph,
+    lessonContract,
+  });
   const contentFingerprint = childrenShowBibleContentFingerprint(input);
   const graphFingerprint = episodeGraphFingerprint(graph);
   const bible = ChildrenShowBibleSchema.parse({

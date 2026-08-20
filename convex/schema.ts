@@ -1330,6 +1330,26 @@ export default defineSchema({
     .index("by_owner_case_updated", ["ownerId", "caseId", "updatedAt"])
     .index("by_owner_updated", ["ownerId", "updatedAt"]),
 
+  // A reusable factual-evidence receipt, deliberately isolated from channel
+  // runs and Casefile.  The row is immutable after admission: it records the
+  // exact reviewer-bound packet that a separately supervised explainer may
+  // reference, and can never authorize rendering, provider spend, or publish.
+  editorialEvidencePackets: defineTable({
+    ownerId: v.string(),
+    subject: v.string(),
+    contentFingerprint: v.string(),
+    reviewerId: v.string(),
+    reviewId: v.string(),
+    reviewedAt: v.string(),
+    release: v.literal("private_human_editorial_review_only"),
+    requiresHumanEditorialReview: v.literal(true),
+    packet: v.any(),
+    createdAt: v.number(),
+  })
+    .index("by_owner_review", ["ownerId", "reviewId"])
+    .index("by_owner_content", ["ownerId", "contentFingerprint"])
+    .index("by_owner_created", ["ownerId", "createdAt"]),
+
   // SPEND LEDGER for the automatic Casefile case-research path
   // (`src/engine/casefileCaseResearcher.ts`'s `researchCase()`, dispatched by
   // `generation-scheduler`). That call spends real money — one live

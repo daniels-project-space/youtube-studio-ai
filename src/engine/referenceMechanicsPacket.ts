@@ -61,6 +61,25 @@ export const ReferenceMechanicsPacketContentSchema = z.object({
 }).strict();
 export type ReferenceMechanicsPacketContent = z.infer<typeof ReferenceMechanicsPacketContentSchema>;
 
+/**
+ * The only human-authored surface accepted by the private Casefile desk.
+ * Source attribution, policies, and fingerprints are always derived from the
+ * current ReferenceQuality contract server-side; this prevents an intake from
+ * smuggling copied media, a different reference set, or a comparison mode
+ * into an otherwise approved mechanics packet.
+ */
+export const ReferenceMechanicsAnnotationSchema = ReferenceMechanicsPacketContentSchema.omit({
+  version: true,
+  family: true,
+  referenceQualityFingerprint: true,
+  storySpineShotPlanFingerprint: true,
+  comparisonPolicy: true,
+  imitationPolicy: true,
+  sourceDocument: true,
+  sources: true,
+}).strict();
+export type ReferenceMechanicsAnnotation = z.infer<typeof ReferenceMechanicsAnnotationSchema>;
+
 export const ReferenceMechanicsEditorialReviewSchema = z.object({
   id: identifier("reference-mechanics-review"),
   decision: z.literal("approved"),
@@ -71,6 +90,14 @@ export const ReferenceMechanicsEditorialReviewSchema = z.object({
   reviewedPacketFingerprint: sha256,
 }).strict();
 export type ReferenceMechanicsEditorialReview = z.infer<typeof ReferenceMechanicsEditorialReviewSchema>;
+
+/** The editor supplies only their identity and review time; all bound hashes are server-derived. */
+export const ReferenceMechanicsReviewDraftSchema = ReferenceMechanicsEditorialReviewSchema.pick({
+  id: true,
+  reviewerId: true,
+  reviewedAt: true,
+}).strict();
+export type ReferenceMechanicsReviewDraft = z.infer<typeof ReferenceMechanicsReviewDraftSchema>;
 
 export const ReferenceMechanicsPacketSchema = ReferenceMechanicsPacketContentSchema.extend({
   contentFingerprint: sha256,
@@ -217,21 +244,14 @@ export function assertCurrentReferenceMechanicsPacket(args: {
 export function createReferenceMechanicsPacket(args: {
   referenceQuality: ReferenceQualityContract;
   shotList: unknown;
-  mechanics: Omit<
-    ReferenceMechanicsPacketContent,
-    | "version"
-    | "family"
-    | "referenceQualityFingerprint"
-    | "storySpineShotPlanFingerprint"
-    | "comparisonPolicy"
-    | "imitationPolicy"
-    | "sourceDocument"
-    | "sources"
-  >;
-  review: Pick<ReferenceMechanicsEditorialReview, "id" | "reviewerId" | "reviewedAt">;
+  /** Parsed at the boundary so an untrusted desk request cannot override contract fields. */
+  mechanics: unknown;
+  review: unknown;
   now?: Date;
 }): ReferenceMechanicsPacket {
   const shotList = ShotPlanSchema.array().min(1).max(2_000).parse(args.shotList);
+  const mechanics = ReferenceMechanicsAnnotationSchema.parse(args.mechanics);
+  const review = ReferenceMechanicsReviewDraftSchema.parse(args.review);
   const content = ReferenceMechanicsPacketContentSchema.parse({
     version: REFERENCE_MECHANICS_PACKET_VERSION,
     family: args.referenceQuality.family,
@@ -241,14 +261,14 @@ export function createReferenceMechanicsPacket(args: {
     imitationPolicy: "original-expression-only",
     sourceDocument: args.referenceQuality.sourceDocument,
     sources: args.referenceQuality.sources.map(sourceProjection),
-    ...args.mechanics,
+    ...mechanics,
   });
   const contentFingerprint = referenceMechanicsPacketContentFingerprint(content);
   return validateReferenceMechanicsPacket({
     ...content,
     contentFingerprint,
     editorialReview: {
-      ...args.review,
+      ...review,
       decision: "approved",
       reviewedReferenceQualityFingerprint: content.referenceQualityFingerprint,
       reviewedStorySpineShotPlanFingerprint: content.storySpineShotPlanFingerprint,

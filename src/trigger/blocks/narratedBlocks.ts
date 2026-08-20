@@ -70,6 +70,7 @@ import {
 import { createCinematicAssemblyHandoff } from "@/lib/assembly/cinematicHandoff";
 import { cinematicFinalMasterQaEvidence } from "@/engine/cinematicQaEvidence";
 import {
+  assertCinematicFinalMasterAudioAesthetics,
   assertCinematicFinalMasterQaAdmission,
   assertCinematicFinalMasterQaProfile,
 } from "@/engine/cinematicFinalMasterQaAdmission";
@@ -120,6 +121,7 @@ import { buildFootageQueries, castFootage, hasAnyFootageProvider, type FootageBr
 import { searchWikimediaImage } from "@/lib/wikimedia";
 import { makeRunTempDir, writeBytes, downloadTo, readBytes } from "@/lib/files";
 import { putObject, putObjectFromFile, getObjectBytes } from "@/lib/storage";
+import { assertSourceProofMediaClipBytes } from "@/lib/sourceProofMedia";
 import { buildChapters } from "@/lib/assemblyai";
 import {
   probe,
@@ -2267,7 +2269,16 @@ export const timelineAssemble: Block = {
       const cinematicPaths: string[] = [];
       for (const [index, item] of cinematicFootageManifest.items.entries()) {
         const local = join(tmp, `cinematic_source_${String(index).padStart(4, "0")}.mp4`);
-        await writeBytes(local, await getObjectBytes(item.clipKey));
+        const clipBytes = await getObjectBytes(item.clipKey);
+        if (item.sourceProofMediaReceipt) {
+          assertSourceProofMediaClipBytes({
+            receipt: item.sourceProofMediaReceipt,
+            sceneId: item.shotId,
+            sequenceFingerprint: cinematicFootageManifest.sequenceFingerprint,
+            bytes: clipBytes,
+          });
+        }
+        await writeBytes(local, clipBytes);
         cinematicPaths.push(local);
       }
       ctx.log(
@@ -2849,6 +2860,15 @@ export const qaVisual: Block = {
         ctx.log(`qa_visual: audio scoring skipped: ${e instanceof Error ? e.message : e}`);
       }
     }
+    if (cinematicQaArtifactsPresent) {
+      // Unlike a generic draft, a source-bound cinematic master has already
+      // reserved final-master review. Do not let a missing scorer result fall
+      // through to the loudness-only evidence branch below.
+      audioAestheticScore = assertCinematicFinalMasterAudioAesthetics(
+        ctx.params["audioQa"],
+        audioAestheticScore,
+      );
+    }
 
     const watchDna = ctx.store["styleDNA"] as
       | { recurringSubject?: string; setting?: string; motifs?: string[] }
@@ -3166,6 +3186,7 @@ export const qaVisual: Block = {
           sequence: cinematicSequenceInput!,
           creativeLocks: cinematicCreativeLocks!,
           editDecisionList: cinematicEdl!,
+          footageManifest: cinematicBinding.footageManifest,
           bodyOffsetSec: cinematicBodyOffsetSec,
         });
         cinematicFinalMasterQaReceipt = await reviewCinematicFinalMasterQaEvidence({

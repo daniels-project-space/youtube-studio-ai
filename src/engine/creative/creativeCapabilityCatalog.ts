@@ -22,10 +22,13 @@ import {
   type DataStoryContract,
 } from "../dataStory";
 
-export const CREATIVE_CAPABILITY_CATALOG_VERSION = "creative-capability-catalog/v1" as const;
+// Bump whenever an offer changes so a cached browser cannot submit a selection
+// against a less restrictive catalog.
+export const CREATIVE_CAPABILITY_CATALOG_VERSION = "creative-capability-catalog/v2" as const;
 
 export type CreativeCapabilityKey =
   | "source_attributed_data_story"
+  | "editorial_evidence_packet"
   | "casefile_cinematic"
   | "children_show_bible";
 
@@ -97,6 +100,36 @@ export interface CreativeCapabilityDefinition {
   materialize: (intent: CreativeCapabilityIntent, family: FamilyKey) => CreativeCapabilityOffer;
 }
 
+/** A selected capability resolved from the current server-owned catalog. */
+export interface ResolvedCreativeCapabilitySelection {
+  selection: CreativeCapabilitySelection;
+  offer: CreativeCapabilityOffer;
+}
+
+/**
+ * A single materialized admission layer that prevents automatic channel
+ * creation. Capabilities own the default admission; an individual module may
+ * make that admission stricter for a specific review stage.
+ */
+export interface CreativeCapabilityAutomaticBuildBlocker {
+  selection: CreativeCapabilitySelection;
+  offer: CreativeCapabilityOffer;
+  admission: CreativeCapabilityAdmission;
+  /** Omitted when the capability-level admission is the blocking layer. */
+  block?: string;
+}
+
+/**
+ * Server-safe result for the boundary that may reserve spend or dispatch a
+ * build. Selection eligibility and automatic-build eligibility are separate:
+ * an explicit opt-in can legitimately compile as a draft while still being
+ * barred from an automatic paid run until its evidence admission is ready.
+ */
+export interface CreativeCapabilityAutomaticBuildAdmission {
+  autonomous: boolean;
+  blockers: readonly CreativeCapabilityAutomaticBuildBlocker[];
+}
+
 const CASEFILE_CINEMATIC_SIGNALS = [
   "true crime",
   "casefile",
@@ -111,6 +144,20 @@ const CASEFILE_CINEMATIC_SIGNALS = [
   "historical crime",
   "factual reconstruction",
   "documentary reconstruction",
+  // The Casefile evidence chain is not crime-specific. These are all existing
+  // supervised Casefile kinds; exposing them here expands discovery without
+  // inventing a renderer or relaxing source/editorial admission.
+  "systems failure",
+  "system failure",
+  "engineering failure",
+  "industrial disaster",
+  "historical disaster",
+  "aviation disaster",
+  "aviation accident",
+  "financial fraud",
+  "corporate fraud",
+  "company scandal",
+  "corporate scandal",
 ] as const;
 
 const CASEFILE_SOURCE_REQUIREMENTS = [
@@ -128,6 +175,40 @@ const CASEFILE_SHOT_MAP_REQUIREMENTS = [
 const CASEFILE_SEQUENCE_REQUIREMENTS = [
   "admitted evidence-shot map",
   "reviewer-signed causal multi-shot sequence with faceless mannequin wardrobe, prop, era, and location continuity locks",
+] as const;
+
+const EDITORIAL_EVIDENCE_PACKET_SIGNALS = [
+  "factual explainer",
+  "fact based",
+  "fact-based",
+  "source based",
+  "source-based",
+  "source led",
+  "source-led",
+  "evidence based",
+  "evidence-led",
+  "research-backed",
+  "historical",
+  "history",
+  "geography",
+  "science",
+  "scientific",
+  "how it works",
+  "real world",
+  "real-world",
+  "systems explained",
+  "data driven",
+  "data-driven",
+  "statistics",
+  "documentary",
+  "true story",
+  "biography",
+] as const;
+
+const EDITORIAL_EVIDENCE_PACKET_REQUIREMENTS = [
+  "reviewed Editorial Evidence Packet with named sources, approved claims, and immutable source snapshots",
+  "fresh human-editorial approval bound to the packet fingerprint",
+  "reviewed map, chart, or factual visual manifests bound to the same source URL and snapshot before Episode Graph compilation",
 ] as const;
 
 const CHILDREN_SHOW_REQUIREMENTS = [
@@ -160,6 +241,23 @@ export function isCasefileCinematicIntent(
   const intent = normalizedIntent(input);
   if (/\b(fictional|fiction|screenplay|original story)\b/.test(intent)) return false;
   return CASEFILE_CINEMATIC_SIGNALS.some((signal) => intent.includes(signal));
+}
+
+/**
+ * Factual illustrated work is deliberately distinct from the existing
+ * fictional/no-external-claims illustrated lane. It may use the same local
+ * scene compiler only after a reviewer has bound its factual visual inputs.
+ */
+export function isReviewedFactualIllustratedExplainerIntent(
+  input: CreativeCapabilityIntent,
+  family: FamilyKey,
+): boolean {
+  if (family !== "illustrated_explainer") return false;
+  const intent = normalizedIntent(input);
+  if (/\b(fictional|fiction|original story|made up|made-up|hypothetical|thought experiment|scenario)\b/.test(intent)) {
+    return false;
+  }
+  return EDITORIAL_EVIDENCE_PACKET_SIGNALS.some((signal) => intent.includes(signal));
 }
 
 function sourceAttributedDataStoryOffer(
@@ -208,6 +306,36 @@ function sourceAttributedDataStoryOffer(
         },
       },
     ],
+  };
+}
+
+function editorialEvidencePacketOffer(): CreativeCapabilityOffer {
+  const admission: CreativeCapabilityAdmission = {
+    autonomous: false,
+    blockers: ["Factual illustrated-explainer evidence admission is private human-editorial review only."],
+    remediation:
+      "Supply a reviewed Editorial Evidence Packet, then bind every factual map, chart, or visual to its exact source URL and immutable snapshot before Episode Graph compilation.",
+  };
+  return {
+    capability: "editorial_evidence_packet",
+    title: "Reviewed factual illustrated explainer",
+    description:
+      "A private factual-explainer intake: reviewed sources, claims, and immutable snapshots must bind the maps, charts, and scene evidence before the deterministic scene compiler is allowed to receive them.",
+    selectionMode: "private_review_only",
+    modules: [{
+      block: "editorial_evidence_packet",
+      profile: "editorial-evidence-packet/v1",
+      automationAdmission: admission,
+      requirements: EDITORIAL_EVIDENCE_PACKET_REQUIREMENTS,
+      qualityFocus: ["factual source-to-visual traceability", "immutable snapshot integrity", "human-reviewed causal explanation"],
+    }],
+    automationAdmission: admission,
+    requirements: EDITORIAL_EVIDENCE_PACKET_REQUIREMENTS,
+    qualityFocus: ["factual source-to-visual traceability", "immutable snapshot integrity", "human-reviewed causal explanation"],
+    reviewHref: "/editorial-evidence",
+    // This is an editorial intake, not a compiler mutation. The packet is
+    // supplied to the supervised episode-graph path only after review.
+    pipelineObligations: [],
   };
 }
 
@@ -296,6 +424,13 @@ export const CREATIVE_CAPABILITY_CATALOG: readonly CreativeCapabilityDefinition[
     selectionMode: "explicit_opt_in",
     matches: (intent, family) => dataStoryRecommendationForIntent(intent, family).length > 0,
     materialize: sourceAttributedDataStoryOffer,
+  },
+  {
+    capability: "editorial_evidence_packet",
+    supportedFamilies: ["illustrated_explainer"],
+    selectionMode: "private_review_only",
+    matches: isReviewedFactualIllustratedExplainerIntent,
+    materialize: () => editorialEvidencePacketOffer(),
   },
   {
     capability: "casefile_cinematic",
@@ -417,7 +552,7 @@ export interface ValidateCreativeCapabilitySelectionsInput {
  */
 export function validateCreativeCapabilitySelections(
   input: ValidateCreativeCapabilitySelectionsInput,
-): Array<{ selection: CreativeCapabilitySelection; offer: CreativeCapabilityOffer }> {
+): ResolvedCreativeCapabilitySelection[] {
   assertCreativeCapabilityCatalog();
   const selections = parseCreativeCapabilitySelections(input.selections);
   return selections.map((selection) => {
@@ -442,6 +577,42 @@ export function validateCreativeCapabilitySelections(
   });
 }
 
+/**
+ * Decides whether the already-resolved selected capabilities may cross the
+ * automatic build boundary. This deliberately evaluates materialized
+ * admissions rather than selectionMode: explicit opt-in means a creator may
+ * request the capability, not that it may reserve spend or dispatch a task.
+ *
+ * Modules only add a blocker when they explicitly tighten the offer-level
+ * admission. Modules without an override inherit the offer admission and must
+ * not produce duplicate remediation entries.
+ */
+export function assessCreativeCapabilityAutomaticBuildAdmission(
+  resolved: readonly ResolvedCreativeCapabilitySelection[],
+): CreativeCapabilityAutomaticBuildAdmission {
+  const blockers: CreativeCapabilityAutomaticBuildBlocker[] = [];
+  for (const item of resolved) {
+    if (!item.offer.automationAdmission.autonomous) {
+      blockers.push({
+        selection: item.selection,
+        offer: item.offer,
+        admission: item.offer.automationAdmission,
+      });
+    }
+    for (const creativeModule of item.offer.modules) {
+      if (creativeModule.automationAdmission && !creativeModule.automationAdmission.autonomous) {
+        blockers.push({
+          selection: item.selection,
+          offer: item.offer,
+          admission: creativeModule.automationAdmission,
+          block: creativeModule.block,
+        });
+      }
+    }
+  }
+  return { autonomous: blockers.length === 0, blockers };
+}
+
 function matchesRequiredParams(
   actual: Readonly<Record<string, unknown>> | undefined,
   expected: Readonly<Record<string, unknown>> | undefined,
@@ -460,12 +631,10 @@ function matchesRequiredParams(
  * Proves a selected opt-in is represented by the effective compiled pipeline,
  * rather than merely being displayed as an advisor suggestion.
  */
-export function assertCreativeCapabilityPipelineObligations(
-  family: FamilyKey,
-  selections: readonly CreativeCapabilitySelection[],
+export function assertResolvedCreativeCapabilityPipelineObligations(
+  resolved: readonly ResolvedCreativeCapabilitySelection[],
   pipeline: readonly Pick<PipelineEntry, "block" | "params">[],
 ): void {
-  const resolved = validateCreativeCapabilitySelections({ family, selections });
   for (const { selection, offer } of resolved) {
     for (const obligation of offer.pipelineObligations) {
       const entry = pipeline.find((candidate) => candidate.block === obligation.block);
@@ -481,6 +650,17 @@ export function assertCreativeCapabilityPipelineObligations(
       }
     }
   }
+}
+
+export function assertCreativeCapabilityPipelineObligations(
+  family: FamilyKey,
+  selections: readonly CreativeCapabilitySelection[],
+  pipeline: readonly Pick<PipelineEntry, "block" | "params">[],
+): void {
+  assertResolvedCreativeCapabilityPipelineObligations(
+    validateCreativeCapabilitySelections({ family, selections }),
+    pipeline,
+  );
 }
 
 /** Catalog integrity is checked before discovery and selection validation. */

@@ -1,9 +1,10 @@
 import { z } from "zod";
 
-export const CINEMATIC_CLIP_REVIEW_VERSION = "cinematic-clip-review/v1" as const;
+export const CINEMATIC_CLIP_REVIEW_VERSION = "cinematic-clip-review/v2" as const;
 export const CINEMATIC_CLIP_MIN_SCORE = 0.84;
 
 const score = z.number().finite().min(0).max(1);
+const mannequinId = z.string().regex(/^mannequin-[a-z0-9-]+$/);
 
 /**
  * Independent evidence that the three sampled frames of the actual LTX clip
@@ -15,6 +16,12 @@ export const CinematicClipReviewSchema = z.object({
   reviewer: z.literal("non_google_vision"),
   sceneId: z.string().regex(/^cinematic-shot-[a-z0-9-]+$/),
   sampleOffsetsSec: z.array(z.number().finite().nonnegative()).length(3),
+  /** Exact sealed cast permitted across the moving take; empty means no people. */
+  expectedCastIds: z.array(mannequinId).max(4),
+  /** No bystanders, background people, extra mannequins, or human stand-ins. */
+  forbidAdditionalPeople: z.literal(true),
+  /** Independent reviewer explicitly confirmed every sample contains only the sealed cast. */
+  onlyExpectedCastVisible: z.literal(true),
   semanticAlignment: score,
   motionIntegrity: score,
   continuity: score,
@@ -34,6 +41,8 @@ export function assertCinematicClipReview(value: unknown, expected: {
   sceneId: string;
   sampleOffsetsSec: readonly number[];
   terminalStillKey?: string;
+  expectedCastIds: readonly string[];
+  forbidAdditionalPeople: true;
 }): CinematicClipReview {
   const review = CinematicClipReviewSchema.parse(value);
   if (review.sceneId !== expected.sceneId) {
@@ -41,6 +50,13 @@ export function assertCinematicClipReview(value: unknown, expected: {
   }
   if (JSON.stringify(review.sampleOffsetsSec) !== JSON.stringify([...expected.sampleOffsetsSec])) {
     throw new Error(`cinematic clip review sample lineage does not match ${expected.sceneId}`);
+  }
+  const expectedCastIds = [...expected.expectedCastIds];
+  if (JSON.stringify(review.expectedCastIds) !== JSON.stringify(expectedCastIds)) {
+    throw new Error(`cinematic clip review cast contract does not match ${expected.sceneId}`);
+  }
+  if (review.forbidAdditionalPeople !== expected.forbidAdditionalPeople || !review.onlyExpectedCastVisible) {
+    throw new Error(`cinematic clip review did not affirm the no-extra-people contract for ${expected.sceneId}`);
   }
   if (expected.terminalStillKey) {
     if (review.terminalStillKey !== expected.terminalStillKey) {

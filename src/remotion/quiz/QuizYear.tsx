@@ -1,5 +1,6 @@
 import React from "react";
 import { AbsoluteFill, interpolate, spring, useCurrentFrame, useVideoConfig } from "remotion";
+import { quizCitationLabel } from "@/lib/quizCitation";
 
 /**
  * One quiz round, rendered as standard game-show multiple choice: four options
@@ -36,6 +37,8 @@ export interface QuizYearRound {
   subject: string;
   /** Short source description, shown small under the subject. */
   subtext?: string;
+  /** Compact source-derived explanation, required by current quiz release gate. */
+  revealExplanation?: string;
   /** Verifiable citation for the CORRECT option only. */
   sourceUrl: string;
   /** Seconds the viewer gets to answer. */
@@ -60,17 +63,7 @@ export function optionText(option: QuizYearOptionView): string {
  * 720p video frame, its host is the legible provenance cue; a raw long URL is
  * too small to read and otherwise gets ellipsized into meaningless text.
  */
-export function sourceCitationLabel(sourceUrl: string): string {
-  const raw = sourceUrl.trim();
-  try {
-    const host = new URL(raw).hostname.replace(/^www\./i, "");
-    if (host) return host;
-  } catch {
-    // Preserve a useful label for a legacy/non-URL source without inventing one.
-  }
-  const fallback = raw.replace(/^https?:\/\//i, "").split(/[/?#]/)[0]?.trim();
-  return fallback || "verified source";
-}
+export const sourceCitationLabel = quizCitationLabel;
 
 /**
  * Option tiles are sized to their content. A year is 4 glyphs; "Central African
@@ -368,7 +361,7 @@ const RoundView: React.FC<{
           >
             {round.subject}
           </div>
-          {round.subtext ? (
+          {(round.revealExplanation ?? round.subtext) ? (
             <div
               style={{
                 fontSize: 22,
@@ -377,7 +370,7 @@ const RoundView: React.FC<{
                 fontFamily: "Inter, Helvetica, Arial, sans-serif",
               }}
             >
-              {round.subtext}
+              {round.revealExplanation ?? round.subtext}
             </div>
           ) : null}
         </div>
@@ -464,9 +457,11 @@ export const QuizYear: React.FC<QuizYearProps> = ({ rounds, palette, title }) =>
             left: 110,
             right: 110,
             textAlign: "center",
-            fontSize: 20,
+            fontSize: 24,
             color: `${ink}bb`,
             fontFamily: "Inter, Helvetica, Arial, sans-serif",
+            fontWeight: 600,
+            textShadow: "0 2px 12px rgba(0,0,0,0.5)",
             overflow: "hidden",
             textOverflow: "ellipsis",
             whiteSpace: "nowrap",

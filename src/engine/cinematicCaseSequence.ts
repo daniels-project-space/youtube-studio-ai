@@ -8,14 +8,25 @@ import {
   type CasefileEvidenceShotMap,
 } from "./casefileEvidenceShotMap";
 import type { ReferenceQualityContract } from "./creative/types";
+import { assertEditorialEvidencePacket } from "./editorialEvidencePacket";
 import { SceneManifestSchema } from "./episodeGraph";
+import { evaluateNarrativeEvidenceLedger } from "./narrativeEvidenceLedger";
 import {
   assertCurrentReferenceMechanicsPacket,
   referenceMechanicsPromptGuidance,
   ReferenceMechanicsPacketSchema,
   type ReferenceMechanicsPacket,
 } from "./referenceMechanicsPacket";
-import { CasefileSourceAdmissionReceiptSchema } from "./sourceFirstAdmission";
+import {
+  casefileSourcePacketContentFingerprint,
+  CasefileSourceAdmissionReceiptSchema,
+  CasefileSourcePacketSchema,
+} from "./sourceFirstAdmission";
+import {
+  SourceProofMediaObligationSchema,
+  type SourceProofMediaObligation,
+} from "./sourceProofMedia";
+import { validateSourceBoundStorySpineHandoff } from "./sourceBoundStorySpine";
 import { BeatMoodSchema, ShotPlanSchema, type ShotPlan } from "./storySpine";
 
 /**
@@ -161,22 +172,10 @@ const CinematicCoverageShotSchema = z
      * authored before this field existed keeps validating unchanged.
      */
     nameCardText: text(120).optional(),
-    /**
-     * A REAL photorealistic document/photo insert — an extreme-close-up
-     * evidentiary beat resolved from an actual photograph (see
-     * `searchWikimediaImage` in `src/lib/wikimedia.ts`), distinct from
-     * every other coverage shot's LTX mannequin-generated `still`/`motion`
-     * prompts. This field only records the reviewed search query used to
-     * resolve that photograph; actual image resolution belongs to the
-     * render pipeline that consumes the generated scene (see the
-     * passthrough field of the same name on `CinematicGeneratedSceneSchema`
-     * below). Optional so every sequence input authored before this field
-     * existed keeps validating unchanged. `evaluateCinematicCaseSequence`
-     * gates it (`real_image_insert_invalid`) to the narrow evidentiary
-     * shape this exception is meant for: a source-proof, evidence-insert,
-     * extreme-close-up shot carrying no mannequin cast.
-     */
+    /** Retired migration field; a free-text search cannot authorize evidence. */
     realImageInsertQuery: text(200).optional(),
+    /** Exact approved source asset used instead of LTX for this evidence insert. */
+    sourceProofMedia: SourceProofMediaObligationSchema.optional(),
   })
   .strict()
   .refine(
@@ -256,6 +255,8 @@ export const CinematicCaseSequenceInputSchema = z
      * still/motion prompts and final-master QA provenance.
      */
     referenceMechanicsPacket: ReferenceMechanicsPacketSchema.optional(),
+    /** Optional reviewed factual-semantics rail; its full packet is revalidated at admission. */
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
     editorialReview: CinematicSequenceEditorialReviewSchema,
   })
   .strict();
@@ -279,15 +280,10 @@ export const CinematicGeneratedSceneSchema = z
     still: text(1_800),
     /** A separately generated target for LTX's final conditioned frame. */
     terminalStill: text(1_800).optional(),
-    /**
-     * Passthrough of the reviewed real-image search query from
-     * `CinematicCoverageShotSchema.realImageInsertQuery` (see that field's
-     * doc comment). Present only on the narrow real-photograph evidentiary
-     * exception; a render pipeline that sees this set should resolve and
-     * insert the actual photograph instead of driving `still`/`motion`
-     * through LTX for this scene.
-     */
+    /** Retired; generated scenes must not carry a free-text image search. */
     realImageInsertQuery: text(200).optional(),
+    /** Exact source/right/asset obligation for a non-LTX evidence insert. */
+    sourceProofMedia: SourceProofMediaObligationSchema.optional(),
     motion: text(1_200),
     /** Shot-specific physical sound direction; final narration is mixed separately. */
     diegeticSoundscape: text(900),
@@ -319,6 +315,7 @@ export const CinematicGeneratedScenePlanSchema = z
     evidenceShotMapFingerprint: fingerprint,
     /** Optional review-only craft packet; it never authorizes a render by itself. */
     referenceMechanicsPacketFingerprint: fingerprint.optional(),
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
     durationSec: z.number().finite().positive(),
     scenes: z.array(CinematicGeneratedSceneSchema).min(2).max(2_000),
     release: z.literal("private_human_editorial_review_only"),
@@ -332,6 +329,7 @@ export const CinematicCreativeLocksSchema = z
     sequenceFingerprint: fingerprint,
     /** Preserves mechanics provenance into final-master QA without any source comparison. */
     referenceMechanicsPacketFingerprint: fingerprint.optional(),
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
     locks: z.array(z.object({
       id: identifier("cinematic-shot"),
       startSec: z.number().finite().nonnegative(),
@@ -348,6 +346,7 @@ export const CinematicEditDecisionListSchema = z
     version: z.literal(CINEMATIC_CASE_SEQUENCE_VERSION),
     sequenceFingerprint: fingerprint,
     referenceMechanicsPacketFingerprint: fingerprint.optional(),
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
     durationSec: z.number().finite().positive(),
     edits: z.array(z.object({
       shotId: identifier("cinematic-shot"),
@@ -377,6 +376,7 @@ export const CinematicCaseSequenceAdmissionReceiptSchema = z
     caseId: identifier("case"),
     sourcePacketFingerprint: fingerprint,
     evidenceShotMapFingerprint: fingerprint,
+    narrativeEvidenceLedgerFingerprint: fingerprint.optional(),
     sequenceFingerprint: fingerprint,
     generatedSceneCount: z.number().int().min(2),
     release: z.literal("private_human_editorial_review_only"),
@@ -405,6 +405,8 @@ export const CinematicCaseSequenceIssueCodeSchema = z.enum([
   "editorial_review_stale",
   "name_card_invalid",
   "real_image_insert_invalid",
+  "source_proof_media_invalid",
+  "narrative_evidence_ledger_invalid",
 ]);
 export type CinematicCaseSequenceIssueCode = z.infer<typeof CinematicCaseSequenceIssueCodeSchema>;
 
@@ -453,10 +455,12 @@ export function cinematicCaseSequenceContentFingerprint(
 }
 
 /**
- * Preserve the same deterministic image prior whenever an approved mannequin
- * cast recurs, while letting non-cast evidence/atmosphere shots compose
- * independently. Prompts still carry every per-shot camera/action lock; the
- * seed is an additional continuity control, never a substitute for review.
+ * Give every approved cinematic shot its own deterministic image/video prior.
+ * A shared seed is a real repetition risk: it is forwarded to both Z-Image
+ * and LTX, so distinct angles of the same mannequin cast can begin from the
+ * same latent composition despite their signed camera prompts. Cast identity
+ * and wardrobe remain locked by the explicit cast contract plus independent
+ * keyframe, clip, and transition review—not by reusing a render seed.
  */
 export function cinematicContinuitySeed(
   sequenceFingerprint: string,
@@ -464,7 +468,7 @@ export function cinematicContinuitySeed(
   sceneId: string,
 ): number {
   const subject = castIds.length
-    ? `cast:${[...castIds].sort().join("|")}`
+    ? `cast:${[...castIds].sort().join("|")}\nscene:${sceneId}`
     : `scene:${sceneId}`;
   const hex = sha256Hex(`cinematic-continuity-seed/v1\n${sequenceFingerprint}\n${subject}`)
     .slice(0, 8);
@@ -487,6 +491,146 @@ function uniqueIssues(issues: readonly CinematicCaseSequenceIssue[]): CinematicC
     seen.add(key);
     return true;
   });
+}
+
+function ledgerTreatmentsForVisualMode(mode: CinematicVisualMode): Set<string> {
+  switch (mode) {
+    case "source_proof":
+      return new Set(["source_proof", "data_diagram", "map_timeline", "document_abstraction"]);
+    case "abstract_reenactment":
+      return new Set(["neutral_reenactment"]);
+    case "spatial_reconstruction":
+    case "atmosphere":
+      return new Set(["ambient_context"]);
+  }
+}
+
+/**
+ * Optional factual-semantics bridge.  It is deliberately evaluated only when
+ * a sequence carries the ledger fingerprint: legacy Casefile review packets
+ * remain valid, while a ledger-bearing sequence cannot silently drop its
+ * reviewed claim/source/treatment limits before a renderer is admitted.
+ */
+function validateNarrativeEvidenceLedgerBinding(args: {
+  input: CinematicCaseSequenceInput;
+  ledger: unknown;
+  sourcePacket: unknown;
+  evidenceShotMap: CasefileEvidenceShotMap;
+  sourceBoundStorySpine: unknown;
+  editorialEvidencePacket?: unknown;
+  now: number;
+}): string[] {
+  const report = evaluateNarrativeEvidenceLedger(args.ledger, args.now);
+  if (!report.safe || !report.ledger) {
+    return [`Narrative Evidence Ledger is invalid: ${report.issues.map((entry) => entry.message).join("; ")}`];
+  }
+  const ledger = report.ledger;
+  const issues: string[] = [];
+  if (args.input.narrativeEvidenceLedgerFingerprint !== ledger.contentFingerprint) {
+    issues.push("the signed cinematic sequence does not carry this exact Narrative Evidence Ledger fingerprint");
+  }
+  const sourcePacket = CasefileSourcePacketSchema.safeParse(args.sourcePacket);
+  if (!sourcePacket.success) {
+    issues.push("the Narrative Evidence Ledger requires the exact current Casefile source packet");
+    return issues;
+  }
+  if (casefileSourcePacketContentFingerprint(sourcePacket.data) !== args.input.sourcePacketFingerprint) {
+    issues.push("the supplied Casefile source packet no longer matches the source-packet fingerprint signed by this cinematic sequence");
+  }
+  let handoff: ReturnType<typeof validateSourceBoundStorySpineHandoff>;
+  try {
+    handoff = validateSourceBoundStorySpineHandoff(args.sourceBoundStorySpine);
+  } catch (error) {
+    issues.push(error instanceof Error ? error.message : "source-bound Story Spine handoff is invalid");
+    return issues;
+  }
+  if (
+    handoff.caseId !== args.input.caseId ||
+    handoff.sourcePacketFingerprint !== args.input.sourcePacketFingerprint ||
+    handoff.evidenceShotMapFingerprint !== args.input.evidenceShotMapFingerprint ||
+    handoff.storySpineShotPlanFingerprint !== args.input.shotPlanFingerprint
+  ) {
+    issues.push("the source-bound Story Spine does not match the Casefile/source/map/ShotPlan signed by this cinematic sequence");
+  }
+
+  const knownCasefileSources = new Set(sourcePacket.data.sourceUsage.map((entry) => entry.sourceId));
+  const knownCasefileClaims = new Set(sourcePacket.data.claimPrimarySources.map((entry) => entry.claimId));
+  const casefileRails = ledger.evidenceRails.filter((rail) => rail.kind === "casefile_source_packet");
+  if (casefileRails.length !== 1) {
+    issues.push("a Casefile cinematic ledger requires exactly one casefile_source_packet rail");
+  }
+  for (const rail of casefileRails) {
+    if (rail.packetFingerprint !== args.input.sourcePacketFingerprint) {
+      issues.push(`Casefile rail ${rail.id} does not match the signed Casefile source packet`);
+    }
+    if (rail.sourceIds.some((id) => !knownCasefileSources.has(id)) || rail.upstreamClaimIds.some((id) => !knownCasefileClaims.has(id))) {
+      issues.push(`Casefile rail ${rail.id} contains a source or claim outside the current reviewed source packet`);
+    }
+  }
+
+  const editorialRails = ledger.evidenceRails.filter((rail) => rail.kind === "editorial_evidence_packet");
+  if (editorialRails.length) {
+    if (args.editorialEvidencePacket === undefined) {
+      issues.push("an editorial_evidence_packet rail requires the exact reviewed Editorial Evidence Packet at cinematic admission");
+    } else {
+      try {
+        const packet = assertEditorialEvidencePacket(args.editorialEvidencePacket, args.now);
+        const sourceIds = new Set(packet.sources.map((source) => source.id));
+        const claimIds = new Set(packet.claims.map((claim) => claim.id));
+        for (const rail of editorialRails) {
+          if (rail.packetFingerprint !== packet.contentFingerprint || rail.sourceIds.some((id) => !sourceIds.has(id)) || rail.upstreamClaimIds.some((id) => !claimIds.has(id))) {
+            issues.push(`editorial rail ${rail.id} does not match the supplied reviewed Editorial Evidence Packet`);
+          }
+        }
+      } catch (error) {
+        issues.push(error instanceof Error ? error.message : "Editorial Evidence Packet is invalid");
+      }
+    }
+  }
+
+  const bindingsByClaim = new Map(handoff.claimBindings.map((binding) => [binding.claimId, binding]));
+  const casefileRailIds = new Set(casefileRails.map((rail) => rail.id));
+  for (const ledgerClaim of ledger.claims) {
+    const supports = ledgerClaim.supports.filter((support) => casefileRailIds.has(support.railId));
+    if (!supports.length) {
+      issues.push(`ledger claim ${ledgerClaim.id} has no Casefile source support`);
+      continue;
+    }
+    for (const support of supports) {
+      for (const upstreamClaimId of support.upstreamClaimIds) {
+        const binding = bindingsByClaim.get(upstreamClaimId);
+        const mapClaim = args.evidenceShotMap.claimMappings.find((mapping) => mapping.claimId === upstreamClaimId);
+        const mapHasExactSources = mapClaim?.bindings.some((binding) =>
+          support.sourceIds.every((sourceId) => binding.sourceIds.includes(sourceId)),
+        ) ?? false;
+        if (!binding || !mapHasExactSources || support.sourceIds.some((sourceId) => !binding.sourceIds.includes(sourceId))) {
+          issues.push(`ledger claim ${ledgerClaim.id} cannot be traced to an exact reviewed source-bound Story Spine claim/shot`);
+        }
+      }
+    }
+  }
+  for (const beat of args.input.beats) {
+    for (const casefileClaimId of beat.claimIds) {
+      const supportingLedgerClaims = ledger.claims.filter((ledgerClaim) =>
+        ledgerClaim.supports.some((support) =>
+          casefileRailIds.has(support.railId) &&
+          support.upstreamClaimIds.includes(casefileClaimId) &&
+          beat.sourceIds.every((sourceId) => support.sourceIds.includes(sourceId)),
+        ),
+      );
+      if (!supportingLedgerClaims.length) {
+        issues.push(`cinematic beat ${beat.id} claim ${casefileClaimId} is not covered by an exact reviewed Narrative Evidence Ledger support`);
+        continue;
+      }
+      for (const shot of beat.shots) {
+        const allowed = ledgerTreatmentsForVisualMode(shot.visualMode);
+        if (!supportingLedgerClaims.some((claim) => claim.allowedVisualTreatments.some((treatment) => allowed.has(treatment.kind)))) {
+          issues.push(`cinematic shot ${shot.id} uses ${shot.visualMode} beyond the Narrative Evidence Ledger's allowed visual treatments`);
+        }
+      }
+    }
+  }
+  return [...new Set(issues)];
 }
 
 function parseReviewedAt(value: string): Date | undefined {
@@ -563,6 +707,8 @@ function requiredScales(role: CinematicNarrativeRole): number {
 export function evaluateCinematicCaseSequence(
   args: {
     input: unknown;
+    /** Required only when a signed source-proof media obligation is present. */
+    sourcePacket?: unknown;
     sourceAdmission: unknown;
     evidenceShotMap: unknown;
     evidenceShotMapAdmission: unknown;
@@ -571,6 +717,10 @@ export function evaluateCinematicCaseSequence(
     /** Optional; a supplied packet must bind the current contract and ShotPlan. */
     referenceMechanicsPacket?: unknown;
     referenceQuality?: ReferenceQualityContract;
+    /** Optional only with a matching signed sequence fingerprint; never a renderer authority. */
+    narrativeEvidenceLedger?: unknown;
+    editorialEvidencePacket?: unknown;
+    sourceBoundStorySpine?: unknown;
   },
   options: { now?: Date } = {},
 ): CinematicCaseSequenceAdmissionReport {
@@ -627,17 +777,68 @@ export function evaluateCinematicCaseSequence(
   const evidenceAdmission = CasefileEvidenceShotMapAdmissionReceiptSchema.safeParse(args.evidenceShotMapAdmission);
   const sceneManifest = SceneManifestSchema.safeParse(args.sceneManifest);
   const shots = z.array(ShotPlanSchema).min(1).max(2_000).safeParse(args.shotList);
+  // `source_proof` is a factual evidence treatment, not an LTX prompt style.
+  // Every such shot must eventually resolve to exact approved source bytes,
+  // so parse the full source packet whenever a sequence claims source proof—
+  // not only when an optional receipt happened to be supplied already.
+  const requiresSourceProofMedia = input.beats.some((beat) =>
+    beat.shots.some((shot) => shot.visualMode === "source_proof"),
+  );
+  const sourcePacket = requiresSourceProofMedia
+    ? CasefileSourcePacketSchema.safeParse(args.sourcePacket)
+    : undefined;
   if (!sourceAdmission.success) issues.push(issue("source_admission_invalid", "A valid source-first Casefile admission receipt is required.", "Run casefile_source_packet and supply its unmodified private-review receipt."));
+  if (requiresSourceProofMedia && !sourcePacket?.success) {
+    issues.push(issue(
+      "source_proof_media_invalid",
+      "A signed source-proof image requires the current Casefile source packet, not only its summary admission receipt.",
+      "Carry casefileSourcePacket through the cinematic handoff so the exact source usage, asset id, and rights locator can be rechecked before rendering.",
+    ));
+  }
   if (!evidenceMap.success || !evidenceAdmission.success) issues.push(issue("evidence_shot_map_invalid", "A valid admitted Casefile evidence shot map and receipt are required.", "Run casefile_evidence_shot_map against the current source packet and planning artifacts."));
   if (!sceneManifest.success) issues.push(issue("scene_manifest_invalid", "A validated Scene Manifest is required.", "Compile the active Episode Graph before sequence planning."));
   if (!shots.success) issues.push(issue("shot_plan_invalid", "A validated Story Spine ShotPlan list is required.", "Run story_spine and pass its complete current shot list."));
-  if (!sourceAdmission.success || !evidenceMap.success || !evidenceAdmission.success || !sceneManifest.success || !shots.success) {
+  if (
+    !sourceAdmission.success ||
+    !evidenceMap.success ||
+    !evidenceAdmission.success ||
+    !sceneManifest.success ||
+    !shots.success ||
+    (requiresSourceProofMedia && !sourcePacket?.success)
+  ) {
     return { safe: false, issues: uniqueIssues(issues) };
   }
 
   const map = evidenceMap.data;
   const admission = evidenceAdmission.data;
   const source = sourceAdmission.data;
+  const usesNarrativeEvidenceLedger =
+    input.narrativeEvidenceLedgerFingerprint !== undefined || args.narrativeEvidenceLedger !== undefined;
+  if (usesNarrativeEvidenceLedger) {
+    if (input.narrativeEvidenceLedgerFingerprint === undefined || args.narrativeEvidenceLedger === undefined || args.sourceBoundStorySpine === undefined) {
+      issues.push(issue(
+        "narrative_evidence_ledger_invalid",
+        "Narrative Evidence Ledger use requires a signed ledger fingerprint, the exact ledger, and the current source-bound Story Spine handoff.",
+        "Keep the reviewed ledger fingerprint in the signed sequence and carry the exact ledger plus current source-bound Story Spine through cinematic admission.",
+      ));
+    } else {
+      for (const message of validateNarrativeEvidenceLedgerBinding({
+        input,
+        ledger: args.narrativeEvidenceLedger,
+        sourcePacket: args.sourcePacket,
+        evidenceShotMap: map,
+        sourceBoundStorySpine: args.sourceBoundStorySpine,
+        editorialEvidencePacket: args.editorialEvidencePacket,
+        now: (options.now ?? new Date()).getTime(),
+      })) {
+        issues.push(issue(
+          "narrative_evidence_ledger_invalid",
+          message,
+          "Repair the reviewed ledger's source/claim/Story Spine bindings or visual-treatment allowance, then obtain a fresh cinematic editorial signature.",
+        ));
+      }
+    }
+  }
   if (
     input.caseId !== source.caseId ||
     input.caseId !== map.caseId ||
@@ -651,6 +852,16 @@ export function evaluateCinematicCaseSequence(
     input.shotPlanFingerprint !== admission.shotPlanFingerprint
   ) {
     issues.push(issue("upstream_fingerprint_mismatch", "The cinematic sequence does not bind the exact admitted source/map/scene/shot planning artifacts.", "Regenerate the sequence from the current Casefile source packet, evidence map, Scene Manifest, and Story Spine; then obtain fresh review."));
+  }
+  if (
+    sourcePacket?.success &&
+    casefileSourcePacketContentFingerprint(sourcePacket.data) !== source.sourcePacketFingerprint
+  ) {
+    issues.push(issue(
+      "upstream_fingerprint_mismatch",
+      "The supplied Casefile source packet does not match the admission receipt bound to this cinematic sequence.",
+      "Use the unmodified current casefileSourcePacket output and obtain a fresh source-proof-media approval after any packet change.",
+    ));
   }
   if (!admission.visualSafetyPolicy.noGore || !admission.visualSafetyPolicy.noUnsupportedRecreation) {
     issues.push(issue("upstream_fingerprint_mismatch", "The upstream Casefile visual-safety policy is not intact.", "Do not sequence a case until the admitted evidence map explicitly requires no gore and no unsupported recreation."));
@@ -691,13 +902,14 @@ export function evaluateCinematicCaseSequence(
     const hasEarlySourceObject = coldOpen.shots.some((shot) =>
       shot.t0 < sourceObjectDeadlineSec &&
       shot.coveragePurpose === "evidence_insert" &&
-      shot.visualMode === "source_proof",
+      shot.visualMode === "source_proof" &&
+      shot.sourceProofMedia !== undefined,
     );
     if (!hasEarlySourceObject) {
       issues.push(issue(
         "coverage_grammar_invalid",
-        "The cold open lacks a cited source-proof evidence insert in its first eight seconds.",
-        "Show a source document, object, map, or timeline that establishes the opening question before relying on reconstruction or atmosphere.",
+        "The cold open lacks an exact approved source-proof evidence insert in its first eight seconds.",
+        "Use an approved source document, object, map, or timeline asset that establishes the opening question before relying on reconstruction or atmosphere.",
       ));
     }
   }
@@ -740,8 +952,17 @@ export function evaluateCinematicCaseSequence(
           issues.push(issue("story_payoff_invalid", `Reveal ${beat.id}'s payoff claim ${claimId} is not source-bound to its declared payoff sources.`, "Bind the payoff claim to the exact cited source ids through casefile_evidence_shot_map before review."));
         }
       }
-      if (!beat.shots.some((shot) => shot.coveragePurpose === "evidence_insert" && shot.visualMode === "source_proof")) {
-        issues.push(issue("story_payoff_invalid", `Reveal ${beat.id}'s storyPayoff has no cited source-proof evidence insert.`, "Include a source_proof evidence_insert in the payoff reveal so final-master QA can see the cited answer or reframe."));
+      if (!beat.shots.some((shot) =>
+        shot.coveragePurpose === "evidence_insert" &&
+        shot.visualMode === "source_proof" &&
+        shot.sourceProofMedia !== undefined &&
+        payoff.citedSourceIds.includes(shot.sourceProofMedia.sourceId),
+      )) {
+        issues.push(issue(
+          "story_payoff_invalid",
+          `Reveal ${beat.id}'s storyPayoff has no exact approved source-proof asset bound to one of its cited sources.`,
+          "Attach an approved sourceProofMedia asset for a cited payoff source; final-master QA must see the real evidence rather than an LTX-generated document approximation.",
+        ));
       }
     }
   }
@@ -816,6 +1037,21 @@ export function evaluateCinematicCaseSequence(
     }
     for (const shot of beat.shots) {
       allCinematicShots.push(shot);
+      const proofMedia: SourceProofMediaObligation | undefined = shot.sourceProofMedia;
+      if (shot.visualMode === "source_proof" && shot.coveragePurpose !== "evidence_insert") {
+        issues.push(issue(
+          "source_proof_media_invalid",
+          `Cinematic shot ${shot.id} uses source_proof outside an evidence_insert coverage purpose.`,
+          "Reserve source_proof for a cited evidence_insert; establishers, relationships, and atmosphere must not present generated visuals as factual source media.",
+        ));
+      }
+      if (shot.visualMode === "source_proof" && !proofMedia) {
+        issues.push(issue(
+          "source_proof_media_invalid",
+          `Cinematic shot ${shot.id} declares source_proof without an exact approved source asset receipt.`,
+          "Attach sourceProofMedia with the admitted source id, asset id, rights locator, immutable asset SHA-256, and human approval receipt; never render a factual source proof through LTX.",
+        ));
+      }
       const binding = beat.claimIds
         .flatMap((claimId) => compatibleMapBindingsFor(map, claimId, beat.parentShotIds, beat.sourceIds))
         .find((candidate) => modeAllowedByBinding(shot.visualMode, candidate, shot.reconstructionDisclosure));
@@ -824,6 +1060,20 @@ export function evaluateCinematicCaseSequence(
       }
       for (const castId of shot.castIds) {
         if (!castById.has(castId)) issues.push(issue("cast_invalid", `Cinematic shot ${shot.id} references unknown mannequin ${castId}.`, "Use only a declared faceless non-likeness cast token."));
+      }
+      // A mannequin action is a narrow neutral-reenactment treatment. Without
+      // this pairing, a planner can label a generic document/map atmosphere
+      // shot as `mannequin_action`, satisfy mechanical scale/camera variety,
+      // and still send repetitive non-action coverage to LTX.
+      const isMannequinAction = shot.coveragePurpose === "mannequin_action";
+      const isNeutralMannequinReenactment =
+        shot.visualMode === "abstract_reenactment" && shot.castIds.length > 0;
+      if (isMannequinAction !== isNeutralMannequinReenactment) {
+        issues.push(issue(
+          "coverage_grammar_invalid",
+          `Cinematic shot ${shot.id} must use mannequin_action exactly for a cast-bound neutral abstract reenactment.`,
+          "Use mannequin_action only with abstract_reenactment and a locked faceless mannequin cast; use relationship for documentary, map, timeline, or atmosphere coverage.",
+        ));
       }
       if (shot.visualMode === "abstract_reenactment" && shot.castIds.length === 0) {
         issues.push(issue("cast_invalid", `Abstract reenactment shot ${shot.id} has no locked anonymous mannequin cast.`, "Bind abstract reenactment to a declared faceless mannequin token with wardrobe/silhouette/prop/movement locks."));
@@ -849,40 +1099,82 @@ export function evaluateCinematicCaseSequence(
           ));
         }
       }
-      // A real photographic evidence insert is a distinct exception from
-      // ordinary LTX mannequin coverage: it stands in for `still`/`motion`
-      // generation with an actual sourced photograph (see
-      // `searchWikimediaImage` in src/lib/wikimedia.ts), so it is gated to
-      // the narrow evidentiary shape that exception is meant for — a cited
-      // source-proof extreme close-up with no mannequin cast attached.
+      // A free-text image search can never prove a factual Casefile claim.
+      // Keep the legacy field parseable solely so it has a clear, fail-closed
+      // remediation instead of silently reaching an old renderer path.
       if (shot.realImageInsertQuery) {
+        issues.push(issue(
+          "real_image_insert_invalid",
+          `Cinematic shot ${shot.id} uses retired realImageInsertQuery text without an approved source-proof media receipt.`,
+          "Replace the query with sourceProofMedia containing the exact admitted source id, asset id, rights locator, immutable asset SHA-256, approval receipt, and provenance fingerprint.",
+        ));
+      }
+      if (proofMedia) {
         if (shot.coveragePurpose !== "evidence_insert") {
           issues.push(issue(
-            "real_image_insert_invalid",
-            `Cinematic shot ${shot.id}'s real image insert is not an evidence_insert shot.`,
-            "Reserve real-image inserts for coveragePurpose evidence_insert; use LTX mannequin coverage for every other purpose.",
+            "source_proof_media_invalid",
+            `Cinematic shot ${shot.id}'s approved source media is not an evidence_insert shot.`,
+            "Use source-proof media only for a cited evidence_insert; ordinary coverage remains governed by its LTX scene contract.",
           ));
         }
         if (shot.visualMode !== "source_proof") {
           issues.push(issue(
-            "real_image_insert_invalid",
-            `Cinematic shot ${shot.id}'s real image insert does not use source_proof visual mode.`,
-            "A real photographic insert is always source_proof; use spatial_reconstruction or abstract_reenactment for LTX mannequin coverage instead.",
+            "source_proof_media_invalid",
+            `Cinematic shot ${shot.id}'s approved source media does not use source_proof visual mode.`,
+            "An exact external asset may only be rendered on a cited source_proof evidence insert.",
           ));
         }
         if (shot.shotScale !== "extreme_close") {
           issues.push(issue(
-            "real_image_insert_invalid",
-            `Cinematic shot ${shot.id}'s real image insert is not framed extreme_close.`,
-            "Real photographic evidence inserts are framed as an extreme close-up on the document or object.",
+            "source_proof_media_invalid",
+            `Cinematic shot ${shot.id}'s approved source media is not framed extreme_close.`,
+            "Use the source asset as an extreme-close evidence insert, not as generic establishing coverage.",
           ));
         }
         if (shot.castIds.length > 0) {
           issues.push(issue(
-            "real_image_insert_invalid",
-            `Cinematic shot ${shot.id}'s real image insert carries a mannequin cast.`,
-            "Real photographic inserts are distinct from mannequin-generated coverage; do not bind a cast token to this shot.",
+            "source_proof_media_invalid",
+            `Cinematic shot ${shot.id}'s approved source media carries a mannequin cast.`,
+            "A source proof insert is never blended with mannequin-generated coverage; split the shots at the editorial cut.",
           ));
+        }
+        if (!beat.sourceIds.includes(proofMedia.sourceId)) {
+          issues.push(issue(
+            "source_proof_media_invalid",
+            `Cinematic shot ${shot.id}'s source-proof asset references ${proofMedia.sourceId}, outside its approved beat source binding.`,
+            "Use only a source already attached to this beat's admitted Casefile claim binding.",
+          ));
+        }
+        if (proofMedia.sourcePacketFingerprint !== input.sourcePacketFingerprint) {
+          issues.push(issue(
+            "source_proof_media_invalid",
+            `Cinematic shot ${shot.id}'s source-proof asset belongs to a different source packet.`,
+            "Re-approve the exact asset after any Casefile source packet change; source media cannot be replayed across packets.",
+          ));
+        }
+        if (sourcePacket?.success) {
+          const sourceRecord = sourcePacket.data.casePacket.sourceLedger.find((entry) => entry.id === proofMedia.sourceId);
+          const usage = sourcePacket.data.sourceUsage.find((entry) =>
+            entry.sourceId === proofMedia.sourceId &&
+            entry.usage === "visual_media" &&
+            entry.assetId === proofMedia.assetId,
+          );
+          if (!sourceRecord || !usage) {
+            issues.push(issue(
+              "source_proof_media_invalid",
+              `Cinematic shot ${shot.id}'s source-proof asset is not an exact visual-media entry in the admitted Casefile source ledger.`,
+              "Add the asset id to the source packet's explicit visual_media usage ledger and obtain fresh source/editorial approval.",
+            ));
+          } else if (
+            usage.rightsEvidenceLocator !== proofMedia.rightsEvidenceLocator ||
+            sourceRecord.rights.evidenceLocator !== proofMedia.rightsEvidenceLocator
+          ) {
+            issues.push(issue(
+              "source_proof_media_invalid",
+              `Cinematic shot ${shot.id}'s source-proof asset rights locator does not match the admitted source ledger.`,
+              "Use the exact rights evidence locator from the approved visual-media source usage; do not attach a substitute license URL.",
+            ));
+          }
         }
       }
     }
@@ -929,6 +1221,7 @@ export function evaluateCinematicCaseSequence(
 export function assertCinematicCaseSequence(
   args: {
     input: unknown;
+    sourcePacket?: unknown;
     sourceAdmission: unknown;
     evidenceShotMap: unknown;
     evidenceShotMapAdmission: unknown;
@@ -936,6 +1229,9 @@ export function assertCinematicCaseSequence(
     shotList: unknown;
     referenceMechanicsPacket?: unknown;
     referenceQuality?: ReferenceQualityContract;
+    narrativeEvidenceLedger?: unknown;
+    editorialEvidencePacket?: unknown;
+    sourceBoundStorySpine?: unknown;
   },
   options: { now?: Date } = {},
 ): AdmittedCinematicCaseSequence {
@@ -976,6 +1272,12 @@ export function assertCinematicCaseSequence(
       // to crowd the causal story instruction or the actual visual prompt out
       // of LTX's useful context window.
       .slice(0, 650);
+    const castExclusivityLock = shot.castIds.length
+      ? `People lock: only declared faceless mannequin cast (${shot.castIds.join(", ")}); no extra people, mannequins, crowds, silhouettes, portraits, or reflections.`
+      : "People lock: no people, mannequins, faces, human silhouettes, portraits, reflections, crowds, or background human presence.";
+    const castExclusivityNegative = shot.castIds.length
+      ? "no extra people, mannequins, bystanders, crowds, human silhouettes, portraits, or reflections"
+      : "no people, mannequins, faces, human silhouettes, portraits, reflections, crowds, or background human presence";
     const parentLock = beat.parentShotIds
       .map((parentId) => parentShotById.get(parentId))
       .filter((parent): parent is ShotPlan => Boolean(parent))
@@ -1002,15 +1304,28 @@ export function assertCinematicCaseSequence(
       ? `On-screen typography permitted for this shot ONLY, as the narrow character-introduction exception: render exactly this name-card text and nothing else — no causal question, no other prose: "${shot.nameCardText}"`
       : `Narrative role ${beat.narrativeRole}; story driver (never render this as on-screen text): ${beat.causalQuestion}`;
     const narrativeLock = [
-      onScreenTextDirective,
+      // Keep this first. `narrationPurpose` is the exact compact causal/source
+      // instruction signed by the editor; free-form still/motion text can be
+      // much longer and must never crowd its tail out of an LTX prompt.
       `This shot must make the narration purpose visually clear: ${shot.narrationPurpose}`,
+      onScreenTextDirective,
       ...(mechanicsGuidance ? [`Approved editorial mechanics: ${mechanicsGuidance}`] : []),
     ].join(" ").slice(0, 620);
+    // `coveragePurpose` and `visualMode` are the signed reason this angle
+    // exists.  Do not leave them at the tail of a long free-text visual
+    // description (or absent from I2V motion entirely), where LTX can turn
+    // several deliberately different coverage slots into generic filler.
+    const visualCoverageLock =
+      `Coverage: ${shot.coveragePurpose}; visual mode: ${shot.visualMode}; ` +
+      "make this specific information change legible.";
     const still = [
-      `Primary visual: ${shot.still}`,
       narrativeLock,
+      visualCoverageLock,
+      castExclusivityLock,
+      `Primary visual: ${shot.still}`,
       castLock,
       parentLock,
+      `Approved framing: ${shot.shotScale} at ${shot.lens}.`,
       `Coverage ${shot.coveragePurpose}; visual mode ${shot.visualMode}.`,
     ]
       .filter(Boolean)
@@ -1018,8 +1333,14 @@ export function assertCinematicCaseSequence(
       .slice(0, 1_800)
       .trim();
     const motion = [
-      `Motivated motion: ${shot.motion}`,
+      // The structured camera field is the reviewed source of truth. Put it
+      // directly in the I2V instruction so a vague or conflicting free-text
+      // motion description cannot silently turn a planned dolly/orbit/crane
+      // into a generic static take before final-master QA sees it.
+      `Approved camera treatment: ${shot.cameraMove}; execute only this motivated movement: ${shot.cameraRationale}`,
       narrativeLock,
+      visualCoverageLock,
+      `Motivated motion: ${shot.motion}`,
       castLock,
       parentLock,
       `First frame: ${shot.firstFrameConstraint}`,
@@ -1033,9 +1354,11 @@ export function assertCinematicCaseSequence(
     // frame. Unlike the motion prompt, this target gives a reviewed cinematic
     // sequence a physical endpoint for a reveal or consequence beat.
     const terminalStill = [
+      narrativeLock,
+      visualCoverageLock,
+      castExclusivityLock,
       `Terminal visual: ${shot.lastFrameConstraint}`,
       `Primary scene: ${shot.still}`,
-      narrativeLock,
       castLock,
       parentLock,
       `Coverage ${shot.coveragePurpose}; visual mode ${shot.visualMode}; ${shot.cameraMove} ${shot.shotScale} ${shot.lens}.`,
@@ -1072,14 +1395,17 @@ export function assertCinematicCaseSequence(
     t1: shot.t1,
     still,
     terminalStill,
-    ...(shot.realImageInsertQuery ? { realImageInsertQuery: shot.realImageInsertQuery } : {}),
+    ...(shot.sourceProofMedia ? { sourceProofMedia: shot.sourceProofMedia } : {}),
     motion,
     diegeticSoundscape,
     durationSec: shot.t1 - shot.t0,
     cameraMove: shot.cameraMove,
     shotScale: shot.shotScale,
     lens: shot.lens,
-    negative: shot.negative,
+    // Still/terminal prompts carry the positive cast contract; LTX's negative
+    // prompt carries it through the moving take without crowding the signed
+    // first/last-frame constraints out of its bounded motion instruction.
+    negative: `${castExclusivityNegative}; ${shot.negative}`.slice(0, 600),
     visualMode: shot.visualMode,
     coveragePurpose: shot.coveragePurpose,
     cutReason: shot.cutReason,
@@ -1102,6 +1428,7 @@ export function assertCinematicCaseSequence(
     sourcePacketFingerprint: input.sourcePacketFingerprint,
     evidenceShotMapFingerprint: input.evidenceShotMapFingerprint,
     ...(referenceMechanics ? { referenceMechanicsPacketFingerprint: referenceMechanics.contentFingerprint } : {}),
+    ...(input.narrativeEvidenceLedgerFingerprint ? { narrativeEvidenceLedgerFingerprint: input.narrativeEvidenceLedgerFingerprint } : {}),
     durationSec,
     scenes,
     release: "private_human_editorial_review_only",
@@ -1110,14 +1437,29 @@ export function assertCinematicCaseSequence(
     version: CINEMATIC_CASE_SEQUENCE_VERSION,
     sequenceFingerprint,
     ...(referenceMechanics ? { referenceMechanicsPacketFingerprint: referenceMechanics.contentFingerprint } : {}),
+    ...(input.narrativeEvidenceLedgerFingerprint ? { narrativeEvidenceLedgerFingerprint: input.narrativeEvidenceLedgerFingerprint } : {}),
     locks: input.beats.flatMap((beat) => beat.shots.map((shot) => ({
       id: shot.id,
       startSec: shot.t0,
       endSec: shot.t1,
       expected: `${shot.visualMode}; ${shot.coveragePurpose}; ${shot.cameraRationale}. ${shot.firstFrameConstraint} ${shot.lastFrameConstraint}`,
       acceptanceCriteria: [
-        `The frame fulfills the narrated purpose: ${shot.narrationPurpose}`,
-        `The viewer can understand the beat's causal question without on-screen prose: ${beat.causalQuestion}`,
+        // Each reviewer-facing criterion is signed under a 360-character
+        // contract. Rich source windows can be longer, so cap the rendered
+        // instruction here rather than rejecting a valid multi-shot plan at
+        // final admission after the editor has reviewed it.
+        // The schema already bounds narrationPurpose to 360 characters. Do
+        // not spend part of that budget on a prefix and silently lose a
+        // source/cause qualifier at the end before the final QA reviewer sees
+        // it.
+        shot.narrationPurpose,
+        // Camera direction is not decorative metadata. The final-master
+        // reviewer sees the lock's start/middle/end evidence frames, so make
+        // the approved framing and motivated movement an exact criterion it
+        // must attest rather than leaving cameraMove only in the generation
+        // prompt and editor-facing `expected` summary.
+        `The planned ${shot.shotScale} framing and ${shot.cameraMove} camera treatment are visibly motivated: ${shot.cameraRationale}`.slice(0, 360),
+        `The viewer can understand the beat's causal question without on-screen prose: ${beat.causalQuestion}`.slice(0, 360),
         `The cut communicates ${shot.cutReason}; tension state is ${shot.tensionState}`,
         ...(mechanicsGuidance
           ? [
@@ -1135,6 +1477,7 @@ export function assertCinematicCaseSequence(
     version: CINEMATIC_CASE_SEQUENCE_VERSION,
     sequenceFingerprint,
     ...(referenceMechanics ? { referenceMechanicsPacketFingerprint: referenceMechanics.contentFingerprint } : {}),
+    ...(input.narrativeEvidenceLedgerFingerprint ? { narrativeEvidenceLedgerFingerprint: input.narrativeEvidenceLedgerFingerprint } : {}),
     durationSec,
     edits: input.beats.flatMap((beat) => beat.shots.map((shot) => ({
       shotId: shot.id,
@@ -1151,6 +1494,7 @@ export function assertCinematicCaseSequence(
     caseId: input.caseId,
     sourcePacketFingerprint: input.sourcePacketFingerprint,
     evidenceShotMapFingerprint: input.evidenceShotMapFingerprint,
+    ...(input.narrativeEvidenceLedgerFingerprint ? { narrativeEvidenceLedgerFingerprint: input.narrativeEvidenceLedgerFingerprint } : {}),
     sequenceFingerprint,
     generatedSceneCount: scenes.length,
     release: "private_human_editorial_review_only",
