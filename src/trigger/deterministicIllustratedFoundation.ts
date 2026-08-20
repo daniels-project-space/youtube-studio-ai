@@ -49,12 +49,16 @@ function starterSlate() {
 export function buildIllustratedFoundation(args: {
   readonly channelName: string;
   readonly storagePrefix: string;
+  readonly programBriefFingerprint: string;
+  readonly programBriefPositioningText: string;
 }): DeterministicChannelFoundation {
   return buildDeterministicChannelFoundation({
     profile: ILLUSTRATED_EXPLAINER_DETERMINISTIC_FOUNDATION_PROFILE,
     family: "illustrated_explainer",
     channelName: args.channelName,
     storagePrefix: args.storagePrefix,
+    programBriefFingerprint: args.programBriefFingerprint,
+    programBriefPositioningText: args.programBriefPositioningText,
     sources: [],
     starterSlate: starterSlate(),
   });
@@ -63,6 +67,8 @@ export function buildIllustratedFoundation(args: {
 export async function buildAndPersistIllustratedFoundation(args: {
   readonly channelName: string;
   readonly storagePrefix: string;
+  readonly programBriefFingerprint: string;
+  readonly programBriefPositioningText: string;
   readonly writer: DeterministicFoundationObjectWriter;
 }): Promise<PersistedIllustratedFoundation> {
   const foundation = buildIllustratedFoundation(args);

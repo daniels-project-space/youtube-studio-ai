@@ -12,9 +12,14 @@ import {
   familyEpisodeLengthError,
   familyProductionReadiness,
   productionReadyFamilyFallback,
-  type FamilyKey,
 } from "@/engine/families";
 import { getNiche } from "@/lib/nicheCatalog";
+import {
+  assertCanonicalChannelProgramBrief,
+  briefToCreativeCapabilityIntent,
+  briefToFormatSelectionInput,
+  canonicalChannelProgramBrief,
+} from "@/engine/channelProgramBrief";
 import { channelInceptionSlug } from "@/lib/channelInceptionIdentity";
 import { channelBuildCostAuthority } from "@/lib/channelBuildCostAuthority";
 import {
@@ -32,6 +37,7 @@ import { formatPreflight } from "@/engine/creative/selectFormat";
 import {
   assessCreativeCapabilityAutomaticBuildAdmission,
   privateReviewCapabilityOffers,
+  resolveUnhostedSupervisedCreativeCapabilityIntents,
   validateCreativeCapabilitySelections,
 } from "@/engine/creative/creativeCapabilityCatalog";
 
@@ -48,7 +54,7 @@ export const runtime = "nodejs";
 export async function POST(request: Request) {
   const authFailure = await authorizeStudioRoute(request);
   if (authFailure) return authFailure;
-  let body: { design?: Record<string, unknown>; requestKey?: string };
+  let body: { design?: Record<string, unknown>; programBrief?: unknown; requestKey?: string };
   try {
     body = await request.json();
   } catch {
@@ -76,6 +82,53 @@ export async function POST(request: Request) {
     if (!requestKey) {
       return NextResponse.json({ error: "missing channel creation requestKey" }, { status: 400 });
     }
+    let programBrief: ReturnType<typeof assertCanonicalChannelProgramBrief>;
+    try {
+      programBrief = assertCanonicalChannelProgramBrief(design.programBrief);
+      if (body.programBrief !== undefined) {
+        const submittedProgramBrief = assertCanonicalChannelProgramBrief(body.programBrief);
+        if (canonicalChannelProgramBrief(submittedProgramBrief) !== canonicalChannelProgramBrief(programBrief)) {
+          return NextResponse.json(
+            { error: "request programBrief must exactly match the request-key-bound design.programBrief" },
+            { status: 400 },
+          );
+        }
+      }
+    } catch (error) {
+      return NextResponse.json(
+        { error: error instanceof Error ? error.message : "invalid channel program brief" },
+        { status: 400 },
+      );
+    }
+    const mismatchedProgramFields = [
+      ...(design.family !== programBrief.family ? ["family"] : []),
+      ...(design.nicheKey !== programBrief.nicheKey ? ["nicheKey"] : []),
+      ...(design.subcategory !== programBrief.subcategory ? ["subcategory"] : []),
+      ...(design.locale !== programBrief.locale ? ["locale"] : []),
+      ...(design.concept !== programBrief.concept ? ["concept"] : []),
+    ];
+    if (mismatchedProgramFields.length) {
+      return NextResponse.json(
+        { error: `channel design ${mismatchedProgramFields.join(", ")} must match the canonical programBrief` },
+        { status: 400 },
+      );
+    }
+    // Replace every duplicated semantic field with the exact brief before the
+    // idempotency check. This both binds the request key to the brief and
+    // prevents later approval/dispatch code from reading mutable browser text.
+    const executionDesign = { ...design };
+    for (const field of ["family", "nicheKey", "subcategory", "locale", "concept", "programBrief"]) {
+      delete executionDesign[field];
+    }
+    design = {
+      ...executionDesign,
+      family: programBrief.family,
+      nicheKey: programBrief.nicheKey,
+      ...(programBrief.subcategory ? { subcategory: programBrief.subcategory } : {}),
+      locale: programBrief.locale,
+      concept: programBrief.concept,
+      programBrief,
+    };
     // Bind the key to the operator's exact submitted intent before any server
     // normalization. This makes retries stable without allowing changed input.
     if (!validateChannelBuildRequestKey(requestKey, design)) {
@@ -91,11 +144,8 @@ export async function POST(request: Request) {
     let channelSlug: string;
     {
       const normalizedRequestKey = requestKey!;
-      const familyKey = typeof design.family === "string" ? design.family : "";
-      if (!(familyKey in FAMILIES)) {
-        return NextResponse.json({ error: "unsupported channel family" }, { status: 400 });
-      }
-      const family = FAMILIES[familyKey as FamilyKey];
+      const familyKey = programBrief.family;
+      const family = FAMILIES[familyKey];
       if (design.dataStory !== undefined) {
         if (!isDataStoryContract(design.dataStory)) {
           return NextResponse.json({ error: "invalid source-attributed data-story contract" }, { status: 400 });
@@ -128,11 +178,8 @@ export async function POST(request: Request) {
       if (lengthError) {
         return NextResponse.json({ error: lengthError }, { status: 400 });
       }
-      const nicheKey = typeof design.nicheKey === "string" ? design.nicheKey.trim() : "";
-      if (!nicheKey) {
-        return NextResponse.json({ error: "missing channel niche" }, { status: 400 });
-      }
-      const concept = typeof design.concept === "string" ? design.concept.trim() : "";
+      const nicheKey = programBrief.nicheKey;
+      const concept = programBrief.concept;
       // Cinematic is the only family where a one-line label can mean either an
       // original mini-film or a factual reconstruction. Require the explicit
       // concept that the creator advised on, then re-run that same deterministic
@@ -144,17 +191,30 @@ export async function POST(request: Request) {
       }
       const requestedLengthMinutes = Number(design.lengthMinutes);
       const requestedBudgetUsd = Number(design.budget);
-      const creatorPreflight = formatPreflight(family.key, {
-        concept,
-        niche: getNiche(nicheKey)?.label,
-        nicheKey,
+      const creatorPreflight = formatPreflight(family.key, briefToFormatSelectionInput(programBrief, {
         ...(Number.isFinite(requestedLengthMinutes) && requestedLengthMinutes > 0
           ? { targetDurationSeconds: Math.round(requestedLengthMinutes * 60) }
           : {}),
         ...(Number.isFinite(requestedBudgetUsd) && requestedBudgetUsd > 0
           ? { maxPerVideoBudgetUsd: requestedBudgetUsd }
           : {}),
-      });
+      }));
+      const capabilityIntent = briefToCreativeCapabilityIntent(programBrief);
+      const unhostedSupervisedIntents = resolveUnhostedSupervisedCreativeCapabilityIntents(
+        capabilityIntent,
+        family.key,
+      );
+      if (unhostedSupervisedIntents.length) {
+        const unique = (values: readonly string[]) => [...new Set(values.filter((value) => value.trim()))];
+        return NextResponse.json({
+          error: `${unhostedSupervisedIntents.map((intent) => intent.offer.title).join(", ")} requires private review before automatic channel creation`,
+          runtimeBlockers: unique(unhostedSupervisedIntents.flatMap((intent) => intent.offer.automationAdmission.blockers)),
+          sourceRequirements: unique(unhostedSupervisedIntents.flatMap((intent) => intent.offer.requirements)),
+          recommendedModules: unique(unhostedSupervisedIntents.flatMap((intent) => intent.offer.modules.map((module) => module.block))),
+          remediation: unique(unhostedSupervisedIntents.map((intent) => intent.offer.automationAdmission.remediation)),
+          reviewHrefs: unique(unhostedSupervisedIntents.flatMap((intent) => intent.offer.reviewHref ? [intent.offer.reviewHref] : [])),
+        }, { status: 409 });
+      }
       // Capability selections are never trusted as a browser-side toggle. The
       // server re-resolves family compatibility, current catalog identity, and
       // intent eligibility before this payload can reach the designer.
@@ -163,7 +223,7 @@ export async function POST(request: Request) {
         const resolvedCapabilities = validateCreativeCapabilitySelections({
           family: family.key,
           selections: design.capabilitySelections,
-          intent: { concept, niche: getNiche(nicheKey)?.label, nicheKey },
+          intent: capabilityIntent,
         });
         // An explicit opt-in authorizes a draft design choice only. The
         // materialized catalog admission is separately authoritative for any
@@ -329,7 +389,7 @@ export async function POST(request: Request) {
         setupBudgetUsd: costAuthority.setupCapUsd,
         approvedForPublish,
       };
-      const fallbackName = `${getNiche(nicheKey)?.label ?? nicheKey} ${FAMILIES[familyKey as FamilyKey].label}`;
+      const fallbackName = `${getNiche(nicheKey)?.label ?? nicheKey} ${FAMILIES[familyKey].label}`;
       channelSlug = channelInceptionSlug(submittedName || fallbackName, normalizedRequestKey);
       const subject = channelDesignApprovalSubject(OWNER_ID, design);
       const actor = `authenticated-operator:${OWNER_ID}`;

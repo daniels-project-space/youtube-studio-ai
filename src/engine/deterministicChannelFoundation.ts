@@ -127,6 +127,10 @@ export interface DeterministicChannelFoundationInput {
   readonly channelName: string;
   /** Already-validated channel storage prefix, e.g. channels/<owner>/<slug>. */
   readonly storagePrefix: string;
+  /** Canonical creator-program receipt; binds the pure foundation to its exact channel intent. */
+  readonly programBriefFingerprint: string;
+  /** Bounded canonical creator-program summary, retained in the immutable manifest. */
+  readonly programBriefPositioningText: string;
   readonly sources: readonly FoundationSourceRecord[];
   readonly starterSlate: readonly SourceFirstStarterEntry[];
 }
@@ -134,6 +138,8 @@ export interface DeterministicChannelFoundationInput {
 export interface DeterministicFoundationPositioning {
   readonly family: FamilyKey;
   readonly channelName: string;
+  readonly programBriefFingerprint: string;
+  readonly programBriefPositioningText: string;
   readonly audience: string;
   readonly promise: string;
   readonly persona: string;
@@ -155,6 +161,7 @@ export interface SourceFirstStarterSlateManifest {
   readonly version: typeof DETERMINISTIC_CHANNEL_FOUNDATION_VERSION;
   readonly family: FamilyKey;
   readonly profile: Readonly<{ id: string; revision: string }>;
+  readonly programBrief: Readonly<{ fingerprint: string; positioningText: string }>;
   readonly sourcePolicy: FoundationSourcePolicy;
   readonly sources: readonly FoundationSourceRecord[];
   readonly entries: readonly SourceFirstStarterEntry[];
@@ -551,11 +558,21 @@ export function buildDeterministicChannelFoundation(
   const profile = normalizeProfile(input.profile, input.family);
   const channelName = text(input.channelName, "channelName", 60);
   const prefix = storagePrefix(input.storagePrefix);
+  const programBriefFingerprint = text(input.programBriefFingerprint, "programBriefFingerprint", 64);
+  if (!SHA256.test(programBriefFingerprint)) {
+    fail("programBriefFingerprint must be a lowercase sha256");
+  }
+  const programBriefPositioningText = text(
+    input.programBriefPositioningText,
+    "programBriefPositioningText",
+    1_500,
+  );
   const { sources, entries } = validateSourceFirstSlate({ ...input, profile });
   const starterSlateWithoutFingerprint = {
     version: DETERMINISTIC_CHANNEL_FOUNDATION_VERSION,
     family: input.family,
     profile: { id: profile.id, revision: profile.revision },
+    programBrief: { fingerprint: programBriefFingerprint, positioningText: programBriefPositioningText },
     sourcePolicy: profile.sourcePolicy,
     sources,
     entries,
@@ -568,6 +585,8 @@ export function buildDeterministicChannelFoundation(
   const positioningBase = {
     family: input.family,
     channelName,
+    programBriefFingerprint,
+    programBriefPositioningText,
     audience: profile.positioning.audience,
     promise: profile.positioning.promise,
     persona: profile.positioning.persona,
@@ -581,6 +600,7 @@ export function buildDeterministicChannelFoundation(
       sourcePolicyId: profile.sourcePolicy.id,
       sourceIds: Object.freeze(sources.map((source) => source.id)),
       starterSlateFingerprint,
+      programBriefFingerprint,
     }),
   } as const;
   const positioning: DeterministicFoundationPositioning = Object.freeze({
@@ -590,6 +610,7 @@ export function buildDeterministicChannelFoundation(
   const foundationFingerprint = sha256(canonicalJson({
     version: DETERMINISTIC_CHANNEL_FOUNDATION_VERSION,
     profile: { id: profile.id, revision: profile.revision },
+    programBriefFingerprint,
     positioningFingerprint: positioning.fingerprint,
     starterSlateFingerprint,
   }));

@@ -1,5 +1,6 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
+import { CHANNEL_PROGRAM_BRIEF_VERSION } from "@/engine/channelProgramBrief";
 
 const planWeekNanoBananaProviderReceipt = v.object({
   version: v.literal("plan-week-provider-render/v2"),
@@ -202,8 +203,24 @@ export default defineSchema({
       thumbnailTemplate: v.string(),
       topicPool: v.array(v.string()),
       cadence: v.string(),
+      // Stable catalog key for data lookups; `niche` below stays presentation-only.
+      nicheKey: v.optional(v.string()),
       // The niche this channel competes in (drives competitor research).
       niche: v.optional(v.string()),
+      // Canonical creator program, retained as immutable channel identity.
+      programBrief: v.optional(
+        v.object({
+          version: v.literal(CHANNEL_PROGRAM_BRIEF_VERSION),
+          catalogFingerprint: v.string(),
+          family: v.string(),
+          nicheKey: v.string(),
+          subcategory: v.optional(v.string()),
+          locale: v.string(),
+          concept: v.string(),
+          audience: v.optional(v.string()),
+          sampleTopics: v.optional(v.array(v.string())),
+        }),
+      ),
       // Generated channel art (R2 keys): square avatar + 16:9 banner.
       imageKey: v.optional(v.string()),
       bannerKey: v.optional(v.string()),

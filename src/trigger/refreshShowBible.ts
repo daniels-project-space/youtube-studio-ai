@@ -13,6 +13,7 @@ import { api } from "../../convex/_generated/api";
 import type { Id } from "../../convex/_generated/dataModel";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { synthShowBible } from "@/engine/creative/showBible";
+import { assertPersistedProgramBriefIdentity } from "@/engine/channelProgramBrief";
 import type { ChannelArtOptions } from "@/lib/channelArt";
 import { FAMILY_CREW, CREW_ROLE_BLOCK, type FamilyKey } from "@/engine/families";
 import type { PipelineEntry } from "@/engine/types";
@@ -107,14 +108,19 @@ export const refreshShowBibleTask = task({
       );
     }
     const family = persistedFamily;
+    const programBrief = assertPersistedProgramBriefIdentity(identity, {
+      context: "refresh-show-bible channel identity",
+      expectedFamily: family,
+    });
     const now = Date.now();
 
     // Competitor context (best-effort).
     let competitorContext = "";
-    if (identity.niche) {
+    const researchNiche = programBrief?.nicheKey ?? identity.nicheKey ?? identity.niche;
+    if (researchNiche) {
       const [nicheIntel, competitors] = await Promise.all([
-        convex.query(api.seo.getNiche, { ownerId, niche: identity.niche }).catch(() => null),
-        convex.query(api.competitors.listCompetitors, { ownerId, niche: identity.niche }).catch(() => []),
+        convex.query(api.seo.getNiche, { ownerId, niche: researchNiche }).catch(() => null),
+        convex.query(api.competitors.listCompetitors, { ownerId, niche: researchNiche }).catch(() => []),
       ]);
       const titles = (competitors as { topVideos?: { title: string; views: number }[] }[])
         .flatMap((c) => c.topVideos ?? []).sort((a, b) => b.views - a.views).slice(0, 15).map((v) => v.title);
@@ -127,7 +133,7 @@ export const refreshShowBibleTask = task({
     }
 
     const creativeBrief = await synthShowBible({
-      family, name: ch.name, niche: identity.niche, persona: identity.persona,
+      family, name: ch.name, programBrief, niche: identity.niche, persona: identity.persona,
       styleGrammar: identity.styleGrammar, competitorContext, motifHint: payload.motifHint, now, log,
     });
     log("bible ready", { motif: creativeBrief.iconicMotif, crew: creativeBrief.activeCrew });

@@ -20,6 +20,10 @@ import {
 import { subcategoryTags } from "@/lib/nicheCatalog";
 import { nichePreset } from "./golden";
 import {
+  briefToCreativeCapabilityIntent,
+  type ChannelProgramBrief,
+} from "./channelProgramBrief";
+import {
   dataStoryInsertParams,
   dataStoryProductionReadiness,
   isDataStoryContract,
@@ -57,6 +61,8 @@ export interface DesignOptions {
   family: FamilyKey;
   nicheKey?: string;
   subcategory?: string;
+  /** Immutable creator intent, required by the channel-inception executor. */
+  programBrief?: ChannelProgramBrief;
   lengthMinutes?: number; // narrated target length
   locale?: string; // "en" | "es" | "de" …
   footageTheme?: string; // narrated-stock visual theme, e.g. "nature"
@@ -166,9 +172,15 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   if (!fam) throw new Error(`unknown family: ${opts.family}`);
   const base = ARCHETYPES[fam.archetypeKey];
   if (!base) throw new Error(`family ${opts.family} → unknown archetype ${fam.archetypeKey}`);
+  if (opts.capabilitySelections?.length && !opts.programBrief) {
+    throw new Error("creative capability selections require a canonical channel program brief");
+  }
   const resolvedCapabilitySelections = validateCreativeCapabilitySelections({
     family: opts.family,
     selections: opts.capabilitySelections,
+    ...(opts.programBrief
+      ? { intent: briefToCreativeCapabilityIntent(opts.programBrief) }
+      : {}),
   });
   const selectedCapabilities = resolvedCapabilitySelections.map(({ selection }) => selection);
   const selectedDataStory = selectedDataStoryContract(selectedCapabilities);

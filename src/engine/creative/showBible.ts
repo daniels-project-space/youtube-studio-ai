@@ -8,6 +8,10 @@ import { z } from "zod";
 import { agentJson } from "@/agents/mastra";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { FAMILY_CREW as FAMILY_CREW_RAW, type FamilyKey } from "@/engine/families";
+import {
+  channelProgramBriefPositioningText,
+  type ChannelProgramBrief,
+} from "@/engine/channelProgramBrief";
 import { VIDEO_CREW_ROLES, type ShowBible, type VideoCrewRole } from "./types";
 
 type Logger = (msg: string, extra?: Record<string, unknown>) => void;
@@ -18,6 +22,8 @@ const FAMILY_CREW = FAMILY_CREW_RAW as Record<FamilyKey, VideoCrewRole[]>;
 export interface ShowBibleInput {
   family: FamilyKey;
   name: string;
+  /** Immutable creator program, carried forward on the channel identity. */
+  programBrief?: ChannelProgramBrief;
   niche?: string;
   persona?: string;
   styleGrammar?: string;
@@ -45,8 +51,13 @@ const bibleSchema = z.object({
 
 function fallbackBible(input: ShowBibleInput): ShowBible {
   const crew = FAMILY_CREW[input.family] ?? FAMILY_CREW.narrated_stock;
+  const programBriefText = input.programBrief
+    ? channelProgramBriefPositioningText(input.programBrief)
+    : "";
   return {
-    positioning: `${input.name} — a ${input.niche ?? "focused"} channel in the ${input.family} format.`,
+    positioning: programBriefText
+      ? `${input.name} — ${programBriefText}`
+      : `${input.name} — a ${input.niche ?? "focused"} channel in the ${input.family} format.`,
     vibe: input.persona ?? "calm, consistent, on-brand",
     iconicMotif: input.motifHint ?? input.styleGrammar ?? "a single bold, recurring central subject",
     worksInSpace: [],
@@ -77,10 +88,16 @@ export async function synthShowBible(input: ShowBibleInput): Promise<ShowBible> 
   }
 
   const familyCrew = FAMILY_CREW[input.family] ?? FAMILY_CREW.narrated_stock;
+  const programBriefText = input.programBrief
+    ? channelProgramBriefPositioningText(input.programBrief)
+    : "";
   const prompt = [
     `Write the SHOW BIBLE for a YouTube channel.`,
     `Name: ${input.name}`,
     `Format (family): ${input.family}`,
+    programBriefText
+      ? `DECLARED CHANNEL PROGRAM — CANON, not a suggestion. Preserve its concept, audience and named sample-topic priorities; competitor signals may improve execution but may not replace the program:\n${programBriefText}`
+      : "",
     input.niche ? `Niche: ${input.niche}` : "",
     input.persona ? `Persona seed: ${input.persona}` : "",
     input.styleGrammar ? `Visual style seed: ${input.styleGrammar}` : "",

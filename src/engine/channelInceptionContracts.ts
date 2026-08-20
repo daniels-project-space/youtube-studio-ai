@@ -5,7 +5,10 @@ import { FAMILY_KEYS, type FamilyKey } from "./families";
  * Provider calls and live mutations belong to a future resumable workflow that
  * persists each stage receipt before advancing.
  */
-export const CHANNEL_INCEPTION_SCHEMA_VERSION = "1.0.0" as const;
+// Program Briefs are part of the immutable plan/request shape. A legacy
+// snapshot cannot be treated as a current admission because it has no bound
+// creative program to replay.
+export const CHANNEL_INCEPTION_SCHEMA_VERSION = "1.1.0" as const;
 
 export const CHANNEL_INCEPTION_MODULE_KEYS = [
   "channel-inception-research",
@@ -254,7 +257,7 @@ export const CHANNEL_INCEPTION_MODULE_CONTRACTS: readonly ChannelInceptionModule
   },
   {
     key: "channel-inception-positioning",
-    version: "1.0.0",
+    version: "1.1.0",
     certification: "contract",
     catalogStatus: "reference",
     stage: "inception/identity",

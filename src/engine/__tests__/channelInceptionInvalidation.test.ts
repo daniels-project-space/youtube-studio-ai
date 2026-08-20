@@ -4,12 +4,22 @@ import {
   positioningIdentityProjection,
   seoIdentityProjection,
 } from "@/engine/channelInceptionInvalidation";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+
+const baseProgramBrief = createChannelProgramBrief({
+  family: "narrated_stock",
+  nicheKey: "psychology",
+  locale: "en",
+  concept: "Calm practical stoicism lessons for reflective adults",
+});
 
 const base = {
   name: "Quiet Truth",
   family: "narrated_stock",
   language: "en",
   identity: {
+    programBrief: baseProgramBrief,
+    nicheKey: "psychology",
     niche: "stoicism",
     persona: "calm",
     styleGrammar: "quiet",
@@ -44,6 +54,25 @@ assert.deepEqual(roots({ identity: { imageKey: "avatar-b" } }), ["channel-incept
 assert.deepEqual(roots({ identity: { bannerKey: "banner-b" } }), ["channel-inception-banner"]);
 assert.deepEqual(roots({ identity: { thumbnailTemplate: "bold" } }), ["channel-inception-thumbnails"]);
 assert.deepEqual(roots({ identity: { niche: "history" } }), ["channel-inception-research"]);
+assert.deepEqual(
+  roots({ identity: { nicheKey: "history" } }),
+  ["channel-inception-research", "channel-inception-positioning"],
+  "a stable niche key selects research and must stale every downstream proof",
+);
+assert.deepEqual(
+  roots({
+    identity: {
+      programBrief: createChannelProgramBrief({
+        family: "narrated_stock",
+        nicheKey: "psychology",
+        locale: "en",
+        concept: "Practical stoic decision-making lessons for busy professionals",
+      }),
+    },
+  }),
+  ["channel-inception-research", "channel-inception-positioning"],
+  "a changed immutable program must restart its research corpus and all descendants",
+);
 assert.deepEqual(roots({ styleDNA: { confidence: 0.95 } }), ["channel-inception-positioning"]);
 assert.deepEqual(roots({ pipeline: [{ block: "whiteboard_scribe" }] }), ["channel-inception-pipeline"]);
 assert.deepEqual(

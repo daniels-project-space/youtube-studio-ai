@@ -19,6 +19,7 @@ import {
   type ChannelInceptionStagePlan,
 } from "@/engine/channelInceptionPlan";
 import type { ChannelInceptionModuleKey } from "@/engine/channelInceptionContracts";
+import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 
 const quietRequest: ChannelInceptionRequest = {
   ownerId: "owner_daniel",
@@ -26,9 +27,15 @@ const quietRequest: ChannelInceptionRequest = {
   name: "The Quiet Stoic",
   slug: "quiet-stoic",
   family: "narrated_stock",
-  nicheKey: "stoic philosophy wisdom",
+  nicheKey: "psychology",
   sourceRevision: "quiet-stoic@2026-08-07",
   pipelineSourceFingerprint: "pipeline:narrated-stock:v3",
+  programBrief: createChannelProgramBrief({
+    family: "narrated_stock",
+    nicheKey: "psychology",
+    locale: "en",
+    concept: "Calm evidence-grounded stoic philosophy lessons for reflective adults",
+  }),
   brand: {
     avatar: {
       existing: {
@@ -557,7 +564,13 @@ function activePaidLeaseRejectsPlanReplacement(): void {
   });
   const revised = buildChannelInceptionPlan({
     ...quietRequest,
-    nicheKey: "changed niche while provider is active",
+    nicheKey: "history",
+    programBrief: createChannelProgramBrief({
+      family: "narrated_stock",
+      nicheKey: "history",
+      locale: "en",
+      concept: "Evidence-led history stories for curious adult viewers",
+    }),
     sourceRevision: "revision-2",
   });
   assert.throws(

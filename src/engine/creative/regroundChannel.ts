@@ -55,6 +55,10 @@
  * The Trigger.dev wrapper lives in `src/trigger/regroundChannel.ts`.
  */
 import { FAMILY_KEYS, type FamilyKey } from "@/engine/families";
+import {
+  assertPersistedProgramBriefIdentity,
+  type ChannelProgramBrief,
+} from "@/engine/channelProgramBrief";
 import type { QualityBar, StyleDNA } from "./types";
 import type {
   DatabankSignals,
@@ -88,6 +92,8 @@ export interface RegroundChannelRecord {
   styleDNA?: StyleDNA | null;
   qaRubric?: QualityBar | null;
   identity?: {
+    programBrief?: ChannelProgramBrief;
+    nicheKey?: string;
     niche?: string;
     persona?: string;
     styleGrammar?: string;
@@ -225,7 +231,12 @@ export async function regroundChannelCore(
   }
 
   const identity = channel.identity ?? {};
-  const grounding = await deps.loadGrounding(channel.ownerId, identity.niche);
+  const programBrief = assertPersistedProgramBriefIdentity(identity, {
+    context: "reground channel identity",
+    expectedFamily: family,
+  });
+  const researchNiche = programBrief?.nicheKey ?? identity.nicheKey ?? identity.niche;
+  const grounding = await deps.loadGrounding(channel.ownerId, researchNiche);
   const now = deps.now();
 
   // EVERY creative input below is read straight off the existing row. Nothing
@@ -234,6 +245,7 @@ export async function regroundChannelCore(
   const styleDNA = await deps.synth({
     family,
     name: channel.name,
+    programBrief,
     niche: identity.niche,
     persona: identity.persona,
     styleGrammar: identity.styleGrammar,

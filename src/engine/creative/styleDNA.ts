@@ -18,6 +18,10 @@ import { agentJson } from "@/agents/mastra";
 import { hasAnthropicKey } from "@/lib/anthropic";
 import { produceAndCritique } from "@/engine/critiqueLoop";
 import type { FamilyKey } from "@/engine/families";
+import {
+  channelProgramBriefPositioningText,
+  type ChannelProgramBrief,
+} from "@/engine/channelProgramBrief";
 import { attachReferenceQualityContract } from "./referenceQuality";
 import type { QualityBar, QualityDimension, StyleDNA } from "./types";
 
@@ -44,6 +48,8 @@ export interface DatabankSignals {
 export interface StyleDNAInput {
   family: FamilyKey;
   name: string;
+  /** Immutable creator program, never inferred from a generic niche label. */
+  programBrief?: ChannelProgramBrief;
   niche?: string;
   persona?: string;
   styleGrammar?: string;
@@ -272,11 +278,17 @@ export async function synthStyleDNA(input: StyleDNAInput): Promise<StyleDNA> {
 
   const g = groundingContext(input);
   const narrated = NARRATED.has(input.family);
+  const programBriefText = input.programBrief
+    ? channelProgramBriefPositioningText(input.programBrief)
+    : "";
   const prompt = [
     `Distil the STYLE DNA for a faceless YouTube channel — the single, frozen,`,
     `machine-readable definition of "good" that EVERY video must conform to.`,
     `Name: ${input.name}`,
     `Format (family): ${input.family}`,
+    programBriefText
+      ? `DECLARED CHANNEL PROGRAM — CANON, not a suggestion. Every recurring subject, setting, motif, narrative and packaging decision must express this exact program; research may improve execution but may not replace it:\n${programBriefText}`
+      : "",
     input.niche ? `Niche: ${input.niche}` : "",
     input.persona
       ? `OPERATOR PERSONA — CANON, not a suggestion: "${input.persona}". The recurringSubject, setting and motifs MUST embody THIS persona's world exactly (a persona set in a neon penthouse must never distill into a café). Competitor/databank signals inform PACKAGING (titles, thumbnails, hooks) only — they never relocate the world.`

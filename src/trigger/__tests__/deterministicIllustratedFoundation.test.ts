@@ -27,6 +27,8 @@ async function main() {
   const result = await buildAndPersistIllustratedFoundation({
     channelName: "The Scenario Desk",
     storagePrefix: "owner/owner-test/channel/scenario-desk/",
+    programBriefFingerprint: "b".repeat(64),
+    programBriefPositioningText: "Illustrated fictional AI scenarios; all outcomes remain explicitly hypothetical.",
     writer,
   });
 

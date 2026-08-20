@@ -23,6 +23,11 @@ import {
   CHANNEL_INCEPTION_MODULE_KEYS,
   CHANNEL_INCEPTION_STAGE_COST_CEILINGS_USD,
 } from "@/engine/channelInceptionContracts";
+import {
+  assertPersistedProgramBriefIdentity,
+  channelProgramBriefFingerprint,
+  CHANNEL_PROGRAM_BRIEF_VERSION,
+} from "@/engine/channelProgramBrief";
 import { comparablePipeline } from "@/engine/channelPipelineComparable";
 import { channelInceptionInvalidationRoots } from "@/engine/channelInceptionInvalidation";
 import {
@@ -62,6 +67,36 @@ function channelContentLane(channel: {
   });
   assertContentLaneMatchesFamily(lane, channel.family);
   return lane;
+}
+
+function assertProgramBriefIdentityMutation(args: {
+  readonly existingIdentity: unknown;
+  readonly nextIdentity: unknown;
+  readonly effectiveFamily: unknown;
+}): void {
+  const existingProgramBrief = assertPersistedProgramBriefIdentity(args.existingIdentity, {
+    context: "existing channel identity",
+  });
+  const nextProgramBrief = assertPersistedProgramBriefIdentity(args.nextIdentity, {
+    context: "next channel identity",
+  });
+  for (const programBrief of [existingProgramBrief, nextProgramBrief]) {
+    if (programBrief && programBrief.family !== args.effectiveFamily) {
+      throw new Error(
+        `channel program brief family ${programBrief.family} does not match the effective channel family ${String(args.effectiveFamily)}`,
+      );
+    }
+  }
+  if (existingProgramBrief && !nextProgramBrief) {
+    throw new Error("channel program brief cannot be removed by a generic channel mutation");
+  }
+  if (
+    existingProgramBrief &&
+    nextProgramBrief &&
+    channelProgramBriefFingerprint(existingProgramBrief) !== channelProgramBriefFingerprint(nextProgramBrief)
+  ) {
+    throw new Error("channel program brief is immutable once stored; create a fresh admitted channel or fork");
+  }
 }
 
 function invalidatePersistedInceptionProofs(
@@ -179,6 +214,7 @@ export const channelInceptionLedgerGuardsForTests = {
   assertInceptionOutputSize,
   assertInceptionStageDescriptor,
   invalidatePersistedInceptionProofs,
+  assertProgramBriefIdentityMutation,
 };
 
 async function projectChannelCard(ctx: QueryCtx, channel: Doc<"channels">) {
@@ -286,6 +322,7 @@ const identityValidator = v.object({
   thumbnailTemplate: v.string(),
   topicPool: v.array(v.string()),
   cadence: v.string(),
+  nicheKey: v.optional(v.string()),
   niche: v.optional(v.string()),
   imageKey: v.optional(v.string()),
   bannerKey: v.optional(v.string()),
@@ -295,6 +332,21 @@ const identityValidator = v.object({
       visualStyle: v.string(),
       textPosition: v.string(),
       avoid: v.array(v.string()),
+    }),
+  ),
+  // The canonical creator program is durable channel identity, not ephemeral
+  // wizard text. Inception re-verifies canonical form before it can spend.
+  programBrief: v.optional(
+    v.object({
+      version: v.literal(CHANNEL_PROGRAM_BRIEF_VERSION),
+      catalogFingerprint: v.string(),
+      family: v.string(),
+      nicheKey: v.string(),
+      subcategory: v.optional(v.string()),
+      locale: v.string(),
+      concept: v.string(),
+      audience: v.optional(v.string()),
+      sampleTopics: v.optional(v.array(v.string())),
     }),
   ),
   creativeBrief: v.optional(
@@ -452,6 +504,11 @@ export const createChannel = mutation({
     });
     assertContentLaneMatchesFamily(lane, family);
     assertPipelineMatchesContentLane(lane, args.pipeline);
+    assertProgramBriefIdentityMutation({
+      existingIdentity: existing?.identity,
+      nextIdentity: args.identity,
+      effectiveFamily: family ?? lane.family,
+    });
     if (
       args.contentLane !== undefined &&
       contentLaneFingerprint(parseContentLane(args.contentLane)) !== contentLaneFingerprint(lane)
@@ -805,6 +862,11 @@ export const updateChannel = mutation({
     const nextFamily = rest.family ?? existing.family;
     assertContentLaneMatchesFamily(lane, nextFamily);
     assertPipelineMatchesContentLane(lane, rest.pipeline ?? existing.pipeline);
+    assertProgramBriefIdentityMutation({
+      existingIdentity: existing.identity,
+      nextIdentity: rest.identity ?? existing.identity,
+      effectiveFamily: nextFamily ?? lane.family,
+    });
     const patch: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(rest)) {
       if (val !== undefined) patch[k] = val;
