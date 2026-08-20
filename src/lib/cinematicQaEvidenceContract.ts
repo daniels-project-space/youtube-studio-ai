@@ -214,6 +214,17 @@ const LockJudgementSchema = z.object({
     visualSupportVisible: z.literal(true),
     pass: z.literal(true),
   }).strict()).max(24),
+  /**
+   * The exact source asset is cryptographically bound by the footage receipt;
+   * this reviewer attestation proves that its resulting evidence insert and
+   * citation are actually visible in the final-master frames.  It must never
+   * be synthesized from a planned source-proof receipt alone.
+   */
+  sourceProof: z.object({
+    onScreenCitationVisible: z.literal(true),
+    visualSourceProofVisible: z.literal(true),
+    pass: z.literal(true),
+  }).strict().optional(),
 }).strict();
 
 const CutJudgementSchema = z.object({
@@ -335,7 +346,12 @@ function lockEvidenceFrames(
   return [start, middle, end];
 }
 
-function lockReviewerPrompt(lock: CinematicQaExpectedLock, frames: readonly CinematicQaEvidenceFrame[]): string {
+function lockReviewerPrompt(args: {
+  lock: CinematicQaExpectedLock;
+  frames: readonly CinematicQaEvidenceFrame[];
+  sourceProof?: CinematicQaExpectedSourceProof;
+}): string {
+  const { lock, frames, sourceProof } = args;
   const cast = lock.cast.map((mannequin) => ({
     castId: mannequin.id,
     silhouette: mannequin.silhouette,
@@ -362,7 +378,10 @@ function lockReviewerPrompt(lock: CinematicQaExpectedLock, frames: readonly Cine
     payoffs.length
       ? `Required story payoff(s): ${JSON.stringify(payoffs)}. For every listed payoff, certify it only when this cited source-proof reveal visibly answers or reframes that exact cold-open question without relying on unsupported prose.`
       : "No story payoff is assigned to this lock; return an empty storyPayoffs array.",
-    "Return JSON only: {\"pass\":true,\"acceptedCriteria\":[...],\"continuity\":[{\"castId\":\"...\",\"faceless\":true,\"noLikeness\":true,\"silhouetteContinuous\":true,\"wardrobeContinuous\":true,\"paletteContinuous\":true,\"keyPropContinuous\":true,\"movementProfileContinuous\":true}],\"claims\":[{\"claimId\":\"...\",\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"storyPayoffs\":[{\"coldOpenBeatId\":\"...\",\"revealBeatId\":\"...\",\"causalQuestionAnsweredOrReframed\":true,\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}]}. If any condition fails or cannot be seen, return {\"pass\":false}.",
+    sourceProof
+      ? `Required source-proof insert: approved source ${sourceProof.sourceProofMediaReceipt.obligation.sourceId}, asset ${sourceProof.sourceProofMediaReceipt.obligation.assetId}. The receipt binds its exact bytes; return sourceProof only when the resulting evidence insert and its on-screen citation are visibly present in these frames.`
+      : "No source-proof insert is assigned to this lock; omit sourceProof.",
+    "Return JSON only: {\"pass\":true,\"acceptedCriteria\":[...],\"continuity\":[{\"castId\":\"...\",\"faceless\":true,\"noLikeness\":true,\"silhouetteContinuous\":true,\"wardrobeContinuous\":true,\"paletteContinuous\":true,\"keyPropContinuous\":true,\"movementProfileContinuous\":true}],\"claims\":[{\"claimId\":\"...\",\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"storyPayoffs\":[{\"coldOpenBeatId\":\"...\",\"revealBeatId\":\"...\",\"causalQuestionAnsweredOrReframed\":true,\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"sourceProof\":{\"onScreenCitationVisible\":true,\"visualSourceProofVisible\":true,\"pass\":true}}. Omit sourceProof when none is required. If any condition fails or cannot be seen, return {\"pass\":false}.",
   ].join("\n");
 }
 
@@ -429,16 +448,23 @@ export async function reviewCinematicFinalMasterQaEvidence(args: {
   const frames = selectedEvidenceFrames({ evidence: args.evidence, framePaths: args.framePaths });
   const locks: CinematicFinalMasterQaEvidenceReceipt["locks"] = [];
   const claims: CinematicFinalMasterQaEvidenceReceipt["claims"] = [];
-  const sourceProofFrameIdsByShot = new Map<string, string[]>();
+  const expectedSourceProofByShot = new Map(args.plan.sourceProofs.map((proof) => [proof.shotId, proof]));
+  const sourceProofs: CinematicFinalMasterQaEvidenceReceipt["sourceProofs"] = [];
   const payoffs: CinematicFinalMasterQaEvidenceReceipt["payoffs"] = [];
   const cuts: CinematicFinalMasterQaEvidenceReceipt["cuts"] = [];
   for (const lock of args.plan.locks) {
     const selected = lockEvidenceFrames(lock, frames);
-    sourceProofFrameIdsByShot.set(lock.shotId, selected.map((frame) => frame.id));
+    const sourceProof = expectedSourceProofByShot.get(lock.shotId);
     const judgement = LockJudgementSchema.parse(parseReviewerJson(
-      await reviewer({ kind: "lock", frames: selected, prompt: lockReviewerPrompt(lock, selected) }),
+      await reviewer({ kind: "lock", frames: selected, prompt: lockReviewerPrompt({ lock, frames: selected, sourceProof }) }),
       `lock ${lock.shotId}`,
     ));
+    if (sourceProof && !judgement.sourceProof) {
+      throw new Error(`cinematic QA lock ${lock.shotId} omitted mandatory visible source-proof evidence`);
+    }
+    if (!sourceProof && judgement.sourceProof) {
+      throw new Error(`cinematic QA lock ${lock.shotId} attested an unplanned source-proof insert`);
+    }
     locks.push({
       shotId: lock.shotId,
       acceptedCriteria: judgement.acceptedCriteria,
@@ -479,21 +505,17 @@ export async function reviewCinematicFinalMasterQaEvidence(args: {
         pass: true,
       });
     }
-  }
-  const sourceProofs: CinematicFinalMasterQaEvidenceReceipt["sourceProofs"] = args.plan.sourceProofs.map((proof) => {
-    const evidenceFrameIds = sourceProofFrameIdsByShot.get(proof.shotId);
-    if (!evidenceFrameIds?.length) {
-      throw new Error(`cinematic QA source-proof shot ${proof.shotId} has no selected final-master evidence frames`);
+    if (sourceProof) {
+      sourceProofs.push({
+        shotId: sourceProof.shotId,
+        sourceProofMediaReceipt: sourceProof.sourceProofMediaReceipt,
+        evidenceFrameIds: selected.map((frame) => frame.id),
+        onScreenCitationVisible: judgement.sourceProof!.onScreenCitationVisible,
+        visualSourceProofVisible: judgement.sourceProof!.visualSourceProofVisible,
+        pass: judgement.sourceProof!.pass,
+      });
     }
-    return {
-      shotId: proof.shotId,
-      sourceProofMediaReceipt: proof.sourceProofMediaReceipt,
-      evidenceFrameIds,
-      onScreenCitationVisible: true,
-      visualSourceProofVisible: true,
-      pass: true,
-    };
-  });
+  }
   for (const cut of args.plan.cuts) {
     const selected = cutEvidenceFrames(cut, frames);
     const judgement = CutJudgementSchema.parse(parseReviewerJson(

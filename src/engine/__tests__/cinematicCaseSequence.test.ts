@@ -775,6 +775,31 @@ async function main() {
     "the final-master reviewer must receive every signed narration-purpose character, including the tail source/cause qualifier",
   );
 
+  // Coverage purpose and visual mode used to live only at the tail of the
+  // still/terminal prompt (and only indirectly inside free-form motion). A
+  // valid maximum-length source description could therefore make differently
+  // planned angles look like the same generic LTX take. Their reviewed
+  // structured assignment must survive at the front of every actual prompt.
+  const longCoverageInput = structuredClone(input);
+  const longCoverageShot = longCoverageInput.beats[0]!.shots[1]!;
+  longCoverageShot.still = `${"dense cited visual context ".repeat(100)}`.slice(0, 1_800).trim();
+  longCoverageShot.motion = `${"restrained source-bound movement ".repeat(100)}`.slice(0, 1_200).trim();
+  longCoverageShot.lastFrameConstraint = `${"preserve the reviewed source state ".repeat(100)}`.slice(0, 700).trim();
+  longCoverageInput.editorialReview.reviewedSequenceFingerprint = cinematicCaseSequenceContentFingerprint(longCoverageInput);
+  const longCoverageAdmitted = assertCinematicCaseSequence({ ...args, input: longCoverageInput }, { now: NOW });
+  const longCoverageScene = longCoverageAdmitted.generatedScenePlan.scenes.find(
+    (scene) => scene.id === "cinematic-shot-closure-figure",
+  )!;
+  const coverageLock =
+    "Coverage: mannequin_action; visual mode: abstract_reenactment; make this specific information change legible.";
+  for (const prompt of [longCoverageScene.still, longCoverageScene.motion, longCoverageScene.terminalStill ?? ""]) {
+    assert.match(prompt, new RegExp(coverageLock));
+    assert.ok(
+      prompt.indexOf(coverageLock) < 850,
+      "each actual LTX prompt must retain the signed coverage/visual assignment before long free-text visual direction can be truncated",
+    );
+  }
+
   const staleReview = structuredClone(input);
   staleReview.editorialReview.reviewedAt = new Date(NOW.getTime() - 31 * 24 * 60 * 60 * 1_000).toISOString();
   assert.throws(() => assertCinematicCaseSequence({ ...args, input: staleReview }, { now: NOW }), /editorial_review_stale:.*Remediation:/);

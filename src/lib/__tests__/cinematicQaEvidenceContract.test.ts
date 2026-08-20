@@ -337,6 +337,13 @@ function approvedLockJudgement(firstFrameSec: number): string {
       visualSupportVisible: true,
       pass: true,
     }],
+    ...(!opening ? {
+      sourceProof: {
+        onScreenCitationVisible: true,
+        visualSourceProofVisible: true,
+        pass: true,
+      },
+    } : {}),
   });
 }
 
@@ -435,6 +442,33 @@ async function main(): Promise<void> {
     }),
     /payoffs|story payoff receipt/,
     "the final-master reviewer cannot silently omit the cited payoff for the opening question",
+  );
+
+  const sourceProofOmittingReviewer: CinematicFinalMasterQaReviewer = async ({ kind, frames }) => {
+    if (kind === "cut") {
+      return JSON.stringify({
+        pass: true,
+        cutReason: "contradiction",
+        tensionState: "reversal",
+        causalTurnVisible: true,
+        tensionTransitionVisible: true,
+      });
+    }
+    const judgement = JSON.parse(approvedLockJudgement(frames[0]?.tSec ?? Number.NaN));
+    delete judgement.sourceProof;
+    return JSON.stringify(judgement);
+  };
+  await assert.rejects(
+    reviewCinematicFinalMasterQaEvidence({
+      plan,
+      evidence,
+      framePaths: evidence.frames.map((frame) => `/tmp/cinematic-qa/${frame.id}.jpg`),
+      visualReviewFingerprint: review,
+      finalMasterSha256: master,
+      reviewer: sourceProofOmittingReviewer,
+    }),
+    /omitted mandatory visible source-proof evidence/i,
+    "a planned receipt alone cannot fabricate final-master proof visibility without a reviewer attestation",
   );
 
   const malformedReviewer: CinematicFinalMasterQaReviewer = async () => "{not-json";

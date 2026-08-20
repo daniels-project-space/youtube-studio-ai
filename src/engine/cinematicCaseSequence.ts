@@ -1309,8 +1309,16 @@ export function assertCinematicCaseSequence(
       onScreenTextDirective,
       ...(mechanicsGuidance ? [`Approved editorial mechanics: ${mechanicsGuidance}`] : []),
     ].join(" ").slice(0, 620);
+    // `coveragePurpose` and `visualMode` are the signed reason this angle
+    // exists.  Do not leave them at the tail of a long free-text visual
+    // description (or absent from I2V motion entirely), where LTX can turn
+    // several deliberately different coverage slots into generic filler.
+    const visualCoverageLock =
+      `Coverage: ${shot.coveragePurpose}; visual mode: ${shot.visualMode}; ` +
+      "make this specific information change legible.";
     const still = [
       narrativeLock,
+      visualCoverageLock,
       castExclusivityLock,
       `Primary visual: ${shot.still}`,
       castLock,
@@ -1329,6 +1337,7 @@ export function assertCinematicCaseSequence(
       // into a generic static take before final-master QA sees it.
       `Approved camera treatment: ${shot.cameraMove}; execute only this motivated movement: ${shot.cameraRationale}`,
       narrativeLock,
+      visualCoverageLock,
       `Motivated motion: ${shot.motion}`,
       castLock,
       parentLock,
@@ -1344,6 +1353,7 @@ export function assertCinematicCaseSequence(
     // sequence a physical endpoint for a reveal or consequence beat.
     const terminalStill = [
       narrativeLock,
+      visualCoverageLock,
       castExclusivityLock,
       `Terminal visual: ${shot.lastFrameConstraint}`,
       `Primary scene: ${shot.still}`,
