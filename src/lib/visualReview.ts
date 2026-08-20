@@ -19,10 +19,12 @@ import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/li
 import { createHash } from "node:crypto";
 import { join } from "node:path";
 
-// v4 adds the non-Google reviewer boundary. A receipt made under v3 may have
-// used the formerly allowed Gemini fallback, so it cannot attest the current
-// independent-review guarantee even if its frame coverage is otherwise sound.
-export const VISUAL_REVIEW_VERSION = "video-review/v4" as const;
+// v5 adds typed reference-criterion coverage and a full SHA-256 review
+// fingerprint. A receipt made under an earlier schema cannot attest the
+// current independent-review or global sampled-batch coverage guarantees.
+export const VISUAL_REVIEW_VERSION = "video-review/v5" as const;
+/** Post-review result schema; kept separate so `reviewFingerprint` stays a plan/intent binding. */
+export const VISUAL_REVIEW_RECEIPT_VERSION = "visual-review-receipt/v1" as const;
 
 export type VisualReviewSeverity = "critical" | "major" | "minor";
 export type VisualReviewVerdict = "pass" | "fail" | "needs_human";
@@ -76,6 +78,39 @@ export interface VisualReviewCreativeLock {
   acceptanceCriteria: string[];
 }
 
+/**
+ * A source-bound, renderer-independent visual mechanic to attest against the
+ * supplied evidence. This deliberately stays distinct from `qualityCriteria`,
+ * which is a small prose context block rather than a typed review contract.
+ */
+export interface VisualReviewReferenceCriterion {
+  id: string;
+  criterion: string;
+  /**
+   * `global` mechanics must be supported in every sampled broad-review batch;
+   * a single local confirmation cannot clear this sampled-evidence gate. This
+   * never claims continuous or master-wide coverage. Omit only for the safe
+   * `global` default. `frame` mechanics may be attested by matching evidence
+   * from one or more batches.
+   */
+  scope?: VisualReviewReferenceCriterionScope;
+}
+
+export type VisualReviewReferenceCriterionScope = "frame" | "global";
+export type VisualReviewReferenceCriterionVerdict = "pass" | "fail" | "not_observable";
+
+interface NormalizedVisualReviewReferenceCriterion extends VisualReviewReferenceCriterion {
+  scope: VisualReviewReferenceCriterionScope;
+}
+
+/** The reviewer receipt for one requested reference criterion. */
+export interface VisualReviewReferenceCriterionReceipt {
+  id: string;
+  scope: VisualReviewReferenceCriterionScope;
+  verdict: VisualReviewReferenceCriterionVerdict;
+  evidenceFrameIds: string[];
+}
+
 export interface VisualReviewIntent {
   title: string;
   topic?: string;
@@ -106,6 +141,13 @@ export interface VisualReviewIntent {
    * source-bound reference mechanics, never an automatic reference comparison.
    */
   qualityCriteria?: string[];
+  /**
+   * Typed, source-bound visual mechanics that must be explicitly attested by
+   * the existing visual reviewer. Unlike the generic QualityBar prose, every
+   * requested ID must receive an evidence-backed receipt or the review cannot
+   * pass automatically.
+   */
+  referenceCriteria?: readonly VisualReviewReferenceCriterion[];
 }
 
 export interface ChannelVisualReviewProfileInput {
@@ -188,6 +230,44 @@ const CHANNEL_REQUIREMENTS: Readonly<Record<string, {
 function compactReviewContext(value: string | undefined, max: number): string | undefined {
   const compact = value?.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, max);
   return compact || undefined;
+}
+
+function normalizeReferenceCriteria(value: unknown): {
+  criteria: NormalizedVisualReviewReferenceCriterion[];
+  error?: string;
+} {
+  if (value === undefined) return { criteria: [] };
+  if (!Array.isArray(value)) return { criteria: [], error: "referenceCriteria must be an array" };
+  if (value.length > MAX_REFERENCE_CRITERIA) {
+    return {
+      criteria: [],
+      error: `referenceCriteria may contain at most ${MAX_REFERENCE_CRITERIA} typed criteria`,
+    };
+  }
+  const criteria: NormalizedVisualReviewReferenceCriterion[] = [];
+  const ids = new Set<string>();
+  for (const rawCriterion of value) {
+    if (!rawCriterion || typeof rawCriterion !== "object" || Array.isArray(rawCriterion)) {
+      return { criteria: [], error: "each reference criterion must be an object" };
+    }
+    const candidate = rawCriterion as Record<string, unknown>;
+    const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+    const criterion = typeof candidate.criterion === "string"
+      ? compactReviewContext(candidate.criterion, 700)
+      : undefined;
+    const scope = candidate.scope === undefined ? "global" : candidate.scope;
+    if (!/^[A-Za-z0-9][A-Za-z0-9._:-]{0,79}$/.test(id)) {
+      return { criteria: [], error: "reference criterion IDs must be 1-80 URL-safe characters" };
+    }
+    if (!criterion) return { criteria: [], error: `reference criterion ${id} is missing its criterion text` };
+    if (scope !== "frame" && scope !== "global") {
+      return { criteria: [], error: `reference criterion ${id} must use scope frame or global` };
+    }
+    if (ids.has(id)) return { criteria: [], error: `reference criterion ${id} is duplicated` };
+    ids.add(id);
+    criteria.push({ id, criterion, scope });
+  }
+  return { criteria };
 }
 
 /**
@@ -292,12 +372,37 @@ export interface VisualReviewResult {
   ran: boolean;
   verdict: VisualReviewVerdict;
   defects: VisualReviewDefect[];
+  /** Aggregated evidence-backed receipts for the requested reference criteria. */
+  referenceCriteria: VisualReviewReferenceCriterionReceipt[];
+  /**
+   * False when any requested criterion was omitted/malformed, or when a
+   * global criterion lacks a pass from every sampled broad-review batch.
+   */
+  referenceCriteriaComplete: boolean;
   evidence: VisualReviewEvidence;
   summary: string;
   focusWindows: VisualReviewWindow[];
+  /** Existing plan/intent-and-evidence-selection fingerprint. */
   reviewFingerprint: string;
+  /** Version for the content-addressed post-review receipt. */
+  reviewReceiptVersion: typeof VISUAL_REVIEW_RECEIPT_VERSION;
+  /**
+   * Content-addressed post-review receipt: binds persisted evidence identity,
+   * parsed findings, typed criterion receipts, and the final verdict.
+   */
+  reviewReceiptFingerprint: string;
   /** Ephemeral paths for same-stage critic checks only; never persist these. */
   framePaths: string[];
+}
+
+export interface VisualReviewReceiptFingerprintInput {
+  ran: boolean;
+  verdict: VisualReviewVerdict;
+  reviewFingerprint: string;
+  evidence: VisualReviewEvidence;
+  defects: readonly VisualReviewDefect[];
+  referenceCriteria: readonly VisualReviewReferenceCriterionReceipt[];
+  referenceCriteriaComplete: boolean;
 }
 
 export class VisualReviewFailure extends Error {
@@ -367,6 +472,12 @@ export interface ReviewRenderOptions {
 
 const DEFAULT_STRUCTURE =
   "opening title card; a coherent body with relevant footage and readable overlays/captions; one closing outro near the end";
+
+// This is intentionally independent of the generic six-item QualityBar prose
+// cap. A typed criterion has a short stable ID and a required receipt, so a
+// moderately richer mechanics contract remains reviewable without silently
+// truncating it into generic reviewer context.
+const MAX_REFERENCE_CRITERIA = 12;
 
 const REASON_PRIORITY: Record<EvidenceReason, number> = {
   focus: 100,
@@ -649,6 +760,7 @@ function reviewerPrompt(
   intent: VisualReviewIntent,
   frames: readonly ExtractedFrame[],
   phase: "broad" | "focus",
+  referenceCriteria: readonly NormalizedVisualReviewReferenceCriterion[],
 ): string {
   const timeline = frames.map((frame) => {
     const transcript = cueForFrame(intent.transcriptCues ?? [], frame.descriptor.tSec);
@@ -671,6 +783,14 @@ function reviewerPrompt(
     .map((item) => item.replace(/\s+/g, " ").trim().slice(0, 360))
     .filter(Boolean)
     .slice(0, 6);
+  const referenceCriteriaInstructions = referenceCriteria.length
+    ? `REFERENCE-MECHANICS CRITERIA\n` +
+      `These are original, source-bound production mechanics, not an automatic comparison with any reference channel. ` +
+      `For every criterion ID below, return exactly one receipt. Mark pass only when the supplied frames support it, fail when the supplied frames visibly contradict it, and not_observable when this batch cannot decide. ` +
+      `A [global] criterion must return pass from every sampled broad-review batch before it clears this sampled-evidence gate; this never claims continuous or master-wide coverage. A [frame] criterion may be attested by matching evidence from one or more batches. ` +
+      `Every receipt must cite one or more IDs from this batch's FRAME LEDGER; never invent frame IDs.\n` +
+      `${referenceCriteria.map((item) => `- ${item.id} [${item.scope}]: "${item.criterion}"`).join("\n")}\n\n`
+    : "";
   return (
     `You are the production visual QA director for a rendered YouTube video. Review only what is visible in the ` +
     `timestamped frames below. This is the ${phase} pass; do not claim continuous-frame coverage.\n\n` +
@@ -690,6 +810,7 @@ function reviewerPrompt(
         `they describe transferable mechanics only, not an automatic comparison with any reference channel): ` +
         `${qualityCriteria.map((item) => `"${item}"`).join("; ")}\n\n`
       : "") +
+    referenceCriteriaInstructions +
     `INTENT\n- Title: "${intent.title}"\n` +
     (intent.topic ? `- Topic: "${intent.topic}"\n` : "") +
     (intent.niche ? `- Niche: ${intent.niche}\n` : "") +
@@ -709,7 +830,11 @@ function reviewerPrompt(
     `Return STRICT JSON {"defects":[{"startSec":number,"endSec":number,"severity":"critical|major|minor",` +
     `"category":"overlay_off_canvas|overlay_occlusion|overlay_collision|caption_cutoff|caption_unreadable|wrong_footage|repeated_clip|black_frame|frozen_frame|transition_break|intro_card|outro_card|general_visual",` +
     `"confidence":0..1,"observed":"what is visibly wrong","expected":"what should be visible",` +
-    `"evidenceFrameIds":["f001"],"suggestedRepair":"short safe repair"}],"summary":"<=100 words"}.`
+    `"evidenceFrameIds":["f001"],"suggestedRepair":"short safe repair"}],` +
+    (referenceCriteria.length
+      ? `"referenceCriteria":[{"id":"${referenceCriteria[0]?.id}","verdict":"pass|fail|not_observable","evidenceFrameIds":["f001"]}],`
+      : "") +
+    `"summary":"<=100 words"}.`
   );
 }
 
@@ -751,27 +876,101 @@ function nearestFrameId(frames: readonly ExtractedFrame[], tSec: number): string
   return nearest ? [nearest.descriptor.id] : [];
 }
 
+function parseReferenceCriteriaReceipt(
+  receipt: Record<string, unknown>,
+  frames: readonly ExtractedFrame[],
+  requested: readonly NormalizedVisualReviewReferenceCriterion[],
+): { referenceCriteria: VisualReviewReferenceCriterionReceipt[]; complete: boolean } {
+  if (!requested.length) return { referenceCriteria: [], complete: true };
+  const reported = receipt.referenceCriteria;
+  if (!Array.isArray(reported)) return { referenceCriteria: [], complete: false };
+  const knownFrameIds = new Set(frames.map((frame) => frame.descriptor.id));
+  const requestedById = new Map(requested.map((criterion) => [criterion.id, criterion]));
+  const seenIds = new Set<string>();
+  const referenceCriteria: VisualReviewReferenceCriterionReceipt[] = [];
+  let complete = reported.length === requested.length;
+  for (const item of reported) {
+    if (!item || typeof item !== "object" || Array.isArray(item)) {
+      complete = false;
+      continue;
+    }
+    const candidate = item as Record<string, unknown>;
+    const id = typeof candidate.id === "string" ? candidate.id.trim() : "";
+    const verdict = typeof candidate.verdict === "string"
+      ? candidate.verdict.trim().toLowerCase()
+      : "";
+    const rawEvidenceFrameIds = candidate.evidenceFrameIds;
+    const requestedCriterion = requestedById.get(id);
+    if (
+      !requestedCriterion ||
+      seenIds.has(id) ||
+      (verdict !== "pass" && verdict !== "fail" && verdict !== "not_observable") ||
+      !Array.isArray(rawEvidenceFrameIds) ||
+      rawEvidenceFrameIds.length === 0 ||
+      !rawEvidenceFrameIds.every((frameId) => typeof frameId === "string" && knownFrameIds.has(frameId))
+    ) {
+      complete = false;
+      continue;
+    }
+    seenIds.add(id);
+    referenceCriteria.push({
+      id,
+      scope: requestedCriterion.scope,
+      verdict: verdict as VisualReviewReferenceCriterionVerdict,
+      evidenceFrameIds: [...new Set(rawEvidenceFrameIds)],
+    });
+  }
+  if (referenceCriteria.length !== requested.length) complete = false;
+  return { referenceCriteria, complete };
+}
+
 function parseModelDefects(
   raw: string,
   frames: readonly ExtractedFrame[],
   intent: VisualReviewIntent,
   phase: "broad" | "focus",
-): { defects: VisualReviewDefect[]; summary: string; complete: boolean } {
+  requestedReferenceCriteria: readonly NormalizedVisualReviewReferenceCriterion[],
+): {
+  defects: VisualReviewDefect[];
+  summary: string;
+  complete: boolean;
+  referenceCriteria: VisualReviewReferenceCriterionReceipt[];
+  referenceCriteriaComplete: boolean;
+} {
   let parsed: unknown;
   try {
     parsed = parseJsonLoose<unknown>(raw);
   } catch {
-    return { defects: [], summary: "", complete: false };
+    return {
+      defects: [],
+      summary: "",
+      complete: false,
+      referenceCriteria: [],
+      referenceCriteriaComplete: requestedReferenceCriteria.length === 0,
+    };
   }
   if (!parsed || typeof parsed !== "object" || Array.isArray(parsed)) {
-    return { defects: [], summary: "", complete: false };
+    return {
+      defects: [],
+      summary: "",
+      complete: false,
+      referenceCriteria: [],
+      referenceCriteriaComplete: requestedReferenceCriteria.length === 0,
+    };
   }
   const receipt = parsed as Record<string, unknown>;
   const reportedDefects = receipt.defects;
   const summary = typeof receipt.summary === "string" ? receipt.summary.trim().slice(0, 500) : "";
   if (!Array.isArray(reportedDefects) || !summary) {
-    return { defects: [], summary, complete: false };
+    return {
+      defects: [],
+      summary,
+      complete: false,
+      referenceCriteria: [],
+      referenceCriteriaComplete: requestedReferenceCriteria.length === 0,
+    };
   }
+  const parsedReferenceCriteria = parseReferenceCriteriaReceipt(receipt, frames, requestedReferenceCriteria);
   const known = new Set(frames.map((frame) => frame.descriptor.id));
   let complete = true;
   const defects = reportedDefects.flatMap((item) => {
@@ -808,7 +1007,13 @@ function parseModelDefects(
       source: "vision" as const,
     } satisfies VisualReviewDefect];
   });
-  return { defects, summary, complete };
+  return {
+    defects,
+    summary,
+    complete,
+    referenceCriteria: parsedReferenceCriteria.referenceCriteria,
+    referenceCriteriaComplete: parsedReferenceCriteria.complete,
+  };
 }
 
 function rectIntersection(a: NormalizedRect, b: NormalizedRect): number {
@@ -905,23 +1110,79 @@ async function reviewBatches(
   intent: VisualReviewIntent,
   frames: readonly ExtractedFrame[],
   phase: "broad" | "focus",
-): Promise<{ defects: VisualReviewDefect[]; summaries: string[]; incompleteReceiptCount: number }> {
+  referenceCriteria: readonly NormalizedVisualReviewReferenceCriterion[],
+): Promise<{
+  defects: VisualReviewDefect[];
+  summaries: string[];
+  incompleteReceiptCount: number;
+  referenceCriteria: VisualReviewReferenceCriterionReceipt[];
+  incompleteReferenceCriteriaReceiptCount: number;
+}> {
   const defects: VisualReviewDefect[] = [];
   const summaries: string[] = [];
+  const criteriaReceipts: VisualReviewReferenceCriterionReceipt[] = [];
   let incompleteReceiptCount = 0;
+  let incompleteReferenceCriteriaReceiptCount = 0;
   for (let index = 0; index < frames.length; index += 12) {
     const batch = frames.slice(index, index + 12);
     const raw = await reviewer({
-      prompt: reviewerPrompt(intent, batch, phase),
+      prompt: reviewerPrompt(intent, batch, phase, referenceCriteria),
       phase,
       frames: batch.map((frame) => ({ ...frame.descriptor, localPath: frame.localPath })),
     });
-    const parsed = parseModelDefects(raw, batch, intent, phase);
+    const parsed = parseModelDefects(raw, batch, intent, phase, referenceCriteria);
     defects.push(...parsed.defects);
+    criteriaReceipts.push(...parsed.referenceCriteria);
     if (!parsed.complete) incompleteReceiptCount += 1;
+    if (!parsed.referenceCriteriaComplete) incompleteReferenceCriteriaReceiptCount += 1;
     if (parsed.summary) summaries.push(parsed.summary);
   }
-  return { defects, summaries, incompleteReceiptCount };
+  return {
+    defects,
+    summaries,
+    incompleteReceiptCount,
+    referenceCriteria: criteriaReceipts,
+    incompleteReferenceCriteriaReceiptCount,
+  };
+}
+
+function aggregateReferenceCriteria(
+  requested: readonly NormalizedVisualReviewReferenceCriterion[],
+  broadReceipts: readonly VisualReviewReferenceCriterionReceipt[],
+  focusReceipts: readonly VisualReviewReferenceCriterionReceipt[],
+  broadBatchCount: number,
+): {
+  referenceCriteria: VisualReviewReferenceCriterionReceipt[];
+  incompleteGlobalCriteria: string[];
+} {
+  const incompleteGlobalCriteria: string[] = [];
+  const referenceCriteria = requested.map((criterion) => {
+    const broadMatching = broadReceipts.filter((receipt) => receipt.id === criterion.id);
+    const matching = [...broadMatching, ...focusReceipts.filter((receipt) => receipt.id === criterion.id)];
+    const evidenceFrameIds = [...new Set(matching.flatMap((receipt) => receipt.evidenceFrameIds))];
+    const hasFailure = matching.some((receipt) => receipt.verdict === "fail");
+    const globalCoverageComplete = criterion.scope !== "global" || (
+      broadBatchCount > 0 &&
+      broadMatching.length === broadBatchCount &&
+      broadMatching.every((receipt) => receipt.verdict === "pass")
+    );
+    // A global mechanic is a sampled-broad-review claim: a pass in one batch
+    // cannot override another sampled broad batch that was not observable.
+    // Focus batches can reveal a failure, but never supply missing broad
+    // sampled coverage or claim continuous/master-wide coverage.
+    if (criterion.scope === "global" && !hasFailure && !globalCoverageComplete) {
+      incompleteGlobalCriteria.push(criterion.id);
+    }
+    const verdict: VisualReviewReferenceCriterionVerdict = matching.some((receipt) => receipt.verdict === "fail")
+      ? "fail"
+      : criterion.scope === "global" && !globalCoverageComplete
+        ? "not_observable"
+        : matching.some((receipt) => receipt.verdict === "pass")
+        ? "pass"
+        : "not_observable";
+    return { id: criterion.id, scope: criterion.scope, verdict, evidenceFrameIds };
+  });
+  return { referenceCriteria, incompleteGlobalCriteria };
 }
 
 function defaultReviewer(input: VisualReviewerInput): Promise<string> {
@@ -954,8 +1215,75 @@ function fingerprint(
       ...(sourceSha256 ? { sourceSha256 } : {}),
       frames: frames.map((frame) => [frame.tSec, frame.selectionReasons]),
     }))
-    .digest("hex")
-    .slice(0, 24);
+    .digest("hex");
+}
+
+/**
+ * Hashes the completed review receipt, not the plan that selected its frames.
+ * Only stable persisted evidence identities are included—never ephemeral local
+ * frame paths—so a receipt can be checked after the worker has exited.
+ */
+export function visualReviewReceiptFingerprint(input: VisualReviewReceiptFingerprintInput): string {
+  const defects = input.defects
+    .map((defect) => ({
+      id: defect.id,
+      startSec: defect.startSec,
+      endSec: defect.endSec,
+      severity: defect.severity,
+      category: defect.category,
+      confidence: defect.confidence,
+      observed: defect.observed,
+      expected: defect.expected,
+      evidenceFrameIds: [...new Set(defect.evidenceFrameIds)].sort(),
+      suggestedRepair: defect.suggestedRepair,
+      source: defect.source,
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id) || left.startSec - right.startSec);
+  const referenceCriteria = input.referenceCriteria
+    .map((criterion) => ({
+      id: criterion.id,
+      scope: criterion.scope,
+      verdict: criterion.verdict,
+      evidenceFrameIds: [...new Set(criterion.evidenceFrameIds)].sort(),
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id) || left.scope.localeCompare(right.scope));
+  const frames = input.evidence.frames
+    .map((frame) => ({
+      id: frame.id,
+      tSec: frame.tSec,
+      // `r2Key` is present only after evidence persistence. Null is explicit
+      // for no-persist test/diagnostic receipts rather than being omitted.
+      r2Key: frame.r2Key ?? null,
+    }))
+    .sort((left, right) => left.id.localeCompare(right.id) || left.tSec - right.tSec);
+  return createHash("sha256")
+    .update(JSON.stringify({
+      version: VISUAL_REVIEW_RECEIPT_VERSION,
+      ran: input.ran,
+      verdict: input.verdict,
+      source: {
+        sha256: input.evidence.source.sha256 ?? null,
+        durationSec: input.evidence.source.durationSec,
+      },
+      reviewFingerprint: input.reviewFingerprint,
+      evidence: {
+        manifestKey: input.evidence.manifestKey ?? null,
+        frames,
+        coverage: {
+          maxGapSec: input.evidence.coverage.maxGapSec,
+          maxAllowedGapSec: input.evidence.coverage.maxAllowedGapSec,
+          focusedWindows: input.evidence.coverage.focusedWindows
+            .map((window) => ({ startSec: window.startSec, endSec: window.endSec, reason: window.reason }))
+            .sort((left, right) => left.startSec - right.startSec || left.endSec - right.endSec || left.reason.localeCompare(right.reason)),
+          requiredFocusFrameCount: input.evidence.coverage.requiredFocusFrameCount ?? null,
+          missingFocusFrameCount: input.evidence.coverage.missingFocusFrameCount ?? null,
+        },
+      },
+      defects,
+      referenceCriteria,
+      referenceCriteriaComplete: input.referenceCriteriaComplete,
+    }))
+    .digest("hex");
 }
 
 async function persistEvidence(
@@ -997,6 +1325,8 @@ export async function reviewRender(
   const log = opts.log ?? (() => {});
   const required = opts.required === true;
   const reviewer = opts.reviewer ?? defaultReviewer;
+  const normalizedReferenceCriteria = normalizeReferenceCriteria(intent.referenceCriteria);
+  const requestedReferenceCriteria = normalizedReferenceCriteria.criteria;
   const sourceSha256 = opts.sourceSha256?.trim().toLowerCase();
   if (opts.sourceSha256 !== undefined && !/^[a-f0-9]{64}$/.test(sourceSha256 ?? "")) {
     throw new Error("visualReview sourceSha256 must be a 64-character hexadecimal SHA-256");
@@ -1007,19 +1337,39 @@ export async function reviewRender(
         "visualReview required grader unavailable (configure OPENROUTER_API_KEY; Google/Gemini is not an eligible final-review provider)",
       );
     }
+    const verdict: VisualReviewVerdict = "needs_human";
+    const defects: VisualReviewDefect[] = [];
+    const referenceCriteria: VisualReviewReferenceCriterionReceipt[] = [];
+    const referenceCriteriaComplete = normalizedReferenceCriteria.error === undefined && requestedReferenceCriteria.length === 0;
+    const evidence: VisualReviewEvidence = {
+      version: VISUAL_REVIEW_VERSION,
+      source: { durationSec, ...(sourceSha256 ? { sha256: sourceSha256 } : {}) },
+      frames: [],
+      coverage: { maxGapSec: durationSec, maxAllowedGapSec: maxAllowedVisualReviewGapSec(durationSec), focusedWindows: [] },
+    };
+    const reviewFingerprint = fingerprint(intent, durationSec, [], sourceSha256);
     return {
       ran: false,
-      verdict: "needs_human",
-      defects: [],
-      evidence: {
-        version: VISUAL_REVIEW_VERSION,
-        source: { durationSec, ...(sourceSha256 ? { sha256: sourceSha256 } : {}) },
-        frames: [],
-        coverage: { maxGapSec: durationSec, maxAllowedGapSec: maxAllowedVisualReviewGapSec(durationSec), focusedWindows: [] },
-      },
-      summary: "vision unavailable",
+      verdict,
+      defects,
+      referenceCriteria,
+      referenceCriteriaComplete,
+      evidence,
+      summary: normalizedReferenceCriteria.error
+        ? `vision unavailable; invalid reference criteria: ${normalizedReferenceCriteria.error}`
+        : "vision unavailable",
       focusWindows: [],
-      reviewFingerprint: fingerprint(intent, durationSec, [], sourceSha256),
+      reviewFingerprint,
+      reviewReceiptVersion: VISUAL_REVIEW_RECEIPT_VERSION,
+      reviewReceiptFingerprint: visualReviewReceiptFingerprint({
+        ran: false,
+        verdict,
+        reviewFingerprint,
+        evidence,
+        defects,
+        referenceCriteria,
+        referenceCriteriaComplete,
+      }),
       framePaths: [],
     };
   }
@@ -1037,28 +1387,48 @@ export async function reviewRender(
   const broad = await extractFrames(videoPath, planned, opts.runId, "broad", log);
   if (broad.length < 3) {
     if (required) throw new Error(`visualReview required 3+ evidence frames, extracted ${broad.length}`);
+    const verdict: VisualReviewVerdict = "needs_human";
+    const defects: VisualReviewDefect[] = [];
+    const referenceCriteria: VisualReviewReferenceCriterionReceipt[] = [];
+    const referenceCriteriaComplete = normalizedReferenceCriteria.error === undefined && requestedReferenceCriteria.length === 0;
+    const evidence: VisualReviewEvidence = {
+      version: VISUAL_REVIEW_VERSION,
+      source: { durationSec, ...(sourceSha256 ? { sha256: sourceSha256 } : {}) },
+      frames: planned,
+      coverage: {
+        maxGapSec: maxGap(planned.map((frame) => frame.tSec), durationSec),
+        maxAllowedGapSec: maxAllowedVisualReviewGapSec(durationSec),
+        focusedWindows: [],
+      },
+    };
+    const reviewFingerprint = fingerprint(intent, durationSec, planned, sourceSha256);
     return {
       ran: false,
-      verdict: "needs_human",
-      defects: [],
-      evidence: {
-        version: VISUAL_REVIEW_VERSION,
-        source: { durationSec, ...(sourceSha256 ? { sha256: sourceSha256 } : {}) },
-        frames: planned,
-        coverage: {
-          maxGapSec: maxGap(planned.map((frame) => frame.tSec), durationSec),
-          maxAllowedGapSec: maxAllowedVisualReviewGapSec(durationSec),
-          focusedWindows: [],
-        },
-      },
-      summary: "insufficient extracted evidence",
+      verdict,
+      defects,
+      referenceCriteria,
+      referenceCriteriaComplete,
+      evidence,
+      summary: normalizedReferenceCriteria.error
+        ? `insufficient extracted evidence; invalid reference criteria: ${normalizedReferenceCriteria.error}`
+        : "insufficient extracted evidence",
       focusWindows: [],
-      reviewFingerprint: fingerprint(intent, durationSec, planned, sourceSha256),
+      reviewFingerprint,
+      reviewReceiptVersion: VISUAL_REVIEW_RECEIPT_VERSION,
+      reviewReceiptFingerprint: visualReviewReceiptFingerprint({
+        ran: false,
+        verdict,
+        reviewFingerprint,
+        evidence,
+        defects,
+        referenceCriteria,
+        referenceCriteriaComplete,
+      }),
       framePaths: broad.map((frame) => frame.localPath),
     };
   }
 
-  const firstPass = await reviewBatches(reviewer, intent, broad, "broad");
+  const firstPass = await reviewBatches(reviewer, intent, broad, "broad", requestedReferenceCriteria);
   const geometry = geometryDefects(intent.overlays ?? [], broad);
   const initialDefects = dedupeDefects([...geometry, ...firstPass.defects]);
   const focusWindows = mergeWindows([
@@ -1081,10 +1451,22 @@ export async function reviewRender(
     ? await extractFrames(videoPath, focusCandidates, opts.runId, "focus", log)
     : [];
   const focusPass = focused.length
-    ? await reviewBatches(reviewer, intent, focused, "focus")
-    : { defects: [], summaries: [], incompleteReceiptCount: 0 };
+    ? await reviewBatches(reviewer, intent, focused, "focus", requestedReferenceCriteria)
+    : {
+        defects: [],
+        summaries: [],
+        incompleteReceiptCount: 0,
+        referenceCriteria: [],
+        incompleteReferenceCriteriaReceiptCount: 0,
+      };
   const allExtracted = [...broad, ...focused];
   const defects = dedupeDefects([...geometry, ...firstPass.defects, ...focusPass.defects]);
+  const aggregatedReferenceCriteria = aggregateReferenceCriteria(
+    requestedReferenceCriteria,
+    firstPass.referenceCriteria,
+    focusPass.referenceCriteria,
+    Math.ceil(broad.length / 12),
+  );
   const allFrames = allExtracted.map((frame) => frame.descriptor);
   const missingFocusFrameCount = requiredFocusFrames.filter((requiredFrame) =>
     !allFrames.some((frame) => Math.abs(frame.tSec - requiredFrame.tSec) < 0.11),
@@ -1125,13 +1507,48 @@ export async function reviewRender(
     (defect.category === "general_visual" || defect.confidence < minBlockingConfidence),
   );
   const incompleteReviewerReceipts = firstPass.incompleteReceiptCount + focusPass.incompleteReceiptCount;
+  const incompleteReferenceCriteriaReceipts =
+    firstPass.incompleteReferenceCriteriaReceiptCount + focusPass.incompleteReferenceCriteriaReceiptCount;
   const coverageIncomplete = evidence.coverage.maxGapSec > evidence.coverage.maxAllowedGapSec + 0.01;
+  const globalCriteriaWithoutEvidenceCoverage = coverageIncomplete
+    ? requestedReferenceCriteria.filter((criterion) => criterion.scope === "global").map((criterion) => criterion.id)
+    : [];
+  const incompleteGlobalCriteria = [...new Set([
+    ...aggregatedReferenceCriteria.incompleteGlobalCriteria,
+    ...globalCriteriaWithoutEvidenceCoverage,
+  ])];
+  const referenceCriteria = globalCriteriaWithoutEvidenceCoverage.length
+    ? aggregatedReferenceCriteria.referenceCriteria.map((criterion) =>
+        criterion.scope === "global" && criterion.verdict === "pass"
+          ? { ...criterion, verdict: "not_observable" as const }
+          : criterion,
+      )
+    : aggregatedReferenceCriteria.referenceCriteria;
+  const referenceCriteriaComplete =
+    normalizedReferenceCriteria.error === undefined &&
+    incompleteReferenceCriteriaReceipts === 0 &&
+    incompleteGlobalCriteria.length === 0 &&
+    referenceCriteria.length === requestedReferenceCriteria.length;
+  const failedReferenceCriteria = referenceCriteria.filter((criterion) => criterion.verdict === "fail");
+  const unobservableReferenceCriteria = referenceCriteria.filter((criterion) => criterion.verdict === "not_observable");
   const focusCoverageIncomplete = requireCompleteFocusCoverage && missingFocusFrameCount > 0;
-  const verdict: VisualReviewVerdict = blocking.length
+  const verdict: VisualReviewVerdict = blocking.length || failedReferenceCriteria.length
     ? "fail"
-    : incompleteReviewerReceipts > 0 || uncertain || focusCoverageIncomplete || (required && coverageIncomplete)
+    : incompleteReviewerReceipts > 0 || !referenceCriteriaComplete || unobservableReferenceCriteria.length > 0 || uncertain || focusCoverageIncomplete || (required && coverageIncomplete)
       ? "needs_human"
       : "pass";
+  // This intentionally happens after `persistEvidence`: the receipt binds the
+  // durable frame/manifest keys when persistence is enabled, rather than the
+  // ephemeral local frame paths used during the reviewer call.
+  const reviewReceiptFingerprint = visualReviewReceiptFingerprint({
+    ran: true,
+    verdict,
+    reviewFingerprint,
+    evidence,
+    defects,
+    referenceCriteria,
+    referenceCriteriaComplete,
+  });
   const reviewerSummary = [...firstPass.summaries, ...focusPass.summaries].filter(Boolean).join(" | ") ||
     `${defects.length} evidence-backed defect(s); ${allFrames.length} frames reviewed`;
   const summary = [
@@ -1139,6 +1556,17 @@ export async function reviewRender(
     incompleteReviewerReceipts
       ? `${incompleteReviewerReceipts} reviewer batch(es) returned an incomplete structured receipt`
       : "",
+    normalizedReferenceCriteria.error
+      ? `invalid reference criteria: ${normalizedReferenceCriteria.error}`
+      : incompleteReferenceCriteriaReceipts
+        ? `${incompleteReferenceCriteriaReceipts} reviewer batch(es) omitted or malformed requested reference criteria`
+        : failedReferenceCriteria.length
+          ? `reference criteria failed: ${failedReferenceCriteria.map((criterion) => criterion.id).join(", ")}`
+          : incompleteGlobalCriteria.length
+            ? `global reference criteria lack passes from all sampled broad-review batches: ${incompleteGlobalCriteria.join(", ")}`
+          : unobservableReferenceCriteria.length
+            ? `reference criteria not observable: ${unobservableReferenceCriteria.map((criterion) => criterion.id).join(", ")}`
+            : "",
     coverageIncomplete
       ? `evidence gap ${evidence.coverage.maxGapSec.toFixed(2)}s exceeds ${evidence.coverage.maxAllowedGapSec.toFixed(2)}s coverage cap`
       : "",
@@ -1153,16 +1581,21 @@ export async function reviewRender(
     intent.criticDoctrine ? "doctrine" : "",
     (intent.criticEmphasis ?? []).length ? `lane-emphasis×${(intent.criticEmphasis ?? []).length}` : "",
     (intent.qualityCriteria ?? []).length ? `quality-bar×${(intent.qualityCriteria ?? []).length}` : "",
+    requestedReferenceCriteria.length ? `reference-criteria×${requestedReferenceCriteria.length}` : "",
   ].filter(Boolean).join("+");
-  log(`visualReview: ${allFrames.length} frames (${Math.ceil(allFrames.length / 12)} batch(es)), ${defects.length} defect(s), ${incompleteReviewerReceipts} incomplete receipt(s), coverage ${evidence.coverage.maxGapSec.toFixed(2)}/${evidence.coverage.maxAllowedGapSec.toFixed(2)}s${grounding ? `, grounded by ${grounding}` : ""} → ${verdict.toUpperCase()}`);
+  log(`visualReview: ${allFrames.length} frames (${Math.ceil(allFrames.length / 12)} batch(es)), ${defects.length} defect(s), ${incompleteReviewerReceipts} incomplete receipt(s), ${incompleteReferenceCriteriaReceipts} incomplete reference-criterion receipt(s), coverage ${evidence.coverage.maxGapSec.toFixed(2)}/${evidence.coverage.maxAllowedGapSec.toFixed(2)}s${grounding ? `, grounded by ${grounding}` : ""} → ${verdict.toUpperCase()}`);
   return {
     ran: true,
     verdict,
     defects,
+    referenceCriteria,
+    referenceCriteriaComplete,
     evidence,
     summary,
     focusWindows,
     reviewFingerprint,
+    reviewReceiptVersion: VISUAL_REVIEW_RECEIPT_VERSION,
+    reviewReceiptFingerprint,
     framePaths: allExtracted.map((frame) => frame.localPath),
   };
 }

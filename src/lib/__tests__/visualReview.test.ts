@@ -10,6 +10,7 @@ import {
   maxAllowedVisualReviewGapSec,
   planVisualReviewEvidence,
   reviewRender,
+  visualReviewReceiptFingerprint,
   visualRepairSignals,
   type VisualReviewIntent,
 } from "@/lib/visualReview";
@@ -31,8 +32,13 @@ assert.match(
 );
 assert.match(
   reviewSource,
-  /video-review\/v4/,
-  "a pre-boundary review receipt must not be mistaken for current non-Google evidence",
+  /video-review\/v5/,
+  "a pre-schema receipt must not be mistaken for current non-Google evidence",
+);
+assert.match(
+  reviewSource,
+  /visual-review-receipt\/v1/,
+  "a review result must declare the content-addressed receipt schema it returns",
 );
 const phraseReviewer = async () => JSON.stringify({
   defects: [{
@@ -129,6 +135,193 @@ async function main(): Promise<void> {
   assert.match(groundedPrompt, /CHANNEL QUALITY BAR/, "the final reviewer must receive the full channel quality standard");
   assert.match(groundedPrompt, /decorative novelty is a defect/i);
   assert.match(groundedPrompt, /not an automatic comparison/i);
+  assert.doesNotMatch(
+    groundedPrompt,
+    /REFERENCE-MECHANICS CRITERIA/,
+    "an unopted generic QualityBar review must not demand typed reference receipts or turn a normal reviewer pass into needs_human",
+  );
+
+  // Typed reference mechanics are a separate contract from the generic
+  // six-item QualityBar prose cap: every requested ID gets a receipt in the
+  // same non-Google reviewer response, with no additional provider call.
+  const referenceCriteria = Array.from({ length: 7 }, (_, index) => ({
+    id: `reference-mechanic-${index + 1}`,
+    criterion: `Original visual mechanic ${index + 1} must be visibly supported by the reviewed frames.`,
+  }));
+  let referenceCriteriaPrompt = "";
+  const referenceCriteriaReviewer = async (input: { prompt: string }) => {
+    referenceCriteriaPrompt = input.prompt;
+    return JSON.stringify({
+      defects: [],
+      referenceCriteria: referenceCriteria.map((criterion) => ({
+        id: criterion.id,
+        verdict: "pass",
+        evidenceFrameIds: ["f001"],
+      })),
+      summary: "All typed reference mechanics are visibly supported in this batch.",
+    });
+  };
+  const referenceCriteriaPassed = await reviewRender(fixture, 18, {
+    title: "Typed reference-criteria fixture",
+    expectTitleCard: false,
+    qualityCriteria: Array.from({ length: 7 }, (_, index) => `Generic prose criterion ${index + 1}`),
+    referenceCriteria,
+  }, {
+    runId: "visual-review-reference-criteria",
+    reviewer: referenceCriteriaReviewer,
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(referenceCriteriaPassed.verdict, "pass", "all explicit reference receipts must allow the review to pass");
+  assert.equal(referenceCriteriaPassed.referenceCriteriaComplete, true);
+  assert.match(referenceCriteriaPassed.reviewFingerprint, /^[a-f0-9]{64}$/, "a review receipt must retain its full SHA-256 fingerprint");
+  assert.equal(referenceCriteriaPassed.reviewReceiptVersion, "visual-review-receipt/v1");
+  assert.match(referenceCriteriaPassed.reviewReceiptFingerprint, /^[a-f0-9]{64}$/, "a post-review receipt must be content-addressed with SHA-256");
+  assert.deepEqual(referenceCriteriaPassed.referenceCriteria.map((criterion) => criterion.id), referenceCriteria.map((criterion) => criterion.id));
+  assert(referenceCriteriaPassed.referenceCriteria.every((criterion) => criterion.scope === "global"), "typed mechanics must default to sampled broad-review coverage");
+  assert.match(referenceCriteriaPrompt, /REFERENCE-MECHANICS CRITERIA/, "typed mechanics must reach the existing reviewer request");
+  assert.match(referenceCriteriaPrompt, /reference-mechanic-7/, "typed mechanics must not be truncated by the six-item QualityBar cap");
+
+  const receiptWithDifferentPersistedFrameKey = visualReviewReceiptFingerprint({
+    ran: referenceCriteriaPassed.ran,
+    verdict: referenceCriteriaPassed.verdict,
+    reviewFingerprint: referenceCriteriaPassed.reviewFingerprint,
+    evidence: {
+      ...referenceCriteriaPassed.evidence,
+      frames: referenceCriteriaPassed.evidence.frames.map((frame, index) =>
+        index === 0 ? { ...frame, r2Key: "reviews/fixture/frames/rebound-f001.jpg" } : frame,
+      ),
+    },
+    defects: referenceCriteriaPassed.defects,
+    referenceCriteria: referenceCriteriaPassed.referenceCriteria,
+    referenceCriteriaComplete: referenceCriteriaPassed.referenceCriteriaComplete,
+  });
+  assert.notEqual(
+    receiptWithDifferentPersistedFrameKey,
+    referenceCriteriaPassed.reviewReceiptFingerprint,
+    "the post-review receipt must bind persisted evidence frame keys",
+  );
+  const receiptWithDifferentSourceSha = visualReviewReceiptFingerprint({
+    ran: referenceCriteriaPassed.ran,
+    verdict: referenceCriteriaPassed.verdict,
+    reviewFingerprint: referenceCriteriaPassed.reviewFingerprint,
+    evidence: {
+      ...referenceCriteriaPassed.evidence,
+      source: { ...referenceCriteriaPassed.evidence.source, sha256: "f".repeat(64) },
+    },
+    defects: referenceCriteriaPassed.defects,
+    referenceCriteria: referenceCriteriaPassed.referenceCriteria,
+    referenceCriteriaComplete: referenceCriteriaPassed.referenceCriteriaComplete,
+  });
+  assert.notEqual(
+    receiptWithDifferentSourceSha,
+    referenceCriteriaPassed.reviewReceiptFingerprint,
+    "the post-review receipt must bind the source SHA-256",
+  );
+
+  const outputChangedReceipt = await reviewRender(fixture, 18, {
+    title: "Typed reference-criteria fixture",
+    expectTitleCard: false,
+    qualityCriteria: Array.from({ length: 7 }, (_, index) => `Generic prose criterion ${index + 1}`),
+    referenceCriteria,
+  }, {
+    runId: "visual-review-reference-criteria-output-change",
+    reviewer: async () => JSON.stringify({
+      defects: [],
+      referenceCriteria: referenceCriteria.map((criterion, index) => ({
+        id: criterion.id,
+        verdict: index === 0 ? "fail" : "pass",
+        evidenceFrameIds: ["f001"],
+      })),
+      summary: "One typed reference mechanic visibly fails.",
+    }),
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(outputChangedReceipt.reviewFingerprint, referenceCriteriaPassed.reviewFingerprint, "legacy reviewFingerprint must remain a plan/intent binding");
+  assert.notEqual(
+    outputChangedReceipt.reviewReceiptFingerprint,
+    referenceCriteriaPassed.reviewReceiptFingerprint,
+    "the post-review receipt must change when parsed reviewer verdicts change",
+  );
+
+  // A global criterion cannot clear the sampled-evidence gate with a pass in
+  // only one broad batch.
+  // The remaining batch is structurally valid but not observable, so this must
+  // remain incomplete and escalate rather than silently inheriting the pass.
+  let globalCriterionBroadBatchCount = 0;
+  const incompleteGlobalCriterion = await reviewRender(fixture, 18, {
+    title: "Global reference-criterion coverage fixture",
+    expectTitleCard: false,
+    referenceCriteria: [{
+      id: "purposeful-change-map",
+      criterion: "Every material visual change must purposefully advance the current story relationship.",
+      scope: "global",
+    }],
+  }, {
+    runId: "visual-review-incomplete-global-reference-criterion",
+    reviewer: async (input) => {
+      const verdict = input.phase === "broad" && globalCriterionBroadBatchCount++ === 0
+        ? "pass"
+        : "not_observable";
+      return JSON.stringify({
+        defects: [],
+        referenceCriteria: [{
+          id: "purposeful-change-map",
+          verdict,
+          evidenceFrameIds: [input.frames[0].id],
+        }],
+        summary: "Global criterion coverage fixture.",
+      });
+    },
+    persistEvidence: false,
+    maxFrames: 16,
+    maxFocusFrames: 0,
+  });
+  assert(globalCriterionBroadBatchCount >= 2, "fixture must exercise more than one broad reviewer batch");
+  assert.equal(incompleteGlobalCriterion.verdict, "needs_human", "one passing frame batch must not clear a global sampled-evidence gate");
+  assert.equal(incompleteGlobalCriterion.referenceCriteriaComplete, false, "a global receipt requires passes from all sampled broad-review batches");
+  assert.equal(incompleteGlobalCriterion.referenceCriteria[0]?.verdict, "not_observable");
+  assert.match(incompleteGlobalCriterion.summary, /all sampled broad-review batches/i);
+
+  const omittedReferenceCriteria = await reviewRender(fixture, 18, {
+    title: "Omitted reference-criteria receipt fixture",
+    expectTitleCard: false,
+    referenceCriteria: [referenceCriteria[0]],
+  }, {
+    runId: "visual-review-omitted-reference-criteria",
+    reviewer,
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(omittedReferenceCriteria.verdict, "needs_human", "an omitted requested reference receipt must never pass visual QA");
+  assert.equal(omittedReferenceCriteria.referenceCriteriaComplete, false);
+  assert.match(omittedReferenceCriteria.summary, /omitted or malformed requested reference criteria/i);
+
+  const malformedReferenceCriteria = await reviewRender(fixture, 18, {
+    title: "Malformed reference-criteria receipt fixture",
+    expectTitleCard: false,
+    referenceCriteria: [referenceCriteria[0]],
+  }, {
+    runId: "visual-review-malformed-reference-criteria",
+    reviewer: async () => JSON.stringify({
+      defects: [],
+      referenceCriteria: [{
+        id: referenceCriteria[0].id,
+        verdict: "pass",
+        evidenceFrameIds: ["not-a-reviewed-frame"],
+      }],
+      summary: "Malformed frame receipt fixture.",
+    }),
+    persistEvidence: false,
+    maxFrames: 8,
+    maxFocusFrames: 0,
+  });
+  assert.equal(malformedReferenceCriteria.verdict, "needs_human", "a malformed evidence-frame receipt must never pass visual QA");
+  assert.equal(malformedReferenceCriteria.referenceCriteriaComplete, false);
 
   const planned = planVisualReviewEvidence({
     durationSec: 18,

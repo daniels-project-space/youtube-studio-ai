@@ -32,6 +32,10 @@ import {
   ltx25Native720X2SmokeImageProfile,
   ltx25Native720X2SmokeProfile,
 } from "./lib/ltx25BenchmarkSmokeProfile.mjs";
+import {
+  assertLtx25ControllerMediaMatchesWorkerProof,
+  createLtx25BenchmarkOutputBinding,
+} from "./lib/ltx25BenchmarkOutputProvenance.mjs";
 
 const LTX_MODEL = "Lightricks/LTX-2.5";
 const LTX_REVISION = "ce298b1259d61ce6c87e05154b9ad339b16f32a0";
@@ -353,7 +357,7 @@ const terminal = createLtx25BenchmarkTerminal({
   reportKey: `${root}/report.json`,
   incompleteKey: `${root}/incomplete.json`,
   nonce,
-  ltxModelManifestKey,
+  ltxModelManifestKey: ltxManifestKey,
   putJson,
   headObject: (key) => sendR2(() => new HeadObjectCommand({ Bucket: bucket, Key: key }), `head:${key}`),
   onIncomplete: (incompleteKey) => console.error(JSON.stringify({ event: "benchmark_incomplete", incompleteKey })),
@@ -606,13 +610,16 @@ async function outputSha256(key) {
 }
 
 async function assertArtifacts(manifest) {
+  const artifacts = new Map();
   for (const job of manifest.jobs) {
     const head = await sendR2(() => new HeadObjectCommand({ Bucket: bucket, Key: job.artifact.key }), `head:${job.id}`);
     const metadata = head.Metadata || {};
     if (!head.ContentLength || metadata["manifest-id"] !== manifest.manifestId || metadata["profile-sha256"] !== manifest.profileSha256 || metadata["job-id"] !== job.id) {
       throw new Error(`artifact metadata is incomplete for ${job.id}`);
     }
+    artifacts.set(job.id, { sizeBytes: head.ContentLength });
   }
+  return artifacts;
 }
 
 async function main() {
@@ -678,19 +685,24 @@ async function main() {
   const video = await buildPhaseManifest({ phase: "video", profile: videoProfile(), models: ltxModels, jobs: videoJobs, maxRuntimeSeconds: phaseMaxSeconds });
   console.error(JSON.stringify({ event: "benchmark_stage", stage: "render_ltx25_videos" }));
   const completion = await executePhase({ phase: "video", ...video, maxRuntimeSeconds: phaseMaxSeconds, workerOverlay });
-  await assertArtifacts(video.manifest);
+  const videoArtifacts = await assertArtifacts(video.manifest);
   const videoOutputs = completion.videoOutputs || {};
   const outputRows = await Promise.all(video.manifest.jobs.map(async (job) => {
     const proof = videoOutputs[job.id];
     assertLtx25Native720X2SmokeProof(proof);
-    return { id: job.id, key: job.artifact.key, url: await signedGet(job.artifact.key, 604_800), proof };
+    const controllerProof = await createLtx25BenchmarkOutputBinding({ bytes: await objectBytes(job.artifact.key) });
+    if (controllerProof.sizeBytes !== videoArtifacts.get(job.id)?.sizeBytes) {
+      throw new Error(`controller download size does not match R2 artifact metadata for ${job.id}`);
+    }
+    assertLtx25ControllerMediaMatchesWorkerProof(controllerProof, proof);
+    return { id: job.id, key: job.artifact.key, url: await signedGet(job.artifact.key, 604_800), proof, controllerProof };
   }));
   await terminal.sealSuccess({
-    contract: BENCHMARK_CONTRACT, ok: true, nonce, ltxModelManifestKey,
+    contract: BENCHMARK_CONTRACT, ok: true, nonce, ltxModelManifestKey: ltxManifestKey,
     stageMaxUsd: STAGE_MAX_USD, spotRateUsdPerHour: spotRate, phaseMaxSeconds,
     zImage: { model: ZIMAGE_MODEL, revision: ZIMAGE_REVISION, volumeReceipt: zProbe },
     ltx: { model: LTX_MODEL, revision: LTX_REVISION, pipeline: "distilled", stageOne: "1280x704", output: "2560x1408@25", frames: 17, quantization: "fp8-cast", offload: "cpu", maxSampledPeakVramMib: 22_000, workerOverlaySha256: workerOverlay.sha256 },
-    outputs: outputRows.map(({ id, key, proof }) => ({ id, key, proof })),
+    outputs: outputRows.map(({ id, key, proof, controllerProof }) => ({ id, key, proof, controllerProof })),
   });
   console.log(JSON.stringify({ event: "benchmark_complete", reportKey: `${root}/report.json`, outputs: outputRows }));
 }
