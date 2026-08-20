@@ -45,6 +45,7 @@ import {
 } from "@/lib/novitaFleet";
 import { waitForNovitaRenderPoll } from "@/lib/novitaPollWait";
 import { assertLtxWorkerCompletionEvidence } from "@/lib/ltxVideoProof";
+import { assertCinematicProofAdmission } from "@/lib/cinematicProofAdmission";
 import {
   resolveLtxCreativeAdapters,
   type ResolvedLtxCreativeAdapter,
@@ -1571,6 +1572,18 @@ function directStatus(args: {
  * task. It is deliberately not exported from a route/UI surface.
  */
 export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Promise<NovitaRenderResult> {
+  // Keep the unproven native-720p x2 promotion path outside all provider work:
+  // not merely before POST, but before secret bootstrap, fleet discovery, or
+  // any worker-manifest/reservation side effect.
+  if (phase === "video") {
+    try {
+      assertCinematicProofAdmission({ profile: cfg.profile, proof: cfg.cinematicProofAdmission });
+    } catch (error) {
+      throw new NovitaAdmissionError(
+        error instanceof Error ? error.message : "cinematic proof admission rejected the requested profile",
+      );
+    }
+  }
   const lifecycle = ensureLifecycle(cfg);
   if (phase === "video") assertRtx4090VideoRuntime(cfg.profile);
   // A provider-facing caller must carry its own conservative worker envelope.

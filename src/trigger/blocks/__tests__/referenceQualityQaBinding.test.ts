@@ -30,5 +30,25 @@ assert.match(
   /casefileReferenceComparison=mechanics-only-no-automatic-comparison/,
   "QA evidence must retain the honest no-similarity-comparison boundary",
 );
+assert.match(
+  source,
+  /const casefileCinematicReferenceCriteria: VisualReviewReferenceCriterion\[\]/,
+  "only the source-bound Casefile path may add typed v5 visual criteria",
+);
+assert.match(
+  source,
+  /requirement\.id === "evidence-bearing-visual-rhythm"[\s\S]{0,700}requirement\.id === "rights-aware-casefile-presentation"/,
+  "typed QA criteria must remain limited to the two visually observable Casefile standards",
+);
+assert.match(
+  source,
+  /referenceCriteria: casefileCinematicReferenceCriteria/,
+  "the final reviewer must receive typed Casefile criteria, not only prose QualityBar guidance",
+);
+assert.match(
+  source,
+  /reviewReceiptFingerprint: visualReview\.reviewReceiptFingerprint[\s\S]{0,600}referenceCriteriaComplete: visualReview\.referenceCriteriaComplete/,
+  "QA must retain the immutable v5 review receipt and its completeness state",
+);
 
 console.log("reference-quality final-QA binding test passed");

@@ -13,6 +13,7 @@ import {
 import { NovitaAdmissionError, requireNovitaFleetReadiness } from "@/lib/novitaFleet";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
+import type { CinematicProofAdmissionReceipt } from "@/lib/cinematicProofAdmission";
 import type { LtxCreativeAdapterSelection } from "@/lib/ltxCreativeAdapter";
 import {
   waitForNovitaRenderPoll,
@@ -244,6 +245,12 @@ export interface NovitaRenderCfg {
     runId: string;
     blockId: string;
   };
+  /**
+   * Explicit durable proof only for the native-720p x2 cinematic promotion
+   * path. The direct controller rejects that exact profile without it before
+   * it can reserve a worker; existing lower-resolution profiles are unchanged.
+   */
+  cinematicProofAdmission?: CinematicProofAdmissionReceipt;
   /** Called after fleet/budget attestation and immediately before paid POST. */
   beforeProviderSpend?: () => void | Promise<void>;
 }

@@ -80,6 +80,7 @@ import {
   evaluateCinematicEditIntegrity,
 } from "@/engine/cinematicEditIntegrity";
 import {
+  cinematicFinalMasterQaEvidenceReceiptFingerprint,
   cinematicFinalMasterQaPlan,
   reviewCinematicFinalMasterQaEvidence,
   type CinematicFinalMasterQaEvidenceReceipt,
@@ -156,6 +157,7 @@ import {
   visualReviewFailureMessage,
   VisualReviewFailure,
   type VisualReviewOverlay,
+  type VisualReviewReferenceCriterion,
 } from "@/lib/visualReview";
 import { validateRender } from "@/lib/renderValidate";
 import type { ValidationAssertion } from "@/engine/creative/types";
@@ -2735,7 +2737,12 @@ export const captions: Block = {
 export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
-  produces: ["qaPassed", "qaReport", "qualityEvidence", "temporalDynamism", "visualPacing", "reviewEvidence", "reviewResult", "reviewFingerprint"],
+  produces: [
+    "qaPassed", "qaReport", "qualityEvidence", "temporalDynamism", "visualPacing",
+    "reviewEvidence", "reviewResult", "reviewFingerprint", "reviewReceiptVersion",
+    "reviewReceiptFingerprint", "referenceCriteria", "referenceCriteriaComplete",
+    "finalMasterSha256", "cinematicFinalMasterQaReceiptFingerprint",
+  ],
   paid: true,
   run: async (ctx) => {
     const productionQa = ctx.params["qaProfile"] !== "draft";
@@ -3078,6 +3085,32 @@ export const qaVisual: Block = {
           "casefileReferenceComparison=mechanics-only-no-automatic-comparison",
         ]
       : [];
+    // The v5 visual reviewer can attest only what is visibly reviewable in
+    // final-master frames. Keep source-trace, audio, and originality claims out
+    // of this typed request: those require their own receipts and, where
+    // applicable, later human review. Ordinary channels receive no additional
+    // typed criteria and therefore retain their existing review behavior.
+    const casefileCinematicReferenceCriteria: VisualReviewReferenceCriterion[] = casefileCinematicReference
+      ? casefileCinematicReference.requirements.flatMap((requirement) => {
+          if (requirement.id === "evidence-bearing-visual-rhythm") {
+            return [{
+              id: requirement.id,
+              scope: "global" as const,
+              criterion:
+                "Across all sampled broad-review batches, the visible cut rhythm follows the evidence and story escalation; decorative motion or an unsupported reconstruction must not be presented as proof.",
+            }];
+          }
+          if (requirement.id === "rights-aware-casefile-presentation") {
+            return [{
+              id: requirement.id,
+              scope: "global" as const,
+              criterion:
+                "Across all sampled broad-review batches, visible source proof, citations or disclosures remain legible and the presentation remains original to this channel; this visual receipt does not certify off-screen rights entitlement.",
+            }];
+          }
+          return [];
+        })
+      : [];
     const cinematicQualityEvidence = [
       ...cinematicReceiptEvidence,
       ...casefileCinematicReferenceEvidence,
@@ -3113,6 +3146,9 @@ export const qaVisual: Block = {
       overlays: reviewOverlays,
       creativeLocks: [...visualMatterLocks, ...cinematicReviewLocks],
       focusWindows: [...repairFocus, ...cinematicFocus],
+      ...(casefileCinematicReferenceCriteria.length
+        ? { referenceCriteria: casefileCinematicReferenceCriteria }
+        : {}),
     };
     // This is the visual release gate. It persists timestamped scene/cue/overlay
     // evidence, reviews <=12-image chronological batches, then creates a dense
@@ -3218,6 +3254,9 @@ export const qaVisual: Block = {
         );
       }
     }
+    const cinematicFinalMasterQaReceiptFingerprint = cinematicFinalMasterQaReceipt
+      ? cinematicFinalMasterQaEvidenceReceiptFingerprint(cinematicFinalMasterQaReceipt)
+      : undefined;
 
     // The old native-video escalation uploaded the full master to Gemini. It is
     // retired under the no-Gemini production policy; the evidence-backed frame
@@ -3295,6 +3334,10 @@ export const qaVisual: Block = {
         evidence: visualReview.evidence,
         summary: visualReview.summary,
         reviewFingerprint: visualReview.reviewFingerprint,
+        reviewReceiptVersion: visualReview.reviewReceiptVersion,
+        reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+        referenceCriteria: visualReview.referenceCriteria,
+        referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
       },
     };
 
@@ -4055,7 +4098,9 @@ export const qaVisual: Block = {
           ran: rv.ran,
           temporalDynamism: rv.temporalDynamism,
           visualPacing: rv.visualPacing,
+          finalMasterSha256: cinematicFinalMasterSha256,
           cinematicFinalMasterQaEvidence: cinematicFinalMasterQaReceipt,
+          cinematicFinalMasterQaReceiptFingerprint,
           adaptiveShotAnalysis: finalShotAnalysis
             ? {
                 provider: finalShotAnalysis.provider,
@@ -4077,8 +4122,18 @@ export const qaVisual: Block = {
         defects: visualReview.defects,
         summary: visualReview.summary,
         focusWindows: visualReview.focusWindows,
+        reviewReceiptVersion: visualReview.reviewReceiptVersion,
+        reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+        referenceCriteria: visualReview.referenceCriteria,
+        referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
       },
       reviewFingerprint: visualReview.reviewFingerprint,
+      reviewReceiptVersion: visualReview.reviewReceiptVersion,
+      reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+      referenceCriteria: visualReview.referenceCriteria,
+      referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
+      finalMasterSha256: cinematicFinalMasterSha256,
+      cinematicFinalMasterQaReceiptFingerprint,
       [COST_PATCH_KEY]: qaCost,
     };
   },
