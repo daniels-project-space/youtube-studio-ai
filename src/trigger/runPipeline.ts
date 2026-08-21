@@ -703,6 +703,28 @@ export const runPipelineTask = task({
           styleDNA: (channel as { styleDNA?: unknown }).styleDNA ?? null,
           qualityBar: (channel as { qaRubric?: unknown }).qaRubric ?? null,
           contentLane,
+          // Non-credential, non-publish-policy channel config a handful of
+          // blocks otherwise re-fetch from Convex independently (crewBlocks.ts's
+          // loadGrounding, intelligenceBlocks.ts's loadChannel). Freezing it here
+          // removes those redundant getChannel calls entirely rather than just
+          // caching them — same freeze rationale as the fields above.
+          ...(channel.identity?.creativeBrief ? { showBible: channel.identity.creativeBrief } : {}),
+          ...((channel as { slug?: string }).slug ? { channelSlug: (channel as { slug?: string }).slug } : {}),
+          channelStatus: (channel as { status?: string }).status ?? "active",
+          ...((channel as { template?: string }).template
+            ? { channelTemplate: (channel as { template?: string }).template }
+            : {}),
+          channelBudget: channel.budget ?? 0,
+          ...((channel as { moduleConfig?: Record<string, Record<string, unknown>> }).moduleConfig
+            ? { channelModuleConfig: (channel as { moduleConfig?: Record<string, Record<string, unknown>> }).moduleConfig }
+            : {}),
+          ...((channel as { thumbnailPlaybook?: unknown }).thumbnailPlaybook
+            ? { thumbnailPlaybook: (channel as { thumbnailPlaybook?: unknown }).thumbnailPlaybook }
+            : {}),
+          ...((channel as { family?: string }).family ? { channelFamily: (channel as { family?: string }).family } : {}),
+          ...(channel.identity?.thumbnailIdentity
+            ? { thumbnailIdentity: channel.identity.thumbnailIdentity }
+            : {}),
           ...(payload.childrenShowBibleInput !== undefined
             ? { childrenShowBibleInput: structuredClone(payload.childrenShowBibleInput) }
             : {}),

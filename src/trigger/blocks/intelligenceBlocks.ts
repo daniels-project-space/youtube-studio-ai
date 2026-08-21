@@ -110,27 +110,13 @@ async function recordAsset(
   }
 }
 
-/** Load the channel doc (for identity.niche / thumbnailIdentity / persona). */
-async function loadChannel(ctx: StageContext) {
-  try {
-    return await convex().query(api.channels.getChannel, {
-      channelId: ctx.channelId as Id<"channels">,
-    });
-  } catch (e) {
-    ctx.log(`loadChannel failed (non-fatal): ${e instanceof Error ? e.message : e}`);
-    return null;
-  }
-}
-
-/** Resolve the niche from params, store, or channel identity. */
-function resolveNiche(
-  ctx: StageContext,
-  channel: { identity?: { niche?: string } } | null,
-): string | undefined {
+/** Resolve the niche from params or store — runPipeline.ts's seedStore always
+ *  carries `niche` (frozen from the channel's identity at run start), so a
+ *  live channel re-fetch as a third fallback is never actually reached. */
+function resolveNiche(ctx: StageContext): string | undefined {
   return (
     (ctx.params["niche"] as string | undefined) ??
     (ctx.store["niche"] as string | undefined) ??
-    channel?.identity?.niche ??
     undefined
   );
 }
@@ -151,8 +137,7 @@ export const competitorResearch: Block = {
     "thumbnailer",
   ],
   run: async (ctx) => {
-    const channel = await loadChannel(ctx);
-    const niche = resolveNiche(ctx, channel);
+    const niche = resolveNiche(ctx);
 
     if (!niche) {
       throw new Error("competitor_research: no niche configured — Golden research cannot be skipped");
@@ -197,9 +182,9 @@ export const competitorResearch: Block = {
       nicheIntel: nicheIntel ?? null,
       seoDatabank: databank ?? null,
       competitors: competitors ?? [],
-      thumbnailIdentity: channel?.identity?.thumbnailIdentity ?? null,
-      persona: channel?.identity?.persona ?? "",
-      thumbnailer: (channel as { thumbnailer?: string } | null)?.thumbnailer ?? "banana",
+      thumbnailIdentity: (ctx.store["thumbnailIdentity"] as unknown) ?? null,
+      persona: (ctx.store["persona"] as string | undefined) ?? "",
+      thumbnailer: (ctx.store["thumbnailer"] as string | undefined) ?? "banana",
     };
   },
 };
@@ -783,17 +768,16 @@ export const thumbnailGen: Block = {
         }
       : null;
 
-    const channelDoc = await loadChannel(ctx);
-    const fullDna = (
-      (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null | undefined) ??
-      (channelDoc as { styleDNA?: import("@/engine/creative/types").StyleDNA } | null)?.styleDNA ??
-      null
-    );
+    // runPipeline.ts's seedStore freezes styleDNA/thumbnailPlaybook/
+    // channelFamily/channelName from the channel doc at run start (see its
+    // comment on the channel-config freeze block) — reading them here instead
+    // of re-fetching the channel removes another redundant getChannel call.
+    const fullDna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null | undefined) ?? null;
     const resolved = resolveGoldenThumbnailPlaybook({
-      storedPlaybook: (channelDoc as { thumbnailPlaybook?: ThumbnailPlaybook } | null)?.thumbnailPlaybook,
+      storedPlaybook: ctx.store["thumbnailPlaybook"] as ThumbnailPlaybook | undefined,
       dna: fullDna,
-      family: String(ctx.store["family"] ?? (channelDoc as { family?: string } | null)?.family ?? ""),
-      channelName: String(ctx.store["channelName"] ?? channelDoc?.name ?? "channel"),
+      family: String(ctx.store["channelFamily"] ?? ""),
+      channelName: String(ctx.store["channelName"] ?? "channel"),
     });
     const playbook = resolved.playbook;
     const strategy = resolved.strategy;
