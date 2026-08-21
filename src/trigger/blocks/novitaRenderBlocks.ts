@@ -39,6 +39,8 @@ import {
   secondsToFrames,
   toNovitaPhaseProfile,
   type NovitaRenderCfg,
+  type NovitaPhaseProfile,
+  type NovitaRenderResult,
   type Shot,
 } from "@/lib/novitaRenderFarm";
 import { novitaCostEnvelope, type NovitaCostEnvelope } from "@/lib/novitaCostEnvelope";
@@ -1033,6 +1035,24 @@ export const qaAssets: Block = {
   },
 };
 
+/**
+ * The direct controller supplies native source hashes only after extracting
+ * them from sealed manifests. Keep those bindings attached to the final
+ * proof-set check so a valid native-720p completion is not self-rejected.
+ */
+export function assertNovitaRenderVideoOutputProofs(args: {
+  profile: NovitaPhaseProfile;
+  shotIds: readonly string[];
+  result: Pick<NovitaRenderResult, "videoOutputProofs" | "nativeInputGeometrySources">;
+}) {
+  return assertLtxVideoOutputProofSet({
+    profile: args.profile,
+    shotIds: args.shotIds,
+    proofs: args.result.videoOutputProofs,
+    nativeInputGeometrySources: args.result.nativeInputGeometrySources,
+  });
+}
+
 export const novitaRenderVideo: Block = {
   id: "novita_render_video",
   consumes: ["shotList", "dpVisualSpecs", "selectedStillManifest", "assetQaReport", "visualMatterManifest"],
@@ -1110,10 +1130,10 @@ export const novitaRenderVideo: Block = {
     const durationSec = shots.at(-1)!.t1;
     let outputProofs;
     try {
-      outputProofs = assertLtxVideoOutputProofSet({
+      outputProofs = assertNovitaRenderVideoOutputProofs({
         profile: cfg.profile,
         shotIds: shots.map((shot) => shot.id),
-        proofs: result.videoOutputProofs,
+        result,
       });
     } catch (error) {
       const message = error instanceof Error ? error.message : "returned invalid LTX x2 output evidence";

@@ -17,6 +17,7 @@ import {
 } from "../cinematicHandoff";
 
 const fingerprint = "a".repeat(64);
+const nameCardText = "LEAD INVESTIGATOR — CASE FILE 118";
 const scenes = [0, 1].map((index) => ({
   id: `cinematic-shot-handoff-${index + 1}`,
   sequenceBeatId: "cinematic-beat-handoff",
@@ -39,6 +40,7 @@ const scenes = [0, 1].map((index) => ({
   tensionState: index === 0 ? "pressure" as const : "reversal" as const,
   castIds: [],
   continuitySeed: index + 1,
+  ...(index === 0 ? { nameCardText } : {}),
 }));
 
 const sourceProofObligation: SourceProofMediaObligation = {
@@ -184,6 +186,11 @@ function validArgsWithSourceProof(): Parameters<typeof createCinematicAssemblyHa
 
 const handoff = createCinematicAssemblyHandoff(validArgs());
 assert.equal(handoff.manifest.exactOrder, true);
+assert.equal(
+  handoff.manifest.items[0]?.nameCardText,
+  nameCardText,
+  "the signed cinematic render-to-assembly handoff must retain the exact deterministic name-card text for its clip",
+);
 assert.deepEqual(
   handoff.manifest.items.map((item) => [item.sequenceIndex, item.shotId, item.clipKey]),
   scenes.map((scene, index) => [index, scene.id, `runs/case/${scene.id}.mp4`]),

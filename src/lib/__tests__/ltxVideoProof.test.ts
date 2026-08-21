@@ -146,6 +146,80 @@ async function main(): Promise<void> {
   });
   assert.deepEqual(completionProof, proofFor(), "direct workers normalize only exact ffprobe/x2 proof values");
 
+  const native720Profile: NovitaPhaseProfile = {
+    ...profile,
+    width: 2560,
+    height: 1408,
+    stageOneWidth: 1280,
+    stageOneHeight: 704,
+  };
+  const nativeSources = { initialSha256: "e".repeat(64) };
+  const nativeProof = {
+    ...proofFor(native720Profile),
+    inputGeometry: {
+      initial: {
+        sha256: nativeSources.initialSha256,
+        width: 1280,
+        height: 704,
+      },
+    },
+  };
+  assert.deepEqual(
+    assertLtxWorkerCompletionEvidence({
+      profile: native720Profile,
+      jobId,
+      nativeInputGeometrySources: nativeSources,
+      completion: {
+        gpuSku: "RTX 4090",
+        gpuCount: 1,
+        renderContract: contractFor(native720Profile),
+        videoOutputs: { [jobId]: nativeProof },
+      },
+    }).inputGeometry,
+    nativeProof.inputGeometry,
+    "native-720p completion evidence binds an ffprobe receipt to the sealed initial still hash",
+  );
+  assert.throws(
+    () => assertLtxWorkerCompletionEvidence({
+      profile: native720Profile,
+      jobId,
+      nativeInputGeometrySources: nativeSources,
+      completion: {
+        gpuSku: "RTX 4090",
+        gpuCount: 1,
+        renderContract: contractFor(native720Profile),
+        videoOutputs: {
+          [jobId]: {
+            ...nativeProof,
+            inputGeometry: { initial: { ...nativeProof.inputGeometry.initial, height: 736 } },
+          },
+        },
+      },
+    }),
+    /invalid LTX x2 output evidence/,
+    "a non-1280x704 native conditioning still cannot pass the controller evidence boundary",
+  );
+  assert.throws(
+    () => assertLtxWorkerCompletionEvidence({
+      profile: native720Profile,
+      jobId,
+      nativeInputGeometrySources: nativeSources,
+      completion: {
+        gpuSku: "RTX 4090",
+        gpuCount: 1,
+        renderContract: contractFor(native720Profile),
+        videoOutputs: {
+          [jobId]: {
+            ...nativeProof,
+            inputGeometry: { initial: { ...nativeProof.inputGeometry.initial, sha256: "f".repeat(64) } },
+          },
+        },
+      },
+    }),
+    /invalid LTX x2 output evidence/,
+    "a geometry receipt cannot be rebound to a different still after manifest sealing",
+  );
+
   assert.throws(
     () => assertLtxWorkerCompletionEvidence({
       profile,

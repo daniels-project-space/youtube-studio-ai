@@ -9,6 +9,8 @@ import {
 } from "@/lib/cinematicProofAdmission";
 import { renderDirectNovita } from "@/lib/novitaDirectRender";
 import {
+  launchVideo,
+  renderVideo,
   toNovitaPhaseProfile,
   type NovitaPhaseProfile,
   type NovitaRenderCfg,
@@ -74,44 +76,43 @@ async function main(): Promise<void> {
 
   assert.throws(
     () => assertCinematicProofAdmission({ profile: native720Profile }),
-    /blocked until an explicit cinematic proof receipt is supplied/,
-    "native-720p x2 cannot be admitted without an explicit proof receipt",
+    /no immutable approved proof receipt is registered/,
+    "native-720p x2 cannot be admitted without a release-controlled proof receipt",
   );
 
   const oldLowerResolutionProof = proofFor(currentProfile);
-  assert.throws(
-    () => assertCinematicProofAdmission({ profile: native720Profile, proof: oldLowerResolutionProof }),
-    /does not match the exact requested native-720p x2 profile/,
-    "a 640x352 -> 1280x704 proof cannot approve the native-720p x2 target",
+  assert.notEqual(
+    oldLowerResolutionProof.profileFingerprint,
+    cinematicProofProfileFingerprint(native720Profile),
+    "a 640x352 -> 1280x704 receipt cannot be the native-720p profile's immutable registry key",
   );
   const syntheticNativeProof = proofFor(native720Profile);
-  assert.throws(
-    () => assertCinematicProofAdmission({ profile: native720Profile, proof: syntheticNativeProof }),
-    /no immutable approved proof receipt is registered/,
-    "a caller-generated, self-consistent native-720p receipt is not a trusted proof admission",
-  );
 
   let paidRenderCalls = 0;
   await assert.rejects(
     () => renderDirectNovita(native720Cfg(() => { paidRenderCalls += 1; }), "video"),
-    /blocked until an explicit cinematic proof receipt is supplied/,
+    /no immutable approved proof receipt is registered/,
     "missing native-720p proof must reject before direct provider admission",
   );
   await assert.rejects(
-    () => renderDirectNovita({
-      ...native720Cfg(() => { paidRenderCalls += 1; }),
-      cinematicProofAdmission: oldLowerResolutionProof,
-    }, "video"),
-    /does not match the exact requested native-720p x2 profile/,
-    "old lower-resolution proof must reject before any paid render call",
+    () => renderVideo(native720Cfg(() => { paidRenderCalls += 1; })),
+    /no immutable approved proof receipt is registered/,
+    "the normal video route must reject before provider admission",
+  );
+  await assert.rejects(
+    () => launchVideo(native720Cfg(() => { paidRenderCalls += 1; })),
+    /no immutable approved proof receipt is registered/,
+    "the retained bridge/repair-compatible video route must reject before secret bootstrap",
   );
   await assert.rejects(
     () => renderDirectNovita({
       ...native720Cfg(() => { paidRenderCalls += 1; }),
+      // Runtime payloads can carry arbitrary extra keys. The controller must
+      // ignore a caller-crafted receipt rather than treating it as authority.
       cinematicProofAdmission: syntheticNativeProof,
-    }, "video"),
+    } as unknown as NovitaRenderCfg, "video"),
     /no immutable approved proof receipt is registered/,
-    "a synthetic native-720p receipt must reject before any paid render call",
+    "a caller-crafted native receipt must not affect trusted proof resolution",
   );
   assert.equal(paidRenderCalls, 0, "proof admission fails before beforeProviderSpend can run");
 

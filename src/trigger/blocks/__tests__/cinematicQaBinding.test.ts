@@ -53,6 +53,16 @@ assert.match(
   "the exact final-master concat must consume the reviewed clip order and timing windows",
 );
 assert.match(
+  timelineSource,
+  /item\.nameCardText[\s\S]*applyNameCardOverlay\(local, cardPath, \{[\s\S]*text: item\.nameCardText,[\s\S]*durationSec: item\.t1 - item\.t0,/,
+  "a required Casefile name card must be applied deterministically to the local reviewed clip before exact final-master assembly",
+);
+assert.match(
+  timelineSource,
+  /required Casefile name-card overlay failed/,
+  "Casefile assembly must fail closed if a required deterministic name-card overlay cannot be delivered",
+);
+assert.match(
   qaSource,
   /acceptedKeyframes=[\s\S]*acceptedMovingTakes=[\s\S]*acceptedTransitions=/,
   "final quality evidence must retain counts of accepted keyframes, moving LTX takes, and actual reviewed cuts",

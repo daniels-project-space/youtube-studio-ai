@@ -37,7 +37,11 @@ test("720p-native x2 smoke rejects non-exact jobs and output evidence", () => {
   const proof = {
     outputWidth: 2560, outputHeight: 1408, stageOneWidth: 1280, stageOneHeight: 704,
     spatialUpscaleFactor: 2, frameCount: 17, frameRate: 25, hasAudio: true, sampledPeakVramMib: 21_999,
+    inputGeometry: { initial: { sha256: "a".repeat(64), width: 1280, height: 704 } },
   };
-  assert.doesNotThrow(() => assertLtx25Native720X2SmokeProof(proof));
+  assert.doesNotThrow(() => assertLtx25Native720X2SmokeProof(proof, { initialSha256: "a".repeat(64) }));
+  assert.throws(() => assertLtx25Native720X2SmokeProof(proof), /input geometry/);
   assert.throws(() => assertLtx25Native720X2SmokeProof({ ...proof, sampledPeakVramMib: LTX25_720P_NATIVE_X2_SMOKE.maxSampledPeakVramMib + 1 }), /22 GiB/);
+  assert.throws(() => assertLtx25Native720X2SmokeProof({ ...proof, inputGeometry: { initial: { ...proof.inputGeometry.initial, height: 736 } } }), /input geometry/);
+  assert.throws(() => assertLtx25Native720X2SmokeProof(proof, { initialSha256: "b".repeat(64) }), /input geometry/);
 });

@@ -672,6 +672,20 @@ export default defineSchema({
       "publishContinuationUpdatedAt",
     ]),
 
+  // A real Convex-transaction lease for the short channel-scoped R2
+  // read/compare/write critical section in originality_gate. It prevents two
+  // concurrent Trigger runs from both accepting the same lexical script based
+  // on an out-of-date corpus snapshot.
+  scriptSelfDedupLeases: defineTable({
+    ownerId: v.string(),
+    channelId: v.id("channels"),
+    runId: v.string(),
+    leaseToken: v.string(),
+    acquiredAt: v.number(),
+    updatedAt: v.number(),
+    leaseExpiresAt: v.number(),
+  }).index("by_channel", ["channelId"]),
+
   // One disposable RTX 4090 worker for one immutable Novita manifest. This is
   // deliberately separate from `runs`: a run can have image/video phases,
   // retries, and parallel waves, while every provider instance must receive an

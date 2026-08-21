@@ -6,9 +6,20 @@
  * accepts an artifact only when every shot carries that exact evidence.
  */
 import type {
+  NovitaNativeInputGeometrySources,
   NovitaPhaseProfile,
+  NovitaVideoInputGeometryReceipt,
   NovitaVideoOutputProof,
 } from "@/lib/novitaRenderFarm";
+import { requiresNative720X2CinematicProof } from "@/lib/cinematicProofAdmission";
+
+const SHA256_HEX = /^[a-f0-9]{64}$/;
+
+/**
+ * Hashes from the sealed worker manifest, used to bind a native-720p geometry
+ * receipt to the exact conditioning stills the worker downloaded.
+ */
+export type LtxNativeInputGeometrySources = NovitaNativeInputGeometrySources;
 
 export interface LtxWorkerCompletionEvidence {
   /** Written only after the worker's local nvidia-smi attestation succeeds. */
@@ -33,7 +44,46 @@ function hasExactLtxTwoStageProfile(profile: NovitaPhaseProfile): boolean {
     && profile.height === profile.stageOneHeight! * 2;
 }
 
-function outputProof(value: unknown, profile: NovitaPhaseProfile): NovitaVideoOutputProof | undefined {
+function nativeInputGeometryProof(args: {
+  value: unknown;
+  profile: NovitaPhaseProfile;
+  sources?: LtxNativeInputGeometrySources;
+}): NovitaVideoInputGeometryReceipt | undefined {
+  const { value, profile, sources } = args;
+  if (!sources || !SHA256_HEX.test(sources.initialSha256) || (sources.endSha256 && !SHA256_HEX.test(sources.endSha256))) {
+    return undefined;
+  }
+  if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
+  const receipts = value as Record<string, unknown>;
+  const normalize = (raw: unknown, expectedSha256: string) => {
+    if (!raw || typeof raw !== "object" || Array.isArray(raw)) return undefined;
+    const receipt = raw as Record<string, unknown>;
+    if (
+      receipt.sha256 !== expectedSha256
+      || receipt.width !== profile.stageOneWidth
+      || receipt.height !== profile.stageOneHeight
+    ) return undefined;
+    return {
+      sha256: expectedSha256,
+      width: profile.stageOneWidth!,
+      height: profile.stageOneHeight!,
+    };
+  };
+  const initial = normalize(receipts.initial, sources.initialSha256);
+  if (!initial) return undefined;
+  if (!sources.endSha256) {
+    if (receipts.end !== undefined) return undefined;
+    return { initial };
+  }
+  const end = normalize(receipts.end, sources.endSha256);
+  return end ? { initial, end } : undefined;
+}
+
+function outputProof(
+  value: unknown,
+  profile: NovitaPhaseProfile,
+  nativeInputGeometrySources?: LtxNativeInputGeometrySources,
+): NovitaVideoOutputProof | undefined {
   if (!value || typeof value !== "object" || Array.isArray(value)) return undefined;
   const proof = value as Record<string, unknown>;
   if (
@@ -47,6 +97,14 @@ function outputProof(value: unknown, profile: NovitaPhaseProfile): NovitaVideoOu
     || proof.quantization !== "fp8-cast"
     || proof.offload !== "cpu"
   ) return undefined;
+  const nativeInputGeometry = requiresNative720X2CinematicProof(profile)
+    ? nativeInputGeometryProof({
+        value: proof.inputGeometry,
+        profile,
+        sources: nativeInputGeometrySources,
+      })
+    : undefined;
+  if (requiresNative720X2CinematicProof(profile) && !nativeInputGeometry) return undefined;
   return {
     outputWidth: profile.width,
     outputHeight: profile.height,
@@ -57,6 +115,7 @@ function outputProof(value: unknown, profile: NovitaPhaseProfile): NovitaVideoOu
     pipeline: "distilled",
     quantization: "fp8-cast",
     offload: "cpu",
+    ...(nativeInputGeometry ? { inputGeometry: nativeInputGeometry } : {}),
   };
 }
 
@@ -96,8 +155,10 @@ export function assertLtxWorkerCompletionEvidence(args: {
   profile: NovitaPhaseProfile;
   jobId: string;
   completion: LtxWorkerCompletionEvidence;
+  /** Required only for native 1280x704 -> 2560x1408 proof normalization. */
+  nativeInputGeometrySources?: LtxNativeInputGeometrySources;
 }): NovitaVideoOutputProof {
-  const { profile, jobId, completion } = args;
+  const { profile, jobId, completion, nativeInputGeometrySources } = args;
   requireExactProfile(profile);
   // The worker independently checks the physical device with nvidia-smi before
   // it writes this receipt. Do not accept a correctly shaped MP4 if that
@@ -114,7 +175,7 @@ export function assertLtxWorkerCompletionEvidence(args: {
     throw new Error("omitted its ffprobe video output evidence");
   }
   const entries = outputs as Record<string, unknown>;
-  const proof = outputProof(entries[jobId], profile);
+  const proof = outputProof(entries[jobId], profile, nativeInputGeometrySources);
   if (!proof || Object.keys(entries).length !== 1) {
     throw new Error("returned invalid LTX x2 output evidence");
   }
@@ -130,8 +191,13 @@ export function assertLtxVideoOutputProofSet(args: {
   profile: NovitaPhaseProfile;
   shotIds: readonly string[];
   proofs: unknown;
+  /**
+   * Future native-720p callers must carry the sealed source hashes per shot;
+   * ordinary 640x352 -> 1280x704 proof sets deliberately need no migration.
+   */
+  nativeInputGeometrySources?: Readonly<Record<string, LtxNativeInputGeometrySources>>;
 }): Record<string, NovitaVideoOutputProof> {
-  const { profile, shotIds, proofs } = args;
+  const { profile, shotIds, proofs, nativeInputGeometrySources } = args;
   requireExactProfile(profile);
   if (!proofs || typeof proofs !== "object" || Array.isArray(proofs)) {
     throw new Error("returned no worker-observed LTX x2 output proof");
@@ -145,9 +211,18 @@ export function assertLtxVideoOutputProofSet(args: {
   if (proofIds.length !== expected.size || proofIds.some((shotId) => !expected.has(shotId))) {
     throw new Error("returned stale, duplicate, or unexpected LTX x2 output proofs");
   }
+  if (requiresNative720X2CinematicProof(profile)) {
+    const sourceIds = Object.keys(nativeInputGeometrySources ?? {});
+    if (
+      sourceIds.length !== expected.size
+      || sourceIds.some((shotId) => !expected.has(shotId))
+    ) {
+      throw new Error("native-720p x2 proof set is missing sealed input geometry sources");
+    }
+  }
   const normalized: Record<string, NovitaVideoOutputProof> = {};
   for (const shotId of shotIds) {
-    const proof = outputProof(received[shotId], profile);
+    const proof = outputProof(received[shotId], profile, nativeInputGeometrySources?.[shotId]);
     if (!proof) {
       throw new Error(`x2 output proof does not match the pinned profile for ${shotId}`);
     }

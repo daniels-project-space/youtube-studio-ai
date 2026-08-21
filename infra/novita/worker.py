@@ -626,6 +626,8 @@ def validate_manifest(manifest: Any, expected_sha256: str) -> dict[str, Any]:
                     if not isinstance(source, dict) or not SHA256_RE.fullmatch(str(source.get("sha256") or "")):
                         raise ValueError(f"render job {job['id']} has invalid {field} contract")
                     _parse_https_url(str(source.get("getUrl") or ""))
+            if is_native_720p_x2_smoke and not isinstance(job.get("input"), dict):
+                raise ValueError(f"render job {job['id']} requires a native-720p x2 initial still")
         artifact = _validate_delivery_target(job.get("artifact"), f"render job {job['id']} artifact")
         normalized_headers = {key.lower(): value for key, value in artifact.get("headers", {}).items()}
         expected_metadata = {
@@ -845,6 +847,56 @@ def build_video_command(
     return command
 
 
+def probe_input_geometry(input_path: Path, expected_sha256: str) -> dict[str, str | int]:
+    """Record ffprobe-observed geometry for one hash-verified LTX conditioning still."""
+    if not SHA256_RE.fullmatch(expected_sha256):
+        raise ValueError("LTX input geometry receipt requires a SHA-256-bound still")
+    result = subprocess.run(
+        [
+            "ffprobe", "-v", "error", "-select_streams", "v:0",
+            "-show_entries", "stream=codec_type,width,height", "-of", "json", str(input_path),
+        ],
+        check=False,
+        capture_output=True,
+        text=True,
+        timeout=30,
+    )
+    if result.returncode != 0:
+        raise RuntimeError("ffprobe could not inspect LTX conditioning still geometry")
+    try:
+        streams = json.loads(result.stdout).get("streams")
+    except (TypeError, ValueError, json.JSONDecodeError) as error:
+        raise RuntimeError("ffprobe returned malformed LTX conditioning still metadata") from error
+    if not isinstance(streams, list) or len(streams) != 1 or not isinstance(streams[0], dict):
+        raise RuntimeError("ffprobe did not return exactly one LTX conditioning still video stream")
+    stream = streams[0]
+    width, height = stream.get("width"), stream.get("height")
+    if (
+        stream.get("codec_type") != "video"
+        or isinstance(width, bool) or not isinstance(width, int) or width < 1
+        or isinstance(height, bool) or not isinstance(height, int) or height < 1
+    ):
+        raise RuntimeError("ffprobe returned invalid LTX conditioning still geometry")
+    return {"sha256": expected_sha256, "width": width, "height": height}
+
+
+def assert_native_input_geometry_receipt(
+    label: str,
+    receipt: dict[str, str | int],
+    profile: dict[str, Any],
+) -> None:
+    """Native 720p promotion never resizes an input still before LTX x2."""
+    expected_width, expected_height = profile["stageOneWidth"], profile["stageOneHeight"]
+    if (
+        not SHA256_RE.fullmatch(str(receipt.get("sha256") or ""))
+        or receipt.get("width") != expected_width
+        or receipt.get("height") != expected_height
+    ):
+        raise RuntimeError(
+            f"native-720p x2 {label} still geometry must be {expected_width}x{expected_height}",
+        )
+
+
 def probe_video_output(
     output: Path,
     width: int,
@@ -942,18 +994,29 @@ def render_video(
         or profile.get("spatialUpscaleFactor") != 2
     ):
         raise ValueError("LTX frame count and two-stage dimensions are invalid")
+    input_geometry: dict[str, dict[str, str | int]] = {}
     image_path: Path | None = None
     if job.get("input"):
         source = job["input"]
         image_path = workdir / f"{job['id']}-input.png"
         download(str(source["getUrl"]), image_path, source.get("sha256"))
+        if is_native_720p_x2_smoke:
+            initial_geometry = probe_input_geometry(image_path, str(source["sha256"]))
+            assert_native_input_geometry_receipt("initial", initial_geometry, profile)
+            input_geometry["initial"] = initial_geometry
         _check_deadline(deadline_monotonic)
     end_image_path: Path | None = None
     if job.get("endInput"):
         source = job["endInput"]
         end_image_path = workdir / f"{job['id']}-end-input.png"
         download(str(source["getUrl"]), end_image_path, source.get("sha256"))
+        if is_native_720p_x2_smoke:
+            end_geometry = probe_input_geometry(end_image_path, str(source["sha256"]))
+            assert_native_input_geometry_receipt("end", end_geometry, profile)
+            input_geometry["end"] = end_geometry
         _check_deadline(deadline_monotonic)
+    if is_native_720p_x2_smoke and "initial" not in input_geometry:
+        raise ValueError("native-720p x2 render requires an initial still geometry receipt")
     command = build_video_command(job, profile, models, output, image_path, end_image_path)
     timeout_seconds = int(job.get("timeoutSeconds", 7_200))
     if deadline_monotonic is not None:
@@ -988,6 +1051,7 @@ def render_video(
         if sampled_peak_vram_mib is None:
             raise RuntimeError("native-720p x2 smoke benchmark lacks sampled VRAM evidence")
         proof["sampledPeakVramMib"] = sampled_peak_vram_mib
+        proof["inputGeometry"] = input_geometry
     return proof
 
 
@@ -1123,6 +1187,8 @@ def assert_video_output_proof(proof: dict[str, Any], profile: dict[str, Any]) ->
         raise ValueError("video output evidence drifts from the sealed LTX 2.5 x2 profile")
     if profile.get("id") == LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID:
         sampled_peak = proof.get("sampledPeakVramMib")
+        input_geometry = proof.get("inputGeometry")
+        initial_geometry = input_geometry.get("initial") if isinstance(input_geometry, dict) else None
         if (
             proof.get("frameCount") != LTX_25_720P_NATIVE_X2_SMOKE_FRAMES
             or proof.get("frameRate") != 25
@@ -1130,8 +1196,18 @@ def assert_video_output_proof(proof: dict[str, Any], profile: dict[str, Any]) ->
             or not isinstance(sampled_peak, int)
             or sampled_peak < 0
             or sampled_peak > LTX_25_720P_NATIVE_X2_SMOKE_MAX_SAMPLED_PEAK_VRAM_MIB
+            or not isinstance(initial_geometry, dict)
         ):
             raise ValueError("native-720p x2 smoke video evidence is incomplete or exceeds its VRAM gate")
+        try:
+            assert_native_input_geometry_receipt("initial", initial_geometry, profile)
+            if "end" in input_geometry:
+                end_geometry = input_geometry["end"]
+                if not isinstance(end_geometry, dict):
+                    raise ValueError("native-720p x2 end still geometry receipt is invalid")
+                assert_native_input_geometry_receipt("end", end_geometry, profile)
+        except (TypeError, ValueError, RuntimeError) as error:
+            raise ValueError("native-720p x2 smoke video evidence has invalid input geometry") from error
 
 
 def _heartbeat_loop(

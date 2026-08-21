@@ -39,6 +39,8 @@ export const CinematicShotToClipSchema = z.object({
   cutReason: CinematicCutReasonSchema,
   tensionState: CinematicTensionStateSchema,
   narrationPurpose: z.string().trim().min(1).max(360),
+  /** Exact compositor-owned character card required on this reviewed clip. */
+  nameCardText: z.string().trim().min(1).max(120).optional(),
   /** Exact approved evidence clip receipt when this is a real source insert. */
   sourceProofMediaReceipt: SourceProofMediaReceiptSchema.optional(),
 }).strict().refine((item) => item.t1 > item.t0, "cinematic clip t1 must follow t0");
@@ -172,6 +174,7 @@ export function createCinematicAssemblyHandoff(args: {
         cutReason: edit.cutReason,
         tensionState: edit.tensionState,
         narrationPurpose: edit.narrationPurpose,
+        ...(scene.nameCardText ? { nameCardText: scene.nameCardText } : {}),
         ...(rendered.sourceProofMediaReceipt
           ? { sourceProofMediaReceipt: rendered.sourceProofMediaReceipt }
           : {}),

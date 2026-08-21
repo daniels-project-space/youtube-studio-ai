@@ -13,7 +13,7 @@ import {
 import { NovitaAdmissionError, requireNovitaFleetReadiness } from "@/lib/novitaFleet";
 import { novitaCostEnvelope } from "@/lib/novitaCostEnvelope";
 import { applyLtxI2vPromptContract } from "@/lib/ltxI2vPrompt";
-import type { CinematicProofAdmissionReceipt } from "@/lib/cinematicProofAdmission";
+import { assertCinematicProofAdmission } from "@/lib/cinematicProofAdmission";
 import type { LtxCreativeAdapterSelection } from "@/lib/ltxCreativeAdapter";
 import {
   waitForNovitaRenderPoll,
@@ -188,7 +188,29 @@ export interface RenderedCandidate {
   key: string;
 }
 
-/** Evidence emitted by the worker only after ffprobe validates the produced MP4. */
+/** Worker-probed geometry for a still that conditioned an LTX video job. */
+export interface NovitaStillGeometryReceipt {
+  /** SHA-256 already verified while the worker downloaded this exact still. */
+  sha256: string;
+  width: number;
+  height: number;
+}
+
+/** Native-720p x2 evidence for every still that conditioned a video job. */
+export interface NovitaVideoInputGeometryReceipt {
+  initial: NovitaStillGeometryReceipt;
+  end?: NovitaStillGeometryReceipt;
+}
+
+/**
+ * SHA-256 values from the sealed worker manifest. Native-720p video receipts
+ * are valid only when their ffprobe geometry is bound to these exact stills.
+ */
+export interface NovitaNativeInputGeometrySources {
+  initialSha256: string;
+  endSha256?: string;
+}
+
 export interface NovitaVideoOutputProof {
   outputWidth: number;
   outputHeight: number;
@@ -200,6 +222,12 @@ export interface NovitaVideoOutputProof {
   pipeline: "distilled";
   quantization: "fp8-cast";
   offload: "cpu";
+  /**
+   * Present only for the benchmark-only native 1280x704 -> 2560x1408 path.
+   * Existing 640x352 -> 1280x704 results intentionally retain their prior
+   * evidence shape so they can be restored without a migration.
+   */
+  inputGeometry?: NovitaVideoInputGeometryReceipt;
 }
 
 /** Full render job config — maps ~1:1 onto the orchestrator's job schema (no translation layer). */
@@ -245,12 +273,6 @@ export interface NovitaRenderCfg {
     runId: string;
     blockId: string;
   };
-  /**
-   * Explicit durable proof only for the native-720p x2 cinematic promotion
-   * path. The direct controller rejects that exact profile without it before
-   * it can reserve a worker; existing lower-resolution profiles are unchanged.
-   */
-  cinematicProofAdmission?: CinematicProofAdmissionReceipt;
   /** Called after fleet/budget attestation and immediately before paid POST. */
   beforeProviderSpend?: () => void | Promise<void>;
 }
@@ -269,6 +291,8 @@ export interface NovitaRenderResult {
   candidates?: RenderedCandidate[];
   /** Per-shot ffprobe evidence for the LTX x2 video phase. */
   videoOutputProofs?: Readonly<Record<string, NovitaVideoOutputProof>>;
+  /** Sealed native-720p conditioning still hashes, keyed by exact shot id. */
+  nativeInputGeometrySources?: Readonly<Record<string, NovitaNativeInputGeometrySources>>;
   outputs: number;
   durationSec: number;
   costUsd: number;
@@ -924,6 +948,22 @@ function normalizedCfg(userCfg: NovitaRenderCfg): NovitaRenderCfg {
   };
 }
 
+/**
+ * Every public video route (normal renders, repair retries, and the retained
+ * bridge launcher) resolves native-720p promotion authority here before it
+ * can bootstrap credentials or reach a provider. The resolver has no
+ * caller-provided receipt input, so a task payload cannot self-authorize.
+ */
+function assertCinematicVideoAdmission(profile: NovitaPhaseProfile): void {
+  try {
+    assertCinematicProofAdmission({ profile });
+  } catch (error) {
+    throw new NovitaAdmissionError(
+      error instanceof Error ? error.message : "cinematic proof admission rejected the requested profile",
+    );
+  }
+}
+
 export function imageJobs(cfg: NovitaRenderCfg) {
   return cfg.shots
     .filter((shot) => shot.prompt && shot.prompt.trim())
@@ -982,6 +1022,7 @@ async function startImageRender(userCfg: NovitaRenderCfg) {
 
 async function startVideoRender(userCfg: NovitaRenderCfg) {
   const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map((shot) => applyLtxI2vPromptContract(shot, userCfg.styleId)) });
+  assertCinematicVideoAdmission(cfg.profile);
   validate(cfg, "video");
   await bootstrapSecrets(() => {}, { required: ["NOVITA_RENDER_FARM_API", "NOVITA_RENDER_FARM_TOKEN"] });
   const jobs = videoJobs(cfg);
@@ -1041,6 +1082,7 @@ export async function renderImages(userCfg: NovitaRenderCfg): Promise<NovitaRend
  */
 export async function renderVideo(userCfg: NovitaRenderCfg): Promise<NovitaRenderResult> {
   const cfg = normalizedCfg({ ...userCfg, shots: userCfg.shots.map((shot) => applyLtxI2vPromptContract(shot, userCfg.styleId)) });
+  assertCinematicVideoAdmission(cfg.profile);
   validate(cfg, "video");
   if (cfg.maxCostUsd === undefined) {
     throw new NovitaAdmissionError("novita video render requires an explicit signed worker cost ceiling");

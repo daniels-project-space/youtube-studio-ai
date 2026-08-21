@@ -17,6 +17,8 @@ export const LTX25_720P_NATIVE_X2_SMOKE = Object.freeze({
   maxSampledPeakVramMib: 22_000,
 });
 
+const SHA256_HEX = /^[a-f0-9]{64}$/;
+
 export function ltx25Native720X2SmokeImageProfile({ model, revision, infrastructure }) {
   const contract = LTX25_720P_NATIVE_X2_SMOKE;
   return {
@@ -87,8 +89,19 @@ export function assertLtx25Native720X2SmokeJob(job) {
   }
 }
 
-export function assertLtx25Native720X2SmokeProof(proof) {
+export function assertLtx25Native720X2SmokeProof(proof, sources = {}) {
   const contract = LTX25_720P_NATIVE_X2_SMOKE;
+  const exactStill = (receipt, expectedSha256) => (
+    receipt
+    && typeof receipt === "object"
+    && SHA256_HEX.test(receipt.sha256 || "")
+    && (!expectedSha256 || receipt.sha256 === expectedSha256)
+    && receipt.width === contract.stageOneWidth
+    && receipt.height === contract.stageOneHeight
+  );
+  const geometry = proof?.inputGeometry;
+  const initial = geometry?.initial;
+  const end = geometry?.end;
   if (
     !proof
     || proof.outputWidth !== contract.outputWidth
@@ -102,7 +115,10 @@ export function assertLtx25Native720X2SmokeProof(proof) {
     || !Number.isInteger(proof.sampledPeakVramMib)
     || proof.sampledPeakVramMib < 0
     || proof.sampledPeakVramMib > contract.maxSampledPeakVramMib
+    || !SHA256_HEX.test(sources.initialSha256 || "")
+    || !exactStill(initial, sources.initialSha256)
+    || (sources.endSha256 ? !exactStill(end, sources.endSha256) : end !== undefined)
   ) {
-    throw new Error("LTX 2.5 native-720p x2 smoke output proof is incomplete or exceeds the 22 GiB VRAM gate");
+    throw new Error("LTX 2.5 native-720p x2 smoke output proof is incomplete, has unbound input geometry, or exceeds the 22 GiB VRAM gate");
   }
 }

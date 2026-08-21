@@ -15,6 +15,7 @@ import {
   evaluateCinematicCaseSequence,
   type CinematicCaseSequenceInput,
 } from "@/engine/cinematicCaseSequence";
+import { cinematicFinalMasterQaEvidence } from "@/engine/cinematicQaEvidence";
 import {
   CASEFILE_SOURCE_PACKET_VERSION,
   assertCasefileSourcePacket,
@@ -353,13 +354,28 @@ function main() {
   assert.ok(actionScene, "the sibling action shot must produce a generated scene");
   assert.ok(coldOpenScene, "the unrelated cold-open shot must produce a generated scene");
 
-  // The reviewed name-card text reaches the actual LTX still/motion prompts
-  // verbatim, and the standard "never render on-screen text" phrase is
-  // replaced (not merely appended) for that one shot.
-  assert.ok(nameScene!.still.includes("LEAD INVESTIGATOR — CASE FILE 118"), "name-card text must reach the still prompt");
-  assert.ok(nameScene!.motion.includes("LEAD INVESTIGATOR — CASE FILE 118"), "name-card text must reach the motion prompt");
-  assert.ok(nameScene!.still.includes("On-screen typography permitted"), "the still prompt must carry the narrow exception directive");
-  assert.ok(!nameScene!.still.includes("never render this as on-screen text"), "the name-card shot must not also carry the blanket no-text directive");
+  // LTX must never be asked to synthesize the reviewed typography. The exact
+  // card survives as structured data for the deterministic local assembly
+  // pass, while every LTX prompt remains free of the actual card content.
+  const nameCardText = "LEAD INVESTIGATOR — CASE FILE 118";
+  assert.equal(nameScene!.nameCardText, nameCardText, "the generated scene plan must retain the reviewed card text");
+  for (const prompt of [nameScene!.still, nameScene!.motion, nameScene!.terminalStill ?? ""]) {
+    assert.ok(!prompt.includes(nameCardText), "LTX prompts must never contain the actual deterministic name-card text");
+  }
+  assert.ok(nameScene!.still.includes("compositor-owned"), "the LTX still prompt must keep the introduction card out of model rendering");
+
+  const nameCardCriterion =
+    `The deterministic character-introduction name-card overlay visibly and exactly reads ${nameCardText}.`;
+  const nameCardLock = admitted.creativeLocks.locks.find((lock) => lock.id === nameScene!.id);
+  assert.ok(nameCardLock?.acceptanceCriteria.includes(nameCardCriterion), "final cinematic QA must receive the exact required name-card overlay criterion");
+  const qaEvidence = cinematicFinalMasterQaEvidence({
+    creativeLocks: admitted.creativeLocks,
+    editDecisionList: admitted.editDecisionList,
+  });
+  assert.ok(
+    qaEvidence.creativeLocks.find((lock) => lock.shotId === nameScene!.id)?.acceptanceCriteria.includes(nameCardCriterion),
+    "the final-master QA evidence must preserve the exact name-card acceptance criterion",
+  );
 
   // The sibling "shown in action" shot in the SAME introduction beat still
   // gets the standard no-on-screen-text directive and no name text — the

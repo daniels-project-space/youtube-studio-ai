@@ -69,6 +69,7 @@ import {
 import { CinematicFinalMasterQaAdmissionSchema } from "./cinematicFinalMasterQaAdmission";
 import { GeneratedFootageSceneManifestSchema } from "./generatedFootageManifest";
 import { VisualPacingEvidenceSchema } from "@/lib/visualPacing";
+import { FinalMasterReleaseCertificateSchema } from "@/lib/finalMasterReleaseCertificate";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -206,7 +207,37 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
       }).strict()).min(5).max(7),
     }).strict(),
   },
-  originalityOk: { type: "OriginalityDecision", schema: z.boolean() },
+  // Legacy key retained for pipeline compatibility. The typed receipt below
+  // records the narrower, actually measured local lexical self-dedup result.
+  originalityOk: { type: "LocalScriptSelfDedupDecision", schema: z.literal(true) },
+  maxLexicalShingleSimilarity: {
+    type: "LexicalShingleSimilarity",
+    schema: z.number().finite().min(0).max(1),
+  },
+  scriptSelfDedupReceipt: {
+    type: "LocalScriptSelfDedupReceipt",
+    schema: z.object({
+      version: z.literal("local-script-self-dedup/v1"),
+      checkStatus: z.literal("measured"),
+      comparisonMethod: z.literal("lexical-shingle-jaccard/v1"),
+      corpusSource: z.enum(["empty", "local_script_index", "legacy_embedding_index"]),
+      canonicalScriptSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+      lexicalTokenCount: z.number().int().positive(),
+      shingleSize: z.literal(5),
+      candidateLexicalShingleCount: z.number().int().positive(),
+      comparableCorpusEntries: z.number().int().nonnegative(),
+      legacyUnmeasuredCorpusEntries: z.number().int().nonnegative(),
+      highestLexicalShingleSimilarity: z.number().finite().min(0).max(1),
+      nearestComparable: z.object({
+        canonicalScriptSha256: z.string().regex(/^[a-f0-9]{64}$/i),
+        runId: z.string(),
+        topic: z.string(),
+        lexicalShingleSimilarity: z.number().finite().min(0).max(1),
+      }).strict().nullable(),
+      threshold: z.number().finite().gt(0).max(1),
+      passesLexicalSelfDedup: z.literal(true),
+    }).strict(),
+  },
   structure: {
     type: "DirectorTreatment",
     schema: z.object({ beats: z.array(z.record(z.string(), jsonValue)).min(1) }).passthrough(),
@@ -427,6 +458,19 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
   stillKeys: { type: "R2ObjectKey[]", schema: stringList, persist: "reference" },
   thumbnailKey: { type: "R2ObjectKey", schema: nonEmpty, persist: "reference" },
   videoKey: { type: "R2ObjectKey", schema: nonEmpty, persist: "reference" },
+  finalMasterReleaseCertificate: {
+    type: "FinalMasterReleaseCertificate",
+    schema: FinalMasterReleaseCertificateSchema,
+    // The complete certificate is durably stored in R2; the artifact row keeps
+    // its content-addressed lineage without duplicating a potentially large
+    // cinematic/audio receipt into the dashboard payload.
+    persist: "reference",
+  },
+  finalMasterReleaseCertificateKey: {
+    type: "R2ObjectKey",
+    schema: nonEmpty,
+    persist: "reference",
+  },
   videoLocalPath: { type: "EphemeralLocalPath", schema: nonEmpty, persist: "summary" },
   watchUrl: { type: "YouTubeWatchUrl", schema: z.string().url() },
   youtubeVideoId: { type: "YouTubeVideoId", schema: nonEmpty },
