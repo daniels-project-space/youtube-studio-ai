@@ -99,8 +99,18 @@ assert.match(
 );
 assert.match(
   narrated,
-  /requireFrozenReferenceQualityContract\(qualityBar\)[\s\S]*?createUnmeasuredReferenceQualityFinalMasterBinding\([\s\S]*?finalMasterSha256: finalMasterSha256AfterVisualReview/,
-  "new production QA must seal its calibrated frozen channel reference contract to the exact reviewed master without inventing a measured pass",
+  /createVisualReviewReleaseReceipt\([\s\S]*?putObject\(\s*visualReviewReceiptKey[\s\S]*?putObject\(\s*finalMasterNarrationAuditKey[\s\S]*?createReferenceQualityEvidenceBridgeV2\([\s\S]*?createFinalMasterReleaseCertificate\(/,
+  "a V2 measured audio bridge may be created only after the visual release receipt and full narration audit are durable",
+);
+assert.match(
+  narrated,
+  /createFinalMasterReleaseCertificate\([\s\S]*?putObject\([\s\S]*?parseFinalMasterReleaseCertificateBytes\([\s\S]*?verifyFinalMasterReleaseEvidenceObjects\([\s\S]*?createFinalMasterReleaseCertificateReference\(/,
+  "QA must reload and cross-validate durable certificate evidence before exposing its compact reference",
+);
+assert.match(
+  narrated,
+  /requireFrozenReferenceQualityContract\(qualityBar\)[\s\S]*?referenceQualityBinding[\s\S]*?createFinalMasterReleaseCertificate\(/,
+  "new production QA must seal its calibrated frozen channel reference contract before attaching either V1 provenance or the narrow V2 bridge",
 );
 const referenceContractAdmission = narrated.indexOf("requireFrozenReferenceQualityContract(qualityBar)");
 const firstVisualGrader = narrated.indexOf("evaluateVisualFrames(vframes");
@@ -115,8 +125,8 @@ assert.match(
 );
 assert.match(
   lofi,
-  /loadDurableFinalMasterReleaseCertificate\([\s\S]*?getObjectBytes\(certificateKey\)[\s\S]*?verifyFinalMasterReleaseEvidenceForUpload\([\s\S]*?retainedFinalMasterReleaseObjectKeys[\s\S]*?assertReleaseCertificateVisualReviewBindings[\s\S]*?fileSha256\(filePath\)/,
-  "upload must reload bounded durable certificate/evidence and hash the exact local master before publishing",
+  /loadDurableFinalMasterReleaseCertificate\([\s\S]*?getObjectBytes\(certificateKey\)[\s\S]*?verifyFinalMasterReleaseEvidenceForUpload\([\s\S]*?verifyFinalMasterReleaseEvidenceObjects\([\s\S]*?fileSha256\(filePath\)/,
+  "upload must reload durable evidence, re-read every sealed review-frame byte, and hash the exact local master before publishing",
 );
 assert.match(
   lofi,
@@ -152,8 +162,8 @@ assert.match(
 );
 assert.match(
   lofi,
-  /retainedFinalMasterReleaseObjectKeys\([\s\S]*?\.{3}retainedReleaseEvidence[\s\S]*?deleteObjects\(del\)/,
-  "cleanup must whitelist the certificate's manifest, receipt, and frame evidence before deleting intermediates",
+  /pruneRunObjectsWithVerifiedFinalMasterEvidence[\s\S]*?retainedFinalMasterReleaseObjectKeys\([\s\S]*?verifyFinalMasterReleaseEvidenceObjects\([\s\S]*?deleteObjects\(deletable\)/,
+  "cleanup must re-read the certificate's manifest, receipt, and frame bytes before deleting intermediates",
 );
 
 console.log("final-master release evidence wiring test passed");

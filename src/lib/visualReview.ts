@@ -14,9 +14,10 @@ import type {
 import { detectSceneChanges, grabFrame } from "@/lib/ffmpeg";
 import { makeRunTempDir } from "@/lib/files";
 import { parseJsonLoose } from "@/lib/gemini";
-import { putObject, putObjectFromFile } from "@/lib/storage";
+import { putObject } from "@/lib/storage";
 import { hasNonGoogleVisionKey, visionLocal, VISION_GATE_MAX_TOKENS } from "@/lib/vision";
 import { createHash } from "node:crypto";
+import { readFile } from "node:fs/promises";
 import { join } from "node:path";
 
 // v5 adds typed reference-criterion coverage and a full SHA-256 review
@@ -327,6 +328,10 @@ export interface VisualReviewFrame {
   tSec: number;
   selectionReasons: EvidenceReason[];
   r2Key?: string;
+  /** Exact bytes persisted for a durable final-master review frame. */
+  contentSha256?: string;
+  /** Exact persisted frame byte length; pairs with contentSha256 on re-read. */
+  byteLength?: number;
 }
 
 export interface VisualReviewEvidence {
@@ -1300,8 +1305,17 @@ async function persistEvidence(
     const extractedFrame = frameById.get(frame.id);
     if (!extractedFrame) continue;
     const r2Key = `${root}/frames/${frame.id}.jpg`;
-    await putObjectFromFile(r2Key, extractedFrame.localPath, { contentType: "image/jpeg" });
-    frames.push({ ...frame, r2Key });
+    // Hash the precise buffer we upload rather than hashing the file in a
+    // separate pass. This gives the release certificate a byte-level binding
+    // even if an ephemeral local path were to change during persistence.
+    const bytes = await readFile(extractedFrame.localPath);
+    await putObject(r2Key, bytes, { contentType: "image/jpeg" });
+    frames.push({
+      ...frame,
+      r2Key,
+      contentSha256: createHash("sha256").update(bytes).digest("hex"),
+      byteLength: bytes.byteLength,
+    });
   }
   const manifestKey = `${root}/manifest.json`;
   const persisted = { ...evidence, frames, manifestKey };

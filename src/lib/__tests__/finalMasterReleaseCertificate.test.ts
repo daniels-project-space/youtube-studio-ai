@@ -8,6 +8,7 @@ import {
   createFinalMasterReleaseCertificate,
   createFinalMasterReleaseCertificateReference,
   createVisualReviewReleaseReceipt,
+  finalMasterReleaseEvidenceFrameArtifactsFingerprint,
   finalMasterReleaseEvidenceFrameKeysFingerprint,
   finalMasterReleaseCertificateKey,
   parseFinalMasterReleaseCertificateBytes,
@@ -39,6 +40,11 @@ const frameKeys = [
   `${keyPrefix}runs/${runId}/visual-review/review-fingerprint/frames/f001.jpg`,
   `${keyPrefix}runs/${runId}/visual-review/review-fingerprint/frames/f002.jpg`,
 ];
+const frameArtifacts = frameKeys.map((r2Key, index) => ({
+  r2Key,
+  contentSha256: `${index + 1}`.repeat(64),
+  byteLength: 100 + index,
+}));
 
 function passingTranscriptProof(sourceSha256: string): NarrationTranscriptProof {
   return {
@@ -113,6 +119,7 @@ const receipt = createVisualReviewReleaseReceipt({
     source: { durationSec: 92.4, sha256: masterSha256 },
     manifestKey: evidenceManifestKey,
     frameKeys,
+    frameArtifacts,
   },
 });
 const receiptKey = visualReviewReleaseReceiptKey(
@@ -131,6 +138,7 @@ const certificate = createFinalMasterReleaseCertificate({
   visualReview: {
     evidenceManifestKey,
     evidenceFrameKeys: frameKeys,
+    evidenceFrameArtifacts: frameArtifacts,
     receiptKey,
     reviewFingerprint: "review-fingerprint",
     reviewReceiptVersion: "visual-review-receipt/v1",
@@ -171,6 +179,7 @@ assert.deepEqual(
       evidenceManifestKey,
       evidenceFrameCount: frameKeys.length,
       evidenceFrameKeysFingerprint: finalMasterReleaseEvidenceFrameKeysFingerprint(frameKeys),
+      evidenceFrameArtifactsFingerprint: finalMasterReleaseEvidenceFrameArtifactsFingerprint(frameArtifacts),
       receiptKey,
       reviewFingerprint: "review-fingerprint",
       reviewReceiptVersion: "visual-review-receipt/v1",
@@ -221,7 +230,7 @@ assert.doesNotThrow(() => assertReleaseCertificateVisualReviewBindings({
   evidenceManifest: {
     source: { durationSec: 92.4, sha256: masterSha256 },
     manifestKey: evidenceManifestKey,
-    frames: frameKeys.map((r2Key) => ({ r2Key })),
+    frames: frameArtifacts,
   },
 }));
 
@@ -237,7 +246,7 @@ assert.throws(
     evidenceManifest: {
       source: { durationSec: 92.4, sha256: masterSha256 },
       manifestKey: evidenceManifestKey,
-      frames: frameKeys.map((r2Key) => ({ r2Key })),
+      frames: frameArtifacts,
     },
   }),
   /release receipt fingerprint does not match/,
@@ -394,7 +403,7 @@ assert.throws(
     evidenceManifest: {
       source: { durationSec: 92.4, sha256: "d".repeat(64) },
       manifestKey: evidenceManifestKey,
-      frames: frameKeys.map((r2Key) => ({ r2Key })),
+      frames: frameArtifacts,
     },
   }),
   /does not match its visual-review evidence manifest/,

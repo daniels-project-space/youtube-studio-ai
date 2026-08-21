@@ -13,15 +13,60 @@
 import { z } from "zod";
 
 import type { CreativeCapabilityKey } from "./creative/creativeCapabilityCatalog";
+import { SOURCE_ATTRIBUTED_DATA_STORY, dataStoryInsertParams } from "./dataStory";
 import type { FamilyKey } from "./families";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 
 /** Catalog bookkeeping only; receipts never use a whole-catalog fingerprint. */
-export const CHANNEL_COMPOSITION_CATALOG_VERSION = "certified-channel-composition-catalog/v2" as const;
+export const CHANNEL_COMPOSITION_CATALOG_VERSION = "certified-channel-composition-catalog/v4" as const;
 export const CHANNEL_COMPOSITION_RECEIPT_VERSION = "certified-channel-composition-receipt/v2" as const;
 
 const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
+
+/**
+ * A small, provider-free pipeline operation owned by a certified composition.
+ * The composition compiler is intentionally limited to these existing block
+ * operations: it cannot invent a provider, renderer, or new execution path.
+ */
+export type ChannelCompositionPipelineOperation =
+  | {
+      readonly kind: "ensure_block_before";
+      readonly block: string;
+      readonly beforeBlock: string;
+    }
+  | {
+      /** The block must stay after one producer and before one consumer. */
+      readonly kind: "ensure_block_between";
+      readonly block: string;
+      /** Producers that must always exist for this composition. */
+      readonly afterBlocks: readonly string[];
+      /** Optional producers that must precede the block whenever they exist. */
+      readonly optionalAfterBlocks?: readonly string[];
+      readonly beforeBlock: string;
+    }
+  | {
+      readonly kind: "merge_block_params";
+      readonly block: string;
+      readonly params: Readonly<Record<string, unknown>>;
+      /**
+       * A composition may admit only named, bounded numeric tuning knobs.
+       * Arbitrary advanced-editor params can never weaken the sealed base
+       * contract or create a new execution path.
+       */
+      readonly numericOverrides?: readonly {
+        readonly key: string;
+        readonly minimum: number;
+        readonly maximum: number;
+        readonly integer?: boolean;
+      }[];
+    };
+
+/** Versioned, exact declarative materialization for one composition definition. */
+export interface ChannelCompositionMaterialization {
+  readonly version: string;
+  readonly operations: readonly ChannelCompositionPipelineOperation[];
+}
 
 interface ChannelCompositionDefinition {
   key: string;
@@ -34,7 +79,104 @@ interface ChannelCompositionDefinition {
   qualityFocus: readonly string[];
   /** Existing explicit capability selections that qualify this route. */
   requiredCapabilityKeys: readonly CreativeCapabilityKey[];
+  /**
+   * Optional because a composition may currently be identity/receipt-only.
+   * When present it is part of this exact definition fingerprint, never an
+   * unsealed compiler-side switch.
+   */
+  materialization?: ChannelCompositionMaterialization;
 }
+
+/** Historical v2 materialization; retain byte-for-byte for sealed v2 receipts. */
+const SOURCE_ATTRIBUTED_DATA_STORY_V2_MATERIALIZATION = {
+  version: "source-attributed-data-story-materialization/v1",
+  operations: [
+    {
+      kind: "ensure_block_before",
+      block: "visual_inserts",
+      beforeBlock: "timeline_assemble",
+    },
+    {
+      kind: "merge_block_params",
+      block: "visual_inserts",
+      params: dataStoryInsertParams(SOURCE_ATTRIBUTED_DATA_STORY),
+      numericOverrides: [
+        { key: "maxInserts", minimum: 1, maximum: 8, integer: true },
+        { key: "minGapSec", minimum: 0, maximum: 120 },
+      ],
+    },
+    {
+      kind: "merge_block_params",
+      block: "script_gen",
+      params: { dataRich: true, sourceAttributionRequired: true },
+    },
+    {
+      kind: "merge_block_params",
+      block: "qa_script",
+      params: {
+        dataStoryContract: SOURCE_ATTRIBUTED_DATA_STORY.version,
+        requireNamedSource: true,
+        requireSpokenNumericAnchor: true,
+      },
+    },
+  ],
+} as const satisfies ChannelCompositionMaterialization;
+
+/**
+ * The current route makes the data visual's quote-overlay dependency explicit:
+ * source-attributed inserts are meaningful only after the title and any
+ * enabled quote overlays exist, and before the final master is assembled.
+ */
+const SOURCE_ATTRIBUTED_DATA_STORY_V3_MATERIALIZATION = {
+  version: "source-attributed-data-story-materialization/v2",
+  operations: [
+    {
+      kind: "ensure_block_between",
+      block: "visual_inserts",
+      afterBlocks: ["intro_card"],
+      optionalAfterBlocks: ["quote_overlays"],
+      beforeBlock: "timeline_assemble",
+    },
+    {
+      kind: "merge_block_params",
+      block: "visual_inserts",
+      params: dataStoryInsertParams(SOURCE_ATTRIBUTED_DATA_STORY),
+      numericOverrides: [
+        { key: "maxInserts", minimum: 1, maximum: 8, integer: true },
+        { key: "minGapSec", minimum: 0, maximum: 120 },
+      ],
+    },
+    {
+      kind: "merge_block_params",
+      block: "script_gen",
+      params: { dataRich: true, sourceAttributionRequired: true },
+    },
+    {
+      kind: "merge_block_params",
+      block: "qa_script",
+      params: {
+        dataStoryContract: SOURCE_ATTRIBUTED_DATA_STORY.version,
+        requireNamedSource: true,
+        requireSpokenNumericAnchor: true,
+      },
+    },
+  ],
+} as const satisfies ChannelCompositionMaterialization;
+
+/**
+ * v2 receipts were sealed before the full producer ordering could be encoded
+ * in their materialization identity. Keep that identity immutable so existing
+ * profiles remain parseable, but reject any persisted v2 graph that drifts
+ * from the already-required insert timing contract. v3 seals this same rule
+ * directly into the receipt for all new admissions.
+ */
+const SOURCE_ATTRIBUTED_DATA_STORY_V2_PERSISTED_ORDER_COMPATIBILITY = {
+  kind: "ensure_block_between",
+  block: "visual_inserts",
+  afterBlocks: ["intro_card"],
+  optionalAfterBlocks: ["quote_overlays"],
+  beforeBlock: "timeline_assemble",
+} as const satisfies ChannelCompositionPipelineOperation;
 
 /**
  * Historical definition ledger. When a definition changes, retain its old
@@ -55,11 +197,34 @@ export const CHANNEL_COMPOSITION_DEFINITION_HISTORY = [
   {
     key: "source_attributed_data_story",
     definitionVersion: "v1",
+    // Keep v1's pre-materialization identity forever so existing sealed Show
+    // Profiles remain readable. v2 below is the first executable declarative
+    // composition definition and is selected for all new admissions.
+    status: "historical",
+    family: "narrated_stock",
+    title: "Source-attributed data story",
+    qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
+    requiredCapabilityKeys: ["source_attributed_data_story"],
+  },
+  {
+    key: "source_attributed_data_story",
+    definitionVersion: "v2",
+    status: "historical",
+    family: "narrated_stock",
+    title: "Source-attributed data story",
+    qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
+    requiredCapabilityKeys: ["source_attributed_data_story"],
+    materialization: SOURCE_ATTRIBUTED_DATA_STORY_V2_MATERIALIZATION,
+  },
+  {
+    key: "source_attributed_data_story",
+    definitionVersion: "v3",
     status: "current",
     family: "narrated_stock",
     title: "Source-attributed data story",
     qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
     requiredCapabilityKeys: ["source_attributed_data_story"],
+    materialization: SOURCE_ATTRIBUTED_DATA_STORY_V3_MATERIALIZATION,
   },
   {
     key: "guided_relaxation",
@@ -119,7 +284,54 @@ export interface ChannelCompositionReceipt {
 }
 
 type ChannelCompositionReceiptBody = Omit<ChannelCompositionReceipt, "fingerprint">;
-type HistoricalCompositionDefinition = (typeof CHANNEL_COMPOSITION_DEFINITION_HISTORY)[number];
+type HistoricalCompositionDefinition = ChannelCompositionDefinition;
+
+function operationKind(operation: unknown): string {
+  if (operation && typeof operation === "object" && typeof (operation as { kind?: unknown }).kind === "string") {
+    return (operation as { kind: string }).kind;
+  }
+  return "<missing>";
+}
+
+function failUnsupportedOperationKind(operation: unknown): never {
+  throw new Error(`unsupported certified composition operation kind ${operationKind(operation)}`);
+}
+
+function operationIdentity(operation: ChannelCompositionPipelineOperation): Record<string, unknown> {
+  switch (operationKind(operation)) {
+    case "ensure_block_before": {
+      const ordered = operation as Extract<ChannelCompositionPipelineOperation, { kind: "ensure_block_before" }>;
+      return {
+        kind: ordered.kind,
+        block: ordered.block,
+        beforeBlock: ordered.beforeBlock,
+      };
+    }
+    case "ensure_block_between": {
+      const ordered = operation as Extract<ChannelCompositionPipelineOperation, { kind: "ensure_block_between" }>;
+      return {
+        kind: ordered.kind,
+        block: ordered.block,
+        afterBlocks: [...ordered.afterBlocks],
+        ...(ordered.optionalAfterBlocks ? { optionalAfterBlocks: [...ordered.optionalAfterBlocks] } : {}),
+        beforeBlock: ordered.beforeBlock,
+      };
+    }
+    case "merge_block_params": {
+      const merged = operation as Extract<ChannelCompositionPipelineOperation, { kind: "merge_block_params" }>;
+      return {
+        kind: merged.kind,
+        block: merged.block,
+        params: cloneParams(merged.params),
+        ...(merged.numericOverrides
+          ? { numericOverrides: merged.numericOverrides.map((override) => ({ ...override })) }
+          : {}),
+      };
+    }
+    default:
+      return failUnsupportedOperationKind(operation);
+  }
+}
 
 function definitionIdentity(definition: ChannelCompositionDefinition) {
   return {
@@ -129,6 +341,14 @@ function definitionIdentity(definition: ChannelCompositionDefinition) {
     title: definition.title,
     qualityFocus: [...definition.qualityFocus],
     requiredCapabilityKeys: [...definition.requiredCapabilityKeys],
+    ...(definition.materialization
+      ? {
+          materialization: {
+            version: definition.materialization.version,
+            operations: definition.materialization.operations.map(operationIdentity),
+          },
+        }
+      : {}),
   };
 }
 
@@ -168,6 +388,67 @@ function receiptFor(definition: ChannelCompositionDefinition): ChannelCompositio
     qualityFocus: [...definition.qualityFocus],
   };
   return { ...body, fingerprint: receiptFingerprint(body) };
+}
+
+function cloneJsonValue(value: unknown): unknown {
+  if (Array.isArray(value)) return value.map(cloneJsonValue);
+  if (value && typeof value === "object") {
+    return Object.fromEntries(
+      Object.entries(value as Record<string, unknown>).map(([key, nested]) => [key, cloneJsonValue(nested)]),
+    );
+  }
+  return value;
+}
+
+function cloneParams(params: Readonly<Record<string, unknown>>): Record<string, unknown> {
+  return Object.fromEntries(
+    Object.entries(params).map(([key, value]) => [key, cloneJsonValue(value)]),
+  );
+}
+
+function cloneMaterialization(
+  materialization: ChannelCompositionMaterialization,
+): ChannelCompositionMaterialization {
+  return {
+    version: materialization.version,
+    operations: materialization.operations.map((operation) => {
+      switch (operationKind(operation)) {
+        case "ensure_block_before": {
+          const ordered = operation as Extract<ChannelCompositionPipelineOperation, { kind: "ensure_block_before" }>;
+          return {
+            kind: ordered.kind,
+            block: ordered.block,
+            beforeBlock: ordered.beforeBlock,
+          };
+        }
+        case "ensure_block_between": {
+          const ordered = operation as Extract<ChannelCompositionPipelineOperation, { kind: "ensure_block_between" }>;
+          return {
+            kind: ordered.kind,
+            block: ordered.block,
+            afterBlocks: [...ordered.afterBlocks],
+            ...(ordered.optionalAfterBlocks
+              ? { optionalAfterBlocks: [...ordered.optionalAfterBlocks] }
+              : {}),
+            beforeBlock: ordered.beforeBlock,
+          };
+        }
+        case "merge_block_params": {
+          const merged = operation as Extract<ChannelCompositionPipelineOperation, { kind: "merge_block_params" }>;
+          return {
+            kind: merged.kind,
+            block: merged.block,
+            params: cloneParams(merged.params),
+            ...(merged.numericOverrides
+              ? { numericOverrides: merged.numericOverrides.map((override) => ({ ...override })) }
+              : {}),
+          };
+        }
+        default:
+          return failUnsupportedOperationKind(operation);
+      }
+    }),
+  };
 }
 
 function normalizedCapabilityKeys(keys: readonly string[]): readonly string[] {
@@ -236,6 +517,185 @@ export function parseChannelCompositionReceipt(value: unknown): ChannelCompositi
     throw new Error("channel composition receipt does not match its sealed historical definition");
   }
   return expected;
+}
+
+/**
+ * Resolve the sealed, provider-free operation list for an exact receipt.
+ * Historical receipt versions intentionally return no operations: a retry may
+ * validate its old receipt but must not silently execute a newer definition.
+ */
+export function certifiedChannelCompositionMaterialization(
+  receipt: ChannelCompositionReceipt,
+): ChannelCompositionMaterialization | undefined {
+  const parsed = parseChannelCompositionReceipt(receipt);
+  const definition = definitionFor(parsed.key, parsed.definitionVersion);
+  if (!definition?.materialization) return undefined;
+  return cloneMaterialization(definition.materialization);
+}
+
+/** Minimal V8-safe shape shared by Show Profile compatibility gates. */
+export interface ChannelCompositionPipelineEntry {
+  readonly block: string;
+  readonly params?: Readonly<Record<string, unknown>>;
+}
+
+function exactPipelineEntryIndex(
+  pipeline: readonly ChannelCompositionPipelineEntry[],
+  block: string,
+  operation: ChannelCompositionPipelineOperation,
+): number {
+  const indexes = pipeline
+    .map((entry, index) => entry.block === block ? index : -1)
+    .filter((index) => index >= 0);
+  if (indexes.length !== 1) {
+    throw new Error(
+      `certified composition operation ${operation.kind} requires exactly one ${block} block; found ${indexes.length}`,
+    );
+  }
+  return indexes[0]!;
+}
+
+function optionalPipelineEntryIndex(
+  pipeline: readonly ChannelCompositionPipelineEntry[],
+  block: string,
+  operation: ChannelCompositionPipelineOperation,
+): number | undefined {
+  const indexes = pipeline
+    .map((entry, index) => entry.block === block ? index : -1)
+    .filter((index) => index >= 0);
+  if (indexes.length > 1) {
+    throw new Error(
+      `certified composition operation ${operation.kind} requires at most one optional ${block} block; found ${indexes.length}`,
+    );
+  }
+  return indexes[0];
+}
+
+function assertOperationCompatibility(
+  pipeline: readonly ChannelCompositionPipelineEntry[],
+  operation: ChannelCompositionPipelineOperation,
+): void {
+  switch (operationKind(operation)) {
+    case "ensure_block_before": {
+      const ordered = operation as Extract<ChannelCompositionPipelineOperation, { kind: "ensure_block_before" }>;
+      const target = exactPipelineEntryIndex(pipeline, ordered.block, ordered);
+      const anchor = exactPipelineEntryIndex(pipeline, ordered.beforeBlock, ordered);
+      if (target >= anchor) {
+        throw new Error(
+          `certified composition operation ${ordered.kind} requires ${ordered.block} before ${ordered.beforeBlock}`,
+        );
+      }
+      return;
+    }
+    case "ensure_block_between": {
+      const ordered = operation as Extract<ChannelCompositionPipelineOperation, { kind: "ensure_block_between" }>;
+      const target = exactPipelineEntryIndex(pipeline, ordered.block, ordered);
+      const anchor = exactPipelineEntryIndex(pipeline, ordered.beforeBlock, ordered);
+      if (target >= anchor) {
+        throw new Error(
+          `certified composition operation ${ordered.kind} requires ${ordered.block} before ${ordered.beforeBlock}`,
+        );
+      }
+      for (const predecessor of ordered.afterBlocks) {
+        const predecessorIndex = exactPipelineEntryIndex(pipeline, predecessor, ordered);
+        if (predecessorIndex >= target) {
+          throw new Error(
+            `certified composition operation ${ordered.kind} requires ${predecessor} before ${ordered.block}`,
+          );
+        }
+      }
+      for (const predecessor of ordered.optionalAfterBlocks ?? []) {
+        const predecessorIndex = optionalPipelineEntryIndex(pipeline, predecessor, ordered);
+        if (predecessorIndex !== undefined && predecessorIndex >= target) {
+          throw new Error(
+            `certified composition operation ${ordered.kind} requires optional ${predecessor} before ${ordered.block} when present`,
+          );
+        }
+      }
+      return;
+    }
+    case "merge_block_params": {
+      const merged = operation as Extract<ChannelCompositionPipelineOperation, { kind: "merge_block_params" }>;
+      const index = exactPipelineEntryIndex(pipeline, merged.block, merged);
+      const params = pipeline[index]!.params;
+      for (const [key, expected] of Object.entries(merged.params)) {
+        if (!params || canonicalJson(params[key]) !== canonicalJson(expected)) {
+          throw new Error(
+            `certified composition operation ${merged.kind} has incomplete effective pipeline evidence at ${merged.block}.${key}`,
+          );
+        }
+      }
+      for (const override of merged.numericOverrides ?? []) {
+        const value = params?.[override.key];
+        if (value === undefined) continue;
+        const numeric = Number(value);
+        if (
+          !Number.isFinite(numeric) ||
+          numeric < override.minimum ||
+          numeric > override.maximum ||
+          (override.integer === true && !Number.isInteger(numeric))
+        ) {
+          throw new Error(
+            `certified composition operation ${merged.kind} has invalid bounded override ${merged.block}.${override.key}`,
+          );
+        }
+      }
+      return;
+    }
+    default:
+      return failUnsupportedOperationKind(operation);
+  }
+}
+
+/**
+ * Checks that a persisted/frozen executable graph still honors every order and
+ * parameter invariant sealed into its receipt's materialization. This never
+ * materializes or repairs a later graph: a drifted graph is rejected rather
+ * than silently mutated after approval.
+ */
+export function assertCertifiedChannelCompositionPipelineCompatibility(input: {
+  receipt: unknown;
+  pipeline: readonly ChannelCompositionPipelineEntry[];
+}): ChannelCompositionReceipt {
+  const receipt = parseChannelCompositionReceipt(input.receipt);
+  const materialization = certifiedChannelCompositionMaterialization(receipt);
+  for (const operation of materialization?.operations ?? []) {
+    assertOperationCompatibility(input.pipeline, operation);
+  }
+  if (
+    receipt.key === "source_attributed_data_story" &&
+    receipt.definitionVersion === "v2"
+  ) {
+    assertOperationCompatibility(
+      input.pipeline,
+      SOURCE_ATTRIBUTED_DATA_STORY_V2_PERSISTED_ORDER_COMPATIBILITY,
+    );
+  }
+  return receipt;
+}
+
+/**
+ * Validates a persisted historical receipt against its own immutable
+ * definition. New admission still uses the exact-current binding below; this
+ * compatibility form prevents a v1 receipt from being invalidated merely
+ * because a newer definition version became current.
+ */
+export function assertPersistedChannelCompositionReceiptBinding(input: {
+  receipt: unknown;
+  family: FamilyKey;
+  selectedCapabilityKeys: readonly string[];
+}): ChannelCompositionReceipt {
+  const receipt = parseChannelCompositionReceipt(input.receipt);
+  const definition = definitionFor(receipt.key, receipt.definitionVersion);
+  if (!definition || definition.family !== input.family || receipt.family !== input.family) {
+    throw new Error("channel composition receipt does not match the persisted channel family");
+  }
+  const selectedCapabilityKeys = normalizedCapabilityKeys(input.selectedCapabilityKeys);
+  const requiredCapabilityKeys = normalizedCapabilityKeys(definition.requiredCapabilityKeys);
+  if (canonicalJson(selectedCapabilityKeys) !== canonicalJson(requiredCapabilityKeys)) {
+    throw new Error("channel composition receipt does not match the persisted selected capabilities");
+  }
+  return receipt;
 }
 
 /**

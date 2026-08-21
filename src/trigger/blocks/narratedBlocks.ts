@@ -171,12 +171,17 @@ import {
   createFinalMasterReleaseCertificate,
   createFinalMasterReleaseCertificateReference,
   createVisualReviewReleaseReceipt,
+  finalMasterReleaseEvidenceFrameArtifactsFingerprint,
   finalMasterReleaseEvidenceFrameKeysFingerprint,
   finalMasterReleaseCertificateKey as finalMasterReleaseCertificateObjectKey,
+  parseFinalMasterReleaseCertificateBytes,
+  verifyFinalMasterReleaseEvidenceObjects,
   visualReviewReleaseReceiptKey,
 } from "@/lib/finalMasterReleaseCertificate";
 import {
+  createReferenceQualityEvidenceBridgeV2,
   createUnmeasuredReferenceQualityFinalMasterBinding,
+  isReferenceQualityEvidenceBridgeV2Family,
   requireFrozenReferenceQualityContract,
 } from "@/lib/referenceQualityFinalMasterBinding";
 import { validateRender } from "@/lib/renderValidate";
@@ -2781,9 +2786,22 @@ const QA_VISUAL_STAGE_SUMMARY_MAX_CHARS = 4_000;
  */
 export function compactQaVisualReviewEvidenceForStage(evidence: VisualReviewEvidence) {
   const frameKeys = evidence.frames.map((frame) => frame.r2Key);
+  const frameArtifacts = evidence.frames.flatMap((frame) => (
+    typeof frame.r2Key === "string" && frame.r2Key.trim().length > 0 &&
+    typeof frame.contentSha256 === "string" && /^[a-f0-9]{64}$/i.test(frame.contentSha256) &&
+    Number.isInteger(frame.byteLength) && Number(frame.byteLength) > 0
+      ? [{
+          r2Key: frame.r2Key,
+          contentSha256: frame.contentSha256,
+          byteLength: Number(frame.byteLength),
+        }]
+      : []
+  ));
   const hasCompleteFrameKeySet = frameKeys.length > 0 && frameKeys.every(
     (key): key is string => typeof key === "string" && key.trim().length > 0,
   );
+  const hasCompleteFrameArtifactSet =
+    hasCompleteFrameKeySet && frameArtifacts.length === evidence.frames.length;
   return {
     version: evidence.version,
     source: evidence.source,
@@ -2791,6 +2809,9 @@ export function compactQaVisualReviewEvidenceForStage(evidence: VisualReviewEvid
     frameCount: evidence.frames.length,
     ...(hasCompleteFrameKeySet
       ? { frameKeysFingerprint: finalMasterReleaseEvidenceFrameKeysFingerprint(frameKeys) }
+      : {}),
+    ...(hasCompleteFrameArtifactSet
+      ? { frameArtifactsFingerprint: finalMasterReleaseEvidenceFrameArtifactsFingerprint(frameArtifacts) }
       : {}),
     coverage: {
       maxGapSec: evidence.coverage.maxGapSec,
@@ -4271,16 +4292,31 @@ export const qaVisual: Block = {
     ) {
       throw new Error("qa_visual FAILED: final-master visual-review evidence was not durably persisted");
     }
-    const visualReviewEvidenceFrameKeys = visualReview.evidence.frames.map((frame) => {
-      if (!frame.r2Key) {
-        throw new Error("qa_visual FAILED: final-master visual-review frame evidence was not durably persisted");
+    const visualReviewEvidenceFrameArtifacts = visualReview.evidence.frames.map((frame) => {
+      const byteLength = frame.byteLength;
+      if (
+        !frame.r2Key ||
+        !frame.contentSha256 ||
+        !/^[a-f0-9]{64}$/i.test(frame.contentSha256) ||
+        typeof byteLength !== "number" ||
+        !Number.isInteger(byteLength) ||
+        byteLength <= 0
+      ) {
+        throw new Error("qa_visual FAILED: final-master visual-review frame evidence lacks a durable byte receipt");
       }
-      return frame.r2Key;
+      return {
+        r2Key: frame.r2Key,
+        contentSha256: frame.contentSha256,
+        byteLength,
+      };
     });
+    const visualReviewEvidenceFrameKeys = visualReviewEvidenceFrameArtifacts.map((frame) => frame.r2Key);
     if (new Set(visualReviewEvidenceFrameKeys).size !== visualReviewEvidenceFrameKeys.length) {
       throw new Error("qa_visual FAILED: final-master visual-review frame evidence contains duplicate storage keys");
     }
-    const sortedVisualReviewEvidenceFrameKeys = [...visualReviewEvidenceFrameKeys].sort();
+    const sortedVisualReviewEvidenceFrameArtifacts = [...visualReviewEvidenceFrameArtifacts]
+      .sort((left, right) => left.r2Key.localeCompare(right.r2Key));
+    const sortedVisualReviewEvidenceFrameKeys = sortedVisualReviewEvidenceFrameArtifacts.map((frame) => frame.r2Key);
     const visualReviewReleaseReceipt = createVisualReviewReleaseReceipt({
       reviewFingerprint: visualReview.reviewFingerprint,
       reviewReceiptVersion: visualReview.reviewReceiptVersion,
@@ -4298,6 +4334,7 @@ export const qaVisual: Block = {
         },
         manifestKey: visualReviewEvidenceManifestKey,
         frameKeys: sortedVisualReviewEvidenceFrameKeys,
+        frameArtifacts: sortedVisualReviewEvidenceFrameArtifacts,
       },
     });
     const visualReviewReceiptKey = visualReviewReleaseReceiptKey(
@@ -4339,6 +4376,43 @@ export const qaVisual: Block = {
           qualityAxis: qualityEvidence.axes.audio,
         }
       : undefined;
+    // V2 is deliberately not a generic "QA passed" upgrade. It is possible
+    // only for the two fixed narrated audio pairs, after both the visual
+    // release receipt and the full final-master narration audit have been
+    // persisted. Any absent/insufficient recipe keeps the honest v1 snapshot;
+    // a candidate V2 receipt that is malformed or mismatched throws below.
+    const hasPassingScoredAudioAxis =
+      qualityEvidence.axes.audio.status === "pass" &&
+      qualityEvidence.axes.audio.score !== undefined &&
+      qualityEvidence.axes.audio.minimumScore !== undefined &&
+      qualityEvidence.axes.audio.score >= qualityEvidence.axes.audio.minimumScore;
+    const referenceQualityBinding =
+      isReferenceQualityEvidenceBridgeV2Family(releaseReferenceQualityContract!.family) &&
+      finalMasterNarrationSemantic !== undefined &&
+      hasPassingScoredAudioAxis
+        ? createReferenceQualityEvidenceBridgeV2({
+            contract: releaseReferenceQualityContract!,
+            finalMaster: {
+              sha256: finalMasterSha256AfterVisualReview,
+              durationSec: p.durationSec,
+            },
+            visualRelease: {
+              reviewFingerprint: visualReviewReleaseReceipt.reviewFingerprint,
+              reviewReceiptVersion: visualReviewReleaseReceipt.reviewReceiptVersion,
+              reviewReceiptFingerprint: visualReviewReleaseReceipt.reviewReceiptFingerprint,
+              releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
+              verdict: visualReviewReleaseReceipt.verdict,
+              source: visualReviewReleaseReceipt.evidence.source,
+            },
+            finalMasterNarration: finalMasterNarrationSemantic,
+            audioAxis: qualityEvidence.axes.audio,
+          })
+        : createUnmeasuredReferenceQualityFinalMasterBinding({
+            contract: releaseReferenceQualityContract!,
+            finalMasterSha256: finalMasterSha256AfterVisualReview,
+            visualReviewFingerprint: visualReview.reviewFingerprint,
+            visualReviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+          });
     const persistedFinalMasterReleaseCertificate = createFinalMasterReleaseCertificate({
       version: FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
       finalMaster: {
@@ -4349,18 +4423,14 @@ export const qaVisual: Block = {
       visualReview: {
         evidenceManifestKey: visualReviewEvidenceManifestKey,
         evidenceFrameKeys: sortedVisualReviewEvidenceFrameKeys,
+        evidenceFrameArtifacts: sortedVisualReviewEvidenceFrameArtifacts,
         receiptKey: visualReviewReceiptKey,
         reviewFingerprint: visualReview.reviewFingerprint,
         reviewReceiptVersion: visualReview.reviewReceiptVersion,
         reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
         releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
       },
-      referenceQuality: createUnmeasuredReferenceQualityFinalMasterBinding({
-        contract: releaseReferenceQualityContract!,
-        finalMasterSha256: finalMasterSha256AfterVisualReview,
-        visualReviewFingerprint: visualReview.reviewFingerprint,
-        visualReviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
-      }),
+      referenceQuality: referenceQualityBinding,
       ...(cinematicFinalMasterQaReceipt && cinematicFinalMasterQaReceiptFingerprint
         ? {
             cinematic: {
@@ -4381,16 +4451,33 @@ export const qaVisual: Block = {
       Buffer.from(JSON.stringify(persistedFinalMasterReleaseCertificate, null, 2)),
       { contentType: "application/json" },
     );
+    // Re-read the just-written certificate and every V2 dependency before the
+    // stage exposes it to upload. This is intentionally a durable R2 check:
+    // an in-memory final-master narration/visual receipt cannot create a
+    // measured bridge unless its content-addressed objects agree after reload.
+    const durableFinalMasterReleaseCertificate = parseFinalMasterReleaseCertificateBytes(
+      await getObjectBytes(persistedFinalMasterReleaseCertificateKey),
+    );
+    if (
+      durableFinalMasterReleaseCertificate.certificateFingerprint !==
+      persistedFinalMasterReleaseCertificate.certificateFingerprint
+    ) {
+      throw new Error("qa_visual FAILED: reloaded final-master release certificate fingerprint changed after persistence");
+    }
+    await verifyFinalMasterReleaseEvidenceObjects({
+      certificate: durableFinalMasterReleaseCertificate,
+      getObjectBytes,
+    });
     if (await sha256ShotAnalysisSource(video) !== finalMasterSha256AfterVisualReview) {
       throw new Error("qa_visual FAILED: final master changed while its durable release evidence was being persisted");
     }
-    finalMasterReleaseCertificate = persistedFinalMasterReleaseCertificate;
+    finalMasterReleaseCertificate = durableFinalMasterReleaseCertificate;
     finalMasterReleaseCertificateKey = persistedFinalMasterReleaseCertificateKey;
     finalMasterReleaseCertificateReference = createFinalMasterReleaseCertificateReference({
       keyPrefix: ctx.keyPrefix,
       runId: ctx.runId,
       certificateKey: persistedFinalMasterReleaseCertificateKey,
-      certificate: persistedFinalMasterReleaseCertificate,
+      certificate: durableFinalMasterReleaseCertificate,
     });
     ctx.log(
       `qa_visual: durable final-master release evidence persisted (${persistedFinalMasterReleaseCertificate.certificateFingerprint.slice(0, 12)}, ` +

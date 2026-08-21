@@ -1964,6 +1964,8 @@
 .video-card-meta { display: flex; align-items: center; justify-content: space-between; gap: 0.55rem; color: var(--color-faint); font-size: 0.66rem; }
 .video-card-meta span { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .video-card-meta time { flex: 0 0 auto; white-space: nowrap; }
+.video-card-evidence { display: flex; align-items: center; justify-content: space-between; gap: 0.45rem; min-width: 0; }
+.video-card-evidence-label { color: var(--color-faint); font: 0.62rem/1.2 var(--font-mono); letter-spacing: 0.025em; text-transform: uppercase; }
 .video-card-views { color: var(--color-secondary); font: 0.65rem/1.35 var(--font-mono); }
 
 /* ── Channel detail: operating profile + progressive disclosure ────────── */

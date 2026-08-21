@@ -207,8 +207,13 @@ type PersistedChannelProgramBrief = Omit<ChannelProgramBrief, "sampleTopics"> & 
   sampleTopics?: string[];
 };
 
-type PersistedChannelShowProfile = Omit<ChannelShowProfile, "selectedCapabilityKeys"> & {
+type PersistedChannelCompositionReceipt = Omit<NonNullable<ChannelShowProfile["composition"]>, "qualityFocus"> & {
+  qualityFocus: string[];
+};
+
+type PersistedChannelShowProfile = Omit<ChannelShowProfile, "selectedCapabilityKeys" | "composition"> & {
   selectedCapabilityKeys: string[];
+  composition?: PersistedChannelCompositionReceipt;
 };
 
 function persistedChannelProgramBrief(brief: ChannelProgramBrief): PersistedChannelProgramBrief {
@@ -220,8 +225,12 @@ function persistedChannelProgramBrief(brief: ChannelProgramBrief): PersistedChan
 }
 
 function persistedChannelShowProfile(profile: ChannelShowProfile): PersistedChannelShowProfile {
-  const { selectedCapabilityKeys, ...canonical } = profile;
-  return { ...canonical, selectedCapabilityKeys: [...selectedCapabilityKeys] };
+  const { selectedCapabilityKeys, composition, ...canonical } = profile;
+  return {
+    ...canonical,
+    selectedCapabilityKeys: [...selectedCapabilityKeys],
+    ...(composition ? { composition: { ...composition, qualityFocus: [...composition.qualityFocus] } } : {}),
+  };
 }
 
 interface ChannelIdentityState {
@@ -362,6 +371,68 @@ function sameChannelShowProfile(left: unknown, right: ChannelShowProfile): boole
   } catch {
     return false;
   }
+}
+
+/**
+ * Validate an existing identity against the submitted current admission, but
+ * preserve its exact historical profile for a retry request. A v1 receipt can
+ * be compatible with the current data-story route without being the same
+ * receipt, and replacing it would invalidate the immutable retry snapshot.
+ */
+export function existingChannelInceptionRetryShowProfile(input: {
+  profile: unknown;
+  programBrief: ChannelProgramBrief;
+  capabilitySelections?: unknown;
+  pipeline: readonly Pick<PipelineEntry, "block" | "params">[];
+}): ChannelShowProfile {
+  const persisted = assertChannelShowProfilePipelineCompatibility({
+    profile: input.profile,
+    programBrief: input.programBrief,
+    pipeline: input.pipeline,
+  });
+  assertChannelShowProfile({
+    profile: input.profile,
+    programBrief: input.programBrief,
+    capabilitySelections: input.capabilitySelections,
+    pipeline: input.pipeline,
+  });
+  return persisted;
+}
+
+/** Actual coordinator retry guard, retained as a pure seam for regression tests. */
+export function channelInceptionSnapshotCanResume(input: {
+  previousSnapshot: unknown;
+  ownerId: string;
+  channelRef: string;
+  slug: string;
+  family: FamilyKey;
+  sourceRevision: string;
+  moduleConfigFingerprint: string;
+  pipelineSourceFingerprint: string;
+  programBrief: ChannelProgramBrief;
+  showProfile: ChannelShowProfile;
+  currentPreviewFingerprintSet: ReadonlySet<string>;
+}): boolean {
+  const snapshot = input.previousSnapshot;
+  if (!snapshot || typeof snapshot !== "object") return false;
+  const previous = snapshot as Partial<ChannelInceptionRequest>;
+  const previousPreviewFingerprints: string[] = Array.isArray(previous.starter?.acceptedPreviewFingerprints)
+    ? previous.starter.acceptedPreviewFingerprints.filter(
+        (fingerprint): fingerprint is string => typeof fingerprint === "string",
+      )
+    : [];
+  return (
+    previous.ownerId === input.ownerId &&
+    previous.channelRef === input.channelRef &&
+    previous.slug === input.slug &&
+    previous.family === input.family &&
+    previous.sourceRevision === input.sourceRevision &&
+    previous.moduleConfigFingerprint === input.moduleConfigFingerprint &&
+    previous.pipelineSourceFingerprint === input.pipelineSourceFingerprint &&
+    sameChannelProgramBrief(previous.programBrief, input.programBrief) &&
+    sameChannelShowProfile(previous.showProfile, input.showProfile) &&
+    previousPreviewFingerprints.every((fingerprint) => input.currentPreviewFingerprintSet.has(fingerprint))
+  );
 }
 
 async function writeImmutableDeterministicFoundationObject(
@@ -1398,18 +1469,20 @@ export async function executeDesignChannel(
   // backfill a newly submitted program. Requiring its sealed brief before any
   // mutation, ledger, deterministic foundation, research, or provider work
   // keeps a legacy/superseded identity from being adopted into this execution.
+  const persistedRetryShowProfile = existingAtStart
+    ? existingChannelInceptionRetryShowProfile({
+        profile: asIdentity(existingAtStart.identity).showProfile,
+        programBrief,
+        capabilitySelections: payload.capabilitySelections,
+        pipeline: design.pipeline,
+      })
+    : undefined;
   if (existingAtStart) {
     assertPersistedProgramBriefIdentity(existingAtStart.identity, {
       context: "existing inception channel identity",
       expectedFamily: programBrief.family,
       expectedProgramBrief: programBrief,
       requireProgramBrief: true,
-    });
-    assertChannelShowProfile({
-      profile: asIdentity(existingAtStart.identity).showProfile,
-      programBrief,
-      capabilitySelections: payload.capabilitySelections,
-      pipeline: design.pipeline,
     });
   }
   // RESUME HOLE: `createChannel` below is the ONLY writer in this flow that
@@ -1594,39 +1667,26 @@ export async function executeDesignChannel(
   const requestedModuleConfigFingerprint = channelInceptionContentSha256(
     requestedModuleConfig,
   );
-  const previousStarter = previousSnapshot && typeof previousSnapshot === "object"
-    ? (previousSnapshot as Partial<ChannelInceptionRequest>).starter
-    : undefined;
-  const previousPreviewFingerprints: string[] = Array.isArray(
-    previousStarter?.acceptedPreviewFingerprints,
-  )
-    ? previousStarter.acceptedPreviewFingerprints.filter(
-        (fingerprint): fingerprint is string => typeof fingerprint === "string",
-      )
-    : [];
   const currentPreviewFingerprintSet = new Set(acceptedPreviewFingerprints);
-  const previousProgramBrief = previousSnapshot && typeof previousSnapshot === "object"
-    ? (previousSnapshot as Partial<ChannelInceptionRequest>).programBrief
-    : undefined;
-  const previousShowProfile = previousSnapshot && typeof previousSnapshot === "object"
-    ? (previousSnapshot as Partial<ChannelInceptionRequest>).showProfile
-    : undefined;
-  const canResumeSnapshot = Boolean(
-    previousSnapshot &&
-    typeof previousSnapshot === "object" &&
-    (previousSnapshot as Partial<ChannelInceptionRequest>).ownerId === ownerId &&
-    (previousSnapshot as Partial<ChannelInceptionRequest>).channelRef === String(channelId) &&
-    (previousSnapshot as Partial<ChannelInceptionRequest>).slug === slug &&
-    (previousSnapshot as Partial<ChannelInceptionRequest>).family === payload.family &&
-    (previousSnapshot as Partial<ChannelInceptionRequest>).sourceRevision === requestKey &&
-    (previousSnapshot as Partial<ChannelInceptionRequest>).moduleConfigFingerprint ===
-      requestedModuleConfigFingerprint &&
-    (previousSnapshot as Partial<ChannelInceptionRequest>).pipelineSourceFingerprint ===
-      designPipelineFingerprint &&
-    sameChannelProgramBrief(previousProgramBrief, programBrief) &&
-    sameChannelShowProfile(previousShowProfile, showProfile) &&
-    previousPreviewFingerprints.every((fingerprint) => currentPreviewFingerprintSet.has(fingerprint)),
-  );
+  // A retry must reproduce the historical receipt already sealed into its
+  // persisted identity. `assertChannelShowProfile` above still compares that
+  // profile with the newly selected current route, but returning the current
+  // receipt here would change the immutable request fingerprint and rerun
+  // expensive completed stages on the first v1 retry.
+  const requestShowProfile = persistedRetryShowProfile ?? showProfile;
+  const canResumeSnapshot = channelInceptionSnapshotCanResume({
+    previousSnapshot,
+    ownerId,
+    channelRef: String(channelId),
+    slug,
+    family: payload.family,
+    sourceRevision: requestKey,
+    moduleConfigFingerprint: requestedModuleConfigFingerprint,
+    pipelineSourceFingerprint: designPipelineFingerprint,
+    programBrief,
+    showProfile: requestShowProfile,
+    currentPreviewFingerprintSet,
+  });
   const currentRequest: ChannelInceptionRequest = {
     ownerId,
     channelRef: String(channelId),
@@ -1639,7 +1699,7 @@ export async function executeDesignChannel(
     pipelineSourceFingerprint: designPipelineFingerprint,
     moduleConfigFingerprint: requestedModuleConfigFingerprint,
     programBrief,
-    showProfile,
+    showProfile: requestShowProfile,
     brand: {
       ...(existingIdentity.imageKey ? {
         avatar: {
