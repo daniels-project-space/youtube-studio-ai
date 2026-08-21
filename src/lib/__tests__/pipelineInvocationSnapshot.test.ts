@@ -3,8 +3,12 @@ import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
 import {
   assertPipelineInvocationCompilation,
   decidePipelineInvocationClaim,
+  HEAVY_RENDER_BLOCK_IDS,
   normalizePipelineInvocationSnapshot,
+  OFFLOADED_RENDER_BLOCK_IDS,
   pipelineInvocationSnapshotsEqual,
+  REMOTE_RENDER_BLOCK_IDS,
+  renderBlockMachineClass,
   snapshotParamsByBlock,
   type PipelineInvocationSnapshot,
 } from "@/lib/pipelineInvocationSnapshot";
@@ -203,5 +207,26 @@ assert.throws(
   })),
   /not JSON-safe/,
 );
+
+// Render-block machine-class routing: the heavy/offloaded lists must remain an
+// exact PARTITION of REMOTE_RENDER_BLOCK_IDS. If a new remote render block is
+// added and not classified, dispatch would have no child task to route it to.
+assert.deepEqual(
+  [...HEAVY_RENDER_BLOCK_IDS, ...OFFLOADED_RENDER_BLOCK_IDS].sort(),
+  [...REMOTE_RENDER_BLOCK_IDS].sort(),
+  "every remote render block must be classified heavy or offloaded exactly once",
+);
+assert.equal(
+  new Set([...HEAVY_RENDER_BLOCK_IDS, ...OFFLOADED_RENDER_BLOCK_IDS]).size,
+  REMOTE_RENDER_BLOCK_IDS.length,
+  "no remote render block may appear in both machine classes",
+);
+// The two blocks that composite media locally must stay on the large worker.
+assert.equal(renderBlockMachineClass("timeline_assemble"), "heavy");
+assert.equal(renderBlockMachineClass("documotion_short"), "heavy");
+// The Novita blocks offload their GPU work and bill on the cheaper task.
+assert.equal(renderBlockMachineClass("novita_render_images"), "offloaded");
+assert.equal(renderBlockMachineClass("novita_render_video"), "offloaded");
+assert.throws(() => renderBlockMachineClass("script_gen"), /not a remote render block/);
 
 console.log("pipeline invocation snapshot tests passed");

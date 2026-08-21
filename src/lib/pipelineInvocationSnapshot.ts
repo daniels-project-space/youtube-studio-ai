@@ -13,6 +13,46 @@ export const REMOTE_RENDER_BLOCK_IDS = [
 
 const REMOTE_RENDER_BLOCK_ID_SET = new Set<string>(REMOTE_RENDER_BLOCK_IDS);
 
+/**
+ * Machine-class split of the remote render blocks.
+ *
+ * `large-2x` exists for exactly one reason: compositing media ON the worker
+ * OOMs a smaller box. Only these two blocks actually do that here —
+ *   - timeline_assemble: the ffmpeg overlay + xfade pass over the full timeline
+ *     (the original OOM/SYSTEM_FAILURE incident render-block.ts documents),
+ *   - documotion_short:  renders 1080p geo_map/parallax frames through a
+ *     concurrency pool and ffmpeg-composites the 9:16 master. See
+ *     src/lib/documotion.ts, whose own comment warns that the default pool
+ *     "can OOM a shared box".
+ */
+export const HEAVY_RENDER_BLOCK_IDS = ["timeline_assemble", "documotion_short"] as const;
+
+/**
+ * Remote render blocks whose expensive work happens OFF this machine: they
+ * submit to the Novita RTX 4090 fleet and then checkpoint-wait — unbilled, via
+ * `wait.for()` in src/lib/novitaPollWait.ts — while the GPU renders. The billed
+ * local work is job submission, manifest validation and QA sampling (one ffprobe
+ * plus three single-frame grabs per shot), which does not need large-2x.
+ */
+export const OFFLOADED_RENDER_BLOCK_IDS = ["novita_render_images", "novita_render_video"] as const;
+
+const HEAVY_RENDER_BLOCK_ID_SET = new Set<string>(HEAVY_RENDER_BLOCK_IDS);
+const OFFLOADED_RENDER_BLOCK_ID_SET = new Set<string>(OFFLOADED_RENDER_BLOCK_IDS);
+
+export type RenderBlockMachineClass = "heavy" | "offloaded";
+
+/**
+ * Single source of truth for which child task renders a block. Both the
+ * orchestrator's dispatch and each child task's own admission guard read this,
+ * so a misroute fails loudly instead of silently paying (or OOMing) on the
+ * wrong machine tier.
+ */
+export function renderBlockMachineClass(blockId: string): RenderBlockMachineClass {
+  if (HEAVY_RENDER_BLOCK_ID_SET.has(blockId)) return "heavy";
+  if (OFFLOADED_RENDER_BLOCK_ID_SET.has(blockId)) return "offloaded";
+  throw new Error(`renderBlockMachineClass: "${blockId}" is not a remote render block`);
+}
+
 export interface PipelineInvocationSnapshot {
   version: typeof PIPELINE_INVOCATION_SNAPSHOT_VERSION;
   ownerId: string;
