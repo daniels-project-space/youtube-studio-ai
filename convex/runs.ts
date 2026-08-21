@@ -29,6 +29,15 @@ import {
   RUNS_BY_CHANNEL_LIMIT,
   validatedReadLimit,
 } from "../src/lib/boundedConvexReads";
+import { normalizeReleaseEvidenceStatus } from "../src/lib/releaseEvidenceStatus";
+
+function withReleaseEvidenceStatus<T extends { releaseEvidenceStatus?: unknown }>(run: T) {
+  // Missing is a pre-projection legacy record, not a passing release state.
+  return {
+    ...run,
+    releaseEvidenceStatus: normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus),
+  };
+}
 
 /**
  * Data-free rollout contract for the Trigger -> Convex authentication boundary.
@@ -60,6 +69,8 @@ export const createRun = mutation({
       status,
       startedAt: now,
       costTotal: 0,
+      releaseEvidenceStatus: "not_ready",
+      releaseEvidenceUpdatedAt: now,
       heartbeatAt: now,
       leaseExpiresAt:
         now + (status === "queued" ? RUN_QUEUE_LEASE_MS : RUN_EXECUTION_LEASE_MS),
@@ -101,6 +112,8 @@ export const createProbeRun = mutation({
       status: "queued",
       startedAt: now,
       costTotal: 0,
+      releaseEvidenceStatus: "not_ready",
+      releaseEvidenceUpdatedAt: now,
       heartbeatAt: now,
       leaseExpiresAt: now + RUN_QUEUE_LEASE_MS,
       probeDispatchKey: args.dispatchKey,
@@ -695,7 +708,8 @@ export const updateRun = mutation({
 export const getRun = query({
   args: { runId: v.id("runs") },
   handler: async (ctx, args) => {
-    return await ctx.db.get(args.runId);
+    const run = await ctx.db.get(args.runId);
+    return run ? withReleaseEvidenceStatus(run) : null;
   },
 });
 
@@ -703,11 +717,12 @@ export const listRunsByChannel = query({
   args: { channelId: v.id("channels"), limit: v.optional(v.number()) },
   handler: async (ctx, args) => {
     const limit = validatedReadLimit(args.limit, RUNS_BY_CHANNEL_LIMIT);
-    return await ctx.db
+    const runs = await ctx.db
       .query("runs")
       .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
       .order("desc")
       .take(limit);
+    return runs.map(withReleaseEvidenceStatus);
   },
 });
 
@@ -723,13 +738,14 @@ export const listRunsByChannelSincePage = query({
       throw new Error("run history start must be a non-negative timestamp");
     }
     validatedReadLimit(args.paginationOpts.numItems, RUN_HISTORY_PAGE_LIMIT);
-    return await ctx.db
+    const page = await ctx.db
       .query("runs")
       .withIndex("by_channel_started", (q) =>
         q.eq("channelId", args.channelId).gte("startedAt", args.startedAfter),
       )
       .order("desc")
       .paginate(args.paginationOpts);
+    return { ...page, page: page.page.map(withReleaseEvidenceStatus) };
   },
 });
 
@@ -766,6 +782,10 @@ export const listActive = query({
           costTotal: run.costTotal,
           youtubeVideoId: run.youtubeVideoId,
           error: run.error,
+          releaseEvidenceStatus: normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus),
+          releaseEvidenceCertificateFingerprint: run.releaseEvidenceCertificateFingerprint,
+          releaseEvidenceCertificateKey: run.releaseEvidenceCertificateKey,
+          releaseEvidenceUpdatedAt: run.releaseEvidenceUpdatedAt,
           heartbeatAt: run.heartbeatAt,
           leaseExpiresAt: run.leaseExpiresAt,
           channelName: channel?.name ?? "(unknown)",
@@ -826,6 +846,10 @@ export const listRecent = query({
           costTotal: run.costTotal,
           youtubeVideoId: run.youtubeVideoId,
           error: run.error,
+          releaseEvidenceStatus: normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus),
+          releaseEvidenceCertificateFingerprint: run.releaseEvidenceCertificateFingerprint,
+          releaseEvidenceCertificateKey: run.releaseEvidenceCertificateKey,
+          releaseEvidenceUpdatedAt: run.releaseEvidenceUpdatedAt,
           channelName: channel?.name ?? "(unknown)",
           channelSlug: channel?.slug ?? "",
         };

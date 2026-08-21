@@ -3,6 +3,7 @@ import type { RunRow } from "@/lib/types";
 import { fmtDateTime, fmtUsd } from "@/lib/format";
 import { StageBadge } from "./StageBadge";
 import { Elapsed } from "./Elapsed";
+import { ReleaseEvidenceBadge } from "./ReleaseEvidenceBadge";
 import { IconExternal } from "./icons";
 
 /**
@@ -40,6 +41,7 @@ export function RunCard({ run }: { run: RunRow }) {
             video <IconExternal width={13} height={13} />
           </span>
         )}
+        <ReleaseEvidenceBadge status={run.releaseEvidenceStatus} />
       </div>
     </Link>
   );

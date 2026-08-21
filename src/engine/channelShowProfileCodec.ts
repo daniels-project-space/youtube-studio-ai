@@ -16,6 +16,11 @@ import {
   type CreativeCapabilityReceiptPipelineEntry,
 } from "@/engine/creative/creativeCapabilityReceiptCatalog";
 import {
+  assertChannelCompositionReceiptBinding,
+  parseChannelCompositionReceipt,
+  type ChannelCompositionReceipt,
+} from "@/engine/channelCompositionCatalog";
+import {
   assertCanonicalChannelProgramBrief,
   briefToCreativeCapabilityIntent,
   channelProgramBriefFingerprint,
@@ -38,6 +43,12 @@ export interface ChannelShowProfile {
   contentLaneFingerprint: string;
   creativeCapabilityCatalogFingerprint: string;
   selectedCapabilityKeys: readonly string[];
+  /**
+   * Present on receipts created after the certified-composition catalog was
+   * introduced. It stays optional solely so historical channels can be read
+   * and upgraded by their next exact new-channel admission.
+   */
+  composition?: ChannelCompositionReceipt;
   designedPipelineFingerprint: string;
   fingerprint: string;
 }
@@ -61,6 +72,7 @@ const ChannelShowProfileSchema = z.object({
   contentLaneFingerprint: z.string().regex(SHA256_PATTERN),
   creativeCapabilityCatalogFingerprint: z.string().min(1).max(512),
   selectedCapabilityKeys: z.array(z.string().min(1).max(160)),
+  composition: z.unknown().optional(),
   designedPipelineFingerprint: z.string().regex(SHA256_PATTERN),
   fingerprint: z.string().regex(SHA256_PATTERN),
 }).strict();
@@ -137,6 +149,9 @@ export function parseChannelShowProfileReceipt(value: unknown): ChannelShowProfi
       throw new Error("channel show profile capability keys must be sorted and unique");
     }
   }
+  const composition = profile.composition === undefined
+    ? undefined
+    : parseChannelCompositionReceipt(profile.composition);
   const body: ChannelShowProfileBody = {
     version: profile.version,
     programBriefFingerprint: profile.programBriefFingerprint,
@@ -144,6 +159,7 @@ export function parseChannelShowProfileReceipt(value: unknown): ChannelShowProfi
     contentLaneFingerprint: profile.contentLaneFingerprint,
     creativeCapabilityCatalogFingerprint: profile.creativeCapabilityCatalogFingerprint,
     selectedCapabilityKeys,
+    ...(composition ? { composition } : {}),
     designedPipelineFingerprint: profile.designedPipelineFingerprint,
   };
   if (profile.fingerprint !== profileFingerprint(body)) {
@@ -190,6 +206,13 @@ export function assertChannelShowProfileReceiptProgramBinding(
       capability,
       family: programBrief.family,
       intent,
+    });
+  }
+  if (profile.composition) {
+    assertChannelCompositionReceiptBinding({
+      receipt: profile.composition,
+      family: programBrief.family,
+      selectedCapabilityKeys: profile.selectedCapabilityKeys,
     });
   }
   return profile;

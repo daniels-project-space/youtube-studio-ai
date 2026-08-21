@@ -3,6 +3,8 @@
  * read queries (listRecent / listActive enrichment, listChannels rows) so
  * components can be strongly typed without importing server internals.
  */
+import type { ReleaseEvidenceStatus } from "@/lib/releaseEvidenceStatus";
+
 export type RunRow = {
   _id: string;
   status: string;
@@ -11,6 +13,10 @@ export type RunRow = {
   costTotal: number;
   youtubeVideoId?: string;
   error?: string;
+  releaseEvidenceStatus?: ReleaseEvidenceStatus;
+  releaseEvidenceCertificateFingerprint?: string;
+  releaseEvidenceCertificateKey?: string;
+  releaseEvidenceUpdatedAt?: number;
   channelName: string;
   channelSlug: string;
 };

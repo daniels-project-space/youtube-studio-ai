@@ -69,7 +69,10 @@ import {
 import { CinematicFinalMasterQaAdmissionSchema } from "./cinematicFinalMasterQaAdmission";
 import { GeneratedFootageSceneManifestSchema } from "./generatedFootageManifest";
 import { VisualPacingEvidenceSchema } from "@/lib/visualPacing";
-import { FinalMasterReleaseCertificateSchema } from "@/lib/finalMasterReleaseCertificate";
+import {
+  FinalMasterReleaseCertificateReferenceSchema,
+  FinalMasterReleaseCertificateSchema,
+} from "@/lib/finalMasterReleaseCertificate";
 
 /**
  * A versioned runtime contract for one value crossing a module boundary.
@@ -464,6 +467,14 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
     // The complete certificate is durably stored in R2; the artifact row keeps
     // its content-addressed lineage without duplicating a potentially large
     // cinematic/audio receipt into the dashboard payload.
+    persist: "reference",
+  },
+  // Stable compact pointer for audit projections. The authoritative full
+  // certificate stays in R2 and may legitimately exceed the inline artifact
+  // budget because it includes narration/cinematic receipts.
+  finalMasterReleaseCertificateReference: {
+    type: "FinalMasterReleaseCertificateReference",
+    schema: FinalMasterReleaseCertificateReferenceSchema,
     persist: "reference",
   },
   finalMasterReleaseCertificateKey: {

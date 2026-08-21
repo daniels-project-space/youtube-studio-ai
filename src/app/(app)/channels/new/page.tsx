@@ -49,6 +49,10 @@ import {
 } from "@/lib/youtubeChannelCreationClaim";
 import { familySupervisedChannelInceptionCapability } from "@/engine/channelInceptionCapability";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import {
+  certifiedChannelCompositionDefinition,
+  findCertifiedChannelComposition,
+} from "@/engine/channelCompositionCatalog";
 
 type Phase = "form" | "building" | "error";
 const DOW = ["Sun", "Mon", "Tue", "Wed", "Thu", "Fri", "Sat"];
@@ -298,6 +302,17 @@ export default function NewChannelWizard() {
   const fam = family ? getFamily(family) : undefined;
   const selectedQuizProfile = CERTIFIED_QUIZ_PROFILE_OPTIONS.find((profile) => profile.key === quizProfile)
     ?? CERTIFIED_QUIZ_PROFILE_OPTIONS[0];
+  // This mirrors the server-owned Show Profile derivation for presentation
+  // only. The request carries family and explicit capability selections; the
+  // server recomputes and seals the receipt before any durable write.
+  const selectedComposition = useMemo(() => {
+    if (!family) return null;
+    const receipt = findCertifiedChannelComposition({
+      family,
+      selectedCapabilityKeys: Object.keys(capabilitySelections),
+    });
+    return receipt ? { receipt, definition: certifiedChannelCompositionDefinition(receipt) } : null;
+  }, [family, capabilitySelections]);
   const duration = family ? familyDurationContract(family) : undefined;
   const costAuthority = channelBuildCostAuthority({
     approveSetupSpend,
@@ -1055,6 +1070,16 @@ export default function NewChannelWizard() {
             )}
             {duration?.inputUnit === "fixed" && family && (
               <Row label="Episode cadence"><span style={muted}>{formatFamilyDurationContract(family)} · {duration.rationale}</span></Row>
+            )}
+            {selectedComposition && (
+              <Row label="Certified composition">
+                <div style={{ display: "grid", gap: "0.2rem", maxWidth: 430 }}>
+                  <strong style={{ fontSize: "0.82rem" }}>{selectedComposition.definition.title}</strong>
+                  <span style={muted}>
+                    {selectedComposition.definition.qualityFocus.join(" · ")}. The saved Show Profile pins this route and its definition version.
+                  </span>
+                </div>
+              </Row>
             )}
             <Row label="Language"><select value={locale} onChange={(e) => setLocale(e.target.value)} style={selStyle}><option value="en">English</option><option value="es">Spanish</option><option value="de">German</option></select></Row>
             {family === "narrated_stock" && (

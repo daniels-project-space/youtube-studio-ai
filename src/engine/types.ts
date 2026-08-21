@@ -106,6 +106,13 @@ export interface Block {
   produces: string[];
   /** Paid blocks are preflighted (budget/key/credits) + idempotent. */
   paid?: boolean;
+  /**
+   * Optional bounded projection for the durable run-stage row. The runner
+   * retains the full patch in memory for immediate downstream blocks and
+   * persists declared artifacts first. Use only when large output has a
+   * content-addressed durable replacement that resume consumers can rehydrate.
+   */
+  persistStageOutputs?: (patch: Readonly<BlockPatch>) => BlockPatch;
   /** Execute the block; return a patch of produced outputs. */
   run: (ctx: StageContext) => Promise<BlockPatch>;
 }
