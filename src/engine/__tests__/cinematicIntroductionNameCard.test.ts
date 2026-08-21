@@ -269,6 +269,11 @@ function approvedSequence(map: ReturnType<typeof admittedMap>): CinematicCaseSeq
     assetUrl: "https://court.example.org/media/archive-team-finding.jpg",
     assetSha256: "b".repeat(64),
     approvalReceiptId: "source-proof-receipt-archive-team-001",
+    citation: {
+      sourceId: "source-court-archive",
+      label: "Regional Court Archive: Case assignment finding",
+      locator: "https://court.example.org/records/archive-team",
+    },
     provenanceFingerprint: "0".repeat(64),
   };
   sourceProofMedia.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(sourceProofMedia);

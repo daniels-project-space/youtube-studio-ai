@@ -134,6 +134,7 @@ import {
   assembleBeatBody,
   assembleAuthoredBody,
   applyNameCardOverlay,
+  applySourceProofCitationOverlay,
   composeWithIntro,
   concatAudioWithGaps,
   applyVoiceFx,
@@ -2297,8 +2298,9 @@ export const timelineAssemble: Block = {
       for (const [index, item] of cinematicFootageManifest.items.entries()) {
         const local = join(tmp, `cinematic_source_${String(index).padStart(4, "0")}.mp4`);
         const clipBytes = await getObjectBytes(item.clipKey);
+        let sourceProofReceipt: ReturnType<typeof assertSourceProofMediaClipBytes> | undefined;
         if (item.sourceProofMediaReceipt) {
-          assertSourceProofMediaClipBytes({
+          sourceProofReceipt = assertSourceProofMediaClipBytes({
             receipt: item.sourceProofMediaReceipt,
             sceneId: item.shotId,
             sequenceFingerprint: cinematicFootageManifest.sequenceFingerprint,
@@ -2306,13 +2308,29 @@ export const timelineAssemble: Block = {
           });
         }
         await writeBytes(local, clipBytes);
+        let assembledClipPath = local;
+        if (sourceProofReceipt) {
+          const citationPath = join(tmp, `cinematic_source_citation_${String(index).padStart(4, "0")}.mp4`);
+          try {
+            await applySourceProofCitationOverlay(local, citationPath, {
+              label: sourceProofReceipt.obligation.citation.label,
+              durationSec: item.t1 - item.t0,
+            });
+          } catch (error) {
+            throw new Error(
+              `timeline_assemble: required Casefile source-proof citation overlay failed for ${item.shotId}: ` +
+                `${error instanceof Error ? error.message : String(error)}`,
+            );
+          }
+          assembledClipPath = citationPath;
+        }
         if (!item.nameCardText) {
-          cinematicPaths.push(local);
+          cinematicPaths.push(assembledClipPath);
           continue;
         }
         const cardPath = join(tmp, `cinematic_namecard_${String(index).padStart(4, "0")}.mp4`);
         try {
-          await applyNameCardOverlay(local, cardPath, {
+          await applyNameCardOverlay(assembledClipPath, cardPath, {
             text: item.nameCardText,
             durationSec: item.t1 - item.t0,
           });

@@ -23,8 +23,9 @@ import {
   CasefileSourcePacketSchema,
 } from "./sourceFirstAdmission";
 import {
+  assertCurrentSourceProofMediaObligation,
   SourceProofMediaObligationSchema,
-  type SourceProofMediaObligation,
+  type CurrentSourceProofMediaObligation,
 } from "./sourceProofMedia";
 import { validateSourceBoundStorySpineHandoff } from "./sourceBoundStorySpine";
 import { BeatMoodSchema, ShotPlanSchema, type ShotPlan } from "./storySpine";
@@ -1042,7 +1043,19 @@ export function evaluateCinematicCaseSequence(
     }
     for (const shot of beat.shots) {
       allCinematicShots.push(shot);
-      const proofMedia: SourceProofMediaObligation | undefined = shot.sourceProofMedia;
+      const suppliedProofMedia = shot.sourceProofMedia;
+      let proofMedia: CurrentSourceProofMediaObligation | undefined;
+      if (suppliedProofMedia) {
+        try {
+          proofMedia = assertCurrentSourceProofMediaObligation(suppliedProofMedia);
+        } catch (error) {
+          issues.push(issue(
+            "source_proof_media_invalid",
+            `Cinematic shot ${shot.id} has no current citation-bound source-proof obligation: ${error instanceof Error ? error.message : String(error)}`,
+            "Reattach the exact approved source asset through the Casefile workflow so it receives a sealed source citation; citation-less legacy proof is read-only history and cannot be newly admitted.",
+          ));
+        }
+      }
       if (shot.visualMode === "source_proof" && shot.coveragePurpose !== "evidence_insert") {
         issues.push(issue(
           "source_proof_media_invalid",
@@ -1050,7 +1063,7 @@ export function evaluateCinematicCaseSequence(
           "Reserve source_proof for a cited evidence_insert; establishers, relationships, and atmosphere must not present generated visuals as factual source media.",
         ));
       }
-      if (shot.visualMode === "source_proof" && !proofMedia) {
+      if (shot.visualMode === "source_proof" && !suppliedProofMedia) {
         issues.push(issue(
           "source_proof_media_invalid",
           `Cinematic shot ${shot.id} declares source_proof without an exact approved source asset receipt.`,
@@ -1157,8 +1170,8 @@ export function evaluateCinematicCaseSequence(
             "Re-approve the exact asset after any Casefile source packet change; source media cannot be replayed across packets.",
           ));
         }
-        if (sourcePacket?.success) {
-          const sourceRecord = sourcePacket.data.casePacket.sourceLedger.find((entry) => entry.id === proofMedia.sourceId);
+      if (sourcePacket?.success) {
+        const sourceRecord = sourcePacket.data.casePacket.sourceLedger.find((entry) => entry.id === proofMedia.sourceId);
           const usage = sourcePacket.data.sourceUsage.find((entry) =>
             entry.sourceId === proofMedia.sourceId &&
             entry.usage === "visual_media" &&
@@ -1178,6 +1191,20 @@ export function evaluateCinematicCaseSequence(
               "source_proof_media_invalid",
               `Cinematic shot ${shot.id}'s source-proof asset rights locator does not match the admitted source ledger.`,
               "Use the exact rights evidence locator from the approved visual-media source usage; do not attach a substitute license URL.",
+            ));
+          }
+          if (
+            sourceRecord &&
+            (
+              proofMedia.citation.sourceId !== sourceRecord.id ||
+              proofMedia.citation.label !== `${sourceRecord.publisher}: ${sourceRecord.title}` ||
+              proofMedia.citation.locator !== sourceRecord.locator
+            )
+          ) {
+            issues.push(issue(
+              "source_proof_media_invalid",
+              `Cinematic shot ${shot.id}'s visible source-proof citation does not exactly match the admitted Casefile source ledger.`,
+              "Derive the source-proof citation from the admitted source's publisher, title, and locator; never attach editable overlay copy.",
             ));
           }
         }

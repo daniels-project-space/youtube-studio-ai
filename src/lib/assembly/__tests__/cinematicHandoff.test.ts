@@ -9,7 +9,7 @@ import {
   SOURCE_PROOF_MEDIA_VERSION,
   createSourceProofMediaReceipt,
   sourceProofMediaProvenanceFingerprint,
-  type SourceProofMediaObligation,
+  type CurrentSourceProofMediaObligation,
 } from "@/engine/sourceProofMedia";
 import {
   assertCinematicAssemblyHandoff,
@@ -43,7 +43,7 @@ const scenes = [0, 1].map((index) => ({
   ...(index === 0 ? { nameCardText } : {}),
 }));
 
-const sourceProofObligation: SourceProofMediaObligation = {
+const sourceProofObligation: CurrentSourceProofMediaObligation = {
   version: SOURCE_PROOF_MEDIA_VERSION,
   sourceId: "source-handoff",
   assetId: "asset-handoff-proof",
@@ -52,6 +52,11 @@ const sourceProofObligation: SourceProofMediaObligation = {
   assetUrl: "https://archive.example.org/media/handoff-proof.jpg",
   assetSha256: "c".repeat(64),
   approvalReceiptId: "source-proof-receipt-handoff-proof",
+  citation: {
+    sourceId: "source-handoff",
+    label: "Archive Office: Handoff proof",
+    locator: "https://archive.example.org/records/handoff-proof",
+  },
   provenanceFingerprint: "",
 };
 sourceProofObligation.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(sourceProofObligation);

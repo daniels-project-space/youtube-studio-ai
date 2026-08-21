@@ -13,6 +13,7 @@ import {
   channelShowProfileFingerprint,
   createChannelShowProfile,
   parseChannelShowProfile,
+  resolveChannelShowProfileComposition,
 } from "@/engine/channelShowProfile";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { creativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
@@ -58,6 +59,25 @@ assert.equal(
   profile.composition?.key,
   "source_attributed_data_story",
   "the explicit existing data-story capability must become a durable named composition rather than collapse into generic narrated stock",
+);
+assert.deepEqual(
+  resolveChannelShowProfileComposition({
+    family: brief.family,
+    selectedCapabilityKeys: profile.selectedCapabilityKeys,
+  }),
+  profile.composition,
+  "the Show Profile must resolve its current receipt from the exact selected capability set",
+);
+assert.throws(
+  () => resolveChannelShowProfileComposition({
+    family: brief.family,
+    selectedCapabilityKeys: [
+      "source_attributed_data_story",
+      "uncomposed_future_capability" as never,
+    ],
+  }),
+  /no certified autonomous channel composition is registered for narrated_stock/,
+  "a Show Profile must reject a new uncomposed capability combination before it can inherit a subset receipt",
 );
 assert.deepEqual(
   assertChannelShowProfileReceiptProgramBinding({ profile, programBrief: brief }),

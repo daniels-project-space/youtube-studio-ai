@@ -1153,6 +1153,116 @@ export function nameCardOverlayFilter(opts: {
  * untouched), matching `applyFilmGrainVignette`'s no-op-safe shape. Empty
  * `text` is a straight remux (no drawtext filter emitted).
  */
+function escapeSourceProofCitationDrawtext(value: string): string {
+  return value
+    .replace(/\\/g, "\\\\")
+    .replace(/:/g, "\\:")
+    .replace(/'/g, "\\'")
+    .replace(/%/g, "\\%")
+    .replace(/\r?\n/g, "\\n");
+}
+
+/**
+ * Keeps every character of a sealed Casefile citation visible without asking
+ * a generative renderer to create typography. Newlines are presentation-only;
+ * the signed citation label itself is never shortened or rewritten.
+ */
+function wrapSourceProofCitationLabel(label: string, maxLineChars = 48): string[] {
+  const lines: string[] = [];
+  let line = "";
+  for (const word of label.trim().split(/\s+/)) {
+    let remaining = word;
+    while (remaining.length > maxLineChars) {
+      if (line) {
+        lines.push(line);
+        line = "";
+      }
+      lines.push(remaining.slice(0, maxLineChars));
+      remaining = remaining.slice(maxLineChars);
+    }
+    const candidate = line ? `${line} ${remaining}` : remaining;
+    if (candidate.length > maxLineChars && line) {
+      lines.push(line);
+      line = remaining;
+    } else {
+      line = candidate;
+    }
+  }
+  if (line) lines.push(line);
+  return lines;
+}
+
+/**
+ * Deterministic, full-duration citation plate for an already verified
+ * source-proof clip. This deliberately has no empty/no-op branch: a missing
+ * citation must stop assembly rather than silently emit uncited evidence.
+ */
+export function sourceProofCitationOverlayFilter(opts: {
+  label: string;
+  durationSec: number;
+  accentColor?: string;
+  fontFile?: string;
+}): string {
+  const label = opts.label.trim();
+  if (!label || !Number.isFinite(opts.durationSec) || opts.durationSec <= 0) {
+    throw new Error("source-proof citation overlay requires a non-empty sealed label and positive duration");
+  }
+  const labelLines = wrapSourceProofCitationLabel(label);
+  if (!labelLines.length || labelLines.some((line) => !line)) {
+    throw new Error("source-proof citation overlay could not lay out the sealed label");
+  }
+  const lineCount = labelLines.length + 1;
+  const fontScale = lineCount > 6 ? "0.022" : lineCount > 4 ? "0.026" : "0.031";
+  const color = opts.accentColor ? thumbnailColor(opts.accentColor, "0xffd400") : "0xffd400";
+  const text = ["SOURCE PROOF", ...labelLines].join("\n");
+  const font = opts.fontFile ?? CLOUD_FONTS.sans;
+  return (
+    `drawtext=fontfile=${font}:text='${escapeSourceProofCitationDrawtext(text)}':expansion=none:` +
+    `fontcolor=${color}:fontsize=h*${fontScale}:line_spacing=8:` +
+    "box=1:boxcolor=black@0.68:boxborderw=14:borderw=1:bordercolor=white@0.45:" +
+    "x=w*0.05:y=h*0.07"
+  );
+}
+
+export async function applySourceProofCitationOverlay(
+  inputPath: string,
+  outputPath: string,
+  opts: {
+    label: string;
+    durationSec: number;
+    accentColor?: string;
+    fontFile?: string;
+    timeoutMs?: number;
+  },
+): Promise<string> {
+  const vf = sourceProofCitationOverlayFilter(opts);
+  await run(
+    FFMPEG,
+    [
+      "-y",
+      "-i",
+      inputPath,
+      "-vf",
+      vf,
+      "-c:v",
+      "libx264",
+      "-preset",
+      "veryfast",
+      "-crf",
+      "20",
+      "-pix_fmt",
+      "yuv420p",
+      "-c:a",
+      "copy",
+      "-movflags",
+      "+faststart",
+      outputPath,
+    ],
+    opts.timeoutMs ?? 900_000,
+  );
+  return outputPath;
+}
+
 export async function applyNameCardOverlay(
   inputPath: string,
   outputPath: string,

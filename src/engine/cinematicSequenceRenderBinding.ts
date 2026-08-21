@@ -10,7 +10,7 @@ import {
 } from "./generatedFootageManifest";
 import { assertCinematicKeyframeReview } from "./cinematicKeyframeReview";
 import { assertCinematicClipReview } from "./cinematicClipReview";
-import { assertSourceProofMediaReceipt } from "./sourceProofMedia";
+import { assertCurrentSourceProofMediaReceipt } from "./sourceProofMedia";
 
 export interface CinematicSequenceRenderBinding {
   scenePlan: CinematicGeneratedScenePlan;
@@ -96,7 +96,7 @@ export function assertCinematicSequenceRenderBinding(args: {
         );
       }
       try {
-        assertSourceProofMediaReceipt({
+        assertCurrentSourceProofMediaReceipt({
           receipt: rendered.sourceProofMediaReceipt,
           sceneId: scene.id,
           sequenceFingerprint: scenePlan.sequenceFingerprint,

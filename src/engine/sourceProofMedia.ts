@@ -6,13 +6,30 @@ import { sha256Hex } from "@/lib/sha256";
  * its source, rights decision, immutable bytes, and approval receipt together
  * from a signed cinematic shot through the rendered-footage manifest.
  */
-export const SOURCE_PROOF_MEDIA_VERSION = "source-proof-media/v1";
-export const SOURCE_PROOF_MEDIA_RECEIPT_VERSION = "source-proof-media-receipt/v1";
+/**
+ * v1 receipts remain parseable so historic evidence can be inspected, but
+ * they cannot enter a new cinematic render or release path. v2 binds the
+ * exact source citation that must be composed over the proof clip.
+ */
+export const LEGACY_SOURCE_PROOF_MEDIA_VERSION = "source-proof-media/v1";
+export const SOURCE_PROOF_MEDIA_VERSION = "source-proof-media/v2";
+export const LEGACY_SOURCE_PROOF_MEDIA_RECEIPT_VERSION = "source-proof-media-receipt/v1";
+export const SOURCE_PROOF_MEDIA_RECEIPT_VERSION = "source-proof-media-receipt/v2";
 
 const identifier = (prefix: string) =>
   z.string().trim().regex(new RegExp(`^${prefix}-[a-z0-9][a-z0-9_-]{1,119}$`));
 const sha256 = z.string().regex(/^[a-f0-9]{64}$/);
 const httpsUrl = z.string().url().refine((value) => value.startsWith("https://"), "expected an https URL");
+const httpLocator = z
+  .string()
+  .url()
+  .refine((value) => value.startsWith("https://") || value.startsWith("http://"), "expected an http(s) URL");
+const citationText = z
+  .string()
+  .trim()
+  .min(1)
+  .max(480)
+  .refine((value) => !/[\r\n]/.test(value), "citation label must be a single display line");
 
 function canonicalJson(value: unknown): string {
   if (Array.isArray(value)) return `[${value.map(canonicalJson).join(",")}]`;
@@ -33,9 +50,22 @@ function fingerprint(value: unknown): string {
   return sha256Hex(canonicalJson(value));
 }
 
-export const SourceProofMediaObligationSchema = z
+/**
+ * Citation data is source evidence, not free overlay copy. It is sealed into
+ * the source-proof provenance and derived from the admitted Casefile ledger.
+ */
+export const SourceProofCitationSchema = z
   .object({
-    version: z.literal(SOURCE_PROOF_MEDIA_VERSION),
+    sourceId: identifier("source"),
+    label: citationText,
+    /** Preserve the exact Casefile source locator; legacy sources may be http. */
+    locator: httpLocator,
+  })
+  .strict();
+export type SourceProofCitation = z.infer<typeof SourceProofCitationSchema>;
+
+const SourceProofMediaObligationBaseSchema = z
+  .object({
     /** Exact admitted Casefile source, never a search query. */
     sourceId: identifier("source"),
     /** Exact approved visual asset from that source's visual-use ledger. */
@@ -53,33 +83,76 @@ export const SourceProofMediaObligationSchema = z
     /** Deterministic fingerprint of source/right/asset provenance below. */
     provenanceFingerprint: sha256,
   })
+  .strict();
+
+export const LegacySourceProofMediaObligationSchema = SourceProofMediaObligationBaseSchema
+  .extend({
+    version: z.literal(LEGACY_SOURCE_PROOF_MEDIA_VERSION),
+  })
   .strict()
   .superRefine((value, ctx) => {
     if (value.provenanceFingerprint !== sourceProofMediaProvenanceFingerprint(value)) {
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["provenanceFingerprint"],
-        message: "source-proof media provenance fingerprint does not bind this exact source, rights record, asset, and source packet",
+        message: "legacy source-proof media provenance fingerprint does not bind this exact source, rights record, asset, and source packet",
       });
     }
   });
 
-export type SourceProofMediaObligation = z.infer<typeof SourceProofMediaObligationSchema>;
+export const CurrentSourceProofMediaObligationSchema = SourceProofMediaObligationBaseSchema
+  .extend({
+    version: z.literal(SOURCE_PROOF_MEDIA_VERSION),
+    /** Exact Casefile citation that the local compositor must visibly render. */
+    citation: SourceProofCitationSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.citation.sourceId !== value.sourceId) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["citation", "sourceId"],
+        message: "source-proof citation must name the exact approved source",
+      });
+    }
+    if (value.provenanceFingerprint !== sourceProofMediaProvenanceFingerprint(value)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["provenanceFingerprint"],
+        message: "source-proof media provenance fingerprint does not bind this exact source, rights record, asset, source packet, and citation",
+      });
+    }
+  });
+
+/** Parses current and historical durable evidence without promoting legacy proof. */
+export const SourceProofMediaObligationSchema = z.union([
+  LegacySourceProofMediaObligationSchema,
+  CurrentSourceProofMediaObligationSchema,
+]);
+
+export type LegacySourceProofMediaObligation = z.infer<typeof LegacySourceProofMediaObligationSchema>;
+export type CurrentSourceProofMediaObligation = z.infer<typeof CurrentSourceProofMediaObligationSchema>;
+export type SourceProofMediaObligation =
+  | LegacySourceProofMediaObligation
+  | CurrentSourceProofMediaObligation;
+
+type SourceProofMediaProvenanceInput = {
+  version: typeof LEGACY_SOURCE_PROOF_MEDIA_VERSION | typeof SOURCE_PROOF_MEDIA_VERSION;
+  sourceId: string;
+  assetId: string;
+  rightsEvidenceLocator: string;
+  sourcePacketFingerprint: string;
+  assetUrl: string;
+  assetSha256: string;
+  approvalReceiptId: string;
+  citation?: SourceProofCitation;
+};
 
 /** Stable provenance fingerprint used in both signed planning and runtime receipts. */
 export function sourceProofMediaProvenanceFingerprint(
-  value: Pick<
-    SourceProofMediaObligation,
-    | "version"
-    | "sourceId"
-    | "assetId"
-    | "rightsEvidenceLocator"
-    | "sourcePacketFingerprint"
-    | "assetUrl"
-    | "assetSha256"
-    | "approvalReceiptId"
-  >,
+  value: SourceProofMediaProvenanceInput,
 ): string {
+  const citation = value.version === SOURCE_PROOF_MEDIA_VERSION ? value.citation : undefined;
   return fingerprint({
     version: value.version,
     sourceId: value.sourceId,
@@ -89,23 +162,52 @@ export function sourceProofMediaProvenanceFingerprint(
     assetUrl: value.assetUrl,
     assetSha256: value.assetSha256,
     approvalReceiptId: value.approvalReceiptId,
+    ...(citation ? { citation } : {}),
   });
 }
 
-export const SourceProofMediaReceiptSchema = z
+const SourceProofMediaReceiptBaseSchema = z
   .object({
-    version: z.literal(SOURCE_PROOF_MEDIA_RECEIPT_VERSION),
     /** The only cinematic shot that may use this source asset. */
     sceneId: identifier("cinematic-shot"),
     sequenceFingerprint: sha256,
-    obligation: SourceProofMediaObligationSchema,
     /** Rechecked from downloaded bytes immediately before Ken Burns rendering. */
     resolvedAssetSha256: sha256,
-    /** Hash of the deterministic evidence clip actually passed to assembly. */
+    /** Hash of the deterministic raw evidence clip actually passed to assembly. */
     sourceProofClipSha256: sha256,
-    /** Durable R2 key of that exact evidence clip. */
+    /** Durable R2 key of that exact raw evidence clip. */
     clipKey: z.string().trim().min(1).max(1_500),
     receiptFingerprint: sha256,
+  })
+  .strict();
+
+export const LegacySourceProofMediaReceiptSchema = SourceProofMediaReceiptBaseSchema
+  .extend({
+    version: z.literal(LEGACY_SOURCE_PROOF_MEDIA_RECEIPT_VERSION),
+    obligation: LegacySourceProofMediaObligationSchema,
+  })
+  .strict()
+  .superRefine((value, ctx) => {
+    if (value.resolvedAssetSha256 !== value.obligation.assetSha256) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["resolvedAssetSha256"],
+        message: "legacy source-proof receipt bytes do not match the approved asset SHA-256",
+      });
+    }
+    if (value.receiptFingerprint !== sourceProofMediaReceiptFingerprint(value)) {
+      ctx.addIssue({
+        code: z.ZodIssueCode.custom,
+        path: ["receiptFingerprint"],
+        message: "legacy source-proof media receipt fingerprint does not bind its exact clip and approved asset",
+      });
+    }
+  });
+
+export const CurrentSourceProofMediaReceiptSchema = SourceProofMediaReceiptBaseSchema
+  .extend({
+    version: z.literal(SOURCE_PROOF_MEDIA_RECEIPT_VERSION),
+    obligation: CurrentSourceProofMediaObligationSchema,
   })
   .strict()
   .superRefine((value, ctx) => {
@@ -120,12 +222,22 @@ export const SourceProofMediaReceiptSchema = z
       ctx.addIssue({
         code: z.ZodIssueCode.custom,
         path: ["receiptFingerprint"],
-        message: "source-proof media receipt fingerprint does not bind its exact clip and approved asset",
+        message: "source-proof media receipt fingerprint does not bind its exact clip, approved asset, and citation",
       });
     }
   });
 
-export type SourceProofMediaReceipt = z.infer<typeof SourceProofMediaReceiptSchema>;
+/** Parses current and historical durable receipts without promoting legacy proof. */
+export const SourceProofMediaReceiptSchema = z.union([
+  LegacySourceProofMediaReceiptSchema,
+  CurrentSourceProofMediaReceiptSchema,
+]);
+
+export type LegacySourceProofMediaReceipt = z.infer<typeof LegacySourceProofMediaReceiptSchema>;
+export type CurrentSourceProofMediaReceipt = z.infer<typeof CurrentSourceProofMediaReceiptSchema>;
+export type SourceProofMediaReceipt =
+  | LegacySourceProofMediaReceipt
+  | CurrentSourceProofMediaReceipt;
 
 export function sourceProofMediaReceiptFingerprint(
   value: Omit<SourceProofMediaReceipt, "receiptFingerprint"> | SourceProofMediaReceipt,
@@ -144,12 +256,12 @@ export function sourceProofMediaReceiptFingerprint(
 export function createSourceProofMediaReceipt(args: {
   sceneId: string;
   sequenceFingerprint: string;
-  obligation: SourceProofMediaObligation;
+  obligation: CurrentSourceProofMediaObligation;
   resolvedAssetSha256: string;
   sourceProofClipSha256: string;
   clipKey: string;
-}): SourceProofMediaReceipt {
-  const withoutFingerprint: Omit<SourceProofMediaReceipt, "receiptFingerprint"> = {
+}): CurrentSourceProofMediaReceipt {
+  const withoutFingerprint: Omit<CurrentSourceProofMediaReceipt, "receiptFingerprint"> = {
     version: SOURCE_PROOF_MEDIA_RECEIPT_VERSION,
     sceneId: args.sceneId,
     sequenceFingerprint: args.sequenceFingerprint,
@@ -158,7 +270,7 @@ export function createSourceProofMediaReceipt(args: {
     sourceProofClipSha256: args.sourceProofClipSha256,
     clipKey: args.clipKey,
   };
-  return SourceProofMediaReceiptSchema.parse({
+  return CurrentSourceProofMediaReceiptSchema.parse({
     ...withoutFingerprint,
     receiptFingerprint: sourceProofMediaReceiptFingerprint(withoutFingerprint),
   });
@@ -189,4 +301,42 @@ export function assertSourceProofMediaReceipt(args: {
     }
   }
   return receipt;
+}
+
+/**
+ * New cinematic work must use v2 proof with a sealed, renderable citation.
+ * Legacy v1 remains available through the generic schemas above strictly for
+ * read-only history inspection.
+ */
+export function assertCurrentSourceProofMediaObligation(value: unknown): CurrentSourceProofMediaObligation {
+  const obligation = SourceProofMediaObligationSchema.parse(value);
+  if (obligation.version !== SOURCE_PROOF_MEDIA_VERSION) {
+    throw new Error(
+      "legacy citation-less source-proof obligation is read-only history and cannot enter a new cinematic admission or release",
+    );
+  }
+  return CurrentSourceProofMediaObligationSchema.parse(obligation);
+}
+
+export function assertCurrentSourceProofMediaReceipt(args: {
+  receipt: unknown;
+  sceneId: string;
+  sequenceFingerprint: string;
+  obligation?: unknown;
+}): CurrentSourceProofMediaReceipt {
+  const obligation = args.obligation === undefined
+    ? undefined
+    : assertCurrentSourceProofMediaObligation(args.obligation);
+  const receipt = assertSourceProofMediaReceipt({
+    receipt: args.receipt,
+    sceneId: args.sceneId,
+    sequenceFingerprint: args.sequenceFingerprint,
+    ...(obligation ? { obligation } : {}),
+  });
+  if (receipt.version !== SOURCE_PROOF_MEDIA_RECEIPT_VERSION) {
+    throw new Error(
+      "legacy citation-less source-proof receipt is read-only history and cannot enter a new cinematic admission or release",
+    );
+  }
+  return CurrentSourceProofMediaReceiptSchema.parse(receipt);
 }

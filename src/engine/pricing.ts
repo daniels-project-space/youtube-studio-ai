@@ -180,6 +180,27 @@ export function qaVisualCost(
   );
 }
 
+/**
+ * The derivative-Short release gate uses the same bounded non-Google visual
+ * review mechanics as final-master QA, but on the actual 9:16 crop after its
+ * captions are burned. Keep this separately costed: a parent-master review
+ * cannot cover a new transform, and a hidden review call must never evade the
+ * frozen run budget.
+ */
+export function shortsSpinoffReleaseEvidenceCost(
+  params: Readonly<Record<string, unknown>>,
+): number {
+  const clampFrames = (value: unknown, fallback: number, max: number): number => {
+    const parsed = Number(value);
+    if (!Number.isFinite(parsed)) return fallback;
+    return Math.max(8, Math.min(max, Math.floor(parsed)));
+  };
+  const broadFrames = clampFrames(params["shortVisualReviewFrames"], 36, 72);
+  const focusFrames = clampFrames(params["shortVisualReviewFocusFrames"], 18, 36);
+  const evidenceBatches = Math.ceil(broadFrames / 12) + Math.ceil(focusFrames / 12);
+  return PRICE.qaBaseUsd * evidenceBatches;
+}
+
 /** Exact observed spend for narration TTS plus its Gemini audio gate. */
 export function narrationTtsCost(
   provider: string,

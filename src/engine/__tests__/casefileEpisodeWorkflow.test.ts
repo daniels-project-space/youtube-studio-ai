@@ -27,6 +27,7 @@ import {
   casefileSourcePacketContentFingerprint,
   type CasefileSourcePacket,
 } from "@/engine/sourceFirstAdmission";
+import { SOURCE_PROOF_MEDIA_VERSION } from "@/engine/sourceProofMedia";
 import { planStorySpine } from "@/engine/storySpine";
 
 const NOW = new Date("2026-08-15T12:00:00.000Z");
@@ -428,10 +429,15 @@ async function main(): Promise<void> {
       attachments: sourceProofAttachments.map((attachment) => ({
         ...attachment,
         sourcePacketFingerprint: "0".repeat(64),
+        citation: {
+          sourceId: "source-forged",
+          label: "Forged overlay copy",
+          locator: "https://forged.example.test/record",
+        },
       })),
     }),
     /unrecognized key/i,
-    "the desk derives packet and provenance binding; the browser cannot inject either",
+    "the desk derives packet, provenance, and citation binding; the browser cannot inject any of them",
   );
   const sourceProofAttached = attachCasefileEpisodeSourceProofMedia({
     episode: draft,
@@ -451,6 +457,28 @@ async function main(): Promise<void> {
         shot.sourceProofMedia.provenanceFingerprint.length === 64,
       ),
     "every source-proof slot carries a server-derived packet/provenance-bound obligation",
+  );
+  const ledgerSource = sourceProofAttached.sourcePacket.casePacket.sourceLedger.find(
+    (entry) => entry.id === "source-court-ledger",
+  );
+  assert.ok(ledgerSource, "the fixture must retain the exact admitted source ledger entry");
+  const attachedCitations = sourceProofAttached.cinematicDraft!.content.beats
+    .flatMap((beat) => beat.shots)
+    .filter((shot) => shot.visualMode === "source_proof")
+    .map((shot) => {
+      const proof = shot.sourceProofMedia;
+      if (!proof || proof.version !== SOURCE_PROOF_MEDIA_VERSION) {
+        throw new Error("newly attached Casefile source proof must carry the current citation-bound obligation");
+      }
+      return proof.citation;
+    });
+  assert.ok(
+    attachedCitations.every((citation) =>
+      citation.sourceId === ledgerSource.id &&
+      citation.label === `${ledgerSource.publisher}: ${ledgerSource.title}` &&
+      citation.locator === ledgerSource.locator,
+    ),
+    "the Casefile desk must derive every visible source citation from the exact admitted source ledger, not browser text",
   );
   assert.throws(
     () => attachCasefileEpisodeSourceProofMedia({ episode: sourceProofAttached, attachments: sourceProofAttachments }),

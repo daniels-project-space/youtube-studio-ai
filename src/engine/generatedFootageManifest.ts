@@ -12,7 +12,7 @@ import {
   CinematicTransitionReviewSchema,
 } from "@/engine/cinematicTransitionReview";
 import {
-  assertSourceProofMediaReceipt,
+  assertCurrentSourceProofMediaReceipt,
   SourceProofMediaReceiptSchema,
 } from "@/engine/sourceProofMedia";
 
@@ -83,7 +83,7 @@ export const GeneratedFootageSceneManifestSchema = z
         }
         if (item.sourceProofMediaReceipt) {
           try {
-            assertSourceProofMediaReceipt({
+            assertCurrentSourceProofMediaReceipt({
               receipt: item.sourceProofMediaReceipt,
               sceneId: item.sceneId,
               sequenceFingerprint: value.sequenceFingerprint!,

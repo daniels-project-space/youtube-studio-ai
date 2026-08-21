@@ -13,14 +13,23 @@ import { pruneRunObjectsWithVerifiedFinalMasterEvidence } from "@/trigger/blocks
 
 const keyPrefix = "owner/alice/channel/casefile/";
 const runId = "run-byte-evidence";
-const reviewFingerprint = "review-byte-evidence";
-const masterSha256 = "a".repeat(64);
+const parentReviewFingerprint = "review-byte-evidence";
+const parentMasterSha256 = "a".repeat(64);
 
 const sha256 = (bytes: Uint8Array) => createHash("sha256").update(bytes).digest("hex");
 
-function buildFixture() {
+function buildFixture(kind: "parent" | "short" = "parent") {
+  const isShort = kind === "short";
+  const reviewFingerprint = isShort
+    ? `${parentReviewFingerprint}-short`
+    : parentReviewFingerprint;
+  const masterSha256 = isShort ? "d".repeat(64) : parentMasterSha256;
+  const masterName = isShort ? "short.mp4" : "final.mp4";
   const evidenceManifestKey = `${keyPrefix}runs/${runId}/visual-review/${reviewFingerprint}/manifest.json`;
-  const frameBytes = [Buffer.from("review-frame-one"), Buffer.from("review-frame-two")];
+  const frameBytes = [
+    Buffer.from(`${kind}-review-frame-one`),
+    Buffer.from(`${kind}-review-frame-two`),
+  ];
   const frameArtifacts = frameBytes.map((bytes, index) => ({
     r2Key: `${keyPrefix}runs/${runId}/visual-review/${reviewFingerprint}/frames/f00${index + 1}.jpg`,
     contentSha256: sha256(bytes),
@@ -51,7 +60,7 @@ function buildFixture() {
   const certificate = createFinalMasterReleaseCertificate({
     version: FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
     finalMaster: {
-      r2Key: `${keyPrefix}runs/${runId}/final.mp4`,
+      r2Key: `${keyPrefix}runs/${runId}/${masterName}`,
       sha256: masterSha256,
       durationSec: 60,
     },
@@ -82,7 +91,10 @@ function buildFixture() {
     }))],
     [frameArtifacts[0].r2Key, frameBytes[0]],
     [frameArtifacts[1].r2Key, frameBytes[1]],
-    [`${keyPrefix}runs/${runId}/intermediates/scene-01.mp4`, Buffer.from("replaceable intermediate")],
+    [
+      `${keyPrefix}runs/${runId}/intermediates/${kind}-scene-01.mp4`,
+      Buffer.from("replaceable intermediate"),
+    ],
   ]);
   return { certificate, certificateKey, frameArtifacts, frameBytes, objects };
 }
@@ -95,22 +107,37 @@ function getObjectBytes(objects: Map<string, Buffer>) {
   };
 }
 
-async function pruneFixture(fixture: ReturnType<typeof buildFixture>) {
+async function pruneFixture(
+  fixture: ReturnType<typeof buildFixture>,
+  additionalFixtures: Array<ReturnType<typeof buildFixture>> = [],
+) {
+  const objects = new Map(fixture.objects);
+  for (const additional of additionalFixtures) {
+    for (const [key, bytes] of additional.objects) objects.set(key, bytes);
+  }
   const deleteCalls: string[][] = [];
   const result = await pruneRunObjectsWithVerifiedFinalMasterEvidence({
     keyPrefix,
     runId,
     certificateKey: fixture.certificateKey,
     certificate: fixture.certificate,
+    ...(additionalFixtures.length > 0
+      ? {
+          additionalCertificates: additionalFixtures.map((additional) => ({
+            certificateKey: additional.certificateKey,
+            certificate: additional.certificate,
+          })),
+        }
+      : {}),
     keepNames: ["final.mp4", "thumbnail.jpg"],
-    getObjectBytes: getObjectBytes(fixture.objects),
-    listObjects: async (prefix) => [...fixture.objects.keys()].filter((key) => key.startsWith(prefix)),
+    getObjectBytes: getObjectBytes(objects),
+    listObjects: async (prefix) => [...objects.keys()].filter((key) => key.startsWith(prefix)),
     deleteObjects: async (keys) => {
       deleteCalls.push([...keys]);
       return keys.length;
     },
   });
-  return { result, deleteCalls };
+  return { result, deleteCalls, objects };
 }
 
 async function main() {
@@ -166,8 +193,51 @@ async function main() {
   assert.equal(validCleanup.result.cleaned, true, "cleanup may proceed only after all evidence bytes revalidate");
   assert.deepEqual(
     validCleanup.deleteCalls,
-    [[`${keyPrefix}runs/${runId}/intermediates/scene-01.mp4`]],
+    [[`${keyPrefix}runs/${runId}/intermediates/parent-scene-01.mp4`]],
     "cleanup must retain the certificate, receipt, manifest, frames, and final master",
+  );
+
+  const parentForDerivativeCleanup = buildFixture();
+  const shortForDerivativeCleanup = buildFixture("short");
+  const derivativeCleanup = await pruneFixture(
+    parentForDerivativeCleanup,
+    [shortForDerivativeCleanup],
+  );
+  assert.equal(
+    derivativeCleanup.result.cleaned,
+    true,
+    "cleanup may proceed when parent and independently certified derivative evidence both revalidate",
+  );
+  assert.deepEqual(
+    derivativeCleanup.deleteCalls,
+    [[
+      `${keyPrefix}runs/${runId}/intermediates/parent-scene-01.mp4`,
+      `${keyPrefix}runs/${runId}/intermediates/short-scene-01.mp4`,
+    ]],
+    "cleanup must retain the derivative master and every one of its evidence objects",
+  );
+  assert(
+    derivativeCleanup.result.retainedReleaseEvidence.includes(shortForDerivativeCleanup.certificate.finalMaster.r2Key),
+    "the certified derivative master itself must survive cleanup",
+  );
+
+  const parentWithBrokenDerivative = buildFixture();
+  const brokenDerivative = buildFixture("short");
+  brokenDerivative.objects.delete(brokenDerivative.frameArtifacts[0].r2Key);
+  const brokenDerivativeCleanup = await pruneFixture(
+    parentWithBrokenDerivative,
+    [brokenDerivative],
+  );
+  assert.equal(
+    brokenDerivativeCleanup.result.cleaned,
+    false,
+    "a missing derivative evidence frame must stop cleanup before any object is deleted",
+  );
+  assert.equal(brokenDerivativeCleanup.result.removedObjects, 0);
+  assert.deepEqual(
+    brokenDerivativeCleanup.deleteCalls,
+    [],
+    "cleanup must preserve the whole run namespace when derivative proof is incomplete",
   );
 
   const missingCleanupFixture = buildFixture();

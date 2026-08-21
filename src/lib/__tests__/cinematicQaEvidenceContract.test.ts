@@ -14,7 +14,7 @@ import {
   SOURCE_PROOF_MEDIA_VERSION,
   createSourceProofMediaReceipt,
   sourceProofMediaProvenanceFingerprint,
-  type SourceProofMediaObligation,
+  type CurrentSourceProofMediaObligation,
 } from "@/engine/sourceProofMedia";
 import type { VisualReviewEvidence } from "@/lib/visualReview";
 
@@ -26,7 +26,7 @@ const nameCardCriterion =
   `The deterministic character-introduction name-card overlay visibly and exactly reads ${nameCardText}.`;
 const openingAcceptanceCriteria = ["faceless", "coat", "scarf", "file", nameCardCriterion];
 
-const sourceProofObligation: SourceProofMediaObligation = {
+const sourceProofObligation: CurrentSourceProofMediaObligation = {
   version: SOURCE_PROOF_MEDIA_VERSION,
   sourceId: "source-court-archive",
   assetId: "asset-court-archive-timeline",
@@ -35,6 +35,11 @@ const sourceProofObligation: SourceProofMediaObligation = {
   assetUrl: "https://court.example.org/media/timeline.jpg",
   assetSha256: "e".repeat(64),
   approvalReceiptId: "source-proof-receipt-court-timeline",
+  citation: {
+    sourceId: "source-court-archive",
+    label: "Regional Court Archive: Court timeline",
+    locator: "https://court.example.org/records/timeline",
+  },
   provenanceFingerprint: "",
 };
 sourceProofObligation.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(sourceProofObligation);
@@ -192,6 +197,7 @@ const receipt = {
   sourceProofs: [{
     shotId: "cinematic-shot-reveal",
     sourceProofMediaReceipt: sourceProofReceipt,
+    citation: sourceProofObligation.citation,
     evidenceFrameIds: ["f6", "f7", "f8"],
     onScreenCitationVisible: true,
     visualSourceProofVisible: true,
@@ -353,6 +359,7 @@ function approvedLockJudgement(firstFrameSec: number): string {
       sourceProof: {
         onScreenCitationVisible: true,
         visualSourceProofVisible: true,
+        citation: sourceProofObligation.citation,
         pass: true,
       },
     } : {}),
@@ -386,6 +393,39 @@ async function main(): Promise<void> {
     reviewer: nonGoogleReviewer,
   });
   assert.equal(reviewedReceipt.pass, true, "an injected non-Google reviewer may certify an evidence-bound receipt");
+  const wrongCitationReviewer: CinematicFinalMasterQaReviewer = async ({ kind, frames }) => {
+    if (kind === "cut") {
+      return JSON.stringify({
+        pass: true,
+        cutReason: "contradiction",
+        tensionState: "reversal",
+        causalTurnVisible: true,
+        tensionTransitionVisible: true,
+      });
+    }
+    const judgement = JSON.parse(approvedLockJudgement(frames[0]!.tSec)) as {
+      sourceProof?: { citation?: { sourceId: string; label: string; locator: string } };
+    };
+    if (judgement.sourceProof?.citation) {
+      judgement.sourceProof.citation = {
+        ...judgement.sourceProof.citation,
+        label: "Incidental archival text, not the sealed citation",
+      };
+    }
+    return JSON.stringify(judgement);
+  };
+  await assert.rejects(
+    () => reviewCinematicFinalMasterQaEvidence({
+      plan,
+      evidence,
+      framePaths: evidence.frames.map((frame) => `/tmp/cinematic-qa/${frame.id}.jpg`),
+      visualReviewFingerprint: review,
+      finalMasterSha256: master,
+      reviewer: wrongCitationReviewer,
+    }),
+    /exact sealed source-proof citation/i,
+    "final-master QA must reject a visible citation that does not exactly match the sealed Casefile citation",
+  );
   assert.equal(
     reviewedReceipt.locks.every((lock) => lock.unplannedInSceneTextFree),
     true,

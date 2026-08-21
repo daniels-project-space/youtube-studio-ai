@@ -20,8 +20,11 @@ import type {
 } from "@/engine/cinematicCaseSequence";
 import type { GeneratedFootageSceneManifest } from "@/engine/generatedFootageManifest";
 import {
-  assertSourceProofMediaReceipt,
+  assertCurrentSourceProofMediaObligation,
+  assertCurrentSourceProofMediaReceipt,
+  SourceProofCitationSchema,
   SourceProofMediaReceiptSchema,
+  type CurrentSourceProofMediaReceipt,
   type SourceProofMediaReceipt,
 } from "@/engine/sourceProofMedia";
 import { canonicalJson } from "@/lib/canonicalJson";
@@ -86,6 +89,12 @@ const ClaimReceiptSchema = z.object({
 const SourceProofFrameReceiptSchema = z.object({
   shotId,
   sourceProofMediaReceipt: SourceProofMediaReceiptSchema,
+  /**
+   * v1 final-master evidence remains readable without this field. New v2
+   * source-proof release evidence retains the exact citation independently
+   * reviewed below.
+   */
+  citation: SourceProofCitationSchema.optional(),
   evidenceFrameIds: z.array(frameId).min(1).max(12),
   onScreenCitationVisible: z.literal(true),
   visualSourceProofVisible: z.literal(true),
@@ -166,7 +175,7 @@ export interface CinematicQaExpectedCut {
 /** The immutable evidence clip expected on one real source-proof shot. */
 export interface CinematicQaExpectedSourceProof {
   shotId: string;
-  sourceProofMediaReceipt: SourceProofMediaReceipt;
+  sourceProofMediaReceipt: CurrentSourceProofMediaReceipt;
 }
 
 /** A source-proof reveal which explicitly earns the opening causal question. */
@@ -242,6 +251,7 @@ const LockJudgementSchema = z.object({
   sourceProof: z.object({
     onScreenCitationVisible: z.literal(true),
     visualSourceProofVisible: z.literal(true),
+    citation: SourceProofCitationSchema,
     pass: z.literal(true),
   }).strict().optional(),
 }).strict();
@@ -398,10 +408,10 @@ function lockReviewerPrompt(args: {
       ? `Required story payoff(s): ${JSON.stringify(payoffs)}. For every listed payoff, certify it only when this cited source-proof reveal visibly answers or reframes that exact cold-open question without relying on unsupported prose.`
       : "No story payoff is assigned to this lock; return an empty storyPayoffs array.",
     sourceProof
-      ? `Required source-proof insert: approved source ${sourceProof.sourceProofMediaReceipt.obligation.sourceId}, asset ${sourceProof.sourceProofMediaReceipt.obligation.assetId}. The receipt binds its exact bytes; return sourceProof only when the resulting evidence insert and its on-screen citation are visibly present in these frames.`
+      ? `Required source-proof insert: approved source ${sourceProof.sourceProofMediaReceipt.obligation.sourceId}, asset ${sourceProof.sourceProofMediaReceipt.obligation.assetId}. The receipt binds its exact bytes. The deterministic visible citation must exactly equal ${JSON.stringify(sourceProof.sourceProofMediaReceipt.obligation.citation)}; return sourceProof only when the resulting evidence insert is visible and you can read that exact sealed citation in these frames.`
       : "No source-proof insert is assigned to this lock; omit sourceProof.",
     "Text-artifact check is limited to these sampled START/MIDDLE/END evidence frames, not OCR and not a whole-master certification. Inspect readable, unreadable, or fabricated signs, papers, timetables, labels, glyphs, or similar in-scene text. Return unplannedInSceneTextFree:true only when no such unplanned generated in-scene text appears. Exempt only the approved source-proof insert named above (if any) and visibly deterministic planned overlays such as captions, title/name cards, or citations; never exempt generated scene text merely because it resembles an overlay.",
-    "Return JSON only: {\"pass\":true,\"unplannedInSceneTextFree\":true,\"acceptedCriteria\":[...],\"continuity\":[{\"castId\":\"...\",\"faceless\":true,\"noLikeness\":true,\"silhouetteContinuous\":true,\"wardrobeContinuous\":true,\"paletteContinuous\":true,\"keyPropContinuous\":true,\"movementProfileContinuous\":true}],\"claims\":[{\"claimId\":\"...\",\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"storyPayoffs\":[{\"coldOpenBeatId\":\"...\",\"revealBeatId\":\"...\",\"causalQuestionAnsweredOrReframed\":true,\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"sourceProof\":{\"onScreenCitationVisible\":true,\"visualSourceProofVisible\":true,\"pass\":true}}. Omit sourceProof when none is required. If any condition fails or cannot be seen, return {\"pass\":false}.",
+    "Return JSON only: {\"pass\":true,\"unplannedInSceneTextFree\":true,\"acceptedCriteria\":[...],\"continuity\":[{\"castId\":\"...\",\"faceless\":true,\"noLikeness\":true,\"silhouetteContinuous\":true,\"wardrobeContinuous\":true,\"paletteContinuous\":true,\"keyPropContinuous\":true,\"movementProfileContinuous\":true}],\"claims\":[{\"claimId\":\"...\",\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"storyPayoffs\":[{\"coldOpenBeatId\":\"...\",\"revealBeatId\":\"...\",\"causalQuestionAnsweredOrReframed\":true,\"onScreenCitationVisible\":true,\"visualSupportVisible\":true,\"pass\":true}],\"sourceProof\":{\"onScreenCitationVisible\":true,\"visualSourceProofVisible\":true,\"citation\":{\"sourceId\":\"source-...\",\"label\":\"exact sealed label\",\"locator\":\"https://...\"},\"pass\":true}}. Omit sourceProof when none is required. If any condition fails or cannot be seen, return {\"pass\":false}.",
   ].join("\n");
 }
 
@@ -527,9 +537,21 @@ export async function reviewCinematicFinalMasterQaEvidence(args: {
       });
     }
     if (sourceProof) {
+      const expectedCitation = sourceProof.sourceProofMediaReceipt.obligation.citation;
+      const observedCitation = judgement.sourceProof!.citation;
+      if (
+        observedCitation.sourceId !== expectedCitation.sourceId ||
+        observedCitation.label !== expectedCitation.label ||
+        observedCitation.locator !== expectedCitation.locator
+      ) {
+        throw new Error(
+          `cinematic QA lock ${lock.shotId} did not attest the exact sealed source-proof citation; refusing incidental or substituted on-screen text`,
+        );
+      }
       sourceProofs.push({
         shotId: sourceProof.shotId,
         sourceProofMediaReceipt: sourceProof.sourceProofMediaReceipt,
+        citation: expectedCitation,
         evidenceFrameIds: selected.map((frame) => frame.id),
         onScreenCitationVisible: judgement.sourceProof!.onScreenCitationVisible,
         visualSourceProofVisible: judgement.sourceProof!.visualSourceProofVisible,
@@ -692,7 +714,7 @@ export function cinematicFinalMasterQaPlan(args: {
   }
   const expectedSourceProofs = [...shotPlan.entries()]
     .flatMap(([shotId, planned]) => planned.sourceProofMedia
-      ? [{ shotId, obligation: planned.sourceProofMedia }]
+      ? [{ shotId, obligation: assertCurrentSourceProofMediaObligation(planned.sourceProofMedia) }]
       : []);
   if (expectedSourceProofs.length > 0 && !args.footageManifest) {
     throw new Error(
@@ -738,7 +760,7 @@ export function cinematicFinalMasterQaPlan(args: {
     try {
       return {
         shotId,
-        sourceProofMediaReceipt: assertSourceProofMediaReceipt({
+        sourceProofMediaReceipt: assertCurrentSourceProofMediaReceipt({
           receipt,
           sceneId: shotId,
           sequenceFingerprint: args.creativeLocks.sequenceFingerprint,
@@ -890,6 +912,17 @@ function assertSourceProofCoverage(
     ) {
       throw new Error(
         `cinematic QA source-proof receipt for ${proof.shotId} does not retain the exact approved asset/rights/clip binding`,
+      );
+    }
+    const expectedCitation = planned.sourceProofMediaReceipt.obligation.citation;
+    if (
+      !proof.citation ||
+      proof.citation.sourceId !== expectedCitation.sourceId ||
+      proof.citation.label !== expectedCitation.label ||
+      proof.citation.locator !== expectedCitation.locator
+    ) {
+      throw new Error(
+        `cinematic QA source-proof receipt for ${proof.shotId} does not retain the exact sealed visible citation`,
       );
     }
     const lock = lockByShot.get(proof.shotId);

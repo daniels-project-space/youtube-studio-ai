@@ -1,10 +1,10 @@
 import { createHash } from "node:crypto";
 
 import {
-  assertSourceProofMediaReceipt,
+  assertCurrentSourceProofMediaObligation,
+  assertCurrentSourceProofMediaReceipt,
   createSourceProofMediaReceipt,
-  SourceProofMediaObligationSchema,
-  type SourceProofMediaReceipt,
+  type CurrentSourceProofMediaReceipt,
 } from "@/engine/sourceProofMedia";
 
 function sha256(bytes: Uint8Array): string {
@@ -21,8 +21,8 @@ export function assertSourceProofMediaClipBytes(args: {
   sceneId: string;
   sequenceFingerprint: string;
   bytes: Uint8Array;
-}): SourceProofMediaReceipt {
-  const receipt = assertSourceProofMediaReceipt({
+}): CurrentSourceProofMediaReceipt {
+  const receipt = assertCurrentSourceProofMediaReceipt({
     receipt: args.receipt,
     sceneId: args.sceneId,
     sequenceFingerprint: args.sequenceFingerprint,
@@ -55,8 +55,8 @@ export async function resolveApprovedSourceProofMedia(args: {
   readBytes: (path: string) => Promise<Uint8Array>;
   createEvidenceClip: (assetPath: string, clipPath: string, durationSec: number) => Promise<string>;
   putEvidenceClip: (key: string, bytes: Uint8Array) => Promise<string>;
-}): Promise<{ localPath: string; receipt: SourceProofMediaReceipt }> {
-  const obligation = SourceProofMediaObligationSchema.parse(args.obligation);
+}): Promise<{ localPath: string; receipt: CurrentSourceProofMediaReceipt }> {
+  const obligation = assertCurrentSourceProofMediaObligation(args.obligation);
   const downloadedPath = await args.downloadAsset(obligation.assetUrl, args.assetPath);
   const assetBytes = await args.readBytes(downloadedPath);
   const resolvedAssetSha256 = sha256(assetBytes);

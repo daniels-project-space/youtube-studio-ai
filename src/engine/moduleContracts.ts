@@ -4,6 +4,7 @@ import {
   PRICE,
   bananaUnitRate,
   qaVisualCost,
+  shortsSpinoffReleaseEvidenceCost,
 } from "./pricing";
 import { cinematicFinalMasterQaAdmissionCost } from "./cinematicFinalMasterQaAdmission";
 import {
@@ -305,10 +306,38 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     },
   ),
   notify: contract(["notify.operator"], { sideEffects: ["external_message"] }),
-  cleanup: contract(["storage.scoped_cleanup"], { sideEffects: ["delete_scoped_artifacts"] }),
-  shorts_spinoff: contract(["master.short_created", "publish.connector_bound", "publish.resumable", "publish.synthetic_disclosed"], {
-    optionalConsumes: ["description", "tags"],
+  cleanup: contract(["storage.scoped_cleanup"], {
+    // Shorts are optional, but a successfully uploaded derivative carries a
+    // separate release certificate that cleanup must retain with its proof.
+    optionalConsumes: ["shortKey", "shortReleaseCertificateKey"],
+    sideEffects: ["delete_scoped_artifacts"],
+  }),
+  shorts_spinoff: contract([
+    "master.short_created",
+    "master.short_release_evidence_passed",
+    "publish.connector_bound",
+    "publish.resumable",
+    "publish.synthetic_disclosed",
+  ], {
+    // The derivative is created from a passing, certificate-bound parent, but
+    // it earns its own final-master certificate after the 9:16 crop/caption
+    // transform. These contextual inputs make the post-transform reviewer
+    // channel-aware without treating them as an inherited pass.
+    optionalConsumes: [
+      "description", "tags", "qualityBar", "contentLane", "channelName", "persona",
+      "styleGrammar", "criticDoctrine", "topic", "niche",
+    ],
+    optionalProduces: [
+      "shortKey",
+      "shortVideoId",
+      "shortReleaseCertificateReference",
+      "shortReleaseCertificateKey",
+    ],
+    providerProfiles: [managed, local],
+    maxCostUsd: 1,
+    maxCostUsdFor: (params) => shortsSpinoffReleaseEvidenceCost(params),
     sideEffects: ["publish_media"],
+    qualityRequired: true,
   }),
 
   metadata: contract(["package.metadata"], {
