@@ -64,8 +64,47 @@ interface ChannelGrounding {
   moduleConfig?: Record<string, Record<string, unknown>>;
 }
 
-/** Load the channel + its Show Bible and Style DNA. */
+/**
+ * Load the channel + its Show Bible and Style DNA.
+ *
+ * `runPipeline.ts` already fetches the channel once and freezes every field
+ * this needs into `seedStore` (showBible/channelSlug/channelStatus/
+ * channelTemplate/channelBudget/channelModuleConfig, alongside the
+ * pre-existing styleDNA/channelName/niche/persona/styleGrammar). Reading that
+ * instead of re-querying Convex removes 5 redundant `getChannel` calls per
+ * run (this function is called from director/cinematographer/editor/composer/
+ * critic briefs). `channelStatus` is frozen deliberately, same as every other
+ * field here — see runPipeline.ts's seedStore comment: this is channel
+ * config, not a credential or live publish-policy value that needs
+ * re-checking mid-run.
+ *
+ * Falls back to a live Convex fetch only when `channelSlug`/`showBible` are
+ * BOTH absent from the store — i.e. a run resumed from a durable snapshot or
+ * probe-invocation context captured before this seeding existed. New runs
+ * never take this path.
+ */
 async function loadGrounding(ctx: StageContext): Promise<ChannelGrounding> {
+  const storeShowBible = ctx.store["showBible"] as ShowBible | null | undefined;
+  const storeSlug = ctx.store["channelSlug"] as string | undefined;
+  if (storeShowBible !== undefined || storeSlug !== undefined) {
+    return {
+      bible: storeShowBible ?? null,
+      dna: (ctx.store["styleDNA"] as StyleDNA | null | undefined) ?? null,
+      channelName: ctx.store["channelName"] as string | undefined,
+      niche: ctx.store["niche"] as string | undefined,
+      persona: ctx.store["persona"] as string | undefined,
+      styleGrammar: ctx.store["styleGrammar"] as string | undefined,
+      slug: storeSlug,
+      status: ctx.store["channelStatus"] as string | undefined,
+      template: ctx.store["channelTemplate"] as string | undefined,
+      budget: ctx.store["channelBudget"] as number | undefined,
+      moduleConfig: ctx.store["channelModuleConfig"] as
+        | Record<string, Record<string, unknown>>
+        | undefined,
+    };
+  }
+
+  ctx.log("crew: loadGrounding — seedStore predates channel freeze, falling back to a live fetch");
   try {
     const channel = await convex().query(api.channels.getChannel, {
       channelId: ctx.channelId as Id<"channels">,

@@ -57,6 +57,52 @@ function hasMissingLocalPath(val: unknown): boolean {
   return false;
 }
 
+/**
+ * The sibling R2-key fields `rehydrateOutputs` needs to find in the SAME patch
+ * to restore `key`. Kept next to the restore rules below because the two must
+ * evolve together: narrationLocalPath←narrationKey, musicUrl←musicKey,
+ * introCardPath←introCardKey, footageClips←footageKeys, entityClips←entityKeys.
+ * (Nested overlay specs carry their own `key` per item, so they need nothing.)
+ */
+function siblingR2KeyFields(key: string): string[] {
+  const fields: string[] = [];
+  const base = key.replace(/(LocalPath|Url|Path)$/, "");
+  if (base !== key) fields.push(`${base}Key`);
+  if (/Clips$/.test(key)) fields.push(`${key.replace(/Clips$/, "")}Keys`);
+  return fields;
+}
+
+/**
+ * Narrow one completed block's outputs to just what a specific CONSUMER needs
+ * rehydrated, so a fresh worker pays R2 GETs only for artifacts it will read.
+ *
+ * The render child (render-block) used to rehydrate EVERY completed upstream
+ * block's outputs — narration, every footage clip, intro card, overlays, music,
+ * avatar — even when the block it was dispatched to run consumes none of them
+ * (novita_render_images/_video and documotion_short consume no media at all).
+ * That was 15-40 pointless R2 GETs per dispatch, repeated on every retry.
+ *
+ * Returns `null` when the consumer needs nothing from this patch (caller skips
+ * the fetch entirely), otherwise the needed values PLUS their sibling R2 keys.
+ * Callers must still merge the block's raw outputs into the store: this decides
+ * what we PAY to fetch, never what the consumer is allowed to see.
+ */
+export function selectRehydrationSubset(
+  outputs: Record<string, unknown>,
+  needed: ReadonlySet<string>,
+): Record<string, unknown> | null {
+  const wanted = Object.keys(outputs).filter((key) => needed.has(key));
+  if (wanted.length === 0) return null;
+  const subset: Record<string, unknown> = {};
+  for (const key of wanted) {
+    subset[key] = outputs[key];
+    for (const sibling of siblingR2KeyFields(key)) {
+      if (sibling in outputs) subset[sibling] = outputs[sibling];
+    }
+  }
+  return subset;
+}
+
 export async function rehydrateOutputs(
   _block: string,
   outputs: Record<string, unknown>,

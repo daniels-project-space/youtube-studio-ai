@@ -48,25 +48,30 @@ export function makeConvexSink(
         error?: string;
       }>;
     },
-    async upsertArtifact(args) {
-      await client.mutation(api.runArtifacts.upsert, {
+    async upsertArtifacts(args) {
+      // One mutation for the whole block. `upsertMany` is transactional, so
+      // the block's artifact set lands completely or not at all.
+      if (args.artifacts.length === 0) return;
+      await client.mutation(api.runArtifacts.upsertMany, {
         secret: requireInternalQuerySecret(),
         ownerId: args.ownerId ?? ownerId,
         channelId: args.channelId as Id<"channels">,
         runId: args.runId as Id<"runs">,
-        artifactId: args.artifact.artifactId,
-        key: args.artifact.key,
-        type: args.artifact.type,
-        schemaVersion: args.artifact.schemaVersion,
-        producerModule: args.artifact.producerModule,
-        producerVersion: args.artifact.producerVersion,
-        payloadHash: args.artifact.payloadHash,
-        inputArtifactIds: args.inputArtifactIds,
-        optionalFallbacks: args.optionalFallbacks,
-        persistence: args.persistence,
-        payload: args.payload,
-        summary: args.summary,
-        createdAt: args.createdAt,
+        artifacts: args.artifacts.map((entry) => ({
+          artifactId: entry.artifact.artifactId,
+          key: entry.artifact.key,
+          type: entry.artifact.type,
+          schemaVersion: entry.artifact.schemaVersion,
+          producerModule: entry.artifact.producerModule,
+          producerVersion: entry.artifact.producerVersion,
+          payloadHash: entry.artifact.payloadHash,
+          inputArtifactIds: entry.inputArtifactIds,
+          optionalFallbacks: entry.optionalFallbacks,
+          persistence: entry.persistence,
+          payload: entry.payload,
+          summary: entry.summary,
+          createdAt: entry.createdAt,
+        })),
       });
     },
   };

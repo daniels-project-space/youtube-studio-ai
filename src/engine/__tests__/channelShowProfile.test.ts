@@ -1,6 +1,11 @@
 import assert from "node:assert/strict";
 
 import {
+  assertChannelShowProfileReceiptExactComposition,
+  assertChannelShowProfileReceiptPipelineCompatibility,
+  assertChannelShowProfileReceiptProgramBinding,
+} from "@/engine/channelShowProfileCodec";
+import {
   assertChannelShowProfile,
   assertChannelShowProfilePipelineCompatibility,
   assertChannelShowProfileProgramBinding,
@@ -12,6 +17,8 @@ import {
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { creativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
 import { designPipeline } from "@/engine/designer";
+import { canonicalJson } from "@/lib/canonicalJson";
+import { sha256Hex } from "@/lib/sha256";
 
 const brief = createChannelProgramBrief({
   family: "narrated_stock",
@@ -46,6 +53,29 @@ assert.deepEqual(
 );
 assert.equal(channelShowProfileFingerprint(profile), profile.fingerprint);
 assert.deepEqual(
+  assertChannelShowProfileReceiptProgramBinding({ profile, programBrief: brief }),
+  profile,
+  "the Convex-safe receipt codec must retain the program/family/lane binding",
+);
+assert.deepEqual(
+  assertChannelShowProfileReceiptPipelineCompatibility({
+    profile,
+    programBrief: brief,
+    pipeline: design.pipeline,
+  }),
+  profile,
+  "the Convex-safe receipt codec must retain selected capability obligations",
+);
+assert.deepEqual(
+  assertChannelShowProfileReceiptExactComposition({
+    profile,
+    programBrief: brief,
+    pipeline: design.pipeline,
+  }),
+  profile,
+  "a new Convex channel write must bind the profile to its exact compiler baseline",
+);
+assert.deepEqual(
   assertChannelShowProfileProgramBinding({ profile, programBrief: brief }),
   profile,
   "planning can bind a profile to the durable program before a compiler output is rehydrated",
@@ -79,6 +109,27 @@ assert.throws(
   /sorted and unique|fingerprint/,
   "duplicate selections cannot be hidden in a persisted profile",
 );
+const duplicateCapabilityProfileBody = {
+  version: profile.version,
+  programBriefFingerprint: profile.programBriefFingerprint,
+  familyManifestFingerprint: profile.familyManifestFingerprint,
+  contentLaneFingerprint: profile.contentLaneFingerprint,
+  creativeCapabilityCatalogFingerprint: profile.creativeCapabilityCatalogFingerprint,
+  selectedCapabilityKeys: ["source_attributed_data_story", "source_attributed_data_story"],
+  designedPipelineFingerprint: profile.designedPipelineFingerprint,
+};
+assert.throws(
+  () =>
+    assertChannelShowProfileReceiptProgramBinding({
+      profile: {
+        ...duplicateCapabilityProfileBody,
+        fingerprint: sha256Hex(canonicalJson(duplicateCapabilityProfileBody)),
+      },
+      programBrief: brief,
+    }),
+  /sorted and unique/,
+  "Convex must reject a re-fingerprinted receipt with duplicate capability keys",
+);
 assert.throws(
   () => parseChannelShowProfile({ ...profile, fingerprint: "0".repeat(64) }),
   /fingerprint/,
@@ -92,13 +143,34 @@ assert.throws(
   /unknown creative capability|fingerprint/,
   "a persisted profile cannot invent a catalog capability key",
 );
+const staleCatalogProfileBody = {
+  version: profile.version,
+  programBriefFingerprint: profile.programBriefFingerprint,
+  familyManifestFingerprint: profile.familyManifestFingerprint,
+  contentLaneFingerprint: profile.contentLaneFingerprint,
+  creativeCapabilityCatalogFingerprint: "creative-capability-catalog/v0:stale",
+  selectedCapabilityKeys: profile.selectedCapabilityKeys,
+  designedPipelineFingerprint: profile.designedPipelineFingerprint,
+};
 assert.throws(
   () => parseChannelShowProfile({
-    ...profile,
-    creativeCapabilityCatalogFingerprint: "creative-capability-catalog/v0:stale",
+    ...staleCatalogProfileBody,
+    fingerprint: sha256Hex(canonicalJson(staleCatalogProfileBody)),
   }),
   /stale creative-capability catalog fingerprint/,
   "a retry cannot reuse a show profile against a changed capability catalog",
+);
+assert.throws(
+  () =>
+    assertChannelShowProfileReceiptProgramBinding({
+      profile: {
+        ...staleCatalogProfileBody,
+        fingerprint: sha256Hex(canonicalJson(staleCatalogProfileBody)),
+      },
+      programBrief: brief,
+    }),
+  /stale creative-capability catalog fingerprint/,
+  "Convex must reject a stale catalog receipt before it reaches durable storage",
 );
 assert.throws(
   () => assertChannelShowProfile({
@@ -109,6 +181,15 @@ assert.throws(
   }),
   /requires effective pipeline block visual_inserts|does not match/,
   "selected-capability obligations must survive in the sealed pipeline",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptPipelineCompatibility({
+    profile,
+    programBrief: brief,
+    pipeline: design.pipeline.filter((entry) => entry.block !== "visual_inserts"),
+  }),
+  /requires effective pipeline block visual_inserts/,
+  "Convex must reject a persisted graph that drops a receipt-selected capability",
 );
 assert.throws(
   () => assertChannelShowProfile({
@@ -133,6 +214,15 @@ assert.notEqual(
   alteredProfile.fingerprint,
   profile.fingerprint,
   "a different baseline pipeline must become a different repeatable channel composition",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptExactComposition({
+    profile,
+    programBrief: brief,
+    pipeline: alteredPipeline,
+  }),
+  /does not match the admitted channel composition/,
+  "new-channel Convex admission must reject a profile replayed against a different compiler baseline",
 );
 
 console.log("channel show profile contract tests passed");

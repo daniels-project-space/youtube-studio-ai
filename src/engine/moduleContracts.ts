@@ -254,7 +254,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     providerProfiles: [local],
     qualityRequired: true,
   }),
-  competitor_research: contract(["topic.researched"], { optionalConsumes: ["niche"] }),
+  competitor_research: contract(["topic.researched"], {
+    optionalConsumes: ["niche", "persona", "thumbnailIdentity", "thumbnailer"],
+  }),
   scene_planner: contract(["visuals.planned"], {
     optionalConsumes: ["styleGrammar", "visualStyle", "visualBrief", "niche", "styleDNA", "sceneLibrary"],
   }),
@@ -320,7 +322,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalConsumes: [
       "channelName", "topic", "f1Url", "f1Key", "f1ThumbnailBaseProvenance", "styleGrammar", "styleDNA", "family", "persona",
       "thumbnailIdentity", "nicheIntel", "niche", "seoDatabank", "competitors", "healHints", "plannedThumbnailKey",
-      "narrationText",
+      "narrationText", "thumbnailPlaybook",
       // Per-channel critique grounding for the produce→critique→regenerate loop.
       "criticDoctrine", "contentLane",
     ],

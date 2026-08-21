@@ -17,9 +17,9 @@
 import { task, logger } from "@trigger.dev/sdk/v3";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { registerAllBlocks } from "@/engine/blocks";
-import { get } from "@/engine/registry";
+import { getManifest } from "@/engine/registry";
 import { makeConvexSink } from "@/engine/convexSink";
-import { rehydrateOutputs } from "@/lib/rehydrate";
+import { rehydrateOutputs, selectRehydrationSubset } from "@/lib/rehydrate";
 import { bootstrapSecrets } from "@/lib/bootstrap";
 import { taskErrorForRetryPolicy } from "@/trigger/taskRetryPolicy";
 import type { StageContext } from "@/engine/types";
@@ -93,8 +93,22 @@ export const renderBlockTask = task({
       },
     });
 
-    const block = get(payload.blockId);
-    if (!block) throw new Error(`render-block: unknown block "${payload.blockId}"`);
+    const manifest = getManifest(payload.blockId);
+    if (!manifest) throw new Error(`render-block: unknown block "${payload.blockId}"`);
+    const block = manifest.block;
+
+    // The declared input contract of the block we are about to run — the SAME
+    // lookup validatePipeline uses. Union of all three sources because they can
+    // legitimately disagree: a contract override may demote a `block.consumes`
+    // key to optional (timeline_assemble does exactly this for entityClips and
+    // introCardPath), and optional inputs are still read when upstream produced
+    // them. Union = every key this block could possibly read, so the filter can
+    // only ever skip artifacts it provably never touches.
+    const consumedKeys = new Set<string>([
+      ...manifest.block.consumes,
+      ...Object.keys(manifest.consumes),
+      ...Object.keys(manifest.optionalConsumes),
+    ]);
 
     // Rebuild the store this block reads: channel seeds + every completed
     // upstream block's outputs, rehydrated from R2 to local files on THIS worker.
@@ -103,24 +117,39 @@ export const renderBlockTask = task({
     if (!sink.getCompleted) throw new Error("render-block: sink lacks getCompleted (cannot rebuild store)");
     const completed = await sink.getCompleted(payload.runId);
     let restored = 0;
+    let fetched = 0;
+    let skipped = 0;
     for (const row of completed) {
       if (row.block === payload.blockId) continue;
-      // Best-effort: rehydrate each upstream block's outputs to local files on
-      // THIS worker. If a block has a local-only output that ISN'T R2-backed, we
-      // still merge its raw values — the render only fails if it actually reads a
-      // missing file (which would mean a render input still needs R2-backing).
-      const r = await rehydrateOutputs(
-        row.block,
-        { ...((row.outputs ?? {}) as Record<string, unknown>) },
-        payload.runId,
-      );
+      const outputs = { ...((row.outputs ?? {}) as Record<string, unknown>) };
+      // Every upstream value is merged verbatim, exactly as before — the store
+      // this block sees is unchanged. Filtering below decides only what we PAY
+      // R2 to download, so an input read but not declared still resolves (it
+      // just never needed a fetch: undeclared reads are plain values, never
+      // R2-backed local paths — asserted in rehydrateSubsetContract.test.ts).
+      Object.assign(store, outputs);
+      restored++;
+      // Only rehydrate artifacts this render block actually consumes. Pulling
+      // every completed block's media onto a worker that will never open it was
+      // 15-40 wasted R2 GETs per dispatch, re-paid on every retry.
+      const subset = selectRehydrationSubset(outputs, consumedKeys);
+      if (!subset) {
+        skipped++;
+        continue;
+      }
+      // Best-effort, unchanged for anything that survives the filter: if a
+      // needed artifact isn't R2-restorable we still merge its raw value — the
+      // render fails loud when it actually opens the missing file.
+      const r = await rehydrateOutputs(row.block, subset, payload.runId);
       if (!r.ok) {
-        logger.warn(`[render-block] block "${row.block}" outputs not fully rehydratable — merging raw (ok if render doesn't read them)`);
+        logger.warn(`[render-block] block "${row.block}" consumed outputs not fully rehydratable — merging raw (render fails if it reads them)`);
       }
       Object.assign(store, r.outputs);
-      restored++;
+      fetched++;
     }
-    logger.info(`[render-block] store rebuilt from ${restored} upstream block(s) → running ${payload.blockId}`);
+    logger.info(
+      `[render-block] store rebuilt from ${restored} upstream block(s); rehydrated ${fetched}, skipped ${skipped} not consumed by ${payload.blockId} → running ${payload.blockId}`,
+    );
 
     const ctx: StageContext = {
       ownerId: payload.ownerId,

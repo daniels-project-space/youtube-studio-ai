@@ -155,17 +155,28 @@ export interface RunStageSink {
       error?: string;
     }>
   >;
-  /** Persist a first-class, content-addressed artifact and its exact lineage. */
-  upsertArtifact?(args: {
+  /**
+   * Persist first-class, content-addressed artifacts and their exact lineage.
+   *
+   * Batched on purpose: the runner calls this ONCE per block with every
+   * artifact that block produced, rather than once per produced key. Blocks
+   * commonly produce 2-14 outputs, so the per-key shape used to cost one
+   * Convex round-trip each. Implementations should persist the whole batch in
+   * a single transaction — a partially-written block is worse than a retried
+   * one, and artifact ids are deterministic so retries are idempotent.
+   */
+  upsertArtifacts?(args: {
     ownerId: string;
     channelId: string;
     runId: string;
-    artifact: ArtifactRef;
-    inputArtifactIds: string[];
-    optionalFallbacks: string[];
-    persistence: "inline" | "reference" | "summary";
-    payload?: unknown;
-    summary?: string;
-    createdAt: number;
+    artifacts: Array<{
+      artifact: ArtifactRef;
+      inputArtifactIds: string[];
+      optionalFallbacks: string[];
+      persistence: "inline" | "reference" | "summary";
+      payload?: unknown;
+      summary?: string;
+      createdAt: number;
+    }>;
   }): Promise<void>;
 }
