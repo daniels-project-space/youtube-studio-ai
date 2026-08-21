@@ -55,6 +55,15 @@ interface RoleConfig {
   /** REST-fallback provider when Mastra is unavailable. */
   provider: "claude";
   model: string;
+  /**
+   * Coarse REST-fallback tier mirroring this role's Mastra model choice
+   * (CLAUDE_MODEL/"fast" roles -> "flash", DIRECTOR_MODEL/"pro" roles ->
+   * "pro"). Mastra's per-role `model` string is the source of truth when
+   * Mastra is available; this is only consulted by the REST fallback in
+   * `agentJson()` so a Mastra outage degrades gracefully instead of
+   * collapsing every role to the tier-less ("flash") default.
+   */
+  tier: "flash" | "pro";
   instructions: string;
 }
 
@@ -66,6 +75,7 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
   producer: {
     provider: "claude",
     model: CLAUDE_MODEL,
+    tier: "flash",
     instructions:
       "You are the Producer in an autonomous YouTube content pipeline. You generate " +
       "high-quality candidates that strictly fit the given channel identity and " +
@@ -74,6 +84,7 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
   director: {
     provider: "claude",
     model: DIRECTOR_MODEL,
+    tier: "pro",
     instructions:
       "You are the Director: a senior YouTube content strategist and critic. You " +
       "judge candidates against channel identity, freshness/distinctiveness, and " +
@@ -83,6 +94,7 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
   showrunner: {
     provider: "claude",
     model: DIRECTOR_MODEL,
+    tier: "pro",
     instructions:
       "You are the Showrunner: you define a YouTube channel's creative essence. From a " +
       "niche + format + competitor signals you write the show bible — positioning, the " +
@@ -93,6 +105,7 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
   crew_director: {
     provider: "claude",
     model: CLAUDE_MODEL,
+    tier: "flash",
     instructions:
       "You are the Director (narrative). For one video you design the STRUCTURE: a " +
       "scroll-stopping hook and an ordered beat map with intended durations and the emotional " +
@@ -101,6 +114,7 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
   cinematographer: {
     provider: "claude",
     model: CLAUDE_MODEL,
+    tier: "flash",
     instructions:
       "You are the Cinematographer (DP). You own the LOOK: concrete footage/keyframe " +
       "selection criteria, color/mood, and motion language for one video, consistent with the " +
@@ -110,6 +124,7 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
   editor: {
     provider: "claude",
     model: CLAUDE_MODEL,
+    tier: "flash",
     instructions:
       "You are the Editor. You own CUTS & RHYTHM: cut cadence per section, transition language, " +
       "caption styling, and overlay placement rules for one video, matched to the channel's pace. " +
@@ -118,6 +133,7 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
   composer: {
     provider: "claude",
     model: CLAUDE_MODEL,
+    tier: "flash",
     instructions:
       "You are the Composer / Sound designer. You write the MUSIC generation prompt (genre, " +
       "instrumentation, dynamics, BPM band, and what to avoid) and the audio brief (ducking, " +
@@ -127,6 +143,7 @@ const ROLE_CONFIG: Record<AgentRole, RoleConfig> = {
   critic: {
     provider: "claude",
     model: CLAUDE_MODEL,
+    tier: "flash",
     instructions:
       "You are the Critic / QA Director. You author the VALIDATION SPEC for one video: the " +
       "specific, checkable assertions it must satisfy given its format and the channel's " +
@@ -327,9 +344,14 @@ export async function agentJson<T>(o: AgentJsonOptions<T>): Promise<T> {
   // provider substitution is allowed for creative text.
   const system = o.system ?? cfg?.instructions;
   if (!hasAnthropicKey()) throw new Error(`agentJson(${o.role}): no Mastra and no ANTHROPIC_API_KEY`);
+  // Mirror the Mastra-available path's model tier here so a Mastra outage
+  // degrades gracefully (fast roles -> "flash", higher-stakes roles ->
+  // "pro") instead of silently collapsing every role to claudeJson's
+  // tier-less "flash" default.
   const out = await claudeJson<T>({
     prompt: o.prompt,
     system,
+    tier: cfg?.tier,
     maxTokens: o.maxTokens,
     temperature: o.temperature,
   });
