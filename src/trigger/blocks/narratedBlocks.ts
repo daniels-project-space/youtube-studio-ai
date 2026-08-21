@@ -13,7 +13,7 @@ import { createHash } from "node:crypto";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
-import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
+import { COST_PATCH_KEY, type Block, type BlockPatch, type StageContext } from "@/engine/types";
 import {
   assertVoiceGatePreconditions,
   qualityProfile,
@@ -106,8 +106,13 @@ import {
   reconcileNarrationCadenceAfterDurationMeasurement,
 } from "@/lib/narrationPerformance";
 import {
+  FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
+  finalMasterNarrationTranscriptAuditObjectKey,
+  prepareFinalMasterNarrationTranscriptAudit,
+  sealFinalMasterNarrationSemanticEvidence,
   proveNarrationTranscript,
   sha256NarrationTranscriptSource,
+  type FinalMasterNarrationSemanticEvidence,
 } from "@/lib/narrationTranscriptProof";
 import {
   assertNarrationCueTimingEvidence,
@@ -157,16 +162,23 @@ import {
   visualRepairSignals,
   visualReviewFailureMessage,
   VisualReviewFailure,
+  type VisualReviewEvidence,
   type VisualReviewOverlay,
   type VisualReviewReferenceCriterion,
 } from "@/lib/visualReview";
 import {
   FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
   createFinalMasterReleaseCertificate,
+  createFinalMasterReleaseCertificateReference,
   createVisualReviewReleaseReceipt,
+  finalMasterReleaseEvidenceFrameKeysFingerprint,
   finalMasterReleaseCertificateKey as finalMasterReleaseCertificateObjectKey,
   visualReviewReleaseReceiptKey,
 } from "@/lib/finalMasterReleaseCertificate";
+import {
+  createUnmeasuredReferenceQualityFinalMasterBinding,
+  requireFrozenReferenceQualityContract,
+} from "@/lib/referenceQualityFinalMasterBinding";
 import { validateRender } from "@/lib/renderValidate";
 import type { ValidationAssertion } from "@/engine/creative/types";
 
@@ -2758,6 +2770,54 @@ export const captions: Block = {
   },
 };
 
+const QA_VISUAL_STAGE_DEFECT_LIMIT = 128;
+const QA_VISUAL_STAGE_SUMMARY_MAX_CHARS = 4_000;
+
+/**
+ * The complete frame set lives in the R2 evidence manifest and the
+ * content-addressed release certificate. Keep the stage row bounded while
+ * retaining an exact digest that the Convex release-status projection can
+ * compare without fetching media.
+ */
+export function compactQaVisualReviewEvidenceForStage(evidence: VisualReviewEvidence) {
+  const frameKeys = evidence.frames.map((frame) => frame.r2Key);
+  const hasCompleteFrameKeySet = frameKeys.length > 0 && frameKeys.every(
+    (key): key is string => typeof key === "string" && key.trim().length > 0,
+  );
+  return {
+    version: evidence.version,
+    source: evidence.source,
+    ...(evidence.manifestKey ? { manifestKey: evidence.manifestKey } : {}),
+    frameCount: evidence.frames.length,
+    ...(hasCompleteFrameKeySet
+      ? { frameKeysFingerprint: finalMasterReleaseEvidenceFrameKeysFingerprint(frameKeys) }
+      : {}),
+    coverage: {
+      maxGapSec: evidence.coverage.maxGapSec,
+      maxAllowedGapSec: evidence.coverage.maxAllowedGapSec,
+      focusedWindowCount: evidence.coverage.focusedWindows.length,
+      ...(evidence.coverage.requiredFocusFrameCount === undefined
+        ? {}
+        : { requiredFocusFrameCount: evidence.coverage.requiredFocusFrameCount }),
+      ...(evidence.coverage.missingFocusFrameCount === undefined
+        ? {}
+        : { missingFocusFrameCount: evidence.coverage.missingFocusFrameCount }),
+    },
+  };
+}
+
+/**
+ * Full release certificates may carry large cinematic/narration receipts. The
+ * runner already persists their content-addressed artifacts before this stage
+ * row. Do not copy that full object into Convex; upload and cleanup rehydrate
+ * it from the R2 key on a resumed run.
+ */
+export function persistQaVisualStageOutputs(patch: Readonly<BlockPatch>): BlockPatch {
+  const { finalMasterReleaseCertificate: _fullReleaseCertificate, ...persisted } = patch;
+  void _fullReleaseCertificate;
+  return persisted;
+}
+
 export const qaVisual: Block = {
   id: "qa_visual",
   consumes: ["videoKey", "videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
@@ -2766,9 +2826,10 @@ export const qaVisual: Block = {
     "reviewEvidence", "reviewResult", "reviewFingerprint", "reviewReceiptVersion",
     "reviewReceiptFingerprint", "referenceCriteria", "referenceCriteriaComplete",
     "finalMasterSha256", "cinematicFinalMasterQaReceiptFingerprint",
-    "finalMasterReleaseCertificate", "finalMasterReleaseCertificateKey",
+    "finalMasterReleaseCertificate", "finalMasterReleaseCertificateReference", "finalMasterReleaseCertificateKey",
   ],
   paid: true,
+  persistStageOutputs: persistQaVisualStageOutputs,
   run: async (ctx) => {
     const productionQa = ctx.params["qaProfile"] !== "draft";
     let qaCost = qaVisualCost(ctx.params);
@@ -2793,6 +2854,13 @@ export const qaVisual: Block = {
       target?: unknown;
       dimensions?: Array<{ id?: unknown; description?: unknown }>;
     } | null;
+    // A new production certificate must freeze the channel's actual reference
+    // contract before any expensive review work. The binding records every
+    // source-specific proof as unmeasured until a trusted adapter exists; it
+    // never turns generic QA prose into a fabricated approval.
+    const releaseReferenceQualityContract = productionQa
+      ? requireFrozenReferenceQualityContract(qualityBar)
+      : undefined;
     const qualityFloor = (dimensionIds: readonly string[], fallback: number): number => {
       if (!productionQa) return fallback;
       const target = Number(qualityBar?.target);
@@ -3624,8 +3692,16 @@ export const qaVisual: Block = {
       : undefined;
     const narrationKey = opt(ctx, "narrationKey");
     const expectsNarrationMixEvidence = narrationDuration >= 1.5 && Boolean(storedNarrationPath || narrationKey);
+    const narrationStartSec = ctx.store["introApplied"] === true
+      ? Math.max(0, Number(ctx.store["introSec"] ?? 0))
+      : 0;
     let finalNarrationMix: { correlation: number | null; narrationStartSec: number } | undefined;
     let finalNarrationTranscript: { wordErrorRate: number; lexicalRecall: number; passed: boolean } | undefined;
+    let finalMasterNarrationSemantic: FinalMasterNarrationSemanticEvidence | undefined;
+    let finalMasterNarrationAudit:
+      | ReturnType<typeof prepareFinalMasterNarrationTranscriptAudit>
+      | undefined;
+    let finalMasterNarrationAuditKey: string | undefined;
     let narrationCueTiming: NarrationCueTimingEvidence | undefined;
     let narrationPerformance: ReturnType<typeof assertNarrationPerformanceEvidence> | undefined;
     const narrationPerformanceEvidence: string[] = [];
@@ -3712,6 +3788,67 @@ export const qaVisual: Block = {
                 ctx.log(`qa_visual: narration cue timing evidence skipped: ${error instanceof Error ? error.message : String(error)}`);
               }
             }
+            // A pristine TTS transcript plus waveform correlation only proves
+            // the source text and signal presence separately. Re-audition the
+            // actual released master with the same pinned local transcriber so
+            // production release requires intelligible approved narration in
+            // the mix itself. This makes no claim about non-speech FX meaning.
+            if (productionQa) {
+              try {
+                const finalMasterTranscriptSha256 = await sha256NarrationTranscriptSource(video);
+                if (finalMasterTranscriptSha256 !== finalMasterSha256AfterVisualReview) {
+                  throw new Error("final-master transcript source hash differs from the reviewed final master");
+                }
+                const finalMasterProof = proveNarrationTranscript({
+                  audioPath: video,
+                  expectedText: expectedNarrationText,
+                  sourceSha256: finalMasterTranscriptSha256,
+                });
+                const narration = {
+                  sourceSha256,
+                  expectedTextSha256: proof.expected.textSha256,
+                  startSec: narrationStartSec,
+                  durationSec: narrationPerformance?.durationSec ?? narrationDuration,
+                };
+                const preparedAudit = prepareFinalMasterNarrationTranscriptAudit({
+                  version: FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
+                  finalMaster: {
+                    sha256: finalMasterSha256AfterVisualReview,
+                    durationSec: p.durationSec,
+                  },
+                  narration,
+                  sourceTranscript: proof,
+                  finalMasterTranscript: finalMasterProof,
+                });
+                const auditKey = finalMasterNarrationTranscriptAuditObjectKey(
+                  ctx.keyPrefix,
+                  ctx.runId,
+                  preparedAudit.contentSha256,
+                );
+                finalMasterNarrationSemantic = sealFinalMasterNarrationSemanticEvidence({
+                  version: "final-master-narration-semantic-evidence/v1",
+                  finalMaster: preparedAudit.audit.finalMaster,
+                  narration: preparedAudit.audit.narration,
+                  sourceTranscript: preparedAudit.sourceTranscript,
+                  finalMasterTranscript: preparedAudit.finalMasterTranscript,
+                  auditArtifact: {
+                    version: FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
+                    r2Key: auditKey,
+                    contentSha256: preparedAudit.contentSha256,
+                    byteLength: preparedAudit.bytes.byteLength,
+                  },
+                });
+                finalMasterNarrationAudit = preparedAudit;
+                finalMasterNarrationAuditKey = auditKey;
+                ctx.log(
+                  `qa_visual: final-master narration semantic proof WER ${finalMasterProof.assessment.wordErrorRate.toFixed(3)}, ` +
+                  `recall ${finalMasterProof.assessment.lexicalRecall.toFixed(3)} ` +
+                  `(${finalMasterNarrationSemantic.receiptFingerprint.slice(0, 12)}; audit ${preparedAudit.contentSha256.slice(0, 12)})`,
+                );
+              } catch (error) {
+                critical.push(`final-master narration semantic evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
+              }
+            }
           } catch (error) {
             if (productionQa) {
               critical.push(`narration transcript evidence unavailable: ${error instanceof Error ? error.message : String(error)}`);
@@ -3720,9 +3857,6 @@ export const qaVisual: Block = {
             }
           }
         }
-        const narrationStartSec = ctx.store["introApplied"] === true
-          ? Math.max(0, Number(ctx.store["introSec"] ?? 0))
-          : 0;
         const evidence = await measureNarrationMixCorrelation({
           narrationPath,
           masterPath: video,
@@ -3759,6 +3893,14 @@ export const qaVisual: Block = {
           `narrationTranscriptRecall=${finalNarrationTranscript.lexicalRecall.toFixed(3)}`,
           `narrationTranscriptProof=${finalNarrationTranscript.passed ? "passed" : "failed"}`,
           "narrationTranscriptEvaluator=faster-whisper-small.en/offline",
+        ]
+      : [];
+    const finalMasterNarrationSemanticEvidence = finalMasterNarrationSemantic
+      ? [
+          `finalMasterNarrationReceipt=${finalMasterNarrationSemantic.receiptFingerprint}`,
+          `finalMasterNarrationWer=${finalMasterNarrationSemantic.finalMasterTranscript.assessment.wordErrorRate.toFixed(3)}`,
+          `finalMasterNarrationRecall=${finalMasterNarrationSemantic.finalMasterTranscript.assessment.lexicalRecall.toFixed(3)}`,
+          "finalMasterNarrationEvaluator=faster-whisper-small.en/offline-speech-semantic",
         ]
       : [];
     // 8) Critic (crew) VALIDATION SPEC â€” the per-video checklist this content must
@@ -3967,6 +4109,7 @@ export const qaVisual: Block = {
           ...(finalAudioMeters ? [`loudness=${finalAudioMeters.integratedLufs ?? "unmeasured"}`] : []),
           ...narrationMixEvidence,
           ...narrationTranscriptEvidence,
+          ...finalMasterNarrationSemanticEvidence,
           ...narrationPerformanceEvidence,
           ...narrationCueTimingEvidence,
           ...onScreenTextEvidence,
@@ -4034,17 +4177,23 @@ export const qaVisual: Block = {
       audio: audioAestheticScore !== undefined
         ? {
             passed: audioAestheticScore >= audioMinimum && (
-              !expectsNarrationMixEvidence || (finalNarrationMix?.correlation ?? 0) >= 0.2
+              !expectsNarrationMixEvidence || (
+                (finalNarrationMix?.correlation ?? 0) >= 0.2
+                && (!productionQa || finalMasterNarrationSemantic !== undefined)
+              )
             ),
             score: audioAestheticScore,
             minimumScore: audioMinimum,
             evaluator: "audio aesthetics grader",
-            evidence: ["audiobox production quality", ...narrationMixEvidence, ...narrationTranscriptEvidence, ...narrationPerformanceEvidence, ...narrationCueTimingEvidence],
+            evidence: ["audiobox production quality", ...narrationMixEvidence, ...narrationTranscriptEvidence, ...finalMasterNarrationSemanticEvidence, ...narrationPerformanceEvidence, ...narrationCueTimingEvidence],
           }
         : finalAudioMeters
           ? {
               passed: finalAudioMeters.integratedLufs !== null && (
-                !expectsNarrationMixEvidence || (finalNarrationMix?.correlation ?? 0) >= 0.2
+                !expectsNarrationMixEvidence || (
+                  (finalNarrationMix?.correlation ?? 0) >= 0.2
+                  && (!productionQa || finalMasterNarrationSemantic !== undefined)
+                )
               ),
               evaluator: "final-mix loudness meter (not an aesthetics score)",
               evidence: [
@@ -4052,6 +4201,7 @@ export const qaVisual: Block = {
                 `introWindowDb=${finalAudioMeters.windowMeanDb ?? "unmeasured"}`,
                 ...narrationMixEvidence,
                 ...narrationTranscriptEvidence,
+                ...finalMasterNarrationSemanticEvidence,
                 ...narrationPerformanceEvidence,
                 ...narrationCueTimingEvidence,
               ],
@@ -4101,6 +4251,9 @@ export const qaVisual: Block = {
     }
     let finalMasterReleaseCertificate:
       | ReturnType<typeof createFinalMasterReleaseCertificate>
+      | undefined;
+    let finalMasterReleaseCertificateReference:
+      | ReturnType<typeof createFinalMasterReleaseCertificateReference>
       | undefined;
     let finalMasterReleaseCertificateKey: string | undefined;
     if (productionQa) {
@@ -4157,10 +4310,21 @@ export const qaVisual: Block = {
       Buffer.from(JSON.stringify(visualReviewReleaseReceipt, null, 2)),
       { contentType: "application/json" },
     );
+    if (finalMasterNarrationSemantic) {
+      if (!finalMasterNarrationAudit || !finalMasterNarrationAuditKey) {
+        throw new Error("qa_visual FAILED: final-master narration semantic receipt has no prepared transcript audit object");
+      }
+      await putObject(
+        finalMasterNarrationAuditKey,
+        finalMasterNarrationAudit.bytes,
+        { contentType: "application/json" },
+      );
+    }
     const audioReceipts = [
       narrationPerformance,
       finalNarrationMix,
       finalNarrationTranscript,
+      finalMasterNarrationSemantic,
       narrationCueTiming,
       finalAudioMeters,
       qualityEvidence.axes.audio,
@@ -4169,6 +4333,7 @@ export const qaVisual: Block = {
           narrationPerformance,
           finalMix: finalNarrationMix,
           transcript: finalNarrationTranscript,
+          finalMasterNarration: finalMasterNarrationSemantic,
           cueTiming: narrationCueTiming,
           finalMasterMeters: finalAudioMeters,
           qualityAxis: qualityEvidence.axes.audio,
@@ -4190,6 +4355,12 @@ export const qaVisual: Block = {
         reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
         releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
       },
+      referenceQuality: createUnmeasuredReferenceQualityFinalMasterBinding({
+        contract: releaseReferenceQualityContract!,
+        finalMasterSha256: finalMasterSha256AfterVisualReview,
+        visualReviewFingerprint: visualReview.reviewFingerprint,
+        visualReviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+      }),
       ...(cinematicFinalMasterQaReceipt && cinematicFinalMasterQaReceiptFingerprint
         ? {
             cinematic: {
@@ -4215,6 +4386,12 @@ export const qaVisual: Block = {
     }
     finalMasterReleaseCertificate = persistedFinalMasterReleaseCertificate;
     finalMasterReleaseCertificateKey = persistedFinalMasterReleaseCertificateKey;
+    finalMasterReleaseCertificateReference = createFinalMasterReleaseCertificateReference({
+      keyPrefix: ctx.keyPrefix,
+      runId: ctx.runId,
+      certificateKey: persistedFinalMasterReleaseCertificateKey,
+      certificate: persistedFinalMasterReleaseCertificate,
+    });
     ctx.log(
       `qa_visual: durable final-master release evidence persisted (${persistedFinalMasterReleaseCertificate.certificateFingerprint.slice(0, 12)}, ` +
         `${sortedVisualReviewEvidenceFrameKeys.length} review frame(s))`,
@@ -4235,10 +4412,36 @@ export const qaVisual: Block = {
       music: music.present,
       intro: intro.applied,
     });
+    // Keep the durable stage row intentionally small. The complete frame set,
+    // reviewer verdict, cinematic receipt, and certificate are all preserved
+    // as R2 objects before this return; the stage keeps exact fingerprints and
+    // bounded diagnostic summaries for resume/UI use.
+    const stageReviewEvidence = compactQaVisualReviewEvidenceForStage(visualReview.evidence);
+    const stageReviewDefects = visualReview.defects.slice(0, QA_VISUAL_STAGE_DEFECT_LIMIT);
+    const stageReferenceCriteria = visualReview.referenceCriteria.map((criterion) => ({
+      id: criterion.id,
+      scope: criterion.scope,
+      verdict: criterion.verdict,
+      evidenceFrameCount: criterion.evidenceFrameIds.length,
+    }));
+    const stageReviewSummary = visualReview.summary.slice(0, QA_VISUAL_STAGE_SUMMARY_MAX_CHARS);
     return {
       qaPassed: true,
       qaReport: {
         ...report,
+        visualReview: {
+          ran: visualReview.ran,
+          verdict: visualReview.verdict,
+          defects: stageReviewDefects,
+          defectCount: visualReview.defects.length,
+          evidence: stageReviewEvidence,
+          summary: stageReviewSummary,
+          reviewFingerprint: visualReview.reviewFingerprint,
+          reviewReceiptVersion: visualReview.reviewReceiptVersion,
+          reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+          referenceCriteria: stageReferenceCriteria,
+          referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
+        },
         ...(specOutcome ? { validation: specOutcome.results } : {}),
         renderValidation: {
           verdict: rv.verdict,
@@ -4246,8 +4449,8 @@ export const qaVisual: Block = {
           temporalDynamism: rv.temporalDynamism,
           visualPacing: rv.visualPacing,
           finalMasterSha256: cinematicFinalMasterSha256,
-          cinematicFinalMasterQaEvidence: cinematicFinalMasterQaReceipt,
           cinematicFinalMasterQaReceiptFingerprint,
+          cinematicFinalMasterQaEvidenceRetained: cinematicFinalMasterQaReceipt !== undefined,
           adaptiveShotAnalysis: finalShotAnalysis
             ? {
                 provider: finalShotAnalysis.provider,
@@ -4257,32 +4460,38 @@ export const qaVisual: Block = {
               }
             : undefined,
           narrationMix: finalNarrationMix ?? undefined,
+          finalMasterNarrationSemantic: finalMasterNarrationSemantic ?? undefined,
           narrationCueTiming,
         },
       },
       qualityEvidence,
       temporalDynamism: rv.temporalDynamism,
       visualPacing: rv.visualPacing,
-      reviewEvidence: visualReview.evidence,
+      reviewEvidence: stageReviewEvidence,
       reviewResult: {
         verdict: visualReview.verdict,
-        defects: visualReview.defects,
-        summary: visualReview.summary,
-        focusWindows: visualReview.focusWindows,
+        defects: stageReviewDefects,
+        defectCount: visualReview.defects.length,
+        summary: stageReviewSummary,
+        focusWindowCount: visualReview.focusWindows.length,
         reviewReceiptVersion: visualReview.reviewReceiptVersion,
         reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
-        referenceCriteria: visualReview.referenceCriteria,
+        referenceCriteria: stageReferenceCriteria,
         referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
       },
       reviewFingerprint: visualReview.reviewFingerprint,
       reviewReceiptVersion: visualReview.reviewReceiptVersion,
       reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
-      referenceCriteria: visualReview.referenceCriteria,
+      referenceCriteria: stageReferenceCriteria,
       referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
       finalMasterSha256: finalMasterSha256AfterVisualReview,
       cinematicFinalMasterQaReceiptFingerprint,
-      ...(finalMasterReleaseCertificate && finalMasterReleaseCertificateKey
-        ? { finalMasterReleaseCertificate, finalMasterReleaseCertificateKey }
+      ...(finalMasterReleaseCertificate && finalMasterReleaseCertificateReference && finalMasterReleaseCertificateKey
+        ? {
+            finalMasterReleaseCertificate,
+            finalMasterReleaseCertificateReference,
+            finalMasterReleaseCertificateKey,
+          }
         : {}),
       [COST_PATCH_KEY]: qaCost,
     };

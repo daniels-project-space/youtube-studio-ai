@@ -598,6 +598,18 @@ export default defineSchema({
     error: v.optional(v.string()),
     videoAssetId: v.optional(v.id("assets")),
     youtubeVideoId: v.optional(v.string()),
+    // Conservative, server-derived release provenance. This is deliberately
+    // separate from publishing state: a stored QA boolean alone can never
+    // promote a run to `release_evidence_recorded`.
+    releaseEvidenceStatus: v.optional(v.union(
+      v.literal("not_ready"),
+      v.literal("legacy_unverified"),
+      v.literal("evidence_incomplete"),
+      v.literal("release_evidence_recorded"),
+    )),
+    releaseEvidenceCertificateFingerprint: v.optional(v.string()),
+    releaseEvidenceCertificateKey: v.optional(v.string()),
+    releaseEvidenceUpdatedAt: v.optional(v.number()),
     pipelinePolicyId: v.optional(v.string()),
     pipelinePolicyVersion: v.optional(v.string()),
     pipelineFingerprint: v.optional(v.string()),

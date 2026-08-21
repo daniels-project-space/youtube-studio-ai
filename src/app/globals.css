@@ -1270,6 +1270,8 @@
 .run-card-meta {
   display: flex;
   align-items: center;
+  flex-wrap: wrap;
+  justify-content: flex-end;
   gap: 0.85rem;
   color: var(--color-faint);
   font-size: 0.7rem;

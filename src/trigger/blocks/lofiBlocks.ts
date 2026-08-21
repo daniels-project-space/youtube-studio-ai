@@ -45,6 +45,10 @@ import {
   parseVisualReviewReleaseReceiptBytes,
   retainedFinalMasterReleaseObjectKeys,
 } from "@/lib/finalMasterReleaseCertificate";
+import {
+  assertFinalMasterNarrationTranscriptAuditBinding,
+  parseFinalMasterNarrationTranscriptAuditBytes,
+} from "@/lib/narrationTranscriptProof";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -1257,29 +1261,35 @@ export const assemble: Block = {
  * lookup/dispatch: a stale, deleted, or mismatched QA receipt must never reach
  * the external publishing path.
  */
+async function loadDurableFinalMasterReleaseCertificate(ctx: StageContext) {
+  const certificateKey = str(ctx, "finalMasterReleaseCertificateKey");
+  const durableCertificate = parseFinalMasterReleaseCertificateBytes(
+    await getObjectBytes(certificateKey),
+  );
+  const expectedCertificateKey = finalMasterReleaseCertificateKey(
+    ctx.keyPrefix,
+    ctx.runId,
+    durableCertificate.certificateFingerprint,
+  );
+  if (certificateKey !== expectedCertificateKey) {
+    throw new Error("final-master release certificate key is not content-addressed for this run");
+  }
+  const stagedCertificateValue = ctx.store["finalMasterReleaseCertificate"];
+  if (stagedCertificateValue !== undefined) {
+    const stagedCertificate = assertFinalMasterReleaseCertificate(stagedCertificateValue);
+    if (durableCertificate.certificateFingerprint !== stagedCertificate.certificateFingerprint) {
+      throw new Error("upload_draft: durable final-master release certificate differs from the staged QA certificate");
+    }
+  }
+  return { certificateKey, durableCertificate };
+}
+
 async function verifyFinalMasterReleaseEvidenceForUpload(
   ctx: StageContext,
   filePath: string,
   videoKey: string,
 ) {
-  const certificateKey = str(ctx, "finalMasterReleaseCertificateKey");
-  const stagedCertificate = assertFinalMasterReleaseCertificate(
-    ctx.store["finalMasterReleaseCertificate"],
-  );
-  const expectedCertificateKey = finalMasterReleaseCertificateKey(
-    ctx.keyPrefix,
-    ctx.runId,
-    stagedCertificate.certificateFingerprint,
-  );
-  if (certificateKey !== expectedCertificateKey) {
-    throw new Error("upload_draft: final-master release certificate key does not match the staged certificate");
-  }
-  const durableCertificate = parseFinalMasterReleaseCertificateBytes(
-    await getObjectBytes(certificateKey),
-  );
-  if (durableCertificate.certificateFingerprint !== stagedCertificate.certificateFingerprint) {
-    throw new Error("upload_draft: durable final-master release certificate differs from the staged QA certificate");
-  }
+  const { certificateKey, durableCertificate } = await loadDurableFinalMasterReleaseCertificate(ctx);
   // Validate the certificate and every retained evidence key in the same
   // bounded namespace cleanup will later use. This also rejects a receipt key
   // that is not derived from its content fingerprint before any connector work.
@@ -1307,6 +1317,15 @@ async function verifyFinalMasterReleaseEvidenceForUpload(
     receipt: parseVisualReviewReleaseReceiptBytes(receiptBytes),
     evidenceManifest,
   });
+  if (durableCertificate.audio?.finalMasterNarration) {
+    const narrationAudit = parseFinalMasterNarrationTranscriptAuditBytes(
+      await getObjectBytes(durableCertificate.audio.finalMasterNarration.auditArtifact.r2Key),
+    );
+    assertFinalMasterNarrationTranscriptAuditBinding({
+      evidence: durableCertificate.audio.finalMasterNarration,
+      audit: narrationAudit,
+    });
+  }
   const localMasterSha256 = await fileSha256(filePath);
   if (localMasterSha256 !== durableCertificate.finalMaster.sha256) {
     throw new Error("upload_draft: local final master no longer matches its durable release certificate");
@@ -1319,7 +1338,7 @@ export const uploadDraft: Block = {
   consumes: [
     "videoKey", "videoLocalPath", "title", "description", "tags", "qaPassed",
     "qualityEvidence", "thumbnailKey", "thumbnailPublishable",
-    "finalMasterReleaseCertificate", "finalMasterReleaseCertificateKey",
+    "finalMasterReleaseCertificateKey",
   ],
   produces: ["youtubeVideoId", "watchUrl", "youtubePrivacy"],
   run: async (ctx) => {
@@ -1405,6 +1424,12 @@ export const uploadDraft: Block = {
     // approves). A scheduled timestamp is reused from the durable upload row so
     // a worker retry cannot change metadata and accidentally create a duplicate.
     const publishMode = (ctx.params["publishMode"] as string | undefined) ?? "draft";
+    if (finalMasterReleaseCertificate.referenceQuality?.assessment === "unmeasured") {
+      // This is an honest evidence state, not a new publication veto. Existing
+      // final QA, editorial acceptance, child-safety, and channel-policy gates
+      // remain authoritative for private, public, and scheduled releases.
+      ctx.log("upload_draft: reference-quality contract is sealed but unmeasured; this certificate makes no reference-quality attestation claim");
+    }
     const isSupervisedChildrenLane = lane.key === "children_learning_supervised";
     const childSafety = ctx.store["childContentSafety"] as
       | {
@@ -1617,7 +1642,6 @@ export const cleanup: Block = {
   id: "cleanup",
   consumes: [
     "watchUrl",
-    "finalMasterReleaseCertificate",
     "finalMasterReleaseCertificateKey",
   ], // gated on a successful upload — never runs on a failed render
   produces: ["cleaned", "removedObjects"],
@@ -1626,11 +1650,12 @@ export const cleanup: Block = {
     const keepNames = (ctx.params["keep"] as string[] | undefined) ?? ["final.mp4", "thumbnail.jpg"];
     let retainedReleaseEvidence: string[];
     try {
+      const { certificateKey, durableCertificate } = await loadDurableFinalMasterReleaseCertificate(ctx);
       retainedReleaseEvidence = retainedFinalMasterReleaseObjectKeys({
         keyPrefix: ctx.keyPrefix,
         runId: ctx.runId,
-        certificateKey: str(ctx, "finalMasterReleaseCertificateKey"),
-        certificate: assertFinalMasterReleaseCertificate(ctx.store["finalMasterReleaseCertificate"]),
+        certificateKey,
+        certificate: durableCertificate,
       });
     } catch (error) {
       // Upload already revalidated this certificate, so a failure here is an

@@ -19,8 +19,11 @@ import {
   assertCanonicalChannelProgramBrief,
   briefToCreativeCapabilityIntent,
   channelProgramBriefFingerprint,
-  type ChannelProgramBrief,
 } from "@/engine/channelProgramBrief";
+import {
+  assertChannelCompositionReceiptBinding,
+  findCertifiedChannelComposition,
+} from "@/engine/channelCompositionCatalog";
 import { resolveChannelFamilyManifest, type ChannelFamilyManifest } from "@/engine/channelFamilyManifest";
 import type { PipelineEntry } from "@/engine/types";
 import {
@@ -122,6 +125,10 @@ function profileBody(input: CreateChannelShowProfileInput): ChannelShowProfileBo
   const selectedCapabilityKeys = resolvedSelections
     .map(({ selection }) => selection.capability)
     .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
+  const composition = findCertifiedChannelComposition({
+    family: programBrief.family,
+    selectedCapabilityKeys,
+  });
   return {
     version: CHANNEL_SHOW_PROFILE_VERSION,
     programBriefFingerprint: channelProgramBriefFingerprint(programBrief),
@@ -129,6 +136,7 @@ function profileBody(input: CreateChannelShowProfileInput): ChannelShowProfileBo
     contentLaneFingerprint: sha256Hex(canonicalJson(contentLaneIdentity(manifest))),
     creativeCapabilityCatalogFingerprint: CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
     selectedCapabilityKeys,
+    ...(composition ? { composition } : {}),
     designedPipelineFingerprint: sha256Hex(canonicalJson(input.pipeline)),
   };
 }
@@ -152,6 +160,13 @@ export function assertChannelShowProfileProgramBinding(
   }
   if (profile.contentLaneFingerprint !== sha256Hex(canonicalJson(contentLaneIdentity(manifest)))) {
     throw new Error("channel show profile does not match the current content-lane policy");
+  }
+  if (profile.composition) {
+    assertChannelCompositionReceiptBinding({
+      receipt: profile.composition,
+      family: programBrief.family,
+      selectedCapabilityKeys: profile.selectedCapabilityKeys,
+    });
   }
   return profile;
 }
@@ -210,6 +225,7 @@ export function parseChannelShowProfile(value: unknown): ChannelShowProfile {
     contentLaneFingerprint: profile.contentLaneFingerprint,
     creativeCapabilityCatalogFingerprint: profile.creativeCapabilityCatalogFingerprint,
     selectedCapabilityKeys,
+    ...(profile.composition ? { composition: profile.composition } : {}),
     designedPipelineFingerprint: profile.designedPipelineFingerprint,
   };
   if (profile.fingerprint !== profileFingerprint(body)) {
@@ -229,6 +245,11 @@ export function parseChannelShowProfile(value: unknown): ChannelShowProfile {
 export function assertChannelShowProfile(input: AssertChannelShowProfileInput): ChannelShowProfile {
   const supplied = assertChannelShowProfilePipelineCompatibility(input);
   const expected = createChannelShowProfile(input);
+  // Historical records remain readable and must still pass their original
+  // family/program/pipeline checks. They are not composition-attested: a new
+  // exact profile is derived for this new snapshot rather than treating the
+  // legacy receipt as proof of a named certified route.
+  if (!supplied.composition) return expected;
   if (canonicalJson(supplied) !== canonicalJson(expected)) {
     throw new Error("channel show profile does not match the admitted channel composition");
   }

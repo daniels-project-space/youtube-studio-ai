@@ -29,6 +29,31 @@ assert.match(
 );
 assert.match(
   source,
+  /audioPath: video,[\s\S]{0,240}sourceSha256: finalMasterTranscriptSha256/,
+  "final QA must independently transcribe the released master, not only the pristine narration source",
+);
+assert.match(
+  source,
+  /sealFinalMasterNarrationSemanticEvidence\(/,
+  "the final-master transcript must be sealed to the reviewed master and approved narration contract",
+);
+assert.match(
+  source,
+  /final-master narration semantic evidence unavailable:/,
+  "a missing or unintelligible final-master narration transcript must block production release",
+);
+assert.match(
+  source,
+  /finalMasterNarrationEvaluator=faster-whisper-small\.en\/offline-speech-semantic/,
+  "quality evidence must describe the final-master transcript as local speech-semantic evidence, not FX semantics",
+);
+assert.match(
+  source,
+  /finalMasterNarration: finalMasterNarrationSemantic/,
+  "the durable release certificate must retain the final-master narration semantic receipt",
+);
+assert.match(
+  source,
   /assertCinematicFinalMasterAudioAesthetics\(\s*ctx\.params\["audioQa"\],\s*audioAestheticScore,\s*\)/,
   "a source-bound cinematic master must not substitute loudness-only evidence when final-mix aesthetics scoring is unavailable",
 );

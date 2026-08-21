@@ -324,6 +324,11 @@ function showProfileIsDurableAndVersionsPipelineStage(): void {
 
   assert.deepEqual(plan.requestSnapshot.showProfile, showProfile);
   assert.equal(
+    plan.requestSnapshot.showProfile?.composition?.key,
+    "source_attributed_data_story",
+    "the immutable inception snapshot must retain the resolved certified channel route, not only its generic family",
+  );
+  assert.equal(
     channelInceptionStage(plan, "channel-inception-pipeline")!.params.showProfileFingerprint,
     showProfile.fingerprint,
   );

@@ -7,6 +7,7 @@ import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
 import { StageBadge } from "@/components/StageBadge";
+import { ReleaseEvidenceBadge } from "@/components/ReleaseEvidenceBadge";
 import { Elapsed } from "@/components/Elapsed";
 import { EmptyState } from "@/components/EmptyState";
 import { SkeletonList } from "@/components/Skeleton";
@@ -147,6 +148,10 @@ export default function RunDetailPage({
             }
           />
           <Field label="Cost" value={fmtUsd(run.costTotal)} mono />
+          <Field
+            label="Release evidence"
+            value={<ReleaseEvidenceBadge status={run.releaseEvidenceStatus} size="md" />}
+          />
           <Field
             label="Video"
             value={

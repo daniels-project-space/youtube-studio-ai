@@ -855,6 +855,12 @@ export async function runPipeline(
       await persistProducedArtifacts(manifest, patch, inputRefs, optionalFallbacks);
       Object.assign(store, patch);
 
+      // Publish-grade receipts can be intentionally complete enough for R2
+      // while exceeding a Convex stage document. A block may project only its
+      // durable stage summary after artifact persistence; the full in-memory
+      // patch remains available to immediate downstream blocks in this run.
+      const persistedStageOutputs = block.persistStageOutputs?.(patch) ?? patch;
+
       await opts.sink.upsert({
         ownerId: opts.ownerId,
         runId: opts.runId,
@@ -862,7 +868,7 @@ export async function runPipeline(
         status: "ok",
         finishedAt: Date.now(),
         cost,
-        outputs: patch,
+        outputs: persistedStageOutputs,
       });
       stages.push({ block: block.id, status: "ok" });
       log(`block ok: ${block.id}`, { produced: block.produces, costUsd: cost });

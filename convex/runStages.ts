@@ -1,5 +1,7 @@
 import { mutation, query } from "./studioFunctions";
 import { v } from "convex/values";
+import type { Id } from "./_generated/dataModel";
+import { deriveReleaseEvidenceProjection } from "../src/lib/releaseEvidenceStatus";
 
 /**
  * Upsert a per-block stage row for a run. Keyed by (runId, block) so the
@@ -27,6 +29,8 @@ export const upsertRunStage = mutation({
       )
       .unique();
 
+    let stageId: Id<"runStages">;
+    let stageOutputs: unknown = args.outputs;
     if (existing) {
       const patch: Record<string, unknown> = { status: args.status };
       if (args.startedAt !== undefined) patch.startedAt = args.startedAt;
@@ -39,21 +43,46 @@ export const upsertRunStage = mutation({
       // rows used to show "superseded by self-heal…" alongside status ok.
       if (args.status === "ok" && args.error === undefined && existing.error) patch.error = undefined;
       await ctx.db.patch(existing._id, patch);
-      return existing._id;
+      stageId = existing._id;
+      stageOutputs = args.outputs ?? existing.outputs;
+    } else {
+      stageId = await ctx.db.insert("runStages", {
+        ownerId: args.ownerId,
+        runId: args.runId,
+        block: args.block,
+        status: args.status,
+        startedAt: args.startedAt,
+        finishedAt: args.finishedAt,
+        cost: args.cost ?? 0,
+        inputs: args.inputs,
+        outputs: args.outputs,
+        error: args.error,
+      });
     }
 
-    return await ctx.db.insert("runStages", {
-      ownerId: args.ownerId,
-      runId: args.runId,
-      block: args.block,
-      status: args.status,
-      startedAt: args.startedAt,
-      finishedAt: args.finishedAt,
-      cost: args.cost ?? 0,
-      inputs: args.inputs,
-      outputs: args.outputs,
-      error: args.error,
-    });
+    // Artifact persistence precedes the runner's `qa_visual: ok` transition.
+    // Read the raw rows only after writing this stage, then project a
+    // conservative status onto the run. This does not gate or alter upload /
+    // publish behavior; it makes the provenance state visible for audit.
+    if (args.block === "qa_visual") {
+      const artifacts = await ctx.db
+        .query("runArtifacts")
+        .withIndex("by_run", (q) => q.eq("runId", args.runId))
+        .collect();
+      const releaseEvidence = deriveReleaseEvidenceProjection({
+        runId: args.runId,
+        qaStage: { status: args.status, outputs: stageOutputs },
+        artifacts,
+      });
+      await ctx.db.patch(args.runId, {
+        releaseEvidenceStatus: releaseEvidence.status,
+        releaseEvidenceCertificateFingerprint: releaseEvidence.certificateFingerprint,
+        releaseEvidenceCertificateKey: releaseEvidence.certificateKey,
+        releaseEvidenceUpdatedAt: Date.now(),
+      });
+    }
+
+    return stageId;
   },
 });
 

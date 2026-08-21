@@ -16,6 +16,7 @@ import {
 } from "@/engine/channelShowProfile";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { creativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
+import { resolveCertifiedChannelComposition } from "@/engine/channelCompositionCatalog";
 import { designPipeline } from "@/engine/designer";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
@@ -52,6 +53,11 @@ assert.deepEqual(
   "a profile must replay only its exact admitted composition",
 );
 assert.equal(channelShowProfileFingerprint(profile), profile.fingerprint);
+assert.equal(
+  profile.composition?.key,
+  "source_attributed_data_story",
+  "the explicit existing data-story capability must become a durable named composition rather than collapse into generic narrated stock",
+);
 assert.deepEqual(
   assertChannelShowProfileReceiptProgramBinding({ profile, programBrief: brief }),
   profile,
@@ -100,6 +106,7 @@ const rekeyed = {
   contentLaneFingerprint: profile.contentLaneFingerprint,
   familyManifestFingerprint: profile.familyManifestFingerprint,
   programBriefFingerprint: profile.programBriefFingerprint,
+  composition: profile.composition,
   version: profile.version,
 };
 assert.deepEqual(parseChannelShowProfile(rekeyed), profile, "object key order must not alter a show profile");
@@ -223,6 +230,86 @@ assert.throws(
   }),
   /does not match the admitted channel composition/,
   "new-channel Convex admission must reject a profile replayed against a different compiler baseline",
+);
+
+const wrongComposition = resolveCertifiedChannelComposition({ family: "narrated_stock" });
+const wrongCompositionBody = {
+  version: profile.version,
+  programBriefFingerprint: profile.programBriefFingerprint,
+  familyManifestFingerprint: profile.familyManifestFingerprint,
+  contentLaneFingerprint: profile.contentLaneFingerprint,
+  creativeCapabilityCatalogFingerprint: profile.creativeCapabilityCatalogFingerprint,
+  selectedCapabilityKeys: profile.selectedCapabilityKeys,
+  composition: wrongComposition,
+  designedPipelineFingerprint: profile.designedPipelineFingerprint,
+};
+const wrongCompositionProfile = {
+  ...wrongCompositionBody,
+  fingerprint: sha256Hex(canonicalJson(wrongCompositionBody)),
+};
+assert.throws(
+  () => assertChannelShowProfile({
+    profile: wrongCompositionProfile,
+    programBrief: brief,
+    capabilitySelections,
+    pipeline: design.pipeline,
+  }),
+  /does not match the admitted channel route/,
+  "a re-fingerprinted receipt cannot relabel a data story as a generic visual essay",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptProgramBinding({
+    profile: wrongCompositionProfile,
+    programBrief: brief,
+  }),
+  /does not match the admitted channel route/,
+  "the Convex-safe receipt codec must enforce the same selected-route binding",
+);
+
+const legacyProfileBody = {
+  version: profile.version,
+  programBriefFingerprint: profile.programBriefFingerprint,
+  familyManifestFingerprint: profile.familyManifestFingerprint,
+  contentLaneFingerprint: profile.contentLaneFingerprint,
+  creativeCapabilityCatalogFingerprint: profile.creativeCapabilityCatalogFingerprint,
+  selectedCapabilityKeys: profile.selectedCapabilityKeys,
+  designedPipelineFingerprint: profile.designedPipelineFingerprint,
+};
+const legacyProfile = {
+  ...legacyProfileBody,
+  fingerprint: sha256Hex(canonicalJson(legacyProfileBody)),
+};
+assert.equal(
+  parseChannelShowProfile(legacyProfile).composition,
+  undefined,
+  "historical receipts remain readable but are never represented as composition-attested",
+);
+const upgradedLegacyProfile = assertChannelShowProfile({
+  profile: legacyProfile,
+  programBrief: brief,
+  capabilitySelections,
+  pipeline: design.pipeline,
+});
+assert.deepEqual(
+  upgradedLegacyProfile,
+  profile,
+  "an exact current admission derives a fresh composition-attested snapshot instead of treating legacy proof as attested",
+);
+
+const genericCinematicBrief = createChannelProgramBrief({
+  family: "cinematic",
+  nicheKey: "business",
+  locale: "en",
+  concept: "A source-first reconstruction awaiting its separate private-review admission.",
+});
+const genericCinematicProfile = createChannelShowProfile({
+  programBrief: genericCinematicBrief,
+  pipeline: [],
+});
+assert.equal(
+  genericCinematicProfile.composition,
+  undefined,
+  "a generic or supervised family remains profile-readable without acquiring an autonomous composition label",
 );
 
 console.log("channel show profile contract tests passed");

@@ -9,6 +9,7 @@ import { api } from "../../../../../convex/_generated/api";
 import type { Id } from "../../../../../convex/_generated/dataModel";
 import { useOwnerId } from "@/lib/owner-context";
 import type { ChannelIdentity, RunRow, VideoRow } from "@/lib/types";
+import type { ReleaseEvidenceStatus } from "@/lib/releaseEvidenceStatus";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
 import { ModuleConfigSection, type ModuleConfigMap } from "@/components/ModuleConfigSection";
 import { RunCard } from "@/components/RunCard";
@@ -82,6 +83,10 @@ type RawRun = {
   costTotal: number;
   youtubeVideoId?: string;
   error?: string;
+  releaseEvidenceStatus?: ReleaseEvidenceStatus;
+  releaseEvidenceCertificateFingerprint?: string;
+  releaseEvidenceCertificateKey?: string;
+  releaseEvidenceUpdatedAt?: number;
 };
 
 type TrendRow = {

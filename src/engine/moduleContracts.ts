@@ -462,7 +462,11 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     ],
     // Draft probes may return a non-passing/unran review. Production QA mints
     // these publish-grade artifacts; upload still consumes them as required.
-    optionalProduces: ["finalMasterReleaseCertificate", "finalMasterReleaseCertificateKey"],
+    optionalProduces: [
+      "finalMasterReleaseCertificate",
+      "finalMasterReleaseCertificateReference",
+      "finalMasterReleaseCertificateKey",
+    ],
     providerProfiles: [managed, local],
     // The exact receipt narrows this before Novita starts. Preserve the normal
     // $5 QA ceiling: an oversized cinematic plan is rejected early rather than
