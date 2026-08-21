@@ -8,7 +8,7 @@ import { FAMILY_KEYS, type FamilyKey } from "./families";
 // Program Briefs are part of the immutable plan/request shape. A legacy
 // snapshot cannot be treated as a current admission because it has no bound
 // creative program to replay.
-export const CHANNEL_INCEPTION_SCHEMA_VERSION = "1.1.0" as const;
+export const CHANNEL_INCEPTION_SCHEMA_VERSION = "1.2.0" as const;
 
 export const CHANNEL_INCEPTION_MODULE_KEYS = [
   "channel-inception-research",

@@ -6,6 +6,9 @@ import {
 } from "@/engine/channelInceptionLedger";
 import { buildChannelInceptionPlan } from "@/engine/channelInceptionPlan";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { createChannelShowProfile } from "@/engine/channelShowProfile";
+import type { CreativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
+import { designPipeline } from "@/engine/designer";
 
 async function main(): Promise<void> {
   const {
@@ -128,14 +131,43 @@ async function main(): Promise<void> {
     locale: "en",
     concept: "A sharper daily stoic challenge program for ambitious professionals",
   });
+  const capabilitySelections: readonly CreativeCapabilitySelection[] = [];
+  const initialDesign = designPipeline({
+    family: initialProgramBrief.family,
+    nicheKey: initialProgramBrief.nicheKey,
+    locale: initialProgramBrief.locale,
+    programBrief: initialProgramBrief,
+    capabilitySelections,
+  });
+  const initialShowProfile = createChannelShowProfile({
+    programBrief: initialProgramBrief,
+    capabilitySelections,
+    pipeline: initialDesign.pipeline,
+  });
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: { persona: "Calm guide" },
+      nextIdentity: {
+        persona: "Calm guide",
+        nicheKey: initialProgramBrief.nicheKey,
+        programBrief: initialProgramBrief,
+      },
+      effectiveFamily: "narrated_stock",
+    }),
+    /requires a sealed channel show profile/,
+    "a generic channel update cannot create a partial program identity that lacks its sealed composition",
+  );
   assert.doesNotThrow(() => assertProgramBriefIdentityMutation({
     existingIdentity: { persona: "Calm guide" },
     nextIdentity: {
       persona: "Calm guide",
       nicheKey: initialProgramBrief.nicheKey,
       programBrief: initialProgramBrief,
+      showProfile: initialShowProfile,
     },
     effectiveFamily: "narrated_stock",
+    nextPipeline: initialDesign.pipeline,
+    allowFirstShowProfile: true,
   }));
   assert.throws(
     () => assertProgramBriefIdentityMutation({
@@ -192,6 +224,18 @@ async function main(): Promise<void> {
       effectiveFamily: "illustrated_explainer",
     }),
     /does not match the effective channel family/,
+  );
+  assert.throws(
+    () => assertProgramBriefIdentityMutation({
+      existingIdentity: {
+        persona: "Corrupt legacy profile",
+        showProfile: initialShowProfile,
+      },
+      nextIdentity: { persona: "Corrupt legacy profile" },
+      effectiveFamily: "narrated_stock",
+    }),
+    /show profile cannot be removed/,
+    "a corrupt legacy record cannot silently lose a composition receipt during a generic mutation",
   );
 
   console.log("channel inception ledger security guards passed");

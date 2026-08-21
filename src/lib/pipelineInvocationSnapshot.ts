@@ -31,6 +31,11 @@ export interface PipelineInvocationSnapshot {
   compilationModules: unknown;
   compilationCapabilities: string[];
   reservedMaxCostUsd: number;
+  /**
+   * Present for newly admitted modular channels. Optional solely for durable
+   * historical runs that predate Channel Show Profile v1.
+   */
+  showProfileFingerprint?: string;
   budgetAdmission?: {
     kind: "channel-inception-probe";
     maximumCostUsd: number;
@@ -152,6 +157,12 @@ export function normalizePipelineInvocationSnapshot(
   const compilationCapabilities = snapshot.compilationCapabilities.map((value) =>
     requiredText(value, "capability")
   );
+  const showProfileFingerprint = snapshot.showProfileFingerprint === undefined
+    ? undefined
+    : requiredText(snapshot.showProfileFingerprint, "channel show profile fingerprint");
+  if (showProfileFingerprint !== undefined && !/^[a-f0-9]{64}$/.test(showProfileFingerprint)) {
+    throw new Error("pipeline invocation channel show profile fingerprint is invalid");
+  }
   let budgetAdmission: PipelineInvocationSnapshot["budgetAdmission"];
   if (snapshot.budgetAdmission !== undefined) {
     const admission = snapshot.budgetAdmission;
@@ -212,6 +223,7 @@ export function normalizePipelineInvocationSnapshot(
     compilationModules: jsonClone(snapshot.compilationModules),
     compilationCapabilities,
     reservedMaxCostUsd: snapshot.reservedMaxCostUsd,
+    ...(showProfileFingerprint ? { showProfileFingerprint } : {}),
     ...(budgetAdmission ? { budgetAdmission } : {}),
   };
 }

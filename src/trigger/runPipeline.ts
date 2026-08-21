@@ -78,6 +78,11 @@ import {
 } from "@/lib/channelInceptionProbe";
 import { CHANNEL_INCEPTION_STANDARD_PROBE_COST_CEILING_USD } from "@/engine/channelInceptionContracts";
 import { assertPipelineVideoRuntimeReady } from "@/engine/runtimeCapability";
+import { assertPersistedProgramBriefIdentity } from "@/engine/channelProgramBrief";
+import {
+  assertChannelShowProfilePipelineCompatibility,
+  channelShowProfileFingerprint,
+} from "@/engine/channelShowProfile";
 import {
   assertChildrenShowBibleSeeded,
   childrenShowBibleSeedKeys,
@@ -615,6 +620,31 @@ export const runPipelineTask = task({
         assertFamilyAutonomousPlanningPipeline(laneFamily as FamilyKey, entries);
       }
 
+      // Profile-bearing channels may evolve their final architect pipeline,
+      // but they can never run a graph that loses the creator-admitted module
+      // composition. Bind the immutable receipt before runtime/provider
+      // preflight, then freeze its fingerprint with this exact run.
+      const showProfileFingerprint = channel.identity?.showProfile
+        ? (() => {
+            const programBrief = assertPersistedProgramBriefIdentity(channel.identity, {
+              context: "run-pipeline channel identity",
+              requireProgramBrief: true,
+            });
+            const profile = assertChannelShowProfilePipelineCompatibility({
+              profile: channel.identity.showProfile,
+              programBrief,
+              pipeline: entries,
+            });
+            return channelShowProfileFingerprint(profile);
+          })()
+        : undefined;
+      if (
+        durableInvocation &&
+        durableInvocation.showProfileFingerprint !== showProfileFingerprint
+      ) {
+        throw new Error("frozen pipeline invocation channel show profile does not match current channel composition");
+      }
+
       // The provider/hardware contract is a pre-spend gate, not a diagnostic
       // emitted after an image, TTS pass, or child worker has already billed.
       // It protects persisted/custom/forged graphs as well as the creator's
@@ -731,6 +761,7 @@ export const runPipelineTask = task({
         compilationModules: compilation.modules,
         compilationCapabilities: compilation.capabilities,
         reservedMaxCostUsd: compilation.reservedMaxCostUsd,
+        ...(showProfileFingerprint ? { showProfileFingerprint } : {}),
         ...(probeBudgetAdmission ? { budgetAdmission: probeBudgetAdmission } : {}),
       });
       preflight(resolved, { budgetUsd: invocationCandidate.budgetUsd });

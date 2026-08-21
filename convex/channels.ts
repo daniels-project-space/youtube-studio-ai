@@ -28,6 +28,14 @@ import {
   channelProgramBriefFingerprint,
   CHANNEL_PROGRAM_BRIEF_VERSION,
 } from "@/engine/channelProgramBrief";
+import {
+  assertChannelShowProfile,
+  assertChannelShowProfilePipelineCompatibility,
+  assertChannelShowProfileProgramBinding,
+  channelShowProfileFingerprint,
+  CHANNEL_SHOW_PROFILE_VERSION,
+} from "@/engine/channelShowProfile";
+import { creativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
 import { comparablePipeline } from "@/engine/channelPipelineComparable";
 import { channelInceptionInvalidationRoots } from "@/engine/channelInceptionInvalidation";
 import {
@@ -73,6 +81,9 @@ function assertProgramBriefIdentityMutation(args: {
   readonly existingIdentity: unknown;
   readonly nextIdentity: unknown;
   readonly effectiveFamily: unknown;
+  readonly nextPipeline?: unknown;
+  /** Only brand-new admitted channels may introduce their first show profile. */
+  readonly allowFirstShowProfile?: boolean;
 }): void {
   const existingProgramBrief = assertPersistedProgramBriefIdentity(args.existingIdentity, {
     context: "existing channel identity",
@@ -96,6 +107,51 @@ function assertProgramBriefIdentityMutation(args: {
     channelProgramBriefFingerprint(existingProgramBrief) !== channelProgramBriefFingerprint(nextProgramBrief)
   ) {
     throw new Error("channel program brief is immutable once stored; create a fresh admitted channel or fork");
+  }
+
+  const existingShowProfile = args.existingIdentity && typeof args.existingIdentity === "object"
+    ? (args.existingIdentity as { showProfile?: unknown }).showProfile
+    : undefined;
+  const nextShowProfile = args.nextIdentity && typeof args.nextIdentity === "object"
+    ? (args.nextIdentity as { showProfile?: unknown }).showProfile
+    : undefined;
+  const allowFirstShowProfile = args.allowFirstShowProfile === true;
+  if (nextProgramBrief && !existingProgramBrief && !nextShowProfile) {
+    throw new Error("a newly admitted channel program requires a sealed channel show profile");
+  }
+  if (existingShowProfile && !nextShowProfile) {
+    throw new Error("channel show profile cannot be removed by a generic channel mutation");
+  }
+  if (!existingShowProfile && nextShowProfile && !allowFirstShowProfile) {
+    throw new Error("channel show profile cannot be backfilled by a generic channel mutation; create a fresh admitted channel or fork");
+  }
+  if (!nextShowProfile) return;
+  if (!nextProgramBrief) {
+    throw new Error("channel show profile requires a canonical channel program brief");
+  }
+  const profile = assertChannelShowProfileProgramBinding({
+    profile: nextShowProfile,
+    programBrief: nextProgramBrief,
+  });
+  if (existingShowProfile && channelShowProfileFingerprint(existingShowProfile) !== channelShowProfileFingerprint(profile)) {
+    throw new Error("channel show profile is immutable once stored; create a fresh admitted channel or fork");
+  }
+  if (!Array.isArray(args.nextPipeline)) {
+    throw new Error("channel show profile requires an effective pipeline");
+  }
+  const selections = profile.selectedCapabilityKeys.map(creativeCapabilitySelection);
+  assertChannelShowProfilePipelineCompatibility({
+    profile,
+    programBrief: nextProgramBrief,
+    pipeline: args.nextPipeline as { block: string; params?: Record<string, unknown> }[],
+  });
+  if (allowFirstShowProfile) {
+    assertChannelShowProfile({
+      profile,
+      programBrief: nextProgramBrief,
+      capabilitySelections: selections,
+      pipeline: args.nextPipeline as { block: string; params?: Record<string, unknown> }[],
+    });
   }
 }
 
@@ -349,6 +405,18 @@ const identityValidator = v.object({
       sampleTopics: v.optional(v.array(v.string())),
     }),
   ),
+  showProfile: v.optional(
+    v.object({
+      version: v.literal(CHANNEL_SHOW_PROFILE_VERSION),
+      programBriefFingerprint: v.string(),
+      familyManifestFingerprint: v.string(),
+      contentLaneFingerprint: v.string(),
+      creativeCapabilityCatalogFingerprint: v.string(),
+      selectedCapabilityKeys: v.array(v.string()),
+      designedPipelineFingerprint: v.string(),
+      fingerprint: v.string(),
+    }),
+  ),
   creativeBrief: v.optional(
     v.object({
       positioning: v.string(),
@@ -508,6 +576,8 @@ export const createChannel = mutation({
       existingIdentity: existing?.identity,
       nextIdentity: args.identity,
       effectiveFamily: family ?? lane.family,
+      nextPipeline: args.pipeline,
+      allowFirstShowProfile: !existing,
     });
     if (
       args.contentLane !== undefined &&
@@ -866,6 +936,8 @@ export const updateChannel = mutation({
       existingIdentity: existing.identity,
       nextIdentity: rest.identity ?? existing.identity,
       effectiveFamily: nextFamily ?? lane.family,
+      nextPipeline: rest.pipeline ?? existing.pipeline,
+      allowFirstShowProfile: false,
     });
     const patch: Record<string, unknown> = {};
     for (const [k, val] of Object.entries(rest)) {

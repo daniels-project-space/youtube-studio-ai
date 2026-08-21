@@ -5,6 +5,11 @@ import {
   type ChannelProgramBrief,
 } from "./channelProgramBrief";
 import {
+  assertChannelShowProfileProgramBinding,
+  channelShowProfileFingerprint,
+  type ChannelShowProfile,
+} from "./channelShowProfile";
+import {
   CHANNEL_INCEPTION_FAMILY_POLICIES,
   CHANNEL_INCEPTION_MODULE_CONTRACTS,
   CHANNEL_INCEPTION_SCHEMA_VERSION,
@@ -75,6 +80,12 @@ export interface ChannelInceptionRequest {
    * brief is the replayable creative authority.
    */
   programBrief: ChannelProgramBrief;
+  /**
+   * Immutable resolved module composition for new inception. It remains
+   * optional solely to read historical snapshots; the executor never admits a
+   * new or retried paid run without it.
+   */
+  showProfile?: ChannelShowProfile;
   brand?: ChannelBrandIntent;
   voice?: ChannelVoiceIntent;
   starter?: ChannelStarterIntent;
@@ -155,6 +166,7 @@ export interface ChannelInceptionStageParamsByKey {
     family: FamilyKey;
     sourcePipelineFingerprint: string;
     moduleConfigFingerprint: string;
+    showProfileFingerprint: string | null;
     preserveSpecializedEntries: true;
     retireOnlyCompilerDeclaredLegacy: true;
     requireGoldenProofForGoldenLabel: true;
@@ -410,6 +422,9 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
   if (programBrief.locale !== locale) {
     throw new Error("channel program brief locale does not match the inception request");
   }
+  const showProfile = request.showProfile
+    ? assertChannelShowProfileProgramBinding({ profile: request.showProfile, programBrief })
+    : undefined;
 
   if (policy.voiceOwnership === "none" && request.voice) {
     throw new Error(`${request.family} omits voice inception and cannot accept a voice intent`);
@@ -579,6 +594,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     family: request.family,
     sourcePipelineFingerprint: pipelineSourceFingerprint,
     moduleConfigFingerprint,
+    showProfileFingerprint: showProfile ? channelShowProfileFingerprint(showProfile) : null,
     preserveSpecializedEntries: true,
     retireOnlyCompilerDeclaredLegacy: true,
     requireGoldenProofForGoldenLabel: true,
@@ -618,6 +634,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     locale,
     sourceRevision,
     programBrief,
+    showProfile: showProfile ?? null,
     pipelineSourceFingerprint,
     moduleConfigFingerprint,
     brand: { avatar, banner, background, colors },
@@ -663,6 +680,7 @@ export function buildChannelInceptionPlan(request: ChannelInceptionRequest): Cha
     pipelineSourceFingerprint,
     moduleConfigFingerprint,
     programBrief,
+    ...(showProfile ? { showProfile } : {}),
     ...(Object.values(snapshotBrand).some(Boolean) ? { brand: snapshotBrand } : {}),
     ...(policy.voiceOwnership !== "none" && existingCastFingerprint
       ? {

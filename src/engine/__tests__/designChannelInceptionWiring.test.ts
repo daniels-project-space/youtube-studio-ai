@@ -13,6 +13,7 @@ const refreshShowBible = readFileSync(join(root, "src/trigger/refreshShowBible.t
 const regroundChannel = readFileSync(join(root, "src/engine/creative/regroundChannel.ts"), "utf8");
 const route = readFileSync(join(root, "src/app/api/build-channel/route.ts"), "utf8");
 const newChannelUi = readFileSync(join(root, "src/app/(app)/channels/new/page.tsx"), "utf8");
+const pipelineRunner = readFileSync(join(root, "src/trigger/runPipeline.ts"), "utf8");
 
 assert.match(entrypoint, /executeDesignChannel\(payload/);
 assert.match(entrypoint, /maxAttempts:\s*3/);
@@ -39,6 +40,10 @@ assert.match(coordinator, /validateCreativeCapabilitySelections\(/);
 assert.match(coordinator, /assessCreativeCapabilityAutomaticBuildAdmission\(/);
 assert.match(coordinator, /export interface DesignChannelArgs extends Omit<DesignOptions, "family" \| "programBrief">/);
 assert.match(coordinator, /programBrief: ChannelProgramBrief/);
+assert.match(coordinator, /const showProfile = createChannelShowProfile\(/,
+  "new channel inception must seal a profile from the admitted program and resolved baseline pipeline");
+assert.match(coordinator, /showProfile: persistedChannelShowProfile\(showProfile\)/,
+  "the durable channel identity must retain the sealed composition receipt");
 assert.match(coordinator, /positioningStage\.params\.programBrief/,
   "positioning must use the sealed plan-stage brief rather than mutable task payload text");
 assert.match(coordinator, /nicheKey:\s*programBrief\.nicheKey/);
@@ -67,7 +72,11 @@ assert.doesNotMatch(coordinator, /groundingSignals\(convex, ownerId, identity\.n
   "Educational must query as educational, never its display label");
 assert.match(mutations, /assertProgramBriefIdentityMutation\(/);
 assert.match(mutations, /channel program brief is immutable once stored/);
+assert.match(mutations, /channel show profile is immutable once stored/);
+assert.match(mutations, /assertChannelShowProfilePipelineCompatibility\(/,
+  "generic channel changes must preserve selected capability obligations from the sealed profile");
 assert.match(schema, /programBrief:\s*v\.optional\(/);
+assert.match(schema, /showProfile:\s*v\.optional\(/);
 assert.match(schema, /catalogFingerprint:\s*v\.string\(\)/);
 assert(
   coordinator.indexOf("if (!design.available || !design.productionReady)") <
@@ -250,6 +259,27 @@ assert.match(
   /requireProgramBrief: true/,
   "a partial legacy row with the brief missing must not resume into research",
 );
+const existingShowProfileGate = coordinator.indexOf("assertChannelShowProfile({");
+assert(
+  existingShowProfileGate > coordinator.indexOf("const existingAtStart =") &&
+    existingShowProfileGate < existingFamilyBackfill &&
+    existingShowProfileGate < researchStage,
+  "an existing retry must prove the exact sealed composition before it can mutate or research",
+);
+assert.match(coordinator, /showProfileFingerprint: channelShowProfileFingerprint\(args\.showProfile\)/,
+  "pipeline certification must carry the composition receipt fingerprint");
+assert.match(coordinator, /sameChannelShowProfile\(previousShowProfile, showProfile\)/,
+  "an immutable inception snapshot cannot be reused for another profile");
+assert.match(coordinator, /new channel inception requires a sealed channel show profile/);
+
+const pipelineProfileGate = pipelineRunner.indexOf("assertChannelShowProfilePipelineCompatibility({");
+const pipelineRuntimeGate = pipelineRunner.indexOf("assertPipelineVideoRuntimeReady(entries)");
+assert(
+  pipelineProfileGate >= 0 && pipelineProfileGate < pipelineRuntimeGate,
+  "frozen pipeline execution must validate the sealed composition before runtime/provider preflight",
+);
+assert.match(pipelineRunner, /frozen pipeline invocation channel show profile does not match current channel composition/);
+assert.match(pipelineRunner, /showProfileFingerprint/);
 
 // Style DNA / quality bar are the other field pair six legacy channels lack.
 // Positioning is an unconditional stage, and both its resume readers demand the
