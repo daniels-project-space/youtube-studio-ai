@@ -217,12 +217,75 @@ async function costAndBudget(): Promise<void> {
   console.log("COST/BUDGET PASS: rollup + ceiling abort both enforced");
 }
 
+/**
+ * Artifact persistence is BATCHED: one sink call per block carrying every
+ * artifact that block produced, never one call per produced key. This pins the
+ * Convex-call-count contract — a regression back to per-key writes would turn
+ * a 3-output block into 3 mutations again.
+ */
+async function artifactBatching(): Promise<void> {
+  _resetBlocks();
+  const triple: Block = {
+    id: "echo_triple",
+    consumes: [],
+    produces: ["a", "b", "c"],
+    run: async () => ({ a: 1, b: "two", c: { three: true } }),
+  };
+  const single: Block = {
+    id: "echo_single",
+    consumes: ["a"],
+    produces: ["d"],
+    run: async () => ({ d: "solo" }),
+  };
+  register(triple);
+  register(single);
+
+  const calls: Array<{ count: number; keys: string[]; createdAt: number[] }> = [];
+  const sink: RunStageSink = {
+    async upsert() {},
+    async upsertArtifacts(args) {
+      calls.push({
+        count: args.artifacts.length,
+        keys: args.artifacts.map((entry) => entry.artifact.key),
+        createdAt: args.artifacts.map((entry) => entry.createdAt),
+      });
+    },
+  };
+
+  const resolved = validatePipeline([{ block: "echo_triple" }, { block: "echo_single" }]);
+  const result = await runPipeline(resolved, {
+    ownerId: "o",
+    runId: "run_artifact_batch",
+    channelId: "c",
+    keyPrefix: "p/",
+    budgetUsd: 0,
+    sink,
+  });
+  assert.equal(result.ok, true, "batching pipeline must succeed");
+
+  // ONE call per block — not one per produced key.
+  assert.equal(calls.length, 2, `expected 1 sink call per block, got ${calls.length}`);
+  assert.deepEqual(calls[0].keys.slice().sort(), ["a", "b", "c"], "3-output block batches all 3");
+  assert.equal(calls[0].count, 3);
+  // A single-output block must behave exactly as before: one call, one entry.
+  assert.deepEqual(calls[1].keys, ["d"], "1-output block still writes exactly one artifact");
+  assert.equal(calls[1].count, 1);
+  // Artifacts written by one transaction share one creation instant.
+  assert.equal(new Set(calls[0].createdAt).size, 1, "batched artifacts share a createdAt");
+
+  const perKeyCallCount = calls.reduce((total, call) => total + call.count, 0);
+  console.log(
+    `ARTIFACT BATCHING PASS: ${perKeyCallCount} artifacts persisted in ${calls.length} sink call(s)`,
+  );
+}
+
 async function main(): Promise<void> {
   await positive();
   await negativeValidation();
   await negativeSilentFallback();
   await preflightCostReservation();
   await costAndBudget();
+  await artifactBatching();
   console.log("\nALL ENGINE TESTS PASSED");
 }
 

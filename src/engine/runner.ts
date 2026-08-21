@@ -444,6 +444,17 @@ export async function runPipeline(
     optionalFallbacks: Set<string>,
   ): Promise<void> => {
     const inputArtifactIds = [...new Set(Object.values(inputRefs).map((ref) => ref.artifactId))].sort();
+    const sortedFallbacks = [...optionalFallbacks].sort();
+
+    // Derive every artifact this block produced FIRST, then persist the whole
+    // set in one round-trip. Blocks routinely produce 2-14 outputs and this
+    // used to cost one Convex mutation per produced key.
+    const produced: Array<{
+      key: string;
+      artifact: ArtifactRef;
+      value: unknown;
+      contract: ModuleManifest["produces"][string];
+    }> = [];
     for (const [key, contract] of [
       ...Object.entries(manifest.produces),
       ...Object.entries(manifest.optionalProduces),
@@ -467,24 +478,38 @@ export async function runPipeline(
         producerVersion: manifest.version,
         payloadHash,
       };
-      if (opts.sink.upsertArtifact) {
-        const serialized = stableJson(value);
-        const canInline = contract.persist !== "summary" && serialized.length <= 100_000;
-        await opts.sink.upsertArtifact({
-          ownerId: opts.ownerId,
-          channelId: opts.channelId,
-          runId: opts.runId,
-          artifact,
-          inputArtifactIds,
-          optionalFallbacks: [...optionalFallbacks].sort(),
-          persistence: canInline ? contract.persist : "summary",
-          payload: canInline ? value : undefined,
-          summary: canInline ? undefined : artifactSummary(value),
-          createdAt: Date.now(),
-        });
-      }
-      artifactRefs[key] = artifact;
+      produced.push({ key, artifact, value, contract });
     }
+    if (produced.length === 0) return;
+
+    if (opts.sink.upsertArtifacts) {
+      // One timestamp for the block: these artifacts are written by a single
+      // transaction, so they share a creation instant instead of drifting by
+      // however long the loop took.
+      const createdAt = Date.now();
+      await opts.sink.upsertArtifacts({
+        ownerId: opts.ownerId,
+        channelId: opts.channelId,
+        runId: opts.runId,
+        artifacts: produced.map(({ artifact, value, contract }) => {
+          const serialized = stableJson(value);
+          const canInline = contract.persist !== "summary" && serialized.length <= 100_000;
+          return {
+            artifact,
+            inputArtifactIds,
+            optionalFallbacks: sortedFallbacks,
+            persistence: canInline ? contract.persist : "summary",
+            payload: canInline ? value : undefined,
+            summary: canInline ? undefined : artifactSummary(value),
+            createdAt,
+          };
+        }),
+      });
+    }
+    // Only advertise refs once the batch is durable. The write is atomic, so
+    // a throw above means NO artifact of this block was persisted and none
+    // should be offered as lineage to a downstream block.
+    for (const { key, artifact } of produced) artifactRefs[key] = artifact;
   };
 
   /**
