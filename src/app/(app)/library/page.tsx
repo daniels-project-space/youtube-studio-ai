@@ -121,8 +121,20 @@ export default function LibraryPage() {
     <>
       <PageHeader
         title="Library"
-        subtitle="Finished videos across your channels"
+        subtitle="Finished videos across your channels. Pipeline completion and retained master evidence are shown separately."
       />
+
+      <p
+        style={{
+          margin: "-0.65rem 0 1.25rem",
+          color: "var(--color-muted)",
+          fontSize: "0.78rem",
+          lineHeight: 1.45,
+        }}
+      >
+        Only <strong>Release evidence recorded</strong> has retained final-master proof. Historical outputs remain visible,
+        but are labelled unverified rather than being presented as release-quality masters.
+      </p>
 
       {!loading && (
         <LibraryFilters

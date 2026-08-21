@@ -71,6 +71,8 @@ export type ChannelRow = {
 export type VideoRow = {
   _id: string;
   status: string;
+  /** Retained final-master provenance, intentionally separate from run status. */
+  releaseEvidenceStatus: ReleaseEvidenceStatus;
   createdAt: number;
   startedAt?: number;
   finishedAt?: number;

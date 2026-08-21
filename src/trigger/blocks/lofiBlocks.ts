@@ -39,11 +39,11 @@ import { assertChildContentRenderEvidence } from "@/trigger/blocks/childrenSafet
 import { assessProductionEditorialAcceptance, QualityEvidenceSchema } from "@/engine/qualityEvidence";
 import {
   assertFinalMasterReleaseCertificate,
-  assertReleaseCertificateVisualReviewBindings,
   finalMasterReleaseCertificateKey,
   parseFinalMasterReleaseCertificateBytes,
-  parseVisualReviewReleaseReceiptBytes,
   retainedFinalMasterReleaseObjectKeys,
+  verifyFinalMasterReleaseEvidenceObjects,
+  type FinalMasterReleaseCertificate,
 } from "@/lib/finalMasterReleaseCertificate";
 import {
   assertFinalMasterNarrationTranscriptAuditBinding,
@@ -1302,20 +1302,9 @@ async function verifyFinalMasterReleaseEvidenceForUpload(
   if (durableCertificate.finalMaster.r2Key !== videoKey) {
     throw new Error("upload_draft: final-master release certificate belongs to a different video object");
   }
-  const [receiptBytes, evidenceManifestBytes] = await Promise.all([
-    getObjectBytes(durableCertificate.visualReview.receiptKey),
-    getObjectBytes(durableCertificate.visualReview.evidenceManifestKey),
-  ]);
-  let evidenceManifest: unknown;
-  try {
-    evidenceManifest = JSON.parse(Buffer.from(evidenceManifestBytes).toString("utf8"));
-  } catch {
-    throw new Error("upload_draft: durable visual-review evidence manifest is not valid JSON");
-  }
-  assertReleaseCertificateVisualReviewBindings({
+  await verifyFinalMasterReleaseEvidenceObjects({
     certificate: durableCertificate,
-    receipt: parseVisualReviewReleaseReceiptBytes(receiptBytes),
-    evidenceManifest,
+    getObjectBytes,
   });
   if (durableCertificate.audio?.finalMasterNarration) {
     const narrationAudit = parseFinalMasterNarrationTranscriptAuditBytes(
@@ -1331,6 +1320,64 @@ async function verifyFinalMasterReleaseEvidenceForUpload(
     throw new Error("upload_draft: local final master no longer matches its durable release certificate");
   }
   return durableCertificate;
+}
+
+/**
+ * The destructive half of cleanup is deliberately isolated so the exact
+ * fail-closed behavior can be exercised without R2 or a pipeline worker.
+ * Any absent, overwritten, or mismatched review-evidence object preserves the
+ * entire run namespace instead of deleting the last recoverable proof.
+ */
+export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
+  keyPrefix: string;
+  runId: string;
+  certificateKey: string;
+  certificate: FinalMasterReleaseCertificate;
+  keepNames: readonly string[];
+  getObjectBytes: (key: string) => Promise<Uint8Array>;
+  listObjects: (prefix: string) => Promise<string[]>;
+  deleteObjects: (keys: string[]) => Promise<number>;
+}): Promise<{
+  cleaned: boolean;
+  removedObjects: number;
+  retainedReleaseEvidence: string[];
+  retainedObjectCount: number;
+  error?: string;
+}> {
+  try {
+    const retainedReleaseEvidence = retainedFinalMasterReleaseObjectKeys({
+      keyPrefix: args.keyPrefix,
+      runId: args.runId,
+      certificateKey: args.certificateKey,
+      certificate: args.certificate,
+    });
+    await verifyFinalMasterReleaseEvidenceObjects({
+      certificate: args.certificate,
+      getObjectBytes: args.getObjectBytes,
+    });
+    const prefix = `${args.keyPrefix}runs/${args.runId}/`;
+    const keep = new Set([
+      ...args.keepNames.map((name) => `${prefix}${name.replace(/^\/+/, "")}`),
+      ...retainedReleaseEvidence,
+    ]);
+    const all = await args.listObjects(prefix);
+    const deletable = all.filter((key) => !keep.has(key));
+    const deleted = await args.deleteObjects(deletable);
+    return {
+      cleaned: true,
+      removedObjects: deleted,
+      retainedReleaseEvidence,
+      retainedObjectCount: all.length - deletable.length,
+    };
+  } catch (error) {
+    return {
+      cleaned: false,
+      removedObjects: 0,
+      retainedReleaseEvidence: [],
+      retainedObjectCount: 0,
+      error: error instanceof Error ? error.message : String(error),
+    };
+  }
 }
 
 export const uploadDraft: Block = {
@@ -1646,42 +1693,39 @@ export const cleanup: Block = {
   ], // gated on a successful upload — never runs on a failed render
   produces: ["cleaned", "removedObjects"],
   run: async (ctx) => {
-    const prefix = `${ctx.keyPrefix}runs/${ctx.runId}/`;
     const keepNames = (ctx.params["keep"] as string[] | undefined) ?? ["final.mp4", "thumbnail.jpg"];
-    let retainedReleaseEvidence: string[];
+    let pruning: Awaited<ReturnType<typeof pruneRunObjectsWithVerifiedFinalMasterEvidence>>;
     try {
       const { certificateKey, durableCertificate } = await loadDurableFinalMasterReleaseCertificate(ctx);
-      retainedReleaseEvidence = retainedFinalMasterReleaseObjectKeys({
+      pruning = await pruneRunObjectsWithVerifiedFinalMasterEvidence({
         keyPrefix: ctx.keyPrefix,
         runId: ctx.runId,
         certificateKey,
         certificate: durableCertificate,
+        keepNames,
+        getObjectBytes,
+        listObjects,
+        deleteObjects,
       });
     } catch (error) {
-      // Upload already revalidated this certificate, so a failure here is an
-      // unexpected persistence fault. Preserve everything rather than deleting
-      // the only auditable final-master evidence after a successful upload.
       ctx.log(
-        `cleanup: release evidence retention failed; preserving all run objects: ${error instanceof Error ? error.message : error}`,
+        `cleanup: release evidence revalidation failed; preserving all run objects: ${error instanceof Error ? error.message : error}`,
       );
       return { cleaned: false, removedObjects: 0 };
     }
-    const keep = new Set([
-      ...keepNames.map((n) => `${prefix}${n.replace(/^\/+/, "")}`),
-      ...retainedReleaseEvidence,
-    ]);
-    let removed = 0;
-    try {
-      const all = await listObjects(prefix);
-      const del = all.filter((k) => !keep.has(k));
-      removed = await deleteObjects(del);
-      ctx.log(
-        `cleanup: removed ${removed} intermediate object(s); kept ${all.length - del.length} ` +
-          `(${keepNames.join(", ")}; ${retainedReleaseEvidence.length} final-master evidence object(s))`,
-      );
-    } catch (e) {
-      ctx.log(`cleanup: R2 prune failed (non-fatal): ${e instanceof Error ? e.message : e}`);
+    if (!pruning.cleaned) {
+      // The proof bytes are re-read immediately before destructive cleanup.
+      // Preserve the entire namespace and its asset rows on any validation or
+      // storage gap; a successful earlier upload is not proof that the retained
+      // evidence is still available now.
+      ctx.log(`cleanup: release evidence revalidation failed; preserving all run objects: ${pruning.error ?? "unknown error"}`);
+      return { cleaned: false, removedObjects: 0 };
     }
+    const removed = pruning.removedObjects;
+    ctx.log(
+      `cleanup: removed ${removed} intermediate object(s); kept ${pruning.retainedObjectCount} ` +
+        `(${keepNames.join(", ")}; ${pruning.retainedReleaseEvidence.length} final-master evidence object(s))`,
+    );
     try {
       const n = await convex().mutation(api.assets.pruneRun, {
         runId: ctx.runId as Id<"runs">,

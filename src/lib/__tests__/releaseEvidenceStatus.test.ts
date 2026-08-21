@@ -25,6 +25,11 @@ const evidenceFrameKeys = [
   `${keyPrefix}runs/${runId}/visual-review/${reviewFingerprint}/frames/f001.jpg`,
   `${keyPrefix}runs/${runId}/visual-review/${reviewFingerprint}/frames/f002.jpg`,
 ];
+const evidenceFrameArtifacts = evidenceFrameKeys.map((r2Key, index) => ({
+  r2Key,
+  contentSha256: `${index + 1}`.repeat(64),
+  byteLength: 100 + index,
+}));
 
 const certificate = createFinalMasterReleaseCertificate({
   version: FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
@@ -36,6 +41,7 @@ const certificate = createFinalMasterReleaseCertificate({
   visualReview: {
     evidenceManifestKey,
     evidenceFrameKeys,
+    evidenceFrameArtifacts,
     receiptKey: visualReviewReleaseReceiptKey(keyPrefix, runId, releaseReceiptFingerprint),
     reviewFingerprint,
     reviewReceiptVersion: "visual-review-receipt/v1",
@@ -62,7 +68,7 @@ const qaStage = {
     finalMasterSha256: masterSha256,
     reviewEvidence: {
       manifestKey: evidenceManifestKey,
-      frames: evidenceFrameKeys.map((r2Key) => ({ r2Key })),
+      frames: evidenceFrameArtifacts,
     },
     reviewResult: {
       verdict: "pass",
@@ -126,6 +132,7 @@ const compactQaStage = {
       manifestKey: evidenceManifestKey,
       frameCount: evidenceFrameKeys.length,
       frameKeysFingerprint: certificateReference.visualReview.evidenceFrameKeysFingerprint,
+      frameArtifactsFingerprint: certificateReference.visualReview.evidenceFrameArtifactsFingerprint,
     },
   },
 };
@@ -236,8 +243,12 @@ assert.equal(
         reviewEvidence: {
           ...qaStage.outputs.reviewEvidence,
           frames: [
-            { r2Key: evidenceFrameKeys[0] },
-            { r2Key: `${keyPrefix}runs/${runId}/visual-review/${reviewFingerprint}/frames/substituted.jpg` },
+            evidenceFrameArtifacts[0],
+            {
+              r2Key: `${keyPrefix}runs/${runId}/visual-review/${reviewFingerprint}/frames/substituted.jpg`,
+              contentSha256: "d".repeat(64),
+              byteLength: 101,
+            },
           ],
         },
       },

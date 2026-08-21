@@ -21,13 +21,15 @@ import {
   channelProgramBriefFingerprint,
 } from "@/engine/channelProgramBrief";
 import {
-  assertChannelCompositionReceiptBinding,
+  assertCertifiedChannelCompositionPipelineCompatibility,
+  assertPersistedChannelCompositionReceiptBinding,
   findCertifiedChannelComposition,
 } from "@/engine/channelCompositionCatalog";
 import { resolveChannelFamilyManifest, type ChannelFamilyManifest } from "@/engine/channelFamilyManifest";
 import type { PipelineEntry } from "@/engine/types";
 import {
   CHANNEL_SHOW_PROFILE_VERSION,
+  assertHistoricalSourceDataStoryPipelineBaseline,
   parseChannelShowProfileReceipt,
   type ChannelShowProfile as ChannelShowProfileReceipt,
 } from "@/engine/channelShowProfileCodec";
@@ -162,7 +164,7 @@ export function assertChannelShowProfileProgramBinding(
     throw new Error("channel show profile does not match the current content-lane policy");
   }
   if (profile.composition) {
-    assertChannelCompositionReceiptBinding({
+    assertPersistedChannelCompositionReceiptBinding({
       receipt: profile.composition,
       family: programBrief.family,
       selectedCapabilityKeys: profile.selectedCapabilityKeys,
@@ -191,6 +193,13 @@ export function assertChannelShowProfilePipelineCompatibility(
     intent: briefToCreativeCapabilityIntent(programBrief),
   });
   assertResolvedCreativeCapabilityPipelineObligations(resolvedSelections, input.pipeline);
+  if (profile.composition) {
+    assertCertifiedChannelCompositionPipelineCompatibility({
+      receipt: profile.composition,
+      pipeline: input.pipeline,
+    });
+  }
+  assertHistoricalSourceDataStoryPipelineBaseline(profile, input.pipeline);
   return profile;
 }
 
@@ -250,9 +259,19 @@ export function assertChannelShowProfile(input: AssertChannelShowProfileInput): 
   // exact profile is derived for this new snapshot rather than treating the
   // legacy receipt as proof of a named certified route.
   if (!supplied.composition) return expected;
-  if (canonicalJson(supplied) !== canonicalJson(expected)) {
+  if (canonicalJson(supplied) === canonicalJson(expected)) return expected;
+  const { composition: _suppliedComposition, fingerprint: _suppliedFingerprint, ...suppliedWithoutComposition } = supplied;
+  const { composition: _expectedComposition, fingerprint: _expectedFingerprint, ...expectedWithoutComposition } = expected;
+  void _suppliedComposition;
+  void _suppliedFingerprint;
+  void _expectedComposition;
+  void _expectedFingerprint;
+  if (canonicalJson(suppliedWithoutComposition) !== canonicalJson(expectedWithoutComposition)) {
     throw new Error("channel show profile does not match the admitted channel composition");
   }
+  // The only allowed non-identical replay is a historically sealed composition
+  // definition whose family, exact selected capabilities, and baseline graph
+  // all still match. Return a freshly current receipt for the new write.
   return expected;
 }
 

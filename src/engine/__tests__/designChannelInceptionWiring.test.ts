@@ -88,6 +88,16 @@ assert.doesNotMatch(showProfileCodec, /from\s+["']@\/engine\/creative\/creativeC
 assert.match(schema, /programBrief:\s*v\.optional\(/);
 assert.match(schema, /showProfile:\s*v\.optional\(/);
 assert.match(schema, /catalogFingerprint:\s*v\.string\(\)/);
+for (const [label, source] of [
+  ["create/update mutation identity validator", mutations],
+  ["durable channels schema", schema],
+] as const) {
+  assert.match(
+    source,
+    /composition:\s*v\.optional\(\s*v\.object\(\s*\{[\s\S]*?definitionFingerprint:\s*v\.string\(\)[\s\S]*?qualityFocus:\s*v\.array\(v\.string\(\)\)[\s\S]*?fingerprint:\s*v\.string\(\)/,
+    `${label} must admit the optional sealed composition receipt rather than reject a newly admitted data-story profile`,
+  );
+}
 assert(
   coordinator.indexOf("if (!design.available || !design.productionReady)") <
     coordinator.indexOf('runStage("channel-inception-research"'),
@@ -269,7 +279,7 @@ assert.match(
   /requireProgramBrief: true/,
   "a partial legacy row with the brief missing must not resume into research",
 );
-const existingShowProfileGate = coordinator.indexOf("assertChannelShowProfile({");
+const existingShowProfileGate = coordinator.indexOf("existingChannelInceptionRetryShowProfile({");
 assert(
   existingShowProfileGate > coordinator.indexOf("const existingAtStart =") &&
     existingShowProfileGate < existingFamilyBackfill &&
@@ -278,7 +288,7 @@ assert(
 );
 assert.match(coordinator, /showProfileFingerprint: channelShowProfileFingerprint\(args\.showProfile\)/,
   "pipeline certification must carry the composition receipt fingerprint");
-assert.match(coordinator, /sameChannelShowProfile\(previousShowProfile, showProfile\)/,
+assert.match(coordinator, /channelInceptionSnapshotCanResume\(\{[\s\S]*?showProfile: requestShowProfile/,
   "an immutable inception snapshot cannot be reused for another profile");
 assert.match(coordinator, /new channel inception requires a sealed channel show profile/);
 

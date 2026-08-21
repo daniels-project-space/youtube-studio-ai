@@ -17,6 +17,8 @@ import {
 } from "@/engine/creative/creativeCapabilityReceiptCatalog";
 import {
   assertChannelCompositionReceiptBinding,
+  assertCertifiedChannelCompositionPipelineCompatibility,
+  assertPersistedChannelCompositionReceiptBinding,
   parseChannelCompositionReceipt,
   type ChannelCompositionReceipt,
 } from "@/engine/channelCompositionCatalog";
@@ -137,6 +139,27 @@ function parsePipeline(value: unknown): CreativeCapabilityReceiptPipelineEntry[]
 }
 
 /**
+ * v1 source-data receipts predate declarative operation materialization. They
+ * remain readable for retry, but a later refiner may not alter their sealed
+ * graph because there is no v1 operation list against which to prove a safe
+ * refinement. Newer definitions carry their own narrower compatibility rules.
+ */
+export function assertHistoricalSourceDataStoryPipelineBaseline(
+  profile: Pick<ChannelShowProfile, "composition" | "designedPipelineFingerprint">,
+  pipeline: readonly CreativeCapabilityReceiptPipelineEntry[],
+): void {
+  if (
+    profile.composition?.key === "source_attributed_data_story" &&
+    profile.composition.definitionVersion === "v1" &&
+    profile.designedPipelineFingerprint !== sha256Hex(canonicalJson(pipeline))
+  ) {
+    throw new Error(
+      "historical v1 source-attributed data-story profile must retain its exact admitted pipeline baseline",
+    );
+  }
+}
+
+/**
  * Parse only the receipt-level invariant needed by Convex persistence. Do not
  * use this in a creator or execution admission path: `parseChannelShowProfile`
  * additionally pins the live catalog and known capability keys.
@@ -209,7 +232,7 @@ export function assertChannelShowProfileReceiptProgramBinding(
     });
   }
   if (profile.composition) {
-    assertChannelCompositionReceiptBinding({
+    assertPersistedChannelCompositionReceiptBinding({
       receipt: profile.composition,
       family: programBrief.family,
       selectedCapabilityKeys: profile.selectedCapabilityKeys,
@@ -237,7 +260,32 @@ export function assertChannelShowProfileReceiptPipelineCompatibility(
     }),
   );
   assertCreativeCapabilityReceiptPipelineObligations(definitions, pipeline);
+  if (profile.composition) {
+    assertCertifiedChannelCompositionPipelineCompatibility({
+      receipt: profile.composition,
+      pipeline,
+    });
+  }
+  assertHistoricalSourceDataStoryPipelineBaseline(profile, pipeline);
   return profile;
+}
+
+/**
+ * A newly admitted channel must bind to the route selected by the live
+ * capability catalog. Historical receipt binding is intentionally reserved
+ * for an already-persisted identity retry or compatible pipeline update.
+ */
+function assertCurrentChannelShowProfileCompositionBinding(
+  profile: ChannelShowProfile,
+  programBrief: unknown,
+): void {
+  if (!profile.composition) return;
+  const canonicalProgramBrief = assertCanonicalChannelProgramBrief(programBrief);
+  assertChannelCompositionReceiptBinding({
+    receipt: profile.composition,
+    family: canonicalProgramBrief.family,
+    selectedCapabilityKeys: profile.selectedCapabilityKeys,
+  });
 }
 
 /**
@@ -250,6 +298,7 @@ export function assertChannelShowProfileReceiptExactComposition(
 ): ChannelShowProfile {
   const profile = assertChannelShowProfileReceiptPipelineCompatibility(input);
   const pipeline = parsePipeline(input.pipeline);
+  assertCurrentChannelShowProfileCompositionBinding(profile, input.programBrief);
   if (profile.designedPipelineFingerprint !== sha256Hex(canonicalJson(pipeline))) {
     throw new Error("channel show profile does not match the admitted channel composition");
   }

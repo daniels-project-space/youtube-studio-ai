@@ -22,6 +22,8 @@ import {
   briefToCreativeCapabilityIntent,
   type ChannelProgramBrief,
 } from "./channelProgramBrief";
+import { compileCertifiedChannelComposition } from "./channelCompositionCompiler";
+import { findCertifiedChannelComposition } from "./channelCompositionCatalog";
 import {
   dataStoryInsertParams,
   dataStoryProductionReadiness,
@@ -693,15 +695,33 @@ export function designPipeline(opts: DesignOptions): DesignResult {
     });
   }
 
+  // A selected certified composition owns the strict source-attributed
+  // data-story rewrite. It is deliberately materialized before the existing
+  // policy/capability/validation gates below; this layer only applies sealed
+  // block and parameter operations and cannot introduce a new renderer.
+  const selectedCapabilityKeys = selectedCapabilities.map((selection) => selection.capability);
+  if (findCertifiedChannelComposition({ family: opts.family, selectedCapabilityKeys })) {
+    const compositionCompilation = compileCertifiedChannelComposition({
+      family: opts.family,
+      capabilitySelections: selectedCapabilities,
+      ...(opts.programBrief ? { intent: briefToCreativeCapabilityIntent(opts.programBrief) } : {}),
+      parameterOverrides: opts.paramOverrides,
+      pipeline,
+    });
+    pipeline = compositionCompilation.pipeline;
+  }
+
   // Script-synced DATA-VIZ inserts (visual_inserts): existing niche presets
-  // may opt into general number-driven inserts. The source-attributed data
-  // story profile is stricter and requires an explicit typed contract; loose
-  // advanced overrides cannot weaken its source or spoken-anchor safeguards.
-  const insertParams: Record<string, unknown> | undefined = effectiveDataStory
-    ? dataStoryInsertParams(effectiveDataStory)
-    : preset?.insertTypes?.length
-      ? { insertTypes: preset.insertTypes }
-      : undefined;
+  // may opt into general number-driven inserts. Legacy data-story contracts
+  // retain their compatibility bridge; selected source-attributed channels are
+  // now materialized exclusively by their sealed composition definition above.
+  const insertParams: Record<string, unknown> | undefined = selectedDataStory
+    ? undefined
+    : effectiveDataStory
+      ? dataStoryInsertParams(effectiveDataStory)
+      : preset?.insertTypes?.length
+        ? { insertTypes: preset.insertTypes }
+        : undefined;
   if (fam.narrated && insertParams && pipeline.some((entry) => entry.block === "timeline_assemble")) {
     const visualInsertOverrides = opts.paramOverrides?.visual_inserts ?? {};
     const maxInserts = Number(visualInsertOverrides.maxInserts);
@@ -742,7 +762,7 @@ export function designPipeline(opts: DesignOptions): DesignResult {
         };
       }
     }
-  } else if (effectiveDataStory) {
+  } else if (effectiveDataStory && !selectedDataStory) {
     throw new Error("source-attributed data story requires a narrated timeline assembly pipeline");
   }
 

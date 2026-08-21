@@ -17,6 +17,7 @@ import {
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
 import { creativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
 import { resolveCertifiedChannelComposition } from "@/engine/channelCompositionCatalog";
+import { SOURCE_ATTRIBUTED_DATA_STORY, dataStoryInsertParams } from "@/engine/dataStory";
 import { designPipeline } from "@/engine/designer";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
@@ -90,6 +91,84 @@ assert.deepEqual(
   assertChannelShowProfilePipelineCompatibility({ profile, programBrief: brief, pipeline: design.pipeline }),
   profile,
   "later pipeline validation preserves selected capability obligations without freezing every safe refinement",
+);
+
+const reorderedCompositionPipeline = [...design.pipeline];
+const visualInsertIndex = reorderedCompositionPipeline.findIndex((entry) => entry.block === "visual_inserts");
+assert.ok(visualInsertIndex >= 0);
+const [visualInsertEntry] = reorderedCompositionPipeline.splice(visualInsertIndex, 1);
+const timelineIndex = reorderedCompositionPipeline.findIndex((entry) => entry.block === "timeline_assemble");
+assert.ok(timelineIndex >= 0);
+reorderedCompositionPipeline.splice(timelineIndex + 1, 0, visualInsertEntry!);
+assert.throws(
+  () => assertChannelShowProfilePipelineCompatibility({
+    profile,
+    programBrief: brief,
+    pipeline: reorderedCompositionPipeline,
+  }),
+  /requires visual_inserts before timeline_assemble/,
+  "a later refiner cannot move a sealed data-story stage after the master assembler",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptPipelineCompatibility({
+    profile,
+    programBrief: brief,
+    pipeline: reorderedCompositionPipeline,
+  }),
+  /requires visual_inserts before timeline_assemble/,
+  "Convex must reject the same composition-order drift before it becomes durable",
+);
+
+const quoteAfterVisualPipeline = [...design.pipeline];
+const quoteAfterVisualInsertIndex = quoteAfterVisualPipeline.findIndex((entry) => entry.block === "visual_inserts");
+assert.ok(quoteAfterVisualInsertIndex >= 0);
+const [quoteAfterVisualInsert] = quoteAfterVisualPipeline.splice(quoteAfterVisualInsertIndex, 1);
+const quoteAfterVisualQuoteIndex = quoteAfterVisualPipeline.findIndex((entry) => entry.block === "quote_overlays");
+assert.ok(quoteAfterVisualQuoteIndex >= 0);
+quoteAfterVisualPipeline.splice(quoteAfterVisualQuoteIndex, 0, quoteAfterVisualInsert!);
+assert.throws(
+  () => assertChannelShowProfilePipelineCompatibility({
+    profile,
+    programBrief: brief,
+    pipeline: quoteAfterVisualPipeline,
+  }),
+  /optional quote_overlays before visual_inserts when present/,
+  "a later refiner cannot move data inserts ahead of enabled quote overlays",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptPipelineCompatibility({
+    profile,
+    programBrief: brief,
+    pipeline: quoteAfterVisualPipeline,
+  }),
+  /optional quote_overlays before visual_inserts when present/,
+  "Convex must retain the enabled quote-overlay predecessor before durable storage",
+);
+
+const introAfterVisualPipeline = [...design.pipeline];
+const introAfterVisualInsertIndex = introAfterVisualPipeline.findIndex((entry) => entry.block === "visual_inserts");
+assert.ok(introAfterVisualInsertIndex >= 0);
+const [introAfterVisualInsert] = introAfterVisualPipeline.splice(introAfterVisualInsertIndex, 1);
+const introAfterVisualIntroIndex = introAfterVisualPipeline.findIndex((entry) => entry.block === "intro_card");
+assert.ok(introAfterVisualIntroIndex >= 0);
+introAfterVisualPipeline.splice(introAfterVisualIntroIndex, 0, introAfterVisualInsert!);
+assert.throws(
+  () => assertChannelShowProfilePipelineCompatibility({
+    profile,
+    programBrief: brief,
+    pipeline: introAfterVisualPipeline,
+  }),
+  /intro_card before visual_inserts/,
+  "a later refiner cannot move data inserts ahead of their required intro timing producer",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptPipelineCompatibility({
+    profile,
+    programBrief: brief,
+    pipeline: introAfterVisualPipeline,
+  }),
+  /intro_card before visual_inserts/,
+  "Convex must retain the intro timing predecessor before durable storage",
 );
 assert.deepEqual(channelShowProfileCapabilityKeys(profile), ["source_attributed_data_story"]);
 assert.notEqual(
@@ -254,7 +333,7 @@ assert.throws(
     capabilitySelections,
     pipeline: design.pipeline,
   }),
-  /does not match the admitted channel route/,
+  /does not match the persisted selected capabilities|does not match the admitted channel route/,
   "a re-fingerprinted receipt cannot relabel a data story as a generic visual essay",
 );
 assert.throws(
@@ -262,8 +341,201 @@ assert.throws(
     profile: wrongCompositionProfile,
     programBrief: brief,
   }),
-  /does not match the admitted channel route/,
+  /does not match the persisted selected capabilities|does not match the admitted channel route/,
   "the Convex-safe receipt codec must enforce the same selected-route binding",
+);
+
+const legacyDataStoryDefinitionIdentity = {
+  key: "source_attributed_data_story",
+  definitionVersion: "v1",
+  family: "narrated_stock",
+  title: "Source-attributed data story",
+  qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
+  requiredCapabilityKeys: ["source_attributed_data_story"],
+} as const;
+const legacyDataStoryCompositionBody = {
+  version: profile.composition!.version,
+  key: "source_attributed_data_story",
+  definitionVersion: "v1",
+  definitionFingerprint: sha256Hex(canonicalJson(legacyDataStoryDefinitionIdentity)),
+  family: "narrated_stock",
+  title: "Source-attributed data story",
+  qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
+} as const;
+const legacyDataStoryComposition = {
+  ...legacyDataStoryCompositionBody,
+  fingerprint: sha256Hex(canonicalJson(legacyDataStoryCompositionBody)),
+} as const;
+const legacyV1DataStoryProfileBody = {
+  version: profile.version,
+  programBriefFingerprint: profile.programBriefFingerprint,
+  familyManifestFingerprint: profile.familyManifestFingerprint,
+  contentLaneFingerprint: profile.contentLaneFingerprint,
+  creativeCapabilityCatalogFingerprint: profile.creativeCapabilityCatalogFingerprint,
+  selectedCapabilityKeys: profile.selectedCapabilityKeys,
+  composition: legacyDataStoryComposition,
+  designedPipelineFingerprint: profile.designedPipelineFingerprint,
+};
+const legacyV1DataStoryProfile = {
+  ...legacyV1DataStoryProfileBody,
+  fingerprint: sha256Hex(canonicalJson(legacyV1DataStoryProfileBody)),
+};
+
+const legacyV2DataStoryDefinitionIdentity = {
+  key: "source_attributed_data_story",
+  definitionVersion: "v2",
+  family: "narrated_stock",
+  title: "Source-attributed data story",
+  qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
+  requiredCapabilityKeys: ["source_attributed_data_story"],
+  materialization: {
+    version: "source-attributed-data-story-materialization/v1",
+    operations: [
+      { kind: "ensure_block_before", block: "visual_inserts", beforeBlock: "timeline_assemble" },
+      {
+        kind: "merge_block_params",
+        block: "visual_inserts",
+        params: dataStoryInsertParams(SOURCE_ATTRIBUTED_DATA_STORY),
+        numericOverrides: [
+          { key: "maxInserts", minimum: 1, maximum: 8, integer: true },
+          { key: "minGapSec", minimum: 0, maximum: 120 },
+        ],
+      },
+      {
+        kind: "merge_block_params",
+        block: "script_gen",
+        params: { dataRich: true, sourceAttributionRequired: true },
+      },
+      {
+        kind: "merge_block_params",
+        block: "qa_script",
+        params: {
+          dataStoryContract: SOURCE_ATTRIBUTED_DATA_STORY.version,
+          requireNamedSource: true,
+          requireSpokenNumericAnchor: true,
+        },
+      },
+    ],
+  },
+} as const;
+const legacyV2DataStoryCompositionBody = {
+  version: profile.composition!.version,
+  key: "source_attributed_data_story",
+  definitionVersion: "v2",
+  definitionFingerprint: sha256Hex(canonicalJson(legacyV2DataStoryDefinitionIdentity)),
+  family: "narrated_stock",
+  title: "Source-attributed data story",
+  qualityFocus: ["named sources", "spoken numeric anchors", "readable chart progression", "causal comparison"],
+} as const;
+const legacyV2DataStoryComposition = {
+  ...legacyV2DataStoryCompositionBody,
+  fingerprint: sha256Hex(canonicalJson(legacyV2DataStoryCompositionBody)),
+} as const;
+const legacyV2DataStoryProfileBody = {
+  version: profile.version,
+  programBriefFingerprint: profile.programBriefFingerprint,
+  familyManifestFingerprint: profile.familyManifestFingerprint,
+  contentLaneFingerprint: profile.contentLaneFingerprint,
+  creativeCapabilityCatalogFingerprint: profile.creativeCapabilityCatalogFingerprint,
+  selectedCapabilityKeys: profile.selectedCapabilityKeys,
+  composition: legacyV2DataStoryComposition,
+  designedPipelineFingerprint: profile.designedPipelineFingerprint,
+};
+const legacyV2DataStoryProfile = {
+  ...legacyV2DataStoryProfileBody,
+  fingerprint: sha256Hex(canonicalJson(legacyV2DataStoryProfileBody)),
+};
+assert.deepEqual(
+  assertChannelShowProfilePipelineCompatibility({
+    profile: legacyV2DataStoryProfile,
+    programBrief: brief,
+    pipeline: design.pipeline,
+  }),
+  legacyV2DataStoryProfile,
+  "a persisted v2 profile remains readable when it retains its full source-attributed producer order",
+);
+assert.throws(
+  () => assertChannelShowProfilePipelineCompatibility({
+    profile: legacyV2DataStoryProfile,
+    programBrief: brief,
+    pipeline: quoteAfterVisualPipeline,
+  }),
+  /optional quote_overlays before visual_inserts when present/,
+  "the rich compatibility gate must reject a v2 profile with quote-overlay timing drift",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptPipelineCompatibility({
+    profile: legacyV2DataStoryProfile,
+    programBrief: brief,
+    pipeline: quoteAfterVisualPipeline,
+  }),
+  /optional quote_overlays before visual_inserts when present/,
+  "the Convex-safe compatibility gate must reject the same v2 timing drift",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptExactComposition({
+    profile: legacyV2DataStoryProfile,
+    programBrief: brief,
+    pipeline: design.pipeline,
+  }),
+  /does not match the admitted channel route/,
+  "a first Convex admission cannot reuse a historical v2 receipt instead of the current v3 route",
+);
+assert.deepEqual(
+  assertChannelShowProfileProgramBinding({ profile: legacyV1DataStoryProfile, programBrief: brief }),
+  legacyV1DataStoryProfile,
+  "a historically sealed v1 composition must remain readable after v2 becomes current",
+);
+assert.deepEqual(
+  assertChannelShowProfileReceiptProgramBinding({ profile: legacyV1DataStoryProfile, programBrief: brief }),
+  legacyV1DataStoryProfile,
+  "the Convex-safe receipt codec must keep the same historical receipt readable",
+);
+assert.deepEqual(
+  assertChannelShowProfileReceiptPipelineCompatibility({
+    profile: legacyV1DataStoryProfile,
+    programBrief: brief,
+    pipeline: design.pipeline,
+  }),
+  legacyV1DataStoryProfile,
+  "a historical v1 source-data profile must resume against its unchanged compiler baseline",
+);
+assert.throws(
+  () => assertChannelShowProfilePipelineCompatibility({
+    profile: legacyV1DataStoryProfile,
+    programBrief: brief,
+    pipeline: reorderedCompositionPipeline,
+  }),
+  /historical v1 source-attributed data-story profile must retain its exact admitted pipeline baseline/,
+  "the rich compatibility gate must make a v1 retry exact-baseline-only",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptPipelineCompatibility({
+    profile: legacyV1DataStoryProfile,
+    programBrief: brief,
+    pipeline: reorderedCompositionPipeline,
+  }),
+  /historical v1 source-attributed data-story profile must retain its exact admitted pipeline baseline/,
+  "the Convex-safe compatibility gate must make the same v1 retry exact-baseline-only",
+);
+assert.throws(
+  () => assertChannelShowProfileReceiptExactComposition({
+    profile: legacyV1DataStoryProfile,
+    programBrief: brief,
+    pipeline: design.pipeline,
+  }),
+  /does not match the admitted channel route/,
+  "a first Convex admission cannot reuse a historical v1 receipt instead of the current v3 route",
+);
+assert.deepEqual(
+  assertChannelShowProfile({
+    profile: legacyV1DataStoryProfile,
+    programBrief: brief,
+    capabilitySelections,
+    pipeline: design.pipeline,
+  }),
+  profile,
+  "an exact new admission may upgrade only the receipt version while retaining the sealed baseline graph",
 );
 
 const legacyProfileBody = {

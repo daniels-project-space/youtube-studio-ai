@@ -45,6 +45,7 @@ type ReleaseCertificateReference = {
   reviewEvidenceManifestKey: string;
   reviewEvidenceFrameCount: number;
   reviewEvidenceFrameKeysFingerprint: string;
+  reviewEvidenceFrameArtifactsFingerprint: string;
   reviewReceiptKey: string;
   reviewFingerprint: string;
   reviewReceiptVersion: string;
@@ -80,6 +81,12 @@ function evidenceFrameKeysFingerprint(keys: readonly string[]): string {
   return sha256Hex(canonicalJson([...keys].sort()));
 }
 
+function evidenceFrameArtifactsFingerprint(
+  frames: readonly { r2Key: string; contentSha256: string; byteLength: number }[],
+): string {
+  return sha256Hex(canonicalJson([...frames].sort((left, right) => left.r2Key.localeCompare(right.r2Key))));
+}
+
 function referenceFrom(value: unknown, runId: string): ReleaseCertificateReference | undefined {
   const reference = record(value);
   if (!reference || reference.version !== FINAL_MASTER_RELEASE_CERTIFICATE_REFERENCE_VERSION) return undefined;
@@ -107,6 +114,9 @@ function referenceFrom(value: unknown, runId: string): ReleaseCertificateReferen
   const reviewReleaseReceiptFingerprint = visualReview && sha256(visualReview.releaseReceiptFingerprint);
   const reviewEvidenceFrameCount = visualReview?.evidenceFrameCount;
   const reviewEvidenceFrameKeysFingerprint = visualReview && sha256(visualReview.evidenceFrameKeysFingerprint);
+  const reviewEvidenceFrameArtifactsFingerprint = visualReview && sha256(
+    visualReview.evidenceFrameArtifactsFingerprint,
+  );
 
   if (
     !certificateKey ||
@@ -126,7 +136,8 @@ function referenceFrom(value: unknown, runId: string): ReleaseCertificateReferen
     !Number.isInteger(reviewEvidenceFrameCount) ||
     reviewEvidenceFrameCount < 1 ||
     reviewEvidenceFrameCount > 20_000 ||
-    !reviewEvidenceFrameKeysFingerprint
+    !reviewEvidenceFrameKeysFingerprint ||
+    !reviewEvidenceFrameArtifactsFingerprint
   ) {
     return undefined;
   }
@@ -139,6 +150,7 @@ function referenceFrom(value: unknown, runId: string): ReleaseCertificateReferen
     reviewEvidenceManifestKey,
     reviewEvidenceFrameCount,
     reviewEvidenceFrameKeysFingerprint,
+    reviewEvidenceFrameArtifactsFingerprint,
     reviewReceiptKey,
     reviewFingerprint,
     reviewReceiptVersion,
@@ -169,25 +181,35 @@ function hasMatchingQaReview(
   const frames = reviewEvidence.frames;
   let frameCount: number | undefined;
   let frameKeysFingerprint: string | undefined;
+  let frameArtifactsFingerprint: string | undefined;
   if (Array.isArray(frames)) {
     const reviewFrameKeys: string[] = [];
+    const reviewFrameArtifacts: Array<{ r2Key: string; contentSha256: string; byteLength: number }> = [];
     for (const frame of frames) {
-      const r2Key = record(frame)?.r2Key;
+      const frameRecord = record(frame);
+      const r2Key = frameRecord?.r2Key;
       if (!belongsToRun(r2Key, runId)) return false;
+      const contentSha256 = sha256(frameRecord?.contentSha256);
+      const byteLength = frameRecord?.byteLength;
+      if (!contentSha256 || !Number.isInteger(byteLength) || Number(byteLength) <= 0) return false;
       reviewFrameKeys.push(r2Key);
+      reviewFrameArtifacts.push({ r2Key, contentSha256, byteLength: Number(byteLength) });
     }
     if (new Set(reviewFrameKeys).size !== reviewFrameKeys.length) return false;
     frameCount = reviewFrameKeys.length;
     frameKeysFingerprint = evidenceFrameKeysFingerprint(reviewFrameKeys);
+    frameArtifactsFingerprint = evidenceFrameArtifactsFingerprint(reviewFrameArtifacts);
   } else {
     frameCount = reviewEvidence.frameCount as number | undefined;
     frameKeysFingerprint = sha256(reviewEvidence.frameKeysFingerprint);
+    frameArtifactsFingerprint = sha256(reviewEvidence.frameArtifactsFingerprint);
   }
 
   if (
     !Number.isInteger(frameCount) ||
     frameCount !== reference.reviewEvidenceFrameCount ||
-    frameKeysFingerprint !== reference.reviewEvidenceFrameKeysFingerprint
+    frameKeysFingerprint !== reference.reviewEvidenceFrameKeysFingerprint ||
+    frameArtifactsFingerprint !== reference.reviewEvidenceFrameArtifactsFingerprint
   ) return false;
 
   return Boolean(

@@ -2,6 +2,7 @@ import { query } from "./studioFunctions";
 import { v } from "convex/values";
 import type { Id } from "./_generated/dataModel";
 import type { QueryCtx } from "./_generated/server";
+import { normalizeReleaseEvidenceStatus } from "../src/lib/releaseEvidenceStatus";
 
 /**
  * Finished-videos library (Tranche 4).
@@ -166,6 +167,10 @@ export const listVideos = query({
       rows.push({
         _id: run._id,
         status: run.status,
+        // Execution completion and master provenance are deliberately distinct.
+        // Historical rows without a retained certificate remain visible, but
+        // must never inherit an implicit quality claim from their `ok` status.
+        releaseEvidenceStatus: normalizeReleaseEvidenceStatus(run.releaseEvidenceStatus),
         createdAt: run.startedAt ?? run._creationTime,
         startedAt: run.startedAt,
         finishedAt: run.finishedAt,

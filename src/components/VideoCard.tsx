@@ -9,6 +9,7 @@ import {
   fmtViews,
 } from "@/lib/asset-url";
 import { StageBadge } from "./StageBadge";
+import { ReleaseEvidenceBadge } from "./ReleaseEvidenceBadge";
 import { IconLibrary } from "./icons";
 
 /**
@@ -81,6 +82,10 @@ export function VideoCard({
           <time>
             {fmtDateTime(video.createdAt)}
           </time>
+        </div>
+        <div className="video-card-evidence">
+          <span className="video-card-evidence-label">Master evidence</span>
+          <ReleaseEvidenceBadge status={video.releaseEvidenceStatus} />
         </div>
         {views && (
           <div className="video-card-views">

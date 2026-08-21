@@ -2,6 +2,7 @@ import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { CHANNEL_PROGRAM_BRIEF_VERSION } from "@/engine/channelProgramBrief";
 import { CHANNEL_SHOW_PROFILE_VERSION } from "@/engine/channelShowProfileCodec";
+import { CHANNEL_COMPOSITION_RECEIPT_VERSION } from "@/engine/channelCompositionCatalog";
 
 const planWeekNanoBananaProviderReceipt = v.object({
   version: v.literal("plan-week-provider-render/v2"),
@@ -230,6 +231,18 @@ export default defineSchema({
           contentLaneFingerprint: v.string(),
           creativeCapabilityCatalogFingerprint: v.string(),
           selectedCapabilityKeys: v.array(v.string()),
+          composition: v.optional(
+            v.object({
+              version: v.literal(CHANNEL_COMPOSITION_RECEIPT_VERSION),
+              key: v.string(),
+              definitionVersion: v.string(),
+              definitionFingerprint: v.string(),
+              family: v.string(),
+              title: v.string(),
+              qualityFocus: v.array(v.string()),
+              fingerprint: v.string(),
+            }),
+          ),
           designedPipelineFingerprint: v.string(),
           fingerprint: v.string(),
         }),
