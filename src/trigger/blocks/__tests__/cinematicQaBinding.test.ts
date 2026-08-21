@@ -4,6 +4,7 @@ import { join } from "node:path";
 
 const source = readFileSync(join(process.cwd(), "src/trigger/blocks/narratedBlocks.ts"), "utf8");
 const cinematicQaEvidenceContractSource = readFileSync(join(process.cwd(), "src/lib/cinematicQaEvidenceContract.ts"), "utf8");
+const sourceProofMediaSource = readFileSync(join(process.cwd(), "src/lib/sourceProofMedia.ts"), "utf8");
 const qaStart = source.indexOf("export const qaVisual: Block");
 const timelineStart = source.indexOf("export const timelineAssemble: Block");
 const qaSource = source.slice(qaStart);
@@ -54,13 +55,28 @@ assert.match(
 );
 assert.match(
   timelineSource,
-  /item\.nameCardText[\s\S]*applyNameCardOverlay\(local, cardPath, \{[\s\S]*text: item\.nameCardText,[\s\S]*durationSec: item\.t1 - item\.t0,/,
-  "a required Casefile name card must be applied deterministically to the local reviewed clip before exact final-master assembly",
+  /item\.nameCardText[\s\S]*applyNameCardOverlay\(assembledClipPath, cardPath, \{[\s\S]*text: item\.nameCardText,[\s\S]*durationSec: item\.t1 - item\.t0,/,
+  "a required Casefile name card must remain its own deterministic transform after any source-proof citation transform",
 );
 assert.match(
   timelineSource,
   /required Casefile name-card overlay failed/,
   "Casefile assembly must fail closed if a required deterministic name-card overlay cannot be delivered",
+);
+assert.match(
+  timelineSource,
+  /sourceProofReceipt = assertSourceProofMediaClipBytes\([\s\S]*applySourceProofCitationOverlay\(local, citationPath, \{[\s\S]*label: sourceProofReceipt\.obligation\.citation\.label,[\s\S]*assembledClipPath = citationPath/,
+  "raw source-proof bytes must be verified before a full-duration citation compositor receives only the sealed receipt label",
+);
+assert.match(
+  timelineSource,
+  /required Casefile source-proof citation overlay failed/,
+  "Casefile assembly must fail closed instead of falling back to uncited proof media when citation composition fails",
+);
+assert.match(
+  sourceProofMediaSource,
+  /assertCurrentSourceProofMediaReceipt/,
+  "new source-proof assembly must reject citation-less legacy receipts even though historical receipt parsing remains available",
 );
 assert.match(
   qaSource,
@@ -146,6 +162,11 @@ assert.match(
   cinematicQaEvidenceContractSource,
   /readable, unreadable, or fabricated signs, papers, timetables, labels, glyphs[\s\S]*approved source-proof insert named above[\s\S]*deterministic planned overlays/,
   "the reviewer prompt must scope the text check to sampled evidence and exempt only approved source-proof or deterministic overlays",
+);
+assert.match(
+  cinematicQaEvidenceContractSource,
+  /deterministic visible citation must exactly equal[\s\S]*did not attest the exact sealed source-proof citation/,
+  "final-master QA must require the exact sealed Casefile citation rather than incidental archive text",
 );
 
 console.log("cinematic QA binding test passed");

@@ -4,7 +4,9 @@ import {
   CERTIFIED_CHANNEL_COMPOSITIONS,
   CHANNEL_COMPOSITION_DEFINITION_HISTORY,
   assertChannelCompositionReceiptBinding,
+  assertCertifiedChannelCompositionCatalog,
   assertCertifiedChannelCompositionPipelineCompatibility,
+  type ChannelCompositionDefinition,
   certifiedChannelCompositionMaterialization,
   certifiedChannelCompositionDefinition,
   findCertifiedChannelComposition,
@@ -60,6 +62,47 @@ assert.equal(
   resolveCertifiedChannelComposition({ family: "narrated_stock" }).key,
   "narrated_visual_essay",
   "the source-attributed route must be qualified by its existing explicit capability, not inferred from prose",
+);
+assert.deepEqual(
+  findCertifiedChannelComposition({
+    family: "narrated_stock",
+    selectedCapabilityKeys: ["source_attributed_data_story", "source_attributed_data_story"],
+  }),
+  dataStory,
+  "low-level receipt lookup must normalize a capability set before resolving its exact route",
+);
+assert.equal(
+  findCertifiedChannelComposition({
+    family: "narrated_stock",
+    selectedCapabilityKeys: ["source_attributed_data_story", "uncomposed_future_capability"],
+  }),
+  undefined,
+  "an incompatible capability combination must not silently select its source-attributed subset route",
+);
+assert.throws(
+  () => resolveCertifiedChannelComposition({
+    family: "narrated_stock",
+    selectedCapabilityKeys: ["source_attributed_data_story", "uncomposed_future_capability"],
+  }),
+  /no certified autonomous channel composition is registered for narrated_stock/,
+  "a requested incompatible capability combination must fail before a profile can seal a subset receipt",
+);
+const conflictingCurrentDataStoryRoute = {
+  key: "conflicting_source_attributed_data_story",
+  definitionVersion: "v1",
+  status: "current",
+  family: "narrated_stock",
+  title: "Conflicting source-attributed data story",
+  qualityFocus: ["named sources"],
+  requiredCapabilityKeys: ["source_attributed_data_story"],
+} as const satisfies ChannelCompositionDefinition;
+assert.throws(
+  () => assertCertifiedChannelCompositionCatalog([
+    ...CHANNEL_COMPOSITION_DEFINITION_HISTORY,
+    conflictingCurrentDataStoryRoute,
+  ]),
+  /ambiguous current certified composition route for narrated_stock capability set \["source_attributed_data_story"\]/,
+  "the catalog must reject two current routes that claim the same normalized capability set",
 );
 
 const legacyDataStoryDefinitionIdentity = {
@@ -238,7 +281,7 @@ const futureCatalogV2 = [
     key: "future_certified_timeline",
     definitionVersion: "v1",
     status: "current" as const,
-    family: "shorts" as const,
+    family: "cinematic" as const,
     title: "Future certified timeline",
     qualityFocus: ["timeline clarity"],
     requiredCapabilityKeys: [],
@@ -248,6 +291,10 @@ assert.notEqual(
   canonicalJson(CHANNEL_COMPOSITION_DEFINITION_HISTORY),
   canonicalJson(futureCatalogV2),
   "the regression must model an additive v2 catalog rather than a no-op reparse",
+);
+assert.doesNotThrow(
+  () => assertCertifiedChannelCompositionCatalog(futureCatalogV2),
+  "an unrelated exact route may be added without creating an ambiguous current capability set",
 );
 assert.equal(
   "catalogFingerprint" in dataStory,

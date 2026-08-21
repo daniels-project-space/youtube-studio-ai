@@ -32,22 +32,33 @@
  */
 import { COST_PATCH_KEY, type Block, type StageContext } from "@/engine/types";
 import { getVisualBrief, getMusicBrief } from "@/engine/creative/brief";
-import { PRICE } from "@/engine/pricing";
+import { PRICE, shortsSpinoffReleaseEvidenceCost } from "@/engine/pricing";
 import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEnvelope";
-import { resolveContentLane } from "@/engine/contentLane";
+import { laneQualityPolicy, resolveContentLane } from "@/engine/contentLane";
 import { assertChildContentRenderEvidence } from "@/trigger/blocks/childrenSafetyBlocks";
 import { assessProductionEditorialAcceptance, QualityEvidenceSchema } from "@/engine/qualityEvidence";
 import {
   assertFinalMasterReleaseCertificate,
+  createFinalMasterReleaseCertificate,
+  createFinalMasterReleaseCertificateReference,
+  createVisualReviewReleaseReceipt,
+  FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
   finalMasterReleaseCertificateKey,
   parseFinalMasterReleaseCertificateBytes,
   retainedFinalMasterReleaseObjectKeys,
   verifyFinalMasterReleaseEvidenceObjects,
+  visualReviewReleaseReceiptKey,
   type FinalMasterReleaseCertificate,
 } from "@/lib/finalMasterReleaseCertificate";
 import {
   assertFinalMasterNarrationTranscriptAuditBinding,
+  FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
+  finalMasterNarrationTranscriptAuditObjectKey,
   parseFinalMasterNarrationTranscriptAuditBytes,
+  prepareFinalMasterNarrationTranscriptAudit,
+  proveNarrationTranscript,
+  sealFinalMasterNarrationSemanticEvidence,
+  sha256NarrationTranscriptSource,
 } from "@/lib/narrationTranscriptProof";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
@@ -65,7 +76,8 @@ import {
 } from "@/lib/music";
 import { requireInternalQuerySecret, requireYouTubeConnector } from "@/lib/youtubeConnector";
 import { notifyDraftReady } from "@/lib/telegram";
-import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
+import { seamlessLoopUnit, boomerangLoopUnit, composeWithIntro, composeMusicLoopDeblur, measureLoopSeamDiff, measureAudio, probe, makeVerticalClip, burnCaptions, captionCuesFromTimings, crossfadeConcatAudio, masterAudio } from "@/lib/ffmpeg";
+import { channelVisualReviewProfile, reviewRender, type VisualReviewResult } from "@/lib/visualReview";
 import { hasAyrshareKey, crosspost as ayrCrosspost } from "@/lib/ayrshare";
 import { parseJsonLoose } from "@/lib/gemini";
 import { hasAnthropicKey } from "@/lib/anthropic";
@@ -1284,6 +1296,61 @@ async function loadDurableFinalMasterReleaseCertificate(ctx: StageContext) {
   return { certificateKey, durableCertificate };
 }
 
+/**
+ * A successful derivative upload leaves only a compact certificate reference
+ * in the run store. Rehydrate its authoritative certificate here so cleanup
+ * can retain the Short and its proof bytes without trusting a stale in-memory
+ * value. An absent key is legitimate for runs that did not opt into Shorts.
+ */
+async function loadDurableShortReleaseCertificate(ctx: StageContext) {
+  const certificateKey = opt(ctx, "shortReleaseCertificateKey");
+  if (!certificateKey) return undefined;
+  const shortKey = opt(ctx, "shortKey");
+  if (!shortKey) {
+    throw new Error("cleanup: a Short release certificate exists without its durable Short object key");
+  }
+  const durableCertificate = parseFinalMasterReleaseCertificateBytes(
+    await getObjectBytes(certificateKey),
+  );
+  const expectedCertificateKey = finalMasterReleaseCertificateKey(
+    ctx.keyPrefix,
+    ctx.runId,
+    durableCertificate.certificateFingerprint,
+  );
+  if (certificateKey !== expectedCertificateKey || durableCertificate.finalMaster.r2Key !== shortKey) {
+    throw new Error("cleanup: Short release certificate is not bound to this run's durable Short object");
+  }
+  return { certificateKey, durableCertificate };
+}
+
+/**
+ * Semantic narration receipts contain a separate, content-addressed full
+ * transcript audit. The common visual-proof verifier only needs that object
+ * for V2 reference contracts, while a derivative Short uses no inherited
+ * reference claim; verify it explicitly wherever we handle the Short.
+ */
+async function verifyFinalMasterNarrationAuditIfPresent(
+  certificate: FinalMasterReleaseCertificate,
+  subject: string,
+): Promise<void> {
+  const narrationEvidence = certificate.audio?.finalMasterNarration;
+  if (!narrationEvidence) return;
+  const audit = parseFinalMasterNarrationTranscriptAuditBytes(
+    await getObjectBytes(narrationEvidence.auditArtifact.r2Key),
+  );
+  try {
+    assertFinalMasterNarrationTranscriptAuditBinding({
+      evidence: narrationEvidence,
+      audit,
+    });
+  } catch (error) {
+    throw new Error(
+      `${subject}: durable final-master narration audit does not bind this release: ` +
+        `${error instanceof Error ? error.message : String(error)}`,
+    );
+  }
+}
+
 async function verifyFinalMasterReleaseEvidenceForUpload(
   ctx: StageContext,
   filePath: string,
@@ -1306,20 +1373,445 @@ async function verifyFinalMasterReleaseEvidenceForUpload(
     certificate: durableCertificate,
     getObjectBytes,
   });
-  if (durableCertificate.audio?.finalMasterNarration) {
-    const narrationAudit = parseFinalMasterNarrationTranscriptAuditBytes(
-      await getObjectBytes(durableCertificate.audio.finalMasterNarration.auditArtifact.r2Key),
-    );
-    assertFinalMasterNarrationTranscriptAuditBinding({
-      evidence: durableCertificate.audio.finalMasterNarration,
-      audit: narrationAudit,
-    });
-  }
+  await verifyFinalMasterNarrationAuditIfPresent(durableCertificate, "upload_draft");
   const localMasterSha256 = await fileSha256(filePath);
   if (localMasterSha256 !== durableCertificate.finalMaster.sha256) {
     throw new Error("upload_draft: local final master no longer matches its durable release certificate");
   }
   return durableCertificate;
+}
+
+type ShortReleaseStructuralEvidence = {
+  hasVideo: boolean;
+  hasAudio: boolean;
+  width?: number;
+  height?: number;
+  durationSec: number;
+  expectedDurationSec: number;
+  integratedLufs: number | null;
+};
+
+/**
+ * The parent master is not evidence for a post-transform Short. This narrow,
+ * deterministic gate rejects the common transform failures before an external
+ * connector can be resolved: missing/cropped streams, a portrait mismatch,
+ * an unexpectedly truncated clip, or an unmeasurable/silent final mix.
+ */
+export function assertShortReleaseStructuralEvidence(
+  evidence: ShortReleaseStructuralEvidence,
+): void {
+  if (!evidence.hasVideo || !evidence.hasAudio) {
+    throw new Error(
+      `shorts_spinoff: post-transform master is structurally invalid (video=${evidence.hasVideo} audio=${evidence.hasAudio})`,
+    );
+  }
+  if (evidence.width !== 1080 || evidence.height !== 1920) {
+    throw new Error(
+      `shorts_spinoff: post-transform master must be native 1080x1920 (got ${evidence.width ?? "?"}x${evidence.height ?? "?"})`,
+    );
+  }
+  if (!Number.isFinite(evidence.durationSec) || evidence.durationSec < 8) {
+    throw new Error("shorts_spinoff: post-transform master duration is invalid");
+  }
+  const toleranceSec = Math.max(1.5, evidence.expectedDurationSec * 0.04);
+  if (
+    !Number.isFinite(evidence.expectedDurationSec) ||
+    evidence.expectedDurationSec < 8 ||
+    Math.abs(evidence.durationSec - evidence.expectedDurationSec) > toleranceSec
+  ) {
+    throw new Error(
+      `shorts_spinoff: post-transform duration ${evidence.durationSec.toFixed(2)}s does not match the selected source window ${evidence.expectedDurationSec.toFixed(2)}s`,
+    );
+  }
+  if (
+    evidence.integratedLufs === null ||
+    !Number.isFinite(evidence.integratedLufs) ||
+    evidence.integratedLufs < -30 ||
+    evidence.integratedLufs > -8
+  ) {
+    throw new Error(
+      "shorts_spinoff: post-transform audio loudness is unavailable or outside the sane release band [-30,-8] LUFS",
+    );
+  }
+}
+
+/**
+ * Validate the actual reviewer result before it is sealed. This function is
+ * deliberately exported for regression coverage, but is called by the live
+ * upload path below; it is not a test-only classifier.
+ */
+export function assertShortReleaseVisualEvidence(args: {
+  review: Pick<
+    VisualReviewResult,
+    "ran" | "verdict" | "referenceCriteriaComplete" | "evidence" | "reviewFingerprint" |
+      "reviewReceiptVersion" | "reviewReceiptFingerprint" | "summary" | "defects" | "focusWindows" |
+      "referenceCriteria"
+  >;
+  expectedMasterSha256: string;
+  actualMasterSha256: string;
+}): {
+  evidenceManifestKey: string;
+  evidenceFrameKeys: string[];
+  evidenceFrameArtifacts: Array<{ r2Key: string; contentSha256: string; byteLength: number }>;
+} {
+  const { review, expectedMasterSha256, actualMasterSha256 } = args;
+  if (!review.ran) {
+    throw new Error("shorts_spinoff: required post-transform visual reviewer did not run");
+  }
+  if (review.verdict !== "pass" || !review.referenceCriteriaComplete) {
+    throw new Error(
+      `shorts_spinoff: post-transform visual review did not pass (verdict=${review.verdict})`,
+    );
+  }
+  if (
+    !/^[a-f0-9]{64}$/i.test(expectedMasterSha256) ||
+    review.evidence.source.sha256 !== expectedMasterSha256 ||
+    actualMasterSha256 !== expectedMasterSha256
+  ) {
+    throw new Error("shorts_spinoff: post-transform master changed during visual release review");
+  }
+  const evidenceManifestKey = review.evidence.manifestKey;
+  if (!evidenceManifestKey) {
+    throw new Error("shorts_spinoff: post-transform visual review lacks a durable evidence manifest");
+  }
+  const evidenceFrameArtifacts = review.evidence.frames.map((frame) => {
+    if (
+      !frame.r2Key ||
+      !frame.contentSha256 ||
+      !/^[a-f0-9]{64}$/i.test(frame.contentSha256) ||
+      typeof frame.byteLength !== "number" ||
+      !Number.isInteger(frame.byteLength) ||
+      frame.byteLength <= 0
+    ) {
+      throw new Error("shorts_spinoff: post-transform visual review frame lacks a durable byte receipt");
+    }
+    return {
+      r2Key: frame.r2Key,
+      contentSha256: frame.contentSha256,
+      byteLength: frame.byteLength,
+    };
+  });
+  if (!evidenceFrameArtifacts.length) {
+    throw new Error("shorts_spinoff: post-transform visual review retained no evidence frames");
+  }
+  const sortedArtifacts = [...evidenceFrameArtifacts].sort((left, right) => left.r2Key.localeCompare(right.r2Key));
+  const evidenceFrameKeys = sortedArtifacts.map((frame) => frame.r2Key);
+  if (new Set(evidenceFrameKeys).size !== evidenceFrameKeys.length) {
+    throw new Error("shorts_spinoff: post-transform visual review has duplicate evidence keys");
+  }
+  return {
+    evidenceManifestKey,
+    evidenceFrameKeys,
+    evidenceFrameArtifacts: sortedArtifacts,
+  };
+}
+
+function shortReviewFrameCount(value: unknown, fallback: number, max: number): number {
+  const parsed = Number(value);
+  if (!Number.isFinite(parsed)) return fallback;
+  return Math.max(8, Math.min(max, Math.floor(parsed)));
+}
+
+function assertParentMasterReadyForShort(ctx: StageContext): void {
+  if (ctx.store["qaPassed"] !== true) {
+    throw new Error("shorts_spinoff: parent master QA did not pass — refusing to derive a Short");
+  }
+  const quality = QualityEvidenceSchema.safeParse(ctx.store["qualityEvidence"]);
+  if (!quality.success || !quality.data.release.hardGateReady) {
+    throw new Error("shorts_spinoff: parent master lacks passing final quality evidence");
+  }
+  const editorialAcceptance = assessProductionEditorialAcceptance(quality.data);
+  if (!editorialAcceptance.ready) {
+    throw new Error(
+      `shorts_spinoff: parent master did not clear editorial acceptance — ${editorialAcceptance.blockers.join("; ")}`,
+    );
+  }
+}
+
+async function persistShortReleaseEvidence(args: {
+  ctx: StageContext;
+  filePath: string;
+  shortKey: string;
+  title: string;
+  topic: string;
+  expectedDurationSec: number;
+  transcriptCues: Array<{ text: string; startSec: number; endSec: number }>;
+  sourceAudioPath: string;
+  expectedNarrationText: string;
+}): Promise<{
+  certificateKey: string;
+  certificateReference: ReturnType<typeof createFinalMasterReleaseCertificateReference>;
+  certificateFingerprint: string;
+  finalMasterSha256: string;
+  durationSec: number;
+}> {
+  const { ctx } = args;
+  const structural = await probe(args.filePath);
+  const audioMeters = await measureAudio(args.filePath);
+  assertShortReleaseStructuralEvidence({
+    ...structural,
+    expectedDurationSec: args.expectedDurationSec,
+    integratedLufs: audioMeters.integratedLufs,
+  });
+
+  const beforeReviewSha256 = await fileSha256(args.filePath);
+  const contentLane = resolveContentLane({
+    stored: ctx.params["contentLane"] ?? ctx.store["contentLane"],
+    pipeline: [],
+  });
+  const laneQuality = laneQualityPolicy(contentLane);
+  const qualityBar = ctx.store["qualityBar"] as {
+    dimensions?: Array<{ id?: unknown; description?: unknown }>;
+  } | null;
+  const criticDoctrine = opt(ctx, "criticDoctrine");
+  const channelProfile = channelVisualReviewProfile({
+    contentLaneKey: contentLane.key,
+    primaryRenderer: contentLane.primaryRenderer,
+    channelName: opt(ctx, "channelName"),
+    persona: opt(ctx, "persona"),
+    styleGrammar: opt(ctx, "styleGrammar"),
+    ...(criticDoctrine ? { criticDoctrine } : {}),
+    laneEmphasis: laneQuality.emphasis,
+    qualityDimensions: (qualityBar?.dimensions ?? []).flatMap((dimension) =>
+      typeof dimension?.id === "string" ? [dimension.id] : [],
+    ),
+    qualityCriteria: (qualityBar?.dimensions ?? []).flatMap((dimension) =>
+      typeof dimension?.id === "string" && typeof dimension?.description === "string"
+        ? [`${dimension.id}: ${dimension.description}`]
+        : [],
+    ),
+  });
+  const durationSec = structural.durationSec;
+  const review = await reviewRender(
+    args.filePath,
+    durationSec,
+    {
+      title: `${args.title} #Shorts`.slice(0, 100),
+      topic: args.topic,
+      niche: opt(ctx, "niche"),
+      expectTitleCard: false,
+      expectOutroCard: false,
+      expectChapters: false,
+      channelWorld: [
+        channelProfile.channelWorld,
+        "This is a post-transform 9:16 derivative. Judge the actual center crop and burned captions, not the parent landscape master.",
+      ].filter(Boolean).join("; "),
+      expectedStructure:
+        "A self-contained portrait Short with an intact subject, a coherent opening-to-end thought, and readable synchronized captions. " +
+        channelProfile.expectedStructure,
+      allowedVisualConditions: [
+        ...channelProfile.allowedVisualConditions,
+        "Portrait reframing is acceptable only when important subjects, factual context, and burned captions remain readable and in-frame.",
+      ],
+      ...(channelProfile.criticDoctrine ? { criticDoctrine: channelProfile.criticDoctrine } : {}),
+      criticEmphasis: [
+        ...channelProfile.criticEmphasis,
+        "portrait crop subject preservation",
+        "burned-caption legibility and synchronization",
+        "opening-hook continuity",
+      ],
+      qualityCriteria: [
+        ...channelProfile.qualityCriteria,
+        "The 9:16 crop must not cut off the active subject, source evidence, or required on-screen context.",
+        "Burned captions must be legible, timed to the spoken words, and must not obscure the primary visual subject.",
+        "The Short must begin and end at coherent speech/edit boundaries without a black, frozen, or abruptly truncated finish.",
+      ],
+      transcriptCues: args.transcriptCues,
+      focusWindows: [
+        { startSec: 0, endSec: Math.min(durationSec, 6), reason: "reviewer" },
+        { startSec: Math.max(0, durationSec - 5), endSec: durationSec, reason: "reviewer" },
+      ],
+    },
+    {
+      runId: ctx.runId,
+      keyPrefix: ctx.keyPrefix,
+      sourceSha256: beforeReviewSha256,
+      required: true,
+      maxFrames: shortReviewFrameCount(ctx.params["shortVisualReviewFrames"], 36, 72),
+      maxFocusFrames: shortReviewFrameCount(ctx.params["shortVisualReviewFocusFrames"], 18, 36),
+      log: (message) => ctx.log(`shorts_spinoff: ${message}`),
+    },
+  );
+  const afterReviewSha256 = await fileSha256(args.filePath);
+  const visualEvidence = assertShortReleaseVisualEvidence({
+    review,
+    expectedMasterSha256: beforeReviewSha256,
+    actualMasterSha256: afterReviewSha256,
+  });
+  const visualReviewReleaseReceipt = createVisualReviewReleaseReceipt({
+    reviewFingerprint: review.reviewFingerprint,
+    reviewReceiptVersion: review.reviewReceiptVersion,
+    reviewReceiptFingerprint: review.reviewReceiptFingerprint,
+    verdict: "pass",
+    summary: review.summary,
+    defects: review.defects,
+    focusWindows: review.focusWindows,
+    referenceCriteria: review.referenceCriteria,
+    // assertShortReleaseVisualEvidence above has already rejected every
+    // non-complete review. Keep the receipt schema's literal pass invariant.
+    referenceCriteriaComplete: true,
+    evidence: {
+      source: { durationSec, sha256: afterReviewSha256 },
+      manifestKey: visualEvidence.evidenceManifestKey,
+      frameKeys: visualEvidence.evidenceFrameKeys,
+      frameArtifacts: visualEvidence.evidenceFrameArtifacts,
+    },
+  });
+  const visualReviewReceiptKey = visualReviewReleaseReceiptKey(
+    ctx.keyPrefix,
+    ctx.runId,
+    visualReviewReleaseReceipt.releaseReceiptFingerprint,
+  );
+  await putObject(
+    visualReviewReceiptKey,
+    Buffer.from(JSON.stringify(visualReviewReleaseReceipt, null, 2)),
+    { contentType: "application/json" },
+  );
+  const expectedNarrationText = args.expectedNarrationText.trim();
+  if (!expectedNarrationText) {
+    throw new Error("shorts_spinoff: selected Short window has no approved narration text to audit");
+  }
+  // makeVerticalClip creates the raw portrait derivative and burnCaptions
+  // copies its audio stream. Audit both independently: the first transcript
+  // proves the selected window against the approved text, while the second
+  // proves that exact spoken text is still audible in the caption-burned
+  // release bytes. This is deliberately not an inherited parent receipt.
+  const sourceNarrationSha256 = await sha256NarrationTranscriptSource(args.sourceAudioPath);
+  const sourceTranscript = proveNarrationTranscript({
+    audioPath: args.sourceAudioPath,
+    expectedText: expectedNarrationText,
+    sourceSha256: sourceNarrationSha256,
+  });
+  const finalMasterTranscript = proveNarrationTranscript({
+    audioPath: args.filePath,
+    expectedText: expectedNarrationText,
+    sourceSha256: afterReviewSha256,
+  });
+  const preparedNarrationAudit = prepareFinalMasterNarrationTranscriptAudit({
+    version: FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
+    finalMaster: { sha256: afterReviewSha256, durationSec },
+    narration: {
+      sourceSha256: sourceNarrationSha256,
+      expectedTextSha256: sourceTranscript.expected.textSha256,
+      startSec: 0,
+      durationSec,
+    },
+    sourceTranscript,
+    finalMasterTranscript,
+  });
+  const narrationAuditKey = finalMasterNarrationTranscriptAuditObjectKey(
+    ctx.keyPrefix,
+    ctx.runId,
+    preparedNarrationAudit.contentSha256,
+  );
+  await putObject(narrationAuditKey, preparedNarrationAudit.bytes, {
+    contentType: "application/json",
+  });
+  const finalMasterNarration = sealFinalMasterNarrationSemanticEvidence({
+    version: "final-master-narration-semantic-evidence/v1",
+    finalMaster: preparedNarrationAudit.audit.finalMaster,
+    narration: preparedNarrationAudit.audit.narration,
+    sourceTranscript: preparedNarrationAudit.sourceTranscript,
+    finalMasterTranscript: preparedNarrationAudit.finalMasterTranscript,
+    auditArtifact: {
+      version: FINAL_MASTER_NARRATION_TRANSCRIPT_AUDIT_VERSION,
+      r2Key: narrationAuditKey,
+      contentSha256: preparedNarrationAudit.contentSha256,
+      byteLength: preparedNarrationAudit.bytes.byteLength,
+    },
+  });
+  // The certificate deliberately carries no inherited reference-quality V1/V2
+  // claim. Its audio proof is only the real, local transcript audit and
+  // deterministic final-mix meter measured on these derivative bytes.
+  const certificate = createFinalMasterReleaseCertificate({
+    version: FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
+    finalMaster: {
+      r2Key: args.shortKey,
+      sha256: afterReviewSha256,
+      durationSec,
+    },
+    visualReview: {
+      evidenceManifestKey: visualEvidence.evidenceManifestKey,
+      evidenceFrameKeys: visualEvidence.evidenceFrameKeys,
+      evidenceFrameArtifacts: visualEvidence.evidenceFrameArtifacts,
+      receiptKey: visualReviewReceiptKey,
+      reviewFingerprint: review.reviewFingerprint,
+      reviewReceiptVersion: review.reviewReceiptVersion,
+      reviewReceiptFingerprint: review.reviewReceiptFingerprint,
+      releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
+    },
+    audio: {
+      finalMasterNarration,
+      finalMasterMeters: {
+        integratedLufs: audioMeters.integratedLufs,
+        windowMeanDb: audioMeters.windowMeanDb,
+      },
+    },
+  });
+  const certificateKey = finalMasterReleaseCertificateKey(
+    ctx.keyPrefix,
+    ctx.runId,
+    certificate.certificateFingerprint,
+  );
+  await putObject(certificateKey, Buffer.from(JSON.stringify(certificate, null, 2)), {
+    contentType: "application/json",
+  });
+  const durableCertificate = parseFinalMasterReleaseCertificateBytes(await getObjectBytes(certificateKey));
+  if (durableCertificate.certificateFingerprint !== certificate.certificateFingerprint) {
+    throw new Error("shorts_spinoff: reloaded post-transform release certificate fingerprint changed after persistence");
+  }
+  await verifyFinalMasterReleaseEvidenceObjects({ certificate: durableCertificate, getObjectBytes });
+  await verifyFinalMasterNarrationAuditIfPresent(durableCertificate, "shorts_spinoff");
+  if (bytesSha256(await getObjectBytes(args.shortKey)) !== afterReviewSha256) {
+    throw new Error("shorts_spinoff: durable Short object no longer matches its post-transform release certificate");
+  }
+  if (await fileSha256(args.filePath) !== afterReviewSha256) {
+    throw new Error("shorts_spinoff: post-transform master changed while its durable release evidence was being persisted");
+  }
+  return {
+    certificateKey,
+    certificateReference: createFinalMasterReleaseCertificateReference({
+      keyPrefix: ctx.keyPrefix,
+      runId: ctx.runId,
+      certificateKey,
+      certificate: durableCertificate,
+    }),
+    certificateFingerprint: durableCertificate.certificateFingerprint,
+    finalMasterSha256: afterReviewSha256,
+    durationSec,
+  };
+}
+
+async function verifyShortReleaseEvidenceForUpload(args: {
+  ctx: StageContext;
+  filePath: string;
+  shortKey: string;
+  certificateKey: string;
+}): Promise<FinalMasterReleaseCertificate> {
+  const certificate = parseFinalMasterReleaseCertificateBytes(await getObjectBytes(args.certificateKey));
+  const expectedCertificateKey = finalMasterReleaseCertificateKey(
+    args.ctx.keyPrefix,
+    args.ctx.runId,
+    certificate.certificateFingerprint,
+  );
+  if (args.certificateKey !== expectedCertificateKey || certificate.finalMaster.r2Key !== args.shortKey) {
+    throw new Error("shorts_spinoff: post-transform release certificate is not bound to this Short object");
+  }
+  retainedFinalMasterReleaseObjectKeys({
+    keyPrefix: args.ctx.keyPrefix,
+    runId: args.ctx.runId,
+    certificateKey: args.certificateKey,
+    certificate,
+  });
+  await verifyFinalMasterReleaseEvidenceObjects({ certificate, getObjectBytes });
+  await verifyFinalMasterNarrationAuditIfPresent(certificate, "shorts_spinoff");
+  if (bytesSha256(await getObjectBytes(args.shortKey)) !== certificate.finalMaster.sha256) {
+    throw new Error("shorts_spinoff: durable Short object no longer matches its release certificate");
+  }
+  if (await fileSha256(args.filePath) !== certificate.finalMaster.sha256) {
+    throw new Error("shorts_spinoff: local Short no longer matches its durable post-transform release certificate");
+  }
+  return certificate;
 }
 
 /**
@@ -1333,6 +1825,11 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
   runId: string;
   certificateKey: string;
   certificate: FinalMasterReleaseCertificate;
+  /** Additional independently certified derivative masters (for example a Short). */
+  additionalCertificates?: readonly {
+    certificateKey: string;
+    certificate: FinalMasterReleaseCertificate;
+  }[];
   keepNames: readonly string[];
   getObjectBytes: (key: string) => Promise<Uint8Array>;
   listObjects: (prefix: string) => Promise<string[]>;
@@ -1345,16 +1842,26 @@ export async function pruneRunObjectsWithVerifiedFinalMasterEvidence(args: {
   error?: string;
 }> {
   try {
-    const retainedReleaseEvidence = retainedFinalMasterReleaseObjectKeys({
-      keyPrefix: args.keyPrefix,
-      runId: args.runId,
-      certificateKey: args.certificateKey,
-      certificate: args.certificate,
-    });
-    await verifyFinalMasterReleaseEvidenceObjects({
-      certificate: args.certificate,
-      getObjectBytes: args.getObjectBytes,
-    });
+    const certificates = [
+      { certificateKey: args.certificateKey, certificate: args.certificate },
+      ...(args.additionalCertificates ?? []),
+    ];
+    const retainedSets = await Promise.all(
+      certificates.map(async ({ certificateKey, certificate }) => {
+        const retained = retainedFinalMasterReleaseObjectKeys({
+          keyPrefix: args.keyPrefix,
+          runId: args.runId,
+          certificateKey,
+          certificate,
+        });
+        await verifyFinalMasterReleaseEvidenceObjects({
+          certificate,
+          getObjectBytes: args.getObjectBytes,
+        });
+        return retained;
+      }),
+    );
+    const retainedReleaseEvidence = [...new Set(retainedSets.flat())].sort();
     const prefix = `${args.keyPrefix}runs/${args.runId}/`;
     const keep = new Set([
       ...args.keepNames.map((name) => `${prefix}${name.replace(/^\/+/, "")}`),
@@ -1697,11 +2204,34 @@ export const cleanup: Block = {
     let pruning: Awaited<ReturnType<typeof pruneRunObjectsWithVerifiedFinalMasterEvidence>>;
     try {
       const { certificateKey, durableCertificate } = await loadDurableFinalMasterReleaseCertificate(ctx);
+      const shortRelease = await loadDurableShortReleaseCertificate(ctx);
+      if (shortRelease) {
+        await verifyFinalMasterNarrationAuditIfPresent(
+          shortRelease.durableCertificate,
+          "cleanup",
+        );
+        if (
+          bytesSha256(await getObjectBytes(shortRelease.durableCertificate.finalMaster.r2Key)) !==
+          shortRelease.durableCertificate.finalMaster.sha256
+        ) {
+          throw new Error("cleanup: durable Short object no longer matches its release certificate");
+        }
+      }
       pruning = await pruneRunObjectsWithVerifiedFinalMasterEvidence({
         keyPrefix: ctx.keyPrefix,
         runId: ctx.runId,
         certificateKey,
         certificate: durableCertificate,
+        ...(shortRelease
+          ? {
+              additionalCertificates: [
+                {
+                  certificateKey: shortRelease.certificateKey,
+                  certificate: shortRelease.durableCertificate,
+                },
+              ],
+            }
+          : {}),
         keepNames,
         getObjectBytes,
         listObjects,
@@ -1729,7 +2259,7 @@ export const cleanup: Block = {
     try {
       const n = await convex().mutation(api.assets.pruneRun, {
         runId: ctx.runId as Id<"runs">,
-        keepKinds: ["video", "thumbnail"],
+        keepKinds: ["video", "thumbnail", "derived_short"],
       });
       ctx.log(`cleanup: pruned ${n} intermediate asset row(s)`);
     } catch (e) {
@@ -1762,40 +2292,105 @@ export const cleanup: Block = {
  */
 export const shortsSpinoff: Block = {
   id: "shorts_spinoff",
-  consumes: ["videoLocalPath", "sentenceTimings", "title", "watchUrl"],
-  produces: ["shortKey", "shortVideoId"],
+  consumes: [
+    "videoKey",
+    "videoLocalPath",
+    "sentenceTimings",
+    "title",
+    "watchUrl",
+    "qaPassed",
+    "qualityEvidence",
+    "finalMasterReleaseCertificateKey",
+  ],
+  produces: [
+    "shortKey",
+    "shortVideoId",
+    "shortReleaseCertificateReference",
+    "shortReleaseCertificateKey",
+  ],
+  paid: true,
   run: async (ctx) => {
     const src = str(ctx, "videoLocalPath");
+    const videoKey = str(ctx, "videoKey");
     const title = str(ctx, "title");
     const timings = (ctx.store["sentenceTimings"] as { text: string; start: number; end: number }[] | undefined) ?? [];
     if (timings.length === 0) {
       ctx.log("shorts_spinoff: no sentenceTimings — skipping");
-      return { shortKey: "", shortVideoId: "" };
+      return { [COST_PATCH_KEY]: 0 };
     }
-    const targetDur = Number(ctx.params["shortDurSec"] ?? 45);
+    // Even a private derivative must originate from the exact certified parent
+    // master. This revalidation is intentionally repeated here rather than
+    // assuming the preceding upload stage's in-memory success is still true.
+    assertParentMasterReadyForShort(ctx);
+    const parentCertificate = await verifyFinalMasterReleaseEvidenceForUpload(ctx, src, videoKey);
+    ctx.log(
+      `shorts_spinoff: revalidated certified parent master (${parentCertificate.certificateFingerprint.slice(0, 12)})`,
+    );
+    const requestedTargetDur = Number(ctx.params["shortDurSec"] ?? 45);
+    // The transform gate and transcript audit both require at least eight
+    // seconds. Normalize the requested window before choosing sentences so a
+    // too-short caller value cannot make the output include un-audited speech.
+    const targetDur = Number.isFinite(requestedTargetDur)
+      ? Math.max(8, requestedTargetDur)
+      : 45;
 
     // Window = the hook: accumulate opening sentences up to ~targetDur seconds.
-    const startSec = Math.max(0, timings[0].start);
-    let endSec = startSec;
+    const sourceStartSec = Math.max(0, timings[0].start);
+    let endSec = sourceStartSec;
     const windowTimings: { text: string; start: number; end: number }[] = [];
     for (const t of timings) {
-      if (t.start < startSec) continue;
+      if (t.start < sourceStartSec) continue;
       windowTimings.push(t);
       endSec = t.end;
-      if (endSec - startSec >= targetDur) break;
+      if (endSec - sourceStartSec >= targetDur) break;
     }
-    const durSec = Math.max(8, Math.min(endSec - startSec, targetDur + 12));
+    const durSec = Math.max(8, Math.min(endSec - sourceStartSec, targetDur + 12));
 
     const tmp = await makeRunTempDir(ctx.runId);
     const raw = join(tmp, "short_raw.mp4");
     const final = join(tmp, "short.mp4");
-    await makeVerticalClip(src, raw, { startSec, durSec });
-    const cues = captionCuesFromTimings(windowTimings, -startSec);
+    await makeVerticalClip(src, raw, { startSec: sourceStartSec, durSec });
+    const cues = captionCuesFromTimings(windowTimings, -sourceStartSec);
     await burnCaptions(raw, cues, final, { tmpDir: tmp, width: 1080, height: 1920 });
 
     const shortKey = `${ctx.keyPrefix}runs/${ctx.runId}/short.mp4`;
     await putObjectFromFile(shortKey, final, { contentType: "video/mp4" });
     ctx.log(`shorts_spinoff: built 9:16 short (${durSec.toFixed(0)}s) → ${shortKey}`);
+
+    // Crop + caption burning creates a new master. Its own required visual
+    // review, audio meter, receipt, and certificate are all persisted and
+    // re-read before any YouTube connector is touched. Parent evidence is
+    // therefore a prerequisite, never a substitute for this actual output.
+    const shortRelease = await persistShortReleaseEvidence({
+      ctx,
+      filePath: final,
+      shortKey,
+      title,
+      topic: opt(ctx, "topic") ?? title,
+      expectedDurationSec: durSec,
+      sourceAudioPath: raw,
+      expectedNarrationText: windowTimings
+        .map((timing) => typeof timing.text === "string" ? timing.text.trim() : "")
+        .filter(Boolean)
+        .join(" "),
+      transcriptCues: windowTimings.flatMap((timing) => {
+        const text = typeof timing.text === "string" ? timing.text.trim() : "";
+        const cueStartSec = Number(timing.start) - sourceStartSec;
+        const cueEndSec = Number(timing.end) - sourceStartSec;
+        return text && Number.isFinite(cueStartSec) && Number.isFinite(cueEndSec) && cueEndSec >= cueStartSec
+          ? [{ text, startSec: Math.max(0, cueStartSec), endSec: Math.min(durSec, cueEndSec) }]
+          : [];
+      }),
+    });
+    await verifyShortReleaseEvidenceForUpload({
+      ctx,
+      filePath: final,
+      shortKey,
+      certificateKey: shortRelease.certificateKey,
+    });
+    ctx.log(
+      `shorts_spinoff: durable post-transform release evidence persisted (${shortRelease.certificateFingerprint.slice(0, 12)})`,
+    );
 
     // Upload as a YouTube Short (PRIVATE unless the param opts into public).
     let shortVideoId = "";
@@ -1834,6 +2429,16 @@ export const shortsSpinoff: Block = {
     });
     shortVideoId = res.videoId;
     ctx.log(`shorts_spinoff: uploaded Short ${res.watchUrl} (privacy=${res.privacyStatus})`);
+    await recordAsset(ctx, "derived_short", shortKey, {
+      kind: "post_transform_short",
+      durationSec: shortRelease.durationSec,
+      sha256: shortRelease.finalMasterSha256,
+      youtubeVideoId: shortVideoId,
+      parentMasterCertificateFingerprint: parentCertificate.certificateFingerprint,
+      releaseCertificateFingerprint: shortRelease.certificateFingerprint,
+      releaseCertificateKey: shortRelease.certificateKey,
+      referenceQualityAssessment: "not_attested_for_derivative",
+    });
 
     // Optional multi-platform crosspost of the SHORT via Ayrshare — explicit opt-in
     // only (so private brand content is never auto-published off-platform).
@@ -1852,7 +2457,13 @@ export const shortsSpinoff: Block = {
         ctx.log(`shorts_spinoff: crosspost failed (non-fatal): ${e instanceof Error ? e.message : e}`);
       }
     }
-    return { shortKey, shortVideoId };
+    return {
+      shortKey,
+      shortVideoId,
+      shortReleaseCertificateReference: shortRelease.certificateReference,
+      shortReleaseCertificateKey: shortRelease.certificateKey,
+      [COST_PATCH_KEY]: shortsSpinoffReleaseEvidenceCost(ctx.params),
+    };
   },
 };
 

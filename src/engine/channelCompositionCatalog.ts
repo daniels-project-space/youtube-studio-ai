@@ -68,7 +68,7 @@ export interface ChannelCompositionMaterialization {
   readonly operations: readonly ChannelCompositionPipelineOperation[];
 }
 
-interface ChannelCompositionDefinition {
+export interface ChannelCompositionDefinition {
   key: string;
   /** Version of this exact human-visible definition, not the whole catalog. */
   definitionVersion: string;
@@ -368,6 +368,7 @@ const ChannelCompositionReceiptSchema = z.object({
 }).strict();
 
 function definitionFor(key: string, definitionVersion: string): HistoricalCompositionDefinition | undefined {
+  assertCertifiedChannelCompositionCatalog();
   return CHANNEL_COMPOSITION_DEFINITION_HISTORY.find(
     (definition) => definition.key === key && definition.definitionVersion === definitionVersion,
   );
@@ -455,24 +456,69 @@ function normalizedCapabilityKeys(keys: readonly string[]): readonly string[] {
   return [...new Set(keys)].sort((left, right) => left.localeCompare(right));
 }
 
+function capabilitySetIdentity(keys: readonly string[]): string {
+  return canonicalJson(normalizedCapabilityKeys(keys));
+}
+
+/**
+ * Keep current route selection one-to-one. A composition receipt names an
+ * exact capability set, so two current definitions may never compete for the
+ * same family/set pair. Historical definitions intentionally remain outside
+ * this uniqueness constraint because they are resolved only by key/version.
+ */
+export function assertCertifiedChannelCompositionCatalog(
+  definitions: readonly ChannelCompositionDefinition[] = CHANNEL_COMPOSITION_DEFINITION_HISTORY,
+): void {
+  const historicalDefinitionIds = new Set<string>();
+  const currentRoutes = new Set<string>();
+
+  for (const definition of definitions) {
+    const definitionId = `${definition.key}\u0000${definition.definitionVersion}`;
+    if (historicalDefinitionIds.has(definitionId)) {
+      throw new Error(
+        `duplicate certified channel composition definition ${definition.key}/${definition.definitionVersion}`,
+      );
+    }
+    historicalDefinitionIds.add(definitionId);
+
+    const normalized = normalizedCapabilityKeys(definition.requiredCapabilityKeys);
+    if (normalized.length !== definition.requiredCapabilityKeys.length) {
+      throw new Error(
+        `certified channel composition ${definition.key}/${definition.definitionVersion} repeats capability keys`,
+      );
+    }
+    if (definition.status !== "current") continue;
+
+    const routeId = `${definition.family}\u0000${capabilitySetIdentity(normalized)}`;
+    if (currentRoutes.has(routeId)) {
+      throw new Error(
+        `ambiguous current certified composition route for ${definition.family} capability set ${capabilitySetIdentity(normalized)}`,
+      );
+    }
+    currentRoutes.add(routeId);
+  }
+}
+
 function matchingCompositionDefinition(input: {
   family: FamilyKey;
   selectedCapabilityKeys?: readonly string[];
 }): HistoricalCompositionDefinition | undefined {
-  const selectedCapabilityKeys = new Set(normalizedCapabilityKeys(input.selectedCapabilityKeys ?? []));
-  return CERTIFIED_CHANNEL_COMPOSITIONS
+  assertCertifiedChannelCompositionCatalog();
+  const selectedCapabilityKeys = normalizedCapabilityKeys(input.selectedCapabilityKeys ?? []);
+  const matches = CERTIFIED_CHANNEL_COMPOSITIONS
     .filter((candidate) => candidate.family === input.family)
-    .filter((candidate) => candidate.requiredCapabilityKeys.every((key) => selectedCapabilityKeys.has(key)))
-    .sort((left, right) =>
-      right.requiredCapabilityKeys.length - left.requiredCapabilityKeys.length ||
-      left.key.localeCompare(right.key) ||
-      right.definitionVersion.localeCompare(left.definitionVersion),
-    )[0];
+    .filter((candidate) => capabilitySetIdentity(candidate.requiredCapabilityKeys) === capabilitySetIdentity(selectedCapabilityKeys));
+  if (matches.length > 1) {
+    throw new Error(
+      `ambiguous current certified composition route for ${input.family} capability set ${capabilitySetIdentity(selectedCapabilityKeys)}`,
+    );
+  }
+  return matches[0];
 }
 
 /**
- * Resolve only an already-admitted composition. More specific, capability
- * qualified routes win over their family's default route deterministically.
+ * Resolve only an already-admitted composition whose normalized capability
+ * set exactly matches the requested selection.
  */
 export function resolveCertifiedChannelComposition(input: {
   family: FamilyKey;

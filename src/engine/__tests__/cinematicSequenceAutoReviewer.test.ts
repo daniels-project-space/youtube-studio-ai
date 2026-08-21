@@ -28,6 +28,7 @@ import {
 import {
   SOURCE_PROOF_MEDIA_VERSION,
   sourceProofMediaProvenanceFingerprint,
+  type CurrentSourceProofMediaObligation,
   type SourceProofMediaObligation,
 } from "@/engine/sourceProofMedia";
 import { createSourceBoundStorySpineHandoff } from "@/engine/sourceBoundStorySpine";
@@ -195,7 +196,7 @@ const shotList = [
 
 const admittedSource = assertCasefileSourcePacket(sourcePacket, { now: NOW });
 
-function sourceProofMediaObligation(): SourceProofMediaObligation {
+function sourceProofMediaObligation(): CurrentSourceProofMediaObligation {
   const obligation = {
     version: SOURCE_PROOF_MEDIA_VERSION,
     sourceId: "source-court-archive",
@@ -205,8 +206,13 @@ function sourceProofMediaObligation(): SourceProofMediaObligation {
     assetUrl: "https://court.example.org/assets/vault-closure-finding.jpg",
     assetSha256: "1".repeat(64),
     approvalReceiptId: "source-proof-receipt-vault-closure-001",
+    citation: {
+      sourceId: "source-court-archive",
+      label: "Regional Court Archive: Closure finding",
+      locator: "https://court.example.org/records/vault-closure",
+    },
     provenanceFingerprint: "0".repeat(64),
-  } satisfies Omit<SourceProofMediaObligation, "provenanceFingerprint"> & { provenanceFingerprint: string };
+  } satisfies Omit<CurrentSourceProofMediaObligation, "provenanceFingerprint"> & { provenanceFingerprint: string };
   obligation.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(obligation);
   return obligation;
 }

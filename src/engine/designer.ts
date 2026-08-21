@@ -23,7 +23,10 @@ import {
   type ChannelProgramBrief,
 } from "./channelProgramBrief";
 import { compileCertifiedChannelComposition } from "./channelCompositionCompiler";
-import { findCertifiedChannelComposition } from "./channelCompositionCatalog";
+import {
+  findCertifiedChannelComposition,
+  resolveCertifiedChannelComposition,
+} from "./channelCompositionCatalog";
 import {
   dataStoryInsertParams,
   dataStoryProductionReadiness,
@@ -700,7 +703,10 @@ export function designPipeline(opts: DesignOptions): DesignResult {
   // policy/capability/validation gates below; this layer only applies sealed
   // block and parameter operations and cannot introduce a new renderer.
   const selectedCapabilityKeys = selectedCapabilities.map((selection) => selection.capability);
-  if (findCertifiedChannelComposition({ family: opts.family, selectedCapabilityKeys })) {
+  const certifiedComposition = selectedCapabilityKeys.length
+    ? resolveCertifiedChannelComposition({ family: opts.family, selectedCapabilityKeys })
+    : findCertifiedChannelComposition({ family: opts.family, selectedCapabilityKeys });
+  if (certifiedComposition) {
     const compositionCompilation = compileCertifiedChannelComposition({
       family: opts.family,
       capabilitySelections: selectedCapabilities,

@@ -24,8 +24,10 @@ import {
   assertCertifiedChannelCompositionPipelineCompatibility,
   assertPersistedChannelCompositionReceiptBinding,
   findCertifiedChannelComposition,
+  resolveCertifiedChannelComposition,
 } from "@/engine/channelCompositionCatalog";
 import { resolveChannelFamilyManifest, type ChannelFamilyManifest } from "@/engine/channelFamilyManifest";
+import type { FamilyKey } from "@/engine/families";
 import type { PipelineEntry } from "@/engine/types";
 import {
   CHANNEL_SHOW_PROFILE_VERSION,
@@ -112,6 +114,23 @@ function assertSortedUniqueCapabilityKeys(keys: readonly string[]): CreativeCapa
   return normalized;
 }
 
+/**
+ * A selected capability is a route choice, never advisory metadata. Families
+ * without a named base composition may retain an empty selection, but any
+ * non-empty normalized selection must resolve to exactly one current receipt.
+ */
+export function resolveChannelShowProfileComposition(input: {
+  family: FamilyKey;
+  selectedCapabilityKeys: readonly CreativeCapabilityKey[];
+}) {
+  const selectedCapabilityKeys = [...new Set(input.selectedCapabilityKeys)]
+    .sort((left, right) => left.localeCompare(right));
+  if (!selectedCapabilityKeys.length) {
+    return findCertifiedChannelComposition({ family: input.family, selectedCapabilityKeys });
+  }
+  return resolveCertifiedChannelComposition({ family: input.family, selectedCapabilityKeys });
+}
+
 function profileBody(input: CreateChannelShowProfileInput): ChannelShowProfileBody {
   const programBrief = assertCanonicalChannelProgramBrief(input.programBrief);
   const manifest = resolveChannelFamilyManifest(programBrief.family);
@@ -127,7 +146,7 @@ function profileBody(input: CreateChannelShowProfileInput): ChannelShowProfileBo
   const selectedCapabilityKeys = resolvedSelections
     .map(({ selection }) => selection.capability)
     .sort((left, right) => left < right ? -1 : left > right ? 1 : 0);
-  const composition = findCertifiedChannelComposition({
+  const composition = resolveChannelShowProfileComposition({
     family: programBrief.family,
     selectedCapabilityKeys,
   });

@@ -482,6 +482,22 @@ const typedSchemas: Record<string, { type: string; schema: z.ZodType<unknown>; p
     schema: nonEmpty,
     persist: "reference",
   },
+  // A derivative Short is a second rendered master, not evidence carried over
+  // from its landscape parent. Its compact certificate reference is retained
+  // separately so cleanup/UI consumers cannot mistake the parent's review for
+  // proof of the post-crop, post-caption artifact.
+  shortKey: { type: "R2ObjectKey", schema: nonEmpty, persist: "reference" },
+  shortVideoId: { type: "YouTubeVideoId", schema: nonEmpty },
+  shortReleaseCertificateReference: {
+    type: "FinalMasterReleaseCertificateReference",
+    schema: FinalMasterReleaseCertificateReferenceSchema,
+    persist: "reference",
+  },
+  shortReleaseCertificateKey: {
+    type: "R2ObjectKey",
+    schema: nonEmpty,
+    persist: "reference",
+  },
   videoLocalPath: { type: "EphemeralLocalPath", schema: nonEmpty, persist: "summary" },
   watchUrl: { type: "YouTubeWatchUrl", schema: z.string().url() },
   youtubeVideoId: { type: "YouTubeVideoId", schema: nonEmpty },

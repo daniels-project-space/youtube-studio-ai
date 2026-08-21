@@ -41,10 +41,10 @@ import {
   validateSourceBoundStorySpineHandoff,
 } from "./sourceBoundStorySpine";
 import {
+  CurrentSourceProofMediaObligationSchema,
   SOURCE_PROOF_MEDIA_VERSION,
-  SourceProofMediaObligationSchema,
   sourceProofMediaProvenanceFingerprint,
-  type SourceProofMediaObligation,
+  type CurrentSourceProofMediaObligation,
 } from "./sourceProofMedia";
 
 /**
@@ -471,7 +471,7 @@ export function attachCasefileEpisodeSourceProofMedia(args: {
     );
   }
   const sourceProofShotById = new Map(sourceProofShots.map(({ shot, sourceIds }) => [shot.id, { shot, sourceIds }]));
-  const obligationByShotId = new Map<string, SourceProofMediaObligation>();
+  const obligationByShotId = new Map<string, CurrentSourceProofMediaObligation>();
   for (const attachment of attachments) {
     const target = sourceProofShotById.get(attachment.shotId);
     if (!target) {
@@ -482,6 +482,14 @@ export function attachCasefileEpisodeSourceProofMedia(args: {
     }
     if (!target.sourceIds.includes(attachment.sourceId)) {
       throw new Error(`casefile source-proof media attachment ${attachment.shotId} names a source outside that shot's admitted attribution`);
+    }
+    const sourceRecord = args.episode.sourcePacket.casePacket.sourceLedger.find(
+      (entry) => entry.id === attachment.sourceId,
+    );
+    if (!sourceRecord) {
+      throw new Error(
+        `casefile source-proof media attachment ${attachment.shotId} names a source outside the admitted Casefile source ledger`,
+      );
     }
     const visualUse = args.episode.sourcePacket.sourceUsage.find((entry) =>
       entry.sourceId === attachment.sourceId &&
@@ -494,7 +502,12 @@ export function attachCasefileEpisodeSourceProofMedia(args: {
         `casefile source-proof media attachment ${attachment.shotId} does not match a current visual-media source/asset/rights entitlement`,
       );
     }
-    const withoutProvenance: Omit<SourceProofMediaObligation, "provenanceFingerprint"> = {
+    if (sourceRecord.rights.evidenceLocator !== attachment.rightsEvidenceLocator) {
+      throw new Error(
+        `casefile source-proof media attachment ${attachment.shotId} does not match the admitted source-ledger rights evidence`,
+      );
+    }
+    const withoutProvenance: Omit<CurrentSourceProofMediaObligation, "provenanceFingerprint"> = {
       version: SOURCE_PROOF_MEDIA_VERSION,
       sourceId: attachment.sourceId,
       assetId: attachment.assetId,
@@ -503,8 +516,13 @@ export function attachCasefileEpisodeSourceProofMedia(args: {
       assetUrl: attachment.assetUrl,
       assetSha256: attachment.assetSha256,
       approvalReceiptId: attachment.approvalReceiptId,
+      citation: {
+        sourceId: sourceRecord.id,
+        label: `${sourceRecord.publisher}: ${sourceRecord.title}`,
+        locator: sourceRecord.locator,
+      },
     };
-    const obligation = SourceProofMediaObligationSchema.parse({
+    const obligation = CurrentSourceProofMediaObligationSchema.parse({
       ...withoutProvenance,
       provenanceFingerprint: sourceProofMediaProvenanceFingerprint(withoutProvenance),
     });

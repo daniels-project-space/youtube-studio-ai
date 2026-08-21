@@ -6,11 +6,17 @@ import {
   GeneratedFootageSceneManifestSchema,
 } from "@/engine/generatedFootageManifest";
 import {
+  LEGACY_SOURCE_PROOF_MEDIA_RECEIPT_VERSION,
+  LEGACY_SOURCE_PROOF_MEDIA_VERSION,
   SOURCE_PROOF_MEDIA_VERSION,
+  SourceProofMediaObligationSchema,
   assertSourceProofMediaReceipt,
   createSourceProofMediaReceipt,
   sourceProofMediaProvenanceFingerprint,
-  type SourceProofMediaObligation,
+  sourceProofMediaReceiptFingerprint,
+  type CurrentSourceProofMediaObligation,
+  type LegacySourceProofMediaObligation,
+  type LegacySourceProofMediaReceipt,
 } from "@/engine/sourceProofMedia";
 import {
   assertSourceProofMediaClipBytes,
@@ -26,8 +32,8 @@ function sha256(bytes: Uint8Array): string {
   return createHash("sha256").update(bytes).digest("hex");
 }
 
-function obligation(assetSha256 = sha256(assetBytes)): SourceProofMediaObligation {
-  const value: SourceProofMediaObligation = {
+function obligation(assetSha256 = sha256(assetBytes)): CurrentSourceProofMediaObligation {
+  const value: CurrentSourceProofMediaObligation = {
     version: SOURCE_PROOF_MEDIA_VERSION,
     sourceId: "source-court-archive",
     assetId: "asset-court-archive-verdict-finding",
@@ -36,6 +42,11 @@ function obligation(assetSha256 = sha256(assetBytes)): SourceProofMediaObligatio
     assetUrl: "https://court.example.org/media/verdict-finding.jpg",
     assetSha256,
     approvalReceiptId: "source-proof-receipt-verdict-archive-001",
+    citation: {
+      sourceId: "source-court-archive",
+      label: "Regional Court Archive: Case verdict finding",
+      locator: "https://court.example.org/records/verdict-archive",
+    },
     provenanceFingerprint: "0".repeat(64),
   };
   value.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(value);
@@ -44,6 +55,21 @@ function obligation(assetSha256 = sha256(assetBytes)): SourceProofMediaObligatio
 
 async function main() {
   const approved = obligation();
+  const alteredCitation = structuredClone(approved);
+  alteredCitation.citation.label = "Forged source label";
+  assert.throws(
+    () => SourceProofMediaObligationSchema.parse(alteredCitation),
+    /provenance fingerprint/i,
+    "changing citation text must invalidate the signed source-proof provenance",
+  );
+  const foreignCitationSource = structuredClone(approved);
+  foreignCitationSource.citation.sourceId = "source-foreign";
+  foreignCitationSource.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(foreignCitationSource);
+  assert.throws(
+    () => SourceProofMediaObligationSchema.parse(foreignCitationSource),
+    /citation must name the exact approved source/i,
+    "a recomputed fingerprint cannot bind a citation to a different source id",
+  );
   const localBytes = new Map<string, Uint8Array>([
     ["/tmp/source-proof-asset", assetBytes],
   ]);
@@ -126,6 +152,82 @@ async function main() {
     }],
   });
   assert.equal(manifest.items[0]?.sourceProofMediaReceipt?.sourceProofClipSha256, sha256(clipBytes));
+
+  // Existing v1 receipt data remains readable for forensic/history views, but
+  // must never be promoted into a new cinematic clip, assembly, or release.
+  const legacyObligation: LegacySourceProofMediaObligation = {
+    version: LEGACY_SOURCE_PROOF_MEDIA_VERSION,
+    sourceId: approved.sourceId,
+    assetId: approved.assetId,
+    rightsEvidenceLocator: approved.rightsEvidenceLocator,
+    sourcePacketFingerprint: approved.sourcePacketFingerprint,
+    assetUrl: approved.assetUrl,
+    assetSha256: approved.assetSha256,
+    approvalReceiptId: approved.approvalReceiptId,
+    provenanceFingerprint: "",
+  };
+  legacyObligation.provenanceFingerprint = sourceProofMediaProvenanceFingerprint(legacyObligation);
+  const legacyReceipt: LegacySourceProofMediaReceipt = {
+    version: LEGACY_SOURCE_PROOF_MEDIA_RECEIPT_VERSION,
+    sceneId,
+    sequenceFingerprint,
+    obligation: legacyObligation,
+    resolvedAssetSha256: approved.assetSha256,
+    sourceProofClipSha256: resolved.receipt.sourceProofClipSha256,
+    clipKey: resolved.receipt.clipKey,
+    receiptFingerprint: "",
+  };
+  legacyReceipt.receiptFingerprint = sourceProofMediaReceiptFingerprint(legacyReceipt);
+  assert.equal(
+    assertSourceProofMediaReceipt({
+      receipt: legacyReceipt,
+      sceneId,
+      sequenceFingerprint,
+      obligation: legacyObligation,
+    }).receiptFingerprint,
+    legacyReceipt.receiptFingerprint,
+    "historical citation-less proof must remain readable without granting a new release path",
+  );
+  assert.throws(
+    () => assertSourceProofMediaClipBytes({
+      receipt: legacyReceipt,
+      sceneId,
+      sequenceFingerprint,
+      bytes: clipBytes,
+    }),
+    /legacy citation-less source-proof receipt.*read-only history/i,
+    "new assembly must refuse a citation-less historical proof clip",
+  );
+  assert.throws(
+    () => GeneratedFootageSceneManifestSchema.parse({
+      ...manifest,
+      items: [{ ...manifest.items[0], sourceProofMediaReceipt: legacyReceipt }],
+    }),
+    /legacy citation-less source-proof receipt.*read-only history/i,
+    "new cinematic manifests must refuse a citation-less historical proof receipt",
+  );
+  let legacyDownloadCalls = 0;
+  await assert.rejects(
+    () => resolveApprovedSourceProofMedia({
+      sceneId,
+      sequenceFingerprint,
+      obligation: legacyObligation,
+      durationSec: 4,
+      assetPath: "/tmp/legacy-source-proof-asset",
+      clipPath: "/tmp/legacy-source-proof-clip.mp4",
+      clipKey: "runs/test/source-proof/legacy.mp4",
+      downloadAsset: async () => {
+        legacyDownloadCalls += 1;
+        return "/tmp/legacy-source-proof-asset";
+      },
+      readBytes: async () => assetBytes,
+      createEvidenceClip: async () => "/tmp/legacy-source-proof-clip.mp4",
+      putEvidenceClip: async (key) => key,
+    }),
+    /legacy citation-less source-proof obligation.*read-only history/i,
+    "new source-proof resolution must reject legacy proof before reading or downloading bytes",
+  );
+  assert.equal(legacyDownloadCalls, 0, "legacy proof must stop before any new footage I/O");
 
   const mutatedReceipt = structuredClone(resolved.receipt);
   mutatedReceipt.clipKey = "runs/test/source-proof/substitute.mp4";
