@@ -768,15 +768,15 @@ export const thumbnailGen: Block = {
         }
       : null;
 
-    // runPipeline.ts's seedStore freezes styleDNA/thumbnailPlaybook/
-    // channelFamily/channelName from the channel doc at run start (see its
-    // comment on the channel-config freeze block) — reading them here instead
-    // of re-fetching the channel removes another redundant getChannel call.
+    // runPipeline.ts's seedStore freezes styleDNA/thumbnailPlaybook/family/
+    // channelName from the channel doc at run start (see its comment on the
+    // channel-config freeze block) — reading them here instead of
+    // re-fetching the channel removes another redundant getChannel call.
     const fullDna = (ctx.store["styleDNA"] as import("@/engine/creative/types").StyleDNA | null | undefined) ?? null;
     const resolved = resolveGoldenThumbnailPlaybook({
       storedPlaybook: ctx.store["thumbnailPlaybook"] as ThumbnailPlaybook | undefined,
       dna: fullDna,
-      family: String(ctx.store["channelFamily"] ?? ""),
+      family: String(ctx.store["family"] ?? ""),
       channelName: String(ctx.store["channelName"] ?? "channel"),
     });
     const playbook = resolved.playbook;

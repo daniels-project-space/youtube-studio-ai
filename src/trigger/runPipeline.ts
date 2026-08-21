@@ -721,7 +721,7 @@ export const runPipelineTask = task({
           ...((channel as { thumbnailPlaybook?: unknown }).thumbnailPlaybook
             ? { thumbnailPlaybook: (channel as { thumbnailPlaybook?: unknown }).thumbnailPlaybook }
             : {}),
-          ...((channel as { family?: string }).family ? { channelFamily: (channel as { family?: string }).family } : {}),
+          ...((channel as { family?: string }).family ? { family: (channel as { family?: string }).family } : {}),
           ...(channel.identity?.thumbnailIdentity
             ? { thumbnailIdentity: channel.identity.thumbnailIdentity }
             : {}),
