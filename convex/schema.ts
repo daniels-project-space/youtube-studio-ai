@@ -1,6 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { CHANNEL_PROGRAM_BRIEF_VERSION } from "@/engine/channelProgramBrief";
+import { CHANNEL_SHOW_PROFILE_VERSION } from "@/engine/channelShowProfile";
 
 const planWeekNanoBananaProviderReceipt = v.object({
   version: v.literal("plan-week-provider-render/v2"),
@@ -219,6 +220,18 @@ export default defineSchema({
           concept: v.string(),
           audience: v.optional(v.string()),
           sampleTopics: v.optional(v.array(v.string())),
+        }),
+      ),
+      showProfile: v.optional(
+        v.object({
+          version: v.literal(CHANNEL_SHOW_PROFILE_VERSION),
+          programBriefFingerprint: v.string(),
+          familyManifestFingerprint: v.string(),
+          contentLaneFingerprint: v.string(),
+          creativeCapabilityCatalogFingerprint: v.string(),
+          selectedCapabilityKeys: v.array(v.string()),
+          designedPipelineFingerprint: v.string(),
+          fingerprint: v.string(),
         }),
       ),
       // Generated channel art (R2 keys): square avatar + 16:9 banner.

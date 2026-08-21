@@ -74,6 +74,17 @@ assert.deepEqual(snapshotParamsByBlock(frozen.entries)["upload_draft"], {
   madeForKids: true,
 });
 
+const profileBound = normalizePipelineInvocationSnapshot(snapshot({
+  showProfileFingerprint: "c".repeat(64),
+}));
+assert.equal(profileBound.showProfileFingerprint, "c".repeat(64));
+assert.throws(
+  () => normalizePipelineInvocationSnapshot(snapshot({
+    showProfileFingerprint: "not-a-profile-fingerprint",
+  })),
+  /channel show profile fingerprint is invalid/,
+);
+
 const hash = pipelineInvocationSha256(frozen);
 assert.match(hash, /^[a-f0-9]{64}$/);
 const reordered = snapshot({
@@ -151,6 +162,7 @@ for (const changed of [
   snapshot({ entries: frozen.entries.map((entry, index) =>
     index === 0 ? { ...entry, params: { model: "changed" } } : entry) }),
   snapshot({ compilationFingerprint: "c".repeat(64) }),
+  snapshot({ showProfileFingerprint: "c".repeat(64) }),
 ]) {
   assert.throws(
     () => decidePipelineInvocationClaim({

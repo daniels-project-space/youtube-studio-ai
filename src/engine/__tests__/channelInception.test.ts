@@ -14,6 +14,9 @@ import {
   type ChannelInceptionRequest,
 } from "@/engine/channelInceptionPlan";
 import { createChannelProgramBrief } from "@/engine/channelProgramBrief";
+import { createChannelShowProfile } from "@/engine/channelShowProfile";
+import { creativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
+import { designPipeline } from "@/engine/designer";
 import { FAMILY_KEYS, type FamilyKey } from "@/engine/families";
 import { GOLDEN_MODULES } from "@/engine/golden";
 import { catalogExecutionBinding } from "@/engine/goldenExecution";
@@ -292,6 +295,47 @@ function plansAndOutputKeysAreContentAddressed(): void {
   );
 }
 
+function showProfileIsDurableAndVersionsPipelineStage(): void {
+  const programBrief = createChannelProgramBrief({
+    family: "narrated_stock",
+    nicheKey: "business",
+    locale: "en",
+    concept: "A source-attributed data storytelling channel with animated charts and ranked comparisons.",
+  });
+  const capabilitySelections = [creativeCapabilitySelection("source_attributed_data_story")];
+  const design = designPipeline({
+    family: programBrief.family,
+    nicheKey: programBrief.nicheKey,
+    locale: programBrief.locale,
+    programBrief,
+    capabilitySelections,
+  });
+  const showProfile = createChannelShowProfile({
+    programBrief,
+    capabilitySelections,
+    pipeline: design.pipeline,
+  });
+  const request = fixture("Causal Data Desk", "causal-data-desk", "narrated_stock", "business", {
+    programBrief,
+    showProfile,
+  });
+  const plan = buildChannelInceptionPlan(request);
+  const historicalPlan = buildChannelInceptionPlan({ ...request, showProfile: undefined });
+
+  assert.deepEqual(plan.requestSnapshot.showProfile, showProfile);
+  assert.equal(
+    channelInceptionStage(plan, "channel-inception-pipeline")!.params.showProfileFingerprint,
+    showProfile.fingerprint,
+  );
+  assert.notEqual(plan.requestFingerprint, historicalPlan.requestFingerprint);
+  assert.notEqual(
+    channelInceptionStage(plan, "channel-inception-pipeline")!.stageKey,
+    channelInceptionStage(historicalPlan, "channel-inception-pipeline")!.stageKey,
+    "the sealed composition must version its pipeline stage and cannot replay as an unprofiled legacy plan",
+  );
+  assert.deepEqual(buildChannelInceptionPlan(plan.requestSnapshot), plan);
+}
+
 function optionalProbeAndInvalidIntentsFailSafely(): void {
   const noProbe = buildChannelInceptionPlan({
     ...fixture("Dusk Frequency", "dusk-frequency", "music_loop", "lofi"),
@@ -345,6 +389,7 @@ function main(): void {
   protectedArtIsIndependentAndNeverOverwritten();
   starterSlateReusesAcceptedWork();
   plansAndOutputKeysAreContentAddressed();
+  showProfileIsDurableAndVersionsPipelineStage();
   optionalProbeAndInvalidIntentsFailSafely();
   console.log("channel inception contracts and family-aware plan tests passed");
 }

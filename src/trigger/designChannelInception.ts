@@ -122,6 +122,13 @@ import {
   channelProgramBriefPositioningText,
   type ChannelProgramBrief,
 } from "@/engine/channelProgramBrief";
+import {
+  assertChannelShowProfile,
+  assertChannelShowProfilePipelineCompatibility,
+  channelShowProfileFingerprint,
+  createChannelShowProfile,
+  type ChannelShowProfile,
+} from "@/engine/channelShowProfile";
 import { formatPreflight } from "@/engine/creative/selectFormat";
 import {
   assessCreativeCapabilityAutomaticBuildAdmission,
@@ -200,6 +207,10 @@ type PersistedChannelProgramBrief = Omit<ChannelProgramBrief, "sampleTopics"> & 
   sampleTopics?: string[];
 };
 
+type PersistedChannelShowProfile = Omit<ChannelShowProfile, "selectedCapabilityKeys"> & {
+  selectedCapabilityKeys: string[];
+};
+
 function persistedChannelProgramBrief(brief: ChannelProgramBrief): PersistedChannelProgramBrief {
   const { sampleTopics, ...canonical } = brief;
   return {
@@ -208,8 +219,14 @@ function persistedChannelProgramBrief(brief: ChannelProgramBrief): PersistedChan
   };
 }
 
+function persistedChannelShowProfile(profile: ChannelShowProfile): PersistedChannelShowProfile {
+  const { selectedCapabilityKeys, ...canonical } = profile;
+  return { ...canonical, selectedCapabilityKeys: [...selectedCapabilityKeys] };
+}
+
 interface ChannelIdentityState {
   programBrief?: PersistedChannelProgramBrief;
+  showProfile?: PersistedChannelShowProfile;
   persona: string;
   voiceId?: string;
   voiceCasting?: VoiceCastingSlim;
@@ -334,6 +351,14 @@ function identityResearchNiche(identity: ChannelIdentityState): string | undefin
 function sameChannelProgramBrief(left: unknown, right: ChannelProgramBrief): boolean {
   try {
     return channelProgramBriefFingerprint(left) === channelProgramBriefFingerprint(right);
+  } catch {
+    return false;
+  }
+}
+
+function sameChannelShowProfile(left: unknown, right: ChannelShowProfile): boolean {
+  try {
+    return channelShowProfileFingerprint(left) === channelShowProfileFingerprint(right);
   } catch {
     return false;
   }
@@ -991,9 +1016,10 @@ function effectivePipelineFingerprint(channel: {
 }
 
 interface ChannelPipelineCertification {
-  version: "channel-inception-pipeline-certification/v1";
+  version: "channel-inception-pipeline-certification/v2";
   family: FamilyKey;
   requestFingerprint: string;
+  showProfileFingerprint: string;
   pipelineSourceFingerprint: string;
   pipelineFingerprint: string;
   moduleConfigFingerprint: string;
@@ -1011,6 +1037,8 @@ function certifyChannelPipeline(args: {
   family: FamilyKey;
   requestFingerprint: string;
   pipelineSourceFingerprint: string;
+  showProfile: ChannelShowProfile;
+  programBrief: ChannelProgramBrief;
 }): ChannelPipelineCertification {
   registerAllBlocks();
   const completed = completePipelineForPolicy(args.pipeline);
@@ -1031,14 +1059,20 @@ function certifyChannelPipeline(args: {
   // a structurally valid graph must not silently lose Story Spine, the local
   // quiz route, or another family-owned non-Gemini admission requirement.
   assertFamilyAutonomousPlanningPipeline(args.family, args.pipeline);
+  assertChannelShowProfilePipelineCompatibility({
+    profile: args.showProfile,
+    programBrief: args.programBrief,
+    pipeline: args.pipeline,
+  });
   const lane = contentLaneForFamily(args.family);
   const compilation = compilePipeline(
     validatePipeline(args.pipeline, ["contentLane", ...childrenShowBibleSeedKeys(lane)]),
   );
   const claims = {
-    version: "channel-inception-pipeline-certification/v1" as const,
+    version: "channel-inception-pipeline-certification/v2" as const,
     family: args.family,
     requestFingerprint: args.requestFingerprint,
+    showProfileFingerprint: channelShowProfileFingerprint(args.showProfile),
     pipelineSourceFingerprint: args.pipelineSourceFingerprint,
     pipelineFingerprint: channelInceptionContentSha256(args.pipeline),
     moduleConfigFingerprint: channelInceptionContentSha256(args.moduleConfig),
@@ -1329,6 +1363,15 @@ export async function executeDesignChannel(
     paramOverrides: payload.paramOverrides,
     quizProfile: payload.quizProfile,
   });
+  // Seal the compiled baseline before any channel state is written. The final
+  // architect may refine the pipeline later, but it must retain this profile's
+  // selected-capability obligations and traceability.
+  const showProfile = createChannelShowProfile({
+    programBrief,
+    capabilitySelections: payload.capabilitySelections,
+    pipeline: design.pipeline,
+  });
+  const designPipelineFingerprint = channelInceptionContentSha256(design.pipeline);
   // Preserve the exact design resolution: an omitted operator duration may
   // intentionally use a valid niche preset rather than the generic family default.
   const lengthSeconds = design.episodeLengthSeconds;
@@ -1362,6 +1405,12 @@ export async function executeDesignChannel(
       expectedProgramBrief: programBrief,
       requireProgramBrief: true,
     });
+    assertChannelShowProfile({
+      profile: asIdentity(existingAtStart.identity).showProfile,
+      programBrief,
+      capabilitySelections: payload.capabilitySelections,
+      pipeline: design.pipeline,
+    });
   }
   // RESUME HOLE: `createChannel` below is the ONLY writer in this flow that
   // stamps `family`/`contentLane`, and the `existingAtStart?._id ??`
@@ -1392,6 +1441,7 @@ export async function executeDesignChannel(
     ? asIdentity(existingAtStart.identity)
     : {
         programBrief: persistedChannelProgramBrief(programBrief),
+        showProfile: persistedChannelShowProfile(showProfile),
         persona: payload.persona?.trim() || `Evidence-grounded ${family.label} channel`,
         styleGrammar: `${family.label}; identity pending Channel Inception positioning`,
         palette: payload.palette?.length ? payload.palette : ["#111827", "#F59E0B", "#F8FAFC"],
@@ -1558,6 +1608,9 @@ export async function executeDesignChannel(
   const previousProgramBrief = previousSnapshot && typeof previousSnapshot === "object"
     ? (previousSnapshot as Partial<ChannelInceptionRequest>).programBrief
     : undefined;
+  const previousShowProfile = previousSnapshot && typeof previousSnapshot === "object"
+    ? (previousSnapshot as Partial<ChannelInceptionRequest>).showProfile
+    : undefined;
   const canResumeSnapshot = Boolean(
     previousSnapshot &&
     typeof previousSnapshot === "object" &&
@@ -1568,7 +1621,10 @@ export async function executeDesignChannel(
     (previousSnapshot as Partial<ChannelInceptionRequest>).sourceRevision === requestKey &&
     (previousSnapshot as Partial<ChannelInceptionRequest>).moduleConfigFingerprint ===
       requestedModuleConfigFingerprint &&
+    (previousSnapshot as Partial<ChannelInceptionRequest>).pipelineSourceFingerprint ===
+      designPipelineFingerprint &&
     sameChannelProgramBrief(previousProgramBrief, programBrief) &&
+    sameChannelShowProfile(previousShowProfile, showProfile) &&
     previousPreviewFingerprints.every((fingerprint) => currentPreviewFingerprintSet.has(fingerprint)),
   );
   const currentRequest: ChannelInceptionRequest = {
@@ -1580,9 +1636,10 @@ export async function executeDesignChannel(
     nicheKey: programBrief.nicheKey,
     locale: programBrief.locale,
     sourceRevision: requestKey,
-    pipelineSourceFingerprint: channelInceptionContentSha256(design.pipeline),
+    pipelineSourceFingerprint: designPipelineFingerprint,
     moduleConfigFingerprint: requestedModuleConfigFingerprint,
     programBrief,
+    showProfile,
     brand: {
       ...(existingIdentity.imageKey ? {
         avatar: {
@@ -1632,6 +1689,10 @@ export async function executeDesignChannel(
       : currentRequest,
   );
   if (canResumeSnapshot) log("restored immutable inception request snapshot for retry");
+  const plannedShowProfile = plan.requestSnapshot.showProfile;
+  if (!plannedShowProfile) {
+    throw new Error("new channel inception requires a sealed channel show profile");
+  }
   const executionReceiptFingerprint = payload.inceptionApproval
     ? channelInceptionContentSha256(payload.inceptionApproval)
     : undefined;
@@ -2371,6 +2432,8 @@ export async function executeDesignChannel(
         family: payload.family,
         requestFingerprint: plan.requestFingerprint,
         pipelineSourceFingerprint: plan.requestSnapshot.pipelineSourceFingerprint ?? "",
+        showProfile: plannedShowProfile,
+        programBrief: plan.requestSnapshot.programBrief,
       });
     } catch {
       return undefined;
@@ -2496,6 +2559,8 @@ export async function executeDesignChannel(
         family: payload.family,
         requestFingerprint: plan.requestFingerprint,
         pipelineSourceFingerprint: plan.requestSnapshot.pipelineSourceFingerprint ?? "",
+        showProfile: plannedShowProfile,
+        programBrief: plan.requestSnapshot.programBrief,
       });
       await convex.mutation(api.channels.updateChannel, {
         channelId,
