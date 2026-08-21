@@ -10,6 +10,15 @@ import {
   type CatalogExecutionStep,
   type NovitaVideoRenderAssessment,
 } from "./goldenExecution";
+import type { GenerationProfileId } from "./runtimeCapability";
+
+/**
+ * The render tier every pipeline resolves to unless a caller explicitly selects
+ * another one. Keep this literal in ONE place: the draft/hero tiers exist in
+ * GENERATION_PROFILES but are only reachable through explicit configuration, so
+ * an absent setting must always land back on exactly this value.
+ */
+export const DEFAULT_GENERATION_PROFILE: GenerationProfileId = "production";
 
 export interface PipelinePolicy {
   id: string;
@@ -258,7 +267,18 @@ function ensureReleaseVisualReview(entries: PipelineEntry[]): boolean {
  */
 export function completePipelineForPolicy(
   source: readonly PipelineEntry[],
+  options?: {
+    /**
+     * Render tier stamped onto a story_spine this function has to BACKFILL.
+     * Omitted by every legacy-repair caller, which is why it falls back to
+     * DEFAULT_GENERATION_PROFILE and reproduces the previous hardcoded value
+     * byte-for-byte. designPipeline passes the channel's resolved tier so a
+     * freshly designed pipeline stays internally consistent.
+     */
+    readonly generationProfile?: GenerationProfileId;
+  },
 ): { entries: PipelineEntry[]; inserted: string[]; retired: string[] } {
+  const generationProfileId = options?.generationProfile ?? DEFAULT_GENERATION_PROFILE;
   const entries = source.map((entry) => ({
     block: entry.block,
     ...(entry.params ? { params: { ...entry.params } } : {}),
@@ -307,7 +327,7 @@ export function completePipelineForPolicy(
     entries.splice(narrationIndex + 1, 0, {
       block: "story_spine",
       params: {
-        generationProfile: "production",
+        generationProfile: generationProfileId,
         targetShotSec: isShorts ? 4 : 6,
       },
     });

@@ -477,6 +477,16 @@ export interface FamilyProductionReadiness {
  * Pinned video-producing blocks by family. Read-only consumers such as the
  * creator preflight may assess this declarative contract, but the authorized
  * design task remains the only authority that compiles an executable run.
+ *
+ * The "production" literal below is DELIBERATELY static and is NOT part of the
+ * per-channel render-tier selection (DesignOptions.generationProfile). This
+ * constant never reaches a compiled pipeline: its only two consumers are
+ * familyProductionReadiness() and selectFormat(), which both feed it to
+ * assessPipelineVideoRuntimeReadiness() as a preflight probe. That probe reads
+ * the profile's `video` block only, and draft/production/hero currently share
+ * byte-identical video settings, so the readiness verdict is tier-invariant.
+ * Making this dynamic would add a per-channel plumbing path that provably
+ * cannot change any outcome.
  */
 export const FAMILY_RUNTIME_PIPELINE: Readonly<Record<FamilyKey, readonly PipelineRuntimeBlockInput[]>> = {
   narrated_stock: [],

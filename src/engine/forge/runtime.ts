@@ -66,6 +66,13 @@ function assertForgedRuntimeAdmissible(spec: ForgedModuleSpec): void {
   if (!forgedSpecUsesI2V(spec)) return;
   // The runtime helper validates the exact production profile used in runStep.
   // It is intentionally called before even the first LLM/image primitive.
+  //
+  // This "production" literal is DELIBERATELY static and is NOT part of the
+  // per-channel render-tier selection (DesignOptions.generationProfile). A
+  // forged module has no parent channel and no compiled pipeline: the array
+  // below is a synthetic admission probe, not a render configuration. It also
+  // reads the profile's `video` block only, and draft/production/hero currently
+  // share byte-identical video settings, so the verdict is tier-invariant.
   assertPipelineVideoRuntimeReady([
     { block: "novita_render_video", params: { generationProfile: "production" } },
   ]);
