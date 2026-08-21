@@ -38,6 +38,7 @@ import {
 } from "@/engine/pipelineCompiler";
 import { runPipeline as runEngine } from "@/engine/runner";
 import { renderBlockTask } from "@/trigger/render-block";
+import { renderBlockLightTask } from "@/trigger/render-block-light";
 import { planHeal } from "@/engine/healer";
 import { makeConvexSink } from "@/engine/convexSink";
 import { makeRunLogSink, teeLog } from "@/engine/runLogSink";
@@ -58,6 +59,7 @@ import {
   assertPipelineInvocationCompilation,
   normalizePipelineInvocationSnapshot,
   REMOTE_RENDER_BLOCK_IDS,
+  renderBlockMachineClass,
   snapshotParamsByBlock,
   type PipelineInvocationSnapshot,
 } from "@/lib/pipelineInvocationSnapshot";
@@ -156,10 +158,12 @@ export interface RunPipelineInput {
 
 export const runPipelineTask = task({
   id: "run-pipeline",
-  // P1→P2 SPLIT: the memory-heavy render (timeline_assemble) now runs on a
-  // large-2x CHILD task (render-block); this orchestrator runs every other block
-  // (LLM/TTS/footage/idle waits) and SUSPENDS during the render. So it no longer
-  // pays the large-2x rate to sit idle ~50% of the run waiting on external APIs.
+  // P1→P2 SPLIT: the memory-heavy local composites (timeline_assemble,
+  // documotion_short) run on a large-2x CHILD task (render-block), and the
+  // GPU-offloaded Novita renders on a medium-1x child (render-block-light);
+  // this orchestrator runs every other block (LLM/TTS/footage/idle waits) and
+  // SUSPENDS during the render. So it no longer pays the large-2x rate to sit
+  // idle ~50% of the run waiting on external APIs.
   // large-1x (8GB) comfortably handles footage gating + captions + qa_visual.
   machine: "large-1x",
   // Long-form (15-35 min) renders do many full-video re-encodes; allow up to ~2h.
@@ -864,7 +868,13 @@ export const runPipelineTask = task({
           // spend), while a self-heal (heals++) mints a fresh key so the
           // superseded render genuinely re-runs.
           const idemKey = await idempotencyKeys.create(`${payload.runId}:${blockId}:h${heals}`);
-          const res = await renderBlockTask.triggerAndWait(
+          // Route to the child task provisioned for this block's machine class:
+          // local compositing (timeline_assemble/documotion_short) needs the
+          // large-2x worker; the Novita blocks offload their GPU work and only
+          // submit + validate here, so they bill on the cheaper medium-1x task.
+          const child =
+            renderBlockMachineClass(blockId) === "heavy" ? renderBlockTask : renderBlockLightTask;
+          const res = await child.triggerAndWait(
             {
               runId: payload.runId,
               ownerId,
@@ -878,7 +888,7 @@ export const runPipelineTask = task({
             { idempotencyKey: idemKey },
           );
           if (!res.ok) {
-            throw new Error(`render-block child failed: ${JSON.stringify(res.error)?.slice(0, 300)}`);
+            throw new Error(`${child.id} child failed: ${JSON.stringify(res.error)?.slice(0, 300)}`);
           }
           return (res.output as { patch: Record<string, unknown> }).patch;
         },
