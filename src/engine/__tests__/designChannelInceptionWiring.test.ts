@@ -14,6 +14,7 @@ const regroundChannel = readFileSync(join(root, "src/engine/creative/regroundCha
 const route = readFileSync(join(root, "src/app/api/build-channel/route.ts"), "utf8");
 const newChannelUi = readFileSync(join(root, "src/app/(app)/channels/new/page.tsx"), "utf8");
 const pipelineRunner = readFileSync(join(root, "src/trigger/runPipeline.ts"), "utf8");
+const showProfileCodec = readFileSync(join(root, "src/engine/channelShowProfileCodec.ts"), "utf8");
 
 assert.match(entrypoint, /executeDesignChannel\(payload/);
 assert.match(entrypoint, /maxAttempts:\s*3/);
@@ -73,8 +74,17 @@ assert.doesNotMatch(coordinator, /groundingSignals\(convex, ownerId, identity\.n
 assert.match(mutations, /assertProgramBriefIdentityMutation\(/);
 assert.match(mutations, /channel program brief is immutable once stored/);
 assert.match(mutations, /channel show profile is immutable once stored/);
-assert.match(mutations, /assertChannelShowProfilePipelineCompatibility\(/,
-  "generic channel changes must preserve selected capability obligations from the sealed profile");
+assert.match(mutations, /assertChannelShowProfileReceiptPipelineCompatibility\(/,
+  "Convex persistence must retain selected capability obligations without importing renderer code");
+assert.match(mutations, /assertChannelShowProfileReceiptExactComposition\(/,
+  "a first channel admission must bind the receipt to its exact compiler baseline");
+assert.match(mutations, /requires the effective pipeline being persisted/,
+  "a profile-bearing mutation cannot bypass the write-time graph validation");
+assert.match(mutations, /channel pipeline upgrade identity/,
+  "the atomic compiler-upgrade mutation must retain the same profile compatibility gate");
+assert.match(showProfileCodec, /channel show profile does not match the canonical channel program brief/);
+assert.doesNotMatch(showProfileCodec, /from\s+["']@\/engine\/creative\/creativeCapabilityCatalog["']/,
+  "the Convex receipt codec must not re-import the renderer-coupled rich catalog");
 assert.match(schema, /programBrief:\s*v\.optional\(/);
 assert.match(schema, /showProfile:\s*v\.optional\(/);
 assert.match(schema, /catalogFingerprint:\s*v\.string\(\)/);

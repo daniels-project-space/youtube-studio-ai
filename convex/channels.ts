@@ -29,13 +29,11 @@ import {
   CHANNEL_PROGRAM_BRIEF_VERSION,
 } from "@/engine/channelProgramBrief";
 import {
-  assertChannelShowProfile,
-  assertChannelShowProfilePipelineCompatibility,
-  assertChannelShowProfileProgramBinding,
-  channelShowProfileFingerprint,
+  assertChannelShowProfileReceiptExactComposition,
+  assertChannelShowProfileReceiptPipelineCompatibility,
+  channelShowProfileReceiptFingerprint,
   CHANNEL_SHOW_PROFILE_VERSION,
-} from "@/engine/channelShowProfile";
-import { creativeCapabilitySelection } from "@/engine/creative/creativeCapabilityCatalog";
+} from "@/engine/channelShowProfileCodec";
 import { comparablePipeline } from "@/engine/channelPipelineComparable";
 import { channelInceptionInvalidationRoots } from "@/engine/channelInceptionInvalidation";
 import {
@@ -81,6 +79,7 @@ function assertProgramBriefIdentityMutation(args: {
   readonly existingIdentity: unknown;
   readonly nextIdentity: unknown;
   readonly effectiveFamily: unknown;
+  /** Effective graph that the mutation is about to persist with this receipt. */
   readonly nextPipeline?: unknown;
   /** Only brand-new admitted channels may introduce their first show profile. */
   readonly allowFirstShowProfile?: boolean;
@@ -129,29 +128,26 @@ function assertProgramBriefIdentityMutation(args: {
   if (!nextProgramBrief) {
     throw new Error("channel show profile requires a canonical channel program brief");
   }
-  const profile = assertChannelShowProfileProgramBinding({
+  if (args.nextPipeline === undefined) {
+    throw new Error("channel show profile requires the effective pipeline being persisted");
+  }
+  // This pure receipt spine preserves the program/family/lane/catalog and
+  // selected-capability obligations at write time. Full registry validation is
+  // still repeated by the admitted executor and the pre-spend run gate.
+  const profileInput = {
     profile: nextShowProfile,
     programBrief: nextProgramBrief,
-  });
-  if (existingShowProfile && channelShowProfileFingerprint(existingShowProfile) !== channelShowProfileFingerprint(profile)) {
+    pipeline: args.nextPipeline,
+  };
+  const profile = allowFirstShowProfile
+    ? assertChannelShowProfileReceiptExactComposition(profileInput)
+    : assertChannelShowProfileReceiptPipelineCompatibility(profileInput);
+  if (
+    existingShowProfile &&
+    channelShowProfileReceiptFingerprint(existingShowProfile) !==
+      channelShowProfileReceiptFingerprint(profile)
+  ) {
     throw new Error("channel show profile is immutable once stored; create a fresh admitted channel or fork");
-  }
-  if (!Array.isArray(args.nextPipeline)) {
-    throw new Error("channel show profile requires an effective pipeline");
-  }
-  const selections = profile.selectedCapabilityKeys.map(creativeCapabilitySelection);
-  assertChannelShowProfilePipelineCompatibility({
-    profile,
-    programBrief: nextProgramBrief,
-    pipeline: args.nextPipeline as { block: string; params?: Record<string, unknown> }[],
-  });
-  if (allowFirstShowProfile) {
-    assertChannelShowProfile({
-      profile,
-      programBrief: nextProgramBrief,
-      capabilitySelections: selections,
-      pipeline: args.nextPipeline as { block: string; params?: Record<string, unknown> }[],
-    });
   }
 }
 
@@ -1004,6 +1000,17 @@ export const updatePipelineIfCurrent = mutation({
     }
     const lane = channelContentLane(channel);
     assertPipelineMatchesContentLane(lane, args.pipeline);
+    if (channel.identity?.showProfile) {
+      const programBrief = assertPersistedProgramBriefIdentity(channel.identity, {
+        context: "channel pipeline upgrade identity",
+        requireProgramBrief: true,
+      });
+      assertChannelShowProfileReceiptPipelineCompatibility({
+        profile: channel.identity.showProfile,
+        programBrief,
+        pipeline: args.pipeline,
+      });
+    }
     const patch: Record<string, unknown> = { pipeline: args.pipeline, contentLane: lane };
     const invalidated = invalidatePersistedInceptionProofs(
       channel.inception,

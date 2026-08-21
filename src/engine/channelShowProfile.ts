@@ -7,8 +7,6 @@
  * copying registry definitions or freezing the final architect-refined
  * executable pipeline.
  */
-import { z } from "zod";
-
 import {
   CREATIVE_CAPABILITY_CATALOG,
   CREATIVE_CAPABILITY_CATALOG_FINGERPRINT,
@@ -25,29 +23,23 @@ import {
 } from "@/engine/channelProgramBrief";
 import { resolveChannelFamilyManifest, type ChannelFamilyManifest } from "@/engine/channelFamilyManifest";
 import type { PipelineEntry } from "@/engine/types";
+import {
+  CHANNEL_SHOW_PROFILE_VERSION,
+  parseChannelShowProfileReceipt,
+  type ChannelShowProfile as ChannelShowProfileReceipt,
+} from "@/engine/channelShowProfileCodec";
 import { canonicalJson } from "@/lib/canonicalJson";
 import { sha256Hex } from "@/lib/sha256";
 
-export const CHANNEL_SHOW_PROFILE_VERSION = "channel-show-profile/v1" as const;
+export { CHANNEL_SHOW_PROFILE_VERSION } from "@/engine/channelShowProfileCodec";
 
-const SHA256_PATTERN = /^[a-f0-9]{64}$/u;
-
-export interface ChannelShowProfile {
-  version: typeof CHANNEL_SHOW_PROFILE_VERSION;
-  /** The immutable creator-program authority, never a mutable display label. */
-  programBriefFingerprint: string;
-  /** Compact identity of the resolved family/archetype/duration/lane contract. */
-  familyManifestFingerprint: string;
-  /** Compact identity of the visual-lane policy that protects renderer semantics. */
-  contentLaneFingerprint: string;
-  /** The precise catalog version used to resolve selected capability overlays. */
-  creativeCapabilityCatalogFingerprint: string;
-  /** Canonical sorted set; order of UI clicks is not a semantic channel distinction. */
+/**
+ * Catalog-aware profile type used by the creator/execution engine. Convex uses
+ * the compact receipt codec because it must not import this renderer/provider
+ * registry.
+ */
+export interface ChannelShowProfile extends Omit<ChannelShowProfileReceipt, "selectedCapabilityKeys"> {
   selectedCapabilityKeys: readonly CreativeCapabilityKey[];
-  /** The post-compiler baseline before later architect/DNA refinement. */
-  designedPipelineFingerprint: string;
-  /** Content address of every preceding field. */
-  fingerprint: string;
 }
 
 export interface CreateChannelShowProfileInput {
@@ -72,17 +64,6 @@ export interface AssertChannelShowProfilePipelineCompatibilityInput
 }
 
 type ChannelShowProfileBody = Omit<ChannelShowProfile, "fingerprint">;
-
-const ChannelShowProfileSchema = z.object({
-  version: z.literal(CHANNEL_SHOW_PROFILE_VERSION),
-  programBriefFingerprint: z.string().regex(SHA256_PATTERN),
-  familyManifestFingerprint: z.string().regex(SHA256_PATTERN),
-  contentLaneFingerprint: z.string().regex(SHA256_PATTERN),
-  creativeCapabilityCatalogFingerprint: z.string().min(1).max(512),
-  selectedCapabilityKeys: z.array(z.string().min(1).max(160)),
-  designedPipelineFingerprint: z.string().regex(SHA256_PATTERN),
-  fingerprint: z.string().regex(SHA256_PATTERN),
-}).strict();
 
 function familyManifestIdentity(manifest: ChannelFamilyManifest) {
   return {
@@ -217,7 +198,7 @@ export function createChannelShowProfile(input: CreateChannelShowProfileInput): 
 
 /** Strict structural parser for a persisted composition receipt. */
 export function parseChannelShowProfile(value: unknown): ChannelShowProfile {
-  const profile = ChannelShowProfileSchema.parse(value) as ChannelShowProfile;
+  const profile = parseChannelShowProfileReceipt(value);
   if (profile.creativeCapabilityCatalogFingerprint !== CREATIVE_CAPABILITY_CATALOG_FINGERPRINT) {
     throw new Error("channel show profile uses a stale creative-capability catalog fingerprint");
   }

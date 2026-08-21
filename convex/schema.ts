@@ -1,7 +1,7 @@
 import { defineSchema, defineTable } from "convex/server";
 import { v } from "convex/values";
 import { CHANNEL_PROGRAM_BRIEF_VERSION } from "@/engine/channelProgramBrief";
-import { CHANNEL_SHOW_PROFILE_VERSION } from "@/engine/channelShowProfile";
+import { CHANNEL_SHOW_PROFILE_VERSION } from "@/engine/channelShowProfileCodec";
 
 const planWeekNanoBananaProviderReceipt = v.object({
   version: v.literal("plan-week-provider-render/v2"),
