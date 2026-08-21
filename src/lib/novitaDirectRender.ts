@@ -44,8 +44,14 @@ import {
   type NovitaVolumeSummary,
 } from "@/lib/novitaFleet";
 import { waitForNovitaRenderPoll } from "@/lib/novitaPollWait";
-import { assertLtxWorkerCompletionEvidence } from "@/lib/ltxVideoProof";
-import { assertCinematicProofAdmission } from "@/lib/cinematicProofAdmission";
+import {
+  assertLtxWorkerCompletionEvidence,
+  type LtxNativeInputGeometrySources,
+} from "@/lib/ltxVideoProof";
+import {
+  assertCinematicProofAdmission,
+  requiresNative720X2CinematicProof,
+} from "@/lib/cinematicProofAdmission";
 import {
   resolveLtxCreativeAdapters,
   type ResolvedLtxCreativeAdapter,
@@ -1026,12 +1032,70 @@ async function reserveLease(
   return await leaseMutation<ReservedLease>(convex, "reserve", args);
 }
 
+function sealedNativeInputGeometrySources(worker: PreparedWorker): LtxNativeInputGeometrySources | undefined {
+  const profile = worker.manifest.profile as NovitaPhaseProfile;
+  if (!requiresNative720X2CinematicProof(profile)) return undefined;
+  const jobs = worker.manifest.jobs;
+  const job = Array.isArray(jobs)
+    ? jobs.find((candidate): candidate is Record<string, unknown> => (
+      Boolean(candidate)
+      && typeof candidate === "object"
+      && !Array.isArray(candidate)
+      && (candidate as Record<string, unknown>).id === worker.job.id
+    ))
+    : undefined;
+  if (!job) {
+    throw new NovitaAdmissionError(`worker ${worker.workerName} native-720p manifest is missing its sealed video job`);
+  }
+  const sourceSha256 = (field: "input" | "endInput", required: boolean): string | undefined => {
+    const source = job[field];
+    if (source === undefined && !required) return undefined;
+    if (!source || typeof source !== "object" || Array.isArray(source)) {
+      throw new NovitaAdmissionError(`worker ${worker.workerName} native-720p manifest is missing sealed ${field}`);
+    }
+    const sha256 = (source as Record<string, unknown>).sha256;
+    if (typeof sha256 !== "string" || !/^[a-f0-9]{64}$/.test(sha256)) {
+      throw new NovitaAdmissionError(`worker ${worker.workerName} native-720p manifest has invalid sealed ${field} hash`);
+    }
+    return sha256;
+  };
+  const initialSha256 = sourceSha256("input", true);
+  const endSha256 = sourceSha256("endInput", false);
+  return {
+    initialSha256: initialSha256!,
+    ...(endSha256 ? { endSha256 } : {}),
+  };
+}
+
+/**
+ * Preserve controller-normalized source bindings with the direct result. The
+ * story block revalidates the output proof against this sealed map rather than
+ * reconstructing authority from caller-supplied still keys.
+ */
+function nativeInputGeometrySourcesByShot(
+  workers: readonly PreparedWorker[],
+): Readonly<Record<string, LtxNativeInputGeometrySources>> {
+  const sourcesByShot: Record<string, LtxNativeInputGeometrySources> = Object.create(null) as Record<string, LtxNativeInputGeometrySources>;
+  for (const worker of workers) {
+    const sources = sealedNativeInputGeometrySources(worker);
+    if (!sources) {
+      throw new NovitaAdmissionError(`worker ${worker.workerName} omitted native-720p sealed input geometry sources`);
+    }
+    if (Object.prototype.hasOwnProperty.call(sourcesByShot, worker.job.shotId)) {
+      throw new NovitaAdmissionError(`native-720p result has duplicate source bindings for ${worker.job.shotId}`);
+    }
+    sourcesByShot[worker.job.shotId] = sources;
+  }
+  return sourcesByShot;
+}
+
 function acceptWorkerVideoCompletionEvidence(worker: PreparedWorker, completion: CompletionReport): void {
   try {
     worker.videoOutputProof = assertLtxWorkerCompletionEvidence({
       profile: worker.manifest.profile as NovitaPhaseProfile,
       jobId: worker.job.id,
       completion,
+      nativeInputGeometrySources: sealedNativeInputGeometrySources(worker),
     });
   } catch (error) {
     const message = error instanceof Error ? error.message : "returned invalid LTX x2 output evidence";
@@ -1577,7 +1641,7 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
   // any worker-manifest/reservation side effect.
   if (phase === "video") {
     try {
-      assertCinematicProofAdmission({ profile: cfg.profile, proof: cfg.cinematicProofAdmission });
+      assertCinematicProofAdmission({ profile: cfg.profile });
     } catch (error) {
       throw new NovitaAdmissionError(
         error instanceof Error ? error.message : "cinematic proof admission rejected the requested profile",
@@ -1695,6 +1759,9 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
       if (!worker.videoOutputProof) await restoreWorkerVideoCompletionEvidence(worker);
     }));
   }
+  const nativeInputGeometrySources = phase === "video" && requiresNative720X2CinematicProof(cfg.profile)
+    ? nativeInputGeometrySourcesByShot(prepared)
+    : undefined;
   const status = directStatus({ phase, cfg, workers: prepared, receipt: aggregateReceipt(allReceipts, hash(canonicalJson(plan))) });
   const candidates: RenderedCandidate[] = prepared.map((worker) => ({
     shotId: worker.job.shotId,
@@ -1709,6 +1776,7 @@ export async function renderDirectNovita(cfg: NovitaRenderCfg, phase: Phase): Pr
     candidates,
     ...(phase === "video" ? {
       videoOutputProofs: Object.fromEntries(prepared.map((worker) => [worker.job.shotId, worker.videoOutputProof!])),
+      ...(nativeInputGeometrySources ? { nativeInputGeometrySources } : {}),
     } : {}),
     outputs: candidates.length,
     durationSec: 0,

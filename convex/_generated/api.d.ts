@@ -34,6 +34,7 @@ import type * as runArtifacts from "../runArtifacts.js";
 import type * as runLogs from "../runLogs.js";
 import type * as runStages from "../runStages.js";
 import type * as runs from "../runs.js";
+import type * as scriptSelfDedupLeases from "../scriptSelfDedupLeases.js";
 import type * as seo from "../seo.js";
 import type * as seriesStoryState from "../seriesStoryState.js";
 import type * as studioFunctions from "../studioFunctions.js";
@@ -77,6 +78,7 @@ declare const fullApi: ApiFromModules<{
   runLogs: typeof runLogs;
   runStages: typeof runStages;
   runs: typeof runs;
+  scriptSelfDedupLeases: typeof scriptSelfDedupLeases;
   seo: typeof seo;
   seriesStoryState: typeof seriesStoryState;
   studioFunctions: typeof studioFunctions;

@@ -529,7 +529,11 @@ export function compilePipeline(
   if (capabilities.has("script.generated")) {
     requireCapability(capabilities, "script.qa_passed", "a script-producing pipeline must certify its script");
     requireCapability(capabilities, "narration.timed", "a script-producing pipeline must produce timed narration");
-    requireCapability(capabilities, "final.originality_passed", "a script-producing pipeline must pass originality");
+    requireCapability(
+      capabilities,
+      "final.lexical_script_self_dedup_passed",
+      "a script-producing pipeline must pass measured local script self-dedup",
+    );
   }
   if (policy.requireStoryAlignmentForGeneratedVisuals && capabilities.has("visuals.generated")) {
     requireCapability(

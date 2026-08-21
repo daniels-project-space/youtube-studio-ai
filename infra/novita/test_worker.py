@@ -431,6 +431,55 @@ class WorkerContractTests(unittest.TestCase):
         finally:
             worker.subprocess.run = original_run
 
+    def test_native_720p_x2_input_geometry_receipt_requires_1280x704_stills(self):
+        profile = worker.approved_profile(worker.LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID, "video")
+        source_hash = "a" * 64
+        original_run = worker.subprocess.run
+        try:
+            def exact_input(command, *_args, **_kwargs):
+                return worker.subprocess.CompletedProcess(
+                    command,
+                    0,
+                    json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 704}]}),
+                    "",
+                )
+
+            worker.subprocess.run = exact_input
+            initial = worker.probe_input_geometry(Path("/tmp/native-initial.png"), source_hash)
+            self.assertEqual(initial, {"sha256": source_hash, "width": 1280, "height": 704})
+            worker.assert_native_input_geometry_receipt("initial", initial, profile)
+
+            def wrong_input(command, *_args, **_kwargs):
+                return worker.subprocess.CompletedProcess(
+                    command,
+                    0,
+                    json.dumps({"streams": [{"codec_type": "video", "width": 1280, "height": 736}]}),
+                    "",
+                )
+
+            worker.subprocess.run = wrong_input
+            wrong = worker.probe_input_geometry(Path("/tmp/native-wrong.png"), source_hash)
+            with self.assertRaisesRegex(RuntimeError, "1280x704"):
+                worker.assert_native_input_geometry_receipt("initial", wrong, profile)
+        finally:
+            worker.subprocess.run = original_run
+
+        proof = {
+            "outputWidth": 2560, "outputHeight": 1408,
+            "stageOneWidth": 1280, "stageOneHeight": 704,
+            "spatialUpscaleFactor": 2, "pipeline": "distilled",
+            "quantization": "fp8-cast", "offload": "cpu",
+            "frameCount": 17, "frameRate": 25, "hasAudio": True,
+            "sampledPeakVramMib": 21_999,
+            "inputGeometry": {"initial": initial},
+        }
+        worker.assert_video_output_proof(proof, profile)
+        with self.assertRaisesRegex(ValueError, "invalid input geometry"):
+            worker.assert_video_output_proof(
+                {**proof, "inputGeometry": {"initial": {**initial, "height": 736}}},
+                profile,
+            )
+
     def test_native_720p_x2_smoke_manifest_allows_only_one_exact_17_frame_job(self):
         profile = worker.approved_profile(worker.LTX_25_720P_NATIVE_X2_SMOKE_PROFILE_ID, "video")
         manifest_id = "video-" + "c" * 32
@@ -438,6 +487,7 @@ class WorkerContractTests(unittest.TestCase):
         job = {
             "id": "smoke-01", "prompt": "A small bounded smoke clip", "seed": 42,
             "width": 2560, "height": 1408, "steps": 8, "frames": 17, "fps": 25, "timeoutSeconds": 600,
+            "input": {"getUrl": "https://objects.example/smoke-input.png", "sha256": "a" * 64},
             "artifact": {"putUrl": "https://objects.example/smoke.mp4", "headers": {
                 "x-amz-meta-manifest-id": manifest_id, "x-amz-meta-profile-sha256": profile_hash, "x-amz-meta-job-id": "smoke-01",
             }},
@@ -454,6 +504,10 @@ class WorkerContractTests(unittest.TestCase):
         }
         manifest, digest = self._seal(unsigned)
         self.assertEqual(worker.validate_manifest(manifest, digest)["profile"]["id"], profile["id"])
+        missing_input_job = {key: value for key, value in job.items() if key != "input"}
+        missing_input, missing_input_digest = self._seal({**unsigned, "jobs": [missing_input_job]})
+        with self.assertRaisesRegex(ValueError, "requires a native-720p x2 initial still"):
+            worker.validate_manifest(missing_input, missing_input_digest)
         two_jobs, two_digest = self._seal({**unsigned, "jobs": [job, {**job, "id": "smoke-02", "artifact": {**job["artifact"], "headers": {**job["artifact"]["headers"], "x-amz-meta-job-id": "smoke-02"}}}]})
         with self.assertRaisesRegex(ValueError, "exactly one job"):
             worker.validate_manifest(two_jobs, two_digest)

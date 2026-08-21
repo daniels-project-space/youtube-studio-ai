@@ -460,6 +460,9 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
       "narrationKey", "narrationLocalPath", "narrationTranscriptText", "onScreenTextCues",
       "casefileEvidenceShotMapAdmission", "casefileSourceAdmission", "sourceBoundStorySpine",
     ],
+    // Draft probes may return a non-passing/unran review. Production QA mints
+    // these publish-grade artifacts; upload still consumes them as required.
+    optionalProduces: ["finalMasterReleaseCertificate", "finalMasterReleaseCertificateKey"],
     providerProfiles: [managed, local],
     // The exact receipt narrows this before Novita starts. Preserve the normal
     // $5 QA ceiling: an oversized cinematic plan is rejected early rather than
@@ -473,7 +476,7 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     ),
     qualityRequired: true,
   }),
-  originality_gate: contract(["final.originality_passed"], { optionalConsumes: ["topic"], qualityRequired: true }),
+  originality_gate: contract(["final.lexical_script_self_dedup_passed"], { optionalConsumes: ["topic"], qualityRequired: true }),
   compliance_check: contract(["final.compliance_passed"], { optionalConsumes: ["niche"], qualityRequired: true }),
 
   director_brief: contract(["crew.director_treatment"], { optionalConsumes: ["styleDNA", "niche", "channelName"] }),

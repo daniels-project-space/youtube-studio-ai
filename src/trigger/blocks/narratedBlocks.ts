@@ -128,6 +128,7 @@ import {
   probe,
   assembleBeatBody,
   assembleAuthoredBody,
+  applyNameCardOverlay,
   composeWithIntro,
   concatAudioWithGaps,
   applyVoiceFx,
@@ -159,6 +160,13 @@ import {
   type VisualReviewOverlay,
   type VisualReviewReferenceCriterion,
 } from "@/lib/visualReview";
+import {
+  FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
+  createFinalMasterReleaseCertificate,
+  createVisualReviewReleaseReceipt,
+  finalMasterReleaseCertificateKey as finalMasterReleaseCertificateObjectKey,
+  visualReviewReleaseReceiptKey,
+} from "@/lib/finalMasterReleaseCertificate";
 import { validateRender } from "@/lib/renderValidate";
 import type { ValidationAssertion } from "@/engine/creative/types";
 
@@ -2281,7 +2289,23 @@ export const timelineAssemble: Block = {
           });
         }
         await writeBytes(local, clipBytes);
-        cinematicPaths.push(local);
+        if (!item.nameCardText) {
+          cinematicPaths.push(local);
+          continue;
+        }
+        const cardPath = join(tmp, `cinematic_namecard_${String(index).padStart(4, "0")}.mp4`);
+        try {
+          await applyNameCardOverlay(local, cardPath, {
+            text: item.nameCardText,
+            durationSec: item.t1 - item.t0,
+          });
+        } catch (error) {
+          throw new Error(
+            `timeline_assemble: required Casefile name-card overlay failed for ${item.shotId}: ` +
+              `${error instanceof Error ? error.message : String(error)}`,
+          );
+        }
+        cinematicPaths.push(cardPath);
       }
       ctx.log(
         `timeline_assemble: exact cinematic body from ${cinematicPaths.length} source-bound multi-shot clip(s); ` +
@@ -2736,12 +2760,13 @@ export const captions: Block = {
 
 export const qaVisual: Block = {
   id: "qa_visual",
-  consumes: ["videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
+  consumes: ["videoKey", "videoLocalPath", "videoDurationSec", "thumbnailKey", "title"],
   produces: [
     "qaPassed", "qaReport", "qualityEvidence", "temporalDynamism", "visualPacing",
     "reviewEvidence", "reviewResult", "reviewFingerprint", "reviewReceiptVersion",
     "reviewReceiptFingerprint", "referenceCriteria", "referenceCriteriaComplete",
     "finalMasterSha256", "cinematicFinalMasterQaReceiptFingerprint",
+    "finalMasterReleaseCertificate", "finalMasterReleaseCertificateKey",
   ],
   paid: true,
   run: async (ctx) => {
@@ -3153,12 +3178,11 @@ export const qaVisual: Block = {
     // This is the visual release gate. It persists timestamped scene/cue/overlay
     // evidence, reviews <=12-image chronological batches, then creates a dense
     // 2-fps focus pass for suspect or previously repaired intervals.
-    // A cinematic master is a file, not just a logical scene plan. Hash its
-    // exact bytes before extracting any final-review evidence so the persisted
-    // frames and their fingerprint cannot later be paired with a replacement.
-    const finalMasterSha256BeforeVisualReview = cinematicBinding && productionQa
-      ? await sha256ShotAnalysisSource(video)
-      : undefined;
+    // A release master is a file, not just a logical scene plan. Hash its
+    // exact bytes before extracting final-review evidence so the persisted
+    // frames, reviewer receipt, and later release certificate cannot be paired
+    // with a replacement master. This applies to every lane that may upload.
+    const finalMasterSha256BeforeVisualReview = await sha256ShotAnalysisSource(video);
     const visualReview = await reviewRender(video, p.durationSec, reviewIntent, {
       runId: ctx.runId,
       keyPrefix: ctx.keyPrefix,
@@ -3174,15 +3198,12 @@ export const qaVisual: Block = {
     });
     // Close the final-master TOCTOU window opened by frame extraction and the
     // independent visual reviewer. A changed master cannot retain this review.
-    const finalMasterSha256AfterVisualReview = cinematicBinding && productionQa
-      ? await sha256ShotAnalysisSource(video)
-      : undefined;
-    if (cinematicBinding && productionQa && (
-      !finalMasterSha256BeforeVisualReview ||
+    const finalMasterSha256AfterVisualReview = await sha256ShotAnalysisSource(video);
+    if (
       visualReview.evidence.source.sha256 !== finalMasterSha256BeforeVisualReview ||
       finalMasterSha256AfterVisualReview !== finalMasterSha256BeforeVisualReview
-    )) {
-      throw new Error("qa_visual FAILED: cinematic final master changed during evidence-backed visual review");
+    ) {
+      throw new Error("qa_visual FAILED: final master changed during evidence-backed visual review");
     }
     if (productionQa && !visualReview.ran) {
       throw new Error("qa_visual FAILED: required evidence-backed visual reviewer did not run");
@@ -4078,6 +4099,132 @@ export const qaVisual: Block = {
         visualRepairSignals(visualReview, reviewIntent),
       );
     }
+    let finalMasterReleaseCertificate:
+      | ReturnType<typeof createFinalMasterReleaseCertificate>
+      | undefined;
+    let finalMasterReleaseCertificateKey: string | undefined;
+    if (productionQa) {
+    // Persist the complete post-review receipt before handing the master to
+    // upload. `visualReview.persistEvidence` deliberately runs before the
+    // reviewer can produce a verdict, so its evidence manifest alone cannot
+    // prove that the retained frames actually passed. Keep that immutable
+    // manifest and write the verdict-bearing receipt beside it; the following
+    // certificate binds both to the exact master bytes.
+    const visualReviewEvidenceManifestKey = visualReview.evidence.manifestKey;
+    if (
+      visualReview.verdict !== "pass" ||
+      !visualReview.referenceCriteriaComplete ||
+      !visualReviewEvidenceManifestKey
+    ) {
+      throw new Error("qa_visual FAILED: final-master visual-review evidence was not durably persisted");
+    }
+    const visualReviewEvidenceFrameKeys = visualReview.evidence.frames.map((frame) => {
+      if (!frame.r2Key) {
+        throw new Error("qa_visual FAILED: final-master visual-review frame evidence was not durably persisted");
+      }
+      return frame.r2Key;
+    });
+    if (new Set(visualReviewEvidenceFrameKeys).size !== visualReviewEvidenceFrameKeys.length) {
+      throw new Error("qa_visual FAILED: final-master visual-review frame evidence contains duplicate storage keys");
+    }
+    const sortedVisualReviewEvidenceFrameKeys = [...visualReviewEvidenceFrameKeys].sort();
+    const visualReviewReleaseReceipt = createVisualReviewReleaseReceipt({
+      reviewFingerprint: visualReview.reviewFingerprint,
+      reviewReceiptVersion: visualReview.reviewReceiptVersion,
+      reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+      verdict: "pass",
+      summary: visualReview.summary,
+      defects: visualReview.defects,
+      focusWindows: visualReview.focusWindows,
+      referenceCriteria: visualReview.referenceCriteria,
+      referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
+      evidence: {
+        source: {
+          durationSec: visualReview.evidence.source.durationSec,
+          sha256: finalMasterSha256AfterVisualReview,
+        },
+        manifestKey: visualReviewEvidenceManifestKey,
+        frameKeys: sortedVisualReviewEvidenceFrameKeys,
+      },
+    });
+    const visualReviewReceiptKey = visualReviewReleaseReceiptKey(
+      ctx.keyPrefix,
+      ctx.runId,
+      visualReviewReleaseReceipt.releaseReceiptFingerprint,
+    );
+    await putObject(
+      visualReviewReceiptKey,
+      Buffer.from(JSON.stringify(visualReviewReleaseReceipt, null, 2)),
+      { contentType: "application/json" },
+    );
+    const audioReceipts = [
+      narrationPerformance,
+      finalNarrationMix,
+      finalNarrationTranscript,
+      narrationCueTiming,
+      finalAudioMeters,
+      qualityEvidence.axes.audio,
+    ].some((receipt) => receipt !== undefined)
+      ? {
+          narrationPerformance,
+          finalMix: finalNarrationMix,
+          transcript: finalNarrationTranscript,
+          cueTiming: narrationCueTiming,
+          finalMasterMeters: finalAudioMeters,
+          qualityAxis: qualityEvidence.axes.audio,
+        }
+      : undefined;
+    const persistedFinalMasterReleaseCertificate = createFinalMasterReleaseCertificate({
+      version: FINAL_MASTER_RELEASE_CERTIFICATE_VERSION,
+      finalMaster: {
+        r2Key: str(ctx, "videoKey"),
+        sha256: finalMasterSha256AfterVisualReview,
+        durationSec: p.durationSec,
+      },
+      visualReview: {
+        evidenceManifestKey: visualReviewEvidenceManifestKey,
+        evidenceFrameKeys: sortedVisualReviewEvidenceFrameKeys,
+        receiptKey: visualReviewReceiptKey,
+        reviewFingerprint: visualReview.reviewFingerprint,
+        reviewReceiptVersion: visualReview.reviewReceiptVersion,
+        reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
+        releaseReceiptFingerprint: visualReviewReleaseReceipt.releaseReceiptFingerprint,
+      },
+      ...(cinematicFinalMasterQaReceipt && cinematicFinalMasterQaReceiptFingerprint
+        ? {
+            cinematic: {
+              receiptFingerprint: cinematicFinalMasterQaReceiptFingerprint,
+              receipt: cinematicFinalMasterQaReceipt,
+            },
+          }
+        : {}),
+      ...(audioReceipts ? { audio: audioReceipts } : {}),
+    });
+    const persistedFinalMasterReleaseCertificateKey = finalMasterReleaseCertificateObjectKey(
+      ctx.keyPrefix,
+      ctx.runId,
+      persistedFinalMasterReleaseCertificate.certificateFingerprint,
+    );
+    await putObject(
+      persistedFinalMasterReleaseCertificateKey,
+      Buffer.from(JSON.stringify(persistedFinalMasterReleaseCertificate, null, 2)),
+      { contentType: "application/json" },
+    );
+    if (await sha256ShotAnalysisSource(video) !== finalMasterSha256AfterVisualReview) {
+      throw new Error("qa_visual FAILED: final master changed while its durable release evidence was being persisted");
+    }
+    finalMasterReleaseCertificate = persistedFinalMasterReleaseCertificate;
+    finalMasterReleaseCertificateKey = persistedFinalMasterReleaseCertificateKey;
+    ctx.log(
+      `qa_visual: durable final-master release evidence persisted (${persistedFinalMasterReleaseCertificate.certificateFingerprint.slice(0, 12)}, ` +
+        `${sortedVisualReviewEvidenceFrameKeys.length} review frame(s))`,
+    );
+    } else {
+      // Draft QA supports fast probes whose reviewer result may be unran or
+      // non-passing. Upload compilation rejects draft QA, so deliberately do
+      // not mint a release certificate outside the production release path.
+      ctx.log("qa_visual: draft profile completed without durable release evidence; uploads require production QA");
+    }
     ctx.log("qa_visual PASS (per-artifact)", {
       video: video_.score,
       thumbnail: thumbnail.score,
@@ -4132,8 +4279,11 @@ export const qaVisual: Block = {
       reviewReceiptFingerprint: visualReview.reviewReceiptFingerprint,
       referenceCriteria: visualReview.referenceCriteria,
       referenceCriteriaComplete: visualReview.referenceCriteriaComplete,
-      finalMasterSha256: cinematicFinalMasterSha256,
+      finalMasterSha256: finalMasterSha256AfterVisualReview,
       cinematicFinalMasterQaReceiptFingerprint,
+      ...(finalMasterReleaseCertificate && finalMasterReleaseCertificateKey
+        ? { finalMasterReleaseCertificate, finalMasterReleaseCertificateKey }
+        : {}),
       [COST_PATCH_KEY]: qaCost,
     };
   },

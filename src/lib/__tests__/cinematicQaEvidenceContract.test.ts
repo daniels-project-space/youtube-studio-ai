@@ -21,6 +21,10 @@ import type { VisualReviewEvidence } from "@/lib/visualReview";
 const fingerprint = "a".repeat(64);
 const master = "b".repeat(64);
 const review = "c".repeat(24);
+const nameCardText = "LEAD INVESTIGATOR — CASE FILE 118";
+const nameCardCriterion =
+  `The deterministic character-introduction name-card overlay visibly and exactly reads ${nameCardText}.`;
+const openingAcceptanceCriteria = ["faceless", "coat", "scarf", "file", nameCardCriterion];
 
 const sourceProofObligation: SourceProofMediaObligation = {
   version: SOURCE_PROOF_MEDIA_VERSION,
@@ -69,7 +73,7 @@ const sequence = {
     causalQuestion: "Why was the case file sealed?",
     claimIds: ["claim-motive"],
     sourceIds: ["source-court-archive"],
-    shots: [{ id: "cinematic-shot-opening", t0: 0, castIds: ["mannequin-detective"], coveragePurpose: "evidence_insert", visualMode: "source_proof" }],
+    shots: [{ id: "cinematic-shot-opening", t0: 0, castIds: ["mannequin-detective"], coveragePurpose: "evidence_insert", visualMode: "source_proof", nameCardText }],
   }, {
     id: "cinematic-beat-reveal",
     narrativeRole: "reveal",
@@ -97,7 +101,7 @@ const creativeLocks = {
   version: CINEMATIC_CASE_SEQUENCE_VERSION,
   sequenceFingerprint: fingerprint,
   locks: [
-    { id: "cinematic-shot-opening", startSec: 0, endSec: 3, expected: "A faceless detective finds the file.", acceptanceCriteria: ["faceless", "coat", "scarf", "file"] },
+    { id: "cinematic-shot-opening", startSec: 0, endSec: 3, expected: "A faceless detective finds the file.", acceptanceCriteria: openingAcceptanceCriteria },
     { id: "cinematic-shot-reveal", startSec: 3, endSec: 6, expected: "The case-file contradiction lands.", acceptanceCriteria: ["faceless", "coat", "scarf", "reveal"] },
   ],
 } as CinematicCreativeLocks;
@@ -145,6 +149,10 @@ const plan = cinematicFinalMasterQaPlan({
   footageManifest: sourceProofFootageManifest,
 });
 assert.equal(plan.locks.length, 2, "approved locks must become receipt requirements");
+assert.ok(
+  plan.locks[0]?.acceptanceCriteria.includes(nameCardCriterion),
+  "the exact deterministic name-card criterion must reach the final-master reviewer plan",
+);
 assert.equal(plan.cuts[0]?.atSec, 3, "EDL joins must use final-master timing");
 assert.equal(plan.payoffs[0]?.shotId, "cinematic-shot-reveal", "the cited reveal's source-proof lock must carry the opening-question payoff");
 assert.equal(plan.sourceProofs[0]?.sourceProofMediaReceipt.obligation.assetSha256, sourceProofObligation.assetSha256, "final QA must retain the exact approved source asset SHA-256");
@@ -158,7 +166,7 @@ const receipt = {
   locks: [
     {
       shotId: "cinematic-shot-opening",
-      acceptedCriteria: ["faceless", "coat", "scarf", "file"],
+      acceptedCriteria: openingAcceptanceCriteria,
       startFrameId: "f1",
       middleFrameId: "f2",
       endFrameId: "f3",
@@ -325,7 +333,7 @@ function approvedLockJudgement(firstFrameSec: number): string {
   return JSON.stringify({
     pass: true,
     unplannedInSceneTextFree: true,
-    acceptedCriteria: opening ? ["faceless", "coat", "scarf", "file"] : ["faceless", "coat", "scarf", "reveal"],
+    acceptedCriteria: opening ? openingAcceptanceCriteria : ["faceless", "coat", "scarf", "reveal"],
     continuity: [continuity],
     claims: [{
       claimId: opening ? "claim-motive" : "claim-timeline",
@@ -398,6 +406,10 @@ async function main(): Promise<void> {
     /approved source-proof insert named above.*deterministic planned overlays/i,
     "approved source-proof inserts and deterministic overlays must be expressly exempt from the narrow text check",
   );
+  assert.ok(
+    lockPrompts[0]?.includes(nameCardCriterion),
+    "the final-master reviewer prompt must require the exact deterministic name-card overlay",
+  );
   assert.deepEqual(
     reviewerCalls.map(({ kind, frameIds }) => ({ kind, frameCount: frameIds.length })),
     [{ kind: "lock", frameCount: 3 }, { kind: "lock", frameCount: 3 }, { kind: "cut", frameCount: 2 }],
@@ -440,7 +452,7 @@ async function main(): Promise<void> {
     return JSON.stringify({
       pass: true,
       unplannedInSceneTextFree: true,
-      acceptedCriteria: frames[0]?.tSec && frames[0].tSec < 3 ? ["faceless", "coat", "scarf", "file"] : ["faceless", "coat", "scarf", "reveal"],
+      acceptedCriteria: frames[0]?.tSec && frames[0].tSec < 3 ? openingAcceptanceCriteria : ["faceless", "coat", "scarf", "reveal"],
       continuity: [continuity],
     });
   };
@@ -462,6 +474,7 @@ async function main(): Promise<void> {
     locks: receipt.locks.map((lock, index) => {
       if (index !== 0) return lock;
       const { unplannedInSceneTextFree: _omitted, ...withoutTextAudit } = lock;
+      void _omitted;
       return withoutTextAudit;
     }),
   };

@@ -689,7 +689,10 @@ async function main() {
   const videoOutputs = completion.videoOutputs || {};
   const outputRows = await Promise.all(video.manifest.jobs.map(async (job) => {
     const proof = videoOutputs[job.id];
-    assertLtx25Native720X2SmokeProof(proof);
+    assertLtx25Native720X2SmokeProof(proof, {
+      initialSha256: job.input?.sha256,
+      ...(job.endInput?.sha256 ? { endSha256: job.endInput.sha256 } : {}),
+    });
     const controllerProof = await createLtx25BenchmarkOutputBinding({ bytes: await objectBytes(job.artifact.key) });
     if (controllerProof.sizeBytes !== videoArtifacts.get(job.id)?.sizeBytes) {
       throw new Error(`controller download size does not match R2 artifact metadata for ${job.id}`);

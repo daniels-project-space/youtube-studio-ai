@@ -18,10 +18,10 @@ export const NATIVE_720_X2_CINEMATIC_TARGET = Object.freeze({
 });
 
 /**
- * A caller may supply this explicit receipt, but it carries no authority by
- * itself. Admission accepts it only when it exactly matches an immutable,
- * release-controlled record below. `receiptSha256` detects accidental field
- * substitution after that durable record has been created.
+ * The immutable proof record that a source-reviewed release may eventually
+ * register for the native-720p x2 target. It is never supplied by a render
+ * caller: callers can request a profile, but only this release-controlled
+ * registry can authorize it.
  */
 export interface CinematicProofAdmissionReceipt {
   version: typeof CINEMATIC_PROOF_ADMISSION_VERSION;
@@ -77,18 +77,6 @@ export function sealCinematicProofAdmissionReceipt(
   return { ...core, receiptSha256: cinematicProofAdmissionReceiptFingerprint(core) };
 }
 
-function sameCinematicProofAdmissionReceipt(
-  left: CinematicProofAdmissionReceipt,
-  right: CinematicProofAdmissionReceipt,
-): boolean {
-  return left.version === right.version
-    && left.profileFingerprint === right.profileFingerprint
-    && left.finalMasterSha256 === right.finalMasterSha256
-    && left.visualReviewReceiptFingerprint === right.visualReviewReceiptFingerprint
-    && left.cinematicFinalMasterQaReceiptFingerprint === right.cinematicFinalMasterQaReceiptFingerprint
-    && left.receiptSha256 === right.receiptSha256;
-}
-
 /**
  * Only the requested native-720p two-stage target is gated here. Existing
  * lower-resolution admitted profiles intentionally retain their current path.
@@ -110,24 +98,26 @@ function assertSha256(name: string, value: string): void {
 }
 
 /**
- * Fail closed before any provider admission. A smaller 640x352 -> 1280x704
- * receipt has a different fingerprint and therefore cannot approve native-720
- * x2 worker spend.
+ * Resolve the sole admissible native-720p x2 proof from the immutable release
+ * registry. This deliberately has no caller-provided receipt parameter: a
+ * self-consistent payload from an API, repair task, or hand-authored config
+ * must never become render authority.
  */
-export function assertCinematicProofAdmission(args: {
-  profile: NovitaPhaseProfile;
-  proof?: CinematicProofAdmissionReceipt;
-}): void {
-  if (!requiresNative720X2CinematicProof(args.profile)) return;
+export function resolveApprovedCinematicProofAdmission(
+  profile: NovitaPhaseProfile,
+): CinematicProofAdmissionReceipt | undefined {
+  if (!requiresNative720X2CinematicProof(profile)) return undefined;
 
-  const proof = args.proof;
+  const expectedProfileFingerprint = cinematicProofProfileFingerprint(profile);
+  const proof = APPROVED_NATIVE_720_X2_PROOF_RECEIPTS
+    .find((candidate) => candidate.profileFingerprint === expectedProfileFingerprint);
   if (!proof) {
     throw new Error(
-      "native-720p x2 cinematic production is blocked until an explicit cinematic proof receipt is supplied",
+      "native-720p x2 cinematic production is blocked: no immutable approved proof receipt is registered for the exact requested profile",
     );
   }
   if (proof.version !== CINEMATIC_PROOF_ADMISSION_VERSION) {
-    throw new Error("cinematic proof admission receipt has an unsupported version");
+    throw new Error("registered cinematic proof admission receipt has an unsupported version");
   }
   assertSha256("profileFingerprint", proof.profileFingerprint);
   assertSha256("finalMasterSha256", proof.finalMasterSha256);
@@ -137,22 +127,21 @@ export function assertCinematicProofAdmission(args: {
 
   const expectedReceiptSha256 = cinematicProofAdmissionReceiptFingerprint(proof);
   if (proof.receiptSha256 !== expectedReceiptSha256) {
-    throw new Error("cinematic proof admission receipt integrity fingerprint does not match");
+    throw new Error("registered cinematic proof admission receipt integrity fingerprint does not match");
   }
-  if (proof.profileFingerprint !== cinematicProofProfileFingerprint(args.profile)) {
-    throw new Error("cinematic proof admission receipt does not match the exact requested native-720p x2 profile");
+  if (proof.profileFingerprint !== expectedProfileFingerprint) {
+    throw new Error("registered cinematic proof admission receipt does not match the exact requested native-720p x2 profile");
   }
+  return proof;
+}
 
-  const approvedProof = APPROVED_NATIVE_720_X2_PROOF_RECEIPTS
-    .find((candidate) => candidate.profileFingerprint === proof.profileFingerprint);
-  if (!approvedProof) {
-    throw new Error(
-      "native-720p x2 cinematic production is blocked: no immutable approved proof receipt is registered for the exact requested profile",
-    );
-  }
-  if (!sameCinematicProofAdmissionReceipt(proof, approvedProof)) {
-    throw new Error(
-      "cinematic proof admission receipt does not match the immutable approved proof record for the exact requested profile",
-    );
-  }
+/**
+ * Fail closed before any provider admission. A smaller 640x352 -> 1280x704
+ * proof has a different profile fingerprint and therefore cannot unlock the
+ * native-720p x2 worker path.
+ */
+export function assertCinematicProofAdmission(args: {
+  profile: NovitaPhaseProfile;
+}): void {
+  void resolveApprovedCinematicProofAdmission(args.profile);
 }

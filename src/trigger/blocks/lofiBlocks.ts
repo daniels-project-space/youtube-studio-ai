@@ -37,6 +37,14 @@ import { novitaCostEnvelope, requireNovitaStageBudget } from "@/lib/novitaCostEn
 import { resolveContentLane } from "@/engine/contentLane";
 import { assertChildContentRenderEvidence } from "@/trigger/blocks/childrenSafetyBlocks";
 import { assessProductionEditorialAcceptance, QualityEvidenceSchema } from "@/engine/qualityEvidence";
+import {
+  assertFinalMasterReleaseCertificate,
+  assertReleaseCertificateVisualReviewBindings,
+  finalMasterReleaseCertificateKey,
+  parseFinalMasterReleaseCertificateBytes,
+  parseVisualReviewReleaseReceiptBytes,
+  retainedFinalMasterReleaseObjectKeys,
+} from "@/lib/finalMasterReleaseCertificate";
 import { StudioConvexHttpClient as ConvexHttpClient } from "@/lib/studioConvexHttpClient";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -1243,11 +1251,75 @@ export const assemble: Block = {
 
 /* --------------------------- 10. upload_draft --------------------------- */
 
+/**
+ * Reload the release certificate from R2 and bind it to the exact local bytes
+ * the connector is about to upload. This is intentionally before connector
+ * lookup/dispatch: a stale, deleted, or mismatched QA receipt must never reach
+ * the external publishing path.
+ */
+async function verifyFinalMasterReleaseEvidenceForUpload(
+  ctx: StageContext,
+  filePath: string,
+  videoKey: string,
+) {
+  const certificateKey = str(ctx, "finalMasterReleaseCertificateKey");
+  const stagedCertificate = assertFinalMasterReleaseCertificate(
+    ctx.store["finalMasterReleaseCertificate"],
+  );
+  const expectedCertificateKey = finalMasterReleaseCertificateKey(
+    ctx.keyPrefix,
+    ctx.runId,
+    stagedCertificate.certificateFingerprint,
+  );
+  if (certificateKey !== expectedCertificateKey) {
+    throw new Error("upload_draft: final-master release certificate key does not match the staged certificate");
+  }
+  const durableCertificate = parseFinalMasterReleaseCertificateBytes(
+    await getObjectBytes(certificateKey),
+  );
+  if (durableCertificate.certificateFingerprint !== stagedCertificate.certificateFingerprint) {
+    throw new Error("upload_draft: durable final-master release certificate differs from the staged QA certificate");
+  }
+  // Validate the certificate and every retained evidence key in the same
+  // bounded namespace cleanup will later use. This also rejects a receipt key
+  // that is not derived from its content fingerprint before any connector work.
+  retainedFinalMasterReleaseObjectKeys({
+    keyPrefix: ctx.keyPrefix,
+    runId: ctx.runId,
+    certificateKey,
+    certificate: durableCertificate,
+  });
+  if (durableCertificate.finalMaster.r2Key !== videoKey) {
+    throw new Error("upload_draft: final-master release certificate belongs to a different video object");
+  }
+  const [receiptBytes, evidenceManifestBytes] = await Promise.all([
+    getObjectBytes(durableCertificate.visualReview.receiptKey),
+    getObjectBytes(durableCertificate.visualReview.evidenceManifestKey),
+  ]);
+  let evidenceManifest: unknown;
+  try {
+    evidenceManifest = JSON.parse(Buffer.from(evidenceManifestBytes).toString("utf8"));
+  } catch {
+    throw new Error("upload_draft: durable visual-review evidence manifest is not valid JSON");
+  }
+  assertReleaseCertificateVisualReviewBindings({
+    certificate: durableCertificate,
+    receipt: parseVisualReviewReleaseReceiptBytes(receiptBytes),
+    evidenceManifest,
+  });
+  const localMasterSha256 = await fileSha256(filePath);
+  if (localMasterSha256 !== durableCertificate.finalMaster.sha256) {
+    throw new Error("upload_draft: local final master no longer matches its durable release certificate");
+  }
+  return durableCertificate;
+}
+
 export const uploadDraft: Block = {
   id: "upload_draft",
   consumes: [
     "videoKey", "videoLocalPath", "title", "description", "tags", "qaPassed",
     "qualityEvidence", "thumbnailKey", "thumbnailPublishable",
+    "finalMasterReleaseCertificate", "finalMasterReleaseCertificateKey",
   ],
   produces: ["youtubeVideoId", "watchUrl", "youtubePrivacy"],
   run: async (ctx) => {
@@ -1289,6 +1361,7 @@ export const uploadDraft: Block = {
       throw new Error("upload_draft: thumbnail is a nonpublishable draft preview — refusing to upload");
     }
     const filePath = str(ctx, "videoLocalPath");
+    const videoKey = str(ctx, "videoKey");
     const title = str(ctx, "title");
     let description = str(ctx, "description");
     // LAST-HOP SANITIZE: performed [audio tags] must never reach a public
@@ -1319,6 +1392,14 @@ export const uploadDraft: Block = {
     if (!channel || channel.ownerId !== ctx.ownerId || !run?.startedAt) {
       throw new Error("upload_draft: run/channel tenancy could not be verified");
     }
+    const finalMasterReleaseCertificate = await verifyFinalMasterReleaseEvidenceForUpload(
+      ctx,
+      filePath,
+      videoKey,
+    );
+    ctx.log(
+      `upload_draft: revalidated final-master release evidence (${finalMasterReleaseCertificate.certificateFingerprint.slice(0, 12)})`,
+    );
 
     // Publish mode (per-channel pipeline param; default "draft" = private, human
     // approves). A scheduled timestamp is reused from the durable upload row so
@@ -1419,7 +1500,7 @@ export const uploadDraft: Block = {
       containsSyntheticMedia: true,
       madeForKids,
     } as const;
-    const videoSha256 = await fileSha256(filePath);
+    const videoSha256 = finalMasterReleaseCertificate.finalMaster.sha256;
     const videoArtifactId = `sha256:${videoSha256}`;
     const intentVersion = Number(ctx.params["intentVersion"] ?? 1);
     const idempotencyKey = buildPublishIdempotencyKey({
@@ -1439,7 +1520,7 @@ export const uploadDraft: Block = {
       connectorVersion: connector.tokenVersion,
       runId: ctx.runId as Id<"runs">,
       videoArtifactId,
-      videoArtifactKey: str(ctx, "videoKey"),
+      videoArtifactKey: videoKey,
       videoSha256,
       thumbnailArtifactKey: thumbKey,
       thumbnailSha256,
@@ -1524,27 +1605,55 @@ export const notify: Block = {
 
 /**
  * Storage minimiser — runs LAST (after a successful upload) and deletes every
- * intermediate artifact for the run, keeping ONLY the finished video + its
- * thumbnail. Removes the matching R2 objects (narration, music, pre-overlay
- * video, captions, stock segments, keyframes, loop unit, …) AND the intermediate
- * asset rows, so the library holds just the final video. Generic (uses
+ * intermediate artifact for the run, keeping the finished video + thumbnail
+ * and the content-addressed final-master release evidence. Removes the matching
+ * R2 objects (narration, music, pre-overlay video, captions, stock segments,
+ * keyframes, loop unit, …) AND the intermediate asset rows, so the library
+ * keeps the final video and auditable proof of its QA. Generic (uses
  * ctx.keyPrefix + runId) → reusable by EVERY channel/archetype. Non-fatal: a
  * cleanup failure never fails an already-uploaded run.
  */
 export const cleanup: Block = {
   id: "cleanup",
-  consumes: ["watchUrl"], // gated on a successful upload — never runs on a failed render
+  consumes: [
+    "watchUrl",
+    "finalMasterReleaseCertificate",
+    "finalMasterReleaseCertificateKey",
+  ], // gated on a successful upload — never runs on a failed render
   produces: ["cleaned", "removedObjects"],
   run: async (ctx) => {
     const prefix = `${ctx.keyPrefix}runs/${ctx.runId}/`;
     const keepNames = (ctx.params["keep"] as string[] | undefined) ?? ["final.mp4", "thumbnail.jpg"];
-    const keep = new Set(keepNames.map((n) => `${prefix}${n}`));
+    let retainedReleaseEvidence: string[];
+    try {
+      retainedReleaseEvidence = retainedFinalMasterReleaseObjectKeys({
+        keyPrefix: ctx.keyPrefix,
+        runId: ctx.runId,
+        certificateKey: str(ctx, "finalMasterReleaseCertificateKey"),
+        certificate: assertFinalMasterReleaseCertificate(ctx.store["finalMasterReleaseCertificate"]),
+      });
+    } catch (error) {
+      // Upload already revalidated this certificate, so a failure here is an
+      // unexpected persistence fault. Preserve everything rather than deleting
+      // the only auditable final-master evidence after a successful upload.
+      ctx.log(
+        `cleanup: release evidence retention failed; preserving all run objects: ${error instanceof Error ? error.message : error}`,
+      );
+      return { cleaned: false, removedObjects: 0 };
+    }
+    const keep = new Set([
+      ...keepNames.map((n) => `${prefix}${n.replace(/^\/+/, "")}`),
+      ...retainedReleaseEvidence,
+    ]);
     let removed = 0;
     try {
       const all = await listObjects(prefix);
       const del = all.filter((k) => !keep.has(k));
       removed = await deleteObjects(del);
-      ctx.log(`cleanup: removed ${removed} intermediate object(s); kept ${all.length - del.length} (${keepNames.join(", ")})`);
+      ctx.log(
+        `cleanup: removed ${removed} intermediate object(s); kept ${all.length - del.length} ` +
+          `(${keepNames.join(", ")}; ${retainedReleaseEvidence.length} final-master evidence object(s))`,
+      );
     } catch (e) {
       ctx.log(`cleanup: R2 prune failed (non-fatal): ${e instanceof Error ? e.message : e}`);
     }

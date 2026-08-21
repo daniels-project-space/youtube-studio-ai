@@ -4,8 +4,10 @@
  * YouTube's "inauthentic content" rule demonetizes templated/repetitive output
  * channel-wide. The old hosted-Gemini embedding route is intentionally
  * retired: Gemini is sealed to thumbnail generation and cannot be used for
- * content or similarity analysis. Callers already treat an unavailable
- * embedding backend as a fail-safe skip with an explicit log.
+ * content or similarity analysis. The production originality gate now uses
+ * deterministic local lexical self-deduplication instead; this compatibility
+ * surface remains only so retired callers cannot silently revive a provider
+ * embedding path.
  */
 import { assertGeminiRuntimeAllowed } from "@/lib/gemini";
 

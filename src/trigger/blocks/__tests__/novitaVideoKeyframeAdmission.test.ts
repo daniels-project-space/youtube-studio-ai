@@ -1,8 +1,17 @@
 import assert from "node:assert/strict";
 
 import { registerAllBlocks } from "@/engine/blocks";
+import { generationProfile } from "@/engine/generationProfiles";
 import { getManifest } from "@/engine/registry";
-import { assertAcceptedKeyframeSelection } from "@/trigger/blocks/novitaRenderBlocks";
+import {
+  toNovitaPhaseProfile,
+  type NovitaPhaseProfile,
+  type NovitaRenderResult,
+} from "@/lib/novitaRenderFarm";
+import {
+  assertAcceptedKeyframeSelection,
+  assertNovitaRenderVideoOutputProofs,
+} from "@/trigger/blocks/novitaRenderBlocks";
 
 const generation = {
   contractVersion: "1.0.0" as const,
@@ -91,6 +100,55 @@ assert.throws(
     }),
   /does not meet its accepted QA threshold/,
   "a report that claims pass below its own threshold cannot authorize LTX",
+);
+
+const native720VideoProfile: NovitaPhaseProfile = {
+  ...toNovitaPhaseProfile(generationProfile("production"), "video"),
+  width: 2560,
+  height: 1408,
+  stageOneWidth: 1280,
+  stageOneHeight: 704,
+};
+const nativeInitialSha256 = "e".repeat(64);
+const nativeEndSha256 = "f".repeat(64);
+const native720Result: Pick<NovitaRenderResult, "videoOutputProofs" | "nativeInputGeometrySources"> = {
+  videoOutputProofs: {
+    "shot-a": {
+      outputWidth: 2560,
+      outputHeight: 1408,
+      hasAudio: true,
+      stageOneWidth: 1280,
+      stageOneHeight: 704,
+      spatialUpscaleFactor: 2 as const,
+      pipeline: "distilled" as const,
+      quantization: "fp8-cast" as const,
+      offload: "cpu" as const,
+      inputGeometry: {
+        initial: { sha256: nativeInitialSha256, width: 1280, height: 704 },
+        end: { sha256: nativeEndSha256, width: 1280, height: 704 },
+      },
+    },
+  },
+  nativeInputGeometrySources: {
+    "shot-a": { initialSha256: nativeInitialSha256, endSha256: nativeEndSha256 },
+  },
+};
+assert.doesNotThrow(
+  () => assertNovitaRenderVideoOutputProofs({
+    profile: native720VideoProfile,
+    shotIds: ["shot-a"],
+    result: native720Result,
+  }),
+  "novita_render_video must retain controller-sealed native input hashes through its final output-proof check",
+);
+assert.throws(
+  () => assertNovitaRenderVideoOutputProofs({
+    profile: native720VideoProfile,
+    shotIds: ["shot-a"],
+    result: { videoOutputProofs: native720Result.videoOutputProofs },
+  }),
+  /missing sealed input geometry sources/,
+  "novita_render_video must fail closed if a native render result loses controller-sealed input bindings",
 );
 
 registerAllBlocks();

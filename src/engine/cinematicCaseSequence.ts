@@ -280,6 +280,11 @@ export const CinematicGeneratedSceneSchema = z
     still: text(1_800),
     /** A separately generated target for LTX's final conditioned frame. */
     terminalStill: text(1_800).optional(),
+    /**
+     * Reviewed character-introduction card, rendered deterministically after
+     * LTX rather than asking the video model to bake typography into a frame.
+     */
+    nameCardText: text(120).optional(),
     /** Retired; generated scenes must not carry a free-text image search. */
     realImageInsertQuery: text(200).optional(),
     /** Exact source/right/asset obligation for a non-LTX evidence insert. */
@@ -1294,14 +1299,12 @@ export function assertCinematicCaseSequence(
     // reach the still/I2V prompts themselves, not live only in a reviewer
     // receipt after the expensive render has already happened.
     // Content-safety/citation-integrity default: never render the causal
-    // question (or any other narrative prose) as on-screen text. The ONE
-    // narrow, explicit exception is a reviewed introduction-beat name card —
-    // `evaluateCinematicCaseSequence`'s `name_card_invalid` checks above
-    // already guarantee nameCardText can only reach this point on an
-    // introduction-role shot, so this directive does not itself need to
-    // re-derive that gate; it only decides which prompt clause to emit.
+    // question (or any other narrative prose) as on-screen text. A reviewed
+    // introduction card is deliberately compositor-owned: its actual text
+    // remains off the LTX prompts and travels on the generated scene plan to
+    // the exact final assembly handoff below.
     const onScreenTextDirective = shot.nameCardText
-      ? `On-screen typography permitted for this shot ONLY, as the narrow character-introduction exception: render exactly this name-card text and nothing else — no causal question, no other prose: "${shot.nameCardText}"`
+      ? `Narrative role ${beat.narrativeRole}; approved character identifier is compositor-owned, so convey this story driver only through visible action: ${beat.causalQuestion}`
       : `Narrative role ${beat.narrativeRole}; story driver (never render this as on-screen text): ${beat.causalQuestion}`;
     const narrativeLock = [
       // Keep this first. `narrationPurpose` is the exact compact causal/source
@@ -1395,6 +1398,7 @@ export function assertCinematicCaseSequence(
     t1: shot.t1,
     still,
     terminalStill,
+    ...(shot.nameCardText ? { nameCardText: shot.nameCardText } : {}),
     ...(shot.sourceProofMedia ? { sourceProofMedia: shot.sourceProofMedia } : {}),
     motion,
     diegeticSoundscape,
@@ -1461,6 +1465,11 @@ export function assertCinematicCaseSequence(
         `The planned ${shot.shotScale} framing and ${shot.cameraMove} camera treatment are visibly motivated: ${shot.cameraRationale}`.slice(0, 360),
         `The viewer can understand the beat's causal question without on-screen prose: ${beat.causalQuestion}`.slice(0, 360),
         `The cut communicates ${shot.cutReason}; tension state is ${shot.tensionState}`,
+        ...(shot.nameCardText
+          ? [
+              `The deterministic character-introduction name-card overlay visibly and exactly reads ${shot.nameCardText}.`,
+            ]
+          : []),
         ...(mechanicsGuidance
           ? [
               "The frame preserves the approved original editorial mechanics without imitating a named reference: " +
