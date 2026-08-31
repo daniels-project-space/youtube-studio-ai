@@ -1571,6 +1571,7 @@ export const stockFootage: Block = {
     // Worker scratch dir (NEVER a dev box / VPS) + cross-video ledger from R2.
     const tmp = await makeRunTempDir(ctx.runId);
     const ledgerKey = `${ctx.keyPrefix}footage/used_clips.json`;
+    const contribKey = `${ctx.keyPrefix}footage/run/${ctx.runId}/picked.json`;
     const usedIds = new Set<string>();
     try {
       const raw = await getObjectBytes(ledgerKey);
@@ -1578,6 +1579,15 @@ export const stockFootage: Block = {
       ctx.log(`stock_footage: ${usedIds.size} clips in cross-video ledger (will be skipped)`);
     } catch {
       /* no ledger yet — first run for this channel */
+    }
+    let priorContrib: string[] = [];
+    try {
+      const parsed = JSON.parse(Buffer.from(await getObjectBytes(contribKey)).toString("utf8")) as unknown;
+      priorContrib = Array.isArray(parsed) ? parsed.filter((id): id is string => typeof id === "string" && id.length > 0) : [];
+    } catch { /* first attempt of this run */ }
+    const rejectedClipIds = brief.healHints?.length ? new Set(priorContrib) : undefined;
+    if (rejectedClipIds?.size) {
+      ctx.log(`stock_footage: repair will not reuse ${rejectedClipIds.size} clip(s) from the rejected attempt`);
     }
 
     // FOOTAGECRAFT — federated 4K search + CONCURRENT download/gate + coverage.
@@ -1587,6 +1597,7 @@ export const stockFootage: Block = {
       targetSec,
       perClipSec: PER_CLIP,
       usedClipIds: usedIds,
+      excludedClipIds: rejectedClipIds,
       tmpDir: tmp,
       legacy: ctx.params["legacyFootage"] === true,
       log: (m) => ctx.log(m),
@@ -1599,11 +1610,6 @@ export const stockFootage: Block = {
     // it to 125 ids). Remove THIS run's previous contribution before adding the
     // new one, so re-runs replace rather than accumulate.
     try {
-      const contribKey = `${ctx.keyPrefix}footage/run/${ctx.runId}/picked.json`;
-      let priorContrib: string[] = [];
-      try {
-        priorContrib = JSON.parse(Buffer.from(await getObjectBytes(contribKey)).toString("utf8")) as string[];
-      } catch { /* first run of this id */ }
       for (const id of priorContrib) usedIds.delete(id);
       for (const id of cast.pickedIds) usedIds.add(id);
       const ledger = Array.from(usedIds).slice(-3000);

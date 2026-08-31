@@ -330,8 +330,10 @@ export function planHeal(
     owners.add(signal.owner);
     labels.push(`visual ${signal.category} → ${signal.action}`);
     const at = Number.isFinite(signal.startSec) ? ` @${signal.startSec.toFixed(1)}s` : "";
+    const observed = signal.observed.replace(/\s+/g, " ").trim().slice(0, 180);
+    const expected = signal.expected.replace(/\s+/g, " ").trim().slice(0, 180);
     (hints[signal.owner] ??= []).push(
-      `[visual-review${at}] ${signal.category}: ${signal.observed}`.slice(0, 300),
+      `[visual-review${at}] ${signal.category}; observed: ${observed}; expected: ${expected}`.slice(0, 440),
     );
     declareClass(signal.owner, VISUAL_REPAIR_HEAL_CLASS[signal.action]);
     acceptedVisualRepair.push(signal);

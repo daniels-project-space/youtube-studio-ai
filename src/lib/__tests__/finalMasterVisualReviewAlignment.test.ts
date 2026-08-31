@@ -6,6 +6,7 @@ import {
   storySpineFingerprint,
   storySpineVisualReviewLocks,
 } from "@/engine/storySpine";
+import { planHeal, type HealableBlock } from "@/engine/healer";
 import {
   finalMasterTranscriptCues,
   planVisualReviewEvidence,
@@ -172,10 +173,33 @@ async function finalReviewerPromptWiringTest(): Promise<void> {
     ["continuity_break", "narration_mismatch", "reveal_failure"],
     "semantic visual failures must not collapse into the uncertain general_visual bucket",
   );
+  const semanticSignals = visualRepairSignals(reviewed, reviewIntent);
+  assert.equal(semanticSignals.length, 3, "each typed semantic failure must carry one bounded repair signal");
+  assert(
+    semanticSignals.every((signal) => signal.owner === "stock_footage" && signal.action === "resample_footage"),
+    "semantic replacement is bounded to the real stock-footage resampling owner",
+  );
+  const generatedLane: HealableBlock[] = [
+    { id: "generated_visuals", produces: ["videoLocalPath"], consumes: ["storySpine"] },
+    { id: "qa_visual", produces: ["qaReport"], consumes: ["videoLocalPath"] },
+  ];
   assert.equal(
-    visualRepairSignals(reviewed, reviewIntent).length,
-    0,
-    "semantic failures must block honestly until a real lane-owned repair action exists",
+    planHeal(visualReviewFailureMessage(reviewed), generatedLane, () => {}, semanticSignals),
+    null,
+    "a generated/cinematic lane without stock_footage must remain fail-closed instead of blindly rerendering",
+  );
+  const stockLane: HealableBlock[] = [
+    { id: "stock_footage", produces: ["footageClips"], consumes: ["narrationText"], paid: true },
+    { id: "timeline_assemble", produces: ["videoLocalPath"], consumes: ["footageClips"] },
+    { id: "qa_visual", produces: ["qaReport"], consumes: ["videoLocalPath"] },
+  ];
+  const stockRepair = planHeal(visualReviewFailureMessage(reviewed), stockLane, () => {}, semanticSignals);
+  assert.deepEqual(stockRepair?.rerunBlocks, ["stock_footage", "timeline_assemble", "qa_visual"]);
+  assert.deepEqual(stockRepair?.healClasses.stock_footage, ["body_rebuild"]);
+  assert.match(
+    stockRepair?.hints.stock_footage?.join(" ") ?? "",
+    /expected: The current spoken seed discovery is visible/i,
+    "the stock query/gate must receive the reviewer's expected correction, not only its complaint",
   );
   assert.match(visualReviewFailureMessage(reviewed), /narration_mismatch/);
   assert.match(visualReviewFailureMessage(reviewed), /continuity_break/);

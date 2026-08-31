@@ -1886,6 +1886,12 @@ function routeForDefect(
     return { owner: "timeline_assemble", action: "recompose_overlay" };
   }
   if (["wrong_footage", "repeated_clip"].includes(defect.category)) return { owner: "stock_footage", action: "resample_footage" };
+  if (["narration_mismatch", "continuity_break", "reveal_failure"].includes(defect.category)) {
+    // This signal is only executable when the active pipeline actually owns a
+    // stock_footage block. planHeal rejects the absent owner in generated,
+    // cinematic, and comic lanes, so those lanes continue to fail honestly.
+    return { owner: "stock_footage", action: "resample_footage" };
+  }
   if (defect.category === "intro_card") return { owner: "intro_card", action: "rerender_card" };
   if (["black_frame", "frozen_frame", "transition_break", "outro_card"].includes(defect.category)) {
     return { owner: "timeline_assemble", action: "rebuild_timeline" };

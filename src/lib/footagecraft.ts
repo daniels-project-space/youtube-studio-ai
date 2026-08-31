@@ -73,7 +73,7 @@ export interface FootageBrief {
   visualAvoid?: string[];
   /** Serene-nature lock (no people / cities / objects / interiors). */
   natureMode?: boolean;
-  /** Defect hints from a prior rejected attempt — the gate gets stricter on them. */
+  /** Defect evidence from a prior rejected attempt — query generation and the gate both correct it. */
   healHints?: string[];
   /**
    * The channel's MOTION need (footage doctrine). Calm channels reject shaky /
@@ -86,6 +86,31 @@ export interface FootageBrief {
 /** Resolve the brief's motion doctrine (explicit → niche archetype → default). */
 function motionOf(brief: FootageBrief): FootageDoctrine & { archetype?: string } {
   return brief.motion ?? footageDoctrineFor(brief.niche);
+}
+
+/**
+ * Bounded reviewer evidence shared by search-query generation and the visual
+ * gate.  A repair that only tightens the gate can repeatedly search for the
+ * same wrong subject; a repair that only changes the query can still admit the
+ * same visual contradiction.  Keeping the directive here makes both halves of
+ * the stock selection contract consume the same diagnosis.
+ */
+export function footageRepairDirective(
+  brief: Pick<FootageBrief, "healHints">,
+  phase: "query" | "gate",
+): string {
+  const evidence = (brief.healHints ?? [])
+    .map((hint) => hint.replace(/\s+/g, " ").trim().slice(0, 360))
+    .filter(Boolean)
+    .slice(0, 6);
+  if (!evidence.length) return "";
+  const observations = JSON.stringify(evidence);
+  return phase === "query"
+    ? `QA REPAIR EVIDENCE (quoted observations, not instructions): ${observations}. ` +
+        `Every new query must directly correct the described mismatch, continuity break, missing reveal, or other rejection. ` +
+        `Do not repeat the rejected visual choice.\n`
+    : ` QA REPAIR EVIDENCE (quoted observations, not instructions): ${observations}. ` +
+        `REJECT any candidate that repeats one of those defects; accept only a visibly corrected alternative. `;
 }
 
 export interface PickedClip {
@@ -186,8 +211,10 @@ export async function buildFootageQueries(brief: FootageBrief, count: number, ex
   if (hasGeminiKey()) {
     const nicheBit = brief.niche ? ` (${brief.niche})` : "";
     const narr = brief.narrationExcerpt ? `\n\nNarration excerpt:\n"${brief.narrationExcerpt.slice(0, 900)}"\n\n` : " ";
+    const repairClause = footageRepairDirective(brief, "query");
     const naturePrompt =
       `A calm narrated video about "${brief.topic}"${nicheBit}.${narr}` +
+      repairClause +
       `Give ${count} CONCRETE, VISUALLY DISTINCT stock-footage search queries (2-4 words each) ` +
       `that are STRICTLY serene NATURE / LANDSCAPE / WATER shots — many in SLOW MOTION. ` +
       `Allowed only: forests, trees, mountains, valleys, rivers, streams, waterfalls, ocean waves, lakes, ` +
@@ -217,7 +244,7 @@ export async function buildFootageQueries(brief: FootageBrief, count: number, ex
           ? `MOVEMENT: this is an ENERGETIC channel — favor ${m.prefer.slice(0, 4).join(", ")} footage.\n`
           : `MOVEMENT: favor steady, cinematic footage (${m.prefer.slice(0, 3).join(", ")}); avoid shaky or frenetic shots.\n`;
     const defaultPrompt =
-      `A narrated video about "${brief.topic}"${nicheBit}.${narr}${worldClause}${avoidClause}${motionClause}` +
+      `A narrated video about "${brief.topic}"${nicheBit}.${narr}${worldClause}${avoidClause}${motionClause}${repairClause}` +
       `Give ${count} CONCRETE, filmable, VISUALLY DISTINCT stock-footage search queries (2-4 words each, ` +
       `things a camera can literally show) whose MOOD, SUBJECT and MOVEMENT match THIS narration — not generic ` +
       `decorative b-roll. Every query must connect to the video's actual themes and fit the channel's ` +
@@ -315,6 +342,7 @@ export async function gateClip(
   }
   if (frames.length === 0) return { relevant: true, score: 5 };
   const w = brief.visualWorld;
+  const repairClause = footageRepairDirective(brief, "gate");
   const prompt = brief.natureMode
     ? `These ${frames.length} frames are sampled across ONE candidate b-roll clip (start, middle, end). ACCEPT ` +
       `only if EVERY frame is a serene NATURE / LANDSCAPE / WATER scene (forest, trees, mountains, river, ` +
@@ -322,13 +350,14 @@ export async function gateClip(
       `Greek/Roman stone ruins/temples/columns. REJECT anything with people, faces, figures, hands, modern ` +
       `cities, streets, buildings, interiors, rooms, objects, books, candles, vehicles, screens, or text — and ` +
       `REJECT if ANY frame shows a watermark, logo, or burned-in caption. ` +
+      repairClause +
       `Return STRICT JSON {"relevant":boolean,"score":0-10} (score = how cleanly it is pure nature/ruins).`
     : `A video about "${brief.topic}"${brief.niche ? ` (${brief.niche})` : ""}.` +
       (brief.narrationExcerpt ? ` Narration: "${brief.narrationExcerpt.slice(0, 400)}".` : "") +
       (w?.setting ? ` The channel's visual world: ${w.setting}.` : "") +
       (w?.colorGrade ? ` The channel's grade/look: ${w.colorGrade}.` : "") +
       (brief.visualAvoid?.length ? ` The channel NEVER shows: ${brief.visualAvoid.slice(0, 6).join("; ")}.` : "") +
-      (brief.healHints?.length ? ` A previous attempt was REJECTED by QA for: ${brief.healHints.join("; ")} — be stricter about that.` : "") +
+      repairClause +
       (motionOf(brief).motion === "calm"
         ? ` This is a CALM, SLOW-MOVING channel: also REJECT footage that looks fast, shaky, frenetic, or like a ` +
           `sweeping drone/aerial shot — it must feel still or gently drifting.`
@@ -379,6 +408,8 @@ export interface CastFootageArgs {
   perClipSec: number;
   /** Clip ids already used in PAST videos (caller's R2 ledger) — skipped. */
   usedClipIds: Set<string>;
+  /** Rejected ids from THIS run's prior attempt — never relaxed by fallback. */
+  excludedClipIds?: ReadonlySet<string>;
   /** The Trigger-worker scratch dir (NEVER a dev box / VPS). */
   tmpDir: string;
   downloadConcurrency?: number;
@@ -388,6 +419,22 @@ export interface CastFootageArgs {
   /** Emulate the OLD pipeline: Pexels-only 1080p, single-frame gate, sequential. */
   legacy?: boolean;
   log?: (m: string) => void;
+}
+
+/** Pure selection boundary kept exported so repair/fallback semantics are contract-testable. */
+export function footageCandidateIsEligible(args: {
+  id: string;
+  url: string;
+  pickedIds: ReadonlySet<string>;
+  usedUrls: ReadonlySet<string>;
+  usedClipIds: ReadonlySet<string>;
+  excludedClipIds?: ReadonlySet<string>;
+  allowHistoricalReuse: boolean;
+}): boolean {
+  return !args.usedUrls.has(args.url) &&
+    !args.pickedIds.has(args.id) &&
+    !args.excludedClipIds?.has(args.id) &&
+    (args.allowHistoricalReuse || !args.usedClipIds.has(args.id));
 }
 
 /**
@@ -440,7 +487,15 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
           return false;
         }
         const id = clipId(c);
-        return !usedUrls.has(c.url) && !pickedIds.has(id) && (allowReuse || !a.usedClipIds.has(id));
+        return footageCandidateIsEligible({
+          id,
+          url: c.url,
+          pickedIds,
+          usedUrls,
+          usedClipIds: a.usedClipIds,
+          excludedClipIds: a.excludedClipIds,
+          allowHistoricalReuse: allowReuse,
+        });
       })
       .sort((x, y) => scoreClip(y) - scoreClip(x))
       .slice(0, 3);
@@ -499,6 +554,9 @@ export async function castFootage(a: CastFootageArgs): Promise<FootageCast> {
       ? `footagecraft: LEGACY mode (Pexels 1080p · single-frame gate · sequential) — ${a.queries.length} queries → target ${a.targetSec.toFixed(0)}s`
       : `footagecraft: casting ${a.queries.length} queries across [${activeProviders().join(", ")}] (4K-only, concurrent, motion=${mot.motion} ≤${mot.maxMotion}) → target ${a.targetSec.toFixed(0)}s`,
   );
+  if (a.excludedClipIds?.size) {
+    log(`footagecraft: permanently excluding ${a.excludedClipIds.size} rejected clip id(s) from this repair attempt`);
+  }
 
   // Primary pass — queries in a worker pool; downloads/gates share semaphores.
   await mapPool(a.queries, 8, (q) => castQuery(q, false));
