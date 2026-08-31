@@ -1964,6 +1964,35 @@
   gap: 0.45rem;
 }
 
+.channel-page-pagination {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.8rem;
+  min-height: 54px;
+  margin-top: 0.8rem;
+  padding: 0.65rem 0.75rem;
+  border: 1px solid var(--color-border);
+  border-radius: 10px;
+  background: var(--color-surface);
+}
+
+.channel-page-pagination p {
+  margin: 0;
+  color: var(--color-muted);
+  font-size: 0.72rem;
+}
+
+.channel-page-pagination p strong {
+  color: var(--color-fg);
+  font-family: var(--font-mono);
+}
+
+.channel-page-pagination > div {
+  display: flex;
+  gap: 0.45rem;
+}
+
 .channel-folder-strip {
   display: flex;
   flex-wrap: wrap;
@@ -2756,6 +2785,9 @@
   .golden-audit-disclosure summary b { display: none; }
   .channel-card-grid { grid-template-columns: 1fr; }
   .channel-card { padding: 0.9rem; }
+  .channel-page-pagination { align-items: stretch; flex-direction: column; }
+  .channel-page-pagination > div { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .channel-page-pagination button:only-child { grid-column: 1 / -1; }
   .channel-card-actions { grid-template-columns: 1fr; }
   .channel-operating-profile { grid-template-columns: 1fr; }
   .channel-operating-profile > div { border-right: 0; border-bottom: 1px solid var(--color-border); }

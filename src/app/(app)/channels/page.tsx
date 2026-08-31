@@ -17,7 +17,11 @@ import {
   formatZonedScheduleTimestamp,
   nextProjectedPlanItem,
 } from "@/lib/scheduleCalendar";
-import { channelsVisibleForFolder } from "./channelCardVisibility";
+import {
+  CHANNEL_PAGE_SIZE,
+  channelsVisibleForFolder,
+  pageChannels,
+} from "./channelCardVisibility";
 
 type ChannelSchedule = {
   frequency?: string;
@@ -104,6 +108,7 @@ export default function ChannelsPage() {
   const removeFolder = useMutation(api.folders.remove);
   const update = useMutation(api.channels.updateChannel);
   const [openFolder, setOpenFolder] = useState<string | null>(null);
+  const [visibleLimit, setVisibleLimit] = useState(CHANNEL_PAGE_SIZE);
   const [dragOver, setDragOver] = useState<string | null>(null);
   const [viewStartedAt] = useState(() => Date.now());
   const loading =
@@ -126,6 +131,7 @@ export default function ChannelsPage() {
 
   const inFolder = (name: string) => (channels ?? []).filter((c) => c.folder === name);
   const visible = channelsVisibleForFolder(channels ?? [], openFolder);
+  const fleetPage = pageChannels(visible, visibleLimit);
   const readyPlanBySlug = new Map<string, PlanCardRow[]>();
   for (const item of plan ?? []) {
     if (item.status !== "ready") continue;
@@ -173,7 +179,10 @@ export default function ChannelsPage() {
         <div className="channel-folder-strip" aria-label="Channel folders">
           {openFolder && (
             <button
-              onClick={() => setOpenFolder(null)}
+              onClick={() => {
+                setOpenFolder(null);
+                setVisibleLimit(CHANNEL_PAGE_SIZE);
+              }}
               onDragOver={(e) => { e.preventDefault(); setDragOver("__all"); }}
               onDragLeave={() => setDragOver(null)}
               onDrop={(e) => onDropToFolder(e, null)}
@@ -200,7 +209,10 @@ export default function ChannelsPage() {
                 <button
                   type="button"
                   className="channel-folder-chip-main"
-                  onClick={() => setOpenFolder(isOpen ? null : f.name)}
+                  onClick={() => {
+                    setOpenFolder(isOpen ? null : f.name);
+                    setVisibleLimit(CHANNEL_PAGE_SIZE);
+                  }}
                   aria-pressed={isOpen}
                   title={`${members.length} channel(s) — click to ${isOpen ? "close" : "open"}; drag a channel card here to file it`}
                 >
@@ -221,6 +233,7 @@ export default function ChannelsPage() {
                   onClick={async () => {
                     if (window.confirm(`Delete folder "${f.name}"? Channels inside are kept (unfiled).`)) {
                       if (openFolder === f.name) setOpenFolder(null);
+                      setVisibleLimit(CHANNEL_PAGE_SIZE);
                       await removeFolder({ ownerId, folderId: f._id as Id<"channelFolders"> });
                     }
                   }}
@@ -243,9 +256,16 @@ export default function ChannelsPage() {
           description="Channels created by the pipeline (or the seed script) will appear here."
           icon={<IconChannels width={24} height={24} />}
         />
+      ) : visible.length === 0 ? (
+        <EmptyState
+          title="No channels in this folder"
+          description="Choose All channels or drag an account into this folder."
+          icon={<IconChannels width={24} height={24} />}
+        />
       ) : (
-        <div className="channel-card-grid">
-          {visible.map((c) => {
+        <>
+          <div className="channel-card-grid" aria-label="Channel fleet">
+          {fleetPage.visible.map((c) => {
             const cardData = channelArtwork.find(
               (art) => art.channelId === c._id || art.channelSlug === c.slug,
             );
@@ -398,7 +418,38 @@ export default function ChannelsPage() {
               </article>
             );
           })}
-        </div>
+          </div>
+          {fleetPage.total > CHANNEL_PAGE_SIZE ? (
+            <div className="channel-page-pagination">
+              <p aria-live="polite">
+                Showing <strong>{fleetPage.visible.length}</strong> of {fleetPage.total}
+                {openFolder ? ` in ${openFolder}` : " channels"}
+              </p>
+              <div>
+                {fleetPage.visible.length > CHANNEL_PAGE_SIZE ? (
+                  <button
+                    type="button"
+                    className="studio-action studio-action-secondary"
+                    onClick={() => setVisibleLimit(CHANNEL_PAGE_SIZE)}
+                  >
+                    Show first {CHANNEL_PAGE_SIZE}
+                  </button>
+                ) : null}
+                {fleetPage.remaining > 0 ? (
+                  <button
+                    type="button"
+                    className="studio-action"
+                    onClick={() =>
+                      setVisibleLimit(fleetPage.visible.length + fleetPage.nextBatchSize)
+                    }
+                  >
+                    Show next {fleetPage.nextBatchSize}
+                  </button>
+                ) : null}
+              </div>
+            </div>
+          ) : null}
+        </>
       )}
     </>
   );
