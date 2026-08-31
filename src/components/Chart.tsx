@@ -58,12 +58,7 @@ export function Chart({
   }
 
   const maxLen = Math.max(...series.map((s) => s.points.length), 1);
-  const maxVal = Math.max(...allPoints.map((p) => p.value), 0);
-  const minVal = Math.min(...allPoints.map((p) => p.value), 0);
-  // Pad the range so the line never hugs the top/bottom edge.
-  const span = maxVal - minVal || 1;
-  const lo = minVal - span * 0.08;
-  const hi = maxVal + span * 0.08;
+  const { lo, hi } = chartDomain(allPoints);
 
   const plotW = W - PAD.left - PAD.right;
   const plotH = height - PAD.top - PAD.bottom;
@@ -198,6 +193,24 @@ export function Chart({
       </svg>
     </div>
   );
+}
+
+/**
+ * Keep count, cost, and revenue charts on an honest zero baseline while still
+ * padding domains that contain genuine positive/negative changes. An all-zero
+ * series receives a small visible range instead of collapsing the SVG scale.
+ */
+export function chartDomain(points: readonly ChartPoint[]): { lo: number; hi: number } {
+  const values = points.map((point) => point.value);
+  if (values.length === 0) return { lo: 0, hi: 1 };
+
+  const min = Math.min(...values);
+  const max = Math.max(...values);
+  if (min >= 0) return { lo: 0, hi: max > 0 ? max * 1.08 : 1 };
+  if (max <= 0) return { lo: min * 1.08, hi: 0 };
+
+  const span = max - min;
+  return { lo: min - span * 0.08, hi: max + span * 0.08 };
 }
 
 function ChartTitle({
