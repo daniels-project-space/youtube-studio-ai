@@ -7,6 +7,8 @@ import {
   novitaVideoProfileIdentity,
 } from "@/engine/runtimeCapability";
 import { PageHeader, SectionTitle } from "@/components/PageHeader";
+import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
+import { useOperationsAccess } from "@/components/OperationsAccess";
 import {
   NOVITA_RENDER_STATUS_TIMEOUT_MS,
   clearPersistedNovitaRenderJob,
@@ -222,6 +224,7 @@ function hasExactLtx25X2Attestation(
 }
 
 export default function NovitaRenderPage() {
+  const operationsAccess = useOperationsAccess();
   const [shots, setShots] = useState<ShotRow[]>([newShot(1)]);
   const [style, setStyle] = useState("");
   const [negative, setNegative] = useState("blurry, low quality, watermark, text, deformed");
@@ -238,6 +241,7 @@ export default function NovitaRenderPage() {
   const attestedFleetHealth = exactLtx25X2Ready ? fleetHealth : null;
 
   useEffect(() => {
+    if (operationsAccess !== "owner") return;
     const restoreTimer = window.setTimeout(() => {
       try {
         setRecoverableJob(loadPersistedNovitaRenderJob(window.localStorage));
@@ -249,9 +253,10 @@ export default function NovitaRenderPage() {
       window.clearTimeout(restoreTimer);
       activePoll.current?.abort();
     };
-  }, []);
+  }, [operationsAccess]);
 
   useEffect(() => {
+    if (operationsAccess !== "owner") return;
     const controller = new AbortController();
     void (async () => {
       try {
@@ -270,7 +275,7 @@ export default function NovitaRenderPage() {
       }
     })();
     return () => controller.abort();
-  }, []);
+  }, [operationsAccess]);
 
   function clearAllStills() {
     setShots((rows) => rows.map((row) => ({ ...row, stillKey: undefined })));
@@ -516,6 +521,21 @@ export default function NovitaRenderPage() {
 
   const busy = phase === "rendering-images" || phase === "rendering-video";
   const launchBlocked = busy || recoverableJob !== null || !exactLtx25X2Ready;
+
+  if (operationsAccess !== "owner") {
+    return (
+      <>
+        <PageHeader
+          title="Novita Render Farm"
+          subtitle="Signed, pinned-profile jobs on the capacity-aware Novita spot fleet."
+        />
+        <OwnerOnlyNotice
+          access={operationsAccess}
+          desk="the Novita render console"
+        />
+      </>
+    );
+  }
 
   return (
     <>

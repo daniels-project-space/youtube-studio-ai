@@ -3,7 +3,10 @@ import { Sidebar } from "./Sidebar";
 import { ChannelSwitcher } from "./ChannelSwitcher";
 import { OwnerProvider } from "@/lib/owner-context";
 import { ChannelProvider } from "@/lib/channel-context";
-import { OperationsAccess } from "./OperationsAccess";
+import {
+  OperationsAccess,
+  OperationsAccessProvider,
+} from "./OperationsAccess";
 import { StudioLocation } from "./StudioLocation";
 import { StudioMark } from "./StudioMark";
 
@@ -12,23 +15,25 @@ export function AppShell({ children }: { children: ReactNode }) {
   return (
     <OwnerProvider>
       <ChannelProvider>
-        <div className="studio-shell">
-          <Sidebar />
-          <div className="studio-workspace">
-            <header className="studio-topbar">
-              <div className="studio-mobile-brand" aria-label="AutoStudio">
-                <span aria-hidden="true"><StudioMark width={20} height={20} /></span>
-                <strong>AutoStudio</strong>
-              </div>
-              <StudioLocation />
-              <div className="studio-topbar-actions">
-                <ChannelSwitcher />
-                <OperationsAccess />
-              </div>
-            </header>
-            <main className="studio-main">{children}</main>
+        <OperationsAccessProvider>
+          <div className="studio-shell">
+            <Sidebar />
+            <div className="studio-workspace">
+              <header className="studio-topbar">
+                <div className="studio-mobile-brand" aria-label="AutoStudio">
+                  <span aria-hidden="true"><StudioMark width={20} height={20} /></span>
+                  <strong>AutoStudio</strong>
+                </div>
+                <StudioLocation />
+                <div className="studio-topbar-actions">
+                  <ChannelSwitcher />
+                  <OperationsAccess />
+                </div>
+              </header>
+              <main className="studio-main">{children}</main>
+            </div>
           </div>
-        </div>
+        </OperationsAccessProvider>
       </ChannelProvider>
     </OwnerProvider>
   );

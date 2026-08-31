@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
+import { useOperationsAccess } from "@/components/OperationsAccess";
+import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
 import { PageHeader } from "@/components/PageHeader";
 import styles from "./studio-assets.module.css";
 
@@ -225,6 +227,7 @@ function curatedExecutionTargetLabel(target: NonNullable<CuratedLtxCatalogItem["
 }
 
 export default function StudioAssetsPage() {
+  const operationsAccess = useOperationsAccess();
   const [assets, setAssets] = useState<StudioAsset[]>([]);
   const [candidates, setCandidates] = useState<StudioAssetPromotionCandidate[]>([]);
   const [curatedLtxCatalog, setCuratedLtxCatalog] = useState<CuratedLtxCatalogItem[]>([]);
@@ -348,9 +351,11 @@ export default function StudioAssetsPage() {
     };
   }, [preview]);
 
-  // One owner-scoped read on mount; the inventory is not a polling or render trigger.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void refresh(); }, [refresh]);
+  useEffect(() => {
+    if (operationsAccess !== "owner") return;
+    const timer = window.setTimeout(() => void refresh(), 0);
+    return () => window.clearTimeout(timer);
+  }, [operationsAccess, refresh]);
 
   const summary = useMemo(() => ({
     approved: assets.filter((asset) => asset.status === "approved").length,
@@ -363,6 +368,21 @@ export default function StudioAssetsPage() {
     () => new Map(releaseFeedback.map((feedback) => [feedback.assetEntryFingerprint, feedback])),
     [releaseFeedback],
   );
+
+  if (operationsAccess !== "owner") {
+    return (
+      <main className={styles.page}>
+        <PageHeader
+          title="Studio assets"
+          subtitle="Approved reusable visual language, adapter evidence, and control guides."
+        />
+        <OwnerOnlyNotice
+          access={operationsAccess}
+          desk="the Studio asset library"
+        />
+      </main>
+    );
+  }
 
   return (
     <main className={styles.page}>

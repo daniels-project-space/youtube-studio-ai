@@ -1,6 +1,8 @@
 "use client";
 
 import { useCallback, useEffect, useMemo, useState } from "react";
+import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
+import { useOperationsAccess } from "@/components/OperationsAccess";
 import {
   casefileEvidenceLocks,
   type CasefileEvidenceEpisode,
@@ -109,6 +111,7 @@ function updatedLabel(updatedAt: number): string {
 
 /** Private editor desk for the immutable Casefile → cinematic render handoff. */
 export default function CasefilePage() {
+  const operationsAccess = useOperationsAccess();
   const [episodes, setEpisodes] = useState<Episode[]>([]);
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [sourcePacket, setSourcePacket] = useState("");
@@ -132,14 +135,15 @@ export default function CasefilePage() {
     setEpisodes(payload.episodes ?? []);
   }, []);
 
-  // One-shot mount fetch: refresh has stable [] deps so this effect runs once; setEpisodes/setMessage
-  // fire only after the fetch settles (success or error), not synchronously in the effect body, and
-  // there is no render-triggered loop. This is the standard "fetch data on mount" effect pattern
-  // (https://react.dev/learn/you-might-not-need-an-effect#fetching-data); restructuring it to satisfy
-  // the compiler's static setState-in-effect heuristic would require moving the fetch into a separate
-  // custom hook/module or an experimental useEffectEvent, which is out of scope for a mechanical lint cleanup.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void refresh().catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error))); }, [refresh]);
+  useEffect(() => {
+    if (operationsAccess !== "owner") return;
+    const timer = window.setTimeout(() => {
+      void refresh().catch((error: unknown) =>
+        setMessage(error instanceof Error ? error.message : String(error)),
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [operationsAccess, refresh]);
 
   const selected = useMemo(
     () => episodes.find((episode) => episode._id === selectedId) ?? episodes[0] ?? null,
@@ -177,6 +181,22 @@ export default function CasefilePage() {
   const selectedStageLabel = selected
     ? stages.find(([status]) => status === selected.status)?.[1] ?? humanizeStatus(selected.status)
     : "New source packet";
+
+  if (operationsAccess !== "owner") {
+    return (
+      <main className={styles.desk}>
+        <header className={styles.header}>
+          <p className={styles.eyebrow}>Private editorial workflow</p>
+          <h1>Casefile cinematic desk</h1>
+          <p>Evidence-led cinematic handoffs with immutable review gates.</p>
+        </header>
+        <OwnerOnlyNotice
+          access={operationsAccess}
+          desk="the Casefile cinematic desk"
+        />
+      </main>
+    );
+  }
 
   return (
     <main className={styles.desk}>

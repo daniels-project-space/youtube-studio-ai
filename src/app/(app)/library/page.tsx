@@ -13,6 +13,8 @@ import { VideoGrid } from "@/components/VideoGrid";
 import { Lightbox } from "@/components/Lightbox";
 import { ArtifactWorkRail } from "@/components/ArtifactWorkRail";
 import { ThumbnailRefreshInventoryPanel } from "@/components/ThumbnailRefreshInventoryPanel";
+import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
+import { useOperationsAccess } from "@/components/OperationsAccess";
 import {
   LibraryFilters,
   type LibraryFilterState,
@@ -25,6 +27,7 @@ type LightboxTarget = { slug: string; index: number };
 export default function LibraryPage() {
   const ownerId = useOwnerId();
   const { selectedSlug } = useSelectedChannel();
+  const operationsAccess = useOperationsAccess();
 
   const videos = useQuery(api.videos.listVideos, { ownerId, limit: 500 }) as
     | VideoRow[]
@@ -148,7 +151,14 @@ export default function LibraryPage() {
         />
       </div>
 
-      <ThumbnailRefreshInventoryPanel selectedChannelSlug={selectedSlug} />
+      {operationsAccess === "owner" ? (
+        <ThumbnailRefreshInventoryPanel selectedChannelSlug={selectedSlug} />
+      ) : (
+        <OwnerOnlyNotice
+          access={operationsAccess}
+          desk="the thumbnail refresh inventory"
+        />
+      )}
 
       {!loading && (
         <LibraryFilters

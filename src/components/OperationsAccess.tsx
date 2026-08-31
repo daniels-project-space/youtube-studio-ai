@@ -1,14 +1,30 @@
 "use client";
 
 import {
-  KeyboardEvent,
-  SyntheticEvent,
+  createContext,
+  type KeyboardEvent,
+  type ReactNode,
+  type SetStateAction,
+  type SyntheticEvent,
+  useContext,
   useEffect,
   useRef,
   useState,
 } from "react";
 
-type AccessState = "checking" | "viewer" | "owner" | "unavailable";
+export type OperationsAccessState =
+  | "checking"
+  | "viewer"
+  | "owner"
+  | "unavailable";
+
+type OperationsAccessContextValue = {
+  state: OperationsAccessState;
+  setState: (value: SetStateAction<OperationsAccessState>) => void;
+};
+
+const OperationsAccessContext =
+  createContext<OperationsAccessContextValue | null>(null);
 
 type ElevationResponse = {
   ok?: boolean;
@@ -21,16 +37,9 @@ async function readResponse(response: Response): Promise<ElevationResponse> {
   return await response.json().catch(() => ({})) as ElevationResponse;
 }
 
-/** Optional operations elevation; the surrounding viewer shell always remains mounted. */
-export function OperationsAccess() {
-  const triggerRef = useRef<HTMLButtonElement>(null);
-  const dialogRef = useRef<HTMLElement>(null);
-  const requestAbortRef = useRef<AbortController | null>(null);
-  const [access, setAccess] = useState<AccessState>("checking");
-  const [open, setOpen] = useState(false);
-  const [secret, setSecret] = useState("");
-  const [busy, setBusy] = useState(false);
-  const [error, setError] = useState("");
+/** One session probe serves the header and every owner-only desk. */
+export function OperationsAccessProvider({ children }: { children: ReactNode }) {
+  const [state, setState] = useState<OperationsAccessState>("checking");
 
   useEffect(() => {
     const controller = new AbortController();
@@ -41,16 +50,49 @@ export function OperationsAccess() {
       signal: controller.signal,
     }).then(async (response) => {
       const body = await readResponse(response);
-      if (!response.ok) throw new Error(body.error ?? "Operations status unavailable");
-      setAccess(body.elevated === true && body.role === "owner" ? "owner" : "viewer");
-    }).catch((reason) => {
-      if (!controller.signal.aborted) {
-        setAccess("unavailable");
-        setError(reason instanceof Error ? reason.message : "Operations status unavailable");
+      if (!response.ok) {
+        throw new Error(body.error ?? "Operations status unavailable");
       }
+      setState(
+        body.elevated === true && body.role === "owner" ? "owner" : "viewer",
+      );
+    }).catch(() => {
+      if (!controller.signal.aborted) setState("unavailable");
     });
     return () => controller.abort();
   }, []);
+
+  return (
+    <OperationsAccessContext.Provider value={{ state, setState }}>
+      {children}
+    </OperationsAccessContext.Provider>
+  );
+}
+
+function useOperationsAccessContext(): OperationsAccessContextValue {
+  const context = useContext(OperationsAccessContext);
+  if (!context) {
+    throw new Error(
+      "Operations access must be read inside OperationsAccessProvider",
+    );
+  }
+  return context;
+}
+
+export function useOperationsAccess(): OperationsAccessState {
+  return useOperationsAccessContext().state;
+}
+
+/** Optional operations elevation; the surrounding viewer shell always remains mounted. */
+export function OperationsAccess() {
+  const triggerRef = useRef<HTMLButtonElement>(null);
+  const dialogRef = useRef<HTMLElement>(null);
+  const requestAbortRef = useRef<AbortController | null>(null);
+  const { state: access, setState: setAccess } = useOperationsAccessContext();
+  const [open, setOpen] = useState(false);
+  const [secret, setSecret] = useState("");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState("");
 
   useEffect(() => () => {
     requestAbortRef.current?.abort();

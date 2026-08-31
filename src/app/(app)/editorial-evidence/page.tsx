@@ -2,6 +2,8 @@
 
 import { useCallback, useEffect, useMemo, useState } from "react";
 import { ReviewedDataStoryRunDesk } from "@/components/ReviewedDataStoryRunDesk";
+import { OwnerOnlyNotice } from "@/components/OwnerOnlyNotice";
+import { useOperationsAccess } from "@/components/OperationsAccess";
 import { editorialEvidenceSummary } from "@/lib/editorialDeskEvidence";
 import styles from "../editorial-desk.module.css";
 
@@ -81,6 +83,7 @@ function formattedTimestamp(value: string | undefined): string {
  * exact engine packet and its review fingerprint before this page may save it.
  */
 export default function EditorialEvidencePage() {
+  const operationsAccess = useOperationsAccess();
   const [subject, setSubject] = useState("");
   const [sources, setSources] = useState(sourceTemplate);
   const [claims, setClaims] = useState(claimTemplate);
@@ -108,10 +111,15 @@ export default function EditorialEvidencePage() {
     setPackets(result.packets ?? []);
   }, []);
 
-  // One read-only load on mount. The desk is not connected to channel creation,
-  // rendering, paid providers, or publishing.
-  // eslint-disable-next-line react-hooks/set-state-in-effect
-  useEffect(() => { void refresh().catch((error: unknown) => setMessage(error instanceof Error ? error.message : String(error))); }, [refresh]);
+  useEffect(() => {
+    if (operationsAccess !== "owner") return;
+    const timer = window.setTimeout(() => {
+      void refresh().catch((error: unknown) =>
+        setMessage(error instanceof Error ? error.message : String(error)),
+      );
+    }, 0);
+    return () => window.clearTimeout(timer);
+  }, [operationsAccess, refresh]);
 
   const validate = useCallback(async () => {
     setBusy(true);
@@ -174,6 +182,22 @@ export default function EditorialEvidencePage() {
     invalidatePreview();
     set(value);
   };
+
+  if (operationsAccess !== "owner") {
+    return (
+      <main className={styles.desk}>
+        <header className={styles.header}>
+          <p className={styles.eyebrow}>Private editorial workflow</p>
+          <h1>Factual evidence desk</h1>
+          <p>Immutable evidence receipts for supervised factual explainers.</p>
+        </header>
+        <OwnerOnlyNotice
+          access={operationsAccess}
+          desk="the factual evidence desk"
+        />
+      </main>
+    );
+  }
 
   return (
     <main className={styles.desk}>
