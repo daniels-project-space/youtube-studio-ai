@@ -69,6 +69,8 @@ assert.match(sidebar, /const PRIMARY_NAV_ITEMS = \[[\s\S]*href: "\/runs"[\s\S]*h
 assert.match(sidebar, /const TOOLBOX_NAV_GROUPS = \[/);
 assert.match(sidebar, /<details[\s\S]*className="studio-toolbox"/);
 assert.match(sidebar, /const MOBILE_PRIMARY_COUNT = 4/);
+assert.match(globalCss, /iframe\[title="JARVIS"\][\s\S]*bottom: calc\(81px/);
+assert.match(globalCss, /data-studio-more-open="true"[\s\S]*iframe\[title="JARVIS"\]/);
 
 // Live work is a receipt-backed workbench: it groups real stages into phases,
 // retains per-stage inspection, and does not suggest an invented render stream.

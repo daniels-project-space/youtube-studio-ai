@@ -1482,6 +1482,11 @@
     transition: opacity 160ms ease, visibility 160ms ease;
   }
 
+  iframe[title="JARVIS"] {
+    bottom: calc(81px + env(safe-area-inset-bottom)) !important;
+    right: max(8px, env(safe-area-inset-right)) !important;
+  }
+
   html[data-studio-more-open="true"] [data-jarvis-edit-ui],
   html[data-studio-more-open="true"] iframe[title="JARVIS"] {
     opacity: 0 !important;
