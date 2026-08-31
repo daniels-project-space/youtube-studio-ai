@@ -3,7 +3,7 @@ import { studioLocationForPathname } from "../studioLocation";
 
 assert.deepEqual(studioLocationForPathname("/"), {
   area: "Workspace",
-  title: "Overview",
+  title: "Studio",
 });
 assert.deepEqual(studioLocationForPathname("/channels/new"), {
   area: "Channel workspace",
@@ -14,8 +14,12 @@ assert.deepEqual(studioLocationForPathname("/channels/quiet-physics"), {
   title: "Channel detail",
 });
 assert.deepEqual(studioLocationForPathname("/runs/run_123"), {
-  area: "Production command",
+  area: "Production",
   title: "Run detail",
+});
+assert.deepEqual(studioLocationForPathname("/golden"), {
+  area: "Toolbox · Assurance",
+  title: "Golden modules",
 });
 assert.deepEqual(studioLocationForPathname("/unknown"), {
   area: "Workspace",

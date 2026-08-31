@@ -147,12 +147,12 @@ assert.doesNotMatch(wizard, /window\.location.*reviewHrefs|router\.push\(.*revie
 
 assert.doesNotMatch(sidebar, /health-dot-ready/);
 assert.doesNotMatch(sidebar, /Live production workspace/);
-// The global rail now deliberately exposes the non-mutating Run and SEO
-// workspaces. This must not be confused with a channel card starting work:
-// those cards continue to surface their own guarded channel/detail links only.
+// The rail keeps production primary and preserves packaging research in the
+// disclosed specialist toolbox. Channel cards still own their guarded actions.
 assert.match(sidebar, /href:\s*["']\/runs["']/);
 assert.match(sidebar, /href:\s*["']\/seo["']/);
-assert.match(sidebar, /label:\s*["']Command["'][\s\S]*href:\s*["']\/runs["']/);
+assert.match(sidebar, /const PRIMARY_NAV_ITEMS[\s\S]*href:\s*["']\/runs["']/);
+assert.match(sidebar, /const TOOLBOX_NAV_GROUPS[\s\S]*href:\s*["']\/seo["']/);
 assert.doesNotMatch(sidebar, /Novita Render/);
 assert.match(sidebar, /MOBILE_PRIMARY_COUNT/);
 assert.match(channels, /channel-live-state/);

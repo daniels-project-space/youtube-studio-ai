@@ -60,12 +60,15 @@ assert.match(runCard, /data-release-evidence=\{run\.releaseEvidenceStatus\}/);
 assert.match(globalCss, /\.run-card\[data-status="running"\]/);
 assert.match(globalCss, /\.video-card-media::after/);
 
-// The full operating surface must be reachable from the desktop rail, while
-// the first four command destinations stay available in the mobile dock.
+// Everyday work stays in one six-item rail. Specialist destinations remain
+// reachable behind one native disclosure, while four actions form the dock.
 for (const route of ["/runs", "/schedule", "/library", "/analytics", "/seo", "/editorial-evidence", "/casefile", "/studio-assets", "/golden", "/novita-render"]) {
   assert.match(sidebar, new RegExp(`href: \\"${route.replace(/[.*+?^${}()|[\\]\\]/g, "\\\\$&")}\\"`));
 }
-assert.match(sidebar, /label: "Command"[\s\S]*href: "\/runs"[\s\S]*href: "\/schedule"/);
+assert.match(sidebar, /const PRIMARY_NAV_ITEMS = \[[\s\S]*href: "\/runs"[\s\S]*href: "\/schedule"[\s\S]*href: "\/analytics"/);
+assert.match(sidebar, /const TOOLBOX_NAV_GROUPS = \[/);
+assert.match(sidebar, /<details[\s\S]*className="studio-toolbox"/);
+assert.match(sidebar, /const MOBILE_PRIMARY_COUNT = 4/);
 
 // Live work is a receipt-backed workbench: it groups real stages into phases,
 // retains per-stage inspection, and does not suggest an invented render stream.

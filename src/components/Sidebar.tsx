@@ -19,51 +19,53 @@ import {
   IconLore,
 } from "./icons";
 
-const NAV_GROUPS = [
+const PRIMARY_NAV_ITEMS = [
+  { href: "/", label: "Studio", icon: <IconOverview /> },
+  { href: "/channels", label: "Channels", icon: <IconChannels /> },
+  { href: "/runs", label: "Production", icon: <IconRuns /> },
+  { href: "/schedule", label: "Schedule", icon: <IconCalendar /> },
+  { href: "/library", label: "Library", icon: <IconLibrary /> },
+  { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
+];
+
+const TOOLBOX_NAV_GROUPS = [
   {
-    label: "Command",
+    label: "Craft",
     items: [
-      { href: "/", label: "Overview", icon: <IconOverview /> },
-      { href: "/channels", label: "Channels", icon: <IconChannels /> },
-      { href: "/runs", label: "Runs", icon: <IconRuns /> },
-      { href: "/schedule", label: "Schedule", icon: <IconCalendar /> },
-    ],
-  },
-  {
-    label: "Content",
-    items: [
-      { href: "/library", label: "Library", icon: <IconLibrary /> },
+      { href: "/seo", label: "Packaging research", icon: <IconSeo /> },
       { href: "/studio-assets", label: "Studio assets", icon: <IconSpark /> },
     ],
   },
   {
-    label: "Growth & evidence",
-    items: [
-      { href: "/analytics", label: "Analytics", icon: <IconAnalytics /> },
-      { href: "/seo", label: "SEO", icon: <IconSeo /> },
-      { href: "/editorial-evidence", label: "Evidence desk", icon: <IconSpark /> },
-      { href: "/casefile", label: "Casefile desk", icon: <IconSpark /> },
-    ],
-  },
-  {
-    label: "Standards",
+    label: "Assurance",
     items: [
       { href: "/golden", label: "Golden modules", icon: <IconGolden /> },
-      { href: "/novita-render", label: "Render lab", icon: <IconTerminal /> },
-      { href: "/lofi", label: "Music archive", icon: <IconLofi /> },
-      { href: "/loreshort", label: "Lore archive", icon: <IconLore /> },
+      { href: "/editorial-evidence", label: "Editorial evidence", icon: <IconSpark /> },
+      { href: "/casefile", label: "Casefile", icon: <IconSpark /> },
     ],
   },
   {
-    label: "System",
-    items: [{ href: "/settings", label: "Settings", icon: <IconSettings /> }],
+    label: "Infrastructure",
+    items: [
+      { href: "/novita-render", label: "Render fleet", icon: <IconTerminal /> },
+      { href: "/lofi", label: "Music references", icon: <IconLofi /> },
+      { href: "/loreshort", label: "Lore references", icon: <IconLore /> },
+    ],
   },
 ];
 
-const MOBILE_PRIMARY_COUNT = NAV_GROUPS[0].items.length;
-const MOBILE_MORE_ITEMS = NAV_GROUPS.flatMap((group) => group.items).slice(
-  MOBILE_PRIMARY_COUNT,
-);
+const SETTINGS_ITEM = {
+  href: "/settings",
+  label: "Settings",
+  icon: <IconSettings />,
+};
+const MOBILE_PRIMARY_COUNT = 4;
+const TOOLBOX_NAV_ITEMS = TOOLBOX_NAV_GROUPS.flatMap((group) => group.items);
+const MOBILE_MORE_ITEMS = [
+  ...PRIMARY_NAV_ITEMS.slice(MOBILE_PRIMARY_COUNT),
+  ...TOOLBOX_NAV_ITEMS,
+  SETTINGS_ITEM,
+];
 
 /** Grouped desktop rail that becomes a five-item mobile dock with an overflow menu. */
 export function Sidebar() {
@@ -74,6 +76,12 @@ export function Sidebar() {
   const moreActive = MOBILE_MORE_ITEMS.some((item) =>
     item.href === "/" ? pathname === "/" : pathname.startsWith(item.href),
   );
+  const toolboxActive = TOOLBOX_NAV_ITEMS.some((item) =>
+    pathname.startsWith(item.href),
+  );
+  const activeToolboxLabel = TOOLBOX_NAV_ITEMS.find((item) =>
+    pathname.startsWith(item.href),
+  )?.label;
 
   useEffect(() => {
     if (!moreOpen) return;
@@ -115,26 +123,60 @@ export function Sidebar() {
       </div>
 
       <nav className="studio-nav">
-        {NAV_GROUPS.map((group) => (
-          <section
-            className="studio-nav-group"
-            key={group.label}
-            aria-label={group.label}
-            data-nav-group={group.label.toLowerCase()}
-          >
-            <span className="studio-nav-label">{group.label}</span>
-            <div className="studio-nav-items">
-              {group.items.map((item) => (
-                <NavItem
-                  key={item.href}
-                  href={item.href}
-                  label={item.label}
-                  icon={item.icon}
-                />
-              ))}
-            </div>
-          </section>
-        ))}
+        <section
+          className="studio-nav-group"
+          aria-label="Workspace"
+          data-nav-group="workspace"
+        >
+          <span className="studio-nav-label">Workspace</span>
+          <div className="studio-nav-items">
+            {PRIMARY_NAV_ITEMS.map((item) => (
+              <NavItem
+                key={item.href}
+                href={item.href}
+                label={item.label}
+                icon={item.icon}
+              />
+            ))}
+          </div>
+        </section>
+
+        <details
+          className="studio-toolbox"
+          open={toolboxActive ? true : undefined}
+        >
+          <summary className="studio-toolbox-trigger">
+            <span className="studio-nav-icon">
+              <IconSpark />
+            </span>
+            <span className="studio-toolbox-copy">
+              <strong>Toolbox</strong>
+              <small>{activeToolboxLabel ?? "Specialist desks & labs"}</small>
+            </span>
+            <span className="studio-toolbox-chevron" aria-hidden="true">+</span>
+          </summary>
+          <div className="studio-toolbox-items">
+            {TOOLBOX_NAV_GROUPS.map((group) => (
+              <section
+                className="studio-nav-group"
+                key={group.label}
+                aria-label={group.label}
+              >
+                <span className="studio-nav-label">{group.label}</span>
+                <div className="studio-nav-items">
+                  {group.items.map((item) => (
+                    <NavItem
+                      key={item.href}
+                      href={item.href}
+                      label={item.label}
+                      icon={item.icon}
+                    />
+                  ))}
+                </div>
+              </section>
+            ))}
+          </div>
+        </details>
 
         <div className="studio-nav-more" ref={moreRef}>
           <button
@@ -170,7 +212,9 @@ export function Sidebar() {
         </div>
       </nav>
 
-      <div className="studio-sidebar-footer">Studio workspace</div>
+      <div className="studio-sidebar-footer">
+        <NavItem {...SETTINGS_ITEM} />
+      </div>
     </aside>
   );
 }
