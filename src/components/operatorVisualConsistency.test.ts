@@ -6,6 +6,7 @@ const root = process.cwd();
 const read = (path: string) => readFileSync(join(root, path), "utf8");
 
 const pageHeader = read("src/components/PageHeader.tsx");
+const appShell = read("src/components/AppShell.tsx");
 const runCard = read("src/components/RunCard.tsx");
 const videoCard = read("src/components/VideoCard.tsx");
 const lightbox = read("src/components/Lightbox.tsx");
@@ -27,6 +28,8 @@ const runDetailCss = read("src/app/(app)/runs/[runId]/runDetail.module.css");
 // state must be structural, not a page-specific style hack.
 assert.match(pageHeader, /<header[\s\S]*data-has-actions=/);
 assert.match(pageHeader, /className="page-header-copy"/);
+assert.match(appShell, /className="studio-mobile-brand"/);
+assert.doesNotMatch(appShell, /className="studio-mobile-brand"\s+aria-label=/);
 
 // Run controls deliberately filter the persisted query result; the summary is
 // an accessible control surface rather than a decorative set of counts.

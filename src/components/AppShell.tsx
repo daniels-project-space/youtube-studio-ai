@@ -20,7 +20,7 @@ export function AppShell({ children }: { children: ReactNode }) {
             <Sidebar />
             <div className="studio-workspace">
               <header className="studio-topbar">
-                <div className="studio-mobile-brand" aria-label="AutoStudio">
+                <div className="studio-mobile-brand">
                   <span aria-hidden="true"><StudioMark width={20} height={20} /></span>
                   <strong>AutoStudio</strong>
                 </div>

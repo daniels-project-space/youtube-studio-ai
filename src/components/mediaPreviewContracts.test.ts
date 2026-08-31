@@ -40,5 +40,7 @@ assert.match(videoCard, /status=\{video\.releaseEvidenceStatus\}/);
 assert.match(rail, /ReleaseEvidenceBadge/);
 assert.match(rail, /status=\{video\.releaseEvidenceStatus\}/);
 assert.match(rail, /state === "ready" && source !== "unavailable"/);
+assert.match(rail, /aria-label=\{`\$\{title\} video artifacts`\}/);
+assert.match(rail, /tabIndex=\{0\}/);
 
 console.log("MediaPreview UI contracts passed");

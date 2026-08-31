@@ -49,7 +49,12 @@ export function ArtifactWorkRail({
       </div>
 
       {videos === undefined ? (
-        <div className={styles.rail} aria-label="Loading real video artifacts" aria-busy="true">
+        <div
+          className={styles.rail}
+          aria-label={`Loading ${title} video artifacts`}
+          aria-busy="true"
+          tabIndex={0}
+        >
           {Array.from({ length: Math.min(maxItems, 4) }, (_, index) => (
             <div key={index} className={styles.loadingCard} />
           ))}
@@ -57,7 +62,11 @@ export function ArtifactWorkRail({
       ) : visible.length === 0 ? (
         <div className={styles.empty}>{emptyMessage}</div>
       ) : (
-        <div className={styles.rail}>
+        <div
+          className={styles.rail}
+          aria-label={`${title} video artifacts`}
+          tabIndex={0}
+        >
           {visible.map((video) => (
             <ArtifactCard key={video._id} video={video} onOpen={onOpen} />
           ))}
