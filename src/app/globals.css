@@ -1573,6 +1573,14 @@
     border-radius: 20px;
   }
 
+  /* A floating assistant must not cover the compact owner-access explanation. */
+  html:has(.owner-only-notice:not([data-access-state="checking"])) [data-jarvis-edit-ui],
+  html:has(.owner-only-notice:not([data-access-state="checking"])) iframe[title="JARVIS"] {
+    opacity: 0 !important;
+    visibility: hidden !important;
+    pointer-events: none !important;
+  }
+
   .page-header {
     align-items: stretch;
     flex-direction: column;

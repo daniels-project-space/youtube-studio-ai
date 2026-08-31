@@ -90,6 +90,7 @@ assert.match(globalCss, /\.studio-mobile-toolbox-trigger/);
 assert.match(globalCss, /iframe\[title="JARVIS"\][\s\S]*bottom: calc\(81px/);
 assert.match(globalCss, /data-studio-more-open="true"[\s\S]*iframe\[title="JARVIS"\]/);
 assert.match(globalCss, /:has\(\[role="dialog"\]\[aria-modal="true"\]\)[\s\S]*iframe\[title="JARVIS"\]/);
+assert.match(globalCss, /:has\(\.owner-only-notice:not\(\[data-access-state="checking"\]\)\)[\s\S]*iframe\[title="JARVIS"\]/);
 
 // Live work is a receipt-backed workbench: it groups real stages into phases,
 // retains per-stage inspection, and does not suggest an invented render stream.
