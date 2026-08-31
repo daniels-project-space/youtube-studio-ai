@@ -21,6 +21,11 @@ import {
   qualityLearningInsightsFromUnknown,
   type QualityLearningInsight,
 } from "@/lib/qualityLearningPresentation";
+import {
+  analyticsRefreshFleetHealth,
+  analyticsRefreshHealth,
+  type AnalyticsRefreshHealthInput,
+} from "@/lib/analyticsRefreshPresentation";
 
 /** Per-channel summary row shape returned by analytics.channelSummary. */
 type SummaryRow = {
@@ -44,6 +49,22 @@ type TrendRow = {
   estimatedRevenueUsd?: number;
 };
 
+type RefreshStatusRow = AnalyticsRefreshHealthInput & {
+  channelId: string;
+  name: string;
+  slug: string;
+  latestSnapshotDate: string | null;
+  connection: null | (NonNullable<AnalyticsRefreshHealthInput["connection"]> & {
+    validatedAt: number | null;
+    updatedAt: number;
+  });
+  refresh: null | (NonNullable<AnalyticsRefreshHealthInput["refresh"]> & {
+    historyCompletedAt: number | null;
+    freshnessNextAt: number | null;
+    updatedAt: number;
+  });
+};
+
 const C_ACCENT = "var(--color-accent)";
 const C_SECONDARY = "var(--color-secondary)";
 const C_OK = "var(--color-ok)";
@@ -56,6 +77,9 @@ export default function AnalyticsPage() {
   const overview = useQuery(api.analytics.overview, { ownerId });
   const summary = useQuery(api.analytics.channelSummary, { ownerId }) as
     | SummaryRow[]
+    | undefined;
+  const refreshStatus = useQuery(api.analytics.refreshStatus, { ownerId }) as
+    | RefreshStatusRow[]
     | undefined;
 
   // Resolve the selected channel (if any) → drives the per-channel trend query.
@@ -107,7 +131,7 @@ export default function AnalyticsPage() {
     return () => controller.abort();
   }, []);
 
-  const loading = overview === undefined || summary === undefined;
+  const loading = overview === undefined || summary === undefined || refreshStatus === undefined;
   const hasTrend = (trend?.length ?? 0) > 0;
   const anyChannelData =
     (summary?.some((s) => s.subscriberCount > 0 || s.totalViews > 0) ?? false);
@@ -163,11 +187,13 @@ export default function AnalyticsPage() {
             />
           </div>
 
+          <AnalyticsRefreshHealth rows={refreshStatus ?? []} selectedSlug={selected?.slug ?? null} />
+
           {/* Charts gate: nothing populated until stats-refresh has run. */}
           {!anyChannelData && !hasTrend ? (
             <EmptyState
               title="No analytics yet"
-              description="Stats refresh pending. Once the stats-refresh task runs (every 6h, once the YouTube Data API key is provisioned), subscriber, view, revenue, and cost trends will appear here."
+              description={emptyAnalyticsDetail(refreshStatus ?? [], selected?.slug ?? null)}
               icon={<IconAnalytics width={24} height={24} />}
             />
           ) : selected ? (
@@ -199,6 +225,73 @@ export default function AnalyticsPage() {
       )}
     </>
   );
+}
+
+function emptyAnalyticsDetail(rows: RefreshStatusRow[], selectedSlug: string | null): string {
+  const scoped = selectedSlug ? rows.find((row) => row.slug === selectedSlug) : rows[0];
+  return scoped
+    ? analyticsRefreshHealth(scoped).detail
+    : "Create a channel and connect it to YouTube to begin scheduled analytics ingestion.";
+}
+
+function AnalyticsRefreshHealth({ rows, selectedSlug }: { rows: RefreshStatusRow[]; selectedSlug: string | null }) {
+  const selectedRow = selectedSlug ? rows.find((row) => row.slug === selectedSlug) : null;
+  if (!rows.length || (selectedSlug && !selectedRow)) return null;
+  const fleet = selectedRow ? null : analyticsRefreshFleetHealth(rows);
+  return (
+    <section>
+      <SectionTitle>Analytics data health</SectionTitle>
+      <div style={{ display: "grid", gridTemplateColumns: "repeat(auto-fit, minmax(260px, 1fr))", gap: "0.75rem" }}>
+        {selectedRow ? [selectedRow].map((row) => {
+          const health = analyticsRefreshHealth(row);
+          const color = health.tone === "ok" ? C_OK : health.tone === "running" ? C_ACCENT : health.tone === "danger" ? "var(--color-danger)" : health.tone === "warning" ? C_AMBER : "var(--color-faint)";
+          return (
+            <article key={row.channelId} className="glass" style={{ padding: "1rem", display: "grid", gap: "0.45rem" }}>
+              <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "baseline" }}>
+                <strong>{row.name}</strong>
+                <span style={{ color, fontSize: "0.76rem", fontWeight: 700 }}>{health.label}</span>
+              </div>
+              <p style={{ margin: 0, color: "var(--color-muted)", fontSize: "0.84rem", lineHeight: 1.45 }}>{health.detail}</p>
+              <p style={{ margin: 0, color: "var(--color-faint)", fontSize: "0.75rem" }}>
+                {row.refresh?.lastCompletedAt
+                  ? `Last completed ${new Date(row.refresh.lastCompletedAt).toLocaleString()}`
+                  : row.latestSnapshotDate
+                    ? `Latest snapshot ${row.latestSnapshotDate}`
+                    : "No completed snapshot yet"}
+              </p>
+              {(health.state === "not_connected" || health.state === "reconnect_required") && (
+                <Link href={`/channels/${row.slug}?tab=settings`} style={{ fontSize: "0.8rem" }}>Open YouTube setup →</Link>
+              )}
+            </article>
+          );
+        }) : (
+          <article className="glass" style={{ padding: "1rem", display: "grid", gap: "0.45rem" }}>
+            <div style={{ display: "flex", justifyContent: "space-between", gap: "0.75rem", alignItems: "baseline" }}>
+              <strong>All channels</strong>
+              <span style={{ color: fleetToneColor(fleet!.tone), fontSize: "0.76rem", fontWeight: 700 }}>{fleet!.label}</span>
+            </div>
+            <p style={{ margin: 0, color: "var(--color-muted)", fontSize: "0.84rem", lineHeight: 1.45 }}>{fleet!.detail}</p>
+            <p style={{ margin: 0, color: "var(--color-faint)", fontSize: "0.75rem" }}>
+              Scheduled YouTube refresh runs every six hours for connected channels.
+            </p>
+            {fleet!.needsAttention && <Link href="/channels" style={{ fontSize: "0.8rem" }}>Review channel connections →</Link>}
+          </article>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function fleetToneColor(tone: ReturnType<typeof analyticsRefreshFleetHealth>["tone"]): string {
+  return tone === "ok"
+    ? C_OK
+    : tone === "running"
+      ? C_ACCENT
+      : tone === "danger"
+        ? "var(--color-danger)"
+        : tone === "warning"
+          ? C_AMBER
+          : "var(--color-faint)";
 }
 
 /** Per-channel time-series (subs, delta, views/day, revenue/day, videos/day). */

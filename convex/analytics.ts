@@ -141,6 +141,56 @@ export const channelSummary = query({
 });
 
 /**
+ * Token-free, owner-scoped operational truth for the Analytics UI. This keeps
+ * OAuth credentials and provider error payloads server-only while exposing
+ * whether each channel is connected, refreshing, current, or awaiting manual
+ * reconciliation.
+ */
+export const refreshStatus = query({
+  args: { ownerId: v.string() },
+  handler: async (ctx, args) => {
+    const channels = await ctx.db
+      .query("channels")
+      .withIndex("by_owner", (q) => q.eq("ownerId", args.ownerId))
+      .collect();
+
+    return await Promise.all(channels.map(async (channel) => {
+      const [connectorRow, progressRow, latest] = await Promise.all([
+        ctx.db.query("youtubeAuth").withIndex("by_channel", (q) => q.eq("channelId", channel._id)).unique(),
+        ctx.db.query("analyticsRefreshCursors").withIndex("by_owner_channel", (q) =>
+          q.eq("ownerId", args.ownerId).eq("channelId", channel._id),
+        ).unique(),
+        latestChannelDay(ctx, channel._id),
+      ]);
+      const connector = connectorRow?.ownerId === args.ownerId ? connectorRow : null;
+      const progress = progressRow?.ownerId === args.ownerId ? progressRow : null;
+      return {
+        channelId: channel._id,
+        name: channel.name,
+        slug: channel.slug,
+        connection: connector ? {
+          status: connector.status ?? "active",
+          scopeHealth: connector.scopeHealth ?? "unknown",
+          validatedAt: connector.validatedAt ?? null,
+          updatedAt: connector.updatedAt,
+        } : null,
+        refresh: progress ? {
+          activeState: progress.activeState ?? null,
+          activeMode: progress.activeBatch?.mode ?? null,
+          videoRequestStatus: progress.activeBatch?.videoRequestStatus ?? null,
+          channelRequestStatus: progress.activeBatch?.channelRequestStatus ?? null,
+          lastCompletedAt: progress.lastCompletedAt ?? null,
+          historyCompletedAt: progress.historyCompletedAt ?? null,
+          freshnessNextAt: progress.freshnessNextAt ?? null,
+          updatedAt: progress.updatedAt,
+        } : null,
+        latestSnapshotDate: latest?.date ?? null,
+      };
+    }));
+  },
+});
+
+/**
  * Owner-wide daily analytics rows across ALL channels, joined with channel name.
  * Drives the main-overview growth charts (subscriber growth, monetization
  * progress, estimated revenue). Sorted by date asc.
