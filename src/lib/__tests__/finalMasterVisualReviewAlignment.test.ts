@@ -10,6 +10,8 @@ import {
   finalMasterTranscriptCues,
   planVisualReviewEvidence,
   reviewRender,
+  visualRepairSignals,
+  visualReviewFailureMessage,
 } from "@/lib/visualReview";
 
 const sentenceTimings = [
@@ -101,15 +103,17 @@ assert.throws(
 
 async function finalReviewerPromptWiringTest(): Promise<void> {
   const prompts: string[] = [];
+  let emittedSemanticDefects = false;
+  const reviewIntent = {
+    title: "Final-master clock alignment fixture",
+    expectTitleCard: false,
+    transcriptCues: [...cues],
+    creativeLocks: [...locks],
+  };
   const reviewed = await reviewRender(
     join(process.cwd(), "public", "golden", "comic", "comic3d.mp4"),
     18,
-    {
-      title: "Final-master clock alignment fixture",
-      expectTitleCard: false,
-      transcriptCues: [...cues],
-      creativeLocks: [...locks],
-    },
+    reviewIntent,
     {
       runId: "final-master-clock-alignment",
       persistEvidence: false,
@@ -117,15 +121,70 @@ async function finalReviewerPromptWiringTest(): Promise<void> {
       maxFocusFrames: 0,
       reviewer: async (input) => {
         prompts.push(input.prompt);
+        if (input.phase === "broad" && !emittedSemanticDefects) {
+          emittedSemanticDefects = true;
+          return JSON.stringify({
+            defects: [
+              {
+                startSec: 5,
+                endSec: 6,
+                severity: "major",
+                category: "general_visual",
+                confidence: 0.96,
+                observed: "The visible prior scene contradicts the current narration cue and is temporally misplaced.",
+                expected: "The current spoken seed discovery is visible.",
+                evidenceFrameIds: [input.frames[0]!.id],
+                suggestedRepair: "Replace the mistimed scene.",
+              },
+              {
+                startSec: 9,
+                endSec: 10,
+                severity: "major",
+                category: "general_visual",
+                confidence: 0.95,
+                observed: "Mira's wardrobe visibly changes from a red coat to a different blue outfit, breaking continuity.",
+                expected: "Mira retains the locked wardrobe.",
+                evidenceFrameIds: [input.frames[0]!.id],
+                suggestedRepair: "Restore the locked wardrobe.",
+              },
+              {
+                startSec: 13,
+                endSec: 14,
+                severity: "major",
+                category: "general_visual",
+                confidence: 0.94,
+                observed: "The planned consequence reveal is missing and the sprout payoff is not visible.",
+                expected: "The authored sprout consequence visibly lands.",
+                evidenceFrameIds: [input.frames[0]!.id],
+                suggestedRepair: "Restore the authored reveal.",
+              },
+            ],
+            summary: "Typed semantic defect fixture.",
+          });
+        }
         return JSON.stringify({ defects: [], summary: "Aligned narration and Story Spine fixture." });
       },
     },
   );
-  assert.equal(reviewed.verdict, "pass");
+  assert.equal(reviewed.verdict, "fail");
+  assert.deepEqual(
+    [...new Set(reviewed.defects.map((defect) => defect.category))].sort(),
+    ["continuity_break", "narration_mismatch", "reveal_failure"],
+    "semantic visual failures must not collapse into the uncertain general_visual bucket",
+  );
+  assert.equal(
+    visualRepairSignals(reviewed, reviewIntent).length,
+    0,
+    "semantic failures must block honestly until a real lane-owned repair action exists",
+  );
+  assert.match(visualReviewFailureMessage(reviewed), /narration_mismatch/);
+  assert.match(visualReviewFailureMessage(reviewed), /continuity_break/);
+  assert.match(visualReviewFailureMessage(reviewed), /reveal_failure/);
   const prompt = prompts.join("\n");
   assert.match(prompt, /narration: "Mira finds a tiny seed/i);
   assert.match(prompt, /visual-lock: "Story Spine shot-0001/i);
   assert.match(prompt, /exact current narrated idea/i);
+  assert.match(prompt, /narration_mismatch\|continuity_break\|reveal_failure/);
   assert.doesNotMatch(
     prompt,
     /@(?:0\.2|0\.7|1\.5)s[^\n]*narration:/i,

@@ -48,6 +48,9 @@ export type VisualReviewCategory =
   | "caption_unreadable"
   | "wrong_footage"
   | "repeated_clip"
+  | "narration_mismatch"
+  | "continuity_break"
+  | "reveal_failure"
   | "black_frame"
   | "frozen_frame"
   | "transition_break"
@@ -964,10 +967,14 @@ function reviewerPrompt(
     `\nFRAME LEDGER\n${timeline}\n\n` +
     `Find only viewer-noticeable defects: overlays/captions clipped, off-canvas, colliding, covering a face or key subject, ` +
     `unreadable text, wrong/repeated footage, black/frozen frames, broken transitions, or missing/broken intro/outro. ` +
-    `For an active visual-lock violation, report wrong_footage when the literal story/subject/location is wrong; use a major general_visual defect when the visible identity, mood, continuity, or composition lock is violated. ` +
+    `For an active visual-lock violation, report wrong_footage when the literal story/subject/location is simply the wrong asset; ` +
+    `report narration_mismatch only when a supplied frame visibly contradicts or is temporally misplaced against its current spoken cue; ` +
+    `report continuity_break when a locked identity, wardrobe, prop, era, or place visibly changes without an authored reason; ` +
+    `report reveal_failure only when the supplied evidence visibly fails an active planned reveal, answer, consequence, or endpoint. ` +
+    `Use general_visual only for another visible mood, composition, or aesthetic concern that does not fit a typed category. ` +
     `Never flag a short on-screen hook merely because it differs from the SEO title. Do not invent defects outside the supplied evidence.\n\n` +
     `Return STRICT JSON {"defects":[{"startSec":number,"endSec":number,"severity":"critical|major|minor",` +
-    `"category":"overlay_off_canvas|overlay_occlusion|overlay_collision|caption_cutoff|caption_unreadable|wrong_footage|repeated_clip|black_frame|frozen_frame|transition_break|intro_card|outro_card|general_visual",` +
+    `"category":"overlay_off_canvas|overlay_occlusion|overlay_collision|caption_cutoff|caption_unreadable|wrong_footage|repeated_clip|narration_mismatch|continuity_break|reveal_failure|black_frame|frozen_frame|transition_break|intro_card|outro_card|general_visual",` +
     `"confidence":0..1,"observed":"what is visibly wrong","expected":"what should be visible",` +
     `"evidenceFrameIds":["f001"],"suggestedRepair":"short safe repair"}],` +
     (referenceCriteria.length
@@ -1000,6 +1007,27 @@ function normalizeCategory(value: unknown, observed: string): VisualReviewCatego
   if (/collision|overlap/.test(raw) && /overlay|bubble|caption|text/.test(raw)) return "overlay_collision";
   if (/caption/.test(raw) && /cut.?off|clip/.test(raw)) return "caption_cutoff";
   if (/caption/.test(raw) && /unread|illegible|tiny|blur/.test(raw)) return "caption_unreadable";
+  if (
+    /narration[_\s-]?mismatch/.test(raw) ||
+    (
+      /narration|spoken|voice|current cue/.test(raw) &&
+      /contradict|mismatch|out of sync|misalign|wrong moment|temporally misplaced|does not (?:match|support)/.test(raw)
+    )
+  ) return "narration_mismatch";
+  if (
+    /continuity[_\s-]?break/.test(raw) ||
+    (
+      /identity|character|wardrobe|clothing|costume|prop|era|location|setting|place/.test(raw) &&
+      /continuity|inconsisten|unexpectedly chang|visibly chang|different (?:person|character|outfit|prop|era|location|setting)/.test(raw)
+    )
+  ) return "continuity_break";
+  if (
+    /reveal[_\s-]?failure/.test(raw) ||
+    (
+      /reveal|payoff|consequence|answer|endpoint/.test(raw) &&
+      /missing|absent|not (?:shown|visible|landed|depicted)|fails? to (?:show|land|appear)/.test(raw)
+    )
+  ) return "reveal_failure";
   if (/wrong|irrelevant|off.?world|unrelated/.test(raw) && /footage|clip|insert|visual/.test(raw)) return "wrong_footage";
   if (/repeat|duplicate/.test(raw) && /clip|footage|insert/.test(raw)) return "repeated_clip";
   if (/black|empty|blank/.test(raw) && /frame|screen|segment|video/.test(raw)) return "black_frame";
