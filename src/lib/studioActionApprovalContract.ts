@@ -5,6 +5,7 @@ export type StudioAction =
   | "route-qualification-benchmark-request"
   /** Full private master/QA run that may earn a route-release receipt, never upload. */
   | "route-qualification-benchmark"
+  | "thumbnail-refresh-candidate"
   | "youtube-channel-create"
   | "channel-publish";
 

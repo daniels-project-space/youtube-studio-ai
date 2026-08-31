@@ -1653,31 +1653,37 @@ export const claimNextPlanRun = mutation({
     const [running, queued, awaitingFactualReview, blockedFactualReview, lastRun] = await Promise.all([
       ctx.db
         .query("runs")
-        .withIndex("by_channel_status", (q) =>
-          q.eq("channelId", args.channelId).eq("status", "running"),
-        )
+        .withIndex("by_channel_status_thumbnail_refresh_source", (q) => q
+          .eq("channelId", args.channelId)
+          .eq("status", "running")
+          .eq("thumbnailRefreshSourceRunId", undefined))
         .first(),
       ctx.db
         .query("runs")
-        .withIndex("by_channel_status", (q) =>
-          q.eq("channelId", args.channelId).eq("status", "queued"),
-        )
+        .withIndex("by_channel_status_thumbnail_refresh_source", (q) => q
+          .eq("channelId", args.channelId)
+          .eq("status", "queued")
+          .eq("thumbnailRefreshSourceRunId", undefined))
         .first(),
       ctx.db
         .query("runs")
-        .withIndex("by_channel_status", (q) =>
-          q.eq("channelId", args.channelId).eq("status", "awaiting_factual_review"),
-        )
+        .withIndex("by_channel_status_thumbnail_refresh_source", (q) => q
+          .eq("channelId", args.channelId)
+          .eq("status", "awaiting_factual_review")
+          .eq("thumbnailRefreshSourceRunId", undefined))
         .first(),
       ctx.db
         .query("runs")
-        .withIndex("by_channel_status", (q) =>
-          q.eq("channelId", args.channelId).eq("status", "factual_review_blocked"),
-        )
+        .withIndex("by_channel_status_thumbnail_refresh_source", (q) => q
+          .eq("channelId", args.channelId)
+          .eq("status", "factual_review_blocked")
+          .eq("thumbnailRefreshSourceRunId", undefined))
         .first(),
       ctx.db
         .query("runs")
-        .withIndex("by_channel", (q) => q.eq("channelId", args.channelId))
+        .withIndex("by_channel_thumbnail_refresh_source", (q) => q
+          .eq("channelId", args.channelId)
+          .eq("thumbnailRefreshSourceRunId", undefined))
         .order("desc")
         .first(),
     ]);

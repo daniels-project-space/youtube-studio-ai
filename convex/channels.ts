@@ -387,7 +387,9 @@ export const channelInceptionLedgerGuardsForTests = {
 async function projectChannelCard(ctx: QueryCtx, channel: Doc<"channels">) {
   const recentRuns = await ctx.db
     .query("runs")
-    .withIndex("by_channel", (q) => q.eq("channelId", channel._id))
+    .withIndex("by_channel_thumbnail_refresh_source", (q) => q
+      .eq("channelId", channel._id)
+      .eq("thumbnailRefreshSourceRunId", undefined))
     .order("desc")
     .take(20);
   const acceptedRunIds = new Set(

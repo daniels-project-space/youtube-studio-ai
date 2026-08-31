@@ -447,11 +447,19 @@ export const MODULE_CONTRACTS: Readonly<Record<string, ModuleContractOverride>> 
     optionalProduces: ["thumbnailScenarioVisualTreatmentProvenance"],
     providerProfiles: [managed],
     maxCostUsd: 2,
-    // One bounded concept pass + one text-free Flash scene + one
-    // post-composite mobile/reference alarm. Spelling can never trigger another
-    // paid render because type is local.
-    maxCostUsdFor: () =>
-      PRICE.thumbnailConceptUsd + bananaUnitRate("flash") + PRICE.visionGraderUsd,
+    // Each critique iteration can buy one bounded concept pass, one text-free
+    // Flash scene, and one mobile/reference alarm. The old envelope counted
+    // only one iteration even though the executable loop can run two (or an
+    // explicitly configured maximum of three), which under-reserved spend.
+    maxCostUsdFor: (params) => {
+      const requested = Number(params.thumbnailCritiqueIters);
+      const iterations = Number.isFinite(requested) && requested >= 1
+        ? Math.min(3, Math.floor(requested))
+        : 2;
+      return iterations * (
+        PRICE.thumbnailConceptUsd + bananaUnitRate("flash") + PRICE.visionGraderUsd
+      );
+    },
     qualityRequired: true,
   }),
   script_gen: contract(["script.generated"], {

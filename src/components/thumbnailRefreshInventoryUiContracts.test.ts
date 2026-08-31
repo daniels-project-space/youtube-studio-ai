@@ -9,10 +9,9 @@ const panel = read("src/components/ThumbnailRefreshInventoryPanel.tsx");
 const route = read("src/app/api/thumbnail-refresh/route.ts");
 const library = read("src/app/(app)/library/page.tsx");
 
-// Legacy output review is deliberately read-only: the browser sees an owner
-// scoped status projection and visual proof. Stored media is resolved by the
-// owner-authenticated server from a run ID; the browser never receives an R2
-// key, render action, or external thumbnail replacement command.
+// Legacy review can now request one bounded, separate candidate. Stored media
+// remains server-resolved from opaque run ids, and neither the browser nor the
+// candidate endpoint receives authority to overwrite the source/YouTube image.
 assert.match(panel, /fetch\("\/api\/thumbnail-refresh"/);
 assert.match(panel, /Legacy never means replace automatically/);
 assert.match(panel, /separate private successor draft/);
@@ -22,13 +21,24 @@ assert.match(panel, /private successor required/);
 assert.match(panel, /Open private benchmark/);
 assert.match(panel, /#route-qualification-benchmark/);
 assert.match(panel, /previewRunId=/);
+assert.match(panel, /candidatePreviewRunId=/);
 assert.match(panel, /i\.ytimg\.com/);
-assert.doesNotMatch(panel, /method:\s*["']POST/);
+assert.match(panel, /method:\s*["']POST/);
+assert.match(panel, /confirmCandidateSpend:\s*true/);
+assert.match(panel, /Render new candidate/);
+assert.match(panel, /Resume candidate delivery/);
+assert.match(panel, /Candidate authorization interrupted/);
+assert.match(panel, /The current thumbnail is unchanged/);
 assert.match(route, /requireStudioActor/);
 assert.match(route, /thumbnailPresent: Boolean\(item\.thumbnailKey\)/);
-assert.match(route, /presignDownload\(item\.thumbnailKey/);
+assert.match(route, /presignDownload\(key/);
 assert.match(route, /previewRunId/);
+assert.match(route, /createCandidateShell/);
+assert.match(route, /issueStudioActionApproval/);
+assert.match(route, /sourceChanged:\s*false/);
+assert.match(route, /youtubeChanged:\s*false/);
 assert.doesNotMatch(route, /thumbnailKey:\s*item\.thumbnailKey/);
+assert.doesNotMatch(route, /youtube\.thumbnails|setThumbnail|videos\.update/);
 assert.match(library, /ThumbnailRefreshInventoryPanel selectedChannelSlug=\{selectedSlug\}/);
 
 console.log("Thumbnail refresh inventory UI contracts passed");

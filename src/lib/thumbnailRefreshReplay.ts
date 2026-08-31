@@ -1,5 +1,10 @@
 import { assertPackageToOpeningPlanBinding, type PackageToOpeningPlan } from "@/engine/packageToOpening";
 import { canonicalJson } from "@/lib/canonicalJson";
+import { pipelineInvocationSha256 as hashPipelineInvocation } from "@/lib/pipelineInvocationHash";
+import {
+  normalizePipelineInvocationSnapshot,
+  type PipelineInvocationSnapshot,
+} from "@/lib/pipelineInvocationSnapshot";
 import { sha256Hex } from "@/lib/sha256";
 
 export const THUMBNAIL_REFRESH_REPLAY_VERSION = "thumbnail-refresh-replay/v1";
@@ -16,6 +21,7 @@ export interface ThumbnailRefreshReplayInput {
   readonly channelId: string;
   readonly runId: string;
   readonly pipelineInvocationSnapshot?: unknown;
+  readonly pipelineInvocationSha256?: unknown;
   readonly stages: readonly ThumbnailRefreshReplayStage[];
 }
 
@@ -35,6 +41,13 @@ export interface ThumbnailRefreshReplayMaterial {
   readonly packageToOpeningPlan: PackageToOpeningPlan;
   readonly script?: unknown;
   readonly quizPlan?: unknown;
+  /**
+   * Exact declared store visible to `thumbnail_gen` in the source run. This is
+   * reconstructed in frozen pipeline order from the invocation seed plus the
+   * retained upstream stage outputs; a refresh must never substitute today's
+   * channel identity, competitor set, or critic doctrine.
+   */
+  readonly store: Readonly<Record<string, unknown>>;
   readonly replayFingerprint: string;
 }
 
@@ -78,6 +91,67 @@ function replayBlockPresent(snapshot: RecordValue): boolean {
   return entries.filter((entry) => record(entry)?.block === "thumbnail_gen").length === 1;
 }
 
+// Keep this aligned with thumbnail_gen's required/optional consumes contract
+// in moduleContracts.ts. Copying only these declared values avoids retaining
+// unrelated scripts/media while still preventing an ambient current-channel
+// read from changing historic packaging.
+export const THUMBNAIL_REFRESH_STORE_KEYS = [
+  "title",
+  "thumbnailDescription",
+  "topic",
+  "packageToOpeningPlan",
+  "channelName",
+  "f1Url",
+  "f1Key",
+  "f1ThumbnailBaseProvenance",
+  "styleGrammar",
+  "styleDNA",
+  "family",
+  "persona",
+  "thumbnailIdentity",
+  "nicheIntel",
+  "niche",
+  "seoDatabank",
+  "competitors",
+  "healHints",
+  "plannedThumbnailKey",
+  "narrationText",
+  "thumbnailPlaybook",
+  "script",
+  "quizPlan",
+  "serializedProgramEpisodeContext",
+  "channelProgramRoute",
+  "syntheticScenario",
+  "syntheticScenarioDisclosure",
+  "scenarioVisualTreatment",
+  "criticDoctrine",
+  "contentLane",
+] as const;
+
+function frozenThumbnailStore(
+  snapshot: RecordValue,
+  seedStore: RecordValue,
+  stages: readonly ThumbnailRefreshReplayStage[],
+): Readonly<Record<string, unknown>> | null {
+  const entries = Array.isArray(snapshot.entries) ? snapshot.entries : [];
+  const thumbnailIndex = entries.findIndex((entry) => record(entry)?.block === "thumbnail_gen");
+  if (thumbnailIndex < 0) return null;
+  const complete: Record<string, unknown> = { ...seedStore };
+  for (const entry of entries.slice(0, thumbnailIndex)) {
+    const block = text(record(entry)?.block);
+    if (!block) return null;
+    const matches = stages.filter((stage) => stage.block === block);
+    if (matches.length !== 1) return null;
+    const outputs = record(matches[0]?.outputs);
+    if (outputs) Object.assign(complete, outputs);
+  }
+  const selected: Record<string, unknown> = {};
+  for (const key of THUMBNAIL_REFRESH_STORE_KEYS) {
+    if (complete[key] !== undefined) selected[key] = structuredClone(complete[key]);
+  }
+  return selected;
+}
+
 function unavailable(missing: readonly string[]): ThumbnailRefreshReplayAssessment {
   return {
     status: "requires_private_successor",
@@ -94,7 +168,24 @@ function unavailable(missing: readonly string[]): ThumbnailRefreshReplayAssessme
 export function assessThumbnailRefreshReplay(
   input: ThumbnailRefreshReplayInput,
 ): ThumbnailRefreshReplayAssessment {
-  const snapshot = record(input.pipelineInvocationSnapshot);
+  const rawSnapshot = record(input.pipelineInvocationSnapshot);
+  let snapshot: RecordValue | null = null;
+  if (
+    rawSnapshot &&
+    typeof input.pipelineInvocationSha256 === "string" &&
+    /^[a-f0-9]{64}$/.test(input.pipelineInvocationSha256)
+  ) {
+    try {
+      const normalized = normalizePipelineInvocationSnapshot(
+        rawSnapshot as unknown as PipelineInvocationSnapshot,
+      );
+      if (hashPipelineInvocation(normalized) === input.pipelineInvocationSha256) {
+        snapshot = normalized as unknown as RecordValue;
+      }
+    } catch {
+      // A malformed or hash-mismatched invocation is not replay authority.
+    }
+  }
   const seedStore = record(snapshot?.seedStore);
   const metadata = record(outputFor(input.stages, ["metadata", "quiz_metadata"], "title") === undefined
     ? undefined
@@ -108,8 +199,12 @@ export function assessThumbnailRefreshReplay(
   const quizPlan = outputFor(input.stages, ["quiz_topic_plan"], "quizPlan");
   const title = text(metadata?.title);
   const thumbnailDescription = text(metadata?.thumbnailDescription);
+  const thumbnailStore = snapshot && seedStore
+    ? frozenThumbnailStore(snapshot, seedStore, input.stages)
+    : null;
   const missing = [
-    !snapshot ? "frozen pipeline invocation" : null,
+    !rawSnapshot ? "frozen pipeline invocation" : null,
+    rawSnapshot && !snapshot ? "hash-verified frozen pipeline invocation" : null,
     snapshot && (!text(snapshot.ownerId) || snapshot.ownerId !== input.ownerId) ? "owner-bound invocation" : null,
     snapshot && (!text(snapshot.channelId) || snapshot.channelId !== input.channelId) ? "channel-bound invocation" : null,
     snapshot && (!text(snapshot.runId) || snapshot.runId !== input.runId) ? "run-bound invocation" : null,
@@ -123,8 +218,9 @@ export function assessThumbnailRefreshReplay(
     !title ? "metadata title output" : null,
     !thumbnailDescription || thumbnailDescription.length < 80 ? "concrete thumbnail brief" : null,
     packageToOpeningPlan === undefined ? "package-to-opening plan" : null,
+    !thumbnailStore ? "complete frozen thumbnail input store" : null,
   ].filter((value): value is string => value !== null);
-  if (missing.length || !snapshot || !seedStore || !topic || !title || !thumbnailDescription || packageToOpeningPlan === undefined) {
+  if (missing.length || !snapshot || !seedStore || !topic || !title || !thumbnailDescription || packageToOpeningPlan === undefined || !thumbnailStore) {
     return unavailable(missing);
   }
 
@@ -161,6 +257,7 @@ export function assessThumbnailRefreshReplay(
     packageToOpeningPlan: plan,
     ...(script === undefined ? {} : { script }),
     ...(quizPlan === undefined ? {} : { quizPlan }),
+    store: thumbnailStore,
   } as const;
   return {
     status: "ready_for_thumbnail_only",

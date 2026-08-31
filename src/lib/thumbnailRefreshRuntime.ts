@@ -24,6 +24,12 @@ export type ThumbnailRefreshInventoryItem = Readonly<{
   releaseEvidenceStatus: string;
   thumbnailReplayStatus: "ready_for_thumbnail_only" | "requires_private_successor";
   thumbnailReplayReason: string;
+  candidateRunId?: string;
+  candidateStatus?: string;
+  candidateDispatchState?: string;
+  candidateDispatchLastError?: string;
+  candidateCostTotal?: number;
+  candidateThumbnailKey?: string | null;
 }>;
 
 // This is deliberately a narrow bridge until an authorized Convex codegen
@@ -31,8 +37,15 @@ export type ThumbnailRefreshInventoryItem = Readonly<{
 const thumbnailRefreshApi = (api as unknown as {
   readonly thumbnailRefresh: {
     readonly listInventory: never;
+    readonly createCandidateShell: never;
+    readonly claimCandidateApproval: never;
+    readonly getCandidateDispatch: never;
+    readonly markCandidateDispatchQueued: never;
+    readonly recordCandidateDispatchFailure: never;
   };
 }).thumbnailRefresh;
+
+export const thumbnailRefreshRuntimeApi = thumbnailRefreshApi;
 
 /**
  * Server-only owner inventory for evaluating older thumbnails. It is neither a

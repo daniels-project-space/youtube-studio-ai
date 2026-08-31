@@ -634,6 +634,29 @@ export default defineSchema({
     // rows without the field are treated as active.
     libraryState: v.optional(v.union(v.literal("active"), v.literal("archived"))),
     libraryStateUpdatedAt: v.optional(v.number()),
+    // A thumbnail refresh is always a separate no-video candidate run. The
+    // source master and its thumbnail remain untouched until a later explicit
+    // YouTube acceptance flow exists. These fields form a durable, bounded
+    // outbox so a lost Trigger acknowledgement cannot purchase twice.
+    thumbnailRefreshSourceRunId: v.optional(v.id("runs")),
+    thumbnailRefreshReplayFingerprint: v.optional(v.string()),
+    thumbnailRefreshDispatchKey: v.optional(v.string()),
+    thumbnailRefreshMaximumCostUsd: v.optional(v.number()),
+    thumbnailRefreshApproval: v.optional(v.any()),
+    thumbnailRefreshApprovalFingerprint: v.optional(v.string()),
+    thumbnailRefreshDispatchState: v.optional(v.union(
+      v.literal("awaiting_approval"),
+      v.literal("pending"),
+      v.literal("queued"),
+      v.literal("consumed"),
+      v.literal("blocked"),
+    )),
+    thumbnailRefreshDispatchAttempts: v.optional(v.number()),
+    thumbnailRefreshDispatchUpdatedAt: v.optional(v.number()),
+    thumbnailRefreshDispatchQueuedAt: v.optional(v.number()),
+    thumbnailRefreshDispatchQueueDeadlineAt: v.optional(v.number()),
+    thumbnailRefreshDispatchTriggerRunId: v.optional(v.string()),
+    thumbnailRefreshDispatchLastError: v.optional(v.string()),
     // Conservative, server-derived release provenance. This is deliberately
     // separate from publishing state: a stored QA boolean alone can never
     // promote a run to `release_evidence_recorded`.
@@ -864,9 +887,30 @@ export default defineSchema({
   })
     .index("by_owner", ["ownerId"])
     .index("by_channel", ["channelId"])
+    // Packaging-only thumbnail candidates share the durable run/stage lease
+    // infrastructure, but are not ordinary video runs. These indexes let
+    // cadence and channel-card projections select source productions without
+    // collecting a channel's full history or mistaking packaging work for a
+    // queued episode.
+    .index("by_channel_thumbnail_refresh_source", ["channelId", "thumbnailRefreshSourceRunId"])
     .index("by_channel_started", ["channelId", "startedAt"])
     .index("by_channel_status", ["channelId", "status"])
+    .index("by_channel_status_thumbnail_refresh_source", [
+      "channelId",
+      "status",
+      "thumbnailRefreshSourceRunId",
+    ])
     .index("by_channel_probe_dispatch", ["channelId", "probeDispatchKey"])
+    .index("by_owner_thumbnail_refresh_source", [
+      "ownerId",
+      "thumbnailRefreshSourceRunId",
+      "thumbnailRefreshReplayFingerprint",
+    ])
+    .index("by_owner_thumbnail_refresh_dispatch", [
+      "ownerId",
+      "thumbnailRefreshDispatchState",
+      "thumbnailRefreshDispatchQueueDeadlineAt",
+    ])
     .index("by_owner_channel_route_qualification_benchmark_dispatch", [
       "ownerId",
       "channelId",

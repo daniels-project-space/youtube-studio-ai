@@ -554,7 +554,7 @@ function configurationSpecificCostEnvelopes(): void {
 
   assert.equal(
     envelope("thumbnail_gen", {}),
-    PRICE.thumbnailConceptUsd + bananaUnitRate("flash") + PRICE.visionGraderUsd,
+    2 * (PRICE.thumbnailConceptUsd + bananaUnitRate("flash") + PRICE.visionGraderUsd),
     "thumbnail reservation must cover concept, one text-free scene, and one publishing alarm",
   );
 

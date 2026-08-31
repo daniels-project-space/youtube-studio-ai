@@ -1,6 +1,8 @@
 import assert from "node:assert/strict";
 
 import { createPackageToOpeningPlan } from "@/engine/packageToOpening";
+import { pipelineInvocationSha256 } from "@/lib/pipelineInvocationHash";
+import type { PipelineInvocationSnapshot } from "@/lib/pipelineInvocationSnapshot";
 import { assessThumbnailRefreshReplay } from "@/lib/thumbnailRefreshReplay";
 
 const ownerId = "owner-thumb-refresh";
@@ -24,22 +26,42 @@ function input(overrides: Partial<Parameters<typeof assessThumbnailRefreshReplay
     family: "narrated_stock",
     contentLane,
   });
+  const pipelineInvocationSnapshot: PipelineInvocationSnapshot = {
+    version: 1,
+    ownerId,
+    channelId,
+    runId,
+    source: "channel",
+    entries: [
+      { block: "topic_select" },
+      { block: "script_gen" },
+      { block: "metadata" },
+      { block: "package_to_opening_plan" },
+      { block: "thumbnail_gen" },
+    ],
+    seedStore: {
+      family: "narrated_stock",
+      contentLane,
+      channelProgramRoute: route,
+      styleDNA: { thumbnail: { composition: "two-state comparison" } },
+    },
+    budgetUsd: 10,
+    keyPrefix: "owner/owner-thumb-refresh/channels/test/",
+    remoteBlocks: [],
+    defaultRetries: 1,
+    compilationFingerprint: "a".repeat(64),
+    compilationPolicyId: "golden-production",
+    compilationPolicyVersion: "1",
+    compilationModules: [],
+    compilationCapabilities: ["package.thumbnail"],
+    reservedMaxCostUsd: 10,
+  };
   return {
     ownerId,
     channelId,
     runId,
-    pipelineInvocationSnapshot: {
-      ownerId,
-      channelId,
-      runId,
-      entries: [{ block: "thumbnail_gen" }],
-      seedStore: {
-        family: "narrated_stock",
-        contentLane,
-        channelProgramRoute: route,
-        styleDNA: { thumbnail: { composition: "two-state comparison" } },
-      },
-    },
+    pipelineInvocationSnapshot,
+    pipelineInvocationSha256: pipelineInvocationSha256(pipelineInvocationSnapshot),
     stages: [
       { block: "topic_select", outputs: { topic } },
       { block: "script_gen", outputs: { script } },
@@ -58,22 +80,54 @@ if (ready.status === "ready_for_thumbnail_only") {
   assert.equal(ready.material.replayFingerprint.length, 64);
 }
 
-const styleDrift = assessThumbnailRefreshReplay(input({
-  pipelineInvocationSnapshot: {
+const styleDriftSnapshot: PipelineInvocationSnapshot = {
+    version: 1,
     ownerId,
     channelId,
     runId,
-    entries: [{ block: "thumbnail_gen" }],
+    source: "channel",
+    entries: [
+      { block: "topic_select" },
+      { block: "script_gen" },
+      { block: "metadata" },
+      { block: "package_to_opening_plan" },
+      { block: "thumbnail_gen" },
+    ],
     seedStore: {
       family: "narrated_stock",
       contentLane,
       channelProgramRoute: route,
     },
-  },
+    budgetUsd: 10,
+    keyPrefix: "owner/owner-thumb-refresh/channels/test/",
+    remoteBlocks: [],
+    defaultRetries: 1,
+    compilationFingerprint: "a".repeat(64),
+    compilationPolicyId: "golden-production",
+    compilationPolicyVersion: "1",
+    compilationModules: [],
+    compilationCapabilities: ["package.thumbnail"],
+    reservedMaxCostUsd: 10,
+};
+const styleDrift = assessThumbnailRefreshReplay(input({
+  pipelineInvocationSnapshot: styleDriftSnapshot,
+  pipelineInvocationSha256: pipelineInvocationSha256(styleDriftSnapshot),
 }));
 assert.equal(styleDrift.status, "requires_private_successor");
 if (styleDrift.status === "requires_private_successor") {
   assert.ok(styleDrift.missing.includes("frozen Style DNA"));
+}
+
+const corruptInvocation = input();
+const corruptSnapshot = structuredClone(corruptInvocation.pipelineInvocationSnapshot) as PipelineInvocationSnapshot;
+corruptSnapshot.seedStore.styleDNA = { thumbnail: { composition: "unapproved current style" } };
+const corrupted = assessThumbnailRefreshReplay({
+  ...corruptInvocation,
+  pipelineInvocationSnapshot: corruptSnapshot,
+});
+assert.equal(corrupted.status, "requires_private_successor");
+if (corrupted.status === "requires_private_successor") {
+  assert.ok(corrupted.missing.includes("hash-verified frozen pipeline invocation"));
 }
 
 const tamperedPlan = assessThumbnailRefreshReplay(input({
