@@ -10,6 +10,7 @@ const appShell = read("src/components/AppShell.tsx");
 const runCard = read("src/components/RunCard.tsx");
 const videoCard = read("src/components/VideoCard.tsx");
 const lightbox = read("src/components/Lightbox.tsx");
+const videoPlayer = read("src/components/VideoPlayer.tsx");
 const libraryFilters = read("src/components/LibraryFilters.tsx");
 const library = read("src/app/(app)/library/page.tsx");
 const runs = read("src/app/(app)/runs/page.tsx");
@@ -120,5 +121,8 @@ assert.match(lightbox, /aria-labelledby=\{titleId\}/);
 assert.match(lightbox, /closeRef\.current\?\.focus\(\)/);
 assert.match(lightbox, /openerRef\.current\?\.focus\(\)/);
 assert.match(lightbox, /if \(e\.key !== "Tab"\) return/);
+assert.match(lightbox, /<VideoPlayer video=\{video\} embedTabIndex=\{-1\}/);
+assert.match(lightbox, /Watch on YouTube/);
+assert.match(videoPlayer, /tabIndex=\{embedTabIndex\}/);
 
 console.log("Operator visual consistency contracts passed");

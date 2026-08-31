@@ -211,7 +211,10 @@ export function Lightbox({
 
         {/* Player + prev/next */}
         <div style={{ position: "relative" }}>
-          <VideoPlayer video={video} />
+          {/* Keep the cross-origin player out of this modal's tab loop. The
+              adjacent Watch on YouTube link remains the keyboard-accessible
+              path to the full player without trapping Escape in another document. */}
+          <VideoPlayer video={video} embedTabIndex={-1} />
           {count > 1 && (
             <>
               <NavArrow side="left" onClick={prev} />

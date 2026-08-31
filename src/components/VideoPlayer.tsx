@@ -8,7 +8,14 @@ import { youtubeEmbed, useAssetUrl } from "@/lib/asset-url";
  * presigned R2 `<video controls>` element (key resolved server-side). Shows a
  * neutral panel when neither source is available.
  */
-export function VideoPlayer({ video }: { video: VideoRow }) {
+export function VideoPlayer({
+  video,
+  embedTabIndex,
+}: {
+  video: VideoRow;
+  /** Cross-origin embeds inside a modal may opt out of its keyboard loop. */
+  embedTabIndex?: number;
+}) {
   // Presign the R2 video only when there's no YouTube id (hook no-ops on null).
   const r2Video = useAssetUrl(video.youtubeVideoId ? null : video.videoKey);
 
@@ -27,6 +34,7 @@ export function VideoPlayer({ video }: { video: VideoRow }) {
         <iframe
           src={youtubeEmbed(video.youtubeVideoId)}
           title={video.title}
+          tabIndex={embedTabIndex}
           allow="accelerometer; autoplay; clipboard-write; encrypted-media; gyroscope; picture-in-picture"
           allowFullScreen
           style={{
