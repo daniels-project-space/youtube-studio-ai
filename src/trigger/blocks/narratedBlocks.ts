@@ -101,7 +101,7 @@ import {
   cinematicCaseSequenceContentFingerprint,
 } from "@/engine/cinematicCaseSequence";
 import { assertSourceBoundNarrationAlignment } from "@/engine/sourceBoundStorySpine";
-import { StorySpineSchema } from "@/engine/storySpine";
+import { StorySpineSchema, storySpineVisualReviewLocks } from "@/engine/storySpine";
 import {
   assertCinematicAssemblyRoute,
   assertCinematicSequenceRenderBinding,
@@ -240,6 +240,7 @@ import {
 } from "@/lib/studioAssetLibraryRuntime";
 import {
   channelVisualReviewProfile,
+  finalMasterTranscriptCues,
   reviewRender,
   visualRepairSignals,
   visualReviewFailureMessage,
@@ -3511,6 +3512,33 @@ export const qaVisual: Block = {
       throw new Error(`qa_visual FAILED (length): video ${p.durationSec}s vs target ${target}s`);
     }
 
+    // sentenceTimings are authored on the narration source's local clock,
+    // while visual-review frames are extracted from the released master. Bind
+    // the two clocks before constructing any cue or Story Spine visual lock.
+    // Without this offset, an intro/preroll pairs spoken evidence with an
+    // earlier, unrelated frame and can both invent and miss sync defects.
+    const rawNarrationStartSec = ctx.store["narrationStartSec"];
+    const declaredNarrationStartSec = rawNarrationStartSec === undefined
+      ? undefined
+      : Number(rawNarrationStartSec);
+    if (
+      rawNarrationStartSec !== undefined &&
+      (!Number.isFinite(declaredNarrationStartSec) || declaredNarrationStartSec! < 0 || declaredNarrationStartSec! > p.durationSec)
+    ) {
+      if (productionQa) {
+        throw new Error("qa_visual: narration start evidence is malformed or outside the final master duration");
+      }
+      ctx.log("qa_visual: malformed draft narration start ignored; using the declared intro offset");
+    }
+    const narrationStartSec = declaredNarrationStartSec !== undefined &&
+      Number.isFinite(declaredNarrationStartSec) &&
+      declaredNarrationStartSec >= 0 &&
+      declaredNarrationStartSec <= p.durationSec
+      ? declaredNarrationStartSec
+      : ctx.store["introApplied"] === true
+        ? Math.max(0, Number(ctx.store["introSec"] ?? 0))
+        : 0;
+
     // Detect the cinematic route before final visual review. A partial
     // cinematic handoff must not be able to hide behind qaProfile=draft and
     // spend on an advisory review before the stricter final-master contract
@@ -3565,15 +3593,18 @@ export const qaVisual: Block = {
     const watchDna = ctx.store["styleDNA"] as
       | { recurringSubject?: string; setting?: string; motifs?: string[] }
       | null;
-    const transcriptCues = ((ctx.store["sentenceTimings"] as Array<{ text?: unknown; start?: unknown; end?: unknown }> | undefined) ?? [])
-      .flatMap((cue) => {
-        const startSec = Number(cue.start);
-        const endSec = Number(cue.end);
-        const text = typeof cue.text === "string" ? cue.text.trim() : "";
-        return Number.isFinite(startSec) && Number.isFinite(endSec) && endSec >= startSec && text
-          ? [{ text, startSec, endSec }]
-          : [];
+    let transcriptCues: readonly ReturnType<typeof finalMasterTranscriptCues>[number][] = [];
+    try {
+      transcriptCues = finalMasterTranscriptCues({
+        sentenceTimings: ctx.store["sentenceTimings"],
+        narrationStartSec,
+        finalMasterDurationSec: p.durationSec,
       });
+    } catch (error) {
+      const detail = error instanceof Error ? error.message : String(error);
+      if (productionQa) throw new Error(`qa_visual: final-master narration cue map is invalid: ${detail}`);
+      ctx.log(`qa_visual: draft narration cues skipped: ${detail}`);
+    }
     const reviewOverlays: VisualReviewOverlay[] = [];
     if (quizShortOpeningHook) {
       reviewOverlays.push({
@@ -3664,6 +3695,49 @@ export const qaVisual: Block = {
     });
     const visualMatter = visualMatterFromUnknown(ctx.store["visualMatterManifest"]);
     const visualMatterLocks = visualMatterReviewLocks(visualMatter);
+    // A renderer-specific planning block may already have produced the durable
+    // episode receipt. Resolve Story Spine authority before paying for final
+    // visual review so a malformed or substituted plan cannot consume review
+    // budget and fail only later in the certificate path.
+    const storedEpisode = EpisodeSpecSchema.safeParse(ctx.store["episodeSpec"]);
+    const storedStory = storedEpisode.success &&
+      storedEpisode.data.lane.key === contentLane.key &&
+      (storedEpisode.data.lane.renderer === undefined ||
+        storedEpisode.data.lane.renderer === contentLane.primaryRenderer) &&
+      storedEpisode.data.story.status === "measured"
+      ? storedEpisode.data.story
+      : undefined;
+    const declaresStorySpine =
+      storedStory?.source === VALIDATED_STORY_SPINE_SOURCE ||
+      ctx.store["storySpineFingerprint"] !== undefined;
+    let storySpineForQa: ReturnType<typeof StorySpineSchema.parse> | undefined;
+    let storySpineVisualLocks: readonly VisualReviewCreativeLock[] = [];
+    if (declaresStorySpine) {
+      try {
+        storySpineForQa = StorySpineSchema.parse({
+          version: "1.0.0",
+          timedScript: ctx.store["timedScript"],
+          narrativeBeats: ctx.store["narrativeBeats"],
+          continuityLedger: ctx.store["continuityLedger"],
+          shotList: ctx.store["shotList"],
+          dpVisualSpecs: ctx.store["dpVisualSpecs"],
+          editorEdl: ctx.store["editorEdl"],
+          coverage: ctx.store["storyCoverage"],
+        });
+        storySpineVisualLocks = storySpineVisualReviewLocks({
+          storySpine: storySpineForQa,
+          expectedStorySpineFingerprint: ctx.store["storySpineFingerprint"],
+          narrationStartSec,
+          finalMasterDurationSec: p.durationSec,
+        });
+      } catch (error) {
+        const detail = error instanceof Error ? error.message : String(error);
+        if (productionQa) {
+          throw new Error(`qa_visual: retained Story Spine cannot be mapped to final-master visual review: ${detail}`);
+        }
+        ctx.log(`qa_visual: draft Story Spine visual locks skipped: ${detail}`);
+      }
+    }
     // Every automatic self-contained panel must influence which final-master
     // frame is inspected. Without this, a generic broad sample could miss a
     // short comic panel or a whiteboard beat even though its sealed plan was
@@ -3904,12 +3978,13 @@ export const qaVisual: Block = {
           ? scenarioVisualTreatmentReviewCriteria(scenarioVisualTreatment)
           : []),
       ],
-      transcriptCues,
+      transcriptCues: [...transcriptCues],
       overlays: reviewOverlays,
       creativeLocks: [
         ...visualMatterLocks,
         ...cinematicReviewLocks,
         ...selfContainedStoryVisualLocks,
+        ...storySpineVisualLocks,
       ],
       focusWindows: [...repairFocus, ...cinematicFocus],
       ...(reviewReferenceCriteria.length
@@ -4414,30 +4489,6 @@ export const qaVisual: Block = {
       : undefined;
     const narrationKey = opt(ctx, "narrationKey");
     const expectsNarrationMixEvidence = narrationDuration >= 1.5 && Boolean(storedNarrationPath || narrationKey);
-    // Self-contained renderers can declare an intentional visual pre-roll
-    // before their voice-only source begins. Bind it explicitly rather than
-    // assuming every narration starts at zero (or pretending it is a generic
-    // intro card); malformed renderer metadata fails closed in production.
-    const rawNarrationStartSec = ctx.store["narrationStartSec"];
-    const declaredNarrationStartSec = rawNarrationStartSec === undefined
-      ? undefined
-      : Number(rawNarrationStartSec);
-    if (
-      rawNarrationStartSec !== undefined &&
-      (!Number.isFinite(declaredNarrationStartSec) || declaredNarrationStartSec! < 0 || declaredNarrationStartSec! > dur)
-    ) {
-      if (productionQa) {
-        critical.push("narration start evidence is malformed or outside the final master duration");
-      }
-    }
-    const narrationStartSec = declaredNarrationStartSec !== undefined &&
-      Number.isFinite(declaredNarrationStartSec) &&
-      declaredNarrationStartSec >= 0 &&
-      declaredNarrationStartSec <= dur
-      ? declaredNarrationStartSec
-      : ctx.store["introApplied"] === true
-        ? Math.max(0, Number(ctx.store["introSec"] ?? 0))
-        : 0;
     let finalNarrationMix: { correlation: number | null; narrationStartSec: number } | undefined;
     let finalNarrationTranscript: { wordErrorRate: number; lexicalRecall: number; passed: boolean } | undefined;
     let finalMasterNarrationSemantic: FinalMasterNarrationSemanticEvidence | undefined;
@@ -4796,27 +4847,11 @@ export const qaVisual: Block = {
       ? assetQa!["selected"].length
       : undefined;
     const storyRatio = Number(storyCoverage?.["ratio"]);
-    // A renderer-specific planning block may have already produced the durable
-    // episode receipt (for example story_spine or short_strategy). Reuse its
-    // measured provenance rather than reconstructing a weaker story claim from
-    // final QA state. A mismatched/legacy receipt is ignored and cannot leak
-    // provenance across content lanes.
-    const storedEpisode = EpisodeSpecSchema.safeParse(ctx.store["episodeSpec"]);
-    const storedStory = storedEpisode.success &&
-      storedEpisode.data.lane.key === contentLane.key &&
-      (storedEpisode.data.lane.renderer === undefined ||
-        storedEpisode.data.lane.renderer === contentLane.primaryRenderer) &&
-      storedEpisode.data.story.status === "measured"
-      ? storedEpisode.data.story
-      : undefined;
     // Story Spine planning is intentionally pre-render evidence. Production
     // release upgrades it only when the exact pre-render fingerprint can be
     // re-bound to the final-master narration transcript. Other story models
     // (self-contained panels and documentary Short strategy) do not enter this
     // adapter and retain their own contracts.
-    const declaresStorySpine =
-      storedStory?.source === VALIDATED_STORY_SPINE_SOURCE ||
-      ctx.store["storySpineFingerprint"] !== undefined;
     let finalMasterNarratedStoryCoverage:
       | DerivedFinalMasterNarratedStoryCoverage
       | undefined;
@@ -4825,18 +4860,11 @@ export const qaVisual: Block = {
         if (!finalMasterNarrationSemantic || !finalMasterNarrationAudit || !narrationCueTiming) {
           throw new Error("final-master narration semantic, transcript-audit, or cue-timing evidence is unavailable");
         }
-        const storySpine = StorySpineSchema.parse({
-          version: "1.0.0",
-          timedScript: ctx.store["timedScript"],
-          narrativeBeats: ctx.store["narrativeBeats"],
-          continuityLedger: ctx.store["continuityLedger"],
-          shotList: ctx.store["shotList"],
-          dpVisualSpecs: ctx.store["dpVisualSpecs"],
-          editorEdl: ctx.store["editorEdl"],
-          coverage: ctx.store["storyCoverage"],
-        });
+        if (!storySpineForQa) {
+          throw new Error("retained Story Spine was unavailable after final visual-review binding");
+        }
         finalMasterNarratedStoryCoverage = deriveFinalMasterNarratedStoryCoverage({
-          storySpine,
+          storySpine: storySpineForQa,
           expectedStorySpineFingerprint: ctx.store["storySpineFingerprint"],
           sentenceTimings: ctx.store["sentenceTimings"],
           narrationCueTiming,

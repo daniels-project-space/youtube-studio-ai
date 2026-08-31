@@ -64,6 +64,47 @@ export interface VisualReviewTranscriptCue {
   endSec: number;
 }
 
+/**
+ * Maps renderer-local narration timings onto the released master's clock.
+ * Final visual review reads frames from the master, so passing raw TTS-local
+ * timestamps would pair every cue with the wrong image whenever an intro or
+ * renderer pre-roll precedes the voice track.
+ */
+export function finalMasterTranscriptCues(input: {
+  readonly sentenceTimings: unknown;
+  readonly narrationStartSec: number;
+  readonly finalMasterDurationSec: number;
+}): readonly VisualReviewTranscriptCue[] {
+  if (input.sentenceTimings === undefined) return Object.freeze([]);
+  if (!Array.isArray(input.sentenceTimings) || input.sentenceTimings.length > 16_000) {
+    throw new Error("final-master visual review requires a bounded narration timing map");
+  }
+  if (!Number.isFinite(input.narrationStartSec) || input.narrationStartSec < 0) {
+    throw new Error("final-master visual review requires a valid narration start");
+  }
+  if (!Number.isFinite(input.finalMasterDurationSec) || input.finalMasterDurationSec <= 0) {
+    throw new Error("final-master visual review requires a valid master duration");
+  }
+  return Object.freeze(input.sentenceTimings.map((rawCue, index) => {
+    if (!rawCue || typeof rawCue !== "object" || Array.isArray(rawCue)) {
+      throw new Error(`final-master visual review narration cue ${index} is malformed`);
+    }
+    const cue = rawCue as Record<string, unknown>;
+    const start = Number(cue["start"]);
+    const end = Number(cue["end"]);
+    const text = typeof cue["text"] === "string" ? cue["text"].trim() : "";
+    if (!text || !Number.isFinite(start) || !Number.isFinite(end) || start < 0 || end < start) {
+      throw new Error(`final-master visual review narration cue ${index} is invalid`);
+    }
+    const startSec = Number((input.narrationStartSec + start).toFixed(3));
+    const endSec = Number((input.narrationStartSec + end).toFixed(3));
+    if (endSec > input.finalMasterDurationSec + 0.75) {
+      throw new Error(`final-master visual review narration cue ${index} extends beyond the master`);
+    }
+    return { text, startSec, endSec };
+  }));
+}
+
 /** A planned, timed overlay or bubble. Coordinates are normalized to its panel. */
 export interface VisualReviewOverlay {
   id: string;
@@ -816,6 +857,13 @@ async function extractFrames(
 }
 
 function cueForFrame(cues: readonly VisualReviewTranscriptCue[], tSec: number): string | undefined {
+  // Intro/outro frames live outside the narrated source window. Nearest-cue
+  // fallback is useful only for small pauses *inside* narration; applying it
+  // before the first word or after the last one falsely tells the reviewer an
+  // intro/outro frame should already depict a spoken sentence.
+  const narrationStartSec = cues.reduce((earliest, cue) => Math.min(earliest, cue.startSec), Number.POSITIVE_INFINITY);
+  const narrationEndSec = cues.reduce((latest, cue) => Math.max(latest, cue.endSec), Number.NEGATIVE_INFINITY);
+  if (tSec < narrationStartSec || tSec > narrationEndSec) return undefined;
   const cue = cues.find((item) => item.startSec <= tSec && item.endSec >= tSec) ??
     cues.reduce<VisualReviewTranscriptCue | undefined>((nearest, item) => {
       if (!nearest) return item;

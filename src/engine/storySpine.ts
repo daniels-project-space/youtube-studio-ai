@@ -13,6 +13,7 @@ import {
   MIN_CINEMATIC_BEAT_SEC,
   pickCoverageCount,
 } from "./shotBoundaryTiming";
+import type { VisualReviewCreativeLock } from "@/lib/visualReview";
 
 const EPSILON = 0.02;
 
@@ -297,6 +298,75 @@ export function validateStorySpine(value: StorySpine): StorySpine {
 export function storySpineFingerprint(value: unknown): string {
   const spine = validateStorySpine(StorySpineSchema.parse(value));
   return sha256Hex(canonicalJson(spine));
+}
+
+function compactReviewText(value: string, maxLength: number): string {
+  return value.replace(/[\r\n]+/g, " ").replace(/\s+/g, " ").trim().slice(0, maxLength);
+}
+
+/**
+ * Projects the exact, fingerprinted Story Spine shot plan onto the released
+ * master's clock. These locks make the existing final visual reviewer judge a
+ * sampled frame against the literal narrated moment, continuity state, and
+ * authored shot purpose that should be visible at that time. They remain
+ * sampled visual evidence; they do not claim continuous shot realization.
+ */
+export function storySpineVisualReviewLocks(input: {
+  readonly storySpine: unknown;
+  readonly expectedStorySpineFingerprint: unknown;
+  readonly narrationStartSec: number;
+  readonly finalMasterDurationSec: number;
+}): readonly VisualReviewCreativeLock[] {
+  const spine = validateStorySpine(StorySpineSchema.parse(input.storySpine));
+  if (
+    typeof input.expectedStorySpineFingerprint !== "string" ||
+    input.expectedStorySpineFingerprint !== storySpineFingerprint(spine)
+  ) {
+    throw new Error("Story Spine visual-review fingerprint does not match the retained pre-render plan");
+  }
+  if (!Number.isFinite(input.narrationStartSec) || input.narrationStartSec < 0) {
+    throw new Error("Story Spine visual review requires a valid final-master narration start");
+  }
+  if (!Number.isFinite(input.finalMasterDurationSec) || input.finalMasterDurationSec <= 0) {
+    throw new Error("Story Spine visual review requires a valid final-master duration");
+  }
+  const plannedEndSec = input.narrationStartSec + spine.timedScript.narrationDurationSec;
+  if (plannedEndSec > input.finalMasterDurationSec + 0.75) {
+    throw new Error("Story Spine visual-review timing extends beyond the final master");
+  }
+
+  const dpByShotId = new Map(spine.dpVisualSpecs.map((spec) => [spec.shotId, spec]));
+  return Object.freeze(spine.shotList.map((shot) => {
+    const dp = dpByShotId.get(shot.id);
+    if (!dp) throw new Error(`Story Spine visual review is missing DP evidence for ${shot.id}`);
+    const startSec = Number((input.narrationStartSec + shot.t0).toFixed(3));
+    const endSec = Number((input.narrationStartSec + shot.t1).toFixed(3));
+    return {
+      shotId: `story-spine-${shot.id}`,
+      startSec,
+      endSec,
+      expected: compactReviewText(
+        `Story Spine ${shot.id}: depict the literal narrated moment "${shot.literalContent}"; ` +
+          `visual purpose: ${shot.coveragePurpose}; story function: ${shot.storyFunction}.`,
+        700,
+      ),
+      acceptanceCriteria: [
+        compactReviewText(
+          "The visible subject, action, and setting support the exact current narrated idea rather than generic, decorative, or temporally misplaced imagery.",
+          220,
+        ),
+        compactReviewText(
+          `Continuity remains locked: ${shot.continuityState}; era ${shot.era}; ` +
+            `wardrobe ${shot.wardrobe.join(", ") || "unchanged"}; props ${shot.props.join(", ") || "as authored"}.`,
+          220,
+        ),
+        compactReviewText(
+          `${dp.firstFrameConstraint}; ${dp.lastFrameConstraint}.`,
+          220,
+        ),
+      ],
+    } satisfies VisualReviewCreativeLock;
+  }));
 }
 
 export function planStorySpine(input: PlanStorySpineInput): StorySpine {

@@ -80,6 +80,11 @@ assert.match(
   /declaredNarrationStartSec[\s\S]{0,500}\? declaredNarrationStartSec[\s\S]{0,500}: ctx\.store\["introApplied"\]/,
   "a valid renderer-declared offset must take precedence over the legacy intro-card fallback",
 );
+assert.match(
+  qaVisual,
+  /finalMasterTranscriptCues\(\{[\s\S]{0,260}sentenceTimings:[\s\S]{0,180}narrationStartSec,[\s\S]{0,180}finalMasterDurationSec:/,
+  "the visual reviewer must receive narration cues shifted onto the released master's clock",
+);
 
 assert.match(
   qaVisual,
@@ -100,6 +105,16 @@ assert.match(
   qaVisual,
   /creativeLocks: \[[\s\S]{0,320}selfContainedStoryVisualLocks/,
   "every self-contained panel lock must feed the actual visual-review evidence plan rather than a logging-only path",
+);
+assert.match(
+  qaVisual,
+  /storySpineVisualReviewLocks\(\{[\s\S]{0,420}expectedStorySpineFingerprint:[\s\S]{0,180}narrationStartSec,[\s\S]{0,180}finalMasterDurationSec:/,
+  "validated Story Spine shots must be rebound to final-master time before visual review",
+);
+assert.match(
+  qaVisual,
+  /creativeLocks: \[[\s\S]{0,420}storySpineVisualLocks/,
+  "Story Spine shot locks must feed the actual final visual reviewer",
 );
 
 console.log("SELF-CONTAINED NARRATION FINAL-QA WIRING PASS");
