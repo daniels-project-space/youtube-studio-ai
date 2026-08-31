@@ -14,8 +14,13 @@ assert.ok(/^\d+\.\d+\.\d+$/.test(sdkVersion ?? ""), "Trigger SDK must use an exa
 assert.equal(buildVersion, sdkVersion, "Trigger build and SDK versions must match");
 assert.match(
   pkg.scripts?.["trigger:deploy"] ?? "",
-  new RegExp(`trigger\\.dev@${sdkVersion?.replaceAll(".", "\\.")} deploy$`),
+  new RegExp(`^npx --yes trigger\\.dev@${sdkVersion?.replaceAll(".", "\\.")} deploy(?:\\s|$)`),
   "Trigger deploy script must pin the same CLI version as the SDK/build packages",
 );
+assert.match(
+  pkg.scripts?.["trigger:deploy"] ?? "",
+  /--native-build-server(?:\s|$)/,
+  "Trigger deploy script must use Trigger's native build server to avoid downstream registry push failures",
+);
 
-console.log(`RELEASE CONFIG PASS: Trigger CLI/SDK/build pinned to ${sdkVersion}`);
+console.log(`RELEASE CONFIG PASS: Trigger CLI/SDK/build pinned to ${sdkVersion} with native builds`);
