@@ -1,6 +1,7 @@
 "use client";
 
 import Link from "next/link";
+import type { CSSProperties } from "react";
 import { useQuery } from "convex/react";
 import { api } from "../../../convex/_generated/api";
 import type { Id } from "../../../convex/_generated/dataModel";
@@ -13,8 +14,13 @@ import { StageBadge } from "@/components/StageBadge";
 import { Elapsed } from "@/components/Elapsed";
 import { SkeletonList } from "@/components/Skeleton";
 import { RecentVideos } from "@/components/RecentVideos";
-import { StatusBanner } from "@/components/StatusBanner";
-import { IconCalendar } from "@/components/icons";
+import { ChannelAvatar, ChannelBanner } from "@/components/ChannelArt";
+import {
+  IconCalendar,
+  IconChannels,
+  IconRuns,
+  IconSpark,
+} from "@/components/icons";
 import styles from "./Overview.module.css";
 
 type PlanRow = {
@@ -44,7 +50,7 @@ const scheduleDate = new Intl.DateTimeFormat("en-GB", {
 });
 
 function nextLabel(value?: number) {
-  return value ? scheduleDate.format(new Date(value)) : "Unscheduled";
+  return value ? scheduleDate.format(new Date(value)) : "Open slot";
 }
 
 export default function OverviewPage() {
@@ -101,7 +107,7 @@ export default function OverviewPage() {
         (a.scheduledAt ?? Number.MAX_SAFE_INTEGER) -
         (b.scheduledAt ?? Number.MAX_SAFE_INTEGER),
     )
-    .slice(0, 3);
+    .slice(0, 4);
   const activeChannelCount =
     channelsFiltered?.filter((channel) => channel.status === "active").length ?? 0;
   const loading =
@@ -109,53 +115,126 @@ export default function OverviewPage() {
     recent === undefined ||
     active === undefined ||
     plan === undefined;
+  const activeCount = activeFiltered?.length ?? 0;
+  const selectedName = selectedSlug
+    ? channelsFiltered?.[0]?.name ?? "Selected channel"
+    : "the full channel fleet";
 
   return (
     <div className={styles.dashboard}>
       <PageHeader
+        eyebrow="Production floor / live"
         title="Studio"
-        subtitle="A live view of the work, channels, and release gates that matter now."
+        subtitle={`A calm operating view across ${selectedName}. Work in motion, release pressure, and channel identity—without the control-room clutter.`}
         actions={
-          <Link href="/schedule" className="studio-action studio-action-secondary">
-            <IconCalendar width={16} height={16} /> Schedule
-          </Link>
+          <div className={styles.headerActions}>
+            <Link href="/schedule" className="studio-action studio-action-secondary">
+              <IconCalendar width={15} height={15} /> Schedule
+            </Link>
+            <Link href="/channels/new" className="studio-action">
+              <IconSpark width={15} height={15} /> New channel
+            </Link>
+          </div>
         }
       />
 
-      <section className={`${styles.statusBar} glass`} aria-label="Studio summary">
-        <div className={styles.statusLead}>
-          <span
-            className={styles.statusDot}
-            aria-hidden="true"
-          />
-          <div>
-            <strong>
-              {loading
-                ? "Syncing studio"
-                : activeFiltered?.length
-                  ? "Production is moving"
-                  : readyPlan.length
-                    ? `${readyPlan.length} ready to publish`
-                    : "Studio ready"}
-            </strong>
-            <small>
-              {selectedSlug
-                ? channelsFiltered?.[0]?.name ?? "Selected channel"
-                : "All channels"}
-            </small>
+      <section className={`${styles.signalHero} glass`} aria-labelledby="studio-signal-title">
+        <div className={styles.signalCopy}>
+          <span className={styles.liveKicker} data-live={activeCount > 0 ? "true" : undefined}>
+            <i aria-hidden="true" />
+            {loading ? "Reading the floor" : activeCount > 0 ? "Production moving" : "Floor ready"}
+          </span>
+          <h2 id="studio-signal-title">
+            {loading
+              ? "Building the live picture."
+              : activeCount > 0
+                ? `${activeCount} ${activeCount === 1 ? "story is" : "stories are"} becoming finished work.`
+                : readyPlan.length > 0
+                  ? `${readyPlan.length} release ${readyPlan.length === 1 ? "decision" : "decisions"} ready for you.`
+                  : "Nothing is shouting. The studio is ready for its next move."}
+          </h2>
+          <p>
+            {overdue.length > 0
+              ? `${overdue.length} scheduled ${overdue.length === 1 ? "item needs" : "items need"} attention before the release rhythm slips.`
+              : failed.length > 0
+                ? `${failed.length} recent ${failed.length === 1 ? "run has" : "runs have"} a traceable failure to review.`
+                : "Release gates remain private by default; only evidence-backed masters advance."}
+          </p>
+          <div className={styles.heroActions}>
+            <Link href={activeCount > 0 ? "/runs" : "/schedule"} className="studio-button" data-variant="signal">
+              <IconRuns width={15} height={15} />
+              {activeCount > 0 ? "Follow live work" : "Shape the next release"}
+            </Link>
+            <Link href="/channels" className={styles.textAction}>
+              Open channel fleet <span aria-hidden="true">↗</span>
+            </Link>
           </div>
         </div>
 
-        <div className={styles.metrics} role="list" aria-label="Key measures">
-          <CompactMetric label="Active" value={loading ? "—" : activeChannelCount} />
-          <CompactMetric label="Running" value={active === undefined ? "—" : activeFiltered?.length ?? 0} />
-          <CompactMetric
-            label="Success"
-            value={loading || successRate === null ? "—" : `${successRate}%`}
-          />
+        <SignalDial
+          successRate={successRate}
+          activeCount={activeCount}
+          readyCount={readyPlan.length}
+          loading={loading}
+        />
+      </section>
+
+      <section className={styles.metricRail} aria-label="Studio measures">
+        <Metric index="01" label="Active channels" value={loading ? "—" : activeChannelCount} note="able to produce" />
+        <Metric index="02" label="In motion" value={loading ? "—" : activeCount} note="queued or rendering" tone="live" />
+        <Metric index="03" label="Release ready" value={loading ? "—" : readyPlan.length} note={overdue.length ? `${overdue.length} overdue` : "cadence on track"} tone={overdue.length ? "warn" : undefined} />
+        <Metric index="04" label="Recorded spend" value={loading ? "—" : usd.format(recordedSpend)} note="latest 50 runs" />
+      </section>
+
+      <ChannelRelay channels={channelsFiltered} loading={channels === undefined} />
+
+      <section className={styles.workbench} aria-label="Current production and release queue">
+        <div className={`${styles.workPanel} glass`}>
+          <PanelHeading kicker="Now making" title="In production" href="/runs" action="Open production" />
+          {active === undefined ? (
+            <SkeletonList rows={3} />
+          ) : activeFiltered && activeFiltered.length > 0 ? (
+            <div className={styles.activeList}>
+              {activeFiltered.slice(0, 4).map((run, index) => (
+                <Link key={run._id} href={`/runs/${run._id}`} className={styles.activeRow}>
+                  <span className={styles.rowIndex}>{String(index + 1).padStart(2, "0")}</span>
+                  <span className={styles.activePulse} data-status={run.status} aria-hidden="true"><i /></span>
+                  <span className={styles.rowCopy}>
+                    <strong>{run.channelName}</strong>
+                    <small>{run.status === "running" ? "Rendering through the pipeline" : "Queued for a production worker"}</small>
+                  </span>
+                  <StageBadge status={run.status} size="sm" />
+                  <Elapsed from={run.startedAt} />
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <CompactEmpty icon={<IconRuns width={20} height={20} />} title="No active runs" detail="The next production will animate here from its first persisted stage." />
+          )}
         </div>
 
-        <StatusBanner overdueCount={overdue.length} channelSlug={selectedSlug} />
+        <div className={`${styles.workPanel} glass`}>
+          <PanelHeading kicker="Release horizon" title="Up next" href="/schedule" action="Open calendar" />
+          {plan === undefined ? (
+            <SkeletonList rows={3} />
+          ) : upcoming.length > 0 ? (
+            <div className={styles.queueList}>
+              {upcoming.map((item, index) => (
+                <Link key={item._id} href="/schedule" className={styles.queueRow}>
+                  <span className={styles.rowIndex}>{String(index + 1).padStart(2, "0")}</span>
+                  <time>{nextLabel(item.scheduledAt)}</time>
+                  <span className={styles.rowCopy}>
+                    <strong>{item.title || item.topic}</strong>
+                    <small>{item.channelName}</small>
+                  </span>
+                  <span className={styles.queueArrow} aria-hidden="true">↗</span>
+                </Link>
+              ))}
+            </div>
+          ) : (
+            <CompactEmpty icon={<IconCalendar width={20} height={20} />} title="The horizon is clear" detail="Planned releases will appear here in chronological order." />
+          )}
+        </div>
       </section>
 
       <RecentVideos
@@ -168,66 +247,23 @@ export default function OverviewPage() {
         limit={12}
       />
 
-      <div className={styles.productionGrid}>
-        <section className={`${styles.panel} glass`}>
-          <PanelHeading title="In production" href="/runs" action="Open runs" />
-          {active === undefined ? (
-            <SkeletonList rows={2} />
-          ) : activeFiltered && activeFiltered.length > 0 ? (
-            <div className={styles.activeList}>
-              {activeFiltered.slice(0, 3).map((run) => (
-                <Link key={run._id} href={`/runs/${run._id}`} className={styles.activeRow}>
-                  <StageBadge status={run.status} size="sm" />
-                  <span>
-                    <strong>{run.channelName}</strong>
-                    <small>{run.status === "running" ? "Rendering" : "Queued"}</small>
-                  </span>
-                  <Elapsed from={run.startedAt} />
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <CompactEmpty title="No active runs" detail="The next queued production will appear here." />
-          )}
-        </section>
-
-        <section className={`${styles.panel} glass`}>
-          <PanelHeading title="Up next" href="/schedule" action="Open schedule" />
-          {plan === undefined ? (
-            <SkeletonList rows={3} />
-          ) : upcoming.length > 0 ? (
-            <div className={styles.queueList}>
-              {upcoming.map((item) => (
-                <Link key={item._id} href="/schedule" className={styles.queueRow}>
-                  <time>{nextLabel(item.scheduledAt)}</time>
-                  <span>
-                    <strong>{item.title || item.topic}</strong>
-                    <small>{item.channelName}</small>
-                  </span>
-                </Link>
-              ))}
-            </div>
-          ) : (
-            <CompactEmpty title="Queue clear" detail="Scheduled work will appear here." />
-          )}
-        </section>
-      </div>
-
       <details className={`${styles.runsWidget} glass`}>
         <summary>
+          <span className={styles.runsSummaryMark} aria-hidden="true"><IconRuns width={17} height={17} /></span>
           <span>
+            <small>Production ledger</small>
             <strong>Recent runs</strong>
-            <small>{recentFiltered?.length ?? 0} tracked</small>
           </span>
           <span className={styles.runSummaryMeta}>
-            {failed.length > 0 && <em>{failed.length} failed</em>}
-            <small>{usd.format(recordedSpend)}</small>
+            {failed.length > 0 && <em>{failed.length} need review</em>}
+            <small>{recentFiltered?.length ?? 0} retained</small>
           </span>
+          <i aria-hidden="true" />
         </summary>
         <div className={styles.runsBody}>
           <div className={styles.runsBodyHeader}>
-            <span>Latest activity</span>
-            <Link href="/runs">Open full history →</Link>
+            <span>Newest production receipts</span>
+            <Link href="/runs">Open full ledger <span aria-hidden="true">↗</span></Link>
           </div>
           {recent === undefined ? (
             <SkeletonList rows={4} />
@@ -238,7 +274,7 @@ export default function OverviewPage() {
               ))}
             </div>
           ) : (
-            <CompactEmpty title="No runs yet" detail="Production history will appear here." />
+            <CompactEmpty icon={<IconRuns width={20} height={20} />} title="No run receipts yet" detail="Every real production will leave an inspectable record here." />
           )}
         </div>
       </details>
@@ -246,37 +282,169 @@ export default function OverviewPage() {
   );
 }
 
-function CompactMetric({ label, value }: { label: string; value: string | number }) {
+function SignalDial({
+  successRate,
+  activeCount,
+  readyCount,
+  loading,
+}: {
+  successRate: number | null;
+  activeCount: number;
+  readyCount: number;
+  loading: boolean;
+}) {
+  const progress = successRate ?? 0;
   return (
-    <span className={styles.metric} role="listitem">
-      <strong>{value}</strong>
-      <small>{label}</small>
-    </span>
+    <figure className={styles.signalDial} aria-label={loading ? "Loading production signal" : `${progress}% recent terminal-run success rate`}>
+      <div
+        className={styles.dialGraphic}
+        style={{ "--dial-progress": `${progress * 3.6}deg` } as CSSProperties}
+      >
+        <span className={styles.dialOrbit} />
+        <span className={styles.dialNode} data-node="one" />
+        <span className={styles.dialNode} data-node="two" />
+        <span className={styles.dialNode} data-node="three" />
+        <div className={styles.dialCore}>
+          <small>Recent success</small>
+          <strong>{loading || successRate === null ? "—" : `${successRate}%`}</strong>
+          <span>{activeCount ? `${activeCount} live` : `${readyCount} ready`}</span>
+        </div>
+      </div>
+      <figcaption>
+        <span>Signal integrity</span>
+        <strong>{loading ? "Calibrating" : successRate === null ? "Awaiting history" : successRate >= 90 ? "Stable" : "Review advised"}</strong>
+      </figcaption>
+    </figure>
+  );
+}
+
+function Metric({
+  index,
+  label,
+  value,
+  note,
+  tone,
+}: {
+  index: string;
+  label: string;
+  value: string | number;
+  note: string;
+  tone?: "live" | "warn";
+}) {
+  return (
+    <article className={styles.metric} data-tone={tone}>
+      <span>{index}</span>
+      <div>
+        <small>{label}</small>
+        <strong>{value}</strong>
+        <p>{note}</p>
+      </div>
+    </article>
+  );
+}
+
+function ChannelRelay({
+  channels,
+  loading,
+}: {
+  channels?: ChannelRow[];
+  loading: boolean;
+}) {
+  const relayChannels = channels ?? [];
+  return (
+    <section className={styles.relay} aria-labelledby="channel-relay-title">
+      <header className={styles.sectionHeading}>
+        <div>
+          <span>Identity in motion</span>
+          <h2 id="channel-relay-title">Channel relay</h2>
+        </div>
+        <p>The fleet moves slowly; hover or focus to hold it.</p>
+        <Link href="/channels">Explore every channel <span aria-hidden="true">↗</span></Link>
+      </header>
+
+      <div className={styles.relayViewport} data-static={relayChannels.length < 2 ? "true" : undefined}>
+        {loading ? (
+          <div className={styles.relaySkeletons} aria-label="Loading channels">
+            {Array.from({ length: 3 }, (_, index) => <span key={index} />)}
+          </div>
+        ) : relayChannels.length > 0 ? (
+          <div className={styles.relayTrack}>
+            <div className={styles.relaySet}>
+              {relayChannels.map((channel) => <RelayCard channel={channel} key={channel._id} />)}
+            </div>
+            {relayChannels.length > 1 ? (
+              <div className={styles.relaySet} aria-hidden="true">
+                {relayChannels.map((channel) => <RelayCard channel={channel} key={`clone-${channel._id}`} clone />)}
+              </div>
+            ) : null}
+          </div>
+        ) : (
+          <Link href="/channels/new" className={styles.emptyRelay}>
+            <IconChannels width={25} height={25} />
+            <span><strong>Build the first channel identity</strong><small>Opportunity, art direction, pipeline, and a QC-reviewed test render.</small></span>
+            <i aria-hidden="true">↗</i>
+          </Link>
+        )}
+      </div>
+    </section>
+  );
+}
+
+function RelayCard({ channel, clone = false }: { channel: ChannelRow; clone?: boolean }) {
+  const identity = channel.identity;
+  return (
+    <Link
+      href={`/channels/${channel.slug}`}
+      className={styles.relayCard}
+      tabIndex={clone ? -1 : undefined}
+    >
+      <ChannelBanner
+        bannerKey={identity?.bannerKey}
+        fallbackKeys={[identity?.imageKey]}
+        name={channel.name}
+        palette={identity?.palette}
+        aspectRatio="16 / 8.2"
+      >
+        <div className={styles.relayCardScrim}>
+          <span className={styles.relayNumber}>{channel.status === "active" ? "ON AIR" : channel.status.toUpperCase()}</span>
+          <div className={styles.relayIdentity}>
+            <ChannelAvatar imageKey={identity?.imageKey} name={channel.name} palette={identity?.palette} size={46} radius={12} />
+            <span>
+              <strong>{channel.name}</strong>
+              <small>{identity?.niche || identity?.persona || channel.template}</small>
+            </span>
+          </div>
+          <span className={styles.relayOpen}>Open show <i aria-hidden="true">↗</i></span>
+        </div>
+      </ChannelBanner>
+    </Link>
   );
 }
 
 function PanelHeading({
+  kicker,
   title,
   href,
   action,
 }: {
+  kicker: string;
   title: string;
   href: string;
   action: string;
 }) {
   return (
     <header className={styles.panelHeading}>
-      <h2>{title}</h2>
-      <Link href={href}>{action} <span aria-hidden="true">→</span></Link>
+      <div><span>{kicker}</span><h2>{title}</h2></div>
+      <Link href={href}>{action} <span aria-hidden="true">↗</span></Link>
     </header>
   );
 }
 
-function CompactEmpty({ title, detail }: { title: string; detail: string }) {
+function CompactEmpty({ icon, title, detail }: { icon: React.ReactNode; title: string; detail: string }) {
   return (
     <div className={styles.empty}>
-      <strong>{title}</strong>
-      <span>{detail}</span>
+      <span aria-hidden="true">{icon}</span>
+      <div><strong>{title}</strong><small>{detail}</small></div>
     </div>
   );
 }
