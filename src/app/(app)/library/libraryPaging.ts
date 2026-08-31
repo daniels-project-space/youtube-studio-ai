@@ -7,6 +7,11 @@ export type LibraryPage<T> = {
   nextBatchSize: number;
 };
 
+/** Open the newest matching channel by default; explicit operator choices always win. */
+export function isLibraryGroupExpanded(groupIndex: number, override?: boolean): boolean {
+  return override ?? groupIndex === 0;
+}
+
 /** Keep one desktop row visible while retaining deterministic access to every match. */
 export function pageLibraryGroup<T>(items: readonly T[], requestedLimit?: number): LibraryPage<T> {
   const limit = Math.max(
@@ -23,4 +28,3 @@ export function pageLibraryGroup<T>(items: readonly T[], requestedLimit?: number
     nextBatchSize: Math.min(LIBRARY_PAGE_SIZE, remaining),
   };
 }
-

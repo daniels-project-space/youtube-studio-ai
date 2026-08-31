@@ -20,7 +20,11 @@ import {
   type LibraryFilterState,
 } from "@/components/LibraryFilters";
 import { IconLibrary, IconChevron } from "@/components/icons";
-import { LIBRARY_PAGE_SIZE, pageLibraryGroup } from "./libraryPaging";
+import {
+  isLibraryGroupExpanded,
+  LIBRARY_PAGE_SIZE,
+  pageLibraryGroup,
+} from "./libraryPaging";
 import styles from "./library.module.css";
 
 /** Open lightbox = which channel group + which index within that group. */
@@ -46,7 +50,7 @@ export default function LibraryPage() {
     from: "",
     to: "",
   });
-  const [collapsed, setCollapsed] = useState<Set<string>>(new Set());
+  const [expandedGroups, setExpandedGroups] = useState<Record<string, boolean>>({});
   const [visibleLimits, setVisibleLimits] = useState<Record<string, number>>({});
   const [lightbox, setLightbox] = useState<LightboxTarget | null>(null);
 
@@ -103,13 +107,8 @@ export default function LibraryPage() {
     return [...map.values()];
   }, [filtered]);
 
-  const toggle = (slug: string) =>
-    setCollapsed((prev) => {
-      const nextSet = new Set(prev);
-      if (nextSet.has(slug)) nextSet.delete(slug);
-      else nextSet.add(slug);
-      return nextSet;
-    });
+  const toggle = (slug: string, isExpanded: boolean) =>
+    setExpandedGroups((current) => ({ ...current, [slug]: !isExpanded }));
 
   // Videos in the currently-open lightbox group (prev/next scope).
   const lightboxVideos = lightbox
@@ -182,24 +181,27 @@ export default function LibraryPage() {
         />
       ) : (
         <div className={styles.archive}>
-          {groups.map((g) => {
-            const isCollapsed = collapsed.has(g.slug);
+          {groups.map((g, groupIndex) => {
+            const isExpanded = isLibraryGroupExpanded(
+              groupIndex,
+              expandedGroups[g.slug],
+            );
             const page = pageLibraryGroup(g.videos, visibleLimits[g.slug]);
             return (
               <section key={g.slug} className={styles.channel}>
                 <button
                   type="button"
-                  onClick={() => toggle(g.slug)}
+                  onClick={() => toggle(g.slug, isExpanded)}
                   className={styles.channelHeader}
-                  data-collapsed={isCollapsed}
-                  aria-expanded={!isCollapsed}
+                  data-collapsed={!isExpanded}
+                  aria-expanded={isExpanded}
                 >
                   <IconChevron width={16} height={16} />
                   <h2>{g.name}</h2>
                   <span className={styles.count}>{g.videos.length} matches</span>
                 </button>
 
-                {!isCollapsed && (
+                {isExpanded && (
                   <>
                     <VideoGrid
                       videos={page.visible}

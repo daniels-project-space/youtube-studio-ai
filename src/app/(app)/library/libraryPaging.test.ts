@@ -1,5 +1,9 @@
 import assert from "node:assert/strict";
-import { LIBRARY_PAGE_SIZE, pageLibraryGroup } from "./libraryPaging";
+import {
+  isLibraryGroupExpanded,
+  LIBRARY_PAGE_SIZE,
+  pageLibraryGroup,
+} from "./libraryPaging";
 
 const archive = Array.from({ length: 11 }, (_, index) => `video-${index + 1}`);
 
@@ -22,5 +26,9 @@ assert.equal(complete.nextBatchSize, 0);
 const invalid = pageLibraryGroup(archive, Number.NaN);
 assert.equal(invalid.visible.length, LIBRARY_PAGE_SIZE);
 
-console.log("Library progressive archive paging tests passed");
+assert.equal(isLibraryGroupExpanded(0), true);
+assert.equal(isLibraryGroupExpanded(1), false);
+assert.equal(isLibraryGroupExpanded(0, false), false);
+assert.equal(isLibraryGroupExpanded(4, true), true);
 
+console.log("Library progressive archive paging tests passed");
