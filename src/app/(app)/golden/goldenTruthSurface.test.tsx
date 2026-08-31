@@ -31,6 +31,11 @@ function main(): void {
     "five catalog disciplines plus foundation and audit evidence stay collapsed by default",
   );
   assert.doesNotMatch(html, /<details[^>]*\sopen(?:=|\s|>)/);
+  assert.equal(
+    html.match(/role="heading" aria-level="2"/g)?.length,
+    5,
+    "each catalog discipline labels its module-card heading level",
+  );
   assert.match(html, /aria-label="Video Engines Golden modules"/);
 }
 

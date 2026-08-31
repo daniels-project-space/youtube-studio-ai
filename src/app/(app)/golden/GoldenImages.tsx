@@ -1,6 +1,13 @@
 "use client";
 
-import { useCallback, useEffect, useState, type CSSProperties } from "react";
+import {
+  useCallback,
+  useEffect,
+  useId,
+  useRef,
+  useState,
+  type CSSProperties,
+} from "react";
 import { createPortal } from "react-dom";
 
 export interface ProofImage {
@@ -34,17 +41,50 @@ function fingerprint(image: ProofImage): string | undefined {
  */
 export function GoldenImages({ images }: { images: ProofImage[] }) {
   const [idx, setIdx] = useState<number | null>(null);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  const closeRef = useRef<HTMLButtonElement>(null);
+  const openerRef = useRef<HTMLButtonElement | null>(null);
+  const titleId = useId();
+  const evidenceId = useId();
+  const open = idx !== null;
 
   const close = useCallback(() => setIdx(null), []);
   const prev = useCallback(() => setIdx((i) => (i === null ? i : (i - 1 + images.length) % images.length)), [images.length]);
   const next = useCallback(() => setIdx((i) => (i === null ? i : (i + 1) % images.length)), [images.length]);
 
   useEffect(() => {
-    if (idx === null) return;
+    if (!open) return;
     const onKey = (e: KeyboardEvent) => {
-      if (e.key === "Escape") close();
-      else if (e.key === "ArrowLeft") prev();
-      else if (e.key === "ArrowRight") next();
+      if (e.key === "Escape") {
+        e.preventDefault();
+        close();
+        return;
+      }
+      if (e.key === "ArrowLeft") {
+        e.preventDefault();
+        prev();
+        return;
+      }
+      if (e.key === "ArrowRight") {
+        e.preventDefault();
+        next();
+        return;
+      }
+      if (e.key !== "Tab") return;
+
+      const focusable = Array.from(
+        dialogRef.current?.querySelectorAll<HTMLButtonElement>("button:not(:disabled)") ?? [],
+      );
+      if (focusable.length === 0) return;
+      const first = focusable[0];
+      const last = focusable[focusable.length - 1];
+      if (e.shiftKey && document.activeElement === first) {
+        e.preventDefault();
+        last.focus();
+      } else if (!e.shiftKey && document.activeElement === last) {
+        e.preventDefault();
+        first.focus();
+      }
     };
     window.addEventListener("keydown", onKey);
     // Lock scroll WITHOUT a layout jump: compensate the scrollbar width.
@@ -54,16 +94,27 @@ export function GoldenImages({ images }: { images: ProofImage[] }) {
     const prevPad = body.style.paddingRight;
     body.style.overflow = "hidden";
     if (sbw > 0) body.style.paddingRight = `${sbw}px`;
+    const focusFrame = window.requestAnimationFrame(() => closeRef.current?.focus());
     return () => {
+      window.cancelAnimationFrame(focusFrame);
       window.removeEventListener("keydown", onKey);
       body.style.overflow = prevOverflow;
       body.style.paddingRight = prevPad;
+      openerRef.current?.focus();
     };
-  }, [idx, close, prev, next]);
+  }, [open, close, prev, next]);
 
   const overlay =
     idx !== null ? (
-      <div onClick={close} style={OVERLAY} role="dialog" aria-modal="true">
+      <div
+        ref={dialogRef}
+        onClick={close}
+        style={OVERLAY}
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby={titleId}
+        aria-describedby={evidenceId}
+      >
         <button onClick={(e) => { e.stopPropagation(); prev(); }} style={{ ...NAV, left: 12 }} aria-label="Previous">‹</button>
         {/* eslint-disable-next-line @next/next/no-img-element -- lightbox image */}
         <img
@@ -73,10 +124,10 @@ export function GoldenImages({ images }: { images: ProofImage[] }) {
           style={{ maxWidth: "90vw", maxHeight: "84vh", borderRadius: 10, boxShadow: "0 24px 70px rgba(0,0,0,0.6)" }}
         />
         <button onClick={(e) => { e.stopPropagation(); next(); }} style={{ ...NAV, right: 12 }} aria-label="Next">›</button>
-        <button onClick={(e) => { e.stopPropagation(); close(); }} style={CLOSE} aria-label="Close">×</button>
+        <button ref={closeRef} onClick={(e) => { e.stopPropagation(); close(); }} style={CLOSE} aria-label="Close">×</button>
         <div style={CAPTION}>
-          <span>{images[idx].alt} · {idx + 1}/{images.length}</span>
-          <span style={{ color: images[idx].status === "context" ? "#f9c968" : "#d9ddff" }}>{evidenceLabel(images[idx])} · {images[idx].id}</span>
+          <span id={titleId}>{images[idx].alt} · {idx + 1}/{images.length}</span>
+          <span id={evidenceId} style={{ color: images[idx].status === "context" ? "#f9c968" : "#d9ddff" }}>{evidenceLabel(images[idx])} · {images[idx].id}</span>
           {fingerprint(images[idx]) && <span>{fingerprint(images[idx])}</span>}
         </div>
       </div>
@@ -98,7 +149,10 @@ export function GoldenImages({ images }: { images: ProofImage[] }) {
           <button
             key={p.id}
             type="button"
-            onClick={() => setIdx(i)}
+            onClick={(event) => {
+              openerRef.current = event.currentTarget;
+              setIdx(i);
+            }}
             aria-label={`Inspect ${evidenceLabel(p).toLowerCase()} artifact ${p.id}: ${p.alt}`}
             title={`${evidenceLabel(p)} · ${p.id}${fingerprint(p) ? ` · ${fingerprint(p)}` : ""}`}
             style={PROOF_BUTTON}

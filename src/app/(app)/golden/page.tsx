@@ -244,7 +244,7 @@ export default function GoldenPipelinePage() {
           >
             <summary className="golden-category-summary">
               <span className="golden-category-copy">
-                <strong>{cat}</strong>
+                <span role="heading" aria-level={2}>{cat}</span>
                 <span>{CATEGORY_BLURB[cat]}</span>
               </span>
               <span className="golden-category-count">

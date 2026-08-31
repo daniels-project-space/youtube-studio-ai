@@ -1641,6 +1641,13 @@
   outline-offset: 3px;
 }
 
+html:has([role="dialog"][aria-modal="true"]) [data-jarvis-edit-ui],
+html:has([role="dialog"][aria-modal="true"]) iframe[title="JARVIS"] {
+  opacity: 0 !important;
+  visibility: hidden !important;
+  pointer-events: none !important;
+}
+
 /* ── Channels: identity-forward operating cards ─────────────────────────── */
 
 .channel-card-grid {
@@ -2665,7 +2672,7 @@
   gap: 0.2rem;
 }
 
-.golden-category-copy strong,
+.golden-category-copy [role="heading"],
 .golden-foundation-summary strong,
 .golden-audit-disclosure summary strong {
   font-size: 0.88rem;
