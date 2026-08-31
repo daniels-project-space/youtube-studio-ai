@@ -33,4 +33,12 @@ assert.match(html, /30-second intro 71% at 30.0s/);
 assert.match(html, /evidence threshold met/);
 assert.doesNotMatch(html, /nextValue|provider transcript/i);
 
+const lockedHtml = renderToStaticMarkup(createElement(QualityLearningPanel, {
+  state: "locked",
+  channelNames: new Map(),
+  insights: [],
+}));
+assert.match(lockedHtml, /Unlock operations to review owner-only learning proposals/);
+assert.doesNotMatch(lockedHtml, /unavailable right now/i);
+
 console.log("quality learning panel tests passed");

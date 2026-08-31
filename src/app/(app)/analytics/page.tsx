@@ -109,25 +109,44 @@ export default function AnalyticsPage() {
       : "skip",
   ) as TrendRow[] | undefined;
   const [qualityLearning, setQualityLearning] = useState<{
-    state: "loading" | "ready" | "unavailable";
+    state: "loading" | "locked" | "ready" | "unavailable";
     insights: readonly QualityLearningInsight[];
   }>({ state: "loading", insights: [] });
 
   useEffect(() => {
     const controller = new AbortController();
-    void fetch("/api/learning-recommendations", { signal: controller.signal })
-      .then(async (response) => {
+    void (async () => {
+      try {
+        const accessResponse = await fetch("/api/operations/elevation", {
+          cache: "no-store",
+          credentials: "same-origin",
+          headers: { Accept: "application/json" },
+          signal: controller.signal,
+        });
+        const access = await accessResponse.json().catch(() => ({})) as {
+          elevated?: boolean;
+          role?: string;
+        };
+        if (!accessResponse.ok) throw new Error(`operations access request failed (${accessResponse.status})`);
+        if (access.elevated !== true || access.role !== "owner") {
+          if (!controller.signal.aborted) setQualityLearning({ state: "locked", insights: [] });
+          return;
+        }
+
+        const response = await fetch("/api/learning-recommendations", {
+          cache: "no-store",
+          credentials: "same-origin",
+          signal: controller.signal,
+        });
         if (!response.ok) throw new Error(`quality learning request failed (${response.status})`);
-        return await response.json() as { recommendations?: unknown };
-      })
-      .then((payload) => {
+        const payload = await response.json() as { recommendations?: unknown };
         if (!controller.signal.aborted) {
           setQualityLearning({ state: "ready", insights: qualityLearningInsightsFromUnknown(payload.recommendations) });
         }
-      })
-      .catch(() => {
+      } catch {
         if (!controller.signal.aborted) setQualityLearning({ state: "unavailable", insights: [] });
-      });
+      }
+    })();
     return () => controller.abort();
   }, []);
 

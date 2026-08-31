@@ -17,6 +17,12 @@ assert.match(page, /Review channel connections/);
 assert.match(page, /\/channels\/\$\{row\.slug\}\?tab=settings/);
 assert.doesNotMatch(page, /YouTube Data API key/);
 
+const operationsCheck = page.indexOf('fetch("/api/operations/elevation"');
+const ownerLearningRead = page.indexOf('fetch("/api/learning-recommendations"');
+assert.ok(operationsCheck >= 0, "analytics checks operations access before owner-only learning reads");
+assert.ok(ownerLearningRead > operationsCheck, "viewer mode cannot request owner-only learning governance");
+assert.match(page, /state: "locked"/);
+
 // The public query uses the authenticated studio wrapper, scopes both primary
 // rows by owner, and returns an explicit token-free/error-free projection.
 assert.match(query, /import \{ mutation, query \} from "\.\/studioFunctions"/);
